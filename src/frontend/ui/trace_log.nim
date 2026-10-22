@@ -122,6 +122,3 @@ method register*(self: TraceLogComponent, api: MediatorWithSubscribers) =
   ## ``TraceLogVM``.
   self.api = api
 
-proc registerTraceLogComponent*(component: TraceLogComponent,
-                                 api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

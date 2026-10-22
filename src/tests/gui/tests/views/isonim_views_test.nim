@@ -11620,7 +11620,7 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(false, "Not a git repository")
 
@@ -11648,7 +11648,7 @@ suite "IsoNim VCS Panel — structure":
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11696,7 +11696,7 @@ suite "IsoNim VCS Panel — structure":
         onCheckoutBranch: proc(branch: string) =
           checkedOutBranch = branch
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11730,7 +11730,7 @@ suite "IsoNim VCS Panel — structure":
         onSelectFile: proc(index: int; path, target, status: string) =
           (discard path; discard target; selected = index),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setDeepReviewMode(true)
       vm.setHeader("Review session")
@@ -11764,7 +11764,7 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11785,7 +11785,7 @@ suite "IsoNim VCS Panel — structure":
     ## replaced the VCS panel's contents.  The toggle selects what a file click
     ## *does*; the commit history must survive it.
     ##
-    ## `renderDiffToggle` was dead code — `renderVCSPanelImpl` never called it
+    ## `renderDiffToggle` was dead code — `renderVCSPanel` never called it
     ## — and `onToggleUnifiedDiff` was a `discard`, so neither the switch nor
     ## its effect existed.
     createRoot proc(dispose: proc()) =
@@ -11799,7 +11799,7 @@ suite "IsoNim VCS Panel — structure":
             if vm.viewMode.val == vmUnifiedDiff: vmOpenFile
             else: vmUnifiedDiff),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11850,7 +11850,7 @@ suite "IsoNim VCS Panel — structure":
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       # --- normal git mode: accordion rows under an expanded commit ---------
       vm.setGitRepoState(true)
@@ -11903,7 +11903,7 @@ suite "IsoNim VCS Panel — structure":
         onSelectFile: proc(index: int; path, target, status: string) =
           (discard index; rowPath = path; rowTarget = target),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setCommits(@[
@@ -11947,7 +11947,7 @@ suite "IsoNim VCS Panel — structure":
       # rather than being written into the Monaco model, where it would render
       # as a line of code with a line number beside it.  `.empty-overlay` is
       # what earns it the shared empty-state treatment.
-      let emptyPanel = isonim_unified_diff_view.renderUnifiedDiffTab(
+      let emptyPanel = isonim_unified_diff_view.renderUnifiedDiffTab[MockRenderer, MockNode](
         r, vm, "unifiedDiffEditor-empty", callbacks)
       let emptyNode = findByClass(emptyPanel, "unified-diff-empty")
       check emptyNode != nil
@@ -11958,7 +11958,7 @@ suite "IsoNim VCS Panel — structure":
         findByClass(emptyPanel, "unified-diff-editor").attributes["class"]
 
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
-      let panel = isonim_unified_diff_view.renderUnifiedDiffTab(
+      let panel = isonim_unified_diff_view.renderUnifiedDiffTab[MockRenderer, MockNode](
         r, vm, "unifiedDiffEditor-7", callbacks)
 
       # Once there are files the message steps aside and the editor is shown.

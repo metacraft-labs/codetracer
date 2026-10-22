@@ -37,3 +37,21 @@ suite "the flow's values, one line of text per source line":
       step(5, 2)])
     let lines = flowLineValues(w, 9, maxValues = 2)
     check lines == @[FlowLineValue(line: 2, text: "a=1, b=2")]
+
+suite "the flow's loops, each where its control goes":
+
+  test "every loop but the function's, open where the debugger is inside":
+    let w = FlowLayoutWindow(loops: @[
+      FlowLayoutLoop(first: 1, last: 20, registeredLine: 1),
+      FlowLayoutLoop(first: 3, last: 5, registeredLine: 3),
+      FlowLayoutLoop(first: 8, last: 12, registeredLine: 8),
+      FlowLayoutLoop(first: 14, last: 15, registeredLine: -1)])
+    check flowLoopLines(w, 4) == @[
+      FlowLoopLine(line: 3, locationInside: true),
+      FlowLoopLine(line: 8, locationInside: false)]
+    check flowLoopLines(w, 12) == @[
+      FlowLoopLine(line: 3, locationInside: false),
+      FlowLoopLine(line: 8, locationInside: true)]
+
+  test "a window without loops has none to show":
+    check flowLoopLines(FlowLayoutWindow(), 1).len == 0

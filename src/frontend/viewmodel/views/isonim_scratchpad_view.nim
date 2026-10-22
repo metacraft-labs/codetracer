@@ -451,6 +451,8 @@ proc renderScratchpadPanel*[R, N](r: R; vm: ScratchpadVM): N =
   ## empty-overlay) is built once via the DSL.  A single outer
   ## ``createRenderEffect`` rebuilds the row list whenever ``entries``
   ## changes and also toggles the empty-state placeholder.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute
   var listContainer, chainListContainer, diffContainer, emptyContainer: N
 
   let panel = ui(r):

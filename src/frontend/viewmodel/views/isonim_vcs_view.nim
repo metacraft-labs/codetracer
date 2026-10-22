@@ -21,18 +21,26 @@
 ## (user has scrolled near the bottom) ``callbacks.onLoadMoreCommits`` fires to
 ## fetch the next page.  A "Loading…" row is shown while ``vm.loadingMore`` is
 ## true.
+##
+## One view for every renderer (Shared-DOM-Front-Ends D6): the panel is
+## `renderVCSPanel[R, N]`, and what only a browser does — the sentinel's
+## observer, the tooltip, modifier keys on a click, the scroll position kept
+## across a rebuild — is a decoration of the helpers below, made only when
+## `N` is the browser's element.
 
 import std/[strformat, strutils]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/vcs_vm
+
+export signals, computation, components
 
 const VCSContainerClass* = "component-container vcs-container"
 const VCSNoRepoClass* = "vcs-no-repo"
@@ -260,56 +268,60 @@ when defined(js):
       io.observe(el);
     })(#, #)""".}
 
-proc attachScrollSentinel(r: MockRenderer; sentinel: MockNode;
-                          callbacks: VCSCallbacks) =
-  ## No-op for the mock renderer (used in unit tests).
-  discard
+proc attachScrollSentinel[R, N](r: R; sentinel: N; callbacks: VCSCallbacks) =
+  ## In a browser, load the next page of commits when `sentinel` scrolls into
+  ## view. Other renderers have no scrolling; their tests call
+  ## `onLoadMoreCommits` directly.
+  when defined(js):
+    when N is isonim_dom.Element:
+      if callbacks.onLoadMoreCommits == nil:
+        return
+      setupScrollSentinel(sentinel, callbacks.onLoadMoreCommits)
 
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
+proc appendRenderedChild[R, N](r: R; host, child: N) =
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
   r.appendChild(host, child)
 
-proc setInnerHtml(r: MockRenderer; node: MockNode; html: string) =
-  ## Set the inner HTML of a mock node.  ``renderBranchPicker`` uses this to
-  ## inject the chevron SVG.  In the mock renderer this is a no-op: tests do
-  ## not inspect the chevron SVG content.
-  discard
-
 when defined(js):
-  proc attachScrollSentinel(r: WebRenderer; sentinel: isonim_dom.Element;
-                            callbacks: VCSCallbacks) =
-    if callbacks.onLoadMoreCommits == nil:
-      return
-    setupScrollSentinel(sentinel, callbacks.onLoadMoreCommits)
+  proc setInnerHtmlJS(node: isonim_dom.Element; html: cstring)
+    {.importjs: "#.innerHTML = #".}
 
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    r.appendChild(host, child)
+proc setInnerHtml[R, N](r: R; node: N; html: string) =
+  ## Set the inner HTML of `node`. ``renderBranchPicker`` uses this to inject
+  ## the chevron SVG, which only a browser draws; elsewhere it is a no-op.
+  when defined(js):
+    when N is isonim_dom.Element:
+      setInnerHtmlJS(node, cstring(html))
 
-  proc setInnerHtml(r: WebRenderer; node: Element; html: string) =
-    node.innerHTML = cstring(html)
+proc attachDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
+                           target: string) =
+  ## Open `target`'s diff on a click on `btn`. In a browser the click does not
+  ## also reach the row underneath, which would select it.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  let t = target
+  template plainClick() =
+    r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(t))
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          callbacks.invokeOpenFileDiff(t)
+          ev.stopPropagation()
+          ev.preventDefault())
+    else:
+      plainClick()
+  else:
+    plainClick()
 
-proc attachFileDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
-  r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
+proc attachFileDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
+                               target: string) =
+  r.attachDiffClick(btn, callbacks, target)
 
-when defined(js):
-  proc attachFileDiffClick(r: WebRenderer; btn: isonim_dom.Element; callbacks: VCSCallbacks; target: string) =
-    let t = target
-    isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeOpenFileDiff(t)
-        ev.stopPropagation()
-        ev.preventDefault())
-
-proc attachCommitDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
-  r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
-
-when defined(js):
-  proc attachCommitDiffClick(r: WebRenderer; btn: isonim_dom.Element; callbacks: VCSCallbacks; target: string) =
-    let t = target
-    isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeOpenFileDiff(t)
-        ev.stopPropagation()
-        ev.preventDefault())
+proc attachCommitDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
+                                 target: string) =
+  r.attachDiffClick(btn, callbacks, target)
 
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
@@ -333,18 +345,25 @@ proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
 # through to the toggle callback, enabling ctrl+click (toggle one) and
 # shift+click (select range) multi-select.
 
-proc attachCommitClick(r: MockRenderer; header: MockNode;
-                       vm: VCSVM; callbacks: VCSCallbacks; index: int) =
-  r.addEventListener(header, "click", proc() =
-    vm.invokeToggleCommitExpand(callbacks, index, false, false))
-
-when defined(js):
-  proc attachCommitClick(r: WebRenderer; header: isonim_dom.Element;
-                         vm: VCSVM; callbacks: VCSCallbacks; index: int) =
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        vm.invokeToggleCommitExpand(callbacks, index,
-                                    ev.ctrlOrMetaKey(), ev.shiftKey()))
+proc attachCommitClick[R, N](r: R; header: N;
+                             vm: VCSVM; callbacks: VCSCallbacks; index: int) =
+  ## Expand or collapse commit `index` on a click on its header. A browser
+  ## click carries the modifier keys of a multi-select; elsewhere it has none.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  template plainClick() =
+    r.addEventListener(header, "click", proc() =
+      vm.invokeToggleCommitExpand(callbacks, index, false, false))
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          vm.invokeToggleCommitExpand(callbacks, index,
+                                      ev.ctrlOrMetaKey(), ev.shiftKey()))
+    else:
+      plainClick()
+  else:
+    plainClick()
 
 # ---------------------------------------------------------------------------
 # Commit-detail tooltip
@@ -448,26 +467,26 @@ when defined(js):
       document.body.appendChild(tip);
     })(#)""".}
 
-  proc attachTooltipToBody(r: WebRenderer; tooltip: isonim_dom.Element) =
-    ensureTooltipInBodyJS(tooltip)
+proc attachTooltipToBody[R, N](r: R; tooltip: N) =
+  ## Move the shared tooltip to the document body (browser only).
+  when defined(js):
+    when N is isonim_dom.Element:
+      ensureTooltipInBodyJS(tooltip)
 
-  proc attachCommitTooltip(r: WebRenderer; header: isonim_dom.Element;
-                            hash, fullHash, author, date: string) =
-    let h  = cstring(hash)
-    let fh = cstring(fullHash)
-    let a  = cstring(author)
-    let d  = cstring(date)
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseenter",
-      proc(ev: isonim_dom.Event) = showVCSTooltip(h, fh, a, d, header))
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseleave",
-      proc(ev: isonim_dom.Event) = hideVCSTooltip())
-
-proc attachCommitTooltip(r: MockRenderer; header: MockNode;
-                          hash, fullHash, author, date: string) =
-  discard
-
-proc attachTooltipToBody(r: MockRenderer; tooltip: MockNode) =
-  discard
+proc attachCommitTooltip[R, N](r: R; header: N;
+                               hash, fullHash, author, date: string) =
+  ## Show the commit's details while the pointer is over its header
+  ## (browser only).
+  when defined(js):
+    when N is isonim_dom.Element:
+      let h  = cstring(hash)
+      let fh = cstring(fullHash)
+      let a  = cstring(author)
+      let d  = cstring(date)
+      isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseenter",
+        proc(ev: isonim_dom.Event) = showVCSTooltip(h, fh, a, d, header))
+      isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseleave",
+        proc(ev: isonim_dom.Event) = hideVCSTooltip())
 
 # ---------------------------------------------------------------------------
 # Branch picker
@@ -502,15 +521,20 @@ proc parseControlInt(value: string; fallback: int): int =
   except ValueError:
     fallback
 
-proc readSelectedInt(r: MockRenderer; node: MockNode; fallback: int): int =
-  parseControlInt(r.inputValue(node), fallback)
-
 when defined(js):
   proc selectValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
 
-  proc readSelectedInt(r: WebRenderer; node: isonim_dom.Element;
-                       fallback: int): int =
-    parseControlInt($isonim_dom.Node(node).selectValue(), fallback)
+proc readSelectedInt[R, N](r: R; node: N; fallback: int): int =
+  ## The integer value of the `<select>` `node`, or `fallback`.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin inputValue
+  when defined(js):
+    when N is isonim_dom.Element:
+      parseControlInt($isonim_dom.Node(node).selectValue(), fallback)
+    else:
+      parseControlInt(r.inputValue(node), fallback)
+  else:
+    parseControlInt(r.inputValue(node), fallback)
 
 proc renderTraceContextOption[R](r: R; ctx: VCSTraceContextRow;
                                  isSelected: bool): auto =
@@ -1089,25 +1113,38 @@ when defined(js):
       }, { passive: true });
     })(#)""".}
 
-proc saveCommitListScroll(body: MockNode)    = discard
-proc restoreCommitListScroll(body: MockNode) = discard
-proc attachMouseTracker(body: MockNode)      = discard
+proc keepCommitListScroll[N](body: N; save: bool) =
+  ## Save (before a rebuild) or restore (after it) the commit list's scroll
+  ## position — a browser's; other renderers do not scroll.
+  when defined(js):
+    when N is isonim_dom.Element:
+      if save: saveCommitListScroll(body) else: restoreCommitListScroll(body)
+
+proc trackMouse[N](body: N) =
+  ## Browser only: see `attachMouseTracker`.
+  when defined(js):
+    when N is isonim_dom.Element:
+      attachMouseTracker(body)
 
 # ---------------------------------------------------------------------------
 # Top-level panel assembly
 # ---------------------------------------------------------------------------
 
-proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
-                           callbacks: VCSCallbacks): auto =
-  var body: typeof(r.createElement("div"))
+proc renderVCSPanel*[R, N](r: R; vm: VCSVM;
+                           callbacks: VCSCallbacks = VCSCallbacks()): N =
+  ## The VCS pane: the review's changed files in DeepReview mode, otherwise
+  ## the branch picker, the working tree and the commit graph.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren
+  var body: N
   let panel = ui(r):
     tdiv(class = VCSContainerClass):
       tdiv(ref = body, class = "vcs-panel-body")
 
-  attachMouseTracker(body)
+  trackMouse(body)
 
   createRenderEffect proc() =
-    saveCommitListScroll(body)
+    keepCommitListScroll(body, save = true)
     r.clearChildren(body)
     if vm.deepReviewMode.val:
       r.appendRenderedChild(body, renderHeader(r, vm, callbacks))
@@ -1127,22 +1164,6 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
       r.appendRenderedChild(body, renderWorkingTree(r, vm, callbacks))
       # Commit graph with accordion expand/collapse and infinite-scroll.
       r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
-    restoreCommitListScroll(body)
+    keepCommitListScroll(body, save = false)
 
   panel
-
-proc renderVCSPanel*(r: MockRenderer; vm: VCSVM;
-                     callbacks: VCSCallbacks = VCSCallbacks()): MockNode =
-  renderVCSPanelImpl(r, vm, callbacks)
-
-when defined(js):
-  proc renderVCSPanel*(r: WebRenderer; vm: VCSVM;
-                       callbacks: VCSCallbacks = VCSCallbacks()):
-                       isonim_dom.Element =
-    renderVCSPanelImpl(r, vm, callbacks)
-
-  proc mountIsoNimVCSPanel*(container: isonim_dom.Element; vm: VCSVM;
-                            callbacks: VCSCallbacks = VCSCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderVCSPanel(r, vm, callbacks)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

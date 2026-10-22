@@ -298,20 +298,6 @@ proc wireFilesystemOpenBridge() =
     loadFolderContentIfNeeded(path)
 
 # ---------------------------------------------------------------------------
-# Component extension (ctInExtension boiler-plate).
-#
-# Preserved from the legacy module so the extension entry-point still
-# resolves to a valid ``FilesystemComponent``; the in-extension render
-# path installs an empty shell since the IsoNim view is the production
-# renderer.  Same pattern as
-# request_panel §1.51 / scratchpad §1.70.
-# ---------------------------------------------------------------------------
-
-when defined(ctInExtension):
-  var filesystemComponentForExtension* {.exportc.}: FilesystemComponent =
-    makeFilesystemComponent(data, 0)
-
-# ---------------------------------------------------------------------------
 # Legacy → VM translation helpers
 # ---------------------------------------------------------------------------
 
@@ -470,6 +456,3 @@ method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =
   self.api = api
   filesystemComponentRef = self
 
-proc registerFilesystemComponent*(component: FilesystemComponent,
-                                   api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

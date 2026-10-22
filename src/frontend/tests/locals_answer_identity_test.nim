@@ -33,10 +33,7 @@
 ## and the native replay backend renders values through the named language's
 ## printers. Now B is the ONE request per move, naming the stop's tick and
 ## the file's language (`ReplayDataStore.sourceLanguageOf`, installed by
-## `installSourceLanguage`), and A stands down once the StateVM runs over the
-## session's store. Where it does not — the stub-backed StateVM a host that
-## never builds the session's store is left with (the VS Code extension) — A
-## is still the one sender, and the first suite asserts it still asks.
+## `installSourceLanguage`), and A is gone: the State component asks nothing.
 ##
 ## This suite drives the real senders and the delivery and reads the store
 ## and the wire.
@@ -47,8 +44,8 @@
 ## `sendCtRequest`, `deliverDapResponse`), `middleware.setupMiddlewareApis`
 ## (the view -> DAP request relay and the DAP -> views response relay), the
 ## views mediator and a component mediator built by `types`' own
-## constructors, `StateComponent.register` / `onCompleteMove` / `loadLocals` /
-## `registerLocals`, `state.wireLocalsAnswers` (called by `ui_js` in
+## constructors, `StateComponent.register` / `onCompleteMove`,
+## `state.wireLocalsAnswers` (called by `ui_js` in
 ## production), and the session `ui_js.configureMiddleware` builds: a
 ## `DebuggerSession` over `newDapBackendService` (the constructor `ui_js`
 ## uses), its panel ViewModels and its stop loader, attached to a trace as
@@ -76,8 +73,7 @@
 ##
 ## Lane: `renderer-dom` — the BROWSER target (`nim js -d:ctRenderer`, no
 ## `-d:nodejs`: `ui/state.nim`'s kdom graph does not compile under it), run
-## by `jsdom-run.mjs` over a real DOM. WITHOUT `-d:ctInExtension`: the
-## extension transport carries no request `seq`. Without `-d:nodejs`
+## by `jsdom-run.mjs` over a real DOM. Without `-d:nodejs`
 ## `std/unittest` cannot set the exit status, so this suite sets it.
 
 import std/[unittest, jsffi, strutils, asyncjs, json]
@@ -163,9 +159,8 @@ setupMiddlewareApis(dapApi, viewsApi)
 
 # The State component registers FIRST, before the session's StateVM exists —
 # the order the desktop is in when `createUIComponents` beats
-# `configureMiddleware`. Its moves are delivered by hand (`moveTo`), as the
-# VS Code extension's subscription delivers them: the component's
-# `onCompleteMove` -> `loadLocals` is that host's sender.
+# `configureMiddleware`. Its moves are delivered by hand (`moveTo`): the
+# component's `onCompleteMove` moves the store's debugger position.
 let component = StateComponent(
   id: 0,
   values: JsAssoc[cstring, ValueComponent]{},
@@ -229,18 +224,6 @@ proc answerFromRequest(packet: JsObject; marker: int): JsObject =
 # renderer resolves it, so the suite does not restate the table.
 let rustWire = langWireName(toLangFromFilename(cstring"/src/calc.rs"))
 doAssert rustWire != LoadLocalsDefaultLang
-
-suite "where the StateVM runs over a stub store, the State component asks":
-
-  test "the stub-store host still asks once per move, in the file's language":
-    # Before `initStateVMFromSession` the StateVM's auto-load goes to a stub
-    # backend that sends nothing, so the legacy component is the only
-    # sender: it must still ask, and name the file's language.
-    let base = localsRequests().len
-    moveTo(50, 5)
-    let sent = newSince(base)
-    ck sent.len == 1
-    ck sent.len == 1 and langOf(sent[0]) == rustWire
 
 # ---------------------------------------------------------------------------
 # The session, built as `ui_js.configureMiddleware` builds it
@@ -466,7 +449,12 @@ proc sessionChecks() {.async.} =
 
   ck moveFailures.len == 0
   echo "CHECKS: ", checks
+  # The checks above run after the event loop turns, outside `std/unittest`'s
+  # `test` blocks, so the result line the lane counts is written here.
   if failedChecks > 0:
+    echo "  [FAILED] the session asks once per stop and applies only its own answers (", failedChecks, " of ", checks, ")"
     {.emit: "process.exitCode = 1;".}
+  else:
+    echo "  [OK] the session asks once per stop and applies only its own answers"
 
 discard sessionChecks()

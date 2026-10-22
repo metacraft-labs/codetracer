@@ -2017,8 +2017,9 @@ proc applyEventLogResponse*(store: ReplayDataStore;
   ## marker-only answers `EventLogVM`'s own effect routes through here are the
   ## second kind.
   ##
-  ## `searched`: the answer is to a search (`ct/event-load`'s `search`), so
-  ## its `total` counts the matching events only.
+  ## `searched`: the answer is to a filtered request (`ct/event-load`'s
+  ## `search` or `selectedKinds`), so its `total` counts the matching events
+  ## only.
   if payload.isNil:
     return
   var hasEvents = false
@@ -2043,13 +2044,27 @@ proc applyEventLogResponse*(store: ReplayDataStore;
     if not holder.isNil and holder.hasKey("total") and
         holder["total"].kind == JInt:
       total = holder["total"].getInt
+  # `unfilteredTotal`: the whole log's size, which the engine reports beside
+  # the filtered `total` (a search, a kind selection).
+  var unfilteredTotal = -1
+  if payload.kind == JObject:
+    let body = payload.getOrDefault("body")
+    let holder = if payload.hasKey("unfilteredTotal"): payload
+                 elif not body.isNil and body.kind == JObject: body
+                 else: nil
+    if not holder.isNil and holder.hasKey("unfilteredTotal") and
+        holder["unfilteredTotal"].kind == JInt:
+      unfilteredTotal = holder["unfilteredTotal"].getInt
   if total >= 0:
     store.eventLog.totalReported.val = true
 
-  # A SEARCHED answer's `total` is the number of MATCHING events — the
-  # filtered count, not the log's size, which stays what it was.
+  # A SEARCHED (or kind-filtered) answer's `total` is the number of MATCHING
+  # events — the filtered count; the log's size is its `unfilteredTotal` when
+  # the engine says it, and otherwise stays what it was.
   store.applyEventLogRows(eventLogRowsFromJson(payload, start), start,
-                          recordsTotal = (if searched: -1 else: total),
+                          recordsTotal = (if unfilteredTotal >= 0: unfilteredTotal
+                                          elif searched: -1
+                                          else: total),
                           recordsFiltered = (if searched: total else: -1),
                           source = elwsEventLoad)
 

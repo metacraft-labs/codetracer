@@ -135,6 +135,8 @@ proc lineJumpHandler(vm: BuildVM; line: BuildOutputLine): proc() =
 proc renderPlainOutput[R, N](r: R; vm: BuildVM; outputContainer: N) =
   ## The output rows as text, rebuilt whenever ``vm.output`` changes — every
   ## renderer but the browser's, which decorates them (`renderBuildPanel`).
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
   createRenderEffect proc() =
     let lines = vm.output.val
     r.clearChildren(outputContainer)

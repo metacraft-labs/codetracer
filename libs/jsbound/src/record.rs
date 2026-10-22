@@ -5,7 +5,9 @@
 //! bottom of this file: tag, name, and its fields in wire order with their
 //! wire types. The enum, the body encoder, the body decoder and the canonical
 //! JSON form (the one the shared byte vectors' expectations are written in)
-//! are all generated from that table, so the four cannot drift apart. The
+//! are all generated from that table, so the four cannot drift apart. Every
+//! `u8` field is an enumeration whose value set is [`VALUE_SETS`]; the
+//! decoder refuses a value outside it (spec §5.3 rule 2). The
 //! TypeScript implementation (codetracer-js-recorder
 //! `packages/boundary-format/src/schema.ts`) carries the same table and is
 //! held to the same vectors.
@@ -183,6 +185,94 @@ impl Field for BlobRef {
     }
 }
 
+/// The value set of every enumerated field of §5.2, as `(record, field,
+/// least, greatest)`: the values from `least` to `greatest` are defined,
+/// every other is refused as [`DecodeErrorKind::UnknownEnumValue`]. Every
+/// `u8` field of the record table is one of these, and only those are
+/// (`tests` below checks both directions). The TypeScript implementation
+/// carries the same table (`ENUM_VALUE_SETS` in
+/// `packages/boundary-format/src/schema.ts`), and the shared refusal vectors
+/// hold both to every bound.
+pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
+    // §9.1 levels.
+    ("Header", "protocol_level", 0, 1),
+    // §10.4: 0 no preference, 1 light, 2 dark; 1 when reduced motion.
+    ("Env", "color_scheme", 0, 2),
+    ("Env", "reduced_motion", 0, 1),
+    ("Task", "kind", 1, 12),
+    ("TaskReg", "kind", 1, 12),
+    ("Clock", "src", 1, 5),
+    ("Random", "src", 1, 3),
+    ("NetRequest", "api", 1, 5),
+    ("NetResponse", "outcome", 1, 5),
+    ("WsMessage", "dir", 1, 4),
+    ("StorageRead", "area", 1, 3),
+    ("StorageRead", "present", 0, 2),
+    ("DomEffect", "effect", 1, 6),
+    ("Navigation", "kind", 1, 5),
+    ("Error", "kind", 1, 2),
+    ("Scrubbed", "class", 1, 4),
+    ("Gap", "reason", 1, 3),
+    ("End", "reason", 1, 4),
+];
+
+/// The value set of `record`.`field`, if it is an enumerated field.
+pub fn value_set(record: &str, field: &str) -> Option<(u8, u8)> {
+    VALUE_SETS
+        .iter()
+        .find(|(r, f, _, _)| *r == record && *f == field)
+        .map(|&(_, _, lo, hi)| (lo, hi))
+}
+
+/// A decoded field checked against its value set (spec §5.3 rule 2). Only
+/// the `u8` fields are enumerations; every other wire type has no set.
+pub(crate) trait ValueSet {
+    fn check(&self, _record: &str, _field: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl ValueSet for u8 {
+    fn check(&self, record: &str, field: &str) -> Result<(), String> {
+        match value_set(record, field) {
+            Some((lo, hi)) if (lo..=hi).contains(self) => Ok(()),
+            Some((lo, hi)) => Err(format!(
+                "{record}.{field} is {self}; vocab {VOCAB} defines {lo} to {hi}"
+            )),
+            None => Err(format!(
+                "{record}.{field} is a u8 field with no value set in this decoder"
+            )),
+        }
+    }
+}
+/// Sets a `u8` field by name (the shared vectors' enumeration edits).
+pub(crate) trait SetU8 {
+    fn set_u8(&mut self, _v: u8) -> bool {
+        false
+    }
+}
+impl SetU8 for u8 {
+    fn set_u8(&mut self, v: u8) -> bool {
+        *self = v;
+        true
+    }
+}
+impl SetU8 for u16 {}
+impl SetU8 for u32 {}
+impl SetU8 for u64 {}
+impl SetU8 for f64 {}
+impl SetU8 for String {}
+impl SetU8 for Vec<u8> {}
+impl SetU8 for BlobRef {}
+
+impl ValueSet for u16 {}
+impl ValueSet for u32 {}
+impl ValueSet for u64 {}
+impl ValueSet for f64 {}
+impl ValueSet for String {}
+impl ValueSet for Vec<u8> {}
+impl ValueSet for BlobRef {}
+
 fn put_len_prefixed(out: &mut Vec<u8>, bytes: &[u8]) {
     let len = u32::try_from(bytes.len()).expect("a jsbound field is smaller than 4 GiB");
     out.extend_from_slice(&len.to_le_bytes());
@@ -219,6 +309,15 @@ macro_rules! define_records {
         /// Every record kind as `(tag, name)`, in tag order.
         pub const RECORD_KINDS: &[(u8, &str)] = &[ $( ($tag, stringify!($name)) ),* ];
 
+        /// Every field as `(record, field, wire type)`, in table order.
+        pub const RECORD_FIELDS: &[(&str, &str, &str)] = &[
+            $( $( (
+                stringify!($name),
+                stringify!($field),
+                stringify!($ty),
+            ), )* )*
+        ];
+
         impl Record {
             /// The frame tag of this record.
             pub fn tag(&self) -> u8 {
@@ -246,6 +345,35 @@ macro_rules! define_records {
                 match tag {
                     $( $tag => Ok(Some(Record::$name { $( $field: <$ty as Field>::get(r)? ),* })), )*
                     _ => Ok(None),
+                }
+            }
+
+            /// Check every enumerated field against its value set, in wire
+            /// order; the first value outside its set is the error.
+            pub(crate) fn check_value_sets(&self) -> Result<(), String> {
+                match self {
+                    $( Record::$name { $( $field ),* } => {
+                        $( ValueSet::check(
+                            $field,
+                            stringify!($name),
+                            stringify!($field).trim_start_matches("r#"),
+                        )?; )*
+                    } ),*
+                }
+                Ok(())
+            }
+
+            /// Set the `u8` field `field` to `v`; false if the record has no
+            /// such `u8` field.
+            pub(crate) fn set_u8_field(&mut self, field: &str, v: u8) -> bool {
+                match self {
+                    $( Record::$name { $( $field ),* } => {
+                        $( if stringify!($field) == field {
+                            return SetU8::set_u8($field, v);
+                        } )*
+                        let _ = v;
+                        false
+                    } ),*
                 }
             }
 
@@ -387,5 +515,30 @@ impl Record {
             Record::WsMessage { data, .. } => Some(data),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RECORD_FIELDS, VALUE_SETS};
+
+    /// Every `u8` field of the record table has a value set, and every
+    /// value set names a `u8` field: a field added to the table without
+    /// one, or a stale entry, fails here rather than in a decoder.
+    #[test]
+    fn every_u8_field_has_exactly_one_value_set() {
+        let u8_fields: Vec<(&str, &str)> = RECORD_FIELDS
+            .iter()
+            .filter(|(_, _, ty)| *ty == "u8")
+            .map(|&(r, f, _)| (r, f))
+            .collect();
+        let mut sets: Vec<(&str, &str)> = VALUE_SETS.iter().map(|&(r, f, _, _)| (r, f)).collect();
+        let mut fields = u8_fields.clone();
+        fields.sort_unstable();
+        sets.sort_unstable();
+        assert_eq!(fields, sets);
+        assert!(VALUE_SETS.iter().all(|&(_, _, lo, hi)| lo <= hi));
+        // Vacuity: the table has its eighteen enumerated fields.
+        assert_eq!(u8_fields.len(), 18);
     }
 }

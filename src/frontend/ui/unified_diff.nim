@@ -64,10 +64,11 @@ import ../viewmodel/viewmodels/context_expansion
 import ../viewmodel/viewmodels/review_flow_overlay
 import diff_expansion
 
-when defined(js):
-  from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_unified_diff_view import
-    mountIsoNimUnifiedDiffTab, UnifiedDiffCallbacks
+from isonim/web/dom_api as isonim_dom_api import nil
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
+import ../viewmodel/views/isonim_unified_diff_view
 
 var unifiedDiffVMInstances*: JsAssoc[int, VCSVM] = JsAssoc[int, VCSVM]{}
 var unifiedDiffComponentRefs: JsAssoc[int, UnifiedDiffComponent] =
@@ -79,8 +80,6 @@ var unifiedDiffSourceCaches: JsAssoc[int, SourceTextCache] =
   ## §4.2).  Per tab rather than global because a tab's lifetime is exactly the
   ## lifetime the cached blobs are wanted for, and `forgetUnifiedDiffTab`
   ## drops both this and the tab's ViewModel when the tab closes.
-var isoNimUnifiedDiffMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
 
 # ---------------------------------------------------------------------------
 # Monaco FFI
@@ -361,8 +360,6 @@ proc forgetUnifiedDiffTab*(componentId: int) =
     discard jsDelete(unifiedDiffSourceCaches[componentId])
   if unifiedDiffComponentRefs.hasKey(componentId):
     discard jsDelete(unifiedDiffComponentRefs[componentId])
-  if isoNimUnifiedDiffMountedIds.hasKey(componentId):
-    discard jsDelete(isoNimUnifiedDiffMountedIds[componentId])
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -2134,77 +2131,106 @@ proc initEditor(self: UnifiedDiffComponent) =
 
   self.scheduleDeletedLineTokens(attempt = 0)
 
-proc tryMountUnifiedDiffTab*(componentId: int) =
-  when defined(js):
-    if not unifiedDiffComponentRefs.hasKey(componentId):
-      return
-    let component = unifiedDiffComponentRefs[componentId]
-    if component.isNil:
-      return
-    let vm = component.ensureUnifiedDiffVM()
+proc resetEditor(self: UnifiedDiffComponent) =
+  ## Drop the Monaco instance of a tab whose container GoldenLayout re-created
+  ## (a tab drag, a layout restore): the previous mount's DOM, and the editor
+  ## attached to it, is gone.
+  self.editorInitialized = false
+  # A diff editor's two models are created explicitly and therefore
+  # outlive it; disposing the editor without them leaks a model pair —
+  # and with it a tokenizer's state — on every tab drag or layout
+  # restore.  Order matters: the editor first, so nothing is holding the
+  # models when they go.
+  udDisposeDiffEditor(self.diffEditor)
+  udDisposeModel(self.originalModel)
+  udDisposeModel(self.modifiedModel)
+  self.diffEditor = nil
+  self.originalModel = nil
+  self.modifiedModel = nil
+  self.editor = nil
+  self.originalEditor = nil
+  self.decorationCollection = nil
+  self.originalDecorationCollection = nil
+  # The review overlay's two handles belong to the destroyed Monaco
+  # instance as much as `decorationCollection` does: a stale collection
+  # would be written to an editor that no longer exists, and a stale zone
+  # id would make the next `rebuildInvocationZones` remove a zone from it.
+  self.flowDecorationCollection = nil
+  self.flowViewZoneIds = @[]
+  # The value bands' content widgets belong to the destroyed editor too.
+  # Dropped without `removeContentWidget`, deliberately: there is nothing
+  # left to remove them FROM, and calling it on a disposed editor throws.
+  self.flowValueWidgets = @[]
+  self.flowValueZoneIds = @[]
+  self.flowValueWidgetMax = 0
+
+proc unifiedDiffComponentFor(host: isonim_dom_api.Element): UnifiedDiffComponent =
+  ## The tab `host` (`unifiedDiffComponent-<id>`) belongs to, or nil.
+  let mapping = data.ui.componentMapping[Content.UnifiedDiff]
+  let componentId = panelHostComponentId(host)
+  if mapping.isNil or not mapping.hasKey(componentId):
+    return nil
+  UnifiedDiffComponent(mapping[componentId])
+
+proc hostIsConnected(host: isonim_dom_api.Element): bool
+  {.importjs: "Boolean(#.isConnected)".}
+
+proc requestFrame(f: proc()) {.importjs: "requestAnimationFrame(#)".}
+
+const EditorAttachFrameLimit = 120
+  ## About two seconds of frames: GoldenLayout attaches a container it has
+  ## built within a frame or two, so a tab still detached after this is not
+  ## going to be shown.
+
+proc initEditorWhenAttached(self: UnifiedDiffComponent;
+                            host: isonim_dom_api.Element; frame = 0) =
+  ## Create the tab's Monaco instance once `host` is in the document.
+  ##
+  ## The panel host renders the tab into the container GoldenLayout has just
+  ## built, which GoldenLayout may attach to the document a frame later, and
+  ## Monaco (and this module's id-based lookups of its host) needs the
+  ## element in the document. This waits for THAT element — it never looks
+  ## for a container — and stops when the tab is closed or remounted.
+  if self.isNil or self.editorInitialized:
+    return
+  if unifiedDiffComponentFor(host) != self:
+    return
+  if host.hostIsConnected():
+    self.initEditor()
+    return
+  if frame >= EditorAttachFrameLimit:
+    cerror "unified diff: tab " & $self.id & " was never attached; " &
+      "its editor is not created"
+    return
+  let component = self
+  requestFrame(proc() =
+    component.initEditorWhenAttached(host, frame + 1))
+
+# The panel host mounts each diff tab into the container GoldenLayout creates
+# (`ui/panel_host`); the factory has created the tab's component by then.
+setPanelRenderer(Content.UnifiedDiff,
+  proc(r: WebRenderer; host: isonim_dom_api.Element;
+       session: SessionViewModel): isonim_dom_api.Element =
+    let component = unifiedDiffComponentFor(host)
+    let vm = if component.isNil: nil else: component.ensureUnifiedDiffVM()
     if vm.isNil:
-      return
-    let container = document.getElementById(
-      cstring(fmt"unifiedDiffComponent-{componentId}"))
-    if container.isNil:
-      return
+      return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")
+    if component.editorInitialized:
+      component.resetEditor()
+    component.syncIntoVM()
+    let callbacks = UnifiedDiffCallbacks(
+      onCopySelectedHunks: proc() = component.copySelectedHunks(),
+      onStageSelectedHunks: proc() = component.stageSelectedHunks(),
+      onClearSelectedHunks: proc() =
+        vm.clearHunkSelection()
+        component.applyDecorations(),
+    )
+    renderUnifiedDiffTab[WebRenderer, isonim_dom_api.Element](
+      r, vm, editorHostId(component.id), callbacks))
 
-    if isoNimUnifiedDiffMountedIds.hasKey(componentId) and
-       isoNimUnifiedDiffMountedIds[componentId] and
-       container.childNodes.len == 0:
-      # GoldenLayout re-created the host element (a tab drag, a layout
-      # restore), so the previous mount's DOM — and with it the Monaco
-      # instance — is gone.  Without this the tab would come back permanently
-      # blank, because the mounted flag alone said the work was already done.
-      isoNimUnifiedDiffMountedIds[componentId] = false
-      component.editorInitialized = false
-      # A diff editor's two models are created explicitly and therefore
-      # outlive it; disposing the editor without them leaks a model pair —
-      # and with it a tokenizer's state — on every tab drag or layout
-      # restore.  Order matters: the editor first, so nothing is holding the
-      # models when they go.
-      udDisposeDiffEditor(component.diffEditor)
-      udDisposeModel(component.originalModel)
-      udDisposeModel(component.modifiedModel)
-      component.diffEditor = nil
-      component.originalModel = nil
-      component.modifiedModel = nil
-      component.editor = nil
-      component.originalEditor = nil
-      component.decorationCollection = nil
-      component.originalDecorationCollection = nil
-      # The review overlay's two handles belong to the destroyed Monaco
-      # instance as much as `decorationCollection` does: a stale collection
-      # would be written to an editor that no longer exists, and a stale zone
-      # id would make the next `rebuildInvocationZones` remove a zone from it.
-      component.flowDecorationCollection = nil
-      component.flowViewZoneIds = @[]
-      # The value bands' content widgets belong to the destroyed editor too.
-      # Dropped without `removeContentWidget`, deliberately: there is nothing
-      # left to remove them FROM, and calling it on a disposed editor throws.
-      component.flowValueWidgets = @[]
-      component.flowValueZoneIds = @[]
-      component.flowValueWidgetMax = 0
-
-    if not (isoNimUnifiedDiffMountedIds.hasKey(componentId) and
-            isoNimUnifiedDiffMountedIds[componentId]):
-      component.syncIntoVM()
-      let callbacks = UnifiedDiffCallbacks(
-        onCopySelectedHunks: proc() = component.copySelectedHunks(),
-        onStageSelectedHunks: proc() = component.stageSelectedHunks(),
-        onClearSelectedHunks: proc() =
-          vm.clearHunkSelection()
-          component.applyDecorations(),
-      )
-      mountIsoNimUnifiedDiffTab(
-        cast[isonim_dom_api.Element](container), vm,
-        editorHostId(componentId), callbacks)
-      isoNimUnifiedDiffMountedIds[componentId] = true
-
-    # The editor host only exists once the view above has mounted, and the
-    # GoldenLayout container can be re-created (a tab drag, a layout restore)
-    # after that, so this runs on every mount attempt rather than once.
-    if not component.editorInitialized:
-      component.initEditor()
-  else:
-    discard
+# The editor host exists once the tab is rendered into its container.
+setPanelDecorator(Content.UnifiedDiff,
+  proc(host: isonim_dom_api.Element; session: SessionViewModel) =
+    let component = unifiedDiffComponentFor(host)
+    if not component.isNil:
+      component.initEditorWhenAttached(host))

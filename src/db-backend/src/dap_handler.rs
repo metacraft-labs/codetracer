@@ -2799,12 +2799,48 @@ impl Handler {
         // fields, and the page's marker rows are cut from this projection.
         self.ensure_marker_rows();
 
-        // Safety: `ensure_events_loaded` guarantees `cached_events` is Some.
-        let all_events = match self.cached_events.as_ref() {
-            Some(events) => events,
-            None => {
-                return Err("internal error: cached_events is None after population".into());
+        // THE EVENT LOG'S EVENTS, as `ct/update-table` serves them: the
+        // event database's global table — the recorded events plus the
+        // trace-log events of each enabled tracepoint, in step order
+        // (`EventDb::refresh_global`). Without a tracepoint run that table
+        // IS the recorded events, and the cached list is read as it is.
+        //
+        // Each merged event's place in the RECORDED log (`recorded_of`): a
+        // recorded event's index in `cached_events` (its index in the
+        // event database's recorded table, `SingleTableId(0)`), none for a
+        // trace-log event. The correlation markers are keyed by it.
+        let merged: Option<(Vec<ProgramEvent>, Vec<Option<usize>>)> = {
+            let cached_len = self.cached_events.as_ref().map_or(0, Vec::len);
+            let table = &self.event_db.global_table;
+            if table.len() != cached_len || table.iter().any(|(_, table_id, _)| table_id.0 != 0) {
+                Some(
+                    table
+                        .iter()
+                        .map(|(_, table_id, event_index)| {
+                            let event = self.event_db.get_program_event(table_id, event_index).clone();
+                            (event, (table_id.0 == 0).then_some(event_index.0))
+                        })
+                        .unzip(),
+                )
+            } else {
+                None
             }
+        };
+        let recorded_of = |i: usize| -> Option<usize> {
+            match &merged {
+                Some((_, recorded)) => recorded[i],
+                None => Some(i),
+            }
+        };
+        // Safety: `ensure_events_loaded` guarantees `cached_events` is Some.
+        let all_events: &[ProgramEvent] = match &merged {
+            Some((events, _)) => events,
+            None => match self.cached_events.as_ref() {
+                Some(events) => events,
+                None => {
+                    return Err("internal error: cached_events is None after population".into());
+                }
+            },
         };
 
         // The order the event log's header click asked for (`sortKey`, a
@@ -2862,19 +2898,35 @@ impl Handler {
                         let event = &all_events[i];
                         event.content.to_lowercase().contains(&query)
                             || event.high_level_path.to_lowercase().contains(&query)
-                            || marker_text.get(&i).is_some_and(|text| text.contains(&query))
+                            || recorded_of(i)
+                                .and_then(|r| marker_text.get(&r))
+                                .is_some_and(|text| text.contains(&query))
                     })
                     .collect()
             }
             None => positions,
         };
+        // The pane's kind selection (`selectedKinds`, one flag per
+        // `EventLogKind`, in any shape `ct/update-table` accepts): only the
+        // events of a selected kind. Absent, every kind.
+        let selected_kinds = match req.arguments.get("selectedKinds") {
+            Some(value) if !value.is_null() => Some(task::selected_kinds_from_json(value)?),
+            _ => None,
+        };
+        let positions: Vec<usize> = match selected_kinds {
+            Some(flags) => positions
+                .into_iter()
+                .filter(|&i| flags[all_events[i].kind as usize])
+                .collect(),
+            None => positions,
+        };
         let (skip, take) = if count > 0 { (start, count) } else { (0, 20) };
-        // The WHOLE log's size, which a list pane's scrollbar scrubber spans
-        // (Scrollbar-Scrubbers.md §2: "the ENTIRE recording's population ...
-        // not the loaded window"). Until now the answer carried only the
-        // window, and a native pane learned the total only by reading a page
-        // that came back short.
+        // `total` is the size of the list the pane pages through — the search
+        // and the kind selection applied — which its scrollbar scrubber spans
+        // (Scrollbar-Scrubbers.md §2); `unfilteredTotal` is the whole log's,
+        // what the desktop footer reports as "filtered from N".
         let total = positions.len();
+        let unfiltered_total = all_events.len();
         // The row of the CURRENT recording position in this order, when the
         // caller names the position (`atRRTicks`): the last event at or before
         // that tick (Scrollbar-Scrubbers.md §3.5, the track's current-position
@@ -2882,13 +2934,19 @@ impl Handler {
         // the recording, not of the position.
         let index_at_tick: i64 = match req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64) {
             Some(at) => {
-                if self.event_tick_index.is_none() {
-                    self.event_tick_index = Some(event_tick_index_of(all_events));
-                }
-                let best = self
-                    .event_tick_index
-                    .as_ref()
-                    .and_then(|index| last_event_at_or_before(index, at));
+                // The cached recorded list keeps its tick index; a merged
+                // list (a tracepoint run's events among them) is indexed for
+                // this request.
+                let best = if merged.is_some() {
+                    last_event_at_or_before(&event_tick_index_of(all_events), at)
+                } else {
+                    if self.event_tick_index.is_none() {
+                        self.event_tick_index = Some(event_tick_index_of(all_events));
+                    }
+                    self.event_tick_index
+                        .as_ref()
+                        .and_then(|index| last_event_at_or_before(index, at))
+                };
                 match best {
                     Some(event_index) => positions
                         .iter()
@@ -2914,6 +2972,7 @@ impl Handler {
                 req,
                 serde_json::json!({
                     "total": total,
+                    "unfilteredTotal": unfiltered_total,
                     "indexAtTick": index_at_tick,
                 }),
                 sender,
@@ -2922,14 +2981,16 @@ impl Handler {
         }
         // Each event carries its place in the RECORDED log (`eventIndex`),
         // whatever order the window was cut in, so a sorted pane still
-        // numbers an event as the recording does.
-        let page_events: Vec<ProgramEvent> = positions
+        // numbers an event as the recording does. A trace-log event has no
+        // such place and carries its place in the merged log.
+        let page_positions: Vec<usize> = positions.iter().skip(skip).take(take).copied().collect();
+        let page_recorded: Vec<Option<usize>> = page_positions.iter().map(|&i| recorded_of(i)).collect();
+        let page_events: Vec<ProgramEvent> = page_positions
             .iter()
-            .skip(skip)
-            .take(take)
-            .map(|&i| {
+            .zip(&page_recorded)
+            .map(|(&i, recorded)| {
                 let mut event = all_events[i].clone();
-                event.event_index = i;
+                event.event_index = recorded.unwrap_or(i);
                 event
             })
             .collect();
@@ -2958,7 +3019,7 @@ impl Handler {
         // (the row's offset into `cached_events`); each page event carries
         // that index as `event_index`, and the marker row is re-numbered by
         // the event's row in the page, which the consumer joins on.
-        let marker_rows = self.collect_marker_rows_for_page(&page_events);
+        let marker_rows = self.collect_marker_rows_for_page(&page_recorded);
 
         // Include event data in the DAP response body so that
         // `session.customRequest("ct/event-load")` resolves with the data
@@ -2970,6 +3031,7 @@ impl Handler {
                 "content": page_contents,
                 "markers": marker_rows,
                 "total": total,
+                "unfilteredTotal": unfiltered_total,
                 "indexAtTick": index_at_tick,
             }),
             sender,
@@ -3024,16 +3086,19 @@ impl Handler {
     ///
     /// A page is not a contiguous run of recorded events once it is cut
     /// from a sorted or searched list, so a marker belongs to the page when
-    /// its event does — matched by the absolute index each page event
-    /// carries as `event_index` — and is re-numbered by that event's row in
+    /// its event does — matched by each page row's index in the recorded
+    /// log (`page_recorded`; none for a trace-log row, which has no marker)
+    /// — and is re-numbered by that event's row in
     /// the page, which is what the frontend joins against the
     /// `events: [...]` array on.
-    fn collect_marker_rows_for_page(&mut self, page_events: &[ProgramEvent]) -> Vec<MarkerEventRow> {
+    fn collect_marker_rows_for_page(&mut self, page_recorded: &[Option<usize>]) -> Vec<MarkerEventRow> {
         self.ensure_marker_rows();
-        let row_in_page: HashMap<usize, usize> = page_events
+        // Each page row's recorded index; a trace-log row has none, and no
+        // marker.
+        let row_in_page: HashMap<usize, usize> = page_recorded
             .iter()
             .enumerate()
-            .map(|(row, event)| (event.event_index, row))
+            .filter_map(|(row, recorded)| recorded.map(|r| (r, row)))
             .collect();
         let mut rows: Vec<MarkerEventRow> = self
             .cached_marker_rows
@@ -3110,6 +3175,9 @@ impl Handler {
     /// the M25b marker-row cache so subsequent `event_load` calls
     /// re-derive against the freshly-installed events.
     pub fn set_cached_events_for_tests(&mut self, events: Vec<ProgramEvent>) {
+        // As `ensure_events_loaded` does: the event database's recorded table
+        // is the same list, so the event log's global table is it too.
+        self.event_db.replace_record_events(&events);
         self.cached_events = Some(events);
         self.event_tick_index = None;
         self.cached_marker_rows = None;

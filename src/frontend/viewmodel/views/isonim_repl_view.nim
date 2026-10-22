@@ -90,6 +90,8 @@ proc renderMessage[R, N](r: R; message: string): N =
 proc renderHistoryEntries[R, N](r: R; historyContainer: N;
                                 entries: seq[ReplInteraction]) =
   ## The last `REPL_HISTORY_VISIBLE_LEN` interactions, newest first.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
   let last = entries.len - 1
   let first = max(0, entries.len - REPL_HISTORY_VISIBLE_LEN)
   if last < 0:
@@ -109,6 +111,8 @@ proc renderHistoryEntries[R, N](r: R; historyContainer: N;
 proc wireHeadlessSubmit[R, N](r: R; vm: ReplVM; formEl, inputEl: N) =
   ## A headless renderer's submit: the input's "value" attribute, which a
   ## test sets before firing "submit".
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
   r.addEventListener(formEl, "submit", proc() =
     let value = inputEl.attributes.getOrDefault("value", "")
     if value.len > 0:
@@ -154,6 +158,8 @@ proc renderReplPanel*[R, N](r: R; vm: ReplVM): N =
   ## The REPL panel, under any renderer (Shared-DOM-Front-Ends D3), mounted
   ## on the desktop by `ui/panel_host`. Its body follows the display mode,
   ## the history and the language, rebuilt when any of them changes.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
   var bodyEl: N
   let panel = ui(r):
     tdiv(ref = bodyEl, class = "repl-component"):

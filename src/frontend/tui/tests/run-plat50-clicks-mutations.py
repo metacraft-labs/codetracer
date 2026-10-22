@@ -144,6 +144,12 @@ EVENTLOGVIEW = "src/frontend/tui/app/views/event_log.nim"
 SCRATCHPANE = "src/frontend/tui/app/views/scratchpad_pane.nim"
 EVENTDB = "src/db-backend/src/event_db.rs"
 DAPHANDLER = "src/db-backend/src/dap_handler.rs"
+# ADDED 2026-10-22: the breakpoint planners every front-end shares moved from
+# `headless_session` into the SDK (`f8d57f478`), and the call-trace toggle and
+# the origin wait from `tui_session` / GPUI's main into the host both share
+# (`session_driver`).
+SDKBP = "src/frontend/viewmodel/sdk/breakpoints.nim"
+SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
 ISONIM_GPUI_DIR = Path(os.environ.get(
     "ISONIM_GPUI_DIR", str(ROOT.parent / "isonim-gpui")))
 if os.environ.get("ISONIM_GPUI_SRC"):
@@ -182,7 +188,8 @@ SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
             FILETREE, POINTLIST, BORDERS, CLI, TUIAPP, TUIMAIN, CHROME,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
             DESKEVENTLOG, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
-            EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP]
+            EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP,
+            SDKBP, SESSDRIVER]
 SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, IGT, ENGT, SHIMT,
           CLIPT, DESKTOP_GATE]
 
@@ -495,14 +502,23 @@ ARMS = [
     # into the shared `headless_session.clearAllBreakpoints` (via
     # `breakpointFiles`), which the program menu's "Delete All Breakpoints"
     # and GPUI's editor menu call too. Same defect, its one copy.
-    Arm("TS6", HSESSION,
+    # RE-AIMED 2026-10-22 (TS6, HS1, HS5, HS6, HS12, SD1): `f8d57f478` moved
+    # the breakpoint planners into `sdk/breakpoints.nim`, which plans every
+    # change as the file's whole set of `BreakpointSpec`s; each claim is
+    # aimed at the code that now carries it. Graded at codetracer
+    # `e353dcb7b` (a provisional record, retracted after the grade): HS5, HS6
+    # and HS12 killed by `test_plat50_column_ops_vm.nim`. TS6, HS1 and SD1 are
+    # NOT YET GRADED: their killer, the real-terminal `test_plat50_clicks.nim`,
+    # is red unmutated there (its dock-label right-click case, recorded in
+    # codetracer-pm `issues/`), so the harness refuses before any arm runs.
+    Arm("TS6", SDKBP,
         "       (path.len == 0 or r.path == path):\n",
         "       (path.len == 0 and r.path == path):\n",
         K_BPMENU, "Delete ALL breakpoints matches no file"),
     # --- 1. the shared operations ------------------------------------------
-    Arm("HS1", HSESSION,
-        "      if enabled: anchors.add a\n      else: disabled.add a\n",
-        "      anchors.add a\n",
+    Arm("HS1", SDKBP,
+        "  for sp in plan:\n    if not sp.enabled:\n      continue\n    var bp",
+        "  for sp in plan:\n    var bp",
         K_GUTTER, "a disabled breakpoint is still sent to the engine"),
     Arm("HS2", HSESSION,
         '  of "forward": 1\n',
@@ -517,8 +533,8 @@ ARMS = [
         "  if false:\n    s.backend.bound = saved\n    raise newException(CatchableError, what)\n",
         G_TEXTMENU, "a line jump that finds no step waits for a move forever"),
     Arm("SD1", STORE,
-        "                              column: max(0, a.column), enabled: false,\n",
-        "                              column: max(0, a.column), enabled: true,\n",
+        "        enabled: sp.enabled, resolution: resolution,\n",
+        "        enabled: true, resolution: resolution,\n",
         K_GUTTER, "the store keeps a disabled breakpoint as an enabled row"),
     Arm("NH1", NATIVEHOST,
         "    expandAllFolders(files)\n",
@@ -591,9 +607,13 @@ ARMS = [
         '         of caRunToCursor: "forward"\n',
         '         of caRunToCursor: "backward"\n',
         G_TEXTMENU, "GPUI's Run to Cursor runs backward"),
-    Arm("GM5", GPUIMAIN,
-        '        (if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"),\n',
-        '        (if line.isExpanded: "ct/expand-calls" else: "ct/collapse-calls"),\n',
+    # RE-AIMED 2026-10-22: GPUI's menu entry calls the toggle the host
+    # shares with the terminal (`session_driver.toggleCallChildren`). NOT YET
+    # GRADED: `test_plat50_gpui_plan.nim` is red unmutated at `e353dcb7b`
+    # (GPUI's call trace draws only its toplevel row; codetracer-pm `issues/`).
+    Arm("GM5", SESSDRIVER,
+        '  let command = if collapse: "ct/collapse-calls" else: "ct/expand-calls"\n',
+        '  let command = if collapse: "ct/expand-calls" else: "ct/collapse-calls"\n',
         G_CALL, "GPUI's Collapse Call Children sends expand"),
     Arm("GM6", GPUIMAIN,
         "  of caClosePane:\n    applyGestureCommand(r, cmdRemovePane(target.pane))\n",
@@ -648,17 +668,17 @@ ARMS = [
         '        let direction = if again and ascending: cstring"desc" else: cstring"asc"\n',
         '        let direction = cstring"asc"\n',
         D_DESKTOP, "the desktop's second header click does not reverse the order"),
-    Arm("HS5", HSESSION,
-        "  anchors.add (line, column)\n  s.sendBreakpoints(path, anchors, disabled)\n",
-        "  anchors.add (line, 0)\n  s.sendBreakpoints(path, anchors, disabled)\n",
+    Arm("HS5", SDKBP,
+        "  result.add BreakpointSpec(line: line, column: max(0, column),\n",
+        "  result.add BreakpointSpec(line: line, column: 0,\n",
         COL_STOP, "a column breakpoint sent without its column"),
-    Arm("HS6", HSESSION,
-        "      if r.enabled: result.enabled.add (r.line, r.column)\n",
-        "      if r.enabled: result.enabled.add (r.line, 0)\n",
+    Arm("HS6", SDKBP,
+        "      result.add BreakpointSpec(line: r.line, column: r.column,\n",
+        "      result.add BreakpointSpec(line: r.line, column: 0,\n",
         COL_STOP, "an edit elsewhere drops the column breakpoints' columns"),
-    Arm("HS12", HSESSION,
-        "      if enabled: anchors.add a\n      else: disabled.add a\n    elif a in held.enabled: anchors.add a\n",
-        "      anchors.add a\n      if not enabled: disabled.add a\n    elif a in held.enabled: anchors.add a\n",
+    Arm("HS12", SDKBP,
+        "  for sp in plan:\n    if not sp.enabled:\n      continue\n    var bp",
+        "  for sp in plan:\n    if not sp.enabled and sp.column == 0:\n      continue\n    var bp",
         COL_OFF, "a disabled column breakpoint is still sent, and also listed disabled"),
     Arm("HS7", HSESSION,
         '              %*{"path": path, "line": line, "token": token,',
@@ -761,9 +781,11 @@ ARMS = [
         "      vm.removeValue(int(c.index))\n",
         "      discard vm\n",
         K_SCRATCH, "the terminal's close button removes nothing"),
-    Arm("TS10", TUISESSION,
-        "      event = s.session.backend.waitForEvent(OriginEventName)\n",
-        "      event = nil\n",
+    # RE-AIMED 2026-10-22: the wait moved into `session_driver.awaitOriginEvent`.
+    # NOT YET GRADED, for TS6's reason above.
+    Arm("TS10", SESSDRIVER,
+        "    result = s.backend.waitForEvent(OriginEventName)\n",
+        "    result = nil\n",
         K_VALUE, "the origin query's answer never read"),
     Arm("TS11", TUISESSION,
         "    line: request.line, expression: request.expression)])\n",
@@ -1015,9 +1037,11 @@ ARMS = [
         "    elif e.target.position.isNil or e.target.element.isNil:\n",
         "    elif false:\n",
         D_DESKTOP, "the desktop's press with no text position throws again"),
+    # RE-AIMED 2026-10-22: `5c52d631f` made the class test one helper that
+    # also matches the empty slot. Killed by the Electron gate at `e353dcb7b`.
     Arm("DE3", DESKEDITOR,
-        '         cstrutils.startsWith(element, cstring"gutter-breakpoint"):\n',
-        '         element == cstring"gutter-breakpoint":\n',
+        '    if cstrutils.startsWith(element, cstring"gutter-breakpoint") or\n',
+        '    if element == cstring"gutter-breakpoint" or\n',
         D_DESKTOP, "the desktop's marker right-click matched by a class it lacks"),
 ]
 
