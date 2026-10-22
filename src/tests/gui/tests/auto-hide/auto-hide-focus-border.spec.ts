@@ -68,8 +68,10 @@ import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
 import {
   DEFAULT_BOTTOM_TAB_TITLES,
+  DOCKED_OPEN_CLASS,
   OVERLAY_SELECTOR,
   bottomStripTab,
+  dockedContainer,
   openDockedPanelFromTab,
   openOverlayFromTab,
   waitForDefaultBottomTabs,
@@ -490,6 +492,17 @@ test.describe("auto-hide panel focus border", () => {
    * outline would be drawn ALONGSIDE the old one rather than instead of it.
    * That is a regression this fix could plausibly have introduced, so it is
    * asserted rather than assumed.
+   *
+   * THE DOCKED PANEL AND THE OVERLAY ARE ON DIFFERENT EDGES, and must be.
+   * While a panel of an edge is docked, hovering that edge's other tabs opens
+   * nothing (`clickModeActive(edge)` in `ui/auto_hide.nim`; codetracer-pm
+   * `spec/Planned-Features/Auto-Hide-Panes.md` §3.2, "Except while a panel of
+   * the same edge is open by click").  The rule is per edge, so a docked
+   * sidebar panel under a status-bar overlay is the way to put both outlines
+   * in contention at once.  This test used to dock BUILD and hover PROBLEMS,
+   * both in the status bar: after `d83de2484` that hover opens nothing, and
+   * the test timed out waiting for an overlay the design no longer shows.
+   * The rule itself is pinned by the next test.
    */
   test("the overlay's outline replaces the others rather than joining them", async ({
     ctPage,
@@ -500,18 +513,24 @@ test.describe("auto-hide panel focus border", () => {
     await forceExpandedStrips(ctPage);
     await waitForDefaultBottomTabs(ctPage);
 
-    const tab = bottomStripTab(ctPage, DEFAULT_BOTTOM_TAB_TITLES[0]);
-
-    // Dock it first, so a docked outline exists and `ct-docked-focused` is set.
-    await openDockedPanelFromTab(ctPage, tab, "bottom", WAIT_TIMEOUT_MS);
+    // Dock a LEFT sidebar panel first, so a docked outline exists and
+    // `ct-docked-focused` is set.
+    const leftStrip = "#auto-hide-strip-left";
+    await pinToEdge(ctPage, "Left");
+    await expect(ctPage.locator(leftStrip)).toHaveClass(/has-tabs/, {
+      timeout: WAIT_TIMEOUT_MS,
+    });
+    await forceExpandedStrips(ctPage);
+    const dockedTab = ctPage.locator(`${leftStrip} .auto-hide-strip-tab`).first();
+    await openDockedPanelFromTab(ctPage, dockedTab, "left", WAIT_TIMEOUT_MS);
     await wait(600);
     expect(
       await ctPage.locator(".ct-docked-outline").count(),
       "a docked panel is outlined to begin with",
     ).toBe(1);
 
-    // Now open a DIFFERENT panel in the overlay, leaving the docked one open.
-    const other = bottomStripTab(ctPage, DEFAULT_BOTTOM_TAB_TITLES[1]);
+    // Now open a status-bar panel in the overlay, leaving the docked one open.
+    const other = bottomStripTab(ctPage, DEFAULT_BOTTOM_TAB_TITLES[0]);
     await openOverlayFromTab(ctPage, other, WAIT_TIMEOUT_MS);
     await wait(600);
 
@@ -528,5 +547,59 @@ test.describe("auto-hide panel focus border", () => {
       await ctPage.locator(".ct-selected-outline").count(),
       "as has the GoldenLayout stack outline",
     ).toBe(0);
+  });
+
+  /**
+   * Hover opens nothing on an edge whose panel is docked, and still opens the
+   * overlay on every other edge.
+   *
+   * This is the rule the previous test has to route around, stated as its own
+   * test so that route is not the only place it is recorded: codetracer-pm
+   * `spec/Planned-Features/Auto-Hide-Panes.md` §3.2, `clickModeActive(edge)`
+   * in `ui/auto_hide.nim` (`d83de2484`).  Once a status-bar panel is docked,
+   * the other status-bar tabs open on a click, not on a hover.
+   *
+   * The second half is the control.  An overlay that never opens at all —
+   * broken hover, a pointer that missed — would pass the first half as well,
+   * so the same session, with the same panel still docked, must then open the
+   * overlay from a tab on another edge.
+   */
+  test("hover opens nothing on the docked panel's edge, and still does on another", async ({
+    ctPage,
+  }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+    await layout.waitForTraceLoaded();
+    await forceExpandedStrips(ctPage);
+    await waitForDefaultBottomTabs(ctPage);
+
+    const overlay = ctPage.locator(OVERLAY_SELECTOR);
+    const dockedTab = bottomStripTab(ctPage, DEFAULT_BOTTOM_TAB_TITLES[0]);
+    await openDockedPanelFromTab(ctPage, dockedTab, "bottom", WAIT_TIMEOUT_MS);
+
+    // --- Same edge: a hover held well past `HOVER_PREVIEW_DELAY_MS` (200 ms)
+    // opens nothing. ---
+    const sameEdge = bottomStripTab(ctPage, DEFAULT_BOTTOM_TAB_TITLES[1]);
+    await expect(sameEdge).toBeVisible({ timeout: WAIT_TIMEOUT_MS });
+    await sameEdge.hover();
+    await wait(1500);
+    await expect(
+      overlay,
+      "a status-bar hover opens no overlay while a status-bar panel is docked",
+    ).not.toHaveClass(/\bvisible\b/);
+
+    // --- Another edge: the same hover opens the overlay. ---
+    await pinToEdge(ctPage, "Left");
+    const leftStrip = "#auto-hide-strip-left";
+    await expect(ctPage.locator(leftStrip)).toHaveClass(/has-tabs/, {
+      timeout: WAIT_TIMEOUT_MS,
+    });
+    await forceExpandedStrips(ctPage);
+    await expect(
+      dockedContainer(ctPage, "bottom"),
+      "the status-bar panel is still docked for the control",
+    ).toHaveClass(new RegExp(`\\b${DOCKED_OPEN_CLASS}\\b`));
+    const otherEdge = ctPage.locator(`${leftStrip} .auto-hide-strip-tab`).first();
+    await openOverlayFromTab(ctPage, otherEdge, WAIT_TIMEOUT_MS);
   });
 });

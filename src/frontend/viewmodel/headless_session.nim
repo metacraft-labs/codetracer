@@ -93,6 +93,14 @@ proc drain() =
     discard
   drainPlatformCallbacks()
 
+proc settle*(s: HeadlessDebugSession) =
+  ## Let the requests the session's ViewModels sent apply their answers. The
+  ## stdio backend answers each request as it is sent, and the ViewModel's
+  ## continuation runs on the next turn of the event loop — this one. A host
+  ## that reported a viewport (`setViewport`) reads the window it asked for
+  ## after this.
+  drain()
+
 proc pumpCallbacks*() =
   ## Apply the answers to requests a ViewModel sent on its own (a viewport's
   ## window): the native backend answers synchronously, and the callbacks

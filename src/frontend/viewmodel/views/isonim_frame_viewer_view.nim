@@ -3,15 +3,17 @@
 import std/options
 
 import isonim/core/[computation, signals]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
   import isonim/web/dom_api as isonim_dom
-  import isonim/web/web_renderer
 
 import ../viewmodels/frame_viewer_vm
 import ../viewmodels/visual_replay_client
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
@@ -83,61 +85,15 @@ proc onDrawCallClick(vm: FrameViewerVM; index: int): proc() =
   let captured = index
   result = proc() = vm.scrubToDrawCall(captured)
 
-template renderFrameViewerPanelImpl(r, vm, rootClass: untyped): untyped =
+proc renderDrawCall[R, N](r: R; vm: FrameViewerVM;
+                          call: proc(): VisualReplayDrawCall; index: int): N =
   ui(r):
-    tdiv(class = rootClass):
-      tdiv(class = "frame-viewer-toolbar"):
-        span(class = "frame-viewer-player-url"):
-          text vm.playerUrl.val
-        span(class = connectionStatusClass(vm)):
-          text connectionStatusText(vm)
-        tdiv(class = "frame-viewer-frame-controls"):
-          button(class = "frame-viewer-prev-frame",
-                 onclick = proc() = vm.previousFrame()):
-            text "<"
-          span(class = "frame-viewer-frame-label"):
-            text frameStatusText(vm)
-            text frameCountText(vm)
-          button(class = "frame-viewer-next-frame",
-                 onclick = proc() = vm.nextFrame()):
-            text ">"
-      tdiv(class = "frame-viewer-scrubber"):
-        input(class = "frame-viewer-frame-range",
-              `type` = "range",
-              min = "0",
-              max = maxFrameValue(vm),
-              value = frameInputValue(vm))
-      tdiv(class = "frame-viewer-body"):
-        tdiv(class = "frame-viewer-frame-stage"):
-          tdiv(class = "frame-viewer-empty", display = emptyDisplay(vm)):
-            text "No frame loaded"
-          tdiv(class = "frame-viewer-loading", display = loadingDisplay(vm)):
-            text "Loading frame..."
-          tdiv(class = "frame-viewer-error", display = errorDisplay(vm)):
-            text vm.error.val
-          img(class = "frame-viewer-image",
-              src = vm.frameImageSrc.val,
-              alt = imageAltText(vm),
-              display = imageDisplay(vm))
-        tdiv(class = "frame-viewer-side-panel"):
-          tdiv(class = "frame-viewer-selected-pixel"):
-            text selectedPixelText(vm)
-          tdiv(class = "frame-viewer-draw-calls"):
-            tdiv(class = "frame-viewer-draw-calls-header"):
-              text "Draw Calls"
-            if vm.drawCalls.val.len == 0:
-              tdiv(class = "frame-viewer-draw-calls-empty"):
-                text "No draw calls"
-            for i, call in vm.drawCalls.val:
-              button(class = drawCallClass(vm, i),
-                     onclick = onDrawCallClick(vm, i)):
-                span(class = "frame-viewer-draw-call-name"):
-                  text drawCallText(call)
-                span(class = "frame-viewer-draw-call-pipeline"):
-                  text call.pipeline
-
-proc renderFrameViewerPanel*(r: MockRenderer; vm: FrameViewerVM): MockNode =
-  renderFrameViewerPanelImpl(r, vm, "frame-viewer-component")
+    button(class = drawCallClass(vm, index),
+           onclick = onDrawCallClick(vm, index)):
+      span(class = "frame-viewer-draw-call-name"):
+        text drawCallText(call())
+      span(class = "frame-viewer-draw-call-pipeline"):
+        text call().pipeline
 
 when defined(js):
   proc setImageClickHandler(
@@ -186,16 +142,9 @@ when defined(js):
       report();
     })(#, #)""".}
 
-  proc renderFrameViewerPanel*(r: WebRenderer;
-                               vm: FrameViewerVM): isonim_dom.Element =
-    renderFrameViewerPanelImpl(r, vm,
-      "frame-viewer-component isonim-frame-viewer")
-
-  proc mountIsoNimFrameViewer*(container: isonim_dom.Element;
-                               vm: FrameViewerVM) =
-    let r = WebRenderer()
-    let panel = renderFrameViewerPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+  proc decorateFrameViewer(panel: isonim_dom.Element; vm: FrameViewerVM) =
+    ## The browser's half: a click on the image selects its pixel, the range
+    ## input scrubs, and the stage's size is the frame size asked for.
     setImageClickHandler(panel,
       proc(renderedX, renderedY, renderedWidth, renderedHeight: float) =
         vm.selectPixelFromRenderedPoint(renderedX, renderedY, renderedWidth,
@@ -211,3 +160,66 @@ when defined(js):
       observeDevicePixelSize(stage, proc(width, height: int) =
         if width > 0 and height > 0:
           vm.setFrameSize(width, height))
+
+proc renderFrameViewerPanel*[R, N](r: R; vm: FrameViewerVM): N =
+  ## The Frame Viewer panel, under any renderer (Shared-DOM-Front-Ends D3).
+  var drawCallsEmpty, drawCalls: N
+  let panel = ui(r):
+    tdiv(class = "frame-viewer-component isonim-frame-viewer"):
+      tdiv(class = "frame-viewer-toolbar"):
+        span(class = "frame-viewer-player-url"):
+          text vm.playerUrl.val
+        span(class = connectionStatusClass(vm)):
+          text connectionStatusText(vm)
+        tdiv(class = "frame-viewer-frame-controls"):
+          button(class = "frame-viewer-prev-frame",
+                 onclick = proc() = vm.previousFrame()):
+            text "<"
+          span(class = "frame-viewer-frame-label"):
+            text frameStatusText(vm)
+            text frameCountText(vm)
+          button(class = "frame-viewer-next-frame",
+                 onclick = proc() = vm.nextFrame()):
+            text ">"
+      tdiv(class = "frame-viewer-scrubber"):
+        input(class = "frame-viewer-frame-range",
+              `type` = "range",
+              min = "0",
+              max = maxFrameValue(vm),
+              value = frameInputValue(vm))
+      tdiv(class = "frame-viewer-body"):
+        tdiv(class = "frame-viewer-frame-stage"):
+          tdiv(class = "frame-viewer-empty", display = emptyDisplay(vm)):
+            text "No frame loaded"
+          tdiv(class = "frame-viewer-loading", display = loadingDisplay(vm)):
+            text "Loading frame..."
+          tdiv(class = "frame-viewer-error", display = errorDisplay(vm)):
+            text vm.error.val
+          img(class = "frame-viewer-image",
+              src = vm.frameImageSrc.val,
+              alt = imageAltText(vm),
+              display = imageDisplay(vm))
+        tdiv(class = "frame-viewer-side-panel"):
+          tdiv(class = "frame-viewer-selected-pixel"):
+            text selectedPixelText(vm)
+          tdiv(class = "frame-viewer-draw-calls"):
+            tdiv(class = "frame-viewer-draw-calls-header"):
+              text "Draw Calls"
+            tdiv(ref = drawCallsEmpty):
+              discard
+            tdiv(ref = drawCalls):
+              discard
+  show(r, drawCallsEmpty,
+    proc(): bool = vm.drawCalls.val.len == 0,
+    proc(): N =
+      ui(r):
+        tdiv(class = "frame-viewer-draw-calls-empty"):
+          text "No draw calls")
+  indexEach[VisualReplayDrawCall, R, N](r, drawCalls,
+    proc(): seq[VisualReplayDrawCall] = vm.drawCalls.val,
+    proc(call: proc(): VisualReplayDrawCall; index: int): N =
+      renderDrawCall[R, N](r, vm, call, index))
+  when defined(js):
+    when N is isonim_dom.Element:
+      decorateFrameViewer(panel, vm)
+  panel

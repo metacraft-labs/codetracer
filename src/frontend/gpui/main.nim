@@ -138,6 +138,7 @@ import headless_app/auto_hide_hover
 import headless_app/footer_info
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
 import headless_session   # `calltraceJumpByLine`, `requestAndLoadCalltrace`
+import pane_viewport     # HSF-V2: a pane's size as the Viewport it reports
 import ../viewmodel/viewmodels/vcs_vm   # `VCSVM`, `VCSRefreshIntervalMs`: the VCS pane's tick
 import ../viewmodel/host/native_vcs_details   # PLAT-50: commit files, diffs
 from std/unicode import runeLen
@@ -2023,6 +2024,14 @@ proc syncLeafContext() =
   let st = gGeom.tabsNodeOfPane($paneState)
   if st >= 0:
     statePaneSizePx = (gGeom.nodes[st].body.w, gGeom.nodes[st].body.h)
+    # HSF-V2: the state pane REPORTS what it shows — its rows under the
+    # pane's header strip, at the rows' pitch, scrolled by `stateScroll` —
+    # and the stop loader sizes the locals it asks for from it.
+    if not gSession.isNil and not gSession.session.stateVM.isNil:
+      let b = gGeom.nodes[st].body
+      gSession.session.stateVM.setViewport(pixelPaneViewport(
+        float(b.h - StateRowsTopPx), float(b.w), float(StateValueRowPx),
+        float(stateScroll.top)))
   syncInHandRows(gGeom)
 
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
@@ -2084,7 +2093,8 @@ proc scrollCalltrace(r: GpuiRenderer; rows: int) =
   # The rows the pane shows: its body inside the pane's padding, at the row
   # pitch (no heading row since PLAT-49; the tab strip is outside the body).
   let body = callTraceRowsIn(gGeom.nodes[i].body)
-  let page = gSession.pageCalltrace(body, rows)
+  let page = gSession.pageCalltrace(body, rows, gGeom.nodes[i].body.w,
+                                    CallIndentPx)
   if page.loaded:
     inc gCalltraceLoads
     traceGesture("calltrace-section top=" & $page.top & " loads=" &
@@ -2351,10 +2361,7 @@ proc clickCalltrace(r: GpuiRenderer; x, y: int): bool =
     return false
   if row.toggle != crtLeaf and x >= toggleX and x < toggleX + 14:
     traceGesture("calltrace toggle #" & $row.index)
-    let why = gSession.toggleCallChildren(
-      row.index,
-      startIndex = vm.scrollPosition.val - GpuiCalltraceBuffer.int64,
-      height = max(1, rows.len) + 2 * GpuiCalltraceBuffer)
+    let why = gSession.toggleCallChildren(row.index)
     if why.len > 0:
       traceGesture("calltrace toggle failed: " & why)
     redrawCalltrace(r)
@@ -2854,7 +2861,9 @@ proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
     if not hit.onTrack:
       return
     let top = sm.scrubTop(hit.fraction, dragging)
-    let page = gSession.pageCalltrace(callTraceRows(), top - sm.firstVisible)
+    let page = gSession.pageCalltrace(callTraceRows(), top - sm.firstVisible,
+                                      visibleBodyOf(paneCalltrace).w,
+                                      CallIndentPx)
     if page.loaded:
       inc gCalltraceLoads
     traceGesture("calltrace top=" & $page.top & " loads=" & $gCalltraceLoads &
@@ -6466,25 +6475,11 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     gTracepointAt = (target.path, target.line)
     openOmnibar(r, TracepointCommand)
   of caToggleCallChildren:
-    let store = gSession.session.store
-    let local = target.index - store.calltrace.startLineIndex.val
-    let lines = store.calltrace.lines.val
-    if local < 0 or local >= lines.len.int64:
-      return
-    let line = lines[local.int]
-    try:
-      gSession.backend.sendDapRequestNoResponse(
-        (if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"),
-        %*{"callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
-      discard gSession.backend.drainEvents()
-      let vm = gSession.session.calltraceVM
-      gSession.requestAndLoadCalltrace(
-        startIndex = max(0'i64, vm.scrollPosition.val -
-                                 GpuiCalltraceBuffer.int64),
-        height = max(1, vm.callRows().len) + 2 * GpuiCalltraceBuffer,
-        depth = RecordingCalltraceDepth)
-    except CatchableError as e:
-      traceGesture("calltrace toggle failed: " & e.msg)
+    # The same toggle a click on the row's icon makes (`session_driver`):
+    # the expansion, then the ViewModel reads its reported window again.
+    let why = gSession.toggleCallChildren(target.index)
+    if why.len > 0:
+      traceGesture("calltrace toggle failed: " & why)
     redrawCalltrace(r)
   of caToggleValueHistory:
     showValueHistory(r, target.path)

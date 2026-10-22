@@ -459,6 +459,8 @@ type
       ## runtime's own screen — so every viewport the session sets from them
       ## follows the editor's windows, and a pane the editor does not show
       ## has none.
+    hostedCols*: Table[PaneKind, int]
+      ## HSF-V2: the same windows' widths, in cells (`paneBodyCols`).
 
 const
   QuitDetail* = "quit"
@@ -5591,6 +5593,23 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
     if region.pane == pane:
       let frame = paneFrame(region.area, body)
       return max(0, frame.box.height - 1)
+  0
+
+proc paneBodyCols*(rt: TuiRuntime; pane: PaneKind): int =
+  ## How many columns `pane` has for its content on the CURRENT screen: the
+  ## rectangle `shell.paintPane` hands its painter, less a right divider
+  ## (`shell.paneFrame`). Zero when the pane is not on the screen. With the
+  ## pane server, the editor window's width (`hostedCols`).
+  if rt.hostedRows.len > 0:
+    return rt.hostedCols.getOrDefault(pane)
+  let model = rt.app.shellModel(rt.width, rt.height)
+  let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
+               else: model.layout
+  let body = bodyArea(rt.width, rt.height)
+  let projection = projectLayout(layout, body)
+  for region in projection.regions:
+    if region.pane == pane:
+      return max(0, paneFrame(region.area, body).box.width)
   0
 
 proc editorBarShown*(rt: TuiRuntime): bool =

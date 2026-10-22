@@ -1155,7 +1155,8 @@ proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposePr
     vm.currentFrame.val = 0
     vm.frameImageSrc.val = storyFrameSvg(0)
     vm.drawCalls.val = storyDrawCalls()
-    mountIsoNimFrameViewer(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderFrameViewerPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     if fixture == "geid":
       vm.loadFrameForGeid(220'u64)
       drainCallbacks()
@@ -1171,7 +1172,8 @@ proc mountPixelHistory(container: isonim_dom.Element; fixture: string): DisposeP
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
     vm = createPixelHistoryVM(client)
-    mountIsoNimPixelHistory(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderPixelHistoryPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     if fixture != "empty":
       vm.loadPixelHistory(160, 90, 0)
       drainCallbacks()
@@ -1187,7 +1189,8 @@ proc mountShaderDebug(container: isonim_dom.Element; fixture: string): DisposePr
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
     vm = createShaderDebugVM(client)
-    mountIsoNimShaderDebug(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderShaderDebugPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     if fixture != "empty":
       vm.loadFromPixel(160, 90, 0, some(220'u64))
       drainCallbacks()

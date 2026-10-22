@@ -941,6 +941,9 @@ test_lane_files() {
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		echo src/frontend/tests/later_session_launch_failure_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
+		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
+		echo src/frontend/tests/low_level_code_markup_dom_test.nim
 		echo src/frontend/tests/loop_built_handlers_test.nim
 		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;

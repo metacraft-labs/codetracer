@@ -18,21 +18,35 @@
 
 import std/sequtils
 
-import isonim/core/owner
+import isonim/core/[owner, signals, computation]
 import isonim/web/web_renderer
 from isonim/web/dom_api import nil
 from ./isonim_panel_mount import findIsoNimPaneHost
 
 import ../types
 import ../viewmodel/session_vm
-from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall
-import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view]
+import ../viewmodel/pane_viewport
+from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall,
+  setViewport, setRowHeightPx
+from ../viewmodel/viewmodels/state_vm import setViewport
+from ../viewmodel/viewmodels/low_level_code_vm import setShown
+from ../viewmodel/store/replay_data_store import nil
+import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
+                            isonim_low_level_code_view]
 
 const
-  PanelHostKinds* = {Content.Calltrace, Content.State}
+  PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
+                     Content.PixelHistory, Content.ShaderDebug,
+                     Content.VideoPlayer}
     ## The panes `mountPanel` renders.
+  StateRowFallbackPx = 22.0
+    ## The State pane's row pitch until a row is rendered to measure.
 
 type
+  PanelRenderer* = proc(r: WebRenderer; session: SessionViewModel): dom_api.Element
+    ## Renders a pane whose ViewModel its own module owns, inside the mount's
+    ## reactive root.
+
   PanelDecorator* = proc(host: dom_api.Element; session: SessionViewModel)
     ## Browser behaviour a pane's host adds around its view — run inside the
     ## mount's reactive root, so the effects it creates are disposed with it.
@@ -42,9 +56,36 @@ type
     host: dom_api.Element
     kind: Content
     disposeRoot: proc()
+    stopMeasuring: StopWatching
     disposed: bool
 
+  StopWatching = proc()
+    ## Disconnects a pane's resize observer and scroll listener.
+
+  PaneMeasure = object
+    ## How the host measures a pane it mounted (Viewport-Driven-Loading V3):
+    ## the element that scrolls, a row's selector (the rows' measured
+    ## advance), the pixels one depth level indents, and where the result
+    ## goes. `fallbackRowPx` is the row pitch to use before a row exists.
+    scroller: cstring
+    row: cstring
+    pxPerLevel: float
+    countPartialRow: bool
+      ## A row any of which shows counts (the State pane: it sizes how many
+      ## values a stop and a "Load More" fetch).
+    reportHidden: bool
+      ## A hidden pane reports no rows, so the ViewModel falls back to its
+      ## defaults, rather than keeping the last size it was told.
+    fallbackRowPx: proc(): float
+    report: proc(v: Viewport; rowPx: float)
+    changed: proc()
+      ## Read inside an effect: the pane's rows changed, measure again.
+
 var decorators: array[Content, PanelDecorator]
+var renderers: array[Content, PanelRenderer]
+  ## Per pane whose ViewModel the session does not own (the visual-replay
+  ## and agent panes): the module that owns it registers how to render it
+  ## (`setPanelRenderer`).
   ## Per pane, set by the module that owns the pane's host behaviour.
 var hostSession: SessionViewModel
   ## The session the panes show; nil until the renderer has one.
@@ -57,6 +98,87 @@ var live: seq[PanelMount]
 
 proc containsNode(outer, inner: dom_api.Element): bool
   {.importjs: "#.contains(#)".}
+
+# ---------------------------------------------------------------------------
+# HSF-V2: THE HOST REPORTS WHAT EACH PANE SHOWS
+# ---------------------------------------------------------------------------
+#
+# One ResizeObserver and one scroll listener per mounted pane, owned here and
+# disconnected when the mount is disposed: the pane's body height over the
+# rows' measured advance is its rows, the scroll offset over the advance is
+# the first row shown, and the width over a depth level's indent is the levels
+# that fit (`pane_viewport.pixelPaneViewport`, the conversion every front-end
+# shares). The views measure nothing for their ViewModels.
+
+proc qsIn(el: dom_api.Element; sel: cstring): dom_api.Element
+  {.importjs: "(#.querySelector(#) || null)".}
+proc paneClientHeight(el: dom_api.Element): float
+  {.importjs: "(#.clientHeight || 0)".}
+proc paneClientWidth(el: dom_api.Element): float
+  {.importjs: "(#.clientWidth || 0)".}
+proc paneScrollTop(el: dom_api.Element): float
+  {.importjs: "(#.scrollTop || 0)".}
+proc rowPitchIn(el: dom_api.Element; sel: cstring): float {.importjs:
+  "((el, sel) => { var r = el.querySelectorAll(sel); if (r.length === 0) return 0; if (r.length === 1) return r[0].getBoundingClientRect().height; return (r[r.length - 1].getBoundingClientRect().top - r[0].getBoundingClientRect().top) / (r.length - 1); })(#, #)".}
+  ## The rows' ADVANCE, top to top, averaged over the rendered rows: what
+  ## positions them (a sub-pixel advance is recovered exactly), not a row box.
+proc watchPane(el: dom_api.Element; onChange: proc()): StopWatching {.importjs:
+  "((el, cb) => { var ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(() => cb()) : null; if (ro) ro.observe(el); el.addEventListener('scroll', cb, {passive: true}); return () => { if (ro) ro.disconnect(); el.removeEventListener('scroll', cb); }; })(#, #)".}
+  ## Call `onChange` on every resize and scroll of `el`; the result stops it.
+proc panelSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
+
+proc measureOf(kind: Content; session: SessionViewModel): PaneMeasure =
+  ## The measurement of a pane the host mounts.
+  case kind
+  of Content.Calltrace:
+    let vm = session.calltraceVM
+    PaneMeasure(
+      scroller: cstring".local-calltrace-view",
+      row: cstring".calltrace-call-line",
+      pxPerLevel: CallDepthIndentPx,
+      fallbackRowPx: proc(): float = vm.rowHeightPx.val,
+      report: proc(v: Viewport; rowPx: float) =
+        vm.setRowHeightPx(rowPx)
+        vm.setViewport(v),
+      changed: proc() = discard session.store.calltrace.lines.val)
+  of Content.State:
+    let vm = session.stateVM
+    PaneMeasure(
+      scroller: cstring".value-components-container",
+      row: cstring".value-expanded",
+      pxPerLevel: 0.0,
+      countPartialRow: true,
+      reportHidden: true,
+      fallbackRowPx: proc(): float = StateRowFallbackPx,
+      report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
+      changed: proc() = discard session.store.locals.locals.val)
+  else:
+    PaneMeasure()
+
+proc startMeasuring(m: PanelMount; session: SessionViewModel) =
+  ## Attach the pane's one observer and one scroll listener; report now (one
+  ## tick later, so the view's elements are laid out) and whenever the pane is
+  ## resized or scrolled, or its rows change.
+  let spec = measureOf(m.kind, session)
+  if spec.report.isNil:
+    return
+  let scroller = qsIn(m.host, spec.scroller)
+  if dom_api.isNodeNil(dom_api.Node(scroller)):
+    return
+  let measure = proc() =
+    var rowPx = rowPitchIn(scroller, spec.row)
+    if rowPx <= 0.0:
+      rowPx = spec.fallbackRowPx()
+    let v = pixelPaneViewport(scroller.paneClientHeight,
+                              scroller.paneClientWidth, rowPx,
+                              scroller.paneScrollTop, spec.pxPerLevel,
+                              countPartialRow = spec.countPartialRow)
+    if v.measured or spec.reportHidden:
+      spec.report(v, rowPx)
+  m.stopMeasuring = watchPane(scroller, measure)
+  createEffect proc() =
+    spec.changed()
+    panelSetTimeout(measure, 0)
 
 proc render(m: PanelMount; session: SessionViewModel) =
   ## Render `m`'s pane into its host, in a root of its own.
@@ -77,11 +199,32 @@ proc render(m: PanelMount; session: SessionViewModel) =
       let panel = renderStatePanel[WebRenderer, dom_api.Element](
         r, session.stateVM)
       dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.LowLevelCode:
+      let panel = renderLowLevelCodePanel[WebRenderer, dom_api.Element](
+        r, session.lowLevelCodeVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
     else:
-      discard
+      let renderPane = renderers[mount.kind]
+      if not renderPane.isNil:
+        dom_api.appendChild(node, dom_api.Node(renderPane(r, session)))
     let decorate = decorators[mount.kind]
     if not decorate.isNil:
       decorate(host, session)
+    mount.startMeasuring(session)
+
+proc reportShown(session: SessionViewModel) =
+  ## Tell the session's ViewModels which of the panes that load only while
+  ## shown are mounted: the stop loader asks for the low-level code only
+  ## then.
+  if session.isNil or session.lowLevelCodeVM.isNil:
+    return
+  session.lowLevelCodeVM.setShown(
+    live.anyIt(it.kind == Content.LowLevelCode and not it.disposeRoot.isNil))
+
+proc setPanelRenderer*(kind: Content; render: PanelRenderer) =
+  ## Install how `kind` renders, for a pane whose ViewModel the session does
+  ## not own. `kind` must be in `PanelHostKinds`.
+  renderers[kind] = render
 
 proc setPanelDecorator*(kind: Content; decorate: PanelDecorator) =
   ## Install the host behaviour for `kind`'s mounts made from now on.
@@ -97,6 +240,7 @@ proc mountPanel*(host: dom_api.Element; kind: Content): PanelMount =
     waiting.add result
   else:
     result.render(hostSession)
+    reportShown(hostSession)
 
 proc dispose*(m: PanelMount) =
   ## Dispose the pane's reactive root; its container is GoldenLayout's.
@@ -105,9 +249,13 @@ proc dispose*(m: PanelMount) =
   m.disposed = true
   waiting.keepItIf(it != m)
   live.keepItIf(it != m)
+  if not m.stopMeasuring.isNil:
+    m.stopMeasuring()
+    m.stopMeasuring = nil
   if not m.disposeRoot.isNil:
     m.disposeRoot()
     m.disposeRoot = nil
+  reportShown(hostSession)
 
 proc setPanelSession*(session: SessionViewModel) =
   ## Install the session the panes show, and mount every pane whose container
@@ -124,6 +272,7 @@ proc setPanelSession*(session: SessionViewModel) =
   for m in pending:
     if not m.disposed:
       m.render(session)
+  reportShown(session)
 
 proc ensurePanelMounted*(host: dom_api.Element; kind: Content) =
   ## Mount `kind` into `host` unless a live mount already renders there — for

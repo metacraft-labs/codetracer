@@ -168,10 +168,11 @@ proc returnArrowForRow(vm: CalltraceVM; item: proc(): CallLine): string =
 # constant except the depth indent, which the row renderer itself writes in
 # pixels. The rest is measured from the rendered rows and passed in.
 
-const CallDepthIndentPx* = 8.0
+const CallDepthIndentPx* = float(CallRowIndentPx)
   ## Width of one level of nesting: `renderCallLineRow` writes a spacer of
   ## `depth * CallDepthIndentPx` px before each row's toggle, so a toggle's
-  ## centre moves right by exactly this much per level.
+  ## centre moves right by exactly this much per level
+  ## (`calltrace_vm.CallRowIndentPx`, GPUI's too).
 
 type
   CallGuideAnchor* = object
@@ -223,7 +224,6 @@ when defined(js):
   proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
   proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc eventKeyCode(ev: isonim_dom.Event): int {.importjs: "(#.keyCode || 0)".}
-  proc scrollTop(node: isonim_dom.Element): float {.importjs: "(#.scrollTop || 0)".}
   proc setScrollTop(node: isonim_dom.Element; value: float) {.importjs: "#.scrollTop = #".}
 
   # DOM helpers for measuring the actual rendered row height.
@@ -426,30 +426,6 @@ when defined(js):
           let query = inputNode.inputValue()
           vm.setSearchQuery($query))
 
-  proc wireScrollContainer(scrollContainer, linesContainer: isonim_dom.Element;
-                            vm: CalltraceVM) =
-    ## Wire scroll events to the VM. The DSL renderer-API `onscroll`
-    ## variant exists, but the handler needs access to `scrollTop` from
-    ## the element, so this is attached imperatively.
-    ##
-    ## The row height is measured from the DOM on every scroll event so that
-    ## the row-index calculation is always consistent with the actual
-    ## em/rem-derived row height, regardless of zoom level or theme changes.
-    ## If no rows have been rendered yet (height = 0), the cached VM value
-    ## is used as a fallback to avoid a divide-by-zero.
-    isonim_dom.addEventListener(isonim_dom.Node(scrollContainer),
-      cstring"scroll",
-      proc(ev: isonim_dom.Event) =
-        let h = measureCallRowPitch(linesContainer)
-        let rowH = if h > 0.0: h else: vm.rowHeightPx.val
-        # Keep the VM's cached row advance in sync; setRowHeightPx ignores
-        # differences too small to move a row, so a stable layout is a no-op.
-        if h > 0.0:
-          vm.setRowHeightPx(h)
-        if rowH > 0.0:
-          vm.setViewport(vm.viewport.val.scrolledTo(
-            int(scrollContainer.scrollTop() / rowH))))
-
   proc renderTraceSvg(r: WebRenderer; svgContainer: isonim_dom.Element;
                       vm: CalltraceVM;
                       anchor: Signal[Option[CallGuideAnchor]]) =
@@ -482,41 +458,12 @@ when defined(js):
       for s in callGuideSegments(depths, pitch, a):
         appendTraceLine(svgContainer, s.x1, s.y1, s.x2, s.y2)
 
-  const CallDepthOffsetPx = 20.0
-    ## One level of call depth, as the rows indent it — what the pane's width
-    ## is divided by to tell the ViewModel how deep a section to ask for.
-
-  proc clientHeight(el: isonim_dom.Element): float {.importjs: "(#.clientHeight || 0)".}
-  proc clientWidth(el: isonim_dom.Element): float {.importjs: "(#.clientWidth || 0)".}
-
-  proc reportPaneSize(scrollContainer, linesContainer: isonim_dom.Element;
-                      vm: CalltraceVM) =
-    ## THE PANE'S SIZE IS THE VIEWMODEL'S INPUT (Viewport-Driven-Loading V3):
-    ## rows from the height and the measured row height, depth columns from
-    ## the width; reported when the pane first lays out and on every resize.
-    ## A pane that has not laid out yet reports nothing, and an unmeasured
-    ## viewport asks the backend for nothing.
-    proc measure() =
-      let rowH = block:
-        let h = measureCallRowPitch(linesContainer)
-        if h > 0.0: h else: vm.rowHeightPx.val
-      let height = scrollContainer.clientHeight()
-      if height <= 0.0 or rowH <= 0.0:
-        return
-      let rows = max(1, int(height / rowH))
-      let cols = max(1, int(scrollContainer.clientWidth() / CallDepthOffsetPx))
-      let v = vm.viewport.val
-      if v.rows != rows or v.cols != cols:
-        vm.setViewport(v.withRows(rows).withCols(cols))
-    calltraceObserveResize(scrollContainer, measure)
-    calltraceSetTimeout(measure, 0)
-
   proc decorateCalltracePanel(panel, formEl, inputEl, scrollContainer,
                               linesContainer: isonim_dom.Element;
                               vm: CalltraceVM) =
     ## The browser's half of the panel: the connector SVG behind the rows,
-    ## the measured row height, the tab's busy mark, the search form, the
-    ## scroll position and the scrollbar scrubber.
+    ## the guide geometry measured from the rows, the tab's busy mark, the
+    ## search form, the reveal scroll and the scrollbar scrubber.
     let r = WebRenderer()
     let svgContainer = createSvgElement(cstring"svg")
     isonim_dom.setAttribute(svgContainer, cstring"id", cstring"svg-content-0")
@@ -548,8 +495,9 @@ when defined(js):
       setCalltraceTabBusy(vm.isLoading.val)
 
     wireSearchForm(formEl, inputEl, vm)
-    wireScrollContainer(scrollContainer, linesContainer, vm)
-    reportPaneSize(scrollContainer, linesContainer, vm)
+    # What the pane shows — its rows, the row it is scrolled to, the depth
+    # levels across it — is reported by the panel host that mounted it
+    # (`ui/panel_host`, HSF-V2), not measured here.
     # codetracer#860: a search result's reveal (`CalltraceVM.revealScroll`)
     # scrolls the container to the row the ViewModel revealed. The scroll
     # listener then reports the same first row back, so the viewport and the

@@ -70,7 +70,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 34
+const ExpectedAssertions = 39
+  ## One per direct-mount pane the dispatch reaches: the panel host's
+  ## kinds count individually (PixelHistory, ShaderDebug, VideoPlayer joined
+  ## them in HSF-D6).
   ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
   ## proc and its give-up lines went (the control-data loop -1, the mount
   ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
@@ -243,7 +246,7 @@ suite "the factory mounts every mountable pane":
       echo "direct-mount Content values with no factory arm: ", missing.join(", ")
     counted missing.len == 0
 
-  test "CONTROL DATA: the same scan reports exactly four on the pre-fix source":
+  test "CONTROL DATA: the same scan reports exactly the removed arms on the pre-fix source":
     # Without this the suite could pass because `dispatchArms` matched every
     # line in the file, or because `directMountContents` returned nothing.
     # The pre-fix source is the current one with the five arms deleted, so the
@@ -252,8 +255,17 @@ suite "the factory mounts every mountable pane":
     let preFix = source.withArmsRemoved(ArmsAddedByThisChange)
     counted preFix.len < source.len
     let missing = armsMissingFrom(preFix)
-    counted missing.len == 4
+    # The panel host's panes share ONE arm (`PanelHostArm`), so deleting it
+    # for State and Calltrace also removes the other panes it mounts; they are
+    # missing too, by name.
+    var sharedArm: seq[string] = @[]
+    for kind in panelHostKinds():
+      if kind notin ArmsAddedByThisChange:
+        sharedArm.add kind
+    counted missing.len == ArmsAddedByThisChange.len + sharedArm.len
     for pane in ArmsAddedByThisChange:
+      counted pane in missing
+    for pane in sharedArm:
       counted pane in missing
 
     # And the deletion took only what it claimed: the other twenty-odd arms
@@ -309,6 +321,7 @@ suite "the factory mounts every mountable pane":
     counted source.contains("discard mountPanel(")
     counted "Calltrace" in panelHostKinds()
     counted "State" in panelHostKinds()
+    counted "LowLevelCode" in panelHostKinds()
 
   test "all three give-ups are audible, and none of them claims the session":
     # Not a dispatch property, and here anyway because it is this dispatch seen

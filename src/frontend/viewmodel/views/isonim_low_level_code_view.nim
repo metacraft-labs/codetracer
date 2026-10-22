@@ -1,45 +1,52 @@
 ## views/isonim_low_level_code_view.nim
 ##
-## IsoNim DOM-rendering view for the Low Level Code panel.
+## The Low Level Code panel: the assembly / IR listing of the function the
+## debugger is in, grouped under the source lines it was generated from
+## (Shared-DOM-Front-Ends D7.2).
 ##
-## Renders a live, reactive DOM tree driven by ``LowLevelCodeVM``
-## signals.  Replaces the legacy Karax ``method render`` in
-## ``frontend/ui/low_level_code.nim`` (the IsoNim view is the single
-## source of truth for the panel's outer DOM).  In production the
-## actual asm-listing buffer is rendered by Monaco inside the editor
-## sub-tree; this view exposes the parity-faithful container shell so
-## existing CSS keeps applying and a fallback row list so headless
-## tests can exercise the same data flow without Monaco.
+## ONE generic view (`renderLowLevelCodePanel[R, N]`): the headless tests
+## render it under `MockRenderer`, the desktop and the web page under
+## `WebRenderer`, mounted by the panel host (`ui/panel_host`) into the
+## container GoldenLayout creates. The data is `LowLevelCodeVM`'s, loaded per
+## stop by the session's stop loader while the pane is shown.
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
-## structure mirroring the legacy ``componentContainerClass(
-## "low-level-code")`` layout::
+## Structure::
 ##
 ##   div.component-container.low-level-code
-##     div.low-level-code-error                            (when errorMessage.len > 0)
-##       text "<errorMessage>"
-##     div.low-level-code-address                          (when address > 0)
-##       text "Originating address: 0x<hex>"
-##     div.low-level-code-instructions
-##       div.low-level-code-instruction[.active-instruction]   (one per row)
-##         span.low-level-code-instruction-offset           text "<offset>" / "StepId(<offset>)"
-##         span.low-level-code-instruction-name             text "<name>" / "<no instructions>"
-##         span.low-level-code-instruction-args             text "<args>"
-##         span.low-level-code-instruction-other            text "<other>"
-##         span.low-level-code-instruction-source           text "<highLevelPath>:<highLevelLine>"   (when present)
+##     div.low-level-code-header
+##       div.low-level-code-error-slot > div.low-level-code-error     (only when errorMessage != "")
+##       div.low-level-code-address-slot > div.low-level-code-address (only when address > 0)
+##       div.low-level-code-sync.sync-{on|off}                        click = toggle sync
+##       div.low-level-code-notice[.notice-…|.hidden]
+##     div.low-level-code-instructions                                one keyed row per item:
+##       div.low-level-code-source-line[.active-source-line]          a source line, before its rows
+##         span.low-level-code-source-line-number   text "<line>"
+##         span.low-level-code-source-line-text     text "<source line>"   (TEXT, never markup)
+##       div.low-level-code-instruction[.active-instruction]          click = go to its source line
+##         span.low-level-code-instruction-offset   text "<offset>" / "StepId(<offset>)"
+##         span.low-level-code-instruction-name     text "<name>" / "<no instructions>"
+##         span.low-level-code-instruction-args     text "<args>"
+##         span.low-level-code-instruction-other    text "<other>"
+##         span.low-level-code-instruction-fidelity.fidelity-<rung>
+##         span.low-level-code-instruction-source   text "<path>:<line>"   (when known)
+##         span.low-level-code-instruction-count    text "<count>"         (when measured)
 ##
-## Reactive surface: a single outer ``createRenderEffect`` rebuilds
-## the ``.low-level-code-instructions`` body whenever ``instructions``,
-## ``activeOffset`` or ``noirProject`` change.  ``isActiveRow`` (in
-## ``viewmodels/low_level_code_vm.nim``) drives the
-## ``active-instruction`` modifier on rows — same offset-equality the
-## legacy ``findHighlight`` used.  Click handlers on rows dispatch
-## ``LowLevelCodeVM.jumpToInstruction``.
+## THE ROWS ARE A `forEachKeyed` LIST, keyed by offset. The engine gives every
+## instruction of one step that step's id as its `offset`, so an offset alone
+## repeats: a row's key is its offset and its ordinal among the rows that
+## share it, and a source line's key is its path, line and ordinal. Each item
+## carries everything its row shows, so a row whose item is unchanged keeps
+## its node and a changed one is rebuilt.
+##
+## A SOURCE LINE IS TEXT. It is a line of the recorded program's own source —
+## markup by construction for HTML, JSX, Vue, PHP or template files — and the
+## DSL's `text` makes it a text node. The desktop's earlier Monaco view zone
+## for the same line set `textContent` for the same reason.
 
-import std/strutils
+import std/[strutils, tables]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -49,80 +56,53 @@ when defined(js):
 import ../store/types
 import ../viewmodels/low_level_code_vm
 
+# A generic view is instantiated where it is called, and the `ui` macro's
+# expansion names `val=`, `createRenderEffect` and the control-flow components
+# there.
+export signals, computation, components
+
 const LowLevelCodeContainerClass* = "component-container low-level-code"
-  ## Verbatim string the legacy ``componentContainerClass(
-  ## "low-level-code")`` template produced (see
-  ## ``frontend/renderer.nim::componentContainerClass`` — emits
-  ## ``"component-container " & class``).  Exposed for headless tests
-  ## so they assert against the exact class string without depending
-  ## on the legacy template.
 
 # ---------------------------------------------------------------------------
-# Reactive helpers used inside DSL expressions
+# Labels and classes
 # ---------------------------------------------------------------------------
 
 proc rowClass*(active: bool): string =
-  ## Outer ``.low-level-code-instruction`` modifier for the active
-  ## row.  Mirrors the legacy ``active-instruction`` CSS hook the
-  ## Monaco view-zone applied for the highlighted offset.
   if active:
     "low-level-code-instruction active-instruction"
   else:
     "low-level-code-instruction"
 
+proc sourceRowClass*(active: bool): string =
+  if active:
+    "low-level-code-source-line active-source-line"
+  else:
+    "low-level-code-source-line"
+
 proc addressText*(address: int): string =
-  ## "Originating address: 0x..." formatting.  Mirrors the same line
-  ## the no_source panel renders (see
-  ## ``isonim_no_source_view.nim::renderAddressRow``).  ``address`` is
-  ## treated as unsigned for hex formatting purposes.
   "Originating address: 0x" & toHex(address)
 
 proc sourceCrossRef*(instr: LowLevelInstruction): string =
-  ## ``<highLevelPath>:<highLevelLine>`` cross-reference text.
-  ## Returns an empty string when no high-level mapping is available
-  ## (``highLevelLine <= 0``); the row guards on this to suppress the
-  ## span entirely (matching the legacy ``mapInstructions`` skip on
-  ## missing line numbers).
   if instr.highLevelLine <= 0 or instr.highLevelPath.len == 0:
     ""
   else:
     instr.highLevelPath & ":" & $instr.highLevelLine
 
 # ---------------------------------------------------------------------------
-# Anchoring, rendered.
-#
-# `Generated-Code-Listing.md` GCL-F1 recorded the defect these exist to fix: the
-# anchoring model was complete and correct, with 336 counted assertions behind
-# it, and NOTHING IN THIS FILE READ ANY OF IT. A grep for `anchors`,
-# `syncSettings`, `fidelityAtRow`, `countLabel` and eight siblings across `src/`
-# returned only the two unit suites. A capability that is present, correct and
-# unreachable is indistinguishable from one that was never built.
+# Anchoring, rendered (Generated-Code-Listing.md): the per-row fidelity, the
+# sync toggle and the notice that says why a listing is not kept in step.
 # ---------------------------------------------------------------------------
 
 proc fidelityClass*(f: MappingFidelity): string =
-  ## Per-row badge class. §4's table is a claim about each row, so it is
-  ## rendered per row rather than summarised — a listing whose rows all look
-  ## alike cannot show that its middle is exact and its tail is unmapped.
   "low-level-code-instruction-fidelity fidelity-" & label(f).replace(" ", "-")
 
 proc syncToggleLabel*(enabled: bool): string =
-  ## §3: "unlocking is a deliberate act with a visible state". This IS the
-  ## visible state.
   if enabled: "sync on" else: "sync off"
 
 proc syncToggleClass*(enabled: bool): string =
   "low-level-code-sync " & (if enabled: "sync-on" else: "sync-off")
 
 proc mappingNotice*(vm: LowLevelCodeVM): string =
-  ## The one line that says why synchronisation is not going to align, or "" if
-  ## nothing is wrong.
-  ##
-  ## THE THREE CASES ARE DELIBERATELY NOT COLLAPSED. `soDisabled` and
-  ## `soSuspended` are distinct outcomes in the model precisely because "you
-  ## turned it off" and "the mapping ran out here" are different things to show,
-  ## and a REFUSED mapping is a third: `anchorsRejected` is not `not hasAnchors`,
-  ## because an artefact with no debug info and a producer whose output was
-  ## rejected both leave the anchor list empty and must not look the same.
   if not vm.syncSettings.val.enabled:
     return "source syncing is off"
   if vm.anchorsRejected.val:
@@ -134,8 +114,6 @@ proc mappingNotice*(vm: LowLevelCodeVM): string =
   ""
 
 proc noticeClass*(vm: LowLevelCodeVM): string =
-  ## The class differs with the CAUSE, not merely with presence, so a
-  ## screenshot can tell the three apart and so can a test.
   if not vm.syncSettings.val.enabled:
     "low-level-code-notice notice-disabled"
   elif vm.anchorsRejected.val:
@@ -145,282 +123,192 @@ proc noticeClass*(vm: LowLevelCodeVM): string =
   else:
     "low-level-code-notice hidden"
 
+# ---------------------------------------------------------------------------
+# The rows
+# ---------------------------------------------------------------------------
+
+type
+  LowLevelRowKind* = enum
+    lrkSource       ## a source line, before the instructions generated from it
+    lrkInstruction  ## one instruction
+
+  LowLevelRowView* = object
+    ## Everything one row shows. `forEachKeyed` compares items whole, so a row
+    ## whose view is unchanged keeps its node.
+    kind*: LowLevelRowKind
+    key*: string
+    active*: bool
+    # lrkSource
+    line*: int
+    text*: string
+    # lrkInstruction
+    index*: int
+      ## The instruction's position in `LowLevelCodeVM.instructions`.
+    offsetText*, name*, args*, other*, crossRef*: string
+    fidelityText*, fidelityCls*, countText*: string
+
+proc lowLevelRows*(vm: LowLevelCodeVM): seq[LowLevelRowView] =
+  ## The listing as rows: each run of instructions generated from one source
+  ## line is preceded by that line. Reads the signals it depends on, so a list
+  ## built over it follows them.
+  let instructions = vm.instructions.val
+  let activeLine = vm.activeLine.val
+  let activePath = vm.activePath.val
+  let activeOffset = vm.activeOffset.val
+  let noir = vm.noirProject.val
+  let anchors = vm.anchors.val
+  let sources = vm.sourceText.val
+  var offsetSeen = initTable[int, int]()
+  var lineSeen = initTable[string, int]()
+  var groupPath = ""
+  var groupLine = 0
+  for i, instr in instructions:
+    let hasSource = instr.highLevelPath.len > 0 and instr.highLevelLine > 0
+    if hasSource and (instr.highLevelPath != groupPath or
+                      instr.highLevelLine != groupLine):
+      groupPath = instr.highLevelPath
+      groupLine = instr.highLevelLine
+      let lineKey = sourceKey(groupPath, groupLine)
+      let ordinal = lineSeen.getOrDefault(lineKey, 0)
+      lineSeen[lineKey] = ordinal + 1
+      result.add LowLevelRowView(
+        kind: lrkSource,
+        key: "src:" & lineKey & "#" & $ordinal,
+        active: activeLine > 0 and groupLine == activeLine and
+                (activePath.len == 0 or groupPath == activePath),
+        line: groupLine,
+        text: sources.getOrDefault(lineKey, ""))
+    elif not hasSource:
+      groupPath = ""
+      groupLine = 0
+    let ordinal = offsetSeen.getOrDefault(instr.offset, 0)
+    offsetSeen[instr.offset] = ordinal + 1
+    # ROW INDEX, not offset, for the anchors: they are ranges of
+    # generated-row indices (`Generated-Code-Listing.md` GCL-D6).
+    let fidelity = vm.fidelityAtRow(i)
+    var count = ExecutedCount(value: 0, provenance: cpNone)
+    let at = anchorIndexAtRow(anchors, i)
+    if at != NoAnchor:
+      count = anchors[at].count
+    result.add LowLevelRowView(
+      kind: lrkInstruction,
+      key: "op:" & $instr.offset & "#" & $ordinal,
+      active: isActiveInstruction(instr, activeLine, activePath, activeOffset),
+      index: i,
+      offsetText: formatOffset(instr, noir),
+      name: displayName(instr),
+      args: instr.args,
+      other: instr.other,
+      crossRef: sourceCrossRef(instr),
+      fidelityText: label(fidelity),
+      fidelityCls: fidelityClass(fidelity),
+      # No count for `cpNone`: a rendered `0` would read as "never ran", a
+      # measurement the pane did not make (GCL-D3).
+      countText: countLabel(count))
+
+proc onRowClick(vm: LowLevelCodeVM; index: int): proc() =
+  ## A row's click: go to the source line its instruction was generated
+  ## from. A factory, so each row's closure owns its index.
+  result = proc() =
+    let rows = vm.instructions.val
+    if index >= 0 and index < rows.len:
+      vm.jumpToInstruction(rows[index])
+
 proc onSyncToggle(vm: LowLevelCodeVM): proc() =
   result = proc() = vm.setSyncEnabled(not vm.syncSettings.val.enabled)
 
-proc onInstructionClick(vm: LowLevelCodeVM;
-                         instr: LowLevelInstruction): proc() =
-  ## Closure factory so each row captures its own
-  ## ``LowLevelInstruction`` value.  Without this the loop variable
-  ## would be shared across all click handlers (same DSL closure-
-  ## sharing concern as the search-results / step-list views).
-  let captured = instr
-  result = proc() = vm.jumpToInstruction(captured)
+proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
+                              row: LowLevelRowView): N =
+  ## One row of the listing (see the structure above).
+  case row.kind
+  of lrkSource:
+    result = ui(r):
+      tdiv(class = sourceRowClass(row.active)):
+        span(class = "low-level-code-source-line-number"):
+          text $row.line
+        span(class = "low-level-code-source-line-text"):
+          text row.text
+  of lrkInstruction:
+    var item: N
+    result = ui(r):
+      tdiv(ref = item, class = rowClass(row.active),
+           onclick = onRowClick(vm, row.index)):
+        span(class = "low-level-code-instruction-offset"):
+          text row.offsetText
+        span(class = "low-level-code-instruction-name"):
+          text row.name
+        span(class = "low-level-code-instruction-args"):
+          text row.args
+        span(class = "low-level-code-instruction-other"):
+          text row.other
+        span(class = row.fidelityCls):
+          text row.fidelityText
+    if row.crossRef.len > 0:
+      let crossSpan = ui(r):
+        span(class = "low-level-code-instruction-source"):
+          text row.crossRef
+      r.appendChild(item, crossSpan)
+    if row.countText.len > 0:
+      let countSpan = ui(r):
+        span(class = "low-level-code-instruction-count"):
+          text row.countText
+      r.appendChild(item, countSpan)
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderInstructionRowMock(r: MockRenderer; vm: LowLevelCodeVM;
-                              instr: LowLevelInstruction;
-                              active: bool; noir: bool;
-                              fidelity: MappingFidelity;
-                              count: ExecutedCount): MockNode =
-  ## One asm-listing row.  Carries the offset / name / args / other
-  ## column spans plus an optional source-cross-reference span.
-  ## Click handler maps to ``vm.jumpToInstruction``.
-  let onClick = onInstructionClick(vm, instr)
-  let crossRef = sourceCrossRef(instr)
-  let countText = countLabel(count)
-  let row = ui(r):
-    tdiv(class = rowClass(active), onclick = onClick):
-      span(class = "low-level-code-instruction-offset"):
-        text formatOffset(instr, noir)
-      span(class = "low-level-code-instruction-name"):
-        text displayName(instr)
-      span(class = "low-level-code-instruction-args"):
-        text instr.args
-      span(class = "low-level-code-instruction-other"):
-        text instr.other
-      span(class = fidelityClass(fidelity)):
-        text label(fidelity)
-  if crossRef.len > 0:
-    let crossSpan = ui(r):
-      span(class = "low-level-code-instruction-source"):
-        text crossRef
-    r.appendChild(row, crossSpan)
-  # NO COUNT COLUMN FOR `cpNone`, and that is the rule rather than an
-  # optimisation: `countLabel` returns "" there, and a rendered `0` would read
-  # as "never ran" — a measurement the pane did not make. See GCL-D3.
-  if countText.len > 0:
-    let countSpan = ui(r):
-      span(class = "low-level-code-instruction-count"):
-        text countText
-    r.appendChild(row, countSpan)
-  row
-
-proc renderLowLevelCodePanel*(r: MockRenderer;
-                              vm: LowLevelCodeVM): MockNode =
-  ## Render the Low Level Code panel for the Mock renderer.
-  ##
-  ## The static shell (``.component-container.low-level-code``) is
-  ## built once via the DSL.  Two outer ``createRenderEffect`` blocks
-  ## handle dynamic content: one rebuilds the optional address /
-  ## error overlays, the other rebuilds the row list whenever
-  ## ``instructions`` / ``activeOffset`` / ``noirProject`` change.
-  ## Using imperative MockRenderer ops inside the effects keeps the
-  ## conditional DOM straightforward — the DSL cannot express
-  ## ``if errorMessage.len > 0`` over a runtime signal.
-  var headerContainer: MockNode
-  var listContainer: MockNode
-
+proc renderLowLevelCodePanel*[R, N](r: R; vm: LowLevelCodeVM): N =
+  ## The Low Level Code panel (see the structure above).
+  var errorSlot, addressSlot, listContainer: N
   let panel = ui(r):
     tdiv(class = LowLevelCodeContainerClass):
-      tdiv(ref = headerContainer, class = "low-level-code-header"):
-        discard
+      tdiv(class = "low-level-code-header"):
+        tdiv(ref = errorSlot, class = "low-level-code-error-slot"):
+          discard
+        tdiv(ref = addressSlot, class = "low-level-code-address-slot"):
+          discard
+        tdiv(class = syncToggleClass(vm.syncSettings.val.enabled),
+             onclick = onSyncToggle(vm)):
+          text syncToggleLabel(vm.syncSettings.val.enabled)
+        tdiv(class = noticeClass(vm)):
+          text mappingNotice(vm)
       tdiv(ref = listContainer, class = "low-level-code-instructions"):
         discard
 
-  # Header overlays (error + address + sync state + mapping notice) — rebuilt
-  # whenever any of them change.  Every signal is read inside the effect so the
-  # subscription edge is established for all of them.
-  createRenderEffect proc() =
-    let err = vm.errorMessage.val
-    let addrVal = vm.address.val
-    let syncOn = vm.syncSettings.val.enabled
-    let notice = mappingNotice(vm)
-    let noticeCls = noticeClass(vm)
-    r.clearChildren(headerContainer)
-    if err.len > 0:
-      let errDiv = ui(r):
+  # The error and the address are lists of zero or one item, keyed by their
+  # text: a new message is a new node, so a shown overlay never keeps a stale
+  # text, and none is in the DOM while there is nothing to say.
+  forEachKeyed[string, R, N](r, errorSlot,
+    proc(): seq[string] =
+      let err = vm.errorMessage.val
+      if err.len > 0: @[err] else: @[],
+    proc(err: proc(): string; index: proc(): int): N =
+      ui(r):
         tdiv(class = "low-level-code-error"):
-          text err
-      r.appendChild(headerContainer, errDiv)
-    if addrVal > 0:
-      let addrDiv = ui(r):
+          text err())
+  forEachKeyed[string, R, N](r, addressSlot,
+    proc(): seq[string] =
+      let a = vm.address.val
+      if a > 0: @[addressText(a)] else: @[],
+    proc(label: proc(): string; index: proc(): int): N =
+      ui(r):
         tdiv(class = "low-level-code-address"):
-          text addressText(addrVal)
-      r.appendChild(headerContainer, addrDiv)
-    let toggle = ui(r):
-      tdiv(class = syncToggleClass(syncOn), onclick = onSyncToggle(vm)):
-        text syncToggleLabel(syncOn)
-    r.appendChild(headerContainer, toggle)
-    let noticeDiv = ui(r):
-      tdiv(class = noticeCls):
-        text notice
-    r.appendChild(headerContainer, noticeDiv)
+          text label())
 
-  # Instruction list — rebuilt whenever any of the row-affecting
-  # signals change.
-  createRenderEffect proc() =
-    let instructions = vm.instructions.val
-    let activeOffset = vm.activeOffset.val
-    let noir = vm.noirProject.val
-    let anchors = vm.anchors.val
-    r.clearChildren(listContainer)
-    for i, instr in instructions:
-      let active = isActiveRow(instr, activeOffset)
-      # ROW INDEX, not offset. Anchors are ranges of generated-row indices, and
-      # `Generated-Code-Listing.md` GCL-D6 makes `row index == opcode index` an
-      # invariant of this pane — using the offset here would be off by whatever
-      # the artefact's first offset happens to be.
-      let fidelity = vm.fidelityAtRow(i)
-      var count = ExecutedCount(value: 0, provenance: cpNone)
-      let idx = anchorIndexAtRow(anchors, i)
-      if idx != NoAnchor:
-        count = anchors[idx].count
-      let row = renderInstructionRowMock(r, vm, instr, active, noir,
-                                         fidelity, count)
-      r.appendChild(listContainer, row)
+  forEachKeyed[LowLevelRowView, R, N](r, listContainer,
+    proc(): seq[LowLevelRowView] = lowLevelRows(vm),
+    proc(row: proc(): LowLevelRowView; index: proc(): int): N =
+      renderLowLevelRow[R, N](r, vm, row()))
 
   panel
 
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
 when defined(js):
-
-  proc createWebElement(tag: string; cssClass: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with an optional class attribute.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element + a text-node child in one shot.
-    let n = createWebElement(tag, cssClass)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderInstructionRowWeb(vm: LowLevelCodeVM;
-                               instr: LowLevelInstruction;
-                               active: bool; noir: bool;
-                               fidelity: MappingFidelity;
-                               count: ExecutedCount): isonim_dom.Element =
-    ## Build an asm-listing row in the real DOM.  Same shape as the
-    ## Mock variant; click handler is wired imperatively via
-    ## ``addEventListener``.
-    ##
-    ## PARITY WITH THE MOCK ARM IS THE POINT. A mock-only assertion is green
-    ## over a surface nobody sees (`Verification-Harness-Traps.md` trap 3), so
-    ## every span the mock arm emits is emitted here too, with the same classes.
-    let row = createWebElement("div", rowClass(active))
-
-    let offsetSpan = createWebTextElement("span", formatOffset(instr, noir),
-                                          "low-level-code-instruction-offset")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(offsetSpan))
-
-    let nameSpan = createWebTextElement("span", displayName(instr),
-                                         "low-level-code-instruction-name")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(nameSpan))
-
-    let argsSpan = createWebTextElement("span", instr.args,
-                                         "low-level-code-instruction-args")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(argsSpan))
-
-    let otherSpan = createWebTextElement("span", instr.other,
-                                          "low-level-code-instruction-other")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(otherSpan))
-
-    let fidelitySpan = createWebTextElement("span", label(fidelity),
-                                            fidelityClass(fidelity))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(fidelitySpan))
-
-    let crossRef = sourceCrossRef(instr)
-    if crossRef.len > 0:
-      let crossSpan = createWebTextElement("span", crossRef,
-                                            "low-level-code-instruction-source")
-      isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(crossSpan))
-
-    let countText = countLabel(count)
-    if countText.len > 0:
-      let countSpan = createWebTextElement("span", countText,
-                                           "low-level-code-instruction-count")
-      isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(countSpan))
-
-    let handler = onInstructionClick(vm, instr)
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                proc(ev: isonim_dom.Event) = handler())
-    row
-
-  proc renderLowLevelCodePanel*(r: WebRenderer;
-                                vm: LowLevelCodeVM): isonim_dom.Element =
-    ## Render the Low Level Code panel for the real DOM.
-    var headerContainer: isonim_dom.Element
-    var listContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = LowLevelCodeContainerClass):
-        tdiv(ref = headerContainer, class = "low-level-code-header"):
-          discard
-        tdiv(ref = listContainer, class = "low-level-code-instructions"):
-          discard
-
-    createRenderEffect proc() =
-      let err = vm.errorMessage.val
-      let addrVal = vm.address.val
-      let syncOn = vm.syncSettings.val.enabled
-      let notice = mappingNotice(vm)
-      let noticeCls = noticeClass(vm)
-      clearWebChildren(headerContainer)
-      if err.len > 0:
-        let errDiv = createWebTextElement("div", err,
-                                           "low-level-code-error")
-        isonim_dom.appendChild(isonim_dom.Node(headerContainer),
-                               isonim_dom.Node(errDiv))
-      if addrVal > 0:
-        let addrDiv = createWebTextElement("div", addressText(addrVal),
-                                            "low-level-code-address")
-        isonim_dom.appendChild(isonim_dom.Node(headerContainer),
-                               isonim_dom.Node(addrDiv))
-
-      let toggle = createWebTextElement("div", syncToggleLabel(syncOn),
-                                        syncToggleClass(syncOn))
-      let toggleHandler = onSyncToggle(vm)
-      isonim_dom.addEventListener(isonim_dom.Node(toggle), cstring"click",
-                                  proc(ev: isonim_dom.Event) = toggleHandler())
-      isonim_dom.appendChild(isonim_dom.Node(headerContainer),
-                             isonim_dom.Node(toggle))
-
-      let noticeDiv = createWebTextElement("div", notice, noticeCls)
-      isonim_dom.appendChild(isonim_dom.Node(headerContainer),
-                             isonim_dom.Node(noticeDiv))
-
-    createRenderEffect proc() =
-      let instructions = vm.instructions.val
-      let activeOffset = vm.activeOffset.val
-      let noir = vm.noirProject.val
-      let anchors = vm.anchors.val
-      clearWebChildren(listContainer)
-      for i, instr in instructions:
-        let active = isActiveRow(instr, activeOffset)
-        let fidelity = vm.fidelityAtRow(i)
-        var count = ExecutedCount(value: 0, provenance: cpNone)
-        let idx = anchorIndexAtRow(anchors, i)
-        if idx != NoAnchor:
-          count = anchors[idx].count
-        let row = renderInstructionRowWeb(vm, instr, active, noir,
-                                          fidelity, count)
-        isonim_dom.appendChild(isonim_dom.Node(listContainer),
-                               isonim_dom.Node(row))
-
-    panel
-
   proc mountIsoNimLowLevelCode*(container: isonim_dom.Element;
                                 vm: LowLevelCodeVM) =
-    ## Mount the IsoNim low-level-code panel as a child of
-    ## ``container``.  Reactive effects handle every subsequent
-    ## update — no manual redraw is needed.
-    let r = WebRenderer()
-    let panel = renderLowLevelCodePanel(r, vm)
+    ## Append the panel to `container` — for a host that is not the panel
+    ## host (the storybook).
+    let panel = renderLowLevelCodePanel[WebRenderer, isonim_dom.Element](
+      WebRenderer(), vm)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))

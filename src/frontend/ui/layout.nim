@@ -5,7 +5,7 @@ import
   # Panes the component factory below mounts by their `tryMountIsoNim…`
   # proc. See the factory arms below.
   trace, event_log, terminal_output,
-  calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
+  calltrace_editor, repl, request_panel, trace_log, scratchpad, filesystem,
   test_results, constraints, point_list,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff, verification,
@@ -1922,21 +1922,6 @@ proc mountPaneForState(state: GoldenItemState) =
         repl.syncReplConfigIntoVM()
         repl.tryMountIsoNimReplPanel()
 
-      # LowLevelCode is now an IsoNim view -- its outer container
-      # is mounted by ``low_level_code.tryMountIsoNimLowLevelCodePanel``
-      # against the ``lowLevelCodeComponent-{id}`` GoldenLayout host,
-      # and reactive effects keep it in sync.  The Monaco-driven
-      # asm buffer still lives inside the editor sub-tree (the
-      # EditorViewComponent owns that DOM); the IsoNim view here
-      # exposes the parity-faithful container shell + a fallback
-      # row list so headless tests can exercise the same data flow
-      # without Monaco.  Closes the no_source asm sub-tree
-      # follow-up tracked from 1.40.
-      if state.content == Content.LowLevelCode:
-        low_level_code.syncLegacyLowLevelCodeIntoVM(
-          LowLevelCodeComponent(component))
-        low_level_code.tryMountIsoNimLowLevelCodePanel()
-
       # RequestPanel is now an IsoNim view -- its DOM is mounted by
       # ``request_panel.tryMountIsoNimRequestPanel`` against the
       # ``requestPanelComponent-{id}`` container, and reactive
@@ -2065,19 +2050,6 @@ proc mountPaneForState(state: GoldenItemState) =
       # Content.FrameViewer pane dispatch was retired in M3.  The legacy
       # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
       # other panes (Video Player, Pixel History, Shader Debug) share.
-
-      if state.content == Content.PixelHistory:
-        pixel_history.tryMountIsoNimPixelHistoryPanel(
-          PixelHistoryComponent(component))
-
-      if state.content == Content.ShaderDebug:
-        shader_debug.tryMountIsoNimShaderDebugPanel(
-          ShaderDebugComponent(component))
-
-      if state.content == Content.VideoPlayer:
-        video_player.syncVisualReplaySessionIntoPlayerVM()
-        video_player.tryMountIsoNimVideoPlayerPanel(
-          VideoPlayerComponent(component))
 
       # CaptionBarProgress: render via IsoNim WebRenderer directly
       # into the GL container. Progress and hover mutation paths refresh

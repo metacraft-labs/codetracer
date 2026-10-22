@@ -8029,6 +8029,13 @@ suite "IsoNim REPL Panel — vm":
 
 const LowLevelCodePanelClass = "low-level-code"
 
+proc instructionRowsOf(list: MockNode): seq[MockNode] =
+  ## The listing's instruction rows, without the source-line rows that head
+  ## each group (HSF-D3).
+  for c in list.children:
+    if "low-level-code-source-line" notin c.attributes.getOrDefault("class", ""):
+      result.add c
+
 proc makeInstr(name: string; offset: int = 0; args: string = "";
                 other: string = ""; highLevelPath: string = "";
                 highLevelLine: int = 0): LowLevelInstruction =
@@ -8055,7 +8062,7 @@ suite "IsoNim Low Level Code Panel — structure":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       check "component-container" in panel.attributes["class"]
       check LowLevelCodePanelClass in panel.attributes["class"]
@@ -8075,7 +8082,7 @@ suite "IsoNim Low Level Code Panel — structure":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       let listContainer = findByClass(panel, "low-level-code-instructions")
       check listContainer != nil
@@ -8100,7 +8107,7 @@ suite "IsoNim Low Level Code Panel — structure":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       let headerContainer = findByClass(panel, "low-level-code-header")
       check headerContainer != nil
@@ -8126,7 +8133,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       let listContainer = findByClass(panel, "low-level-code-instructions")
       check listContainer.children.len == 0
 
@@ -8146,7 +8153,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("mov", offset = 4, args = "rax, 1", other = "; init"),
       ])
@@ -8166,7 +8173,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("", offset = 0),
       ])
@@ -8184,7 +8191,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       vm.setInstructions(@[
         makeInstr("acir", offset = 7),
@@ -8205,7 +8212,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("call", offset = 0, highLevelPath = "src/main.nim",
                    highLevelLine = 12),
@@ -8213,8 +8220,9 @@ suite "IsoNim Low Level Code Panel — instruction list":
       ])
 
       let listContainer = findByClass(panel, "low-level-code-instructions")
-      let firstRow = listContainer.children[0]
-      let secondRow = listContainer.children[1]
+      let rows = instructionRowsOf(listContainer)
+      let firstRow = rows[0]
+      let secondRow = rows[1]
       check findByClass(firstRow, "low-level-code-instruction-source")
         .textContent == "src/main.nim:12"
       check findByClassOrNil(secondRow, "low-level-code-instruction-source") == nil
@@ -8227,7 +8235,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
       vm.setActiveOffset(0)
 
@@ -8252,7 +8260,7 @@ suite "IsoNim Low Level Code Panel — active row":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("mov", offset = 0),
         makeInstr("add", offset = 1),
@@ -8280,7 +8288,7 @@ suite "IsoNim Low Level Code Panel — active row":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
 
       vm.setActiveOffset(0)
@@ -8312,7 +8320,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       check findByClassOrNil(panel, "low-level-code-address") == nil
 
       vm.setAddress(0x1000)
@@ -8328,7 +8336,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setAddress(0xABCD)
       check findByClassOrNil(panel, "low-level-code-address") != nil
 
@@ -8343,7 +8351,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       check findByClassOrNil(panel, "low-level-code-error") == nil
 
       vm.setErrorMessage("function not found")
@@ -8402,7 +8410,7 @@ suite "IsoNim Low Level Code Panel — interactions":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("mov", offset = 0, highLevelPath = "src/a.nim",
                    highLevelLine = 3),
@@ -8412,7 +8420,7 @@ suite "IsoNim Low Level Code Panel — interactions":
 
       mock.clearReceivedCommands()
       let listContainer = findByClass(panel, "low-level-code-instructions")
-      listContainer.children[1].fireEvent("click")
+      instructionRowsOf(listContainer)[1].fireEvent("click")
 
       check mock.receivedCommands.len == 1
       let sent = mock.receivedCommands[0]

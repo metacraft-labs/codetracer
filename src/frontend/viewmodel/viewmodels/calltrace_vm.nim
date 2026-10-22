@@ -312,6 +312,11 @@ const
     ## decoders now fill from the call's `returnValue`.
   CallRowIndentCells* = 2
     ## A text medium's indent per depth level.
+  CallRowIndentPx* = 8
+    ## A pixel medium's indent per depth level — the desktop's `.call-depth`
+    ## offset (measured 8 px a level, 2026-10-17), which GPUI draws too. The
+    ## web view and GPUI both take it from here, and a pane's reporter divides
+    ## its width by it to say how many levels fit (`pane_viewport`).
   CallToggleGlyphs*: array[CallRowToggle, string] = ["·", "▾", "▸"]
     ## A text medium's toggles: the desktop's dot, collapse and expand icons.
 
@@ -411,6 +416,14 @@ proc requestWindow(vm: CalltraceVM) =
     line = dbg.location.line,
     rawIgnorePatterns = vm.rawIgnorePatterns.val,
   )
+
+proc reloadWindow*(vm: CalltraceVM) =
+  ## Ask again for the window the viewport shows, though the request is the
+  ## same as the last: the engine changed the section under it (an expansion
+  ## sent outside this ViewModel, e.g. by a host whose transport cannot send
+  ## `ct/expand-calls` through `toggleExpandCallChildren`).
+  vm.store.requestTracker.forget("load-calltrace")
+  vm.requestWindow()
 
 proc writeSelectedEntry(vm: CalltraceVM; lineIndex: Option[int64]) =
   ## Write `selectedEntry` (through the collaborative session when there is

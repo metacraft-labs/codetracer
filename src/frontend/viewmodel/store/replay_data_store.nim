@@ -22,7 +22,7 @@ import std/[json, options, strutils, tables]
 # package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
 import ../vm_log
 
-import isonim/core/[signals, owner, async_compat]
+import isonim/core/[signals, owner, async_compat, batch]
 import isonim/viewmodel
 
 import ../backend/backend_service
@@ -1363,11 +1363,35 @@ proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
     stop.cPath = c.getOrDefault("path").getStr("")
     stop.cLine = c.getOrDefault("line").getInt(0)
     stop.cAsmName = c.getOrDefault("asmName").getStr("")
+    stop.cFunctionName = c.getOrDefault("functionName").getStr("")
+    stop.cKey = c.getOrDefault("key").getStr("")
   let frame = body.getOrDefault("frameInfo")
   if not frame.isNil and frame.kind == JObject and
      frame.getOrDefault("hasSelected").getBool(false):
     stop.frameOffset = frame.getOrDefault("offset").getInt(-1)
   store.stop.val = stop
+
+proc asmFunctionOf*(path, name, key: string; line: int;
+                    cPath, cName, cKey: string; cLine: int): AsmFunctionLocation =
+  ## The function a stop's low-level code is for: the C-level location for a
+  ## Nim recording (its assembly is the generated C's, and the engine names
+  ## that function by the C path and name), the location itself otherwise. A
+  ## Noir recording asks again on every move. The desktop's low-level pane
+  ## made the same choice (`data.trace.lang == LangNim and cLocation.path !=
+  ## ""`); the recording's language is read here from the source path.
+  let nim = path.endsWith(".nim") and cPath.len > 0
+  if nim:
+    AsmFunctionLocation(path: cPath, name: cName, key: cKey, line: cLine)
+  else:
+    AsmFunctionLocation(path: path, name: name, key: key, line: line,
+                        forceReload: path.endsWith(".nr"))
+
+proc asmFunction*(store: ReplayDataStore): AsmFunctionLocation =
+  ## The function the debugger's stop is in, for the low-level code pane —
+  ## read from `stop`, so a reader of it follows the stop.
+  let s = store.stop.val
+  asmFunctionOf(s.path, s.functionName, s.key, s.line,
+                s.cPath, s.cFunctionName, s.cKey, s.cLine)
 
 proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   ## Adopt the position a `ct/complete-move` event reports, and mark the
@@ -1402,10 +1426,14 @@ proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
     geid = some(body["geid"].getBiggestInt().uint64)
   elif body.hasKey("currentGeid"):
     geid = some(body["currentGeid"].getBiggestInt().uint64)
-  store.updateDebuggerPosition(rrTicks, file, line, geid,
-                               sourceGeneration = sourceGeneration,
-                               sourceDigest = sourceDigest)
-  store.applyStopLocation(body)
+  # One batch: a reader of the stop (the stop loader) must see the position
+  # and the stop's location together, not the new position with the
+  # previous stop's function first.
+  batch(proc() =
+    store.updateDebuggerPosition(rrTicks, file, line, geid,
+                                 sourceGeneration = sourceGeneration,
+                                 sourceDigest = sourceDigest)
+    store.applyStopLocation(body))
   # A FRESH object: on the JS backend `var dbg = store.debugger.val` is the
   # signal's own reference, so writing it back compares equal to itself and
   # the status change never fires — the debugger stayed `dsStepping` and every

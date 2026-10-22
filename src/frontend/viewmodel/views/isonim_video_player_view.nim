@@ -10,16 +10,18 @@
 import std/[options, strformat]
 
 import isonim/core/[computation, signals]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
   import isonim/web/dom_api as isonim_dom
-  import isonim/web/web_renderer
 
 import ../viewmodels/frame_viewer_vm
 import ../viewmodels/video_player_vm
 import ../viewmodels/visual_replay_client
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 ## Loupe geometry — keep these in lockstep with .video-player-loupe-canvas
 ## in styles/components/video_player.styl.
@@ -229,9 +231,19 @@ proc onPickerClick(vm: VideoPlayerVM): proc() =
 # Template.
 # ---------------------------------------------------------------------------
 
-template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
+proc renderScrubTick[R, N](r: R; tick: proc(): ScrubTick): N =
   ui(r):
-    tdiv(class = rootClassFor(vm, rootClass)):
+    tdiv(class = "video-player-scrub-tick",
+         style = "left: " & $tick().leftPercent & "%"):
+      text ""
+
+proc renderVideoPlayerPanelBody[R, N](r: R; vm: VideoPlayerVM): N =
+  ## The panel's markup, for every renderer. The clear-frame ticks follow
+  ## ``FrameViewerVM.clearFrames`` reactively (``layoutScrubTicks`` maps
+  ## them to 0..100 % positions; legacy traces have none).
+  var ticks: N
+  let panel = ui(r):
+    tdiv(class = rootClassFor(vm, "video-player-component isonim-video-player")):
       ## --- Canvas area -----------------------------------------------------
       tdiv(class = "video-player-stage"):
         tdiv(class = "video-player-empty", display = emptyDisplay(vm)):
@@ -358,17 +370,8 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
         ## ``loadInfo`` from the ``/info`` ``clearFrames`` field).
         ## Empty input (legacy traces, no clear-frame metadata) →
         ## no ticks via the helper's early return.
-        tdiv(class = "video-player-scrub-ticks"):
-          # ``for tick in seq[ScrubTick]`` yields ``lent ScrubTick`` on
-          # Nim 2.x, which cannot be captured by the closure inside
-          # ``tdiv(... style = "...")``.  Copy the field eagerly into a
-          # local ``float`` so the closure captures a plain value.
-          for tick in layoutScrubTicks(
-              vm.frameVm.clearFrames.val, vm.frameVm.frameCount.val):
-            let leftPercent = tick.leftPercent
-            tdiv(class = "video-player-scrub-tick",
-                 style = "left: " & $leftPercent & "%"):
-              text ""
+        tdiv(class = "video-player-scrub-ticks", ref = ticks):
+          discard
         input(class = "video-player-scrub-range",
               `type` = "range",
               min = "0",
@@ -383,8 +386,12 @@ template renderVideoPlayerPanelImpl(r, vm, rootClass: untyped): untyped =
           tdiv(class = "video-player-selected-pixel"):
             text selectedPixelText(vm)
 
-proc renderVideoPlayerPanel*(r: MockRenderer; vm: VideoPlayerVM): MockNode =
-  renderVideoPlayerPanelImpl(r, vm, "video-player-component")
+  indexEach[ScrubTick, R, N](r, ticks,
+    proc(): seq[ScrubTick] =
+      layoutScrubTicks(vm.frameVm.clearFrames.val, vm.frameVm.frameCount.val),
+    proc(tick: proc(): ScrubTick; index: int): N =
+      renderScrubTick[R, N](r, tick))
+  panel
 
 # ---------------------------------------------------------------------------
 # Web-only mounting and DOM event wiring.
@@ -677,11 +684,6 @@ when defined(js):
   ## component's ``onEscape``).
   ## Spec: Visual-Replay.md §Pixel Picker Mode → Activation.
 
-  proc renderVideoPlayerPanel*(r: WebRenderer;
-                               vm: VideoPlayerVM): isonim_dom.Element =
-    renderVideoPlayerPanelImpl(r, vm,
-      "video-player-component isonim-video-player")
-
   proc observeDevicePixelSize(el: isonim_dom.Element;
                               cb: proc(width, height: int)) {.importjs: """
     (function(el, cb) {
@@ -696,11 +698,9 @@ when defined(js):
   proc parentOf(el: isonim_dom.Element): isonim_dom.Element
       {.importjs: "#.parentElement".}
 
-  proc mountIsoNimVideoPlayer*(container: isonim_dom.Element;
-                               vm: VideoPlayerVM) =
-    let r = WebRenderer()
-    let panel = renderVideoPlayerPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+  proc decorateVideoPlayer(panel: isonim_dom.Element; vm: VideoPlayerVM) =
+    ## The browser's half of the panel: the picker's mouse handling, the
+    ## stage size, the scrubber, the loupe and the playback loop.
 
     setCanvasMouseHandlers(panel,
       proc(renderedX, renderedY, renderedWidth, renderedHeight: float) =
@@ -787,3 +787,12 @@ when defined(js):
     ## pipeline (M4).  No raw keydown listener is installed here — the
     ## pane's own keys in ``ui/key_router.nim`` (``videoPlayerKey``) query
     ## ``videoPlayerHasFocus()`` and ``vm.pickerState`` before delegating.
+
+proc renderVideoPlayerPanel*[R, N](r: R; vm: VideoPlayerVM): N =
+  ## The Video Player panel, under any renderer (Shared-DOM-Front-Ends D3);
+  ## the panel host (`ui/panel_host`) mounts it.
+  let panel = renderVideoPlayerPanelBody[R, N](r, vm)
+  when defined(js):
+    when N is isonim_dom.Element:
+      decorateVideoPlayer(panel, vm)
+  panel
