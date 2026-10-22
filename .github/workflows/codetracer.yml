@@ -7263,8 +7263,8 @@ jobs:
         with:
           name: ui-tests-rr-artifacts
           path: |
-            tsc-ui-tests/test-results/
-            tsc-ui-tests/playwright-report/
+            src/tests/gui/test-results/
+            src/tests/gui/playwright-report/
           retention-days: 14
           if-no-files-found: ignore
 

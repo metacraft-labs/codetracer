@@ -1,7 +1,7 @@
 ## test_noir_space_ship.nim
 ##
 ## Headless ViewModel equivalents of the Playwright Noir Space Ship GUI tests
-## from ``tsc-ui-tests/tests/noir-space-ship/noir-space-ship.spec.ts``.
+## from ``src/tests/gui/tests/noir-space-ship/noir-space-ship.spec.ts``.
 ##
 ## Each test uses HeadlessDebugSession with a real replay-server backend and
 ## the actual noir_space_ship trace.  Instead of verifying DOM elements, these

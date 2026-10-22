@@ -52,7 +52,7 @@ const ThemeLinesPerConfig = 1;
 
 /**
  * The bundled default layout shipped with the source tree.
- * `codetracerInstallDir` should be the repo root (one level above tsc-ui-tests).
+ * `codetracerInstallDir` should be the repo root (three levels above src/tests/gui/).
  */
 function bundledDefaultLayoutPath(codetracerInstallDir: string): string {
   return path.join(codetracerInstallDir, "src", "config", "default_layout.json");

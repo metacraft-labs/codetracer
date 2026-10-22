@@ -215,9 +215,19 @@ Don't disable the lint: try to fix the code instead first!
 just test-e2e
 ```
 
-The Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app via the `ct`
-binary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`
-first to rebuild the frontend before running the tests.
+The Playwright suite is `src/tests/gui/`. Its config is `src/tests/gui/playwright.config.ts`,
+and the specs live under `src/tests/gui/tests/` (the config's `testDir`). Write a new GUI test
+there: `just test-e2e`, `just test-gui` and `just test-gui-prebuilt` all run
+`npx playwright test` from `src/tests/gui/`, so a spec anywhere else is run by no recipe and no
+CI lane. Spec arguments are relative to `src/tests/gui/`, e.g.
+`just test-e2e tests/sudoku/nim-sudoku.spec.ts`.
+
+The tests launch the real Electron app via the `ct` binary at `$CODETRACER_E2E_CT_PATH` when
+that is set (CI points it at the nix build), otherwise at `$CODETRACER_BUILD_DIR/bin/ct` (the
+dev shell sets `CODETRACER_BUILD_DIR` to the platform's build output), falling back to
+`src/build-debug/bin/ct`; see `src/tests/gui/lib/fixtures.ts`. If you modify frontend Nim
+code, run `just build-once` first to rebuild the frontend before running `just test-e2e`;
+`just test-gui` runs it for you as a prerequisite.
 
 ## Running the cross-language ct_test provider tests
 

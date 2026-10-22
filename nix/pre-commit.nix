@@ -238,7 +238,6 @@
         "^src/db-backend/" # db-backend internal docs
         "^examples/" # Example project READMEs with varied formatting
         "^test-programs/" # Test program READMEs
-        "^tsc-ui-tests/" # TypeScript UI tests
         "^src/tracer/" # Tracer docs
         "^CHANGELOG\\.md$" # Auto-generated changelog
         "^CONTRIBUTING\\.md$"
