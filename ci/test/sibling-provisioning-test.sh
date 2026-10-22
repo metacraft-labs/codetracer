@@ -1908,6 +1908,211 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5. A step that runs BEFORE the dev shell uses only the tools its runner has.
+#
+# Provisioning happens before `nix develop`, so it runs on the runner's own
+# PATH, and that PATH is not a stock Linux userland:
+#
+#   * nix-darwin runners (`aarch64-darwin`): the nix profile built from infra's
+#     runner `extraPackages` (coreutils-full, git, curl, jq, gh, gnupg, openssh,
+#     direnv). No grep, no sed, no awk, no python3. `provision-repro-lock-
+#     siblings` died there with `grep: command not found` (codetracer-pm
+#     issues/2026-10-22-provision-repro-lock-siblings-runs-grep-and-sed-
+#     outside-the-dev-shell-on-darwin.md).
+#   * self-hosted NixOS runners (`[self-hosted, linux, …]`): the same profile
+#     plus systemd's default service PATH, which does bring the GNU userland
+#     but NO python3 and NO perl. The GPUI window-captures lane read the
+#     isonim-gpui pin with python3 there and has never got past that step
+#     (issues/2026-10-22-gpui-window-captures-lane-reads-the-isonim-gpui-pin-
+#     with-python3-the-runner-lacks.md).
+#
+# jq is on both, and is what such a step reads JSON with.
+#
+# WHAT COUNTS AS "BEFORE THE DEV SHELL". A `run:` step whose `shell:` is not a
+# `nix develop` wrapper, read line by line until the first line that enters an
+# environment (`nix develop`, `nix shell`, `nix run`, `nix-shell`,
+# `repro exec`); from there on a line may be running inside it, and is not
+# judged. So a banned tool AFTER an environment is entered in the same step is
+# not caught -- a known blind spot, kept because the alternative is parsing
+# shell quoting. A local composite action is judged by the runners of the jobs
+# that use it. Windows steps and GitHub-hosted runners are not judged here: the
+# hosted images carry all of these tools, and the Windows images have their
+# own contract in ci/test/windows-runner-bootstrap-test.sh.
+# ---------------------------------------------------------------------------
+echo
+echo "steps that run before the dev shell use only their runner's tools"
+
+readonly DARWIN_MISSING_TOOLS="grep sed awk python3 perl"
+readonly NIXOS_MISSING_TOOLS="python3 perl"
+
+# runs-on value(s) -> darwin | nixos | '' (not judged here)
+runner_class_of() {
+	local value="${1//[\[\],]/ }" token
+	for token in $value; do
+		case "$token" in *darwin* | macos*) echo darwin && return 0 ;; esac
+	done
+	for token in $value; do
+		case "$token" in windows | eph-win-* | windows-*) return 0 ;; esac
+	done
+	for token in $value; do
+		[ "$token" = self-hosted ] && echo nixos && return 0
+	done
+	return 0
+}
+
+# Does $1 (one line of shell) invoke tool $2 as a command? Command position
+# only: after start of line, a pipe, `;`, `&`, `(`, `$(` or a backtick, so a
+# word in an echo'd sentence or a path such as `ci/foo-grep.sh` is not a hit.
+invokes_tool() {
+	[[ " $1" =~ (^|[[:space:]\;\&\|\(\`]|\$\()$2([[:space:]]|$) ]]
+}
+
+raw_steps_judged=0
+raw_tool_violations=()
+declare -A ACTION_RUNNER_CLASSES=()
+declare -A JOB_RUNNER_VALUES=()
+
+# Judge one finished step: $1 = where it is (`<dir>/<file>`), $2 = runner
+# classes, $3 = its shell: value, then "lineno<TAB>text" records of its run: body.
+judge_step() {
+	local where="$1" classes="$2" shell="$3"
+	shift 3
+	[ "$#" -gt 0 ] || return 0
+	case "$shell" in *'nix develop'* | *pwsh* | *powershell* | *cmd*) return 0 ;; esac
+	local class tools rec text lineno tool entered
+	for class in $classes; do
+		case "$class" in
+		darwin) tools="$DARWIN_MISSING_TOOLS" ;;
+		nixos) tools="$NIXOS_MISSING_TOOLS" ;;
+		*) continue ;;
+		esac
+		raw_steps_judged=$((raw_steps_judged + 1))
+		entered=0
+		for rec in "$@"; do
+			lineno="${rec%%	*}"
+			text="${rec#*	}"
+			case "$text" in '#'*) continue ;; esac
+			case "$text" in
+			*'nix develop'* | *'nix shell'* | *'nix run'* | *'nix-shell'* | *'repro exec'*) entered=1 ;;
+			esac
+			[ "$entered" -eq 0 ] || break
+			for tool in $tools; do
+				if invokes_tool "$text" "$tool"; then
+					raw_tool_violations+=("$where:$lineno [$class runner] runs '$tool' before the dev shell: $text")
+				fi
+			done
+		done
+	done
+}
+
+# Walk one YAML file's steps. $2 = the runner classes to judge every step by
+# (a composite action), or '' to take them from each job's `runs-on:` and
+# matrix `runner:` values (a workflow).
+scan_raw_steps() {
+	local file="$1" forced="$2"
+	# `<dir>/<file>` names the step in a report, so a composite action is
+	# named by its directory rather than as one of many `action.yml`s.
+	local where="${file%/*}"
+	where="${where##*/}/${file##*/}"
+	local line line_no=0 job="" indent item_indent=-1 in_run=0 run_indent=0
+	local step_shell="" classes="" text next_job next_indent
+	local -a body=()
+
+	# Pass 1, workflows only: each job's runner values, and which local
+	# composite actions it uses (so an action is judged by its callers).
+	if [ -z "$forced" ]; then
+		while IFS= read -r line; do
+			if [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+				job="${BASH_REMATCH[1]}"
+			elif [[ $line =~ ^[[:space:]]+(-[[:space:]]+)?(runs-on|runner):[[:space:]]*([^#]*) ]]; then
+				JOB_RUNNER_VALUES["$file|$job"]+=" ${BASH_REMATCH[3]}"
+			fi
+		done <"$file"
+		job=""
+		while IFS= read -r line; do
+			if [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+				job="${BASH_REMATCH[1]}"
+			elif [[ $line =~ uses:[[:space:]]*\./\.github/actions/([A-Za-z0-9_-]+) ]]; then
+				ACTION_RUNNER_CLASSES["${BASH_REMATCH[1]}"]+=" $(runner_class_of "${JOB_RUNNER_VALUES["$file|$job"]:-}")"
+			fi
+		done <"$file"
+		job=""
+	fi
+
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		indent="${line%%[![:space:]]*}"
+		# Inside a block `run: |` body: everything indented past the key.
+		if [ "$in_run" -eq 1 ]; then
+			if [ -z "${line//[[:space:]]/}" ] || [ "${#indent}" -gt "$run_indent" ]; then
+				text="${line#"$indent"}"
+				[ -n "$text" ] && body+=("$line_no	$text")
+				continue
+			fi
+			in_run=0
+		fi
+		if [ -z "$forced" ] && [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+			# Read the match first: judge_step runs regexes of its own.
+			next_job="${BASH_REMATCH[1]}"
+			judge_step "$where" "$classes" "$step_shell" "${body[@]+"${body[@]}"}"
+			body=()
+			step_shell=""
+			item_indent=-1
+			job="$next_job"
+			classes="$(runner_class_of "${JOB_RUNNER_VALUES["$file|$job"]:-}")"
+			continue
+		fi
+		[ -n "$forced" ] && classes="$forced"
+		# A list item at or left of the current step's indent starts a new step
+		# (or ends the list); either way the open step is finished.
+		if [[ $line =~ ^([[:space:]]*)-[[:space:]] ]] && { [ "$item_indent" -lt 0 ] || [ "${#BASH_REMATCH[1]}" -le "$item_indent" ]; }; then
+			next_indent="${#BASH_REMATCH[1]}"
+			judge_step "$where" "$classes" "$step_shell" "${body[@]+"${body[@]}"}"
+			body=()
+			step_shell=""
+			item_indent="$next_indent"
+		fi
+		if [[ $line =~ ^([[:space:]]*)(-[[:space:]]+)?shell:[[:space:]]*(.*)$ ]]; then
+			step_shell="${BASH_REMATCH[3]}"
+		elif [[ $line =~ ^([[:space:]]*)(-[[:space:]]+)?run:[[:space:]]*(.*)$ ]]; then
+			run_indent=$((${#BASH_REMATCH[1]} + ${#BASH_REMATCH[2]}))
+			case "${BASH_REMATCH[3]}" in
+			'|'* | '>'*) in_run=1 ;;
+			*) body+=("$line_no	${BASH_REMATCH[3]}") ;;
+			esac
+		fi
+	done <"$file"
+	judge_step "$where" "$classes" "$step_shell" "${body[@]+"${body[@]}"}"
+}
+
+for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+	[ -f "$wf" ] && scan_raw_steps "$wf" ""
+done
+for act_dir in "$ACTIONS_DIR"/*/; do
+	act_name="${act_dir%/}"
+	act_name="${act_name##*/}"
+	act_classes="${ACTION_RUNNER_CLASSES[$act_name]:-}"
+	[ -n "${act_classes// /}" ] || continue
+	for act in "$act_dir"action.yml "$act_dir"action.yaml; do
+		[ -f "$act" ] && scan_raw_steps "$act" "$(tr ' ' '\n' <<<"$act_classes" | sort -u | tr '\n' ' ')"
+	done
+done
+unset wf act act_dir act_name act_classes
+
+# Anti-vacuity: a scanner that stopped recognising steps (or runners) would
+# report "no violations" over nothing. Dozens of raw steps run on these two
+# runner classes today.
+if [ "$raw_steps_judged" -ge 20 ] && [ "${#raw_tool_violations[@]}" -eq 0 ]; then
+	ok "no step uses a tool its runner lacks before the dev shell ($raw_steps_judged raw steps judged)"
+else
+	fail "no step uses a tool its runner lacks before the dev shell" \
+		"judged $raw_steps_judged raw steps (a floor of 20 keeps the scan honest)." \
+		"Read the value with a tool the runner declares (jq for JSON, bash" \
+		"builtins for text), or move the step into 'nix develop .#ci'." \
+		"${raw_tool_violations[@]+"${raw_tool_violations[@]}"}"
+fi
+
+# ---------------------------------------------------------------------------
 # 6. The lane that runs this suite runs every suite, whatever fails first.
 #
 # `ci-contract-suites` (codetracer.yml) is a list of steps, one per contract
@@ -2024,7 +2229,8 @@ echo
 # 32 -> 34 (2026-10-22): every build input is public, and section 6 (the
 # ci-contract-suites lane runs every suite).
 # 34 -> 35: the build-input selector runs on a bash-only PATH.
-readonly EXPECTED_ASSERTIONS=35
+# 35 -> 36: section 5, raw steps use only their runner's tools.
+readonly EXPECTED_ASSERTIONS=36
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

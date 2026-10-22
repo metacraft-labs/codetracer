@@ -4115,9 +4115,19 @@ jobs:
         # The ONE pin this repo keeps for isonim-gpui is flake.lock's; the
         # clone below takes it from there rather than from a second copy of
         # the SHA in this file.
+        #
+        # jq, not python3: this step runs before any Nix provisioning, on the
+        # runner's own PATH, and the persistent NixOS runners have no python3
+        # there -- the step died with `python3: command not found` on every run
+        # since the job was added, so nothing after it had ever run in CI. jq
+        # is declared on every self-hosted runner. `-e` makes a missing node
+        # or a null rev an error rather than the string "null" handed to the
+        # clone below. ci/test/sibling-provisioning-test.sh section 5 fails a
+        # pre-dev-shell step that reaches for a tool its runner lacks.
         id: gpui_pin
         run: |
-          rev="$(python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["isonim-gpui"]["locked"]["rev"])')"
+          set -euo pipefail
+          rev="$(jq -er '.nodes["isonim-gpui"].locked.rev' flake.lock)"
           echo "rev=${rev}" >> "${GITHUB_OUTPUT}"
 
       # Every authenticated clone near the top: the installation token expires
