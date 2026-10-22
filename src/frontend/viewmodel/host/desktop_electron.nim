@@ -374,7 +374,25 @@ proc electronProcess(profile: PlatformProfile): ProcessFacade =
 # VCS
 # ---------------------------------------------------------------------------
 
-proc electronVcs(profile: PlatformProfile): VcsFacade =
+proc electronVcs*(profile: PlatformProfile): VcsFacade =
+  ## The Electron renderer's version-control facade.
+  ##
+  ## Exported for one reader: `tests/electron_vcs_content_id_async_test.nim`
+  ## in the `main-process` lane, which runs under plain node. There
+  ## `newDesktopElectronPlatform` finds no `require('electron')` and — rightly,
+  ## for a browser tab — falls back to the web profile, so this facade, the
+  ## one the shipped window installs, is reachable from a Nim lane only by
+  ## name.
+  ##
+  ## ## The two reads the certificate indicator makes do not block
+  ##
+  ## `contentId` and `repositoryRoot` run git through `child_process.spawn`
+  ## and settle their futures when it answers; the indicator gathers W, H, S
+  ## and the root on every refresh, and through `execFileSync` / `spawnSync`
+  ## each refresh froze the window for up to 1.2 s (Status-Bar.md, "A refresh
+  ## never stalls the window"). The VCS pane's operations below still use
+  ## `execFileSync`; that is recorded as its own issue
+  ## (`2026-10-21-vcs-auto-refresh-runs-git-synchronously-on-the-renderer-main-thread`).
   result = unavailableVcs(profile)
 
   proc git(repository: string; args: seq[string]): PlatformOutcome[string] =
@@ -389,10 +407,26 @@ proc electronVcs(profile: PlatformProfile): VcsFacade =
     let res = git(path, @["rev-parse", "--is-inside-work-tree"])
     resolvedOk(res.ok and res.value.strip() == "true")
 
+  # `git rev-parse --show-toplevel`, asynchronously: the same success (the
+  # top level, without its line terminator) and the same failure (`pkFailed`,
+  # git's own diagnostic in `detail`) `execFileSync` gave, without the wait.
+  let rootGit = nodeAsyncGitRunner()
   result.repositoryRoot = proc(path: string): PlatformFuture[PlatformOutcome[string]] =
-    let res = git(path, @["rev-parse", "--show-toplevel"])
-    if res.ok: resolvedOk(res.value.strip())
-    else: resolved(failed[string](res.error))
+    const shown = "git rev-parse --show-toplevel"
+    jsGuard:
+      settledLater(proc(settle: proc(value: PlatformOutcome[string])) =
+        rootGit(GitCall(argv: @["git", "rev-parse", "--show-toplevel"],
+                        cwd: path),
+          proc(reply: GitReply) {.closure, gcsafe.} =
+            {.cast(gcsafe).}:
+              if reply.exitCode == 0 and reply.complete:
+                settle(succeeded(reply.stdout.strip()))
+              else:
+                settle(failed[string](pkFailed, shown & " failed",
+                  if reply.stderr.strip().len > 0: reply.stderr.strip()
+                  else: "exit " & $reply.exitCode))))
+    do:
+      resolvedErr[string](pkFailed, shown & " failed", errorText())
 
   result.status = proc(repository: string): PlatformFuture[PlatformOutcome[VcsStatus]] =
     let res = git(repository, @["status", "--porcelain=v2", "--branch"])
@@ -486,17 +520,19 @@ proc electronVcs(profile: PlatformProfile): VcsFacade =
     let res = git(repository, args)
     if res.ok: resolvedOk(res.value) else: resolved(failed[string](res.error))
 
-  # The content-id recipe through node's `spawnSync`, its temporary index
-  # under the OS temporary directory. `node_certificate_host` returns every
+  # The content-id recipe through node's `child_process.spawn`, its temporary
+  # index under the OS temporary directory, settling when the last git call
+  # answers (`contentIdOverAsync`). `node_certificate_host` returns every
   # failure as a value; `jsGuard` is the facade's own contract on top, so even
-  # a lapse there arrives as an outcome rather than on `window.onerror`.
-  let contentHost = nodeContentIdHost()
+  # a lapse there — a throw before the first git call is launched — arrives
+  # as an outcome rather than on `window.onerror`.
+  let contentHost = nodeAsyncContentIdHost()
   result.contentId = proc(repository: string; state: VcsBlobSource;
                           algorithm: string; scope: seq[string]
                          ): PlatformFuture[PlatformOutcome[VcsContentId]] =
     jsGuard:
-      resolved(contentIdOver(contentHost, profile, repository, state,
-                             algorithm, scope))
+      contentIdOverAsync(contentHost, profile, repository, state, algorithm,
+                         scope)
     do:
       resolvedErr[VcsContentId](pkFailed, "computing a content id failed",
                                 errorText())

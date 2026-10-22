@@ -34,6 +34,13 @@
 ## exactly that, for every instantiation, by driving the ONE recipe
 ## `ct_test/certificate_content_id` implements through each host's own way of
 ## running git (`contentIdOver` below). No instantiation restates the recipe.
+##
+## A host whose thread must not wait for git — the Electron renderer, whose
+## main thread is the UI — answers through `contentIdOverAsync`, which runs
+## the SAME `contentIdOver` (the `git --version` probe included) under
+## `certificate_content_id.runResumable` over an asynchronous git, and settles
+## its future when the last git call has answered (Status-Bar.md, "A refresh
+## never stalls the window").
 
 import std/strutils
 
@@ -45,6 +52,7 @@ export outcome
 export certificate_content_id.NoContentIdCondition,
        certificate_content_id.NoContentIdState,
        certificate_content_id.ContentIdHost,
+       certificate_content_id.AsyncContentIdHost,
        certificate_content_id.ContentAlgorithm
 
 type
@@ -328,6 +336,40 @@ proc contentIdOver*(host: ContentIdHost; profile: PlatformProfile;
         "git cannot be run on this host" &
         (if probe.stderr.strip().len > 0: ": " & probe.stderr.strip() else: "")))
     failed[VcsContentId](pkFailed, computed.reason)
+
+proc contentIdOverAsync*(host: AsyncContentIdHost; profile: PlatformProfile;
+                         repository: string; state: VcsBlobSource;
+                         algorithm: string; scope: seq[string]
+                        ): PlatformFuture[PlatformOutcome[VcsContentId]] =
+  ## `contentIdOver`, over a host whose git answers later. The future settles
+  ## when the computation's last git call has answered; nothing waits for git
+  ## in between, so the calling thread runs on (Status-Bar.md, "A refresh
+  ## never stalls the window").
+  ##
+  ## Not a second implementation: `runResumable` re-runs `contentIdOver`
+  ## itself, journaling git's replies (see `certificate_content_id`, "Driving
+  ## the recipe over an asynchronous git"), so this answers exactly what the
+  ## synchronous form answers. A refusal or an unknown algorithm needs no git
+  ## and comes back already settled (`settledLater` → `resolved`).
+  ##
+  ## `runResumable` requires a computation that does not raise. The recipe
+  ## returns every failure as a value; the arms below are the backstop that
+  ## keeps an unforeseen raise from stranding the future, turning it into an
+  ## outcome the indicator reports as "could not be computed".
+  settledLater(proc(settle: proc(value: PlatformOutcome[VcsContentId])) =
+    runResumable(host,
+      proc(sync: ContentIdHost): PlatformOutcome[VcsContentId] =
+        try:
+          contentIdOver(sync, profile, repository, state, algorithm, scope)
+        except CatchableError as err:
+          failed[VcsContentId](pkFailed, "computing a content id raised",
+                               err.msg)
+        except:
+          # A BARE ARM: on the JS backend a node `Error` is not a Nim
+          # exception and a typed arm re-throws it (`desktop_electron.jsGuard`).
+          failed[VcsContentId](pkFailed, "computing a content id raised",
+                               getCurrentExceptionMsg()),
+      settle))
 
 proc unavailableVcs*(profile: PlatformProfile): VcsFacade =
   VcsFacade(
