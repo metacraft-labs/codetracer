@@ -479,15 +479,12 @@ proc sessionChecks() {.async.} =
     ck newSince(base).len == 1
 
   endCase()
+  beginCase("every move the State component is handed completes")
   ck moveFailures.len == 0
+  endCase()
   echo "CHECKS: ", checks
-  # The checks above run after the event loop turns, outside `std/unittest`'s
-  # `test` blocks, so the result line the lane counts is written here.
   if failedChecks > 0:
-    echo "  [FAILED] the session asks once per stop and applies only its own answers (", failedChecks, " of ", checks, ")"
     {.emit: "process.exitCode = 1;".}
-  else:
-    echo "  [OK] the session asks once per stop and applies only its own answers"
 
 # A section that RAISES (an index past what a broken sender sent) fails by
 # its name, as a `unittest` case that raised would, instead of leaving the
