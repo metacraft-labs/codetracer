@@ -1855,12 +1855,15 @@ test-frontend-js:
   # unified-diff pane needs an id no OTHER tab uses -- its host is the
   # document-global `editorComponent-<id>` / `unifiedDiffComponent-<id>`.
   # Covers `utils.generateId` and `utils.claimWindowUniqueLayoutIds`, and that
-  # the singleton chrome keeps its per-tab id 0. `utils.nim` compiles for node;
-  # same `window` alias as above.
+  # the singleton chrome keeps its per-tab id 0. `utils.nim` compiles for node,
+  # but its module graph reaches IsoNim's `core/nondet`, which snapshots the
+  # page (`location`, viewport, `matchMedia`) as soon as a `window` exists. A
+  # bare `window = globalThis` alias has none of that and the suite dies at
+  # load, so it runs over jsdom's real page globals instead.
   echo "Running component ids across sessions tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$component_ids_across_sessions_test" js src/frontend/tests/component_ids_across_sessions_test.nim
-  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$component_ids_across_sessions_test"
+  node src/frontend/tests/jsdom-run.mjs "$component_ids_across_sessions_test"
   echo ""
   # *Stop* leaves Debug mode for Edit mode. `renderer.nim`'s `stopAction` was
   # `discard` from the initial open-source commit while `SHIFT+F5` dispatched
@@ -1895,10 +1898,13 @@ test-frontend-js:
   # is waiting on it. Under `-d:ctInExtension` that table does not exist —
   # VS Code's debug client does the correlation — so compiling this with the
   # flag would silently test the wrong arm.
+  #
+  # The status shell reaches IsoNim's `core/nondet` too, so this runs over
+  # jsdom for the same reason as the component ids suite above.
   echo "Running DAP refusal surfacing tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer \
     --out:"$dap_refusal_test" js src/frontend/tests/dap_refusal_surfaces_test.nim
-  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$dap_refusal_test"
+  node src/frontend/tests/jsdom-run.mjs "$dap_refusal_test"
   echo ""
   echo "Running ACP notification tests..."
   just test-acp-notifications

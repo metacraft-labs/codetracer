@@ -747,7 +747,9 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
   ['src/frontend/ui/auto_hide.nim', 3, 0],
-  ['src/frontend/ui/calltrace.nim', 1, 0],
+  // The value-cell mount clear moved here from `ui/calltrace.nim` when the
+  // Call Trace pane started mounting where its container is made.
+  ['src/frontend/ui/calltrace_extension.nim', 1, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
   ['src/frontend/ui/event_log.nim', 1, 0],
