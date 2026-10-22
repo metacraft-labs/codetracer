@@ -4216,9 +4216,6 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
       self.lastSliderUpdateTimeInMs = newTimeInMs
       self.selectLoopIteration(step.loop, loopIteration, step.position)
       self.updateLoopControlDom(step.position)
-      # Affect the complete move to have a delay on the update
-      # Maybe later on add to all of the EventLog components?
-      cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
     ,
     requireMeasurable = true
   )

@@ -17,8 +17,6 @@ import ../types
 import ../viewmodel/views/context_menu_bridge
 import ../ui/file_conflict_dialog
 import ../lib/ansi_html
-import ../ui/event_log_cells
-from std/strutils import parseEnum
 
 proc setGlobal(name: cstring; value: js) {.importjs: "globalThis[#] = #;".}
 
@@ -55,31 +53,3 @@ setGlobal(cstring"__ctFileConflictMarkup", toJs(probeFileConflictMarkup))
 setGlobal(cstring"__ctShowContextMenu", toJs(probeShowContextMenu))
 setGlobal(cstring"__ctAnsiToHtml", toJs(probeAnsiToHtml))
 setGlobal(cstring"__ctAnsiEscapeFlag", toJs(probeAnsiEscapeFlag))
-
-# --- site 9: the desktop Event Log's DataTables cells ------------------------
-
-proc probeEventLogRow(kind: cstring; content: cstring; metadata: cstring;
-                      stdout: bool; highLevelPath: cstring;
-                      fullPath: cstring): JsObject =
-  ## A recorded event through the shipped row projection (`dataTableRowOf`),
-  ## i.e. the object DataTables is handed for one row.  `kind` is the
-  ## `EventLogKind` name, so the test needs no copy of the enum's ordinals.
-  var event = ProgramEvent(
-    kind: parseEnum[EventLogKind]($kind),
-    content: content,
-    metadata: metadata,
-    stdout: stdout,
-    highLevelPath: highLevelPath,
-    highLevelLine: 7)
-  dataTableRowOf(event, EventLogRowExtras(fullPath: fullPath))
-
-proc probeEventLogOutputText(row: ProgramEvent): cstring =
-  ## What the output cell must SAY: the shipped description, as text.
-  cstring(eventLogOutputText(row))
-
-setGlobal(cstring"__ctEventLogRow", toJs(probeEventLogRow))
-setGlobal(cstring"__ctEventLogOutputText", toJs(probeEventLogOutputText))
-# The two shipped `render` callbacks, unwrapped: the test installs them on a
-# real DataTables instance exactly as `event_log.nim`'s column table does.
-setGlobal(cstring"__ctEventLogOutputRender", toJs(eventLogOutputRender))
-setGlobal(cstring"__ctEventLogLocationRender", toJs(eventLogLocationRender))

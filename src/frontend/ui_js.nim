@@ -4763,10 +4763,6 @@ proc updateEditors(data: Data) =
       diff.updateOptions(cast[MonacoEditorOptions](options))
 
 proc updateDataTables(data: Data) =
-  for _, component in data.ui.componentMapping[Content.EventLog]:
-    if not component.isNil:
-      EventLogComponent(component).resizeEventLogHandler()
-
   for _, component in data.ui.componentMapping[Content.Trace]:
     if not component.isNil:
       let trace = TraceComponent(component)

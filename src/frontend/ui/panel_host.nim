@@ -40,7 +40,9 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_repl_view, isonim_filesystem_view,
                             isonim_command_palette_view]
 import ../viewmodel/views/[isonim_search_results_view, isonim_trace_log_view,
-                            isonim_terminal_output_view]
+                            isonim_terminal_output_view, isonim_event_log_view]
+from ../viewmodel/viewmodels/event_log_vm import followStop, setRowHeightPx,
+  setViewport
 from ../viewmodel/viewmodels/terminal_output_vm import nil
 from ../viewmodel/viewmodels/trace_log_vm import setViewport
 
@@ -56,7 +58,7 @@ const
                      Content.Scratchpad, Content.Repl, Content.Filesystem,
                      Content.TestResults, Content.Constraints,
                      Content.CommandPalette, Content.Verification,
-                     Content.UnifiedDiff, Content.VCS}
+                     Content.UnifiedDiff, Content.VCS, Content.EventLog}
     ## The panes `mountPanel` renders.
   RequestRowFallbackPx = 24.0
     ## The Request panel's row pitch until a row is rendered to measure.
@@ -66,6 +68,8 @@ const
     ## The Trace Log's row pitch until a row is rendered to measure.
   TerminalLineFallbackPx = 18.0
     ## A terminal line's height until one is drawn to measure.
+  EventRowFallbackPx = 24.0
+    ## An Event Log row's pitch until a row is rendered to measure.
 
 type
   PanelRenderer* = proc(r: WebRenderer; host: dom_api.Element;
@@ -207,6 +211,23 @@ proc measureOf(kind: Content; session: SessionViewModel): PaneMeasure =
       report: proc(v: Viewport; rowPx: float) =
         terminal_output_vm.setViewport(vm, v),
       changed: proc() = discard vm.lines.val)
+  of Content.EventLog:
+    # The rows the list shows (Viewport-Driven-Loading V2): the engine is
+    # asked for that window (`ct/event-load`), and the scroll area is as tall
+    # as the whole list at the rows' measured pitch. A hidden pane reports
+    # none and asks nothing until it is shown.
+    let vm = session.eventLogVM
+    PaneMeasure(
+      scroller: cstring".eventLog-scroll-body",
+      row: cstring".eventLog-row",
+      pxPerLevel: 0.0,
+      countPartialRow: true,
+      reportHidden: true,
+      fallbackRowPx: proc(): float = EventRowFallbackPx,
+      report: proc(v: Viewport; rowPx: float) =
+        vm.setRowHeightPx(rowPx)
+        vm.setViewport(v),
+      changed: proc() = discard vm.eventRows.val)
   of Content.RequestPanel:
     # The rows the table body shows (Viewport-Driven-Loading V2): a partly
     # visible row counts; the window held is padded by the view.
@@ -303,6 +324,10 @@ proc render(m: PanelMount; session: SessionViewModel) =
         r, session.terminalOutputVM)
       dom_api.appendChild(node, dom_api.Node(panel))
       decorateTerminalOutput(panel, session.terminalOutputVM)
+    of Content.EventLog:
+      let panel = renderEventLogPanel[WebRenderer, dom_api.Element](
+        r, session.eventLogVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Scratchpad:
       let panel = renderScratchpadPanel[WebRenderer, dom_api.Element](
         r, session.scratchpadVM)
@@ -388,6 +413,10 @@ proc setPanelSession*(session: SessionViewModel) =
   # move, as the Call Trace component did before it was mounted here.
   if not session.calltraceVM.isNil:
     session.calltraceVM.followDebuggerCall()
+  # The Event Log marks the current event, and asks for it after a move, as
+  # the terminal's and GPUI's do (HSF-D6).
+  if not session.eventLogVM.isNil:
+    session.eventLogVM.followStop()
   let pending = waiting
   waiting = @[]
   for m in pending:

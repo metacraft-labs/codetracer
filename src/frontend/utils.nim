@@ -270,48 +270,11 @@ proc claimWindowUniqueLayoutIds*(data: Data, root: JsObject) =
     state["id"] = fresh
     claimed.add((content, fresh))
 
-var eventLogTableSerial = 0
-  ## Window-wide serial for `EventLogComponent.index`, the suffix of the
-  ## pane's DataTables ids (`eventLog-<id>-dense-table-<index>`, see
-  ## `ui/event_log.denseId`). The Event Log keeps id 0 in every tab, and all
-  ## tabs share one document, so with `index` left at 0 every tab's tables
-  ## had tab 0's ids and `jQuery("#…").DataTable()` bound tab 0's table
-  ## (codetracer-pm issue
-  ## `2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first.md`).
-  ## A serial rather than the tab index: tabs are renumbered when one closes,
-  ## and a new tab could then reuse a live tab's number.
-
 proc makeEventLogComponent*(data: Data, id: int): EventLogComponent =
-  var dropDownsInit: array[EventDropDownBox,bool]
-  dropDownsInit.fill(false);
-
-  var selectedKinds: array[EventLogKind,bool]
-  selectedKinds.fill(true)
-
   result = EventLogComponent(
     id: id,
     service: data.services.eventLog,
-    traceService: data.services.trace,
-    kinds: JsAssoc[EventLogKind, bool]{},
-    kindsEnabled: JsAssoc[EventLogKind, bool]{},
-    columns: JsAssoc[EventOptionalColumn, bool]{},
-    tags: JsAssoc[EventTag, bool]{},
-    traceRenderedLength: 0,
-    dropDowns: dropDownsInit,
-    dropdownOutsideHandlerInstalled: false,
-    selectedKinds: selectedKinds,
-    denseTable: DataTableComponent(rowHeight: 35, autoScroll: true),
-    detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
-    traceSessionID: -1,
-    traceUpdateId: -1,
-    lastJumpFireTime: 0,
-    drawId: 0,
-    started: false,
-    liveDebugRows: @[],
-    usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
-    index: eventLogTableSerial,
   )
-  eventLogTableSerial += 1
   when defined(ctRenderer):
     data.registerComponent(result, Content.EventLog)
 

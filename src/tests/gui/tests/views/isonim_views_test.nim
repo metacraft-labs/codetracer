@@ -3132,7 +3132,14 @@ suite "IsoNim Debug Controls — tooltips read the binding":
 
 proc makeTestEvent(eventId: uint64; kind: string; line: int;
                    value: string): EventLogRow =
-  EventLogRow(eventId: eventId, kind: kind, line: line, value: value)
+  EventLogRow(eventId: eventId, kind: kind, line: line, value: value,
+              rrTicks: eventId)
+
+proc renderEventLog(vm: EventLogVM): MockNode =
+  renderEventLogPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+proc eventRowsOf(panel: MockNode): seq[MockNode] =
+  findAllByClass(panel, "eventLog-row")
 
 # ---------------------------------------------------------------------------
 # Event Log structure tests
@@ -3140,80 +3147,60 @@ proc makeTestEvent(eventId: uint64; kind: string; line: int;
 
 suite "IsoNim Event Log Panel — structure":
 
-  test "renders root with event-log-component class":
+  test "renders the pane's root, toolbar and dense table":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
+      let panel = renderEventLog(vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "event-log-component"
+      check "eventLog" in panel.attributes["class"]
+      check "component-container" in panel.attributes["class"]
+      check findByClass(panel, "eventLog-dense-table") != nil
+      check findByClass(panel, "eventLog-scroll-body") != nil
 
       dispose()
 
-  test "renders search input":
+  test "renders the search field":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let input = findByClass(panel, "event-log-search-input")
+      let input = findByClass(panel, "eventLog-search-field")
       check input != nil
-      check input.attributes["placeholder"] == "Search events..."
+      check input.attributes["placeholder"] == "Find event"
 
       dispose()
 
-  test "renders column headers":
+  test "renders a header cell per shown column, in the ViewModel's order":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
+      let header = findByClass(panel, "eventLog-column-header")
+      check header != nil
+      check header.children.len == vm.columns.val.visibleColumns.len
+      check "TICK" in header.textContent.toUpperAscii
+      check "OUTPUT" in header.textContent.toUpperAscii
 
-      let headerRow = findByClass(panel, "event-log-header-row")
-      check headerRow != nil
-
-      let col0 = findByClass(panel, "column-0")
-      let col1 = findByClass(panel, "column-1")
-      let col2 = findByClass(panel, "column-2")
-      let col3 = findByClass(panel, "column-3")
-
-      check col0 != nil
-      check col1 != nil
-      check col2 != nil
-      check col3 != nil
-
-      check "ID" in col0.textContent
-      check "Kind" in col1.textContent
-      check "Line" in col2.textContent
-      check "Value" in col3.textContent
+      discard vm.toggleColumn(elcLocation)
+      check header.children.len == vm.columns.val.visibleColumns.len
+      check findByClass(header, "eventLog-fullpath") != nil
 
       dispose()
 
-  test "renders pagination controls":
+  test "renders the footer's counters":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let prevBtn = findByClass(panel, "page-prev")
-      let nextBtn = findByClass(panel, "page-next")
-      let indicator = findByClass(panel, "page-indicator")
-
-      check prevBtn != nil
-      check nextBtn != nil
-      check indicator != nil
-
-      check prevBtn.tag == "button"
-      check nextBtn.tag == "button"
+      check findByClass(panel, "data-tables-footer-input") != nil
+      check findByClass(panel, "data-tables-footer-end-row") != nil
+      check findByClass(panel, "data-tables-footer-rows-count") != nil
 
       dispose()
 
@@ -3221,9 +3208,7 @@ suite "IsoNim Event Log Panel — structure":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
+      let panel = renderEventLog(vm)
 
       let indicator = findByClass(panel, "event-log-loading")
       check indicator != nil
@@ -3237,77 +3222,91 @@ suite "IsoNim Event Log Panel — structure":
 
 suite "IsoNim Event Log Panel — rows":
 
-  test "renders event rows":
+  test "renders a row per held event, with its identity and text":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
       vm.eventRows.val = @[
-        makeTestEvent(1, "call", 10, "foo()"),
-        makeTestEvent(2, "return", 15, "42"),
+        makeTestEvent(1, "stdout", 10, "foo()"),
+        makeTestEvent(2, "event", 15, "42"),
       ]
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-      let container = findByClass(panel, "event-log-rows")
-      check container != nil
-
-      let rows = findAllByClass(container, "event-row")
+      let rows = eventRowsOf(panel)
       check rows.len == 2
-
-      check "1" in rows[0].textContent
-      check "call" in rows[0].textContent
-      check "foo()" in rows[0].textContent
-
-      check "2" in rows[1].textContent
-      check "return" in rows[1].textContent
-      check "42" in rows[1].textContent
+      check rows[0].tag == "tr"
+      check rows[0].attributes["data-rr-ticks"] == "1"
+      check rows[1].attributes["data-position"] == "1"
+      check findByClass(rows[0], "eventLog-index").textContent == "1"
+      check findByClass(rows[0], "rr-ticks-time").textContent == "1"
+      check findByClass(rows[0], "eventLog-text").textContent == "stdout: foo()"
+      check findByClass(rows[1], "eventLog-text").textContent == "42"
 
       dispose()
 
-  test "click selects row":
+  test "a window further down the log keeps the rows it still shows":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      var rows: seq[EventLogRow] = @[]
+      for i in 0 ..< 6:
+        rows.add makeTestEvent(uint64(i + 1), "event", i, "e" & $i)
+      store.applyEventLogRows(rows, 0, recordsTotal = 100)
+      let panel = renderEventLog(vm)
+      let before = eventRowsOf(panel)
+      check before.len == 6
 
+      store.applyEventLogRows(rows[2 .. ^1] & @[makeTestEvent(7, "event", 6, "e6"),
+                                                makeTestEvent(8, "event", 7, "e7")],
+                              2, recordsTotal = 100)
+      let after = eventRowsOf(panel)
+      check after.len == 6
+      # The row at position 2 is the same node it was.
+      check after[0] == before[2]
+      check after[0].attributes["data-position"] == "2"
+      check findByClass(after[^1], "eventLog-text").textContent == "e7"
+
+      dispose()
+
+  test "click selects the row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
       vm.eventRows.val = @[
-        makeTestEvent(1, "call", 10, "foo()"),
-        makeTestEvent(2, "return", 15, "42"),
+        makeTestEvent(1, "event", 10, "foo()"),
+        makeTestEvent(2, "event", 15, "42"),
       ]
-
-      let panel = renderEventLogPanel(r, vm)
-      let container = findByClass(panel, "event-log-rows")
-      let rows = findAllByClass(container, "event-row")
+      let panel = renderEventLog(vm)
+      let rows = eventRowsOf(panel)
 
       check vm.selectedRow.val.isNone
-
       rows[1].fireEvent("click")
-
       check vm.selectedRow.val.isSome
       check vm.selectedRow.val.get == 1
+      check "selected" in rows[1].attributes["class"]
+      check "selected" notin rows[0].attributes["class"]
 
       dispose()
 
-  test "selected row gets highlighted class":
+  test "a move changes only which rows are past, now and future":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
       vm.eventRows.val = @[
-        makeTestEvent(1, "call", 10, "foo()"),
-        makeTestEvent(2, "return", 15, "42"),
+        makeTestEvent(10, "event", 1, "a"),
+        makeTestEvent(20, "event", 2, "b"),
+        makeTestEvent(30, "event", 3, "c"),
       ]
-
-      let panel = renderEventLogPanel(r, vm)
-      let container = findByClass(panel, "event-log-rows")
-      let rows = findAllByClass(container, "event-row")
-
-      vm.selectRow(some(0))
-
-      check "selected" in rows[0].attributes["class"]
-      check "selected" notin rows[1].attributes["class"]
+      let panel = renderEventLog(vm)
+      let rows = eventRowsOf(panel)
+      store.updateDebuggerPosition(20'u64, "/src/main.py", 2)
+      check "past" in rows[0].attributes["class"]
+      check "active" in rows[1].attributes["class"]
+      check "future" in rows[2].attributes["class"]
+      store.updateDebuggerPosition(30'u64, "/src/main.py", 3)
+      check "past" in rows[1].attributes["class"]
+      check "active" in rows[2].attributes["class"]
+      check eventRowsOf(panel)[0] == rows[0]
 
       dispose()
 
@@ -3317,77 +3316,45 @@ suite "IsoNim Event Log Panel — rows":
 
 suite "IsoNim Event Log Panel — sorting":
 
-  test "click column header toggles sort":
+  test "a header click orders the log by its column, again to reverse it":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let col1 = findByClass(panel, "column-1")
-      check col1 != nil
-
-      col1.fireEvent("click")
-
-      check vm.sortColumn.val == 1
-      check vm.sortAscending.val == true
-
-      # Click again to toggle direction
-      col1.fireEvent("click")
-
-      check vm.sortColumn.val == 1
-      check vm.sortAscending.val == false
-
-      dispose()
-
-  test "sort indicator shown on active column":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
-
-      # Sort by column 0 (default)
-      let col0 = findByClass(panel, "column-0")
-      check col0 != nil
-      check "sort-active" in col0.attributes["class"]
+      let header = findByClass(panel, "eventLog-column-header")
+      let index = findByClass(header, "eventLog-index")
+      check index != nil
+      index.fireEvent("click")
+      check vm.order().column == elcIndex
+      check vm.order().ascending
+      check "▲" in index.textContent
+      index.fireEvent("click")
+      check vm.order().column == elcIndex
+      check not vm.order().ascending
+      check "▼" in index.textContent
 
       dispose()
 
 # ---------------------------------------------------------------------------
-# Event Log pagination tests
+# Event Log footer tests
 # ---------------------------------------------------------------------------
 
-suite "IsoNim Event Log Panel — pagination":
+suite "IsoNim Event Log Panel — footer":
 
-  test "prev button disabled on first page":
+  test "the footer counts the rows shown and the whole list":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      store.applyEventLogRows(@[makeTestEvent(1, "event", 1, "a")], 0,
+                              recordsTotal = 150)
+      let panel = renderEventLog(vm)
+      vm.viewport.val = Viewport(rows: 20, firstRow: 40)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let prevBtn = findByClass(panel, "page-prev")
-      check prevBtn.attributes.getOrDefault("disabled", "") == "true"
-
-      dispose()
-
-  test "page indicator shows correct text":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      vm.totalEventCount.val = 150
-
-      let panel = renderEventLogPanel(r, vm)
-
-      let indicator = findByClass(panel, "page-indicator")
-      check indicator != nil
-      check "Page 1" in indicator.textContent
+      let footer = findByClass(panel, "data-tables-footer")
+      check "41to60" in footer.attributes["class"]
+      check findByClass(panel, "data-tables-footer-end-row").textContent == "60"
+      check findByClass(panel, "data-tables-footer-rows-count").textContent == "150"
 
       dispose()
 
@@ -3401,16 +3368,12 @@ suite "IsoNim Event Log Panel — loading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
+      let panel = renderEventLog(vm)
       let indicator = findByClass(panel, "event-log-loading")
 
       check indicator.styles["display"] == "none"
-
       vm.loadingState.val = lsLoading
       check indicator.styles["display"] == "block"
-
       vm.loadingState.val = lsIdle
       check indicator.styles["display"] == "none"
 

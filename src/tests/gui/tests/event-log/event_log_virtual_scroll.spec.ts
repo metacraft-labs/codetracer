@@ -12,25 +12,24 @@
  * § 3 item 3 (a newer position supersedes an older one; the pane is never
  * drawn empty).
  *
- * WHAT IS UNDER TEST. The desktop table is DataTables + its Scroller plugin
- * over server-side `ct/update-table` paging (`ui/event_log.nim` `events`,
- * `ui/datatable.nim`). The Scroller lays out a virtual body of
- * `rowHeight × recordsDisplay` pixels and maps a scroll offset to a row with
- * that same `rowHeight`; the footer ("Rows X to Y of Z") reports the
- * Scroller's own `page()`. So the footer is only true when the Scroller's
- * row height is the height of the rows the table actually draws. These cases
- * therefore compare three independent readings:
+ * WHAT IS UNDER TEST. The desktop list is the generic IsoNim view
+ * (`viewmodel/views/isonim_event_log_view.nim`) over `EventLogVM`, which asks
+ * the engine for the window the pane shows (`ct/event-load`). Its scroll
+ * area is as tall as the whole list at the rows' measured pitch, the held
+ * window sits at its place in it, and the footer ("Rows X to Y of Z") reports
+ * the viewport the panel host measured. So the footer is only true when the
+ * pitch the area is laid out with is the rows' own. These cases therefore
+ * compare three independent readings:
  *
  *   * the FOOTER, as the user reads it (the input, the end-row and the count);
  *   * the ROWS IN VIEW: the drawn `<tr>`s whose box intersects the scroll
- *     body's box, each placed at its absolute position in the log
- *     (`displayStart` — the window DataTables asked the engine for — plus its
- *     ordinal in the `tbody`), so no Scroller arithmetic is involved;
- *   * the LOG'S SIZE, `recordsDisplay`, the engine's filtered count.
+ *     body's box, each at the absolute position in the log it carries
+ *     (`data-position`), so no scroll arithmetic is involved;
+ *   * the LOG'S SIZE, the scroll area's height over the rows' pitch.
  *
  * WHY THREE CASES. (a) is the reported end-of-log symptom. (b) is the
  * "jumped, and the wrong window is on screen" symptom, driven as a scrub
- * would drive it: two positions in successive frames, so the Scroller's
+ * would drive it: two positions in successive frames, so the viewport's
  * coalescing has to land on the second. (c) is the "repeating the same
  * scrolling action can produce different results" claim: the same gestures,
  * ten times, must read identically.
@@ -58,7 +57,7 @@ const MIN_EVENTS = 70;
 type Reading = {
   /** "Rows <start> to <end> of <of>", as the footer shows it (1-based). */
   footer: { start: number; end: number; of: number };
-  /** The engine's filtered count, as DataTables holds it. */
+  /** The whole list's size, from the scroll area's geometry. */
   total: number;
   /** Absolute 0-based positions of the drawn rows whose box is in view. */
   inView: number[];
@@ -69,63 +68,66 @@ type Reading = {
   scrollTop: number;
   scrollHeight: number;
   clientHeight: number;
-  /** DataTables' "processing" indicator is up: a window is in flight. */
+  /** The pane's loading indicator is up: a window is in flight. */
   processing: boolean;
   /**
-   * An animated scroll is running on the scroll body. The app scrolls the log
-   * to the debugger's active event with one (`findActiveRow` -> `scrollTable`
-   * -> the Scroller's `toPosition`), on the entry move too; it animates from
-   * row 0 to row 0, so the other readings do not change, but a scroll made
-   * while it runs is overwritten frame by frame.
+   * An animated scroll is running on the scroll body. The list does not
+   * animate its scroll (the DataTables Scroller it replaced did), so this is
+   * always false; kept so a reading's shape, and `settled`, stay as they were.
    */
   animating: boolean;
 };
 
-/** One reading of the dense table, straight from the DOM and DataTables. */
+/** One reading of the list, straight from the DOM. */
 async function read(page: Page): Promise<Reading> {
   return page.evaluate(() => {
-    const w = globalThis as any;
     const pane = document.querySelector("[id^='eventLogComponent']");
-    const table = pane?.querySelector("table[id*='-dense-table-']") as HTMLElement | null;
-    const body = pane?.querySelector(".dt-scroll-body") as HTMLElement | null;
+    const body = pane?.querySelector(".eventLog-scroll-body") as HTMLElement | null;
+    const space = pane?.querySelector(".eventLog-scroll-space") as HTMLElement | null;
     const footer = pane?.querySelector(".data-tables-footer") as HTMLElement | null;
-    if (!pane || !table || !body || !footer) {
-      throw new Error("event log: the dense table, its scroll body or its footer is missing");
+    if (!pane || !body || !space || !footer) {
+      throw new Error("event log: the list, its scroll area or its footer is missing");
     }
-    const settings = w.jQuery(table).DataTable().settings()[0];
     const box = body.getBoundingClientRect();
-    // The empty-table message is a row of its own; it is not an event.
-    const rows = (Array.from(table.querySelectorAll("tbody tr")) as HTMLElement[]).filter(
-      (tr) => !tr.querySelector("td.dt-empty, td.dataTables_empty"),
-    );
+    // Each drawn row carries its absolute position in the list.
+    const rows = Array.from(
+      pane.querySelectorAll(".eventLog-dense-table tbody tr.eventLog-row"),
+    ) as HTMLElement[];
+    const positions = rows.map((tr) => parseInt(tr.dataset.position ?? "-1", 10));
     const inView: number[] = [];
     rows.forEach((tr, i) => {
       const r = tr.getBoundingClientRect();
       // A row counts as in view when at least a pixel of it is inside the body.
       if (r.bottom > box.top + 1 && r.top < box.bottom - 1) {
-        inView.push(settings._iDisplayStart + i);
+        inView.push(positions[i]);
       }
     });
+    inView.sort((x, y) => x - y);
+    // The LOG'S SIZE, read from the geometry rather than from the footer: the
+    // scroll area is as tall as the whole list at the rows' pitch.
+    const pitch = rows.length > 1
+      ? (rows[rows.length - 1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top) /
+        (rows.length - 1)
+      : rows.length === 1 ? rows[0].getBoundingClientRect().height : 0;
+    const total = pitch > 0 ? Math.round(space.getBoundingClientRect().height / pitch) : 0;
     const num = (el: Element | null) => parseInt((el?.textContent ?? "").trim(), 10);
     const input = footer.querySelector(".data-tables-footer-input") as HTMLInputElement | null;
-    const processingEl = (table.closest(".dt-container") ?? pane).querySelector(
-      ".dt-processing",
-    ) as HTMLElement | null;
+    const loading = pane.querySelector(".event-log-loading") as HTMLElement | null;
     return {
       footer: {
         start: parseInt(input?.value ?? "", 10),
         end: num(footer.querySelector(".data-tables-footer-end-row")),
         of: num(footer.querySelector(".data-tables-footer-rows-count")),
       },
-      total: settings.fnRecordsDisplay(),
+      total,
       inView,
       drawn: rows.length,
-      displayStart: settings._iDisplayStart,
+      displayStart: positions.length > 0 ? Math.min(...positions) : 0,
       scrollTop: body.scrollTop,
       scrollHeight: body.scrollHeight,
       clientHeight: body.clientHeight,
-      processing: !!processingEl && getComputedStyle(processingEl).display !== "none",
-      animating: !!w.jQuery && w.jQuery(body).is(":animated"),
+      processing: !!loading && getComputedStyle(loading).display !== "none",
+      animating: false,
     };
   });
 }
@@ -133,7 +135,7 @@ async function read(page: Page): Promise<Reading> {
 /**
  * Wait until the table has stopped moving: nothing in flight (no window being
  * fetched, no animated scroll running) and three consecutive readings, 250 ms
- * apart, identical. The Scroller defers its fetch by `serverWait` (200 ms) and
+ * apart, identical. The viewport report is debounced and
  * the reply is asynchronous, so "settled" is a property of the readings, not a
  * fixed delay.
  */
@@ -160,7 +162,7 @@ async function settled(page: Page): Promise<Reading> {
  */
 async function scrollThrough(page: Page, fractions: number[]): Promise<Reading> {
   await page.evaluate(async (fs: number[]) => {
-    const body = document.querySelector("[id^='eventLogComponent'] .dt-scroll-body") as HTMLElement;
+    const body = document.querySelector("[id^='eventLogComponent'] .eventLog-scroll-body") as HTMLElement;
     for (let i = 0; i < fs.length; i++) {
       if (i > 0) await new Promise((r) => requestAnimationFrame(() => r(null)));
       body.scrollTop = fs[i] * (body.scrollHeight - body.clientHeight);
@@ -262,7 +264,7 @@ test("the same gestures, ten times over, give the same correct result every time
   ends.forEach(expectAtTheEnd);
   jumps.forEach(expectAtEightyPercent);
   // What the user sees — the footer and the rows in view — is identical on
-  // every repetition. (The window DataTables fetched may legitimately differ
+  // every repetition. (The window the pane fetched may legitimately differ
   // in its buffer, so it is not compared.)
   const seen = (r: Reading) => JSON.stringify({ footer: r.footer, inView: r.inView });
   expect(ends.map(seen), "scrolling to the end must read the same every time").toEqual(
