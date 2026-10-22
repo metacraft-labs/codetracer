@@ -495,9 +495,8 @@ test.describe("auto-hide panel focus border", () => {
    *
    * THE DOCKED PANEL AND THE OVERLAY ARE ON DIFFERENT EDGES, and must be.
    * While a panel of an edge is docked, hovering that edge's other tabs opens
-   * nothing (`clickModeActive(edge)` in `ui/auto_hide.nim`; codetracer-pm
-   * `spec/Planned-Features/Auto-Hide-Panes.md` §3.2, "Except while a panel of
-   * the same edge is open by click").  The rule is per edge, so a docked
+   * nothing: the edge's other panels then open on a click, not a hover
+   * (`clickModeActive(edge)` in `ui/auto_hide.nim`).  The rule is per edge, so a docked
    * sidebar panel under a status-bar overlay is the way to put both outlines
    * in contention at once.  This test used to dock BUILD and hover PROBLEMS,
    * both in the status bar: after `d83de2484` that hover opens nothing, and
@@ -554,9 +553,9 @@ test.describe("auto-hide panel focus border", () => {
    * overlay on every other edge.
    *
    * This is the rule the previous test has to route around, stated as its own
-   * test so that route is not the only place it is recorded: codetracer-pm
-   * `spec/Planned-Features/Auto-Hide-Panes.md` §3.2, `clickModeActive(edge)`
-   * in `ui/auto_hide.nim` (`d83de2484`).  Once a status-bar panel is docked,
+   * test so that route is not the only place it is recorded:
+   * `clickModeActive(edge)` in `ui/auto_hide.nim` (`d83de2484`).  Once a
+   * status-bar panel is docked,
    * the other status-bar tabs open on a click, not on a hover.
    *
    * The second half is the control.  An overlay that never opens at all —
