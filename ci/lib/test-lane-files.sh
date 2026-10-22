@@ -934,7 +934,12 @@ test_lane_files() {
 		# `origin_chain_wiring_test.nim` holds `ui/state.nim` to installing the
 		# origin badge's chain fetch and the "Pin to scratchpad" bridge into the
 		# Scratchpad pane's ViewModel (codetracer#856).
+		# `later_session_launch_failure_test.nim` holds a replay that cannot
+		# start to saying so in its own tab: the refusal a later tab's session
+		# is sent reaches that tab's status bar, once, ends its busy state, and
+		# is drawn into `#status` only while that tab is the one on screen.
 		echo src/frontend/tests/locals_answer_identity_test.nim
+		echo src/frontend/tests/later_session_launch_failure_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
 		echo src/frontend/tests/loop_built_handlers_test.nim
 		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim

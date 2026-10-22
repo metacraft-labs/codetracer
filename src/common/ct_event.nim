@@ -73,6 +73,13 @@ type
     InternalNewOperation,
     InternalTraceMapUpdate,
     CtNotification,
+    # `ct/launch-failed`: the replay server's statement that a `launch` it
+    # acknowledged cannot succeed, with the reason as `{message}`. It travels
+    # beside the Error `ct/notification` carrying the same sentence; the
+    # notification is what the status bar shows, and this event is what ends
+    # the tab's busy state (`ui/status.nim`). Without a kind here the renderer
+    # dropped it as an unmapped event.
+    CtLaunchFailed,
     TracepointLocals,
     CtTracepointResults,
     CtFlowJump,

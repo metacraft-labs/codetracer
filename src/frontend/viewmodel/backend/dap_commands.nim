@@ -98,6 +98,7 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/update-expansion",
   "internal/last-complete-move",
   "ct/notification",
+  "ct/launch-failed",
   "tracepoint-locals",
   "ct/tracepoint-results",
   "ct/flow-jump",

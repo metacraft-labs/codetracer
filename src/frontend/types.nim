@@ -2404,6 +2404,22 @@ template `startOptions=`*(d: Data, v: StartOptions) = d.sessions[d.activeSession
 template dapApi*(d: Data): untyped = d.sessions[d.activeSessionIndex].dapApi
 template `dapApi=`*(d: Data, v: DapApi) = d.sessions[d.activeSessionIndex].dapApi = v
 
+proc sessionOwning*(d: Data; dapApi: DapApi): ReplaySession =
+  ## The replay session whose `DapApi` is `dapApi`, or nil when no open
+  ## session owns it.
+  ##
+  ## A handler registered on one session's `DapApi` runs for that session's
+  ## events whichever tab is on screen (`event_helpers.deliverDapEvent` routes
+  ## each event by the session it was tagged with), so it must act on this
+  ## session's state, not on the `Data` forwarders above, which name the tab on
+  ## screen.
+  if dapApi.isNil:
+    return nil
+  for session in d.sessions:
+    if not session.isNil and session.dapApi == dapApi:
+      return session
+  nil
+
 template asyncSendCache*(d: Data): untyped = d.sessions[d.activeSessionIndex].asyncSendCache
 template `asyncSendCache=`*(d: Data, v: auto) =
   d.sessions[d.activeSessionIndex].asyncSendCache = v
@@ -2567,14 +2583,31 @@ when defined(ctRenderer):
   console.log "data.viewsApi"
   console.log data.viewsApi
 
+  let firstSessionDapApi = data.dapApi
   data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     # Guard against -1 sentinel: activeSessionIndex is -1 when no session is
     # active (e.g. extension webview receives a CtCompleteMove before the
     # session is fully initialized).  Dropping the event is safe; the component
     # path (register -> api.subscribe) handles it independently.
     if data.activeSessionIndex >= 0:
-      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
-      discard data.services.editor.onCompleteMove(data.services.editor, value))
+      # This is the first session's move, and it arrives here even while
+      # another tab is on screen, because events are routed by the session
+      # they were tagged with. Its debugger state is its own, so it is
+      # updated whichever tab is shown. The editor service opens the moved-to
+      # file in the layout on screen, so it follows the move only while this
+      # session's tab is that layout: never in another tab's editor.
+      # The callbacks are installed by `services/*_service.nim` when they
+      # load; a session whose services have none yet takes no service update.
+      let owner = data.sessionOwning(firstSessionDapApi)
+      if owner.isNil or owner.services.isNil:
+        return
+      let debugger = owner.services.debugger
+      if not debugger.isNil and not debugger.onCompleteMove.isNil:
+        discard debugger.onCompleteMove(debugger, value)
+      let editor = owner.services.editor
+      if owner == data.sessions[data.activeSessionIndex] and
+          not editor.isNil and not editor.onCompleteMove.isNil:
+        discard editor.onCompleteMove(editor, value))
 
   data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
     ## Handle the macro expansion response from the backend (S6).

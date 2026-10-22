@@ -3912,6 +3912,9 @@ test-renderer-browser:
 # senders through the real response fan-out and asserts one request per stop,
 # in the stopped-in file's language, and that every answer is judged against
 # the stop its own request was sent at.
+# `later_session_launch_failure_test.nim` delivers a refusal tagged for a tab
+# that is not on screen and asserts it reaches that tab's status bar only, and
+# is painted into `#status` when that tab is shown.
 #
 # NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
 # Nix-built node modules on entry; the runner fails (rather than skipping) when

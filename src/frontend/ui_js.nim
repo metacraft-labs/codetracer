@@ -2117,9 +2117,6 @@ proc tryInitLayout*(data: Data) =
 
 # We receive a DAP "Response" from the index process
 proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
-  # M8: Extract sessionId from the message for future multi-session routing.
-  # During M8 there is only one session, so we log but do not route.
-  let sessionId = getSessionIdFromMessage(raw)
   # M49 — settle the `asyncSendCtRequest` continuation waiting on this
   # request's `seq` first. This is what makes `BackendService.send`
   # resolve with the response the backend actually sent; before it, the
@@ -2152,12 +2149,13 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
   # risk handing a response to an identically numbered request in the
   # wrong session. The main process already tags every response with the
   # session that issued it (`ipc_subsystems/dap.nim::resolveSessionId`),
-  # so the owner is known without any new wire field.
-  var responseDap = data.dapApi
-  for session in data.sessions:
-    if not session.dapApi.isNil and session.dapApi.sessionId == sessionId:
-      responseDap = session.dapApi
-      break
+  # so the owner is known without any new wire field. `dapApiForFrame` is the
+  # lookup events are routed by too. A response for a tab that has since been
+  # closed still falls back to the tab on screen, as it did before that
+  # lookup was shared.
+  var responseDap = dapApiForFrame(data, raw)
+  if responseDap.isNil:
+    responseDap = data.dapApi
   #
   # `deliverDapResponse` also stamps a TRACKED answer (`ct/load-locals`) with
   # the identity of the request it answers before the fan-out, so a
@@ -2166,12 +2164,9 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
 
 # We receive a DAP "Event" from the index process
 proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
-  # M8: Extract sessionId from the message for future multi-session routing.
-  let sessionId = getSessionIdFromMessage(raw)
-  try:
-    receiveEvent(data.dapApi, raw["event"].to(cstring), raw["body"])
-  except ValueError:
-    console.log(cstring"dap: ignoring event for unmapped event type: ", raw["event"])
+  # Routed to the session the main process tagged the event with, not to the
+  # tab on screen: see `event_helpers.deliverDapEvent`.
+  deliverDapEvent(data, raw)
 
 proc onReady(event: dom.Event) =
   if cast[cstring](cast[js](dom.document).readyState) == cstring"complete":

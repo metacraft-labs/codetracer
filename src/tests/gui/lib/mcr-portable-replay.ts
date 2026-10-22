@@ -58,7 +58,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { expect, type Page } from "@playwright/test";
+import { expect } from "@playwright/test";
 
 import { parseStatusLocation, type SimpleLocation, type StatusBar } from "../page-objects/status_bar";
 import { ctfsContainerVersion, ctfsVersionRefusal, readableCtfsVersions } from "./ctfs-container";
@@ -87,14 +87,6 @@ export const ISSUE_CROSS_PLATFORM_INITIAL_STATE =
  */
 export const ISSUE_PORTABLE_EXPORT_NO_LINE_TABLE =
   "codetracer-pm/issues/2026-10-22-portable-export-bundles-no-dsym-or-pdb-debug-info.md";
-
-/**
- * Defect B: the Electron GUI does not show a replay launch failure of a
- * session opened after the first; the `ct/notification` and
- * `ct/launch-failed` events reach the renderer and nothing is shown.
- */
-export const ISSUE_LATER_SESSION_LAUNCH_FAILURE_HIDDEN =
-  "codetracer-pm/issues/2026-10-22-electron-gui-does-not-show-a-later-sessions-replay-launch-failure.md";
 
 /** One `mcr/<platform>/` fixture directory with a portable trace. */
 export interface McrPortableFixture {
@@ -580,59 +572,4 @@ export function assertMcrSessionOutcome(
       `refusal matching ${expectation.refusal} (${expectation.reason}).\n` +
       describeObservation(observation),
   ).toBe(true);
-}
-
-// ---------------------------------------------------------------------------
-// What the Electron renderer received, as opposed to what it showed
-// ---------------------------------------------------------------------------
-
-/** One DAP event the renderer received from the main process. */
-export interface RendererDapEvent {
-  /** The DAP event name (`ct/notification`, `ct/launch-failed`, ...). */
-  event: string;
-  /** The session the main process tagged it with, when it did. */
-  sessionId: number | null;
-  /** The event's message: `body.text` of a notification, `body.message` of a launch failure. */
-  text: string;
-}
-
-/** The DAP events `recordRendererDapEvents` keeps; everything else is ignored. */
-const RECORDED_RENDERER_EVENTS = ["ct/notification", "ct/launch-failed"];
-
-/**
- * Start recording the launch-failure DAP events the Electron renderer
- * receives on `CODETRACER::dap-receive-event` (the IPC channel
- * `onDapReceiveEvent` in `src/frontend/ui_js.nim` consumes), whatever the GUI
- * then does with them.
- *
- * This observes the renderer's input, beside the app's own listener; it does
- * not change what the app does. Call it before the launch whose events are
- * wanted. Calling it again keeps the events already recorded.
- */
-export async function recordRendererDapEvents(page: Page): Promise<void> {
-  await page.evaluate((wanted) => {
-    const w = window as any;
-    if (w.__ctTestRendererDapEvents) return;
-    const events: unknown[] = [];
-    w.__ctTestRendererDapEvents = events;
-    const ipc = w.data?.ipc;
-    if (!ipc || typeof ipc.on !== "function") {
-      throw new Error("window.data.ipc has no on(): this renderer cannot be observed");
-    }
-    ipc.on("CODETRACER::dap-receive-event", (_sender: unknown, raw: any) => {
-      const event = String(raw?.event ?? "");
-      if (!wanted.includes(event)) return;
-      const body = raw?.body ?? {};
-      events.push({
-        event,
-        sessionId: typeof raw?.sessionId === "number" ? raw.sessionId : null,
-        text: String(body.message ?? body.text ?? ""),
-      });
-    });
-  }, RECORDED_RENDERER_EVENTS);
-}
-
-/** The events recorded since `recordRendererDapEvents`. */
-export async function rendererDapEvents(page: Page): Promise<RendererDapEvent[]> {
-  return page.evaluate(() => (window as any).__ctTestRendererDapEvents ?? []);
 }

@@ -22,15 +22,6 @@
  * the imported trace's id is not evidence of either: a session holds it
  * before any replay answers.
  *
- * Today the Electron GUI does not show the launch failure of a session
- * opened after the first, although the backend sends it
- * (codetracer-pm/issues/2026-10-22-electron-gui-does-not-show-a-later-sessions-replay-launch-failure.md).
- * When neither a replay nor the refusal is shown, the test still asserts
- * that the renderer received the debugserver's refusal of this recording
- * (its `CODETRACER::dap-receive-event` input), adds a `not-verified`
- * annotation naming that issue, and goes on. If the refusal never reached
- * the renderer, the test fails.
- *
  * ## Prerequisites
  *
  * - RR backend: `CODETRACER_RR_BACKEND_PATH` or `CODETRACER_RR_BACKEND_PRESENT`
@@ -80,14 +71,10 @@ import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
 import {
-  ISSUE_LATER_SESSION_LAUNCH_FAILURE_HIDDEN,
   assertMcrSessionOutcome,
   expectedMcrPortableOutcome,
   mcrPortableFixture,
   observeMcrSession,
-  recordRendererDapEvents,
-  refusalShown,
-  rendererDapEvents,
 } from "../../lib/mcr-portable-replay";
 
 // ---------------------------------------------------------------------------
@@ -568,9 +555,6 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
     expect(await getActiveIndex(ctPage)).toBe(2);
     expect(await sessionHasTrace(ctPage, 2)).toBe(false);
 
-    // Record what the renderer receives from session 2's backend, so a
-    // refusal the GUI does not show can still be attributed (see below).
-    await recordRendererDapEvents(ctPage);
     await loadTraceIntoActiveSession(ctPage, mcrTraceId);
 
     // Wait for session 2 to receive its trace.
@@ -594,43 +578,7 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
         JSON.stringify(mcrSessionObservation.replayLocation) +
         ` notifications=${JSON.stringify(mcrSessionObservation.notifications)}`,
     );
-    // A replay expected on this host gets no not-verified route here: the
-    // cross-platform spec reports a known defect only with its cause read
-    // from the replay worker's log, and this test does not see the Electron
-    // app's replay server output, so a replay that does not happen fails.
-    if (
-      mcrExpectation.kind === "refused" &&
-      mcrSessionObservation.replayLocation === null &&
-      !refusalShown(mcrSessionObservation, mcrExpectation)
-    ) {
-      // Refused, and the GUI showed neither a replay nor the refusal. The
-      // GUI half cannot be verified while a later session's launch failure
-      // is not shown (issue B); the backend half still can: the renderer
-      // must have received this recording's refusal, for its own reason.
-      // The refusal names the container it refused, which lives in the
-      // folder named after the recording id, so it is attributed to this
-      // session's recording and not to another one.
-      const received = await rendererDapEvents(ctPage);
-      console.log(`# session 2 (MCR): renderer received ${JSON.stringify(received)}`);
-      const ownRefusal = received.filter(
-        (e) => mcrExpectation.refusal.test(e.text) && e.text.includes(mcrTraceId),
-      );
-      expect(
-        ownRefusal.length,
-        `session 2: the GUI showed neither a replay nor the refusal, and the renderer did ` +
-          `not receive the debugserver's refusal of recording ${mcrTraceId} either ` +
-          `(${mcrExpectation.reason}); events received: ${JSON.stringify(received)}`,
-      ).toBeGreaterThan(0);
-      testInfo.annotations.push({
-        type: "not-verified",
-        description:
-          `session 2 (MCR ${MCR_PLATFORM}): the renderer received the debugserver's refusal ` +
-          `(${ownRefusal.map((e) => e.event).join(", ")}) but the GUI did not show it; ` +
-          ISSUE_LATER_SESSION_LAUNCH_FAILURE_HIDDEN,
-      });
-    } else {
-      assertMcrSessionOutcome(mcrSessionObservation, mcrExpectation, mcrFixture);
-    }
+    assertMcrSessionOutcome(mcrSessionObservation, mcrExpectation, mcrFixture);
 
     // ==================================================================
     // Phase 5: Verify all three traces are distinct
