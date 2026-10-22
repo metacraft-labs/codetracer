@@ -964,8 +964,8 @@ type
       ## a single collection would make each rebuild throw the other away.
     flowValueWidgets*: seq[js]
       ## The Monaco **content widgets** carrying the review's parallel value
-      ## bands (UD-3) — one per annotated line, each holding the
-      ## `.flow-parallel` row the debugger's own `ui/flow.renderFlow` builds.
+      ## bands (UD-3) — one per annotated line, each holding a `.flow-parallel`
+      ## row of the shared flow views (`isonim_flow_value_view`).
       ##
       ## A content widget rather than an injected-text decoration, which is
       ## what RV-5 used: injected text is part of the code line, so it starts

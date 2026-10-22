@@ -65,7 +65,7 @@ export FlowValueContainerClass, FlowValueNameClass, FlowValueColumnClass,
   FlowValueGroupClass, FlowValueLoopValuesClass, FlowValueBandClass,
   FlowValueBandLoopClass, FlowValueBandSingleClass, FlowValueEmptyClass
 
-proc flowStyleOf(s: VStyle): FlowStyle =
+proc flowStyleOf*(s: VStyle): FlowStyle =
   ## A `VStyle`'s properties as the view's style list.
   if s.isNil:
     return @[]

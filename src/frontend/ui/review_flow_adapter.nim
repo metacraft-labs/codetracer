@@ -677,8 +677,8 @@ func stepAtLineIteration*(plan: ReviewFlowPlan; sourceLine, iteration: int): int
   ##
   ## A -1 answer is load-bearing rather than an error: it is how a pass that
   ## never reached the line gets an EMPTY column instead of a neighbouring
-  ## pass's values under its heading. See `renderFlow`'s "no value" span, which
-  ## occupies the same slot in the debugger's own band.
+  ## pass's values under its heading: the column holds the empty placeholder
+  ## (`renderFlowValueEmpty`) in that slot instead.
   result = -1
   for i in 0 ..< plan.steps.len:
     let step = plan.steps[i]
