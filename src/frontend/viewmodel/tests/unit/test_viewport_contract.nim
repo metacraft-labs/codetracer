@@ -243,8 +243,9 @@ suite "EventLogVM on the viewport contract":
 
   test "the filter bar's shorthands are not sent as search text":
     # `boundary:<id>` and `unmatched` select marker rows on the client
-    # (Correlation-Markers §5.4). The engine's `search` matches event content
-    # and path, so sent as text they would match nothing and empty the pane.
+    # (Correlation-Markers §5.4). The engine's `search` matches text — event
+    # content and path, a marker's boundary, key and shown value — so sent as
+    # text they would match nothing and empty the pane.
     # Only the free text beside them is the log's search.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = false)
@@ -263,6 +264,35 @@ suite "EventLogVM on the viewport contract":
       check asked.len == 3
       check not asked[^1].hasKey("search")
       check vm.filterBar.val.unmatchedOnly
+      dispose()
+
+  test "a live stop during a search leaves the matches and their count":
+    # The rows on hand are the engine's answer to the search. Whether a live
+    # stop matches is the engine's question: the stop does not join the
+    # matches, the pager keeps counting them, and only the recording's extent
+    # grows. Without a search the stop joins the window as before.
+    createRoot proc(dispose: proc()) =
+      let backend = BackendService(
+        sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
+          let total = if args.hasKey("search"): 15 else: 100
+          newCompletedFuture[JsonNode](%*{"events": [], "total": total}),
+        onEventProc: proc(handler: EventHandler) = discard)
+      let store = createReplayDataStore(backend)
+      let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 10))
+      vm.setSearchQuery("tick")
+      drain()
+      check vm.totalPages.val == 2
+      vm.appendLiveDebuggerStop(EventLogRow(eventId: 500'u64, rrTicks: 500'u64,
+                                            maxRRTicks: 500'u64, value: "stop"))
+      check vm.eventRows.val.len == 0
+      check vm.totalPages.val == 2
+      check store.eventLog.maxRRTicks.val == 500'u64
+      vm.setSearchQuery("")
+      drain()
+      vm.appendLiveDebuggerStop(EventLogRow(eventId: 501'u64, rrTicks: 501'u64,
+                                            maxRRTicks: 501'u64, value: "stop"))
+      check vm.eventRows.val.len == 1
       dispose()
 
   test "a search's pages are counted from its matches, not from the log":

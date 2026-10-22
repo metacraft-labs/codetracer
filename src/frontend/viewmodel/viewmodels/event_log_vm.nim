@@ -874,15 +874,17 @@ proc rowMatchesFilter*(row: MarkerEventRow; filter: MarkerFilterBar; isUnmatched
   ## Predicate used by the `visibleMarkerRows` memo. Encapsulated as
   ## a free proc so the unit tests can pin the matching rules without
   ## touching VM state.
+  ##
+  ## Only the §5.4 shorthands are applied here. The free text is the log's
+  ## ONE text filter and the engine applies it (`ct/event-load`'s `search`,
+  ## which matches a marker's boundary, key and shown value as well as its
+  ## event's content), so the marker rows of an answer already match it.
+  ## Matching it again here, on fewer fields, dropped markers the search had
+  ## found by their event's content.
   if filter.boundaryFilter.len > 0 and row.boundaryId != filter.boundaryFilter:
     return false
   if filter.unmatchedOnly and not isUnmatched:
     return false
-  if filter.freeText.len > 0:
-    let needle = filter.freeText.toLowerAscii
-    let haystack = (row.boundaryId & " " & row.keyValue & " " & row.showValue).toLowerAscii
-    if not haystack.contains(needle):
-      return false
   true
 
 proc setLoadingBanner*(vm: EventLogVM; banner: MarkerLoadingBanner) =

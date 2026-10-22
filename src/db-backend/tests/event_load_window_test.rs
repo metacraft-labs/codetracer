@@ -165,3 +165,83 @@ fn the_index_at_tick_answer_matches_the_scan_it_replaced() {
     assert_eq!(body["indexAtTick"], 42);
     assert_eq!(body["total"], 100);
 }
+
+/// Ten events; the even ones are correlation markers whose key is
+/// `order-<i>` and whose content never mentions it, so a match on the key
+/// can only come from the marker's own fields.
+fn marker_events() -> Vec<ProgramEvent> {
+    use db_backend::correlation_markers::{MarkerDirection, MarkerPayload};
+    (0..10)
+        .map(|i| {
+            let mut e = event(i, &format!("write {i}"), "src/main.rs");
+            if i % 2 == 0 {
+                e.metadata = MarkerPayload {
+                    marker_id: i,
+                    boundary_id: "order-processing".to_string(),
+                    direction: MarkerDirection::Send,
+                    key_text: "msg.id".to_string(),
+                    key_value: format!("order-{i}"),
+                    show_text: None,
+                    show_value: None,
+                    description: None,
+                    format: Some("text".to_string()),
+                }
+                .encode();
+            }
+            e
+        })
+        .collect()
+}
+
+#[test]
+fn a_search_matches_a_markers_boundary_key_and_shown_value() {
+    // The Event Log's filter bar has ONE free-text filter, applied by the
+    // engine. A marker is found by what the pane shows for it — its
+    // boundary, key and shown value — not only by its event's content.
+    let mut handler = handler_with_events(marker_events());
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 10, "search": "ORDER-4" }),
+    );
+    assert_eq!(contents(&body), vec!["write 4"]);
+    assert_eq!(body["total"], 1);
+    let by_boundary = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 10, "search": "order-processing" }),
+    );
+    assert_eq!(by_boundary["total"], 5);
+}
+
+#[test]
+fn a_searched_or_sorted_windows_markers_are_those_of_its_events() {
+    // The window of a search or a sort is not a contiguous run of recorded
+    // events, so its markers cannot be cut by recorded index: each one must
+    // be the marker of an event in the window, numbered by its row in it.
+    let mut handler = handler_with_events(marker_events());
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "start": 1, "count": 2, "search": "order" }),
+    );
+    // Matches are events 0, 2, 4, 6, 8; the window is rows 1..3: 2 and 4.
+    assert_eq!(contents(&body), vec!["write 2", "write 4"]);
+    let markers = body["markers"].as_array().expect("markers");
+    let keys: Vec<(u64, &str)> = markers
+        .iter()
+        .map(|m| (m["eventIndex"].as_u64().unwrap(), m["keyValue"].as_str().unwrap()))
+        .collect();
+    assert_eq!(keys, vec![(0, "order-2"), (1, "order-4")]);
+
+    let sorted = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 3, "sortKey": "tick", "sortAscending": false }),
+    );
+    // Descending by tick: events 9, 8, 7 — one marker, event 8, on row 1.
+    assert_eq!(contents(&sorted), vec!["write 9", "write 8", "write 7"]);
+    let sorted_keys: Vec<(u64, &str)> = sorted["markers"]
+        .as_array()
+        .expect("markers")
+        .iter()
+        .map(|m| (m["eventIndex"].as_u64().unwrap(), m["keyValue"].as_str().unwrap()))
+        .collect();
+    assert_eq!(sorted_keys, vec![(1, "order-8")]);
+}

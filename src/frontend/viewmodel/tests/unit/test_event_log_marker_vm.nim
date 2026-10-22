@@ -435,10 +435,18 @@ suite "M25b — filter-bar shorthands":
     check composed.len == 1
     check composed[0].keyValue == "K-unpaired"
 
+    # Free text is the log's search, applied ONCE, by the engine — whose
+    # `search` matches a marker's key too (db-backend
+    # `event_load_window_test.rs`). The rows on hand are an answer the
+    # engine already filtered, so the client does not filter them by the
+    # text again: only the shorthand narrows them here, and the text goes
+    # to the engine.
     vm.setFilterInput("boundary:order-processing K-unpaired")
-    let combo = vm.visibleMarkerRows.val
-    check combo.len == 1
-    check combo[0].keyValue == "K-unpaired"
+    check vm.filterBar.val.freeText == "K-unpaired"
+    check vm.searchQuery.val == "K-unpaired"
+    check vm.visibleMarkerRows.val.len == 3
+    vm.setFilterInput("boundary:other K-unpaired")
+    check vm.visibleMarkerRows.val.len == 0
 
 # ---------------------------------------------------------------------------
 # Layer-2 Test 9 — empty-state + one-time toast.

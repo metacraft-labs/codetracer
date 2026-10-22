@@ -238,6 +238,13 @@ type
     recordsFiltered*: Signal[int]
       ## The same count after the server-side search filter, for a host that
       ## has one. Equal to `recordsTotal` when nothing filtered.
+    windowSearched*: Signal[bool]
+      ## Whether the rows on hand are the engine's answer to a SEARCH
+      ## (`ct/event-load`'s `search`). A live debugger stop does not enter
+      ## such a window (`appendLiveEventRow`): whether it matches is the
+      ## engine's question, answered by the next searched request. A table
+      ## page (`ct/update-table`) is not one: the desktop's live stops are
+      ## synthetic rows the engine never reports, so they join its window.
     maxRRTicks*: Signal[uint64]
       ## The recording's last step id, as reported by the events themselves.
       ## CTUI-8 established that this is the ONLY surface in the workspace that
@@ -1024,6 +1031,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         totalReported: createSignal(false),
         currentIndex: createSignal(-1),
         recordsFiltered: createSignal(0),
+        windowSearched: createSignal(false),
         maxRRTicks: createSignal(0'u64),
         loadedStart: createSignal(0),
         windowSource: createSignal(elwsUnknown),
@@ -1915,6 +1923,24 @@ func eventLogRowFromProgramEvent*[E](event: E;
     stdout: event.stdout,
   )
 
+proc raiseEventLogExtent(store: ReplayDataStore; rows: openArray[EventLogRow]) =
+  ## Raise the recording's extent to the largest `maxRRTicks` of `rows`.
+  ##
+  ## THE TIMELINE'S EXTENT FOLLOWS WHAT THE LOG LEARNS (PLAT-41). The
+  ## recording's extent is one fact, and for a completed recording the event
+  ## log's `maxRRTicks` is where every front-end learns it; the timeline's own
+  ## copy was raised only by LIVE recording-head updates, so on a replay the
+  ## native timeline drew `tick 4 / 0`. Raised, never lowered — as the log's.
+  var maxTicks = store.eventLog.maxRRTicks.val
+  for row in rows:
+    if row.maxRRTicks > maxTicks:
+      maxTicks = row.maxRRTicks
+  store.eventLog.maxRRTicks.val = maxTicks
+  if maxTicks > store.timeline.val.maxRRTicks:
+    var timeline = store.timeline.val
+    timeline.maxRRTicks = maxTicks
+    store.timeline.val = timeline
+
 proc applyEventLogRows*(store: ReplayDataStore;
                         rows: seq[EventLogRow];
                         start: int = 0;
@@ -1950,6 +1976,10 @@ proc applyEventLogRows*(store: ReplayDataStore;
     store.eventLog.loadedStart.val = start
     if source != elwsUnknown:
       store.eventLog.windowSource.val = source
+    # A SEARCHED `ct/event-load` window reports its matches and not the
+    # log's size (`applyEventLogResponse`). See `windowSearched`.
+    store.eventLog.windowSearched.val =
+      source == elwsEventLoad and recordsFiltered >= 0 and recordsTotal < 0
   if recordsTotal >= 0:
     store.eventLog.recordsTotal.val = recordsTotal
   else:
@@ -1965,20 +1995,7 @@ proc applyEventLogRows*(store: ReplayDataStore;
     # just established and put the pane's footer back to "of <everything>"
     # while it is showing a filtered page.
     store.eventLog.recordsFiltered.val = store.eventLog.recordsTotal.val
-  var maxTicks = store.eventLog.maxRRTicks.val
-  for row in rows:
-    if row.maxRRTicks > maxTicks:
-      maxTicks = row.maxRRTicks
-  store.eventLog.maxRRTicks.val = maxTicks
-  # THE TIMELINE'S EXTENT FOLLOWS WHAT THE LOG LEARNS (PLAT-41). The
-  # recording's extent is one fact, and for a completed recording the event
-  # log's `maxRRTicks` is where every front-end learns it; the timeline's own
-  # copy was raised only by LIVE recording-head updates, so on a replay the
-  # native timeline drew `tick 4 / 0`. Raised, never lowered — as the log's.
-  if maxTicks > store.timeline.val.maxRRTicks:
-    var timeline = store.timeline.val
-    timeline.maxRRTicks = maxTicks
-    store.timeline.val = timeline
+  store.raiseEventLogExtent(rows)
   store.eventLog.loadingState.val = lsIdle
 
 proc applyEventLogResponse*(store: ReplayDataStore;
@@ -2045,6 +2062,18 @@ proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
   ## load. The duplicate test is the identity the live producer can supply —
   ## `(eventId, kind, sourceGeneration, sourceDigest)` — because a live stop
   ## has no `eventIndex` of its own until it is appended.
+  ##
+  ## NOT INTO A SEARCHED WINDOW (`windowSearched`). The rows on hand are then
+  ## the engine's answer to a search, and so is the count the pager reads.
+  ## Whether the stop matches is the engine's question, not one to answer by
+  ## filtering on the client. Appending it anyway put an unmatched row among
+  ## the matches and reset the match count to the whole log. Only the
+  ## recording's extent, a fact about the recording, is raised; the next
+  ## searched request reports the stop if it matches. Answers false: the row
+  ## was not added.
+  if store.eventLog.windowSearched.val:
+    store.raiseEventLogExtent([row])
+    return false
   var rows = store.eventLog.rows.val
   for existing in rows:
     if existing.eventId == row.eventId and
@@ -2067,6 +2096,7 @@ proc clearEventLog*(store: ReplayDataStore) =
   store.eventLog.currentIndex.val = -1
   store.eventIndexAskedFor = ""
   store.eventLog.recordsFiltered.val = 0
+  store.eventLog.windowSearched.val = false
   store.eventLog.maxRRTicks.val = 0'u64
   store.eventLog.loadedStart.val = 0
   # AND THE WINDOW'S OWNER. A restart that left `elwsTable` behind would make

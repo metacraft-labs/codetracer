@@ -475,6 +475,18 @@ pub struct PairIndexCounterpart {
 //   receives sender as arg
 //   sender.
 
+/// What `ct/event-load`'s `search` matches of a marker row, lower-cased: its
+/// boundary, key and shown value — the fields the Event Log shows for it.
+/// Each is matched on its own, so a query cannot match across two of them.
+fn marker_search_text(row: &MarkerEventRow) -> String {
+    let mut text = format!("{}\n{}", row.boundary_id, row.key_value);
+    if let Some(show) = &row.show_value {
+        text.push('\n');
+        text.push_str(show);
+    }
+    text.to_lowercase()
+}
+
 fn decode_event_log_marker_payload(
     event: &ProgramEvent,
     marker_id: usize,
@@ -2749,6 +2761,9 @@ impl Handler {
 
             self.cached_events = Some(events_data.events);
             self.event_tick_index = None;
+            // The marker projection is OF these events; a reloaded list
+            // (a live session's growing log) needs it rebuilt.
+            self.cached_marker_rows = None;
         }
         Ok(())
     }
@@ -2780,6 +2795,9 @@ impl Handler {
             .max(0) as usize;
 
         self.ensure_events_loaded()?;
+        // Before the events are borrowed below: the search reads a marker's
+        // fields, and the page's marker rows are cut from this projection.
+        self.ensure_marker_rows();
 
         // Safety: `ensure_events_loaded` guarantees `cached_events` is Some.
         let all_events = match self.cached_events.as_ref() {
@@ -2816,9 +2834,13 @@ impl Handler {
         };
         // The pane's search (`search`): only the events whose content or
         // source path contains it, case-insensitively — what the GUI's
-        // DataTables global search matched. The window, `total` and
-        // `indexAtTick` are all cut from the MATCHING list, so a pane that
-        // pages through a search pages through its results.
+        // DataTables global search matched — or, for a correlation marker,
+        // whose boundary, key or shown value does: what the pane shows for
+        // it. It is the Event Log's ONE free-text filter (Correlation-Markers
+        // §5.4), so the marker rows are not filtered by the text a second
+        // time on the client. The window, `total` and `indexAtTick` are all
+        // cut from the MATCHING list, so a pane that pages through a search
+        // pages through its results.
         let search = req
             .arguments
             .get("search")
@@ -2826,14 +2848,24 @@ impl Handler {
             .map(str::to_lowercase)
             .filter(|q| !q.is_empty());
         let positions: Vec<usize> = match search {
-            Some(query) => positions
-                .into_iter()
-                .filter(|&i| {
-                    let event = &all_events[i];
-                    event.content.to_lowercase().contains(&query)
-                        || event.high_level_path.to_lowercase().contains(&query)
-                })
-                .collect(),
+            Some(query) => {
+                let marker_text: HashMap<usize, String> = self
+                    .cached_marker_rows
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|row| (row.event_index, marker_search_text(row)))
+                    .collect();
+                positions
+                    .into_iter()
+                    .filter(|&i| {
+                        let event = &all_events[i];
+                        event.content.to_lowercase().contains(&query)
+                            || event.high_level_path.to_lowercase().contains(&query)
+                            || marker_text.get(&i).is_some_and(|text| text.contains(&query))
+                    })
+                    .collect()
+            }
             None => positions,
         };
         let (skip, take) = if count > 0 { (start, count) } else { (0, 20) };
@@ -2922,11 +2954,11 @@ impl Handler {
         // contract — verified by the M25b DAP test
         // `test_dap_event_log_marker_response_serves_from_cache_post_load`).
         //
-        // We index the cached projection by the *absolute* event index
-        // (the row's offset into `cached_events`) so that the page-
-        // local `event_index` field on each `MarkerEventRow` lines up
-        // with the consumer's row indices.
-        let marker_rows = self.collect_marker_rows_for_page(&page_events, start, count);
+        // The cached projection is indexed by the *absolute* event index
+        // (the row's offset into `cached_events`); each page event carries
+        // that index as `event_index`, and the marker row is re-numbered by
+        // the event's row in the page, which the consumer joins on.
+        let marker_rows = self.collect_marker_rows_for_page(&page_events);
 
         // Include event data in the DAP response body so that
         // `session.customRequest("ct/event-load")` resolves with the data
@@ -2946,74 +2978,79 @@ impl Handler {
         Ok(())
     }
 
-    /// M25b — Build the marker-row projection for the events served by
-    /// a single `ct/event-load` page. Honours the §3.2.1
-    /// one-time-evaluation contract: the projection over the full
-    /// `cached_events` slice is computed on the first call and cached;
-    /// repeat calls reuse the cached slice (filtered to the page) and
-    /// do NOT re-decode `ProgramEvent.metadata`. The
-    /// `marker_decode_calls` counter advances only on the first build.
-    fn collect_marker_rows_for_page(
-        &mut self,
-        page_events: &[ProgramEvent],
-        start: usize,
-        count: usize,
-    ) -> Vec<MarkerEventRow> {
-        if self.cached_marker_rows.is_none() {
-            let all_events = match self.cached_events.as_ref() {
-                Some(events) => events,
-                None => return Vec::new(),
-            };
-            let mut rows: Vec<MarkerEventRow> = Vec::new();
-            for (absolute_index, event) in all_events.iter().enumerate() {
-                self.marker_decode_calls
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some(payload) = decode_event_log_marker_payload(event, absolute_index) else {
-                    continue;
-                };
-                rows.push(MarkerEventRow {
-                    event_index: absolute_index,
-                    marker_id: payload.marker_id,
-                    boundary_id: payload.boundary_id,
-                    direction: payload.direction.as_str().to_string(),
-                    key_text: payload.key_text,
-                    key_value: payload.key_value,
-                    show_text: payload.show_text,
-                    show_value: payload.show_value,
-                    description: payload.description,
-                    format: payload.format,
-                    source_path: event.high_level_path.clone(),
-                    source_line: event.high_level_line.max(0) as usize,
-                    step_id: event.direct_location_rr_ticks,
-                });
-            }
-            self.cached_marker_rows = Some(rows);
+    /// M25b — Build the marker-row projection over the full
+    /// `cached_events` slice, once. Honours the §3.2.1
+    /// one-time-evaluation contract: repeat `ct/event-load` calls reuse
+    /// the cached projection and do NOT re-decode `ProgramEvent.metadata`;
+    /// the `marker_decode_calls` counter advances only on a build. The
+    /// cache is dropped with the events it projects
+    /// (`ensure_events_loaded`).
+    fn ensure_marker_rows(&mut self) {
+        if self.cached_marker_rows.is_some() {
+            return;
         }
-        // Filter the cached projection to the page window. When the
-        // call uses the legacy "first 20" fallback the lower / upper
-        // bounds wrap the page's first/last absolute event index.
-        let (lower, upper) = if count > 0 {
-            (start, start.saturating_add(page_events.len()))
-        } else {
-            // Legacy fallback — pages slice `[0..min(20, len)]`.
-            (0usize, page_events.len())
+        let all_events = match self.cached_events.as_ref() {
+            Some(events) => events,
+            None => return,
         };
-        self.cached_marker_rows
-            .as_ref()
-            .map(|all| {
-                all.iter()
-                    .filter(|row| row.event_index >= lower && row.event_index < upper)
-                    .map(|row| {
-                        let mut adjusted = row.clone();
-                        // Re-base `event_index` to be page-local so the
-                        // frontend's join against the `events: [...]`
-                        // array is correct.
-                        adjusted.event_index = row.event_index.saturating_sub(lower);
-                        adjusted
-                    })
-                    .collect()
-            })
+        let mut rows: Vec<MarkerEventRow> = Vec::new();
+        for (absolute_index, event) in all_events.iter().enumerate() {
+            self.marker_decode_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(payload) = decode_event_log_marker_payload(event, absolute_index) else {
+                continue;
+            };
+            rows.push(MarkerEventRow {
+                event_index: absolute_index,
+                marker_id: payload.marker_id,
+                boundary_id: payload.boundary_id,
+                direction: payload.direction.as_str().to_string(),
+                key_text: payload.key_text,
+                key_value: payload.key_value,
+                show_text: payload.show_text,
+                show_value: payload.show_value,
+                description: payload.description,
+                format: payload.format,
+                source_path: event.high_level_path.clone(),
+                source_line: event.high_level_line.max(0) as usize,
+                step_id: event.direct_location_rr_ticks,
+            });
+        }
+        self.cached_marker_rows = Some(rows);
+    }
+
+    /// M25b — The marker rows of the events served by one `ct/event-load`
+    /// page, from the projection `ensure_marker_rows` built.
+    ///
+    /// A page is not a contiguous run of recorded events once it is cut
+    /// from a sorted or searched list, so a marker belongs to the page when
+    /// its event does — matched by the absolute index each page event
+    /// carries as `event_index` — and is re-numbered by that event's row in
+    /// the page, which is what the frontend joins against the
+    /// `events: [...]` array on.
+    fn collect_marker_rows_for_page(&mut self, page_events: &[ProgramEvent]) -> Vec<MarkerEventRow> {
+        self.ensure_marker_rows();
+        let row_in_page: HashMap<usize, usize> = page_events
+            .iter()
+            .enumerate()
+            .map(|(row, event)| (event.event_index, row))
+            .collect();
+        let mut rows: Vec<MarkerEventRow> = self
+            .cached_marker_rows
+            .as_deref()
             .unwrap_or_default()
+            .iter()
+            .filter_map(|row| {
+                row_in_page.get(&row.event_index).map(|&page_row| {
+                    let mut adjusted = row.clone();
+                    adjusted.event_index = page_row;
+                    adjusted
+                })
+            })
+            .collect();
+        // In the page's order, as the events are.
+        rows.sort_by_key(|row| row.event_index);
+        rows
     }
 
     /// M25b — `ct/pairIndexLookup` handler. Returns the counterparts
