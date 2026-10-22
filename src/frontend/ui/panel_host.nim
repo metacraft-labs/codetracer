@@ -35,12 +35,18 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_low_level_code_view]
 
 const
-  PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode}
+  PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
+                     Content.PixelHistory, Content.ShaderDebug,
+                     Content.VideoPlayer}
     ## The panes `mountPanel` renders.
   StateRowFallbackPx = 22.0
     ## The State pane's row pitch until a row is rendered to measure.
 
 type
+  PanelRenderer* = proc(r: WebRenderer; session: SessionViewModel): dom_api.Element
+    ## Renders a pane whose ViewModel its own module owns, inside the mount's
+    ## reactive root.
+
   PanelDecorator* = proc(host: dom_api.Element; session: SessionViewModel)
     ## Browser behaviour a pane's host adds around its view — run inside the
     ## mount's reactive root, so the effects it creates are disposed with it.
@@ -76,6 +82,10 @@ type
       ## Read inside an effect: the pane's rows changed, measure again.
 
 var decorators: array[Content, PanelDecorator]
+var renderers: array[Content, PanelRenderer]
+  ## Per pane whose ViewModel the session does not own (the visual-replay
+  ## and agent panes): the module that owns it registers how to render it
+  ## (`setPanelRenderer`).
   ## Per pane, set by the module that owns the pane's host behaviour.
 var hostSession: SessionViewModel
   ## The session the panes show; nil until the renderer has one.
@@ -194,7 +204,9 @@ proc render(m: PanelMount; session: SessionViewModel) =
         r, session.lowLevelCodeVM)
       dom_api.appendChild(node, dom_api.Node(panel))
     else:
-      discard
+      let renderPane = renderers[mount.kind]
+      if not renderPane.isNil:
+        dom_api.appendChild(node, dom_api.Node(renderPane(r, session)))
     let decorate = decorators[mount.kind]
     if not decorate.isNil:
       decorate(host, session)
@@ -208,6 +220,11 @@ proc reportShown(session: SessionViewModel) =
     return
   session.lowLevelCodeVM.setShown(
     live.anyIt(it.kind == Content.LowLevelCode and not it.disposeRoot.isNil))
+
+proc setPanelRenderer*(kind: Content; render: PanelRenderer) =
+  ## Install how `kind` renders, for a pane whose ViewModel the session does
+  ## not own. `kind` must be in `PanelHostKinds`.
+  renderers[kind] = render
 
 proc setPanelDecorator*(kind: Content; decorate: PanelDecorator) =
   ## Install the host behaviour for `kind`'s mounts made from now on.

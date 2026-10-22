@@ -2051,19 +2051,6 @@ proc mountPaneForState(state: GoldenItemState) =
       # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
       # other panes (Video Player, Pixel History, Shader Debug) share.
 
-      if state.content == Content.PixelHistory:
-        pixel_history.tryMountIsoNimPixelHistoryPanel(
-          PixelHistoryComponent(component))
-
-      if state.content == Content.ShaderDebug:
-        shader_debug.tryMountIsoNimShaderDebugPanel(
-          ShaderDebugComponent(component))
-
-      if state.content == Content.VideoPlayer:
-        video_player.syncVisualReplaySessionIntoPlayerVM()
-        video_player.tryMountIsoNimVideoPlayerPanel(
-          VideoPlayerComponent(component))
-
       # CaptionBarProgress: render via IsoNim WebRenderer directly
       # into the GL container. Progress and hover mutation paths refresh
       # this direct mount explicitly.

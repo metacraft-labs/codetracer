@@ -10,12 +10,12 @@ import
 import std/options
 import isonim/core/signals
 import isonim/web/dom_api as dom_api
+when not defined(ctInExtension):
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 var pixelHistoryVMInstance: PixelHistoryVM
-var pixelHistoryComponentRef: PixelHistoryComponent
-var isoNimPixelHistoryMounted*: bool = false
-
-proc refreshMountedPixelHistoryPanel()
 
 proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   if not pixelHistoryVMInstance.isNil:
@@ -24,9 +24,6 @@ proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   pixelHistoryVMInstance = createPixelHistoryVM(
     createInactiveVisualReplayClient(""),
     store)
-  pixelHistoryVMInstance.onHistoryLoaded =
-    proc(entryCount: int; error: string; loading: bool) =
-      refreshMountedPixelHistoryPanel()
   pixelHistoryVMInstance.onEntrySelected =
     proc(entry: VisualReplayPixelHistoryEntry) =
       if pixelHistoryVMInstance.selectedPixel.val.isSome:
@@ -48,66 +45,16 @@ proc loadPixelHistoryFromFrameViewer*(x, y, frame: int) =
   if not pixelHistoryVMInstance.isNil:
     pixelHistoryVMInstance.loadPixelHistory(x, y, frame)
 
-proc tryMountIsoNimPixelHistoryPanel*(component: PixelHistoryComponent = nil) =
-  if not component.isNil and pixelHistoryComponentRef.isNil:
-    pixelHistoryComponentRef = component
-  if pixelHistoryVMInstance.isNil:
-    initPixelHistoryVM()
-  if pixelHistoryVMInstance.isNil:
-    return
-  if pixelHistoryComponentRef.isNil:
-    return
-
-  let key = cstring("pixelHistoryComponent-" & $pixelHistoryComponentRef.id)
-  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-  let tab = data.activeSessionIndex
-  var retryCount = 0
-  proc doMount() =
-    retryCount += 1
-    let container = findIsoNimPaneHost(key, tab)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimPixelHistoryPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    # Per HOST, not per id: tab 0's mount set the latch for a host this
-    # tab does not share. See `isoNimPanelNeedsMountInHost`.
-    if not isoNimPanelNeedsMountInHost(
-        latchSaysMounted = isoNimPixelHistoryMounted,
-        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-      return
-
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimPixelHistoryMounted = true
-    markIsoNimPanelContainerMounted(container)
-    try:
-      mountIsoNimPixelHistory(container, pixelHistoryVMInstance)
-    except:
-      cerror "tryMountIsoNimPixelHistoryPanel: mount EXCEPTION: " &
-        getCurrentExceptionMsg()
-
-  doMount()
-
-proc refreshMountedPixelHistoryPanel() =
-  if not isoNimPixelHistoryMounted or pixelHistoryComponentRef.isNil or
-      pixelHistoryVMInstance.isNil:
-    return
-  let key = cstring("pixelHistoryComponent-" & $pixelHistoryComponentRef.id)
-  let container = findIsoNimPaneHost(key, data.activeSessionIndex)
-  if dom_api.isNodeNil(dom_api.Node(container)):
-    return
-
-  let containerNode = dom_api.Node(container)
-  while not dom_api.isNodeNil(containerNode.firstChild):
-    discard dom_api.removeChild(containerNode, containerNode.firstChild)
-  mountIsoNimPixelHistory(container, pixelHistoryVMInstance)
+when not defined(ctInExtension):
+  # The panel host mounts the pane into the container GoldenLayout creates
+  # (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
+  # here re-mounts it when a history loads.
+  setPanelRenderer(Content.PixelHistory,
+    proc(r: WebRenderer; session: SessionViewModel): dom_api.Element =
+      initPixelHistoryVM()
+      renderPixelHistoryPanel[WebRenderer, dom_api.Element](
+        r, pixelHistoryVMInstance))
 
 method register*(self: PixelHistoryComponent, api: MediatorWithSubscribers) =
   self.api = api
   initPixelHistoryVM()
-  tryMountIsoNimPixelHistoryPanel(self)

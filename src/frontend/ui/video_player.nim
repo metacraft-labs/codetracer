@@ -21,11 +21,13 @@ import
 import std/[json, options]
 import isonim/core/signals
 import isonim/web/dom_api as dom_api
+when not defined(ctInExtension):
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 var videoPlayerFrameVMInstance: FrameViewerVM
 var videoPlayerVMInstance: VideoPlayerVM
-var videoPlayerComponentRef: VideoPlayerComponent
-var isoNimVideoPlayerMounted*: bool = false
 
 proc currentVideoPlayerVM*(): VideoPlayerVM =
   ## Accessor used by the global ClientAction dispatcher in ``ui_js.nim`` to
@@ -334,59 +336,23 @@ proc initVideoPlayerVMWithStore*(store: ReplayDataStore) =
         except CatchableError:
           discard)
 
-proc tryMountIsoNimVideoPlayerPanel*(
-    component: VideoPlayerComponent = nil) =
-  if not component.isNil and videoPlayerComponentRef.isNil:
-    videoPlayerComponentRef = component
-  if videoPlayerVMInstance.isNil:
-    initVideoPlayerVM()
-  if videoPlayerVMInstance.isNil:
-    return
-  if videoPlayerComponentRef.isNil:
-    return
-
-  let key = cstring("videoPlayerComponent-" & $videoPlayerComponentRef.id)
-  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-  let tab = data.activeSessionIndex
-  var retryCount = 0
-  proc doMount() =
-    retryCount += 1
-    let container = findIsoNimPaneHost(key, tab)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimVideoPlayerPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    # Per HOST, not per id: tab 0's mount set the latch for a host this
-    # tab does not share. See `isoNimPanelNeedsMountInHost`.
-    if not isoNimPanelNeedsMountInHost(
-        latchSaysMounted = isoNimVideoPlayerMounted,
-        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-      return
-
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimVideoPlayerMounted = true
-    markIsoNimPanelContainerMounted(container)
-    try:
-      mountIsoNimVideoPlayer(container, videoPlayerVMInstance)
-    except:
-      cerror "tryMountIsoNimVideoPlayerPanel: mount EXCEPTION: " &
-        getCurrentExceptionMsg()
-    when defined(js):
-      ## Install the focus / hover tracker on the just-mounted panel so the
-      ## global ClientAction handlers (in ``ui_js.nim``) can gate keys on
-      ## Video Player focus.  The tracker selector matches the root class
-      ## the view renders (see ``renderVideoPlayerPanel``).
-      installVideoPlayerFocusTracker(cstring".video-player-component")
-
-  doMount()
+when not defined(ctInExtension):
+  # The panel host mounts the pane into the container GoldenLayout creates
+  # (`ui/panel_host`), after syncing the session's visual-replay player into
+  # the ViewModel, as the layout's dispatch arm did before mounting.
+  setPanelRenderer(Content.VideoPlayer,
+    proc(r: WebRenderer; session: SessionViewModel): dom_api.Element =
+      initVideoPlayerVM()
+      syncVisualReplaySessionIntoPlayerVM()
+      renderVideoPlayerPanel[WebRenderer, dom_api.Element](
+        r, videoPlayerVMInstance))
+  # Once the panel is in the document: the focus / hover tracker the global
+  # ClientAction handlers (in ``ui_js.nim``) gate Video Player keys on. The
+  # selector matches the root class the view renders.
+  setPanelDecorator(Content.VideoPlayer,
+    proc(host: dom_api.Element; session: SessionViewModel) =
+      installVideoPlayerFocusTracker(cstring".video-player-component"))
 
 method register*(self: VideoPlayerComponent, api: MediatorWithSubscribers) =
   self.api = api
   initVideoPlayerVM()
-  tryMountIsoNimVideoPlayerPanel(self)

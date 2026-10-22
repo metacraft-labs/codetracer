@@ -70,7 +70,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 36
+const ExpectedAssertions = 39
+  ## One per direct-mount pane the dispatch reaches: the panel host's
+  ## kinds count individually (PixelHistory, ShaderDebug, VideoPlayer joined
+  ## them in HSF-D6).
   ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
   ## proc and its give-up lines went (the control-data loop -1, the mount
   ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
