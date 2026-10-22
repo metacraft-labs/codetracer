@@ -22,7 +22,7 @@ The suite runs in-process against the real `calc` recording and a real
 `replay-server`. Its DIFF-9 half reads the committed pixel record of the
 native window and the desktop, which a source mutation cannot move; the
 native-window table rows (`gpui_binding`) and the desktop's row copy
-(`ui/event_log.dataTableRowOf`) are therefore graded by their capture lanes
+(`ui/event_log_cells.dataTableRowOf`) are therefore graded by their capture lanes
 re-measuring, not here.
 
 Usage:

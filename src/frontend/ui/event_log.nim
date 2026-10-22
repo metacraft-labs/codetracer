@@ -2,7 +2,8 @@ import
   ../[ types, communication ],
   ../../common/ct_event,
   ui_imports, colors, trace, typetraits, strutils, jsconsole,
-  datatable, strutils, base64
+  datatable, strutils, base64,
+  event_log_cells
 
 # ---------------------------------------------------------------------------
 # ViewModel layer — wired in parallel with the legacy event-bus code.
@@ -391,39 +392,6 @@ proc syncProgramEventsFromStore(self: EventLogComponent;
     events.add programEventOf(row, extras)
   self.programEvents = events
 
-proc dataTableRowOf(event: ProgramEvent; extras: EventLogRowExtras): JsObject =
-  ## One row as DataTables will see it.
-  ##
-  ## A `ProgramEvent` plus the two path fields the widget's column definitions
-  ## name (`data: "fullPath"`) and `ProgramEvent` does not have. The widget used
-  ## to be handed raw `TableRow`s instead, which is the mirror image: it had the
-  ## paths and lacked `highLevelPath`, `highLevelLine`, `eventIndex` and
-  ## `maxRRTicks`, all four of which its own renderers read — so
-  ## `eventLogDescriptionRepr(event, event.eventIndex)` was reading `undefined`
-  ## off every row it drew. Every field either side of that seam is present now.
-  ##
-  ## **A COPY, NOT THE ARGUMENT ITSELF** (`PLAT35-PD2`, closed by PLAT-40).
-  ## Under the JS backend an object argument is the caller's object, and the
-  ## caller passes the variable of a `for` loop — ONE object, overwritten on
-  ## every iteration. `event.toJs` handed DataTables that one object once per
-  ## row, so every row of the table was the LAST event: `calc`'s six rows all
-  ## read `stdout: checksum = 73`. `var row = event` is a fresh object per call.
-  var row = event
-  result = row.toJs
-  # THE LOCATION COLUMN NEVER GOES BLANK FOR A ROW THAT HAS A LOCATION.
-  # `fullPath` is the table reply's own text, and a capture of `calc`
-  # (PLAT-40's re-take of PLAT-35's `returned-calltrace`) measured a reply
-  # whose rows carried none — the column under the `location` header was
-  # empty on every row while `highLevelPath`/`highLevelLine`, which the
-  # neutral row always carries, said `main.py:111`. The reply's text wins
-  # when it has one.
-  result.fullPath =
-    if extras.fullPath.len > 0: extras.fullPath
-    elif event.highLevelPath.len > 0:
-      cstring($event.highLevelPath.split("/")[^1] & ":" & $event.highLevelLine)
-    else: extras.fullPath
-  result.lowLevelLocation = extras.lowLevelLocation
-
 proc dataTableOrder(table: js): js {.importjs: "#.order()".}
   ## DataTables' current order: `[[columnIndex, "asc" | "desc"], …]`.
 proc orderDataTable(table: js; column: int; direction: cstring)
@@ -752,34 +720,6 @@ const
     "errors",
     "evm events",
     "process"
-  ]
-
-  EVENT_LOG_KIND_NAMES: array[EventLogKind, string] = [
-    "write",
-    "write file",
-    "write(other)",
-    "read",
-    "read file",
-    "read(other)",
-    "read dir",
-    "open dir",
-    "close dir",
-    "socket",
-    "open",
-    "error",
-
-    "trace log event",
-    "messages",
-    "write(stderr)",
-    "exec",
-    "read env",
-    "write env",
-    "stat",
-    "create dir",
-    "remove dir",
-    "remove file",
-    "rename",
-    "change dir",
   ]
 
   EVENT_LOG_BUTTON_NAMES: array[EventDropDownBox, string] = [
@@ -1322,70 +1262,6 @@ func reprAndLang(eventElement: ProgramEvent, index: int): (string, Lang) =
 
   (name, lang)
 
-func eventLogDescriptionRepr(eventElement: ProgramEvent, index: int): string =
-  if not eventElement.semanticKind.isNil and eventElement.semanticKind.len > 0:
-    case $eventElement.semanticKind
-    of "debugger-stop":
-      if eventElement.metadata.len > 0:
-        return $eventElement.metadata
-      elif eventElement.highLevelPath.len > 0 and eventElement.highLevelLine > 0:
-        return fmt"debugger stop at {eventElement.highLevelPath}:{eventElement.highLevelLine}"
-      else:
-        return $eventElement.content
-    else:
-      discard
-
-  case eventElement.kind:
-    of Write:
-      let into = if eventElement.stdout: "stdout" else: "stderr"
-      fmt"{into}: {eventElement.content}"
-
-    of WriteStderr:
-      fmt"stderr: {eventElement.content}"
-
-    of Exec, ReadEnv, WriteEnv, Stat, CreateDir, RemoveDir, RemoveFile,
-        Rename, ChangeDir:
-      let label = EVENT_LOG_KIND_NAMES[eventElement.kind]
-      if eventElement.metadata != "":
-        fmt"{label} {eventElement.metadata}: {eventElement.content}"
-      else:
-        fmt"{label}: {eventElement.content}"
-
-    of Read:
-      fmt"stdin: {eventElement.content}"
-
-    of WriteFile:
-      fmt"write to {eventElement.metadata}: {eventElement.content}"
-
-    of ReadFile:
-      fmt"read from {eventElement.metadata}: {eventElement.content}"
-
-    of WriteOther:
-      fmt"write: {eventElement.metadata}: {eventElement.content}"
-
-    of ReadOther:
-      fmt"read: {eventElement.metadata}: {eventElement.content}"
-
-    of OpenDir, ReadDir, CloseDir:
-      "eventually TODO"
-
-    of Socket:
-      fmt"socket: {eventElement.content}"
-
-    of EventLogKind.Open:
-      fmt"open {eventElement.metadata}"
-
-    of EventLogKind.Error:
-      fmt"error: {eventElement.content}"
-
-    of EventLogKind.EvmEvent:
-      if eventElement.metadata != "":
-        fmt"{eventElement.metadata}: {eventElement.content}"
-      else:
-        fmt"{eventElement.content}"
-    else:
-      fmt"event {eventElement.kind}"
-
 proc eventJump(self: EventLogComponent, event: ProgramEvent) =
   if not eventLogVMStore.isNil:
     eventLogVMStore.enterHistoricalModeForNavigation()
@@ -1567,6 +1443,9 @@ proc events(self: EventLogComponent) =
               title: cstring"location",
               data: cstring"fullPath",
               visible: shown,
+              # A path the recording names is text; without a `render`
+              # DataTables would insert it as HTML (`event_log_cells`).
+              render: eventLogLocationRender,
             }
         of elcKind:
           denseColumns.add js{
@@ -1590,18 +1469,8 @@ proc events(self: EventLogComponent) =
             data: cstring"content",
             title: cstring"output",
             visible: shown,
-            render: proc(content: cstring, t: js, event: ProgramEvent): cstring =
-              let text = case event.kind:
-                of Write, WriteFile, WriteOther, Read, ReadFile, ReadOther,
-                  OpenDir, ReadDir, CloseDir, Socket, EventLogKind.Open, EventLogKind.Error, EventLogKind.EvmEvent,
-                  WriteStderr, Exec, ReadEnv, WriteEnv, Stat, CreateDir, RemoveDir,
-                  RemoveFile, Rename, ChangeDir:
-                  cstring(eventLogDescriptionRepr(event, event.eventIndex))
-
-                of TraceLogEvent:
-                  event.content
-
-              text
+            # The program's own output, as text (`event_log_cells`).
+            render: eventLogOutputRender,
           }
       # The table orders by the TICK column, wherever it is now.
       var tickAt = 0
@@ -1624,22 +1493,6 @@ proc events(self: EventLogComponent) =
 
       console.timeEnd(cstring"new events: load in datatable: columns init")
       console.time(cstring"new events: load in datatable: optional columns")
-
-      var renderColumns: array[
-          EventOptionalColumn,
-          proc(content: cstring, t: js, event: ProgramEvent): cstring
-        ] =
-        [
-          proc(content: cstring, t: js, event: ProgramEvent): cstring {.closure.} =
-            if event.kind != TraceLogEvent:
-              cstring"&lt;unknown before jump&gt;"
-            else:
-              let filename = event.filename
-              let line = event.highLevelLine
-              cstring(fmt"{filename}:{line}"),
-          proc(content: cstring, t: js, event: ProgramEvent): cstring {.closure.} =
-            cstring"low level location"
-        ]
 
       # if self.usesMaterializedTracesTrace:
       #   let lower = cstring("FullPath".toLowerAscii())
