@@ -1,16 +1,40 @@
 /**
  * Playwright E2E test for cross-platform trace replay.
  *
- * Verifies that pre-recorded portable traces from `codetracer-example-recordings`
- * (recorded on different platforms/architectures) can be loaded and displayed in
- * the CodeTracer browser UI via `ct host --trace-path=<folder>`.
+ * Opens each pre-recorded MCR portable trace from `codetracer-example-recordings`
+ * (recorded on different platforms/architectures) in the CodeTracer browser UI
+ * via `ct host --trace-path=<folder>`, and checks that the session ends the way
+ * the specifications say it must on this host:
+ *
+ * - **replayed** — the status bar shows a location in the recorded program's
+ *   source, at a line the program has. Only a replay of the recording produces
+ *   that; page title, panels and layout items are there before any replay
+ *   answers, so they are not asserted as evidence of one.
+ * - **refused** — the user is shown the prescribed refusal, word for word:
+ *   `ct host`'s import refusal for a container version this build does not
+ *   read, or `ct-mcr debugserver`'s refusal of a Linux interpose recording in
+ *   Linux x86-64 trace mode, which reaches the GUI as an error notification.
+ *
+ * Which outcome a fixture must have is decided before the session opens, by
+ * `expectedMcrPortableOutcome` in `lib/mcr-portable-replay.ts`, whose header
+ * gives the rules and the specifications behind them. A fixture expected to
+ * replay that does not fails, naming what the user was shown instead, with
+ * one exception the issue allows: when the GUI shows exactly the symptom of
+ * an open, recorded product defect and the replay worker's own log records
+ * that defect's cause, the case is skipped as "not verified", naming the
+ * issue (`knownDefectReport`). On a Linux host that is the macos-arm64 and
+ * windows-x86_64 fixtures, whose replay worker exits on the recording host's
+ * binary path
+ * (codetracer-pm/issues/2026-10-22-ct-native-replay-targets-the-recording-hosts-binary-path-on-a-portable-trace.md).
+ * Chrome only, nothing shown, any other error, or the symptom without that
+ * cause in the log still fails.
  *
  * Each platform with a `trace-portable.ct` file gets its own independent test.
  * The test copies the portable trace into a temp folder as `trace.ct` (the name
- * ct host expects), spawns `ct host --trace-path=<folder>`, waits for the server,
- * then verifies the GUI loads in a Chromium browser.
+ * ct host expects), spawns `ct host --trace-path=<folder>`, waits for the
+ * server, then observes the GUI in a Chromium browser.
  *
- * Skips gracefully when the example-recordings sibling repo is not present.
+ * Skips when the example-recordings sibling repo is not present.
  */
 
 import * as fs from "node:fs";
@@ -22,8 +46,18 @@ import * as process from "node:process";
 import { test as base, expect, chromium } from "@playwright/test";
 
 import { codetracerInstallDir } from "../lib/fixtures";
+import {
+  assertMcrSessionOutcome,
+  expectedMcrPortableOutcome,
+  knownDefectReport,
+  mcrPortableFixture,
+  observeMcrSession,
+  replayWorkerLogs,
+  type McrPortableFixture,
+} from "../lib/mcr-portable-replay";
 import { getFreeTcpPort } from "../lib/port-allocator";
 import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
+import { StatusBar } from "../page-objects/status_bar";
 
 // ---------------------------------------------------------------------------
 // Path constants
@@ -77,6 +111,9 @@ const MAX_CONNECT_ATTEMPTS = 25;
 const RETRY_DELAY_MS = 1_500;
 const GOTO_TIMEOUT_MS = 5_000;
 const PORT_RELEASE_DELAY_MS = 500;
+// How long ct host may take to read a fixture and refuse it before the test
+// concludes that it did not refuse.
+const IMPORT_REFUSAL_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,42 +256,28 @@ function copyDirSync(src: string, dest: string): void {
 }
 
 /**
- * Prepares a temporary trace folder from a platform fixture directory.
+ * Prepares a temporary trace folder from a platform fixture.
  *
  * Copies the `trace-portable.ct` as `trace.ct` (the name ct host expects),
- * the source file into `files/`, and the `binaries/` directory if present.
+ * the recorded program's source into `files/source.c`, and the `binaries/`
+ * directory if present.
  */
-function prepareTraceFolder(platformDir: string): string {
+function prepareTraceFolder(fixture: McrPortableFixture): string {
   const tmpDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "ct-cross-platform-test-"),
   );
 
   // Copy the portable trace file as trace.ct.
-  fs.copyFileSync(
-    path.join(platformDir, "trace-portable.ct"),
-    path.join(tmpDir, "trace.ct"),
-  );
+  fs.copyFileSync(fixture.tracePath, path.join(tmpDir, "trace.ct"));
 
   // Copy the source file into files/ so the editor panel can display it.
-  // The fixture directories contain a `source.c` symlink pointing to the
-  // shared program in the example-recordings repo.
-  const sourceFile = path.join(platformDir, "source.c");
-  const sharedSource = path.join(
-    exampleRecordingsDir,
-    "programs",
-    "ct_fixture_prog.c",
-  );
-  const sourceToUse = fs.existsSync(sourceFile)
-    ? fs.realpathSync(sourceFile)
-    : sharedSource;
-  if (fs.existsSync(sourceToUse)) {
-    const filesDir = path.join(tmpDir, "files");
-    fs.mkdirSync(filesDir, { recursive: true });
-    fs.copyFileSync(sourceToUse, path.join(filesDir, "source.c"));
-  }
+  // `programSource` has the fixture's `source.c` link already followed.
+  const filesDir = path.join(tmpDir, "files");
+  fs.mkdirSync(filesDir, { recursive: true });
+  fs.copyFileSync(fixture.programSource, path.join(filesDir, "source.c"));
 
   // Copy binaries directory if present (contains the original platform binary).
-  const binariesDir = path.join(platformDir, "binaries");
+  const binariesDir = path.join(fixture.dir, "binaries");
   if (fs.existsSync(binariesDir)) {
     copyDirSync(binariesDir, path.join(tmpDir, "binaries"));
   }
@@ -281,7 +304,10 @@ const platforms: string[] = (() => {
 // ---------------------------------------------------------------------------
 
 base.describe("cross-platform portable trace replay", () => {
-  base.describe.configure({ mode: "serial", timeout: 120_000 });
+  // Not `serial`: each platform is an independent session, and one
+  // platform's failure must not hide the outcome of the others. The suite
+  // runs with one worker, so the ct host instances still do not overlap.
+  base.describe.configure({ timeout: 120_000 });
 
   base.skip(
     platforms.length === 0,
@@ -289,9 +315,17 @@ base.describe("cross-platform portable trace replay", () => {
   );
 
   for (const platform of platforms) {
-    base(`${platform}: portable trace loads in browser`, async () => {
-      const platformDir = path.join(MCR_DIR, platform);
-      const traceFolder = prepareTraceFolder(platformDir);
+    base(`${platform}: portable trace replays, or the user sees its refusal`, async () => {
+      const fixture = mcrPortableFixture(MCR_DIR, platform);
+      const expectation = expectedMcrPortableOutcome(fixture);
+      console.log(
+        `# cross-platform test [${platform}]: expected outcome on ` +
+          `${process.platform}-${process.arch}: ` +
+          (expectation.kind === "replay"
+            ? "replay"
+            : `refused by the ${expectation.refusedBy} (${expectation.reason})`),
+      );
+      const traceFolder = prepareTraceFolder(fixture);
       let ctProcess: childProcess.ChildProcess | null = null;
       let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
@@ -343,6 +377,40 @@ base.describe("cross-platform portable trace replay", () => {
         ctProcess.stderr?.on("data", (chunk: Buffer) => {
           ctStderr.push(chunk.toString());
         });
+        const ctExit = new Promise<number | null>((resolve) => {
+          ctProcess?.on("exit", (code) => resolve(code));
+        });
+
+        // -- A container this build does not read: ct host refuses it -------
+        //
+        // The import reader refuses the fixture before anything is served,
+        // so there is no page to look at. What the user sees is ct host's
+        // output and its exit. The reason text is matched, not the way ct
+        // host reports it: today it ends in an unhandled exception
+        // (codetracer-pm/issues/2026-10-04-ct-importer-turns-a-container-refusal-into-false.md),
+        // and a clean refusal must pass too. The android-arm64 and ios-arm64
+        // fixtures are such containers until they are re-recorded
+        // (codetracer-pm/issues/2026-10-02-example-recordings-fixtures-are-container-v3-v4.md).
+        if (expectation.kind === "refused" && expectation.refusedBy === "import-reader") {
+          let refusalTimer: NodeJS.Timeout | undefined;
+          const exitCode = await Promise.race([
+            ctExit,
+            new Promise<"still running">((resolve) => {
+              refusalTimer = setTimeout(() => resolve("still running"), IMPORT_REFUSAL_TIMEOUT_MS);
+            }),
+          ]);
+          clearTimeout(refusalTimer);
+          const output = ctStdout.join("") + ctStderr.join("");
+          expect(
+            exitCode,
+            `[${platform}] ct host must refuse the fixture and exit (${expectation.reason}); ` +
+              `output so far:\n${output}`,
+          ).not.toBe("still running");
+          expect(exitCode, `[${platform}] ct host exit code; output:\n${output}`).not.toBe(0);
+          expect(output, `[${platform}] ct host must name the refusal`).toMatch(expectation.refusal);
+          console.log(`# cross-platform test [${platform}]: ct host refused the fixture, exit ${exitCode}`);
+          return;
+        }
 
         // -- Launch browser and connect to ct host ----------------------------
         const chromiumPath = resolveChromiumPath();
@@ -387,35 +455,38 @@ base.describe("cross-platform portable trace replay", () => {
           );
         }
 
-        console.log(`# ct host connected for ${platform}, verifying GUI...`);
+        console.log(`# ct host connected for ${platform}, observing the session...`);
 
-        // -- Assertions: verify the GUI loaded --------------------------------
-
-        // 1. Page title should contain "CodeTracer" (set by the frontend).
-        await expect(async () => {
-          const title = await page.title();
-          expect(title.toLowerCase()).toContain("codetracer");
-        }).toPass({ timeout: 30_000, intervals: [1_000] });
-
-        // 2. The golden-layout panels should be visible — this confirms the
-        //    backend connected and delivered trace data to the frontend.
-        const glComponent = page.locator(".lm_content");
-        await expect(glComponent.first()).toBeVisible({ timeout: 30_000 });
-
-        // 3. Multiple golden-layout items should be present (panels like editor,
-        //    event log, call trace, state, etc.).
-        const glItems = page.locator(".lm_item");
-        const itemCount = await glItems.count();
-        expect(itemCount).toBeGreaterThan(2);
-
-        // 4. The page body should have actual content (not empty or stuck on
-        //    a loading screen).
-        const bodyText = await page.evaluate(
-          () => document.body?.innerText ?? "",
+        // -- Assertions: the replay's own output, or the refusal ------------
+        //
+        // Title, panels and layout items are present before any replay
+        // answers, so they say nothing about the recording. The status bar's
+        // location in the recorded program is produced only by a replay, and
+        // a refusal reaches the user as an error notification.
+        const statusBar = new StatusBar(page, page.locator("#status-base"));
+        const observation = await observeMcrSession(statusBar, fixture);
+        console.log(
+          `# cross-platform test [${platform}]: location=` +
+            JSON.stringify(observation.replayLocation) +
+            ` notifications=${JSON.stringify(observation.notifications)}`,
         );
-        expect(bodyText.length).toBeGreaterThan(0);
+        // The symptom of an open, recorded defect, with its cause in the
+        // replay worker's own log, is reported as not verified, as the issue
+        // allows; every other outcome is asserted. The logs are read now,
+        // while ct host's replay server (and so its run directory) is alive.
+        const workerLogs = replayWorkerLogs(ctStdout.join("") + ctStderr.join(""));
+        console.log(
+          `# cross-platform test [${platform}]: replay worker logs read from ` +
+            `${JSON.stringify(workerLogs.runDirs)} (${workerLogs.text.length} bytes)`,
+        );
+        const notVerified = knownDefectReport(observation, expectation, fixture, workerLogs);
+        if (notVerified !== null) {
+          console.log(`# cross-platform test [${platform}]: ${notVerified}`);
+          base.skip(true, notVerified);
+        }
+        assertMcrSessionOutcome(observation, expectation, fixture);
 
-        console.log(`# cross-platform replay test passed for ${platform}`);
+        console.log(`# cross-platform test [${platform}]: outcome is the expected ${expectation.kind}`);
       } finally {
         // -- Cleanup ----------------------------------------------------------
         if (ctProcess?.pid) {

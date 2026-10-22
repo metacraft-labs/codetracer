@@ -2,6 +2,8 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { ctfsMagic, readableCtfsVersions } from "./ctfs-container";
+
 export const repoRoot = path.resolve(__dirname, "../../../..");
 export const elixirOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "elixir-canonical-flow");
 export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "erlang-canonical-flow");
@@ -21,11 +23,8 @@ export const erlangOutDir = path.join(repoRoot, "target", "beam-ui-fixtures", "e
  * reuses one the backend will reject.
  */
 const expectedMetaDatVersion = 7;
-/** The CTFS container versions the backend reads (`ctfs-container.md` §1, §1a). */
-const readableCtfsVersions = [5, 6];
 /** Bit 63 of `MapBlock`: the rest is the member's only data block (§2). */
 const ctfsDirect = 1n << 63n;
-const ctfsMagic = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
 const base40Alphabet = "\0" + "0123456789abcdefghijklmnopqrstuvwxyz./-";
 
 type PreparedBeamFixtures = {

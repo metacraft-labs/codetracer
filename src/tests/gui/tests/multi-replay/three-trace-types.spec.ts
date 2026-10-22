@@ -7,10 +7,29 @@
  *
  * - **Session 0: Python** (py_console_logs/main.py) — materialized DB trace
  * - **Session 1: C / RR** (c_sudoku_solver/main.c) — rr-recorded trace
- * - **Session 2: MCR portable** (codetracer-example-recordings) — imported .ct file
+ * - **Session 2: MCR portable** (codetracer-example-recordings
+ *   `mcr/linux-x86_64`) — imported .ct file, opened through `ct-mcr
+ *   debugserver`
  *
- * This test exercises all three replay backends (DB, RR/native, MCR) in a
- * single Electron window with separate session tabs.
+ * Session 2 must end the way the specifications say it must on this host,
+ * as `expectedMcrPortableOutcome` in `lib/mcr-portable-replay.ts` decides:
+ * either the replay puts the status bar at a line of the recorded program,
+ * or the user is shown the debugserver's refusal word for word. On a Linux
+ * x86-64 host the fixture is refused: Linux trace mode serves an interpose
+ * recording only from a stage0 boundary and with one recorded thread
+ * (codetracer-pm `spec/CLI/ct-mcr/debugserver.md`, "Linux interpose
+ * recordings in trace mode"), and the fixture records four threads. Holding
+ * the imported trace's id is not evidence of either: a session holds it
+ * before any replay answers.
+ *
+ * Today the Electron GUI does not show the launch failure of a session
+ * opened after the first, although the backend sends it
+ * (codetracer-pm/issues/2026-10-22-electron-gui-does-not-show-a-later-sessions-replay-launch-failure.md).
+ * When neither a replay nor the refusal is shown, the test still asserts
+ * that the renderer received the debugserver's refusal of this recording
+ * (its `CODETRACER::dap-receive-event` input), adds a `not-verified`
+ * annotation naming that issue, and goes on. If the refusal never reached
+ * the renderer, the test fails.
  *
  * ## Prerequisites
  *
@@ -21,26 +40,28 @@
  *
  * 1. Three traces from different backends coexist in tabs.
  * 2. Each session holds the correct trace metadata (program, trace ID).
- * 3. The editor shows the correct source file for each session.
+ * 3. The editor shows the correct source file for session 0.
  * 4. Event log panel contains data with real text for session 0.
  * 5. Stepping forward (F10/next) in session 0 changes the line number.
- * 6. After switching to session 1 (C/RR), the editor shows .c source
- *    and the status bar shows a different file/line from session 0.
- * 7. Call trace has entries in session 1 after stepping.
- * 8. Switching back to session 0 preserves editor file (main.py) and
- *    the line number from our earlier step.
- * 9. Clicking an event log entry in session 0 navigates the editor.
- * 10. Session 2 (MCR) holds a distinct trace from sessions 0 and 1.
- * 11. Each session's trace ID remains distinct after the full
+ * 6. Session 2 (MCR) shows a replay of the recording (a status-bar location
+ *    in its program's source) or the refusal the specifications prescribe
+ *    for it on this host, and no source location.
+ * 7. Switching back to session 0 preserves editor file (main.py).
+ * 8. Clicking an event log entry in session 0 navigates the editor.
+ * 9. Back on session 2, its outcome has not changed: still a location in
+ *    the program for a replay, still no location for a refusal.
+ * 10. Each session's trace ID remains distinct after the full
  *     interaction round-trip (stepping, clicking, switching).
  *
  * ## Known limitations
  *
  * Loading a trace into session N stops the replay for session N-1
  * (`prepareForLoadingTrace` calls `ct/stop-replay`). Some interaction
- * checks (stepping in session 1, event log click navigation) are wrapped
- * in try/catch to handle cases where the backend has not fully started
- * or the replay was stopped.
+ * checks on sessions 0 and 1 (stepping in session 1, event log click
+ * navigation) are wrapped in try/catch to handle cases where the backend
+ * has not fully started or the replay was stopped, so this test does NOT
+ * verify that the C/RR session replays. The MCR checks are never wrapped:
+ * an MCR outcome other than the expected one fails the test.
  */
 
 import * as path from "node:path";
@@ -58,20 +79,27 @@ import {
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
+import {
+  ISSUE_LATER_SESSION_LAUNCH_FAILURE_HIDDEN,
+  assertMcrSessionOutcome,
+  expectedMcrPortableOutcome,
+  mcrPortableFixture,
+  observeMcrSession,
+  recordRendererDapEvents,
+  refusalShown,
+  rendererDapEvents,
+} from "../../lib/mcr-portable-replay";
 
 // ---------------------------------------------------------------------------
 // Path constants
 // ---------------------------------------------------------------------------
 
-/** MCR portable trace from the example-recordings sibling repo. */
-const MCR_TRACE_PATH = path.resolve(
-  codetracerInstallDir,
-  "..",
-  "codetracer-example-recordings",
-  "mcr",
-  "linux-x86_64",
-  "trace-portable.ct",
-);
+/** The MCR fixtures in the example-recordings sibling repo. */
+const MCR_DIR = path.resolve(codetracerInstallDir, "..", "codetracer-example-recordings", "mcr");
+/** The MCR fixture session 2 opens. */
+const MCR_PLATFORM = "linux-x86_64";
+/** Its portable trace. */
+const MCR_TRACE_PATH = path.join(MCR_DIR, MCR_PLATFORM, "trace-portable.ct");
 
 // ---------------------------------------------------------------------------
 // Helpers — session introspection via window.data
@@ -410,6 +438,14 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
     const layout = new LayoutPage(ctPage);
     const statusBar = new StatusBar(ctPage, ctPage.locator("#status-base"));
 
+    // What session 2 must show, decided before it is opened.
+    const mcrFixture = mcrPortableFixture(MCR_DIR, MCR_PLATFORM);
+    const mcrExpectation = expectedMcrPortableOutcome(mcrFixture);
+    console.log(
+      `# session 2 (MCR ${MCR_PLATFORM}) expected outcome on ${process.platform}-${process.arch}: ` +
+        (mcrExpectation.kind === "replay" ? "replay" : `refused (${mcrExpectation.reason})`),
+    );
+
     // ==================================================================
     // Phase 1: Session 0 — Python DB trace (py_console_logs/main.py)
     //
@@ -532,6 +568,9 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
     expect(await getActiveIndex(ctPage)).toBe(2);
     expect(await sessionHasTrace(ctPage, 2)).toBe(false);
 
+    // Record what the renderer receives from session 2's backend, so a
+    // refusal the GUI does not show can still be attributed (see below).
+    await recordRendererDapEvents(ctPage);
     await loadTraceIntoActiveSession(ctPage, mcrTraceId);
 
     // Wait for session 2 to receive its trace.
@@ -544,6 +583,54 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
     expect(trace2).not.toBeNull();
     expect(trace2!.id).toBe(mcrTraceId);
     console.log(`# session 2 (MCR): id=${trace2!.id} program=${trace2!.program}`);
+
+    // The session holds the trace before any replay answers, so the id
+    // above proves nothing about the replay. What must follow is either the
+    // replay's own output — a status-bar location in the recorded program —
+    // or the refusal the specifications prescribe on this host.
+    const mcrSessionObservation = await observeMcrSession(statusBar, mcrFixture);
+    console.log(
+      `# session 2 (MCR): expected ${mcrExpectation.kind}; location=` +
+        JSON.stringify(mcrSessionObservation.replayLocation) +
+        ` notifications=${JSON.stringify(mcrSessionObservation.notifications)}`,
+    );
+    // A replay expected on this host gets no not-verified route here: the
+    // cross-platform spec reports a known defect only with its cause read
+    // from the replay worker's log, and this test does not see the Electron
+    // app's replay server output, so a replay that does not happen fails.
+    if (
+      mcrExpectation.kind === "refused" &&
+      mcrSessionObservation.replayLocation === null &&
+      !refusalShown(mcrSessionObservation, mcrExpectation)
+    ) {
+      // Refused, and the GUI showed neither a replay nor the refusal. The
+      // GUI half cannot be verified while a later session's launch failure
+      // is not shown (issue B); the backend half still can: the renderer
+      // must have received this recording's refusal, for its own reason.
+      // The refusal names the container it refused, which lives in the
+      // folder named after the recording id, so it is attributed to this
+      // session's recording and not to another one.
+      const received = await rendererDapEvents(ctPage);
+      console.log(`# session 2 (MCR): renderer received ${JSON.stringify(received)}`);
+      const ownRefusal = received.filter(
+        (e) => mcrExpectation.refusal.test(e.text) && e.text.includes(mcrTraceId),
+      );
+      expect(
+        ownRefusal.length,
+        `session 2: the GUI showed neither a replay nor the refusal, and the renderer did ` +
+          `not receive the debugserver's refusal of recording ${mcrTraceId} either ` +
+          `(${mcrExpectation.reason}); events received: ${JSON.stringify(received)}`,
+      ).toBeGreaterThan(0);
+      testInfo.annotations.push({
+        type: "not-verified",
+        description:
+          `session 2 (MCR ${MCR_PLATFORM}): the renderer received the debugserver's refusal ` +
+          `(${ownRefusal.map((e) => e.event).join(", ")}) but the GUI did not show it; ` +
+          ISSUE_LATER_SESSION_LAUNCH_FAILURE_HIDDEN,
+      });
+    } else {
+      assertMcrSessionOutcome(mcrSessionObservation, mcrExpectation, mcrFixture);
+    }
 
     // ==================================================================
     // Phase 5: Verify all three traces are distinct
@@ -787,10 +874,11 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
     }
 
     // ==================================================================
-    // Phase 9: Switch to session 2 (MCR) — verify distinct trace
+    // Phase 9: Switch to session 2 (MCR) — same outcome, distinct trace
     //
-    // Confirm session 2 is a genuinely different trace from sessions
-    // 0 and 1 (different program, different trace ID).
+    // Confirm session 2 still shows what phase 4 asserted (a location in
+    // the recorded program for a replay, none for a refusal), and that it
+    // is a genuinely different trace from sessions 0 and 1.
     // ==================================================================
 
     await switchToSession(ctPage, 2);
@@ -805,6 +893,27 @@ test.describe("Three trace types in simultaneous tabs (DB + RR + MCR)", () => {
     expect(trace2Check!.id).not.toBe(trace1!.id);
     expect(trace2Check!.program).not.toBe(trace0!.program);
     console.log(`# phase 9: session 2 (MCR) verified distinct: id=${trace2Check!.id}, program=${trace2Check!.program}`);
+
+    // A replay must be back at a location in the program; a refused
+    // session must still show none. The refusal toast from phase 4 has
+    // dismissed itself by now, so only the absence is re-checked.
+    const SESSION2_RECHECK_REPLAY_MS = 30_000;
+    const SESSION2_RECHECK_REFUSED_MS = 5_000;
+    const session2Again = await observeMcrSession(
+      statusBar,
+      mcrFixture,
+      mcrExpectation.kind === "replay" ? SESSION2_RECHECK_REPLAY_MS : SESSION2_RECHECK_REFUSED_MS,
+    );
+    if (mcrExpectation.kind === "replay") {
+      assertMcrSessionOutcome(session2Again, mcrExpectation, mcrFixture);
+    } else {
+      expect(
+        session2Again.replayLocation,
+        `phase 9: session 2 was refused in phase 4 but now shows a location in ` +
+          `${path.basename(mcrFixture.programSource)}`,
+      ).toBeNull();
+    }
+    console.log(`# phase 9: session 2 (MCR) outcome unchanged: ${mcrExpectation.kind}`);
 
     // ==================================================================
     // Phase 10: Final session isolation verification
