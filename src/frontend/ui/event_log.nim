@@ -64,43 +64,8 @@ var tableHasLocationColumn = false
   ## (PLAT-49 part B): a change of `EventLogVM.columns` from the column menu
   ## rebuilds the table's columns.
 when defined(js):
-  proc stringifyJs(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
-  proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
 
-  proc jsonToJsObject(j: JsonNode): JsObject =
-    jsonParseJs(cstring($j))
-
-  proc jsonFromJsObject(o: JsObject): JsonNode =
-    if o.isNil:
-      return %*{}
-    parseJson($stringifyJs(o))
-
-  proc requestExtensionDap(command: cstring; args: JsObject;
-                           resolve: proc(resp: JsObject)) {.importjs: """
-    (function(command, args, resolve) {
-      if (typeof vscode === "undefined" || !vscode || typeof vscode.postMessage !== "function") {
-        resolve({});
-        return;
-      }
-      var id = "event-log-dap-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-      function onMessage(event) {
-        var message = event && event.data ? event.data : {};
-        if (message.command !== "ct-vscode-dap-response" || message.requestId !== id) {
-          return;
-        }
-        window.removeEventListener("message", onMessage);
-        resolve(message.value || {});
-      }
-      window.addEventListener("message", onMessage);
-      vscode.postMessage({
-        command: "ct-vscode-dap-request",
-        requestId: id,
-        dapCommand: String(command || ""),
-        value: args || {}
-      });
-    })(#, #, #);
-  """.}
 
 
 # ---------------------------------------------------------------------------
@@ -147,18 +112,6 @@ proc initEventLogVMFromSession*(vm: EventLogVM) =
   # VM auto-load effects need to re-bind, and those rebind when the
   # next mutation propagates.  Skip the mount-state reset on
   # replacement.
-  when defined(ctInExtension):
-    if replacing and not eventLogComponentRef.isNil:
-      isoNimEventLogMounted = false
-      let hostId =
-        if eventLogComponentRef.extensionRendererId.len > 0:
-          eventLogComponentRef.extensionRendererId
-        else:
-          cstring"eventLogComponent-0"
-      let host = document.getElementById(hostId)
-      if not host.isNil:
-        host.innerHTML = cstring""
-      tryMountIsoNimEventLogPanel()
   if not replacing:
     tryMountIsoNimEventLogPanel()
 
@@ -171,17 +124,8 @@ proc initEventLogVM() =
 
   let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
     when defined(js):
-      when defined(ctInExtension):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          requestExtensionDap(cstring(command), jsonToJsObject(args),
-            proc(raw: JsObject) =
-              try:
-                resolve(jsonFromJsObject(raw))
-              except CatchableError:
-                resolve(%*{}))
-      else:
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
     else:
       var fut = newFuture[JsonNode]("stub-backend")
       fut.complete(%*{})
@@ -601,8 +545,8 @@ proc mergeLiveDebuggerRows(self: EventLogComponent; data: var TableData): int =
 
 proc eventLogComponentFor(tab: int): EventLogComponent =
   ## The Event Log component of tab `tab` (its `componentMapping[EventLog][0]`),
-  ## falling back to the module's `eventLogComponentRef` where the tab has none
-  ## (the extension's component is not in a session's mapping).
+  ## falling back to the module's `eventLogComponentRef` where the tab has
+  ## none.
   if tab >= 0 and tab < data.sessions.len:
     let session = data.sessions[tab]
     if not session.isNil and not session.ui.isNil:
@@ -763,30 +707,6 @@ for kind, tags in kindTags:
   for tag in tags:
     tagKinds[tag].add(kind)
 
-when defined(ctInExtension):
-  var eventLogComponentForExtension* {.exportc.}: EventLogComponent
-
-  proc bindEventLogExtensionHost(component: EventLogComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    if eventLogComponentRef.isNil:
-      eventLogComponentRef = component
-    tryMountIsoNimEventLogPanel()
-
-  proc makeEventLogComponentForExtension*(id: cstring): EventLogComponent {.exportc.} =
-    if eventLogComponentForExtension.isNil:
-      if data.sessions.len == 0:
-        return
-      eventLogComponentForExtension = makeEventLogComponent(data, 0, inExtension = true)
-    if eventLogComponentForExtension.extensionRendererId.len == 0:
-      eventLogComponentForExtension.extensionRendererId = id
-      eventLogComponentForExtension.bindEventLogExtensionHost()
-    result = eventLogComponentForExtension
 
 proc resizeEventLogHandler*(self: EventLogComponent)
 
@@ -2009,13 +1929,12 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
     resizeObserver.observe(componentTab)
     self.resizeObserver = resizeObserver
 
-  if not self.inExtension:
-    if not self.isDetailed:
-      jq(denseWrapper).show()
-      jq(detailedWrapper).hide()
-    else:
-      jq(denseWrapper).hide()
-      jq(detailedWrapper).show()
+  if not self.isDetailed:
+    jq(denseWrapper).show()
+    jq(detailedWrapper).hide()
+  else:
+    jq(denseWrapper).hide()
+    jq(detailedWrapper).show()
 
   self.denseTable.updateTableRows(redraw = true)
   self.detailedTable.updateTableRows(redraw = true)
@@ -2026,9 +1945,6 @@ proc eventLogAfterRedraws(self: EventLogComponent) =
 # Generic callers are expected to use direct IsoNim mount paths. All
 # real rendering is handled by tryMountIsoNimEventLogPanel().
 
-when defined(ctInExtension):
-  method redrawForExtension*(self: EventLogComponent) =
-    self.bindEventLogExtensionHost()
 
 proc scrollOnMove*(self: EventLogComponent, rowSelected: int) =
   if rowSelected > self.denseTable.endRow - 1 or rowSelected < self.denseTable.startRow:
@@ -2345,7 +2261,3 @@ method register*(self: EventLogComponent, api: MediatorWithSubscribers) =
   )
 
   api.emit(InternalLastCompleteMove, EmptyArg())
-
-proc registerEventLogComponent*(component: EventLogComponent, api: MediatorWithSubscribers) {.exportc.} =
-  initEventLogVM()
-  component.register(api)

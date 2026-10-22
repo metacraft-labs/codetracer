@@ -8,10 +8,9 @@ import
 
 import std/options
 import isonim/web/dom_api as dom_api
-when not defined(ctInExtension):
-  import isonim/web/web_renderer
-  import ./panel_host
-  from ../viewmodel/session_vm import SessionViewModel
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 
 var shaderDebugVMInstance: ShaderDebugVM
 
@@ -42,16 +41,15 @@ proc loadShaderDebugFromPixelHistoryEntry*(x, y, frame: int;
   if not shaderDebugVMInstance.isNil:
     shaderDebugVMInstance.loadFromPixelHistoryEntry(x, y, frame, entry)
 
-when not defined(ctInExtension):
-  # The panel host mounts the pane into the container GoldenLayout creates
-  # (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
-  # here re-mounts it when a trace loads or the step changes.
-  setPanelRenderer(Content.ShaderDebug,
-    proc(r: WebRenderer; host: dom_api.Element;
-         session: SessionViewModel): dom_api.Element =
-      initShaderDebugVM()
-      renderShaderDebugPanel[WebRenderer, dom_api.Element](
-        r, shaderDebugVMInstance))
+# The panel host mounts the pane into the container GoldenLayout creates
+# (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
+# here re-mounts it when a trace loads or the step changes.
+setPanelRenderer(Content.ShaderDebug,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    initShaderDebugVM()
+    renderShaderDebugPanel[WebRenderer, dom_api.Element](
+      r, shaderDebugVMInstance))
 
 method register*(self: ShaderDebugComponent, api: MediatorWithSubscribers) =
   self.api = api

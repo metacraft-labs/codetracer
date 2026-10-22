@@ -101,7 +101,7 @@ suite "PLAT-47 deliverable 4: one working tree for every VCS pane":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       vm.refreshFromFacade(newDesktopNativePlatform().vcs, repo)
-      let root = renderVCSPanel(MockRenderer(), vm)
+      let root = renderVCSPanel[MockRenderer, MockNode](MockRenderer(), vm)
       var sections: seq[MockNode] = @[]
       root.allByClass("vcs-working-tree", sections)
       ck sections.len == 1

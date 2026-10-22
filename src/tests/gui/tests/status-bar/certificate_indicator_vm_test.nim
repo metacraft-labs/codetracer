@@ -1303,3 +1303,167 @@ suite "SB-2b: the indicator decides on content":
     check gitDirTrigger("/w/demo-project/.git/ORIG_HEAD") == citCommitChanged
     check gitDirTrigger("C:\\w\\.git\\index") == citIndexChanged
     check gitDirTrigger("/w/demo-project/.git/indexes") == citCommitChanged
+
+# ---------------------------------------------------------------------------
+# A refresh whose facts arrive later (Status-Bar.md, "A refresh never stalls
+# the window")
+# ---------------------------------------------------------------------------
+#
+# On the desktop the facts are gathered asynchronously: git runs in child
+# processes and the answer arrives on a later turn of the event loop. The
+# gatherer below is the honest stand-in for that: it records each request and
+# the test delivers the facts — real facts, from the fake world above — when
+# it chooses. What is under test is the ViewModel's handling of the delay:
+# the previous answer stays until a complete one arrives, a partial one is
+# never shown, and a trigger during a refresh is not dropped. Built at module
+# level for the `nim js` reason recorded above.
+
+type
+  DeferredGather = ref object
+    waiting: seq[proc(facts: CertificateIndicatorFacts)]
+    started: int
+
+  RefreshLog = ref object
+    changes: seq[bool]
+      ## Every `onRefreshed` call, in order, with its `changed` flag.
+
+proc deferredGatherer(deferred: DeferredGather): CertificateFactsGatherer =
+  result = proc(done: proc(facts: CertificateIndicatorFacts)) {.closure.} =
+    inc deferred.started
+    deferred.waiting.add done
+
+proc deliver(deferred: DeferredGather; facts: CertificateIndicatorFacts) =
+  let done = deferred.waiting[0]
+  deferred.waiting.delete(0)
+  done(facts)
+
+proc recorder(log: RefreshLog): proc(changed: bool) =
+  result = proc(changed: bool) = log.changes.add changed
+
+proc notLookedYet(model: CertificateIndicatorModel): bool =
+  model.state == cisNoCertificates and model.summary == "Not looked yet."
+
+suite "a refresh whose facts arrive later":
+
+  test "nothing changes until the facts arrive, then onRefreshed reports the change":
+    let world = newWorld()
+    discard world.withCertificate(sampleCertificate())
+    let deferred = DeferredGather()
+    let log = RefreshLog()
+    let vm = newCertificateIndicatorVmWith(deferredGatherer(deferred))
+    vm.onRefreshed = recorder(log)
+
+    check not vm.refresh(citStartup)
+    check vm.refreshInFlight
+    check deferred.started == 1
+    check vm.refreshes == 1
+    # Before the first answer: "not looked yet", never a guess.
+    check vm.model.notLookedYet
+    check vm.revision == 0
+    check log.changes.len == 0
+
+    deferred.deliver(world.facts)
+    check not vm.refreshInFlight
+    check log.changes == @[true]
+    check vm.revision == 1
+    check vm.model.state == cisCertified
+
+  test "the previous answer stays while a refresh is in flight":
+    let world = newWorld()
+    discard world.withCertificate(sampleCertificate(content = TreeA))
+    let deferred = DeferredGather()
+    let log = RefreshLog()
+    let vm = newCertificateIndicatorVmWith(deferredGatherer(deferred))
+    vm.onRefreshed = recorder(log)
+    discard vm.refresh(citStartup)
+    deferred.deliver(world.facts)
+    check vm.model.state == cisCertified
+
+    # An edit: W moves. Until the new facts arrive the indicator still says
+    # what it last established — not "unverifiable" for a fact still being
+    # computed, not a blank.
+    world.workingTree = TreeB
+    check not vm.refresh(citWorktreeChanged)
+    check vm.refreshInFlight
+    check vm.model.state == cisCertified
+    check vm.revision == 1
+    deferred.deliver(world.facts)
+    check vm.model.state == cisWasCertified
+    check vm.revision == 2
+    check log.changes == @[true, true]
+
+    # A refresh that finds nothing new reports `changed = false` and does not
+    # move the revision.
+    discard vm.refresh(citManualRefresh)
+    deferred.deliver(world.facts)
+    check log.changes == @[true, true, false]
+    check vm.revision == 2
+
+  test "a trigger during a refresh causes exactly one more, with the latest trigger":
+    let world = newWorld()
+    discard world.withCertificate(sampleCertificate(content = TreeA))
+    let deferred = DeferredGather()
+    let log = RefreshLog()
+    let vm = newCertificateIndicatorVmWith(deferredGatherer(deferred))
+    vm.onRefreshed = recorder(log)
+
+    discard vm.refresh(citStartup)
+    # What the first gather read when it started: a world of its own, because
+    # the fake world's oracles read it when asked, not when built.
+    let earlier = newWorld()
+    discard earlier.withCertificate(sampleCertificate(content = TreeA))
+    let firstFacts = earlier.facts
+    # The facts move while the first gather is in flight, and three triggers
+    # arrive. They coalesce into ONE follow-up: the facts it reads are the
+    # current ones whichever trigger asked.
+    world.workingTree = TreeB
+    check not vm.refresh(citIndexChanged)
+    check not vm.refresh(citStoreChanged)
+    check not vm.refresh(citCommitChanged)
+    check deferred.started == 1
+    check vm.refreshes == 4
+    check vm.lastTrigger == citCommitChanged
+
+    # The first gather completes with what it read when it started; the
+    # follow-up starts right after, once.
+    deferred.deliver(firstFacts)
+    check vm.model.state == cisCertified
+    check log.changes == @[true]
+    check deferred.started == 2
+    check vm.refreshInFlight
+    check vm.lastTrigger == citCommitChanged
+
+    deferred.deliver(world.facts)
+    check vm.model.state == cisWasCertified
+    check log.changes == @[true, true]
+    check deferred.started == 2
+    check not vm.refreshInFlight
+
+  test "a reader still refreshes synchronously, and reports through onRefreshed":
+    ## The native and headless callers build the ViewModel over a reader, and
+    ## keep its synchronous contract: `refresh` answers whether the model
+    ## changed, there and then.
+    let world = newWorld()
+    discard world.withCertificate(sampleCertificate())
+    let log = RefreshLog()
+    let vm = newCertificateIndicatorVm(world.reader)
+    vm.onRefreshed = recorder(log)
+    check vm.refresh(citStartup)
+    check not vm.refreshInFlight
+    check vm.model.state == cisCertified
+    check log.changes == @[true]
+    check not vm.refresh(citManualRefresh)
+    check log.changes == @[true, false]
+
+  test "selecting the indicator toggles the disclosure at once, refresh or not":
+    let world = newWorld()
+    discard world.withCertificate(sampleCertificate())
+    let deferred = DeferredGather()
+    let vm = newCertificateIndicatorVmWith(deferredGatherer(deferred))
+    vm.toggleDisclosure()
+    check vm.disclosed
+    check vm.refreshInFlight
+    vm.toggleDisclosure()
+    check not vm.disclosed
+    deferred.deliver(world.facts)
+    check vm.model.state == cisCertified

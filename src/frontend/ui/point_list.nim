@@ -23,7 +23,3 @@ import
 
 method register*(self: PointListComponent, api: MediatorWithSubscribers) =
   self.api = api
-
-proc registerPointListComponent*(component: PointListComponent,
-                                 api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

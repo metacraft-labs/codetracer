@@ -1071,4 +1071,3 @@ proc loadEditingKeymap*(base: EditingKeymap; text: string): EditingKeymapLoad =
       model: model, scope: BindingScope(modes: modes, products: {}, panes: {}),
       chords: chords, operation: name, args: args,
       spelling: chords.join(" "))
-

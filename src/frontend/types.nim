@@ -587,7 +587,6 @@ type
     readOnly*: js
     content*: Content
     layoutItem*: GoldenContentItem
-    inExtension*: bool
     api*: MediatorWithSubscribers
     location*: Location
     stableBusy*: bool
@@ -719,7 +718,6 @@ type
     liveDebugRows*: seq[TableRow]
     receivedUpdates*: bool
     pendingReloadRetries*: int
-    extensionRendererId*: cstring
 
 
 
@@ -775,7 +773,6 @@ type
     values*:        seq[ValueComponent]
     service*:       DebuggerService
     locals*:        seq[Variable]
-    extensionRendererId*: cstring
 
   # (PLAT-51: `TimelineMode` and `TimelineComponent` stood here; the Timeline
   # panel is removed.)
@@ -967,8 +964,8 @@ type
       ## a single collection would make each rebuild throw the other away.
     flowValueWidgets*: seq[js]
       ## The Monaco **content widgets** carrying the review's parallel value
-      ## bands (UD-3) — one per annotated line, each holding the
-      ## `.flow-parallel` row the debugger's own `ui/flow.renderFlow` builds.
+      ## bands (UD-3) — one per annotated line, each holding a `.flow-parallel`
+      ## row of the shared flow views (`isonim_flow_value_view`).
       ##
       ## A content widget rather than an injected-text decoration, which is
       ## what RV-5 used: injected text is part of the code line, so it starts
@@ -1018,7 +1015,6 @@ type
     minNameWidth*: float # %
     maxNameWidth*: float # %
     totalValueWidth*: float # %
-    extensionRendererId*: cstring
 
   CallExpandedValuesComponent* = ref object of Component
     values*:        JsAssoc[cstring, ValueComponent]
@@ -1082,7 +1078,6 @@ type
     width*: cstring
     resizeObserver*: ResizeObserver
     isCalltrace*: bool
-    extensionRendererId*: cstring
 
     debugger*:       DebuggerService
     service*:        CalltraceService
@@ -1278,7 +1273,6 @@ type
 
   RequestPanelComponent* = ref object of Component
     panelState*: RequestPanelState
-    extensionRendererId*: cstring
 
   LowLevelCodeComponent* = ref object of Component
     ## The Low Level Code pane's layout entry. The pane itself is the
@@ -1428,7 +1422,6 @@ type
     runTraceButtonDom*:     kdom.Element
     searchInput*:           kdom.Element
     traceViewDom*:          kdom.Element
-    extensionRendererId*:   cstring
     lineCount*:             int
     resultsHeight*:         int
     toggleState*:           bool
@@ -1631,7 +1624,6 @@ type
     leftPos*: cstring
     lastScrollFireTime*: int64
     position*: int
-    extensionRendererId*: cstring
     # codeID*: int64
 
 
@@ -1960,7 +1952,6 @@ type
     renderedEventIndex*: int
     currentLine*:    int
     initialUpdate*:  bool
-    extensionRendererId*: cstring
 
   LayoutSizes* = ref object
     normalSize*: float
@@ -2582,8 +2573,8 @@ when defined(ctRenderer):
   let firstSessionDapApi = data.dapApi
   data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     # Guard against -1 sentinel: activeSessionIndex is -1 when no session is
-    # active (e.g. extension webview receives a CtCompleteMove before the
-    # session is fully initialized).  Dropping the event is safe; the component
+    # active (a CtCompleteMove before the session is fully initialized).
+    # Dropping the event is safe; the component
     # path (register -> api.subscribe) handles it independently.
     if data.activeSessionIndex >= 0:
       # This is the first session's move, and it arrives here even while
@@ -3073,17 +3064,12 @@ method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {
 # to THIS declaration, dispatched dynamically, and discarded. Deleted rather
 # than fixed; the history now belongs to `DebugControlsVM`, which the mouse
 # handlers reach through `ui/debug_toolbar.moveInDebugHistory`.
-method redrawForExtension*(self: Component) {.base.} =
-  discard
 
 method redrawForSinglePage*(self: Component) {.base.} =
   discard
 
 method redraw*(self: Component) {.base.} =
-  if self.inExtension:
-    self.redrawForExtension()
-  else:
-    self.redrawForSinglePage()
+  self.redrawForSinglePage()
 
 # templates for singletons
 template welcomeScreen*(data: Data): WelcomeScreenComponent =

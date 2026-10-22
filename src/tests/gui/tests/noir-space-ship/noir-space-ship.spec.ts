@@ -1106,17 +1106,139 @@ test.describe("NoirSpaceShip", () => {
 
     expect(actualCallOptions).toEqual(expectedCallOptions);
 
-    const args = await callEntry.arguments();
-    const argument = args[0];
+    // Entry 0 is `<toplevel>`, which takes no arguments: the argument menu is
+    // read on the first call that has one (`main` takes four).
+    let argument: Awaited<ReturnType<CallTraceEntry["arguments"]>>[number] | undefined;
+    for (const entry of ctEntries) {
+      argument = (await entry.arguments())[0];
+      if (argument !== undefined) break;
+    }
     expect(argument).toBeDefined();
 
-    const argumentOptions = (await argument.contextMenuEntries())
+    const argumentOptions = (await argument!.contextMenuEntries())
       .slice()
       .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    const expectedArgumentOptions = [...argument.expectedContextMenuEntries]
+    const expectedArgumentOptions = [...argument!.expectedContextMenuEntries]
       .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
     expect(argumentOptions).toEqual(expectedArgumentOptions);
+  });
+
+  test("Escape closes the call trace context menu", async ({ ctPage }) => {
+    // Once open, the context menu takes `Escape` (`context-menu.close`,
+    // CUA-Keymap.md §3.8) — not the call trace under it. The desktop's key
+    // router used to resolve `Escape` to the list's `list.clear-selection`,
+    // run it and stop the event, so the menu never closed.
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    const callTrace = (await layout.callTraceTabs())[0];
+    await callTrace.clickTab();
+    callTrace.invalidateEntries();
+    const callEntry = (await callTrace.getEntries(true))[0];
+    expect(callEntry).toBeDefined();
+
+    const menu = await callEntry.openContextMenu();
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    await ctPage.keyboard.press("Escape");
+
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+    // ONE operation ran, the menu's: what the router resolved, in order
+    // (`ui/key_router.traceOperation`).
+    expect(await ctPage.evaluate(() =>
+      ((globalThis as any).__ctKeyTrace ?? []).slice())).toEqual(["context-menu.close"]);
+  });
+
+  // The rest of the open menu's keys (CUA-Keymap.md §3.8): the arrows,
+  // `Home` / `End` walk its rows (the keyboard row is `.ct-menu-item--active`)
+  // and `Enter` chooses one — not the pane under the menu.
+  const activeMenuRow = (page: Page) => page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(
+      "#context-menu-container .context-menu-item"));
+    return { index: rows.findIndex((r) => r.classList.contains("ct-menu-item--active")),
+             count: rows.length };
+  });
+  const keyTraceOf = (page: Page) => page.evaluate(() =>
+    ((globalThis as any).__ctKeyTrace ?? []).slice());
+
+  test("the arrows, Home and End walk the context menu", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    // The flow-value menu: several rows, so walking and wrapping show.
+    const editor = (await layout.editorTabs())[0];
+    let flowValue: FlowValue | null = null;
+    await retry(
+      async () => {
+        for (const val of await editor.flowValues()) {
+          if (await val.supportsScratchpad()) {
+            flowValue = val;
+            return true;
+          }
+        }
+        return false;
+      },
+      { maxAttempts: 20, delayMs: 200 },
+    );
+    expect(flowValue).not.toBeNull();
+    const menu = await flowValue!.openContextMenu();
+    const { count } = await activeMenuRow(ctPage);
+    expect(count).toBeGreaterThan(1);
+    expect((await activeMenuRow(ctPage)).index).toBe(-1);
+
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    await ctPage.keyboard.press("ArrowDown");
+    expect((await activeMenuRow(ctPage)).index).toBe(0);
+    await ctPage.keyboard.press("ArrowDown");
+    expect((await activeMenuRow(ctPage)).index).toBe(1);
+    await ctPage.keyboard.press("End");
+    expect((await activeMenuRow(ctPage)).index).toBe(count - 1);
+    await ctPage.keyboard.press("ArrowDown");   // wraps to the top
+    expect((await activeMenuRow(ctPage)).index).toBe(0);
+    await ctPage.keyboard.press("ArrowUp");     // and back to the bottom
+    expect((await activeMenuRow(ctPage)).index).toBe(count - 1);
+    await ctPage.keyboard.press("Home");
+    expect((await activeMenuRow(ctPage)).index).toBe(0);
+    expect(await keyTraceOf(ctPage)).toEqual([
+      "context-menu.focus-next", "context-menu.focus-next",
+      "context-menu.focus-last", "context-menu.focus-next",
+      "context-menu.focus-previous", "context-menu.focus-first",
+    ]);
+    await expect(menu.container).toBeVisible();
+
+    await ctPage.keyboard.press("Escape");
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+  });
+
+  test("Enter chooses the context menu's highlighted entry", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    const callTrace = (await layout.callTraceTabs())[0];
+    await callTrace.clickTab();
+    callTrace.invalidateEntries();
+    const callEntry = (await callTrace.getEntries(true))[0];
+    expect(callEntry).toBeDefined();
+    await callEntry.expandChildren();
+    expect(await callEntry.hasExpandedChildren()).toBe(true);
+
+    const menu = await callEntry.openContextMenu();
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    // With no row highlighted, Enter chooses nothing.
+    await ctPage.keyboard.press("Enter");
+    await expect(menu.container).toBeVisible();
+    // "Collapse Call Children", highlighted and chosen from the keyboard.
+    await ctPage.keyboard.press("ArrowDown");
+    await ctPage.keyboard.press("Enter");
+
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+    expect(await keyTraceOf(ctPage)).toEqual([
+      "context-menu.accept", "context-menu.focus-next", "context-menu.accept",
+    ]);
+    await retry(async () => !(await callEntry.hasExpandedChildren()),
+                { maxAttempts: 50, delayMs: 200 });
+    expect(await callEntry.hasExpandedChildren()).toBe(false);
+    await callEntry.expandChildren();
   });
 
   test("flow context menu options", async ({ ctPage }) => {

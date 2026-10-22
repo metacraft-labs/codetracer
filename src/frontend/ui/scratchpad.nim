@@ -33,10 +33,6 @@ from ../viewmodel/store/types as vmtypes import ScratchpadValueEntry
 from ../viewmodel/viewmodels/scratchpad_vm import
   ScratchpadVM, createScratchpadVM,
   addValue, removeValue, clearValues, setLocals, addFromExpression
-when defined(ctInExtension):
-  from isonim/web/dom_api import nil
-  import isonim/web/web_renderer
-  import ../viewmodel/views/isonim_scratchpad_view
 
 # ---------------------------------------------------------------------------
 # The session's ViewModel and the registered component, so the legacy
@@ -49,50 +45,11 @@ var scratchpadComponentRef: ScratchpadComponent
 
 # "Pin to scratchpad" (Value-Origin-Tracking.md §3.3, §3.5) lands in THIS
 # pane's ViewModel: the session's, once `initScratchpadVMFromSession` has
-# installed it (the VS Code extension's stub-backed one there). `ui/state.nim` owns the
-# OriginChainVM that pins and cannot import this module (this module imports
-# it), so the target is handed over as a resolver.
+# installed it. `ui/state.nim` owns the OriginChainVM that pins and cannot
+# import this module (this module imports it), so the target is handed over
+# as a resolver.
 installScratchpadForPins(proc(): ScratchpadVM = scratchpadVMInstance)
 
-when defined(ctInExtension):
-  var extensionMountedHost: dom_api.Element
-    ## The webview element the extension's pane was mounted into.
-
-  proc mountScratchpadForExtension()
-
-# ---------------------------------------------------------------------------
-# Component extension (ctInExtension boiler-plate).
-#
-# Preserved from the legacy module so the extension entry-point still
-# resolves to a valid ``ScratchpadComponent``; the in-extension
-# surface has no panel markup of its own because the IsoNim view is
-# the production renderer.
-# ---------------------------------------------------------------------------
-
-when defined(ctInExtension):
-  var scratchpadComponentForExtension* {.exportc.}: ScratchpadComponent
-
-  proc bindScratchpadExtensionHost(component: ScratchpadComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    # Mount the scratchpad panel into the container the extension webview
-    # provides.
-    mountScratchpadForExtension()
-
-  proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
-    if scratchpadComponentForExtension.isNil:
-      if data.sessions.len == 0:
-        return
-      scratchpadComponentForExtension = makeScratchpadComponent(data, 0, inExtension = true)
-    if scratchpadComponentForExtension.extensionRendererId.len == 0:
-      scratchpadComponentForExtension.extensionRendererId = id
-      scratchpadComponentForExtension.bindScratchpadExtensionHost()
-    result = scratchpadComponentForExtension
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers.
@@ -208,9 +165,7 @@ proc registerLocals*(self: ScratchpadComponent,
 proc registerValue*(self: ScratchpadComponent,
                     variable: ValueWithExpression) =
   ## Append a captured value to both the legacy cache and the parallel
-  ## VM.  The legacy ``ValueComponent`` shell is still constructed so
-  ## any historical non-render Karax-side caller (e.g. the in-
-  ## extension build path) keeps compiling.
+  ## VM.
   let value = variable.value
   let expression = variable.expression
   self.programValues.add((expression, value))
@@ -272,53 +227,17 @@ proc initScratchpadVMFromSession*(vm: ScratchpadVM) =
   if not scratchpadComponentRef.isNil:
     syncLegacyScratchpadIntoVM(scratchpadComponentRef)
 
-when defined(ctInExtension):
-  proc initScratchpadVM() =
-    ## The VS Code extension's webview has no session store: a ScratchpadVM
-    ## over a stub backend, fed by the component's events.
-    if scratchpadVMInstance != nil:
-      return
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-    scratchpadVMInstance = createScratchpadVM(createReplayDataStore(stubBackend))
-
-  proc mountScratchpadForExtension() =
-    ## Mount the pane into the element the extension's webview names.
-    if scratchpadVMInstance.isNil or scratchpadComponentForExtension.isNil:
-      return
-    let host = dom_api.getElementById(dom_api.document,
-      scratchpadComponentForExtension.extensionRendererId)
-    if dom_api.isNodeNil(dom_api.Node(host)) or host == extensionMountedHost:
-      return
-    extensionMountedHost = host
-    let node = dom_api.Node(host)
-    while not dom_api.isNodeNil(node.firstChild):
-      discard dom_api.removeChild(node, node.firstChild)
-    discard dom_api.appendChild(node, dom_api.Node(
-      renderScratchpadPanel[WebRenderer, dom_api.Element](WebRenderer(),
-        scratchpadVMInstance)))
 
 # ---------------------------------------------------------------------------
 # Component registration. The pane's view is mounted by the panel host.
 # ---------------------------------------------------------------------------
 
-when defined(ctInExtension):
-  method redrawForExtension*(self: ScratchpadComponent) =
-    self.bindScratchpadExtensionHost()
 
 method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
   ## Register the ScratchpadComponent with the mediator. Its handlers feed
   ## the session's `ScratchpadVM` once `initScratchpadVMFromSession` has
   ## installed it.
   self.api = api
-  when defined(ctInExtension):
-    initScratchpadVM()
 
   # Always adopt the newest registration as the live component: a closed and
   # re-opened pane registers a new one, and the handlers must feed through it.
@@ -362,7 +281,3 @@ method unregister*(self: ScratchpadComponent) =
   if scratchpadComponentRef == self:
     scratchpadComponentRef = nil
   procCall unregister(Component(self))
-
-proc registerScratchpadComponent*(component: ScratchpadComponent,
-                                   api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

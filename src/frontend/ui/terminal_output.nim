@@ -5,12 +5,10 @@ import
 
 # ---------------------------------------------------------------------------
 # The pane is the generic view (`viewmodel/views/isonim_terminal_output_view`)
-# over the session's `TerminalOutputVM`. On the desktop and the web page the
-# panel host (`ui/panel_host`) mounts it and reports the lines it shows; the
-# ViewModel loads those lines by window and follows the store's position, so
-# the component subscribes to nothing. The VS Code extension's webview has no
-# session store: there the component still feeds a stub-backed ViewModel from
-# its events (CtLoadedTerminal, CtUpdatedEvents, CtCompleteMove).
+# over the session's `TerminalOutputVM`. The panel host (`ui/panel_host`)
+# mounts it and reports the lines it shows; the ViewModel loads those lines by
+# window and follows the store's position, so the component subscribes to
+# nothing.
 # ---------------------------------------------------------------------------
 
 import std/json
@@ -27,9 +25,6 @@ from ../viewmodel/viewmodels/terminal_output_vm import
 import std/tables
 import isonim/core/signals
 from isonim/web/dom_api import nil
-when defined(ctInExtension):
-  from ../viewmodel/views/isonim_terminal_output_view import
-    mountIsoNimTerminalOutput
 
 # PLAT-52: no `ansi_up` here any more. A program's output reaches the DOM as
 # text nodes (`textContent`) inside spans whose style comes from the decoded
@@ -42,8 +37,6 @@ when defined(ctInExtension):
 var terminalOutputVMInstance: TerminalOutputVM
 var terminalOutputVMStore: ReplayDataStore
 
-when defined(ctInExtension):
-  proc mountTerminalOutputForExtension()
 proc rememberTerminalViews(vm: TerminalOutputVM; data: Data)
 
 # ---------------------------------------------------------------------------
@@ -61,33 +54,6 @@ proc initTerminalOutputVMFromSession*(vm: TerminalOutputVM) =
   terminalOutputVMInstance = vm
   rememberTerminalViews(vm, data)
 
-when defined(ctInExtension):
-  proc initTerminalOutputVM() =
-    ## Lazily create the parallel ``TerminalOutputVM`` backed by a stub
-    ## ``BackendService``. Fallback when no shared store has been
-    ## provided via ``initTerminalOutputVMFromSession``.
-    if terminalOutputVMInstance != nil:
-      return
-
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      when defined(js):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
-      else:
-        var fut = newFuture[JsonNode]("stub-backend")
-        fut.complete(%*{})
-        result = fut
-
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-
-    terminalOutputVMStore = createReplayDataStore(stubBackend)
-    terminalOutputVMInstance = createTerminalOutputVM(terminalOutputVMStore)
-    clog "TerminalOutputVM: parallel ViewModel instance created (stub backend)"
-    mountTerminalOutputForExtension()
 
 # ---------------------------------------------------------------------------
 # The recorded writes, handed to the shared model.
@@ -101,49 +67,6 @@ when defined(ctInExtension):
 # from those attributes (`isonim_terminal_output_view`).
 # ---------------------------------------------------------------------------
 
-when defined(ctInExtension):
-  var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent
-
-  var mountedTerminalOutputVM: TerminalOutputVM
-  var mountedTerminalOutputHost: dom_api.Element
-
-  proc mountTerminalOutputForExtension() =
-    ## Mount the pane into the element the extension's webview names
-    ## (`extensionRendererId`) — the webview is not the panel host.
-    if terminalOutputVMInstance.isNil or
-       terminalOutputComponentForExtension.isNil:
-      return
-    let host = dom_api.getElementById(
-      dom_api.document, terminalOutputComponentForExtension.extensionRendererId)
-    if dom_api.isNodeNil(dom_api.Node(host)):
-      return
-    if mountedTerminalOutputVM == terminalOutputVMInstance and
-       mountedTerminalOutputHost == host:
-      return
-    let hostNode = dom_api.Node(host)
-    while not dom_api.isNodeNil(hostNode.firstChild):
-      discard dom_api.removeChild(hostNode, hostNode.firstChild)
-    mountedTerminalOutputVM = terminalOutputVMInstance
-    mountedTerminalOutputHost = host
-    mountIsoNimTerminalOutput(host, terminalOutputVMInstance)
-
-  proc bindTerminalOutputExtensionHost(component: TerminalOutputComponent) =
-    if component.extensionRendererId.len > 0:
-      mountTerminalOutputForExtension()
-
-  proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
-    if terminalOutputComponentForExtension.isNil:
-      if data.sessions.len == 0:
-        return
-      terminalOutputComponentForExtension = makeTerminalOutputComponent(data, 0, inExtension = true)
-    if terminalOutputComponentForExtension.extensionRendererId.len == 0:
-      terminalOutputComponentForExtension.extensionRendererId = id
-      terminalOutputComponentForExtension.bindTerminalOutputExtensionHost()
-    result = terminalOutputComponentForExtension
-
-when defined(ctInExtension):
-  proc getLines(self: TerminalOutputComponent) =
-    self.api.emit(CtLoadTerminal, EmptyArg())
 
 proc terminalOutputEventsOf*(eventList: seq[ProgramEvent]):
     seq[TerminalOutputEvent] =
@@ -209,9 +132,8 @@ proc rememberTerminalViews(vm: TerminalOutputVM; data: Data) =
 proc syncTerminalOutputVM(self: TerminalOutputComponent) =
   ## Hand the recorded writes to the ``TerminalOutputVM``, the recording's
   ## remembered view choice first — where the ViewModel does not load its
-  ## own lines (the VS Code extension's stub store). A ViewModel the engine
-  ## serves by line window loads its writes itself, when its screen view is
-  ## shown.
+  ## own lines. A ViewModel the engine serves by line window loads its writes
+  ## itself, when its screen view is shown.
   if terminalOutputVMInstance.isNil or terminalOutputVMInstance.windowed:
     return
   rememberTerminalViews(terminalOutputVMInstance, self.data)
@@ -274,32 +196,7 @@ method restart*(self: TerminalOutputComponent) =
 # paths; all real DOM construction happens in
 # ``viewmodel/views/isonim_terminal_output_view.nim``.
 
-when defined(ctInExtension):
-  method redrawForExtension*(self: TerminalOutputComponent) =
-    self.bindTerminalOutputExtensionHost()
 
 method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
-  ## On the desktop and the web page the pane subscribes to nothing (see the
-  ## module header). The VS Code extension's webview feeds its stub-backed
-  ## ViewModel from the events below: its stub store cannot serve the line
-  ## window, so it asks for every write once.
+  ## The pane subscribes to nothing (see the module header).
   self.api = api
-  when defined(ctInExtension):
-    initTerminalOutputVM()
-    api.subscribe(CtLoadedTerminal, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
-      discard self.onLoadedTerminal(response)
-    )
-    api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
-      if self.initialUpdate:
-        self.getLines()
-        self.initialUpdate = false
-    )
-    api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-      self.location = response.location
-      syncTerminalOutputDebuggerPosition(response.location.rrTicks)
-    )
-    api.emit(InternalLastCompleteMove, EmptyArg())
-
-# think if it's possible to directly exportc in this way the method
-proc registerTerminalOutputComponent*(component: TerminalOutputComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

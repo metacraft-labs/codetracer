@@ -29,9 +29,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/../../../../.." && pwd)"
 
 if ! command -v nim >/dev/null 2>&1; then
-  echo "regenerate.sh: no 'nim' on PATH — run this inside the codetracer dev shell:" >&2
-  echo "  direnv exec $repo_root $0" >&2
-  exit 1
+	echo "regenerate.sh: no 'nim' on PATH — run this inside the codetracer dev shell:" >&2
+	echo "  direnv exec $repo_root $0" >&2
+	exit 1
 fi
 
 work="$(mktemp -d)"
@@ -43,8 +43,8 @@ echo "[span-stream fixtures] compiling generator with the canonical Nim writer"
 # the Nim path.
 cd "$repo_root"
 nim c -d:release --hints:off --warnings:off \
-  --out:"$work/gen_span_fixtures" \
-  "$here/gen_span_fixtures.nim"
+	--out:"$work/gen_span_fixtures" \
+	"$here/gen_span_fixtures.nim"
 
 echo "[span-stream fixtures] generating into $here"
 "$work/gen_span_fixtures" "$here"

@@ -245,3 +245,223 @@ fn a_searched_or_sorted_windows_markers_are_those_of_its_events() {
         .collect();
     assert_eq!(sorted_keys, vec![(1, "order-8")]);
 }
+
+// ---------------------------------------------------------------------------
+// The kind selection and the trace-log rows (the desktop Event Log's needs).
+// ---------------------------------------------------------------------------
+
+use codetracer_trace_types::EventLogKind as Kind;
+use db_backend::task::{EVENT_KINDS_COUNT, OrdValue, SearchValue, Stop, TableArgs, TableRow, UpdateTableArgs};
+
+/// Thirty events cycling through Write, Read and Error kinds, one tick apart
+/// at even ticks (so a tracepoint stop at an odd tick falls between two).
+fn mixed_events() -> Vec<ProgramEvent> {
+    (0..30)
+        .map(|i| ProgramEvent {
+            kind: [Kind::Write, Kind::Read, Kind::Error][i % 3],
+            direct_location_rr_ticks: 2 * i as i64,
+            ..event(i, &format!("event {i}"), "src/main.rs")
+        })
+        .collect()
+}
+
+fn only(kinds: &[Kind]) -> [bool; EVENT_KINDS_COUNT] {
+    let mut flags = [false; EVENT_KINDS_COUNT];
+    for kind in kinds {
+        flags[*kind as usize] = true;
+    }
+    flags
+}
+
+/// The rows `ct/update-table` serves for the event log's first `length`
+/// rows under `kinds` — the request the desktop pane sent until now.
+fn update_table_rows(handler: &mut Handler, kinds: [bool; EVENT_KINDS_COUNT], length: usize) -> (Vec<TableRow>, usize) {
+    let args = UpdateTableArgs {
+        table_args: TableArgs {
+            columns: vec![],
+            draw: 1,
+            length,
+            order: Vec::<OrdValue>::new(),
+            search: SearchValue::default(),
+            start: 0,
+        },
+        selected_kinds: kinds,
+        is_trace: false,
+        event_slot: 0,
+    };
+    let (update, _) = handler.event_db.update_table(args).expect("update_table");
+    (update.data.data, update.data.records_filtered)
+}
+
+fn tracepoint_stop(tracepoint_id: usize, rr_ticks: u64, iteration: usize) -> Stop {
+    Stop {
+        tracepoint_id,
+        rr_ticks: rr_ticks as _,
+        iteration,
+        path: "src/main.rs".to_string(),
+        line: 7,
+        ..Stop::default()
+    }
+}
+
+#[test]
+fn the_kind_selection_narrows_the_list_and_total_counts_the_selection() {
+    let mut handler = handler_with_events(mixed_events());
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 4, "selectedKinds": only(&[Kind::Read]) }),
+    );
+    assert_eq!(contents(&body), vec!["event 1", "event 4", "event 7", "event 10"]);
+    assert_eq!(body["total"], 10);
+    assert_eq!(body["unfilteredTotal"], 30);
+    // Each event still carries its place in the whole log.
+    assert_eq!(body["events"][1]["eventIndex"], 4);
+}
+
+#[test]
+fn the_kind_selection_is_read_in_every_shape_update_table_accepts() {
+    let mut handler = handler_with_events(mixed_events());
+    // Nim's JS backend: an object keyed by ordinal, flags as numbers.
+    let mut keyed = serde_json::Map::new();
+    for i in 0..EVENT_KINDS_COUNT {
+        keyed.insert(
+            i.to_string(),
+            serde_json::json!(if i == Kind::Error as usize { 1 } else { 0 }),
+        );
+    }
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 2, "selectedKinds": keyed }),
+    );
+    assert_eq!(contents(&body), vec!["event 2", "event 5"]);
+    assert_eq!(body["total"], 10);
+}
+
+#[test]
+fn the_kind_selection_and_a_search_combine() {
+    let mut handler = handler_with_events(mixed_events());
+    // "event 1" matches 1 and 10..19; of those, Read (i % 3 == 1) is 1, 10,
+    // 13, 16 and 19.
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 50, "search": "event 1", "selectedKinds": only(&[Kind::Read]) }),
+    );
+    assert_eq!(
+        contents(&body),
+        vec!["event 1", "event 10", "event 13", "event 16", "event 19"]
+    );
+    assert_eq!(body["total"], 5);
+}
+
+#[test]
+fn the_index_at_tick_is_the_place_in_the_selected_list() {
+    let mut handler = handler_with_events(mixed_events());
+    // Tick 20 is event 10 (Read), the fourth Read event.
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "indexOnly": true, "atRRTicks": 20, "selectedKinds": only(&[Kind::Read]) }),
+    );
+    assert_eq!(body["indexAtTick"], 3);
+    assert_eq!(body["total"], 10);
+}
+
+#[test]
+fn event_load_serves_the_events_update_table_serves() {
+    let mut handler = handler_with_events(mixed_events());
+    for kinds in [
+        [true; EVENT_KINDS_COUNT],
+        only(&[Kind::Write, Kind::Error]),
+        only(&[Kind::Read]),
+    ] {
+        let (rows, filtered) = update_table_rows(&mut handler, kinds, 100);
+        let body = load(
+            &mut handler,
+            serde_json::json!({ "start": 0, "count": 100, "selectedKinds": kinds }),
+        );
+        let served: Vec<String> = rows.iter().map(|r| r.content.clone()).collect();
+        assert_eq!(contents(&body), served, "kinds {kinds:?}");
+        assert_eq!(body["total"], filtered, "kinds {kinds:?}");
+    }
+}
+
+#[test]
+fn a_tracepoint_run_adds_its_trace_log_rows_in_step_order() {
+    let mut handler = handler_with_events(mixed_events());
+    // Tracepoint 0 hit twice, at ticks 5 and 11: between events 2/3 and 5/6.
+    handler
+        .event_db
+        .register_tracepoint_results(&[tracepoint_stop(0, 5, 0), tracepoint_stop(0, 11, 1)]);
+
+    let body = load(&mut handler, serde_json::json!({ "start": 0, "count": 100 }));
+    assert_eq!(body["total"], 32);
+    let kinds: Vec<String> = body["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .map(|e| e["kind"].to_string())
+        .collect();
+    let trace_log = serde_json::to_value(Kind::TraceLogEvent).expect("kind").to_string();
+    let at: Vec<usize> = kinds
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| **k == trace_log)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(at, vec![3, 7], "trace-log rows at {at:?}");
+
+    // The same rows `ct/update-table` serves, kind selection or not.
+    for kinds in [[true; EVENT_KINDS_COUNT], only(&[Kind::TraceLogEvent])] {
+        let (rows, filtered) = update_table_rows(&mut handler, kinds, 100);
+        let body = load(
+            &mut handler,
+            serde_json::json!({ "start": 0, "count": 100, "selectedKinds": kinds }),
+        );
+        let served: Vec<String> = rows.iter().map(|r| r.content.clone()).collect();
+        assert_eq!(contents(&body), served, "kinds {kinds:?}");
+        assert_eq!(body["total"], filtered, "kinds {kinds:?}");
+    }
+
+    // A toggled-off tracepoint takes its rows out again.
+    let table = handler.event_db.make_single_table_id(0);
+    handler.event_db.disable_table(table);
+    handler.event_db.refresh_global();
+    let body = load(&mut handler, serde_json::json!({ "start": 0, "count": 100 }));
+    assert_eq!(body["total"], 30);
+}
+
+#[test]
+fn a_tracepoint_runs_rows_leave_the_markers_on_their_events() {
+    // Markers are keyed by an event's place in the RECORDED log; with
+    // trace-log rows merged in, the search still finds a marker by its key
+    // and the page's markers still sit on their events' rows.
+    let mut handler = handler_with_events(marker_events());
+    handler
+        .event_db
+        .register_tracepoint_results(&[tracepoint_stop(0, 1, 0), tracepoint_stop(0, 3, 1)]);
+    let body = load(
+        &mut handler,
+        serde_json::json!({ "start": 0, "count": 10, "search": "ORDER-4" }),
+    );
+    assert_eq!(contents(&body), vec!["write 4"]);
+    assert_eq!(body["events"][0]["eventIndex"], 4);
+
+    // Ticks 0, 1(trace), 1, 2, 3(trace), 3, 4: the window's rows are
+    // write 0, a trace row, write 1, write 2, a trace row, write 3, write 4.
+    let page = load(&mut handler, serde_json::json!({ "start": 0, "count": 7 }));
+    assert_eq!(page["total"], 12);
+    let markers = page["markers"].as_array().expect("markers");
+    let keys: Vec<(u64, &str)> = markers
+        .iter()
+        .map(|m| (m["eventIndex"].as_u64().unwrap(), m["keyValue"].as_str().unwrap()))
+        .collect();
+    let rows = contents(&page);
+    for (row, key) in &keys {
+        let n: usize = key.trim_start_matches("order-").parse().unwrap();
+        assert_eq!(
+            rows[*row as usize],
+            format!("write {n}"),
+            "marker {key} on row {row}: {rows:?}"
+        );
+    }
+    assert_eq!(keys.len(), 3, "markers of write 0, 2 and 4: {keys:?}");
+}

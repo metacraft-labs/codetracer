@@ -98,11 +98,39 @@ OVERLAY=nix/overlays/crates-io-download-url.nix
 LEGACY_PREFIX="https://crates.io/api/v1/crates/"
 CDN_PREFIX="https://static.crates.io/crates/"
 
-# A crate that both Rust packages depend on, with the checksum its own
-# Cargo.lock records. Assertion 4 is anchored on it.
+# A crate that both Rust packages depend on, with the version and checksum
+# backend-manager's Cargo.lock records. Assertion 4 is anchored on it, and it
+# instantiates backend-manager's vendor directory, so that is the lock it reads.
+#
+# The version and checksum are READ from the lock, not written here. They used
+# to be literals (serde 1.0.219), and the first routine `cargo update` that
+# moved serde (to 1.0.229, in 01068538c) turned both identity assertions red
+# although the overlay had not changed: the probe was asking the vendor
+# directory for a crate the lock no longer named. What assertion 4 states is
+# "the derivation carries the hash ITS Cargo.lock records", so the lock is the
+# only source the expectation may come from.
 PROBE_CRATE=serde
-PROBE_VERSION=1.0.219
-PROBE_CHECKSUM=5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6
+PROBE_LOCK=src/backend-manager/Cargo.lock
+# Prints "<version> <checksum>" of the first [[package]] named $PROBE_CRATE
+# that comes from the crates.io registry; prints nothing if there is none.
+probe_lock_entry() {
+	awk -v want="$PROBE_CRATE" '
+		/^\[\[package\]\]/ { name = ""; ver = ""; reg = 0; next }
+		/^name = /     { name = $3; gsub(/"/, "", name) }
+		/^version = /  { ver = $3; gsub(/"/, "", ver) }
+		/^source = "registry\+https:\/\/github.com\/rust-lang\/crates.io-index"/ { reg = 1 }
+		/^checksum = / {
+			sum = $3; gsub(/"/, "", sum)
+			if (name == want && reg) { print ver, sum; exit }
+		}
+	' "$PROBE_LOCK"
+}
+read -r PROBE_VERSION PROBE_CHECKSUM < <(probe_lock_entry) || true
+if [ -z "${PROBE_VERSION:-}" ] || [ -z "${PROBE_CHECKSUM:-}" ]; then
+	echo "ERROR: $PROBE_LOCK names no crates.io '$PROBE_CRATE' package with a checksum;" >&2
+	echo "       assertion 4 has no anchor. Pick another crate both packages depend on." >&2
+	exit 1
+fi
 
 PASS=0
 FAIL=0

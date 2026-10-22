@@ -233,22 +233,31 @@ fn deserialize_selected_kinds<'de, D>(deserializer: D) -> Result<[bool; EVENT_KI
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    selected_kinds_from_json(&value).map_err(serde::de::Error::custom)
+}
+
+/// The event log's kind selection (`array[EventLogKind, bool]`, one flag per
+/// kind) from any of the shapes a frontend sends it in: a JSON array, a
+/// Node.js Buffer (`{"type": "Buffer", "data": [...]}`), or an object keyed
+/// by the kind's ordinal (`{"0": true, ...}`), with flags as booleans or as
+/// the numbers Nim 2.2's JS backend writes. Read by `ct/update-table` and
+/// `ct/event-load` alike, so both accept what either was sent.
+pub fn selected_kinds_from_json(value: &serde_json::Value) -> Result<[bool; EVENT_KINDS_COUNT], String> {
     use serde_json::Value;
 
-    let value = Value::deserialize(deserializer)?;
     match value {
         Value::Array(arr) => {
             if arr.len() != EVENT_KINDS_COUNT {
-                return Err(de::Error::custom(format!(
+                return Err(format!(
                     "expected array of length {}, got {}",
                     EVENT_KINDS_COUNT,
                     arr.len()
-                )));
+                ));
             }
             let mut result = [false; EVENT_KINDS_COUNT];
-            for (i, v) in arr.into_iter().enumerate() {
-                result[i] = value_as_truthy(&v);
+            for (i, v) in arr.iter().enumerate() {
+                result[i] = value_as_truthy(v);
             }
             Ok(result)
         }
@@ -268,7 +277,7 @@ where
             }
             // Handle plain object format: {"0": true, "1": true, ...}
             let mut result = [false; EVENT_KINDS_COUNT];
-            for (key, val) in &map {
+            for (key, val) in map {
                 if let Ok(idx) = key.parse::<usize>()
                     && idx < EVENT_KINDS_COUNT
                 {
@@ -277,7 +286,7 @@ where
             }
             Ok(result)
         }
-        _ => Err(de::Error::custom("selectedKinds must be an array or object")),
+        _ => Err("selectedKinds must be an array or object".to_string()),
     }
 }
 

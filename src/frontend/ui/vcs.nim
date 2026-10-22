@@ -25,25 +25,22 @@ import
 
 import git_cli
 import agent_activity
-# A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
-import isonim_panel_mount
 import ../viewmodel/viewmodels/vcs_vm
 from ../viewmodel/platform/vcs import parsePorcelainV2
 import ../viewmodel/viewmodels/review_entry
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
 
-when defined(js):
-  from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_vcs_view import
-    mountIsoNimVCSPanel, VCSCallbacks
+from isonim/web/dom_api as isonim_dom_api import nil
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
+import ../viewmodel/views/isonim_vcs_view
 
 var vcsVMInstances*: JsAssoc[int, VCSVM] = JsAssoc[int, VCSVM]{}
 var vcsComponentRefs: JsAssoc[int, VCSComponent] = JsAssoc[int, VCSComponent]{}
-var isoNimVCSMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
 
 proc syncLegacyVCSIntoVM*(self: VCSComponent)
-proc tryMountIsoNimVCSPanel*(componentId: int)
 
 # ---------------------------------------------------------------------------
 # File watching constants (Task #68)
@@ -961,120 +958,101 @@ proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
   data.startOptions.deepReview = data.deepReviewData
   startDeepReviewNavigation(data)
 
-proc tryMountIsoNimVCSPanel*(componentId: int) =
-  when defined(js):
-    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE ID, and so it is asked
-    # further down, once `container` has been resolved.
-    #
-    # This pane was the airtight case: `isoNimVCSMountedIds` was written in one
-    # place and deleted in NO place in the whole tree — `VCSComponent` has
-    # neither a `register` nor an `unregister` method — so once VCS had mounted,
-    # every later `tryMount` for that id returned immediately, for the life of
-    # the page. A mode swap destroys the host and builds an empty one with the
-    # same id, and the pane never came back. See `ui/isonim_panel_mount.nim`.
-    if not vcsComponentRefs.hasKey(componentId):
-      return
-    let component = vcsComponentRefs[componentId]
-    let vm = ensureVCSVM(component)
-    if vm.isNil:
-      return
-    # This tab's host, not the first in the document — see
-    # `findIsoNimPaneHost`. Both spellings of the label are still accepted.
-    let tab = data.activeSessionIndex
-    var host = findIsoNimPaneHost(cstring(fmt"vcsComponent-{componentId}"), tab)
-    if host.isNil:
-      host = findIsoNimPaneHost(cstring(fmt"vCSComponent-{componentId}"), tab)
-    if host.isNil:
-      return
-    let container = cast[kdom.Element](host)
-    if not isoNimPanelNeedsMount(
-        idLatchSaysMounted = isoNimVCSMountedIds.hasKey(componentId) and
-                             isoNimVCSMountedIds[componentId],
-        containerCarriesMark = isoNimPanelContainerIsMounted(
-          cast[isonim_dom_api.Element](container))):
-      return
-    component.syncLegacyVCSIntoVM()
-    let callbacks = VCSCallbacks(
-      onToggleBranchDropdown: proc() =
-        component.branchDropdownOpen = not component.branchDropdownOpen
-        component.syncLegacyVCSIntoVM(),
-      onCheckoutBranch: proc(branch: string) =
-        component.branchDropdownOpen = false
-        component.commitOffset = 0
-        component.allCommitsLoaded = false
-        component.selectedCommitIndices = @[]
-        component.lastClickedCommitIndex = -1
-        component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-        discard gitExec(@[cstring"checkout", cstring(branch)],
-                        component.getWorkingDirectory())
-        component.refreshVCSData()
-        component.syncLegacyVCSIntoVM(),
-      onSelectCommit: proc(index: int) =
-        component.selectedCommitIndices = @[index]
-        component.lastClickedCommitIndex = index
-        component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-        component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
-        component.syncLegacyVCSIntoVM(),
-      onSelectFile: proc(index: int; path, target, status: string) =
-        component.handleVCSFileSelection(index, path, target, status),
-      onToggleUnifiedDiff: proc() =
-        component.openFileMode = not component.openFileMode
-        component.syncLegacyVCSIntoVM(),
-      onSetTraceContext: proc(id: int) =
-        component.handleTraceContextSelection(id),
-      onRefresh: proc() =
-        component.refreshVCSData()
-        component.syncLegacyVCSIntoVM(),
-      onOpenFileDiff: proc(target: string) =
-        component.openUnifiedDiffTab(target),
-      onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
-        ## Multi-select accordion toggle.
-        ## • ctrl+click  — toggle this commit in/out of the expanded set.
-        ## • shift+click — expand the range from lastClickedCommitIndex to index.
-        ## • plain click — exclusive expand, or collapse if already sole selection.
-        let cwd = component.getWorkingDirectory()
-        if ctrl:
-          # Toggle individual commit without affecting others.
-          var newSel = component.selectedCommitIndices
-          let pos = newSel.find(index)
-          if pos >= 0:
-            newSel.delete(pos)
-            # Cache entry is left intact; it is simply no longer visible since
-            # the index is absent from selectedCommitIndices.
-          else:
-            newSel.add(index)
-            component.loadChangedFilesForIndex(cwd, index)
-          component.selectedCommitIndices = newSel
-          component.lastClickedCommitIndex = index
-        elif shift and component.lastClickedCommitIndex >= 0:
-          # Range-select from anchor to current index (inclusive).
-          let lo = min(component.lastClickedCommitIndex, index)
-          let hi = max(component.lastClickedCommitIndex, index)
-          var newSel = component.selectedCommitIndices
-          for i in lo..hi:
-            if i notin newSel:
-              newSel.add(i)
-              component.loadChangedFilesForIndex(cwd, i)
-          component.selectedCommitIndices = newSel
-          # Do not update anchor on shift+click (matches standard list behaviour).
+proc vcsCallbacks(component: VCSComponent): VCSCallbacks =
+  ## What the pane's controls do, on `component`'s git data.
+  VCSCallbacks(
+    onToggleBranchDropdown: proc() =
+      component.branchDropdownOpen = not component.branchDropdownOpen
+      component.syncLegacyVCSIntoVM(),
+    onCheckoutBranch: proc(branch: string) =
+      component.branchDropdownOpen = false
+      component.commitOffset = 0
+      component.allCommitsLoaded = false
+      component.selectedCommitIndices = @[]
+      component.lastClickedCommitIndex = -1
+      component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+      discard gitExec(@[cstring"checkout", cstring(branch)],
+                      component.getWorkingDirectory())
+      component.refreshVCSData()
+      component.syncLegacyVCSIntoVM(),
+    onSelectCommit: proc(index: int) =
+      component.selectedCommitIndices = @[index]
+      component.lastClickedCommitIndex = index
+      component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+      component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
+      component.syncLegacyVCSIntoVM(),
+    onSelectFile: proc(index: int; path, target, status: string) =
+      component.handleVCSFileSelection(index, path, target, status),
+    onToggleUnifiedDiff: proc() =
+      component.openFileMode = not component.openFileMode
+      component.syncLegacyVCSIntoVM(),
+    onSetTraceContext: proc(id: int) =
+      component.handleTraceContextSelection(id),
+    onRefresh: proc() =
+      component.refreshVCSData()
+      component.syncLegacyVCSIntoVM(),
+    onOpenFileDiff: proc(target: string) =
+      component.openUnifiedDiffTab(target),
+    onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
+      ## Multi-select accordion toggle.
+      ## • ctrl+click  — toggle this commit in/out of the expanded set.
+      ## • shift+click — expand the range from lastClickedCommitIndex to index.
+      ## • plain click — exclusive expand, or collapse if already sole selection.
+      let cwd = component.getWorkingDirectory()
+      if ctrl:
+        # Toggle individual commit without affecting others.
+        var newSel = component.selectedCommitIndices
+        let pos = newSel.find(index)
+        if pos >= 0:
+          newSel.delete(pos)
+          # Cache entry is left intact; it is simply no longer visible since
+          # the index is absent from selectedCommitIndices.
         else:
-          # Plain click: exclusive select or collapse when already sole.
-          if component.selectedCommitIndices == @[index]:
-            component.selectedCommitIndices = @[]
-            component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-          else:
-            component.selectedCommitIndices = @[index]
-            component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-            component.loadChangedFilesForIndex(cwd, index)
-          component.lastClickedCommitIndex = index
-        component.syncLegacyVCSIntoVM(),
-      onLoadMoreCommits: proc() =
-        component.loadMoreCommits()
-        component.syncLegacyVCSIntoVM(),
-    )
-    mountIsoNimVCSPanel(cast[isonim_dom_api.Element](container), vm,
-                        callbacks)
-    markIsoNimPanelContainerMounted(cast[isonim_dom_api.Element](container))
-    isoNimVCSMountedIds[componentId] = true
-  else:
-    discard
+          newSel.add(index)
+          component.loadChangedFilesForIndex(cwd, index)
+        component.selectedCommitIndices = newSel
+        component.lastClickedCommitIndex = index
+      elif shift and component.lastClickedCommitIndex >= 0:
+        # Range-select from anchor to current index (inclusive).
+        let lo = min(component.lastClickedCommitIndex, index)
+        let hi = max(component.lastClickedCommitIndex, index)
+        var newSel = component.selectedCommitIndices
+        for i in lo..hi:
+          if i notin newSel:
+            newSel.add(i)
+            component.loadChangedFilesForIndex(cwd, i)
+        component.selectedCommitIndices = newSel
+        # Do not update anchor on shift+click (matches standard list behaviour).
+      else:
+        # Plain click: exclusive select or collapse when already sole.
+        if component.selectedCommitIndices == @[index]:
+          component.selectedCommitIndices = @[]
+          component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+        else:
+          component.selectedCommitIndices = @[index]
+          component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+          component.loadChangedFilesForIndex(cwd, index)
+        component.lastClickedCommitIndex = index
+      component.syncLegacyVCSIntoVM(),
+    onLoadMoreCommits: proc() =
+      component.loadMoreCommits()
+      component.syncLegacyVCSIntoVM(),
+  )
+
+# The panel host mounts each VCS pane into the container GoldenLayout creates
+# (`ui/panel_host`); the factory has created the pane's component by then.
+setPanelRenderer(Content.VCS,
+  proc(r: WebRenderer; host: isonim_dom_api.Element;
+       session: SessionViewModel): isonim_dom_api.Element =
+    let mapping = data.ui.componentMapping[Content.VCS]
+    let componentId = panelHostComponentId(host)
+    let component =
+      if not mapping.isNil and mapping.hasKey(componentId):
+        VCSComponent(mapping[componentId])
+      else: nil
+    let vm = if component.isNil: nil else: ensureVCSVM(component)
+    if vm.isNil:
+      return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")
+    component.syncLegacyVCSIntoVM()
+    renderVCSPanel[WebRenderer, isonim_dom_api.Element](
+      r, vm, component.vcsCallbacks()))

@@ -21,10 +21,10 @@ import isonim/core/[owner, signals]
 
 import ../../../entries/vscode_host
 import ../../session_vm
-import ../../store/types
+import ../../store/[replay_data_store, types]
 import ../../sync/[mirror_session, transport, webview_transport]
 import ../../viewmodels/[calltrace_vm, filesystem_vm, flow_line_values,
-                         state_vm]
+                         scratchpad_vm, state_vm]
 
 var checks = 0
 var failures = 0
@@ -128,9 +128,30 @@ proc main() {.async.} =
 
   # ---- the editor's flow decorations are fed from the host's FlowVM
   var flowCalls = 0
-  host.onFlowLines(proc(path: string; lines: seq[FlowLineValue]) =
+  host.onFlowLines(proc(path: string; lines: seq[FlowLineValue];
+                        loops: seq[FlowLoopLine]) =
     inc flowCalls)
   ck flowCalls >= 1, "the flow listener is told the active session's flow"
+
+  # ---- "Add to scratchpad" in the editor reaches the session's scratchpad
+  let s1 = host.sessionView("s1")
+  s1.store.locals.locals.val = @[makeVariable(name = "x", value = "42",
+                                              typeName = "int")]
+  ck host.addToScratchpad("x"), "a local of the stop is added"
+  ck not host.addToScratchpad("nope"), "a name the stop has no value for is not"
+  ck s1.scratchpadVM.entries.val.len == 1 and
+    s1.scratchpadVM.entries.val[0].valueText == "42",
+    "a local added in the editor is pinned in the session's scratchpad"
+  ck await eventually(proc(): bool =
+    mirror.session.scratchpadVM.entries.val.len == 1),
+    "and the panel shows it"
+
+  # ---- the debug toolbar's history back / forward jump through the session
+  clearRequests("s1Requests")
+  host.moveInHistory(back = true)
+  ck await eventually(proc(): bool =
+    requested("s1Requests", "ct/history-jump")),
+    "history back jumps to the session's previous stop"
 
   # ---- a tracepoint sweep is asked for, and its answer applied
   clearRequests("s1Requests")

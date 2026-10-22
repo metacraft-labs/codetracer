@@ -391,4 +391,20 @@ fn frames_are_encoded_exactly_as_the_spec_lays_them_out() {
         delay_ms: 16.5,
     });
     assert_eq!(&frame[22..30], &16.5f64.to_bits().to_le_bytes());
+    // XhrEvent: seq, req_id, target, event, loaded, total, length_computable.
+    assert_eq!(
+        encode_frame(&Record::XhrEvent {
+            seq: 1,
+            req_id: 3,
+            target: 2,
+            event: 7,
+            loaded: 0x0102,
+            total: 0x0304,
+            length_computable: 1,
+        }),
+        [
+            36, 0, 0, 0, 0x56, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 2, 7, 2, 1, 0, 0, 0,
+            0, 0, 0, 4, 3, 0, 0, 0, 0, 0, 0, 1
+        ]
+    );
 }

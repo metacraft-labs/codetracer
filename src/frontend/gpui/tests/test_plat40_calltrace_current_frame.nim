@@ -98,8 +98,17 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 371
+  ExpectedAssertions = 106
+    ## 99 -> 106 (2026-10-22): the mark over the pane's window — a call
+    ## trace brought to the front from behind a tab (+3), and one scrolled
+    ## away, resized and scrolled back (+4). Measured.
+    ## 371 -> 99 (2026-10-22): "DRAWN differently" asserts each property once
+    ## over the unmarked rows instead of once per row. Since the pane reports
+    ## its viewport the window draws the rows it shows, not the whole trace,
+    ## so a check per row tied this count to the pane's height. Measured.
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
+  PagesFixture = "test-logs/tui-fixtures/call_pages-d6745afd1e2e"
+    ## 603 calls: a trace the pane can be scrolled far from the current call.
   CalcSource = "test-programs/calc/main.py"
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   ModuleFrame = "<__main__>"
@@ -131,6 +140,7 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                      repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = repo / CalcFixture
+let pages = repo / PagesFixture
 
 # ---------------------------------------------------------------------------
 # The expectation, derived from the RECORDED PROGRAM rather than the product
@@ -179,18 +189,22 @@ let frameOfLine = enclosingFrames(repo / CalcSource)
 
 var planCache = initTable[string, JsonNode]()
 
-proc windowPlan(width, height: int; ops: string): JsonNode =
+proc windowPlan(width, height: int; ops: string; windowOps = "";
+                layoutOps = ""; subject = calc): JsonNode =
   ## The window's root as the shipped binary reports it, at `width`x`height`
-  ## after the replay operations `ops`. Cached: one process per distinct
+  ## after the replay operations `ops`, then the window's own events
+  ## `windowOps` (`--window-ops`), over `subject` opened in the layout
+  ## `layoutOps` makes (`--layout-ops`). Cached: one process per distinct
   ## reading, because every case below would otherwise pay for a replay.
-  let key = $width & "x" & $height & "|" & ops
+  let key = $width & "x" & $height & "|" & ops & "|" & windowOps & "|" &
+            layoutOps & "|" & subject
   if key in planCache:
     return planCache[key]
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
-  if not dirExists(calc):
-    raise newException(IOError, "prerequisite missing: " & calc &
+  if not dirExists(subject):
+    raise newException(IOError, "prerequisite missing: " & subject &
                        " (run 'just test-tui' once)")
   let state = createTempDir("plat40-calltrace-", "")
   var env = newStringTable()
@@ -205,9 +219,13 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   env["CODETRACER_HOME"] = state / "ct-home"
   var args = @["--report-window-plan", "--width=" & $width,
                "--height=" & $height]
+  if layoutOps.len > 0:
+    args.add "--layout-ops=" & layoutOps
   if ops.len > 0:
     args.add "--replay-ops=" & ops
-  args.add calc
+  if windowOps.len > 0:
+    args.add "--window-ops=" & windowOps
+  args.add subject
   let errFile = genTempPath("plat40-calltrace-", ".err")
   let p = startProcess("/bin/sh",
     args = @["-c", "exec \"$0\" \"$@\" 2>" & quoteShell(errFile), bin] & args,
@@ -220,7 +238,8 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   removeDir(state)
   if rc != 0:
     checkpoint("codetracer-gpui exited " & $rc & ": " & err)
-    raise newException(IOError, "the window plan run failed (" & ops & ")")
+    raise newException(IOError, "the window plan run failed (" & ops & " | " &
+                       windowOps & ")")
   result = parseJson(output)
   planCache[key] = result
 
@@ -419,18 +438,32 @@ suite "PLAT-40 / PLAT35-F2: the pane marks the current frame, and draws it":
       let icon = row.toggleIcon
       checkpoint(vp & " the marked row's toggle icon " & icon)
       ck icon.endsWith("-active.svg")
+      # Each property is asserted ONCE over every other row, naming the rows
+      # that break it: the pane draws the rows it shows (Viewport-Driven-
+      # Loading V2), so a check per row would make this file's count a
+      # function of the pane's height rather than of the cases that ran.
       var others = 0
+      var grounded, iconless, active, bold: seq[string] = @[]
       for r in plan.callRows:
         if r.attr(CallSelectedAttr) == "true": continue
         inc others
-        ck r.style("bg").len == 0
+        let at = r.attr(CallIndexAttr)
+        if r.style("bg").len != 0: grounded.add at
         # Every other row's toggle is the plain icon, and present: a pane
         # that drew the active icon everywhere (or nowhere) fails one side.
-        ck r.toggleIcon.len > 0
-        ck not r.toggleIcon.endsWith("-active.svg")
+        if r.toggleIcon.len == 0: iconless.add at
+        if r.toggleIcon.endsWith("-active.svg"): active.add at
         for c in r{"children"}.getElems:
-          if c.attr(CallPartAttr) in ["callee", "index"]:
-            ck c.style("font_weight") != "bold"
+          if c.attr(CallPartAttr) in ["callee", "index"] and
+             c.style("font_weight") == "bold":
+            bold.add at
+      checkpoint(vp & " unmarked rows " & $others & ": grounded " &
+                 $grounded & ", no icon " & $iconless & ", active icon " &
+                 $active & ", bold " & $bold)
+      ck grounded.len == 0
+      ck iconless.len == 0
+      ck active.len == 0
+      ck bold.len == 0
       ck others > 1
 
     test "at " & vp & " the marker MOVES with the stop rather than resting":
@@ -449,6 +482,57 @@ suite "PLAT-40 / PLAT35-F2: the pane marks the current frame, and draws it":
       ck ia != ib
       ck b[0].partText("callee") == "main"
       ck entry.executionLine != inMain.executionLine
+
+suite "PLAT-40: the mark follows the pane's window, not the open's":
+
+  # The open reads ONE call-trace row; the window reports the pane's
+  # viewport at the first frame and after every committed arrangement
+  # (`main.followListViewports`), and the pane reads the section it shows.
+  # Two ways that report could lose the mark, one case each.
+
+  test "a call trace hidden at the open, brought to the front: rows, and the mark":
+    # Hidden behind Agent Activity, the pane reports nothing and keeps the
+    # open's one-row section, which cannot show the current call. Its tab
+    # pressed, the pane reads its section — and the current call is
+    # selected in it. Without that selection the rows come back unmarked.
+    let hidden = windowPlan(1440, 900, "stepIn=21,stepOut=1",
+                            layoutOps = "activate:agentActivity")
+    ck hidden.callRows.len == 0
+    let shown = windowPlan(1440, 900, "stepIn=21,stepOut=1",
+                           windowOps = "click:tab:calltrace",
+                           layoutOps = "activate:agentActivity")
+    let marked = shown.markedRows
+    checkpoint("brought to the front: rows " & $shown.callRows.len &
+               ", marked " & $marked.len)
+    ck shown.callRows.len > 1
+    ck marked.len == 1 and marked[0].partText("callee") == "main"
+
+  test "scrolled off the current call, resized, scrolled back: still marked":
+    # The resize makes the pane taller, so it reads a new section — one
+    # scrolled past the current call. A selection made again over THAT
+    # section answers none (`currentCallInSectionOf` answers only what the
+    # section shows), and the reader scrolling back would find the current
+    # call unmarked until the debugger next moved. The selection names a
+    # trace index, so it stands until a move.
+    let entry = windowPlan(1440, 900, "", subject = pages)
+    let mark = entry.markedRows
+    ck mark.len == 1
+    let away = windowPlan(1440, 900, "", subject = pages,
+      windowOps = "wheel:calltrace:100,resize:1440:1300")
+    checkpoint("scrolled away and resized: rows " & $away.callRows.len &
+               " (at the open " & $entry.callRows.len & "), first " &
+               (if away.callRows.len > 0: away.callRows[0].attr(CallIndexAttr)
+                else: "none"))
+    # The taller pane drew more rows than the open's — it read a section —
+    # and the current call is not among them.
+    ck away.callRows.len > entry.callRows.len
+    ck away.markedRows.len == 0
+    let back = windowPlan(1440, 900, "", subject = pages,
+      windowOps = "wheel:calltrace:100,resize:1440:1300,wheel:calltrace:-100")
+    let again = back.markedRows
+    checkpoint("scrolled back: marked " & $again.len)
+    ck again.len == 1 and mark.len == 1 and
+       again[0].attr(CallIndexAttr) == mark[0].attr(CallIndexAttr)
 
 suite "PLAT-40 / PLAT35-F2: every case in this file ran":
 

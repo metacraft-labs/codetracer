@@ -537,7 +537,6 @@ else:
       check noTraceBody.contains("hideWelcomeScreenSurface()")
       check noTraceBody.contains("filesystem.refreshIsoNimFilesystemPanel()")
       check noTraceBody.contains("vcs.resetAndRefreshVCS(")
-      check noTraceBody.contains("vcs.tryMountIsoNimVCSPanel(")
 
       let ipcBody = sectionBetween(uiSource,
         "proc configureIPC(data: Data) =",

@@ -25,7 +25,7 @@
 ##
 ## Runs on the C and JS backends (`vm-unit`, `vm-unit-js`).
 
-import std/[json, options, sets, unittest]
+import std/[json, options, sets, tables, unittest]
 
 import isonim/core/[async_compat, owner, signals]
 
@@ -36,6 +36,8 @@ import ../../store/types
 import ../../sync/[action_relay, mirror_session, sync_host, sync_publisher,
                    sync_subscriber, synced_signals, transport]
 import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
+                         filesystem_vm, terminal_output_model,
+                         terminal_output_vm,
                          state_vm]
 import ../../viewport
 
@@ -592,7 +594,6 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       done()
 
   test "without relayActions a mirror's ViewModel acts on its own":
-    # `ct host`'s page mirrors without relaying: its page drives the replay.
     createRoot proc(done: proc()) =
       let (primary, _) = newPrimary()
       let host = newSyncHost(manual)
@@ -603,6 +604,134 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       link.settle()
       ck mirror.session.calltraceVM.actionSink.isNil
       ck mirror.session.stateVM.actionSink.isNil
+      mirror.dispose()
+      host.dispose()
+      done()
+
+suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
+  # `ct host`: the server owns the client's session and the page mirrors it,
+  # relaying its panels' actions with `action_relay` exactly as a VS Code
+  # webview does — while its toolbar still steps the replay the page drives.
+  # The page measures its panes; the server's session has no screen, so
+  # nothing loads for a pane until the page's measurement reaches it
+  # (Viewport-Driven-Loading V3). That never happened: the page's mirror
+  # relayed nothing, the call trace stayed empty in the browser, and a click
+  # on a call went to the mirror's inert backend.
+
+  test "the call trace the page measured loads on the server's session":
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      var hostSteps: seq[string]
+      let mirror = createHostedPageMirror(link.b,
+        debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
+          result = defaultDebugCommands(session.store)
+          result.step = proc(actionId: string) = hostSteps.add actionId)
+      link.settle()
+      primary.moveTo(100, "main.c", 69)
+      link.settle()
+
+      mock.clearReceivedCommands()
+      mirror.session.calltraceVM.setViewport(
+        Viewport(rows: 17, cols: 87, firstRow: 0))
+      link.settle()
+      drainPlatformCallbacks()
+      ck primary.calltraceVM.viewport.val.rows == 17
+      ck mock.findCommand("ct/load-calltrace-section").isSome
+
+      # A click on a call jumps on the server's session, over its backend.
+      primary.store.calltrace.lines.val = @[callLine(0, "main"),
+                                             callLine(1, "helper")]
+      primary.store.calltrace.totalCallsCount.val = 2
+      link.settle()
+      mock.clearReceivedCommands()
+      mirror.session.calltraceVM.doubleClickEntry(0)
+      link.settle()
+      ck mock.findCommand("ct/calltrace-jump").isSome
+
+      # The toolbar is still the page's: a step is not relayed.
+      mock.clearReceivedCommands()
+      mirror.session.debugControlsVM.invokeToolbarStep("next")
+      link.settle()
+      ck hostSteps == @["next"]
+      ck mock.findCommand("next").isNone
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "the actions that reach the page's own callbacks stay on the page":
+    # The file tree opens a file in the PAGE's editor and loads a folder
+    # through the page (`onOpenFile`, `onFolderExpanded`, installed by
+    # `ui/filesystem`); the terminal output saves the page's view choice
+    # (`onViewChosen`). The server's session has none of these callbacks, so
+    # relayed there they would do nothing: the Files pane stayed on
+    # "Loading..." in the browser when every panel action was relayed.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      var opened, expanded: seq[string]
+      var chosen = 0
+      mirror.session.fileTreeVM.onOpenFile = proc(path: string) =
+        opened.add path
+      mirror.session.fileTreeVM.onFolderExpanded = proc(path: string) =
+        expanded.add path
+      mirror.session.terminalOutputVM.onViewChosen =
+        proc(memory: Table[string, TerminalView]) = inc chosen
+      mirror.session.terminalOutputVM.setRecordingKey("rec",
+        initTable[string, TerminalView]())
+
+      let before = host.actionsApplied
+      mock.clearReceivedCommands()
+      mirror.session.fileTreeVM.openFile("/src/main.c")
+      mirror.session.fileTreeVM.expandPath("/src")
+      mirror.session.terminalOutputVM.setView(tvLines)
+      link.settle()
+      ck opened == @["/src/main.c"]
+      ck expanded == @["/src"]
+      ck chosen == 1
+      ck host.actionsApplied == before
+      ck "/src" notin primary.fileTreeVM.expandedPaths.val
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a pane measured before the server's session exists loads once it does":
+    # The page mounts and measures its panes as soon as the trace is shown;
+    # the server hosts the client's session only on the replay's first stop
+    # (`hosted_primary`). A report sent before then names no hosted session
+    # and is dropped, and a pane that is not resized never reports again.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      ck mirror.following == ""
+      mirror.session.calltraceVM.setViewport(
+        Viewport(rows: 17, cols: 87, firstRow: 0))
+      mirror.session.eventLogVM.setViewport(Viewport(rows: 12))
+      link.settle()
+      drainPlatformCallbacks()
+
+      mock.clearReceivedCommands()
+      primary.moveTo(100, "main.c", 69)
+      host.addPrimary("ct-host/replay-0", primary)
+      link.settle()
+      drainPlatformCallbacks()
+      ck mirror.following == "ct-host/replay-0"
+      ck primary.calltraceVM.viewport.val.rows == 17
+      ck primary.calltraceVM.viewport.val.cols == 87
+      ck primary.eventLogVM.viewport.val.rows == 12
+      ck mock.findCommand("ct/load-calltrace-section").isSome
       mirror.dispose()
       host.dispose()
       done()

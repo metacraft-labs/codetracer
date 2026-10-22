@@ -1306,7 +1306,8 @@ proc mountVcs(container: isonim_dom.Element; fixture: string): DisposeProc =
     rootDisposer = dispose
     vm = createVCSVM()
     if fixture != "empty": vm.applyVCS()
-    mountIsoNimVCSPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderVCSPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
   return proc() =
     if vm != nil: vm.dispose()
     if rootDisposer != nil: rootDisposer()

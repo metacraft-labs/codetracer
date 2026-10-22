@@ -304,7 +304,6 @@ build-ui-js output:
   nim \
     -d:chronicles_enabled=off \
     -d:ctRenderer \
-    -d:ctInExtension \
     --debugInfo:on \
     --lineDir:on \
     --out:{{output}} \
@@ -329,6 +328,18 @@ build-vscode-host output:
     --out:{{output}} \
     js src/frontend/entries/vscode_host.nim
 
+# The extension host's middleware (`ct_vscode.js`): the commands that ask the
+# replay directly. It runs in Node, so it must not reach the renderer's UI
+# graph, which registers browser hooks on `window` as it loads;
+# `ci/test/renderer-extension-build.sh` loads it under node to hold that.
+build-vscode-middleware output:
+  nim \
+    -d:ctRenderer \
+    -d:ctInExtension \
+    -d:ctInCentralExtensionContext \
+    --out:{{output}} \
+    js src/frontend/middleware.nim
+
 # HMR-enabled renderer build. Adds `-d:ctHmr` (which transitively
 # activates `-d:isonimHmr`) so {.uiComponent.} pragmas register slots
 # and `mountUiHot` boundaries listen for swaps. The runtime gate is
@@ -347,7 +358,6 @@ build-ui-js-hmr output:
   nim \
     -d:chronicles_enabled=off \
     -d:ctRenderer \
-    -d:ctInExtension \
     -d:ctHmr \
     -d:isonimHmr \
     --debugInfo:on \

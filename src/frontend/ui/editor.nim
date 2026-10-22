@@ -1183,8 +1183,6 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   api.emit(InternalLastCompleteMove, EmptyArg())
   self.scheduleInitialFlowLoad()
 
-proc registerEditorViewComponent*(component: EditorViewComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
 
 proc sourceLineJump(self: EditorViewComponent, path: cstring, line: int, behaviour: JumpBehaviour) =
   self.api.emit(

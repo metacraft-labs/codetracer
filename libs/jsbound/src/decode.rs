@@ -7,7 +7,8 @@
 //!   the frame runs of uploaded batches, which carry no stream prefix.
 //! * [`decode_record`] decodes one payload into a [`Record`], refusing an
 //!   unknown tag, a frame shorter or longer than its fields, a string that is
-//!   not UTF-8 and an unknown `blobref` kind.
+//!   not UTF-8, an unknown `blobref` kind and an enumerated field outside its
+//!   value set (checked once the frame is whole, in wire order).
 //! * [`StreamRules`] holds the stream-level rules: `Header` first, `Env`
 //!   second, `vocab` 1, the `seq` rule with its `Gap` exception, `End`'s
 //!   `last_seq`, nothing after `End`, inline bodies at most 1024 bytes.
@@ -50,6 +51,9 @@ pub enum DecodeErrorKind {
     InvalidUtf8,
     /// A `blobref` whose kind is neither 0 nor 1.
     UnknownBlobKind,
+    /// An enumerated field (a `u8` of §5.2) whose value vocab 1 does not
+    /// define.
+    UnknownEnumValue,
     /// An inline `blobref` longer than 1024 bytes in `jsbound.log`.
     InlineBlobTooLarge,
     /// The first frame is not `Header`, or a `Header` appears again later.
@@ -81,6 +85,7 @@ impl DecodeErrorKind {
         DecodeErrorKind::TrailingFieldBytes,
         DecodeErrorKind::InvalidUtf8,
         DecodeErrorKind::UnknownBlobKind,
+        DecodeErrorKind::UnknownEnumValue,
         DecodeErrorKind::InlineBlobTooLarge,
         DecodeErrorKind::HeaderNotFirst,
         DecodeErrorKind::EnvNotSecond,
@@ -103,6 +108,7 @@ impl DecodeErrorKind {
             DecodeErrorKind::TrailingFieldBytes => "TrailingFieldBytes",
             DecodeErrorKind::InvalidUtf8 => "InvalidUtf8",
             DecodeErrorKind::UnknownBlobKind => "UnknownBlobKind",
+            DecodeErrorKind::UnknownEnumValue => "UnknownEnumValue",
             DecodeErrorKind::InlineBlobTooLarge => "InlineBlobTooLarge",
             DecodeErrorKind::HeaderNotFirst => "HeaderNotFirst",
             DecodeErrorKind::EnvNotSecond => "EnvNotSecond",
@@ -238,6 +244,9 @@ pub fn decode_record(payload: &[u8], offset: u64) -> Result<Record, DecodeError>
             ),
         ));
     }
+    record
+        .check_value_sets()
+        .map_err(|d| DecodeError::new(DecodeErrorKind::UnknownEnumValue, offset, d))?;
     Ok(record)
 }
 

@@ -888,7 +888,10 @@ assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
 // Request panel's copy has been named `setPickerChevron` since 167227860; the
 // VCS view's is still `setInnerHtml`.  Both names are scanned, so a third
 // helper under either name, or a call with another argument, is a red run.
-assertEqual(filesMatching(/proc (setInnerHtml|setPickerChevron)\(r: WebRenderer/),
+// Since 09239daa3 the VCS view's helper is ONE generic proc,
+// `setInnerHtml[R, N](r: R; …)`, whose write is the `importjs`
+// `setInnerHtmlJS` — so the declaration is matched in either shape.
+assertEqual(filesMatching(/proc (setInnerHtml|setPickerChevron)(\[R, N\])?\(r: (WebRenderer|R);/),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim,'
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim',
   'the scan finds both chevron helpers');
@@ -896,6 +899,12 @@ assertEqual(matchesAcross(/r\.(setInnerHtml|setPickerChevron)\([^)]*\)/g),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setPickerChevron(chevronHost, chevronSvg) | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:r.setInnerHtml(chevronHost, chevronSvg)',
   'and every call passes chevronSvg — the call set is closed');
+// The generic helper's raw `importjs` write takes any string, so the closed
+// call set above only holds while the helper is its one caller.
+assertEqual(matchesAcross(/\bsetInnerHtmlJS\(/g),
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS( | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS(',
+  'and it is named only by its declaration and that one call');
 assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronDownSvg | '
   + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronUpSvg | '
@@ -934,18 +943,17 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
   ['src/frontend/ui/auto_hide.nim', 3, 0],
-  // The value-cell mount clear moved here from `ui/calltrace.nim` when the
-  // Call Trace pane started mounting where its container is made.
-  ['src/frontend/ui/calltrace_extension.nim', 1, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
-  ['src/frontend/ui/event_log.nim', 1, 0],
   ['src/frontend/ui/file_conflict_dialog.nim', 0, 1],
-  ['src/frontend/ui/flow.nim', 2, 0],
+  ['src/frontend/ui/flow.nim', 1, 0],
   ['src/frontend/ui/hcr_live_edit_panel.nim', 0, 1],
   ['src/frontend/ui/layout.nim', 3, 0],
-  ['src/frontend/ui/request_panel.nim', 1, 0],
-  ['src/frontend/ui/trace.nim', 6, 3],
+  // HSF-X2 removed the VS Code extension's components, and with them
+  // `ui/calltrace_extension.nim`'s, `ui/event_log.nim`'s and
+  // `ui/request_panel.nim`'s clears and one each of `ui/flow.nim`'s and
+  // `ui/trace.nim`'s.
+  ['src/frontend/ui/trace.nim', 5, 3],
   ['src/frontend/ui/welcome_screen.nim', 2, 0],
   ['src/frontend/viewmodel/views/context_menu_bridge.nim', 1, 0],
   // TRIAGED 2026-09-30, and the fact that it needed triaging is the finding.
@@ -1005,7 +1013,7 @@ const INNER_HTML_LIVE_WRITES = [
   "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)\"\"\".}",
   'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
-  'src/frontend/viewmodel/views/isonim_vcs_view.nim: node.innerHTML = cstring(html)',
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim: {.importjs: "#.innerHTML = #".}',
 ];
 
 const foundByFile = new Map();
@@ -1195,7 +1203,11 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 // assertions for each of 6 hostile outputs and 2 hostile locations, the two
 // corpus counts and the three plain-row checks) and its three column-wiring
 // assertions in arm S.  Raised in the same diff that adds them.
-const EXPECTED_ASSERTIONS = 208;
+// 208 -> 209 on 2026-10-22, for the assertion that the VCS view's raw
+// `setInnerHtmlJS` write (the generic chevron helper's, since 09239daa3) is
+// named only by its declaration and the helper's one call, so the chevron's
+// closed call set still covers the sink.  Raised in the same diff.
+const EXPECTED_ASSERTIONS = 209;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

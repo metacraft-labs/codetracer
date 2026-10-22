@@ -850,14 +850,6 @@ ARMS = [
         "(`dap.ctRequestId`) match nothing",
     ),
     Arm(
-        "L1", STATE_UI,
-        "  if storeSendsLocals:\n    return\n",
-        "  if false:\n    return\n",
-        W_WEB,
-        "**THE LEGACY COMPONENT ASKS AS WELL** — the web's two requests per "
-        "move, the residual as it was",
-    ),
-    Arm(
         "L2", STORE,
         "    \"lang\": (if lang.len > 0: lang else: store.localsLanguage()),\n",
         "    \"lang\": (if lang.len > 0: lang else: LoadLocalsDefaultLang),\n",

@@ -55,7 +55,8 @@ const
                      Content.RequestPanel, Content.AgentActivity,
                      Content.Scratchpad, Content.Repl, Content.Filesystem,
                      Content.TestResults, Content.Constraints,
-                     Content.CommandPalette, Content.Verification}
+                     Content.CommandPalette, Content.Verification,
+                     Content.UnifiedDiff, Content.VCS}
     ## The panes `mountPanel` renders.
   RequestRowFallbackPx = 24.0
     ## The Request panel's row pitch until a row is rendered to measure.
@@ -335,6 +336,11 @@ proc reportShown(session: SessionViewModel) =
     return
   session.lowLevelCodeVM.setShown(
     live.anyIt(it.kind == Content.LowLevelCode and not it.disposeRoot.isNil))
+
+proc panelHostComponentId*(host: dom_api.Element): int {.importjs:
+  "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
+  ## The `<id>` of a host whose id is `<pane>Component-<id>`: which of the
+  ## pane's components a `PanelRenderer` renders, for a pane that has several.
 
 proc setPanelRenderer*(kind: Content; render: PanelRenderer) =
   ## Install how `kind` renders, for a pane whose ViewModel the session does

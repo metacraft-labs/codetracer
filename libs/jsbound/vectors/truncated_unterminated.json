@@ -173,6 +173,16 @@
       "name": "exposure",
       "record": "Mark",
       "seq": "21"
+    },
+    {
+      "event": 2,
+      "length_computable": 1,
+      "loaded": "65536",
+      "record": "XhrEvent",
+      "req_id": "3",
+      "seq": "22",
+      "target": 1,
+      "total": "2097152"
     }
   ],
   "termination": "TruncatedUnterminated"

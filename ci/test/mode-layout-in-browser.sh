@@ -74,9 +74,19 @@ checks=0
 failures=0
 skips=0
 
-ok() { checks=$((checks + 1)); echo "  [OK]      $*"; }
-bad() { checks=$((checks + 1)); failures=$((failures + 1)); echo "  [FAILED]  $*"; }
-skip() { skips=$((skips + 1)); echo "  [SKIPPED] $*"; }
+ok() {
+	checks=$((checks + 1))
+	echo "  [OK]      $*"
+}
+bad() {
+	checks=$((checks + 1))
+	failures=$((failures + 1))
+	echo "  [FAILED]  $*"
+}
+skip() {
+	skips=$((skips + 1))
+	echo "  [SKIPPED] $*"
+}
 note() { echo "      $*"; }
 check() {
 	# check <verdict> <text...> — `ok` when $1 is the string `ok`.
@@ -288,6 +298,12 @@ py() { python3 -c "$1" "${report}" "${@:2}"; }
 # line and any detail on the rest, so every check below is one process and one
 # `check` call. A question that cannot be answered prints `no` — an
 # unanswerable question is a failure, never a silent pass.
+#
+# Every question is a SINGLE-QUOTED Python snippet, so it must not contain an
+# apostrophe or a backtick, even in a Python comment or string: an apostrophe
+# ends the shell string. One in a printed message ("debug mode's default")
+# left this file unparseable — bash ran up to §2 and then died on "unexpected
+# EOF" with exit 2, before any verdict — until shellcheck's SC1073 named it.
 q() { py "$1" "${@:2}"; }
 
 # ---------------------------------------------------------------------------
@@ -434,9 +450,9 @@ if not e.get("present"):
 elif c.get("present"):
     # The user, 2026-09-27: CONSTRAINTS does not belong in the default replay
     # layout (it was a tab of the EVENT LOG stack until then) —
-    # `frontend.modeDefaultOmittedContentIds(DebugMode)`.
+    # see frontend.modeDefaultOmittedContentIds(DebugMode).
     print("no")
-    print("debug mode's default places CONSTRAINTS in [%s]" % c.get("stackKey"))
+    print("the debug-mode default places CONSTRAINTS in [%s]" % c.get("stackKey"))
 else:
     print("ok"); print("the EVENT LOG is in [%s] and CONSTRAINTS is not placed"
                        % e.get("stackKey"))

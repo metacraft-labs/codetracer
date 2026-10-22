@@ -1,3 +1,20 @@
+## ui/flow.nim — inline flow (Omniscience) in the web editor: the host.
+##
+## This module decides WHERE and WHEN inline flow appears in Monaco — which
+## lines get a content widget or a view zone, the widths and offsets measured
+## from the editor, the loop states and iteration windows, the noUiSlider on a
+## loop's track, the tooltips and the context menu — and nothing about what an
+## element looks like. Every element it places (value and event chips, the
+## loop control, collapsed iterations, legends, backgrounds, multiline boxes,
+## the view zones themselves) is a view generic over the renderer in
+## `viewmodel/views/isonim_flow_inline_view.nim` and `isonim_flow_value_view`
+## (Shared-DOM-Front-Ends D7.4 (b)), rendered here under `WebRenderer` and in
+## the headless tests under `MockRenderer`; their gestures come back through
+## `FlowInput` handlers this module binds to the jump, the scratchpad and the
+## loop selection.
+##
+## The renderer-neutral layout arithmetic is `viewmodel/viewmodels/flow_layout`.
+
 import
   strutils, os,
   ui_imports,
@@ -18,11 +35,31 @@ import
   # (UD-3, DeepReview-GUI.md §4.4). See flow_value_dom.nim.
   flow_value_dom
 
+# Every element this module places in Monaco is a view generic over the
+# renderer (Shared-DOM-Front-Ends D7.4 (b)), rendered here under `WebRenderer`
+# and headlessly under `MockRenderer`. See isonim_flow_inline_view.nim.
+from isonim/web/web_renderer import WebRenderer
+from ../viewmodel/views/isonim_flow_inline_view import
+  FlowStyle, FlowInput, FlowValueSide, fvsBefore, fvsAfter,
+  planFlowValueChip, FlowChipHandlers, renderFlowVariableChip,
+  FlowEventChip, renderFlowEventChip, flowEventBoxId, renderFlowEventPopup,
+  renderFlowLineHost, renderFlowComplexStep, renderFlowValueGap,
+  FlowCollapse, fcNone, fcContinuous, fcShrinked,
+  renderFlowLoopStepContainer, renderFlowCollapsedStep,
+  renderFlowShrinkedIteration, renderFlowLegend, renderFlowLoopContainer,
+  renderFlowLoopBackground, renderFlowMultilineValue,
+  FlowLoopControl, FlowLoopControlHandlers, renderFlowLoopControl,
+  renderFlowLoopSliderTrack, renderFlowLoopSlider, renderFlowViewZone,
+  FlowValueMenuAction, FlowValueMenuEntry, fvmaJump, fvmaScratchpad,
+  fvmaScratchpadAll, flowValueMenu
+
 from trace import getConfiguration
 
 # ---------------------------------------------------------------------------
-# ViewModel layer — wired in parallel with the legacy event-bus code.
-# The FlowVM receives the same data but does not affect rendering yet.
+# The Flow PANEL (`isonim_flow_view`, mounted into `.flow-component-container`)
+# renders from a FlowVM of its own. Inline flow in the editor does not read it:
+# it is laid out from the `CtUpdatedFlow` window this component receives, whose
+# typed values the tooltips and the scratchpad need.
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -49,6 +86,16 @@ from ../viewmodel/viewmodels/flow_layout import
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_flow_view import
   mountIsoNimFlow
+
+type
+  WR = WebRenderer
+  WE = dom_api.Element
+
+let flowRenderer = WebRenderer()
+
+template web(view: untyped): Node =
+  ## A view's DOM element, as the `Node` the rest of this module handles.
+  cast[Node](view)
 
 proc removeMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
   #.changeViewZones(function(accessor) {
@@ -226,7 +273,8 @@ proc tryMountIsoNimFlowPanel() =
 proc resizeLineSlider(self: FlowComponent, position: int)
 proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int)
 proc createLoopViewZones(self: FlowComponent, loopIndex:int)
-proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, isLoop: bool = false): Node
+proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float,
+                        isLoop: bool = false, contentWidget: bool = false): Node
 proc positionRRTicksToStepCount*(self: FlowComponent, position: int, rrTicks: int): int
 proc updateIterationStepCount*(self: FlowComponent, line: int, stepCount: int, loopId: int, iteration: int): int
 proc reloadFlow*(self:FlowComponent)
@@ -287,29 +335,6 @@ proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value
   of fvmAfter: AfterValueMode
   of fvmBeforeAndAfter: BeforeAndAfterValueMode
 
-when defined(ctInExtension):
-  var flowComponentForExtension* {.exportc.}: FlowComponent = makeFlowComponent(data, 13, inExtension = true)
-
-  proc bindFlowExtensionHost(component: FlowComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    # The extension flow surface has no panel markup of its own; keep the
-    # exported component usable without retaining an empty Karax renderer.
-    host.innerHTML = cstring""
-
-  proc makeFlowComponentForExtension*(id: cstring): FlowComponent {.exportc.} =
-    if flowComponentForExtension.extensionRendererId.len == 0:
-      flowComponentForExtension.extensionRendererId = id
-      flowComponentForExtension.bindFlowExtensionHost()
-    result = flowComponentForExtension
-
-  method redrawForExtension*(self: FlowComponent) =
-    self.bindFlowExtensionHost()
 
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api
@@ -342,8 +367,6 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
 # real rendering is handled by tryMountIsoNimFlowPanel().
 
 
-proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
 
 proc getStepDomOffsetLeft*(self: FlowComponent, step: FlowStep): float =
   let flowLine = self.flowLines[step.position]
@@ -699,8 +722,8 @@ func tokenizeExpressions*(source: cstring, lang: Lang): seq[(cstring, int)] =
   ##
   ## It is unobservable, and that is checkable rather than hopeful:
   ## `ensureTokens` stores the column as the VALUE of `editorUI.tokens[line]`,
-  ## and both readers (`calculateLayout` and `renderFlow`, below) iterate that
-  ## map for the label and discard the value. Nothing outside this file reads
+  ## and its reader (`calculateLayout`, below) iterates that map for the label
+  ## and discards the value. Nothing outside this file reads
   ## `editorUI.tokens` at all.
   result = @[]
   {.noSideEffect.}:
@@ -817,18 +840,6 @@ proc displayTooltip(
           instance.show()
   else:
     cerror "flow: displayTooltip: tippy import not implemented for browser"
-
-proc tooltipValueView(expression: cstring, value: cstring): Node =
-  result = document.createElement("div")
-  result.setAttribute(cstring"id", cstring(&"flow-tooltip-value-{expression}"))
-  result.setAttribute(cstring"class", cstring"flow-tooltip-value")
-  result.appendChild(document.createTextNode(cstring(&"{expression}: {value}")))
-
-proc tooltipStepInfo(step: FlowStep): Node =
-  result = document.createElement("div")
-  result.setAttribute(cstring"id", cstring(&"flow-tooltip-step-info-{step.stepCount}"))
-  result.setAttribute(cstring"class", cstring"flow-tooltip-step-info")
-  result.appendChild(document.createTextNode(cstring(&"Iteration: {step.iteration}")))
 
 proc customRedraw(self: ValueComponent) =
   discard
@@ -951,7 +962,6 @@ proc getOriginLoopIndex*(self: FlowComponent, loopIndex: int): int =
     self.getOriginLoopIndex(parentId)
 
 proc calculateFlowLineLeftOffset(self:FlowComponent, flowLine: FlowLine): int =
-  if self.inExtension: return 0
   case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     var flowLineOffset =
@@ -1027,14 +1037,11 @@ proc makeFlowLoopContainer(
   nested: bool = false
 ): Node =
   var containerId = &"flow-loop-container-{position}"
-  var containerClass: cstring
-
-  result = document.createElement(cstring"div")
+  var style: FlowStyle
 
   if nested:
     containerId = containerId & &"-{loopIndex}-{self.flow.loops[loopIndex].baseIteration}"
     let containerWidth = self.loopStates[loopIndex].totalLoopWidth
-    containerClass = "flow-nested-loop-container"
 
     if position == self.flow.loops[loopIndex].first:
       setLoopContainerOffset(self, loopIndex)
@@ -1043,20 +1050,16 @@ proc makeFlowLoopContainer(
     let leftValue =
       self.loopStates[loopIndex].containerOffset - (flowLine.baseOffsetLeft.float - flowLine.offsetleft.float)
 
-    result.style.width = cstring($containerWidth & "px")
-    result.style.left = cstring($leftValue & "px")
+    style = @[("width", $containerWidth & "px"), ("left", $leftValue & "px")]
   else:
     let containerProps = self.prepareFlowLineContainerProps(position)
 
-    result.style.left = cstring($(containerProps.left) & "px")
-    result.style.height = cstring($(containerProps.height) & "px")
-    result.style.width = cstring($(containerProps.width) & "px")
+    style = @[
+      ("left", $(containerProps.left) & "px"),
+      ("height", $(containerProps.height) & "px"),
+      ("width", $(containerProps.width) & "px")]
 
-    containerClass = "flow-loop-container"
-
-  result.setAttribute(cstring"id", cstring(containerId))
-  result.setAttribute(cstring"class", containerClass)
-  result.appendChild(document.createTextNode(cstring""))
+  web(renderFlowLoopContainer[WR, WE](flowRenderer, containerId, nested, style))
 
 proc ensureLoopContainer(self: FlowComponent, step: FlowStep, flowDom: Node): Node =
   var positionContainer = cast[Node](findNodeInElement(
@@ -1593,44 +1596,32 @@ proc selectLoopIteration(
     self.jumpToFlowStep(loopStep)
 
 
+proc flowValueMenuItem(self: FlowComponent, entry: FlowValueMenuEntry,
+                       name: cstring, beforeValue: Value,
+                       stepCount: int): ContextMenuItem =
+  ## One entry of a value's menu, bound to what it does here.
+  let action = entry.action
+  ContextMenuItem(
+    name: cstring(entry.name),
+    hint: cstring(entry.hint),
+    handler: proc(e: Event) =
+      case action
+      of fvmaJump:
+        self.jumpToLocalStep(stepCount)
+      of fvmaScratchpad:
+        self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: beforeValue))
+        data.redraw()
+      of fvmaScratchpadAll:
+        for key, value in self.flow.steps[stepCount].beforeValues:
+          self.api.openValueInScratchpad(ValueWithExpression(expression: key, value: value))
+        data.redraw()
+  )
+
 proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Value, stepCount: int): seq[ContextMenuItem] =
-  var addToScratchpad:  ContextMenuItem
-  var addAllValuesToScratchpad:  ContextMenuItem
-  var jumpToValue: ContextMenuItem
-  var contextMenu:      seq[ContextMenuItem]
-  let step = self.flow.steps[stepCount]
-
-  jumpToValue = ContextMenuItem(
-    name: "Jump to value",
-    hint: "<click on value>",
-    handler: proc(e: Event) =
-      self.jumpToLocalStep(stepCount)
-  )
-
-  contextMenu &= jumpToValue
-
-  addToScratchpad = ContextMenuItem(
-    name: "Add value to scratchpad",
-    hint: "CTRL+<click on value>",
-    handler: proc(e: Event) =
-      self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: beforeValue))
-      data.redraw()
-  )
-
-  contextMenu &= addToScratchpad
-
-  addAllValuesToScratchpad = ContextMenuItem(
-    name: "Add all values to scratchpad",
-    hint: "",
-    handler: proc(e: Event) =
-      for key, value in step.beforeValues:
-        self.api.openValueInScratchpad(ValueWithExpression(expression: key, value: value))
-      data.redraw()
-  )
-
-  contextMenu &= addAllValuesToScratchpad
-
-  return contextMenu
+  ## A value's menu: the entries `flowValueMenu` lists (and the headless view
+  ## tests check), in its order.
+  for entry in flowValueMenu():
+    result.add self.flowValueMenuItem(entry, name, beforeValue, stepCount)
 
 proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value: Value) =
   self.modalValueComponent[id] =
@@ -1649,11 +1640,12 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, value
     )
 
 proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, style: VStyle, i: int): Node =
+  ## An event's chip (`renderFlowEventChip`): a press on it jumps to the step;
+  ## a cut-short text opens in a popup. It has no tooltip and no menu.
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
-  let before = &"flow-{flowMode}-value-before-only"
 
   let (nameClassSuffix, valueClass, name) =
     case event.kind:
@@ -1674,53 +1666,26 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
     else:
       ("", "", "")
 
-  result = document.createElement(cstring"span")
-  result.setAttribute(cstring"class", cstring"ct-omni-value")
-  result.applyStyle(style)
+  let chip = FlowEventChip(
+    name: name, nameClassSuffix: nameClassSuffix, valueClass: valueClass,
+    text: $event.text, truncated: event.text.len() > FLOW_VALUE_LIMIT)
 
-  if event.text.len() > FLOW_VALUE_LIMIT:
-    let viewMore = document.createElement(cstring"span")
-    viewMore.setAttribute(cstring"class", cstring(&"ct-omni-name{nameClassSuffix} flow-view-more-button flow-hide-content"))
-    viewMore.applyStyle(style)
-    # An event chip carries recorded output, which is a string and has no
-    # type to visualise — so this opens the full text in a popup rather than
-    # the typed tree a variable chip opens. What it does NOT do any more is
-    # set `max-width: none`: that is the same un-capping that let a long
-    # value draw over the source lines beneath it, and the chip is now
-    # clipped unconditionally by `.flow-parallel-value-box`.
-    let eventAnchorId = cstring(&"flow-{flowMode}-value-box-{stepCount}-{i}")
-    let fullText = event.text
-    viewMore.addEventListener(cstring"mousedown", proc(e: Event) =
-      e.stopPropagation()
-      let popup = document.createElement(cstring"div")
-      popup.setAttribute(cstring"class", cstring"flow-event-value-popup")
-      popup.appendChild(document.createTextNode(fullText))
-      self.displayTooltip(eventAnchorId, popup, showNow = true)
-    )
-    result.appendChild(viewMore)
-
-  let nameSpan = document.createElement(cstring"span")
-  nameSpan.setAttribute(cstring"class", cstring(&"ct-omni-name{nameClassSuffix}"))
-  nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
+  # An event chip carries recorded output, which is a string and has no type
+  # to visualise — so "view more" opens the full text in a popup rather than
+  # the typed tree a variable chip opens. It does not un-cap the chip
+  # (`max-width: none` let a long value draw over the source lines beneath
+  # it); the chip is clipped unconditionally by `.flow-parallel-value-box`.
+  let eventAnchorId = cstring(flowEventBoxId(flowMode, stepCount, i))
+  let fullText = $event.text
+  proc jump(input: FlowInput) =
     self.jumpToLocalStep(stepCount)
-  )
-  nameSpan.appendChild(document.createTextNode(cstring(&"<{name}>")))
-  result.appendChild(nameSpan)
+  proc viewMore(input: FlowInput) =
+    self.displayTooltip(eventAnchorId,
+      web(renderFlowEventPopup[WR, WE](flowRenderer, fullText)), showNow = true)
 
-  let valueSpan = document.createElement(cstring"span")
-  valueSpan.setAttribute(cstring"id", cstring(&"flow-{flowMode}-value-box-{stepCount}-{i}"))
-  valueSpan.applyStyle(style)
-  if event.text.len() > FLOW_VALUE_LIMIT:
-    valueSpan.style.maxWidth = FLOW_VALUE_MAX_WIDTH
-  valueSpan.setAttribute(cstring"iteration", cstring($(self.flow.steps[stepCount].iteration)))
-  valueSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-box {valueClass} " & before))
-  valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
-    self.jumpToLocalStep(stepCount)
-  )
-  # flowEventValue intentionally has no tooltip/modal behavior. Normal
-  # flow values centralize modal materialization in renderModalValueDom.
-  valueSpan.appendChild(document.createTextNode(event.text))
-  result.appendChild(valueSpan)
+  web(renderFlowEventChip[WR, WE](flowRenderer, flowMode, chip, stepCount, i,
+    self.flow.steps[stepCount].iteration, flowStyleOf(style),
+    $FLOW_VALUE_MAX_WIDTH, jump, viewMore))
 
 
 proc flowSimpleValue*(
@@ -1733,20 +1698,16 @@ proc flowSimpleValue*(
   style: VStyle,
   i: int = 0,
 ): Node =
+  ## A variable's chip (`renderFlowVariableChip`), in the value mode the step
+  ## calls for, and what its gestures do here: a press jumps to the step (with
+  ## Ctrl, adds the value to the scratchpad), a right click opens the value
+  ## menu, hovering shows the typed value, "view more" opens it in a popup.
+  ## The review's diff tab draws the same chip without the behaviour.
   let flowMode =
     ($self.data.config.flow.realFlowUI)
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
-  # The ids of the value boxes. Each is ONE token, and it is the exact id the
-  # eye button and the hover popup look their box up by (`displayTooltip`).
-  # Dual mode used to give each box two space-separated tokens, which no
-  # id lookup matched, so neither popup opened there. The dual
-  # halves keep `-{name}` as their suffix because the GUI page objects find
-  # a value box by `[id$="-<name>"]` and `[id*="-<name>"]`.
-  let valueBoxId = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-{name}")
-  let valueBoxIdBefore = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-before-{name}")
-  let valueBoxIdAfter = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-after-{name}")
 
   proc openTypedValuePopup(anchorId: cstring, value: Value) =
     ## Open the full value in a popup drawn by the TYPED value renderer
@@ -1759,149 +1720,106 @@ proc flowSimpleValue*(
       self.ensureValueComponent(anchorId, name, value)
     self.openTooltip(anchorId, value, showNow = true)
 
-  proc renderViewOption(value: Value, anchorId: cstring): Node =
-    ## The eye button. `anchorId` is the id of the value box the popup is
-    ## attached to, which must be the box that shows `value`.
-    result = document.createElement(cstring"span")
-    result.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-view-more-button flow-hide-content"))
-    result.applyStyle(style)
-    # The chip is now clipped unconditionally (see `.flow-parallel-value-box`
-    # in `styles/components/flow.styl`), so this button no longer un-caps its
-    # width. It used to set `max-width: none`, which is what let a long value
-    # draw over the source lines below it; the full value belongs in a popup,
-    # not in a chip that has grown out of its own box.
-    let popupValue = value
-    result.addEventListener(cstring"mousedown", proc(e: Event) =
-      e.stopPropagation()
-      openTypedValuePopup(anchorId, popupValue)
-    )
-
-  proc onMouseDown(e: Event, value: Value) =
-    e.stopPropagation()
-
-    if cast[MouseEvent](e).button == 0:
-      if cast[bool](e.toJs.ctrlKey):
-        self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: value))
-        data.redraw()
-      else:
-        self.jumpToLocalStep(stepCount)
-
-  proc onContextMenu(e: Event, value: Value) =
+  proc onContextMenu(input: FlowInput, value: Value) =
     # A SIBLING OF THE EDITOR'S OWN LEAK, and it is inside the editor area: flow
     # values are inline widgets drawn over the source, so right-clicking one is
     # "right click in the editor area" as far as the reporter is concerned.  It
     # stopped propagation but never suppressed the default, so the browser drew
     # its menu over ours here too.  Shift stands down for the same reason as in
     # `ui/editor.nim` — see the comment there.
-    if cast[bool](e.toJs.shiftKey):
+    if input.shift:
       return
-    e.preventDefault()
-    e.stopPropagation()
+    input.prevent = true
+    input.stop = true
 
-    let step = self.flow.steps[stepCount]
     let contextMenu = createContextMenuItems(self, name, value, stepCount)
 
     if contextMenu != @[]:
-      showContextMenu(contextMenu, cast[int](e.toJs.clientX), cast[int](e.toJs.clientY))
+      showContextMenu(contextMenu, input.x, input.y)
 
-  proc appendValueSpan(parent: Node, id: cstring, className: string, value: Value) =
-    # The element itself comes from `ui/flow_value_dom.nim`, which the review's
-    # diff tab also builds from (UD-3) — so "the standard Omniscience
-    # appearance" is one implementation rather than two that agree today.
-    # Everything below it here is behaviour this host has and the review does
-    # not: the jump, the context menu and the tooltip.
-    # PLAT-2: ONE presentation, at the `flow` budget, reused.
-    #
-    # This rendered the value TWICE — once for the text and once to decide the
-    # width — so every flow chip paid for two renderings per paint and threw the
-    # second away after comparing its `.len`. `Presentation.truncated` is the
-    # presenter's own answer to the same question and costs nothing.
-    let presentation = flowValue(value)
-    let valueSpan = flowValueBoxDom(
-      id = id,
-      className = cstring(className),
-      text = presentation.root.text,
-      iteration = self.flow.steps[stepCount].iteration,
-      style = style,
-      maxWidth =
-        if presentation.truncated: cstring(FLOW_VALUE_MAX_WIDTH)
-        else: cstring"")
-    valueSpan.addEventListener(cstring"mousedown", proc(e: Event) =
-      onMouseDown(e, value)
-    )
-    valueSpan.addEventListener(cstring"contextmenu", proc(e: Event) =
-      onContextMenu(e, value)
-    )
-    # Tooltip/modal value rendering is centralized through ValueComponent's
-    # DOM entrypoint so flow no longer owns a local Karax materialization bridge.
-    valueSpan.addEventListener(cstring"mouseover", proc(e: Event) =
-      if not self.modalValueComponent.hasKey(id):
-        self.ensureValueComponent(id, name, value)
-        self.openTooltip(id, value)
+  proc valueOf(side: FlowValueSide): Value =
+    if side == fvsBefore: beforeValue else: afterValue
+
+  # PLAT-2: ONE presentation per value, at the `flow` budget. "Does it fit" is
+  # `Presentation.truncated`, the presenter's own answer, rather than a length
+  # this module measured against a constant it also owned.
+  proc textOf(value: Value): string =
+    if value.isNil: "" else: $flowValue(value).root.text
+  proc capOf(value: Value): string =
+    if not value.isNil and flowValue(value).truncated: $FLOW_VALUE_MAX_WIDTH
+    else: ""
+
+  let layoutMode =
+    case flowValueMode
+    of BeforeValueMode: fvmBefore
+    of AfterValueMode: fvmAfter
+    of BeforeAndAfterValueMode: fvmBeforeAndAfter
+
+  # "View more" opens the value that does not fit; in the dual mode it is the
+  # "after" value, the one the step produced.
+  let (viewMore, popupValue) =
+    case flowValueMode
+    of BeforeValueMode:
+      (flowValue(beforeValue).truncated, beforeValue)
+    of AfterValueMode:
+      (flowValue(afterValue).truncated, afterValue)
+    of BeforeAndAfterValueMode:
+      (flowValue(beforeValue).truncated or flowValue(afterValue).truncated or
+         flowValueWidth(beforeValue) + flowValueWidth(afterValue) > FLOW_VALUE_LIMIT,
+       afterValue)
+  # The eye button's popup anchors on the box that shows `popupValue`
+  # (`displayTooltip` looks it up by that one-token id): the chip's single box,
+  # or a dual chip's "after" box.
+  let boxes = planFlowValueChip(flowMode, layoutMode, i, stepCount, $name,
+    textOf(beforeValue), textOf(afterValue),
+    capOf(beforeValue), capOf(afterValue))
+  let popupAnchorId = cstring(boxes[^1].id)
+
+  proc onViewMore(input: FlowInput) =
+    openTypedValuePopup(popupAnchorId, popupValue)
+
+  proc onNamePress(input: FlowInput) =
+    self.jumpToLocalStep(stepCount)
+
+  proc onNameContext(input: FlowInput) =
+    case flowValueMode:
+    of BeforeValueMode:
+      onContextMenu(input, beforeValue)
+    of AfterValueMode:
+      onContextMenu(input, afterValue)
+    of BeforeAndAfterValueMode:
+      discard
+
+  proc onBoxPress(side: FlowValueSide; boxId: string; input: FlowInput) =
+    input.stop = true
+    if input.button == 0:
+      if input.ctrl:
+        self.api.openValueInScratchpad(ValueWithExpression(expression: name, value: valueOf(side)))
+        data.redraw()
       else:
-        let valueDom = self.renderModalValueDom(id)
-        self.displayTooltip(id, valueDom)
-    )
-    parent.appendChild(valueSpan)
+        self.jumpToLocalStep(stepCount)
 
-  result = flowValueContainerDom(style)
+  proc onBoxContext(side: FlowValueSide; boxId: string; input: FlowInput) =
+    onContextMenu(input, valueOf(side))
 
-  # PLAT-2: "does it fit" is `Presentation.truncated`, the presenter's answer,
-  # rather than a length this module measured against a constant it also owned.
-  case flowValueMode:
-  of BeforeValueMode:
-    if flowValue(beforeValue).truncated:
-      result.appendChild(renderViewOption(beforeValue, valueBoxId))
-  of AfterValueMode:
-    if flowValue(afterValue).truncated:
-      result.appendChild(renderViewOption(afterValue, valueBoxId))
-  of BeforeAndAfterValueMode:
-    if flowValue(beforeValue).truncated or flowValue(afterValue).truncated or
-       flowValueWidth(beforeValue) + flowValueWidth(afterValue) > FLOW_VALUE_LIMIT:
-      # The "after" value is the one the step produced, so it is the one
-      # the popup opens on when both halves are drawn, anchored on the
-      # box that shows it.
-      result.appendChild(renderViewOption(afterValue, valueBoxIdAfter))
+  proc onBoxHover(side: FlowValueSide; boxId: string; input: FlowInput) =
+    # Tooltip/modal value rendering is centralized through ValueComponent's
+    # DOM entrypoint (`renderModalValueDom`).
+    let id = cstring(boxId)
+    if not self.modalValueComponent.hasKey(id):
+      self.ensureValueComponent(id, name, valueOf(side))
+      self.openTooltip(id, valueOf(side))
+    else:
+      self.displayTooltip(id, self.renderModalValueDom(id))
 
-  if showName:
-    let nameSpan = flowValueNameDom(name)
-    nameSpan.addEventListener(cstring"mousedown", proc(e: Event) =
-      self.jumpToLocalStep(stepCount)
-    )
-    nameSpan.addEventListener(cstring"contextmenu", proc(e: Event) =
-      case flowValueMode:
-      of BeforeValueMode:
-        onContextMenu(e, beforeValue)
-      of AfterValueMode:
-        onContextMenu(e, afterValue)
-      of BeforeAndAfterValueMode:
-        discard
-    )
-    result.appendChild(nameSpan)
-
-  if flowValueMode == BeforeValueMode:
-    let before = &"flow-{flowMode}-value-before-only"
-    # The `flow-parallel-value-box` token is part of the DOM contract:
-    # the GUI smoke-test helper `assertFlowValueVisible` (and any
-    # consumer checking [class*="flow-parallel-value-box"]) needs it
-    # present even on single-assignment / before-only spans. The
-    # AfterValueMode and dual cases below already include it; emit it
-    # here too so the contract is uniform across all flow value
-    # branches.
-    appendValueSpan(result, valueBoxId, &"flow-{flowMode}-value-box " & before, beforeValue)
-  elif flowValueMode == AfterValueMode:
-    let after = &"flow-{flowMode}-value-after-only"
-    appendValueSpan(result, valueBoxId, &"flow-{flowMode}-value-box " & after, afterValue)
-  else:
-    let before = &"flow-{flowMode}-value-dual"
-    appendValueSpan(result, valueBoxIdBefore, &"flow-{flowMode}-value-box flow-dual-value-before " & before, beforeValue)
-
-    let arrowSpan = document.createElement(cstring"span")
-    arrowSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-dual-arrow"))
-    arrowSpan.appendChild(document.createTextNode(cstring"=>"))
-    result.appendChild(arrowSpan)
-
-    appendValueSpan(result, valueBoxIdAfter, &"flow-{flowMode}-value-box " & before, afterValue)
+  result = web(renderFlowVariableChip[WR, WE](flowRenderer, flowMode, $name,
+    boxes, self.flow.steps[stepCount].iteration, showName, viewMore,
+    flowStyleOf(style),
+    FlowChipHandlers(
+      onViewMore: onViewMore,
+      onNamePress: onNamePress, onNameContext: onNameContext,
+      onBoxPress: onBoxPress, onBoxContext: onBoxContext,
+      onBoxHover: onBoxHover)))
 
   # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 2) — attach the
   # icon-only origin badge per annotated value.  The per-value summary
@@ -1963,17 +1881,16 @@ proc clearInline(self: FlowComponent) =
       line.contentWidget = nil
 
 proc clearParallel(self: FlowComponent) =
-  if not self.inExtension:
-    var tab = self.data.services.editor.open[self.editorUI.path]
+  var tab = self.data.services.editor.open[self.editorUI.path]
 
-    if not tab.monacoEditor.isNil:
-      for _, viewZone in self.loopViewZones:
-        removeMonacoViewZone(tab.monacoEditor, viewZone)
-      # clear flow line content widgets
-      for _, flowLine in self.flowLines:
-        if not flowLine.contentWidget.isNil:
-          tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
-          flowLine.contentWidget = nil
+  if not tab.monacoEditor.isNil:
+    for _, viewZone in self.loopViewZones:
+      removeMonacoViewZone(tab.monacoEditor, viewZone)
+    # clear flow line content widgets
+    for _, flowLine in self.flowLines:
+      if not flowLine.contentWidget.isNil:
+        tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
+        flowLine.contentWidget = nil
   self.flowDom = JsAssoc[int, Node]{}
   self.lineWidgets = JsAssoc[int, JsObject]{}
   self.flowLoops = JsAssoc[int, FlowLoop]{}
@@ -2002,7 +1919,7 @@ proc clearStepNodes*(self: FlowComponent) =
   self.stepNodes = JsAssoc[int, kdom.Node]{}
 
 proc removeViewZones(self: FlowComponent, zones: JsAssoc[int, int]) =
-  if self.inExtension or self.editorUI.isNil or self.editorUI.monacoEditor.isNil:
+  if self.editorUI.isNil or self.editorUI.monacoEditor.isNil:
     return
 
   for _, zoneId in zones:
@@ -2033,8 +1950,7 @@ proc resetFlow*(self: FlowComponent) =
   self.clearParallel()
 
   self.clearLoopStates()
-  if not self.inExtension:
-    self.clearWidgets()
+  self.clearWidgets()
   self.clearFlowLines()
   self.clearStepNodes()
   self.clearViewZones()
@@ -2092,35 +2008,25 @@ proc addContentWidget*(
   return widget
 
 proc makeLegend(self: FlowComponent, step: FlowStep): Node =
-  let legendNode = document.createElement(cstring"div")
-  legendNode.setAttribute(cstring"class", cstring"flow-loop-legend")
-  legendNode.style.left = cstring($(self.maxFlowLineWidth + self.distanceToSource) & "px")
-  legendNode.style.width = cstring($(self.loopStates[step.loop].legendWidth) & "px")
-
-  var counter = 0
-  let valuesCount = toSeq(step.beforeValues.keys()).len
+  var headings: seq[(string, float)]
   for expression, value in step.beforeValues:
-    counter += 1
-    let valueNode = document.createElement(cstring"div")
-    valueNode.setAttribute(cstring"class", cstring"flow-loop-legend-expression")
     let valueWidth =
       self.loopStates[step.loop]
         .positions[step.position]
         .positionColumns[step.iteration]
         .valuesExpressions[expression]
         .expressionLegendPercent
-    valueNode.style.width = cstring($valueWidth & "%")
-    valueNode.appendChild(document.createTextNode(expression))
-    legendNode.appendChild(valueNode)
+    headings.add(($expression, valueWidth.float))
+  let gap =
+    if headings.len > 1:
+      self.loopStates[step.loop].positions[step.position]
+        .legendValueGapPercentage.float
+    else:
+      0.0
 
-    if counter < valuesCount:
-      let emptySpaceNode = document.createElement(cstring"div")
-      emptySpaceNode.setAttribute(cstring"class", cstring"flow-loop-empty-space")
-      let emptySpaceWidth =
-        self.loopStates[step.loop].positions[step.position]
-          .legendValueGapPercentage
-      emptySpaceNode.style.width = cstring($(emptySpaceWidth) & "%")
-      legendNode.appendChild(emptySpaceNode)
+  let legendNode = web(renderFlowLegend[WR, WE](flowRenderer,
+    (self.maxFlowLineWidth + self.distanceToSource).float,
+    self.loopStates[step.loop].legendWidth.float, headings, gap))
 
   self.flowLines[step.position].legendDom = legendNode
 
@@ -2128,7 +2034,7 @@ proc makeLegend(self: FlowComponent, step: FlowStep): Node =
 
 proc makeFlowLineContainer*(self: FlowComponent, step: FlowStep) =
   # create content widget for
-  var dom = cast[Node](document.createElement(cstring"div"))
+  var dom = web(renderFlowLineHost[WR, WE](flowRenderer))
   let id = cstring(&"ct-flow-{self.id}-{step.position}")
 
   self.flowDom[step.position] = dom
@@ -2136,10 +2042,7 @@ proc makeFlowLineContainer*(self: FlowComponent, step: FlowStep) =
   discard self.addContentWidget(dom, step.position, 0, id)
 
 proc shrinkedLoopIterationView(self: FlowComponent, iteration: int) : Node =
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring"flow-loop-shrinked-iteration")
-  result.setAttribute(cstring"id", cstring(&"flow-loop-shrinked-iteration-{iteration}"))
-  result.appendChild(document.createTextNode(cstring""))
+  web(renderFlowShrinkedIteration[WR, WE](flowRenderer, iteration))
 
 proc shrinkLoopIterations*(self: FlowComponent, loopIndex: int) =
   let state = self.loopStates[loopIndex]
@@ -2252,14 +2155,8 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
 
-  let nodeStyle = self.flowLeftStyle(step.position)
-  let parentId = cstring(&"flow-{flowMode}-value-{step.position}")
-  let parentClass = cstring(&"flow-{flowMode} flow-{flowMode}-value-single")
-
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", parentId)
-  result.setAttribute(cstring"class", parentClass)
-  result.applyStyle(nodeStyle)
+  result = web(renderFlowComplexStep[WR, WE](flowRenderer, flowMode,
+    step.position, flowStyleOf(self.flowLeftStyle(step.position))))
 
   var counter = 0
   let valuesCount = toSeq(step.beforeValues.keys()).len
@@ -2293,10 +2190,7 @@ proc flowComplexStep(self: FlowComponent, step: FlowStep): Node =
     result.appendChild(valueNode)
 
     if counter < valuesCount:
-      let emptySpace = document.createElement(cstring"div")
-      emptySpace.setAttribute(cstring"class", cstring"flow-loop-empty-space")
-      emptySpace.applyStyle(style())
-      result.appendChild(emptySpace)
+      result.appendChild(web(renderFlowValueGap[WR, WE](flowRenderer)))
 
 proc getEditorFirstLineNumber(self: FlowComponent): int =
   let editorId = self.editorUI.id
@@ -2373,18 +2267,9 @@ proc makeflowValue(
     (StyleAttr.height, cstring($(self.lineHeight - 2) & "px"))
   )
 
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", cstring(&"flow-multiline-value-{position}-{expression}"))
-  result.setAttribute(cstring"class", cstring"flow-multiline-value-container")
-  result.style.top = cstring($(topOffset*editorLineHeight) & "px")
-  result.style.left = cstring($(nodeLeft) & "px")
-
-  if topOffset > 0:
-    let pointer = document.createElement(cstring"div")
-    pointer.setAttribute(cstring"class", cstring"flow-multiline-value-pointer")
-    pointer.style.top = cstring($((-1)*topOffset*editorLineHeight) & "px")
-    pointer.style.height = cstring($(topOffset*editorLineHeight) & "px")
-    result.appendChild(pointer)
+  result = web(renderFlowMultilineValue[WR, WE](flowRenderer, position,
+    $expression, (topOffset * editorLineHeight).float, nodeLeft.float,
+    pointer = topOffset > 0))
 
   let valueNode = flowSimpleValue(
     self,
@@ -2536,65 +2421,36 @@ proc makeInlineFlowLines(self: FlowComponent, step: FlowStep) =
   let valData = InlineFlowValuesData(self: self, step: step)
   setTimeoutWithArg(triggerInsertFlowInlineValues, 50, valData)
 
-proc renderContinuousStep(
+proc renderCollapsedStep(
   self: FlowComponent,
-  stepContainer: Node,
   step: FlowStep,
   name: cstring,
-  singleValue: bool,
+  collapse: FlowCollapse,
   style: VStyle
 ): Node =
-  stepContainer.toJs.classList.toJs.add("continuous")
-
-  let id = &"flow-loop-shrinked-iteration-step-{step.stepCount}"
-
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", cstring(id))
-  result.setAttribute(cstring"class", cstring"flow-loop-continuous-iteration")
-  result.applyStyle(style)
-  result.addEventListener(cstring"click", proc(ev: Event) =
+  ## A collapsed loop's cell for a step: a click jumps to it, a double click
+  ## opens its values in the scratchpad.
+  proc jump(input: FlowInput) =
     self.jumpToLocalStep(step.stepCount)
-  )
-  result.addEventListener(cstring"dblclick", proc(ev: Event) =
+  proc open(input: FlowInput) =
     self.openValue(step.stepCount, name, before=true)
-  )
-  result.addEventListener(cstring"mouseover", proc(ev: Event) =
-    ev.stopPropagation()
-  )
-  result.appendChild(document.createTextNode(cstring""))
+  web(renderFlowCollapsedStep[WR, WE](flowRenderer, step.stepCount, collapse,
+    flowStyleOf(style), jump, open))
 
-proc renderShrinkedStep(
-  self: FlowComponent,
-  stepContainer: Node,
-  step: FlowStep,
-  name: cstring,
-  singleValue: bool,
-  style: VStyle
-): Node =
-  stepContainer.toJs.classList.toJs.add("shrinked")
-
-  let id = &"flow-loop-shrinked-iteration-step-{step.stepCount}"
-
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", cstring(id))
-  result.setAttribute(cstring"class", cstring"flow-loop-shrinked-iteration")
-  result.applyStyle(style)
-  result.addEventListener(cstring"click", proc(ev: Event) =
-    self.jumpToLocalStep(step.stepCount)
-  )
-  result.addEventListener(cstring"dblclick", proc(ev: Event) =
-    self.openValue(step.stepCount, name, before=true)
-  )
-  result.addEventListener(cstring"mouseover", proc(ev: Event) =
-    ev.stopPropagation()
-  )
-  result.appendChild(document.createTextNode(cstring""))
+proc loopCollapse(self: FlowComponent, loopIndex: int): FlowCollapse =
+  ## How a loop's cells are drawn: its values, or collapsed. A step outside
+  ## every loop (`addParallelRegularStepValues` gives it a step container too)
+  ## has no loop state, and is drawn with its values.
+  if not self.loopStates.hasKey(loopIndex):
+    return fcNone
+  case self.loopStates[loopIndex].viewState:
+  of LoopContinuous: fcContinuous
+  of LoopShrinked: fcShrinked
+  else: fcNone
 
 proc makeFlowStepContainer(self: FlowComponent, step: FlowStep): Node =
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", cstring(&"flow-loop-step-container-{step.loop}-{step.iteration}"))
-  result.setAttribute(cstring"class", cstring"flow-loop-step-container")
-  result.appendChild(document.createTextNode(cstring""))
+  web(renderFlowLoopStepContainer[WR, WE](flowRenderer, step.loop,
+    step.iteration, self.loopCollapse(step.loop)))
 
 proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
   # create flow loop step container
@@ -2620,16 +2476,13 @@ proc makeMultilineLoopStepView(self: FlowComponent, step: FlowStep): Node =
       (StyleAttr.top, cstring($(topOffset*editorLineHeight) & "px"))
     )
 
-    case self.loopStates[step.loop].viewState:
-    of LoopContinuous:
-      let stepNode = renderContinuousStep(self, stepContainer, step, expression, singleValue=true, style)
+    case self.loopCollapse(step.loop):
+    of fcContinuous, fcShrinked:
+      let stepNode = renderCollapsedStep(self, step, expression,
+                                         self.loopCollapse(step.loop), style)
       stepContainer.appendChild(stepNode)
 
-    of LoopShrinked:
-      let stepNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=true, style)
-      stepContainer.appendChild(stepNode)
-
-    else:
+    of fcNone:
       let stepNode = flowSimpleValue(
         self,
         expression,
@@ -2657,16 +2510,13 @@ proc makeComplexLoopStepView(self: FlowComponent, step: FlowStep): Node =
 
   # create step node
   var stepNode: Node
-  case self.loopStates[step.loop].viewState:
-  of LoopContinuous:
+  case self.loopCollapse(step.loop):
+  of fcContinuous, fcShrinked:
     for expression, value in step.beforeValues:
-      stepNode = renderContinuousStep(self, stepContainer, step, expression, singleValue=false, style())
+      stepNode = renderCollapsedStep(self, step, expression,
+                                     self.loopCollapse(step.loop), style())
 
-  of LoopShrinked:
-    for expression, value in step.beforeValues:
-      stepNode = renderShrinkedStep(self, stepContainer, step, expression, singleValue=false, style())
-
-  else:
+  of fcNone:
     stepNode = flowComplexStep(self, step)
 
   stepContainer.appendChild(stepNode)
@@ -2764,14 +2614,8 @@ proc makeMultilineLoopFlow(self: FlowComponent, step: FlowStep) =
 proc makeFlowLoopBackgroundDom(self: FlowComponent, loopIndex: int): Node =
   let props = self.prepareBackgroundStyleProps(loopIndex)
 
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", cstring(&"flow-loop-{loopIndex}-background"))
-  result.setAttribute(cstring"class", cstring"flow-loop-background")
-  result.style.left = cstring($(props.left) & "px")
-  result.style.top = cstring($(props.top) & "px")
-  result.style.width = cstring($(props.width) & "px")
-  result.style.height = cstring($(props.height) & "px")
-  result.appendChild(document.createTextNode(cstring""))
+  web(renderFlowLoopBackground[WR, WE](flowRenderer, loopIndex,
+    props.left.float, props.top.float, props.width.float, props.height.float))
 
 proc makeFlowLoopBackground(self: FlowComponent, loopIndex: int) =
   let backgroundDom = self.makeFlowLoopBackgroundDom(loopIndex)
@@ -2880,14 +2724,12 @@ proc addComplexLoopStepValues(self: FlowComponent, step: FlowStep) =
   # create step node
   var stepNode: Node
 
-  case self.loopStates[step.loop].viewState:
-  of LoopContinuous:
-    stepNode = renderContinuousStep(self, stepContainer, step, "complex", singleValue=false, style())
+  case self.loopCollapse(step.loop):
+  of fcContinuous, fcShrinked:
+    stepNode = renderCollapsedStep(self, step, "complex",
+                                   self.loopCollapse(step.loop), style())
 
-  of LoopShrinked:
-    stepNode = renderShrinkedStep(self, stepContainer, step, "complex", singleValue=false, style())
-
-  else:
+  of fcNone:
     stepNode = flowComplexStep(self, step)
 
   # append step Node to stepContainer
@@ -2911,15 +2753,14 @@ proc addMultilineStepValues(self: FlowComponent, step: FlowStep) =
       createFlowViewZone(
         self,
         step.position,
-        valueRows.float*self.lineHeight.float)
+        valueRows.float*self.lineHeight.float,
+        contentWidget = true)
 
     self.multiLineZones[step.position] =
       MultilineZone(
         dom: newZoneDom,
         zoneId: self.viewZones[step.position],
         variables: JsAssoc[cstring, bool]{})
-
-    cast[Element](newZoneDom).classList.add("flow-content-widget")
 
     if not self.flowDom.hasKey(step.position):
       self.flowDom[step.position] = newZoneDom
@@ -3592,80 +3433,6 @@ proc updateLoopControlDom*(self: FlowComponent, position: int) =
   setDisabled(root.querySelector(cstring".flow-loop-button.backward"), iteration <= FLOW_ITERATION_START)
   setDisabled(root.querySelector(cstring".flow-loop-button.forward"), maxIteration <= iteration)
 
-proc flowLoopValue*(
-  self: FlowComponent,
-  step: FlowStep,
-  allIterations: int,
-  style: VStyle
-): Node =
-  var iteration = self.activeLoopIterationFor(step)
-  var width = len(intToStr(allIterations))
-
-  proc onEnter(self: FlowComponent) =
-    self.selectLoopIteration(step.loop, iteration, step.position)
-
-  result = document.createElement(cstring"span")
-  result.setAttribute(cstring"class", cstring"flow-loop-value")
-  result.applyStyle(style)
-
-  let loopSpan = document.createElement(cstring"span")
-  loopSpan.setAttribute(cstring"class", cstring"ct-omniscience-loop")
-  loopSpan.applyStyle(style)
-
-  let iterationStart = document.createElement(cstring"span")
-  iterationStart.setAttribute(cstring"class", cstring"flow-parallel-loop-iteration-start")
-  iterationStart.appendChild(document.createTextNode(cstring"iteration "))
-  loopSpan.appendChild(iterationStart)
-
-  let textarea = document.createElement(cstring"textarea")
-  textarea.setAttribute(cstring"class", cstring"flow-loop-textarea")
-  textarea.setAttribute(cstring"value", cstring($(iteration)))
-  textarea.toJs.value = cstring($(iteration))
-  textarea.setAttribute(cstring"maxlength", cstring($width))
-  textarea.addEventListener(cstring"blur", proc(e: Event) =
-    self.onEnter()
-    # `redrawFlow()` used to be called here. It is `clear()` +
-    # `recalculateAndRedrawFlow()`, and `clear()` drops `loopStates` — so it
-    # discarded the iteration `onEnter` had just selected and re-derived it
-    # from `self.location`, which still holds the PRE-jump position until the
-    # move completes. The control therefore snapped back to the old iteration
-    # for the duration of the jump. `updateLoopControlDom` writes the two
-    # things that changed and leaves the view zones standing (see #562's
-    # "blinking").
-    self.updateLoopControlDom(step.position)
-    self.scheduleActiveLoopIterationValueRender()
-  )
-  textarea.addEventListener(cstring"input", proc(ev: Event) =
-    let rawValue = $cast[cstring](ev.target.toJs.value)
-    if rawValue.len > 0:
-      try:
-        let value = parseInt(rawValue)
-        if value >= 0 and value <= allIterations:
-          iteration = value
-      except ValueError:
-        discard
-  )
-  textarea.addEventListener(cstring"keydown", proc(ev: Event) =
-    let key = $cast[cstring](ev.toJs.key)
-    if key == "Enter" or cast[int](ev.toJs.keyCode) == ENTER_KEY_CODE:
-      ev.preventDefault()
-      self.onEnter()
-      # Same reasoning as the `blur` handler above.
-      self.updateLoopControlDom(step.position)
-  )
-  textarea.applyStyle(style(
-    (StyleAttr.width, cstring($(width+1) & "ch")),
-    (StyleAttr.textAlign, cstring("right"))))
-  loopSpan.appendChild(textarea)
-
-  # TODO: FOR NOW HARDCODE THE PARALLEL
-  let iterationEnd = document.createElement(cstring"span")
-  iterationEnd.setAttribute(cstring"class", cstring"flow-parallel-loop-iteration-end")
-  iterationEnd.appendChild(document.createTextNode(cstring(fmt"from {allIterations}")))
-  loopSpan.appendChild(iterationEnd)
-
-  result.appendChild(loopSpan)
-
 proc liveLoopIteration(self: FlowComponent, step: FlowStep): int =
   ## The active iteration as of RIGHT NOW, read through `flowLoops` so a handler
   ## installed on an earlier rebuild still sees the current value.
@@ -3675,47 +3442,13 @@ proc liveLoopIteration(self: FlowComponent, step: FlowStep): int =
       return self.activeLoopIterationFor(loopStep)
   self.activeLoopIterationFor(step)
 
-proc backLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration = self.activeLoopIterationFor(step)
-
-  result = document.createElement(cstring"button")
-  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border flow-loop-button backward")
-  result.setAttribute(cstring"id", cstring"backward-loop")
-  result.applyStyle(style)
-  if iteration <= FLOW_ITERATION_START:
-    result.setAttribute(cstring"disabled", cstring"disabled")
-  result.addEventListener(cstring"click", proc(e: Event) =
-    # Resolve the target from the LIVE active iteration rather than from the
-    # value captured when this button was built: rebuilds can leave a stale
-    # control transiently clickable, and a captured index would then move the
-    # user by more than one iteration (#595).
-    let target = previousIteration(self.liveLoopIteration(step), self.maxLoopIteration(step.loop))
-    self.selectLoopIteration(step.loop, target, step.position)
-    # Targeted DOM update instead of `redrawFlow()`: see `updateLoopControlDom`.
-    self.updateLoopControlDom(step.position)
-  )
-
-proc nextLoopControlButton(self: FlowComponent, step: FlowStep, style: VStyle): Node =
-  let iteration = self.activeLoopIterationFor(step)
-  let maxIterations = self.maxLoopIteration(step.loop)
-
-  result = document.createElement(cstring"button")
-  result.setAttribute(cstring"class", cstring"ct-button-image-sm-secondary ct-button-no-border flow-loop-button forward")
-  result.setAttribute(cstring"id", cstring"forward-loop")
-  result.applyStyle(style)
-  if maxIterations <= iteration:
-    result.setAttribute(cstring"disabled", cstring"disabled")
-  result.addEventListener(cstring"click", proc(e: Event) =
-    let target = nextIteration(self.liveLoopIteration(step), self.maxLoopIteration(step.loop))
-    self.selectLoopIteration(step.loop, target, step.position)
-    self.updateLoopControlDom(step.position)
-  )
-
 proc makeLoopLine(
   self: FlowComponent,
   step: FlowStep,
   allIterations: int
 ): Node =
+  ## A loop header's control (`renderFlowLoopControl`): back, the iteration
+  ## field, forward.
   let fontSize = if self.fontSize != 0: cstring($(self.fontSize) & "px") else: cstring("inherit")
   let style = style(
     (StyleAttr.fontSize, fontSize),
@@ -3723,32 +3456,52 @@ proc makeLoopLine(
     (StyleAttr.height, cstring($self.lineHeight & "px")),
     (StyleAttr.width, cstring("fit-content"))
   )
+  let iteration = self.activeLoopIterationFor(step)
+  let control = FlowLoopControl(
+    position: step.position,
+    stepCount: step.stepCount,
+    live: step.rrTicks != -1,
+    iteration: iteration,
+    allIterations: allIterations,
+    canBack: iteration > FLOW_ITERATION_START,
+    canForward: self.maxLoopIteration(step.loop) > iteration)
 
-  let bStyle = style()
+  # The arrows resolve their target from the LIVE active iteration rather
+  # than from the one this control was built with: rebuilds can leave a stale
+  # control transiently clickable, and a captured index would then move the
+  # user by more than one iteration (#595). Each then updates the control in
+  # place (`updateLoopControlDom`) instead of `redrawFlow()`, which rebuilt
+  # every view zone (#562's "blinking").
+  proc back(input: FlowInput) =
+    let target = previousIteration(self.liveLoopIteration(step), self.maxLoopIteration(step.loop))
+    self.selectLoopIteration(step.loop, target, step.position)
+    self.updateLoopControlDom(step.position)
 
-  # NOTE: keep the `flow-multiline-value-container` class on the outer
-  # element.  It is part of the public DOM contract of the flow loop
-  # control and used as a stable selector by Playwright suites
-  # (e.g. tests/noir-space-ship/noir-space-ship.spec.ts:
-  # "loop iteration slider tracks remaining shield" /
-  # "simple loop iteration jump").  The 0ac4fdda
-  # (feat: Omniscience design redo) commit dropped this class in favour
-  # of the new `ct-flex ct-p-0` design-system utilities — that is how
-  # the noir-space-ship loop tests started to fail to find the loop
-  # control.  Both class names are preserved together: the design
-  # utilities for layout, the legacy class for tests + styling
-  # consistency with the (post-fix-1.12) flow-parallel-value-box DOM
-  # contract.
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"id", cstring(&"flow-multiline-value-{step.position}-{step.stepCount}"))
-  result.setAttribute(cstring"class", cstring"flow-multiline-value-container ct-flex ct-p-0")
+  proc forward(input: FlowInput) =
+    let target = nextIteration(self.liveLoopIteration(step), self.maxLoopIteration(step.loop))
+    self.selectLoopIteration(step.loop, target, step.position)
+    self.updateLoopControlDom(step.position)
 
-  if step.rrTicks != -1:
-    result.appendChild(backLoopControlButton(self, step, bStyle))
-    result.appendChild(flowLoopValue(self, step, allIterations, style))
-    result.appendChild(nextLoopControlButton(self, step, bStyle))
+  # A typed iteration is selected on Enter and on leaving the field.
+  # `redrawFlow()` used to follow: it is `clear()` + `recalculateAndRedrawFlow()`,
+  # and `clear()` drops `loopStates` — so it discarded the iteration just
+  # selected and re-derived it from `self.location`, which still holds the
+  # PRE-jump position until the move completes; the control snapped back for
+  # the duration of the jump. `updateLoopControlDom` writes the two things
+  # that changed and leaves the view zones standing.
+  proc commit(target: int; viaBlur: bool) =
+    self.selectLoopIteration(step.loop, target, step.position)
+    self.updateLoopControlDom(step.position)
+    if viaBlur:
+      self.scheduleActiveLoopIterationValueRender()
 
-  # self.redraw()
+  # The outer `flow-multiline-value-container` class is the noir-space-ship
+  # loop tests' selector (tests/noir-space-ship/noir-space-ship.spec.ts:
+  # "loop iteration slider tracks remaining shield" / "simple loop iteration
+  # jump"); the view keeps it beside the design-system utilities.
+  web(renderFlowLoopControl[WR, WE](flowRenderer, control, flowStyleOf(style),
+    FlowLoopControlHandlers(onBack: back, onForward: forward,
+                            onCommit: commit)))
 
 proc makeFlowLoops(self: FlowComponent, step: FlowStep) =
   let expression = &"for-{step.position}"
@@ -3834,15 +3587,14 @@ proc addLoopInfo(self: FlowComponent, step: FlowStep) =
         self,
         zonePosition,
         self.lineHeight.float,
-        true)
+        isLoop = true,
+        contentWidget = true)
 
     self.flowLoops[step.position].flowZones =
       MultilineZone(
         dom: newZoneDom,
         zoneId: self.loopViewZones[zonePosition],
         variables: JsAssoc[cstring, bool]{})
-
-    cast[Element](newZoneDom).classList.add("flow-content-widget")
 
     self.makeFlowLoops(step)
     self.scheduleActiveLoopIterationValueRender()
@@ -3969,7 +3721,7 @@ proc doRenderActiveLoopIterationValues(data: LoopIterationRenderData) {.cdecl.} 
   if data.self.isNil or data.self.flow.isNil or not data.self.flowIsLive:
     return
   data.self.renderActiveLoopIterationValues()
-  if not data.self.inExtension and not data.self.editorUI.isNil:
+  if not data.self.editorUI.isNil:
     data.self.editorUI.adjustEditorWidth()
     data.self.resizeFlowSlider()
 
@@ -3997,10 +3749,7 @@ proc scheduleActiveLoopIterationValueRender*(self: FlowComponent) =
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
   let editorContentLeft =
-    if self.inExtension:
-      0.0
-    else:
-      self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
+    self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   self.createLoopStates()
 
@@ -4018,7 +3767,6 @@ proc renderFlowLines*(self: FlowComponent) =
       let loopId = step.loop
 
       # TODO: We need to calculate the position beforehand
-      # it will be used both in the extension and standalone
       self.prepareFlowLineVariables(step)
 
       if not self.stepNodes.hasKey(step.stepCount) and
@@ -4075,13 +3823,10 @@ proc scheduleFlowRedraw(self: FlowComponent, delay: int) =
 
 proc createFlowLines(self: FlowComponent) =
   let editorContentLeft =
-    if self.inExtension:
-      0.0
-    else:
-      self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
+    self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   for line, stepCounts in self.flow.positionStepCounts:
-    if self.inExtension or line < self.tab.sourceLines.len:
+    if line < self.tab.sourceLines.len:
       for stepCount in stepCounts:
         let step = self.flow.steps[stepCount]
         if step.loop == 0 and step.iteration == 0:
@@ -4136,11 +3881,10 @@ proc recalculateAndRedrawFlow*(self: FlowComponent) =
     return
   if not self.flow.isNil:
     self.createFlowLines()
-    if not self.inExtension:
-      self.calculateLineHeight()
+    self.calculateLineHeight()
     self.renderFlowLines()
 
-    if self.mutationObserver.isNil and not self.inExtension:
+    if self.mutationObserver.isNil:
       setEditorMutationObserver(self)
 
 proc adjustFlow(self: FlowComponent) =
@@ -4165,7 +3909,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     if update.location.toJs.isNil:
       cdebug "flow: update location is nil: stopping"
       return
-    let updateLocationName = if self.inExtension or self.editorUI.editorView != ViewInstructions:
+    let updateLocationName = if self.editorUI.editorView != ViewInstructions:
         update.location.highLevelPath
       else:
         # should be always path:name
@@ -4190,21 +3934,19 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     let locationMatchesRequest =
       not self.location.toJs.isNil and
       $self.location.highLevelPath == $self.editorUI.name
-    if not self.inExtension and
-        self.editorUI.name != updateLocationName and
+    if self.editorUI.name != updateLocationName and
         not locationMatchesRequest:
       cdebug "flow: editor name not equal to update location name: stopping"
       return
 
     self.status = update.status
 
-    let editorView = if self.inExtension: EditorView.ViewSource else: self.editorUI.editorView
+    let editorView = self.editorUI.editorView
     if ord(editorView) < 0 or ord(editorView) >= update.view_updates.len:
       cerror "flow: editorView index out of bounds: " & $ord(editorView) & " updates len: " & $update.view_updates.len
       return
 
-    if not self.inExtension:
-      self.editorUI.flowUpdate = update
+    self.editorUI.flowUpdate = update
 
     if update.location.key != self.key or self.flow.isNil:
       # Full rebuild required when:
@@ -4236,9 +3978,6 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       self.handoffFlow = nil
       self.updateFlowOnMove(self.location.rrTicks, self.location.line)
       self.recalculate = true
-      # NOTE: a no-op in the app (`FlowComponent` overrides only
-      # `redrawForExtension`); kept because it rebinds the extension host.
-      self.redraw()
       # One deferred rebuild to capture offsets Monaco has not yet laid out.
       self.scheduleFlowRedraw(100)
       self.scheduleActiveLoopIterationValueRender()
@@ -4265,45 +4004,35 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     cerror "flow: " & getCurrentExceptionMsg()
 
 
-proc varStyle(self: FlowComponent, fields: seq[cstring]): VStyle =
-  let width = 70 / fields.len.float
-  style((StyleAttr.cssFloat, cstring"left"))
+proc loopSliderTrackStyle(self: FlowComponent, position: int): FlowStyle =
+  ## Where the slider track sits beside the loop control, as measured from the
+  ## control's width. A control not laid out yet (width 0) gets a zero-width
+  ## track and asks for a recalculation.
+  let leftValue = cast[Element](self.flowLoops[position].flowDom).clientWidth
+  var widthValue = "0px"
+  if leftValue != 0:
+    widthValue = fmt"{calculateLoopSliderWidth(self, leftValue)}px"
+  else:
+    self.shouldRecalcFlow = true
+  @[("width", fmt"calc({widthValue} - {SLIDER_OFFSET}ch)"),
+    ("fontSize", $data.ui.fontSize),
+    ("fontFamily", "SpaceGrotesk"),
+    ("marginLeft", "4ch"),
+    ("height", $self.lineHeight & "px"),
+    ("lineHeight", $self.lineHeight & "px")]
 
-proc makeLoopSliderChildDom(self: FlowComponent, position: int, includeEmptyText: bool = false): Node =
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring"flow-loop-slider")
-  result.setAttribute(cstring"id", cstring(&"flow-loop-slider-{position}"))
-
-  if not self.inExtension:
-    var leftValue = cast[Element](self.flowLoops[position].flowDom).clientWidth
-    var widthValue = cstring"0px"
-
-    if leftValue != 0:
-      widthValue = cstring(fmt"{calculateLoopSliderWidth(self, leftValue)}px")
-    else:
-      self.shouldRecalcFlow = true
-
-    result.style.width = fmt"calc({widthValue} - {SLIDER_OFFSET}ch)".cstring
-    result.style.fontSize = cstring($data.ui.fontSize)
-    result.style.fontFamily = cstring"SpaceGrotesk"
-    result.style.marginLeft = cstring"4ch"
-    result.style.height = cstring($self.lineHeight & "px")
-    result.style.lineHeight = cstring($self.lineHeight & "px")
-
-  if includeEmptyText:
-    result.appendChild(document.createTextNode(cstring""))
+proc makeLoopSliderChildDom(self: FlowComponent, position: int): Node =
+  web(renderFlowLoopSliderTrack[WR, WE](flowRenderer, position,
+    self.loopSliderTrackStyle(position)))
 
 proc makeLoopSliderContainerDom(self: FlowComponent, position: int): Node =
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring"flow-loop-slider-container")
-  result.setAttribute(cstring"id", cstring(&"flow-loop-slider-container-{position}"))
+  let flowDomWidth = self.flowLoops[position].flowDom.toJs.clientWidth
+  let containerStyle: FlowStyle = @[
+    ("left", fmt"calc({flowDomWidth}px - 2ch)"),
+    ("fontSize", $data.ui.fontSize & "px")]
 
-  if not self.inExtension:
-    let flowDomWidth = self.flowLoops[position].flowDom.toJs.clientWidth
-    result.style.left = cstring(fmt"calc({flowDomWidth}px - 2ch)")
-    result.style.fontSize = cstring($data.ui.fontSize & "px")
-
-  result.appendChild(self.makeLoopSliderChildDom(position))
+  web(renderFlowLoopSlider[WR, WE](flowRenderer, position, containerStyle,
+    self.loopSliderTrackStyle(position)))
 
 proc makeSliderDom(self: FlowComponent, position: int): Node =
   var dom = cast[Node](jq(&"#flow-loop-slider-container-{position}"))
@@ -4322,7 +4051,7 @@ proc makeSliderDom(self: FlowComponent, position: int): Node =
   # one, leaving a stack of dead empty divs behind (#562).
   var sliderDom = cast[Node](dom.querySelector(cstring".flow-loop-slider"))
   if sliderDom.isNil:
-    sliderDom = self.makeLoopSliderChildDom(position, includeEmptyText = true)
+    sliderDom = self.makeLoopSliderChildDom(position)
     dom.appendChild(sliderDom)
 
   self.flowLoops[position].sliderDom = sliderDom
@@ -4386,38 +4115,26 @@ proc setEditorResizeObserver(self: FLowComponent, position: int) =
 # available to a renderer that has no Monaco. Removing the DOM version cannot
 # change what the desktop draws, because nothing drew from it.
 
-proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, isLoop: bool = false): Node =
-  #create viewZone
-  var zoneDom = document.createElement("div")
+proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float,
+                        isLoop: bool = false, contentWidget: bool = false): Node =
+  ## Open a Monaco view zone under `position` holding a `renderFlowViewZone`
+  ## row; Monaco positions it, the view draws it.
+  let lineNumbersWidth = $jq(".line-numbers").style.width
+  let zoneDom = web(renderFlowViewZone[WR, WE](flowRenderer, position,
+                                               lineNumbersWidth, contentWidget))
 
-  zoneDom.id = fmt"flow-view-zone-{position}"
-  zoneDom.class = "flow-view-zone"
-  zoneDom.style.display = "flex"
+  let viewZone = js{
+        afterLineNumber: position,
+        heightInPx: heightInPx + 3,
+        domNode: zoneDom
+      }
 
-  if not self.inExtension:
-    let viewZone = js{
-          afterLineNumber: position,
-          heightInPx: heightInPx + 3,
-          domNode: zoneDom
-        }
-
-    if isLoop:
-      var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
-      self.loopViewZones[position] = zoneId
-    else:
-      var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
-      self.viewZones[position] = zoneId
-
-  # calculate previous position indentations count
-  let lineNumberDom = document.createElement("div")
-
-  lineNumberDom.class = "line-numbers"
-  lineNumberDom.style.height = "100%"
-  if not self.inExtension:
-    lineNumberDom.style.width = jq(".line-numbers").style.width
-  lineNumberDom.style.position = "absolute"
-  lineNumberDom.style.left = "0px"
-  zoneDom.appendChild(lineNumberDom)
+  if isLoop:
+    var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
+    self.loopViewZones[position] = zoneId
+  else:
+    var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
+    self.viewZones[position] = zoneId
 
   return zoneDom
 
@@ -4474,17 +4191,7 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
 
   # Defer until the hosting view zone has been laid out. `shouldRecalcFlow`
   # records that a recalculation is still owed.
-  #
-  # ONLY outside the extension, and that has always been the rule: the
-  # extension has no `resizeFlowSlider` path to come back on
-  # (`doRenderActiveLoopIterationValues` schedules it behind
-  # `if not data.self.inExtension`, and `resizeEditorHandler` needs an
-  # `editorUI.monacoEditor` the extension does not have), so deferring there
-  # means never building the slider at all.  `requireMeasurable` below carries
-  # the same condition into `ensureFlowLoopSlider`, which would otherwise apply
-  # lesson 1 unconditionally and reintroduce exactly that.
-  let canDeferForWidth = not self.inExtension
-  if canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+  if maxIteration > FLOW_ITERATION_START and
      self.loopControlWidth(position) == 0:
     self.shouldRecalcFlow = true
     return
@@ -4513,7 +4220,7 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
       # Maybe later on add to all of the EventLog components?
       cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
     ,
-    requireMeasurable = canDeferForWidth
+    requireMeasurable = true
   )
   # The width gate above measures the CONTAINER; `ensureFlowLoopSlider`
   # measures the slider element itself, and the two can disagree — the slider's
@@ -4528,7 +4235,7 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
   # happens to run. Benign today — `resizeFlowSlider` applies `loopSliderStyle`
   # before calling back in — but "benign today" is how #562 was introduced, and
   # this is one assignment.
-  if not slid and canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+  if not slid and maxIteration > FLOW_ITERATION_START and
      not flowLoopSliderIsMeasurable(element):
     self.shouldRecalcFlow = true
   if not slid and maxIteration <= FLOW_ITERATION_START:
@@ -4551,8 +4258,7 @@ proc makeSlider(self: FlowComponent, position: int) =
   self.addSliderWidget(position)
   self.ensureLoopSlider(position)
 
-  if not self.inExtension:
-    setEditorResizeObserver(self, position)
+  setEditorResizeObserver(self, position)
 
 proc resizeLineSlider(self: FlowComponent, position: int) =
   let editor = self.editorUI.monacoEditor
@@ -4563,56 +4269,6 @@ proc resizeLineSlider(self: FlowComponent, position: int) =
   if not slider.isNil:
     let leftValue = slider.style.left
     slider.style.width = fmt"calc({minimapLeft - minimapWidth}px - {leftValue})"
-
-const MAX_CELL_WIDTH = 100
-
-proc flowFontAwesomeIcon(typ: string, kl: string = ""): Node =
-  result = document.createElement(cstring"i")
-  result.setAttribute(cstring"class", cstring(fmt"fa fa-{typ} {kl}"))
-
-proc moveButtonsView(self: FlowComponent, visibleWidth: float): Node =
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring"move-buttons")
-
-  let leftStyle = style((StyleAttr.left, cstring($(self.maxFlowLineWidth - 4) & cstring"ex")))
-  let rightStyle = style((StyleAttr.marginLeft, cstring($(visibleWidth + MAX_CELL_WIDTH.float)) & cstring"px"))
-
-  let leftButton = document.createElement(cstring"div")
-  leftButton.setAttribute(cstring"class", cstring"flow-left-button")
-  leftButton.applyStyle(leftStyle)
-  leftButton.addEventListener(cstring"click", proc(e: Event) =
-    if not self.selected:
-      discard self.select()
-    discard self.onLeft()
-  )
-  leftButton.appendChild(flowFontAwesomeIcon("caret-left"))
-  result.appendChild(leftButton)
-
-  let rightButton = document.createElement(cstring"div")
-  rightButton.setAttribute(cstring"class", cstring"flow-right-button")
-  rightButton.applyStyle(rightStyle)
-  rightButton.addEventListener(cstring"click", proc(e: Event) =
-    if not self.selected:
-      discard self.select()
-    discard self.onRight()
-  )
-  rightButton.appendChild(flowFontAwesomeIcon("caret-right"))
-  result.appendChild(rightButton)
-
-proc iterationVarView(self: FlowComponent, line: int, field: cstring, style: VStyle): Node =
-  var limitedLabel = if ($field).len > 5: ($field)[0 .. ^4] & ".." else: $field
-
-  result = document.createElement(cstring"div")
-  result.applyStyle(style)
-  result.appendChild(document.createTextNode(cstring(limitedLabel)))
-
-proc iterationInfoView(self: FlowComponent, line: int, fields: seq[cstring]): Node =
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring"flow-iteration-info")
-
-  let style = self.varStyle(fields)
-  for variable in fields:
-    result.appendChild(iterationVarView(self, line, variable, style))
 
 func calculateInternal(self: FlowComponent, group: Group, loop: Loop, width: float)
 
@@ -4773,166 +4429,6 @@ func startWidth*(self: FlowComponent, group: Group, loopID: int, i: int): float 
 func startWidth*(self: FlowComponent, loopID: int): float =
   var group = self.lineGroups[self.flow.loops[loopID].first]
   return self.startWidth(group, loopID, 0)
-
-proc renderFlow*(self: FlowComponent, position: int, stepCount: int): Node =
-  if stepCount notin self.flow.steps.low .. self.flow.steps.high:
-    return
-  var step = self.flow.steps[stepCount]
-
-  if step.loop == -1:
-    # Built through `flow_value_dom`, shared with the review's diff tab (UD-3).
-    # `flowLeftStyle`'s own `left` is applied on top, because this host's offset
-    # is a `calc()` in `ch` rather than a pixel count.
-    result = flowValueBandDom(0.0, isLoop = false)
-    result.applyStyle(self.flowLeftStyle())
-
-    var style = style()
-    var i = 0
-    for name in step.exprOrder:
-      result.appendChild(flowSimpleValue(self, name, step.beforeValues[name], step.afterValues[name], stepCount, true, style, i))
-      i += 1
-
-    return
-
-  let firstLoopID = step.loop
-  let firstHeader = self.flow.loops[firstLoopID].first == position
-  let firstLoop = self.flow.loops[firstLoopID]
-
-  self.calculateLayout()
-
-  var loops: seq[(int, Loop)]
-  if firstLoop.base == -1:
-    loops.add((firstLoopID, firstLoop))
-  else:
-    var firstBase = firstLoop.base
-    var baseLoop = self.flow.loops[firstBase]
-    for internal in baseLoop.internal:
-      var internalLoop = self.flow.loops[internal]
-      loops.add((internal, internalLoop))
-
-  var group = self.lineGroups[position]
-  var values: seq[cstring] = @[]
-  var valueLines: seq[seq[cstring]] = @[]
-  var loopClass = ""
-
-  if self.data.config.flow.realFlowUI != FlowMultiline:
-    for name, value in step.beforeValues:
-      values.add(name)
-
-    valueLines = @[values]
-    loopClass = "flow-loop-line"
-  else:
-    self.ensureTokens(position)
-
-    for label, left in self.editorUI.tokens[position]:
-      values = @[label]
-      valueLines.add(values)
-
-    loopClass = "flow-loop-multiline"
-
-  let domElement = self.editorUI.monacoEditor.domElement
-  let monacoEditorWidth = cast[kdom.Element](domElement).clientWidth
-  let visibleWidth = monacoEditorWidth.float - (self.maxFlowLineWidth + 11).float * 13.0 - 70 # iteration info is 70
-
-  result = document.createElement(cstring"div")
-  result.setAttribute(cstring"class", cstring(loopClass))
-
-  for values in valueLines:
-    if self.data.config.flow.realFlowUI == FlowMultiline and not self.multilineZones[position].variables[values[0]]:
-      continue
-
-    var lineClass = ""
-
-    if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
-      lineClass = "flow-loop-first-line"
-
-    var res = flowValueBandDom(0.0, isLoop = true, extraClass = lineClass)
-    res.applyStyle(flowLeftStyle(self))
-
-    if not group.isNil and self.flow.loops[group.focusedLoopID].first == position:
-      res.appendChild(moveButtonsView(self, visibleWidth))
-
-    if self.data.config.flow.realFlowUI != FlowMultiline:
-      res.appendChild(iterationInfoView(self, position, values))
-
-    for (loopID, loop) in loops:
-      var index = 0
-
-      if not self.flow.positionStepCounts.hasKey(position):
-        index += 1
-
-        continue
-
-      for step in self.flow.positionStepCounts[position]:
-        if step == stepCount.int:
-          break
-
-        index += 1
-
-      var hasLoop = false
-      # The band's elements come from `flow_value_dom`, shared with the
-      # review's diff tab (UD-3) so both draw one implementation's columns.
-      var html = flowValueLoopValuesDom(loopID.int)
-      html.addEventListener(cstring"scroll", proc(ev: Event) =
-        discard
-      )
-
-      let parallelGroup = flowValueGroupDom()
-      html.appendChild(parallelGroup)
-
-      for i in 0 ..< loop.iteration:
-        if group.isNil:
-          break
-        if index < self.selectedIndex:
-          index += 1
-          continue
-
-        hasLoop = true
-        let width =
-          if self.valueMode == BeforeAndAfterValueMode:
-            group.loopWidths[loopID][i] * group.baseWidth * 2 + 21
-          else:
-            group.loopWidths[loopID][i] * group.baseWidth
-        # `flowValueColumnDom` carries the "change the class on a width change
-        # so Monaco cannot skip the re-render" rule with it.
-        let valuesColumn = flowValueColumnDom(
-          cstring(&"flow-values-{position}-{loopID.int}-{index}"), width)
-        parallelGroup.appendChild(valuesColumn)
-
-        if not self.flow.positionStepCounts.hasKey(position):
-          continue
-
-        if index >= self.flow.positionStepCounts[position].len:
-          break
-
-        let currentStepCount = self.flow.positionStepCounts[position][index]
-
-        if currentStepCount notin self.flow.steps.low .. self.flow.steps.high:
-          break
-
-        let currentStep = self.flow.steps[currentStepCount]
-
-        index += 1
-
-        var style = style()
-
-        for name in values:
-          if not currentStep.beforeValues.hasKey(name) or not currentStep.afterValues.hasKey(name):
-            valuesColumn.appendChild(flowValueEmptyDom(style))
-          else:
-            valuesColumn.appendChild(flowSimpleValue(
-              self,
-              name,
-              currentStep.beforeValues[name],
-              currentStep.afterValues[name],
-              currentStepCount,
-              false,
-              style
-            ))
-      if hasLoop:
-        res.appendChild(html)
-
-    result.appendChild(res)
 
 proc resizeFlowSlider*(self: FlowComponent) =
   self.shouldRecalcFlow = false
@@ -5120,61 +4616,3 @@ proc switchFlowType*(self: FlowComponent, flowType: FlowUI) =
     self.data.config.flow.realFlowUI = flowType
     self.recalculateAndRedrawFlow()
     self.updateFlowDom()
-
-when defined(ctInExtension):
-  proc vsUpdatedFlow*(editor: JsObject, update: FlowUpdate) {.exportc.} =
-    discard
-    # discard cast[FlowComponent](vsCodeEditor.flow).onUpdatedFlow(update)
-
-  proc completeMove*(editor: JsObject, response: MoveState, dapApi: DapApi) {.exportc.} =
-    discard
-    # vsCodeEditor.flow = FlowComponent(
-    #   id: 0,
-    #   flow: nil,
-    #   # tab: self.tabInfo,
-    #   location: response.location,
-    #   multilineZones: JsAssoc[int, MultilineZone]{},
-    #   flowDom: JsAssoc[int, Node]{},
-    #   shouldRecalcFlow: false,
-    #   flowLoops: JsAssoc[int, FlowLoop]{},
-    #   flowLines: JsAssoc[int, FlowLine]{},
-    #   activeStep: FlowStep(rrTicks: -1),
-    #   selectedLine: -1,
-    #   selectedLineInGroup: -1,
-    #   selectedStepCount: -1,
-    #   multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
-    #   loopLineSteps: JsAssoc[int, int]{},
-    #   inlineDecorations: JsAssoc[int, InlineDecorations]{},
-    #   # editorUI: self,
-    #   # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
-    #   # editor: self.service,
-    #   # service: self.data.services.flow,
-    #   # data: self.data,
-    #   lineGroups: JsAssoc[int, Group]{},
-    #   # status: FlowUpdateState(kind: FlowWaitingForStart),
-    #   statusWidget: nil,
-    #   sliderWidgets: JsAssoc[int, js]{},
-    #   lineWidgets: JsAssoc[int, js]{},
-    #   multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
-    #   stepNodes: JsAssoc[int, Node]{},
-    #   loopStates: JsAssoc[int, LoopState]{},
-    #   viewZones: JsAssoc[int, int]{},
-    #   loopViewZones: JsAssoc[int, int]{},
-    #   loopColumnMinWidth: 15,
-    #   shrinkedLoopColumnMinWidth: 8,
-    #   pixelsPerSymbol: 8,
-    #   distanceBetweenValues: 10,
-    #   distanceToSource: 50,
-    #   inlineValueWidth: 80,
-    #   bufferMaxOffsetInPx: 300,
-    #   maxWidth: 0,
-    #   modalValueComponent: JsAssoc[cstring, ValueComponent]{},
-    #   valueMode: BeforeValueMode
-    # )
-
-    # dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
-
-when defined(ctInExtension):
-  when defined(ctInCentralExtensionContext):
-    {.emit: "module.exports.vsUpdatedFlow = vsUpdatedFlow".}
-    {.emit: "module.exports.completeMove = completeMove".}
