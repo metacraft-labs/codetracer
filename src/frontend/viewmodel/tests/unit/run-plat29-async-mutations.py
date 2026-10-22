@@ -828,8 +828,8 @@ ARMS = [
     ),
     Arm(
         "R2", MAIN_DAP,
-        "      body[\"request_seq\"] = request.seq\n",
-        "      discard request.seq\n",
+        "      body[\"request_seq\"] = request.seq\n      return request.sessionId\n",
+        "      discard request.seq\n      return request.sessionId\n",
         R_SESSIONS,
         "**THE ANSWER KEEPS THE WIRE NUMBER.** Routed to the right session, "
         "but carrying the router's own `seq` rather than the one that session "
@@ -1072,9 +1072,14 @@ def check_killer_names(problems: int) -> int:
     laws = read_source(LAWS)
     ex = read_source(EX)
     closure = read_source(CLOSURE)
-    everywhere = "\n".join([laws, ex, closure, read_source(T_PRODUCER),
-                            read_source(T_FILES), read_source(T_VALUES),
-                            read_source(T_WEB), read_source(T_ROUTING)])
+    # A name found only in a comment names no case: a suite that folds its
+    # cases into one test can keep their names as comments, and the control
+    # then runs none of them.
+    everywhere = "\n".join(
+        line for text in [laws, ex, closure, read_source(T_PRODUCER),
+                          read_source(T_FILES), read_source(T_VALUES),
+                          read_source(T_WEB), read_source(T_ROUTING)]
+        for line in text.splitlines() if not line.lstrip().startswith("#"))
 
     templates = [
         ('test "LAW-V1 and FUZZ-5 x class " & $(ci + 1):', laws,

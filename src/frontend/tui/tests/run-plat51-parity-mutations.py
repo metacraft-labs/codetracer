@@ -442,10 +442,12 @@ ARMS = [
         "          outcome.requestClick(PaneClickRequest(kind: pcSeek,\n                                                tick: prow.ticks))\n",
         "          rt.note(\"history entry\")\n",
         P_HISTORY, "a click on a history entry goes nowhere"),
+    # The pane and the engine read ONE StateVM, the session's, since the
+    # panes take the session's ViewModels: the watch reaching it is the job.
     Arm("T7", TSESSION,
-        "    for vm in [session.session.stateVM, s.state]:\n",
-        "    for vm in [session.session.stateVM]:\n",
-        P_WATCH, "a watch reaches the engine's StateVM and not the pane's"),
+        "      else: vm.addWatch(c.text)\n",
+        "      else: discard c.text\n",
+        P_WATCH, "an added watch reaches no StateVM: neither the pane nor the engine sees it"),
     Arm("TS1", TSESSION,
         "      session.gotoTick(c.tick)\n",
         "      session.gotoTick(c.tick div 2)\n",
@@ -509,8 +511,8 @@ ARMS = [
     # pressed between the scrubber and the call row; the arm still puts the
     # call row first.
     Arm("G1", GMAIN,
-        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    if clickCalltrace(r, x, y):\n      return\n",
-        "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n",
+        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n    if clickCalltrace(r, x, y):\n      return\n",
+        "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n",
         G_CALLS, "a press on GPUI's call-trace track jumps to the call row under it"),
     Arm("G2", GLIST,
         "               fraction: trackFractionAt(local, track.h))\n",
@@ -636,8 +638,8 @@ ARMS += [
         "  (r: (fg.r * 3 + bg.r + 2) div 4, g: (fg.g * 3 + bg.g + 2) div 4,\n",
         Z_COMPOSITE, "the future's blend is not the desktop's 0.5 composite"),
     Arm("B10", RUNTIME,
-        "    if not rt.app.welcomeHost.isNil:\n      rt.openWelcomeTab(outcome)\n",
-        "    if false:\n      rt.openWelcomeTab(outcome)\n",
+        "  if not rt.app.welcomeHost.isNil:\n    rt.openWelcomeTab(outcome)\n",
+        "  if false:\n    rt.openWelcomeTab(outcome)\n",
         B_WELCOME, "the strip's + opens the omnibar, not the Welcome Screen"),
     Arm("B11", WELCOMEVM,
         "    {wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace}\n",

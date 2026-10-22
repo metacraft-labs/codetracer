@@ -68,13 +68,17 @@ ARMS = [
      '    if s.session.store.applyCalltraceResponse(resp.getOrDefault("body")) >= 0:',
      "    if false:", [PRODUCERS],
      "the call trace is requested and its answer dropped"),
+    # The open reads ONE event, for the log's size and the extent; the rows
+    # are each pane's to ask for (Viewport-Driven-Loading V2).
     ("E1", HOST,
-     "    discard s.requestAndLoadEventLog(start = 0, count = RecordingEventWindow)",
+     "    discard s.requestAndLoadEventLog(start = 0, count = 1)",
      "    discard", [PRODUCERS],
      "the recording's event log is never asked for"),
+    # The planners every front-end shares (`sdk/breakpoints`) make the
+    # request; the session hands the store the engine's answer.
     ("P1", SESSION,
-     "  s.session.store.applyVerifiedBreakpoints(path, verified, disabled)",
-     "  discard verified", [PRODUCERS],
+     "  s.session.store.applyVerifiedBreakpoints(path,\n    answeredBreakpoints(plan, resp.getOrDefault(\"body\")))",
+     "  discard path", [PRODUCERS],
      "the engine's breakpoint verdict never reaches the store"),
     # --- the one decoder ---------------------------------------------------
     ("D1", STORE,
