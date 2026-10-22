@@ -1431,11 +1431,17 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 .collapsed-icon-zone.has-icons
   flex-shrink: 0
 
-// Hidden for now (Nikolay, 2026-10-15): the per-panel icons of a minimal
-// sidebar.  Only the sidebar toggle shows in the group; the panels are still
-// reached through the thin edge line.  Delete this rule to bring them back.
-.collapsed-icon-zone .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button)
-  display: none
+// The per-panel icons of a minimal sidebar are SHOWN: `Auto-Hide-Panes.md`
+// §10.3 makes the icon zone the collapsed sidebar's panel directory, "one
+// small icon per auto-hidden panel", each opening the overlay on its own
+// panel.  They were hidden "for now" on 2026-10-15 (d83de2484) with no change
+// to that section, which left every minimal sidebar without its directory and
+// its icons without an accessible name.  The zone's `gap` is 0 for the
+// toggle/tab-list pair (below), so the icons keep their former 2px spacing
+// from their neighbours here.
+.collapsed-icon-zone .collapsed-icon + .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button),
+.collapsed-icon-zone .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button) + .collapsed-icon
+  margin-left: 2px
 
 SIDEBAR_OPEN_ICON_PATH = url('../../public/resources/shared/sidebar_open.svg')
 SIDEBAR_CLOSE_ICON_PATH = url('../../public/resources/shared/sidebar_close.svg')
@@ -1516,8 +1522,8 @@ CLOSE_SM_ICON_PATH = url('../../public/resources/shared/close_sm.svg')
 
 // 8px between the toggle's icon and the tab-list icon (Nikolay, 2026-10-16):
 // the two 24px buttons touch, and each insets its 16px icon by 4px.  So the
-// zone's 2px item gap goes (the per-panel icons it spaced are hidden for now —
-// restore it with them).
+// zone's 2px item gap goes; the per-panel icons get it back as a margin (the
+// §10.3 rule above).
 .collapsed-icon-zone.has-icons
   gap: 0
 
