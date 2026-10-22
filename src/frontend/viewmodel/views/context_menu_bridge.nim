@@ -15,7 +15,20 @@ when defined(js):
   proc currentTargetId(ev: kdom.Event): cstring
       {.importjs: "(function(e){ return (e.currentTarget && e.currentTarget.id) || ''; })(#)".}
 
-  proc hideContextMenu() =
+  proc contextMenuIsOpen*(): bool {.importjs: """
+    (function(){
+      const c = document.getElementById('context-menu-container');
+      return !!c && getComputedStyle(c).display !== 'none';
+    })()""".}
+    ## Whether the right-click menu is showing. The desktop's key router asks
+    ## before every key, so that while it shows the menu's own keys
+    ## (`Escape` → `context-menu.close`) are consulted first, as on the
+    ## terminal and GPUI (CUA-Keymap.md §3.8).
+
+  proc hideContextMenu*() =
+    ## Close the right-click menu, whichever `showContextMenu` opened it (this
+    ## one or its twin in `renderer.nim`): both draw into the one
+    ## `#context-menu-container`.
     let container = kdom.document.getElementById(cstring"context-menu-container")
     if not container.isNil:
       container.style.display = cstring"none"
