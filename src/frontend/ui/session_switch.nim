@@ -224,8 +224,7 @@ proc createNewSession*(data: Data) =
       paths: @[],
       skipInternal: true,
       skipNoSource: false,
-      historyIndex: 1,
-      showInlineValues: true),
+      historyIndex: 1),
     editor: EditorService(
       open: JsAssoc[cstring, TabInfo]{},
       loading: @[],

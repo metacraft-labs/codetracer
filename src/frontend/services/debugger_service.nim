@@ -23,19 +23,6 @@ proc loadLocals*(self: DebuggerService, rrTicks: int, countBudget: int, minCount
     seq[Variable])
   return self.locals
 
-proc evaluateExpression*(self: DebuggerService, rrTicks: int, expression: cstring): Future[Value] {.async.} =
-  let value = await self.data.asyncSend("evaluate-expression", EvaluateExpressionArg(rrTicks: rrTicks, expression: expression), &"{rrTicks}:{expression}", Value)
-  return value
-
-proc loadParsedExprs*(self: DebuggerService, line: int, path: cstring) {.async.} =
-  var table = await self.data.asyncSend("load-parsed-exprs", LoadParsedExprsArg(line: line, path: path), &"{path}:{line}", JsAssoc[cstring, seq[FlowExpression]])
-  if self.expressionMap.isNil:
-    self.expressionMap = JsAssoc[cstring, seq[FlowExpression]]{}
-    self.expressionMap = table
-  else:
-    for key, item in table:
-      self.expressionMap[key] = item
-
 proc calltraceSearch*(self: DebuggerService, response: CallSearchArg): Future[seq[Call]] {.async.} =
   let calls = await self.data.asyncSend("calltrace-search", response, &"{response}", seq[Call])
   return calls

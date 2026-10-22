@@ -197,6 +197,18 @@ proc renderExpandedEditorDirect(self: EditorViewComponent)
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
   x >= location.left and x <= location.right and y >= location.top and y <= location.bottom
 
+proc nameAt(self: EditorViewComponent; line, column: int): string =
+  ## The word Monaco finds at `line:column` of this editor's text, or "".
+  if self.monacoEditor.isNil or line <= 0 or column <= 0:
+    return ""
+  let model = self.monacoEditor.getModel()
+  if model.isNil:
+    return ""
+  let word = model.toJs.getWordAtPosition(js{lineNumber: line, column: column})
+  if word.isNil or jsUndefined == word:
+    return ""
+  $word.word.to(cstring)
+
 proc clearViewZones*(self: EditorViewComponent) =
   self.monacoEditor.changeViewZones do (view: js):
     for viewZone in self.viewZones:
@@ -1849,8 +1861,8 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # TRACEPOINTS AND THE SCRATCHPAD ARE DEBUG-ONLY, and unlike breakpoints
     # they are not project state.  A tracepoint is an expression evaluated
     # against a recorded trace (`toggleTrace` -> `updateExpansion`), and
-    # "Add value to scratchpad" reads `services.debugger.locals`, which is the
-    # frame the session is stopped in.  Neither has any referent before a
+    # "Add value to scratchpad" values the name at the stop the session is
+    # in (`editor_points.valueInScope`).  Neither has any referent before a
     # recording exists, so neither is offered — a disabled "Add tracepoint"
     # would be a row about debugging in a menu that is meant to be about
     # editing.
@@ -1895,34 +1907,17 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
       contextMenu &= addDeleteTracepoint
 
-      # Add expression to Scratchpad
-      let key = &"{self.path}:{self.lastMouseMoveLine}"
-
-      if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-        for item in data.services.debugger.expressionMap[key]:
-          let startCol = cast[int](item.startCol)
-          var endCol = cast[int](item.endCol)
-          var expression: cstring
-          case item.kind:
-          of TkField:
-            expression = item.base
-
-          of TkIndex:
-            expression = item.collection
-            endCol -= 2
-
-          else:
-            expression = item.expression
-
-          if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-            for local in data.services.debugger.locals:
-              if local.expression == expression:
-                let baseValue = local.value
-                addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
-                  self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: baseValue))
-                  self.data.redraw())
-                contextMenu &= addToScratchpad
-            break
+      # Add the clicked name's value to the Scratchpad: the name under the
+      # pointer, valued at the stop by the session (`valueInScope`).
+      let clickedName = self.nameAt(self.lastMouseMoveLine, self.lastMouseClickCol)
+      let clickedValue = valueInScope(clickedName)
+      if clickedValue.isSome:
+        let name = clickedName
+        let valueText = clickedValue.get
+        addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
+          discard editor_points.addToScratchpad(name, valueText)
+          self.data.redraw())
+        contextMenu &= addToScratchpad
   else:
     # NO MODE GATE HERE, and it is not an oversight.  This arm is reached only
     # when the right-click landed inside a tracepoint's results table
@@ -2136,89 +2131,47 @@ proc getSourceLineDomIndex(self:EditorViewComponent, position: int): int =
 
   return result
 
-proc legacyValueViewZoneDom(self: EditorViewComponent, value: ValueComponent): Node =
-  ## DOM entrypoint for inline Monaco value view zones.
-  ##
-  ## The value module owns the remaining value-tree DOM materialization.  Editor
-  ## only supplies the legacy root-left style required by Monaco view zones.
-  value.renderValueDomWithLeft(&"{self.currentTooltip[0] * 9}px")
+proc valueTooltipDom(name, valueText: string; column: int): Node =
+  ## The value of a clicked name, as a row under its line: `name = value`,
+  ## indented to the name's column.
+  let row = document.createElement(cstring"div")
+  row.class = cstring"ct-editor-value-tooltip"
+  row.style.paddingLeft = cstring(&"{max(0, column - 1) * 9}px")
+  let nameSpan = document.createElement(cstring"span")
+  nameSpan.class = cstring"value-name"
+  nameSpan.textContent = cstring(name & " = ")
+  let valueSpan = document.createElement(cstring"span")
+  valueSpan.class = cstring"value-expanded-text"
+  valueSpan.textContent = cstring(valueText)
+  row.appendChild(nameSpan)
+  row.appendChild(valueSpan)
+  cast[Node](row)
 
-proc addLegacyValueViewZone(self: EditorViewComponent, value: ValueComponent, line: int) =
+proc renderValueTooltip(self: EditorViewComponent) =
+  ## Editor-Pane.md gesture 5: a plain click on a name shows its value at
+  ## the stop, in a row under the clicked line. The name is the word Monaco
+  ## finds at the click; its value is the session's (`valueInScope`), the
+  ## values every front-end shows. A click on anything with no value in
+  ## scope shows nothing.
+  if self.monacoEditor.isNil:
+    return
+  self.currentTooltip = (0, 0, 0)
+  if not self.viewZones.isNil:
+    self.clearViewZones()
+  let name = self.nameAt(self.lastMouseClickLine, self.lastMouseClickCol)
+  let value = valueInScope(name)
+  if value.isNone:
+    return
+  let line = self.lastMouseClickLine
+  self.currentTooltip = (self.lastMouseClickCol, self.lastMouseClickCol, line)
   let viewZone = js{
     afterLineNumber: line,
-    heightInPx: 0,
-    domNode: self.legacyValueViewZoneDom(value)
+    heightInLines: 1,
+    domNode: valueTooltipDom(name, value.get, self.lastMouseClickCol)
   }
-
   self.monacoEditor.changeViewZones do (view: js):
     var zoneId = cast[int](view.addZone(viewZone))
     self.viewZones[line] = zoneId
-
-proc renderValueView(self: EditorViewComponent, value: ValueComponent, line: int) =
-  self.addLegacyValueViewZone(value, line)
-
-proc customRedraw(self: ValueComponent) =
-  let editor = data.ui.editors[data.services.debugger.location.path]
-  var line = editor.lastMouseClickLine
-
-  editor.clearViewZones()
-  editor.addLegacyValueViewZone(self, line)
-
-proc renderValueTooltip(self: EditorViewComponent) {.async.} =
-  let key = &"{self.path}:{self.lastMouseClickLine}"
-
-  self.currentTooltip = (0, 0, 0)
-
-  if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-    self.clearViewZones()
-    if self.data.services.debugger.showInlineValues:
-      for item in data.services.debugger.expressionMap[key]:
-        let startCol = cast[int](item.startCol)
-        var endCol = cast[int](item.endCol)
-        var expression: cstring
-        case item.kind:
-        of TkField:
-          expression = item.expression
-
-        of TkIndex:
-          expression = item.collection
-          endCol -= 2
-
-        else:
-          expression = item.expression
-
-        if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-          var baseValue: Value
-
-          for local in self.data.services.debugger.locals:
-            if local.expression == expression:
-              baseValue = local.value
-              break
-
-          if baseValue.isNil:
-            baseValue = await self.data.services.debugger.evaluateExpression(self.data.services.debugger.location.rrTicks, item.expression)
-
-          if not baseValue.isNil:
-            let value = ValueComponent(
-              expanded: JsAssoc[cstring, bool]{expression: false},
-              charts: JsAssoc[cstring, ChartComponent]{},
-              showInLine: JsAssoc[cstring, bool]{},
-              baseExpression: expression,
-              baseValue: baseValue,
-              stateID: -1,
-              nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-              valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-              data: data,
-              customRedraw: customRedraw
-            )
-            self.currentTooltip = (startCol, endCol, self.lastMouseClickLine)
-            if not self.viewZones.isNil:
-              self.clearViewZones()
-            self.renderValueView(value, self.lastMouseClickLine)
-            break
-
-  elif not self.monacoEditor.isNil:
-    self.clearViewZones()
 
 const DELAY: int64 = 400 # milliseconds
 
@@ -3929,7 +3882,7 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
 
   if self.data.ui.activeFocus == self:
-    discard self.renderValueTooltip()
+    self.renderValueTooltip()
 
   # Tracepoint results (#566): this used to unconditionally call
   # `refreshTraceViewZoneDom()` for every expanded tracepoint, on every
@@ -4430,7 +4383,6 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
      sameSourceRevisionPath(response.location.highLevelPath, sourceFilePath))
 
   if moveTargetsEditor:
-    self.data.services.debugger.stableBusy = false
     if not response.location.isExpanded:
       self.service.active = canonicalSourceRevisionPath(response.location.path)
     else:
@@ -4541,9 +4493,6 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
         clog cstring("[NSS-1.64] EditorVC.onCompleteMove: elif branch -- redrawFlow only (no fresh fetch)")
       self.flow.redrawFlow()
       self.adjustEditorWidth()
-
-  if self.data.trace.lang != LangRubyDb:
-    discard data.services.debugger.loadParsedExprs(self.service.currentLine, response.cLocation.path)
 
   if not self.flow.isNil:
     discard self.flow.onCompleteMove(response)

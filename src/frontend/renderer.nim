@@ -646,9 +646,6 @@ proc onContextStartHistory*(sender: js, response: jsobject(inState=bool, express
   # redrawAll()
   discard
 
-proc onLoadParsedExprsReceived*(sender: js, response: jsobject(argId=cstring, value=JsAssoc[cstring, seq[FlowExpression]])) =
-  jsAsFunction[proc(response: JsAssoc[cstring, seq[FlowExpression]]): void](data.network.futures["load-parsed-exprs"][response.argId])(response.value)
-
 proc onUploadTraceFileReceived*(sender: js, response: jsobject(argId=cstring, value=UploadedTraceData)) =
   jsAsFunction[proc(response: UploadedTraceData): void](data.network.futures["upload-trace-file"][response.argId])(response.value)
 
@@ -671,9 +668,6 @@ proc onLoadCallstackDirectChildrenBeforeReceived*(sender: js, response: jsobject
   jsAsFunction[proc(response: seq[Call]): void](data.network.futures["load-callstack-direct-children-before"][response.argId])(response.value)
 
 # value
-proc onEvaluateExpressionReceived*(sender: js, response: jsobject(argId=cstring, value=Value)) =
-  jsAsFunction[proc(response: Value): void](data.network.futures["evaluate-expression"][response.argId])(response.value)
-
 proc onExpandValueReceived*(sender: js, response: jsobject(argId=cstring, value=Value)) =
   jsAsFunction[proc(response: Value): void](data.network.futures["expand-value"][response.argId])(response.value)
 

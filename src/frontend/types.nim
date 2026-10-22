@@ -290,8 +290,6 @@ type
     operationCount*:        int
     lastRRTickTime*:        float
     avgRRTickTime*:         float
-    expressionMap*:         JsAssoc[cstring, seq[FlowExpression]]
-    showInlineValues*:      bool
     valueHistory*:          JsAssoc[cstring, ValueHistory]
     skipInternal*:          bool
     skipNoSource*:          bool
@@ -2512,8 +2510,7 @@ when defined(ctRenderer):
         paths: @[],
         skipInternal: true,
         skipNoSource: false,
-        historyIndex: 1,
-        showInlineValues: true),
+        historyIndex: 1),
       editor: EditorService(
         open: JsAssoc[cstring, TabInfo]{},
         loading: @[],

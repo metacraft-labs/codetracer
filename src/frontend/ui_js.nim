@@ -2556,7 +2556,8 @@ when not defined(ctInExtension):
         # The editor's surface reads the session's values and flow, as the
         # terminal's and GPUI's do (`editor_points.webEditorSurface`).
         editor_points.setEditorSessionVMs(activeSessionVM.editorVM,
-          activeSessionVM.stateVM, activeSessionVM.flowVM)
+          activeSessionVM.stateVM, activeSessionVM.flowVM,
+          activeSessionVM.scratchpadVM)
       initPanelVM("initTimelineVMFromSession"):
         trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
       initPanelVM("initTerminalOutputVMFromSession"):
@@ -4614,10 +4615,8 @@ proc configureIPC(data: Data) =
     "asm-load-received"
     "load-locals-received"
     "expand-value-received"
-    "evaluate-expression-received"
     "expand-values-received"
     "search-calltrace-received"
-    "load-parsed-exprs-received"
     "updated-events": seq[EventElement] => eventLog
     "updated-events-content": cstring => eventLog
     "updated-trace": TraceUpdate => [ui]

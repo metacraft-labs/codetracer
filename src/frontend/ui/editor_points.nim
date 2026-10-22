@@ -22,6 +22,7 @@ import ../view_vocabulary/editor_surface
 from ../viewmodel/viewmodels/editor_vm import EditorVM
 from ../viewmodel/viewmodels/state_vm import StateVM
 from ../viewmodel/viewmodels/flow_vm import FlowVM
+from ../viewmodel/viewmodels/scratchpad_vm import ScratchpadVM, addValue
 from ../../common/value_presentation/surfaces import FlowBudget
 
 export breakpoints, editor_surface
@@ -31,16 +32,39 @@ var pointStore: ReplayDataStore
 var sessionEditor: EditorVM
 var sessionState: StateVM
 var sessionFlow: FlowVM
+var sessionScratchpad: ScratchpadVM
   ## The session's ViewModels the editor's surface reads
   ## (`webEditorSurface`); nil until the renderer has a session.
 
 const WebEditorMedium* = "web"
   ## The medium the web editor's surface is built for.
 
-proc setEditorSessionVMs*(editor: EditorVM; state: StateVM; flow: FlowVM) =
+proc setEditorSessionVMs*(editor: EditorVM; state: StateVM; flow: FlowVM;
+                          scratchpad: ScratchpadVM = nil) =
   sessionEditor = editor
   sessionState = state
   sessionFlow = flow
+  sessionScratchpad = scratchpad
+
+proc valueInScope*(name: string): Option[string] =
+  ## The value of `name` in scope at the stop, presented on one line — what
+  ## the editor shows for a clicked name (Editor-Pane.md gesture 5): the
+  ## session's `StateVM`, which every front-end's values come from.
+  if name.len == 0:
+    return none(string)
+  for v in inlineValuesOf(sessionState, FlowBudget):
+    if v.name == name:
+      return some(v.value)
+  none(string)
+
+proc addToScratchpad*(name, valueText: string): bool =
+  ## Pin `name = valueText` to the session's scratchpad; false when there is
+  ## no session scratchpad.
+  if sessionScratchpad.isNil:
+    return false
+  sessionScratchpad.addValue(ScratchpadValueEntry(expression: name,
+                                                  valueText: valueText))
+  true
 
 proc editorStop*(): StopLocation =
   ## The debugger's stop as an editor shows it (`ReplayDataStore.stop`).
