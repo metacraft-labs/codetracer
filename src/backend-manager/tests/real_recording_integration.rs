@@ -1083,8 +1083,8 @@ fn find_nargo() -> Option<PathBuf> {
 ///    backend-manager's `read_trace_metadata` can read (M-REC-1.5
 ///    retired the JSON sidecar fallback).
 /// 3. The native gem launcher at its in-repo location, provided the
-///    Rust `.so` extension has been built.  We probe for the `.so`
-///    explicitly because the launcher script otherwise silently
+///    Rust extension has been built (see `ruby_native_extension_built`).
+///    We probe for it explicitly because the launcher script otherwise silently
 ///    falls back to an event-less mode that produces no `.ct` and
 ///    breaks downstream session tests.
 /// 4. As a last resort, the pure-Ruby recorder — kept around so dev
@@ -1107,6 +1107,121 @@ fn is_pure_ruby_launcher(path: &std::path::Path) -> bool {
     })
 }
 
+/// Ruby's `RbConfig::CONFIG["DLEXT"]`: the extension `require` loads a C
+/// extension under — `bundle` on macOS, `so` on Linux and on Windows
+/// (RubyInstaller).  Asked of the `ruby` on `PATH`, which is the
+/// interpreter the gem launcher's `#!/usr/bin/env ruby` runs; when Ruby
+/// cannot be asked, fall back to the per-OS default, mirroring
+/// `scripts/detect-siblings.sh`.
+fn ruby_dlext() -> String {
+    let asked = std::process::Command::new("ruby")
+        .args(["-e", "print RbConfig::CONFIG['DLEXT']"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|ext| !ext.is_empty());
+    asked.unwrap_or_else(|| {
+        if cfg!(target_os = "macos") {
+            "bundle".to_string()
+        } else {
+            "so".to_string()
+        }
+    })
+}
+
+/// True when `ext_release` (the gem's `ext/native_tracer/target/release/`)
+/// holds a native extension the gem will actually load.
+///
+/// The source of truth is `load_extension!` in
+/// `codetracer-ruby-recorder/gems/codetracer-ruby-recorder/lib/codetracer/native.rb`:
+/// it loads `codetracer_ruby_recorder.<DLEXT>`, or else any
+/// `libcodetracer_ruby_recorder.{so,bundle,dylib,dll}` (cargo's own name for
+/// the cdylib).  This probe accepts exactly that set, so it cannot pick a
+/// launcher whose extension the loader then refuses, nor reject one it would
+/// load — on macOS DLEXT is `bundle` and cargo emits `.dylib`, which a
+/// `.so`-only probe missed.  On Windows the recorder's build renames cargo's
+/// `codetracer_ruby_recorder.dll` to `codetracer_ruby_recorder.so`, which is
+/// the `<DLEXT>` name there (RubyInstaller's DLEXT is `so`); an un-renamed
+/// `codetracer_ruby_recorder.dll` is not loaded, so it is not accepted.
+fn ruby_native_extension_built(ext_release: &std::path::Path, dlext: &str) -> bool {
+    std::iter::once(format!("codetracer_ruby_recorder.{dlext}"))
+        .chain(
+            ["so", "bundle", "dylib", "dll"]
+                .iter()
+                .map(|ext| format!("libcodetracer_ruby_recorder.{ext}")),
+        )
+        .any(|name| ext_release.join(name).is_file())
+}
+
+/// Creates a scratch `target/release/` directory holding exactly `names`.
+fn ext_release_with(names: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create scratch ext_release dir");
+    for name in names {
+        std::fs::write(dir.path().join(name), b"").expect("create scratch artifact");
+    }
+    dir
+}
+
+/// macOS: `cargo build --release` leaves the cdylib as
+/// `libcodetracer_ruby_recorder.dylib`, which `load_extension!` accepts.
+/// Platform-independent: the DLEXT is passed in, no recorder is needed.
+#[test]
+fn ruby_extension_probe_accepts_cargo_dylib() {
+    let dir = ext_release_with(&["libcodetracer_ruby_recorder.dylib"]);
+    assert!(
+        ruby_native_extension_built(dir.path(), "bundle"),
+        "libcodetracer_ruby_recorder.dylib must count as a built extension"
+    );
+}
+
+/// macOS: the build copies the cdylib to `codetracer_ruby_recorder.bundle`
+/// (Ruby's DLEXT there), the primary name `load_extension!` loads.
+#[test]
+fn ruby_extension_probe_accepts_dlext_bundle() {
+    let dir = ext_release_with(&["codetracer_ruby_recorder.bundle"]);
+    assert!(
+        ruby_native_extension_built(dir.path(), "bundle"),
+        "codetracer_ruby_recorder.bundle must count as a built extension when DLEXT is bundle"
+    );
+}
+
+/// Linux and Windows (RubyInstaller): DLEXT is `so`, and
+/// `codetracer_ruby_recorder.so` is the name `load_extension!` requires.
+#[test]
+fn ruby_extension_probe_accepts_dlext_so() {
+    let dir = ext_release_with(&["codetracer_ruby_recorder.so"]);
+    assert!(ruby_native_extension_built(dir.path(), "so"));
+}
+
+/// A `codetracer_ruby_recorder.<ext>` whose `<ext>` is not this Ruby's DLEXT
+/// is never `require`d, so it must not make the launcher count as usable:
+/// on macOS a stray `.so`, and anywhere cargo's un-renamed Windows
+/// `codetracer_ruby_recorder.dll`.
+#[test]
+fn ruby_extension_probe_rejects_names_the_loader_skips() {
+    let so_only = ext_release_with(&["codetracer_ruby_recorder.so"]);
+    assert!(!ruby_native_extension_built(so_only.path(), "bundle"));
+    let dll_only = ext_release_with(&["codetracer_ruby_recorder.dll"]);
+    assert!(!ruby_native_extension_built(dll_only.path(), "so"));
+    assert!(!ruby_native_extension_built(dll_only.path(), "bundle"));
+}
+
+/// Nothing built, or only files the loader would not load: not built.
+#[test]
+fn ruby_extension_probe_rejects_missing_extension() {
+    let empty = ext_release_with(&[]);
+    assert!(!ruby_native_extension_built(empty.path(), "bundle"));
+    assert!(!ruby_native_extension_built(empty.path(), "so"));
+    let unrelated = ext_release_with(&[
+        "libsomething_else.dylib",
+        "codetracer_ruby_recorder.d",
+        "libcodetracer_ruby_recorder.rlib",
+    ]);
+    assert!(!ruby_native_extension_built(unrelated.path(), "bundle"));
+    assert!(!ruby_native_extension_built(unrelated.path(), "so"));
+}
+
 fn find_ruby_recorder() -> Option<PathBuf> {
     // 1. Explicit environment variable override.  Honour it only when it
     //    is a CTFS-capable (native) launcher — a pure-Ruby launcher here
@@ -1127,8 +1242,9 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     }
 
     // 2. Native gem launcher on PATH.  This is the production path —
-    //    the launcher loads `codetracer_ruby_recorder.so` from the
-    //    gem and emits a CTFS container the daemon can read.
+    //    the launcher loads the gem's native extension
+    //    (`codetracer_ruby_recorder.<DLEXT>`) and emits a CTFS container
+    //    the daemon can read.
     if let Ok(output) = std::process::Command::new("which")
         .arg("codetracer-ruby-recorder")
         .output()
@@ -1146,9 +1262,9 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     //    the candidate paths first: `CARGO_MANIFEST_DIR` is an absolute
     //    path with native separators, but joining a `../../..`-style
     //    relative literal leaves an un-normalized mixed-separator path
-    //    whose `.parent()` / `.join()` arithmetic for the `.so` probe is
+    //    whose `.parent()` / `.join()` arithmetic for the extension probe is
     //    fragile on Windows.  Canonicalizing the launcher up-front gives a
-    //    clean absolute path so the `.so` existence probe is reliable.
+    //    clean absolute path so the extension existence probe is reliable.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let native_launcher_paths = [
         "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
@@ -1165,25 +1281,17 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
         // The launcher lives in `bin/` of the gem; the compiled native
         // extension lives in `<gem>/ext/native_tracer/target/release/`.
-        // The crate's `cdylib` artifact is named `codetracer_ruby_recorder`
-        // with a platform-specific extension (`.so` on Linux/macOS,
-        // `.dll`/`.so` on Windows depending on the Ruby ABI), so probe
-        // every candidate name before deciding the extension is built.
+        // Its file name depends on the platform (`.so` on Linux,
+        // `.bundle`/`.dylib` on macOS, `.so`/`.dll` on Windows), so accept
+        // exactly the names the gem's loader accepts — see
+        // `ruby_native_extension_built`.
         let gem_root = launcher
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| launcher.clone());
         let ext_release = gem_root.join("ext/native_tracer/target/release");
-        let native_artifact_names = [
-            "codetracer_ruby_recorder.so",
-            "codetracer_ruby_recorder.dll",
-            "libcodetracer_ruby_recorder.so",
-        ];
-        let extension_built = native_artifact_names
-            .iter()
-            .any(|name| ext_release.join(name).exists());
-        if extension_built {
+        if ruby_native_extension_built(&ext_release, &ruby_dlext()) {
             return Some(launcher);
         }
     }
@@ -1196,9 +1304,11 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     panic!(
         "no CTFS-capable Ruby recorder found.  The native gem launcher \
          (codetracer-ruby-recorder/gems/codetracer-ruby-recorder) and its \
-         compiled `ext/native_tracer/target/release/codetracer_ruby_recorder` \
-         extension are required — run `just build-extension` in \
-         codetracer-ruby-recorder, or set CODETRACER_RUBY_RECORDER_PATH to a \
+         compiled extension in `ext/native_tracer/target/release/` \
+         (`codetracer_ruby_recorder.<DLEXT>` or \
+         `libcodetracer_ruby_recorder.{{so,bundle,dylib,dll}}`, the names \
+         lib/codetracer/native.rb loads) are required — run \
+         `just build-extension` in codetracer-ruby-recorder, or set CODETRACER_RUBY_RECORDER_PATH to a \
          native launcher."
     );
 }
