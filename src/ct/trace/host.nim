@@ -40,6 +40,10 @@ type
     monotonicTimeNs*: string
     materializedArtifactKey*: string
     materializedMomentId*: string
+    # The key of the recording-manifest slice that holds the position
+    # (`replay_start.slice_key`), which `ct host` imports: such slices carry no
+    # geid range to select by. Empty when the start names no slice.
+    sliceKey*: string
 
   HostResolvedTrace* = object
     # M-REC-3: UUIDv7 recording-id string.  Pre-M-REC-2 this was the
@@ -829,6 +833,7 @@ proc readReplayStart(node: JsonNode): HostStartCoordinates =
   result.wallTimeUnixNs = node.jsonString(["wall_time_unix_ns", "wallTimeUnixNs", "timestamp_unix_nanos"])
   result.monotonicTimeNs = node.jsonString(["monotonic_time_ns", "monotonicTimeNs"])
   result.materializedMomentId = node.jsonString(["moment_id", "momentId", "materializedMomentId"])
+  result.sliceKey = node.jsonString(["slice_key", "sliceKey"])
 
 proc parseUintOrZero(value: string): uint64 =
   if value.len == 0:
@@ -1219,6 +1224,27 @@ proc resolveSharedManifest(
   else:
     raise newException(ValueError, "unsupported shared manifest source kind: " & kind)
 
+proc selectMcrSlice(manifest: JsonNode, start: HostStartCoordinates): JsonNode =
+  ## The slice of a recording manifest's `mcrSlices` to import, or nil when it
+  ## lists none. Recording-manifest slices carry no geid range, so `ct host`
+  ## cannot find the slice holding the start geid by itself: the replay start
+  ## names it (`replay_start.slice_key`, which the replay agent takes from the
+  ## slice the debug-session lookup resolved; CLI/ct/host.md, "The start
+  ## position"). A named slice the manifest does not list is refused rather
+  ## than answered with another slice, whose replay would refuse the start
+  ## geid. Without a name, the first slice.
+  if start.sliceKey.len == 0:
+    return manifest.firstObject(["mcrSlices", "mcr_slices"])
+  let slices = manifest.jsonField(["mcrSlices", "mcr_slices"])
+  if not slices.isNil and slices.kind == JArray:
+    for slice in slices:
+      if slice.kind == JObject and
+          slice.jsonString(["sliceKey", "slice_key"]) == start.sliceKey:
+        return slice
+  raise newException(ValueError,
+    "mcr_slices manifest does not list the slice its replay start names: " &
+    start.sliceKey)
+
 proc resolveRecordingManifest(
     manifestPath: string,
     manifest: JsonNode,
@@ -1231,25 +1257,30 @@ proc resolveRecordingManifest(
     raise newException(ValueError, "recording manifest is missing or expired")
   case kind
   of "mcr_slices":
+    let start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
     let shardedSegments = manifest.jsonField(["shardedMcrSegments", "sharded_mcr_segments"])
     if not shardedSegments.isNil and shardedSegments.kind == JArray and shardedSegments.len > 0:
-      result.recordingId = importShardedSegment(selectedSegment(shardedSegments, readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))), storageOptions)
+      # Sharded segments carry geid ranges, so the geid selects; a slice key
+      # names no segment.
+      result.recordingId = importShardedSegment(selectedSegment(shardedSegments, start), storageOptions)
     else:
-      let slice = manifest.firstObject(["mcrSlices", "mcr_slices"])
+      let slice = selectMcrSlice(manifest, start)
       if slice.isNil:
         raise newException(ValueError, "mcr_slices manifest has no retained slices")
       requireReadableObject(slice, "MCR slice")
-      let path = resolveLocalReference(slice.jsonString(["sliceKey", "slice_key"]), manifestPath, manifestKey)
+      let sliceKey = slice.jsonString(["sliceKey", "slice_key"])
+      echo "ct host: selected mcr slice: ", sliceKey
+      let path = resolveLocalReference(sliceKey, manifestPath, manifestKey)
       if path.len > 0 and fileExists(path):
         result.recordingId = importCtFile(path)
       else:
         let obj = %*{
-          "objectKey": slice.jsonString(["sliceKey", "slice_key"]),
+          "objectKey": sliceKey,
           "uploadCompletionState": slice.jsonString(["uploadCompletionState", "upload_completion_state"]),
           "retentionStatus": slice.jsonString(["retentionStatus", "retention_status"])
         }
         result.recordingId = importCtFile(writeStorageObjectToTemp(obj, storageOptions, "MCR slice", ".ct"))
-    result.start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+    result.start = start
   of "materialized_trace":
     let artifact = manifest.firstObject(["materializedTraceArtifacts", "materialized_trace_artifacts"])
     if artifact.isNil:

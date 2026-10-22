@@ -190,6 +190,7 @@ tui-real-terminal
 gpui-shell
 ui-selection
 ct-host-admission
+ct-host-manifest
 screen-oracle
 EOF
 }
@@ -236,6 +237,7 @@ test_lane_description() {
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, end to end: the real ct host refuses a client without its session secret or from a foreign origin' ;;
+	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start names, refuses one it does not list' ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -1918,6 +1920,16 @@ test_lane_files() {
 		# rather than part of `ct-trace-units`, whose recipe builds neither.
 		# `just test-ct-host-admission` builds them.
 		_tlf_find src/tests/ct_host 'test_*.nim'
+		;;
+
+	ct-host-manifest)
+		# `ct host --manifest` choosing the slice of a recording manifest it
+		# imports (CLI/ct/host.md, "The start position"), against the real
+		# `ct host` and the node index it starts. Its own directory and lane for
+		# the reason `ct-host-admission` has one: it needs a built
+		# `src/build-debug/bin/ct` (or CODETRACER_CT_BIN), `node` and
+		# socket.io-client. `just test-ct-host-manifest` builds them.
+		_tlf_find src/tests/ct_host_manifest 'test_*.nim'
 		;;
 
 	tui-real-terminal)

@@ -5718,6 +5718,19 @@ test-ct-host-admission: build-once
   exec > >(tee test-logs/test-ct-host-admission.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh ct-host-admission
 
+# `ct host --manifest` given a recording manifest of kind mcr_slices imports the
+# slice its replayStart names (sliceKey), refuses one it does not list, and
+# without one opens the first:
+# src/tests/ct_host_manifest/test_ct_host_manifest_opens_the_named_slice.nim
+# hosts two different recordings as two slices and reads which one the real
+# session serves over its socket.
+test-ct-host-manifest: build-once
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-host-manifest.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-host-manifest
+
 
 # RS-M12: assert no recorder writes a sidecar manifest any more.
 #
