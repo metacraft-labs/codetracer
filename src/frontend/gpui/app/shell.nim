@@ -126,6 +126,14 @@ type
     kind*: GpuiLeafKind
     paneId*: string
       ## The model's own persisted id.
+    topStrip*: bool
+      ## The pane is docked to the TOP edge, which the projected document has
+      ## no placement for (gpui-kit's `DockPlacement` has no `top`; see
+      ## `projectDock`): the window draws that strip itself, from the model's
+      ## `dockedAt(leTop)`, and this leaf comes from the same list. `slot` is
+      ## then the pane's position ON THE STRIP (`tabIndex` of `tabCount`,
+      ## `path` empty) and its `region` means nothing — `leaves.nim` names the
+      ## slot `top/<index>` instead.
     builtin*: PaneKind
       ## Meaningful when `kind == glkBuiltin`.
     title*: string
@@ -276,16 +284,76 @@ proc projectionFor*(shell: GpuiShell; id: WindowId): DockProjection =
                             detail: "no window " & $id)])
   projectDock(shell.windows.windows[idx].layout, shell.viewport)
 
+proc leafOf(slot: DockPaneSlot; session: HeadlessSessionSlot;
+            tree: LayoutNode; loadedExtensions: HashSet[string];
+            fallbackTitle = ""): GpuiLeaf =
+  ## One leaf for one placed pane: what it holds (built-in, contributed, or a
+  ## report naming an unloaded extension), its ViewModel and its title. The
+  ## ONE place a slot becomes a leaf, whichever list the slot came from.
+  ## `fallbackTitle` is the model's own title for a pane the tree does not
+  ## hold (a docked one), used before the window's name for the pane.
+  result = GpuiLeaf(slot: slot, paneId: slot.pane)
+  if slot.contributed:
+    # PLAT-9's three-way classification, THROUGH `layout_model.classify` —
+    # the model's own function, which its doc comment calls "THE ONE PLACE
+    # `prUnloadedExtension` IS PRODUCED". Deciding it here instead would be a
+    # second copy of the predicate (Verification-Harness-Traps §14), and the
+    # first draft of this line got it wrong in exactly the way a second copy
+    # does: it asked whether the pane was IN THE TREE, which is always true
+    # for a pane the projection just placed, so `glkUnloadedExtension` was
+    # unreachable. Being in the layout and being provided by a loaded
+    # extension are different questions, and `classify` is the one that asks
+    # the second.
+    let node = if tree.isNil: nil else: tree.findContributed(slot.pane)
+    let classified = classify(PaneRef(kind: prContributed, id: slot.pane),
+                              loadedExtensions)
+    result.kind = if classified.kind == prContributed: glkContributed
+                    else: glkUnloadedExtension
+    result.title = if node.isNil: fallbackTitle else: node.title
+  else:
+    var found = false
+    for k in PaneKind:
+      if $k == slot.pane:
+        result.kind = glkBuiltin
+        result.builtin = k
+        found = true
+        break
+    if not found:
+      result.kind = glkUnloadedExtension
+    elif not session.isNil:
+      result.vm = session.paneViewModel(result.builtin)
+    if not tree.isNil:
+      let node = tree.find(result.builtin)
+      if not node.isNil:
+        result.title = node.title
+    if result.title.len == 0:
+      result.title = fallbackTitle
+    # PLAT-45: an untitled leaf (every pane of the shared default) takes
+    # this window's own name for its pane, never the enum's spelling.
+    if result.kind == glkBuiltin and result.title.len == 0:
+      result.title = gpuiPaneName(result.builtin)
+
 proc leavesFor*(shell: GpuiShell; id: WindowId;
                 loadedExtensions: HashSet[string] =
                   initHashSet[string]()): GpuiLeafSet =
-  ## **The seam.** Every leaf a host must draw for one window, in the order the
-  ## projected document places them.
+  ## **The seam.** Every leaf a host must draw for one window: the panes the
+  ## projected document places, in its order, then the panes of the TOP
+  ## strip, in strip order.
   ##
   ## Derived from the PROJECTION rather than from the model, deliberately: the
   ## host draws what the dock was told, and a leaf list re-walked out of the
   ## `Layout` would be a second opinion from the same source (§14). A pane the
   ## projection refused to place is not in this list, and the refusal is.
+  ##
+  ## The top strip is the one exception, because the document cannot say
+  ## it: gpui-kit's `DockPlacement` has no `top`, so `projectDock` writes no
+  ## top dock and the WINDOW draws that strip itself, from the model's
+  ## `dockedAt(leTop)` (`window_geometry.stripsOf`). Its panes are still
+  ## leaves the host must draw — a label's hover previews the pane and a
+  ## click docks it open, both by moving the pane's element — so they are
+  ## taken from that same list, as the strip is, and marked `topStrip`.
+  ## Without them a pane docked on the top when the window opened had no
+  ## element at all, and its label previewed nothing.
   result = GpuiLeafSet(windowId: id, leaves: @[], refused: @[])
   if shell.isNil:
     return
@@ -299,45 +367,15 @@ proc leavesFor*(shell: GpuiShell; id: WindowId;
   let idx = shell.windows.indexOf(id)
   let tree = if idx >= 0: shell.windows.windows[idx].layout.tree else: nil
   for slot in arrangement.slots:
-    var leaf = GpuiLeaf(slot: slot, paneId: slot.pane)
-    if slot.contributed:
-      # PLAT-9's three-way classification, THROUGH `layout_model.classify` —
-      # the model's own function, which its doc comment calls "THE ONE PLACE
-      # `prUnloadedExtension` IS PRODUCED". Deciding it here instead would be a
-      # second copy of the predicate (Verification-Harness-Traps §14), and the
-      # first draft of this line got it wrong in exactly the way a second copy
-      # does: it asked whether the pane was IN THE TREE, which is always true
-      # for a pane the projection just placed, so `glkUnloadedExtension` was
-      # unreachable. Being in the layout and being provided by a loaded
-      # extension are different questions, and `classify` is the one that asks
-      # the second.
-      let node = if tree.isNil: nil else: tree.findContributed(slot.pane)
-      let classified = classify(PaneRef(kind: prContributed, id: slot.pane),
-                                loadedExtensions)
-      leaf.kind = if classified.kind == prContributed: glkContributed
-                  else: glkUnloadedExtension
-      leaf.title = if node.isNil: "" else: node.title
-    else:
-      var found = false
-      for k in PaneKind:
-        if $k == slot.pane:
-          leaf.kind = glkBuiltin
-          leaf.builtin = k
-          found = true
-          break
-      if not found:
-        leaf.kind = glkUnloadedExtension
-      elif not session.isNil:
-        leaf.vm = session.paneViewModel(leaf.builtin)
-      if not tree.isNil:
-        let node = tree.find(leaf.builtin)
-        if not node.isNil:
-          leaf.title = node.title
-      # PLAT-45: an untitled leaf (every pane of the shared default) takes
-      # this window's own name for its pane, never the enum's spelling.
-      if leaf.kind == glkBuiltin and leaf.title.len == 0:
-        leaf.title = gpuiPaneName(leaf.builtin)
-    result.leaves.add leaf
+    result.leaves.add leafOf(slot, session, tree, loadedExtensions)
+  if idx >= 0:
+    let top = shell.windows.windows[idx].layout.dockedAt(leTop)
+    for i, d in top:
+      let slot = DockPaneSlot(pane: $d.pane, contributed: false, path: @[],
+                              tabIndex: i, tabCount: top.len, activeIndex: 0)
+      var leaf = leafOf(slot, session, tree, loadedExtensions, d.title)
+      leaf.topStrip = true
+      result.leaves.add leaf
 
 # ---------------------------------------------------------------------------
 # Persistence — the SAME document the terminal front-end writes

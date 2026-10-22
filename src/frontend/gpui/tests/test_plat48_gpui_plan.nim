@@ -44,7 +44,11 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 216
+  ExpectedAssertions = 222
+    ## 216 -> 222 (2026-10-22, codetracer-pm issue 2026-10-08-gpui-pane-
+    ## docked-at-start-has-no-element-so-its-label-hover-reveals-nothing):
+    ## the top-edge case asserts that the label of a pane docked BEFORE the
+    ## window opened previews it (+3) and docks it open (+3). Measured.
     ## 213 -> 216 (2026-10-17, arm GW4's re-grade): the popover case also
     ## focuses the Files pane and asserts its outline is painted under the
     ## first level (+3). Measured.
@@ -61,8 +65,9 @@ const
     ## button's logo and place and the omnibox's magnifier.
     ## 203 -> 203 (PLAT-51 part B), net: the top-edge case docks by a layout
     ## command, since a drag no longer docks, and no longer asserts the reveal
-    ## from that strip (a pane docked at start has no element — filed); the
-    ## drop-tint case also asserts the smaller middle's join; the Ctrl+O case
+    ## from that strip (a pane docked at start had no element — filed, and
+    ## fixed 2026-10-22, above); the drop-tint case also asserts the smaller
+    ## middle's join; the Ctrl+O case
     ## also reveals a pane from the LEFT strip over the strips there (+2).
     ## Measured.
     ## 179 -> 203 at the adversarial review of 2026-10-03: ONE case added
@@ -412,8 +417,8 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       ck root < plan.topIndex(rev[0])
     # A pane revealed from the LEFT strip lies over the tree's left third —
     # over the strips there, whose pin buttons are not drawn through it.
-    # (PLAT-51 part B: the top strip's reveal did this job until a drag no
-    # longer docked; a pane docked on the top at start has no element.)
+    # (PLAT-51 part B: the top strip's reveal did this job while a drag
+    # still docked; the top-edge case below now asserts that reveal itself.)
     let left = windowPlan("hover-label:state,wait:350",
                           @["--layout-ops=dock:state:left"])
     let lrev = left.nodesWith("data-ct-revealed")
@@ -459,11 +464,28 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     # No pane box holds State any more: no tab of the tree is State's.
     ck plan.tabPanes().len > 0
     ck $paneState notin plan.tabPanes()
-    # The reveal FROM the top strip is not asserted here: a pane docked when
-    # the window opens has no element to reveal (filed:
-    # codetracer-specs issues/2026-10-08-gpui-pane-docked-at-start-has-no-
-    # element-so-its-label-hover-reveals-nothing.md). Until PLAT-51 this case
-    # docked by a DRAG after start-up, which no longer docks.
+    # Its label previews it and docks it open, as every strip label does —
+    # although the pane was docked BEFORE the window opened. The top strip is
+    # the window's own (the dock document has no `top`), and until 2026-10-22
+    # its pane got no element at start-up, so the hover previewed nothing
+    # (codetracer-pm issue 2026-10-08-gpui-pane-docked-at-start-has-no-
+    # element-so-its-label-hover-reveals-nothing.md).
+    let hovered = windowPlan("hover-label:state,wait:350", dockTop)
+    let rev = hovered.nodesWith("data-ct-revealed")
+    ck rev.len == 1
+    if rev.len == 1:
+      ck rev[0].attr("data-ct-revealed") == $paneState
+      var panes: seq[string] = @[]
+      for p in rev[0].nodesWith("data-ct-pane"): panes.add p.attr("data-ct-pane")
+      ck panes == @[$paneState]
+    let opened = windowPlan("label:state", dockTop)
+    let open = opened.nodesWith("data-ct-docked-open")
+    ck open.len == 1
+    if open.len == 1:
+      ck open[0].attr("data-ct-docked-open") == $paneState
+      var panes: seq[string] = @[]
+      for p in open[0].nodesWith("data-ct-pane"): panes.add p.attr("data-ct-pane")
+      ck panes == @[$paneState]
 
   test "a tab dragged over a pane: the drop tint covers its content, never a pin button":
     # PLAT-51: aimed at the pane's LEFT quarter — GoldenLayout's left segment,

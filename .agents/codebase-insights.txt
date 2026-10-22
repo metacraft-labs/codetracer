@@ -7019,10 +7019,11 @@ Two traps in the same area, both live:
   `src/build-debug/bin/ct`, then PATH; an old `ct` on PATH records a trace the
   engine refuses ("unsupported CTFS version"). The PTY / plan suites set
   `CT_BIN` to the checkout's own.
-- 2026-10-08: A GPUI PANE DOCKED WHEN THE WINDOW OPENS HAS NO ELEMENT
-  (`gShell.leavesFor` walks the dock PROJECTION, and a top-docked pane is the
-  window's own strip, not in it): its label hover "previews" and draws nothing.
-  Filed (codetracer-specs issues/2026-10-08-gpui-pane-docked-at-start-...).
+- 2026-10-22: `GpuiShell.leavesFor` is NOT only the dock projection: a
+  top-docked pane is the window's own strip (gpui-kit has no `top`
+  placement), so its leaf comes from `layout.dockedAt(leTop)` and carries
+  `topStrip = true`. Before this a pane docked there when the window opened had
+  no element, and its label's hover previewed nothing.
 - 2026-10-09: A MUTATION HARNESS KILLED MID-ARM (the shared host's disk filled
   to 99%, and long chains were killed outright) can leave its subject EMPTIED
   — `run-plat14-image-mutations.py` left `tui/app/theme/image_capability.nim`

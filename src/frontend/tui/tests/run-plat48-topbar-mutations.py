@@ -605,9 +605,8 @@ ARMS = [
     Arm("GW9", GPUIMAIN,
         "      let onPin = n.pins[t].contains(x, y) and pinButtonShown(n.pins[t], covers)\n",
         "      let onPin = n.pins[t].contains(x, y)\n",
-        # PLAT-51 part B: graded on the footer's reveal (Ctrl+O) — the top
-        # strip's reveal is not reachable from a scripted run since a drag no
-        # longer docks (and a pane docked at start has no element: filed).
+        # PLAT-51 part B: graded on the footer's reveal (Ctrl+O), which
+        # replaced the top strip's after a drag stopped docking.
         W_REVEAL,
         "the window presses the tree's pins through a revealed pane"),
     # GW10 RE-AIMED 2026-10-17: the pin is a tab icon since the redesign,

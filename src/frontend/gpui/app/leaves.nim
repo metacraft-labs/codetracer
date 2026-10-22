@@ -361,9 +361,14 @@ type
       ## How many of those were a report (no ViewModel, or an unloaded
       ## extension) rather than a live pane.
 
-proc slotPath(slot: DockPaneSlot): string =
-  var parts: seq[string] = @[$slot.region]
-  for i in slot.path:
+proc slotPath(leaf: GpuiLeaf): string =
+  ## Where the leaf sits, as `<region>/<path…>` — or `top/<index>` for a pane
+  ## of the window's own top strip, which the document gives no region
+  ## (`GpuiLeaf.topStrip`).
+  if leaf.topStrip:
+    return "top/" & $leaf.slot.tabIndex
+  var parts: seq[string] = @[$leaf.slot.region]
+  for i in leaf.slot.path:
     parts.add $i
   parts.join("/")
 
@@ -3982,7 +3987,7 @@ proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
   # column must not draw into each other either (PLAT-41).
   r.setStyle(node, "overflow", "hidden")
   r.setAttribute(node, PaneRoleAttribute, leaf.paneId)
-  r.setAttribute(node, SlotPathAttribute, slotPath(leaf.slot))
+  r.setAttribute(node, SlotPathAttribute, slotPath(leaf))
   r.setAttribute(node, TabAttribute,
                  $leaf.slot.tabIndex & "/" & $leaf.slot.tabCount &
                  "@" & $leaf.slot.activeIndex)

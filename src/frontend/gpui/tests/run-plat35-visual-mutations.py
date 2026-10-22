@@ -128,8 +128,8 @@ class Arm:
 # shared spelling per file is one thing to keep aimed instead of eight. Each
 # ends AT A LINE END, which the needle scan enforces.
 CTL = {
-    LEAVES: ("proc slotPath(slot: DockPaneSlot): string =",
-             "proc slotPath(slot: DockPaneSlot): string =  ## ctl"),
+    LEAVES: ("proc slotPath(leaf: GpuiLeaf): string =",
+             "proc slotPath(leaf: GpuiLeaf): string =  ## ctl"),
     ANSWERS: ("proc lineOf(node: GpuiElement): int =",
               "proc lineOf(node: GpuiElement): int =  ## ctl"),
     VOCAB: ("proc tokenIsPublished*(token: string): bool =",
