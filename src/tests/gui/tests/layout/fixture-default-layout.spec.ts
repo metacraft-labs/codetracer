@@ -42,6 +42,7 @@ import {
   launchedPrefix,
   shippedLayoutFile,
   stackContents,
+  stackHolding,
   withoutEditor,
 } from "../../lib/layout-stacks";
 
@@ -51,18 +52,24 @@ import {
 // recording of `calc` is open does not change the arrangement under test.
 const calcProgram = "calc/main.py";
 const calcTrace = process.env.PLAT45_CALC_TRACE ?? "";
-const recording: { sourcePath: string; launchMode: "trace-folder" | "trace" } = calcTrace.length > 0
-  ? { sourcePath: calcTrace, launchMode: "trace-folder" }
-  : { sourcePath: calcProgram, launchMode: "trace" };
+const recording: { sourcePath: string; launchMode: "trace-folder" | "trace" } = calcTrace === ""
+  ? { sourcePath: calcProgram, launchMode: "trace" }
+  : { sourcePath: calcTrace, launchMode: "trace-folder" };
+
+// Recording `calc` and starting the app on a contended host: the bound of
+// `plat45-desktop-remembers-own.spec.ts`, which launches the same way.
+const LaunchTimeoutMs = 300_000;
+// The editor's first line is the sign the replay has loaded its layout.
+const EditorReadyTimeoutMs = 90_000;
 
 test.describe("the launch fixture's layout", () => {
-  test.setTimeout(300_000);
+  test.setTimeout(LaunchTimeoutMs);
 
   test.describe("a spec that sets no layout option", () => {
     test.use({ ...recording });
 
     test("opens the product's own first-run layout: the Debug mode's default", async ({ ctPage }) => {
-      await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
+      await ctPage.waitForSelector(".view-line", { timeout: EditorReadyTimeoutMs });
       const live = withoutEditor(await stackContents(ctPage));
       const expected = debugDefaultStacks(fileStacks(shippedLayoutFile(launchedPrefix())));
 
@@ -70,7 +77,7 @@ test.describe("the launch fixture's layout", () => {
       // says which one broke before the whole-tree comparison below does.
       expect(hasContent(live, ConstraintsContent), "CONSTRAINTS is placed: the fixture installed the bundled tree")
         .toBe(false);
-      const testsStack = live.find((s) => s.includes(TestResultsContent));
+      const testsStack = stackHolding(live, TestResultsContent);
       expect(testsStack, "TESTS is not placed at all").toBeDefined();
       expect(testsStack, "TESTS is not a tab of the FILES stack").toContain(FilesystemContent);
 
@@ -82,7 +89,7 @@ test.describe("the launch fixture's layout", () => {
     test.use({ ...recording, bundledLayout: true });
 
     test("opens the bundled tree verbatim", async ({ ctPage }) => {
-      await ctPage.waitForSelector(".view-line", { timeout: 90_000 });
+      await ctPage.waitForSelector(".view-line", { timeout: EditorReadyTimeoutMs });
       const live = withoutEditor(await stackContents(ctPage));
       // What the fixture copies for this option: the source tree's file.
       const bundled = fileStacks(path.join(codetracerInstallDir, "src", "config", "default_layout.json"));

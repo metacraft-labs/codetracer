@@ -45,7 +45,8 @@ function scratch(): Scratch {
 test.describe("harness: the launch fixture's saved-layout reset", () => {
   test.beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "ct-layout-reset-"));
-    previousHome = process.env.CODETRACER_HOME;
+    const home: string | undefined = process.env.CODETRACER_HOME;
+    previousHome = home;
     process.env.CODETRACER_HOME = path.join(root, "home");
   });
 

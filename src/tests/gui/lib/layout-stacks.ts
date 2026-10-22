@@ -28,40 +28,85 @@ export const FilesystemContent = 9;
 export const TestResultsContent = 48;
 /** `Content.Constraints` — the CONSTRAINTS pane. */
 export const ConstraintsContent = 49;
+/** What a tab whose component state names no `content` reads as. */
+export const UnknownContent = -1;
+
+/** How many tabs the editor's own stack holds: the editor alone. */
+const EditorStackTabs = 1;
+/** The tab count of a stack the mode default emptied, which it drops. */
+const EmptyStackTabs = 0;
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
 
+/** The part of a GoldenLayout component's state these helpers read. */
+interface ComponentState {
+  content?: unknown;
+}
+
+/**
+ * A node of a GoldenLayout config document (`default_layout.json`): the
+ * document itself carries `root`, every item `type` and `content`.
+ */
+interface ConfigItem {
+  type?: unknown;
+  root?: ConfigItem;
+  content?: ConfigItem[];
+  componentState?: ComponentState;
+}
+
+/** A content item of the LIVE GoldenLayout tree — the fields read here. */
+interface LiveItem {
+  type?: string;
+  contentItems?: LiveItem[];
+  toConfig?: () => { componentState?: ComponentState };
+}
+
+/**
+ * The renderer global the desktop keeps its GoldenLayout instance on. `document`
+ * is there so `window` is assignable to it without a cast: a type whose every
+ * member is optional shares nothing with `Window`, and TypeScript refuses it.
+ */
+interface DesktopWindow {
+  document: Document;
+  data?: { ui?: { layout?: { rootItem?: LiveItem } } };
+}
+
 /**
  * The stacks of the live GoldenLayout tree in `page`, in document order.
- * A tab whose component state names no `content` reads as -1.
+ * A tab whose component state names no `content` reads as `UnknownContent`.
  */
 export async function stackContents(page: Page): Promise<number[][]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gl = (window as any).data?.ui?.layout;
+  // The callback runs in the renderer, so it cannot close over module
+  // constants; the sentinel goes in as the argument.
+  return await page.evaluate((unknown: number): number[][] => {
+    const desktop: DesktopWindow = window;
+    const root = desktop.data?.ui?.layout?.rootItem;
     const out: number[][] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const walk = (item: any) => {
-      if (!item) return;
+    const tabContent = (tab: LiveItem): number => {
+      const content = tab.toConfig?.().componentState?.content;
+      return typeof content === "number" ? content : unknown;
+    };
+    const walk = (item: LiveItem | undefined): void => {
+      if (item === undefined) return;
       if (item.type === "stack") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        out.push(item.contentItems.map((c: any) => {
-          const cfg = c.toConfig ? c.toConfig() : {};
-          const st = cfg.componentState ?? {};
-          return typeof st.content === "number" ? st.content : -1;
-        }));
+        out.push((item.contentItems ?? []).map(tabContent));
         return;
       }
-      for (const c of item.contentItems ?? []) walk(c);
+      for (const child of item.contentItems ?? []) walk(child);
     };
-    walk(gl?.rootItem);
+    walk(root);
     return out;
-  });
+  }, UnknownContent);
 }
 
 /** Whether any stack holds a tab of `content`. */
 export function hasContent(stacks: number[][], content: number): boolean {
   return stacks.some((s) => s.includes(content));
+}
+
+/** The first stack holding a tab of `content`, or `undefined`. */
+export function stackHolding(stacks: number[][], content: number): number[] | undefined {
+  return stacks.find((s) => s.includes(content));
 }
 
 /**
@@ -71,31 +116,31 @@ export function hasContent(stacks: number[][], content: number): boolean {
  * config drops it.
  */
 export function withoutEditor(stacks: number[][]): number[][] {
-  return stacks.filter((s) => !(s.length === 1 && s[0] === EditorContent));
+  return stacks.filter((s) => !(s.length === EditorStackTabs && s.includes(EditorContent)));
 }
 
 /**
  * The stacks of a GoldenLayout config document, in document order — the same
  * shape `stackContents` reads off the live layout. Works on the bundled
  * default and on the file the desktop saves (the same schema, re-serialised
- * on one line).
+ * on one line). `doc` is parsed JSON, so nothing about its shape is trusted:
+ * a node that is not an object is skipped.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function configStacks(doc: any): number[][] {
+export function configStacks(doc: unknown): number[][] {
   const out: number[][] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const walk = (item: any) => {
-    if (!item || typeof item !== "object") return;
+  const tabContent = (tab: ConfigItem): number => {
+    const content = tab.componentState?.content;
+    return typeof content === "number" ? content : UnknownContent;
+  };
+  const walk = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) return;
+    const item = node as ConfigItem;
     if (item.type === "stack") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      out.push((item.content ?? []).map((c: any) => {
-        const st = c.componentState ?? {};
-        return typeof st.content === "number" ? st.content : -1;
-      }));
+      out.push((item.content ?? []).map(tabContent));
       return;
     }
-    if (item.root) walk(item.root);
-    for (const c of item.content ?? []) walk(c);
+    walk(item.root);
+    for (const child of item.content ?? []) walk(child);
   };
   walk(doc);
   return out;
@@ -119,9 +164,9 @@ export function fileStacks(file: string): number[][] {
 export function debugDefaultStacks(bundled: number[][]): number[][] {
   const out = bundled
     .map((s) => s.filter((c) => c !== TestResultsContent && c !== ConstraintsContent))
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length !== EmptyStackTabs);
   const files = out.find((s) => s.includes(FilesystemContent));
-  if (files) files.push(TestResultsContent);
+  if (files !== undefined) files.push(TestResultsContent);
   return out;
 }
 
@@ -133,9 +178,10 @@ export function debugDefaultStacks(bundled: number[][]): number[][] {
  * into the package, so that is the shipped default to compare with.
  */
 export function buildPrefix(): string {
-  const build = process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
-    ? process.env.CODETRACER_BUILD_DIR
-    : path.join(repoRoot, "src", "build-debug");
+  const configured = process.env.CODETRACER_BUILD_DIR ?? "";
+  const build = configured === ""
+    ? path.join(repoRoot, "src", "build-debug")
+    : configured;
   if (!fs.existsSync(path.join(build, "config", "default_layout.json"))) {
     return path.join(repoRoot, "src");
   }
@@ -150,7 +196,7 @@ export function buildPrefix(): string {
  */
 export function launchedPrefix(): string {
   const prepared = process.env.CODETRACER_TEST_PREFIX ?? "";
-  return prepared.length > 0 ? prepared : buildPrefix();
+  return prepared === "" ? buildPrefix() : prepared;
 }
 
 /** The shipped `config/default_layout.json` of `prefix`. */
