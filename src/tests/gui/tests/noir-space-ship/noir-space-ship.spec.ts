@@ -415,6 +415,35 @@ test.describe("NoirSpaceShip", () => {
       trace("Pressed Tab to trigger blur");
       await sleep(500);
 
+      // The loop body must show the chosen iteration and ONLY it: a line shows
+      // one iteration of a loop at a time (Omniscience-Flow.md, "Advanced Loop
+      // Visualization"). Choosing a new iteration used to append its values
+      // after the previous iteration's instead of replacing them, so the
+      // `remaining_shield` box read below (the first in DOM order) kept
+      // reporting the old iteration. Checked per loop and independently of DOM
+      // order, so a stale iteration anywhere in the body fails here by name.
+      let rendered: Record<string, number[]> = {};
+      try {
+        await retry(
+          async () => {
+            rendered = await editor.renderedLoopIterations();
+            const loops = Object.values(rendered);
+            return (
+              loops.length > 0 &&
+              loops.every((its) => its.length === 1 && its[0] === iteration)
+            );
+          },
+          { maxAttempts: 20, delayMs: 300 },
+        );
+      } catch {
+        // Fall through to the assertions, which say what was rendered instead.
+      }
+      trace(`Rendered loop iterations: ${JSON.stringify(rendered)}`);
+      expect(Object.keys(rendered).length).toBeGreaterThan(0);
+      for (const [loop, iterations] of Object.entries(rendered)) {
+        expect(iterations, `iterations rendered for loop ${loop}`).toEqual([iteration]);
+      }
+
       await retry(
         async () => {
           const currentIteration = await iterationValueBox.getAttribute("iteration");

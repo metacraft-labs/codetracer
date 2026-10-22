@@ -2774,7 +2774,80 @@ proc ensureFlowLineContainer(self: FlowComponent, step: FlowStep) =
     cwarn fmt"flow: cannot create flow widget at {step.position} line"
     return
 
+proc removeOtherIterationValues(self: FlowComponent, step: FlowStep) =
+  ## Take down the values of every OTHER iteration of `step.loop` that are
+  ## still rendered on `step.position`, before `step`'s values go up there.
+  ##
+  ## A line shows one iteration of a loop at a time
+  ## (`codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md`, "Advanced
+  ## Loop Visualization"). Choosing an iteration — the counter's textarea, the
+  ## arrows or the slider, all through `selectLoopIteration` ->
+  ## `renderActiveLoopIterationValues` — renders the new iteration's step and
+  ## the two `add*StepValues` writers APPEND it to the line's container. Nothing
+  ## removed the previous iteration's, so each body line carried both, the
+  ## stale one first in DOM order, and the value a reader (or a test) found
+  ## first still belonged to the old iteration
+  ## (codetracer-pm `issues/2026-10-21-noir-space-ship-typed-loop-iteration-never-reaches-the-flow-value.md`).
+  ##
+  ## Removing the node is not enough on its own: `stepNodes` is what
+  ## `renderLoopIterationStepValue` and `renderFlowLines` consult to decide a
+  ## step is already on screen, so a removed node left registered there would
+  ## stop the user from ever getting back to that iteration. Loop `0` is the
+  ## code outside any loop and has one "iteration" only, so it is left alone.
+  if step.loop <= 0 or not self.flow.positionStepCounts.hasKey(step.position):
+    return
+
+  # Only the steps recorded on this line can be stale here, so walk the line's
+  # own step counts rather than every rendered node: this runs once per value
+  # written, and `stepNodes` grows with the whole flow window.
+  var staleStepCounts: seq[int] = @[]
+  for stepCount in self.flow.positionStepCounts[step.position]:
+    if stepCount == step.stepCount or
+       not self.validFlowStepCount(stepCount) or
+       not self.stepNodes.hasKey(stepCount):
+      continue
+    let other = self.flow.steps[stepCount]
+    if other.position == step.position and
+       other.loop == step.loop and
+       other.iteration != step.iteration:
+      staleStepCounts.add(stepCount)
+
+  if staleStepCounts.len == 0:
+    return
+
+  let flowLine =
+    if self.flowLines.hasKey(step.position): self.flowLines[step.position]
+    else: nil
+
+  for stepCount in staleStepCounts:
+    let other = self.flow.steps[stepCount]
+    let node = self.stepNodes[stepCount]
+    if not node.isNil:
+      node.toJs.remove()
+    discard jsDelete(self.stepNodes[stepCount])
+
+    if not flowLine.isNil and not flowLine.stepLoopCells.isUndefined and
+       flowLine.stepLoopCells.hasKey(step.loop) and
+       flowLine.stepLoopCells[step.loop].hasKey(other.iteration):
+      let cell = flowLine.stepLoopCells[step.loop][other.iteration]
+      if not cell.isNil:
+        cell.toJs.remove()
+      discard jsDelete(flowLine.stepLoopCells[step.loop][other.iteration])
+
+  # FlowMultiline registers one container per expression and only the last of
+  # them under `stepNodes`, so the rest are reached through
+  # `multilineValuesDoms`. Every one of them belongs to the stale iteration:
+  # the early return in `renderLoopIterationStepValue` means this line is only
+  # re-rendered when the step about to be drawn is not on screen yet.
+  if self.multilineValuesDoms.hasKey(step.position):
+    for _, node in self.multilineValuesDoms[step.position]:
+      if not node.isNil:
+        node.toJs.remove()
+    discard jsDelete(self.multilineValuesDoms[step.position])
+
 proc addParallelRegularStepValues(self: FlowComponent, step: FlowStep) =
+  self.removeOtherIterationValues(step)
+
   # check if there is a widget and container for this step
   # create them if there is not
   self.ensureFlowLineContainer(step)
@@ -2872,6 +2945,8 @@ proc addParallelStepValues(self: FlowComponent, step: FlowStep) =
   self.addParallelRegularStepValues(step)
 
 proc addMultilineStepValues(self: FlowComponent, step: FlowStep) =
+  self.removeOtherIterationValues(step)
+
   # create viewZone for this step if there is not any yet
   if not self.multilineZones.hasKey(step.position):
     let valueRows = max(
