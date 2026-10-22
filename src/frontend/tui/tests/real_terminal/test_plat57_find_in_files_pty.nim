@@ -83,6 +83,43 @@ proc waitScreen(sess: var TuiTestSession; needle: string;
   raise newException(AssertionFailedError,
     "'" & needle & "' never appeared; screen:\n" & result.join("\n"))
 
+proc noteShowsPath(row, path: string; line: int): bool =
+  ## Whether status row `row` carries the note `opened <path>:<line>` as the
+  ## terminal draws it. The note is right-aligned after the file info and the
+  ## dock labels, and a note naming an absolute path has that path's
+  ## directories give way to `…` when the row is short of room
+  ## (`status_bar.fitNoteCells`), so the path may be shown as `…` and its
+  ## END — its last component always. How much is kept depends on how long
+  ## the checkout's path is, which is a fact about the host, not the product.
+  let at = row.find("opened ")
+  if at < 0:
+    return false
+  let rest = row[at + "opened ".len .. ^1].strip(leading = false)
+  let want = ":" & $line
+  if not rest.endsWith(want):
+    return false
+  let shown = rest[0 ..< rest.len - want.len]
+  if shown == path:
+    return true
+  let name = path[path.rfind('/') + 1 .. ^1]
+  if not shown.startsWith("…"):
+    return false
+  let tail = shown["…".len .. ^1]
+  tail.len > name.len and path.endsWith(tail)
+
+proc waitOpened(sess: var TuiTestSession; path: string; line: int;
+                timeoutMs = 60000): seq[string] =
+  ## Wait for the status row's `opened <path>:<line>` note (`noteShowsPath`).
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    result = sess.screen()
+    if noteShowsPath(result[Rows - 1], path, line):
+      return
+    sleep(50)
+  raise newException(AssertionFailedError,
+    "'opened " & path & ":" & $line & "' never appeared on the status row; " &
+    "screen:\n" & result.join("\n"))
+
 proc tickOf(line: string): int =
   let at = line.find("tick: ")
   if at < 0: return -1
@@ -229,20 +266,19 @@ suite "PLAT-57 on a real terminal: Find in Files":
        $sess.cellAt(firstRow, hitCol).bg != $sess.cellAt(firstRow, hitCol - 1).bg
     let col = s[firstRow].runeLen - s[firstRow].strip(leading = true).runeLen
     sess.press(firstRow, col + 1)
-    let opened = "opened " & listed[0][0] & ":" & $listed[0][1]
-    discard sess.waitScreen(opened)
+    discard sess.waitOpened(listed[0][0], listed[0][1])
     ck tickOf(sess.rowOf(0)) == tick0
 
     # `:cnext` (the palette's `:` line is the command line): the next one.
     sess.omnibox(":cnext")
     let second = expected[1]
-    discard sess.waitScreen("opened " & second[0] & ":" & $second[1])
+    discard sess.waitOpened(second[0], second[1])
     ck tickOf(sess.rowOf(0)) == tick0
     # `F4` (CUA, §5.3): the next one again; `Shift+F4` back.
     sess.send("\eOS")
-    discard sess.waitScreen("opened " & expected[2][0] & ":" & $expected[2][1])
+    discard sess.waitOpened(expected[2][0], expected[2][1])
     sess.send("\e[1;2S")
-    discard sess.waitScreen("opened " & second[0] & ":" & $second[1])
+    discard sess.waitOpened(second[0], second[1])
     ck tickOf(sess.rowOf(0)) == tick0
 
     # A result in ANOTHER file: the editor's tab becomes that file and the
@@ -258,7 +294,7 @@ suite "PLAT-57 on a real terminal: Find in Files":
         if s[r].contains("4  def scale(value, factor):"): extraRow = r
     ck extraRow > 0
     sess.press(extraRow, 3)
-    s = sess.waitScreen("opened " & expected[3][0] & ":4")
+    s = sess.waitOpened(expected[3][0], 4)
     # The lone editor's tab is the file's folder and name since 2026-10-17
     # (`product_mode.editorTabLabel`), so the name follows a `/`. The strip
     # can repaint a frame after the status line says "opened", so the tab is
