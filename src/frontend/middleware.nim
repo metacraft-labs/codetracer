@@ -4,9 +4,14 @@ import
   lib/[jslib, logging],
   types,
   communication, dap,
-  event_helpers,
-  ui/[calltrace, status]
+  event_helpers
 from isonim/core/batch as isoBatch import batch
+
+# The status bar is the renderer's. The VS Code extension host's middleware
+# (`ct_vscode.js`, `-d:ctInCentralExtensionContext`) runs in Node, and the UI
+# graph behind `ui/status` registers browser hooks on `window` as it loads.
+when not defined(ctInCentralExtensionContext):
+  import ui/status
 
 
 # backend(dap) <-> middleware <-> view (self-contained, can be separate: 0, 1 or more components);

@@ -338,13 +338,11 @@ suite "PLAT-40 2 — one decoder: what a call-trace row IS":
     # §30b: one predicate, one function, every consumer calling it. The
     # desktop decodes a TYPED response and the native front-ends a JSON one,
     # so the two cannot share the parse — they share the decision.
-    # The desktop's pane reads the session's store since HSF-D1 (`ui/calltrace`
-    # decodes nothing); the extension's stub-store pane keeps a typed decode.
-    let desktop = readFile(repo / "src/frontend/ui/calltrace_extension.nim")
+    # Every pane reads the session's store since HSF-D1 and HSF-X2
+    # (`ui/calltrace` decodes nothing; the extension's panels mirror the
+    # host's session), so the store is the one decoder.
     let native = readFile(repo / "src/frontend/viewmodel/headless_session.nim")
     let store = readFile(repo / "src/frontend/viewmodel/store/replay_data_store.nim")
-    ck "callLineOf(" in desktop
-    ck "makeCallLine(" notin desktop
     ck "applyCalltraceResponse(" in native
     ck "parseCallLine" notin native
     # The DEFINITION — the store forward-declares the proc above
@@ -396,9 +394,6 @@ suite "PLAT-40 3 — the producer partition":
 
   const Declared = {
     "calltrace": @[
-      # The VS Code extension's stub-store pane (HSF-D1 moved it out of
-      # `ui/calltrace.nim`; the desktop's pane reads the session's store).
-      ("src/frontend/ui/calltrace_extension.nim", "syncCalltraceData"),
       ("src/frontend/viewmodel/collab/backend_snapshots.nim",
        "projectBackendSnapshotToStore"),
       ("src/frontend/viewmodel/store/replay_data_store.nim",

@@ -3329,6 +3329,9 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-main-process
 
       - name: Compile the renderer the way a developer builds it
+        # Also builds the VS Code extension's panel and host bundles and
+        # asserts the panel bundle carries none of the renderer (HSF-X2).
+        #
         # THE STEP ABOVE COMPILES WHAT SHIPS, AND THAT IS NOT WHAT ANYONE TYPES.
         # `just build-ui-js` adds `-d:ctInExtension` and
         # `--hotCodeReloading:on`; nothing ran it, and `cloud` carried it broken

@@ -36,8 +36,9 @@ import ../viewmodel/store/[replay_data_store, types]
 import ../viewmodel/session_vm
 import ../viewmodel/viewport
 import ../viewmodel/sync/[sync_host, transport, webview_transport]
-import ../viewmodel/viewmodels/[calltrace_vm, filesystem_vm, flow_vm,
-                                flow_line_values, state_vm]
+import ../viewmodel/viewmodels/[calltrace_vm, debug_controls_vm,
+                                filesystem_vm, flow_vm, flow_line_values,
+                                scratchpad_vm, state_vm]
 import ../../common/lang as common_lang
 
 type
@@ -278,10 +279,12 @@ proc runTracepoint*(host: VsCodeHost; path: string; line: int;
     tracepointSweepRequest(hosted.tracepoints))
 
 proc onFlowLines*(host: VsCodeHost;
-                  listener: proc(path: string; lines: seq[FlowLineValue])) =
+                  listener: proc(path: string; lines: seq[FlowLineValue];
+                                 loops: seq[FlowLoopLine])) =
   ## Call `listener` with the active session's flow, one line of text per
-  ## source line (`flow_line_values`), whenever it changes: what VS Code
-  ## draws after each line.
+  ## source line and the lines its loop controls go on (`flow_line_values`),
+  ## whenever it changes: what VS Code draws after each line and in an inset
+  ## above each loop.
   let theHost = host
   createRoot proc(dispose: proc()) =
     createEffect proc() =
@@ -289,12 +292,37 @@ proc onFlowLines*(host: VsCodeHost;
       let id = theHost.active.val
       let s = theHost.sync.primary(id)
       if s.isNil or s.flowVM.isNil:
-        listener("", @[])
+        listener("", @[], @[])
         return
       let window = s.flowVM.layoutWindow.val
       let path = s.flowVM.windowPath.val
-      let ticks = s.store.debugger.val.rrTicks
-      listener(path, flowLineValues(window, ticks.int))
+      let debugger = s.store.debugger.val
+      listener(path, flowLineValues(window, debugger.rrTicks.int),
+               flowLoopLines(window, debugger.location.line))
+
+proc addToScratchpad*(host: VsCodeHost; expression: string) =
+  ## Add `expression`'s value at the current stop to the active session's
+  ## scratchpad: the editor's "Add to scratchpad". The value is the stop's
+  ## local or watch of that name, as the State pane shows it; an expression
+  ## the stop has no value for adds nothing.
+  let s = host.activeSession
+  if s.isNil or s.scratchpadVM.isNil:
+    return
+  for rows in [s.store.locals.locals.val, s.store.locals.watches.val]:
+    for v in rows:
+      if v.name == expression:
+        s.scratchpadVM.addValue(ScratchpadValueEntry(
+          expression: v.name, valueText: v.value, typeName: v.typeName,
+          hasChildren: v.hasChildren, children: v.children))
+        return
+
+proc moveInHistory*(host: VsCodeHost; back: bool) =
+  ## The debug toolbar's history back / forward: move the active session's
+  ## jump-history cursor one entry and jump there (`DebugControlsVM`).
+  let s = host.activeSession
+  if s.isNil or s.debugControlsVM.isNil:
+    return
+  if back: s.debugControlsVM.goBack() else: s.debugControlsVM.goForward()
 
 proc attachWebview*(host: VsCodeHost; post: proc(message: JsObject)):
     SyncChannel =
@@ -358,13 +386,21 @@ proc ctHostRunTracepoint(host: VsCodeHost; path: cstring; line: int;
   host.runTracepoint($path, line, $expression)
 
 proc ctHostOnFlowLines(host: VsCodeHost;
-                       listener: proc(path: cstring; lines: JsObject))
+                       listener: proc(path: cstring; lines, loops: JsObject))
     {.exportc.} =
-  host.onFlowLines(proc(path: string; lines: seq[FlowLineValue]) =
-    var arr = newJArray()
+  host.onFlowLines(proc(path: string; lines: seq[FlowLineValue];
+                        loops: seq[FlowLoopLine]) =
+    var lineArr = newJArray()
     for l in lines:
-      arr.add %*{"line": l.line, "text": l.text}
-    listener(cstring(path), jsOf(arr)))
+      lineArr.add %*{"line": l.line, "text": l.text}
+    var loopArr = newJArray()
+    for l in loops:
+      loopArr.add %*{"line": l.line, "locationInside": l.locationInside}
+    listener(cstring(path), jsOf(lineArr), jsOf(loopArr)))
+
+proc ctHostAddToScratchpad(host: VsCodeHost; expression: cstring)
+    {.exportc.} =
+  host.addToScratchpad($expression)
 
 proc ctHostSetSourceFiles(host: VsCodeHost; id: cstring;
                           paths: seq[cstring]) {.exportc.} =
@@ -378,6 +414,9 @@ proc ctHostOnOpenFile(host: VsCodeHost; listener: proc(path: cstring))
 
 proc ctHostRevealFile(host: VsCodeHost; path: cstring) {.exportc.} =
   host.revealFile($path)
+
+proc ctHostHistory(host: VsCodeHost; back: bool) {.exportc.} =
+  host.moveInHistory(back)
 
 proc ctHostDispose(host: VsCodeHost) {.exportc.} =
   host.dispose()
@@ -397,5 +436,7 @@ module.exports.ctHostOnFlowLines = ctHostOnFlowLines;
 module.exports.ctHostSetSourceFiles = ctHostSetSourceFiles;
 module.exports.ctHostOnOpenFile = ctHostOnOpenFile;
 module.exports.ctHostRevealFile = ctHostRevealFile;
+module.exports.ctHostAddToScratchpad = ctHostAddToScratchpad;
+module.exports.ctHostHistory = ctHostHistory;
 module.exports.ctHostDispose = ctHostDispose;
 """.}

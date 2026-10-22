@@ -24,8 +24,8 @@
 ## is enabled and does nothing is what §8 / EMT-D14 forbid, so the buttons are
 ## shown disabled with that sentence until the desktop has a build route.
 ##
-## Desktop-only: the web studio composes its own model in `web_noir_build`, and
-## the extension has no topbar. `ui_js` imports this module only on the
+## Desktop-only: the web studio composes its own model in `web_noir_build`.
+## `ui_js` imports this module only on the
 ## Electron arm.
 
 import ui_imports

@@ -26,10 +26,9 @@ from ../viewmodel/viewmodels/review_session import
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   import ../viewmodel/views/isonim_agent_activity_view
-  when not defined(ctInExtension):
-    import isonim/web/web_renderer
-    import ./panel_host
-    from ../viewmodel/session_vm import SessionViewModel
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 const AGENT_MSG_DIV = "msg-content"
 const DIFF_EDITOR_DIV = "diff-editor"
@@ -762,32 +761,31 @@ when defined(js):
       self.data.openLayoutTab(Content.UnifiedDiff, newId, isEditor = true,
                               path = cstring("diff:agent-diff:" & target))
 
-  when not defined(ctInExtension):
-    proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
-      "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
-      ## The `<id>` of the host's `agentActivityComponent-<id>`.
+  proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
+    "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
+    ## The `<id>` of the host's `agentActivityComponent-<id>`.
 
-    # The panel host mounts each Agent Activity pane into the container
-    # GoldenLayout creates (`ui/panel_host`); the factory has created its
-    # component by then.
-    setPanelRenderer(Content.AgentActivity,
-      proc(r: WebRenderer; host: isonim_dom_api.Element;
-           session: SessionViewModel): isonim_dom_api.Element =
-        if agentActivityVMStore.isNil and not session.isNil:
-          agentActivityVMStore = session.store
-        let componentId = hostComponentId(host)
-        let component =
-          if agentActivityComponentRefs.hasKey(componentId):
-            agentActivityComponentRefs[componentId]
-          else: nil
-        let vm = ensureAgentActivityVM(component)
-        if vm.isNil:
-          return isonim_dom_api.createElement(isonim_dom_api.document,
-                                              cstring"div")
-        component.syncLegacyAgentActivityIntoVM()
-        renderAgentActivityPanel[WebRenderer, isonim_dom_api.Element](
-          r, vm, componentId, safeStr(component.commandInputId),
-          component.buildAgentActivityCallbacks()))
+  # The panel host mounts each Agent Activity pane into the container
+  # GoldenLayout creates (`ui/panel_host`); the factory has created its
+  # component by then.
+  setPanelRenderer(Content.AgentActivity,
+    proc(r: WebRenderer; host: isonim_dom_api.Element;
+         session: SessionViewModel): isonim_dom_api.Element =
+      if agentActivityVMStore.isNil and not session.isNil:
+        agentActivityVMStore = session.store
+      let componentId = hostComponentId(host)
+      let component =
+        if agentActivityComponentRefs.hasKey(componentId):
+          agentActivityComponentRefs[componentId]
+        else: nil
+      let vm = ensureAgentActivityVM(component)
+      if vm.isNil:
+        return isonim_dom_api.createElement(isonim_dom_api.document,
+                                            cstring"div")
+      component.syncLegacyAgentActivityIntoVM()
+      renderAgentActivityPanel[WebRenderer, isonim_dom_api.Element](
+        r, vm, componentId, safeStr(component.commandInputId),
+        component.buildAgentActivityCallbacks()))
 
 method register*(self: AgentActivityComponent, api: MediatorWithSubscribers) =
   self.api = api

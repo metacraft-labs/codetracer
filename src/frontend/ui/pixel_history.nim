@@ -10,10 +10,9 @@ import
 import std/options
 import isonim/core/signals
 import isonim/web/dom_api as dom_api
-when not defined(ctInExtension):
-  import isonim/web/web_renderer
-  import ./panel_host
-  from ../viewmodel/session_vm import SessionViewModel
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 
 var pixelHistoryVMInstance: PixelHistoryVM
 
@@ -45,16 +44,15 @@ proc loadPixelHistoryFromFrameViewer*(x, y, frame: int) =
   if not pixelHistoryVMInstance.isNil:
     pixelHistoryVMInstance.loadPixelHistory(x, y, frame)
 
-when not defined(ctInExtension):
-  # The panel host mounts the pane into the container GoldenLayout creates
-  # (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
-  # here re-mounts it when a history loads.
-  setPanelRenderer(Content.PixelHistory,
-    proc(r: WebRenderer; host: dom_api.Element;
-         session: SessionViewModel): dom_api.Element =
-      initPixelHistoryVM()
-      renderPixelHistoryPanel[WebRenderer, dom_api.Element](
-        r, pixelHistoryVMInstance))
+# The panel host mounts the pane into the container GoldenLayout creates
+# (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
+# here re-mounts it when a history loads.
+setPanelRenderer(Content.PixelHistory,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    initPixelHistoryVM()
+    renderPixelHistoryPanel[WebRenderer, dom_api.Element](
+      r, pixelHistoryVMInstance))
 
 method register*(self: PixelHistoryComponent, api: MediatorWithSubscribers) =
   self.api = api

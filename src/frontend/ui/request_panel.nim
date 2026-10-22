@@ -62,12 +62,9 @@ from ../viewmodel/viewmodels/request_panel_vm import
 when defined(js):
   from isonim/web/dom_api import nil
   import ../viewmodel/views/isonim_request_panel_view
-  when not defined(ctInExtension):
-    import isonim/web/web_renderer
-    import ./panel_host
-    from ../viewmodel/session_vm import SessionViewModel
-  else:
-    import isonim/web/web_renderer
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 # ---------------------------------------------------------------------------
 # Module-level VM/store/component slots so the IsoNim mount and the
@@ -98,53 +95,6 @@ var requestSpanPollingStarted = false
   ## Guards against installing a second timer when the panel is re-mounted
   ## or a second Request panel instance is opened — the tail is per-store,
   ## not per-panel.
-
-# ---------------------------------------------------------------------------
-# Component extension (ctInExtension boiler-plate).
-#
-# Preserved from the legacy module so the extension entry-point still
-# resolves to a valid ``RequestPanelComponent``; the in-extension
-# surface has no panel markup of its own because the IsoNim view is
-# the production renderer.
-# ---------------------------------------------------------------------------
-
-when defined(ctInExtension):
-  var requestPanelComponentForExtension* {.exportc.}: RequestPanelComponent =
-    makeRequestPanelComponent(data, 0, inExtension = true)
-
-  proc bindRequestPanelExtensionHost(component: RequestPanelComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    # The extension request-panel surface is an empty compatibility host; keep
-    # the exported component usable without retaining a Karax renderer.
-    host.innerHTML = cstring""
-
-  proc mountRequestPanelForExtension() =
-    ## The VS Code extension's webview hosts the view itself.
-    if requestPanelVMInstance.isNil or
-        requestPanelComponentForExtension.extensionRendererId.len == 0:
-      return
-    let host = dom_api.getElementById(dom_api.document,
-      requestPanelComponentForExtension.extensionRendererId)
-    if dom_api.isNodeNil(dom_api.Node(host)):
-      return
-    let node = dom_api.Node(host)
-    while not dom_api.isNodeNil(node.firstChild):
-      discard dom_api.removeChild(node, node.firstChild)
-    discard dom_api.appendChild(node, dom_api.Node(
-      renderRequestPanel[WebRenderer, dom_api.Element](
-        WebRenderer(), requestPanelVMInstance)))
-
-  proc makeRequestPanelComponentForExtension*(id: cstring): RequestPanelComponent {.exportc.} =
-    if requestPanelComponentForExtension.extensionRendererId.len == 0:
-      requestPanelComponentForExtension.extensionRendererId = id
-      requestPanelComponentForExtension.bindRequestPanelExtensionHost()
-    result = requestPanelComponentForExtension
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers.
@@ -423,9 +373,7 @@ proc applyRequestSpanDeltaEvent*(raw: JsObject) =
   ## forwards every DAP-mapped kind).  Both paths land in
   ## ``applyRequestSpanDelta``, which is idempotent — merging a delta keyed on
   ## span id twice yields the same rows and the same cursor — so the overlap
-  ## costs a redundant merge and nothing else.  The panel keeps its own
-  ## subscription because it must also work when the ViewModel layer's real
-  ## backend is not wired (``-d:ctInExtension``, stub-backed bootstrap).
+  ## costs a redundant merge and nothing else.
   if requestPanelVMStore.isNil:
     return
   let body = requestSpanDeltaToJson(raw)
@@ -483,54 +431,22 @@ proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
       untrack(proc() = scheduleRequestPanelReveal())
   startRequestSpanPolling()
 
-when defined(ctInExtension):
-  proc initRequestPanelVM*() =
-    ## Lazy fallback used when no shared store has been provided yet.
-    ## Same shape as ``initStepListVM`` / ``initReplVM`` /
-    ## ``initLowLevelCodeVM`` — a stub backend so the panel can still
-    ## render before ``configureMiddleware`` runs.
-    if requestPanelVMInstance != nil:
-      return
 
-    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-      when defined(js):
-        result = newPromise proc(resolve: proc(resp: JsonNode)) =
-          resolve(%*{})
-      else:
-        var fut = newFuture[JsonNode]("stub-backend")
-        fut.complete(%*{})
-        result = fut
-
-    let stubBackend = BackendService(
-      sendProc: stubSend,
-      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-      disconnectProc: proc() = discard,
-    )
-
-    requestPanelVMStore = createReplayDataStore(stubBackend)
-    requestPanelVMInstance = createRequestPanelVM(requestPanelVMStore)
-    clog "RequestPanelVM: parallel ViewModel instance created (stub backend)"
-    mountRequestPanelForExtension()
-
-when not defined(ctInExtension):
-  # The panel host mounts the pane into the container GoldenLayout (or the
-  # auto-hide strip) creates (`ui/panel_host`), on the session's ViewModel.
-  setPanelRenderer(Content.RequestPanel,
-    proc(r: WebRenderer; host: dom_api.Element;
-         session: SessionViewModel): dom_api.Element =
-      if not requestPanelComponentRef.isNil:
-        syncLegacyRequestPanelIntoVM(requestPanelComponentRef)
-      renderRequestPanel[WebRenderer, dom_api.Element](
-        r, session.requestPanelVM))
+# The panel host mounts the pane into the container GoldenLayout (or the
+# auto-hide strip) creates (`ui/panel_host`), on the session's ViewModel.
+setPanelRenderer(Content.RequestPanel,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    if not requestPanelComponentRef.isNil:
+      syncLegacyRequestPanelIntoVM(requestPanelComponentRef)
+    renderRequestPanel[WebRenderer, dom_api.Element](
+      r, session.requestPanelVM))
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
 # render.  Generic callers are expected to use direct IsoNim mount paths.
 # ---------------------------------------------------------------------------
 
-when defined(ctInExtension):
-  method redrawForExtension*(self: RequestPanelComponent) =
-    self.bindRequestPanelExtensionHost()
 
 method unregister*(self: RequestPanelComponent) =
   ## Release the module-global slot before the base implementation drops the
@@ -556,12 +472,6 @@ method register*(self: RequestPanelComponent, api: MediatorWithSubscribers) =
   self.api = api
   if requestPanelComponentRef.isNil:
     requestPanelComponentRef = self
-  when defined(ctInExtension):
-    # The extension's webview has no session store: it feeds its own.
-    api.subscribe(CtUpdatedHttpRequests,
-      proc(kind: CtEventKind, raw: JsObject, sub: Subscriber) =
-        applyRequestSpanDeltaEvent(raw))
-    initRequestPanelVM()
 
 method restart*(self: RequestPanelComponent) =
   self.clearRequests()
@@ -569,6 +479,3 @@ method restart*(self: RequestPanelComponent) =
 method clear*(self: RequestPanelComponent) =
   self.clearRequests()
 
-proc registerRequestPanelComponent*(component: RequestPanelComponent,
-                                     api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

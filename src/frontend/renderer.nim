@@ -570,10 +570,7 @@ proc requestInitialPanelData*(data: Data) =
   ## Ask backend to resend panel data that isn't automatically replayed.
   data.viewsApi.emit(CtEventLoad, EmptyArg())
   # The terminal output's line view asks for the lines it shows
-  # (`TerminalOutputVM.setViewport`); only the extension's stub-backed pane
-  # is still handed every write.
-  when defined(ctInExtension):
-    data.viewsApi.emit(CtLoadTerminal, EmptyArg())
+  # (`TerminalOutputVM.setViewport`).
 
 # proc saveNew(data: Data, file: SaveFile) =
 #   ipc.send "CODETRACER::save-new", file
@@ -736,12 +733,8 @@ proc expand*(path: cstring, line: int) {.exportc, used.} =
   ## The response is handled by the `ct/update-expansion` DAP response
   ## handler which opens the expanded code inline or in a tab.
   ##
-  ## VSCode-extension builds (`-d:ctInExtension`) use a different
-  ## `DapApi` shape (no `seq` / `sessionId`) and dispatch DAP through
-  ## a separate path entirely. Without the guard the body fails to
-  ## type-check there — `data.dapApi.seq` resolves to the typedesc
-  ## `seq[T]` rather than reporting the missing field, which broke
-  ## `just build-ui-js`.
+  ## Under `-d:ctInExtension` (the JS suites built with dap's extension arm)
+  ## `DapApi` has no `seq` / `sessionId`; the request is the renderer's alone.
   when not defined(ctInExtension):
     # `DapApi.seq` collides with something in this module's import
     # graph: `d.seq` for `d: DapApi` resolves to a typedesc lookup
@@ -1646,7 +1639,7 @@ proc appendContextMenuBrowserHint*(container: dom.Element) =
   hintRow.textContent = cstring text
   container.append(cast[dom.Element](hintRow))
 
-proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
+proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
   let container = dom.document.getElementById("context-menu-container")
   container.style.display = "flex"
   container.innerHTML = ""
@@ -1703,11 +1696,6 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
   let clientWidth = cast[int](dom.window.toJs.innerWidth)
   let contextHeight = cast[dom.Element](container).clientHeight
   let clientHeight = cast[int](dom.window.toJs.innerHeight)
-  let heightOffset =
-    if inExtension:
-      40
-    else:
-      0
   # Anchor the menu corner closest to the cursor:
   # default is top-left at cursor; flip horizontally if too far right,
   # flip vertically if too far down.
@@ -1715,7 +1703,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
   let tooFarDown  = yPos + contextHeight > clientHeight
   let leftPos = max(0, if tooFarRight: x - contextWidth else: x)
   let topPos  = max(0, if tooFarDown:  yPos - contextHeight else: yPos)
-  container.style.top = cstring(fmt"{topPos + heightOffset}px")
+  container.style.top = cstring(fmt"{topPos}px")
   container.style.left = cstring(fmt"{leftPos}px")
 
   kdom.document.addEventListener("click", proc(e: Event) =

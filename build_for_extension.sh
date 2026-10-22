@@ -1,32 +1,29 @@
 #!/usr/bin/env bash
 
-# build_for_extension.sh <ui_js_output_path> <ct_vscode_js_output_path> <db_backend_path>
+# build_for_extension.sh <media_dir> <db_backend_path>
+#
+# The CodeTracer VS Code extension's Nim and Rust artefacts, built from this
+# checkout (Shared-DOM-Front-Ends D5):
+#
+#   <media_dir>/vscode_panel.js  the panel webviews' bundle: one panel over a
+#                                mirror of the host's session
+#   <media_dir>/vscode_host.js   the extension host's sessions (CommonJS)
+#   <media_dir>/ct_vscode.js     the extension host's middleware (commands
+#                                that ask the replay directly)
+#   <db_backend_path>            the replay backend
 set -e
 
-# `--hotCodeReloading:on` must not be added here: on the JS backend it makes
-# distinct routines collide onto one function name inside the single-scope
-# bundle (see the note on `ctNimJs` in repro.nim), which takes the renderer
-# down at startup.  `src/frontend/tests/renderer_js_symbol_uniqueness_test.nim`
-# fails if it comes back.
-nim \
-	-d:chronicles_enabled=off \
-	-d:ctRenderer \
-	-d:ctInExtension \
-	--debugInfo:on \
-	--lineDir:on \
-	--out:"$1" \
-	js src/frontend/ui_js.nim
+media_dir="$1"
+mkdir -p "${media_dir}"
 
-nim \
-	-d:ctRenderer \
-	-d:ctInExtension \
-	-d:ctInCentralExtensionContext \
-	--out:"$2" \
-	js src/frontend/middleware.nim
+just build-vscode-panel "${media_dir}/vscode_panel.js"
+just build-vscode-host "${media_dir}/vscode_host.js"
+
+just build-vscode-middleware "${media_dir}/ct_vscode.js"
 
 just build-once
 
 cd ./src/db-backend
 cargo build
 cd ../..
-mv ./src/db-backend/target/debug/db-backend "$3"
+mv ./src/db-backend/target/debug/db-backend "$2"

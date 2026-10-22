@@ -57,6 +57,3 @@ method register*(self: TestResultsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initTestResultsVM()
 
-proc registerTestResultsComponent*(component: TestResultsComponent,
-                                   api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
