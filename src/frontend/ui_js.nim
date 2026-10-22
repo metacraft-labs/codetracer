@@ -116,6 +116,12 @@ when not defined(ctWeb):
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
+# A TAB ENTERED AGAIN SHOWS ITS OWN VCS PANE. Every tab's VCS panel draws the
+# one `VCSVM` of component id 0, so the tab switch re-syncs it from the entered
+# tab's own panel. Installed here because this module imports both sides and
+# `session_switch` cannot import `vcs` (see `syncSessionVCSHook`).
+session_switch.syncSessionVCSHook = vcs.syncSessionVCSIntoVM
+
 proc configureIPC(data: Data)
 
 proc jsMissing(value: JsObject): bool {.

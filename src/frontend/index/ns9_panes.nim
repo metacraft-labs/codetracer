@@ -45,6 +45,9 @@ import ../../ct_test/contracts
 # half is exactly what this file needs, and it is the same half the browser
 # calls, so using it is not a workaround: it is the reason the split exists.
 import ../../ct_test/frameworks/noir_test_syntax
+# The one sentence every pane shows for a session with no project folder
+# (Files and VCS say it too; `viewmodels/no_project_folder`).
+from ../viewmodel/viewmodels/no_project_folder import NoProjectFolderText
 
 # ---------------------------------------------------------------------------
 # The node side, and the one rule it has: CROSS THE BOUNDARY AS `cstring`.
@@ -149,7 +152,7 @@ proc nargoInfoJson(projectRoot: string): tuple[info, absence: string] =
   ## an empty string with an empty reason, because the pane renders that as
   ## "no circuit" — a claim about the project rather than about the attempt.
   if projectRoot.len == 0:
-    return ("", "No project folder is open.")
+    return ("", NoProjectFolderText)
   if not fileExistsIn(projectRoot, NoirProjectMarker):
     return ("", "This project has no " & NoirProjectMarker &
                 ", so it is not a Noir crate and has no circuit to measure. " &
@@ -174,7 +177,7 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   var catalogJson = ""
   var catalogAbsence = ""
   if folder.len == 0:
-    catalogAbsence = "No project folder is open."
+    catalogAbsence = NoProjectFolderText
   elif not fileExistsIn(folder, NoirProjectMarker):
     catalogAbsence =
       "This project has no " & NoirProjectMarker & ", so CodeTracer has no " &

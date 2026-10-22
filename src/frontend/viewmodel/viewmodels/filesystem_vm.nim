@@ -43,6 +43,9 @@
 ## - ``failLoad``            — end a root load that failed: ``lsError``
 ##                             plus the reason, so the pane never waits
 ##                             forever (GitHub #785).
+## - ``showNoProjectFolder``  — the session has no project folder (New
+##                             File): an empty project, not a load to
+##                             wait for.
 ## - ``toggleExpanded``      — toggle a path's expansion state.  No-op
 ##                             when the path is not present in the
 ##                             tree.
@@ -86,6 +89,13 @@ type
     loadError*: Signal[string]
       ## Why the last root load failed, when ``loadingState`` is ``lsError``;
       ## ``""`` otherwise.  The view shows it in place of "Loading...".
+    noProjectFolder*: Signal[bool]
+      ## True while the session has NO project folder (Welcome screen → New
+      ## File).  The tree is then empty because there is nothing to list, not
+      ## because a load is outstanding, and the view's empty state says so
+      ## ("No project folder is open.") instead of "No filesystem loaded
+      ## yet.", which reads as a load still to come.  Set only by
+      ## ``showNoProjectFolder``; every other root transition clears it.
     expandedPaths*: Signal[HashSet[string]]
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
     onOpenFile*: proc(path: string)
@@ -207,6 +217,7 @@ proc setRoot*(vm: FilesystemVM; root: FilesystemEntryNode) =
   vm.rootEntry.val = root
   vm.loadingState.val = lsIdle
   vm.loadError.val = ""
+  vm.noProjectFolder.val = false
 
   # Perform smart auto-expansion for single-child folders on load
   var paths = vm.expandedPaths.val
@@ -219,6 +230,7 @@ proc clearRoot*(vm: FilesystemVM) =
   vm.rootEntry.val = emptyEntry()
   vm.loadingState.val = lsLoading
   vm.loadError.val = ""
+  vm.noProjectFolder.val = false
 
 proc resetToInitial*(vm: FilesystemVM) =
   ## Put back what a freshly created VM shows: no tree (waiting for a root
@@ -247,6 +259,28 @@ proc failLoad*(vm: FilesystemVM; reason: string) =
   vm.loadError.val = if reason.len > 0: reason
                      else: "The file tree could not be loaded."
   vm.loadingState.val = lsError
+  vm.noProjectFolder.val = false
+
+proc showNoProjectFolder*(vm: FilesystemVM) =
+  ## The session has no project folder: show an EMPTY PROJECT.
+  ##
+  ## `Welcome-Screen.md` §"New file, and what it creates": *"The session's
+  ## folder is empty, so the Files panel shows an empty project rather than
+  ## a tree"*.  That is a settled answer, not a load in flight — there is no
+  ## folder to walk and nothing will ever answer a root load — so the state
+  ## is ``lsIdle`` with no tree, and ``noProjectFolder`` tells the view to
+  ## name the reason (the same "No project folder is open." the Test
+  ## Results and Constraints panes show) rather than the generic "No
+  ## filesystem loaded yet.", which promises a tree that is not coming.
+  ##
+  ## The tree is dropped: one FilesystemVM serves every tab of a window
+  ## (`shared_pane_state`), so whatever it held was another session's.  The
+  ## expanded folders are left alone, as ``setRoot`` leaves them; the
+  ## session switch restores or resets them.
+  vm.rootEntry.val = emptyEntry()
+  vm.loadError.val = ""
+  vm.loadingState.val = lsIdle
+  vm.noProjectFolder.val = true
 
 proc toggleExpanded*(vm: FilesystemVM; path: string) =
   ## Toggle ``path``'s expanded state.  Folders not yet in the
@@ -358,6 +392,7 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     # compile under Nim's side-effect inference for compound types.
     let rootEntry = createSignal(emptyEntry())
     let loadingState = createSignal(lsLoading)
+    let noProjectFolder = createSignal(false)
     let loadError = createSignal("")
     let expandedPaths = createSignal(initHashSet[string]())
     let diffEntries = createSignal(newSeq[FilesystemDiffEntry]())
@@ -376,6 +411,7 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
       rootEntry: rootEntry,
       loadingState: loadingState,
       loadError: loadError,
+      noProjectFolder: noProjectFolder,
       expandedPaths: expandedPaths,
       diffEntries: diffEntries,
       isEmpty: isEmpty,

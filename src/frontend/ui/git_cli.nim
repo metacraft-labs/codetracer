@@ -25,6 +25,9 @@ from ../platform_host import
 
 import std/tables
 
+import ../viewmodel/viewmodels/no_project_folder
+export no_project_folder.NoProjectFolderText
+
 const gitTimeoutMs = 5000
 
 # ---------------------------------------------------------------------------
@@ -305,9 +308,18 @@ proc gitWorkingDirectory*(data: Data): cstring =
   ## right place to run a user's git command, which is a fact about how the app
   ## was launched, not about the project.
   ##
-  ## **On the desktop the observable behaviour is unchanged**, and that is
-  ## checked rather than assumed: every consumer passes this value into a git
-  ## command's `cwd` and none of them branches on its emptiness or displays it,
+  ## **A session with NO project folder never reaches git through this.** For
+  ## the New File session the folder is empty for a different reason — there
+  ## is no project, not "use the default" — and running git in the default
+  ## directory drew the launch directory's repository in the VCS panel. Every
+  ## consumer that shows a repository's content therefore asks
+  ## `sessionHasNoProjectFolder` first and shows the absence instead
+  ## (`ui/vcs.refreshVCSData`, `ui/agent_activity`'s branch sync);
+  ## `certificate_indicator` already reads "" as "no workspace".
+  ##
+  ## **For every other session the desktop behaviour is unchanged**, and that
+  ## is checked rather than assumed: those consumers pass this value into a
+  ## git command's `cwd` without displaying it,
   ## `runGit` turns it into `ProcessSpec.workingDir`, and both desktop
   ## instantiations resolve an empty one to the process's own directory —
   ## `osproc.startProcess` by definition, and node's `execFileSync` through
@@ -321,6 +333,26 @@ proc gitWorkingDirectory*(data: Data): cstring =
   if not folder.isNil and folder.len > 0:
     return folder
   cstring""
+
+proc startOptionsHaveNoProjectFolder*(options: StartOptions): bool =
+  ## Do these start options describe a session with NO project folder
+  ## (Welcome screen → New File)? `no_project_folder.isFolderlessEditSession`
+  ## is the rule.
+  let folder = options.folder
+  isFolderlessEditSession(options.edit, if folder.isNil: "" else: $folder)
+
+proc sessionHasNoProjectFolder*(data: Data): bool =
+  ## Does the ACTIVE session have no project folder? A pane that belongs to
+  ## one particular tab should ask about its own session's start options
+  ## (`startOptionsHaveNoProjectFolder`) instead: `data.startOptions` is the
+  ## active tab's, and a background tab's timer runs while another is shown.
+  ##
+  ## Ask it BEFORE `gitWorkingDirectory` wherever the answer is shown to the
+  ## user: an empty working directory means "the platform's default" to git,
+  ## which for such a session is a repository the session does not have.
+  if data.isNil:
+    return false
+  startOptionsHaveNoProjectFolder(data.startOptions)
 
 proc gitRepositoryRoot*(data: Data): cstring =
   ## Absolute path of the git work tree root.

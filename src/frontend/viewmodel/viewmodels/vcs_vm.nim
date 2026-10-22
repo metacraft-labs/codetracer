@@ -28,6 +28,7 @@ import isonim/viewmodel
 
 import ../platform/vcs as platform_vcs
 import ../viewport
+import ./no_project_folder
 export viewport
 
 const
@@ -554,6 +555,30 @@ proc syncCommitFilesMap*(vm: VCSVM;
 proc setWorkingTreeFiles*(vm: VCSVM; files: openArray[VCSFileRow]) =
   vm.workingTreeFiles.val = @files
 
+proc setNoProjectFolder*(vm: VCSVM) =
+  ## The session has NO project folder (Welcome screen → New File), so there
+  ## is no repository to show: the panel shows the "No project folder is
+  ## open." absence — the one the Test Results and Constraints panes show for
+  ## the same session — and nothing else.
+  ##
+  ## Every repository-derived value is cleared rather than left as it was:
+  ## a panel that showed a project before (another tab of the window, or a
+  ## folder this window had open) must not keep its branch, history or
+  ## changes on screen beside a sentence saying there is no project.
+  ##
+  ## Callers must not ask git anything for such a session. An empty working
+  ## directory is not "no repository" to git: every platform reads it as the
+  ## process's own directory, which is how the panel used to draw the
+  ## history of whatever repository the app had been launched from.
+  vm.setDeepReviewMode(false)
+  vm.setHeader("")
+  vm.setGitRepoState(false, NoProjectFolderText)
+  vm.setBranchState("", [], false)
+  vm.setCommits([], [])
+  vm.syncCommitFilesMap([])
+  vm.setWorkingTreeFiles([])
+  vm.changedFiles.val = @[]
+
 func workingTreeStatusLetter*(change: platform_vcs.VcsFileChange): string =
   ## The one letter a file's working-tree state is shown with, as git's short
   ## status and VCS-Panel.md spell them: `M` modified, `A` added, `D`
@@ -665,6 +690,15 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
   ## synchronous subprocess, so there is nothing to wait for; a facade that
   ## cannot settle here reports "not a repository" rather than a stale list.
   if vm.isNil or facade.isNil:
+    return
+  # NO DIRECTORY IS NO PROJECT FOLDER, and git is not asked. An empty
+  # directory would reach the facade as "the platform's default" — the
+  # process's working directory — and the pane would show that repository
+  # instead of the absence (codetracer-pm issue 2026-10-21, "...its VCS pane
+  # shows the launch directory's repository"). The native hosts already
+  # treat "" this way on refresh (`gpui_host.refreshGpuiVcs`).
+  if directory.len == 0:
+    vm.setNoProjectFolder()
     return
   let isRepo = awaitSync(facade.isRepository(directory))
   if not isRepo.ok or not isRepo.value:

@@ -1,6 +1,7 @@
 import ../utils, ../communication, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
 from unified_diff import registerAgentDiffEntry
-from git_cli import gitWorkingDirectory, gitExec, isGitRepository
+from git_cli import gitWorkingDirectory, gitExec, isGitRepository,
+  sessionHasNoProjectFolder
 
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -439,6 +440,12 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   # their defaults, so the ACP backend can push authoritative values later
   # without them being overwritten on every sync.
   block branchSync:
+    # A session with no project folder (New File) has no branch to show:
+    # `gitWorkingDirectory` answers "" for it, and git would read the launch
+    # directory's repository instead (see `git_cli.sessionHasNoProjectFolder`).
+    # A worktree session names its own directory and is unaffected.
+    if self.workspaceDir.len == 0 and sessionHasNoProjectFolder(self.data):
+      break branchSync
     let cwd = if self.workspaceDir.len > 0: self.workspaceDir
               else: gitWorkingDirectory(self.data)
     if not isGitRepository(cwd):

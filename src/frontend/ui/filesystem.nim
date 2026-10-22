@@ -52,7 +52,9 @@ from ../viewmodel/store/types as vmtypes import
 from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
-  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry, failLoad
+  setExpandedPaths, isExpanded, setDiffEntries, emptyEntry, failLoad,
+  showNoProjectFolder
+from git_cli import sessionHasNoProjectFolder
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -403,7 +405,18 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
   filesystemComponentRef = self
   if filesystemVMInstance.isNil:
     return
-  if not self.service.isNil and not self.service.filesystem.isNil:
+  let sessionData = if self.data.isNil: data else: self.data
+  if sessionHasNoProjectFolder(sessionData):
+    # NEW FILE: the session has no project folder, so its tree is the empty
+    # "source folders" container and nothing will ever be loaded into it.
+    # Checked BEFORE the tree, because that empty container is a perfectly
+    # good tree to `setRoot`, and the pane would then show the generic
+    # "No filesystem loaded yet." — which reads as a load still to come and,
+    # with the hidden "Loading..." overlay beside it, was reported as a pane
+    # stuck loading (codetracer-pm issue 2026-10-21). `Welcome-Screen.md`
+    # §"New file, and what it creates": an empty project, not a tree.
+    filesystemVMInstance.showNoProjectFolder()
+  elif not self.service.isNil and not self.service.filesystem.isNil:
     var openedPaths = initHashSet[string]()
     collectLegacyOpenedPaths(self.service.filesystem, openedPaths)
     filesystemVMInstance.setRoot(legacyFileToVm(self.service.filesystem))
