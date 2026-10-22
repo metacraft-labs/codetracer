@@ -80,7 +80,6 @@ function recording(): string {
 test.use({
   sourcePath: recording(),
   launchMode: "trace-folder",
-  noUserLayout: true,
 });
 test.setTimeout(300_000);
 

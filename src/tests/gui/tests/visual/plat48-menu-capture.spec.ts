@@ -55,7 +55,6 @@ function recording(): string {
 test.use({
   sourcePath: recording(),
   launchMode: "trace-folder",
-  noUserLayout: true,
   codetracerPrefixOverride: process.env.PLAT48_DESKTOP_PREFIX ?? "",
 });
 test.setTimeout(300_000);

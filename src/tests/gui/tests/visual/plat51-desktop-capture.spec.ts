@@ -176,7 +176,6 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
   test.use({
     sourcePath: recording("noir_space_ship"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -321,7 +320,6 @@ test.describe("PLAT-51: the desktop's Call Trace scrubber", () => {
   test.use({
     sourcePath: recording("call_pages"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -372,7 +370,6 @@ test.describe("PLAT-51: the desktop's Terminal Output line scrubber", () => {
   test.use({
     sourcePath: recording("terminal_colours"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -407,7 +404,6 @@ test.describe("PLAT-51: the desktop's changed-value style", () => {
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -488,7 +484,6 @@ test.describe("PLAT-51: GoldenLayout's drop decisions, for the pointer-trace dif
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -733,7 +728,6 @@ test.describe("PLAT-51: the desktop's new tab opens the Welcome Screen", () => {
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 

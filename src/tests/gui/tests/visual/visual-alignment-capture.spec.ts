@@ -875,17 +875,17 @@ async function captureSettled(
 
 for (const scenario of definition.scenarios) {
   test.describe(`PLAT-35 capture: ${scenario.id}`, () => {
-    // `noUserLayout: true` — the product's own first-run layout (the shared
-    // default), not the bundled tree the launch fixture otherwise copies into
-    // the run's home. Without it this capture drew a fourth column (TESTS
-    // over CONSTRAINTS) that no CodeTracer mode opens with, and a parity review
+    // No layout option: the launch fixture's default is the product's own
+    // first-run layout (the shared default). Do not set `bundledLayout`: the
+    // raw bundled tree it installs drew a fourth column here (TESTS over
+    // CONSTRAINTS) that no CodeTracer mode opens with, and a parity review
     // read the GPUI front-end — which draws the shared default — as the
-    // deficient side (measured 2026-10-17; the same defect, and the same
-    // remedy, as PARITY-S1 in `plat37-electron-window-capture.spec.ts`).
+    // deficient side (measured 2026-10-17, when that tree was still the
+    // fixture's default; the same defect as PARITY-S1 in
+    // `plat37-electron-window-capture.spec.ts`).
     test.use({
       sourcePath: recordingPath,
       launchMode: "trace-folder",
-      noUserLayout: true,
     });
 
     test(`captures the '${scenario.view}' view and its eight answers`, async ({

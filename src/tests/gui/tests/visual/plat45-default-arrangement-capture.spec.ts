@@ -92,7 +92,6 @@ for (const which of ["generated", "scratch"]) {
     test.use({
       sourcePath: calcTrace || calcProgram,
       launchMode: calcTrace ? "trace-folder" : "trace",
-      noUserLayout: true,
       codetracerPrefixOverride: process.env[prefixVar(which)] ?? "",
     });
     test.setTimeout(300_000);

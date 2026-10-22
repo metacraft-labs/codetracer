@@ -36,17 +36,24 @@
 import * as fs from "fs";
 import * as path from "path";
 import { ctNativeStateDir, ctUserConfigDir } from "../../lib/ct-home";
+import {
+  ConstraintsContent,
+  EditorContent,
+  buildPrefix,
+  debugDefaultStacks,
+  fileStacks,
+  hasContent,
+  shippedLayoutFile,
+  stackContents,
+  withoutEditor,
+} from "../../lib/layout-stacks";
 
 import { expect, test } from "../../lib/fixtures";
 
-const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
 // The pane the case rearranges away: VCS (`Content.VCS`). PLAT-45 closed
 // CONSTRAINTS; since PLAT-47 the first run's Debug-mode default does not place
 // CONSTRAINTS at all, so the case closes a pane that default does place.
 const ClosedContent = 41;
-const FilesystemContent = 9;
-const TestResultsContent = 48;
-const ConstraintsContent = 49;
 
 // THE RECORDING IS MADE BY THE RUN ITSELF: `launchMode: "trace"` records
 // `test-programs/calc/main.py` with the `ct` under test before the app opens,
@@ -76,118 +83,19 @@ function prefix(): string {
   // generated default. A worktree whose `src/build-debug` is another
   // checkout's needs `scripts/plat45-desktop-prefix.sh` and one of the two
   // variables above.
-  if (preparedPrefix.length > 0) return preparedPrefix;
-  const build = process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
-    ? process.env.CODETRACER_BUILD_DIR
-    : path.join(repoRoot, "src", "build-debug");
-  // A job that runs a PACKAGED `ct` (CODETRACER_E2E_CT_PATH, the nix build)
-  // has no tup build directory; its `config/` is this checkout's `src/config/`
-  // copied into the package, so that is the shipped default to compare with.
-  if (!fs.existsSync(path.join(build, "config", "default_layout.json"))) {
-    return path.join(repoRoot, "src");
-  }
-  return build;
+  return preparedPrefix.length > 0 ? preparedPrefix : buildPrefix();
 }
 
 function userLayoutPath(): string {
   return path.join(ctUserConfigDir(), "default_layout.json");
 }
 
-// The native products' state root for this run — the terminal's and the GPUI
-// window's own files live here, never under the desktop's config directory.
-// Resolved lazily: the fixtures assign `CODETRACER_HOME` at import time, and
-// the native products' root lives under it (`lib/ct-home.ts`).
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function stackContents(page: any): Promise<number[][]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const gl = (window as any).data?.ui?.layout;
-    const out: number[][] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const walk = (item: any) => {
-      if (!item) return;
-      if (item.type === "stack") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        out.push(item.contentItems.map((c: any) => {
-          const cfg = c.toConfig ? c.toConfig() : {};
-          const st = cfg.componentState ?? {};
-          return typeof st.content === "number" ? st.content : -1;
-        }));
-        return;
-      }
-      for (const c of item.contentItems ?? []) walk(c);
-    };
-    walk(gl?.rootItem);
-    return out;
-  });
-}
-
-function hasContent(stacks: number[][], content: number): boolean {
-  return stacks.some((s) => s.includes(content));
-}
-
-// The editor's stack is not in `default_layout.json` at all: the desktop
-// inserts it at the root row's index 1 at runtime (`utils.nim`). Comparing a
-// live arrangement with a config therefore drops it.
-const EditorContent = 2;
-
-function withoutEditor(stacks: number[][]): number[][] {
-  return stacks.filter((s) => !(s.length === 1 && s[0] === EditorContent));
-}
-
-/**
- * The stacks of a GoldenLayout config document, in document order, each as
- * the `Content` ordinals of its tabs — the same shape `stackContents` reads
- * off the live layout. Works on the bundled default and on the file the
- * desktop saves (which is the same schema, re-serialised on one line).
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function configStacks(doc: any): number[][] {
-  const out: number[][] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const walk = (item: any) => {
-    if (!item || typeof item !== "object") return;
-    if (item.type === "stack") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      out.push((item.content ?? []).map((c: any) => {
-        const st = c.componentState ?? {};
-        return typeof st.content === "number" ? st.content : -1;
-      }));
-      return;
-    }
-    if (item.root) walk(item.root);
-    for (const c of item.content ?? []) walk(c);
-  };
-  walk(doc);
-  return out;
-}
-
-function fileStacks(file: string): number[][] {
-  return configStacks(JSON.parse(fs.readFileSync(file, "utf8")));
-}
-
-// THE DEBUG MODE'S DEFAULT, from the bundled file, by the rule the product
-// states (`frontend.paneHomesForMode` / `modeDefaultOmittedContentIds`) —
-// written out here, not imported: TESTS joins the FILES stack as its last tab,
-// CONSTRAINTS is not placed, and a stack left empty is gone. The first run and
-// View > Reset Layout both install this (PLAT-47): it is the arrangement every
-// CodeTracer front-end opens with.
-function debugDefaultStacks(bundled: number[][]): number[][] {
-  const out = bundled
-    .map((s) => s.filter((c) => c !== TestResultsContent && c !== ConstraintsContent))
-    .filter((s) => s.length > 0);
-  const files = out.find((s) => s.includes(FilesystemContent));
-  if (files) files.push(TestResultsContent);
-  return out;
-}
 
 test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets to the shared default", () => {
   test.describe("first run, then a rearrangement", () => {
     test.use({
       sourcePath: calcTrace || calcProgram,
       launchMode: calcTrace ? "trace-folder" : "trace",
-      noUserLayout: true,
       codetracerPrefixOverride: preparedPrefix,
     });
     test.setTimeout(300_000);
@@ -206,7 +114,7 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       // comparison: the write-through rewrites the file as soon as the layout
       // settles.
       const shipped = debugDefaultStacks(
-        fileStacks(path.join(prefix(), "config", "default_layout.json")));
+        fileStacks(shippedLayoutFile(prefix())));
       expect(withoutEditor(before)).toEqual(shipped);
       expect(fs.existsSync(userLayoutPath())).toBe(true);
       expect(fileStacks(userLayoutPath())).toEqual(shipped);
@@ -289,7 +197,7 @@ test.describe.serial("PLAT-45: the desktop remembers its own layout, and resets 
       const reset = await stackContents(ctPage);
       expect(reset.some((s) => s.includes(EditorContent))).toBe(true);
       const shipped = debugDefaultStacks(
-        fileStacks(path.join(prefix(), "config", "default_layout.json")));
+        fileStacks(shippedLayoutFile(prefix())));
       expect(withoutEditor(reset)).toEqual(shipped);
       // …THE DESKTOP'S SAVED FILE IS THE DEFAULT AGAIN (deleted, re-copied by
       // the first run's own loader, then re-saved from the live layout)…

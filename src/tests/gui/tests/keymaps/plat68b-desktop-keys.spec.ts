@@ -161,7 +161,6 @@ test.describe("PLAT-68: the desktop's keys through the one router", () => {
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -262,7 +261,6 @@ test.describe("PLAT-68: the program menu from the keyboard (CUA-Keymap.md §3.8)
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -311,7 +309,6 @@ test.describe("PLAT-68: the user's keybindings.json on the desktop", () => {
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 

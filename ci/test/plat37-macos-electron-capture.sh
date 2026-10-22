@@ -688,7 +688,10 @@ elif grade_rc != 0:
 # every mode. Every frame this lane took therefore showed two panes no
 # CodeTracer front-end opens with, the oracle counted 7 against the GPUI
 # window's 5, and that was filed as PARITY-S1 with GPUI named the deficient
-# side. The frames were right and the finding read them backwards.
+# side. The frames were right and the finding read them backwards. (Since
+# 2026-10-22 the fixture takes the product's first-run path by default and
+# `noUserLayout` is gone; the raw bundled tree is the opt-in `bundledLayout`,
+# which this lane must not set.)
 #
 # WHY THE EXPECTATION IS DERIVED AND NOT WRITTEN DOWN. `expected` below is
 # computed from `headless_app/shared_default_layout.generated.json` — the
@@ -768,7 +771,8 @@ elif grade is not None:
                 + (f"; missing {missing}" if missing else "")
                 + ". A frame with panes the shared default does not place is "
                   "not a reference frame for parity: see this lane's spec "
-                  "`noUserLayout` note and PARITY-S1.")
+                  "launch-layout note (the fixture default, the product's first-run "
+                  "layout) and PARITY-S1.")
 
 rec["grade"] = grade
 rec["route"] = route

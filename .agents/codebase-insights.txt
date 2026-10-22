@@ -982,8 +982,9 @@ and a correlation marker's counterpart is by definition in another process.
     Anything that asks "is panel X in the layout?" must also consult the
     auto-hide state (`~/.config/codetracer/auto_hide_state.json`), or pinning
     FILES makes the loader declare the layout incompatible and delete it.
-  * The GUI fixture copies the bundled default over `default_layout.json` on
-    EVERY test setup (`src/tests/gui/lib/layout-reset.ts`), and the index
+  * The GUI fixture resets `default_layout.json` on EVERY test setup (removes
+    it, or installs the bundled tree under `bundledLayout`;
+    `src/tests/gui/lib/layout-reset.ts` `prepareUserLayout`), and the index
     process reads the layout file exactly once at startup. A layout-loading
     spec must therefore write `default_edit_layout.json` from a `beforeEach`
     that requests no fixture — writing after `ctPage.reload()` tests nothing.
@@ -1347,7 +1348,10 @@ inside the directory.
   (`lib/fixtures.ts` mkdtemps it at module scope). So anything a test leaves
   in `~/.config/codetracer` is input to every later test in that worker. The
   `ctPage` fixture resets all three pieces of the saved arrangement before a
-  launch: `default_layout.json` (`ensureDefaultLayout`), `auto_hide_state.json`
+  launch: `default_layout.json` (`prepareUserLayout` — REMOVED by default, so
+  the launch takes the product's first-run path and opens the Debug mode's
+  default; `bundledLayout: true` installs the raw bundled tree no mode draws,
+  `preserveUserLayout: true` keeps the saved one), `auto_hide_state.json`
   (`resetAutoHideState`) and — since a `ct review` launch reads it —
   `default_edit_layout.json` (`resetEditLayout`). Specs that seed one of those
   themselves must do it in a fixture-free `beforeEach` (which runs BEFORE the
