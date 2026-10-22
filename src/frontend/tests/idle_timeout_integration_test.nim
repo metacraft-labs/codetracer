@@ -19,6 +19,12 @@ proc waitForExitWithin(p: Process, timeoutMs: int): (bool, int) =
     return (false, -1)
   (true, waitForExit(p))
 
+# The session secret a supervisor would give `ct host`. Every host and client
+# below inherits it: the host admits a socket only with it
+# (`index/host_session_guard.nim`), so without it the "connected" cases would
+# have no connection to time out.
+putEnv("CODETRACER_HOST_SESSION_SECRET", "idle-timeout-integration-test-session-secret")
+
 suite "ct host idle timeout integration":
   let serverIndex = codetracerExeDir / "server_index.js"
   let node = nodeExe()
@@ -139,7 +145,7 @@ suite "ct host idle timeout integration":
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 setTimeout(() => process.exit(0), 4000);
 """
         client = startProcess(
@@ -190,7 +196,7 @@ setTimeout(() => process.exit(0), 4000);
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   let sent = 0;
   const interval = setInterval(() => {
@@ -251,7 +257,7 @@ socket.on('connect', () => {
         # connect first socket and send one activity ping, then exit
         let clientScript1 = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   socket.emit('test-event', { source: 'first' });
   setTimeout(() => process.exit(0), 200);
@@ -269,7 +275,7 @@ socket.on('connect', () => {
 
         let clientScript2 = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   socket.emit('test-event', { source: 'second' });
   setTimeout(() => process.exit(0), 200);
@@ -325,7 +331,7 @@ socket.on('connect', () => {
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   const interval = setInterval(() => socket.emit('test-event', { tick: Date.now() }), 200);
   setTimeout(() => {

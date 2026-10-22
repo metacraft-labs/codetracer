@@ -28,6 +28,7 @@ import {
   type ElectronApplication,
 } from "@playwright/test";
 import { _electron, chromium } from "playwright";
+import { ctHostPageUrl, withCtHostSessionSecret } from "./ct-host-session";
 
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
@@ -838,6 +839,9 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+  // Every `ct host` these tests start is given the session secret the page
+  // URLs carry (ct-host-session.ts).
+  withCtHostSessionSecret(env);
   // Turn HMR off for ordinary GUI tests.
   //
   // `just build-once` compiles the renderer with `-d:ctHmr`, and
@@ -1610,7 +1614,7 @@ async function launchTraceWeb(
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: GOTO_TIMEOUT_MS,
       });
       connected = true;
@@ -1756,7 +1760,7 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: GOTO_TIMEOUT_MS,
       });
       connected = true;

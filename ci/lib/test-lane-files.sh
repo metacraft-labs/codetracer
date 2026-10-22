@@ -189,6 +189,7 @@ tui
 tui-real-terminal
 gpui-shell
 ui-selection
+ct-host-admission
 screen-oracle
 EOF
 }
@@ -234,6 +235,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
+	ct-host-admission) echo 'ct host admission, end to end: the real ct host refuses a client without its session secret or from a foreign origin' ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -1024,6 +1026,13 @@ test_lane_files() {
 		# still answers `filesystem-loaded` with an `error`. Writes only under one `mkdtemp`
 		# directory, which it removes.
 		echo src/frontend/tests/file_tree_root_load_test.nim
+		#
+		# `host_session_guard_test.nim` holds `ct host`'s admission rule to
+		# the cases one end-to-end run cannot reach: a supervisor's secret
+		# (used, removed from the environment, refused when weak without
+		# being quoted), the origins of each kind of bind, and
+		# CODETRACER_HOST_ALLOWED_ORIGINS.
+		echo src/frontend/tests/host_session_guard_test.nim
 		;;
 
 	frontend-native-units)
@@ -1899,6 +1908,16 @@ test_lane_files() {
 		# failure would read as a broken test rather than as a missing build.
 		# `just test-ui-selection` names all four.
 		_tlf_find src/tests/ui_selection 'test_*.nim'
+		;;
+
+	ct-host-admission)
+		# `ct host`'s admission rule (CLI/ct/host.md, "Admission"), against
+		# the real `ct host` and the node index it starts. Like `ui-selection`
+		# it needs a built `src/build-debug/bin/ct` (or CODETRACER_CT_BIN),
+		# `node` and socket.io-client, which is why it is a lane of its own
+		# rather than part of `ct-trace-units`, whose recipe builds neither.
+		# `just test-ct-host-admission` builds them.
+		_tlf_find src/tests/ct_host 'test_*.nim'
 		;;
 
 	tui-real-terminal)

@@ -5707,6 +5707,17 @@ test-ui-selection: build-once build-tui
   exec > >(tee test-logs/test-ui-selection.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh ui-selection
 
+# `ct host` admits a client only with the session secret it printed in its URL
+# (or was given in CODETRACER_HOST_SESSION_SECRET) and only from its own page's
+# origin: src/tests/ct_host/test_ct_host_socket_requires_session_secret_and_origin.nim
+# drives the real `ct host` over HTTP, engine.io polling and WebSocket.
+test-ct-host-admission: build-once
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-host-admission.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-host-admission
+
 
 # RS-M12: assert no recorder writes a sidecar manifest any more.
 #

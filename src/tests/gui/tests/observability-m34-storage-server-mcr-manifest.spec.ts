@@ -25,6 +25,7 @@ import {
 } from "../lib/fixtures";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
+import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
 import { retry } from "../lib/retry-helpers";
 import { LayoutPage } from "../page-objects/layout-page";
 
@@ -384,6 +385,9 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_PREFIX;
   delete env.WAYLAND_DISPLAY;
   delete env.XDG_SESSION_TYPE;
+  // The session secret every `ct host` started here is given
+  // (../lib/ct-host-session.ts).
+  withCtHostSessionSecret(env);
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   env.CODETRACER_ELECTRON_ARGS = [
@@ -1252,7 +1256,7 @@ async function connectToHost(
   let connected = false;
   for (let attempt = 1; attempt <= maxConnectAttempts && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: gotoTimeoutMs,
       });
       connected = true;
@@ -2858,7 +2862,7 @@ function startPlatformLaunchBridge(options: {
       const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -3012,7 +3016,7 @@ function startMaterializedPlatformLaunchBridge(options: {
 
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(
@@ -3157,7 +3161,7 @@ function startMixedPlatformLaunchBridge(options: {
       const replayEnv = parseReplayAgentEnv(replayAgentCommandLine);
       const httpPort = await getFreeTcpPort();
       const backendPort = await getFreeTcpPort();
-      const hostUrl = `http://127.0.0.1:${httpPort}`;
+      const hostUrl = ctHostPageUrl(httpPort, "127.0.0.1");
       const hostOutput: string[] = [];
       const shimDir = createCtPathShim(options.runnerRoot);
       const entrypointPath = path.join(

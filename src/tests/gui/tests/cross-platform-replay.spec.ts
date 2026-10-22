@@ -23,6 +23,7 @@ import { test as base, expect, chromium } from "@playwright/test";
 
 import { codetracerInstallDir } from "../lib/fixtures";
 import { getFreeTcpPort } from "../lib/port-allocator";
+import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
 
 // ---------------------------------------------------------------------------
 // Path constants
@@ -183,6 +184,9 @@ function makeCleanEnv(
   delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   delete env.CODETRACER_PREFIX;
+  // The session secret every `ct host` started here is given
+  // (../lib/ct-host-session.ts).
+  withCtHostSessionSecret(env);
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   // Point ct host at the ct-mcr binary for trace enrichment if available.
@@ -360,7 +364,7 @@ base.describe("cross-platform portable trace replay", () => {
           attempt++
         ) {
           try {
-            await page.goto(`http://localhost:${httpPort}`, {
+            await page.goto(ctHostPageUrl(httpPort), {
               timeout: GOTO_TIMEOUT_MS,
             });
             connected = true;

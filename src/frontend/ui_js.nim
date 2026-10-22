@@ -7180,6 +7180,23 @@ when not defined(ctInExtension) and not defined(ctWeb):
     var frontendSocketPort {.importc.}: int
     var frontendSocketParameters {.importc.}: cstring
 
+    # THE SESSION SECRET, from the address the page was opened at.
+    #
+    # `ct host` admits a socket handshake, and serves this page and its
+    # descriptor, only to a client that presents the secret printed in its
+    # `CODETRACER_HOST_URL` (`index/host_session_guard.nim`). The page carries
+    # it as `?ct_session=` and hands it on to the two requests that need it.
+    # Empty when the page was opened without one (the browsersync dev
+    # server), and then nothing is added.
+    proc hostSessionSecret(): cstring {.importjs: """(function () {
+  try {
+    return new URLSearchParams(window.location.search).get('ct_session') || '';
+  } catch (e) {
+    return '';
+  }
+})()""".}
+    proc encodeQueryValue(value: cstring): cstring {.importjs: "encodeURIComponent(#)".}
+
     proc startIPC =
       let host = domwindow.location.hostname.to(cstring)
       let parameters = if frontendSocketParameters.len > 0:
@@ -7203,9 +7220,14 @@ when not defined(ctInExtension) and not defined(ctWeb):
           cstring(fmt"{wsProtocol}//{host}")
 
       console.log protocol, wsProtocol, address
+      let secret = hostSessionSecret()
+      let sessionQuery = if secret.len > 0:
+          cstring"&ct_session=" & encodeQueryValue(secret)
+        else:
+          cstring""
       var socket = io(
         address,
-        js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}")})
+        js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}") & sessionQuery})
       socketdebug = socket
       pageSocket = socket.toJs
       socket.on(cstring"disconnect") do (reason: cstring):
@@ -7303,7 +7325,15 @@ when not defined(ctInExtension) and not defined(ctWeb):
     # dead page.
     proc fetchDescriptorThen(done: proc()) {.importjs: """(function (done) {
   try {
-    fetch('/deployment.json', { credentials: 'same-origin' })
+    // `ct host` answers the descriptor only to a request carrying the
+    // session secret (index/host_session_guard.nim), sent as a header so it
+    // stays out of any request log.
+    var secret = '';
+    try {
+      secret = new URLSearchParams(window.location.search).get('ct_session') || '';
+    } catch (e) {}
+    var headers = secret ? { 'X-CodeTracer-Session': secret } : {};
+    fetch('/deployment.json', { credentials: 'same-origin', headers: headers })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (d && d.session && typeof d.session.placement === 'string') {

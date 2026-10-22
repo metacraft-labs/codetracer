@@ -1,6 +1,7 @@
 import
   std / [ async, json, jsffi, macros, jsconsole, strformat, strutils ],
   electron_vars, base_handlers, config, idle_timeout, facade_endpoint,
+  host_session_guard,
   ../lib/[ jslib, electron_lib, misc_lib ],
   ../[ types ],
   ../../common/[ paths, ct_logging ]
@@ -141,17 +142,68 @@ when defined(server):
     let facadeEndpoint = newFacadeEndpoint(
       deployment = encodeDescriptor(hostDescriptor()))
 
+    # ADMISSION: ONE SECRET PER RUN, AND ONLY THIS PAGE'S ORIGIN.
+    #
+    # Both listeners are reachable by anything that can connect to the bound
+    # address, including a web page in the operator's browser, which can make
+    # the browser send requests to loopback. `host_session_guard` holds the
+    # rule; it is built before either listener so that neither ever runs
+    # without it. A malformed supervisor-supplied secret stops the server
+    # rather than falling back to a generated one the supervisor cannot know.
+    var guard: HostSessionGuard
+    try:
+      guard = newHostSessionGuard()
+    except HostSessionError as e:
+      errorPrint "ct host: " & e.msg
+      nodeProcess.exit(1)
+      return
+
+    proc refuseHttp(response: JsObject; reason: string) =
+      # The reason is ours, never the presented value.
+      debugPrint "ct host: page request refused: " & reason
+      response.status(403)
+      response.setHeader(cstring"Cache-Control", cstring"no-store")
+      response.setHeader(cstring"Content-Type", cstring"text/plain; charset=utf-8")
+      response.send(cstring("This CodeTracer session needs the address `ct host` " &
+        "printed (CODETRACER_HOST_URL), which carries the session secret.\n"))
+
+    # Every request: a foreign `Origin` is refused before any route answers,
+    # so a page elsewhere cannot use this server even for the public bundle.
+    proc refuseForeignOrigin(request: JsObject, response: JsObject, next: JsObject) =
+      let origin = request.headers[cstring"origin"]
+      if not origin.isUndefined and
+          not guard.originAllowed($origin.to(cstring)):
+        refuseHttp(response, "origin not allowed")
+      else:
+        jsAsFunction[proc(): void](next)()
+    server.use(cstring"/", toJs(refuseForeignOrigin))
+
+    # The routes that carry this session (the entry page and its descriptor)
+    # need the secret too. The static bundle under them does not: it is the
+    # shipped UI, the same bytes for every session and every deployment, and
+    # it is cached across sessions (`cacheClassFor`), which a per-session
+    # credential on each asset would defeat.
+    proc admitted(request, response: JsObject): bool =
+      let reason = guard.refusal(request)
+      if reason.len > 0:
+        refuseHttp(response, reason)
+        return false
+      true
+
+    proc renderIndex(request: JsObject, response: JsObject) =
+      if not admitted(request, response):
+        return
+      # The page URL carries the secret in its query; a Referer must not take
+      # it to another origin.
+      response.setHeader(cstring"Referrer-Policy", cstring"no-referrer")
+      response.render(cstring"server_index", js{
+        frontendSocketPort: data.startOptions.frontendSocket.port,
+        frontendSocketParameters: data.startOptions.frontendSocket.parameters
+      })
+
     server.toJs.set(cstring"view engine", cstring"ejs")
-    server.get(cstring"/", proc(request: JsObject, response: JsObject) =
-      response.render(cstring"server_index", js{
-        frontendSocketPort: data.startOptions.frontendSocket.port,
-        frontendSocketParameters: data.startOptions.frontendSocket.parameters
-      }))
-    server.get(cstring"/collab/join/:inviteToken", proc(request: JsObject, response: JsObject) =
-      response.render(cstring"server_index", js{
-        frontendSocketPort: data.startOptions.frontendSocket.port,
-        frontendSocketParameters: data.startOptions.frontendSocket.parameters
-      }))
+    server.get(cstring"/", renderIndex)
+    server.get(cstring"/collab/join/:inviteToken", renderIndex)
 
     # THE CACHE CLASSES ARE THE DEPLOYMENT'S OWN, NOT SIMILAR ONES — WD1c.
     #
@@ -201,6 +253,8 @@ when defined(server):
       })
 
     server.get(cstring"/deployment.json", proc(request: JsObject, response: JsObject) =
+      if not admitted(request, response):
+        return
       # Uncacheable BY CLASS, not by a header written here: it is the mutable
       # pointer the immutable document is cacheable because of, and
       # `cacheClassFor` is what decides that for every other path this server
@@ -246,11 +300,16 @@ when defined(server):
         if not address.isNil and not address[cstring"port"].isUndefined:
           boundPort = address[cstring"port"].to(int)
       data.startOptions.port = boundPort
+      # The page's own origins follow from the bound port, so they are set
+      # here; until now the socket has accepted no page origin at all.
+      guard.setPagePort($bindAddress, boundPort)
       infoPrint fmt"listening on {bindAddress}:{boundPort}"
       # One line, one prefix, the whole URL. A supervisor greps for the prefix
       # and takes the rest; `infoPrint` above is for a person and carries a
       # timestamp and a source location that a parser would have to strip.
-      echo fmt"CODETRACER_HOST_URL=http://{bindAddress}:{boundPort}"
+      # It is the one place the session secret is written, and only when this
+      # process generated it (`sessionUrl`); the log lines never carry it.
+      echo "CODETRACER_HOST_URL=" & guard.sessionUrl($bindAddress, boundPort)
       # An explicit flush: node buffers stdout when it is a pipe, which is
       # exactly the case a supervisor reads it through, and "before the first
       # client connects" is a promise about when the bytes ARRIVE.
@@ -263,9 +322,26 @@ when defined(server):
     let backendSocketPort = data.startOptions.backendSocket.port
 
     var socketIoServerClass = (require("socket.io"))[cstring"Server"]
+    # `allowRequest` runs on every handshake, before a session exists, for
+    # the polling and the WebSocket transport alike: a refused request gets a
+    # 403 and never reaches `connection`. Later requests of an admitted
+    # session name its random `sid`, which only the admitted client holds.
+    # `cors` answers the page's cross-port polling requests for the allowed
+    # origins only.
+    proc allowRequest(request: JsObject, callback: JsObject) =
+      let reason = guard.refusal(request)
+      if reason.len > 0:
+        debugPrint "ct host: socket handshake refused: " & reason
+      jsAsFunction[proc(message: cstring, success: bool): void](callback)(
+        reason.cstring, reason.len == 0)
+    proc corsOrigin(origin: JsObject, callback: JsObject) =
+      let allowed = origin.isUndefined or guard.originAllowed($origin.to(cstring))
+      jsAsFunction[proc(error: JsObject, allow: bool): void](callback)(
+        jsNull, allowed)
     var socketIoServer = newSocketIoServer(socketIoServerClass, httpServer, js{
+      allowRequest: allowRequest,
       cors: js{
-        origin: cstring("*"),
+        origin: corsOrigin,
         credentials: false
       }
     })

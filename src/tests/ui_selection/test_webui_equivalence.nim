@@ -76,6 +76,9 @@ const
     ## process's entry point, which has no business on the web front-end — so it
     ## answers 404, and its body is part of the equivalence.
 
+  SessionSecret = "plat1-webui-equivalence-session-secret-0123456789"
+    ## Given to both arms, so the served bytes cannot differ by it.
+
   StartupTimeoutMs = 120_000
     ## `ct host` imports the recording before it binds, and on a cold page cache
     ## that is seconds rather than milliseconds.
@@ -115,6 +118,9 @@ proc fetch(port: int; path: string; timeoutMs = 5000): Served =
   ## rather than an exception, because "nothing answered" is a served behaviour
   ## the two arms have to agree about too.
   var client = newHttpClient(timeout = timeoutMs)
+  # Both arms are given the same session secret (`startServer`); the entry
+  # page answers only a request presenting it.
+  client.headers = newHttpHeaders({"X-CodeTracer-Session": SessionSecret})
   try:
     let response = client.request("http://127.0.0.1:" & $port & path,
                                   httpMethod = HttpGet)
@@ -137,6 +143,9 @@ proc startServer(args: seq[string]; port: int): Server =
     if key == "CODETRACER_UI":
       continue
     env[key] = value
+  # The secret a supervisor gives `ct host`; with it the served page is the
+  # same document on both arms, and `ct host` does not print it.
+  env["CODETRACER_HOST_SESSION_SECRET"] = SessionSecret
   let logPath = getTempDir() / ("plat1-webui-" & $port & ".log")
   # `poStdErrToStdOut` into a FILE the failure arm can quote: `ct host`'s
   # diagnostics ("no valid port", "error importing trace") are the only thing

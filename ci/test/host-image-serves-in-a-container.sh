@@ -198,12 +198,17 @@ incus_p exec "${name}" -- /bin/sh -c \
 url=""
 for _ in $(seq 1 60); do
 	url="$(incus_p exec "${name}" -- /bin/sh -c 'cat /workspace/host.log 2>/dev/null' 2>/dev/null |
-		awk -F= '/^CODETRACER_HOST_URL=/ { print $2; exit }')"
+		sed -n 's/^CODETRACER_HOST_URL=//p' | head -n 1)"
 	[ -n "${url}" ] && break
 	sleep 1
 done
-if [ -n "${url}" ]; then
-	ok "it printed a machine-readable URL line (${url})"
+# The URL carries the session secret `ct host` generated
+# (`http://<bind>:<port>/?ct_session=<secret>`); the page and its descriptor
+# answer only a request presenting it. It is kept out of this log.
+secret="${url##*ct_session=}"
+url="${url%%/\?*}"
+if [ -n "${url}" ] && [ "${secret}" != "${url}" ] && [ -n "${secret}" ]; then
+	ok "it printed a machine-readable URL line with a session secret (${url}/?ct_session=...)"
 else
 	bad "it printed CODETRACER_HOST_URL="
 	incus_p exec "${name}" -- /bin/sh -c 'tail -20 /workspace/host.log' 2>/dev/null | sed 's/^/      /'
@@ -220,7 +225,7 @@ fi
 
 # THE ASSERTION THE WHOLE FILE IS FOR. From OUTSIDE the container's network
 # namespace, over the bridge, to the port the server chose for itself.
-code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://${ip}:${port}/" 2>/dev/null || true)"
+code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -H "X-CodeTracer-Session: ${secret}" "http://${ip}:${port}/" 2>/dev/null || true)"
 if [ "${code}" = "200" ]; then
 	ok "the HOST can GET / from the container (${code})"
 else
@@ -229,7 +234,7 @@ fi
 
 # And WD1c's descriptor endpoint, from the same outside. A 200 on `/` could be a
 # static file; this is the server answering a question only it can answer.
-descriptor="$(curl -sS --max-time 20 "http://${ip}:${port}/deployment.json" 2>/dev/null || true)"
+descriptor="$(curl -sS --max-time 20 -H "X-CodeTracer-Session: ${secret}" "http://${ip}:${port}/deployment.json" 2>/dev/null || true)"
 if printf '%s' "${descriptor}" | grep -q '"connection"'; then
 	ok "and /deployment.json answers — WD1c's endpoint, from inside a session"
 else
