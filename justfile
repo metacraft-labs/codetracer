@@ -5719,8 +5719,9 @@ test-ct-host-admission: build-once
   bash ci/lib/run-nim-test-lane.sh ct-host-admission
 
 # `ct host --manifest` given a recording manifest of kind mcr_slices imports the
-# slice its replayStart names (sliceKey), refuses one it does not list, and
-# without one opens the first:
+# slice its replayStart names (sliceKey) or, when it names none, the slice
+# CODETRACER_START_SLICE_KEY names; refuses one it does not list; and without
+# either opens the first:
 # src/tests/ct_host_manifest/test_ct_host_manifest_opens_the_named_slice.nim
 # hosts two different recordings as two slices and reads which one the real
 # session serves over its socket.

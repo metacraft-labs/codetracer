@@ -1,9 +1,10 @@
 ## test_ct_host_manifest_opens_the_named_slice.nim
 ##
 ## `ct host --manifest` given a codetracer-ci recording manifest of kind
-## `mcr_slices` opens the slice its `replayStart` names (`sliceKey`), refuses a
-## manifest whose named slice it does not list, and without one opens the first
-## slice (`CLI/ct/host.md`, "The start position"; `src/ct/trace/host.nim`,
+## `mcr_slices` opens the slice its `replayStart` names (`sliceKey`) or, when it
+## names none, the slice `CODETRACER_START_SLICE_KEY` in its environment names;
+## refuses a manifest whose named slice it does not list; and without either
+## opens the first slice (`CLI/ct/host.md`, "The start position"; `src/ct/trace/host.nim`,
 ## `selectMcrSlice`).
 ##
 ## ## Why the claim matters
@@ -54,8 +55,19 @@
 ## - The manifest names no slice (the control): the session serves the first,
 ##   `gf_values`, and not `gf_coroutine`. This is also the vacuity guard:
 ##   the observable tells the two recordings apart.
+## - The manifest names no slice and `ct host`'s environment carries
+##   `CODETRACER_START_SLICE_KEY` naming the second: the session serves
+##   `gf_coroutine`. This is the stored recording manifest the entrypoint hands
+##   over through `CODETRACER_LOCAL_MANIFEST_PATH` as recorded, with the replay
+##   agent's variable beside it. (Red without the fallback, which serves the
+##   first slice.)
+## - The manifest names the first slice and the variable the second: the
+##   manifest wins, and the session serves `gf_values`.
 ## - The manifest names a slice it does not list: `ct host` exits non-zero,
-##   naming the key, without serving either slice.
+##   naming the key and that the replay start named it, without serving
+##   either slice.
+## - The manifest names no slice and the variable names one it does not list:
+##   refused the same way, the error naming the variable as the key's source.
 ##
 ## Lane: `ct-host-manifest` (`just test-ct-host-manifest`).
 
@@ -64,7 +76,7 @@ import std/[httpclient, json, net, os, osproc, posix, streams, strtabs, strutils
 
 # One line: `ci/lib/run-nim-test-lane.sh` reads this spelling as the runtime
 # assertion count.
-const ExpectedAssertions = 18
+const ExpectedAssertions = 32
 
 var countedAssertions = 0
 
@@ -162,9 +174,11 @@ proc writeStore(scratch: string; replayStart: JsonNode): string =
   result = store / ManifestKey
   writeFile(result, $manifest)
 
-proc launchHost(scratch, manifestPath: string): Host =
+proc launchHost(scratch, manifestPath: string;
+                startSliceKeyEnv = ""): Host =
   ## `ct host --manifest` in its own session (so stopping it stops the node
-  ## index it starts), its output in a file.
+  ## index it starts), its output in a file. A non-empty `startSliceKeyEnv` is
+  ## exported as `CODETRACER_START_SLICE_KEY`, as the replay agent does.
   result.socketPort = freePort()
   result.logPath = scratch / "ct-host.log"
   var env = newStringTable(modeCaseSensitive)
@@ -181,6 +195,8 @@ proc launchHost(scratch, manifestPath: string): Host =
   env["TMPDIR"] = scratch
   env["CODETRACER_IN_UI_TEST"] = "1"
   env["CT_TEST_LOG"] = result.logPath
+  if startSliceKeyEnv.len > 0:
+    env["CODETRACER_START_SLICE_KEY"] = startSliceKeyEnv
   let wrapper = "exec >\"$CT_TEST_LOG\" 2>&1; exec \"$@\""
   result.process = startProcess("/usr/bin/env", workingDir = root, env = env,
     args = @["setsid", "bash", "-c", wrapper, "bash", ctBinary, "host",
@@ -294,18 +310,48 @@ proc servedWorkdir(seen: JsonNode): string =
   ## (`meta.dat`), and each fixture was recorded in a directory named after it.
   seen{"trace", "workdir"}.getStr
 
-proc hostSession(replayStart: JsonNode): tuple[seen: JsonNode, log: string] =
-  ## Hosts a manifest with `replayStart`, opens one session on it, and stops it.
+proc hostSession(replayStart: JsonNode; startSliceKeyEnv = ""):
+    tuple[seen: JsonNode, log: string] =
+  ## Hosts a manifest with `replayStart` (and `startSliceKeyEnv` in `ct host`'s
+  ## environment), opens one session on it, and stops it.
   let scratch = createTempDir("ct-host-manifest-", "")
   var host: Host
   try:
-    host = launchHost(scratch, writeStore(scratch, replayStart))
+    host = launchHost(scratch, writeStore(scratch, replayStart), startSliceKeyEnv)
     waitForUrl(host)
     result.seen = runSessionClient(host, scratch)
     result.log = readLog(host.logPath)
   finally:
     stopHost(host)
     removeDir(scratch)
+
+proc refusedHost(replayStart: JsonNode; startSliceKeyEnv = ""):
+    tuple[code: int, log: string] =
+  ## Hosts a manifest with `replayStart` (and `startSliceKeyEnv` in `ct host`'s
+  ## environment) that `ct host` is expected to refuse: waits for it to exit,
+  ## and returns its exit code (-1: still running at the deadline, i.e. it
+  ## hosted something) and its output.
+  let scratch = createTempDir("ct-host-manifest-", "")
+  var host: Host
+  try:
+    host = launchHost(scratch, writeStore(scratch, replayStart), startSliceKeyEnv)
+    result.code = waitForExit(host, StartupTimeoutMs)
+    result.log = readLog(host.logPath)
+  finally:
+    stopHost(host)
+    removeDir(scratch)
+
+template checkRefused(refused: tuple[code: int, log: string]; source: string) =
+  ## `ct host` exited non-zero naming `UnknownSliceKey` and where the key came
+  ## from (`source`), and announced no hosted session. A template, so each
+  ## check counts against the test that runs it.
+  let (code, log) = refused  # evaluated once: it runs `ct host`
+  checkpoint("exit code " & $code)
+  checkpoint(log)
+  ck code > 0
+  ck log.contains("ct host: error: failed to load local manifest:")
+  ck log.contains("does not list the slice " & source & " names: " & UnknownSliceKey)
+  ck not log.contains("CODETRACER_HOST_URL=")
 
 suite "ct host --manifest opens the slice the replay start names":
 
@@ -342,23 +388,36 @@ suite "ct host --manifest opens the slice the replay start names":
     ck not served.endsWith(SecondWorkdirTail)
     ck log.contains("ct host: selected mcr slice: " & FirstSliceKey)
 
+  test "a replay start naming no slice opens the slice CODETRACER_START_SLICE_KEY names":
+    let (seen, log) = hostSession(%*{"geid": "120045"}, startSliceKeyEnv = SecondSliceKey)
+    checkpoint($seen)
+    checkpoint(log)
+    ck seen["connected"].getBool
+    ck seen["init"].getBool
+    let served = servedWorkdir(seen)
+    ck served.endsWith(SecondWorkdirTail)
+    ck not served.endsWith(FirstWorkdirTail)
+    ck log.contains("ct host: selected mcr slice: " & SecondSliceKey)
+
+  test "a replay start naming a slice outranks CODETRACER_START_SLICE_KEY":
+    let (seen, log) = hostSession(%*{"geid": "120045", "sliceKey": FirstSliceKey},
+                                  startSliceKeyEnv = SecondSliceKey)
+    checkpoint($seen)
+    checkpoint(log)
+    ck seen["connected"].getBool
+    ck seen["init"].getBool
+    let served = servedWorkdir(seen)
+    ck served.endsWith(FirstWorkdirTail)
+    ck not served.endsWith(SecondWorkdirTail)
+    ck log.contains("ct host: selected mcr slice: " & FirstSliceKey)
+
   test "a replay start naming a slice the manifest does not list is refused":
-    let scratch = createTempDir("ct-host-manifest-", "")
-    var host: Host
-    try:
-      host = launchHost(scratch, writeStore(scratch, %*{"geid": "120045", "sliceKey": UnknownSliceKey}))
-      let code = waitForExit(host, StartupTimeoutMs)
-      let log = readLog(host.logPath)
-      checkpoint("exit code " & $code)
-      checkpoint(log)
-      # -1: still running at the deadline, i.e. it hosted something.
-      ck code > 0
-      ck log.contains("ct host: error: failed to load local manifest:")
-      ck log.contains(UnknownSliceKey)
-      ck not log.contains("CODETRACER_HOST_URL=")
-    finally:
-      stopHost(host)
-      removeDir(scratch)
+    checkRefused(refusedHost(%*{"geid": "120045", "sliceKey": UnknownSliceKey}),
+                 "its replay start")
+
+  test "a CODETRACER_START_SLICE_KEY naming a slice the manifest does not list is refused":
+    checkRefused(refusedHost(%*{"geid": "120045"}, startSliceKeyEnv = UnknownSliceKey),
+                 "CODETRACER_START_SLICE_KEY")
 
 suite "assertion count":
   test "assertion count":

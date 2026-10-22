@@ -1224,15 +1224,18 @@ proc resolveSharedManifest(
   else:
     raise newException(ValueError, "unsupported shared manifest source kind: " & kind)
 
-proc selectMcrSlice(manifest: JsonNode, start: HostStartCoordinates): JsonNode =
+proc selectMcrSlice(manifest: JsonNode, start: HostStartCoordinates,
+                    keySource: string): JsonNode =
   ## The slice of a recording manifest's `mcrSlices` to import, or nil when it
   ## lists none. Recording-manifest slices carry no geid range, so `ct host`
   ## cannot find the slice holding the start geid by itself: the replay start
   ## names it (`replay_start.slice_key`, which the replay agent takes from the
-  ## slice the debug-session lookup resolved; CLI/ct/host.md, "The start
-  ## position"). A named slice the manifest does not list is refused rather
-  ## than answered with another slice, whose replay would refuse the start
-  ## geid. Without a name, the first slice.
+  ## slice the debug-session lookup resolved, or `CODETRACER_START_SLICE_KEY`
+  ## when the manifest names none; CLI/ct/host.md, "The start position"). A
+  ## named slice the manifest does not list is refused rather than answered
+  ## with another slice, whose replay would refuse the start geid; the refusal
+  ## names `keySource`, where the key came from. Without a name, the first
+  ## slice.
   if start.sliceKey.len == 0:
     return manifest.firstObject(["mcrSlices", "mcr_slices"])
   let slices = manifest.jsonField(["mcrSlices", "mcr_slices"])
@@ -1242,7 +1245,7 @@ proc selectMcrSlice(manifest: JsonNode, start: HostStartCoordinates): JsonNode =
           slice.jsonString(["sliceKey", "slice_key"]) == start.sliceKey:
         return slice
   raise newException(ValueError,
-    "mcr_slices manifest does not list the slice its replay start names: " &
+    "mcr_slices manifest does not list the slice " & keySource & " names: " &
     start.sliceKey)
 
 proc resolveRecordingManifest(
@@ -1257,14 +1260,23 @@ proc resolveRecordingManifest(
     raise newException(ValueError, "recording manifest is missing or expired")
   case kind
   of "mcr_slices":
-    let start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+    var start = readReplayStart(manifest.jsonField(["replayStart", "replay_start"]))
+    # A stored recording manifest (`CODETRACER_LOCAL_MANIFEST_PATH`) is handed
+    # over as recorded, so its replay start names no slice; the replay agent
+    # exports the slice the request named beside it. The manifest's own value
+    # wins, and the refusal says which of the two named a slice it does not
+    # list (CLI/ct/host.md, "The start position").
+    var keySource = "its replay start"
+    if start.sliceKey.len == 0:
+      start.sliceKey = getEnv("CODETRACER_START_SLICE_KEY", "")
+      keySource = "CODETRACER_START_SLICE_KEY"
     let shardedSegments = manifest.jsonField(["shardedMcrSegments", "sharded_mcr_segments"])
     if not shardedSegments.isNil and shardedSegments.kind == JArray and shardedSegments.len > 0:
       # Sharded segments carry geid ranges, so the geid selects; a slice key
       # names no segment.
       result.recordingId = importShardedSegment(selectedSegment(shardedSegments, start), storageOptions)
     else:
-      let slice = selectMcrSlice(manifest, start)
+      let slice = selectMcrSlice(manifest, start, keySource)
       if slice.isNil:
         raise newException(ValueError, "mcr_slices manifest has no retained slices")
       requireReadableObject(slice, "MCR slice")
