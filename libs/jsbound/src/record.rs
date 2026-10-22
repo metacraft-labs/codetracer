@@ -214,6 +214,11 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     ("Scrubbed", "class", 1, 4),
     ("Gap", "reason", 1, 3),
     ("End", "reason", 1, 4),
+    // 1 the request, 2 its upload object; the seven `ProgressEvent` types
+    // an XMLHttpRequest dispatches; a boolean.
+    ("XhrEvent", "target", 1, 2),
+    ("XhrEvent", "event", 1, 7),
+    ("XhrEvent", "length_computable", 0, 1),
 ];
 
 /// The value set of `record`.`field`, if it is an enumerated field.
@@ -444,6 +449,15 @@ define_records! {
     0x51 => Scrubbed { seq: u64, target: String, class: u8, length: u32 },
     0x52 => Gap { first_seq: u64, last_seq: u64, reason: u8 },
     0x53 => Mark { seq: u64, name: String, data: String },
+    0x56 => XhrEvent {
+        seq: u64,
+        req_id: u64,
+        target: u8,
+        event: u8,
+        loaded: u64,
+        total: u64,
+        length_computable: u8,
+    },
     0x5F => End { last_seq: u64, reason: u8 },
 }
 
@@ -455,6 +469,28 @@ pub mod gap_reason {
     pub const BATCH_NEVER_ARRIVED: u8 = 2;
     /// A batch was refused by the ingest.
     pub const BATCH_REFUSED: u8 = 3;
+}
+
+/// `XhrEvent.target` and `XhrEvent.event` values (spec §5.2).
+pub mod xhr_event {
+    /// The event was dispatched at the `XMLHttpRequest` itself.
+    pub const TARGET_REQUEST: u8 = 1;
+    /// The event was dispatched at the request's `upload` object.
+    pub const TARGET_UPLOAD: u8 = 2;
+    /// `loadstart`.
+    pub const LOADSTART: u8 = 1;
+    /// `progress`.
+    pub const PROGRESS: u8 = 2;
+    /// `abort`.
+    pub const ABORT: u8 = 3;
+    /// `error`.
+    pub const ERROR: u8 = 4;
+    /// `load`.
+    pub const LOAD: u8 = 5;
+    /// `timeout`.
+    pub const TIMEOUT: u8 = 6;
+    /// `loadend`.
+    pub const LOADEND: u8 = 7;
 }
 
 /// `End.reason` values (spec §5.2).
@@ -494,7 +530,8 @@ impl Record {
             | Record::Navigation { seq, .. }
             | Record::Error { seq, .. }
             | Record::Scrubbed { seq, .. }
-            | Record::Mark { seq, .. } => Some(*seq),
+            | Record::Mark { seq, .. }
+            | Record::XhrEvent { seq, .. } => Some(*seq),
         }
     }
 
@@ -538,7 +575,7 @@ mod tests {
         sets.sort_unstable();
         assert_eq!(fields, sets);
         assert!(VALUE_SETS.iter().all(|&(_, _, lo, hi)| lo <= hi));
-        // Vacuity: the table has its eighteen enumerated fields.
-        assert_eq!(u8_fields.len(), 18);
+        // Vacuity: the table has its twenty-one enumerated fields.
+        assert_eq!(u8_fields.len(), 21);
     }
 }

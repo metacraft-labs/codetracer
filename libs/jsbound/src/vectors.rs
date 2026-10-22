@@ -305,6 +305,99 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 data: r#"{"experiment":"hero","arm":"b"}"#.into(),
             },
         ),
+        (
+            "xhr_event",
+            Record::XhrEvent {
+                seq,
+                req_id: 3,
+                target: 1,
+                event: 2,
+                loaded: 65_536,
+                total: 2_097_152,
+                length_computable: 1,
+            },
+        ),
+    ]
+}
+
+/// An XMLHttpRequest that uploads a body and downloads a response, with the
+/// `XhrEvent` of every `ProgressEvent` it dispatches (spec §5.2, §6, §10.4):
+/// `loadstart` inside `send()` (no `Task`), the upload object's `progress`,
+/// `load` and `loadend` in network tasks of their own, the head and a piece
+/// at `readystatechange` (no `XhrEvent`), a `progress` with what the page
+/// can read, the last `progress` at DONE, then `load` and `loadend`.
+fn xhr_events_records() -> Vec<Record> {
+    let xhr_event = |seq, target, event, loaded, total, length_computable| Record::XhrEvent {
+        seq,
+        req_id: 1,
+        target,
+        event,
+        loaded,
+        total,
+        length_computable,
+    };
+    let task = |seq| Record::Task {
+        seq,
+        task_id: 1,
+        kind: 4,
+    };
+    let piece = |seq, data: &[u8]| Record::WsMessage {
+        seq,
+        req_id: 1,
+        dir: 1,
+        data: BlobRef::Inline(data.to_vec()),
+    };
+    vec![
+        header(),
+        env(),
+        Record::NetRequest {
+            seq: 1,
+            req_id: 1,
+            api: 2,
+            method: "POST".into(),
+            url: "https://shop.example/api/upload".into(),
+            body_digest: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae".into(),
+        },
+        Record::TaskReg {
+            seq: 2,
+            task_id: 1,
+            kind: 4,
+            delay_ms: 0.0,
+        },
+        xhr_event(3, 1, 1, 0, 0, 0),
+        xhr_event(4, 2, 1, 0, 3_000_000, 1),
+        task(5),
+        xhr_event(6, 2, 2, 65_536, 3_000_000, 1),
+        task(7),
+        xhr_event(8, 2, 5, 3_000_000, 3_000_000, 1),
+        task(9),
+        xhr_event(10, 2, 7, 3_000_000, 3_000_000, 1),
+        task(11),
+        Record::NetResponse {
+            seq: 12,
+            req_id: 1,
+            outcome: 5,
+            status: 200,
+            headers: r#"[["content-type","text/plain"]]"#.into(),
+            body: BlobRef::Inline(Vec::new()),
+        },
+        task(13),
+        piece(14, b"c0\n"),
+        task(15),
+        piece(16, b"c1\n"),
+        xhr_event(17, 1, 2, 6, 0, 0),
+        task(18),
+        piece(19, b"c2\n"),
+        Record::WsMessage {
+            seq: 20,
+            req_id: 1,
+            dir: 4,
+            data: BlobRef::Inline(br#"{"outcome":1}"#.to_vec()),
+        },
+        xhr_event(21, 1, 2, 9, 0, 0),
+        xhr_event(22, 1, 5, 9, 0, 0),
+        xhr_event(23, 1, 7, 9, 0, 0),
+        end(23),
     ]
 }
 
@@ -489,7 +582,8 @@ fn set_seq(r: &mut Record, value: u64) {
         | Record::Navigation { seq, .. }
         | Record::Error { seq, .. }
         | Record::Scrubbed { seq, .. }
-        | Record::Mark { seq, .. } => *seq = value,
+        | Record::Mark { seq, .. }
+        | Record::XhrEvent { seq, .. } => *seq = value,
         _ => panic!("set_seq on a record without seq"),
     }
 }
@@ -578,6 +672,14 @@ fn decoding_vectors() -> Vec<Vector> {
          two pieces (WsMessage dir 1), the second in a network task of its \
          own, and the end (WsMessage dir 4)",
         streamed_response_records(),
+    ));
+    out.push(complete(
+        "xhr_events",
+        "an XMLHttpRequest's ProgressEvents (XhrEvent): loadstart inside \
+         send(), the upload object's progress, load and loadend each in a \
+         network task, the response's progress events with the values the \
+         page reads, the last at DONE, then load and loadend",
+        xhr_events_records(),
     ));
     out.push(complete(
         "storage_shape_reads",
