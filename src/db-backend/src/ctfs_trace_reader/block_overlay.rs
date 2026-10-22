@@ -34,6 +34,25 @@
 //! Closed Container"): the overlay recovers it from the backing length at
 //! construction and keeps it as a field.
 //!
+//! # A snapshot of a closed container, plus its own writes
+//!
+//! The overlay is an appender of a **closed** container (§5), and it is
+//! refused over a backing that reports a container still being written
+//! ([`BlockSource::is_finalized`]). It owns its backing and never refreshes it,
+//! and it fixes two facts when it first learns them: `NextFreeBlock`, at
+//! construction, and the root directory, an image of the entry array filled
+//! by the first directory lookup. Every later lookup is answered from that
+//! image; the overlay's own entry writes patch it, and a raw
+//! [`write_block`](CtfsBlockOverlay::write_block) or
+//! [`mutate_block`](CtfsBlockOverlay::mutate_block) of a root block drops it.
+//!
+//! `ctfs-container.md` §6, "What Is Mutated In Place, And What A Cache May
+//! Keep", requires a cache to re-read the root region at every refresh. The
+//! overlay has no refresh, so there is nothing to re-read at: another writer
+//! appending to the same container was never supported (its blocks would
+//! collide with the overlay's `NextFreeBlock`), and a caller that wants to
+//! observe one builds a new overlay.
+//!
 //! # Decoupling
 //!
 //! The overlay only ever *reads* from its backing [`BlockSource`]; in `InMemory`
@@ -46,6 +65,7 @@
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use super::ctfs_container::{BlockSource, CTFS_DIRECT, CtfsError, FILE_ENTRY_SIZE, base40_decode, base40_encode};
 
@@ -181,6 +201,17 @@ pub struct CtfsBlockOverlay {
     /// allocation hands out. Initialised from the backing container's block
     /// count and bumped by [`alloc_block`](CtfsBlockOverlay::alloc_block).
     next_free_block: u64,
+    /// The entry array as the overlay currently resolves it (`max_root_entries`
+    /// entries, entry `i` at byte `i * FILE_ENTRY_SIZE`), read from the root
+    /// region by the first directory lookup and kept current by
+    /// [`write_root_bytes`](CtfsBlockOverlay::write_root_bytes). Empty until
+    /// then, and emptied again by a raw write of a root block.
+    ///
+    /// A `OnceLock` rather than a `RefCell` because the lookups take `&self`
+    /// and the overlay must stay `Sync` (its backing is a `Send + Sync`
+    /// `BlockSource`). Writes take `&mut self` and reach the image through
+    /// `get_mut`, so it never needs a lock.
+    root_directory: OnceLock<Vec<u8>>,
     /// Persistence mode (the §11.4 "flip").
     mode: OverlayMode,
 }
@@ -192,6 +223,19 @@ impl CtfsBlockOverlay {
     /// The backing source must already carry a valid CTFS header (the overlay is
     /// layered over an existing container image, never over empty bytes).
     pub fn new(backing: Box<dyn BlockSource>, mode: OverlayMode) -> Result<Self, CtfsError> {
+        // The overlay keeps the `NextFreeBlock` and the root directory it
+        // reads (module docs, "A snapshot of a closed container"), and it is
+        // the appender of `ctfs-container.md` §5, "Adding Members To A Closed
+        // Container". A container another writer is still growing would
+        // invalidate both behind its back, so it is refused up front.
+        if !backing.is_finalized() {
+            return Err(CtfsError::Unimplemented(
+                "the block overlay adds members to a closed container (ctfs-container.md §5, \
+                 \"Adding Members To A Closed Container\") and keeps the root region it reads, \
+                 but this container is still being written"
+                    .to_string(),
+            ));
+        }
         let total = backing.current_size();
         // Parse the header to learn block_size / entry_start / max_root_entries.
         // `read_block` would over-read on a sub-block-sized header, so read the
@@ -262,6 +306,7 @@ impl CtfsBlockOverlay {
             max_root_entries,
             root_blocks,
             next_free_block,
+            root_directory: OnceLock::new(),
             mode,
         })
     }
@@ -310,7 +355,8 @@ impl CtfsBlockOverlay {
     /// - A newly-allocated block (>= the backing block count) is simply created
     ///   in the overlay; it is never read from the backing store.
     ///
-    /// The backing store is never written here regardless of mode.
+    /// The backing store is never written here regardless of mode. A write of
+    /// a root block drops the root directory image, which it may change.
     pub fn write_block(&mut self, block_num: u64, bytes: Vec<u8>) -> Result<(), CtfsError> {
         if bytes.len() != self.block_size {
             return Err(CtfsError::Corrupt(format!(
@@ -319,8 +365,18 @@ impl CtfsBlockOverlay {
                 self.block_size
             )));
         }
+        self.forget_root_directory_if_root(block_num);
         self.blocks.insert(block_num, bytes);
         Ok(())
+    }
+
+    /// Drop the root directory image when `block_num` is a root block, so the
+    /// next lookup reads the root region again. For the raw block writes,
+    /// whose bytes the overlay does not interpret as entries.
+    fn forget_root_directory_if_root(&mut self, block_num: u64) {
+        if block_num < self.root_blocks {
+            self.root_directory.take();
+        }
     }
 
     /// Read-modify-write `block_num` through the overlay, preserving the bytes
@@ -330,8 +386,22 @@ impl CtfsBlockOverlay {
     /// of an existing block (a `FileEntry.Size` bump): the first such mutation
     /// copies the backing block into the overlay, then the closure mutates the
     /// overlay copy. Subsequent mutations hit the overlay copy directly. The
-    /// backing block is never altered.
+    /// backing block is never altered. A mutation of a root block drops the
+    /// root directory image, which it may change.
     pub fn mutate_block<F>(&mut self, block_num: u64, mutate: F) -> Result<(), CtfsError>
+    where
+        F: FnOnce(&mut [u8]),
+    {
+        self.forget_root_directory_if_root(block_num);
+        self.mutate_staged_block(block_num, mutate)
+    }
+
+    /// [`mutate_block`](CtfsBlockOverlay::mutate_block) without touching the
+    /// root directory image: for [`write_root_bytes`], which patches the image
+    /// itself.
+    ///
+    /// [`write_root_bytes`]: CtfsBlockOverlay::write_root_bytes
+    fn mutate_staged_block<F>(&mut self, block_num: u64, mutate: F) -> Result<(), CtfsError>
     where
         F: FnOnce(&mut [u8]),
     {
@@ -384,6 +454,27 @@ impl CtfsBlockOverlay {
         self.entry_start + index * FILE_ENTRY_SIZE
     }
 
+    /// The whole entry array: `max_root_entries` entries, entry `i` at byte
+    /// `i * FILE_ENTRY_SIZE`. Read from the root region by the first call and
+    /// kept afterwards (the `root_directory` field), so a lookup costs memory
+    /// reads, not `root_blocks` block reads.
+    ///
+    /// `OnceLock::get_or_try_init` is not stable, so the image is built and
+    /// then offered with `set`. Two threads that both find it empty build the
+    /// same bytes — neither can write while they hold `&self` — and the
+    /// loser's copy is discarded.
+    fn root_directory(&self) -> Result<&[u8], CtfsError> {
+        if let Some(directory) = self.root_directory.get() {
+            return Ok(directory);
+        }
+        let directory = self.read_root_directory()?;
+        let _ = self.root_directory.set(directory);
+        self.root_directory
+            .get()
+            .map(Vec::as_slice)
+            .ok_or_else(|| CtfsError::Corrupt("overlay: the root directory image was not kept".to_string()))
+    }
+
     /// The whole entry array, read through the overlay from every root block
     /// (so a shadowed root block is honoured): `max_root_entries` entries,
     /// entry `i` at byte `i * FILE_ENTRY_SIZE`.
@@ -399,9 +490,9 @@ impl CtfsBlockOverlay {
         Ok(directory)
     }
 
-    /// The `field` word of entry `index` in a [`read_root_directory`] image.
+    /// The `field` word of entry `index` in a [`root_directory`] image.
     ///
-    /// [`read_root_directory`]: CtfsBlockOverlay::read_root_directory
+    /// [`root_directory`]: CtfsBlockOverlay::root_directory
     fn entry_word(directory: &[u8], index: usize, field: usize) -> u64 {
         let off = index * FILE_ENTRY_SIZE + field;
         let mut word = [0u8; 8];
@@ -415,19 +506,50 @@ impl CtfsBlockOverlay {
             .find(|&index| Self::entry_word(directory, index, FILE_ENTRY_NAME_OFFSET) == target)
     }
 
-    /// Copy-on-write `bytes` into the root region at container byte `offset`,
-    /// split across the root blocks the range spans.
+    /// Copy-on-write `bytes` into the entry array at container byte `offset`,
+    /// split across the root blocks the range spans, and make the same change
+    /// to the root directory image when one is kept, so it stays current
+    /// without being read again.
+    ///
+    /// All or nothing: every root block the range spans is staged (copied from
+    /// the backing on first write) before any byte is changed, so a backing
+    /// read that fails part-way leaves the staged blocks — and with them the
+    /// image — as they were. Otherwise an entry straddling two root blocks
+    /// could be half-written into the first block while the image, never
+    /// patched, still showed the old entry.
     fn write_root_bytes(&mut self, offset: usize, bytes: &[u8]) -> Result<(), CtfsError> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let first_block = (offset / self.block_size) as u64;
+        let last_block = ((offset + bytes.len() - 1) / self.block_size) as u64;
+        for block_num in first_block..=last_block {
+            self.mutate_staged_block(block_num, |_| {})?;
+        }
         let mut written = 0;
         while written < bytes.len() {
             let at = offset + written;
             let in_block = at % self.block_size;
             let len = (self.block_size - in_block).min(bytes.len() - written);
             let chunk = &bytes[written..written + len];
-            self.mutate_block((at / self.block_size) as u64, |block| {
+            self.mutate_staged_block((at / self.block_size) as u64, |block| {
                 block[in_block..in_block + len].copy_from_slice(chunk);
             })?;
             written += len;
+        }
+        if let Some(directory) = self.root_directory.get_mut() {
+            // Every caller writes inside the entry array, which is what the
+            // image holds; a range outside it would be a bug here, so it
+            // drops the image rather than patch the wrong bytes.
+            match offset
+                .checked_sub(self.entry_start)
+                .filter(|start| start + bytes.len() <= directory.len())
+            {
+                Some(start) => directory[start..start + bytes.len()].copy_from_slice(bytes),
+                None => {
+                    self.root_directory.take();
+                }
+            }
         }
         Ok(())
     }
@@ -437,16 +559,16 @@ impl CtfsBlockOverlay {
     /// overlay so shadowed root blocks are honoured.
     pub fn find_file_entry(&self, name: &str) -> Result<Option<usize>, CtfsError> {
         let target = base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
-        Ok(Self::find_in(&self.read_root_directory()?, target))
+        Ok(Self::find_in(self.root_directory()?, target))
     }
 
     /// The current `FileEntry.Size` for the named internal file (resolved through
     /// the overlay's shadow root blocks if present).
     pub fn file_size(&self, name: &str) -> Result<Option<u64>, CtfsError> {
         let target = base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
-        let directory = self.read_root_directory()?;
-        Ok(Self::find_in(&directory, target)
-            .map(|index| Self::entry_word(&directory, index, FILE_ENTRY_SIZE_FIELD_OFFSET)))
+        let directory = self.root_directory()?;
+        Ok(Self::find_in(directory, target)
+            .map(|index| Self::entry_word(directory, index, FILE_ENTRY_SIZE_FIELD_OFFSET)))
     }
 
     /// Copy-on-write update of the named file's `FileEntry.Size` in the shadow
@@ -540,11 +662,10 @@ impl CtfsBlockOverlay {
     fn set_or_create_file_entry(&mut self, name: &str, size: u64, map_block: u64) -> Result<(), CtfsError> {
         let name_encoded =
             base40_encode(name).map_err(|e| CtfsError::Corrupt(format!("overlay: bad name '{name}': {e}")))?;
-        let directory = self.read_root_directory()?;
+        let directory = self.root_directory()?;
         let entries = directory.len() / FILE_ENTRY_SIZE;
-        let first_free =
-            || (0..entries).find(|&index| Self::entry_word(&directory, index, FILE_ENTRY_NAME_OFFSET) == 0);
-        let index = Self::find_in(&directory, name_encoded)
+        let first_free = || (0..entries).find(|&index| Self::entry_word(directory, index, FILE_ENTRY_NAME_OFFSET) == 0);
+        let index = Self::find_in(directory, name_encoded)
             .or_else(first_free)
             .ok_or_else(|| {
                 CtfsError::Corrupt(format!(
@@ -631,6 +752,8 @@ impl CtfsBlockOverlay {
 
                 // The backing file now holds the staged state; drop the overlay
                 // copies so reads fall through to the updated backing store.
+                // The root directory image is kept: it describes the staged
+                // root blocks, which are now the backing's bytes.
                 self.blocks.clear();
                 Ok(())
             }
@@ -667,9 +790,9 @@ impl CtfsBlockOverlay {
     /// List the names of every file currently in the (shadow) root directory,
     /// in slot order.
     pub fn file_names(&self) -> Result<Vec<String>, CtfsError> {
-        let directory = self.read_root_directory()?;
+        let directory = self.root_directory()?;
         Ok((0..directory.len() / FILE_ENTRY_SIZE)
-            .map(|index| Self::entry_word(&directory, index, FILE_ENTRY_NAME_OFFSET))
+            .map(|index| Self::entry_word(directory, index, FILE_ENTRY_NAME_OFFSET))
             .filter(|&name_encoded| name_encoded != 0)
             .map(base40_decode)
             .collect())
@@ -683,6 +806,8 @@ mod tests {
     use crate::ctfs_trace_reader::ctfs_container::{
         CtfsReader, InMemoryBlockSource, LocalFileSource, write_minimal_ctfs,
     };
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     const BLOCK_SIZE: usize = 4096;
 
@@ -1499,5 +1624,339 @@ mod tests {
         let mut reader = CtfsReader::open(&path).unwrap();
         assert_eq!(reader.read_file(&member_name(straddling)).unwrap(), b"straddles");
         assert_eq!(reader.file_entry(&member_name(last)), Some((5, 0)));
+    }
+
+    // ── The root directory image ──────────────────────────────────────────
+
+    /// The overlay stays usable from several threads: its lookups take `&self`,
+    /// so the root directory image it keeps must not cost it `Sync`.
+    const _: fn() = || {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<CtfsBlockOverlay>();
+    };
+
+    /// A [`BlockSource`] that counts the `read_at` calls reaching `inner`, so a
+    /// test can state how many backing reads an overlay operation costs. It
+    /// does not override `read_block`, so the trait's default — one `read_at`
+    /// per block — is what the overlay's block reads go through. A real source
+    /// is wrapped rather than mocked: the bytes served are the container's.
+    #[derive(Debug)]
+    struct CountingSource {
+        inner: Box<dyn BlockSource>,
+        reads: Arc<AtomicUsize>,
+        finalized: bool,
+    }
+
+    impl CountingSource {
+        fn over(inner: Box<dyn BlockSource>) -> (Box<dyn BlockSource>, Arc<AtomicUsize>) {
+            let reads = Arc::new(AtomicUsize::new(0));
+            let source = CountingSource {
+                inner,
+                reads: Arc::clone(&reads),
+                finalized: true,
+            };
+            (Box::new(source), reads)
+        }
+    }
+
+    impl BlockSource for CountingSource {
+        fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.inner.read_at(offset, buf)
+        }
+        fn current_size(&self) -> u64 {
+            self.inner.current_size()
+        }
+        fn is_finalized(&self) -> bool {
+            self.finalized
+        }
+    }
+
+    /// A named directory lookup that asserts its own answer.
+    type Lookup<'a> = (&'static str, Box<dyn Fn(&CtfsBlockOverlay) + 'a>);
+
+    /// The backing reads `op` costs.
+    fn reads_during<T>(reads: &AtomicUsize, op: impl FnOnce() -> T) -> (T, usize) {
+        let before = reads.load(Ordering::SeqCst);
+        let value = op();
+        (value, reads.load(Ordering::SeqCst) - before)
+    }
+
+    /// Once the root region has been read, a directory lookup is answered from
+    /// memory: no accessor reads the backing again, on a container whose root
+    /// region is the recorder's 17 checkpointing blocks at version 6.
+    ///
+    /// Every accessor used to read all `root_blocks` blocks on each call, so
+    /// each lookup here cost 17 backing reads (each a `pread`, or an HTTP range
+    /// request over an `HttpRangeSource`).
+    #[test]
+    fn test_overlay_directory_lookups_read_the_root_region_once() {
+        let last = CHECKPOINTED_ROOT_ENTRIES as usize - 1;
+        let members = vec![
+            (0, member_name(0)),
+            (1000, member_name(1000)),
+            (last, member_name(last)),
+        ];
+        let (raw, root_blocks) = root_region_container(6, CHECKPOINTED_ROOT_ENTRIES, &members);
+        assert_eq!(root_blocks, 17);
+        let (backing, reads) = CountingSource::over(Box::new(InMemoryBlockSource::new(raw)));
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::InMemory).unwrap();
+
+        let (found, first) = reads_during(&reads, || overlay.find_file_entry(&member_name(1000)).unwrap());
+        assert_eq!(found, Some(1000));
+        assert_eq!(
+            first, root_blocks,
+            "the first lookup reads the root region once, block by block"
+        );
+
+        let lookups: [Lookup; 4] = [
+            (
+                "find_file_entry",
+                Box::new(|o| assert_eq!(o.find_file_entry(&member_name(last)).unwrap(), Some(last))),
+            ),
+            (
+                "file_size",
+                Box::new(|o| assert_eq!(o.file_size(&member_name(0)).unwrap(), Some(0))),
+            ),
+            ("has_file", Box::new(|o| assert!(!o.has_file("absent.tc").unwrap()))),
+            (
+                "file_names",
+                Box::new(|o| assert_eq!(o.file_names().unwrap().len(), members.len())),
+            ),
+        ];
+        for (name, lookup) in &lookups {
+            let ((), cost) = reads_during(&reads, || lookup(&overlay));
+            assert_eq!(
+                cost, 0,
+                "{name} read the backing {cost} times after the root region was read"
+            );
+        }
+
+        // A write copies on first write only the root block(s) its entry
+        // spans; its own directory lookup costs nothing.
+        let ((), cost) = reads_during(&reads, || overlay.set_file_size(&member_name(last), 7).unwrap());
+        assert!(cost <= 1, "set_file_size of one word cost {cost} backing reads");
+        let ((), cost) = reads_during(&reads, || overlay.write_internal_file("coverage.tc", b"hits").unwrap());
+        assert!(
+            cost <= 2,
+            "write_internal_file of a one-entry update cost {cost} backing reads"
+        );
+        let ((), cost) = reads_during(&reads, || overlay.write_internal_file("coverage.tc", b"again").unwrap());
+        assert_eq!(
+            cost, 0,
+            "rewriting an entry in an already-staged root block read the backing"
+        );
+
+        for (name, lookup) in &lookups[..3] {
+            let ((), cost) = reads_during(&reads, || lookup(&overlay));
+            assert_eq!(cost, 0, "{name} read the backing {cost} times after a write");
+        }
+    }
+
+    /// The image is patched by the overlay's own entry writes, so every lookup
+    /// after one sees it: a size update, a new member, and a rewritten member.
+    /// It stays correct across a `Persist` flush (the backing then holds the
+    /// same bytes), and a plain reader of the flushed file agrees with it.
+    #[test]
+    fn test_overlay_directory_image_follows_the_overlays_own_writes() {
+        let straddling = BLOCK0_ENTRIES - 1; // straddles blocks 0 and 1 at version 6
+        let last = CHECKPOINTED_ROOT_ENTRIES as usize - 1;
+        let members = vec![(straddling, member_name(straddling)), (last, member_name(last))];
+        let (raw, _) = root_region_container(6, CHECKPOINTED_ROOT_ENTRIES, &members);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.ct");
+        std::fs::write(&path, &raw).unwrap();
+        let (backing, reads) = CountingSource::over(Box::new(LocalFileSource::open(&path).unwrap()));
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::Persist).unwrap();
+
+        // Fill the image before any write, so every write below must patch it.
+        assert_eq!(
+            overlay.file_names().unwrap(),
+            vec![member_name(straddling), member_name(last)]
+        );
+
+        overlay.set_file_size(&member_name(last), 33).unwrap();
+        assert_eq!(overlay.file_size(&member_name(last)).unwrap(), Some(33));
+
+        let data: Vec<u8> = (0..(BLOCK_SIZE + 9) as u32).map(|i| (i % 251) as u8).collect();
+        overlay.write_internal_file("coverage.tc", &data).unwrap();
+        assert_eq!(overlay.find_file_entry("coverage.tc").unwrap(), Some(0));
+        assert_eq!(overlay.file_size("coverage.tc").unwrap(), Some(data.len() as u64));
+
+        overlay
+            .write_internal_file(&member_name(straddling), b"straddles")
+            .unwrap();
+        assert_eq!(overlay.file_size(&member_name(straddling)).unwrap(), Some(9));
+        let expected = vec!["coverage.tc".to_string(), member_name(straddling), member_name(last)];
+        assert_eq!(overlay.file_names().unwrap(), expected);
+
+        let mut sink = FileBlockSink::open(&path).unwrap();
+        overlay.flush(&mut sink).unwrap();
+        let (names, cost) = reads_during(&reads, || overlay.file_names().unwrap());
+        assert_eq!(names, expected);
+        assert_eq!(cost, 0, "a flush dropped the directory image");
+        assert_eq!(overlay.file_size(&member_name(last)).unwrap(), Some(33));
+
+        let mut reader = CtfsReader::open(&path).unwrap();
+        assert_eq!(reader.read_file("coverage.tc").unwrap(), data);
+        assert_eq!(reader.read_file(&member_name(straddling)).unwrap(), b"straddles");
+        assert_eq!(reader.file_entry(&member_name(last)), Some((33, 0)));
+
+        // A fresh overlay over the flushed file reads the same directory.
+        let fresh =
+            CtfsBlockOverlay::new(Box::new(LocalFileSource::open(&path).unwrap()), OverlayMode::InMemory).unwrap();
+        assert_eq!(fresh.file_names().unwrap(), expected);
+        assert_eq!(fresh.file_size(&member_name(last)).unwrap(), Some(33));
+    }
+
+    /// A raw `write_block` or `mutate_block` of a root block is not an entry
+    /// write the overlay can interpret, so it drops the image and the next
+    /// lookup sees the new bytes. A write of any other block keeps the image.
+    #[test]
+    fn test_overlay_raw_root_block_writes_drop_the_directory_image() {
+        let slot = 1000;
+        let (raw, root_blocks) = root_region_container(5, CHECKPOINTED_ROOT_ENTRIES, &[(slot, member_name(slot))]);
+        let (backing, reads) = CountingSource::over(Box::new(InMemoryBlockSource::new(raw)));
+        let mut overlay = CtfsBlockOverlay::new(backing, OverlayMode::InMemory).unwrap();
+        let name_at = entry_offset(16, slot) + FILE_ENTRY_NAME_OFFSET;
+        let (block, in_block) = ((name_at / BLOCK_SIZE) as u64, name_at % BLOCK_SIZE);
+        assert!(block > 0 && block < root_blocks as u64);
+        assert_eq!(overlay.find_file_entry(&member_name(slot)).unwrap(), Some(slot));
+
+        // A data block written through either primitive keeps the image.
+        let data_block = overlay.alloc_block();
+        overlay.write_block(data_block, vec![7u8; BLOCK_SIZE]).unwrap();
+        overlay.mutate_block(data_block, |b| b[0] = 8).unwrap();
+        let (_, cost) = reads_during(&reads, || overlay.has_file(&member_name(slot)).unwrap());
+        assert_eq!(
+            cost, 0,
+            "a write of data block {data_block} dropped the directory image"
+        );
+
+        // `write_block` of the root block holding the entry renames it.
+        let mut bytes = overlay.read_block(block).unwrap();
+        bytes[in_block..in_block + 8].copy_from_slice(&base40_encode("renamed.tc").unwrap().to_le_bytes());
+        overlay.write_block(block, bytes).unwrap();
+        assert_eq!(overlay.find_file_entry("renamed.tc").unwrap(), Some(slot));
+        assert!(!overlay.has_file(&member_name(slot)).unwrap());
+
+        // `mutate_block` of it renames it again.
+        overlay
+            .mutate_block(block, |b| {
+                b[in_block..in_block + 8].copy_from_slice(&base40_encode("again.tc").unwrap().to_le_bytes());
+            })
+            .unwrap();
+        assert_eq!(overlay.find_file_entry("again.tc").unwrap(), Some(slot));
+        assert_eq!(overlay.file_names().unwrap(), vec!["again.tc".to_string()]);
+    }
+
+    /// The overlay adds members to a closed container and keeps the root region
+    /// it read, so a backing that reports a container still being written is
+    /// refused at construction rather than served a directory that goes stale.
+    #[test]
+    fn test_overlay_refuses_a_container_still_being_written() {
+        let (raw, _) = root_region_container(5, 31, &[(0, member_name(0))]);
+        let source = CountingSource {
+            inner: Box::new(InMemoryBlockSource::new(raw)),
+            reads: Arc::new(AtomicUsize::new(0)),
+            finalized: false,
+        };
+        // Mapped to `()` first: `expect_err` would print the overlay's `Debug`,
+        // the whole container, into the failure message.
+        let err = CtfsBlockOverlay::new(Box::new(source), OverlayMode::InMemory)
+            .map(|_| ())
+            .expect_err("an overlay was built over a container that is still being written")
+            .to_string();
+        assert!(
+            err.contains("still being written") && err.contains("closed container"),
+            "the refusal does not say why: {err}"
+        );
+    }
+
+    /// A [`BlockSource`] whose reads of one block fail while `armed` is set:
+    /// the backing I/O error a copy-on-first-write can meet part-way through
+    /// an entry write. The bytes it does serve are a real container's.
+    #[derive(Debug)]
+    struct FailingBlockSource {
+        inner: Box<dyn BlockSource>,
+        failing_block: u64,
+        armed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl BlockSource for FailingBlockSource {
+        fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, CtfsError> {
+            let start = self.failing_block * BLOCK_SIZE as u64;
+            let touches = offset < start + BLOCK_SIZE as u64 && offset + buf.len() as u64 > start;
+            if touches && self.armed.load(Ordering::SeqCst) {
+                return Err(CtfsError::Corrupt(format!(
+                    "injected read failure at block {}",
+                    self.failing_block
+                )));
+            }
+            self.inner.read_at(offset, buf)
+        }
+        fn current_size(&self) -> u64 {
+            self.inner.current_size()
+        }
+    }
+
+    /// An entry write whose second root block cannot be read changes nothing:
+    /// neither the staged root blocks nor the directory image, which therefore
+    /// still agree. The entry here straddles blocks 0 and 1 at version 6, with
+    /// its `Size` and `MapBlock` words in block 0; staging block 0 and writing
+    /// into it before block 1 failed used to leave a new `Size` in the staged
+    /// block that the kept image never saw.
+    #[test]
+    fn test_overlay_failed_entry_write_keeps_the_image_and_blocks_in_step() {
+        let straddling = BLOCK0_ENTRIES - 1;
+        assert_eq!(entry_offset(24, straddling) / BLOCK_SIZE, 0);
+        assert_eq!((entry_offset(24, straddling) + FILE_ENTRY_NAME_OFFSET) / BLOCK_SIZE, 1);
+        let (raw, _) = root_region_container(6, CHECKPOINTED_ROOT_ENTRIES, &[(straddling, member_name(straddling))]);
+        let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let source = FailingBlockSource {
+            inner: Box::new(InMemoryBlockSource::new(raw)),
+            failing_block: 1,
+            armed: Arc::clone(&armed),
+        };
+        let mut overlay = CtfsBlockOverlay::new(Box::new(source), OverlayMode::InMemory).unwrap();
+        assert_eq!(overlay.file_size(&member_name(straddling)).unwrap(), Some(0));
+
+        armed.store(true, Ordering::SeqCst);
+        overlay
+            .write_internal_file(&member_name(straddling), b"straddles")
+            .expect_err("the write read an unreadable root block and still succeeded");
+        armed.store(false, Ordering::SeqCst);
+
+        assert_eq!(
+            image_drift(&overlay),
+            None,
+            "the directory image and the staged root blocks disagree after a failed write"
+        );
+        assert_eq!(overlay.file_size(&member_name(straddling)).unwrap(), Some(0));
+
+        overlay
+            .write_internal_file(&member_name(straddling), b"straddles")
+            .unwrap();
+        assert_eq!(overlay.file_size(&member_name(straddling)).unwrap(), Some(9));
+        assert_eq!(image_drift(&overlay), None);
+    }
+
+    /// The first entry-array byte at which the kept directory image differs
+    /// from the root region read afresh through the overlay, as
+    /// `(byte, image, root region)`, or `None` when they agree. A byte rather
+    /// than the two images, which are tens of KiB each.
+    fn image_drift(overlay: &CtfsBlockOverlay) -> Option<(usize, u8, u8)> {
+        let image = overlay.root_directory().unwrap();
+        let fresh = overlay.read_root_directory().unwrap();
+        assert_eq!(
+            image.len(),
+            fresh.len(),
+            "the image and the root region differ in length"
+        );
+        image
+            .iter()
+            .zip(&fresh)
+            .position(|(a, b)| a != b)
+            .map(|at| (at, image[at], fresh[at]))
     }
 }
