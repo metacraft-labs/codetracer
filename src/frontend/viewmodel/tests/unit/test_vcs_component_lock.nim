@@ -51,7 +51,7 @@ suite "VCS Component Commit Selection":
           vm.selectedCommitIndices.val = @[index]
       )
 
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
       let headers = findAllByClass(panel, "vcs-commit-header")
       check headers.len == 3
 
@@ -85,7 +85,7 @@ suite "VCS Component Commit Selection":
           vm.branchDropdownOpen.val = false
       )
 
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
       let dropdown = findByClass(panel, "vcs-branch-dropdown")
       check dropdown != nil
 

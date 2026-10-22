@@ -1861,18 +1861,6 @@ proc mountPaneForState(state: GoldenItemState) =
           discard shellComponent.createShell()
 
 
-      if state.content == Content.VCS:
-        vcs.syncLegacyVCSIntoVM(VCSComponent(component))
-        vcs.tryMountIsoNimVCSPanel(component.id)
-
-      # A unified diff is an editor-area *document*, not a second VCS panel
-      # (VCS-Panel.md, "Unified Diff View (Editor Integration)"): the sync
-      # parses the target's hunks into the tab's ViewModel and the mount
-      # creates the Monaco instance over them.
-      if state.content == Content.UnifiedDiff:
-        unified_diff.syncIntoVM(UnifiedDiffComponent(component))
-        unified_diff.tryMountUnifiedDiffTab(component.id)
-
       # ``Content.AgentActivityDeepReview`` has no renderer of its own since
       # AA-1 deleted the roll-up.  The id survives as the review's layout
       # identity for the Agent Activity pillar (see the note on the

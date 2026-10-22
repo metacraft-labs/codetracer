@@ -435,7 +435,6 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   # behind it is `data.deepReviewData`, which `syncDeepReview` below sets from
   # the same source this used to copy in here.
   comp.syncLegacyVCSIntoVM()
-  vcs.tryMountIsoNimVCSPanel(comp.id)
 
 proc syncDeepReview(launcher: AgenticSessionLauncher) =
   ## The agentic handoff into DeepReview — Agentic-Coding-Integration.md §4.4,

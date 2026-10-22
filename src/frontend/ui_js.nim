@@ -3621,11 +3621,11 @@ proc onNoTrace(
 
   # The welcome/new-tab handoff can reuse already-mounted panel instances.
   # Resync the panels against the freshly loaded edit-mode services so the
-  # Files and VCS panes reflect the selected folder immediately.
+  # Files and VCS panes reflect the selected folder immediately; a mounted
+  # VCS pane follows its ViewModel, which the refresh resyncs.
   filesystem.refreshIsoNimFilesystemPanel()
   for _, component in data.ui.componentMapping[Content.VCS]:
     vcs.resetAndRefreshVCS(VCSComponent(component))
-    vcs.tryMountIsoNimVCSPanel(component.id)
 
   # Open the file AFTER layout is initialized. Folder edit mode has no
   # explicit path, so seed the editor from the indexed project files instead

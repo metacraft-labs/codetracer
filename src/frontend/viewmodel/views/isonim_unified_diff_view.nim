@@ -18,15 +18,16 @@
 ## rebuilt reactively.
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/vcs_vm
 import ../viewmodels/diff_document
+
+export signals, computation, components
 
 const
   UnifiedDiffContainerClass* = "component-container unified-diff-container"
@@ -54,13 +55,6 @@ type
     onStageSelectedHunks*: proc()
     onClearSelectedHunks*: proc()
 
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
-  r.appendChild(host, child)
-
-when defined(js):
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    r.appendChild(host, child)
-
 proc hunkToolbarText*(count: int): string =
   $count & " hunk" & (if count == 1: "" else: "s") & " selected"
 
@@ -70,9 +64,11 @@ proc copyButtonText*(copied: bool): string =
   ## clipboard gives.
   if copied: "Copied!" else: "Copy as patch"
 
-proc renderHunkToolbar[R](r: R; vm: VCSVM;
-                          callbacks: UnifiedDiffCallbacks): auto =
-  var actions: typeof(r.createElement("div"))
+proc renderHunkToolbar[R, N](r: R; vm: VCSVM;
+                             callbacks: UnifiedDiffCallbacks): N =
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
+  var actions: N
   let bar = ui(r):
     tdiv(class = "hunk-toolbar"):
       span(class = "hunk-toolbar-count"):
@@ -93,17 +89,17 @@ proc renderHunkToolbar[R](r: R; vm: VCSVM;
              if callbacks.onStageSelectedHunks != nil:
                callbacks.onStageSelectedHunks()):
         text "Stage hunks"
-    r.appendRenderedChild(actions, stage)
+    r.appendChild(actions, stage)
   let clear = ui(r):
     tdiv(class = "hunk-toolbar-button hunk-toolbar-button-subtle",
          onclick = proc() =
            if callbacks.onClearSelectedHunks != nil:
              callbacks.onClearSelectedHunks()):
       text "Clear"
-  r.appendRenderedChild(actions, clear)
+  r.appendChild(actions, clear)
   bar
 
-proc renderFileHeader[R](r: R; entry: DiffFileEntry): auto =
+proc renderFileHeader[R, N](r: R; entry: DiffFileEntry): N =
   ## DeepReview-GUI.md §4.1: "A file header with path and diff metadata".
   ##
   ## It used to be line 1 of the Monaco model.  UD-2 made the model the file
@@ -121,12 +117,18 @@ proc renderFileHeader[R](r: R; entry: DiffFileEntry): auto =
       span(class = UnifiedDiffFileHeaderStatsClass):
         text fileStatsText(entry.additions, entry.deletions)
 
-proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
-                                 callbacks: UnifiedDiffCallbacks): auto =
-  var toolbarHost: typeof(r.createElement("div"))
-  var fileHeaderHost: typeof(r.createElement("div"))
-  var editorHost: typeof(r.createElement("div"))
-  var emptyHost: typeof(r.createElement("div"))
+proc renderUnifiedDiffTab*[R, N](r: R; vm: VCSVM;
+                                  editorHostId = "unifiedDiffEditor-0";
+                                  callbacks = UnifiedDiffCallbacks()): N =
+  ## The tab's chrome and the element Monaco mounts into, for every renderer
+  ## (Shared-DOM-Front-Ends D6). The browser host creates the editor after
+  ## the tab is in the document (`ui/unified_diff`).
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute
+  var toolbarHost: N
+  var fileHeaderHost: N
+  var editorHost: N
+  var emptyHost: N
 
   let panel = ui(r):
     tdiv(class = UnifiedDiffContainerClass):
@@ -142,12 +144,12 @@ proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
     # review's tab always names exactly one file (§4.1, "Each diff tab shows a
     # single file"); a git target can name several, and each keeps its own row.
     for entry in diffPairFor(vm).files:
-      r.appendRenderedChild(fileHeaderHost, renderFileHeader(r, entry))
+      r.appendChild(fileHeaderHost, renderFileHeader[R, N](r, entry))
 
   createRenderEffect proc() =
     r.clearChildren(toolbarHost)
     if vm.hunkToolbarVisible.val and vm.selectedHunkCount.val > 0:
-      r.appendRenderedChild(toolbarHost, renderHunkToolbar(r, vm, callbacks))
+      r.appendChild(toolbarHost, renderHunkToolbar[R, N](r, vm, callbacks))
 
   # Swap the editor for the empty-state message when there is nothing to diff.
   # Toggled by class rather than by inserting/removing the node, because the
@@ -162,22 +164,3 @@ proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
       else: UnifiedDiffEditorClass)
 
   panel
-
-proc renderUnifiedDiffTab*(r: MockRenderer; vm: VCSVM;
-                           editorHostId = "unifiedDiffEditor-0";
-                           callbacks = UnifiedDiffCallbacks()): MockNode =
-  renderUnifiedDiffTabImpl(r, vm, editorHostId, callbacks)
-
-when defined(js):
-  proc renderUnifiedDiffTab*(r: WebRenderer; vm: VCSVM;
-                             editorHostId: string;
-                             callbacks = UnifiedDiffCallbacks()):
-                             isonim_dom.Element =
-    renderUnifiedDiffTabImpl(r, vm, editorHostId, callbacks)
-
-  proc mountIsoNimUnifiedDiffTab*(container: isonim_dom.Element; vm: VCSVM;
-                                  editorHostId: string;
-                                  callbacks = UnifiedDiffCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderUnifiedDiffTab(r, vm, editorHostId, callbacks)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
