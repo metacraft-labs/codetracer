@@ -220,7 +220,6 @@ proc createNewSession*(data: Data) =
     debugger: DebuggerService(
       locals: @[],
       registerState: JsAssoc[cstring, cstring]{},
-      breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{},
       valueHistory: JsAssoc[cstring, ValueHistory()]{},
       paths: @[],
       skipInternal: true,

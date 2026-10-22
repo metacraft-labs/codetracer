@@ -883,7 +883,7 @@ template reverseStepIn*(fromShortcut: bool) =
 template reverseStepOut*(fromShortcut: bool) =
   data.step CtReverseStepOut, fromShortcutArg=fromShortcut
 
-# proc continueTo(breakpoints: seq[UIBreakpoint]) =
+# proc continueTo(breakpoints) =
 #   changeLine(data.lastLine)
 #   data.stableBusy = true
 #   data.currentOperation = "continue"

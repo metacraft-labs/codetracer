@@ -68,14 +68,14 @@
 import std/[strutils, tables]
 from std/os import extractFilename
 
-import codetracer_embed
+import ../viewmodel/codetracer_embed
 
 # `ProductMode` and `sourceContractFor` are re-exported by NAME rather than by
 # re-exporting the whole facade. PLAT-16 put the answer to "which source does a
 # mode show" in the core precisely so every front-end reads one answer, and a
 # front-end that had to import the SDK facade to learn the name of a product
 # mode would have a reason to spell it itself instead.
-import viewmodels/product_mode
+import ../viewmodel/viewmodels/product_mode
 export product_mode
 
 # PLAT-28's trailing-line policy and the one function that applies it, by the
@@ -83,7 +83,7 @@ export product_mode
 # re-exported because it appears in this module's published signature: a caller
 # choosing `tlpKeep` over `tlpDropFinalEmpty` is making PLAT-28's decision, and
 # a decision a caller cannot spell is one it cannot make.
-import editor/row_projection
+import ../viewmodel/editor/row_projection
 export row_projection.TrailingLinePolicy
 
 import ../../common/view_vocabulary
@@ -467,6 +467,25 @@ proc projectedRows(doc: string; firstLine: int; trailing: TrailingLinePolicy;
                              viewportHeight: viewportHeight,
                              trailing: trailing, requested: requested))
 
+proc rowFactsFor(line: int; text: string; held: bool;
+                 executionLine, inspection: int; pts: seq[EditorPoint];
+                 path: string; values: seq[EditorValue]; flowVisible: bool;
+                 flowFacts: seq[FlowStyledLine]): RowFacts =
+  ## One row's facts — the rule every editor surface applies, whoever holds
+  ## the text.
+  result.pointer = pointerFor(line, executionLine, inspection)
+  result.mark = markFor(pts, path, line)
+  # THE NAMES IN SCOPE, ON THE EXECUTION LINE ONLY — where the flow has
+  # no values for it (the flow's replace them on every line it reached).
+  # The values the ViewModel reports are the values in scope AT THE STOP;
+  # attaching them to every line that mentions the name would put the value
+  # of `x` at the stop beside a line thirty above it that has not run yet,
+  # which is a stale value with extra steps.
+  if held and result.pointer == eptExecution:
+    result.values = valuesForLine(text, values)
+  result.flow = if flowVisible: flowStateOf(flowFacts, line)
+                else: efsUnknown
+
 proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
                        flow: FlowVM; availability: SourceAvailability;
                        budget: Budget; medium: string;
@@ -573,24 +592,83 @@ proc editorSurfaceFor*(source: SourceVM; editor: EditorVM; state: StateVM;
   result.rows = projectedRows(windowLines.join("\n"), reads[0].line, tlpKeep,
                               reads[0].line, 0, requested,
     proc (line: int; text: string; held: bool): RowFacts =
-      result.pointer = pointerFor(line, executionLine, inspection)
-      result.mark = markFor(pts, path, line)
-      # THE NAMES IN SCOPE, ON THE EXECUTION LINE ONLY — where the flow has
-      # no values for it (the flow's, below, replace them on every line it
-      # reached). The values the ViewModel
-      # reports are the values in scope AT THE STOP; attaching them to every
-      # line that mentions the name would put the value of `x` at the stop
-      # beside a line thirty above it that has not run yet, which is a stale
-      # value with extra steps.
-      if held and result.pointer == eptExecution:
-        result.values = valuesForLine(text, values)
-      result.flow = if flowVisible: flowStateOf(flowFacts, line)
-                    else: efsUnknown)
+      rowFactsFor(line, text, held, executionLine, inspection, pts, path,
+                  values, flowVisible, flowFacts))
   # THE FLOW'S VALUES, on every line it has values for (`flowValuesByLine`);
   # a line it has nothing for — the execution line included — keeps the rule
   # above. Set on the projected rows rather than through the decoration codec
   # because a flow name is an arbitrary EXPRESSION, and `inlineTextOf` refuses
   # a name containing its separator.
+  let flowValues = flowValuesByLine(flow, path, currentTickOf(flow),
+                                    flowVisible)
+  if flowValues.len > 0:
+    for row in result.rows.mitems:
+      if row.held and flowValues.hasKey(row.line):
+        row.values = flowValues[row.line]
+
+proc editorSurfaceForView*(path: string; firstLine, lastLine: int;
+                           lineText: proc(line: int): string;
+                           store: ReplayDataStore; editor: EditorVM;
+                           state: StateVM; flow: FlowVM; budget: Budget;
+                           medium: string; inspectionLine = 0): EditorSurface =
+  ## **The surface of an editor that holds the file's text itself** — the
+  ## web's Monaco (Shared-DOM-Front-Ends D7.4 (a)) — over lines `firstLine ..
+  ## lastLine` of `path`, whose text `lineText` reads from that editor.
+  ##
+  ## The rules are `editorSurfaceFor`'s (`rowFactsFor`): the execution line is
+  ## the store's debugger position when it is in `path`, the marks are the
+  ## store's point rows (`editorPointsOf`), the values in scope are
+  ## `StateVM`'s and the flow's are `FlowVM`'s. Only where the text comes from
+  ## differs, so the web editor and the terminal mark the same lines for the
+  ## same position.
+  ##
+  ## The gutter is not degraded when the store holds no point: the store IS
+  ## the producer here (`sdk/breakpoints`), so an empty list is an answer.
+  result.medium = medium
+  result.productMode = pmDebug
+  result.sourceStatement = sourceContractFor(pmDebug).statement
+  result.mutable = sourceContractFor(pmDebug).mutable
+  result.support = [ecExecutionPointer: esRendered,
+                    ecLineStatus: esRendered,
+                    ecInlineValues: esRendered,
+                    ecFlowOverlay: esRendered]
+  if store.isNil:
+    result.report = NoSessionReport
+    result.rows = @[]
+    for c in EditorConcern:
+      result.support[c] = esDegraded
+    return
+  result.path = path
+  let dbg = store.debugger.val
+  result.executionLine =
+    if dbg.location.file == path and dbg.location.line > 0: dbg.location.line
+    else: 0
+  result.inspectionLine = inspectionLine
+  result.viewportTop = max(1, firstLine)
+  result.totalLineCount = max(0, lastLine)
+  result.flowOverlayVisible =
+    if editor.isNil: false else: editor.showFlowOverlay.val
+  result.gutterVisible =
+    if editor.isNil: true else: editor.showBreakpointGutter.val
+  let flowFacts = if flow.isNil: @[] else: flow.styledLines.val
+  if flow.isNil:
+    result.support[ecFlowOverlay] = esDegraded
+  result.rows = @[]
+  if lastLine < firstLine or firstLine < 1:
+    return
+  var windowLines: seq[string] = @[]
+  for line in firstLine .. lastLine:
+    windowLines.add(if lineText.isNil: "" else: lineText(line))
+  let values = inlineValuesOf(state, budget)
+  let pts = editorPointsOf(store.pointList.rows.val)
+  let executionLine = result.executionLine
+  let inspection = result.inspectionLine
+  let flowVisible = result.flowOverlayVisible
+  result.rows = projectedRows(windowLines.join("\n"), firstLine, tlpKeep,
+                              firstLine, 0, @[],
+    proc (line: int; text: string; held: bool): RowFacts =
+      rowFactsFor(line, text, held, executionLine, inspection, pts, path,
+                  values, flowVisible, flowFacts))
   let flowValues = flowValuesByLine(flow, path, currentTickOf(flow),
                                     flowVisible)
   if flowValues.len > 0:

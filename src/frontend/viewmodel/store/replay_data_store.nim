@@ -2029,10 +2029,20 @@ type
   BreakpointAnchor* = tuple[line, column: int]
     ## PLAT-50: where a breakpoint is — a line, and the column it is anchored
     ## at (0: the whole line).
+  BreakpointSpec* = object
+    ## One breakpoint as a front-end holds it: where it is, what it asks of
+    ## the engine, and whether it is armed. A DISABLED one is not sent (the
+    ## engine holds only the enabled ones) and stays a row of the point list.
+    line*: int
+    column*: int
+      ## The column it is anchored at; 0 for the whole line.
+    condition*: string
+    logMessage*: string
+    enabled*: bool
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
-                               verified: openArray[BreakpointAnchor];
-                               disabled: openArray[BreakpointAnchor] = []) =
+                               specs: openArray[BreakpointSpec];
+                               resolution = "verified") =
   ## Replace `path`'s breakpoint rows with the anchors the ENGINE verified.
   ##
   ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
@@ -2050,6 +2060,12 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   ## (only enabled ones are sent, as the desktop's `dapSetBreakpoints` sends
   ## them) and stays a row of the point list — and a dimmed mark in the
   ## gutter — until it is deleted.
+  ##
+  ## `specs` is the set held for `path` after the engine answered: the
+  ## enabled ones at the line and column it BOUND, the disabled ones as they
+  ## were. A breakpoint carries its condition and log message (Column-Aware
+  ## Navigation M9 and M10) onto its row. `resolution` is `requested` for a
+  ## set held before the engine has answered (`sdk/breakpoints.requestBreakpoints`).
   var rows: seq[PointListEntry] = @[]
   for r in store.pointList.rows.val:
     if not (r.kind == PointKindBreakpoint and r.path == path):
@@ -2058,23 +2074,32 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   let slash = max(path.rfind('/'), path.rfind('\\'))
   if slash >= 0: name = path[slash + 1 .. ^1]
   var lines: seq[int] = @[]
-  proc label(a: BreakpointAnchor): string =
-    name & ":" & $a.line & (if a.column > 0: ":" & $a.column else: "")
-  for a in verified:
-    if a.line >= 1 and a.line notin lines:
-      lines.add a.line
-      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
-                              path: path, line: a.line,
-                              column: max(0, a.column), enabled: true,
-                              resolution: "verified")
-  for a in disabled:
-    if a.line >= 1 and a.line notin lines:
-      lines.add a.line
-      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
-                              path: path, line: a.line,
-                              column: max(0, a.column), enabled: false,
-                              resolution: "verified")
+  # The armed ones first: a line carrying both an armed and a disabled
+  # breakpoint stops, so the armed one is the line's row.
+  for armed in [true, false]:
+    for sp in specs:
+      if sp.enabled != armed or sp.line < 1 or sp.line in lines:
+        continue
+      lines.add sp.line
+      rows.add PointListEntry(kind: PointKindBreakpoint,
+        label: name & ":" & $sp.line &
+               (if sp.column > 0: ":" & $sp.column else: ""),
+        path: path, line: sp.line, column: max(0, sp.column),
+        enabled: sp.enabled, resolution: resolution,
+        condition: sp.condition, logMessage: sp.logMessage)
   store.applyPointRows(rows)
+
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verified: openArray[BreakpointAnchor];
+                               disabled: openArray[BreakpointAnchor] = []) =
+  ## The anchor form: `verified` armed, `disabled` held unarmed, none of them
+  ## conditional.
+  var specs: seq[BreakpointSpec] = @[]
+  for a in verified:
+    specs.add BreakpointSpec(line: a.line, column: a.column, enabled: true)
+  for a in disabled:
+    specs.add BreakpointSpec(line: a.line, column: a.column, enabled: false)
+  store.applyVerifiedBreakpoints(path, specs)
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
                                verifiedLines: openArray[int];

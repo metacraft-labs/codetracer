@@ -46,7 +46,7 @@ from ../../common/lang import toLangFromFilename, langWireName
 import ../../common/value_presentation/json_adapter
 import session_vm
 import app/app_vm
-import sdk/[debugger_session, trace_source]
+import sdk/[debugger_session, trace_source, breakpoints]
 import viewmodels/[state_vm, calltrace_vm, scratchpad_vm, event_log_vm,
                   origin_chain_types]
 
@@ -734,42 +734,23 @@ proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode]
   ## Forward: defined with the rest of the event queue below.
 
 proc sendBreakpoints(s: HeadlessDebugSession; path: string;
-                     anchors: seq[BreakpointAnchor];
-                     disabled: seq[BreakpointAnchor] = @[]): bool =
-  ## `setBreakpoints` for `path` with exactly `anchors` (a column breakpoint
-  ## carries its `column`, Column-Aware Navigation M1's wire), and the store's
-  ## rows for `path` replaced by what the engine verified — at the line and
-  ## column it BOUND, which it echoes — plus the `disabled` breakpoints the
-  ## engine does not hold (PLAT-50). False (and nothing changed) when the
-  ## engine refused.
-  var wanted = newJArray()
-  for a in anchors:
-    var bp = %*{"line": a.line}
-    if a.column > 0:
-      bp["column"] = %a.column
-    wanted.add bp
+                     plan: seq[BreakpointSpec]): bool =
+  ## `setBreakpoints` for `path` with the planned set (`sdk/breakpoints`, the
+  ## planners every front-end shares), and the store's rows for `path`
+  ## replaced by what the engine verified (`answeredBreakpoints`). False (and
+  ## nothing changed) when the engine refused.
   let resp = s.backend.sendDapRequest("setBreakpoints",
-    %*{"source": {"path": path}, "breakpoints": wanted})
+    setBreakpointsArgs(path, plan))
   discard s.drainEvents()
   if not resp.getOrDefault("success").getBool(false):
     return false
-  var verified: seq[BreakpointAnchor] = @[]
-  for i, bp in resp{"body", "breakpoints"}.getElems:
-    if bp.getOrDefault("verified").getBool(false):
-      let asked = if i < anchors.len: anchors[i].column else: 0
-      verified.add (bp.getOrDefault("line").getInt(0),
-                    (if asked > 0: bp.getOrDefault("column").getInt(asked)
-                     else: 0))
-  s.session.store.applyVerifiedBreakpoints(path, verified, disabled)
+  s.session.store.applyVerifiedBreakpoints(path,
+    answeredBreakpoints(plan, resp.getOrDefault("body")))
   true
 
-proc heldBreakpoints(s: HeadlessDebugSession; path: string):
-    tuple[enabled, disabled: seq[BreakpointAnchor]] =
-  ## `path`'s breakpoints as the store holds them, enabled and disabled.
-  for r in s.session.store.pointList.rows.val:
-    if r.kind == PointKindBreakpoint and r.path == path:
-      if r.enabled: result.enabled.add (r.line, r.column)
-      else: result.disabled.add (r.line, r.column)
+proc heldBreakpoints(s: HeadlessDebugSession; path: string): seq[BreakpointSpec] =
+  ## `path`'s breakpoints as the store holds them, armed and disabled.
+  heldBreakpoints(s.session.store, path)
 
 proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
                        line: int): bool =
@@ -799,38 +780,18 @@ proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
   ## disabled, unless it is the line being toggled (toggling a disabled
   ## breakpoint removes it, as a gutter click does on the desktop). A column
   ## breakpoint on another line keeps its column.
-  let held = s.heldBreakpoints(path)
-  var anchors, disabled: seq[BreakpointAnchor] = @[]
-  var removing = false
-  for a in held.enabled:
-    if a.line == line: removing = true
-    else: anchors.add a
-  for a in held.disabled:
-    if a.line == line: removing = true
-    else: disabled.add a
-  if not removing:
-    anchors.add (line, 0)
-  s.sendBreakpoints(path, anchors, disabled)
+  s.sendBreakpoints(path, plannedToggle(s.heldBreakpoints(path), line))
 
 proc setColumnBreakpoint*(s: HeadlessDebugSession; path: string; line,
                           column: int): bool =
   ## PLAT-50: a breakpoint at `path:line` ANCHORED AT `column` — the
-  ## desktop's Alt+click on the editor's text (`ui/editor.lineActionClickAt`
-  ## → `DebuggerService.addColumnBreakpoint`), which REPLACES whatever
-  ## breakpoint the line had (one breakpoint per line, as the desktop's
-  ## `breakpointTable[path][line]` holds one) and is never a toggle. The
-  ## engine stops on it only at a step recorded at that column. False when
-  ## the engine refused, or `column` is not a column.
+  ## desktop's Alt+click (`ui/editor.lineActionClickAt`), which REPLACES
+  ## whatever breakpoint the line had and is never a toggle
+  ## (`plannedAnchored`). The engine stops on it only at a step recorded at
+  ## that column. False when the engine refused, or `column` is not a column.
   if column < 1:
     return false
-  let held = s.heldBreakpoints(path)
-  var anchors, disabled: seq[BreakpointAnchor] = @[]
-  for a in held.enabled:
-    if a.line != line: anchors.add a
-  for a in held.disabled:
-    if a.line != line: disabled.add a
-  anchors.add (line, column)
-  s.sendBreakpoints(path, anchors, disabled)
+  s.sendBreakpoints(path, plannedAnchored(s.heldBreakpoints(path), line, column))
 
 proc clearBreakpoints*(s: HeadlessDebugSession; path: string): bool =
   ## PLAT-50: delete every breakpoint of `path` — the editor menu's "Delete
@@ -841,33 +802,20 @@ proc clearBreakpoints*(s: HeadlessDebugSession; path: string): bool =
 proc setBreakpointEnabled*(s: HeadlessDebugSession; path: string; line: int;
                            enabled: bool): bool =
   ## PLAT-50: enable or disable the breakpoint at `path:line` — the desktop's
-  ## gutter right-click (`ui/editor.lineActionContextMenu` →
-  ## `DebuggerService.enable` / `disable`). A disabled breakpoint stays on
-  ## the point list and the gutter, dimmed, and is NOT sent to the engine (the
-  ## desktop's `dapSetBreakpoints` sends only `enabled` ones), so the replay
-  ## no longer stops there; its column, if it has one, is kept. False when
-  ## there is no breakpoint at the line or the engine refused.
-  let held = s.heldBreakpoints(path)
-  var found = false
-  var anchors, disabled: seq[BreakpointAnchor] = @[]
-  for a in held.enabled & held.disabled:
-    if a.line == line:
-      found = true
-      if enabled: anchors.add a
-      else: disabled.add a
-    elif a in held.enabled: anchors.add a
-    else: disabled.add a
-  if not found:
+  ## gutter right-click. A disabled breakpoint stays on the point list and the
+  ## gutter, dimmed, and is NOT sent to the engine, so the replay no longer
+  ## stops there; its column, if it has one, is kept (`plannedEnabled`).
+  ## False when there is no breakpoint at the line or the engine refused.
+  let plan = plannedEnabled(s.heldBreakpoints(path), line, enabled)
+  if plan.isNone:
     return false
-  s.sendBreakpoints(path, anchors, disabled)
+  s.sendBreakpoints(path, plan.get)
 
 proc hasBreakpointAt*(s: HeadlessDebugSession; path: string;
                       line: int): bool =
   ## Whether the store holds a breakpoint — enabled or disabled — at
   ## `path:line`.
-  for r in s.session.store.pointList.rows.val:
-    if r.kind == PointKindBreakpoint and r.path == path and r.line == line:
-      return true
+  breakpointAt(s.heldBreakpoints(path), line).isSome
 
 proc deleteBreakpointAt*(s: HeadlessDebugSession; path: string;
                          line: int): bool =
@@ -879,21 +827,13 @@ proc deleteBreakpointAt*(s: HeadlessDebugSession; path: string;
     return false
   s.toggleBreakpoint(path, line)
 
-proc breakpointFiles(s: HeadlessDebugSession; path: string): seq[string] =
-  ## Every file the store holds a breakpoint in, in row order — or only
-  ## `path`, when it names one that has any.
-  for r in s.session.store.pointList.rows.val:
-    if r.kind == PointKindBreakpoint and r.path notin result and
-       (path.len == 0 or r.path == path):
-      result.add r.path
-
 proc clearAllBreakpoints*(s: HeadlessDebugSession; path = ""): int =
   ## Delete every breakpoint of `path`, or of every file when `path` is ""
   ## — the editor menu's "Delete breakpoints in file" / "Delete ALL
   ## breakpoints" and the program menu's "Delete All Breakpoints", one
   ## `setBreakpoints` with none per file (`clearBreakpoints`). Answers how
   ## many files the engine cleared; a file it refused keeps its rows.
-  for p in s.breakpointFiles(path):
+  for p in breakpointFiles(s.session.store, path):
     if s.clearBreakpoints(p):
       inc result
 
@@ -903,16 +843,16 @@ proc setAllBreakpointsEnabled*(s: HeadlessDebugSession; enabled: bool): int =
   ## file with the enabled set (a disabled breakpoint is not on the engine;
   ## see `setBreakpointEnabled`), columns kept. Answers how many breakpoints
   ## CHANGED state; a file already in the asked state is not sent again.
-  for p in s.breakpointFiles(""):
-    let held = s.heldBreakpoints(p)
-    let changing = if enabled: held.disabled.len else: held.enabled.len
+  for p in breakpointFiles(s.session.store, ""):
+    var plan = s.heldBreakpoints(p)
+    var changing = 0
+    for sp in plan.mitems:
+      if sp.enabled != enabled:
+        sp.enabled = enabled
+        inc changing
     if changing == 0:
       continue
-    let all = held.enabled & held.disabled
-    let ok =
-      if enabled: s.sendBreakpoints(p, all, @[])
-      else: s.sendBreakpoints(p, @[], all)
-    if ok:
+    if s.sendBreakpoints(p, plan):
       result += changing
 
 const LineJumpQuietMs* = 15_000

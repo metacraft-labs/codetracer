@@ -335,6 +335,12 @@ type
       ## Alt+click (`ui/editor.lineActionClickAt`, Column-Aware Navigation
       ## M6), which the replay stops at only on a step at that column. 0 (the
       ## zero value, every other producer) is a line breakpoint.
+    condition*: string
+      ## A breakpoint's CONDITION (Column-Aware Navigation M9): the engine
+      ## stops only at a step where it holds. "" for an unconditional one.
+    logMessage*: string
+      ## A LOGPOINT's message (M10): passing the line logs it and does not
+      ## stop. "" for a breakpoint that stops.
 
     # -- PLAT-11 -----------------------------------------------------------
     #

@@ -2362,12 +2362,10 @@ when not defined(ctInExtension):
         activeSessionVM.debugCommands = desktopDebugCommands(data,
           activeSessionVM.store, toolbarApi)
         activeSessionVM.initializePanelViewModels()
-      # PLAT-40: the debugger service's `setBreakpoints` answers go to the
-      # ViewModel store's one breakpoint decoder — the point list then holds
-      # what the engine verified, as it does on the native front-ends.
-      let pointStore = activeSessionVM.store
-      data.onBreakpointsVerified = proc(path: cstring; lines: seq[int]) =
-        pointStore.applyVerifiedBreakpoints($path, lines)
+      # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
+      # the debugger service plans each change over its rows and the engine's
+      # answer replaces them, as on the native front-ends (PLAT-40).
+      data.services.debugger.pointStore = cast[JsObject](activeSessionVM.store)
       point_list.setPointListVM(activeSessionVM.pointListVM)
       # Apply any `supportsStepBack` capability that arrived before this VM
       # existed (its DAP `initialize` response can beat this assignment), so the
@@ -4970,9 +4968,7 @@ proc removeBreakpointAtPosition*(data: Data) =
 
 proc removeAllBreakpoints*(data: Data) =
   data.pointsOperationsSetup()
-  for line, point in debuggerService.breakpointTable[activeEditorPath]:
-    debuggerService.deleteBreakpoint(activeEditorPath, line)
-    editor.refreshEditorLine(line)
+  debuggerService.deleteAllBreakpoints(activeEditorPath)
 
 proc enableBreakpointAtPosition*(data: Data) =
   data.pointsOperationsSetup()
@@ -4981,9 +4977,7 @@ proc enableBreakpointAtPosition*(data: Data) =
 
 proc enableAllBreakpoints*(data: Data) =
   data.pointsOperationsSetup()
-  for line, point in debuggerService.breakpointTable[activeEditorPath]:
-    debuggerService.enable(activeEditorPath, line)
-    editor.refreshEditorLine(line)
+  debuggerService.setAllEnabled(activeEditorPath, true)
 
 proc disableBreakpointAtPosition*(data: Data) =
   data.pointsOperationsSetup()
@@ -4992,9 +4986,7 @@ proc disableBreakpointAtPosition*(data: Data) =
 
 proc disableAllBreakpoints*(data: Data) =
   data.pointsOperationsSetup()
-  for line, point in debuggerService.breakpointTable[activeEditorPath]:
-    debuggerService.disable(activeEditorPath, line)
-    editor.refreshEditorLine(line)
+  debuggerService.setAllEnabled(activeEditorPath, false)
 
 proc addTracepointAtPosition*(data: Data) =
   data.pointsOperationsSetup()

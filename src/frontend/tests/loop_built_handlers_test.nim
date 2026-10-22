@@ -10,6 +10,9 @@ import ../types
 import ../renderer
 import ../ui/[layout, shortcuts, panel_transfer, file_conflict_dialog]
 import ../services/debugger_service
+import ../dap_backend
+import ../viewmodel/store/replay_data_store
+import isonim/core/signals
 import ../dap
 import ../viewmodel/platform/outcome as platform_outcome
 import ../lib/jslib
@@ -82,29 +85,34 @@ suite "legacy loop-built handlers keep their own item":
 proc breakpointAnswers() {.async.} =
   echo "[Case] deferred breakpoint answers retain each requested file"
   var requests: seq[JsObject] = @[]
-  var seen: seq[string] = @[]
   let transport = JsObject{}
   transport.send = proc(channel: cstring; payload: JsObject) = requests.add payload
   data.dapApi = DapApi(ipc: transport)
-  data.onBreakpointsVerified = proc(path: cstring; lines: seq[int]) =
-    seen.add $path & ":" & $lines[0]
-  let service = DebuggerService(data: data,
-    breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{})
-  service.breakpointTable[cstring"/first.nim"] = JsAssoc[int, UIBreakpoint]{}
-  service.breakpointTable[cstring"/first.nim"][10] = UIBreakpoint(enabled: true)
-  service.breakpointTable[cstring"/second.nim"] = JsAssoc[int, UIBreakpoint]{}
-  service.breakpointTable[cstring"/second.nim"][20] = UIBreakpoint(enabled: true)
+  # The session store holds the breakpoints; the service plans over it and
+  # each file's answer replaces that file's rows (`sdk/breakpoints`).
+  let store = createReplayDataStore(newDapBackendService(data.dapApi))
+  store.applyVerifiedBreakpoints("/first.nim", @[10])
+  store.applyVerifiedBreakpoints("/second.nim", @[20])
+  let service = DebuggerService(data: data, pointStore: cast[JsObject](store))
   service.dapSetBreakpoints()
   ck requests.len == 2
-  # Resolve in reverse order only after BOTH requests/closures exist.
+  # Resolve in reverse order only after BOTH requests/closures exist; the
+  # engine binds each to the next line, so the rows show whose answer landed.
   for index in countdown(requests.high, 0):
     let request = requests[index]
     let line = request.arguments.lines[0].to(int)
     data.dapApi.resolvePendingDapResponse(js{
       request_seq: request["seq"], success: true,
-      body: js{breakpoints: @[js{verified: true, line: line}]}})
+      body: js{breakpoints: @[js{verified: true, line: line + 1}]}})
     await tick()
-  ck seen == @["/second.nim:20", "/first.nim:10"]
+  # The answer reaches the store a few promise turns after its resolution
+  # (`asyncSendCtRequest` -> the backend's future -> `requestBreakpoints`).
+  for _ in 0 ..< 4:
+    await tick()
+  var seen: seq[string] = @[]
+  for r in store.pointList.rows.val:
+    seen.add r.path & ":" & $r.line
+  ck seen == @["/second.nim:21", "/first.nim:11"]
 
 proc deferredFold() {.async.} =
   echo "[Case] deferred foldOutcome visits every item in order"

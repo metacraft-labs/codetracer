@@ -81,41 +81,6 @@ type
     cwd*: cstring
     configType*: cstring
 
-  UIBreakpoint* = object
-    line*: int
-    ## M1 — Column-Aware Replay Navigation: 1-indexed column when the
-    ## breakpoint is anchored at a specific column on the line; ``0``
-    ## preserves the legacy line-only semantics.  Multiple
-    ## column-aware breakpoints can coexist on the same line (the
-    ## breakpoint registry on the replay-server keys ``(path, line,
-    ## column)``); the GUI exposes them through the same gutter
-    ## marker for now.
-    column*: int
-    ## M9 — Column-Aware Conditional Breakpoint: optional condition
-    ## expression evaluated by the replay engine at the candidate
-    ## stop step.  Empty string preserves the unconditional behaviour
-    ## M1 shipped with; a non-empty string is forwarded on the DAP
-    ## ``setBreakpoints`` request so the replay engine can evaluate
-    ## it against the locals at the matched step.  Composes
-    ## orthogonally with ``column``.
-    condition*: cstring
-    ## M10 — Column-Aware Tracepoint / Logpoint: when non-empty, the
-    ## entry describes a DAP *logpoint* (tracepoint) at
-    ## ``(line, column)`` rather than a breakpoint.  The replay engine
-    ## emits a DAP ``output`` event carrying ``logMessage`` as
-    ## execution passes through the matched step and CONTINUES
-    ## without stopping.  ``""`` (the default) preserves the M1
-    ## breakpoint behaviour; the GUI keeps the same gutter marker
-    ## table for both surfaces.  Spec:
-    ## codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
-    logMessage*: cstring
-    path*: cstring
-    fun*: cstring
-    level*: int
-    id*: int
-    enabled*: bool
-    error*: bool
-
   BreakpointMenu* = ref object
     program*: int
     frame*: seq[int]
@@ -313,7 +278,11 @@ type
     lastAction*:            cstring
     cLocation*:             Location
     error*:                 DebuggerError
-    breakpointTable*: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]
+    pointStore*: JsObject
+      ## The session's `ReplayDataStore`, where its breakpoints are held
+      ## (`services/debugger_service`, Shared-DOM-Front-Ends D7.4). Opaque here
+      ## because this module cannot import the ViewModel types; the renderer
+      ## sets it when it builds the session. Nil until then.
     currentJump*: int
     stopSignal*:            RRGDBStopSignal
     frameInfo*:             FrameInfo
@@ -2223,13 +2192,6 @@ type
 
   Data* = ref object
     redraw*:                proc: void
-    onBreakpointsVerified*: proc(path: cstring; lines: seq[int])
-      ## PLAT-40: where the debugger service hands the ENGINE's answer to a
-      ## `setBreakpoints` request — the lines it verified for `path`. The
-      ## renderer installs it to call `ReplayDataStore.applyVerifiedBreakpoints`
-      ## on the ViewModel session's store, the same decoder the native
-      ## front-ends reach, so the point list holds what the engine bound.
-      ## Nil until the ViewModel session exists; the service checks.
     ipc*:                   JsObject
     config*:                Config
     lastNoInfoMessage*:     cstring
@@ -2303,13 +2265,9 @@ type
 
   PointListData* = ref object
     init*: bool
-    breakpointTable*: js
     tracepointTable*: js
-    lastBreakpoint*: int
     lastTracepoint*: int
-    breakpoints*: seq[UIBreakpoint]
     tracepoints*: JsAssoc[int, Tracepoint]
-    redrawBreakpoints*: bool
     redrawTracepoints*: bool
 
   ProblemSeverity* = enum
@@ -2550,7 +2508,6 @@ when defined(ctRenderer):
       debugger: DebuggerService(
         locals: @[],
         registerState: JsAssoc[cstring, cstring]{},
-        breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{},
         valueHistory: JsAssoc[cstring, ValueHistory()]{},
         paths: @[],
         skipInternal: true,

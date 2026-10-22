@@ -32,6 +32,10 @@ from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
   EditorVM, createEditorVM
+import ./editor_points
+from isonim/core/owner import createRoot
+from isonim/core/computation import createEffect
+from isonim/core/signals import val
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
@@ -53,6 +57,47 @@ var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
+proc applyColumnBreakpointDecorations*(self: EditorViewComponent)
+
+var disposePointWatch: proc()
+var drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
+  ## The mark each open editor's gutter last drew per line (`EditorMark`'s
+  ## ordinal), so a change to the store's rows redraws only the lines whose
+  ## mark changed.
+
+proc watchEditorPoints(store: ReplayDataStore) =
+  ## Redraw the gutter lines and the column marks of every open editor when
+  ## the session store's point rows change — the answer to a breakpoint
+  ## request arrives after the click, so the gutter follows the store rather
+  ## than the click.
+  if not disposePointWatch.isNil:
+    disposePointWatch()
+    disposePointWatch = nil
+  drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
+  createRoot proc(dispose: proc()) =
+    disposePointWatch = dispose
+    createEffect proc() =
+      let rows = store.pointList.rows.val
+      if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+        return
+      for path, editor in data.ui.editors:
+        if editor.isNil or editor.monacoEditor.isNil:
+          continue
+        var now = JsAssoc[int, int]{}
+        for r in rows:
+          if cstring(r.path) == path and r.line >= 1:
+            now[r.line] = ord(gutterMarkFor($path, r.line))
+        let before =
+          if drawnMarks.hasKey(path): drawnMarks[path] else: JsAssoc[int, int]{}
+        for line, mark in now:
+          if not before.hasKey(line) or before[line] != mark:
+            editor.refreshEditorLine(line)
+        for line, mark in before:
+          if not now.hasKey(line):
+            editor.refreshEditorLine(line)
+        drawnMarks[path] = now
+        editor.applyColumnBreakpointDecorations()
+
 proc initEditorVMFromSession*(vm: EditorVM) =
   ## Hand the pane the session's `EditorVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
@@ -65,6 +110,10 @@ proc initEditorVMFromSession*(vm: EditorVM) =
     clog "EditorVM: replacing existing instance with shared-store version"
   editorVMStore = store
   editorVMInstance = vm
+  # The gutter and the editor's breakpoint actions read and write the
+  # session store's points (`editor_points`, `sdk/breakpoints`).
+  setEditorPointStore(store)
+  watchEditorPoints(store)
   clog "EditorVM: parallel ViewModel instance created (shared store)"
 
 proc initEditorVM() =
@@ -418,18 +467,13 @@ proc applyColumnBreakpointDecorations*(self: EditorViewComponent) =
   ## ``editorLineNumber`` in ``ui/trace.nim``.
   if self.monacoEditor.isNil:
     return
-  let debuggerService = self.data.services.debugger
-  if debuggerService.isNil:
-    self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
-      self.columnBreakpointDecorations, @[])
-    return
-  let path = self.path
   var newDecorations: seq[DeltaDecoration] = @[]
-  if debuggerService.breakpointTable.hasKey(path):
+  # The session store's armed column breakpoints (`editor_points`).
+  let anchored = anchoredBreakpointsIn($self.path)
+  if anchored.len > 0:
     let textModel = self.monacoEditor.getModel()
-    for line, b in debuggerService.breakpointTable[path]:
-      if b.column <= 0 or not b.enabled:
-        continue
+    for b in anchored:
+      let line = b.line
       var column = b.column
       var endColumn = column + 1
       # Clamp to the actual line length so the marker never extends
@@ -461,12 +505,11 @@ proc setColumnBreakpoint*(
     tabInfo: TabInfo;
     line: int;
     column: int) =
-  ## M6 — invoke the column-aware breakpoint path on the underlying
-  ## ``DebuggerService`` and refresh the editor row so the gutter dot
-  ## and the new column-anchored decoration both render.
-  self.data.services.debugger.addColumnBreakpoint(tabInfo.name, line, column)
-  self.applyColumnBreakpointDecorations()
-  self.refreshEditorLine(line)
+  ## M6 — a breakpoint anchored at the column, through the session's one
+  ## breakpoint producer (`sdk/breakpoints`). The gutter dot and the
+  ## column-anchored decoration follow the store's rows
+  ## (`watchEditorPoints`).
+  setAnchoredBreakpoint(editorPointStore(), $tabInfo.name, line, column)
 
 
 proc lineActionClickAt*(
@@ -499,8 +542,7 @@ proc lineActionClickAt*(
   of ColumnAwareClick:
     self.setColumnBreakpoint(tabInfo, resolution.line, resolution.column)
   of GutterClick:
-    self.data.services.debugger.toggleBreakpoint(tabInfo.name, resolution.line)
-    self.refreshEditorLine(resolution.line)
+    toggleBreakpoint(editorPointStore(), $tabInfo.name, resolution.line)
 
 
 proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
@@ -513,8 +555,7 @@ proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
 
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    self.data.services.debugger.toggleBreakpoint(tabInfo.name, lineNumber)
-    self.refreshEditorLine(lineNumber)
+    toggleBreakpoint(editorPointStore(), $tabInfo.name, lineNumber)
 
 proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
   # PLAT-50: THE PARENT'S DATASET IS READ AFTER MOVING TO IT, as
@@ -532,12 +573,12 @@ proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js
     dataset = element.dataset
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    let path = tabInfo.name
-    if self.data.services.debugger.isEnabled(path, lineNumber):
-      self.data.services.debugger.disable(path, lineNumber)
-    else:
-      self.data.services.debugger.enable(path, lineNumber)
-    self.refreshEditorLine(lineNumber)
+    let path = $tabInfo.name
+    let held = breakpointOn(path, lineNumber)
+    # An empty slot does nothing (`isGutterToggleTarget`): no row, no request.
+    if held.isSome:
+      discard setBreakpointEnabled(editorPointStore(), path, lineNumber,
+                                   not held.get.enabled)
 
 proc isGutterToggleTarget(target: js): bool =
   ## Whether a right click on `target` is the gutter's enable / disable toggle
@@ -557,13 +598,9 @@ proc isGutterToggleTarget(target: js): bool =
   ##
   ## Matching it gives "does nothing" from the two listeners as they are:
   ## Monaco's menu stands down, and the container listener's
-  ## `lineActionContextMenu` changes nothing. With no breakpoint on the line
-  ## `DebuggerService.isEnabled` answers false, so it calls
-  ## `DebuggerService.enable`, which acts only on a line `breakpointTable`
-  ## already holds: no entry is added and no `dapSetBreakpoints` is sent. The
-  ## `refreshEditorLine` after it adds and removes a zero-height view zone to
-  ## make Monaco redraw the line, which draws the same placeholder again. The
-  ## class is drawn only by `trace.editorLineNumber`, in the gutter, so no
+  ## `lineActionContextMenu` changes nothing: with no breakpoint on the line
+  ## the store holds no row for it, so nothing is planned and nothing is sent.
+  ## The class is drawn only by `trace.editorLineNumber`, in the gutter, so no
   ## surface where the menu should open carries it.
   ##
   ## NOT THE LINE NUMBER. `gutter-line` is the element holding the line's
@@ -1735,30 +1772,28 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # beside it.
     #
     # Delete/Add Breakpoint Menu Item
-    if data.services.debugger.hasBreakpoint(path, line):
+    let held = breakpointOn($path, line)
+    if held.isSome:
       toggleBreakpoint = ContextMenuItem(
         name: "Delete breakpoint",
         hint: "<click on the red dot>",
         handler: proc(e: Event) =
-          self.data.services.debugger.deleteBreakpoint(path, line)
-          self.refreshEditorLine(line)
+          discard deleteBreakpoint(editorPointStore(), $path, line)
       )
       # Enable/Disable Breakpoint
-      if data.services.debugger.isEnabled(path, line):
+      if held.get.enabled:
         toggleBreakpointState = ContextMenuItem(
           name: "Disable breakpoint",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.disable(path, line)
-            self.refreshEditorLine(line)
+            discard setBreakpointEnabled(editorPointStore(), $path, line, false)
         )
       else:
         toggleBreakpointState = ContextMenuItem(
           name: "Enable breakpoint",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.enable(path, line)
-            self.refreshEditorLine(line)
+            discard setBreakpointEnabled(editorPointStore(), $path, line, true)
         )
 
       contextMenu &= toggleBreakpointState
@@ -1769,47 +1804,31 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         name: "Add breakpoint",
         hint: "<click line number gutter>",
         handler: proc(e: Event) =
-          data.services.debugger.addBreakpoint(path, line)
-          self.refreshEditorLine(line)
+          toggleBreakpoint(editorPointStore(), $path, line)
       )
 
     contextMenu &= toggleBreakpoint
 
-    # Delete Breakpoints in file
-    #
-    # "IN FILE" IS NOW TRUE OF BOTH HALVES OF THIS ENTRY.  It used to be true
-    # of neither: the row appeared whenever the PROJECT held a breakpoint, and
-    # its handler walked every breakpoint in the project passing `path` — this
-    # file's path — to `deleteBreakpoint`, so a breakpoint at line 40 of
-    # another file deleted whatever this file had at line 40 and left the other
-    # one standing.  It also called `pointList.breakpoints.delete(i, i)` while
-    # walking indices taken from a copy of that same seq, so after the first
-    # removal every index was off by one.
-    let breakpointsInFile = data.pointList.breakpoints.filterIt(it.path == path)
-    if breakpointsInFile.len > 0:
+    # Delete Breakpoints in file: offered when THIS file holds one, and it
+    # deletes this file's breakpoints only.
+    if breakpointsInFile($path).len > 0:
       deleteBreakpoints = ContextMenuItem(
         name: "Delete breakpoints in file",
         hint: "",
+        # One `setBreakpoints` with none for this file (`clearBreakpoints`).
         handler: proc(e: Event) =
-          # `deleteBreakpoint` maintains `pointList.breakpoints` itself, so the
-          # lines are collected FIRST and this loop never mutates what it reads.
-          for b in data.pointList.breakpoints.filterIt(it.path == path):
-            data.services.debugger.deleteBreakpoint(path, b.line)
-            self.refreshEditorLine(b.line)
+          clearBreakpoints(editorPointStore(), $path)
       )
 
       contextMenu &= deleteBreakpoints
 
     # Delete ALL Breakpoints in project
-    if data.pointList.breakpoints.len > 0:
+    if anyBreakpoints():
       deleteAllBreakpoints = ContextMenuItem(
         name: "Delete ALL breakpoints",
         hint: "",
-        # `deleteAllBreakpoints` empties `pointList.breakpoints` itself now, so
-        # the assignment that used to be here was masking the index corruption
-        # inside it rather than finishing its work.
         handler: proc(e: Event) =
-          data.services.debugger.deleteAllBreakpoints(self)
+          clearBreakpoints(editorPointStore())
       )
 
       contextMenu &= deleteAllBreakpoints
