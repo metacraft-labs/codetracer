@@ -267,8 +267,10 @@ proc settle(): Future[void] =
 # Attaching asks nothing: the store has no stop yet.
 let bootRequests = localsRequests().len
 
-var caseName = ""
+var caseName = "the session attaches to the trace"
+  ## Until the first section begins, a failure is the setup's.
 var caseFailuresBefore = 0
+var caseOpen = false
 
 proc beginCase(name: string) =
   ## The checks below are ONE async walk (the stop loader applies an answer
@@ -277,8 +279,10 @@ proc beginCase(name: string) =
   ## a mutation harness naming its killer case — finds it as any other case.
   caseName = name
   caseFailuresBefore = failedChecks
+  caseOpen = true
 
 proc endCase() =
+  caseOpen = false
   echo (if failedChecks == caseFailuresBefore: "  [OK] " else: "  [FAILED] ") &
        caseName
 
@@ -488,10 +492,28 @@ proc sessionChecks() {.async.} =
 
 # A section that RAISES (an index past what a broken sender sent) fails by
 # its name, as a `unittest` case that raised would, instead of leaving the
-# run with no verdict for it.
+# run with no verdict for it. So does one whose senders raise where nothing
+# awaits them (a rejected promise no one handles), which node would
+# otherwise end the run on before any verdict is written.
+proc failRunningCase(how: string) =
+  ## Inside a section the failure is one of its checks, reported once by
+  ## `endCase`; outside one (the setup, or a section that never ends) it is
+  ## reported here.
+  echo "    ", how
+  inc failedChecks
+  if not caseOpen:
+    echo "  [FAILED] ", caseName
+  {.emit: "process.exitCode = 1;".}
+
+proc onUnhandledRejection(handler: proc(reason: JsObject))
+    {.importjs: "process.on('unhandledRejection', #)".}
+
+onUnhandledRejection(proc(reason: JsObject) =
+  discard reason
+  failRunningCase("a promise nothing awaits was rejected"))
+
 discard sessionChecks().catch(
   proc(e: Error) =
     discard e
-    echo "    the section raised"
-    echo "  [FAILED] ", caseName
-    {.emit: "process.exitCode = 1;".})
+    caseOpen = false
+    failRunningCase("the section raised"))
