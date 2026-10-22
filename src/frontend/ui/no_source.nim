@@ -14,10 +14,9 @@
 ##    ``editorComponent-{id}`` placeholder.
 ## 3. ``renderNoSourceShellDirect`` replaces that placeholder with the
 ##    stable ``<div id="no-source-{id}" class="unknown-location">``
-##    shell and asks ``tryMountIsoNimNoSourcePanel`` to mount the
-##    IsoNim ``renderNoSourcePanel`` view inside it.  The mount runs
-##    once per component id; subsequent renders are driven by the VM's
-##    reactive signals.
+##    shell and mounts the IsoNim ``renderNoSourcePanel`` view inside it,
+##    synchronously: the shell it has just inserted is the host.
+##    Subsequent renders are driven by the VM's reactive signals.
 ## 4. Callers feed live data into the VM via ``syncNoSourceVM``.
 
 import
@@ -30,7 +29,6 @@ from ../rr_gdb import RRGDBStopSignal
 # ViewModel layer — IsoNim is the primary renderer for the no-source panel.
 # ---------------------------------------------------------------------------
 import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   NoSourceLocationInfo, NoSourceHistoryInfo
@@ -43,19 +41,10 @@ const
   NO_CODE = -1
   NO_PATH = ""
 
-# Shared ViewModel instance.  Created once via ``initNoSourceVMFromSession``
-# from ``ui_js.configureMiddleware`` so the panel uses the real DapApi
-# backend.  A stub-backed lazy fallback is also provided so unit tests
-# and early-render paths can still construct the panel.
+# The session's ViewModel, handed over by ``initNoSourceVMFromSession`` from
+# ``ui_js.configureMiddleware``.
 var noSourceVMInstance*: NoSourceVM
 var noSourceVMStore: ReplayDataStore
-# Track which NoSourceComponent ids have already mounted their IsoNim
-# view.  The shell ``<div>`` is keyed by ``self.id`` so each editor
-# tab that hosts a no-source view gets its own mount.  The map is
-# only meaningful on the JS backend (the shell only mounts in real
-# DOM); we still declare it unconditionally so the rest of the file
-# stays platform-neutral.
-var isoNimNoSourceMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
 
 proc asmLoad(self: EditorService, location: types.Location): Future[Instructions] {.async.} =
   var name = cstring""
@@ -139,55 +128,6 @@ proc syncNoSourceVM*(self: NoSourceComponent) =
 # ---------------------------------------------------------------------------
 
 when defined(js):
-  proc tryMountIsoNimNoSourcePanel*(self: NoSourceComponent) =
-    ## Mount the IsoNim no-source view into the Karax-materialised
-    ## ``<div id="no-source-{id}">`` shell.  Idempotent per component
-    ## id; subsequent renders are reactive and do not require Karax to
-    ## re-run.
-    ##
-    ## ``method render`` calls this synchronously while Karax is still
-    ## computing the VDOM, so the shell ``<div>`` may not yet be in
-    ## the live DOM tree.  The proc retries via ``setTimeout`` until
-    ## the container appears.
-    if noSourceVMInstance.isNil:
-      return
-    let key = cstring("no-source-" & $self.id)
-    let componentId = self.id
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimNoSourceMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      # Tear down anything Karax may have left behind in the container
-      # (defensive — the shell render emits no children, but avoid
-      # double-mounting the IsoNim subtree if the proc is called
-      # twice).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimNoSourceMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      mountIsoNimNoSource(container, noSourceVMInstance)
-      syncNoSourceVM(self)
-
-    doMount()
-
   proc renderNoSourceShellDirect*(self: NoSourceComponent;
                                   placeholder: dom_api.Element) =
     ## Materialise the no-source shell through direct DOM and IsoNim.
@@ -212,7 +152,9 @@ when defined(js):
       dom_api.Node(shell),
       dom_api.Node(placeholder))
 
-    self.tryMountIsoNimNoSourcePanel()
+    # The shell is the host, and it exists now: mount the view into it.
+    if not noSourceVMInstance.isNil:
+      mountIsoNimNoSource(shell, noSourceVMInstance)
 # ---------------------------------------------------------------------------
 # VM lifecycle hooks called from ui_js.configureMiddleware.
 # ---------------------------------------------------------------------------
@@ -222,41 +164,7 @@ proc initNoSourceVMFromSession*(vm: NoSourceVM) =
   ## `initializePanelViewModels` built on the session's store, so every
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created before the session
-  ## was available), it is replaced so the panel uses the real backend.
   let store = vm.store
-  if noSourceVMInstance != nil:
-    # Clear the per-id mount table so the next render re-mounts the
-    # panel against the new VM.  ``JsAssoc`` does not provide
-    # ``clear``; reassigning to a fresh empty assoc is the idiomatic
-    # equivalent.
-    isoNimNoSourceMountedIds = JsAssoc[int, bool]{}
   noSourceVMStore = store
   noSourceVMInstance = vm
-  clog "NoSourceVM: parallel ViewModel instance created (shared store)"
-
-proc initNoSourceVM*() =
-  ## Lazy fallback used when no shared store has been provided yet
-  ## (e.g. in the VS Code extension where the SessionViewModel is not
-  ## wired before the first render).  Same shape as ``initStateVM``.
-  if noSourceVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  noSourceVMStore = createReplayDataStore(stubBackend)
-  noSourceVMInstance = createNoSourceVM(noSourceVMStore)
-  clog "NoSourceVM: parallel ViewModel instance created (stub backend)"
+  clog "NoSourceVM: the session's instance installed"

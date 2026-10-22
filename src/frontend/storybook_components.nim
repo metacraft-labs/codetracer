@@ -1462,7 +1462,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
   let r = WebRenderer()
   case name
   of "session-tabs":
-    appendRendered(container, renderSessionTabsPanel(r, @[
+    appendRendered(container, renderSessionTabsPanel[WebRenderer, isonim_dom.Element](r, @[
       SessionTabRecord(label: "noir-space-ship"),
       SessionTabRecord(label: "sudoku"),
     ], 0))
@@ -1478,7 +1478,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
                      nameWidth: 18),
     ])
     let menuHost = createHost(container, "div", "menu")
-    renderMenuShellInto(r, menuHost, MenuShellModel(
+    renderMenuShellInto[WebRenderer, isonim_dom.Element](r, menuHost, MenuShellModel(
       showNavigation: true, active: true, searchQuery: "",
       rootNodes: @[fileNode, debugNode],
       showWindowMenu: true,
@@ -1502,7 +1502,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
       showNotifications: fixture == "history",
     ))
   of "debug-shell":
-    appendRendered(container, renderDebugChromePanel(r, 3))
+    appendRendered(container, renderDebugChromePanel[WebRenderer, isonim_dom.Element](r, 3))
   of "auto-hide-bottom-strip":
     # The fixture renders the *live* bottom-strip view. It used to render
     # `isonim_auto_hide_bottom_tabs_view`, a second bottom-tabs renderer that
@@ -1526,17 +1526,17 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
       AutoHideBottomStripRecord(title: "Build", active: false),
     ])
   of "auto-hide-collapsed-icons":
-    appendRendered(container, renderAutoHideCollapsedIconsPanel(r, @[
+    appendRendered(container, renderAutoHideCollapsedIconsPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideCollapsedIconRecord(title: "Calltrace", icon: "C"),
       AutoHideCollapsedIconRecord(title: "State", icon: "S"),
     ]))
   of "auto-hide-overlay-tabs":
-    appendRendered(container, renderAutoHideOverlayTabsPanel(r, @[
+    appendRendered(container, renderAutoHideOverlayTabsPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideOverlayTabRecord(title: "Calltrace", active: true),
       AutoHideOverlayTabRecord(title: "State", active: false),
     ], true, " side-tabs-left"))
   of "auto-hide-side-strip":
-    appendRendered(container, renderAutoHideSideStripPanel(r, @[
+    appendRendered(container, renderAutoHideSideStripPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideSideStripRecord(title: "Calltrace"),
       AutoHideSideStripRecord(title: "State"),
     ], fixture == "collapsed"))

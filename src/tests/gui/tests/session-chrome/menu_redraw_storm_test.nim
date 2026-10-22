@@ -170,7 +170,7 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
     # the loss of node identity instead of measuring it.)
     let r = MockRenderer()
     if sim.preserveHost:
-      renderMenuShellInto(r, sim.shell, model)
+      renderMenuShellInto[MockRenderer, MockNode](r, sim.shell, model)
     elif sim.detachAndRestore:
       # THE FIRST ATTEMPT AT THE FIX, kept because it is the arm for "never
       # detached": the same node is carried across, but it is taken OUT of the
@@ -182,7 +182,7 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
       if not carried.isNil:
         r.removeChild(sim.shell, carried)
       r.clearChildren(sim.shell)
-      let fresh = renderMenuShell(r, model)
+      let fresh = renderMenuShell[MockRenderer, MockNode](r, model)
       let moving = fresh.children
       for child in moving:
         if not carried.isNil and
@@ -198,7 +198,7 @@ proc redraw(sim: MenuChromeSim; model: MenuShellModel;
       # production proc, because production has no such flag and must not grow
       # one for a test.
       r.clearChildren(sim.shell)
-      let fresh = renderMenuShell(r, model)
+      let fresh = renderMenuShell[MockRenderer, MockNode](r, model)
       let moving = fresh.children
       for child in moving:
         r.appendChild(sim.shell, child)

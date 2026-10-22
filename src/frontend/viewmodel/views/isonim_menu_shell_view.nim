@@ -6,8 +6,12 @@
 
 import std/[strutils, tables]
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -240,10 +244,12 @@ proc menuItemClass*(node: MenuNodeRecord): string =
   if not node.enabled:
     result.add " ct-menu-item--disabled"
 
-template renderMenuShellImpl(
-    r: untyped;
+proc renderMenuShell*[R, N](
+    r: R;
     model: MenuShellModel;
-    callbacks: MenuShellCallbacks): untyped =
+    callbacks: MenuShellCallbacks = MenuShellCallbacks()): N =
+  ## The menu shell, for every renderer. `model` is a value; the host redraws
+  ## through `renderMenuShellInto`, so the loops below run once per render.
   ui(r):
     tdiv(id = "menu", class = MenuShellRootClass):
       if model.showNavigation:
@@ -395,12 +401,6 @@ template renderMenuShellImpl(
               onclick = proc() = callbacks.invokeClose()):
             discard
 
-proc renderMenuShell*(
-    r: MockRenderer;
-    model: MenuShellModel;
-    callbacks: MenuShellCallbacks = MenuShellCallbacks()): MockNode =
-  renderMenuShellImpl(r, model, callbacks)
-
 # ---------------------------------------------------------------------------
 # Rebuilding the shell around a host that must NOT be rebuilt
 # ---------------------------------------------------------------------------
@@ -500,13 +500,6 @@ proc menuShellMoveChildrenAround(
       r.insertBefore(destination, child, anchor)
 
 when defined(js):
-  proc renderMenuShell*(
-      r: WebRenderer;
-      model: MenuShellModel;
-      callbacks: MenuShellCallbacks = MenuShellCallbacks()):
-        isonim_dom.Element =
-    renderMenuShellImpl(r, model, callbacks)
-
   proc menuShellFindChild(r: WebRenderer; parent: isonim_dom.Element;
                           id: string): isonim_dom.Element =
     var child = isonim_dom.Node(parent).firstChild
@@ -572,42 +565,28 @@ when defined(js):
 # already see at its definition site, so a template declared above the
 # `when defined(js)` block would resolve `menuShellFindChild` and friends to
 # the mock ones and fail to compile for the web.
-template renderMenuShellIntoImpl(
-    r: untyped;
-    container: untyped;
+proc renderMenuShellInto*[R, N](
+    r: R;
+    container: N;
     model: MenuShellModel;
-    callbacks: MenuShellCallbacks): untyped =
+    callbacks: MenuShellCallbacks = MenuShellCallbacks()) =
+  ## Render the menu shell into `container`, keeping the debugger toolbar's
+  ## host (`DebugControlsHostId`) in the document if it is already there.
+  ## The helpers it uses are per renderer: they walk and move the host's
+  ## children, which a renderer exposes in its own way.
+  mixin menuShellFindChild, menuShellIsNilNode, menuShellClearExcept,
+        menuShellMoveChildren, menuShellMoveChildrenAround
   let preservedHost = menuShellFindChild(r, container, DebugControlsHostId)
   let hasPreserved = not menuShellIsNilNode(preservedHost)
-  # NB: only the shell's *children* reach the caller's host; the wrapper the
-  # render produced is discarded.  A class set on it never reaches the
-  # document, so the caption-bar host classes are owned by `ui/menu.nim`
-  # instead — it also has to track fullscreen, which no render pass knows
-  # about.
   if hasPreserved:
     # THE HOST NEVER LEAVES THE DOCUMENT. Everything around it is removed and
     # the new siblings are inserted before and after it, rather than the host
     # being detached and put back — see the header for why a detach that is
     # immediately undone is still enough to lose a press.
     menuShellClearExcept(r, container, preservedHost)
-    let shell = renderMenuShell(r, model, callbacks)
+    let shell = renderMenuShell[R, N](r, model, callbacks)
     menuShellMoveChildrenAround(r, container, shell, preservedHost)
   else:
     r.clearChildren(container)
-    let shell = renderMenuShell(r, model, callbacks)
+    let shell = renderMenuShell[R, N](r, model, callbacks)
     menuShellMoveChildren(r, container, shell)
-
-proc renderMenuShellInto*(
-    r: MockRenderer;
-    container: MockNode;
-    model: MenuShellModel;
-    callbacks: MenuShellCallbacks = MenuShellCallbacks()) =
-  renderMenuShellIntoImpl(r, container, model, callbacks)
-
-when defined(js):
-  proc renderMenuShellInto*(
-      r: WebRenderer;
-      container: isonim_dom.Element;
-      model: MenuShellModel;
-      callbacks: MenuShellCallbacks = MenuShellCallbacks()) =
-    renderMenuShellIntoImpl(r, container, model, callbacks)

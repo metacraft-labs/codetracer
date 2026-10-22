@@ -129,7 +129,7 @@ suite "SB-1: the indicator in the status bar's DOM":
     ## render-stability spec and the two visibility guards seeing the DOM they
     ## were written against.
     let r = MockRenderer()
-    let shell = renderStatusShell(r, baseShell())
+    let shell = renderStatusShell[MockRenderer, MockNode](r, baseShell())
     check findByClassOrNil(shell, "test-certificate-status") == nil
     check findByClassOrNil(shell, "test-certificate-disclosure") == nil
     # And the projection of a nil ViewModel is what produces that.
@@ -144,7 +144,7 @@ suite "SB-1: the indicator in the status bar's DOM":
     for state in [cisNoCertificates, cisCertified, cisNotCertified,
                   cisWasCertified, cisUnverifiable]:
       let r = MockRenderer()
-      let shell = renderStatusShell(r, baseShell(modelFor(state)))
+      let shell = renderStatusShell[MockRenderer, MockNode](r, baseShell(modelFor(state)))
       let node = findByClass(shell, "test-certificate-status")
       let label = findByClass(node, "test-certificate-label")
       checkpoint $state & " -> '" & textOf(label) & "'"
@@ -173,7 +173,7 @@ suite "SB-1: the indicator in the status bar's DOM":
     check notCertified.stateClass != unverifiable.stateClass
 
     let r = MockRenderer()
-    let shell = renderStatusShell(r, baseShell(unverifiable))
+    let shell = renderStatusShell[MockRenderer, MockNode](r, baseShell(unverifiable))
     let node = findByClass(shell, "test-certificate-status")
     check node.hasClass("test-certificate-unverifiable")
     check not node.hasClass("test-certificate-not-certified")
@@ -184,7 +184,7 @@ suite "SB-1: the indicator in the status bar's DOM":
     ## "Certified" to a wrong conclusion, so it is where the sentence has to be.
     let certified = modelFor(cisCertified)
     let r = MockRenderer()
-    let shell = renderStatusShell(r, baseShell(certified))
+    let shell = renderStatusShell[MockRenderer, MockNode](r, baseShell(certified))
     let title = findByClass(shell, "test-certificate-status")
       .attributes.getOrDefault("title")
     checkpoint title
@@ -196,11 +196,11 @@ suite "SB-1: the indicator in the status bar's DOM":
     ## or replace the user's layout." Rendered as a CHILD of the indicator's own
     ## span, so there is no layout slot involved to disturb.
     let closed = MockRenderer()
-    let closedShell = renderStatusShell(closed, baseShell(modelFor(cisCertified)))
+    let closedShell = renderStatusShell[MockRenderer, MockNode](closed, baseShell(modelFor(cisCertified)))
     check findByClassOrNil(closedShell, "test-certificate-disclosure") == nil
 
     let opened = MockRenderer()
-    let openedShell = renderStatusShell(
+    let openedShell = renderStatusShell[MockRenderer, MockNode](
       opened, baseShell(modelFor(cisCertified, disclosed = true)))
     let indicator = findByClass(openedShell, "test-certificate-status")
     # Found from the INDICATOR, not from the shell: this is the assertion that
@@ -213,7 +213,7 @@ suite "SB-1: the indicator in the status bar's DOM":
 
   test "the disclosure names framework, targets, platform and the record":
     let r = MockRenderer()
-    let shell = renderStatusShell(
+    let shell = renderStatusShell[MockRenderer, MockNode](
       r, baseShell(modelFor(cisCertified, disclosed = true)))
     let rows = findAllByClass(shell, "test-certificate-row")
     check rows.len == 3
@@ -233,20 +233,20 @@ suite "SB-1: the indicator in the status bar's DOM":
     ## keeping unverifiable apart from not-certified, so the remedy must reach
     ## the surface — and a certified state must not invent one.
     let stale = MockRenderer()
-    let staleShell = renderStatusShell(
+    let staleShell = renderStatusShell[MockRenderer, MockNode](
       stale, baseShell(modelFor(cisWasCertified, disclosed = true)))
     check textOf(findByClass(staleShell, "test-certificate-remedy")) ==
       RunTheTestsRemedy
 
     let good = MockRenderer()
-    let goodShell = renderStatusShell(
+    let goodShell = renderStatusShell[MockRenderer, MockNode](
       good, baseShell(modelFor(cisCertified, disclosed = true)))
     check findByClassOrNil(goodShell, "test-certificate-remedy") == nil
 
   test "selecting the indicator invokes the callback":
     var selected = 0
     let r = MockRenderer()
-    let shell = renderStatusShell(
+    let shell = renderStatusShell[MockRenderer, MockNode](
       r, baseShell(modelFor(cisCertified)),
       StatusShellCallbacks(onSelectCertificate: proc() = inc selected))
     findByClass(shell, "test-certificate-status").fireEvent("click")
@@ -300,7 +300,7 @@ suite "SB-1: the indicator in the status bar's DOM":
     for (model, text) in [(uncommitted, "Certified, uncommitted"),
                           (changed, "Changed since certified")]:
       let r = MockRenderer()
-      let shell = renderStatusShell(r, baseShell(model))
+      let shell = renderStatusShell[MockRenderer, MockNode](r, baseShell(model))
       let node = findByClass(shell, "test-certificate-status")
       check textOf(findByClass(node, "test-certificate-label")) == text
       let title = node.attributes.getOrDefault("title")
@@ -325,7 +325,7 @@ suite "SB-1: the indicator in the status bar's DOM":
     ## path itself is `when defined(js)` and needs a real DOM.
     proc rendered(model: StatusCertificateModel): string =
       let r = MockRenderer()
-      let shell = renderStatusShell(r, baseShell(model))
+      let shell = renderStatusShell[MockRenderer, MockNode](r, baseShell(model))
       let node = findByClassOrNil(shell, "test-certificate-status")
       if node == nil: return "<absent>"
       result = node.attributes.getOrDefault("class") & "\x1f" &

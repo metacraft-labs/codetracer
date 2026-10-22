@@ -35,7 +35,7 @@ proc findAllByClass(node: MockNode; cls: string): seq[MockNode] =
 suite "Caption session tabs overflow":
   test "menu shell owns the flex-row session-tab host":
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(showNavigation: true, showWindowMenu: true))
 
@@ -47,7 +47,7 @@ suite "Caption session tabs overflow":
 
   test "visible tabs stop at the supplied min-width capacity":
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),
@@ -77,7 +77,7 @@ suite "Caption session tabs overflow":
       visibleTabCount = 1) == @[4]
 
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),
@@ -100,7 +100,7 @@ suite "Caption session tabs overflow":
   test "overflow menu items can select tabs hidden from the bar":
     var selected: seq[int] = @[]
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),

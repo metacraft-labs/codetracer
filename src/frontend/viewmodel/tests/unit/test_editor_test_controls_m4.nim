@@ -168,7 +168,7 @@ suite "ct-test editor controls M4":
     check plan.controls[1].line == 24
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     let controls = nodesByAttr(dom, "data-ct-test-control", "true")
     check controls.len == 2
     check controls[0].attr("data-ct-test-line") == "12"
@@ -195,7 +195,7 @@ suite "ct-test editor controls M4":
       elmDiagnostic]
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     let control = firstByAttr(dom, "data-ct-test-control", "true")
     check control.attr("data-ct-test-gutter-slot") == "secondary"
     check control.attr("data-ct-test-collision-markers") ==
@@ -215,7 +215,7 @@ suite "ct-test editor controls M4":
     check plan.controls[0].surface == etcsAboveLine
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     check dom.attr("data-ct-test-scroll-anchor-before") == "42"
     check dom.attr("data-ct-test-scroll-anchor-after") == "42"
 
@@ -229,7 +229,7 @@ suite "ct-test editor controls M4":
     check plan.controls.len == 0
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     check nodesByAttr(dom, "data-ct-test-control", "true").len == 0
 
   test "both_placement_renders_gutter_and_above_line_surfaces":
@@ -244,7 +244,7 @@ suite "ct-test editor controls M4":
     check plan.controls[1].surface == etcsAboveLine
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     check nodesByAttr(dom, "data-ct-test-surface", "gutter").len == 1
     check nodesByAttr(dom, "data-ct-test-surface", "above-line").len == 1
 
@@ -259,7 +259,7 @@ suite "ct-test editor controls M4":
       EditorTestControlSettings(placement: etcpAboveLine))
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     let run = firstByAttr(dom, "data-ct-test-action", "run")
     let record = firstByAttr(dom, "data-ct-test-action", "record")
     let openLastTrace = firstByAttr(
@@ -287,7 +287,7 @@ suite "ct-test editor controls M4":
       EditorTestControlSettings(placement: etcpBoth))
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     for surface in ["gutter", "above-line"]:
       let surfaceControls = nodesByAttr(dom, "data-ct-test-surface", surface)
       check surfaceControls.len == 1
@@ -311,7 +311,7 @@ suite "ct-test editor controls M4":
     let editor = createEditorVM(store)
     let r = MockRenderer()
 
-    let defaultDom = r.renderEditorContainer(
+    let defaultDom = renderEditorContainer[MockRenderer, MockNode](r,
       editor, 0, FileA, isExpansion = false, expansionDepth = 0)
     check nodesByAttr(defaultDom, "data-ct-test-controls", "true").len == 0
 
@@ -329,7 +329,7 @@ suite "ct-test editor controls M4":
         gutterSlot: etgsPrimary,
         collisionMarkers: @[],
         actions: @[])])
-    let disabledDom = r.renderEditorContainer(
+    let disabledDom = renderEditorContainer[MockRenderer, MockNode](r,
       editor, 0, FileA, isExpansion = false, expansionDepth = 0,
       testControls = staleDisabledPlan)
     check nodesByAttr(disabledDom, "data-ct-test-controls", "true").len == 0
@@ -353,7 +353,7 @@ suite "ct-test editor controls M4":
       EditorTestControlSettings(placement: etcpAboveLine))
 
     let r = MockRenderer()
-    let dom = r.renderEditorTestControls(plan)
+    let dom = renderEditorTestControls[MockRenderer, MockNode](r, plan)
     let openLastTrace = firstByAttr(
       dom, "data-ct-test-action", "open-last-trace")
     let status = firstByAttr(dom, "data-ct-test-action", "status")

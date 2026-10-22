@@ -46,6 +46,9 @@ when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_editor_view import renderEditorPanel
+  # The generic view expands the DSL here.
+  import isonim/core/computation
+  import isonim/dsl/components
 # The IsoNim editor view owns direct editor containers for top-level and
 # expansion editors; Monaco still manages the container's internal DOM.
 
@@ -4026,7 +4029,7 @@ when defined(js):
       return host
 
     let r = WebRenderer()
-    let panel = renderEditorPanel(
+    let panel = renderEditorPanel[WebRenderer, dom_api.Element](
       r,
       editorVMInstance,
       self.id,
@@ -4151,7 +4154,7 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
 
   if dom_api.getAttribute(host, cstring"data-isonim-editor-host") != cstring"true":
     let r = WebRenderer()
-    let panel = renderEditorPanel(
+    let panel = renderEditorPanel[WebRenderer, dom_api.Element](
       r,
       editorVMInstance,
       self.id,

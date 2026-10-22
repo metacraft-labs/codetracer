@@ -2,11 +2,15 @@
 ##
 ## State derivation and legacy side effects stay in ``ui/status.nim``; this
 ## module owns the DOM structure for the shared ``#status`` host and exposes a
-## MockRenderer/WebRenderer-compatible surface for focused structure tests.
+## generic view (`renderStatusShell[R, N]`) rendered under every renderer.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import jsffi
@@ -277,10 +281,13 @@ proc statusStructureSignature*(model: StatusShellModel): string =
     for notification in model.notificationHistory:
       result.add("\x1e" & notificationSignature(notification))
 
-template renderStatusShellImpl(
-    r: untyped;
+proc renderStatusShell*[R, N](
+    r: R;
     model: StatusShellModel;
-    callbacks: StatusShellCallbacks): untyped =
+    callbacks: StatusShellCallbacks = StatusShellCallbacks()): N =
+  ## The status bar shell, for every renderer. `model` is a value: the host
+  ## redraws on a structural change and patches values in place otherwise
+  ## (`renderStatusInto`), so the loops below run once per render.
   ui(r):
     tdiv(id = "status", class = StatusRootClass):
       tdiv(
@@ -500,12 +507,6 @@ template renderStatusShellImpl(
                     callbacks.invokeSendBugReport("", "")):
                 text "Send report"
 
-proc renderStatusShell*(
-    r: MockRenderer;
-    model: StatusShellModel;
-    callbacks: StatusShellCallbacks = StatusShellCallbacks()): MockNode =
-  renderStatusShellImpl(r, model, callbacks)
-
 when defined(js):
   proc inputValue(node: isonim_dom.Element): cstring {.importjs: "(#.value || '')".}
   proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
@@ -538,13 +539,6 @@ when defined(js):
         proc(ev: isonim_dom.Event) =
           if ev.isCtrlEnter():
             sendBugReportFromDom(callbacks))
-
-  proc renderStatusShell*(
-      r: WebRenderer;
-      model: StatusShellModel;
-      callbacks: StatusShellCallbacks = StatusShellCallbacks()):
-        isonim_dom.Element =
-    renderStatusShellImpl(r, model, callbacks)
 
   proc querySelectorIn(
       root: isonim_dom.Element;
@@ -674,7 +668,8 @@ when defined(js):
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
-    let shell = renderStatusShell(r, model, callbacks)
+    let shell = renderStatusShell[WebRenderer, isonim_dom.Element](
+      r, model, callbacks)
     let shellNode = isonim_dom.Node(shell)
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)

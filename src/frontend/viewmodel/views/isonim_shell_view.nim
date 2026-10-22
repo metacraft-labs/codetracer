@@ -3,9 +3,7 @@
 ## IsoNim DOM-rendering view for the Shell / REPL panel.
 ##
 ## Renders a live, reactive DOM tree driven by `ShellVM` signals.
-## Both renderer overloads (Mock and Web) produce the same structure,
-## hoisted into a single template that is materialised into one
-## concrete proc per renderer.
+## One generic proc renders it under every renderer.
 ##
 ## Structure:
 ##   div.shell-component
@@ -18,7 +16,11 @@
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -58,9 +60,10 @@ proc historyIndicatorVisible(vm: ShellVM): bool =
 # Panel template
 # ---------------------------------------------------------------------------
 
-template renderShellPanelImpl(r, vm, rootClass: untyped): untyped =
+proc renderShellPanel*[R, N](r: R; vm: ShellVM): N =
+  ## The Shell panel, for every renderer.
   ui(r):
-    tdiv(class = rootClass):
+    tdiv(class = "shell-component isonim-shell"):
       tdiv(class = "shell-input-row"):
         span(class = "shell-prompt"):
           text "$ "
@@ -76,23 +79,15 @@ template renderShellPanelImpl(r, vm, rootClass: untyped): untyped =
         text historyIndicatorText(vm)
 
 # ---------------------------------------------------------------------------
-# Renderer overloads
+# The browser's mount
 # ---------------------------------------------------------------------------
-
-proc renderShellPanel*(r: MockRenderer; vm: ShellVM): MockNode =
-  renderShellPanelImpl(r, vm, "shell-component")
 
 when defined(js):
   when defined(ctHmr):
-    proc renderShellPanel*(r: WebRenderer; vm: ShellVM): isonim_dom.Element {.uiComponent.} =
-      ## The `{.uiComponent.}` pragma registers a slot keyed by this
-      ## proc's source location for HMR-enabled bundles. A hash mismatch
-      ## on the body causes `mountUiHot` mounts that read the slot to
-      ## re-render this panel in place.
-      renderShellPanelImpl(r, vm, "shell-component isonim-shell")
-  else:
-    proc renderShellPanel*(r: WebRenderer; vm: ShellVM): isonim_dom.Element =
-      renderShellPanelImpl(r, vm, "shell-component isonim-shell")
+    proc renderShellPanelHot(r: WebRenderer; vm: ShellVM): isonim_dom.Element {.uiComponent.} =
+      ## The `{.uiComponent.}` pragma registers a slot keyed by this proc's
+      ## source location for HMR-enabled bundles; `mountIsoNimShell` reads it.
+      renderShellPanel[WebRenderer, isonim_dom.Element](r, vm)
 
   proc mountIsoNimShell*(container: isonim_dom.Element; vm: ShellVM) =
     ## Mount the IsoNim Shell panel as a child of `container`. Reactive
@@ -108,8 +103,8 @@ when defined(js):
       let vmRef = vm
       discard mountUiHot(container, proc(): isonim_dom.Node =
         let r = WebRenderer()
-        isonim_dom.Node(renderShellPanel(r, vmRef)))
+        isonim_dom.Node(renderShellPanelHot(r, vmRef)))
     else:
       let r = WebRenderer()
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[WebRenderer, isonim_dom.Element](r, vm)
       isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

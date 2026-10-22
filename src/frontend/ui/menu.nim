@@ -23,6 +23,9 @@ when defined(js):
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
+  # `renderMenuShellInto` is generic: its DSL expands here.
+  import isonim/core/[signals, computation]
+  import isonim/dsl/components
   from ../viewmodel/views/isonim_menu_shell_view import
     DebugControlsHostId, MenuNestedRecord, MenuNodeRecord, MenuNodeRecordKind,
     MenuRecordElement, MenuRecordFolder, MenuSearchResultRecord,
@@ -775,7 +778,7 @@ when defined(js):
         self.data.ipc.send("CODETRACER::close-app"))
 
     let r = WebRenderer()
-    renderMenuShellInto(r, container, model, callbacks)
+    renderMenuShellInto[WebRenderer, dom_api.Element](r, container, model, callbacks)
     menuShellGate.noteRendered(signature)
     requestSessionTabsRenderSoon()
     if not self.data.startOptions.shellUi:

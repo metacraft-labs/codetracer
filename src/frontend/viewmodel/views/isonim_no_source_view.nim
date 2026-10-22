@@ -7,7 +7,7 @@
 ## ``frontend/ui/no_source.nim`` (the IsoNim view is the single source
 ## of truth for the panel's DOM).
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
+## One generic proc renders, under every renderer, the outer
 ## structure, mirroring the legacy view's class hooks so any CSS
 ## styling and DOM-based tests keep working::
 ##
@@ -49,7 +49,11 @@
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -96,11 +100,11 @@ proc stopSignalLineText(signalText: string): string =
   "Signal received: " & signalText
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel, for every renderer
 # ---------------------------------------------------------------------------
 
-proc renderNoSourcePanel*(r: MockRenderer; vm: NoSourceVM): MockNode =
-  ## Render the no-source panel for the Mock renderer.
+proc renderNoSourcePanel*[R, N](r: R; vm: NoSourceVM): N =
+  ## The no-source panel, for every renderer.
   ##
   ## The static shell (``.unknown-location`` + header + body wrapper)
   ## is built once via the DSL.  Three render-effects wire the
@@ -108,8 +112,8 @@ proc renderNoSourcePanel*(r: MockRenderer; vm: NoSourceVM): MockNode =
   ## and the history-context block.  The trailing ``<p>`` rows update
   ## via DSL attribute expressions because the macro emits per-attribute
   ## ``createRenderEffect``s.
-  var contentNode: MockNode
-  var trailingNode: MockNode
+  var contentNode: N
+  var trailingNode: N
 
   let panel = ui(r):
     tdiv(class = "unknown-location"):
@@ -123,7 +127,7 @@ proc renderNoSourcePanel*(r: MockRenderer; vm: NoSourceVM): MockNode =
 
   # Body content render-effect.  Rebuilds the message + location +
   # history blocks whenever any of the relevant signals change.  Uses
-  # imperative MockRenderer ops because the conditional shape of the
+  # imperative renderer ops because the conditional shape of the
   # tree (presence of the optional borders) is easier to express
   # imperatively than via the declarative DSL.
   createRenderEffect proc() =
@@ -193,116 +197,12 @@ proc renderNoSourcePanel*(r: MockRenderer; vm: NoSourceVM): MockNode =
 
   panel
 
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
 when defined(js):
-
-  proc renderMessageBorder(r: WebRenderer; message: string):
-      isonim_dom.Element =
-    ui(r):
-      tdiv(class = "unknown-border"):
-        p(class = "unknown-location-message"):
-          text message
-
-  proc renderLocationBorder(r: WebRenderer; location: NoSourceLocationInfo):
-      isonim_dom.Element =
-    ui(r):
-      tdiv(class = "unknown-border"):
-        p:
-          text functionRowText(location)
-        if location.path.len > 0:
-          p:
-            text pathRowText(location)
-        if location.line >= 0:
-          p:
-            text lineRowText(location)
-
-  proc renderHistoryContextBorder(r: WebRenderer;
-                                  history: NoSourceHistoryInfo):
-      isonim_dom.Element =
-    ui(r):
-      tdiv(class = "unknown-border"):
-        p:
-          text historyContextText(history)
-
-  proc renderHistoryButtonBorder(r: WebRenderer; vm: NoSourceVM):
-      isonim_dom.Element =
-    ui(r):
-      tdiv(class = "unknown-border"):
-        tdiv(class = "unknown-location-buttons"):
-          p:
-            text "You can still use all of the actions or you can go back"
-          button(class = "jump-back-button",
-                 onclick = proc() = vm.jumpBack()):
-            text "Jump back"
-
-  proc renderAddressRow(r: WebRenderer; address: string):
-      isonim_dom.Element =
-    ui(r):
-      p(class = "unknown-location-address"):
-        text originatingAddressText(address)
-
-  proc renderSignalRow(r: WebRenderer; signalText: string):
-      isonim_dom.Element =
-    ui(r):
-      p(class = "unknown-location-signal"):
-        text stopSignalLineText(signalText)
-
-  proc renderNoSourcePanel*(r: WebRenderer; vm: NoSourceVM): isonim_dom.Element =
-    ## Render the panel for the real DOM.  The DOM ops mirror the
-    ## Mock-renderer body so the resulting structure is identical
-    ## across backends.
-    var contentNode: isonim_dom.Element
-    var trailingNode: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = "unknown-location"):
-        tdiv(class = "unknown-location-header"):
-          text "Whoops!"
-        tdiv(ref = contentNode,
-             class = "unknown-location-content"):
-          discard
-        tdiv(ref = trailingNode):
-          discard
-
-    createRenderEffect proc() =
-      let message = vm.message.val
-      let location = vm.location.val
-      let history = vm.history.val
-      # Stable host slot: conditional blocks are rebuilt as complete
-      # IsoNim DSL nodes whenever the VM snapshot changes.
-      r.clearChildren(contentNode)
-
-      if message.len > 0:
-        r.appendChild(contentNode, renderMessageBorder(r, message))
-
-      r.appendChild(contentNode, renderLocationBorder(r, location))
-
-      if history.hasHistory and history.action.len > 0:
-        r.appendChild(contentNode, renderHistoryContextBorder(r, history))
-        r.appendChild(contentNode, renderHistoryButtonBorder(r, vm))
-
-    createRenderEffect proc() =
-      let address = vm.originatingAddress.val
-      let signalText = vm.stopSignalText.val
-      # Trailing rows are outside `.unknown-location-content` for legacy
-      # DOM parity; this ref is the host boundary for those optional rows.
-      r.clearChildren(trailingNode)
-
-      if address.len > 0:
-        r.appendChild(trailingNode, renderAddressRow(r, address))
-      if signalText.len > 0:
-        r.appendChild(trailingNode, renderSignalRow(r, signalText))
-
-    panel
-
   proc mountIsoNimNoSource*(container: isonim_dom.Element;
                             vm: NoSourceVM) =
     ## Mount the IsoNim no-source panel as a child of ``container``.
     ## Reactive effects handle every subsequent update — no manual
     ## redraw is needed.
     let r = WebRenderer()
-    let panel = renderNoSourcePanel(r, vm)
+    let panel = renderNoSourcePanel[WebRenderer, isonim_dom.Element](r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

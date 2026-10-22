@@ -193,7 +193,7 @@ suite "IsoNim Toggle — structure":
 
   test "an unchecked medium toggle renders the documented attribute set":
     let r = MockRenderer()
-    let node = renderToggle(r, ToggleRecord(
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(
       label: "Auto-scroll", isChecked: false, isDisabled: false, size: "md"))
 
     check node.attributes["class"] == "ct-toggle-field"
@@ -213,25 +213,25 @@ suite "IsoNim Toggle — structure":
     # that moved state into class names would break every stylesheet rule
     # and pass any test that only looked for the root class.
     let r = MockRenderer()
-    let sw = renderToggle(r, ToggleRecord(
+    let sw = renderToggle[MockRenderer, MockNode](r, ToggleRecord(
       label: "Wrap", isChecked: true, size: "sm")).findByClass("ct-toggle")
     check sw.attributes["data-checked"] == "true"
     check sw.attributes["data-size"] == "sm"
 
   test "an unknown size falls back to md rather than emitting it verbatim":
     let r = MockRenderer()
-    let sw = renderToggle(r, ToggleRecord(label: "X", size: "enormous"))
+    let sw = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X", size: "enormous"))
       .findByClass("ct-toggle")
     check sw.attributes["data-size"] == "md"
 
   test "an empty size is md too":
     let r = MockRenderer()
-    let sw = renderToggle(r, ToggleRecord(label: "X")).findByClass("ct-toggle")
+    let sw = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X")).findByClass("ct-toggle")
     check sw.attributes["data-size"] == "md"
 
   test "disabled sets data-disabled on the field wrapper":
     let r = MockRenderer()
-    let node = renderToggle(r, ToggleRecord(label: "X", isDisabled: true))
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X", isDisabled: true))
     check node.attributes["data-disabled"] == "true"
 
 suite "IsoNim Toggle — events":
@@ -239,7 +239,7 @@ suite "IsoNim Toggle — events":
   test "clicking the switch fires onChange":
     let r = MockRenderer()
     var fired = 0
-    let node = renderToggle(r, ToggleRecord(label: "X"),
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X"),
       ToggleCallbacks(onChange: proc() = inc fired))
     node.findByClass("ct-toggle").fireEvent("click")
     check fired == 1
@@ -248,7 +248,7 @@ suite "IsoNim Toggle — events":
     # Every handler in this view is nil-guarded, and the guard is only
     # observable by exercising it.
     let r = MockRenderer()
-    let node = renderToggle(r, ToggleRecord(label: "X"))
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X"))
     node.findByClass("ct-toggle").fireEvent("click")
     check node.findByClass("ct-toggle-label").textContent == "X"
 

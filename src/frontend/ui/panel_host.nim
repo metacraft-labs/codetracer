@@ -37,7 +37,8 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_point_list_view, isonim_step_list_view,
                             isonim_calltrace_editor_view, isonim_build_view,
                             isonim_errors_view, isonim_scratchpad_view,
-                            isonim_repl_view, isonim_filesystem_view]
+                            isonim_repl_view, isonim_filesystem_view,
+                            isonim_command_palette_view]
 import ../viewmodel/views/[isonim_search_results_view, isonim_trace_log_view,
                             isonim_terminal_output_view]
 from ../viewmodel/viewmodels/terminal_output_vm import nil
@@ -53,7 +54,7 @@ const
                      Content.AgentWorkspace, Content.RequestPanel,
                      Content.AgentActivity, Content.Scratchpad, Content.Repl,
                      Content.Filesystem, Content.TestResults,
-                     Content.Constraints}
+                     Content.Constraints, Content.CommandPalette}
     ## The panes `mountPanel` renders.
   RequestRowFallbackPx = 24.0
     ## The Request panel's row pitch until a row is rendered to measure.
@@ -311,6 +312,10 @@ proc render(m: PanelMount; session: SessionViewModel) =
     of Content.Filesystem:
       let panel = renderFilesystemPanel[WebRenderer, dom_api.Element](
         r, session.fileTreeVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.CommandPalette:
+      let panel = renderCommandPalettePanel[WebRenderer, dom_api.Element](
+        r, session.commandPaletteVM)
       dom_api.appendChild(node, dom_api.Node(panel))
     else:
       let renderPane = renderers[mount.kind]

@@ -23,7 +23,11 @@ import isonim/core/[signals, computation]
 # screen — see the `setChecked` call in `renderNewRecordModeWeb`.
 from isonim/core/batch import untrack
 import isonim/dsl/ui
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -253,15 +257,121 @@ proc parseArgsInput*(value: string): seq[string] =
   else:
     value.split(" ").filterIt(it.len > 0)
 
-proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
-                           callbacks: WelcomeScreenCallbacks): MockNode =
-  let hoveredRecordingId = vm.hoveredRecording.val
-  let hoveredOptionKey = vm.hoveredOption.val
+# ---------------------------------------------------------------------------
+# Form wiring, per renderer
+# ---------------------------------------------------------------------------
+#
+# A field's current text is read where the renderer keeps it: the DOM
+# input's `value` property in the browser, the node's `value` attribute in
+# `MockRenderer` (what a headless test sets before firing `input`).
+
+proc wireWelcomeInput(r: MockRenderer; node: MockNode;
+                      onValue: proc(v: string)) =
+  let captured = node
+  r.addEventListener(node, "input", proc() =
+    onValue(captured.attributes.getOrDefault("value", "")))
+
+proc wireWelcomeChange(r: MockRenderer; node: MockNode;
+                       onValue: proc(v: string)) =
+  let captured = node
+  r.addEventListener(node, "change", proc() =
+    onValue(captured.attributes.getOrDefault("value", "")))
+
+proc initWelcomeChecked(r: MockRenderer; node: MockNode; checked: bool) =
+  r.setAttribute(node, "checked", if checked: "true" else: "false")
+
+when defined(js):
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setChecked(node: isonim_dom.Node; checked: bool) {.importjs: "#.checked = #".}
+
+  proc readInputValue(node: isonim_dom.Node): string =
+    $node.inputValue()
+
+  proc wireWelcomeInput(r: WebRenderer; node: isonim_dom.Element;
+                        onValue: proc(v: string)) =
+    let asNode = isonim_dom.Node(node)
+    isonim_dom.addEventListener(asNode, cstring"input",
+      proc(ev: isonim_dom.Event) = onValue(readInputValue(asNode)))
+
+  proc wireWelcomeChange(r: WebRenderer; node: isonim_dom.Element;
+                         onValue: proc(v: string)) =
+    let asNode = isonim_dom.Node(node)
+    isonim_dom.addEventListener(asNode, cstring"change",
+      proc(ev: isonim_dom.Event) = onValue(readInputValue(asNode)))
+
+  proc initWelcomeChecked(r: WebRenderer; node: isonim_dom.Element;
+                          checked: bool) =
+    isonim_dom.Node(node).setChecked(checked)
+
+# ---------------------------------------------------------------------------
+# The screen, for every renderer
+# ---------------------------------------------------------------------------
+
+# One Recent traces row, and one start option, each built in a proc of its
+# own rather than inline in `renderWelcomeMode`'s `for` loops.  Their
+# `class` expressions read the hover state, so the `ui` DSL gives each one a
+# live effect (a closure).  Nim's JS backend shares one closure environment
+# across a loop's iterations, so effects created inline in the loop all saw
+# the LAST row's element and id: hovering any row could only ever mark the
+# last tooltip.  A proc call gets a fresh environment per row.
+proc renderRecentTraceRow[R, N](r: R; vm: WelcomeScreenVM;
+                                callbacks: WelcomeScreenCallbacks;
+                                trace: RecentTraceRecord): N =
+  let recordingId = trace.recordingId
+  ui(r):
+    tdiv(class = "recent-trace-container"):
+      tdiv(class = "recent-trace",
+           onclick = traceClickHandler(vm, callbacks, recordingId),
+           onmouseover = traceMouseOverHandler(vm, recordingId),
+           onmouseleave = proc() = vm.clearHoveredTrace()):
+        tdiv(class = "recent-trace-title"):
+          span(class = "recent-trace-title-time"):
+            text formatWelcomeTimeAgo(trace.date)
+          tdiv(class = "separate-bar"):
+            discard
+          span(class = "recent-trace-title-content"):
+            text traceCommandText(trace)
+        tdiv(class = traceTooltipClass(vm.hoveredRecording.val == recordingId)):
+          text traceTooltipText(trace)
+
+proc renderStartOption[R, N](r: R; vm: WelcomeScreenVM;
+                             callbacks: WelcomeScreenCallbacks;
+                             opt: WelcomeStartOptionRecord): N =
+  ui(r):
+    button(class = "ct-button-sm-tertiary " &
+                   startOptionClass(opt, vm.hoveredOption.val == opt.key),
+           title = opt.disabledReason,
+           `aria-disabled` = startOptionAriaDisabled(opt),
+           onclick = startOptionClickHandler(vm, callbacks, opt),
+           onmouseover = startOptionMouseOverHandler(vm, opt.key),
+           onmouseleave = proc() =
+             vm.clearHoveredOption()):
+      text opt.name
+
+proc renderWelcomeMode[R, N](r: R; vm: WelcomeScreenVM;
+                             callbacks: WelcomeScreenCallbacks): N =
+  # The hover state is NOT read here.  This proc runs inside
+  # `renderWelcomeScreenPanel`'s `createRenderEffect`, which clears and
+  # rebuilds the whole screen whenever a signal read directly in its body
+  # changes.  Reading `vm.hoveredRecording` / `vm.hoveredOption` here rebuilt
+  # the screen on every row and button enter/leave, and the rebuilt Recent
+  # traces list started back at the top — scrolling it with the wheel moved
+  # rows under the pointer, changed the hover, and snapped the list back.
+  # Each hover read now sits in its element's `class` expression instead
+  # (`renderRecentTraceRow`, `renderStartOption`), where the `ui` DSL
+  # wraps it in an effect of its own that only re-sets that one attribute
+  # (see `isDynamic`, isonim/dsl/transform.nim).
   let traces = vm.recentTraces.val
   let folders = vm.recentFolders.val
   let options = vm.startOptions.val
   let startOptionsNote = vm.startOptionsNote.val
   let firstTime = traces.len == 0 and folders.len == 0
+  # Plain names for the child calls: the `ui` macro passes a call through as
+  # a child only when its callee is an identifier, and `f[R, N](...)` is not.
+  template traceRow(trace: RecentTraceRecord): N =
+    renderRecentTraceRow[R, N](r, vm, callbacks, trace)
+  template startOption(opt: WelcomeStartOptionRecord): N =
+    renderStartOption[R, N](r, vm, callbacks, opt)
 
   ui(r):
     tdiv(class = WelcomeScreenWrapperClass):
@@ -308,47 +418,33 @@ proc renderWelcomeModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               tdiv(class = "recent-traces-list"):
                 if traces.len > 0:
                   for trace in traces:
-                    let traceCopy = trace
-                    let recordingId = traceCopy.recordingId
-                    tdiv(class = "recent-trace-container"):
-                      tdiv(class = "recent-trace",
-                           onclick = traceClickHandler(vm, callbacks, recordingId),
-                           onmouseover = traceMouseOverHandler(vm, recordingId),
-                           onmouseleave = proc() = vm.clearHoveredTrace()):
-                        tdiv(class = "recent-trace-title"):
-                          span(class = "recent-trace-title-time"):
-                            text formatWelcomeTimeAgo(traceCopy.date)
-                          tdiv(class = "separate-bar"):
-                            discard
-                          span(class = "recent-trace-title-content"):
-                            text traceCommandText(traceCopy)
-                        tdiv(class = traceTooltipClass(hoveredRecordingId == recordingId)):
-                          text traceTooltipText(traceCopy)
+                    traceRow(trace)
                 else:
                   tdiv(class = "empty-state-message"):
                     tdiv(class = "empty-state-text"):
                       text RecentTracesEmptyText
         tdiv(class = "start-options"):
           for opt in options:
-            let hovered = hoveredOptionKey == opt.key
-            let optCopy = opt
-            button(class = "ct-button-sm-tertiary " &
-                           startOptionClass(optCopy, hovered),
-                   title = optCopy.disabledReason,
-                   `aria-disabled` = startOptionAriaDisabled(optCopy),
-                   onclick = startOptionClickHandler(vm, callbacks, optCopy),
-                   onmouseover = startOptionMouseOverHandler(vm, optCopy.key),
-                   onmouseleave = proc() =
-                     vm.clearHoveredOption()):
-              text optCopy.name
+            startOption(opt)
         if startOptionsNote.len > 0:
           tdiv(class = StartOptionsNoteClass):
             text startOptionsNote
 
-proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
-                             callbacks: WelcomeScreenCallbacks): MockNode =
-  var execInput, argsInput, workDirInput, outputInput, backendSelect,
-      checkbox: MockNode
+proc renderNewRecordMode[R, N](r: R; vm: WelcomeScreenVM;
+                               callbacks: WelcomeScreenCallbacks): N =
+  mixin wireWelcomeInput, wireWelcomeChange, initWelcomeChecked
+  var execInput, argsInput, workDirInput, outputInput, checkbox: N
+  var backendSelect: N
+  # The backend choice is read here, in the body: its rows are a plain list
+  # below, and a change to either signal rebuilds the form (it runs in
+  # `renderWelcomeScreenPanel`'s effect), as before.
+  let showBackend = vm.showRecordBackendChoice.val
+  var backendRows: seq[tuple[value, label: string; selected: bool]] = @[]
+  if showBackend:
+    let chosen = vm.newRecord.val.backendChoice
+    for opt in vm.recordBackendOptions.val:
+      backendRows.add((opt.backend.recordBackendWireName, opt.label,
+                       opt.backend == chosen))
   let panel = ui(r):
     tdiv(class = WelcomeScreenWrapperClass):
       tdiv(class = "window-menu"):
@@ -383,18 +479,16 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                       class = "ct-input-form ct-fill-available",
                       placeholder = "Command line arguments",
                       value = vm.newRecord.val.args.join(" "))
-            if vm.showRecordBackendChoice.val:
+            if showBackend:
               tdiv(class = "new-record-form-row record-backend-row"):
                 select(ref = backendSelect,
                        id = "new-record-backend",
                        `data-field` = "new-record-backend",
                        class = "ct-input-form record-backend-select"):
-                  for opt in vm.recordBackendOptions.val:
-                    let backendValue = opt.backend.recordBackendWireName
-                    let backendLabel = opt.label
-                    let isSelected =
-                      opt.backend == vm.newRecord.val.backendChoice
-                    if isSelected:
+                  for row in backendRows:
+                    let backendValue = row.value
+                    let backendLabel = row.label
+                    if row.selected:
                       option(value = backendValue,
                              selected = "selected"):
                         text backendLabel
@@ -419,10 +513,7 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
               label(class = "ct-checkmark-field"):
                 input(ref = checkbox,
                       `type` = "checkbox",
-                      class = "ct-checkmark-input",
-                      checked =
-                        (if vm.newRecord.val.defaultOutputFolder: "true"
-                         else: "false"))
+                      class = "ct-checkmark-input")
                 span(class = "ct-checkmark-label"):
                   text "Use default output folder"
             tdiv(class = "new-record-form-row"):
@@ -457,49 +548,49 @@ proc renderNewRecordModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                          discard vm.submitNewRecord()):
                 text "Record"
 
-  let captureExec = execInput
-  let captureArgs = argsInput
-  let captureWorkDir = workDirInput
-  let captureOutput = outputInput
-  let captureBackend = backendSelect
-  let captureCheckbox = checkbox
-  r.addEventListener(execInput, "input", proc() =
-    let v = captureExec.attributes.getOrDefault("value", "")
+  # Read untracked.  This proc runs inside `renderWelcomeScreenPanel`'s
+  # `createRenderEffect`, which re-runs — clearing and rebuilding the whole
+  # screen — whenever a signal read directly in its body changes.  A plain
+  # `vm.newRecord.val` here subscribed it to the entire form state, so every
+  # keystroke in any field (each one calls `vm.setRecord…`) rebuilt the form:
+  # the field lost focus after one character, and the Record button was
+  # replaced instead of changing state.  The checkbox only needs the value it
+  # has when the form opens; toggling it goes through its own handler below.
+  untrack proc() =
+    initWelcomeChecked(r, checkbox, vm.newRecord.val.defaultOutputFolder)
+  wireWelcomeInput(r, execInput, proc(v: string) =
     vm.setRecordExecutable(v)
     if callbacks.onRecordExecutableChange != nil:
       callbacks.onRecordExecutableChange(v))
-  r.addEventListener(argsInput, "input", proc() =
-    let v = captureArgs.attributes.getOrDefault("value", "")
+  wireWelcomeInput(r, argsInput, proc(v: string) =
     let parsed = parseArgsInput(v)
     vm.setRecordArgs(parsed)
     if callbacks.onRecordArgsChange != nil:
       callbacks.onRecordArgsChange(parsed))
-  r.addEventListener(workDirInput, "input", proc() =
-    let v = captureWorkDir.attributes.getOrDefault("value", "")
+  wireWelcomeInput(r, workDirInput, proc(v: string) =
     vm.setRecordWorkDir(v)
     if callbacks.onRecordWorkDirChange != nil:
       callbacks.onRecordWorkDirChange(v))
-  r.addEventListener(outputInput, "input", proc() =
-    let v = captureOutput.attributes.getOrDefault("value", "")
+  wireWelcomeInput(r, outputInput, proc(v: string) =
     vm.setRecordOutputFolder(v)
     if callbacks.onRecordOutputFolderChange != nil:
       callbacks.onRecordOutputFolderChange(v))
-  if not captureBackend.isNil:
-    r.addEventListener(captureBackend, "change", proc() =
-      let backend = recordBackendChoiceFromWireName(
-        captureBackend.attributes.getOrDefault("value", "mcr"))
+  if showBackend:
+    wireWelcomeChange(r, backendSelect, proc(v: string) =
+      let backend = recordBackendChoiceFromWireName(v)
       vm.setRecordBackendChoice(backend)
       if callbacks.onRecordBackendChange != nil:
         callbacks.onRecordBackendChange(backend))
-  r.addEventListener(captureCheckbox, "change", proc() =
+  wireWelcomeChange(r, checkbox, proc(v: string) =
     vm.toggleDefaultOutputFolder()
     if callbacks.onToggleDefaultOutputFolder != nil:
       callbacks.onToggleDefaultOutputFolder())
   panel
 
-proc renderOnlineTraceModeMock(r: MockRenderer; vm: WelcomeScreenVM;
-                               callbacks: WelcomeScreenCallbacks): MockNode =
-  var inputNode: MockNode
+proc renderOnlineTraceMode[R, N](r: R; vm: WelcomeScreenVM;
+                                 callbacks: WelcomeScreenCallbacks): N =
+  mixin wireWelcomeInput
+  var inputNode: N
   let panel = ui(r):
     tdiv(class = WelcomeScreenWrapperClass):
       tdiv(class = "window-menu"):
@@ -519,8 +610,8 @@ proc renderOnlineTraceModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                       placeholder = "Download URL or key",
                       value = vm.onlineTraceInput.val)
             tdiv(class = "new-record-form-row"):
-              # `mr-2` (8px), the same class as the Start Debugger form's Back
-              # button, so both screens space their button pair alike.
+              # `mr-2` (8px), the same class as the Start Debugger form's
+              # Back button, so both screens space their button pair alike.
               button(class = "ct-button-sm-tertiary mr-2",
                      onclick = proc() =
                        backToWelcome(vm, callbacks)):
@@ -532,15 +623,13 @@ proc renderOnlineTraceModeMock(r: MockRenderer; vm: WelcomeScreenVM;
                            vm.onlineTraceInput.val)):
                 text "Download"
 
-  let captureInput = inputNode
-  r.addEventListener(inputNode, "input", proc() =
-    let v = captureInput.attributes.getOrDefault("value", "")
+  wireWelcomeInput(r, inputNode, proc(v: string) =
     vm.setOnlineTraceInput(v)
     if callbacks.onOnlineTraceInputChange != nil:
       callbacks.onOnlineTraceInputChange(v))
   panel
 
-proc renderLoadingOverlayMock(r: MockRenderer): MockNode =
+proc renderLoadingOverlay[R, N](r: R): N =
   ui(r):
     tdiv(class = WelcomeLoadingOverlayClass):
       tdiv(class = "welcome-screen-loading-overlay-icon"):
@@ -549,10 +638,12 @@ proc renderLoadingOverlayMock(r: MockRenderer): MockNode =
         tdiv:
           text "Loading trace..."
 
-proc renderWelcomeScreenPanel*(r: MockRenderer; vm: WelcomeScreenVM;
-                               callbacks: WelcomeScreenCallbacks =
-                                 WelcomeScreenCallbacks()): MockNode =
-  var rootContainer: MockNode
+proc renderWelcomeScreenPanel*[R, N](r: R; vm: WelcomeScreenVM;
+                                     callbacks: WelcomeScreenCallbacks =
+                                       WelcomeScreenCallbacks()): N =
+  ## The welcome screen, for every renderer: one mode at a time, rebuilt when
+  ## the mode or the loading state changes.
+  var rootContainer: N
   let panel = ui(r):
     tdiv(ref = rootContainer, class = WelcomeScreenRootClass):
       discard
@@ -561,417 +652,27 @@ proc renderWelcomeScreenPanel*(r: MockRenderer; vm: WelcomeScreenVM;
     r.clearChildren(rootContainer)
     case vm.mode.val
     of wsmWelcome:
-      r.appendChild(rootContainer, renderWelcomeModeMock(r, vm, callbacks))
+      r.appendChild(rootContainer, renderWelcomeMode[R, N](r, vm, callbacks))
     of wsmNewRecord:
-      r.appendChild(rootContainer, renderNewRecordModeMock(r, vm, callbacks))
+      r.appendChild(rootContainer, renderNewRecordMode[R, N](r, vm, callbacks))
     of wsmOnlineTrace:
-      r.appendChild(rootContainer, renderOnlineTraceModeMock(r, vm, callbacks))
+      r.appendChild(rootContainer,
+                    renderOnlineTraceMode[R, N](r, vm, callbacks))
     of wsmEdit:
       discard
     if vm.loading.val:
-      r.appendChild(rootContainer, renderLoadingOverlayMock(r))
+      r.appendChild(rootContainer, renderLoadingOverlay[R, N](r))
 
   panel
 
 when defined(js):
-  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
-  proc setChecked(node: isonim_dom.Node; checked: bool) {.importjs: "#.checked = #".}
-
-  proc createText(tag: string; value: string; cssClass: string = ""):
-      isonim_dom.Element =
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(value))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc readInputValue(node: isonim_dom.Node): string =
-    $node.inputValue()
-
-  # One Recent traces row, and one start option, each built in a proc of its
-  # own rather than inline in `renderWelcomeModeWeb`'s `for` loops.  Their
-  # `class` expressions read the hover state, so the `ui` DSL gives each one a
-  # live effect (a closure).  Nim's JS backend shares one closure environment
-  # across a loop's iterations, so effects created inline in the loop all saw
-  # the LAST row's element and id: hovering any row could only ever mark the
-  # last tooltip.  A proc call gets a fresh environment per row.
-  proc renderRecentTraceRowWeb(r: WebRenderer; vm: WelcomeScreenVM;
-                               callbacks: WelcomeScreenCallbacks;
-                               trace: RecentTraceRecord):
-      isonim_dom.Element =
-    let recordingId = trace.recordingId
-    ui(r):
-      tdiv(class = "recent-trace-container"):
-        tdiv(class = "recent-trace",
-             onclick = traceClickHandler(vm, callbacks, recordingId),
-             onmouseover = traceMouseOverHandler(vm, recordingId),
-             onmouseleave = proc() = vm.clearHoveredTrace()):
-          tdiv(class = "recent-trace-title"):
-            span(class = "recent-trace-title-time"):
-              text formatWelcomeTimeAgo(trace.date)
-            tdiv(class = "separate-bar"):
-              discard
-            span(class = "recent-trace-title-content"):
-              text traceCommandText(trace)
-          tdiv(class = traceTooltipClass(vm.hoveredRecording.val == recordingId)):
-            text traceTooltipText(trace)
-
-  proc renderStartOptionWeb(r: WebRenderer; vm: WelcomeScreenVM;
-                            callbacks: WelcomeScreenCallbacks;
-                            opt: WelcomeStartOptionRecord):
-      isonim_dom.Element =
-    ui(r):
-      button(class = "ct-button-sm-tertiary " &
-                     startOptionClass(opt, vm.hoveredOption.val == opt.key),
-             title = opt.disabledReason,
-             `aria-disabled` = startOptionAriaDisabled(opt),
-             onclick = startOptionClickHandler(vm, callbacks, opt),
-             onmouseover = startOptionMouseOverHandler(vm, opt.key),
-             onmouseleave = proc() =
-               vm.clearHoveredOption()):
-        text opt.name
-
-  proc renderWelcomeModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
-                            callbacks: WelcomeScreenCallbacks):
-      isonim_dom.Element =
-    # The hover state is NOT read here.  This proc runs inside
-    # `renderWelcomeScreenPanel`'s `createRenderEffect`, which clears and
-    # rebuilds the whole screen whenever a signal read directly in its body
-    # changes.  Reading `vm.hoveredRecording` / `vm.hoveredOption` here rebuilt
-    # the screen on every row and button enter/leave, and the rebuilt Recent
-    # traces list started back at the top — scrolling it with the wheel moved
-    # rows under the pointer, changed the hover, and snapped the list back.
-    # Each hover read now sits in its element's `class` expression instead
-    # (`renderRecentTraceRowWeb`, `renderStartOptionWeb`), where the `ui` DSL
-    # wraps it in an effect of its own that only re-sets that one attribute
-    # (see `isDynamic`, isonim/dsl/transform.nim).
-    let traces = vm.recentTraces.val
-    let folders = vm.recentFolders.val
-    let options = vm.startOptions.val
-    let startOptionsNote = vm.startOptionsNote.val
-    let firstTime = traces.len == 0 and folders.len == 0
-
-    ui(r):
-      tdiv(class = WelcomeScreenWrapperClass):
-        tdiv(class = "window-menu"):
-          discard
-        tdiv(class = welcomeScreenClass(vm.loading.val),
-             id = "welcome-screen"):
-          tdiv(class = "welcome-title"):
-            tdiv(class = "welcome-text"):
-              tdiv(class = "welcome-logo"):
-                discard
-              tdiv:
-                tdiv: text "Welcome to"
-                tdiv: text displayedProductName()
-            tdiv(class = "welcome-version"):
-              text versionLineText(CodeTracerVersionStr, displayedBuildLabel())
-          tdiv(class = "welcome-content"):
-            tdiv(class = "welcome-left-panel"):
-              tdiv(class = "recent-folders"):
-                tdiv(class = "recent-folders-title"):
-                  text "Recent folders"
-                tdiv(class = "recent-folders-list"):
-                  if folders.len > 0:
-                    for folder in folders:
-                      let folderCopy = folder
-                      let path = folderCopy.path
-                      tdiv(class = "recent-folder-container"):
-                        tdiv(class = "recent-folder",
-                             onclick = folderClickHandler(vm, callbacks, path)):
-                          tdiv(class = "recent-folder-name"):
-                            text folderCopy.name
-                  else:
-                    tdiv(class = "empty-state-message"):
-                      if firstTime:
-                        tdiv(class = "empty-state-text"):
-                          text RecentFoldersFirstTimeText
-                      else:
-                        tdiv(class = "empty-state-text"):
-                          text RecentFoldersEmptyText
-            tdiv(class = "welcome-right-panel"):
-              tdiv(class = "recent-traces"):
-                tdiv(class = "recent-traces-title"):
-                  text "Recent traces"
-                tdiv(class = "recent-traces-list"):
-                  if traces.len > 0:
-                    for trace in traces:
-                      renderRecentTraceRowWeb(r, vm, callbacks, trace)
-                  else:
-                    tdiv(class = "empty-state-message"):
-                      tdiv(class = "empty-state-text"):
-                        text RecentTracesEmptyText
-          tdiv(class = "start-options"):
-            for opt in options:
-              renderStartOptionWeb(r, vm, callbacks, opt)
-          if startOptionsNote.len > 0:
-            tdiv(class = StartOptionsNoteClass):
-              text startOptionsNote
-
-  proc renderNewRecordModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
-                              callbacks: WelcomeScreenCallbacks):
-      isonim_dom.Element =
-    var execInput, argsInput, workDirInput, outputInput, checkbox:
-      isonim_dom.Element
-    var backendSelect: isonim_dom.Element
-    let panel = ui(r):
-      tdiv(class = WelcomeScreenWrapperClass):
-        tdiv(class = "window-menu"):
-          discard
-        tdiv(class = "new-record-screen"):
-          tdiv(class = "new-record-screen-content"):
-            tdiv(class = "welcome-logo"):
-              discard
-            tdiv(class = "new-record-title"):
-              text "Start Debugger"
-            tdiv(class = "new-record-form"):
-              tdiv(class = "new-record-form-row"):
-                tdiv(class = "new-record-input-row"):
-                  input(ref = execInput,
-                        `type` = "text",
-                        id = "new-record-executable",
-                        `data-field` = "new-record-executable",
-                        class = "ct-input-form ct-fill-available",
-                        placeholder = "Local project path",
-                        value = vm.newRecord.val.executable)
-                  button(class = "ct-button-sm-tertiary",
-                         onclick = proc() =
-                           if callbacks.onChooseExecutable != nil:
-                             callbacks.onChooseExecutable()):
-                    text "Choose"
-              tdiv(class = "new-record-form-row"):
-                tdiv(class = "new-record-input-row"):
-                  input(ref = argsInput,
-                        `type` = "text",
-                        id = "new-record-args",
-                        `data-field` = "new-record-args",
-                        class = "ct-input-form ct-fill-available",
-                        placeholder = "Command line arguments",
-                        value = vm.newRecord.val.args.join(" "))
-              if vm.showRecordBackendChoice.val:
-                tdiv(class = "new-record-form-row record-backend-row"):
-                  select(ref = backendSelect,
-                         id = "new-record-backend",
-                         `data-field` = "new-record-backend",
-                         class = "ct-input-form record-backend-select"):
-                    for opt in vm.recordBackendOptions.val:
-                      let backendValue = opt.backend.recordBackendWireName
-                      let backendLabel = opt.label
-                      let isSelected =
-                        opt.backend == vm.newRecord.val.backendChoice
-                      if isSelected:
-                        option(value = backendValue,
-                               selected = "selected"):
-                          text backendLabel
-                      else:
-                        option(value = backendValue):
-                          text backendLabel
-              tdiv(class = "new-record-form-row"):
-                tdiv(class = "new-record-input-row"):
-                  input(ref = workDirInput,
-                        `type` = "text",
-                        id = "new-record-workdir",
-                        `data-field` = "new-record-workdir",
-                        class = "ct-input-form ct-fill-available",
-                        placeholder = "Working directory",
-                        value = vm.newRecord.val.workDir)
-                  button(class = "ct-button-sm-tertiary",
-                         onclick = proc() =
-                           if callbacks.onChooseWorkDir != nil:
-                             callbacks.onChooseWorkDir()):
-                    text "Choose"
-              tdiv(class = "new-record-form-row"):
-                label(class = "ct-checkmark-field"):
-                  input(ref = checkbox,
-                        `type` = "checkbox",
-                        class = "ct-checkmark-input")
-                  span(class = "ct-checkmark-label"):
-                    text "Use default output folder"
-              tdiv(class = "new-record-form-row"):
-                tdiv(class = "new-record-input-row"):
-                  input(ref = outputInput,
-                        `type` = "text",
-                        id = "new-record-output",
-                        `data-field` = "new-record-output",
-                        class = "ct-input-form ct-fill-available",
-                        placeholder = "Output folder",
-                        value =
-                          (if vm.newRecord.val.defaultOutputFolder:
-                             "/home/<user>/.local/codetracer/"
-                           else:
-                             vm.newRecord.val.outputFolder))
-                  button(class = "ct-button-sm-tertiary",
-                         onclick = proc() =
-                           if callbacks.onChooseOutputFolder != nil:
-                             callbacks.onChooseOutputFolder()):
-                    text "Choose"
-              tdiv(class = "new-record-form-row"):
-                button(class = "ct-button-sm-tertiary mr-2",
-                       onclick = proc() =
-                         backToWelcome(vm, callbacks)):
-                  text "Back"
-                button(class = "ct-button-sm-primary",
-                       id = "new-record-submit",
-                       onclick = proc() =
-                         if callbacks.onSubmitNewRecord != nil:
-                           callbacks.onSubmitNewRecord()
-                         else:
-                           discard vm.submitNewRecord()):
-                  text "Record"
-
-    let execNode = isonim_dom.Node(execInput)
-    let argsNode = isonim_dom.Node(argsInput)
-    let workDirNode = isonim_dom.Node(workDirInput)
-    let outputNode = isonim_dom.Node(outputInput)
-    let checkboxNode = isonim_dom.Node(checkbox)
-    # Read untracked.  This proc runs inside `renderWelcomeScreenPanel`'s
-    # `createRenderEffect`, which re-runs — clearing and rebuilding the whole
-    # screen — whenever a signal read directly in its body changes.  A plain
-    # `vm.newRecord.val` here subscribed it to the entire form state, so every
-    # keystroke in any field (each one calls `vm.setRecord…`) rebuilt the form:
-    # the field lost focus after one character, and the Record button was
-    # replaced instead of changing state.  The checkbox only needs the value it
-    # has when the form opens; toggling it goes through its own handler below.
-    untrack proc() =
-      checkboxNode.setChecked(vm.newRecord.val.defaultOutputFolder)
-    isonim_dom.addEventListener(execNode, cstring"input",
-      proc(ev: isonim_dom.Event) =
-        let v = readInputValue(execNode)
-        vm.setRecordExecutable(v)
-        if callbacks.onRecordExecutableChange != nil:
-          callbacks.onRecordExecutableChange(v))
-    isonim_dom.addEventListener(argsNode, cstring"input",
-      proc(ev: isonim_dom.Event) =
-        let v = readInputValue(argsNode)
-        let parsed = parseArgsInput(v)
-        vm.setRecordArgs(parsed)
-        if callbacks.onRecordArgsChange != nil:
-          callbacks.onRecordArgsChange(parsed))
-    isonim_dom.addEventListener(workDirNode, cstring"input",
-      proc(ev: isonim_dom.Event) =
-        let v = readInputValue(workDirNode)
-        vm.setRecordWorkDir(v)
-        if callbacks.onRecordWorkDirChange != nil:
-          callbacks.onRecordWorkDirChange(v))
-    isonim_dom.addEventListener(outputNode, cstring"input",
-      proc(ev: isonim_dom.Event) =
-        let v = readInputValue(outputNode)
-        vm.setRecordOutputFolder(v)
-        if callbacks.onRecordOutputFolderChange != nil:
-          callbacks.onRecordOutputFolderChange(v))
-    if not backendSelect.isNil:
-      let backendNode = isonim_dom.Node(backendSelect)
-      isonim_dom.addEventListener(backendNode, cstring"change",
-        proc(ev: isonim_dom.Event) =
-          let backend = recordBackendChoiceFromWireName(
-            readInputValue(backendNode))
-          vm.setRecordBackendChoice(backend)
-          if callbacks.onRecordBackendChange != nil:
-            callbacks.onRecordBackendChange(backend))
-    isonim_dom.addEventListener(checkboxNode, cstring"change",
-      proc(ev: isonim_dom.Event) =
-        vm.toggleDefaultOutputFolder()
-        if callbacks.onToggleDefaultOutputFolder != nil:
-          callbacks.onToggleDefaultOutputFolder())
-    panel
-
-  proc renderOnlineTraceModeWeb(r: WebRenderer; vm: WelcomeScreenVM;
-                                callbacks: WelcomeScreenCallbacks):
-      isonim_dom.Element =
-    var inputNode: isonim_dom.Element
-    let panel = ui(r):
-      tdiv(class = WelcomeScreenWrapperClass):
-        tdiv(class = "window-menu"):
-          discard
-        tdiv(class = "new-record-screen"):
-          tdiv(class = "new-record-screen-content"):
-            tdiv(class = "welcome-logo"):
-              discard
-            tdiv(class = "new-record-title"):
-              text "Download and open online trace"
-            tdiv(class = "new-record-form new-online-trace-form"):
-              tdiv(class = "new-record-form-row"):
-                tdiv(class = "new-record-input-row"):
-                  input(ref = inputNode,
-                        `type` = "text",
-                        class = "ct-input-form ct-fill-available",
-                        placeholder = "Download URL or key",
-                        value = vm.onlineTraceInput.val)
-              tdiv(class = "new-record-form-row"):
-                # `mr-2` (8px), the same class as the Start Debugger form's
-                # Back button, so both screens space their button pair alike.
-                button(class = "ct-button-sm-tertiary mr-2",
-                       onclick = proc() =
-                         backToWelcome(vm, callbacks)):
-                  text "Back"
-                button(class = "ct-button-sm-primary",
-                       onclick = proc() =
-                         if callbacks.onSubmitOnlineTrace != nil:
-                           callbacks.onSubmitOnlineTrace(
-                             vm.onlineTraceInput.val)):
-                  text "Download"
-
-    let inputAsNode = isonim_dom.Node(inputNode)
-    isonim_dom.addEventListener(inputAsNode, cstring"input",
-      proc(ev: isonim_dom.Event) =
-        let v = readInputValue(inputAsNode)
-        vm.setOnlineTraceInput(v)
-        if callbacks.onOnlineTraceInputChange != nil:
-          callbacks.onOnlineTraceInputChange(v))
-    panel
-
-  proc renderLoadingOverlayWeb(r: WebRenderer): isonim_dom.Element =
-    ui(r):
-      tdiv(class = WelcomeLoadingOverlayClass):
-        tdiv(class = "welcome-screen-loading-overlay-icon"):
-          discard
-        tdiv(class = "welcome-screen-loading-overlay-text"):
-          tdiv:
-            text "Loading trace..."
-
-  proc renderWelcomeScreenPanel*(r: WebRenderer; vm: WelcomeScreenVM;
-                                 callbacks: WelcomeScreenCallbacks =
-                                   WelcomeScreenCallbacks()):
-      isonim_dom.Element =
-    var rootContainer: isonim_dom.Element
-    let panel = ui(r):
-      tdiv(ref = rootContainer, class = WelcomeScreenRootClass):
-        discard
-
-    createRenderEffect proc() =
-      clearChildren(rootContainer)
-      let nextNode =
-        case vm.mode.val
-        of wsmWelcome:
-          renderWelcomeModeWeb(r, vm, callbacks)
-        of wsmNewRecord:
-          renderNewRecordModeWeb(r, vm, callbacks)
-        of wsmOnlineTrace:
-          renderOnlineTraceModeWeb(r, vm, callbacks)
-        of wsmEdit:
-          nil
-      if not nextNode.isNil:
-        isonim_dom.appendChild(isonim_dom.Node(rootContainer),
-                               isonim_dom.Node(nextNode))
-      if vm.loading.val:
-        let overlay = renderLoadingOverlayWeb(r)
-        isonim_dom.appendChild(isonim_dom.Node(rootContainer),
-                               isonim_dom.Node(overlay))
-
-    panel
-
   proc mountIsoNimWelcomeScreen*(container: isonim_dom.Element;
                                  vm: WelcomeScreenVM;
                                  callbacks: WelcomeScreenCallbacks =
                                    WelcomeScreenCallbacks()) =
     let r = WebRenderer()
-    let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+    let panel = renderWelcomeScreenPanel[WebRenderer, isonim_dom.Element](
+      r, vm, callbacks)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))
     # Position each trace tooltip to the right of its row instead of the

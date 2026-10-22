@@ -1860,22 +1860,6 @@ proc mountPaneForState(state: GoldenItemState) =
         if shellComponent.shell.isNil:
           discard shellComponent.createShell()
 
-      # CommandPalette is now an IsoNim view -- its DOM is mounted by
-      # ``command.tryMountIsoNimCommandPalettePanel`` against the
-      # ``commandPaletteComponent-{id}`` container, and reactive
-      # effects keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy
-      # ``CommandPaletteComponent`` remains as the event-bus carrier
-      # (the keyboard / interpreter / agent passthrough) and
-      # ``syncLegacyCommandPaletteIntoVM`` mirrors any state already
-      # accumulated when the panel becomes visible.  Mission goal #3
-      # \u00a71.72.  The rich per-kind row rendering paths
-      # (program-search HTML fragment, symbol-kind suffix, file-path
-      # tail truncation, agent-mode passthrough) remain a follow-up.
-      if state.content == Content.CommandPalette:
-        command.syncLegacyCommandPaletteIntoVM(
-          CommandPaletteComponent(component))
-        command.tryMountIsoNimCommandPalettePanel()
 
       if state.content == Content.VCS:
         vcs.syncLegacyVCSIntoVM(VCSComponent(component))

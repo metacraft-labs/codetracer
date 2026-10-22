@@ -16,7 +16,7 @@
 ## rich per-kind rendering paths remain a follow-up captured in the
 ## VM doc-comment.
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
+## One generic proc renders, under every renderer, the outer
 ## structure mirroring the legacy ``command-view`` layout::
 ##
 ##   div.component-container.command-container[.hidden]
@@ -45,7 +45,11 @@ import std/strutils
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -185,17 +189,15 @@ proc containerClass*(isActive: bool): string =
     CommandPaletteContainerClass & " " & CommandPaletteHiddenModifier
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel, for every renderer
 # ---------------------------------------------------------------------------
 
-proc renderMockResultRow(r: MockRenderer; vm: CommandPaletteVM;
-                         entry: CommandPaletteResultEntry;
-                         index: int; selected: bool): MockNode =
+proc renderResultRow[R, N](r: R; vm: CommandPaletteVM;
+                           entry: CommandPaletteResultEntry;
+                           index: int; selected: bool): N =
   ## Render a single dropdown row.  Click handler invokes
-  ## ``vm.setSelected`` so the headless tests can drive the
-  ## selection from a synthetic click event without touching the
-  ## legacy interpreter (which the bridge wires through the row's
-  ## ``runQuery`` pipeline on the production path).
+  ## ``vm.runResult`` — the run the bridge wires to the legacy
+  ## interpreter (``onResultRun``).
   let cls = resultRowClass(entry, index, selected)
   let suffix = rowSuffixText(entry)
   let value = entry.value
@@ -210,19 +212,18 @@ proc renderMockResultRow(r: MockRenderer; vm: CommandPaletteVM;
         text suffix
   row
 
-proc renderCommandPalettePanel*(r: MockRenderer;
-                                vm: CommandPaletteVM): MockNode =
-  ## Render the Command Palette panel for the Mock renderer.
+proc renderCommandPalettePanel*[R, N](r: R; vm: CommandPaletteVM): N =
+  ## The Command Palette panel, for every renderer.
   ##
   ## The static shell (outer container + surface + input row +
   ## results dropdown + empty overlay) is built once via the DSL.
   ## A single outer ``createRenderEffect`` rebuilds the dynamic
   ## content whenever any source signal changes.
-  var outerContainer: MockNode
-  var inputField: MockNode
-  var placeholderSpan: MockNode
-  var resultsContainer: MockNode
-  var emptyContainer: MockNode
+  var outerContainer: N
+  var inputField: N
+  var placeholderSpan: N
+  var resultsContainer: N
+  var emptyContainer: N
 
   let panel = ui(r):
     tdiv(ref = outerContainer, class = CommandPaletteContainerClass):
@@ -276,7 +277,7 @@ proc renderCommandPalettePanel*(r: MockRenderer;
       r.setAttribute(resultsContainer, "class", CommandPaletteResultsClass)
       for i, entry in entries:
         let isSelected = (i == selectedIdx)
-        let row = renderMockResultRow(r, vm, entry, i, isSelected)
+        let row = renderResultRow[R, N](r, vm, entry, i, isSelected)
         r.appendChild(resultsContainer, row)
 
     # -- Empty-state overlay --
@@ -288,145 +289,13 @@ proc renderCommandPalettePanel*(r: MockRenderer;
 
   panel
 
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
 when defined(js):
-
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with optional class + id
-    ## attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = "";
-                            elemId: string = ""): isonim_dom.Element =
-    ## Helper: create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass, elemId)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderWebResultRow(vm: CommandPaletteVM;
-                          entry: CommandPaletteResultEntry;
-                          index: int;
-                          selected: bool): isonim_dom.Element =
-    ## Build one dropdown row in the real DOM.  Same shape as the
-    ## Mock variant; click handler is wired imperatively via
-    ## ``addEventListener``.
-    let row = createWebElement("div", resultRowClass(entry, index, selected))
-    let rowIndex = index
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                proc(ev: isonim_dom.Event) =
-      vm.runResult(rowIndex))
-
-    let valueSpan = createWebTextElement("span", entry.value,
-                                         "command-result-value ct-menu-item-label")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(valueSpan))
-
-    let suffixSpan = createWebTextElement("span", rowSuffixText(entry),
-                                          "command-result-suffix ct-menu-item-sublabel")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(suffixSpan))
-    row
-
-  proc renderCommandPalettePanel*(r: WebRenderer;
-                                  vm: CommandPaletteVM): isonim_dom.Element =
-    ## Render the Command Palette panel for the real DOM.  Same
-    ## dispatch shape as the Mock variant — outer wrapper plus a
-    ## render-effect that rebuilds the result list, updates the
-    ## input value + placeholder, and toggles the empty-state
-    ## placeholder + outer hidden modifier.
-    var outerContainer: isonim_dom.Element
-    var inputField: isonim_dom.Element
-    var placeholderSpan: isonim_dom.Element
-    var resultsContainer: isonim_dom.Element
-    var emptyContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(ref = outerContainer, class = CommandPaletteContainerClass):
-        tdiv(id = CommandPaletteSurfaceId, class = CommandPaletteSurfaceClass):
-          tdiv(class = "command-input-row"):
-            input(ref = inputField, `type` = "text",
-                  id = CommandPaletteInputId,
-                  name = "command-query",
-                  # PLAT-49: the Omnibar ViewModel's placeholder, as the
-                  # MockRenderer variant above draws it.
-                  placeholder = OmnibarPlaceholder,
-                  class = CommandPaletteInputFieldClass &
-                    " mousetrap ct-input-com-pal ct-input-search-image",
-                  autocomplete = "off",
-                  autocorrect = "off",
-                  autocapitalize = "off",
-                  spellcheck = "false")
-            span(ref = placeholderSpan, class = CommandPalettePlaceholderClass):
-              text ""
-          tdiv(ref = resultsContainer, class = CommandPaletteResultsClass):
-            discard
-          tdiv(ref = emptyContainer, class = "command-empty-overlay"):
-            text CommandPaletteEmptyStateText
-
-    createRenderEffect proc() =
-      # -- Outer container visibility --
-      isonim_dom.setAttribute(outerContainer, cstring"class",
-                              cstring(containerClass(vm.isActive.val)))
-
-      # -- Input field value + placeholder --
-      isonim_dom.setAttribute(inputField, cstring"value",
-                              cstring(vm.inputValue.val))
-      isonim_dom.setAttribute(placeholderSpan, cstring"data-hint",
-                              cstring(vm.inputPlaceholder.val))
-      clearWebChildren(placeholderSpan)
-      if vm.inputPlaceholder.val.len > 0:
-        let hint = isonim_dom.createTextNode(
-          isonim_dom.document, cstring(vm.inputPlaceholder.val))
-        isonim_dom.appendChild(isonim_dom.Node(placeholderSpan), hint)
-
-      # -- Results --
-      let entries = vm.results.val
-      let selectedIdx = vm.selectedIndex.val
-      clearWebChildren(resultsContainer)
-      if entries.len == 0:
-        isonim_dom.setAttribute(resultsContainer, cstring"class",
-                                cstring(CommandPaletteResultsClass & " " &
-                                          CommandPaletteHiddenModifier))
-      else:
-        isonim_dom.setAttribute(resultsContainer, cstring"class",
-                                cstring(CommandPaletteResultsClass))
-        for i, entry in entries:
-          let isSelected = (i == selectedIdx)
-          let row = renderWebResultRow(vm, entry, i, isSelected)
-          isonim_dom.appendChild(isonim_dom.Node(resultsContainer),
-                                 isonim_dom.Node(row))
-
-      # -- Empty-state overlay --
-      if vm.isActive.val and entries.len == 0 and vm.inputValue.val.len > 0:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"command-empty-overlay")
-      else:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring("command-empty-overlay " &
-                                          CommandPaletteHiddenModifier))
-
-    panel
-
   proc mountIsoNimCommandPalettePanel*(container: isonim_dom.Element;
                                        vm: CommandPaletteVM) =
     ## Mount the IsoNim Command Palette panel as a child of
     ## ``container``.  Reactive effects handle every subsequent
     ## update — no manual redraw is needed.
     let r = WebRenderer()
-    let panel = renderCommandPalettePanel(r, vm)
+    let panel = renderCommandPalettePanel[WebRenderer, isonim_dom.Element](r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container),
                            isonim_dom.Node(panel))

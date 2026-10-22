@@ -20,15 +20,14 @@
 ## 1. ``utils.nim::makeCommandPaletteComponent`` constructs the legacy
 ##    ``CommandPaletteComponent`` and registers it under
 ##    ``Content.CommandPalette`` (one instance per panel id).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.CommandPalette`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimCommandPalettePanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``commandPaletteComponent-{id}`` container and the reactive
-##    effects keep the DOM in sync with the VM.
-## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initCommandPaletteVMFromSession`` so
-##    the panel uses the production ``ReplayDataStore``.
+## 2. The panel host (``ui/panel_host.nim``) mounts the session's
+##    ``CommandPaletteVM`` view into the container it is given — the debug
+##    header's ``commandPaletteComponent-{id}`` (``debug_toolbar``) or a
+##    GoldenLayout container — synchronously, and the reactive effects keep
+##    the DOM in sync with the VM. This module's decorator connects the
+##    view's input to the legacy interpreter.
+## 3. ``configureMiddleware`` (in ``ui_js.nim``) hands the module the
+##    session's VM (``initCommandPaletteVMFromSession``).
 ##
 ## NOTE: rich per-kind row rendering (program-search HTML fragment,
 ## symbol-kind suffix, file-path tail truncation, agent-mode
@@ -41,7 +40,6 @@ import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activi
 
 import ../communication
 import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   CommandPaletteResultEntry, CommandPaletteResultKind,
@@ -50,13 +48,15 @@ from ../viewmodel/store/types as vmtypes import
   cpnlInfo, cpnlWarning, cpnlError, cpnlSuccess,
   cpmNormal, cpmAgent
 from ../viewmodel/viewmodels/command_palette_vm import
-  CommandPaletteVM, createCommandPaletteVM,
+  CommandPaletteVM,
   open, close, clear, setQuery, setResults, setSelected, setMode,
   setInputPlaceholder, setActiveCommandName
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   from ../viewmodel/views/isonim_command_palette_view import
-    CommandPaletteInputId, mountIsoNimCommandPalettePanel
+    CommandPaletteInputId
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent)
 
@@ -234,14 +234,6 @@ method onProgramSearchResults*(self: CommandPaletteComponent, results: seq[Comma
 var commandPaletteVMInstance*: CommandPaletteVM
 var commandPaletteVMStore: ReplayDataStore
 var commandPaletteComponentRef: CommandPaletteComponent
-# Track which CommandPaletteComponent ids have already mounted their
-# IsoNim view.  The GL container is keyed by
-# ``commandPaletteComponent-{id}`` so each open palette panel
-# instance gets its own mount.
-var isoNimCommandPaletteMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
-proc tryMountIsoNimCommandPalettePanel*()
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers
@@ -359,7 +351,6 @@ proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent) =
   ## mutations. The legacy component remains the command interpreter/event-bus
   ## carrier, while the VM and direct mount own the visible DOM.
   self.syncLegacyCommandPaletteIntoVM()
-  tryMountIsoNimCommandPalettePanel()
 
 proc wireCommandPaletteResultRunner(self: CommandPaletteComponent) =
   if commandPaletteVMInstance.isNil or self.isNil:
@@ -383,45 +374,13 @@ proc initCommandPaletteVMFromSession*(vm: CommandPaletteVM) =
   ## If a stub-backed instance already exists (created before the session
   ## was available), it is replaced so the panel uses the real backend.
   let store = vm.store
-  if commandPaletteVMInstance != nil:
-    clog "CommandPaletteVM: replacing existing instance with shared-store version"
-    isoNimCommandPaletteMountedIds = JsAssoc[int, bool]{}
   commandPaletteVMStore = store
   commandPaletteVMInstance = vm
   if not commandPaletteComponentRef.isNil:
     commandPaletteComponentRef.wireCommandPaletteResultRunner()
-  clog "CommandPaletteVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimCommandPalettePanel()
-
-proc initCommandPaletteVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initFilesystemVM`` / ``initScratchpadVM`` — a
-  ## stub backend so the panel can still render before
-  ## ``configureMiddleware`` runs.
-  if commandPaletteVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  commandPaletteVMStore = createReplayDataStore(stubBackend)
-  commandPaletteVMInstance = createCommandPaletteVM(commandPaletteVMStore)
+  clog "CommandPaletteVM: the session's instance installed"
   if not commandPaletteComponentRef.isNil:
-    commandPaletteComponentRef.wireCommandPaletteResultRunner()
-  clog "CommandPaletteVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimCommandPalettePanel()
+    commandPaletteComponentRef.syncLegacyCommandPaletteIntoVM()
 
 # ---------------------------------------------------------------------------
 # Mount helper — Web only
@@ -510,68 +469,16 @@ when defined(js):
           ev.preventDefault()
           self.onTab())
 
-  proc tryMountIsoNimCommandPalettePanel*() =
-    ## Mount the IsoNim Command Palette panel view into the
-    ## GoldenLayout-managed container.  The container's id is
-    ## ``commandPaletteComponent-{id}`` — each open palette panel
-    ## instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container
-    ## appears (capped at 200 attempts, ~2 s) since GoldenLayout
-    ## creates the host slightly after the layout state changes
-    ## (mirrors ``tryMountIsoNimFilesystemPanel`` /
-    ## ``tryMountIsoNimScratchpadPanel`` /
-    ## ``tryMountIsoNimTraceLogPanel``).
-    if commandPaletteVMInstance.isNil:
-      return
-    if commandPaletteComponentRef.isNil:
-      return
-    let componentId = commandPaletteComponentRef.id
-    let key = cstring("commandPaletteComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if isonim_dom_api.isNodeNil(isonim_dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimCommandPalettePanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-      if isoNimCommandPaletteMountedIds.hasKey(componentId):
-        let containerNode = isonim_dom_api.Node(container)
-        if not isonim_dom_api.isNodeNil(containerNode.firstChild):
-          return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = isonim_dom_api.Node(container)
-      while not isonim_dom_api.isNodeNil(containerNode.firstChild):
-        discard isonim_dom_api.removeChild(
-          containerNode, containerNode.firstChild)
-
-      isoNimCommandPaletteMountedIds[componentId] = true
-      try:
-        mountIsoNimCommandPalettePanel(container, commandPaletteVMInstance)
-      except:
-        cerror "tryMountIsoNimCommandPalettePanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-      # Re-sync any state the legacy component already carries so
-      # the freshly-mounted view reflects the latest state.
+  # The panel host mounts the palette's view into the host it is given — the
+  # debug header's `commandPaletteComponent-<id>` (`debug_toolbar`) or a
+  # GoldenLayout container — and this decoration connects that view's input
+  # to the legacy interpreter, which still owns command, search and agent
+  # behaviour, and brings the view up to the component's current state.
+  setPanelDecorator(Content.CommandPalette,
+    proc(host: isonim_dom_api.Element; session: SessionViewModel) =
       if not commandPaletteComponentRef.isNil:
         wireLegacyCommandPaletteInput(commandPaletteComponentRef)
-        syncLegacyCommandPaletteIntoVM(commandPaletteComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimCommandPalettePanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initCommandPaletteVM*``) compile on every backend.
-    discard
+        syncLegacyCommandPaletteIntoVM(commandPaletteComponentRef))
 
 # ---------------------------------------------------------------------------
 # Component registration — IsoNim primary renderer; no Karax method
@@ -579,28 +486,9 @@ else:
 # ---------------------------------------------------------------------------
 
 method register*(self: CommandPaletteComponent, api: MediatorWithSubscribers) =
-  ## Register the CommandPaletteComponent with the mediator.  Bring
-  ## up the IsoNim CommandPaletteVM lazily so the mount procedure
-  ## can find it; the shared-store version is installed by
-  ## ``configureMiddleware`` if the ViewModel layer is enabled.
+  ## Register the CommandPaletteComponent with the mediator. It adopts the
+  ## newest registration; the view is the panel host's.
   self.api = api
-  initCommandPaletteVM()
   commandPaletteComponentRef = self
-  # THE MARKER GOES WITH THE REF, and until now only half of the pair was
-  # maintained. This method already adopts the NEWEST registration
-  # unconditionally, so `commandPaletteComponentRef` was never stale — but
-  # `isoNimCommandPaletteMountedIds` was never cleared by anything, and
-  # `tryMountIsoNimCommandPalettePanel` returns at its `hasKey` guard. Ids are
-  # reused: GoldenLayout hands a re-created panel the same number, and they
-  # restart from 0 after a layout reset. So a palette closed and reopened
-  # adopted the new component, skipped the mount, and came back blank — with
-  # no error, because returning early at a guard looks exactly like having
-  # nothing to show.
-  #
-  # Cleared HERE rather than in an `unregister` override, matching this
-  # module's own idiom and `ui/verification.nim`'s: a clear on the way IN does
-  # not depend on teardown having run, which matters because a panel can be
-  # destroyed by paths that do not unregister it.
-  discard jsDelete(isoNimCommandPaletteMountedIds[self.id])
   self.wireCommandPaletteResultRunner()
-  tryMountIsoNimCommandPalettePanel()
+  self.syncLegacyCommandPaletteIntoVM()

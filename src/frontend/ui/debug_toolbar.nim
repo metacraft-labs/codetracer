@@ -23,6 +23,7 @@ import std/strformat
 import results
 
 import ui_imports, chord_display, command
+import ./panel_host
 import ../[renderer, communication, event_helpers]
 import ../../common/ct_event
 from shortcut_labels import toolbarChord
@@ -295,5 +296,9 @@ proc requestDebugShellRender*() =
     return
   renderDebugChromeInto(WebRenderer(), container, commandPaletteId)
   debugShellMountedCommandPaletteId = commandPaletteId
-  if not data.ui.commandPalette.isNil:
-    data.ui.commandPalette.requestCommandPalettePanelRefresh()
+  # The palette's host exists now: the panel host mounts the palette into it
+  # (or as soon as the session exists), synchronously — no poll.
+  if commandPaletteId >= 0:
+    let host = dom_api.getElementById(dom_api.document, cstring expectedHost)
+    if not dom_api.isNodeNil(dom_api.Node(host)):
+      ensurePanelMounted(host, Content.CommandPalette)
