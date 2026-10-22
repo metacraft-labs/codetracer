@@ -1,7 +1,7 @@
 when defined(js):
   import std/[dom, strformat, strutils]
   import kdom
-  import ../../types
+  import ../../context_menu_item
   import context_menu_hint
   from ../../lib/electron_presence import inElectron
 

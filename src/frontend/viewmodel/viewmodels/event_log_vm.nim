@@ -56,6 +56,7 @@
 ##   echo vm.totalPages.val       # derived from store data
 
 import std/[json, options, strutils, tables, unicode]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, batch]
 import isonim/core/async_compat
@@ -312,6 +313,9 @@ type
     ##
     ## The store reference is kept for the auto-load effect and
     ## for navigation actions (double-click jump).
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -410,6 +414,9 @@ type
 
 proc selectRow*(vm: EventLogVM; row: Option[int]) =
   ## Set the currently selected row. Pass `none(int)` to clear.
+  if vm.actionSink.forwards("eventLog", "selectRow",
+      %*{"row": sinkArg(row)}):
+    return
   vm.selectedRow.val = row
 
 proc appendLiveDebuggerStop*(vm: EventLogVM; row: EventLogRow) =
@@ -430,6 +437,9 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
   ## Navigate to the source location of the event at `row`.
   ## Looks up the event in the VM's event rows and sends a
   ## ProgramEvent-shaped navigation command via the backend.
+  if vm.actionSink.forwards("eventLog", "doubleClickRow",
+      %*{"row": row}):
+    return
   let rows = vm.eventRows.val
   if row >= 0 and row < rows.len:
     let event = rows[row]
@@ -469,10 +479,16 @@ proc setViewport*(vm: EventLogVM; v: Viewport) =
   ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). Reports
   ## are debounced on the store's `viewportScheduler`; the auto-load effect
   ## then asks for the window `viewport.listWindow` derives.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "eventLog", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
   vm.viewportGate.submit(v)
 
 proc nextPage*(vm: EventLogVM) =
   ## Show the next screenful of rows, clamped to the last page.
+  if vm.actionSink.forwards("eventLog", "nextPage", %*{}):
+    return
   let v = vm.viewport.val
   let maxPage = vm.totalPages.val - 1
   let next = vm.currentPage.val + 1
@@ -481,6 +497,8 @@ proc nextPage*(vm: EventLogVM) =
 
 proc prevPage*(vm: EventLogVM) =
   ## Show the previous screenful of rows, clamped to the first page.
+  if vm.actionSink.forwards("eventLog", "prevPage", %*{}):
+    return
   let v = vm.viewport.val
   let prev = vm.currentPage.val - 1
   if v.rows > 0 and prev >= 0:
@@ -490,6 +508,8 @@ proc sort*(vm: EventLogVM; column: int) =
   ## Sort by the given column. If already sorting by this column,
   ## toggle the direction. Otherwise, set the column and default
   ## to ascending.
+  if vm.actionSink.forwards("eventLog", "sort", %*{"column": column}):
+    return
   if vm.sortColumn.val == column:
     vm.sortAscending.val = not vm.sortAscending.val
   else:
@@ -509,12 +529,17 @@ proc sortBy*(vm: EventLogVM; order: EventLogOrder) =
   ## PLAT-50: order the log by `order` (the header click's answer,
   ## `clickedHeader`) — the column's index among those shown, and the
   ## direction.
+  if vm.actionSink.forwards("eventLog", "sortBy",
+      %*{"order": sinkArg(order)}):
+    return
   let shown = vm.columns.val.visibleColumns
   let at = shown.find(order.column)
   vm.sortColumn.val = max(0, at)
   vm.sortAscending.val = order.ascending
 
 proc toggleColumnsMenu*(vm: EventLogVM) =
+  if vm.actionSink.forwards("eventLog", "toggleColumnsMenu", %*{}):
+    return
   vm.columnsMenuOpen.val = not vm.columnsMenuOpen.val
 
 proc showColumn*(vm: EventLogVM; col: EventLogColumn): bool =
@@ -540,6 +565,9 @@ proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
 proc setSearchQuery*(vm: EventLogVM; query: string) =
   ## Search the log: the engine returns only the matching events
   ## (`ct/event-load`'s `search`), and the pane shows them from the top.
+  if vm.actionSink.forwards("eventLog", "setSearchQuery",
+      %*{"query": query}):
+    return
   batch(proc() =
     vm.searchQuery.val = query
     vm.setViewport(vm.viewport.val.scrolledTo(0)))
@@ -821,6 +849,9 @@ proc setFilterInput*(vm: EventLogVM; raw: string) =
   ## top: the engine cuts the window from the matching events, and the old
   ## scroll offset may lie past their end. The scroll goes through the
   ## viewport, not `currentPage`, which is derived from it and moves no window.
+  if vm.actionSink.forwards("eventLog", "setFilterInput",
+      %*{"raw": raw}):
+    return
   let bar = parseFilterBar(raw)
   batch(proc() =
     vm.filterBar.val = bar
@@ -910,6 +941,9 @@ proc dismissToast*(vm: EventLogVM; workspaceId: string) =
   ## workspace doesn't re-trigger it. The dismissal log is held on
   ## the VM here; production wiring persists it through the
   ## preferences-store bridge per spec §7.
+  if vm.actionSink.forwards("eventLog", "dismissToast",
+      %*{"workspaceId": workspaceId}):
+    return
   if workspaceId notin vm.dismissedWorkspaces.val:
     var dismissed = vm.dismissedWorkspaces.val
     dismissed.add(workspaceId)

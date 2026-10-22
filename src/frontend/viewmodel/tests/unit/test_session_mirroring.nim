@@ -37,6 +37,7 @@ import ../../sync/[action_relay, mirror_session, sync_host, sync_publisher,
                    sync_subscriber, synced_signals, transport]
 import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          state_vm]
+import ../../viewport
 
 var checks = 0
 template ck(cond: untyped) =
@@ -440,6 +441,72 @@ suite "several primaries, one set of mirrors":
       link.settle()
       ck mirror.unknownSession == "gone"
       ck not mirror.subscriber.inStep
+      mirror.dispose()
+      host.dispose()
+      done()
+
+suite "a mirror whose panels act on the primary (a VS Code webview)":
+
+  test "a view's call on the mirror's ViewModel runs on the primary":
+    # The views call the ViewModels as anywhere; with `relayActions` the
+    # mirror's ViewModels hand those calls to the primary
+    # (Shared-DOM-Front-Ends D6), which runs them on its own backend.
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      let mirror = createMirrorSession(link.b, relayActions = true)
+      link.settle()
+      primary.store.calltrace.lines.val = @[callLine(0, "main"),
+                                             callLine(1, "helper")]
+      primary.store.calltrace.totalCallsCount.val = 2
+      link.settle()
+
+      # An `Option` argument.
+      mirror.session.calltraceVM.selectEntry(some(1'i64))
+      # An enum argument.
+      mirror.session.stateVM.selectTab(stGlobals)
+      link.settle()
+      ck primary.calltraceVM.selectedEntry.val == some(1'i64)
+      ck mirror.session.calltraceVM.selectedEntry.val == some(1'i64)
+      ck primary.stateVM.activeTab.val == stGlobals
+      ck mirror.session.stateVM.activeTab.val == stGlobals
+
+      # An action that asks the backend: the PRIMARY's backend is asked.
+      mock.clearReceivedCommands()
+      mirror.session.calltraceVM.doubleClickEntry(1)
+      link.settle()
+      ck mock.findCommand("ct/calltrace-jump").isSome
+
+      # A clearing `Option`.
+      mirror.session.calltraceVM.selectEntry(none(int64))
+      link.settle()
+      ck primary.calltraceVM.selectedEntry.val.isNone
+
+      # The size the mirror's view measured reaches the primary's ViewModel,
+      # and the mirror keeps it too.
+      mirror.session.eventLogVM.setViewport(Viewport(rows: 17))
+      link.settle()
+      ck primary.eventLogVM.viewport.val.rows == 17
+      ck mirror.session.eventLogVM.viewport.val.rows == 17
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "without relayActions a mirror's ViewModel acts on its own":
+    # `ct host`'s page mirrors without relaying: its page drives the replay.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      let mirror = createMirrorSession(link.b)
+      link.settle()
+      ck mirror.session.calltraceVM.actionSink.isNil
+      ck mirror.session.stateVM.actionSink.isNil
       mirror.dispose()
       host.dispose()
       done()

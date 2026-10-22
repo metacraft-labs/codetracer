@@ -33,6 +33,7 @@
 ##   echo vm.totalIterations.val   # derived from the loaded flow window
 
 import std/[algorithm, json, options, strutils, tables]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, async_compat]
 import isonim/viewmodel
@@ -138,6 +139,9 @@ type
     ##
     ## The store reference is kept for the auto-load effect and
     ## for navigation actions (click-step jump).
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -263,6 +267,9 @@ proc isDiffFlowUpdate*(update: JsonNode): bool =
 proc setMode*(vm: FlowVM; mode: FlowMode) =
   ## Switch to a different flow mode. The auto-load effect will
   ## request new data because it depends on flowMode.
+  if vm.actionSink.forwards("flow", "setMode",
+      %*{"mode": sinkArg(mode)}):
+    return
   vm.flowMode.val = mode
 
 proc maxIteration*(vm: FlowVM): int =
@@ -276,6 +283,9 @@ proc maxIteration*(vm: FlowVM): int =
 proc selectIteration*(vm: FlowVM; iteration: int) =
   ## Set the currently selected iteration index.
   ## Clamped to [0, totalIterations - 1].
+  if vm.actionSink.forwards("flow", "selectIteration",
+      %*{"iteration": iteration}):
+    return
   let maxIter = vm.maxIteration()
   if iteration < 0:
     vm.selectedIteration.val = 0
@@ -290,19 +300,28 @@ proc stepIterationForward*(vm: FlowVM) =
   ## Spec (`codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md`,
   ## "Loop Slider Control"): "Click arrows for previous/next" — one click is
   ## one iteration, never two (#595).
+  if vm.actionSink.forwards("flow", "stepIterationForward", %*{}):
+    return
   vm.selectIteration(nextIteration(vm.selectedIteration.val, vm.maxIteration()))
 
 proc stepIterationBackward*(vm: FlowVM) =
   ## The "previous iteration" arrow of the loop control. See above.
+  if vm.actionSink.forwards("flow", "stepIterationBackward", %*{}):
+    return
   vm.selectIteration(previousIteration(vm.selectedIteration.val, vm.maxIteration()))
 
 proc hoverStep*(vm: FlowVM; step: Option[int]) =
   ## Set the currently hovered step. Pass `none(int)` to clear.
+  if vm.actionSink.forwards("flow", "hoverStep",
+      %*{"step": sinkArg(step)}):
+    return
   vm.hoveredStep.val = step
 
 proc clickStep*(vm: FlowVM; step: int) =
   ## Navigate to the source location of the given flow step.
   ## Sends a jump command to the backend.
+  if vm.actionSink.forwards("flow", "clickStep", %*{"step": step}):
+    return
   let args = %*{
     "step": step,
     "flowMode": $vm.flowMode.val,
@@ -312,6 +331,8 @@ proc clickStep*(vm: FlowVM; step: int) =
 
 proc toggleRawValues*(vm: FlowVM) =
   ## Toggle whether raw (unformatted) values are shown.
+  if vm.actionSink.forwards("flow", "toggleRawValues", %*{}):
+    return
   vm.showRawValues.val = not vm.showRawValues.val
 
 proc setSteps*(vm: FlowVM; steps: openArray[FlowStepEntry]) =

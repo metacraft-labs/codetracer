@@ -43,9 +43,9 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
   import ../store/replay_data_store
   from ./context_menu_bridge import showContextMenu
-  from ../../types import ContextMenuItem, RAW_TYPE, TypeKind, Value,
-    ValueWithExpression
+  from ../../context_menu_item import ContextMenuItem
   when defined(ctRenderer):
+    from ../../types import RAW_TYPE, TypeKind, Value, ValueWithExpression
     from ../../../common/ct_event import InternalAddToScratchpad
     from ../../communication import emit
     from ../../types import data
@@ -346,14 +346,24 @@ when defined(js):
     isonim_dom.setAttribute(line, cstring"stroke-width", cstring"0.5")
     isonim_dom.appendChild(isonim_dom.Node(svg), isonim_dom.Node(line))
 
-  proc rawScratchpadValue(text: string): Value =
-    Value(
-      kind: TypeKind.Raw,
-      typ: RAW_TYPE,
-      r: cstring(text),
-      isLiteral: false)
+  when defined(ctRenderer):
+    proc rawScratchpadValue(text: string): Value =
+      Value(
+        kind: TypeKind.Raw,
+        typ: RAW_TYPE,
+        r: cstring(text),
+        isLiteral: false)
+
+  var addToScratchpadHook*: proc(name, text: string)
+    ## Where "Add value to scratchpad" goes when the page has no desktop
+    ## renderer: a VS Code webview sets it to its mirror's
+    ## `ScratchpadVM.addValue` (`entries/vscode_panel`). Unset, the desktop's
+    ## event bus is used.
 
   proc addCallArgToScratchpad(name, text: string) =
+    if not addToScratchpadHook.isNil:
+      addToScratchpadHook(name, text)
+      return
     when defined(ctRenderer):
       if data.sessions.len == 0:
         return
@@ -362,8 +372,6 @@ when defined(js):
       api.emit(InternalAddToScratchpad, ValueWithExpression(
         expression: cstring(name),
         value: rawScratchpadValue(text)))
-    else:
-      discard
 
   proc showMenu(ev: isonim_dom.Event; items: seq[ContextMenuItem]) =
     ev.preventDefault()

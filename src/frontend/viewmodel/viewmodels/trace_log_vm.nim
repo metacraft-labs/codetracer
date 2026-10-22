@@ -54,6 +54,7 @@
 ## ``cstring`` / ``langstring`` conversion noise.
 
 import std/[algorithm, json, strutils, tables]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
@@ -72,6 +73,9 @@ const NO_SELECTED_INDEX* = -1
 type
   TraceLogVM* = ref object of ViewModel
     ## Reactive state for the Trace Log panel.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -145,6 +149,10 @@ proc setViewport*(vm: TraceLogVM; v: Viewport) =
   ## The rows the view shows — the ONE way a view tells this ViewModel what
   ## it shows (Viewport-Driven-Loading V1). Debounced on the store's
   ## `viewportScheduler`; the locals of those rows are then read.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "traceLog", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
   vm.viewportGate.submit(v)
 
 proc localsTextOf*(locals: JsonNode): string =
@@ -215,6 +223,9 @@ proc selectEntry*(vm: TraceLogVM; index: int) =
   ## clears the selection.  Out-of-range indices that are not the
   ## sentinel are clamped to the sentinel so the view never paints
   ## a phantom selection on a non-existent row.
+  if vm.actionSink.forwards("traceLog", "selectEntry",
+      %*{"index": index}):
+    return
   let total = vm.entries.val.len
   if index == NO_SELECTED_INDEX or index < 0 or index >= total:
     vm.selectedIndex.val = NO_SELECTED_INDEX
@@ -226,6 +237,9 @@ proc jumpToEntry*(vm: TraceLogVM; index: int) =
   ## legacy ``CtEventJump`` payload (a ``ProgramEvent`` whose
   ## ``rrEventId`` field carries the event identifier).  An out-of-
   ## range index is a silent no-op.
+  if vm.actionSink.forwards("traceLog", "jumpToEntry",
+      %*{"index": index}):
+    return
   let rows = vm.entries.val
   if index < 0 or index >= rows.len:
     return

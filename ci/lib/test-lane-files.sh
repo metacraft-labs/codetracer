@@ -1193,7 +1193,12 @@ test_lane_files() {
 		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
 			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
 			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
-				'/test_opfs_volume\.nim$'
+				'/test_opfs_volume\.nim$' \
+				'/test_vscode_host\.nim$'
+		# `test_vscode_host` (HSF-X2) drives `entries/vscode_host`, the VS Code
+		# extension host's side, which is a hard `{.error.}` off the JS target:
+		# a debug session's `customRequest` and a webview's `postMessage` are
+		# JavaScript functions. It runs in `vm-unit-js`, added there below.
 		;;
 
 	vm-unit-js)
@@ -1432,6 +1437,7 @@ test_lane_files() {
 		# and the only place in the tree where the WEB instantiation's
 		# browser-facing half is exercised at all.
 		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
+		printf '%s\n' src/frontend/viewmodel/tests/unit/test_vscode_host.nim
 		;;
 
 	vm-unit-wasm)

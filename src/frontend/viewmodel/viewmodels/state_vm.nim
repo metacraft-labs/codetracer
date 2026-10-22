@@ -29,6 +29,7 @@
 ##   echo vm.currentVariables.val # globals from the store
 
 import std/[json, options, sets, tables, strutils]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
@@ -107,6 +108,9 @@ type
     ##   isLoading        — whether a locals request is in flight
     ##
     ## The store reference is kept for the auto-load effect.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
     collabCore*: CollaborativeSessionCore
     runtimeRole*: ViewModelRuntimeRole
@@ -322,6 +326,9 @@ func stateEmptyText*(tab: StateTab): string =
 proc selectTab*(vm: StateVM; tab: StateTab) =
   ## Switch to a different tab. The `currentVariables` memo updates
   ## automatically because it depends on `activeTab`.
+  if vm.actionSink.forwards("state", "selectTab",
+      %*{"tab": sinkArg(tab)}):
+    return
   if not vm.collabCore.isNil:
     discard vm.collabCore.dispatchLocalViewOp(
       vokSetStateTab,
@@ -335,6 +342,8 @@ proc toggleExpand*(vm: StateVM; path: string) =
   ## Toggle whether a variable path is expanded or collapsed.
   ## If the path is currently in the expanded set it is removed;
   ## otherwise it is added.
+  if vm.actionSink.forwards("state", "toggleExpand", %*{"path": path}):
+    return
   if not vm.collabCore.isNil:
     let expanded = not (path in vm.expandedPaths.val)
     let observedAddTags =
@@ -361,6 +370,8 @@ proc toggleExpand*(vm: StateVM; path: string) =
 proc selectPath*(vm: StateVM; path: string) =
   ## Set the currently selected variable path.
   ## Pass an empty string to clear the selection.
+  if vm.actionSink.forwards("state", "selectPath", %*{"path": path}):
+    return
   if not vm.collabCore.isNil:
     discard vm.collabCore.dispatchLocalViewOp(
       vokSetRegister,
@@ -397,6 +408,9 @@ proc addWatch*(vm: StateVM; expression: string) =
   ## the origin chain. The actual `ct/originChain` dispatch is wired
   ## via the host bridge so the `OriginChainVM` observes the same
   ## response and updates its `activeChain` signal.
+  if vm.actionSink.forwards("state", "addWatch",
+      %*{"expression": expression}):
+    return
   if expression.len == 0:
     return
   if isOriginWatch(expression) and not vm.onShowOriginProc.isNil and
@@ -429,6 +443,9 @@ proc addWatch*(vm: StateVM; expression: string) =
 
 proc removeWatch*(vm: StateVM; expression: string) =
   ## Remove a watch expression by value. No-op if not found.
+  if vm.actionSink.forwards("state", "removeWatch",
+      %*{"expression": expression}):
+    return
   if not vm.collabCore.isNil:
     let watch = vm.collabCore.liveWatchForExpression(expression)
     if watch.isNone:
@@ -457,6 +474,9 @@ proc editWatch*(vm: StateVM; old, expression: string) =
   ## list (Variable-State-Pane.md: watch expressions "add, edit, remove").
   ## No-op when `old` is not a watch; an edit to an expression already
   ## watched removes `old` (the list stays free of duplicates).
+  if vm.actionSink.forwards("state", "editWatch",
+      %*{"old": old, "expression": expression}):
+    return
   if expression.len == 0 or old == expression:
     return
   if not vm.collabCore.isNil:
@@ -476,6 +496,10 @@ proc editWatch*(vm: StateVM; old, expression: string) =
 proc setViewport*(vm: StateVM; v: Viewport) =
   ## The size the state pane was given (Viewport-Driven-Loading V1); the
   ## stop loader's value budget follows it.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "state", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
   vm.viewport.val = v
 
 const
@@ -540,6 +564,8 @@ proc loadMore*(vm: StateVM; path: string) =
   ## which the locals budget cut short (`Variable.moreElements`), appended to
   ## its children. Asked once at a time per row; an answer about a stop the
   ## debugger has since left is dropped. A row with nothing more does nothing.
+  if vm.actionSink.forwards("state", "loadMore", %*{"path": path}):
+    return
   let store = vm.store
   if store.isNil or path.len == 0 or path in vm.loadingMore.val:
     return
@@ -589,6 +615,9 @@ proc loadMore*(vm: StateVM; path: string) =
       done())
 
 proc toggleHistory*(vm: StateVM; expression: string) =
+  if vm.actionSink.forwards("state", "toggleHistory",
+      %*{"expression": expression}):
+    return
   # Build a fresh HashSet to avoid same-reference equality on the JS target.
   # See updateHistory for full explanation.
   var h = initHashSet[string]()
@@ -674,6 +703,9 @@ proc onShowOrigin*(vm: StateVM; expression: string; location: store_types.Locati
   ## The host bridge is invoked AFTER the wire send so that the
   ## OriginChainVM observes the request fire-and-forget — it tracks
   ## the response via its own event handler.
+  if vm.actionSink.forwards("state", "onShowOrigin",
+      %*{"expression": expression, "location": sinkArg(location)}):
+    return
   if not vm.store.isNil and not vm.store.backend.isNil:
     let args = originChainArgs(expression = expression)
     discard vm.store.backend.send("ct/originChain", args)
@@ -981,6 +1013,9 @@ proc jumpToHistoryEntry*(vm: StateVM; ticks: int64) =
   ## PLAT-51: a value-history entry is a NAVIGATION ROW (Variable-State-Pane
   ## .md; Click-Navigation.md §2): go to the tick its value was recorded at
   ## (`ct/goto-ticks`, the seek the terminal's and GPUI's history rows send).
+  if vm.actionSink.forwards("state", "jumpToHistoryEntry",
+      %*{"ticks": ticks}):
+    return
   if vm.isNil or vm.store.isNil or ticks < 0:
     return
   vm.store.requestHistoricalNavigation("ct/goto-ticks", %*{"ticks": ticks})

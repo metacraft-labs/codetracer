@@ -48,6 +48,7 @@ import ../viewmodels/[
   terminal_output_model,
   terminal_output_vm,
   timeline_vm,
+  trace_log_vm,
 ]
 
 const
@@ -121,6 +122,16 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
     if vm.isNil: return false
     vm.setViewport(merged(vm.viewport.val))
     true
+  of "state":
+    let vm = session.stateVM
+    if vm.isNil: return false
+    vm.setViewport(merged(vm.viewport.val))
+    true
+  of "traceLog":
+    let vm = session.traceLogVM
+    if vm.isNil: return false
+    vm.setViewport(merged(vm.viewport.val))
+    true
   else:
     false
 
@@ -170,6 +181,8 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "doubleClickEntry": v.doubleClickEntry(a.arg("lineIndex", 0'i64))
     of "setSearchQuery": v.setSearchQuery(a.arg("query", ""))
     of "setRawIgnorePatterns": v.setRawIgnorePatterns(a.arg("patterns", ""))
+    of "selectCall": v.selectCall(a.arg("callKey", ""))
+    of "jumpToSearchResult": v.jumpToSearchResult(a.arg("index", 0))
     # Kept for mirrors that predate the `viewport` action.
     of "setViewportHeight":
       v.setViewport(v.viewport.val.withRows(a.arg("height", 0)))
@@ -192,6 +205,7 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
       v.onShowOrigin(a.arg("expression", ""),
                      a.arg("location", store_types.Location()))
     of "jumpToHistoryEntry": v.jumpToHistoryEntry(a.arg("ticks", 0'i64))
+    of "loadMore": v.loadMore(a.arg("path", ""))
     else: return false
 
   of "debugControls":
@@ -278,6 +292,14 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "cancelScrub": v.cancelScrub()
     else: return false
 
+  of "traceLog":
+    let v = session.traceLogVM
+    if v.isNil: return false
+    case action
+    of "selectEntry": v.selectEntry(a.arg("index", 0))
+    of "jumpToEntry": v.jumpToEntry(a.arg("index", 0))
+    else: return false
+
   of "scratchpad":
     let v = session.scratchpadVM
     if v.isNil: return false
@@ -288,6 +310,7 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "clearChains": v.clearChains()
     of "toggleExpand": v.toggleExpand(a.arg("path", ""))
     of "addFromExpression": v.addFromExpression(a.arg("expression", ""))
+    of "addValue": v.addValue(a.arg("entry", store_types.ScratchpadValueEntry()))
     else: return false
 
   of "fileTree":

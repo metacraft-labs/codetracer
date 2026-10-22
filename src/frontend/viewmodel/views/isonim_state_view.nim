@@ -34,7 +34,7 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   from ./context_menu_bridge import showContextMenu
-  from ../../types import ContextMenuItem
+  from ../../context_menu_item import ContextMenuItem
   import kdom except Location
 
 import ../viewmodels/state_vm

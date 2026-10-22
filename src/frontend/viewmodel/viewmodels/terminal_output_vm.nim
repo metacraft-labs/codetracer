@@ -46,6 +46,7 @@
 ## then `lines` is every line.
 
 import std/[json, options, tables]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
@@ -61,6 +62,9 @@ export terminal_output_model
 
 type
   TerminalOutputVM* = ref object of ViewModel
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -159,6 +163,10 @@ proc setViewport*(vm: TerminalOutputVM; v: Viewport) =
   ## The lines the view shows — the ONE way a view tells this ViewModel what
   ## it shows (Viewport-Driven-Loading V1). Debounced on the store's
   ## `viewportScheduler`; the window is then asked for.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "terminalOutput", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
   vm.viewportGate.submit(v)
 
 proc setLines*(vm: TerminalOutputVM; lines: seq[TerminalLine]) =
@@ -257,6 +265,9 @@ proc setRecordingKey*(vm: TerminalOutputVM; key: string;
 proc setView*(vm: TerminalOutputVM; view: TerminalView) =
   ## The user chose a view. The screen view is offered only for output with
   ## screen control; asking for it otherwise keeps the line view.
+  if vm.actionSink.forwards("terminalOutput", "setView",
+      %*{"view": sinkArg(view)}):
+    return
   let v = if view == tvScreen and not vm.screenOffered.val: tvLines else: view
   vm.view.val = v
   vm.viewChosen = true
@@ -266,6 +277,8 @@ proc setView*(vm: TerminalOutputVM; view: TerminalView) =
       vm.onViewChosen(vm.viewMemory)
 
 proc toggleView*(vm: TerminalOutputVM) =
+  if vm.actionSink.forwards("terminalOutput", "toggleView", %*{}):
+    return
   vm.setView(if vm.view.val == tvLines: tvScreen else: tvLines)
 
 proc eventOf*(vm: TerminalOutputVM; eventIndex: int): TerminalOutputEvent =
@@ -299,6 +312,9 @@ proc eventJumpArgs*(ev: TerminalOutputEvent): JsonNode =
 proc jumpToEvent*(vm: TerminalOutputVM; eventIndex: int) =
   ## Go to the moment write `eventIndex` was produced (K32): the fragment's
   ## write, through `ct/event-jump`. A no-op for an unknown index.
+  if vm.actionSink.forwards("terminalOutput", "jumpToEvent",
+      %*{"eventIndex": eventIndex}):
+    return
   var ev = vm.eventOf(eventIndex)
   if ev.eventIndex < 0:
     # Lines set directly (no events): the fragment knows its tick.
@@ -315,6 +331,9 @@ proc jumpToEvent*(vm: TerminalOutputVM; eventIndex: int) =
 proc jumpToWrite*(vm: TerminalOutputVM; write: int) =
   ## Move the recording position to write `write` (the scrubber's release,
   ## the step keys).
+  if vm.actionSink.forwards("terminalOutput", "jumpToWrite",
+      %*{"write": write}):
+    return
   let evs = vm.events.val
   if write < 0 or write >= evs.len:
     return
@@ -355,6 +374,9 @@ proc scrubTo*(vm: TerminalOutputVM; write: int) =
   ## pointer changes, at most one is in flight, and a write reached while one
   ## is in flight waits — superseded by any newer one — until it lands.
   ## `scrubPreview` shows the write under the pointer meanwhile.
+  if vm.actionSink.forwards("terminalOutput", "scrubTo",
+      %*{"write": write}):
+    return
   let n = vm.events.val.len
   if n == 0:
     return
@@ -385,6 +407,8 @@ proc releaseScrub*(vm: TerminalOutputVM): int =
     vm.scrubSent = -1
 
 proc cancelScrub*(vm: TerminalOutputVM) =
+  if vm.actionSink.forwards("terminalOutput", "cancelScrub", %*{}):
+    return
   vm.scrubPreview.val = -1
   vm.scrubSent = -1
   vm.scrubHeld = false

@@ -125,6 +125,20 @@ proc addPrimary*(host: SyncHost; id: string; session: SessionViewModel) =
   if host.active.len == 0:
     host.activate(id)
 
+proc removePrimary*(host: SyncHost; id: string) =
+  ## Stop hosting primary `id` (its debug session ended). The session is the
+  ## caller's to dispose. When it was the active one, the next session hosted
+  ## becomes active; with none left, mirrors keep what they show.
+  if not host.sessions.hasKey(id):
+    return
+  host.sessions[id].publisher.dispose()
+  host.sessions.del(id)
+  if host.active == id:
+    host.active = ""
+    for next in host.sessions.keys:
+      host.activate(next)
+      break
+
 proc dispose*(host: SyncHost) =
   for h in host.sessions.values:
     h.publisher.dispose()

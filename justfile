@@ -310,6 +310,25 @@ build-ui-js output:
     --out:{{output}} \
     js src/frontend/ui_js.nim
 
+# The VS Code extension's two bundles (Shared-DOM-Front-Ends D5): the webview
+# panel (`vscode_panel.js`: one panel over a mirror of the host's session; no
+# `ui_js`, `Data`, Monaco or jQuery) and the extension host's side
+# (`vscode_host.js`: the primary sessions, CommonJS, run by Node). The
+# extension builds both from this checkout (its `CODETRACER_DIR`).
+# `ci/test/renderer-extension-build.sh` builds them through these recipes.
+build-vscode-panel output:
+  nim \
+    -d:chronicles_enabled=off \
+    --out:{{output}} \
+    js src/frontend/entries/vscode_panel.nim
+
+build-vscode-host output:
+  nim \
+    -d:nodejs \
+    -d:chronicles_enabled=off \
+    --out:{{output}} \
+    js src/frontend/entries/vscode_host.nim
+
 # HMR-enabled renderer build. Adds `-d:ctHmr` (which transitively
 # activates `-d:isonimHmr`) so {.uiComponent.} pragmas register slots
 # and `mountUiHot` boundaries listen for swaps. The runtime gate is
