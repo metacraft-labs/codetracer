@@ -4,28 +4,14 @@
 ## ViewModel layer — IsoNim is the primary renderer.
 ##
 ## The legacy Karax ``method render`` was dropped in favour of an IsoNim
-## view (``viewmodel/views/isonim_scratchpad_view.nim``) that mounts
-## directly into the GoldenLayout container.  The legacy
-## ``ScratchpadComponent`` retains its event-bus-carrier methods so the
-## frontend's existing wiring (``InternalAddToScratchpad`` /
+## view (``viewmodel/views/isonim_scratchpad_view.nim``, one generic proc
+## for every renderer) that the panel host (``ui/panel_host``) mounts into
+## the GoldenLayout container, over the session's ``ScratchpadVM``. The
+## legacy ``ScratchpadComponent`` retains its event-bus-carrier methods so
+## the frontend's existing wiring (``InternalAddToScratchpad`` /
 ## ``InternalAddToScratchpadFromExpression`` / ``CtLoadLocalsResponse``)
-## keeps feeding the panel; every state mutation now mirrors into the
-## parallel ``ScratchpadVM`` so the IsoNim view is the single source of
-## truth for the panel's DOM.
-##
-## Lifecycle:
-## 1. ``utils.nim::makeScratchpadComponent`` constructs the legacy
-##    ``ScratchpadComponent`` and registers it under
-##    ``Content.Scratchpad`` (one instance per panel id).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.Scratchpad`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimScratchpadPanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``scratchpadComponent-{id}`` container and the reactive effects
-##    keep the DOM in sync with the VM.
-## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initScratchpadVMFromSession`` so the
-##    panel uses the production ``ReplayDataStore``.
+## keeps feeding that ViewModel; ``configureMiddleware`` (in ``ui_js.nim``)
+## installs it via ``initScratchpadVMFromSession``.
 ##
 ## NOTE: the rich ``ValueComponent`` rendering remains a follow-up — the
 ## IsoNim view renders a single-line ``expression: valueText``
@@ -47,36 +33,32 @@ from ../viewmodel/store/types as vmtypes import ScratchpadValueEntry
 from ../viewmodel/viewmodels/scratchpad_vm import
   ScratchpadVM, createScratchpadVM,
   addValue, removeValue, clearValues, setLocals, addFromExpression
-when defined(js):
+when defined(ctInExtension):
   from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_scratchpad_view import
-    mountIsoNimScratchpadPanel
+  import isonim/web/web_renderer
+  import ../viewmodel/views/isonim_scratchpad_view
 
 # ---------------------------------------------------------------------------
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by trace_log / request_panel / step_list / repl /
-# low_level_code.
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other. On the desktop
+# and the web the pane's view is mounted by the panel host (`ui/panel_host`).
 # ---------------------------------------------------------------------------
 
 var scratchpadVMInstance*: ScratchpadVM
-var scratchpadVMStore: ReplayDataStore
 var scratchpadComponentRef: ScratchpadComponent
-# Track which ScratchpadComponent ids have already mounted their IsoNim
-# view.  The GL container is keyed by ``scratchpadComponent-{id}`` so
-# each panel instance gets its own mount.
-var isoNimScratchpadMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
 
 # "Pin to scratchpad" (Value-Origin-Tracking.md §3.3, §3.5) lands in THIS
-# pane's ViewModel, whichever instance it is when the pin happens: the
-# stub-backed one `initScratchpadVM` builds, or the session's once
-# `initScratchpadVMFromSession` replaces it. `ui/state.nim` owns the
+# pane's ViewModel: the session's, once `initScratchpadVMFromSession` has
+# installed it (the VS Code extension's stub-backed one there). `ui/state.nim` owns the
 # OriginChainVM that pins and cannot import this module (this module imports
 # it), so the target is handed over as a resolver.
 installScratchpadForPins(proc(): ScratchpadVM = scratchpadVMInstance)
 
-proc tryMountIsoNimScratchpadPanel*()
+when defined(ctInExtension):
+  var extensionMountedHost: dom_api.Element
+    ## The webview element the extension's pane was mounted into.
+
+  proc mountScratchpadForExtension()
 
 # ---------------------------------------------------------------------------
 # Component extension (ctInExtension boiler-plate).
@@ -98,10 +80,9 @@ when defined(ctInExtension):
     if host.isNil:
       return
 
-    # Mount the IsoNim scratchpad panel into the container the extension webview
-    # provides.  tryMountIsoNimScratchpadPanel is idempotent — it skips the work
-    # if the panel is already mounted and still in the document.
-    tryMountIsoNimScratchpadPanel()
+    # Mount the scratchpad panel into the container the extension webview
+    # provides.
+    mountScratchpadForExtension()
 
   proc makeScratchpadComponentForExtension*(id: cstring): ScratchpadComponent {.exportc.} =
     if scratchpadComponentForExtension.isNil:
@@ -286,118 +267,45 @@ proc initScratchpadVMFromSession*(vm: ScratchpadVM) =
   ## Hand the pane the session's `ScratchpadVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ##
-  ## If a stub-backed instance already exists (created before the session
-  ## was available), it is replaced so the panel uses the real backend.
-  let store = vm.store
-  if scratchpadVMInstance != nil:
-    clog "ScratchpadVM: replacing existing instance with shared-store version"
-    isoNimScratchpadMountedIds = JsAssoc[int, bool]{}
-  scratchpadVMStore = store
+  ## Values the component already holds are replayed into it once.
   scratchpadVMInstance = vm
-  clog "ScratchpadVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimScratchpadPanel()
+  if not scratchpadComponentRef.isNil:
+    syncLegacyScratchpadIntoVM(scratchpadComponentRef)
 
-proc initScratchpadVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initRequestPanelVM`` / ``initTraceLogVM`` — a stub
-  ## backend so the panel can still render before
-  ## ``configureMiddleware`` runs.
-  if scratchpadVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
+when defined(ctInExtension):
+  proc initScratchpadVM() =
+    ## The VS Code extension's webview has no session store: a ScratchpadVM
+    ## over a stub backend, fed by the component's events.
+    if scratchpadVMInstance != nil:
+      return
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
       result = newPromise proc(resolve: proc(resp: JsonNode)) =
         resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
+    scratchpadVMInstance = createScratchpadVM(createReplayDataStore(stubBackend))
 
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  scratchpadVMStore = createReplayDataStore(stubBackend)
-  scratchpadVMInstance = createScratchpadVM(scratchpadVMStore)
-  clog "ScratchpadVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimScratchpadPanel()
-
-# ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc tryMountIsoNimScratchpadPanel*() =
-    ## Mount the IsoNim Scratchpad panel view into the GoldenLayout-
-    ## managed container.  The container's id is
-    ## ``scratchpadComponent-{id}`` — each open Scratchpad panel
-    ## instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes (mirrors
-    ## ``tryMountIsoNimRequestPanel`` / ``tryMountIsoNimTraceLogPanel``).
-    if scratchpadVMInstance.isNil:
+  proc mountScratchpadForExtension() =
+    ## Mount the pane into the element the extension's webview names.
+    if scratchpadVMInstance.isNil or scratchpadComponentForExtension.isNil:
       return
-    if scratchpadComponentRef.isNil:
+    let host = dom_api.getElementById(dom_api.document,
+      scratchpadComponentForExtension.extensionRendererId)
+    if dom_api.isNodeNil(dom_api.Node(host)) or host == extensionMountedHost:
       return
-    let componentId = scratchpadComponentRef.id
-
-    let key = cstring("scratchpadComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimScratchpadPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimScratchpadMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimScratchpadMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      try:
-        mountIsoNimScratchpadPanel(container, scratchpadVMInstance)
-      except:
-        cerror "tryMountIsoNimScratchpadPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-      # Re-sync any rows the legacy component already carries so the
-      # freshly-mounted view reflects the latest list.
-      if not scratchpadComponentRef.isNil:
-        syncLegacyScratchpadIntoVM(scratchpadComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimScratchpadPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initScratchpadVM*``) compile on every backend.
-    discard
+    extensionMountedHost = host
+    let node = dom_api.Node(host)
+    while not dom_api.isNodeNil(node.firstChild):
+      discard dom_api.removeChild(node, node.firstChild)
+    discard dom_api.appendChild(node, dom_api.Node(
+      renderScratchpadPanel[WebRenderer, dom_api.Element](WebRenderer(),
+        scratchpadVMInstance)))
 
 # ---------------------------------------------------------------------------
-# Component registration — IsoNim primary renderer; no Karax method
-# render.  Generic callers are expected to use direct IsoNim mount paths.
+# Component registration. The pane's view is mounted by the panel host.
 # ---------------------------------------------------------------------------
 
 when defined(ctInExtension):
@@ -405,26 +313,16 @@ when defined(ctInExtension):
     self.bindScratchpadExtensionHost()
 
 method register*(self: ScratchpadComponent, api: MediatorWithSubscribers) =
-  ## Register the ScratchpadComponent with the mediator.  Bring up the
-  ## IsoNim ScratchpadVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## Register the ScratchpadComponent with the mediator. Its handlers feed
+  ## the session's `ScratchpadVM` once `initScratchpadVMFromSession` has
+  ## installed it.
   self.api = api
-  initScratchpadVM()
+  when defined(ctInExtension):
+    initScratchpadVM()
 
-  # Always adopt the newest registration as the live panel.
-  #
-  # This used to latch onto the FIRST component ever registered and never let
-  # go, so once the Scratchpad panel was closed and re-opened (or the layout
-  # was reset) ``tryMountIsoNimScratchpadPanel`` kept looking for the DOM
-  # container of the dead component (``scratchpadComponent-{oldId}``) and the
-  # re-opened panel never mounted its IsoNim view at all.  The mount-tracking
-  # entry for this id is dropped as well: ids restart from 0 after a layout
-  # reset, so a stale "already mounted" marker would otherwise suppress the
-  # mount into the freshly created container.
-  discard jsDelete(isoNimScratchpadMountedIds[self.id])
+  # Always adopt the newest registration as the live component: a closed and
+  # re-opened pane registers a new one, and the handlers must feed through it.
   scratchpadComponentRef = self
-  tryMountIsoNimScratchpadPanel()
 
   api.subscribe(InternalAddToScratchpad,
     proc(kind: CtEventKind, response: ValueWithExpression, sub: Subscriber) =
@@ -460,12 +358,9 @@ method unregister*(self: ScratchpadComponent) =
   ## implementation (which drops the event-bus subscriptions).
   ##
   ## Without this a closed Scratchpad panel would keep ``scratchpadComponentRef``
-  ## pointing at a component whose DOM container no longer exists, and the
-  ## "already mounted" marker for its id would survive into the next panel
-  ## that happens to be given the same id.
+  ## pointing at a component that no longer receives events.
   if scratchpadComponentRef == self:
     scratchpadComponentRef = nil
-  discard jsDelete(isoNimScratchpadMountedIds[self.id])
   procCall unregister(Component(self))
 
 proc registerScratchpadComponent*(component: ScratchpadComponent,

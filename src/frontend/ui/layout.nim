@@ -1860,67 +1860,6 @@ proc mountPaneForState(state: GoldenItemState) =
         if shellComponent.shell.isNil:
           discard shellComponent.createShell()
 
-
-
-
-      # Repl is now an IsoNim view -- its DOM is mounted by
-      # ``repl.tryMountIsoNimReplPanel`` against the
-      # ``replComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      if state.content == Content.Repl:
-        repl.syncLegacyReplIntoVM(ReplComponent(component))
-        repl.syncReplConfigIntoVM()
-        repl.tryMountIsoNimReplPanel()
-
-      # TraceLog is now an IsoNim view -- its DOM is mounted by
-      # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
-      # ``traceLogComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``TraceLogComponent`` remains
-      # as the event-bus carrier (its ``register`` method still
-      # subscribes to tracepoint-result events) and
-      # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
-      # accumulated when the panel becomes visible.
-      # TestResults and Constraints are IsoNim views with no legacy half,
-      # so there is nothing to sync -- the mount is the whole hook.
-      if state.content == Content.TestResults:
-        test_results.tryMountIsoNimTestResultsPanel()
-
-      if state.content == Content.Constraints:
-        constraints.tryMountIsoNimConstraintsPanel()
-
-      # Scratchpad is now an IsoNim view -- its DOM is mounted by
-      # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
-      # ``scratchpadComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``ScratchpadComponent`` remains
-      # as the event-bus carrier (its ``register`` method still
-      # subscribes to ``InternalAddToScratchpad`` /
-      # ``InternalAddToScratchpadFromExpression`` /
-      # ``CtLoadLocalsResponse``) and ``syncLegacyScratchpadIntoVM``
-      # mirrors any rows already accumulated when the panel becomes
-      # visible.  Mission goal #3 §1.70.
-      if state.content == Content.Scratchpad:
-        scratchpad.syncLegacyScratchpadIntoVM(
-          ScratchpadComponent(component))
-        scratchpad.tryMountIsoNimScratchpadPanel()
-
-      # Filesystem is now an IsoNim view -- its DOM is mounted by
-      # ``filesystem.tryMountIsoNimFilesystemPanel`` against the
-      # ``filesystemComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is
-      # needed here.  The legacy ``FilesystemComponent`` remains as
-      # the event-bus carrier (its existing event handlers populate
-      # ``data.services.editor.filesystem``) and
-      # ``syncLegacyFilesystemIntoVM`` mirrors any tree already
-      # accumulated when the panel becomes visible.  Mission goal #3
-      # \u00a71.71.  The rich jstree affordances (animated open/close,
-      # contextmenu plugin, search plugin) remain a follow-up.
-      if state.content == Content.Filesystem:
-        filesystem.syncLegacyFilesystemIntoVM(
-          FilesystemComponent(component))
-        filesystem.tryMountIsoNimFilesystemPanel()
-
       # CommandPalette is now an IsoNim view -- its DOM is mounted by
       # ``command.tryMountIsoNimCommandPalettePanel`` against the
       # ``commandPaletteComponent-{id}`` container, and reactive

@@ -4009,13 +4009,15 @@ suite "IsoNim Scratchpad Panel — structure":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
       check "component-container" in panel.attributes["class"]
       check "active-state" in panel.attributes["class"]
-      check panel.attributes["id"] == "scratchpadComponent-0"
+      # The host the pane is mounted into carries `scratchpadComponent-<n>`;
+      # an id names one element.
+      check "id" notin panel.attributes
 
       dispose()
 
@@ -4031,7 +4033,7 @@ suite "IsoNim Scratchpad Panel — structure":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
 
       let list = findByClass(panel, "value-components-container")
       check list != nil
@@ -4064,7 +4066,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       let list = findByClass(panel, "value-components-container")
       check list.children.len == 0
 
@@ -4081,7 +4083,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("x", "99"))
 
       let list = findByClass(panel, "value-components-container")
@@ -4101,7 +4103,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("board[1][2]", "X"))
 
       let valueRoot = findByClass(panel, "value-expanded")
@@ -4125,7 +4127,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       let overlay = findByClass(panel, "empty-overlay")
       check "hidden" notin overlay.attributes["class"]
 
@@ -4143,7 +4145,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("$msg", "hello world",
                                       isLiteral = true))
 
@@ -4158,7 +4160,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("crash", "<error: boom>", isError = true))
 
       let list = findByClass(panel, "value-components-container")
@@ -4178,7 +4180,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("z", "26"))
       vm.addValue(makeScratchpadEntry("a", "1"))
       vm.addValue(makeScratchpadEntry("m", "13"))
@@ -4212,7 +4214,7 @@ suite "IsoNim Scratchpad Panel — interactions":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("a", "1"))
       vm.addValue(makeScratchpadEntry("b", "2"))
       vm.addValue(makeScratchpadEntry("c", "3"))
@@ -4252,7 +4254,7 @@ suite "IsoNim Scratchpad Panel — interactions":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("a", "1"))
       vm.addValue(makeScratchpadEntry("b", "2"))
 
@@ -4396,7 +4398,7 @@ suite "IsoNim Scratchpad Panel — vm":
       vm.addValue(entry)
 
       let r = MockRenderer()
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       drain()
 
       # Initially, only the top-level element is in the row views
@@ -7591,7 +7593,7 @@ suite "IsoNim REPL Panel — structure":
       let vm = createReplVM(store)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -7608,7 +7610,7 @@ suite "IsoNim REPL Panel — structure":
       let vm = createReplVM(store)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check vm.displayMode.val == rdmReplDisabled
       let msg = findByClass(panel, "repl-disabled-msg")
@@ -7630,7 +7632,7 @@ suite "IsoNim REPL Panel — structure":
       vm.setLangName("noir")
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check vm.displayMode.val == rdmMaterializedDisabled
       let msg = findByClass(panel, "repl-disabled-msg")
@@ -7649,7 +7651,7 @@ suite "IsoNim REPL Panel — structure":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check vm.displayMode.val == rdmReplEnabled
       check findByClassOrNil(panel, "repl-disabled-msg") == nil
@@ -7689,7 +7691,7 @@ suite "IsoNim REPL Panel — display mode reactivity":
       let vm = createReplVM(store)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       # Initially disabled — no form, message visible.
       check findByTagOrNil(panel, "form") == nil
@@ -7711,7 +7713,7 @@ suite "IsoNim REPL Panel — display mode reactivity":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check findByTagOrNil(panel, "form") != nil
 
@@ -7734,7 +7736,7 @@ suite "IsoNim REPL Panel — display mode reactivity":
       vm.setLangName("noir")
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       var msg = findByClass(panel, "repl-disabled-msg")
       check msg.children[0].text ==
@@ -7766,7 +7768,7 @@ suite "IsoNim REPL Panel — submit input":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       let formEl = findByTag(panel, "form")
       let inputEl = findByTag(panel, "input")
       check formEl != nil
@@ -7804,7 +7806,7 @@ suite "IsoNim REPL Panel — submit input":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       let formEl = findByTag(panel, "form")
 
       # Without setting the value the handler reads "" and short-
@@ -7824,7 +7826,7 @@ suite "IsoNim REPL Panel — submit input":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       vm.submitInput("p y")
 
@@ -7878,7 +7880,7 @@ suite "IsoNim REPL Panel — onDebugOutput":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       vm.submitInput("err")
 
       vm.onDebugOutput(ReplOutput(kind: rokError, output: "boom"))
@@ -7931,7 +7933,7 @@ suite "IsoNim REPL Panel — bounded history":
       vm.setHistory(entries)
 
       let r = MockRenderer()
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       let inputRows = findAllByClass(panel, "repl-input-history")
       let outputRows = findAllByClass(panel, "repl-output-history")
@@ -7962,7 +7964,7 @@ suite "IsoNim REPL Panel — bounded history":
       ])
 
       let r = MockRenderer()
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       let inputRows = findAllByClass(panel, "repl-input-history")
       check inputRows.len == 2
@@ -7988,7 +7990,7 @@ suite "IsoNim REPL Panel — bounded history":
           output: ReplOutput(kind: rokResult, output: "1")),
       ])
       let r = MockRenderer()
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       check findAllByClass(panel, "repl-input-history").len == 1
 
       vm.clearHistory()
@@ -9690,7 +9692,7 @@ suite "IsoNim Filesystem Panel — structure":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -9712,7 +9714,7 @@ suite "IsoNim Filesystem Panel — structure":
       vm.loadingState.val = lsIdle
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
 
       let tree = findByClass(panel, "filesystem-tree")
       check tree != nil
@@ -9731,7 +9733,7 @@ suite "IsoNim Filesystem Panel — structure":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
 
       let diff = findByClass(panel, "diff-files-list")
       check diff != nil
@@ -9755,7 +9757,7 @@ suite "IsoNim Filesystem Panel — loading state":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       let loadingOverlay = findByClass(panel, "filesystem-loading-overlay")
       let emptyOverlay = findByClass(panel, "filesystem-empty-overlay")
       let filesystemDiv = findByClass(panel, "filesystem")
@@ -9796,7 +9798,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       let tree = findByClass(panel, "filesystem-tree")
       check tree.children.len == 0
 
@@ -9808,75 +9810,74 @@ suite "IsoNim Filesystem Panel — tree rendering":
 
       dispose()
 
-  test "file rows carry filesystem-entry + file class":
+  test "file rows are jstree leaf nodes":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[makeFsEntry("foo.nim")]))
 
-      let row = findByClass(panel, "filesystem-entry")
+      let row = findByClass(panel, "jstree-node")
       check row != nil
-      check "file" in row.attributes["class"]
-      check "folder" notin row.attributes["class"]
+      check "jstree-leaf" in row.attributes["class"]
+      check "jstree-closed" notin row.attributes["class"]
 
-      let label = findByClass(row, "filesystem-entry-label")
+      let label = findByClass(row, "jstree-anchor")
       check label != nil
       check label.textContent == "foo.nim"
 
       dispose()
 
-  test "folder rows carry folder class + a twisty glyph":
+  test "folder rows are closed jstree nodes until expanded":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("src", path = "src", isFolder = true,
                     children = @[makeFsEntry("inner.nim",
                                              path = "src/inner.nim")]),
       ]))
 
-      let row = findByClass(panel, "filesystem-entry")
-      check "folder" in row.attributes["class"]
-      # Collapsed by default — twisty is the closed glyph.
-      let twisty = findByClass(row, "filesystem-entry-twisty")
-      check twisty.textContent == ">"
+      let row = findByClass(panel, "jstree-node")
+      # Collapsed by default: a closed node, with no children built.
+      check "jstree-closed" in row.attributes["class"]
+      check row.attributes.getOrDefault("aria-expanded") == "false"
+      check findAllByClass(row, "jstree-children").len == 0
 
       dispose()
 
-  test "expandPath shows children + toggles the twisty":
+  test "expandPath shows children and opens the node":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("src", path = "src", isFolder = true,
                     children = @[makeFsEntry("inner.nim",
                                              path = "src/inner.nim")]),
       ]))
 
-      # Folder collapsed: children container is empty.
-      var children = findByClass(panel, "filesystem-entry-children")
-      check children.children.len == 0
+      # Folder collapsed: only the folder's own label.
+      check findAllByClass(panel, "jstree-anchor").len == 1
 
       vm.expandPath("src")
 
       # After expansion the inner row materialises.
-      let labels = findAllByClass(panel, "filesystem-entry-label")
+      let labels = findAllByClass(panel, "jstree-anchor")
       check labels.len == 2
       check labels[1].textContent == "inner.nim"
 
-      # The twisty flips to open.
-      let folderRow = findByClass(panel, "filesystem-entry")
-      let twisty = findByClass(folderRow, "filesystem-entry-twisty")
-      check twisty.textContent == "v"
+      # The node is open.
+      let folderRow = findByClass(panel, "jstree-node")
+      check "jstree-open" in folderRow.attributes["class"]
+      check folderRow.attributes.getOrDefault("aria-expanded") == "true"
 
       dispose()
 
@@ -9886,20 +9887,21 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("src", path = "src", isFolder = true,
                     children = @[makeFsEntry("inner.nim",
                                              path = "src/inner.nim")]),
       ]))
 
-      let row = findByClass(panel, "filesystem-entry")
+      let row = findByClass(panel, "jstree-anchor")
       check not vm.isExpanded("src")
 
       row.fireEvent("click")
       check vm.isExpanded("src")
 
-      row.fireEvent("click")
+      # The tree is rebuilt on the change: click the new anchor.
+      findByClass(panel, "jstree-anchor").fireEvent("click")
       check not vm.isExpanded("src")
 
       dispose()
@@ -9912,13 +9914,12 @@ suite "IsoNim Filesystem Panel — tree rendering":
       var openedPath = ""
       vm.onOpenFile = proc(path: string) = openedPath = path
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("foo.nim", path = "/trace/files/foo.nim"),
       ]))
 
-      let row = findByClass(panel, "filesystem-entry")
-      row.fireEvent("click")
+      findByClass(panel, "jstree-anchor").fireEvent("click")
       check openedPath == "/trace/files/foo.nim"
 
       dispose()
@@ -9931,7 +9932,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       var openedPaths: seq[string] = @[]
       vm.onOpenFile = proc(path: string) = openedPaths.add(path)
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setDiffEntries(@[
         FilesystemDiffEntry(path: "/trace/files/changed.nim", zebra: false),
       ])
@@ -9948,14 +9949,14 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("added.nim", diffClass = fdcAdded),
         makeFsEntry("changed.nim", diffClass = fdcChanged),
         makeFsEntry("deleted.nim", diffClass = fdcDeleted),
       ]))
 
-      let rows = findAllByClass(panel, "filesystem-entry")
+      let rows = findAllByClass(panel, "jstree-node")
       check rows.len == 3
       check "diff-file-added" in rows[0].attributes["class"]
       check "diff-file-changed" in rows[1].attributes["class"]
@@ -9969,7 +9970,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       let overlay = findByClass(panel, "filesystem-empty-overlay")
       check "hidden" in overlay.attributes["class"]
 
@@ -9999,7 +10000,7 @@ suite "IsoNim Filesystem Panel — diff + deep-review":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setDiffEntries([
         FilesystemDiffEntry(path: "src/a.nim", zebra: false),
         FilesystemDiffEntry(path: "src/b.nim", zebra: true),
@@ -10165,7 +10166,7 @@ suite "IsoNim Filesystem Panel — vm":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("proj", path = "/proj", isFolder = true, children = @[
           makeFsEntry("src", path = "/proj/src", isFolder = true, children = @[
@@ -10183,7 +10184,7 @@ suite "IsoNim Filesystem Panel — vm":
       ]))
 
       proc labelTexts(): seq[string] =
-        for node in findAllByClass(panel, "filesystem-entry-label"):
+        for node in findAllByClass(panel, "jstree-anchor"):
           result.add(node.textContent)
 
       # Everything below the top level is collapsed, so the file is absent.
@@ -12114,7 +12115,7 @@ suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
       var openedPaths: seq[string] = @[]
       vm.onOpenFile = proc(path: string) = openedPaths.add(path)
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setDiffEntries(@[
         FilesystemDiffEntry(path: "/trace/files/first.nim", zebra: false),
         FilesystemDiffEntry(path: "/trace/files/second.nim", zebra: true),

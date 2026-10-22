@@ -39,6 +39,11 @@ import std/tables
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
 
+when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
+  import isonim/web/web_renderer
+
 import ../store/types
 import ../viewmodels/errors_vm
 

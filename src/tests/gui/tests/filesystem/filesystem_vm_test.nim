@@ -989,7 +989,7 @@ suite "FilesystemVM a root load that fails or comes back empty (#785)":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
-      let panel = renderFilesystemPanel(MockRenderer(), vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check isShown(findOverlay(panel, "filesystem-loading-overlay"))
 
       vm.failLoad("cannot read /proj: EACCES")
@@ -1007,7 +1007,7 @@ suite "FilesystemVM a root load that fails or comes back empty (#785)":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
-      let panel = renderFilesystemPanel(MockRenderer(), vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
       vm.failLoad("cannot read /proj: EACCES")
 
       vm.setRoot(makeSourceFoldersRoot(@[makeEntry("main.nr", path = "src/main.nr")]))
@@ -1036,7 +1036,7 @@ suite "FilesystemVM a root load that fails or comes back empty (#785)":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
-      let panel = renderFilesystemPanel(MockRenderer(), vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
 
       vm.setRoot(emptySourceFoldersRoot())
 

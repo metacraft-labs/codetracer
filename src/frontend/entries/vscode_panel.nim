@@ -61,13 +61,15 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
       r, s.terminalOutputVM)
     decorateTerminalOutput(panel, s.terminalOutputVM)
     panel
-  of "scratchpad": renderScratchpadPanel(r, s.scratchpadVM)
+  of "scratchpad":
+    renderScratchpadPanel[WebRenderer, dom_api.Element](r, s.scratchpadVM)
   of "traceLog":
     renderTraceLogPanel[WebRenderer, dom_api.Element](r, s.traceLogVM)
   of "flow": renderFlowPanel(r, s.flowVM)
   of "pointList":
     renderPointListPanel[WebRenderer, dom_api.Element](r, s.pointListVM)
-  of "fileTree": renderFilesystemPanel(r, s.fileTreeVM)
+  of "fileTree":
+    renderFilesystemPanel[WebRenderer, dom_api.Element](r, s.fileTreeVM)
   else: nil
 
 var activeMirror: MirrorSession

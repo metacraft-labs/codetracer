@@ -25,113 +25,37 @@
 
 import
   ui_imports,
-  # A MOUNT LATCH THAT DIES WITH ITS CONTAINER. See the module header for why
-  # `isoNimTestResultsMountedIds` alone cannot answer this after a mode swap.
-  isonim_panel_mount,
   ../[ types, communication ]
 
+from isonim/web/dom_api import nil
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 from ../viewmodel/viewmodels/test_results_vm import
   TestResultsVM, createTestResultsVM, setCatalog, setRunAbsence, clearRun,
   ingestEvent, applyRunText
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_test_results_view import
-    mountIsoNimTestResultsPanel
+import ../viewmodel/views/isonim_test_results_view
 
 var testResultsVMInstance*: TestResultsVM
-var testResultsComponentRef: TestResultsComponent
-var isoNimTestResultsMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
-proc tryMountIsoNimTestResultsPanel*()
+  ## The pane's ViewModel: one per window, made on first use.
 
 proc initTestResultsVM*() =
-  ## The VM needs no store: its inputs arrive from a host as a catalog and a
-  ## run, never from the replay data store. That is why there is no
-  ## `initTestResultsVMWithStore` twin — a `ReplayDataStore` parameter would
-  ## be a promise this pane does not keep.
   if testResultsVMInstance != nil:
     return
   testResultsVMInstance = createTestResultsVM()
   clog "TestResultsVM: instance created"
-  tryMountIsoNimTestResultsPanel()
 
-when defined(js):
-  proc tryMountIsoNimTestResultsPanel*() =
-    ## Mount into `testResultsComponent-{id}`, retrying until GoldenLayout has
-    ## created the host. Same shape and same 200-attempt cap as
-    ## `trace_log.tryMountIsoNimTraceLogPanel`; see its comment for why the
-    ## retry is needed at all.
-    if testResultsVMInstance.isNil:
-      return
-    if testResultsComponentRef.isNil:
-      return
-    let componentId = testResultsComponentRef.id
-    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE ID, and the question can
-    # only be asked once the container has been found — so there is no early
-    # return here any more. `isoNimTestResultsMountedIds` is kept as the record
-    # of which ids this module has ever mounted, and `unregister` still clears
-    # it, but it no longer decides: a mode swap destroys the container while
-    # `layout.nim` suppresses `itemDestroyed`, so `unregister` never runs and
-    # the id latch outlives the mount it describes. See `ui/isonim_panel_mount.nim`.
-    let key = cstring("testResultsComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimTestResultsPanel: not ready after 200 retries"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      if not isoNimPanelNeedsMount(
-          idLatchSaysMounted = isoNimTestResultsMountedIds.hasKey(componentId),
-          containerCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimTestResultsMountedIds[componentId] = true
-      try:
-        mountIsoNimTestResultsPanel(container, testResultsVMInstance)
-        markIsoNimPanelContainerMounted(container)
-      except:
-        cerror "tryMountIsoNimTestResultsPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-    doMount()
-else:
-  proc tryMountIsoNimTestResultsPanel*() =
-    discard
+# The panel host mounts the pane into the container GoldenLayout creates.
+setPanelRenderer(Content.TestResults,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    initTestResultsVM()
+    renderTestResultsPanel[WebRenderer, dom_api.Element](r,
+      testResultsVMInstance))
 
 method register*(self: TestResultsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initTestResultsVM()
-  if testResultsComponentRef.isNil:
-    testResultsComponentRef = self
-    tryMountIsoNimTestResultsPanel()
-
-method unregister*(self: TestResultsComponent) =
-  ## Release the module-global slot and the mounted marker. See
-  ## `ui/constraints.nim`'s twin for the full account — the two panes share the
-  ## write-once ref plus write-once mounted-marker shape, and therefore share
-  ## the failure: after a session switch or a panel close the pane comes back
-  ## blank and silent, because its mount returns early at a guard that nothing
-  ## ever clears.
-  ##
-  ## The VM stays, deliberately: a test catalog and the last run's rows describe
-  ## a project rather than a panel, and re-running the suite because someone
-  ## closed a pane would be a worse answer than keeping them.
-  if testResultsComponentRef == self:
-    testResultsComponentRef = nil
-  discard jsDelete(isoNimTestResultsMountedIds[self.id])
-  procCall unregister(Component(self))
 
 proc registerTestResultsComponent*(component: TestResultsComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =

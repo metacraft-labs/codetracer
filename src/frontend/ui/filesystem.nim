@@ -17,12 +17,11 @@
 ## 1. ``utils.nim::makeFilesystemComponent`` constructs the legacy
 ##    ``FilesystemComponent`` and registers it under
 ##    ``Content.Filesystem`` (one instance per panel id).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.Filesystem`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimFilesystemPanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``filesystemComponent-{id}`` container and the reactive effects
-##    keep the DOM in sync with the VM.
+## 2. GoldenLayout's component factory (``layout.nim``) builds the
+##    pane's container and the panel host (``ui/panel_host``) mounts the
+##    generic view into it; reactive effects keep the DOM in sync with the
+##    VM.
+## 3. The legacy event handlers feed the session's VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
 ##    store version of the VM via ``initFilesystemVMFromSession`` so the
 ##    panel uses the production ``ReplayDataStore``.
@@ -54,10 +53,6 @@ from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
   setExpandedPaths, isExpanded, setDiffEntries, emptyEntry, failLoad
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_filesystem_view import
-    mountIsoNimFilesystemPanel
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -217,16 +212,12 @@ proc openTab*(currentPath: cstring) =
 # the pattern used by trace_log / scratchpad / request_panel / step_list.
 # ---------------------------------------------------------------------------
 
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other. The pane's view
+# is mounted by the panel host (`ui/panel_host`).
 var filesystemVMInstance*: FilesystemVM
-var filesystemVMStore: ReplayDataStore
 var filesystemComponentRef: FilesystemComponent
-# Track which FilesystemComponent ids have already mounted their IsoNim
-# view for each session. GoldenLayout component ids are reused across
-# sessions, so the key must include the active session index.
-var isoNimFilesystemMountedIds {.used.}: JsAssoc[cstring, bool] =
-  JsAssoc[cstring, bool]{}
 
-proc tryMountIsoNimFilesystemPanel*()
 
 proc findFileByPath(file: CodetracerFile; path: string): CodetracerFile =
   if file.isNil:
@@ -445,11 +436,10 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
   filesystemVMInstance.setDiffEntries(legacyDiffEntries())
 
 proc refreshIsoNimFilesystemPanel*() =
-  ## Re-sync the mounted IsoNim tree after IPC handlers mutate the
-  ## legacy EditorService filesystem cache.
+  ## Re-sync the session's ViewModel after IPC handlers mutate the legacy
+  ## EditorService filesystem cache; the mounted view follows it.
   if not filesystemComponentRef.isNil:
     syncLegacyFilesystemIntoVM(filesystemComponentRef)
-  tryMountIsoNimFilesystemPanel()
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -459,14 +449,6 @@ proc initFilesystemVMFromSession*(vm: FilesystemVM) =
   ## Hand the pane the session's `FilesystemVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ##
-  ## If a stub-backed instance already exists (created before the session
-  ## was available), it is replaced so the panel uses the real backend.
-  let store = vm.store
-  if filesystemVMInstance != nil:
-    clog "FilesystemVM: replacing existing instance with shared-store version"
-    isoNimFilesystemMountedIds = JsAssoc[cstring, bool]{}
-  filesystemVMStore = store
   filesystemVMInstance = vm
   wireFilesystemOpenBridge()
   when defined(js):
@@ -476,142 +458,17 @@ proc initFilesystemVMFromSession*(vm: FilesystemVM) =
       for _, component in data.ui.componentMapping[Content.Filesystem]:
         syncLegacyFilesystemIntoVM(FilesystemComponent(component))
         break
-  tryMountIsoNimFilesystemPanel()
-
-proc initFilesystemVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initScratchpadVM`` / ``initTraceLogVM`` — a stub
-  ## backend so the panel can still render before
-  ## ``configureMiddleware`` runs.
-  if filesystemVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  filesystemVMStore = createReplayDataStore(stubBackend)
-  filesystemVMInstance = createFilesystemVM(filesystemVMStore)
-  wireFilesystemOpenBridge()
-  tryMountIsoNimFilesystemPanel()
 
 # ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc findFilesystemMountContainer(
-      keyedId, legacyId: cstring;
-      sessionIndex: int): dom_api.Element =
-    ## This tab's Files host: the keyed id, then the legacy unkeyed one. Both
-    ## through `findIsoNimPaneHost`, which never hands back ANOTHER tab's
-    ## host — this used to fall back to a document-wide `getElementById` when
-    ## the tab's own host was not built yet, and that returned tab 0's.
-    result = findIsoNimPaneHost(keyedId, sessionIndex)
-    if dom_api.isNodeNil(dom_api.Node(result)):
-      result = findIsoNimPaneHost(legacyId, sessionIndex)
-
-  proc tryMountIsoNimFilesystemPanel*() =
-    ## Mount the IsoNim Filesystem panel view into the GoldenLayout-
-    ## managed container.  The container's id is
-    ## ``filesystemComponent-{id}`` — each open Filesystem panel
-    ## instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes (mirrors
-    ## ``tryMountIsoNimScratchpadPanel`` / ``tryMountIsoNimTraceLogPanel``).
-    if filesystemVMInstance.isNil:
-      return
-    if filesystemComponentRef.isNil:
-      return
-    let componentId = filesystemComponentRef.id
-    let sessionIndex = data.activeSessionIndex
-    let mountKey = cstring($sessionIndex & ":" & $componentId)
-    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE KEY, so the check moves
-    # inside `doMount` where a container exists to ask. `swapLayout` destroys
-    # this pane's host and builds a fresh one with the same id, while
-    # `layout.nim` suppresses `itemDestroyed` for the swap — so nothing clears
-    # a key-based latch and the pane came back mounted and empty. See
-    # `ui/isonim_panel_mount.nim`.
-    let keyedId = cstring("filesystemComponent-" & $componentId)
-    let legacyId = cstring"filesystemComponent"
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findFilesystemMountContainer(
-        keyedId,
-        legacyId,
-        sessionIndex)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimFilesystemPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      if not isoNimPanelNeedsMount(
-          idLatchSaysMounted = isoNimFilesystemMountedIds.hasKey(mountKey),
-          containerCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      try:
-        mountIsoNimFilesystemPanel(container, filesystemVMInstance)
-        markIsoNimPanelContainerMounted(container)
-        isoNimFilesystemMountedIds[mountKey] = true
-      except:
-        if isoNimFilesystemMountedIds.hasKey(mountKey):
-          isoNimFilesystemMountedIds.del(mountKey)
-        cerror "tryMountIsoNimFilesystemPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-        if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Re-sync any state the legacy component already carries so the
-      # freshly-mounted view reflects the latest tree.
-      if not filesystemComponentRef.isNil:
-        syncLegacyFilesystemIntoVM(filesystemComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimFilesystemPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initFilesystemVM*``) compile on every backend.
-    discard
-
-# ---------------------------------------------------------------------------
-# Component registration — IsoNim primary renderer; no Karax method
-# render.  Generic callers are expected to use direct IsoNim mount paths.
+# Component registration. The pane's view is mounted by the panel host.
 # ---------------------------------------------------------------------------
 
 method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =
-  ## Register the FilesystemComponent with the mediator.  Bring up the
-  ## IsoNim FilesystemVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## Register the FilesystemComponent with the mediator. Its handlers feed
+  ## the session's `FilesystemVM` once `initFilesystemVMFromSession` has
+  ## installed it.
   self.api = api
-  initFilesystemVM()
   filesystemComponentRef = self
-  tryMountIsoNimFilesystemPanel()
 
 proc registerFilesystemComponent*(component: FilesystemComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =

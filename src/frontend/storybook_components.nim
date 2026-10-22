@@ -903,7 +903,8 @@ proc mountScratchpad(container: isonim_dom.Element; fixture: string): DisposePro
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createScratchpadVM(store)
     if fixture != "empty": vm.applyScratchpad()
-    mountIsoNimScratchpadPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderScratchpadPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountSearchResults(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -982,7 +983,8 @@ proc mountFilesystem(container: isonim_dom.Element; fixture: string): DisposePro
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createFilesystemVM(store)
     if fixture != "empty": vm.applyFilesystem()
-    mountIsoNimFilesystemPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderFilesystemPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountFlow(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1248,7 +1250,8 @@ proc mountRepl(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createReplVM(store)
     if fixture == "materialized": vm.setMaterialized(true) else: vm.applyRepl()
-    mountIsoNimRepl(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderReplPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountRequestPanel(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1596,7 +1599,8 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "scratchpad":
         let vm = createScratchpadVM(store); vm.applyScratchpad()
-        mountIsoNimScratchpadPanel(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderScratchpadPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "shell":
         let vm = createShellVM(store); vm.applyShell()

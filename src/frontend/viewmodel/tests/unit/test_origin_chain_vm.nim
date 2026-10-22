@@ -1191,7 +1191,7 @@ suite "M4 — Scratchpad side-by-side chain diff (Gap 5)":
       let store = createReplayDataStore(mock.toBackendService())
       let scratchVM = createScratchpadVM(store)
       let r = MockRenderer()
-      let panel = renderScratchpadPanel(r, scratchVM)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, scratchVM)
       # One chain → no diff block.
       scratchVM.addChain(makeFixtureChain(
         "total", [("c", "b")], "10"))
@@ -1324,7 +1324,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let w = makeWiredOrigin()
       w.showEagerRow("c")
       w.mock.expect("ct/originChain", twoHopChainPayload("c"))
-      let panel = renderStatePanel(MockRenderer(), w.state)
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       let badge = findBadgeForRow(panel, "c")
       check badge != nil
       # Nothing has fetched a chain yet: no context menu, no side panel.
@@ -1356,7 +1356,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let w = makeWiredOrigin()
       w.showEagerRow("c")
       w.mock.expect("ct/originChain", twoHopChainPayload("c"))
-      let panel = renderStatePanel(MockRenderer(), w.state)
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       findBadgeForRow(panel, "c").fireEvent("click")
       drain()
       check originChainRequests(w.mock).len == 1
@@ -1371,7 +1371,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let w = makeWiredOrigin()
       w.showEagerRow("c")
       w.mock.expect("ct/originChain", twoHopChainPayload("c"))
-      let panel = renderStatePanel(MockRenderer(), w.state)
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       let badge = findBadgeForRow(panel, "c")
       badge.fireEvent("click")   # expand: fetch
       drain()
@@ -1402,7 +1402,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       w.mock.clearReceivedCommands()
       w.mock.expect("ct/originChain", twoHopChainPayload("c"))
       w.mock.expect("ct/originChain", twoHopChainPayload("d"))
-      let panel = renderStatePanel(MockRenderer(), w.state)
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       findBadgeForRow(panel, "c").fireEvent("click")
       drain()
       findBadgeForRow(panel, "d").fireEvent("click")
@@ -1420,7 +1420,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       let w = makeWiredOrigin()
       w.showEagerRow("c")
       w.mock.expect("ct/originChain", twoHopChainPayload("c"))
-      let panel = renderStatePanel(MockRenderer(), w.state)
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       findBadgeForRow(panel, "c").fireEvent("click")
       drain()
       check w.state.originChainLookup("c").isSome
@@ -1483,7 +1483,7 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check w.origin.activeChain.val.isSome and
         w.origin.activeChain.val.get.queryVariable == "c"
       w.mock.expect("ct/originChain", twoHopChainPayload("d"))
-      let panel = renderStatePanel(MockRenderer(), w.state)
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
       findBadgeForRow(panel, "d").fireEvent("click")
       drain()
       check w.state.originChainLookup("d").isSome

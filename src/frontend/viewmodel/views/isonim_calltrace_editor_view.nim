@@ -24,6 +24,11 @@ import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
+  import isonim/web/web_renderer
+
+when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/calltrace_editor_vm

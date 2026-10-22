@@ -24,17 +24,14 @@ import
 # where the rule about which edits count can be driven by a headless lane.
 from ../viewmodel/viewmodels/constraints_vm import
   ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_constraints_view import
-    mountIsoNimConstraintsPanel
+from isonim/web/dom_api import nil
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
+import ../viewmodel/views/isonim_constraints_view
 
 var constraintsVMInstance*: ConstraintsVM
-var constraintsComponentRef: ConstraintsComponent
-var isoNimConstraintsMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
-proc tryMountIsoNimConstraintsPanel*()
+  ## The pane's ViewModel: one per window, made on first use.
 
 proc initConstraintsVM*() =
   ## The VM needs no store: a constraint report comes from `nargo info`, or
@@ -45,7 +42,14 @@ proc initConstraintsVM*() =
     return
   constraintsVMInstance = createConstraintsVM()
   clog "ConstraintsVM: instance created"
-  tryMountIsoNimConstraintsPanel()
+
+# The panel host mounts the pane into the container GoldenLayout creates.
+setPanelRenderer(Content.Constraints,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
+    initConstraintsVM()
+    renderConstraintsPanel[WebRenderer, dom_api.Element](r,
+      constraintsVMInstance))
 
 proc noteEditorSourceChanged*(path: cstring) =
   ## A visitor edited `path`, so the counts on screen may no longer describe
@@ -66,93 +70,9 @@ proc noteEditorSourceChanged*(path: cstring) =
     return
   constraintsVMInstance.noteSourceEdited($path)
 
-when defined(js):
-  proc tryMountIsoNimConstraintsPanel*() =
-    ## Mount into `constraintsComponent-{id}`, retrying until GoldenLayout has
-    ## created the host. Same shape and same 200-attempt cap as
-    ## `trace_log.tryMountIsoNimTraceLogPanel`; see its comment for why the
-    ## retry is needed at all.
-    if constraintsVMInstance.isNil:
-      return
-    if constraintsComponentRef.isNil:
-      return
-    let componentId = constraintsComponentRef.id
-
-    let key = cstring("constraintsComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimConstraintsPanel: not ready after 200 retries"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimConstraintsMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimConstraintsMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      try:
-        mountIsoNimConstraintsPanel(container, constraintsVMInstance)
-      except:
-        cerror "tryMountIsoNimConstraintsPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-    doMount()
-else:
-  proc tryMountIsoNimConstraintsPanel*() =
-    discard
-
 method register*(self: ConstraintsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initConstraintsVM()
-  if constraintsComponentRef.isNil:
-    constraintsComponentRef = self
-    tryMountIsoNimConstraintsPanel()
-
-method unregister*(self: ConstraintsComponent) =
-  ## Release the module-global slot and the mounted marker before the base
-  ## implementation drops the event-bus subscriptions.
-  ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK. Both globals above are
-  ## write-once — `register` assigns the ref only `if isNil`, and the mount
-  ## consults `isoNimConstraintsMountedIds`. Neither is cleared anywhere else,
-  ## so after a teardown `constraintsComponentRef` still points at a component
-  ## whose DOM container no longer exists. The id latch alone no longer blanks
-  ## a FRESH host — `isoNimPanelNeedsMountInHost` also asks whether the host in
-  ## front of the mount carries the mark, and a new element does not — but a
-  ## host that survived the teardown still carries it, and clearing the latch
-  ## here is what has that host rebuilt for the next component given the id.
-  ##
-  ## `ui/session_switch.nim` unregisters EVERY component of the closing
-  ## session, and `ui/layout.nim` unregisters a closed panel, so this is an
-  ## ordinary transition rather than an exotic one — and the failure is silent,
-  ## because a pane that returns early at a guard looks exactly like a pane
-  ## with nothing to show.
-  ##
-  ## The VM is deliberately NOT reset. `constraintsVMInstance` is a singleton
-  ## by design (`initConstraintsVM` returns early when it exists), and the
-  ## report it holds describes a project, not a panel — dropping it would make
-  ## closing and reopening the pane lose counts that are still true.
-  ##
-  ## Modelled on `ui/scratchpad.nim`, which is the only pane that had this.
-  if constraintsComponentRef == self:
-    constraintsComponentRef = nil
-  discard jsDelete(isoNimConstraintsMountedIds[self.id])
-  procCall unregister(Component(self))
 
 proc registerConstraintsComponent*(component: ConstraintsComponent,
                                    api: MediatorWithSubscribers) {.exportc.} =

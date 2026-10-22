@@ -250,7 +250,7 @@ proc desktopHostOverPane(spies: Spies; installControls = true):
   let vm = createTestResultsVM()
   vm.setCatalog(TestCatalog(items: fiveTests()))
   let r = MockRenderer()
-  let panel = renderTestResultsPanel(r, vm)
+  let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
   let host = newDesktopTestHost(
     vm,
     dispatch = proc(selector, file: string; line: int): string =

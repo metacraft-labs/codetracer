@@ -121,7 +121,7 @@ suite "the Constraints pane marks a count stale when the sources move":
       paneWithCounts(vm)
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
 
       # BEFORE THE EDIT, by value. These are the counts and this is the
       # sentence; both are asserted so the comparison below is between two
@@ -157,7 +157,7 @@ suite "the Constraints pane marks a count stale when the sources move":
       paneWithCounts(vm)
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
 
       for _ in 0 ..< 5:
         vm.noteSourceEdited("src/main.nr")
@@ -181,7 +181,7 @@ suite "the Constraints pane marks a count stale when the sources move":
       paneWithCounts(vm)
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
       let before = paneText(panel, "constraints-headline")
 
       for path in ["README.md", "Prover.toml", "notes.txt", ".gitignore"]:
@@ -209,7 +209,7 @@ suite "the Constraints pane marks a count stale when the sources move":
       paneWithCounts(vm)
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
       let before = paneText(panel, "constraints-headline")
 
       vm.noteSourceEdited("Nargo.toml")
@@ -232,7 +232,7 @@ suite "the Constraints pane marks a count stale when the sources move":
       paneWithCounts(vm)
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
 
       vm.noteSourceEdited("src/main.nr")
       ck paneText(panel, "constraints-headline").endsWith("(stale)")
@@ -271,7 +271,7 @@ suite "the Constraints pane marks a count stale when the sources move":
                     "constraint listing.")
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
       let before = paneText(panel, "constraints-headline")
       ck before == "unavailable"
 
@@ -300,7 +300,7 @@ suite "the Constraints pane marks a count stale when the sources move":
       paneWithCounts(vm)
 
       let r = MockRenderer()
-      let panel = renderConstraintsPanel(r, vm)
+      let panel = renderConstraintsPanel[MockRenderer, MockNode](r, vm)
 
       ck not paneText(panel, "constraints-headline").contains("(stale)")
       ck allByClass(panel, "stale").len == 0

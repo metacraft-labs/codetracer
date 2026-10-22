@@ -104,7 +104,8 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   isonim_dom.appendChild(isonim_dom.Node(shell.sections[5].content),
     isonim_dom.Node(renderPointListPanel[WebRenderer, isonim_dom.Element](
       r, session.pointListVM)))
-  mountIsoNimScratchpadPanel(shell.sections[6].content, session.scratchpadVM)
+  discard isonim_dom.appendChild(isonim_dom.Node(shell.sections[6].content), isonim_dom.Node(
+    renderScratchpadPanel[WebRenderer, isonim_dom.Element](WebRenderer(), session.scratchpadVM)))
   mountIsoNimShell(shell.sections[7].content, session.shellVM)
 
   # Note: Editor is not mounted here because it requires additional

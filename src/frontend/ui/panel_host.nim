@@ -36,7 +36,8 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_low_level_code_view,
                             isonim_point_list_view, isonim_step_list_view,
                             isonim_calltrace_editor_view, isonim_build_view,
-                            isonim_errors_view]
+                            isonim_errors_view, isonim_scratchpad_view,
+                            isonim_repl_view, isonim_filesystem_view]
 import ../viewmodel/views/[isonim_search_results_view, isonim_trace_log_view,
                             isonim_terminal_output_view]
 from ../viewmodel/viewmodels/terminal_output_vm import nil
@@ -50,7 +51,9 @@ const
                      Content.BuildErrors, Content.SearchResults,
                      Content.TraceLog, Content.TerminalOutput,
                      Content.AgentWorkspace, Content.RequestPanel,
-                     Content.AgentActivity}
+                     Content.AgentActivity, Content.Scratchpad, Content.Repl,
+                     Content.Filesystem, Content.TestResults,
+                     Content.Constraints}
     ## The panes `mountPanel` renders.
   RequestRowFallbackPx = 24.0
     ## The Request panel's row pitch until a row is rendered to measure.
@@ -297,6 +300,18 @@ proc render(m: PanelMount; session: SessionViewModel) =
         r, session.terminalOutputVM)
       dom_api.appendChild(node, dom_api.Node(panel))
       decorateTerminalOutput(panel, session.terminalOutputVM)
+    of Content.Scratchpad:
+      let panel = renderScratchpadPanel[WebRenderer, dom_api.Element](
+        r, session.scratchpadVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.Repl:
+      let panel = renderReplPanel[WebRenderer, dom_api.Element](
+        r, session.replVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.Filesystem:
+      let panel = renderFilesystemPanel[WebRenderer, dom_api.Element](
+        r, session.fileTreeVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
     else:
       let renderPane = renderers[mount.kind]
       if not renderPane.isNil:
