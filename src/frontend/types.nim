@@ -666,7 +666,7 @@ type
     startRow*: int
     endRow*: int
     scrollAreaHeight*: int
-    rowHeight*: int
+    rowHeight*: float
     activeRowIndex*: int
     autoScroll*: bool
     inputFieldChange*: bool

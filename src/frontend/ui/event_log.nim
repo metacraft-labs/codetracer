@@ -2246,17 +2246,20 @@ proc attachEventLogScrubber(self: EventLogComponent) =
     current = proc(): int =
       if eventLogVMStore.isNil: -1
       else: eventLogVMStore.eventLog.currentIndex.val,
-    # DataTables' Scroller SCALES its body: the virtual height is not the
-    # drawn rows' (measured: 39340px for 70 rows of 24px), and it maps the
-    # scroll offset to a row proportionally. So a row's offset is its share
-    # of that virtual height, and the view's height in rows is the DRAWN
-    # rows'.
+    # DataTables' Scroller can SCALE its body: past 1,000,000 px it caps the
+    # physical height and maps the scroll offset to a row proportionally
+    # (`_scrollForce` / `_domain` in dataTables.scroller.mjs). So a row's
+    # offset is its share of that virtual height, and the view's height in
+    # rows is the DRAWN rows'. (The 39340px body once measured here for 70
+    # rows of 24px was not scaling but #850: the Scroller held the empty-table
+    # message's height as its row height. `datatable.nim` now keeps it to the
+    # drawn rows', and that body is 1680px.)
     rowHeight = proc(): float =
       let n = max(1, eventLogTotal(component))
       max(1.0, scrollHeightOf(body) / float(n)),
     paneId = "eventLog",
-    # THE SCROLLER'S MAPPING IS PROPORTIONAL (measured 2026-10-06): its
-    # body is sometimes SCALED (39340 px for 70 rows of 24 px), and it then
+    # THE SCROLLER'S MAPPING IS PROPORTIONAL (measured 2026-10-06): when its
+    # body is SCALED (see `rowHeight` above) it
     # shows the rows at `offset / (scrollHeight - clientHeight)` of the way
     # through `total - visible` — so the first row in view and a jump are
     # that same proportion, which is exact for an unscaled body too.
