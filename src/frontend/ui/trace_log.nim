@@ -121,4 +121,3 @@ method register*(self: TraceLogComponent, api: MediatorWithSubscribers) =
   ## The pane subscribes to nothing: its rows are the session's
   ## ``TraceLogVM``.
   self.api = api
-

@@ -200,4 +200,3 @@ method restart*(self: TerminalOutputComponent) =
 method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
   ## The pane subscribes to nothing (see the module header).
   self.api = api
-

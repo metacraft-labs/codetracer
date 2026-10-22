@@ -455,4 +455,3 @@ method register*(self: FilesystemComponent, api: MediatorWithSubscribers) =
   ## installed it.
   self.api = api
   filesystemComponentRef = self
-

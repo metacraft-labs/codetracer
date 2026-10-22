@@ -56,4 +56,3 @@ setPanelRenderer(Content.TestResults,
 method register*(self: TestResultsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initTestResultsVM()
-

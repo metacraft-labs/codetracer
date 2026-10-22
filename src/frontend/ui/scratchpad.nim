@@ -281,4 +281,3 @@ method unregister*(self: ScratchpadComponent) =
   if scratchpadComponentRef == self:
     scratchpadComponentRef = nil
   procCall unregister(Component(self))
-
