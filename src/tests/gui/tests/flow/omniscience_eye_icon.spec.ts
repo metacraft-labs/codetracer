@@ -1,6 +1,6 @@
 import { test, expect } from "../../lib/fixtures";
 import * as helpers from "../../lib/language-smoke-test-helpers";
-import { LayoutPage } from "../../page-objects/layout_page";
+import { LayoutPage } from "../../page-objects/layout-page";
 
 /**
  * The omniscience/flow value chip must CLIP, and the eye icon must open the

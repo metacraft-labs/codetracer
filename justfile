@@ -1975,9 +1975,15 @@ test-e2e *args:
   esac
   just ensure-storybook-static "$@"
   bash "${CODETRACER_REPO_ROOT_PATH}/ci/lib/npm-install.sh" "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui"
-  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
-    env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
-      "$@"
+  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui"
+  # Playwright transpiles specs WITHOUT type-checking them, so a spec that
+  # calls a helper with the wrong arguments, or a method its page object does
+  # not have, loads and fails (or skips itself) at runtime instead of here.
+  # `test-gui`, `test-gui-prebuilt` and the CI GUI job reach the suite through
+  # this recipe, so the whole suite is type-checked once per run, whatever
+  # subset of it the arguments select.
+  npx tsc --noEmit
+  env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 "$@"
 
 dev-tools-test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/src/tests/gui && \

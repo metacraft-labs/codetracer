@@ -2292,8 +2292,10 @@ export {
 };
 
 // Export recordTestProgram so multi-trace tests can pre-record additional
-// programs and load them into new sessions via IPC.
-export { recordTestProgram };
+// programs and load them into new sessions via IPC, and traceFolderForId so
+// they can name the folder a recording id was written to (a session manifest
+// references its traces by folder).
+export { recordTestProgram, traceFolderForId };
 
 // Re-export performance timing utilities for use in tests
 export { timed, timedVoid } from "./performance-limits";

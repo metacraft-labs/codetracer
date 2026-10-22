@@ -47,6 +47,9 @@ function currentLayoutPaths(): { userLayoutDir: string; userLayoutPath: string; 
 
 const backupSuffix = ".backup_build_tests";
 
+/** The bundled `default_config.yaml` must carry exactly this many top-level `theme:` lines. */
+const ThemeLinesPerConfig = 1;
+
 /**
  * The bundled default layout shipped with the source tree.
  * `codetracerInstallDir` should be the repo root (one level above tsc-ui-tests).
@@ -70,16 +73,20 @@ export function ensureDefaultConfig(codetracerInstallDir: string, theme = ""): v
   }
   const target = path.join(userLayoutDir, ".config.yaml");
   fs.copyFileSync(bundled, target);
-  if (theme.length > 0) {
+  if (theme !== "") {
     // The bundled config names its theme on one top-level `theme:` line; a
     // config without exactly one is a changed schema, and silently launching
     // in the default theme would make a light capture a dark one.
-    const text = fs.readFileSync(target, "utf8");
-    const line = /^theme:.*$/m;
-    if ((text.match(/^theme:.*$/gm) ?? []).length !== 1) {
+    // Matched line by line rather than with a regex: the lint config demands
+    // the `v` flag on every regex, and the suite's `tsconfig.json` targets
+    // ES2022, which rejects it (TS1501).
+    const isThemeLine = (line: string): boolean => line.startsWith("theme:");
+    const lines = fs.readFileSync(target, "utf8").split("\n");
+    if (lines.filter(isThemeLine).length !== ThemeLinesPerConfig) {
       throw new Error(`${bundled} does not carry exactly one top-level 'theme:' line`);
     }
-    fs.writeFileSync(target, text.replace(line, `theme: "${theme}"`));
+    const themed = lines.map((line) => (isThemeLine(line) ? `theme: "${theme}"` : line));
+    fs.writeFileSync(target, themed.join("\n"));
   }
 }
 
@@ -121,7 +128,7 @@ export function ensureDefaultLayout(codetracerInstallDir: string): void {
  */
 export function removeUserLayout(): void {
   const { userLayoutPath } = currentLayoutPaths();
-  for (const victim of [userLayoutPath, userLayoutPath + ".broken"]) {
+  for (const victim of [userLayoutPath, `${userLayoutPath}.broken`]) {
     if (fs.existsSync(victim)) {
       fs.unlinkSync(victim);
     }
@@ -229,7 +236,7 @@ export function editLayoutPath(): string {
  */
 export function resetEditLayout(): void {
   const target = editLayoutPath();
-  for (const victim of [target, target + ".broken"]) {
+  for (const victim of [target, `${target}.broken`]) {
     if (fs.existsSync(victim)) {
       fs.unlinkSync(victim);
     }
