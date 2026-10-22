@@ -6200,7 +6200,15 @@ jobs:
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}/../codetracer-wasm-instrumenter"
-          nix develop --no-write-lock-file --command cargo build --release -p ct-instrument-cli
+          # Pinned, like the native backend and Ruby recorder builds in this
+          # lane: the self-hosted runners export a runner-wide
+          # CARGO_TARGET_DIR, and under it cargo wrote the binary there, so
+          # the check below failed after a successful build. The pin makes
+          # the path checked the path written. scripts/materialize-recording.sh
+          # also honours a CARGO_TARGET_DIR it is given, for builds outside
+          # this step. Asserted by ci/test/ct-instrument-target-dir-test.sh.
+          CARGO_TARGET_DIR="$PWD/target" \
+            nix develop --no-write-lock-file --command cargo build --release -p ct-instrument-cli
           if [ ! -x target/release/ct-instrument ]; then
             echo "::error::cargo build reported success but target/release/ct-instrument is missing; scripts/materialize-recording.sh cannot produce the cross-process recording."
             exit 1
@@ -8754,6 +8762,15 @@ jobs:
       - name: Assert the WebAssembly recording fixture lane stays required
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash ci/test/wasm-recordings-ci-test.sh
+
+      - name: Assert ct-instrument is found wherever cargo put it
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # test-non-gui's build of the instrumenter sibling, and the recording
+        # materializer that consumes it, both looked only in the sibling's
+        # own target/ while the self-hosted runners' CARGO_TARGET_DIR sent
+        # cargo's output elsewhere. Static over the workflow step, plus the
+        # real materializer run up to its prerequisite gate.
+        run: bash ci/test/ct-instrument-target-dir-test.sh
 
       - name: Assert every job in this workflow declares a timeout
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

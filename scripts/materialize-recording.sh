@@ -190,20 +190,43 @@ digest_fixture_sources() {
 # ---------------------------------------------------------------------------
 missing=()
 
+# Where `cargo build -p ct-instrument-cli` in the instrumenter put its binary.
+#
+# The sibling's own `target/` first: that is where a build with no
+# CARGO_TARGET_DIR lands, and where the CI step that builds it pins it. Then
+# the CARGO_TARGET_DIR this script was given, because a build made in the same
+# environment lands there instead -- the self-hosted runners export a
+# runner-wide one (infra `services/github-runners/default.nix`), and a
+# developer may set one globally. Before this was honoured, a successful build
+# under such a variable left this script reporting "ct-instrument not found"
+# (codetracer-pm issues/2026-10-22-test-non-gui-ct-instrument-build-ignores-
+# the-runners-cargo-target-dir.md). The sibling's `target/` keeps precedence
+# because a runner-wide directory is shared by every job on the runner and may
+# hold a binary an earlier job built from another revision. A relative
+# CARGO_TARGET_DIR is cargo's "relative to the working directory", taken here
+# as the instrumenter root, where it is built.
+# https://doc.rust-lang.org/cargo/reference/config.html#buildtarget-dir
 resolve_ct_instrument() {
 	local instrumenter="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
-	local candidate
+	local candidate target_dir profile
+	local -a target_dirs=("$instrumenter/target")
 	if [ -n "${CT_INSTRUMENT_BIN:-}" ] && [ -x "${CT_INSTRUMENT_BIN}" ]; then
 		printf '%s\n' "$CT_INSTRUMENT_BIN"
 		return 0
 	fi
-	for candidate in \
-		"$instrumenter/target/release/ct-instrument" \
-		"$instrumenter/target/debug/ct-instrument"; do
-		if [ -x "$candidate" ]; then
-			printf '%s\n' "$candidate"
-			return 0
-		fi
+	case "${CARGO_TARGET_DIR:-}" in
+	'') ;;
+	/*) target_dirs+=("$CARGO_TARGET_DIR") ;;
+	*) target_dirs+=("$instrumenter/$CARGO_TARGET_DIR") ;;
+	esac
+	for target_dir in "${target_dirs[@]}"; do
+		for profile in release debug; do
+			candidate="$target_dir/$profile/ct-instrument"
+			if [ -x "$candidate" ]; then
+				printf '%s\n' "$candidate"
+				return 0
+			fi
+		done
 	done
 	if command -v ct-instrument >/dev/null 2>&1; then
 		command -v ct-instrument
@@ -243,7 +266,7 @@ readonly JS_RECORDER_ROOT
 
 CT_INSTRUMENT_BIN="$(resolve_ct_instrument || true)"
 [ -n "$CT_INSTRUMENT_BIN" ] ||
-	missing+=("- ct-instrument not found (cargo build --release -p ct-instrument-cli in $INSTRUMENTER_ROOT)")
+	missing+=("- ct-instrument not found (cargo build --release -p ct-instrument-cli in $INSTRUMENTER_ROOT; searched its target/ and CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>})")
 
 RECORD_WEB_BIN="$(resolve_record_web || true)"
 [ -n "$RECORD_WEB_BIN" ] ||
