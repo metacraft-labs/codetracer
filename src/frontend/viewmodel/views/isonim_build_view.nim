@@ -40,8 +40,7 @@
 import std/strutils
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
   import isonim/web/web_renderer
@@ -49,6 +48,9 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/build_vm
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
@@ -130,20 +132,57 @@ proc lineJumpHandler(vm: BuildVM; line: BuildOutputLine): proc() =
   ## this call's own parameter, so each row's closure owns its value.
   result = proc() = vm.jumpToLine(line)
 
-proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
-  ## Render the build panel for the Mock renderer.
+proc renderPlainOutput[R, N](r: R; vm: BuildVM; outputContainer: N) =
+  ## The output rows as text, rebuilt whenever ``vm.output`` changes — every
+  ## renderer but the browser's, which decorates them (`renderBuildPanel`).
+  createRenderEffect proc() =
+    let lines = vm.output.val
+    r.clearChildren(outputContainer)
+    for line in lines:
+      # Copied out of the iterator: the DSL's attribute closures cannot
+      # capture a `lent` value. The click goes through `lineJumpHandler`,
+      # NOT a closure over this copy -- see that proc for why.
+      let lineCopy = line
+      let lineNode = ui(r):
+        tdiv(class = lineClass(lineCopy),
+             onclick = lineJumpHandler(vm, lineCopy)):
+          text lineCopy.htmlText
+      r.appendChild(outputContainer, lineNode)
+
+when defined(js):
+  import std/jsffi
+  import ./list_scrubber_dom
+
+  proc buildSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
+  proc scrollToBottom(node: isonim_dom.Element) {.importjs: "(function(node) { if (node) { node.scrollTop = node.scrollHeight; } })(#)".}
+  proc outputContainerOf(panel: JsObject): JsObject {.importjs:
+    "(#.querySelector('.build-output-container') || null)".}
+
+  proc lineClickListener(vm: BuildVM;
+                         line: BuildOutputLine): proc(ev: isonim_dom.Event) =
+    ## `lineJumpHandler` in the shape a DOM listener takes: per row, for the
+    ## same reason.
+    let jump = lineJumpHandler(vm, line)
+    result = proc(ev: isonim_dom.Event) = jump()
+
+
+proc renderBuildPanel*[R, N](r: R; vm: BuildVM): N =
+  ## The build panel, under any renderer (Shared-DOM-Front-Ends D3), mounted
+  ## on the desktop by `ui/panel_host`.
   ##
-  ## The header / controls section is built once via the DSL with
-  ## reactive attributes (header class, label text, button modifiers).
-  ## An outer ``createRenderEffect`` rebuilds the
-  ## ``#build`` output container whenever ``vm.output`` changes — this
-  ## is the same shape the ``isonim_terminal_output_view`` uses for the
-  ## ``<pre>`` body, and lets per-line click handlers capture the
-  ## right ``BuildOutputLine`` without leaking shared state.
-  var outputContainer: MockNode
+  ## The header and controls are built once with reactive attributes. An
+  ## effect rebuilds the ``#build`` output container whenever ``vm.output``
+  ## changes. In a browser each line's ``innerHTML`` carries the
+  ## ANSI-decorated ``<span>`` runs (the legacy view used Karax's
+  ## ``verbatim``; the page objects read the ``build-stdout`` /
+  ## ``build-stderr`` classes on the line itself), a located line opens its
+  ## location on click, the output follows ``vm.autoScroll``, and the
+  ## output's horizontal bar is the shared scrubber (PLAT-70,
+  ## Horizontal-Overflow.md §4).
+  var outputContainer: N
 
   let panel = ui(r):
-    tdiv(class = "build-panel"):
+    tdiv(class = "build-panel isonim-build"):
       tdiv(class = headerClass(vm)):
         tdiv(class = "build-command-label"):
           text headerLabel(vm)
@@ -174,122 +213,48 @@ proc renderBuildPanel*(r: MockRenderer; vm: BuildVM): MockNode =
            class = "build-output-container"):
         discard
 
-  createRenderEffect proc() =
-    let lines = vm.output.val
-    r.clearChildren(outputContainer)
-    for line in lines:
-      # Copied out of the iterator: the DSL's attribute closures cannot
-      # capture a `lent` value. The click goes through `lineJumpHandler`,
-      # NOT a closure over this copy -- see that proc for why.
-      let lineCopy = line
-      let lineNode = ui(r):
-        tdiv(class = lineClass(lineCopy),
-             onclick = lineJumpHandler(vm, lineCopy)):
-          text lineCopy.htmlText
-      r.appendChild(outputContainer, lineNode)
+  when defined(js):
+    when N is isonim_dom.Element:
+      createRenderEffect proc() =
+        let lines = vm.output.val
+        let autoScrollOn = vm.autoScroll.val
+        # Tear down the previous body.  IsoNim's reactive root cleans up
+        # the closures attached to the discarded line nodes.
+        let containerAsNode = isonim_dom.Node(outputContainer)
+        while not isonim_dom.isNodeNil(containerAsNode.firstChild):
+          discard isonim_dom.removeChild(containerAsNode, containerAsNode.firstChild)
+        for line in lines:
+          let lineCopy = line
+          let lineNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
+          isonim_dom.setAttribute(lineNode, cstring"class", cstring(lineClass(lineCopy)))
+          # innerHTML — the htmlText carries ANSI-decorated <span> runs
+          # from ansi_up (legacy view used Karax's `verbatim`).
+          lineNode.innerHTML = cstring(lineCopy.htmlText)
+          # THE CLICK THE HEADER HAS ALWAYS DOCUMENTED. `build-clickable` and
+          # its `cursor: pointer` have been on these rows since the Karax
+          # migration dropped the handler; this is the handler.
+          if lineCopy.locationPath.len > 0 and lineCopy.locationLine > 0:
+            # A per-row factory, not an inline closure over `lineCopy` (one
+            # variable for the whole loop): see `lineJumpHandler`.
+            isonim_dom.addEventListener(isonim_dom.Node(lineNode), cstring"click",
+              lineClickListener(vm, lineCopy))
+          isonim_dom.appendChild(isonim_dom.Node(outputContainer),
+                                 isonim_dom.Node(lineNode))
+        if autoScrollOn:
+          outputContainer.scrollToBottom()
+
+      # Attached once the panel is in the document.
+      let panelEl = panel
+      buildSetTimeout(proc() =
+        let output = outputContainerOf(cast[JsObject](panelEl))
+        if not output.isNil:
+          discard attachHorizontalScrubber(output, cast[JsObject](panelEl),
+                                           paneId = "buildOutput")
+      , 0)
+    else:
+      renderPlainOutput[R, N](r, vm, outputContainer)
+  else:
+    renderPlainOutput[R, N](r, vm, outputContainer)
+
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  import std/jsffi
-  import ./list_scrubber_dom
-
-  proc scrollToBottom(node: isonim_dom.Element) {.importjs: "(function(node) { if (node) { node.scrollTop = node.scrollHeight; } })(#)".}
-  proc outputContainerOf(panel: JsObject): JsObject {.importjs:
-    "(#.querySelector('.build-output-container') || null)".}
-
-  proc lineClickListener(vm: BuildVM;
-                         line: BuildOutputLine): proc(ev: isonim_dom.Event) =
-    ## `lineJumpHandler` in the shape a DOM listener takes: per row, for the
-    ## same reason.
-    let jump = lineJumpHandler(vm, line)
-    result = proc(ev: isonim_dom.Event) = jump()
-
-  proc renderBuildPanel*(r: WebRenderer; vm: BuildVM): isonim_dom.Element =
-    ## Render the panel for the real DOM.  Uses ``innerHTML`` for each
-    ## line because the legacy view inserts ANSI-decorated ``<span>``
-    ## runs via Karax's ``verbatim``, and the page-object tests inspect
-    ## the resulting ``build-stdout`` / ``build-stderr`` classes on the
-    ## per-line div itself, not its children.
-    var outputContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = "build-panel isonim-build"):
-        tdiv(class = headerClass(vm)):
-          tdiv(class = "build-command-label"):
-            text headerLabel(vm)
-          tdiv(class = "build-header-controls"):
-            tdiv(class = "build-ctrl-btn build-run-btn",
-                 title = "Run build (no re-record)",
-                 onclick = proc() =
-                   if not vm.runBuild.isNil: vm.runBuild()):
-              discard
-            tdiv(class = stopButtonClass(vm),
-                 title = "Stop build",
-                 onclick = proc() =
-                   if vm.isRunning.val: vm.cancelBuild()):
-              discard
-            tdiv(class = "build-ctrl-btn build-clear-btn",
-                 title = "Clear build output",
-                 onclick = proc() = vm.clearOutput()):
-              discard
-            tdiv(class = scrollButtonClass(vm),
-                 title = "Toggle auto-scroll",
-                 onclick = proc() = vm.toggleAutoScroll()):
-              discard
-            tdiv(class = "build-duration",
-                 display = displayIf(vm.isRunning.val)):
-              text vm.command.val
-        tdiv(ref = outputContainer,
-             id = "build",
-             class = "build-output-container"):
-          discard
-
-    createRenderEffect proc() =
-      let lines = vm.output.val
-      let autoScrollOn = vm.autoScroll.val
-      # Tear down the previous body.  IsoNim's reactive root cleans up
-      # the closures attached to the discarded line nodes.
-      let containerAsNode = isonim_dom.Node(outputContainer)
-      while not isonim_dom.isNodeNil(containerAsNode.firstChild):
-        discard isonim_dom.removeChild(containerAsNode, containerAsNode.firstChild)
-      for line in lines:
-        let lineCopy = line
-        let lineNode = isonim_dom.createElement(isonim_dom.document, cstring"div")
-        isonim_dom.setAttribute(lineNode, cstring"class", cstring(lineClass(lineCopy)))
-        # innerHTML — the htmlText carries ANSI-decorated <span> runs
-        # from ansi_up (legacy view used Karax's `verbatim`).
-        lineNode.innerHTML = cstring(lineCopy.htmlText)
-        # THE CLICK THE HEADER HAS ALWAYS DOCUMENTED. `build-clickable` and
-        # its `cursor: pointer` have been on these rows since the Karax
-        # migration dropped the handler; this is the handler.
-        if lineCopy.locationPath.len > 0 and lineCopy.locationLine > 0:
-          # A per-row factory, not an inline closure over `lineCopy` (one
-          # variable for the whole loop): see `lineJumpHandler`.
-          isonim_dom.addEventListener(isonim_dom.Node(lineNode), cstring"click",
-            lineClickListener(vm, lineCopy))
-        isonim_dom.appendChild(isonim_dom.Node(outputContainer),
-                               isonim_dom.Node(lineNode))
-      if autoScrollOn:
-        outputContainer.scrollToBottom()
-
-    panel
-
-  proc mountIsoNimBuild*(container: isonim_dom.Element; vm: BuildVM) =
-    ## Mount the IsoNim build panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderBuildPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
-    # PLAT-70 (Horizontal-Overflow.md §4): Build Output is a text pane — its
-    # lines are not wrapped, and its overflow-only horizontal bar is the
-    # shared scrubber's, along the output's bottom.
-    let output = outputContainerOf(cast[JsObject](panel))
-    if not output.isNil:
-      discard attachHorizontalScrubber(output, cast[JsObject](panel),
-                                       paneId = "buildOutput")

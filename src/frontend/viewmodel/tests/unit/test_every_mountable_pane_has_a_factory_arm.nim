@@ -70,10 +70,11 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 39
-  ## One per direct-mount pane the dispatch reaches: the panel host's
-  ## kinds count individually (PixelHistory, ShaderDebug, VideoPlayer joined
-  ## them in HSF-D6).
+const ExpectedAssertions = 32
+  ## HSF-D6: 36 -> 32. The control-data test counts the removed arms and the
+  ## panel host's shared arm as two group assertions, and the surviving arms
+  ## as two, instead of one per pane — so this count no longer changes when a
+  ## pane joins the panel host.
   ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
   ## proc and its give-up lines went (the control-data loop -1, the mount
   ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
@@ -263,17 +264,18 @@ suite "the factory mounts every mountable pane":
       if kind notin ArmsAddedByThisChange:
         sharedArm.add kind
     counted missing.len == ArmsAddedByThisChange.len + sharedArm.len
-    for pane in ArmsAddedByThisChange:
-      counted pane in missing
-    for pane in sharedArm:
-      counted pane in missing
+    # One assertion per group rather than per pane, so this suite's measured
+    # assertion count does not change each time a pane joins the panel host.
+    counted ArmsAddedByThisChange.allIt(it in missing)
+    counted sharedArm.allIt(it in missing)
 
-    # And the deletion took only what it claimed: the other twenty-odd arms
-    # survive it, so "five missing" is a measurement and not an artefact of a
+    # And the deletion took only what it claimed: every other arm survives
+    # it, so the missing count is a measurement and not an artefact of a
     # butchered source.
-    counted "Build" in dispatchArms(preFix)
-    counted "Filesystem" in dispatchArms(preFix)
-    counted "Scratchpad" in dispatchArms(preFix)
+    let survivors = layoutSource().dispatchArms().filterIt(
+      it notin ArmsAddedByThisChange and it notin panelHostKinds())
+    counted survivors.len >= 3
+    counted survivors.allIt(it in dispatchArms(preFix))
 
   test "the desktop-blank panes are dispatched, each by name; the retired one is not":
     # Named individually, not left to the aggregate above: "some pane has an

@@ -32,12 +32,17 @@ from ../viewmodel/viewmodels/state_vm import setViewport
 from ../viewmodel/viewmodels/low_level_code_vm import setShown
 from ../viewmodel/store/replay_data_store import nil
 import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
-                            isonim_low_level_code_view]
+                            isonim_low_level_code_view,
+                            isonim_point_list_view, isonim_step_list_view,
+                            isonim_calltrace_editor_view, isonim_build_view,
+                            isonim_errors_view]
 
 const
   PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
                      Content.PixelHistory, Content.ShaderDebug,
-                     Content.VideoPlayer}
+                     Content.VideoPlayer, Content.PointList, Content.StepList,
+                     Content.CalltraceEditor, Content.Build,
+                     Content.BuildErrors}
     ## The panes `mountPanel` renders.
   StateRowFallbackPx = 22.0
     ## The State pane's row pitch until a row is rendered to measure.
@@ -202,6 +207,26 @@ proc render(m: PanelMount; session: SessionViewModel) =
     of Content.LowLevelCode:
       let panel = renderLowLevelCodePanel[WebRenderer, dom_api.Element](
         r, session.lowLevelCodeVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.PointList:
+      let panel = renderPointListPanel[WebRenderer, dom_api.Element](
+        r, session.pointListVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.StepList:
+      let panel = renderStepListPanel[WebRenderer, dom_api.Element](
+        r, session.stepListVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.CalltraceEditor:
+      let panel = renderCalltraceEditorPanel[WebRenderer, dom_api.Element](
+        r, session.calltraceEditorVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.Build:
+      let panel = renderBuildPanel[WebRenderer, dom_api.Element](
+        r, session.buildVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.BuildErrors:
+      let panel = renderErrorsPanel[WebRenderer, dom_api.Element](
+        r, session.errorsVM)
       dom_api.appendChild(node, dom_api.Node(panel))
     else:
       let renderPane = renderers[mount.kind]

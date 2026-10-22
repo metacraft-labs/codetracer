@@ -37,15 +37,13 @@
 import std/tables
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
-
-when defined(js):
-  import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
+import isonim/dsl/[ui, components]
 
 import ../store/types
 import ../viewmodels/errors_vm
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
@@ -148,7 +146,7 @@ proc onFilterClick(vm: ErrorsVM; filter: ProblemFilterTag): proc() =
   let captured = filter
   result = proc() = vm.setFilter(captured)
 
-template renderProblemRow(r, vm, p, masterIndex: untyped): untyped =
+proc renderProblemRow[R, N](r: R; vm: ErrorsVM; p: BuildProblemLine; masterIndex: int): N =
   ui(r):
     tdiv(class = problemRowClass(vm, p, masterIndex),
          onclick = onProblemClick(vm, p, masterIndex)):
@@ -161,23 +159,23 @@ template renderProblemRow(r, vm, p, masterIndex: untyped): untyped =
       tdiv(class = "problems-message"):
         text p.message
 
-template renderProblemsEmpty(r: untyped): untyped =
+proc renderProblemsEmpty[R, N](r: R): N =
   ui(r):
     tdiv(class = "problems-empty"):
       text "No problems detected."
 
-template renderGroupedProblemShell(r, headerText: untyped): untyped =
+proc renderGroupedProblemShell[R, N](r: R; headerText: string): N =
   ui(r):
     tdiv(class = "problems-file-group"):
       tdiv(class = "problems-file-header"):
         text headerText
 
-template renderProblemsGroupedRoot(r: untyped): untyped =
+proc renderProblemsGroupedRoot[R, N](r: R): N =
   ui(r):
     tdiv(class = "problems-grouped"):
       discard
 
-template renderErrorsShell(r, vm, rootClass, listContainer: untyped): untyped =
+proc renderErrorsShell[R, N](r: R; vm: ErrorsVM; rootClass: string; listContainer: var N): N =
   ui(r):
     tdiv(class = rootClass):
       tdiv(class = "problems-header"):
@@ -216,14 +214,17 @@ template renderErrorsShell(r, vm, rootClass, listContainer: untyped): untyped =
         discard
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderErrorsPanel*(r: MockRenderer; vm: ErrorsVM): MockNode =
-  ## Render the errors panel for the Mock renderer.
-  var listContainer: MockNode
+proc renderErrorsPanel*[R, N](r: R; vm: ErrorsVM): N =
+  ## The errors panel, under any renderer (Shared-DOM-Front-Ends D3),
+  ## mounted on the desktop by `ui/panel_host`. The rows are rebuilt from
+  ## `vm.visibleRefs` whenever it or the grouping changes.
+  var listContainer: N
 
-  let panel = renderErrorsShell(r, vm, "problems-panel", listContainer)
+  let panel = renderErrorsShell[R, N](r, vm, "problems-panel isonim-problems",
+                                    listContainer)
 
   createRenderEffect proc() =
     let visible = vm.visibleRefs.val
@@ -231,7 +232,7 @@ proc renderErrorsPanel*(r: MockRenderer; vm: ErrorsVM): MockNode =
     r.clearChildren(listContainer)
 
     if visible.len == 0:
-      r.appendChild(listContainer, renderProblemsEmpty(r))
+      r.appendChild(listContainer, renderProblemsEmpty[R, N](r))
       return
 
     if grouped:
@@ -245,83 +246,22 @@ proc renderErrorsPanel*(r: MockRenderer; vm: ErrorsVM): MockNode =
           order.add(p.path)
         groups[p.path].add(entry)
 
-      let groupedNode = renderProblemsGroupedRoot(r)
+      let groupedNode = renderProblemsGroupedRoot[R, N](r)
       r.appendChild(listContainer, groupedNode)
       for pathIndex in 0 ..< order.len:
         let pathStr = order[pathIndex]
         let rows = groups[pathStr]
         let header = pathStr & " (" & $rows.len & ")"
-        let groupNode = renderGroupedProblemShell(r, header)
+        let groupNode = renderGroupedProblemShell[R, N](r, header)
         r.appendChild(groupedNode, groupNode)
         for rowIndex in 0 ..< rows.len:
           let entry = rows[rowIndex]
           r.appendChild(groupNode,
-                        renderProblemRow(r, vm, entry.problem, entry.index))
+                        renderProblemRow[R, N](r, vm, entry.problem, entry.index))
     else:
       for i in 0 ..< visible.len:
         let entry = visible[i]
         r.appendChild(listContainer,
-                      renderProblemRow(r, vm, entry.problem, entry.index))
+                      renderProblemRow[R, N](r, vm, entry.problem, entry.index))
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc renderErrorsPanel*(r: WebRenderer; vm: ErrorsVM): isonim_dom.Element =
-    ## Render the panel for the real DOM.
-    var listContainer: isonim_dom.Element
-
-    let panel = renderErrorsShell(r, vm, "problems-panel isonim-problems",
-                                  listContainer)
-
-    createRenderEffect proc() =
-      let visible = vm.visibleRefs.val
-      let grouped = vm.groupByFile.val
-      r.clearChildren(listContainer)
-
-      if visible.len == 0:
-        r.appendChild(listContainer, renderProblemsEmpty(r))
-        return
-
-      if grouped:
-        var order: seq[string] = @[]
-        var groups: Table[string, seq[ProblemRef]]
-        for i in 0 ..< visible.len:
-          let entry = visible[i]
-          let p = entry.problem
-          if not groups.hasKey(p.path):
-            groups[p.path] = @[]
-            order.add(p.path)
-          groups[p.path].add(entry)
-
-        let groupedNode = renderProblemsGroupedRoot(r)
-        r.appendChild(listContainer, groupedNode)
-        for pathIndex in 0 ..< order.len:
-          let pathStr = order[pathIndex]
-          let rows = groups[pathStr]
-          let header = pathStr & " (" & $rows.len & ")"
-          let groupNode = renderGroupedProblemShell(r, header)
-          r.appendChild(groupedNode, groupNode)
-          for rowIndex in 0 ..< rows.len:
-            let entry = rows[rowIndex]
-            r.appendChild(groupNode,
-                          renderProblemRow(r, vm, entry.problem, entry.index))
-      else:
-        for i in 0 ..< visible.len:
-          let entry = visible[i]
-          r.appendChild(listContainer,
-                        renderProblemRow(r, vm, entry.problem, entry.index))
-
-    panel
-
-  proc mountIsoNimErrors*(container: isonim_dom.Element; vm: ErrorsVM) =
-    ## Mount the IsoNim errors panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderErrorsPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

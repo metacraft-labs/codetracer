@@ -2361,7 +2361,6 @@ when not defined(ctInExtension):
       # the debugger service plans each change over its rows and the engine's
       # answer replaces them, as on the native front-ends (PLAT-40).
       data.services.debugger.pointStore = cast[JsObject](activeSessionVM.store)
-      point_list.setPointListVM(activeSessionVM.pointListVM)
       # Apply any `supportsStepBack` capability that arrived before this VM
       # existed (its DAP `initialize` response can beat this assignment), so the
       # reverse-step toolbar buttons reflect the backend's real capability.
@@ -2568,8 +2567,6 @@ when not defined(ctInExtension):
         no_source.initNoSourceVMFromSession(activeSessionVM.noSourceVM)
       initPanelVM("initStepListVMFromSession"):
         step_list.initStepListVMFromSession(activeSessionVM.stepListVM)
-      initPanelVM("initCalltraceEditorVMFromSession"):
-        calltrace_editor.initCalltraceEditorVMFromSession(activeSessionVM.calltraceEditorVM)
       initPanelVM("initReplVMFromSession"):
         repl.initReplVMFromSession(activeSessionVM.replVM)
       initPanelVM("initRequestPanelVMFromSession"):

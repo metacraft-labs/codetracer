@@ -100,7 +100,9 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   mountIsoNimFlow(shell.sections[3].content, session.flowVM)
   # (PLAT-51: the Timeline panel is removed from every product.)
   mountIsoNimSearch(shell.sections[4].content, session.searchVM)
-  mountIsoNimPointList(shell.sections[5].content, session.pointListVM)
+  isonim_dom.appendChild(isonim_dom.Node(shell.sections[5].content),
+    isonim_dom.Node(renderPointListPanel[WebRenderer, isonim_dom.Element](
+      r, session.pointListVM)))
   mountIsoNimScratchpadPanel(shell.sections[6].content, session.scratchpadVM)
   mountIsoNimShell(shell.sections[7].content, session.shellVM)
 

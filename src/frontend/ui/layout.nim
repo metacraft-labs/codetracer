@@ -6,7 +6,7 @@ import
   # proc. See the factory arms below.
   trace, event_log, terminal_output,
   calltrace_editor, repl, request_panel, trace_log, scratchpad, filesystem,
-  test_results, constraints, point_list,
+  test_results, constraints,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff, verification,
   agent_activity, agent_workspace,
@@ -1864,30 +1864,7 @@ proc mountPaneForState(state: GoldenItemState) =
         if shellComponent.shell.isNil:
           discard shellComponent.createShell()
 
-      # Build is now an IsoNim view — its DOM is mounted by
-      # `build.tryMountIsoNimBuildPanel` against the `buildComponent-{id}`
-      # container, and reactive effects keep it in sync. No direct-DOM
-      # redraw hook is needed here.
-      if state.content == Content.Build:
-        # The IsoNim view mounts itself once `buildComponentRef` and
-        # the VM are both available (the registration order between
-        # `register()` and `configureMiddleware` is non-deterministic
-        # under different layouts).  Calling tryMount here is safe and
-        # idempotent — it short-circuits when already mounted.  Also
-        # sync any data the legacy ``build`` record already carries
-        # (e.g. when the GL container appears after a recorded build
-        # already finished).
-        build.syncLegacyBuildIntoVM(BuildComponent(component))
-        build.tryMountIsoNimBuildPanel()
 
-      # BuildErrors is now an IsoNim view -- its DOM is mounted by
-      # ``errors.tryMountIsoNimErrorsPanel`` against the
-      # ``errorsComponent-{id}`` container, and reactive effects keep
-      # it in sync. No direct-DOM redraw hook is
-      # needed here.
-      if state.content == Content.BuildErrors:
-        errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
-        errors.tryMountIsoNimErrorsPanel()
 
       # SearchResults is an IsoNim view over `SearchResultsVM`, mounted by
       # ``search_results.tryMountIsoNimSearchResultsPanel`` against the
@@ -1896,22 +1873,6 @@ proc mountPaneForState(state: GoldenItemState) =
       if state.content == Content.SearchResults:
         search_results.tryMountIsoNimSearchResultsPanel()
 
-      # StepList is now an IsoNim view -- its DOM is mounted by
-      # ``step_list.tryMountIsoNimStepListPanel`` against the
-      # ``stepListComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      if state.content == Content.StepList:
-        step_list.syncLegacyStepListIntoVM(StepListComponent(component))
-        step_list.tryMountIsoNimStepListPanel()
-
-      # CalltraceEditor is now an IsoNim view -- its DOM is mounted
-      # by ``calltrace_editor.tryMountIsoNimCalltraceEditorPanel``
-      # against the GoldenLayout-managed ``<div id="calls">``
-      # container.  The panel is single-instance and the legacy
-      # render produced an empty placeholder, so there is no
-      # legacy state to sync into the VM.
-      if state.content == Content.CalltraceEditor:
-        calltrace_editor.tryMountIsoNimCalltraceEditorPanel()
 
       # Repl is now an IsoNim view -- its DOM is mounted by
       # ``repl.tryMountIsoNimReplPanel`` against the
@@ -1952,9 +1913,6 @@ proc mountPaneForState(state: GoldenItemState) =
 
       if state.content == Content.Constraints:
         constraints.tryMountIsoNimConstraintsPanel()
-
-      if state.content == Content.PointList:
-        point_list.tryMountIsoNimPointListPanel()
 
       if state.content == Content.TraceLog:
         trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
@@ -2612,15 +2570,15 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
         build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
-      build.isoNimBuildMounted = false
-      build.tryMountIsoNimBuildPanel()
+      ensurePanelMountedById(convertComponentLabel(panel.content, 0),
+                             Content.Build, data.activeSessionIndex)
       return
     if panel.content == Content.BuildErrors:
       let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
       if not errorsComp.isNil:
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
-      errors.isoNimErrorsMounted = false
-      errors.tryMountIsoNimErrorsPanel()
+      ensurePanelMountedById(convertComponentLabel(panel.content, 0),
+                             Content.BuildErrors, data.activeSessionIndex)
       return
     if panel.content == Content.SearchResults:
       search_results.isoNimSearchResultsMounted = false
@@ -2799,12 +2757,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # nodes, the GL one holding the mounted panel and an empty duplicate
         # parked in the offscreen host at x = -9999.
         #
-        # It stays broken after the duplicate is gone, because
-        # `ui/errors.nim`'s `tryMountIsoNimErrorsPanel` resolves its container
-        # with `getElementById` — which returns the FIRST match — and
-        # `mountIsoNimErrors` has no owner and no disposal. Any of the five
-        # sites that reset `isoNimErrorsMounted` could then remount into a
-        # different node and leave the previous subtree live. One id, one node.
+        # One id, one node: a pane is looked up by its id (the auto-hide
+        # reveal, `ensurePanelMountedById`), and a second element carrying it
+        # would make which one is mounted depend on document order.
         # A saved layout that holds the pane as a GoldenLayout tab is the
         # newer statement of where it is, so a restored auto-hide entry for
         # the same content is stale; leaving it would shadow the pin below
@@ -2855,24 +2810,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       # SearchResults, RequestPanel) is an IsoNim view.  Each mounts itself
       # against the inner div the next time its ``tryMountIsoNim*``
       # runs; the reactive root keeps the DOM in sync automatically.
-      if panelDef.content == Content.Build:
-        try:
-          let buildComp = data.ui.componentMapping[Content.Build][0]
-          if not buildComp.isNil:
-            build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
-          build.isoNimBuildMounted = false
-          build.tryMountIsoNimBuildPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimBuildPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
-      elif panelDef.content == Content.BuildErrors:
-        try:
-          let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
-          if not errorsComp.isNil:
-            errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
-          errors.isoNimErrorsMounted = false
-          errors.tryMountIsoNimErrorsPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimErrorsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      if panelDef.content in PanelHostKinds:
+        # The panel host mounts the pane into the container just built.
+        discard mountPanel(cast[dom_api.Element](innerDiv), panelDef.content)
       elif panelDef.content == Content.SearchResults:
         try:
           search_results.isoNimSearchResultsMounted = false
@@ -2913,11 +2853,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     ## ``build.output`` / ``build.problems`` / search service results)
     ## into the VM and then re-mount.
     if contentId == int(Content.Build):
+      # The view is reactive: replaying the injected legacy state into the
+      # session's ViewModel is the whole re-render.
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
         build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
-      build.isoNimBuildMounted = false
-      build.tryMountIsoNimBuildPanel()
       return
     if contentId == int(Content.BuildErrors):
       # ``syncLegacyBuildIntoVM`` already pushed the bulk-replay path
@@ -2929,8 +2869,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
       if not errorsComp.isNil:
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
-      errors.isoNimErrorsMounted = false
-      errors.tryMountIsoNimErrorsPanel()
       return
     if contentId == int(Content.SearchResults):
       search_results.isoNimSearchResultsMounted = false
