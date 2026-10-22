@@ -18,6 +18,7 @@
 ## | `spLocals`            | `ct/load-locals`, the GUI's budgets (`localsLoadArgs`) and the state pane's watch list | `ReplayDataStore.applyLocalsResponse`, against the stop it was SENT at (PLAT-29), and `StateVM.updateOriginSummaries` |
 ## | `spCallStackFallback` | `stackTrace`, only when the recording has no call trace | `CalltraceVM.fallbackStack` (PLAT-47) |
 ## | `spDiffFlow`          | `ct/load-flow` with `flowMode: diff`, ONCE per session, when the session has a diff (`FlowVM.diffSession`) | `FlowVM.applyDiffFlowUpdate` |
+## | `spLowLevelCode`      | `ct/load-asm-function` for the function the stop is in (`ReplayDataStore.asmFunction`, from `stop`: the C-level location for Nim), while a front-end shows the pane (`LowLevelCodeVM.shown`) | `LowLevelCodeVM.applyAsmAnswer` |
 ##
 ## The locals are the Electron GUI's behaviour, which is the reference
 ## (SDF-AREQ7): one request per stop identity and watch list, at 3000/50/7.
@@ -49,7 +50,7 @@ import ../backend/backend_service
 import ../collab/runtime_role
 import ../session_vm
 import ../store/[replay_data_store, types, stop_timeline, locals_answer]
-import ../viewmodels/[state_vm, calltrace_vm, flow_vm]
+import ../viewmodels/[state_vm, calltrace_vm, flow_vm, low_level_code_vm]
 import ../../../common/flow_mode_wire   # `FlowModeWireDiff`
 
 type
@@ -65,6 +66,11 @@ type
       ## per-stop load: the diff flow covers the recording's changed lines,
       ## so it is asked for once, whatever the stop. Open on every host; it
       ## sends nothing unless `FlowVM.diffSession` is set.
+    spLowLevelCode
+      ## The low-level code pane: the listing of the function the debugger is
+      ## in, once per stop. Open on every host; it sends nothing while no
+      ## front-end shows the pane (`LowLevelCodeVM.shown`) or the move named
+      ## no function.
 
   PaneLoadStatus* = enum
     plsNone       ## nothing issued for the current stop
@@ -87,9 +93,9 @@ type
       ## The loader's reactive root, so `follow`'s effect is disposed with it.
 
 const
-  DefaultStopPanes* = {spLocals, spDiffFlow}
-    ## What the Electron GUI loads: the locals on every stop, and a diff
-    ## session's diff flow once.
+  DefaultStopPanes* = {spLocals, spDiffFlow, spLowLevelCode}
+    ## What the Electron GUI loads: the locals on every stop, a diff
+    ## session's diff flow once, and the low-level code while it is shown.
   CallStackFallbackLevels* = 400
     ## Frames asked for by the call-stack fallback — the native hosts'
     ## `RecordingCalltraceLevels`.
@@ -144,6 +150,17 @@ proc stopKey(l: StopLoader; pane: StopPane): string =
     # session that is not a diff session holds no key, and asks nothing.
     let flow = l.session.flowVM
     result = if flow.isNil or not flow.diffSession.val: "" else: "diff"
+  of spLowLevelCode:
+    # Nothing to ask while the pane is not shown or the move named no
+    # function; otherwise once per stop and function.
+    let vm = l.session.lowLevelCodeVM
+    let fn = store.asmFunction
+    if vm.isNil or not vm.shown.val or (fn.key.len == 0 and fn.path.len == 0) or
+       vm.generatedAtStop.val == result:
+      # (The last: a generated-code listing painted at this stop.)
+      result = ""
+    else:
+      result.add "\x02" & fn.path & "\x1f" & fn.name & "\x1f" & fn.key
 
 proc mayLoad(l: StopLoader): bool =
   ## A collaboration follower renders the leader's answers and asks nothing.
@@ -244,6 +261,33 @@ proc loadDiffFlow(l: StopLoader; key: string) =
       vm.diffLoadingState.val = lsError
       loader.settle(spDiffFlow, key, plsFailed))
 
+proc loadLowLevelCode(l: StopLoader; key: string) =
+  ## The listing of the function the debugger is in. A refusal is shown in
+  ## the pane: an empty listing would read as a function with no code.
+  let vm = l.session.lowLevelCodeVM
+  let fn = l.session.store.asmFunction
+  let loader = l
+  vm.clearInstructions()
+  onComplete(l.session.store.backend.send("ct/load-asm-function",
+                                          asmFunctionArgs(fn)),
+    onSuccess = proc(resp: JsonNode) =
+      if loader.sentFor[spLowLevelCode] != key or
+         vm.generatedAtStop.val.len > 0:
+        return  # the debugger moved on, or a generated listing replaced it
+      if not responseSucceeded(resp):
+        vm.setErrorMessage("the low-level code of " & fn.name &
+          " could not be loaded: " &
+          resp{"message"}.getStr("the engine refused the request"))
+        loader.settle(spLowLevelCode, key, plsFailed)
+        return
+      vm.applyAsmAnswer(responseBody(resp), fn)
+      loader.settle(spLowLevelCode, key, plsApplied),
+    onError = proc(message: string) =
+      if loader.sentFor[spLowLevelCode] == key:
+        vm.setErrorMessage("the low-level code of " & fn.name &
+          " could not be loaded: " & message)
+      loader.settle(spLowLevelCode, key, plsFailed))
+
 proc loadStop*(l: StopLoader) =
   ## Issue each open pane's load for the stop the store is at, once per stop.
   ## On a transport whose futures settle through the platform callback queue
@@ -268,6 +312,7 @@ proc loadStop*(l: StopLoader) =
     of spLocals: l.loadLocals(key)
     of spCallStackFallback: l.loadCallStackFallback(key)
     of spDiffFlow: l.loadDiffFlow(key)
+    of spLowLevelCode: l.loadLowLevelCode(key)
 
 proc reload*(l: StopLoader; pane: StopPane) =
   ## Load `pane` for the current stop even if it was already loaded there —
@@ -312,4 +357,11 @@ proc follow*(l: StopLoader) =
       if spDiffFlow in loader.openPanes.val and
          not loader.session.flowVM.isNil:
         discard loader.session.flowVM.diffSession.val
+      # The low-level code is asked for when the pane is shown, and for the
+      # function each move reports.
+      if spLowLevelCode in loader.openPanes.val and
+         not loader.session.lowLevelCodeVM.isNil:
+        discard loader.session.lowLevelCodeVM.shown.val
+        discard loader.session.lowLevelCodeVM.generatedAtStop.val
+        discard loader.session.store.stop.val
       untrack(proc() = loader.loadStop()))

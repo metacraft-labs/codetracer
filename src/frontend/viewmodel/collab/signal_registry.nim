@@ -588,9 +588,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     requiresStableId = true,
     stableIdNote = "Offset should be tied to stable instruction/address identity.")
   entries.addMany("LowLevelCodeVM",
-    ["instructions", "address", "errorMessage", "noirProject"],
+    ["instructions", "address", "errorMessage", "noirProject", "activeLine",
+     "activePath", "sourceText", "generatedAtStop"],
     vscBackendAuthoritative,
-    "Instruction data and status are backend-derived facts.")
+    "Instruction data and status, the source line the debugger's move marks, the groups' source text and the stop a generated listing was painted at are backend-derived facts.")
+  # Whether a front-end shows the pane decides whether THIS participant's stop
+  # loader asks for the listing; a follower renders the leader's answers.
+  entries.addEntry("LowLevelCodeVM", "shown", vscRendererLocal,
+    "Whether this front-end has the pane mounted.")
   # NS4 anchoring. `anchors` is the mapping a PRODUCER emitted and `validate`
   # accepted; `anchorDefects` is why the last `setAnchors` was refused. Both
   # are answers about the artefact, identical for every participant looking at

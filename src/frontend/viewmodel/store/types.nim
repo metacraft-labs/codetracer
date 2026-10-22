@@ -186,6 +186,10 @@ type
     cPath*: string
     cLine*: int
     cAsmName*: string
+    cFunctionName*: string
+    cKey*: string
+      ## The C-level function and call a Nim recording's stop is in — what
+      ## its low-level code is loaded for (`ReplayDataStore.asmFunction`).
     frameOffset*: int
       ## The selected frame's instruction offset, -1 for none.
 
@@ -778,12 +782,10 @@ type
   # -------------------------------------------------------------------
   # Low Level Code panel — assembly / IR view.
   #
-  # Mirrors the legacy ``Instruction`` / ``Instructions`` records in
-  # ``common_types/language_features/code.nim`` but uses ``string``
-  # instead of ``langstring`` so the same value works on both native
-  # and JS backends without conversion noise.  Used by
-  # ``LowLevelCodeVM`` to drive the IsoNim view that replaces the
-  # legacy Karax ``method render`` on ``LowLevelCodeComponent``.
+  # The engine's ``Instruction`` / ``Instructions`` (``task.rs``), decoded
+  # straight from the ``ct/load-asm-function`` answer by
+  # ``LowLevelCodeVM.instructionListOf`` with ``string`` fields, so the same
+  # value works on the native and JS backends.
   # -------------------------------------------------------------------
 
   LowLevelInstruction* = object
@@ -810,6 +812,24 @@ type
     address*: int
     instructions*: seq[LowLevelInstruction]
     error*: string
+
+  AsmFunctionLocation* = object
+    ## The function whose low-level code the debugger is in, as the move that
+    ## reached the stop reported it — what `ct/load-asm-function` asks for
+    ## (`FunctionLocation` in `src/db-backend/src/task.rs`) and the line the
+    ## listing marks. For a Nim recording the assembly is the generated C's,
+    ## so this is the stop's C-level location (`StopLocation.cPath` …), as
+    ## the desktop's low-level pane chose it.
+    path*: string
+    name*: string
+    key*: string
+      ## The call's key; the engine resolves the listing from it.
+    line*: int
+      ## The line within `path` the debugger is at: the instructions generated
+      ## from it are the active rows.
+    forceReload*: bool
+      ## A Noir recording asks again on every move (the engine's per-move
+      ## listing).
 
   # -------------------------------------------------------------------
   # HTTP Request panel — captured HTTP request inspector.

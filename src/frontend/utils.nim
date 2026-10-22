@@ -979,34 +979,7 @@ proc makeNoSourceComponent*(data: Data, id: int, noInfoMessage: cstring): NoSour
     data.registerComponent(result, Content.NoInfo)
 
 proc makeLowLevelCodeComponent*(data: Data, id: int): LowLevelCodeComponent =
-  let location = data.services.debugger.location
-  let name = location.path
-
-  result = LowLevelCodeComponent(
-    id: id,
-    viewZones: JsAssoc[int, int]{},
-    multilineZones: JsAssoc[int, MultilineZone]{},
-    viewDom: JsAssoc[int, kdom.Node]{},
-    instructionsMapping: JsAssoc[int, int]{},
-    path: name,
-    editor: EditorViewComponent(
-      id: data.generateId(Content.EditorView),
-      path: name,
-      data: data,
-      lang: LangAsm,
-      name: name,
-      editorView: ViewLowLevelCode,
-      tokens: JsAssoc[int, JsAssoc[cstring, int]]{},
-      decorations: @[],
-      whitespace: Whitespace(character: WhitespaceSpaces, width: 2),
-      encoding: cstring"UTF-8",
-      lastMouseMoveLine: -1,
-      traces: JsAssoc[int, TraceComponent]{},
-      expanded: JsAssoc[int, EditorViewComponent]{},
-      service: data.services.editor,
-      viewZones: JsAssoc[int, int]{}
-    )
-  )
+  result = LowLevelCodeComponent(id: id)
 
   when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
     data.registerComponent(result, Content.LowLevelCode)

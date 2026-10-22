@@ -1281,14 +1281,10 @@ type
     extensionRendererId*: cstring
 
   LowLevelCodeComponent* = ref object of Component
-    editor*: EditorViewComponent
-    instructionsMapping*: JsAssoc[int, int]
-    viewZones*: JsAssoc[int, int]
-    multilineZones*: JsAssoc[int, MultilineZone]
-    viewDom*: JsAssoc[int, kdom.Node]
-    mutationObserver*: MutationObserver
-    path*: cstring
-    partialTabInfo*: TabInfo
+    ## The Low Level Code pane's layout entry. The pane itself is the
+    ## session's `LowLevelCodeVM`, mounted by the panel host
+    ## (`ui/panel_host`) and loaded by the session's stop loader; the
+    ## component holds nothing.
 
   EditorViewComponent* = ref object of Component
     editorView*:     EditorView

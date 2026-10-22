@@ -79,7 +79,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 48
+const ExpectedAssertions = 46
   ## Was 46. +2 for the two polarities of the declaration predicate in
   ## `panesWithMountMarkers` (the "the scan finds ..." case): a file that only
   ## MENTIONS a marker table in prose is not a pane, and a pane that declares
@@ -193,8 +193,8 @@ proc clearsMarkerOnRegister(pane: string): bool =
   ##
   ## Matched on the `jsDelete` of the pane's own `MountedIds` table keyed by
   ## `self.id`, which is the whole of the idiom, rather than on the mere
-  ## presence of `jsDelete` — `ui/low_level_code.nim:332` `jsDelete`s a DOM
-  ## node and has nothing to do with mount markers.
+  ## presence of `jsDelete`, which a pane may also use on a DOM node that has
+  ## nothing to do with mount markers.
   let source = readFile(UiDir / (pane & ".nim"))
   for line in source.splitLines:
     let t = line.strip()
@@ -237,11 +237,13 @@ suite "panes release their mount markers":
     counted "constraints" notin KnownMissingRelease
     counted "test_results" notin KnownMissingRelease
 
-  test "the six panes fixed with an unregister override do release":
+  test "the panes fixed with an unregister override do release":
     # Named individually and asserted through `overridesUnregister`, not the
     # combined predicate, so a later edit that deleted one of these overrides
     # cannot be masked by the register-side pattern matching something else.
-    for pane in ["calltrace_editor", "low_level_code", "repl",
+    # (`low_level_code` was the sixth; its pane is now mounted by the panel
+    # host, which keeps no marker, and `ui/low_level_code.nim` is gone.)
+    for pane in ["calltrace_editor", "repl",
                  "request_panel", "step_list", "trace_log"]:
       counted overridesUnregister(pane)
       counted pane notin KnownMissingRelease

@@ -32,7 +32,7 @@ import
       debug_toolbar, flow, filesystem, vcs, value, repl,
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
-      no_source, ui_imports, shortcuts, chord_display, step_list, low_level_code,
+      no_source, ui_imports, shortcuts, chord_display, step_list,
       request_panel, session_switch, session_tabs, command, frame_viewer,
       pixel_history, shader_debug, video_player, agentic_session_launcher],
   # `layout_config_repair` is dependency-free by design (its own header says
@@ -2572,8 +2572,6 @@ when not defined(ctInExtension):
         calltrace_editor.initCalltraceEditorVMFromSession(activeSessionVM.calltraceEditorVM)
       initPanelVM("initReplVMFromSession"):
         repl.initReplVMFromSession(activeSessionVM.replVM)
-      initPanelVM("initLowLevelCodeVMFromSession"):
-        low_level_code.initLowLevelCodeVMFromSession(activeSessionVM.lowLevelCodeVM)
       initPanelVM("initRequestPanelVMFromSession"):
         request_panel.initRequestPanelVMFromSession(activeSessionVM.requestPanelVM)
       initPanelVM("initTraceLogVMFromSession"):

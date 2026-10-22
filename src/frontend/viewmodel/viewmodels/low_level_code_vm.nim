@@ -2,99 +2,55 @@
 ##
 ## LowLevelCodeVM — ViewModel for the Low Level Code panel.
 ##
-## The Low Level Code panel renders the asm / IR listing for the
-## currently-debugged function.  It is a thin shell around the
-## EditorViewComponent in production (Monaco renders the actual asm
-## buffer), but the legacy ``LowLevelCodeComponent`` (see
-## ``frontend/ui/low_level_code.nim``) still owns the data plumbing
-## that issues ``CtLoadAsmFunction``, accepts the
-## ``CtLoadAsmFunctionResponse`` payload, formats each instruction
-## (``formatLine`` — offset / name / args / other column layout) and
-## sets up Monaco view-zones cross-referencing the high-level source
-## line each instruction was generated from.
-##
-## This VM mirrors that data model platform-neutrally so:
-## - the IsoNim view (``views/isonim_low_level_code_view.nim``) can
-##   render a parity-faithful container shell + a fallback
-##   instruction list usable from headless tests, and
-## - mission goal #2's headless ViewModel tests can exercise the same
-##   load / active-row / jump-to-instruction flow without depending on
-##   kdom / Monaco.
+## The pane shows the assembly / IR listing of the function the debugger is
+## in, grouped under the source lines it was generated from
+## (Shared-DOM-Front-Ends D7.2). It is loaded per stop by the session's stop
+## loader (`sdk/stop_loader`, `spLowLevelCode`) while the pane is shown
+## (`shown`, set by the host that mounts it): the request is
+## `ct/load-asm-function` for the store's `asmFunction` — the C-level location
+## for a Nim recording — and the answer lands here (`applyAsmAnswer`). The
+## source text of each group is fetched through the DAP `source` request
+## (`sdk/source_provider.newDapSourceProvider`), so it works over every
+## transport, and a view sets it as TEXT: a line of the recorded program's
+## own source is markup by construction for HTML, JSX or template files.
 ##
 ## Reactive surface:
-## - ``instructions``    — current asm instruction list (sorted by
-##                         offset, mirroring the legacy backend reply
-##                         which already arrives in offset order).
-## - ``activeOffset``    — the offset of the row that should carry the
-##                         ``active-instruction`` highlight class.
-##                         Negative (default ``-1``) means "no row
-##                         active" — matches the legacy ``NO_LINE`` /
-##                         ``findHighlight = -1`` sentinel.
-## - ``address``         — the function's load address.  Rendered as
-##                         the panel's "Originating address" hex
-##                         string when non-zero (mirrors the legacy
-##                         ``Instructions.address`` field which the
-##                         no-source panel also exposes).
-## - ``errorMessage``    — backend-reported load error, replaces the
-##                         listing when non-empty.
-## - ``noirProject``     — flips the offset rendering to
-##                         ``StepId(<offset>)`` for Noir traces
-##                         (legacy ``isNoirProject`` branch in
-##                         ``formatLine``).
+## - ``instructions``    — the listing, in the engine's order.
+## - ``activeLine`` / ``activePath`` — where the debugger is in the
+##                         listing's source: rows generated from that line are
+##                         the active ones (``isActiveInstruction``).
+## - ``activeOffset``    — a row marked by offset instead, for a generated-code
+##                         listing anchored to a cursor (`showGeneratedListing`).
+## - ``address``         — the function's load address, shown when non-zero.
+## - ``errorMessage``    — a load error or notice, shown above the listing.
+## - ``noirProject``     — offsets render as ``StepId(<offset>)``.
+## - ``sourceText``      — the text of each group's source line, by
+##                         ``sourceKey(path, line)``.
+## - ``shown``           — whether a front-end is showing the pane; the stop
+##                         loader asks only then.
 ##
-## Derived:
-## - ``isEmpty``         — convenience for the empty-state.
+## Actions: ``applyAsmAnswer``, ``loadAsmFor``, ``jumpToInstruction``,
+## ``showGeneratedListing``, the setters, and the anchoring (`setAnchors`
+## and the sync queries) of `Generated-Code-Listing.md`.
 ##
-## Actions:
-## - ``setInstructions``     — replace the row list wholesale.
-## - ``setActiveOffset``     — refresh the active-row reference.
-## - ``setAddress``          — set the function's load address.
-## - ``setErrorMessage``     — set the load error message.
-## - ``setNoirProject``      — toggle the Noir offset rendering.
-## - ``loadAsmFor``          — emit a ``ct/load-asm-function`` request
-##                             (mirrors the legacy ``loadAsm`` proc).
-## - ``jumpToInstruction``   — move the debugger to the source line the
-##                             clicked instruction was generated from,
-##                             by emitting ``ct/source-line-jump``.
-##                             Used by the IsoNim row click handler.
-##
-##                             This used to emit ``ct/asm-instruction-jump``,
-##                             a command with no entry in
-##                             ``EVENT_KIND_TO_DAP_MAPPING``, no entry in
-##                             ``VALID_DAP_COMMANDS`` and no arm in
-##                             ``dap_server.rs``.  The production
-##                             ``sendProc`` (``ui_js.nim``) resolves the
-##                             command string through
-##                             ``dapCommandToEventKind`` *before* it
-##                             reaches any transport, and that proc
-##                             raises ``ValueError`` for an unmapped
-##                             string — so every row click in this pane
-##                             threw synchronously, out of the click
-##                             handler, on both desktop and web.  The
-##                             pane is reachable (``Alt+1`` →
-##                             ``openLowLevelCode``) and its rows really
-##                             populate (via ``ct/load-asm-function``),
-##                             so this was a live crash on an ordinary
-##                             gesture.
-##
-##                             ``ct/source-line-jump`` is what the legacy
-##                             Karax editor dispatched for exactly this
-##                             gesture (``ui/editor.nim`` ``editorLineJump``
-##                             → ``sourceLineJump(path, instructions[i]
-##                             .highLevelLine, ...)``), and unlike
-##                             ``ct/local-step-jump`` it both moves the
-##                             session *and* answers the request
-##                             (``dap_handler.rs::source_line_jump`` ends
-##                             in ``respond_dap``).
+## ``jumpToInstruction`` emits ``ct/source-line-jump`` — what the desktop's
+## editor dispatched for this gesture, and an engine command that both moves
+## the session and answers (``dap_handler.rs::source_line_jump``). It used to
+## emit ``ct/asm-instruction-jump``, which no transport maps, and threw on
+## every row click.
 
-import std/json
+import std/[json, strutils, tables]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+from ../store/stop_timeline import stopIdentityOf
 import ./generated_code_anchors
+from ./source_vm import SourceLineRequest
+from ../sdk/source_provider import SourceProvider, SourceFetch,
+  newDapSourceProvider, fetch, hasText
 
 export generated_code_anchors
 
@@ -109,6 +65,25 @@ type
     address*: Signal[int]
     errorMessage*: Signal[string]
     noirProject*: Signal[bool]
+    activeLine*: Signal[int]
+      ## The source line the debugger is at, in the listing's source
+      ## (`AsmFunctionLocation.line`); 0 when none.
+    activePath*: Signal[string]
+      ## The file `activeLine` is in; "" matches any.
+    sourceText*: Signal[Table[string, string]]
+      ## The text of each group's source line, by `sourceKey(path, line)`.
+    shown*: Signal[bool]
+      ## Whether a front-end shows the pane: the stop loader asks only then.
+    generatedAtStop*: Signal[string]
+      ## The stop (`stopIdentityOf`) at which a generated-code listing was
+      ## painted (`showGeneratedListing`), "" when the pane shows the
+      ## recording's own code. The stop loader asks nothing at that stop and
+      ## drops an answer that lands after it, so opening the pane for the
+      ## listing does not replace it; the next move loads the recording's
+      ## code again.
+    sources: SourceProvider
+      ## Where source text comes from; a DAP provider over the store's
+      ## backend unless a host installed one (`setSourceProvider`).
 
     # -- Anchoring (NS4, Generated-Code-Listing.md §3.1/§4) --
     anchors*: Signal[seq[MappingAnchor]]
@@ -133,6 +108,19 @@ type
 const NO_ACTIVE_OFFSET* = -1
   ## Sentinel matching the legacy ``NO_LINE`` / ``findHighlight = -1``
   ## "no row active" indicator.
+
+proc sourceKey*(path: string; line: int): string =
+  ## The key of one source line in `sourceText`.
+  path & "\x1f" & $line
+
+proc isActiveInstruction*(instr: LowLevelInstruction; activeLine: int;
+                          activePath: string; activeOffset: int): bool =
+  ## Whether `instr` is one of the rows the debugger's position marks: one
+  ## generated from the source line it is at, or the row a generated-code
+  ## cursor anchored by offset.
+  (activeLine > 0 and instr.highLevelLine == activeLine and
+   (activePath.len == 0 or instr.highLevelPath == activePath)) or
+    (activeOffset >= 0 and instr.offset == activeOffset)
 
 proc isActiveRow*(instr: LowLevelInstruction; activeOffset: int): bool =
   ## True when ``instr`` should carry the ``active-instruction`` class.
@@ -170,11 +158,8 @@ proc displayName*(instr: LowLevelInstruction): string =
 # ---------------------------------------------------------------------------
 
 proc setInstructions*(vm: LowLevelCodeVM; instructions: seq[LowLevelInstruction]) =
-  ## Replace the row list wholesale.  Used by the legacy
-  ## ``onLoadAsmFunctionResponse`` handler when a fresh asm-load reply
-  ## arrives.  The list is preserved in arrival order — the legacy
-  ## backend already sends instructions sorted by offset, and the
-  ## panel relies on that ordering for Monaco view-zone alignment.
+  ## Replace the row list wholesale, in the order given: the engine answers
+  ## in offset order, and the groups follow it.
   vm.instructions.val = instructions
 
 proc setActiveOffset*(vm: LowLevelCodeVM; offset: int) =
@@ -197,9 +182,23 @@ proc setErrorMessage*(vm: LowLevelCodeVM; message: string) =
 
 proc setNoirProject*(vm: LowLevelCodeVM; noir: bool) =
   ## Toggle the Noir offset-display branch (``StepId(...)`` instead of
-  ## a plain integer).  Mirrors the legacy ``isNoirProject`` check in
-  ## ``low_level_code.nim::formatLine``.
+  ## a plain integer).
   vm.noirProject.val = noir
+
+proc setShown*(vm: LowLevelCodeVM; shown: bool) =
+  ## A front-end shows the pane (or stops). The host that mounts the view
+  ## sets it; the stop loader loads the listing only while it is set.
+  if vm.shown.val != shown:
+    vm.shown.val = shown
+
+proc setActiveLine*(vm: LowLevelCodeVM; path: string; line: int) =
+  ## Where the debugger is in the listing's source.
+  vm.activePath.val = path
+  vm.activeLine.val = line
+
+proc setSourceProvider*(vm: LowLevelCodeVM; provider: SourceProvider) =
+  ## Use `provider` for the groups' source text instead of the DAP default.
+  vm.sources = provider
 
 proc clearInstructions*(vm: LowLevelCodeVM) =
   ## Reset the row list and the active-offset / error signals.  Called
@@ -218,26 +217,106 @@ proc clearInstructions*(vm: LowLevelCodeVM) =
   vm.errorMessage.val = ""
   vm.anchors.val = @[]
   vm.anchorDefects.val = @[]
+  vm.sourceText.val = initTable[string, string]()
+  vm.generatedAtStop.val = ""
+
+func instructionOf*(node: JsonNode): LowLevelInstruction =
+  ## One `Instruction` of the engine's answer (`src/db-backend/src/task.rs`).
+  LowLevelInstruction(
+    name: node{"name"}.getStr(""),
+    args: node{"args"}.getStr(""),
+    other: node{"other"}.getStr(""),
+    offset: node{"offset"}.getInt(-1),
+    highLevelPath: node{"highLevelPath"}.getStr(""),
+    highLevelLine: node{"highLevelLine"}.getInt(0))
+
+func instructionListOf*(body: JsonNode): LowLevelInstructionList =
+  ## The body of a `ct/load-asm-function` answer (`Instructions`: `address`,
+  ## `instructions`, `error`).
+  if body.isNil or body.kind != JObject:
+    return
+  result.address = body{"address"}.getInt(0)
+  result.error = body{"error"}.getStr("")
+  for n in body{"instructions"}.getElems:
+    result.instructions.add instructionOf(n)
+
+proc loadSourceText*(vm: LowLevelCodeVM) =
+  ## Fetch the text of every source line the listing's groups name: one
+  ## request per file, over the lines it uses. A file the provider cannot
+  ## serve leaves its lines without text; the groups still show path and
+  ## line.
+  var ranges = initOrderedTable[string, (int, int)]()
+  for instr in vm.instructions.val:
+    if instr.highLevelPath.len == 0 or instr.highLevelLine <= 0:
+      continue
+    let r = ranges.getOrDefault(instr.highLevelPath,
+                                (instr.highLevelLine, instr.highLevelLine))
+    ranges[instr.highLevelPath] = (min(r[0], instr.highLevelLine),
+                                   max(r[1], instr.highLevelLine))
+  if ranges.len == 0:
+    return
+  if vm.sources.isNil:
+    if vm.store.isNil or vm.store.backend.isNil:
+      return
+    vm.sources = newDapSourceProvider(vm.store.backend)
+  let listing = vm.instructions.val
+  let theVm = vm
+  for path, r in ranges:
+    let request = SourceLineRequest(path: path, firstLine: r[0], lastLine: r[1])
+    vm.sources.fetch(request, proc(answer: SourceFetch) =
+      # The listing may have been replaced while the text was asked for.
+      if theVm.instructions.val != listing or not answer.hasText:
+        return
+      # A fresh table: on the JS backend a mutated signal value compares
+      # equal to itself and notifies nobody.
+      var table = initTable[string, string]()
+      for k, v in theVm.sourceText.val: table[k] = v
+      for i, line in answer.lines:
+        table[sourceKey(answer.request.path, answer.firstLine + i)] = line
+      theVm.sourceText.val = table)
+
+proc applyAsmAnswer*(vm: LowLevelCodeVM; body: JsonNode;
+                     fn: AsmFunctionLocation) =
+  ## Show the engine's answer for `fn`: the listing, its address, an error the
+  ## engine reported, which rows the debugger's line marks, and the groups'
+  ## source text.
+  let list = instructionListOf(body)
+  vm.clearInstructions()
+  vm.instructions.val = list.instructions
+  vm.address.val = list.address
+  vm.errorMessage.val = list.error
+  vm.noirProject.val = fn.path.endsWith(".nr")
+  vm.setActiveLine(fn.path, fn.line)
+  vm.loadSourceText()
+
+proc asmFunctionArgs*(fn: AsmFunctionLocation): JsonNode =
+  ## The `ct/load-asm-function` arguments (`FunctionLocation`, which refuses
+  ## unknown fields).
+  %*{"path": fn.path, "name": fn.name, "key": fn.key,
+     "forceReload": fn.forceReload}
 
 proc loadAsmFor*(vm: LowLevelCodeVM; path: string; functionName: string;
-                 key: string = ""; forceReload: bool = false) =
-  ## Emit a ``ct/load-asm-function`` request for the given function.
-  ## Mirrors the legacy ``LowLevelCodeComponent.loadAsm`` proc which
-  ## emitted ``CtLoadAsmFunction`` over the mediator.  Routing the
-  ## request through the backend lets headless tests verify the
-  ## end-to-end flow without depending on Karax / the mediator.
-  ##
-  ## Resets the row list and the active-offset / error signals before
-  ## the response arrives — same pre-load reset the legacy ``clear``
-  ## proc performed.
+                 key: string = ""; forceReload: bool = false;
+                 line: int = 0) =
+  ## Ask for the listing of one function and show it — for a host that names
+  ## the function itself. The session's stop loader does this per stop for
+  ## the function the debugger is in.
   vm.clearInstructions()
-  let args = %*{
-    "path": path,
-    "name": functionName,
-    "key": key,
-    "forceReload": forceReload,
-  }
-  discard vm.store.backend.send("ct/load-asm-function", args)
+  let fn = AsmFunctionLocation(path: path, name: functionName, key: key,
+                               line: line, forceReload: forceReload)
+  let theVm = vm
+  onComplete(vm.store.backend.send("ct/load-asm-function", asmFunctionArgs(fn)),
+    proc(response: JsonNode) =
+      if responseSucceeded(response):
+        theVm.applyAsmAnswer(responseBody(response), fn)
+      else:
+        theVm.setErrorMessage(
+          "the low-level code of " & fn.name & " could not be loaded: " &
+          response{"message"}.getStr("the engine refused the request")),
+    proc(message: string) =
+      theVm.setErrorMessage(
+        "the low-level code of " & fn.name & " could not be loaded: " &
+        message))
 
 proc jumpToInstruction*(vm: LowLevelCodeVM; instr: LowLevelInstruction) =
   ## Move the debugger to the source line ``instr`` was generated from.
@@ -354,6 +433,43 @@ proc fidelityAtRow*(vm: LowLevelCodeVM; row: int): MappingFidelity =
       return a.fidelity
   mfUnmapped
 
+proc showGeneratedListing*(vm: LowLevelCodeVM;
+                           rows: seq[LowLevelInstruction];
+                           anchors: seq[MappingAnchor];
+                           support: ArtefactSupport;
+                           sourcePath: string; sourceLine: int;
+                           notice: string): bool {.discardable.} =
+  ## Paint a generated-code listing into this pane, anchored to a cursor
+  ## (`Generated-Code-Listing.md` §7; the pane stands in for the spec's
+  ## editor tab, which is recorded there as a divergence).
+  ##
+  ## Returns whether the ANCHORS were installed. False is an answer, not an
+  ## error: `setAnchors` refuses a set `validate` rejects, wholesale. The rows
+  ## are painted either way — a listing whose mapping was refused is still the
+  ## compiler's own output, and §5's rule is that it says so rather than
+  ## disappearing.
+  vm.setInstructions(rows)
+  vm.setErrorMessage(notice)
+  vm.setNoirProject(true)
+  vm.setActiveLine("", 0)
+  vm.sourceText.val = initTable[string, string]()
+  if not vm.store.isNil:
+    vm.generatedAtStop.val = stopIdentityOf(vm.store.debugger.val)
+  vm.setActiveOffset(NO_ACTIVE_OFFSET)
+  vm.clearAnchors()
+  if anchors.len == 0:
+    return false
+  if not vm.setAnchors(anchors, support):
+    return false
+  # The cursor is what the pane now shows: without it the pane holds a
+  # correct mapping and points at nothing.
+  let decision = vm.syncFromSourceLine(sourcePath, sourceLine)
+  if decision.outcome == soAligned:
+    let (first, _) = vm.rowsFor(decision)
+    if first >= 0 and first < rows.len:
+      vm.setActiveOffset(rows[first].offset)
+  true
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -369,6 +485,11 @@ proc createLowLevelCodeVM*(store: ReplayDataStore): LowLevelCodeVM =
     let address = createSignal(0)
     let errorMessage = createSignal("")
     let noirProject = createSignal(false)
+    let activeLine = createSignal(0)
+    let activePath = createSignal("")
+    let sourceText = createSignal(initTable[string, string]())
+    let shown = createSignal(false)
+    let generatedAtStop = createSignal("")
     let anchors = createSignal(newSeq[MappingAnchor]())
     let anchorDefects = createSignal(newSeq[AnchorDefect]())
     let syncSettings = createSignal(DefaultSyncSettings)
@@ -392,6 +513,11 @@ proc createLowLevelCodeVM*(store: ReplayDataStore): LowLevelCodeVM =
       address: address,
       errorMessage: errorMessage,
       noirProject: noirProject,
+      activeLine: activeLine,
+      activePath: activePath,
+      sourceText: sourceText,
+      shown: shown,
+      generatedAtStop: generatedAtStop,
       anchors: anchors,
       anchorDefects: anchorDefects,
       syncSettings: syncSettings,

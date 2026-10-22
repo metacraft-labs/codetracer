@@ -26,10 +26,12 @@ from ./isonim_panel_mount import findIsoNimPaneHost
 import ../types
 import ../viewmodel/session_vm
 from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall
-import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view]
+from ../viewmodel/viewmodels/low_level_code_vm import setShown
+import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
+                            isonim_low_level_code_view]
 
 const
-  PanelHostKinds* = {Content.Calltrace, Content.State}
+  PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode}
     ## The panes `mountPanel` renders.
 
 type
@@ -77,11 +79,24 @@ proc render(m: PanelMount; session: SessionViewModel) =
       let panel = renderStatePanel[WebRenderer, dom_api.Element](
         r, session.stateVM)
       dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.LowLevelCode:
+      let panel = renderLowLevelCodePanel[WebRenderer, dom_api.Element](
+        r, session.lowLevelCodeVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
     else:
       discard
     let decorate = decorators[mount.kind]
     if not decorate.isNil:
       decorate(host, session)
+
+proc reportShown(session: SessionViewModel) =
+  ## Tell the session's ViewModels which of the panes that load only while
+  ## shown are mounted: the stop loader asks for the low-level code only
+  ## then.
+  if session.isNil or session.lowLevelCodeVM.isNil:
+    return
+  session.lowLevelCodeVM.setShown(
+    live.anyIt(it.kind == Content.LowLevelCode and not it.disposeRoot.isNil))
 
 proc setPanelDecorator*(kind: Content; decorate: PanelDecorator) =
   ## Install the host behaviour for `kind`'s mounts made from now on.
@@ -97,6 +112,7 @@ proc mountPanel*(host: dom_api.Element; kind: Content): PanelMount =
     waiting.add result
   else:
     result.render(hostSession)
+    reportShown(hostSession)
 
 proc dispose*(m: PanelMount) =
   ## Dispose the pane's reactive root; its container is GoldenLayout's.
@@ -108,6 +124,7 @@ proc dispose*(m: PanelMount) =
   if not m.disposeRoot.isNil:
     m.disposeRoot()
     m.disposeRoot = nil
+  reportShown(hostSession)
 
 proc setPanelSession*(session: SessionViewModel) =
   ## Install the session the panes show, and mount every pane whose container
@@ -124,6 +141,7 @@ proc setPanelSession*(session: SessionViewModel) =
   for m in pending:
     if not m.disposed:
       m.render(session)
+  reportShown(session)
 
 proc ensurePanelMounted*(host: dom_api.Element; kind: Content) =
   ## Mount `kind` into `host` unless a live mount already renders there — for
