@@ -44,7 +44,11 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 140
+  ExpectedAssertions = 113
+    ## 140 -> 113 (2026-10-22): the collapse case asserts once over the rows
+    ## drawn instead of once per row. Since the pane reports its viewport the
+    ## window draws the rows it shows, not the whole trace, so a check per
+    ## row tied this count to the pane's height. Measured.
     ## 139 -> 140 (2026-10-17, PLAT-49 arm TC5b): the + case also asserts
     ## the session tabs' grounds, active and not (+1). Measured.
     ## 128 -> 136 (2026-10-04): the call-trace cases find their rows by what
@@ -191,6 +195,17 @@ proc callRowOf(plan: JsonNode; name, args: string): JsonNode =
       return r
   nil
 
+proc sessionCalls(plan: JsonNode): tuple[pages, calc: int] =
+  ## How many of the drawn call rows are call_pages's calls (`step`, `leaf`)
+  ## and how many calc's (`evaluate`): which recording a session tab
+  ## draws, read off its rows. The pane draws the rows it shows
+  ## (Viewport-Driven-Loading V2), so two sessions fill it alike and are
+  ## told apart by what their rows are, not by how many.
+  for r in plan.callRows:
+    let t = r.textOf
+    if t.startsWith("step #") or t.startsWith("leaf #"): inc result.pages
+    if t.startsWith("evaluate #"): inc result.calc
+
 proc indexOf(row: JsonNode): int =
   if row.isNil: -1 else: parseInt(row.attr("data-call-index"))
 
@@ -305,8 +320,15 @@ suite "PLAT-49 part B: the GPUI window's call trace":
     ck collapsed.callRow(opAt).textOf.startsWith("apply_op #" & $opAt & "(")
     # Its child `add` is gone; the rows below move up — and are renumbered,
     # as the desktop's are (`#N` is the row's place in the section).
+    # One check over every drawn row (the pane draws the rows it shows,
+    # Viewport-Driven-Loading V2, so a check per row would tie this file's
+    # count to the pane's height).
+    var stillDrawn: seq[string] = @[]
     for r in collapsed.callRows:
-      ck not r.textOf.contains("add #" & $addAt & "(left=2, right=3)")
+      if r.textOf.contains("add #" & $addAt & "(left=2, right=3)"):
+        stillDrawn.add r.textOf
+    checkpoint("the collapsed child still drawn: " & $stillDrawn)
+    ck stillDrawn.len == 0
     ck collapsed.callRow(addAt).textOf.startsWith("evaluate #" & $addAt &
                                                   "(expression=\"10 - 4 + 1\")")
 
@@ -618,12 +640,17 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
                     ("true", chromeOf(crTabActiveBackground))]
     ck two.nodesWith("data-ct-session-tab-close").len == 2
     ck two.nodesWith("data-ct-session-tab-add").len == 1
+    # The new tab draws call_pages's calls, not calc's (`sessionCalls`).
     let pagesRows = two.callRows.len
-    ck pagesRows > one.callRows.len          # call_pages's trace is long
+    let pagesTab = two.sessionCalls
+    let calcTab = one.sessionCalls
+    checkpoint("call_pages tab rows: " & $pagesRows & ", step/leaf, evaluate " &
+               $pagesTab & "; calc's " & $calcTab)
+    ck pagesTab.pages > 0 and pagesTab.calc == 0
     # The same through "Open local trace" and a typed path.
     let typedOpen = windowPlan("tab-add" & toLocal & ",key:enter" &
                                typed(pages) & ",key:enter")
-    ck typedOpen.callRows.len == pagesRows
+    ck typedOpen.callRows.len == pagesRows and typedOpen.sessionCalls == pagesTab
     # The first tab: calc's panes again.
     let back = windowPlan("tab-add" & toPages & ",key:enter,tab:0")
     ck back.callRows.len == one.callRows.len
@@ -633,7 +660,8 @@ suite "PLAT-49 part B review: the GPUI band's + opens a recording in a new tab":
     let closed = windowPlan("tab-add" & toPages & ",key:enter,tab-close:1")
     ck closed.nodesWith("data-ct-session-tab").len == 0
     ck closed.nodesWith("data-ct-session-tab-add").len == 1
-    ck closed.callRows.len == one.callRows.len
+    ck closed.callRows.len == one.callRows.len and calcTab.calc > 0 and
+       closed.sessionCalls == calcTab
     # A folder that is not a recording opens nothing: the welcome tab stays,
     # and says why.
     let refused = windowPlan("tab-add" & toLocal & ",key:enter" &
