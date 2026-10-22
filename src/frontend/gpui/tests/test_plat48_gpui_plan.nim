@@ -44,7 +44,10 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 222
+  ExpectedAssertions = 243
+    ## 222 -> 243 (M76, codetracer#843): the Debug menu's Stop and point
+    ## items drawn enabled (+15), and Shift+F5 ending the session (+6).
+    ## Measured.
     ## 216 -> 222 (2026-10-22, codetracer-pm issue 2026-10-08-gpui-pane-
     ## docked-at-start-has-no-element-so-its-label-hover-reveals-nothing):
     ## the top-edge case asserts that the label of a pane docked BEFORE the
@@ -97,7 +100,11 @@ var drawnFiles: Table[string, string]
   ## is: `--report-window-plan` leaves the marks' SVG files for its reader,
   ## and this reader removes them.
 
-proc windowPlan(ops: string; pre: seq[string] = @[]): JsonNode =
+var lastPlanTrace = ""
+  ## M76: the gesture trace (`CODETRACER_GPUI_GESTURE_TRACE=1`) of the last
+  ## `windowPlan(…, trace = true)` run — what the window says it did.
+
+proc windowPlan(ops: string; pre: seq[string] = @[]; trace = false): JsonNode =
   ## The window's root after `ops`, as the shipped binary reports it.
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
@@ -115,6 +122,8 @@ proc windowPlan(ops: string; pre: seq[string] = @[]): JsonNode =
   # Every other per-user location (trace index, config, caches) of the
   # spawned binary: its own, under this case's directory (common/ct_home).
   env["CODETRACER_HOME"] = state / "ct-home"
+  if trace:
+    env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   var args = pre & @["--report-window-plan", "--width=" & $W,
                      "--height=" & $H]
   if ops.len > 0:
@@ -128,6 +137,7 @@ proc windowPlan(ops: string; pre: seq[string] = @[]): JsonNode =
   let rc = p.waitForExit()
   p.close()
   let err = if fileExists(errFile): readFile(errFile) else: ""
+  lastPlanTrace = err
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
@@ -671,6 +681,49 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
     let elsewhere = windowPlan("hwheel:state:" & $maxLeft)
     ck elsewhere.fieldOf("leftCols") == 0
     ck elsewhere.codeByRow()[widestRow] == atRest[widestRow]
+
+  test "M76 (#843): the Debug menu draws Stop and every breakpoint and tracepoint item enabled":
+    # An item's enabled state is the ink it is drawn in (`crWindowForeground`
+    # enabled, `crTabInactiveForeground` disabled), read against two items
+    # whose state M76 does not change: Step Over (performed) and Keyboard
+    # Shortcuts (the undecided half of #843, still disabled).
+    let plan = windowPlan("menu:Debug")
+    var ink = initTable[string, string]()
+    for it in plan.nodesWith("data-ct-menu-item"):
+      ink[it.attr("data-ct-menu-item")] = it{"styles"}{"text_color"}.getStr
+    let enabledInk = ink.getOrDefault("Step Over")
+    let disabledInk = ink.getOrDefault("Keyboard Shortcuts")
+    checkpoint("enabled ink " & enabledInk & ", disabled ink " & disabledInk)
+    ck enabledInk.len > 0 and disabledInk.len > 0 and enabledInk != disabledInk
+    for label in ["Stop", "Delete Breakpoint", "Delete All Breakpoints",
+                  "Enable Breakpoint", "Enable All Breakpoints",
+                  "Disable Breakpoint", "Disable All Breakpoints",
+                  "Add a Tracepoint", "Delete Tracepoint", "Enable Tracepoint",
+                  "Enable All Tracepoints", "Disable Tracepoint",
+                  "Disable All Tracepoints", "Run All Tracepoints"]:
+      checkpoint(label & ": " & ink.getOrDefault(label, "(not drawn)"))
+      ck ink.getOrDefault(label) == enabledInk
+
+  test "M76 (#843): Shift+F5 is Stop: the session tab gives way to an Edit tab and its replay ends":
+    # The window's own key handler, CUA's `debugger.stop` row. What the plan
+    # shows afterwards — no session tab, the toolbar's Stop unavailable — and
+    # what the window says it did: `session_driver.endDebugSession` ended a
+    # RUNNING replay (it answers "had already ended" otherwise).
+    let plan = windowPlan("key:f5:shift", trace = true)
+    checkpoint(lastPlanTrace)
+    # The key reached the operation (CUA's row), and the operation ran.
+    ck lastPlanTrace.contains("gesture operation debugger.stop")
+    ck not lastPlanTrace.contains("is not available in this window")
+    # The workspace is in Edit mode: the recording's folder shown as an
+    # Edit tab.
+    ck lastPlanTrace.contains("folder tab ")
+    ck lastPlanTrace.contains("stop: stopped the debugging session")
+    var stopTool = 0
+    for b in plan.nodesWith("data-ct-tool"):
+      if b.attr("data-ct-tool") == "stop":
+        inc stopTool
+        ck b.attr("data-ct-enabled") == "false"
+    ck stopTool == 1
 
   test "every assertion ran":
     echo "CHECKS: " & $CHECKS

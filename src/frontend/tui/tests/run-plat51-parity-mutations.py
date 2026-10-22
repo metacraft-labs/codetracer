@@ -453,8 +453,10 @@ ARMS = [
     # T8 RE-AIMED 2026-10-12 (PLAT-68 Phase B): `Alt+T` and `Ctrl+Enter` are
     # CUA rows naming `editor.toggle-tracepoint`; the runtime performs it.
     Arm("T8", RUNTIME,
-        "    rt.openTracepointEditorAt(rt.app.source.path, max(1, line))\n",
-        "    discard line\n",
+        # RE-AIMED 2026-10-21 (M76): the caret line is `editorCaretLine`, shared
+        # with the program menu's "Add a Tracepoint"; same arm, its one call.
+        "    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())\n",
+        "    discard rt.editorCaretLine()\n",
         P_CARET, "Alt+t and Ctrl+Enter do not open the tracepoint editor"),
     Arm("T14", TDRIVER,
         "      if (b >= ' ' and b <= '~') or b == '\\x7f' or (b < ' ' and b != Esc):\n        let alt = Esc & $b\n",

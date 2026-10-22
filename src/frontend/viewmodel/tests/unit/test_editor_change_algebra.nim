@@ -117,7 +117,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1864
+const ExpectedAssertions = 1867
+  ## *1864 -> 1867 on 2026-10-22: `viewmodels/point_menu_ops.nim` (the Debug
+  ## menu's Stop and its breakpoint and tracepoint items, codetracer#843) x
+  ## three assertions. It calls no `rebase(` and spells no `mapOver`.*
   ## *1861 -> 1864 on 2026-10-21: `viewmodels/run_control_ownership.nim`
   ## (codetracer#731, a7f6ef42d) adds three production-module scan assertions.
   ## It calls no `rebase(` and spells no `mapOver`; every functional check stays.*

@@ -861,6 +861,60 @@ proc setBreakpointEnabled*(s: HeadlessDebugSession; path: string; line: int;
     return false
   s.sendBreakpoints(path, anchors, disabled)
 
+proc hasBreakpointAt*(s: HeadlessDebugSession; path: string;
+                      line: int): bool =
+  ## Whether the store holds a breakpoint — enabled or disabled — at
+  ## `path:line`.
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path == path and r.line == line:
+      return true
+
+proc deleteBreakpointAt*(s: HeadlessDebugSession; path: string;
+                         line: int): bool =
+  ## M76: the program menu's "Delete Breakpoint" — the breakpoint at
+  ## `path:line` removed (the desktop's `removeBreakpointAtPosition`), and
+  ## NEVER a toggle: with none there, nothing is sent and the answer is
+  ## false, where `toggleBreakpoint` would have ADDED one.
+  if not s.hasBreakpointAt(path, line):
+    return false
+  s.toggleBreakpoint(path, line)
+
+proc breakpointFiles(s: HeadlessDebugSession; path: string): seq[string] =
+  ## Every file the store holds a breakpoint in, in row order — or only
+  ## `path`, when it names one that has any.
+  for r in s.session.store.pointList.rows.val:
+    if r.kind == PointKindBreakpoint and r.path notin result and
+       (path.len == 0 or r.path == path):
+      result.add r.path
+
+proc clearAllBreakpoints*(s: HeadlessDebugSession; path = ""): int =
+  ## Delete every breakpoint of `path`, or of every file when `path` is ""
+  ## — the editor menu's "Delete breakpoints in file" / "Delete ALL
+  ## breakpoints" and the program menu's "Delete All Breakpoints", one
+  ## `setBreakpoints` with none per file (`clearBreakpoints`). Answers how
+  ## many files the engine cleared; a file it refused keeps its rows.
+  for p in s.breakpointFiles(path):
+    if s.clearBreakpoints(p):
+      inc result
+
+proc setAllBreakpointsEnabled*(s: HeadlessDebugSession; enabled: bool): int =
+  ## M76: the program menu's "Enable / Disable All Breakpoints" — every
+  ## breakpoint of every file enabled or disabled, one `setBreakpoints` per
+  ## file with the enabled set (a disabled breakpoint is not on the engine;
+  ## see `setBreakpointEnabled`), columns kept. Answers how many breakpoints
+  ## CHANGED state; a file already in the asked state is not sent again.
+  for p in s.breakpointFiles(""):
+    let held = s.heldBreakpoints(p)
+    let changing = if enabled: held.disabled.len else: held.enabled.len
+    if changing == 0:
+      continue
+    let all = held.enabled & held.disabled
+    let ok =
+      if enabled: s.sendBreakpoints(p, all, @[])
+      else: s.sendBreakpoints(p, @[], all)
+    if ok:
+      result += changing
+
 const LineJumpQuietMs* = 15_000
   ## How long `sourceLineJump` waits for the engine's next message before it
   ## takes silence for "no step reaches that line" (a stepping engine answers
@@ -1532,3 +1586,17 @@ proc close*(s: HeadlessDebugSession) =
   ## `DapStdioBackend.close` twice on the same handle.
   s.sdk.dispose(disconnectBackend = false)
   s.backend.close()
+
+proc replayPid*(s: HeadlessDebugSession): int =
+  ## The `replay-server` child's process id, or -1 when there is none. Still
+  ## answered after `close` (the id of the process that was ended), so a
+  ## caller can ask the OS whether it is really gone.
+  if s.isNil or s.backend.isNil or s.backend.process.isNil:
+    return -1
+  int(s.backend.process.processID)
+
+proc replayRunning*(s: HeadlessDebugSession): bool =
+  ## Whether this session's `replay-server` is still being driven: the
+  ## channel is open and the child has not exited. False after `close`.
+  not s.isNil and not s.backend.isNil and not s.backend.isClosed and
+    s.backend.process.running

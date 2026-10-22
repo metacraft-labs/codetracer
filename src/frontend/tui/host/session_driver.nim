@@ -33,11 +33,115 @@ from viewmodels/debug_controls_vm import DebugControlsVM, transportAvailable,
   continueExecution, reverseContinue, moveInHistory, HistoryDirection,
   nextHistoryIndex
 
-export native_host, OriginEventName
+import viewmodels/point_menu_ops
+from store/replay_data_store import setTracepointsEnabled, deleteTracepoint,
+  enabledTracepointSpecs
+from std/os import extractFilename
+
+export native_host, OriginEventName, point_menu_ops
 
 const
   OriginWaitMs* = 20_000
     ## How long a host waits for that chain before saying none arrived.
+
+type
+  PointMenuOutcome* = object
+    ## What one Debug-menu point item did, for the host to show.
+    performed*: bool
+      ## The item changed something (a row, the engine's set, a sweep ran).
+      ## False with a `message` saying why not — the item is answered, never
+      ## silently inert.
+    message*: string
+      ## The status line's sentence.
+    swept*: seq[TracepointSweepHit]
+      ## `pmoRunAllTracepoints`: the sweep's hits, for the host's overlay.
+    sweptSpecs*: int
+      ## `pmoRunAllTracepoints`: how many tracepoints were swept.
+
+proc performPointMenuOp*(s: HeadlessDebugSession; op: PointMenuOp;
+                         path: string; line: int;
+                         nextTracepointId: var int): PointMenuOutcome =
+  ## THE NATIVE PERFORMER of the program menu's breakpoint and tracepoint
+  ## items (M76, codetracer#843) — the terminal's and GPUI's, over the
+  ## desktop's semantics (`ui_js.nim`'s `removeBreakpointAtPosition` …
+  ## `ui/trace.runTracepoints`): an item that names one point acts on the one
+  ## at `path:line`, the editor caret's line; an "All" item acts on every
+  ## point of every file.
+  ##
+  ## `nextTracepointId` is the host's sweep counter: "Run All Tracepoints"
+  ## numbers its specs from it and advances it, so the ids of two sweeps
+  ## never collide. `pmoAddTracepoint` is the front end's — it opens its own
+  ## editor — and is answered here as not performed.
+  ##
+  ## TOTAL: a refused or failed request is a message, never an exception, on
+  ## `session_driver`'s rule (a host loop must not lose its screen).
+  let store = s.session.store
+  let at = path.extractFilename & ":" & $line
+  proc said(performed: bool; message: string): PointMenuOutcome =
+    PointMenuOutcome(performed: performed, message: message)
+  try:
+    case op
+    of pmoNone, pmoAddTracepoint:
+      said(false, "the front end opens the tracepoint editor")
+    of pmoDeleteBreakpoint:
+      if s.deleteBreakpointAt(path, line): said(true, "deleted the breakpoint at " & at)
+      else: said(false, "there is no breakpoint at " & at)
+    of pmoDeleteAllBreakpoints:
+      let files = s.clearAllBreakpoints()
+      if files > 0: said(true, "deleted the breakpoints in " & $files & " file(s)")
+      else: said(false, "there are no breakpoints to delete")
+    of pmoEnableBreakpoint, pmoDisableBreakpoint:
+      let enable = op == pmoEnableBreakpoint
+      let word = if enable: "enabled" else: "disabled"
+      if not s.hasBreakpointAt(path, line):
+        said(false, "there is no breakpoint at " & at)
+      elif s.setBreakpointEnabled(path, line, enable):
+        said(true, word & " the breakpoint at " & at)
+      else:
+        said(false, "the engine refused the breakpoint at " & at)
+    of pmoEnableAllBreakpoints, pmoDisableAllBreakpoints:
+      let enable = op == pmoEnableAllBreakpoints
+      let n = s.setAllBreakpointsEnabled(enable)
+      if n > 0:
+        said(true, (if enable: "enabled " else: "disabled ") & $n &
+                   " breakpoint(s)")
+      else:
+        said(false, "no breakpoint is " &
+                    (if enable: "disabled" else: "enabled"))
+    of pmoDeleteTracepoint:
+      if store.deleteTracepoint(path, line):
+        said(true, "deleted the tracepoint at " & at)
+      else: said(false, "there is no tracepoint at " & at)
+    of pmoEnableTracepoint, pmoDisableTracepoint:
+      let enable = op == pmoEnableTracepoint
+      if store.setTracepointsEnabled(path, line, enable) > 0:
+        said(true, (if enable: "enabled" else: "disabled") &
+                   " the tracepoint at " & at)
+      else:
+        said(false, "there is no " & (if enable: "disabled" else: "enabled") &
+                    " tracepoint at " & at)
+    of pmoEnableAllTracepoints, pmoDisableAllTracepoints:
+      let enable = op == pmoEnableAllTracepoints
+      let n = store.setTracepointsEnabled("", 0, enable, every = true)
+      if n > 0:
+        said(true, (if enable: "enabled " else: "disabled ") & $n &
+                   " tracepoint(s)")
+      else:
+        said(false, "no tracepoint is " &
+                    (if enable: "disabled" else: "enabled"))
+    of pmoRunAllTracepoints:
+      let specs = store.enabledTracepointSpecs(nextTracepointId)
+      if specs.len == 0:
+        said(false, "there are no enabled tracepoints to run")
+      else:
+        nextTracepointId += specs.len
+        let hits = s.runTracepoints(specs)
+        PointMenuOutcome(performed: true, swept: hits, sweptSpecs: specs.len,
+                         message: "ran " & $specs.len & " tracepoint(s): " &
+                                  $hits.len & " hit(s)")
+  except CatchableError as e:
+    said(false, "could not " & $op & ": " & e.msg)
+
 
 proc settleMove*(s: HeadlessDebugSession): bool =
   ## Consume the `stopped` + `ct/complete-move` pair a navigation command

@@ -69,6 +69,8 @@ type
   TopBarPart* = enum
     tpMenuButton = "menu"
     tpControl = "control"
+    tpStop = "stop"
+      ## M76: the toolbar's Stop, at its tail (`StopControl`).
     tpOmnibar = "omnibar"
     tpTab = "tab"
     tpTabMore = "tab-more"
@@ -98,6 +100,10 @@ type
       ## Empty means "no session": every control is drawn disabled.
     hoveredControl*: int
       ## The control under the pointer (or keyboard-focused), -1 for none.
+    stopEnabled*: bool
+      ## M76: a debugging session is open, so the Stop control can end it.
+    hoveredStop*: bool
+      ## M76: the pointer is on Stop; `hoverTooltip` is its tooltip.
     hoverTooltip*: string
       ## PLAT-49: its tooltip (`debug_controls_vm.transportTooltip`), drawn
       ## as a one-row label under it (`paintControlTooltip`).
@@ -141,7 +147,7 @@ type
 
   TopBarHitKind* = enum
     thNone, thMenuButton, thControl, thOmnibar, thTab, thTabMore, thTabClose,
-    thTabAdd
+    thTabAdd, thStop
 
   TopBarHit* = object
     kind*: TopBarHitKind
@@ -243,6 +249,15 @@ proc controlCells*(mode: IconsMode; i: int): int =
   of imText: textButtonCells(TransportControls[i])
   else: textCells(TransportControls[i].glyphFor(mode)) + 2
 
+proc stopCells*(mode: IconsMode): int =
+  ## The Stop control's cells, its padding included. `graphics` draws its
+  ## square as text: the desktop's Stop is an image (`stop_16_dark.svg`),
+  ## not one of the marks this terminal rasterises (`debug_control_marks`).
+  case mode
+  of imText: textButtonCells(StopControl)
+  of imNerd: textCells(StopControl.nerd) + 2
+  else: textCells(StopControl.unicode) + 2
+
 proc controlsSubset*(mode: IconsMode; budget: int): seq[int] =
   ## The controls that fit `budget` cells: every one when they all do, else
   ## the longest prefix of `TextPriority` that fits — the text mode's rule,
@@ -335,6 +350,13 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   let controlsW = controlsWidth(result.effectiveIcons, result.shownControls)
   if controlsW > 0:
     discard take(controlsW + 1)
+  # 4b. M76: Stop, at the toolbar's tail, with the room the transports
+  # left — never in place of one of them, so the priority subset above is
+  # exactly what it was; on a row too narrow for it, Stop stays the menu's
+  # and the chord's.
+  var stopW = 0
+  if controlsW > 0 and take(stopCells(result.effectiveIcons) + 1):
+    stopW = stopCells(result.effectiveIcons)
   # 5. The omnibar field.
   if not omnibarOpen and omniW > 0:
     let room = avail - used
@@ -419,6 +441,10 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
                                         index: i)
       col += w
     inc col
+  if stopW > 0:
+    # One cell after the last transport, as the controls are spaced.
+    result.segments.add TopBarSegment(part: tpStop, col: col, width: stopW)
+    col += stopW + 1
   if omniW > 0:
     var after = 0
     if tabSegs.len > 0:
@@ -535,10 +561,16 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
           g.paint(0, s.col + s.width - 1, FieldEdgeRight,
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
-    of tpControl:
-      let enabled = s.index < m.controlsEnabled.len and
-                    m.controlsEnabled[s.index]
-      let hovered = m.hoveredControl == s.index
+    of tpControl, tpStop:
+      # M76: Stop (`tpStop`) is drawn exactly as a transport is — the same
+      # ground and roles — with its own enabled state (a session to stop),
+      # its own hover and its square in every mode (`StopControl`).
+      let isStop = s.part == tpStop
+      let enabled =
+        if isStop: m.stopEnabled
+        else: s.index < m.controlsEnabled.len and m.controlsEnabled[s.index]
+      let hovered = if isStop: m.hoveredStop
+                    else: m.hoveredControl == s.index
       let role = if hovered: srTabActive
                  elif enabled: srChromeText
                  else: srChromeMuted
@@ -548,10 +580,13 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       # #1b1b1b on the #1b1b1b `#menu`); only the hovered one is lifted.
       g.fillSurface(0, s.col, s.width, 1,
                     if hovered: srTabActive else: srSurfaceTopBar)
-      let c = TransportControls[s.index]
+      let c = if isStop: StopControl else: TransportControls[s.index]
       let text =
         case lay.effectiveIcons
-        of imGraphics: spaces(s.width)   # the picture is drawn over these
+        of imGraphics:
+          # The picture is drawn over these; Stop has no rasterised mark (the
+          # desktop's is an image), so it keeps its square.
+          if isStop: " " & c.unicode & " " else: spaces(s.width)
         of imText: " " & c.text & " "
         else: " " & c.glyphFor(lay.effectiveIcons) & " "
       g.paint(0, s.col, fitCells(text, s.width),
@@ -645,7 +680,7 @@ proc tooltipText*(m: TopBarModel): string =
   ## The tooltip under the pointer: a control's, else a session tab's
   ## (PLAT-49 part B — `SessionTabView.tooltip`, with the agent's task and
   ## progress while one works in that session).
-  if m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
+  if (m.hoveredControl >= 0 or m.hoveredStop) and m.hoverTooltip.len > 0:
     m.hoverTooltip
   elif m.hoveredTab >= 0 and m.hoveredTab < m.tabs.len:
     m.tabs[m.hoveredTab].tooltip
@@ -661,7 +696,9 @@ proc controlTooltipArea*(m: TopBarModel; lay: TopBarLayout;
   let text = m.tooltipText
   if text.len == 0:
     return CellArea()
-  let s = if m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
+  let s = if m.hoveredStop and m.hoverTooltip.len > 0:
+            lay.segmentOf(tpStop)
+          elif m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
             lay.segmentOf(tpControl, m.hoveredControl)
           elif m.hoveredTab >= 0: lay.segmentOf(tpTab, m.hoveredTab)
           else: lay.segmentOf(tpTabAdd)
@@ -913,6 +950,7 @@ proc topBarHitAt*(lay: TopBarLayout; col: int;
       case s.part
       of tpMenuButton: return TopBarHit(kind: thMenuButton)
       of tpControl: return TopBarHit(kind: thControl, index: s.index)
+      of tpStop: return TopBarHit(kind: thStop)
       of tpOmnibar: return TopBarHit(kind: thOmnibar)
       of tpTab:
         # The close control: the `×` two cells from the tab's end, drawn

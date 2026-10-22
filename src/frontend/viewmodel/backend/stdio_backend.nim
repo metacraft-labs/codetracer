@@ -472,6 +472,14 @@ proc readDapMessage*(backend: DapStdioBackend): JsonNode =
 
 proc writeDapMessage*(backend: DapStdioBackend; msg: JsonNode) =
   ## Write a DAP message to the child's stdin using the wire format.
+  ##
+  ## Raises `IOError` once the channel is `close`d (M76: *Stop* ends a
+  ## session while a host may still hold it): the child's stdin is released
+  ## then, and writing to it would be a write through a freed stream, not an
+  ## error a caller can handle.
+  if backend.closed:
+    raise newException(IOError,
+      "DapStdioBackend: the replay channel is closed (the session ended)")
   let body = $msg
   let header = "Content-Length: " & $body.len & "\r\n\r\n"
   let stream = backend.process.inputStream
@@ -709,6 +717,11 @@ proc startReplayServer*(replayServerBin: string;
     eventQueue: @[],
     bound: bound,
   )
+
+proc isClosed*(backend: DapStdioBackend): bool =
+  ## Whether `close` has run: the child was ended and its handles released.
+  ## Every request after it fails, so a host asks this first.
+  backend.closed
 
 proc close*(backend: DapStdioBackend) =
   ## Terminate the replay-server child process.

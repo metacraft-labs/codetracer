@@ -2161,12 +2161,22 @@ proc applyTracepointResults*(store: ReplayDataStore;
       else: "the sweep reached this line no times"
     var replaced = false
     for j in 0 ..< rows.len:
-      if rows[j].path == spec.path and rows[j].line == spec.line and
+      # A BREAKPOINT at the line is not this tracepoint (M76): merging into
+      # it would leave the sweep with no tracepoint row — none for the Debug
+      # menu's tracepoint items to act on, none for "Run All Tracepoints" to
+      # send again — and would mark the breakpoint as swept.
+      if rows[j].kind != PointKindBreakpoint and
+         rows[j].path == spec.path and rows[j].line == spec.line and
          rows[j].line != 0:
         rows[j].line = line
         rows[j].path = path
         rows[j].resolution = resolution
         rows[j].detail = detail
+        # The expression this sweep RAN: a second `:tracepoint` on the line
+        # replaces the first, and "Run All Tracepoints" sends the row's
+        # expression again (`enabledTracepointSpecs`).
+        if spec.expression.len > 0:
+          rows[j].expression = spec.expression
         replaced = true
         break
     if not replaced:
@@ -2183,9 +2193,81 @@ proc applyTracepointResults*(store: ReplayDataStore;
         enabled: true,
         collection: "",
         resolution: resolution,
-        detail: detail)
+        detail: detail,
+        expression: spec.expression)
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
+
+# ---------------------------------------------------------------------------
+# The program menu's tracepoint items (M76, codetracer#843)
+# ---------------------------------------------------------------------------
+#
+# The desktop's Debug menu enables, disables and deletes the tracepoint at the
+# editor's caret line, or all of them, and "Run All Tracepoints" sweeps the
+# enabled ones again (`ui_js.nim`'s `enableTracepointAtPosition` …
+# `ui/trace.runTracepoints`, which skips a disabled trace). The native front
+# ends hold their tracepoints as `pointList.rows` of kind
+# `PointKindTracepoint` — what a sweep wrote — so the operations are written
+# HERE, once, over those rows, and both native menus call them. Pure store
+# writes: no request is sent, because a post-hoc tracepoint is not on the
+# engine between sweeps; what an enabled flag changes is the next sweep.
+
+proc tracepointMatches(r: PointListEntry; path: string; line: int;
+                       every: bool): bool =
+  ## Whether row `r` is a tracepoint the operation names: every tracepoint, or
+  ## the one at `path:line` (a row with no line — an unresolved point — is
+  ## never "at" a line).
+  r.kind == PointKindTracepoint and
+    (every or (r.line != 0 and r.line == line and r.path == path))
+
+proc setTracepointsEnabled*(store: ReplayDataStore; path: string; line: int;
+                            enabled: bool; every = false): int =
+  ## Enable or disable the tracepoint at `path:line` — or, with `every`, every
+  ## tracepoint (the menu's "Enable / Disable All Tracepoints"). Answers how
+  ## many rows CHANGED; 0 when none was there to change, which the caller
+  ## reports rather than claiming it acted. Rows of other kinds are untouched.
+  var rows = store.pointList.rows.val
+  for r in rows.mitems:
+    if r.tracepointMatches(path, line, every) and r.enabled != enabled:
+      r.enabled = enabled
+      inc result
+  if result > 0:
+    store.pointList.rows.val = rows
+
+proc deleteTracepoint*(store: ReplayDataStore; path: string; line: int): bool =
+  ## Delete the tracepoint at `path:line` — its point-list row and the hits
+  ## its sweeps left at that line (`tracepointHits`), so the gutter and a trace
+  ## pane stop showing what is no longer a tracepoint. False when there was
+  ## none.
+  var kept: seq[PointListEntry] = @[]
+  for r in store.pointList.rows.val:
+    if r.tracepointMatches(path, line, every = false):
+      result = true
+    else:
+      kept.add r
+  if not result:
+    return
+  store.pointList.rows.val = kept
+  var hits: seq[TracepointSweepHit] = @[]
+  for h in store.pointList.tracepointHits.val:
+    if not (h.path == path and h.line == line):
+      hits.add h
+  store.pointList.tracepointHits.val = hits
+
+proc enabledTracepointSpecs*(store: ReplayDataStore;
+                             firstId: int): seq[TracepointSweepSpec] =
+  ## The sweep "Run All Tracepoints" sends: one spec per ENABLED tracepoint
+  ## row that has a line and an expression, numbered from `firstId` (a sweep's
+  ## ids are how its hits are matched back to its specs, so a caller that has
+  ## swept before passes the next unused id). A disabled tracepoint is not
+  ## swept, as the desktop's `runTracepoints` skips a disabled trace.
+  var id = firstId
+  for r in store.pointList.rows.val:
+    if r.kind == PointKindTracepoint and r.enabled and r.line != 0 and
+       r.expression.len > 0:
+      result.add TracepointSweepSpec(tracepointId: id, path: r.path,
+                                     line: r.line, expression: r.expression)
+      inc id
 
 proc updateCodeStateLine*(store: ReplayDataStore;
                           line: int;

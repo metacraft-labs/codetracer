@@ -405,6 +405,13 @@ suite "PLAT-40 3 — the producer partition":
       ("src/frontend/viewmodel/store/replay_data_store.nim", "applyTracepointResults"),
       ("src/frontend/viewmodel/store/replay_data_store.nim",
        "applyVerifiedBreakpoints"),
+      # M76 (codetracer#843): the Debug menu's tracepoint items, the one place
+      # a tracepoint row is enabled, disabled or deleted, shared by both
+      # native menus (`session_driver.performPointMenuOp`).
+      ("src/frontend/viewmodel/store/replay_data_store.nim",
+       "setTracepointsEnabled"),
+      ("src/frontend/viewmodel/store/replay_data_store.nim",
+       "deleteTracepoint"),
       ("src/frontend/viewmodel/viewmodels/point_list_vm.nim", "setPoints")]}.toTable
   const Sinks = {
     "calltrace": ("updateCalltraceSection", @["updateCalltraceSection(",

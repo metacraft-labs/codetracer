@@ -354,6 +354,13 @@ type
     detail*: string
       ## Why, for a point that did not resolve cleanly. What the user needs in
       ## order to fix the definition; empty for `resolved`.
+    expression*: string
+      ## A TRACEPOINT's expression — what a sweep evaluates at every step of
+      ## its line. Kept apart from `label`, which a definition may name
+      ## differently, because the program menu's "Run All Tracepoints" sweeps
+      ## the enabled rows AGAIN and must send what the user typed, not what
+      ## the pane shows (`enabledTracepointSpecs`). "" for a breakpoint, and
+      ## for a row no producer gave one.
 
   TracepointSweepSpec* = object
     ## One tracepoint to run over the whole recording.

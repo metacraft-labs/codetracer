@@ -789,17 +789,33 @@ proc interactive(command: TuiCommand): int =
     ## the desktop's new tab starts from the current one.
     if not sessions.hasKey(int(id)):
       return
+    let fromEnded = not session.isNil and session.ended
     session = sessions[int(id)]
     shownId = id
     let slot = app.shell.activeSlot()
     if not slot.isNil:
       slot.layout = app.layoutBinding.layout.clone()
+    if session.ended:
+      # M76: a tab whose session *Stop* ended is an edit tab: nothing of a
+      # replay is shown in it, and its workspace is Edit mode.
+      rt.forgetSession()
+      rt.enterProductMode(pmEdit)
+      app.notification = EndedSessionNote
+      return
+    if fromEnded:
+      # Back from such a tab onto a live session: a replay is Debug mode.
+      rt.enterProductMode(pmDebug)
     session.header(rt)
     app.fileTree = FileTreeModel()      # this session's files (`refresh`)
     session.setViewportHeight(rt.sourcePaneRows())
     session.refresh(rt)
     app.refreshOmnibarIndex()
     app.notification = describe(session)
+
+  # M76: set by `welcomeHost` around the open it performs for the welcome tab
+  # that stands in for a tab *Stop* ended (`TuiApp.stoppedTabWelcome`); only
+  # then does `recordingOpener` start the session in the stopped tab.
+  var openingInStoppedTab = false
 
   app.recordingOpener = proc(path: string): string =
     # The handshake is BOUNDED, as the first one is; no keyboard hatch: the
@@ -820,6 +836,33 @@ proc interactive(command: TuiCommand): int =
       layout = app.layoutBinding.layout, adopt = opened.session.sdk)
     opened.wireFindInFiles()
     sessions[int(slot.id)] = opened
+    # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
+    # Trace…* (or *Record New Trace…*) chosen there, whose welcome tab
+    # `openingInStoppedTab` names — the recording starts its new debugging
+    # session IN THAT TAB (Debugger-Controls.md § "Ending a session from
+    # inside it", requirement 3: "*Run*, or opening a trace, starts a new
+    # debugging session in it by the ordinary route"): the new slot takes the
+    # stopped one's place in the strip, and the stopped slot — whose engine is
+    # already gone — is removed. The workspace returns to Debug mode, as a
+    # replay opens in it. Any other open (*Open Trace in New Tab…*, the "+",
+    # the omnibar) is a new tab and leaves the stopped tab where it is:
+    # *Stop* never closes a tab, and neither does a later request for a new
+    # one.
+    let stoppedId = shownId
+    let replacing = openingInStoppedTab and not session.isNil and
+                    session.ended and sessions.hasKey(int(stoppedId))
+    if replacing:
+      var at = -1
+      for i, t in app.shell.tabsOf():
+        if t.id == stoppedId:
+          at = i
+      if app.shell.closeSession(stoppedId, disconnectBackend = false):
+        sessions[int(stoppedId)].close()
+        sessions.del(int(stoppedId))
+        if at >= 0:
+          discard app.shell.moveSlot(slot.id, at)
+      discard app.shell.activate(slot.id)
+      rt.enterProductMode(pmDebug)
     showSession(slot.id)
     ""
 
@@ -901,9 +944,17 @@ proc interactive(command: TuiCommand): int =
       let problem = traceFolderProblem(path)
       if problem.len > 0:
         return path & ": " & problem
-      let why = app.recordingOpener(path)
+      # M76: the welcome tab that stands in for a stopped tab
+      # (`runtime.openWelcomeOption`) opens its recording IN that tab.
+      let standsIn = app.welcomeTabs.tabs[tab].serial == app.stoppedTabWelcome
+      openingInStoppedTab = standsIn
+      let why =
+        try: app.recordingOpener(path)
+        finally: openingInStoppedTab = false
       if why.len > 0:
         return why
+      if standsIn:
+        app.stoppedTabWelcome = -1
       # THE TAB BECAME THAT SESSION: the welcome tab gives its place up.
       app.welcomeTabs.closeWelcomeTab(tab)
       if tab < app.welcomes.len:

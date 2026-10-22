@@ -458,10 +458,14 @@ export keymap_router, keymap_importers, client_actions, navigation_keymap
 # plain Nim over `std/*` and the ViewModels this facade already exports —
 # `filesystem_vm` is `session_vm`'s own import, exported so its type is
 # nameable — so the facade's graph gains no renderer, no I/O and no process.
+#
+# M76 (codetracer#843): `point_menu_ops` too — the Debug menu's Stop and its
+# breakpoint / tracepoint items as one action table, which both native menus
+# read to enable an item and to run it. Pure Nim over `std/*`.
 import viewmodels/[menu_vm, product_menu, omnibar_vm, omnibar_sources,
-                   transport_icons, filesystem_vm]
+                   transport_icons, filesystem_vm, point_menu_ops]
 export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
-       filesystem_vm
+       filesystem_vm, point_menu_ops
 
 # PLAT-51 part B: the native front-ends' Welcome Screen of a new tab
 # (`native_welcome`, over the desktop's `WelcomeScreenVM` and a store that

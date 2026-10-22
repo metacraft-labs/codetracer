@@ -490,9 +490,14 @@ ARMS = [
         "    if session.setBreakpointEnabled(c.path, c.line, c.enabled):\n",
         "    if session.setBreakpointEnabled(c.path, c.line, true):\n",
         K_GUTTER, "the host always enables, whatever the click asked"),
-    Arm("TS6", TUISESSION,
-        "         (c.path.len == 0 or r.path == c.path):\n",
-        "         (c.path.len == 0 and r.path == c.path):\n",
+    # TS6 RE-AIMED 2026-10-21 (M76): the file filter of "Delete breakpoints
+    # in file" / "Delete ALL breakpoints" moved from the terminal's click arm
+    # into the shared `headless_session.clearAllBreakpoints` (via
+    # `breakpointFiles`), which the program menu's "Delete All Breakpoints"
+    # and GPUI's editor menu call too. Same defect, its one copy.
+    Arm("TS6", HSESSION,
+        "       (path.len == 0 or r.path == path):\n",
+        "       (path.len == 0 and r.path == path):\n",
         K_BPMENU, "Delete ALL breakpoints matches no file"),
     # --- 1. the shared operations ------------------------------------------
     Arm("HS1", HSESSION,

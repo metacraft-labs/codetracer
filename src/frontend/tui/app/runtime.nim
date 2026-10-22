@@ -221,6 +221,10 @@ type
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
       ## Visual-Replay.md's Scrub Slider, whose release settles there).
+    pcPointMenu
+      ## M76: the program menu's breakpoint or tracepoint item whose
+      ## `ClientAction` is `text` (`point_menu_ops`), at `path:line` — the
+      ## editor caret's line (the desktop's `pointsOperationsSetup`).
 
   PaneClickRequest* = object
     kind*: PaneClickKind
@@ -309,6 +313,11 @@ type
       ## `ct/collapse-calls`) and reloads the section.
     callIndex*: int64
       ## The trace index `jumpsToCall` / `togglesCall` act on.
+    stopsSession*: bool
+      ## M76: *Stop* (the Debug menu, CUA's `Shift+F5`): the workspace is in
+      ## Edit mode already (`stopDebugging`), and the host ends the session
+      ## behind the tab — its replay backend terminated — and makes the
+      ## runtime forget it (`tui_session.stop`).
     paneClick*: PaneClickRequest
       ## PLAT-50: a click in a pane that the host carries out.
       ## PLAT-47. The reader scrolled the call trace: the host loads the
@@ -3517,6 +3526,12 @@ type
     mrBuffer
       ## File › Close / Reopen / Next / Previous / Switch File: Edit mode's
       ## open buffers (`buffer`).
+    mrStop
+      ## M76 (codetracer#843): Debug › Stop — `stopDebugging`, the chord's and
+      ## the toolbar control's performer too.
+    mrPoint
+      ## M76: a Debug-menu breakpoint or tracepoint item (`point`, the shared
+      ## `point_menu_ops` table GPUI's menu reads too), at the editor caret.
 
   MenuBufferOp* = enum
     mboClose, mboReopen, mboNext, mboPrevious, mboSwitch
@@ -3534,6 +3549,8 @@ type
       ## `mrWelcomeOption`: always a new welcome tab (Open Trace in New Tab…),
       ## or the shown welcome tab when there is one.
     buffer*: MenuBufferOp
+    point*: PointMenuOp
+      ## `mrPoint`'s operation.
     reason*: string
       ## Non-empty when the item cannot run now — what the menu shows it
       ## disabled with and says when it is chosen (EMT-D14).
@@ -3551,6 +3568,23 @@ const
   NoOtherFileShownReason* = "no other open file has been shown"
   NoClosedFileReason* = "no file has been closed"
   NoFileReaderReason* = "this session has no file reader to reopen it with"
+  NoDebugSessionReason* = "there is no debugging session to stop"
+    ## M76: Stop with no replay behind the runtime (`ct edit`, or after Stop).
+  PointsNeedReplayReason* =
+    "the breakpoint and tracepoint items act on a replay: open a recording " &
+    "to debug it"
+  PointsInEditModeReason* =
+    "in Edit mode the breakpoint and tracepoint items act on the replay; " &
+    "Ctrl+F5 switches to Debug mode"
+  NoRecordingFileReason* = "the editor shows no file of the recording"
+
+proc pointMenuReason(rt: TuiRuntime): string =
+  ## M76: why a Debug-menu point item cannot run now, or "" when it can — it
+  ## acts on the replay, at the caret of the recording file the editor shows.
+  if not rt.app.hasDebugSession: PointsNeedReplayReason
+  elif rt.app.modes.product != pmDebug: PointsInEditModeReason
+  elif rt.app.source.path.len == 0: NoRecordingFileReason
+  else: ""
 
 func unsavedCloseReason(path: string): string =
   ## Close Current File on a buffer with unsaved changes. The desktop asks in a
@@ -3636,8 +3670,18 @@ proc menuRouteOf*(rt: TuiRuntime; action: string): MenuRoute =
              else: mboSwitch
     result = MenuRoute(kind: mrBuffer, buffer: op)
     result.reason = rt.menuBufferReason(op)
+  of StopMenuAction:
+    # M76: Stop ends the session behind the tab; with none, it is disabled
+    # and says so.
+    result = MenuRoute(kind: mrStop)
+    if not rt.app.hasDebugSession:
+      result.reason = NoDebugSessionReason
   else:
-    result = MenuRoute(kind: mrNone, reason: "not available in the terminal")
+    let op = pointMenuOpOf(action)
+    if op != pmoNone:
+      result = MenuRoute(kind: mrPoint, point: op, reason: rt.pointMenuReason())
+    else:
+      result = MenuRoute(kind: mrNone, reason: "not available in the terminal")
 
 proc menuAvailability*(rt: TuiRuntime; action: string): MenuAvailability =
   ## Whether the terminal can perform menu item `action` now, and why not.
@@ -3682,6 +3726,12 @@ proc refreshMenuForKeymap*(rt: TuiRuntime) =
     let chord = rt.chordOf(kaCommandPalette)
     if chord.len > 0:
       chords["findSymbol"] = chord
+  # M76: Stop is an operation the router resolves (`debugger.stop`), not a
+  # `KeyAction`; its chord is asked for by the operation's name.
+  let stopChord = rt.router.chordFor("debugger.stop", rt.sessionFacts,
+                                     rt.scopePath, rt.navMode, "")
+  if stopChord.len > 0:
+    chords[StopMenuAction] = stopChord
   rt.refreshMenuAvailability()
   rt.app.menu.setShortcuts(chords)
   rt.app.refreshOmnibarIndex()
@@ -3763,6 +3813,57 @@ proc enterProductMode*(rt: TuiRuntime; product: ProductMode) =
     rt.setProductMode(product, o)
   elif product == pmEdit:
     discard rt.ensureEditWorkspace()
+
+proc hasDebugSession*(rt: TuiRuntime): bool =
+  ## Whether a replay session is behind this runtime — the host pointed the
+  ## panes at one (`tui_session.refresh` installs its store) and *Stop* has
+  ## not made the runtime forget it (`forgetSession`).
+  not rt.app.store.isNil
+
+proc forgetSession*(rt: TuiRuntime) =
+  ## M76: the runtime's half of *Stop* ending a session — every handle the
+  ## host gave it onto that session dropped, so the tab is an edit tab that
+  ## is "indistinguishable from one that was never run" (Debugger-Controls.md
+  ## § "Ending a session from inside it", requirement 3): no recording name
+  ## (so a later `Ctrl+F5` onto the debugger is the empty debugger, with no
+  ## stale-trace notice about a recording that is no longer open), no engine
+  ## behind the dispatcher (a step answers "unavailable" instead of writing to
+  ## a closed pipe), and the debugger's panes back to what a runtime with no
+  ## session shows. The Edit-mode workspace — its buffers, the project's file
+  ## tree — is the user's and is kept.
+  # The panes' values with no session are READ from the one constructor that
+  # defines them (`newTuiApp`), not restated here, so "what the empty
+  # debugger shows" has one definition. Creating it opens nothing.
+  let blank = newTuiApp()
+  rt.app.store = nil
+  rt.app.controls = nil
+  rt.app.filesVM = nil
+  rt.app.traceName = ""
+  rt.app.tick = 0
+  rt.app.totalTicks = 0
+  rt.app.location = ""
+  rt.app.viewedFile = ""
+  rt.app.source = blank.source
+  rt.app.callStack = blank.callStack
+  rt.app.callTrace = blank.callTrace
+  rt.app.callTraceLoaded = false
+  rt.app.callTraceScrolled = false
+  rt.app.callTraceAtEnd = false
+  rt.app.variables = blank.variables
+  rt.app.eventLog = blank.eventLog
+  rt.app.points = blank.points
+  rt.app.scratchpad = blank.scratchpad
+  rt.app.terminalOutput = blank.terminalOutput
+  rt.app.search = blank.search
+  rt.app.openHistories.clear()
+  rt.app.openOrigins = @[]
+  rt.app.tracepointAt = ("", 0)
+  rt.app.content = ContentOverlay()
+  rt.editServices.readSource = nil
+  rt.dispatcher = Dispatcher(services: CommandServices(
+    setTheme: rt.themeService))
+  rt.context = CommandContext()
+  rt.app.refreshOmnibarIndex()
 
 proc showWelcomeTab*(rt: TuiRuntime; index: int; outcome: var RuntimeOutcome) =
   ## Show welcome tab `index`: its Welcome Screen, or — a tab that became an
@@ -3889,8 +3990,21 @@ proc openWelcomeOption(rt: TuiRuntime; option: WelcomeStartOptionKind;
   ## terminal's dialog, whose choice the host performs (`runWelcomeIntent`).
   ## In the shown welcome tab unless `newTab` or none is shown, the desktop's
   ## *Open Trace in New Tab…* being a new tab and then the dialog.
+  ##
+  ## M76: chosen without `newTab` on a session tab whose session *Stop*
+  ## ended, the welcome tab this opens stands in for THAT tab: what it opens
+  ## starts its session in the stopped tab (`TuiApp.stoppedTabWelcome`,
+  ## which the host reads). Debugger-Controls.md § "Ending a session from
+  ## inside it", requirement 3.
+  let fromStoppedTab = not newTab and not rt.app.welcomeTabs.welcomeShown and
+                       not rt.app.shell.activeSlot().isNil and
+                       not rt.hasDebugSession
   if newTab or rt.app.shownWelcome().isNil:
     rt.openWelcomeTab(outcome)
+    if fromStoppedTab:
+      let tabs = rt.app.welcomeTabs
+      if tabs.active >= 0 and tabs.active < tabs.tabs.len:
+        rt.app.stoppedTabWelcome = tabs.tabs[tabs.active].serial
   let w = rt.app.shownWelcome()
   if w.isNil:
     rt.note("there is no welcome tab to open the form in")
@@ -4002,6 +4116,10 @@ proc stepFindInFiles(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   if why.len > 0:
     rt.note(why)
 
+proc stopDebugging(rt: TuiRuntime; outcome: var RuntimeOutcome)
+proc runPointMenuItem(rt: TuiRuntime; op: PointMenuOp; action: string;
+                      outcome: var RuntimeOutcome)
+
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
@@ -4052,6 +4170,10 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
   case route.kind
   of mrKey:
     rt.performAction(route.key, outcome)
+  of mrStop:
+    rt.stopDebugging(outcome)
+  of mrPoint:
+    rt.runPointMenuItem(route.point, action, outcome)
   of mrPane:
     rt.showPane(route.pane, outcome)
   of mrPromptLine:
@@ -4282,11 +4404,14 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     # Hover: the row's controls, and the open menu's items.
     var hovered = -1
     var hoveredTab = -1
+    var hoveredStop = false
     var hoveredAdd = false
     if event.row == 0:
       let hit = lay.topBarHitAt(event.col)
       if hit.kind == thControl:
         hovered = hit.index
+      elif hit.kind == thStop:
+        hoveredStop = true
       elif hit.kind == thTab:
         hoveredTab = hit.index
       elif hit.kind == thTabAdd:
@@ -4308,6 +4433,18 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
         vm.hoverPath(path)
         if vm.revision != before:
           outcome.repaint = true
+    if hoveredStop != rt.app.hoveredStop:
+      # M76: Stop's tooltip — the desktop's words and the chord that runs
+      # `debugger.stop` here (CUA's `Shift+F5`), as a transport's is.
+      rt.app.hoveredStop = hoveredStop
+      if hoveredStop:
+        rt.app.hoveredTooltip = tooltipText(StopControl.label,
+          rt.router.chordFor("debugger.stop", rt.sessionFacts, rt.scopePath,
+                             rt.navMode, ""))
+        rt.note(rt.app.hoveredTooltip)
+      elif hovered < 0:
+        rt.app.hoveredTooltip = ""
+      outcome.repaint = true
     if hovered != rt.app.hoveredControl:
       rt.app.hoveredControl = hovered
       # PLAT-49: the tooltip is the ViewModel's (`transportTooltip`: label
@@ -4318,7 +4455,7 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
         rt.app.hoveredTooltip = transportTooltip(
           c.id, rt.chordOf(transportKeyAction(c.id)))
         rt.note(rt.app.hoveredTooltip)
-      else:
+      elif not hoveredStop:
         rt.app.hoveredTooltip = ""
       outcome.repaint = true
     return true
@@ -4383,6 +4520,14 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   of thOmnibar:
     if not rt.app.omnibar.isOpen:
       rt.openOmnibar()
+  of thStop:
+    # M76: the toolbar's Stop — the same proc the menu item and the chord
+    # run (`stopDebugging`); with no session it answers so.
+    rt.app.hoveredStop = false
+    if not rt.hasDebugSession:
+      rt.note("Stop: " & NoDebugSessionReason)
+    else:
+      rt.stopDebugging(outcome)
   of thTab:
     # A click on a session tab switches to it; the switch is on the screen,
     # so nothing is echoed (PLAT-49 part B). PLAT-51: a welcome tab (or a
@@ -4486,6 +4631,60 @@ proc editorBuffer(rt: TuiRuntime): EditBuffer =
   if rt.app.modes.product == pmEdit:
     if rt.app.editSession.isNil: nil else: rt.app.editSession.activeBuffer()
   else: rt.debugBuffer()
+
+proc editorCaretLine(rt: TuiRuntime): int =
+  ## The line the editor's caret is on — the line the desktop's Debug-menu
+  ## point items act at (Monaco's cursor, `pointsOperationsSetup`) and
+  ## `editor.toggle-tracepoint`'s line: the document's caret, else the last
+  ## caret placed, else the execution line.
+  let buf = rt.editorBuffer()
+  result = if not buf.isNil: buf.caretLine
+           elif rt.app.caret.line > 0: rt.app.caret.line
+           else: rt.app.source.executionLine
+  result = max(1, result)
+
+proc stopDebugging(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## M76 (codetracer#843): *Stop* — the Debug menu's item and the keymap's
+  ## `debugger.stop` (CUA's `Shift+F5`). Debugger-Controls.md § "Ending a
+  ## session from inside it": the workspace returns to Edit mode, the replay
+  ## backend for the session is terminated, and the tab survives as an edit
+  ## tab. The mode switch is this layer's and is made here, through the same
+  ## transition `Ctrl+F5` makes (Mode-Transitions.md §1: Debug → Edit "cannot
+  ## fail"); ending the backend is the host's, so the outcome asks for it
+  ## (`stopsSession`) and `tui_session.stop` performs it.
+  ##
+  ## With no session behind the runtime — `ct edit`, or a second Stop — there
+  ## is nothing to end, and the status line says so: not an error, the
+  ## desktop's `stopAlreadyInEditMode`.
+  outcome.repaint = true
+  if not rt.hasDebugSession:
+    rt.note(NoDebugSessionReason)
+    outcome.detail = rt.app.notification
+    return
+  rt.setProductMode(pmEdit, outcome)
+  outcome.stopsSession = true
+  rt.note("stopping the debugging session")
+  outcome.detail = rt.app.notification
+
+proc runPointMenuItem(rt: TuiRuntime; op: PointMenuOp; action: string;
+                      outcome: var RuntimeOutcome) =
+  ## M76 (codetracer#843): a Debug-menu breakpoint or tracepoint item. The
+  ## ones that name one point act at the editor caret's line in the file the
+  ## editor shows — the desktop's semantics. "Add a Tracepoint" opens this
+  ## terminal's tracepoint editor there (the command line, `:tracepoint `
+  ## typed, as K13's "Add tracepoint" does); every other item is the host's,
+  ## over the session (`PaneClickRequest(kind: pcPointMenu)` →
+  ## `session_driver.performPointMenuOp`). Reached only through
+  ## `menuRouteOf`, whose `pointMenuReason` refused it first when there is no
+  ## replay, the workspace is in Edit mode or the editor shows no file of it.
+  outcome.repaint = true
+  let path = rt.app.source.path
+  let line = rt.editorCaretLine()
+  if op == pmoAddTracepoint:
+    rt.openTracepointEditorAt(path, line)
+    return
+  outcome.requestClick(PaneClickRequest(kind: pcPointMenu, path: path,
+                                        line: line, text: action))
 
 proc editorFocused(rt: TuiRuntime): bool =
   let (had, focused) = rt.focus.focusedPane()
@@ -4898,11 +5097,11 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
               else: "the editor is writable — Ctrl+E makes it read-only again")
     return
   of "editor.toggle-tracepoint":
-    let buf = rt.editorBuffer()
-    let line = if not buf.isNil: buf.caretLine
-               elif rt.app.caret.line > 0: rt.app.caret.line
-               else: rt.app.source.executionLine
-    rt.openTracepointEditorAt(rt.app.source.path, max(1, line))
+    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())
+    return
+  of "debugger.stop":
+    # M76: the keymap's Stop (CUA's `Shift+F5`) — the menu item's proc.
+    rt.stopDebugging(outcome)
     return
   of "editor.toggle-tab-moves-focus":
     rt.tabMovesFocus = not rt.tabMovesFocus

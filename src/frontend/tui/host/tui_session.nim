@@ -47,7 +47,7 @@ import std/[json, os, strutils, tables]
 import codetracer_embed
 import headless_session
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents,
-  waitForEvent
+  waitForEvent, isClosed
 
 # QUALIFIED, and the qualification is load-bearing: `EventLogRow` is declared
 # TWICE in this module's scope — `viewmodel/store/types.EventLogRow` is the
@@ -86,6 +86,9 @@ const
     ## number, kept so the shipped front-end fetches the window its Tier-1
     ## suites measured.
   EventLogPageSize* = 64
+  EndedSessionNote* =
+    "the debugging session has ended; open a recording to debug again"
+    ## M76: what an entry point answers once *Stop* ended the session.
   CalltraceLevels* = 400
     ## `stackTrace`'s `levels`. The same number CTUI-6's suites ask for, so a
     ## deep recursion is as visible here as it is there.
@@ -152,6 +155,21 @@ type
       ## from are about the stop the debugger is at — reconciled against the
       ## store's stop timeline (`viewmodels/inline_value_timeline`). Counts
       ## every draw; the store's `stops.report` counts every arrival.
+    stopped: bool
+      ## M76: *Stop* ended this session (`stop`) — its `replay-server` is
+      ## gone and nothing here may ask it anything. Every entry point the
+      ## host loop calls answers without touching the engine once this is
+      ## set; the tab it was shown in survives as an edit tab.
+    closed: bool
+      ## `close` has run; a second call is a no-op.
+
+proc ended*(s: TuiSession): bool =
+  ## M76: whether the session's replay has ended — by this host's *Stop*
+  ## (`stop`), or by any other caller of the session's `DebugControlsVM`
+  ## Stop (`invokeToolbarAction("stop")`, which `native_host` installs), whose
+  ## closed channel is read here so no entry point writes to it afterwards.
+  not s.isNil and (s.stopped or s.session.isNil or s.session.backend.isNil or
+                   s.session.backend.isClosed)
 
 proc openTuiSession*(traceFolder: string; viewportHeight: int;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -210,10 +228,44 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
 proc close*(s: TuiSession) =
   ## Tear the session down. The source window is this host's; the panel
   ## ViewModels are the session's, and `session.close` disposes them with it.
-  if s.isNil:
+  ##
+  ## Idempotent: *Stop* closes a session that the loop's teardown closes
+  ## again on the way out.
+  if s.isNil or s.closed:
     return
+  s.closed = true
   s.source.dispose()
   s.session.close()
+
+proc stop*(s: TuiSession; rt: TuiRuntime): NativeStopOutcome =
+  ## M76: THE TERMINAL'S STOP, the host half (Debugger-Controls.md § "Ending
+  ## a session from inside it"). The runtime already put the workspace in
+  ## Edit mode (requirement 1, `runtime.stopDebugging`); this ends the replay
+  ## — the SDK session disposed, the `replay-server` child terminated
+  ## (`native_host.stopThroughControls`: the session's `DebugControlsVM`
+  ## Stop, shared with GPUI; requirement 2) —
+  ## and makes the runtime forget the session, so the tab that showed it is
+  ## an edit tab like one that never ran (requirement 3): no recording name,
+  ## no engine behind the dispatcher, empty debugger panes. Opening a
+  ## recording, or `Ctrl+F5` onto the empty debugger, is the ordinary route
+  ## from there.
+  if s.isNil:
+    return NativeStopOutcome(pid: -1, message: "there is no debugging session")
+  if s.stopped:
+    return NativeStopOutcome(pid: s.session.replayPid(),
+                             message: "the debugging session had already ended")
+  s.stopped = true
+  if not s.closed:
+    s.closed = true
+    s.source.dispose()
+  result = s.session.stopThroughControls()
+  rt.forgetSession()
+  # Requirement 1 for every route here — the menu and the chord made the
+  # switch already (`runtime.stopDebugging`); a caller of the ViewModel's
+  # Stop did not.
+  rt.enterProductMode(pmEdit)
+  rt.app.notification = "stopped the debugging session" &
+    " — the tab is in Edit mode; open a recording to debug again"
 
 proc setViewportHeight*(s: TuiSession; height: int) =
   ## Tell `SourceVM` how many lines the source PANE actually has.
@@ -225,6 +277,8 @@ proc setViewportHeight*(s: TuiSession; height: int) =
   ## line 55 and the pane was showing 23-51. The height therefore comes from the
   ## PROJECTION, once the shell has been laid out, and is re-set on every
   ## resize.
+  if s.ended:
+    return
   s.source.setOverscan(SourceOverscan)
   s.source.setViewport(s.source.viewport.withRows(max(1, height)))
   s.followOwed = true
@@ -238,6 +292,8 @@ proc pumpMove*(s: TuiSession) =
   ## terminal it was restoring on a command the engine merely declined. The
   ## caller sees an unchanged position instead, which is what the screen would
   ## show anyway.
+  if s.ended:
+    return
   discard s.session.settleMove()
 
 proc serveSourceRequests(s: TuiSession; requests: seq[SourceLineRequest]) =
@@ -308,6 +364,10 @@ proc scrollSource*(s: TuiSession; rt: TuiRuntime; scroll: SourceScroll) =
         topCentring(m.viewportTop, m.executionLine, rows, m.totalLineCount)
       of sskFollowCaret:
         topFollowingCursor(m.viewportTop, scroll.line, rows, m.totalLineCount)
+    return
+  # M76: after *Stop* the session's `SourceVM` is disposed and no engine
+  # serves the lines it would request.
+  if s.ended:
     return
   case scroll.kind
   of sskNone: discard
@@ -394,6 +454,8 @@ proc learnExtent*(s: TuiSession) =
   ## change: `ct/event-load`'s `maxRRTicks` is a property of the recording, and
   ## re-asking for it after every step would put a whole-log request inside the
   ## step latency CTUI-14 measures.
+  if s.ended:
+    return
   # THE SHARED PRODUCERS (`native_host.loadRecordingPanes`) — the event log's
   # first window and the call trace, asked by the same call the GPUI front-end
   # makes, so neither front-end can be fed while the other is starved. Both
@@ -489,6 +551,8 @@ proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
   ## counts the whole trace (`totalCallsCount`), and scrolling past the
   ## section loads the next. A row the store does not hold is drawn as
   ## loading, never as the end of the trace.
+  if s.ended:
+    return
   var model = s.callTraceModelOf(rt)
   rt.app.callTrace = model
   if model.total == 0 or s.calltrace.isNil:
@@ -596,6 +660,8 @@ proc terminalLinesRefetch(s: TuiSession):
       result.writeOf = m.writeOf
 
 proc refreshTerminalOutput*(s: TuiSession; rt: TuiRuntime) =
+  if s.ended:
+    return
   rt.app.terminalOutput = terminalOutputModelOf(
     s.session.session.terminalOutputVM, s.session.getCurrentRRTicks(),
     rt.app.terminalOutput)
@@ -652,6 +718,8 @@ proc wireFindInFiles*(s: TuiSession) =
 proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
   ## `:grep <query>`: the session's search (`SearchResultsVM.search`, which
   ## hands it to the runner). "" when it started, else why not.
+  if s.ended:
+    return EndedSessionNote
   let vm = s.session.session.searchResultsVM
   if vm.isNil:
     return "this session has no Find in Files"
@@ -662,6 +730,8 @@ proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
 proc pumpFindInFiles*(s: TuiSession; rt: TuiRuntime): bool =
   ## Advance the search in flight (the loop calls this on its idle tick);
   ## whether the pane's value changed.
+  if s.ended:
+    return false
   discard nativeFindInFiles.pump()
   let before = rt.app.search
   s.refreshSearch(rt)
@@ -673,6 +743,8 @@ proc showSearchResult*(s: TuiSession; rt: TuiRuntime; index: int): string =
   ## — read from the recording, as a file opened from the Files pane is; the
   ## recording position does not move (Editor-Pane.md: a Find-in-Files row
   ## click deliberately does not). "" when it opened, else why not.
+  if s.ended:
+    return EndedSessionNote
   let vm = s.session.session.searchResultsVM
   if vm.isNil:
     return "there are no search results"
@@ -717,6 +789,8 @@ proc toggleSearchOption*(s: TuiSession; rt: TuiRuntime;
   ## (`search.toggle-case`, `-whole-word`, `-regex`) — a press on it, or its
   ## key in the field — and a search that ran runs again with it (the
   ## ViewModel's rule). The words the status line shows.
+  if s.ended:
+    return EndedSessionNote
   let vm = s.session.session.searchResultsVM
   if vm.isNil:
     return "this session has no Find in Files"
@@ -730,6 +804,8 @@ proc toggleSearchOption*(s: TuiSession; rt: TuiRuntime;
 proc stepSearchResult*(s: TuiSession; rt: TuiRuntime; delta: int): string =
   ## `search.next-result` / `search.previous-result`: the next / previous
   ## result, wrapping (`SearchResultsVM.stepResult`), shown.
+  if s.ended:
+    return EndedSessionNote
   let vm = s.session.session.searchResultsVM
   if vm.isNil or vm.results.val.len == 0:
     return "there are no search results"
@@ -749,6 +825,23 @@ proc refreshOrigins(s: TuiSession; rt: TuiRuntime) =
 
 proc refresh*(s: TuiSession; rt: TuiRuntime)
 
+proc showTracepointHits(s: TuiSession; rt: TuiRuntime;
+                        hits: seq[TracepointSweepHit]; title: string) =
+  ## A sweep's hits over the body, as the desktop's tracepoint editor lists
+  ## them under the line — one `:tracepoint`'s, or the program menu's "Run
+  ## All Tracepoints" (M76). The values of the hits the overlay shows are read
+  ## as it scrolls (Q4).
+  let sess = s.session
+  var held = hits
+  let text = sess.tracepointHitsText(held, 0)
+  rt.app.content = ContentOverlay(
+    refill: proc(top: int): string = sess.tracepointHitsText(held, top),
+    open: true,
+    title: title,
+    text: (if text.len > 0: text else: "the line never ran"))
+  if hits.len == 0:
+    rt.app.content.refill = nil
+
 proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
                         request: TracepointRequest): int =
   ## PLAT-50: one tracepoint swept over the recording; its hits shown, the
@@ -758,19 +851,10 @@ proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
   var hits = s.session.runTracepoints(@[TracepointSweepSpec(
     tracepointId: s.tracepointsRun - 1, path: request.path,
     line: request.line, expression: request.expression)])
-  # The values of the hits the overlay shows are read as it scrolls (Q4).
-  let text = s.session.tracepointHitsText(hits, 0)
-  let sess = s.session
-  var held = hits
-  rt.app.content = ContentOverlay(
-    refill: proc(top: int): string = sess.tracepointHitsText(held, top),
-    open: true,
-    title: "tracepoint `" & request.expression & "` at " &
-           request.path.extractFilename & ":" & $request.line & " — " &
-           $hits.len & " hit(s)",
-    text: (if text.len > 0: text else: "the line never ran"))
-  if hits.len == 0:
-    rt.app.content.refill = nil
+  s.showTracepointHits(rt, hits,
+    "tracepoint `" & request.expression & "` at " &
+    request.path.extractFilename & ":" & $request.line & " — " &
+    $hits.len & " hit(s)")
   s.refresh(rt)
   hits.len
 
@@ -782,6 +866,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## open and after each pumped move), which is what makes "the panes agree with
   ## each other" a property of the code rather than of the caller remembering
   ## the order.
+  if s.ended:
+    return
   let tick = s.session.getCurrentRRTicks()
 
   serveSourceWindow(s, tick)
@@ -1033,6 +1119,8 @@ proc toggleCallChildren*(s: TuiSession; rt: TuiRuntime; index: int64) =
   ## PLAT-49 part B: expand or collapse the children of the call at trace
   ## `index` (`session_driver.toggleCallChildren`, the desktop's toggle) and
   ## redraw the pane from the section the pane shows, read again.
+  if s.ended:
+    return
   let body = rt.paneBodyRows(paneCalltrace)
   let start = max(0, rt.app.callTrace.visibleTop(max(1, body)) -
                      CallTraceBuffer)
@@ -1235,16 +1323,24 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.noteWhere(rt)
   of pcDeleteBreakpoints:
     # K13's "Delete breakpoints in file" / "Delete ALL breakpoints".
-    var paths: seq[string] = @[]
-    for r in session.session.store.pointList.rows.val:
-      if r.kind == PointKindBreakpoint and r.path notin paths and
-         (c.path.len == 0 or r.path == c.path):
-        paths.add r.path
-    for p in paths:
-      discard session.clearBreakpoints(p)
+    discard session.clearAllBreakpoints(c.path)
     rt.app.notification = "deleted the breakpoints " &
       (if c.path.len == 0: "in every file" else: "in " & c.path)
     s.refresh(rt)
+  of pcPointMenu:
+    # M76 (codetracer#843): the program menu's breakpoint and tracepoint
+    # items, at the editor caret's line — the performer GPUI's menu calls
+    # too (`session_driver.performPointMenuOp`).
+    let op = pointMenuOpOf(c.text)
+    var nextId = s.tracepointsRun
+    let done = session.performPointMenuOp(op, c.path, c.line, nextId)
+    s.tracepointsRun = nextId
+    if op == pmoRunAllTracepoints and done.performed:
+      s.showTracepointHits(rt, done.swept,
+        "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
+        " hit(s)")
+    s.refresh(rt)
+    rt.app.notification = done.message
   of pcSeek:
     # K30: the timeline's click (`TimelineVM.seek` → `ct/timeline-seek`,
     # the handler `ct/goto-ticks` reaches).
@@ -1265,11 +1361,24 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
   ## viewed file and the panes rebuilt from the session. A change to what the
   ## session holds without a move (a breakpoint) is refreshed and NOT pumped —
   ## a pump there would wait on a `stopped` event no engine sends.
+  ##
+  ## M76: *Stop* (`outcome.stopsSession`) ends the session here (`stop`).
+  ## Once it has, nothing below may reach the engine: a request that would
+  ## need it is answered on the status line instead.
+  if outcome.stopsSession:
+    discard s.stop(rt)
+    return
   # M73 (#840): the user moved the source window (the wheel over the editor,
   # its scroll keys, its vertical bar, or a caret that left the screen).
   # Never a move, so nothing else here is owed for it.
   if outcome.sourceScroll.kind != sskNone:
     s.scrollSource(rt, outcome.sourceScroll)
+  if s.ended:
+    if outcome.paneClick.kind != pcNone or outcome.jumpsToCall or
+       outcome.togglesCall or outcome.awaitsOrigin or outcome.awaitsMove or
+       outcome.refreshesSession:
+      rt.app.notification = EndedSessionNote
+    return
   if outcome.paneClick.kind != pcNone:
     s.applyPaneClick(rt, outcome.paneClick)
   elif outcome.jumpsToCall:
@@ -1344,6 +1453,8 @@ proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
   ## Returns the dispatcher's own detail line, which `main.nim` puts on the
   ## status bar: a clamp against the recording's bounds is reported there
   ## ("goto to tick 900 (clamped from 99999)") rather than silently obeyed.
+  if s.ended:
+    return EndedSessionNote
   let outcome = dispatchAction(rt.dispatcher, rt.context, kaSeekToTick, $tick)
   if outcome.status == drDone:
     s.pumpMove()
@@ -1355,15 +1466,26 @@ proc header*(s: TuiSession; rt: TuiRuntime) =
   ## where §3.1's header row reads it, and (PLAT-68) the reader the Debug-mode
   ## editor opens its read-only documents with, from THIS recording. Separate
   ## from `refresh` because neither changes and `refresh` runs on every step.
+  if s.ended:
+    return
   let name = extractFilename(s.session.tracePath.strip(chars = {'/'}))
   rt.app.title = name
   rt.app.traceName = name
   rt.editServices.readSource = proc(path: string): EditReadResult =
     let read = s.recordedSourceText(path)
     EditReadResult(ok: read.ok, text: read.text, message: read.message)
+  # M76: the session's `DebugControlsVM` Stop (installed by `native_host`)
+  # does this terminal's half too — Edit mode, the runtime forgetting the
+  # session — whichever caller reaches it, so a Stop from anywhere leaves
+  # no part of the front end pointing at the ended engine. `stop` is
+  # re-entrant-safe: it marks the session stopped before it ends the replay.
+  let sess = s
+  s.session.installNativeStop(proc() = discard sess.stop(rt))
 
 proc describe*(s: TuiSession): string =
   ## For a diagnostic: where the engine is and what the recording's extent is.
+  if s.ended:
+    return EndedSessionNote
   s.session.getCurrentFile() & ":" & $s.session.getCurrentLine() &
     "  tick " & $s.session.getCurrentRRTicks() &
     "  extent " & (if s.bounds.known: $s.bounds.minTick & ".." & $s.bounds.maxTick

@@ -86,6 +86,17 @@ const
                      nerd: "\u{EAD2}", unicode: "⏮", text: "Entry")]
     ## In the desktop toolbar's order (`TransportActions`).
 
+  StopControl* = TransportControl(
+    id: "stop", label: "Stop and return to editing", clientAction: "stop",
+    nerd: "\u{EAD7}", unicode: "■", text: "Stop")
+    ## M76 (codetracer#843): the toolbar's STOP, at its tail — where the
+    ## desktop draws `#stop-image` (`isonim_debug_controls_view`, after run
+    ## tests) and GPUI its `gtbStop`. Not one of `TransportControls`: Stop
+    ## is not a motion, it ends the session (`DebugControlsVM.stopOperation`).
+    ## Its mark is a square in every mode (Debugger-Controls.md § Control
+    ## Marks): Codicons' `debug-stop`, `■`, the labelled button. The label is
+    ## the desktop's tooltip (`toolbarTooltip("stop", …)`).
+
   TextPriority*: array[9, string] = [
     "continue", "next", "step-in", "step-out", "reverse-continue",
     "reverse-next", "reverse-step-in", "reverse-step-out", "run-to-entry"]

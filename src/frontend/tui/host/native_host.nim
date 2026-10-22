@@ -53,6 +53,7 @@ import store/types as store_types   # `FilesystemEntryNode`
 from store/replay_data_store import applySymbolsResponse   # the omnibar's symbols
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallInSectionOf   # PLAT-49 part B
+from viewmodels/debug_controls_vm import invokeToolbarAction   # M76: the native Stop
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
 import ../../../common/replay_server_path   # the one replay-server search order
@@ -442,6 +443,86 @@ proc recordingsBeside*(traceFolder: string): seq[OmnibarEntry] =
                             label: extractFilename(path),
                             detail: parent, target: path)
 
+# ---------------------------------------------------------------------------
+# M76 (codetracer#843): THE NATIVE STOP
+# ---------------------------------------------------------------------------
+#
+# Debugger-Controls.md § "Ending a session from inside it", requirement 2:
+# "The replay backend for that session is terminated." `DebugControlsVM`'s
+# `invokeToolbarAction` is "the one route a button, a key chord and a menu
+# item take, on every front-end", and its `stop` entry is a host's to supply
+# (`defaultDebugCommands` cannot end a process). Until M76 no native host
+# supplied it, so `invokeToolbarAction("stop")` was a silent no-op on the
+# terminal and GPUI. `openLocalTrace` — the one function both native front
+# ends open a recording with — now installs it, so no native session has a
+# nil Stop, and both front ends' Stop (button, menu, chord) goes through it
+# (`stopThroughControls`).
+
+type
+  NativeStopOutcome* = object
+    ## What the native Stop did to the session's replay — a VALUE, so a test
+    ## and a host read the same fact.
+    ended*: bool
+      ## The replay was running and has been ended by this call.
+    pid*: int
+      ## The `replay-server` that was ended (or that had already gone), -1
+      ## when the session had none.
+    message*: string
+
+proc endDebugSession*(s: HeadlessDebugSession): NativeStopOutcome =
+  ## End the session's replay: the SDK session disposed and the
+  ## `replay-server` child terminated, its handles released
+  ## (`HeadlessDebugSession.close`). Idempotent: a session already ended
+  ## answers `ended = false` and says so. The workspace's return to Edit mode
+  ## and the tab that survives as an edit tab (requirements 1 and 3) are the
+  ## front end's.
+  result.pid = s.replayPid()
+  if not s.replayRunning():
+    result.message = "the debugging session had already ended"
+    s.close()
+    return
+  s.close()
+  result.ended = true
+  result.message = "stopped the debugging session"
+
+proc installNativeStop*(s: HeadlessDebugSession;
+                        afterStop: proc() {.closure.} = nil) =
+  ## Give the session's `DebugControlsVM` its host Stop: `commands.stop` ends
+  ## this session's replay (`endDebugSession`), then runs `afterStop` — the
+  ## front end's own half (its mode, its tab, forgetting the session), so a
+  ## caller that reaches the ViewModel's Stop from anywhere leaves the front
+  ## end consistent, not holding a dead engine. Installed again by a front end
+  ## that has its half to add (`tui_session.header`).
+  let vm = s.session.debugControlsVM
+  if vm.isNil:
+    return
+  let sess = s
+  vm.commands.stop = proc() =
+    discard sess.endDebugSession()
+    if not afterStop.isNil:
+      afterStop()
+
+proc stopThroughControls*(s: HeadlessDebugSession): NativeStopOutcome =
+  ## A native front end's Stop, through THE route: the session's
+  ## `DebugControlsVM.invokeToolbarAction("stop")`, which runs the host Stop
+  ## `installNativeStop` gave it. Answers what happened to the replay.
+  result.pid = s.replayPid()
+  let wasRunning = s.replayRunning()
+  let vm = s.session.debugControlsVM
+  if vm.isNil or vm.commands.stop.isNil:
+    # A session built without `openLocalTrace` (a test harness): end it the
+    # same way, directly, rather than leaving its engine running.
+    result = s.endDebugSession()
+    return
+  if not wasRunning:
+    result.message = "the debugging session had already ended"
+    return
+  vm.invokeToolbarAction("stop")
+  result.ended = wasRunning and not s.replayRunning()
+  result.message =
+    if result.ended: "stopped the debugging session"
+    else: "the replay did not end"
+
 proc openLocalTrace*(traceFolder: string;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
                     ): HeadlessDebugSession =
@@ -460,7 +541,8 @@ proc openLocalTrace*(traceFolder: string;
   let bin = findReplayServer()
   if bin.len == 0:
     raiseHost(replayServerRemedy())
-  newHeadlessDebugSession(resolved, bin, handshake = bound)
+  result = newHeadlessDebugSession(resolved, bin, handshake = bound)
+  result.installNativeStop()
 
 # ---------------------------------------------------------------------------
 # The panes' producers — ONE set, called by both native front-ends

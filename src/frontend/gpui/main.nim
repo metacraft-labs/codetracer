@@ -3338,6 +3338,12 @@ type
     gmrWelcomeOption
       ## File › Open Trace… / Open Trace in New Tab… / Record New Trace…: the
       ## welcome tab's start option (`option`), in a new tab or the shown one.
+    gmrStop
+      ## M76 (codetracer#843): Debug › Stop — the toolbar's Stop (`gtbStop`),
+      ## which the keymap's `debugger.stop` reaches through this table too.
+    gmrPoint
+      ## M76: a Debug-menu breakpoint or tracepoint item (`point`, the shared
+      ## `point_menu_ops` table the terminal's menu reads too).
 
   GpuiMenuRoute = object
     ## The window's answer for one menu item, now: how it is performed and,
@@ -3347,6 +3353,7 @@ type
     pane: PaneKind
     option: WelcomeStartOptionKind
     newTab: bool
+    point: PointMenuOp
     reason: string
 
 const
@@ -3389,7 +3396,20 @@ proc gpuiMenuRouteOf(action: string): GpuiMenuRoute =
   of "closeTab", "reopenTab", "switchTabRight", "switchTabLeft",
      "switchTabHistory":
     GpuiMenuRoute(kind: gmrNone, reason: GpuiFileListReason)
-  else: GpuiMenuRoute(kind: gmrNone, reason: "not available in this window")
+  of StopMenuAction:
+    # M76: Stop ends the session the window shows; with none it is disabled.
+    GpuiMenuRoute(kind: gmrStop,
+                  reason: (if gSession.isNil: "there is no debugging session to stop"
+                           else: ""))
+  else:
+    let op = pointMenuOpOf(action)
+    if op != pmoNone:
+      GpuiMenuRoute(kind: gmrPoint, point: op,
+                    reason: (if gSession.isNil: "the breakpoint and tracepoint " &
+                               "items act on a replay: open a recording to debug it"
+                             else: ""))
+    else:
+      GpuiMenuRoute(kind: gmrNone, reason: "not available in this window")
 
 proc gpuiMenuAvailability(action: string): MenuAvailability =
   ## Whether this window can perform menu item `action` now, and why not.
@@ -5044,20 +5064,33 @@ proc performTool(r: GpuiRenderer; tool: GToolButton) =
           break
       showSession(r, fresh)
   of gtbStop:
-    let folder = gSession.getCurrentFile().parentDir
-    let tabs = gShell.app.tabsOf()
-    let current = gShell.app.activeSessionId()
+    # M76 (codetracer#843), Debugger-Controls.md § "Ending a session from
+    # inside it": the workspace in Edit mode (the recording's folder as an
+    # Edit tab, which takes the session tab's place), and the replay backend
+    # for the session TERMINATED — in the single-session case too. Until M76
+    # the session tab was closed only when it was not the last, so the one
+    # session an ordinary user has kept its `replay-server` running behind
+    # the Edit tab; and the close was looked up in the Edit shell, which
+    # holds no session tabs. The session is ended here through the performer
+    # the terminal's Stop uses (`native_host.stopThroughControls`, the
+    # session's `DebugControlsVM` Stop), and its slot removed from the
+    # REPLAY shell.
+    let stopped = gSession
+    let folder = stopped.getCurrentFile().parentDir
+    let replayShell = if gMainShell.isNil: gShell else: gMainShell
+    let current = replayShell.app.activeSessionId()
     openWelcomeTab(r)
     let index = gWelcomeTabs.tabs.high
     gWelcomeTabs.turnIntoFolder(index, folder)
     let why = showFolderTab(r, index)
     if why.len > 0:
       traceGesture("stop: " & why)
-    if tabs.len >= 2:
-      for i, t in tabs:
-        if t.id == current:
-          closeSessionTab(r, i)
-          break
+    let ended = stopped.stopThroughControls()
+    discard replayShell.app.closeSession(current, disconnectBackend = false)
+    gSessionsOpened.del(int(current))
+    gSession = nil
+    traceGesture("stop: " & ended.message & " (replay-server " & $ended.pid &
+                 ")")
   of gtbRunTests:
     gTestJob = startRecordTestJob(gSession.getCurrentFile())
     if gTestJob.done:
@@ -5108,6 +5141,9 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
                       gRecordings)
   gOmnibar.open(query)
   drawTopBar(r)
+
+proc editorPath(): string
+proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp)
 
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
@@ -5184,6 +5220,11 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   of gmrExit:
     traceGesture("exit")
     gpui_quit()
+  of gmrStop:
+    performTool(r, gtbStop)
+    return
+  of gmrPoint:
+    runGpuiPointMenuOp(r, route.point)
   of gmrNewTab: openWelcomeTab(r)
   of gmrWelcomeOption:
     # The start option's form, the window's dialog — in the shown welcome
@@ -5202,6 +5243,20 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
 
 proc showContent(r: GpuiRenderer; title, text: string; diff = false)
 
+proc showTracepointHits(r: GpuiRenderer; hits: seq[TracepointSweepHit];
+                        title: string) =
+  ## A sweep's hits shown over the window, as the desktop's tracepoint editor
+  ## lists them under the line — one `:tracepoint`'s, or the Debug menu's
+  ## "Run All Tracepoints" (M76). The values of the hits the overlay shows
+  ## are read as it scrolls (Q4).
+  let session = gSession
+  var held = hits
+  let text = session.tracepointHitsText(held, 0)
+  showContent(r, title, (if text.len > 0: text else: "the line never ran"))
+  if hits.len > 0:
+    gContent.refill = proc(top: int): string =
+      session.tracepointHitsText(held, top)
+
 proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
                        expression: string) =
   ## PLAT-50: "Add tracepoint" then `:tracepoint <expression>` — the sweep
@@ -5219,18 +5274,40 @@ proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
   except CatchableError as e:
     traceGesture("tracepoint failed: " & e.msg)
     return
-  # The values of the hits the overlay shows are read as it scrolls (Q4).
-  let text = gSession.tracepointHitsText(hits, 0)
   refreshReplayWindow(r)
-  showContent(r, "tracepoint `" & expression & "` at " &
-                   path.extractFilename & ":" & $line & " — " & $hits.len &
-                   " hit(s)",
-              (if text.len > 0: text else: "the line never ran"))
-  if hits.len > 0:
-    let session = gSession
-    var held = hits
-    gContent.refill = proc(top: int): string =
-      session.tracepointHitsText(held, top)
+  showTracepointHits(r, hits,
+    "tracepoint `" & expression & "` at " & path.extractFilename & ":" &
+    $line & " — " & $hits.len & " hit(s)")
+
+proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
+  ## M76 (codetracer#843): a Debug-menu breakpoint or tracepoint item. The
+  ## ones that name one point act at the editor caret's line in the file the
+  ## editor shows (the desktop's `pointsOperationsSetup`). "Add a Tracepoint"
+  ## opens this window's tracepoint editor there (the omnibar on
+  ## `:tracepoint `, as `editor.toggle-tracepoint` does); every other item
+  ## is the performer the terminal's menu calls too
+  ## (`session_driver.performPointMenuOp`).
+  if gSession.isNil:
+    traceGesture("menu " & PointMenuActions[op] &
+                 " needs a replay session; open a recording to debug it")
+    return
+  let path = editorPath()
+  let line = if gDebugDocs.hasKey(path): gDebugDocs[path].caretLine
+             else: max(1, gEditorSurface.executionLine)
+  if op == pmoAddTracepoint:
+    gTracepointAt = (path, line)
+    traceGesture("tracepoint editor at " & $line)
+    openOmnibar(r, TracepointCommand)
+    return
+  var nextId = gTracepointsRun
+  let done = gSession.performPointMenuOp(op, path, line, nextId)
+  gTracepointsRun = nextId
+  traceGesture("menu " & PointMenuActions[op] & ": " & done.message)
+  refreshReplayWindow(r)
+  if op == pmoRunAllTracepoints and done.performed:
+    showTracepointHits(r, done.swept,
+      "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
+      " hit(s)")
 
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.
@@ -6341,13 +6418,8 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
                                           action == caEnableBreakpoint)
     refreshReplayWindow(r)
   of caDeleteBreakpointsInFile, caDeleteAllBreakpoints:
-    var paths: seq[string] = @[]
-    for row in gSession.session.store.pointList.rows.val:
-      if row.kind == PointKindBreakpoint and row.path notin paths and
-         (action == caDeleteAllBreakpoints or row.path == target.path):
-        paths.add row.path
-    for path in paths:
-      discard gSession.clearBreakpoints(path)
+    discard gSession.clearAllBreakpoints(
+      if action == caDeleteAllBreakpoints: "" else: target.path)
     refreshReplayWindow(r)
   of caAddTracepoint:
     # The desktop opens its tracepoint editor on the line; the window's

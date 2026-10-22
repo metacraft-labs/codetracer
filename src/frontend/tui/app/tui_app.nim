@@ -301,6 +301,8 @@ type
     graphicsDrawn*: bool
       ## The terminal answered the kitty graphics query: it draws pictures.
     hoveredControl*: int
+    hoveredStop*: bool
+      ## M76: the pointer is on the top bar's Stop control.
     hoveredTab*: int
       ## PLAT-49 part B: the session tab under the pointer, -1 for none.
     hoveredTabAdd*: bool
@@ -335,6 +337,15 @@ type
     welcomes*: seq[NativeWelcome]
       ## Each welcome tab's screen (`viewmodels/native_welcome`), parallel to
       ## `welcomeTabs.tabs`.
+    stoppedTabWelcome*: int
+      ## M76: the serial of the welcome tab *File › Open Trace…* (or *Record
+      ## New Trace…*) opened FROM a tab whose session *Stop* ended, -1 for
+      ## none (`runtime.openWelcomeOption`). A recording opened from that
+      ## welcome tab starts its session IN the stopped tab, taking its place
+      ## (Debugger-Controls.md § "Ending a session from inside it",
+      ## requirement 3). A recording opened any other way — *Open Trace in
+      ## New Tab…*, the strip's "+", the omnibar — is a new tab, and the
+      ## stopped tab stays, because *Stop* never closes a tab.
     recentFolders*: seq[string]
       ## PLAT-51: the folders opened in this process, newest first — the
       ## Welcome Screen's "Recent folders".
@@ -375,13 +386,20 @@ proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
          modes: initModeRegister(),
          menu: newMenuVM(nativeFrontEndMenu("CodeTracer")),
          omnibar: newOmnibarVM(), icons: imUnicode, hoveredControl: -1,
-         hoveredTab: -1,
+         hoveredTab: -1, stoppedTabWelcome: -1,
          # The event log's default columns before any session (PLAT-49 part
          # B): `:column-*` acts on these when no log is open yet.
          eventLog: initEventLogModel(),
          terminalOutput: TerminalOutputPaneModel(follow: true,
                                                  shownWrite: -1,
                                                  currentLine: -1))
+
+proc hasDebugSession*(app: TuiApp): bool =
+  ## M76: whether a replay session is behind the panes — the host pointed
+  ## them at one (`tui_session.refresh` installs its store) and *Stop* has
+  ## not made the runtime forget it (`runtime.forgetSession`). What the
+  ## Stop control's enabled state and Stop itself read.
+  not app.isNil and not app.store.isNil
 
 proc controlsEnabledOf*(app: TuiApp): seq[bool] =
   ## Per `TransportControls`: whether the session's ViewModel offers it now
@@ -529,6 +547,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),
                         hoveredControl: app.hoveredControl,
+                        stopEnabled: app.hasDebugSession,
+                        hoveredStop: app.hoveredStop,
                         hoverTooltip: app.hoveredTooltip,
                         hoveredTab: app.hoveredTab,
                         canAddTab: not app.welcomeHost.isNil or
