@@ -2260,6 +2260,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
       cdebug "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      # The editor is a layout pane again, so it leaves the strip — see
+      # `releaseReparentedPanel` for what skipping this used to do.
+      releaseReparentedPanel(panel)
       dispatchLayoutUpdated()
     else:
       cdebug "[EDITOR_REG] Regular mount (non-reparenting)"
@@ -2444,11 +2447,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         element.appendChild(panel.liveElement.childNodes[0])
       cdebug "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
 
-      # Clean up the panel from autoHideState.panels list now that it is reparented
-      if not autoHideState.isNil:
-        autoHideState.panels = autoHideState.panels.filterIt(it != panel)
-        if not autoHideState.onChanged.isNil:
-          autoHideState.onChanged()
+      # The pane is a layout pane again, so it leaves the strip.
+      releaseReparentedPanel(panel)
 
       dispatchLayoutUpdated()
     else:
