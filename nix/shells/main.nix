@@ -151,8 +151,13 @@ mkShell {
     ++ [ preCommit.settings.package ]
     ++ preCommit.settings.enabledPackages;
 
-  # Compose: build-critical exports from ci-base, then dev-only tail.
+  # Compose: build-critical exports from ci-base, then dev-only tail. The tail
+  # runs with its stdout sent to stderr, for the reason ci-base.nix gives at
+  # `hookOnStderr`: its banners, the venv rebuild notices, the workspace line
+  # and everything detect-siblings.sh reports are diagnostics, and
+  # `nix develop --command` callers read stdout as the command's output.
   shellHook = base.shellHook + ''
+    {
     # Every path below is anchored to ROOT_PATH, which ci-base's hook (composed
     # above) sets to the top level of the CodeTracer checkout the shell was
     # entered from, and to "" when the current directory is not inside one. A
@@ -491,5 +496,6 @@ mkShell {
     if [ "''${METACRAFT_WORKSPACE_PRESENT:-}" = "1" ]; then
       echo "  workspace: detected (shared scripts at $METACRAFT_WORKSPACE_SCRIPTS)"
     fi
+    } >&2
   '';
 }

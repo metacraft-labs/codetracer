@@ -22,6 +22,7 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_event_log_static_across_moves.nim
 
+import ../../viewport
 import std/[json, options, unittest]
 
 import isonim/core/async_compat
@@ -41,6 +42,9 @@ proc makeEventLogVM(): tuple[vm: EventLogVM, store: ReplayDataStore,
   let mock = newMockBackendService(autoRespond = true)
   let store = createReplayDataStore(mock.toBackendService())
   let vm = createEventLogVM(store)
+  # A measured pane (Viewport-Driven-Loading V1): an unmeasured one asks
+  # for nothing.
+  vm.setViewport(Viewport(rows: 20))
   drain()
   (vm, store, mock)
 
@@ -125,7 +129,9 @@ suite "Event Log rows are static across debugger moves":
     let baseline = mock.eventLoadCount()
     check baseline > 0
 
-    vm.currentPage.val = 1
+    # The next screenful: paging is the viewport scrolling (V1), not a write
+    # to the page index.
+    vm.setViewport(vm.viewport.val.scrolledTo(20))
     drain()
     check mock.eventLoadCount() > baseline
 

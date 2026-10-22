@@ -339,6 +339,16 @@ type
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
+    positionReported*: Signal[bool]
+      ## Whether the engine has stated a position for this session yet.
+      ##
+      ## `debugger.rrTicks` starts at 0, and 0 is also a real position — the
+      ## first step of the trace, where `run-to-entry` lands — so "no answer
+      ## yet" and "parked on tick 0" cannot be told apart from the tick. A host
+      ## that shows a served or cached frame until the engine answers reads
+      ## this instead (BlockTracer's `arrived`, moved here by
+      ## Shared-DOM-Front-Ends D8). Set by every write of an engine-reported
+      ## position (`updateDebuggerPosition`), whatever tick it names.
     currentGeid*: Signal[Option[uint64]]
     timeline*: Signal[TimelineState]
     agentSessions*: Signal[AgentSessionsState]
@@ -974,6 +984,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         status: dsIdle,
         threadId: 0'u32,
       )),
+      positionReported: createSignal(false),
       currentGeid: createSignal(none(uint64)),
       timeline: createSignal(TimelineState(
         minRRTicks: 0'u64,
@@ -1194,6 +1205,9 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
       s.locals.loadingState.val = lsError,
   )
 
+proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int
+  ## Forward-declared: `requestCalltraceSection` decodes its own answer.
+
 proc requestCalltraceSection*(store: ReplayDataStore;
                               startIndex: int64;
                               height: int;
@@ -1242,14 +1256,23 @@ proc requestCalltraceSection*(store: ReplayDataStore;
   let fut = store.backend.send("ct/load-calltrace-section", args)
 
   let s = store
-  fut.onComplete(
-    onSuccess = proc() =
+  onComplete(fut,
+    proc(response: JsonNode) =
       s.requestTracker.markComplete(key, argsStr)
-      s.calltrace.loadingState.val = lsIdle,
-    onError = proc() =
+      # THE STORE DECODES ITS OWN ANSWER, on every transport, through the one
+      # section decoder (`applyCalltraceResponse`). The desktop used to read
+      # it from the legacy call-trace component's event subscription instead,
+      # so a host without that component showed an empty pane. A body that is
+      # not a section (an older engine answering only with the event) leaves
+      # the store as it was.
+      if responseSucceeded(response):
+        discard s.applyCalltraceResponse(responseBody(response))
+        s.calltrace.loadingState.val = lsIdle
+      else:
+        s.calltrace.loadingState.val = lsError,
+    proc(message: string) =
       s.requestTracker.markComplete(key, argsStr)
-      s.calltrace.loadingState.val = lsError,
-  )
+      s.calltrace.loadingState.val = lsError)
 
 # ---------------------------------------------------------------------------
 # Bridge procs — used by the legacy UI layer to feed data into the store
@@ -1267,6 +1290,9 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
   let current = store.debugger.val
+  # The engine has spoken, whatever it said — tick 0 included.
+  if not store.positionReported.val:
+    store.positionReported.val = true
   when defined(js):
     vmDebug "[PIPELINE] updateDebuggerPosition: storeId=" &
       $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
@@ -1343,9 +1369,15 @@ proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   store.updateDebuggerPosition(rrTicks, file, line, geid,
                                sourceGeneration = sourceGeneration,
                                sourceDigest = sourceDigest)
-  var dbg = store.debugger.val
-  dbg.status = dsIdle
-  store.debugger.val = dbg
+  # A FRESH object: on the JS backend `var dbg = store.debugger.val` is the
+  # signal's own reference, so writing it back compares equal to itself and
+  # the status change never fires — the debugger stayed `dsStepping` and every
+  # step control stayed disabled after the first move.
+  let moved = store.debugger.val
+  if moved.status != dsIdle:
+    store.debugger.val = DebuggerState(
+      rrTicks: moved.rrTicks, location: moved.location, status: dsIdle,
+      threadId: moved.threadId)
 
 proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
   ## Update the current visual replay GEID independently of rrTicks. MCR
@@ -1562,6 +1594,19 @@ func firstTicks(node: JsonNode; names: varargs[string]): uint64 =
       return if raw > 0.0: uint64(raw) else: 0'u64
   0'u64
 
+func hasTicks(node: JsonNode; names: varargs[string]): bool =
+  ## Whether this object reports a tick under any of `names` — a number that
+  ## is not negative (-1 is how some producers spell "no position"). Tick 0 is
+  ## a position; absence is not.
+  if node.isNil or node.kind != JObject:
+    return false
+  for name in names:
+    let child = node.getOrDefault(name)
+    if child.isNil: continue
+    if child.kind == JInt: return child.getBiggestInt(0) >= 0
+    if child.kind == JFloat: return child.getFloat(0.0) >= 0.0
+  false
+
 func firstInt(node: JsonNode; names: varargs[string]): int =
   ## The first of `names` this object carries as a number, or 0.
   ##
@@ -1611,6 +1656,8 @@ proc eventLogRowFromJson*(node: JsonNode; positionIndex: int): EventLogRow =
   result.line = firstInt(node, "highLevelLine", "high_level_line")
   result.rrTicks = firstTicks(node, "directLocationRRTicks",
                               "direct_location_rr_ticks")
+  result.noPosition = not hasTicks(node, "directLocationRRTicks",
+                                   "direct_location_rr_ticks")
   result.sourceGeneration = firstInt(node, "sourceGeneration",
                                      "source_generation")
   result.sourceDigest = firstStr(node, "sourceDigest", "source_digest")

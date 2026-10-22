@@ -2042,12 +2042,26 @@ proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
     return
   data.ui.resolvedConfig = newConfig
 
+  # A LIVE LAYOUT WAS READ WITH `saveLayout()`, so `newConfig` is RESOLVED, and
+  # `loadLayout` takes an unresolved config: handed straight over, GoldenLayout
+  # throws `value.trimStart is not a function` on the first size it parses and
+  # the panes are never built. `restoreSavedLayout` converts first (its header
+  # has the whole story). This path runs whenever the trace finishes loading
+  # after the layout is up, which a slow replay start makes the usual order.
   if layoutLive:
-    try:
-      data.swapLayout(newConfig)
-    except CatchableError:
-      cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
-        getCurrentExceptionMsg()
+    data.restoreSavedLayout(newConfig, "the layout with the Visual Replay tabs")
+
+proc applyVisualReplayTabsNow() =
+  applyVisualReplayTabsToResolvedConfig(data)
+
+# THE LIVE-LAYOUT ORDER, ON DEMAND: `layout/visual_replay_tabs_on_a_live_layout`
+# re-places the Visual Replay tabs after the panes are up, which is the order a
+# slow replay start produces and the one a fast one never reaches.
+{.emit: """
+window.__ctApplyVisualReplayTabs = function() {
+  `applyVisualReplayTabsNow`();
+};
+""".}
 
 proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
   initLayout(config)

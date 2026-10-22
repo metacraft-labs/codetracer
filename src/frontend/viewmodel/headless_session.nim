@@ -1087,6 +1087,9 @@ type
     stdout*: bool
     eventIndex*: int
     maxRRTicks*: uint64
+    noPosition*: bool
+      ## The producer reported no position (`EventLogRow.noPosition`): the
+      ## entry is shown but is not a place to jump to.
 
 func toEventLogEntry*(row: EventLogRow): EventLogEntry =
   ## One store row in this module's legacy compatibility shape.
@@ -1105,7 +1108,8 @@ func toEventLogEntry*(row: EventLogRow): EventLogEntry =
     kind: row.kindId,
     stdout: row.stdout,
     eventIndex: row.eventIndex,
-    maxRRTicks: row.maxRRTicks)
+    maxRRTicks: row.maxRRTicks,
+    noPosition: row.noPosition)
 
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
@@ -1209,6 +1213,11 @@ proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
   ## keys must match what the Rust deserializer expects.
   ## EventLogKind is repr(u8) with Serialize_repr/Deserialize_repr:
   ##   0 = Write, 1 = WriteFile, 2 = WriteOther, 3 = Read, etc.
+  ##
+  ## An entry with no reported position is not a place to go, so nothing is
+  ## sent for it.
+  if event.noPosition:
+    return
   let args = %*{
     "kind": 0,
     "content": event.content,

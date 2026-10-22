@@ -107,8 +107,8 @@
 # which is the artefact GitHub executes.
 #
 # Run: bash ci/test/sibling-provisioning-test.sh
-# Lane: a step of the `ci-verdict` job (stock ubuntu-latest, bash only -- no
-#       Nix, no dev shell), alongside the verdict gate's own self-test.
+# Lane: a step of the `ci-contract-suites` job in codetracer.yml (stock
+#       ubuntu-latest: bash, coreutils, git and jq -- no Nix, no dev shell).
 # =============================================================================
 set -uo pipefail
 
@@ -469,12 +469,19 @@ readonly REPRO_LOCK="$REPO_ROOT/repro.lock"
 # which `clone-siblings` resolves by bare name from this lock. Several of the
 # latter are private, and none is something a Nim build compiles, so the
 # provisioning action clones only the build-input subset below.
-readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,codetracer-beam-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-trace-format,codetracer-trace-format-nim,codetracer-visual-replay,codetracer-vscode-extension'
+#
+# Re-taken from repro.lock on 2026-10-22 at codetracer `2b2ba87ae`. The lock had
+# grown from 17 members to 50 (its relocks since the last update added the
+# IsoNim renderer, TermAssert, observability and native-runtime siblings), and
+# its build-input subset from 6 to 13: `codetracer-trace-format-nim` and the
+# IsoNim libraries the lock now solves as packages. All 13 are public, which
+# the credential-less clone requires and an assertion below checks.
+readonly LOCK_DECLARED_DEPS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,isonim-render-serve,nim-termctl,nim-pty,isonim-gpui,isonim-freya,isonim-cocoa,reprobuild-packages,TermAssert,TermAssertClient,codetracer-beam-recorder,codetracer-ci,codetracer-evm-recorder,codetracer-js-recorder,codetracer-launcher,codetracer-native-backend,codetracer-native-recorder,codetracer-native-test-programs,codetracer-observability-cli,codetracer-observability-e2e,codetracer-observability-grafana,codetracer-observability-jaeger,codetracer-python-recorder,codetracer-ruby-recorder,codetracer-test-mirror,codetracer-trace-format,codetracer-visual-replay,codetracer-vscode-extension,codetracer-wasm-instrumenter,codetracer-wasm-recorder,io-mon,isonim-examples,metacraft-github-actions,ngx-isonim,nim-faststreams,nim-libvterm,nim-shm-gset,nim-shm-queue,nim-stackable-hooks,nim-stew,reprobuild,runquota,tree-sitter-aiken,tree-sitter-nim'
 # The build-input subset of that set (members that are also solved packages,
 # i.e. what `repro.nim` `uses` from source), as
 # `ci/repro-lock-build-input-siblings.sh` derives it from the lock. This is
 # what `provision-repro-lock-siblings` clones.
-readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp'
+readonly LOCK_BUILD_INPUT_SIBLINGS='isonim,isonim-tui,codetracer-trace-format-nim,nim-everywhere,nim-agent-harbor,nim-agents,nim-acp,isonim-render-serve,nim-termctl,nim-pty,isonim-gpui,isonim-freya,isonim-cocoa'
 readonly BUILD_INPUT_SELECTOR="$REPO_ROOT/ci/repro-lock-build-input-siblings.sh"
 
 # Anti-vacuity first: the action must exist and must still invoke the command
@@ -592,6 +599,53 @@ else
 		"expected: $actual_build_inputs" "actual: $path_free_inputs"
 fi
 
+# The selector runs in a raw `shell: bash` step BEFORE the dev shell, and on
+# the nix-darwin runners that PATH has no `grep` and no `sed`: written with
+# them, the selector died there with `grep: command not found` (codetracer-pm
+# issues/2026-10-22-provision-repro-lock-siblings-runs-grep-and-sed-outside-
+# the-dev-shell-on-darwin.md). So it is run again with a PATH holding nothing
+# but bash -- once with the lock named, once relying on its default lock path
+# -- and must give the same answer. A run on a host that does have grep and
+# sed cannot see this; the stripped PATH is what makes the check portable.
+minimal_path_dir="$(mktemp -d)"
+ln -s "$(command -v bash)" "$minimal_path_dir/bash"
+minimal_path_named="$(env -i PATH="$minimal_path_dir" "$minimal_path_dir/bash" \
+	"$BUILD_INPUT_SELECTOR" "$REPRO_LOCK" 2>&1)" || true
+minimal_path_default="$(env -i PATH="$minimal_path_dir" "$minimal_path_dir/bash" \
+	"$BUILD_INPUT_SELECTOR" 2>&1)" || true
+rm -rf "$minimal_path_dir"
+if [ "$minimal_path_named" = "$actual_build_inputs" ] &&
+	[ "$minimal_path_default" = "$actual_build_inputs" ]; then
+	ok "the build-input selector needs nothing but bash (the pre-dev-shell PATH on nix-darwin)"
+else
+	fail "the build-input selector needs nothing but bash (the pre-dev-shell PATH on nix-darwin)" \
+		"provision-repro-lock-siblings runs it before 'nix develop', where a" \
+		"nix-darwin runner has no grep or sed" \
+		"expected:              $actual_build_inputs" \
+		"actual (lock named):   $minimal_path_named" \
+		"actual (default lock): $minimal_path_default"
+fi
+
+# Every build input is cloned by a step that is deliberately given NO
+# credential (see the comment on that step in the action), so each one must be
+# a public repository. The lock records that: a private build input would fail
+# its anonymous clone, and the fix is a token added on purpose, not a widened
+# credential discovered from a red job.
+private_build_inputs=()
+IFS=',' read -r -a _build_inputs <<<"$actual_build_inputs"
+for dep in "${_build_inputs[@]}"; do
+	visibility="$(grep -o "{ name = \"$dep\", coord_kind = [^}]*visibility = \"[^\"]*\"" "$REPRO_LOCK" |
+		sed 's/.*visibility = "//; s/"$//' | head -n 1)"
+	[ "$visibility" = public ] || private_build_inputs+=("$dep -> visibility '${visibility:-<no deps record>}'")
+done
+if [ "${#_build_inputs[@]}" -gt 0 ] && [ "${#private_build_inputs[@]}" -eq 0 ]; then
+	ok "every build-input sibling is public, so the credential-less clone can fetch it (${#_build_inputs[@]} checked)"
+else
+	fail "every build-input sibling is public, so the credential-less clone can fetch it" \
+		"provision-repro-lock-siblings clones these with no token" \
+		"${private_build_inputs[@]:-no build-input sibling was selected}"
+fi
+
 # ... and each of them at an IMMUTABLE revision. A branch name here would be
 # the same defect the ceiling above exists to prevent, arriving through the
 # other lock.
@@ -659,16 +713,30 @@ fi
 # ---------------------------------------------------------------------------
 readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim'
 
+# jq, not python3: jq is on every runner this suite is meant to run on -- the
+# stock ubuntu-latest of `ci-contract-suites` and the self-hosted NixOS and
+# nix-darwin runners alike -- while python3 is absent from the persistent NixOS
+# runners and from a bare NixOS host. Where python3 was missing this printed
+# nothing, and the vacuity arm below then reported "found 0 entries", which
+# reads as a workflow defect and is a missing interpreter.
+#
+# An input declared with `follows` is locked as a PATH of input names walked
+# from the root (`["reprobuild", "runquota-src"]`), not as a node key, so it is
+# walked one input at a time as Nix resolves it -- reading its first element as
+# the node would answer with another repository's rev. Same rule as
+# `flake_lock_revs` in ci/test/launcher-recorder-e2e-workflow-test.sh.
+# https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-flake.html#lock-files
 flake_rev() { # $1 = root input name -> its locked.rev, or '' when absent
-	python3 -c '
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    key = d["nodes"][d["root"]]["inputs"][sys.argv[2]]
-    print(d["nodes"][key if isinstance(key, str) else key[0]]["locked"]["rev"])
-except Exception:
-    pass
-' "$REPO_ROOT/flake.lock" "$1" 2>/dev/null
+	jq -r --arg name "$1" '
+		. as $lock
+		| def node_of($ref):
+			if ($ref | type) == "string" then $ref
+			else reduce $ref[] as $input ($lock.root;
+				node_of($lock.nodes[.].inputs[$input]))
+			end;
+		($lock.nodes[$lock.root].inputs[$name] // empty) as $ref
+		| $lock.nodes[node_of($ref)].locked.rev // empty
+	' "$REPO_ROOT/flake.lock" 2>/dev/null
 }
 
 flake_pin_mismatches=()
@@ -1481,6 +1549,7 @@ mint_steps=0
 mint_refs=""
 mint_bad_app_id=()
 mint_bad_scope=()
+write_mint_steps=0
 mint_duplicate=()
 legacy_pat_refs=()
 unresolved_consumers=()
@@ -1514,8 +1583,21 @@ flush_mint_step() {
 	if [ "$mint_owner" -eq 0 ]; then
 		mint_bad_scope+=("$wf_name:$mint_line: job '$scope' mints without 'owner: metacraft-labs'")
 	fi
-	if [ "$mint_repositories" -eq 1 ]; then
-		mint_bad_scope+=("$wf_name:$mint_line: job '$scope' narrows the installation with 'repositories:'")
+	# The org-wide shape is for READ tokens, the ones that clone siblings: the
+	# installation is org-scoped, so leaving `repositories:` out is what lets a
+	# new sibling need no workflow edit. A token that asks for a WRITE
+	# permission is the opposite case. Left org-wide it could write to every
+	# repository the App is installed on, so it must name the repositories it
+	# writes to -- release.yml's dispatch to metacraft-desktop-packages, with
+	# `permission-contents: write`, is the shape. Each kind is held to its own
+	# rule; neither is waved through.
+	if [ "$mint_write" -eq 1 ]; then
+		write_mint_steps=$((write_mint_steps + 1))
+		if [ "$mint_repositories" -eq 0 ]; then
+			mint_bad_scope+=("$wf_name:$mint_line: job '$scope' mints a WRITE token ($mint_write_permission) for the whole installation; name its target with 'repositories:'")
+		fi
+	elif [ "$mint_repositories" -eq 1 ]; then
+		mint_bad_scope+=("$wf_name:$mint_line: job '$scope' narrows a read token with 'repositories:'")
 	fi
 
 	local key="$wf_name|$scope"
@@ -1561,6 +1643,8 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 	mint_app_id_forbidden=0
 	mint_owner=0
 	mint_repositories=0
+	mint_write=0
+	mint_write_permission=""
 	cur_step_id=""
 	in_checkout=0
 	checkout_line=0
@@ -1646,6 +1730,8 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			mint_app_id_forbidden=0
 			mint_owner=0
 			mint_repositories=0
+			mint_write=0
+			mint_write_permission=""
 			;;
 		esac
 
@@ -1658,6 +1744,12 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 				;;
 			'owner: metacraft-labs') mint_owner=1 ;;
 			'repositories:'*) mint_repositories=1 ;;
+			# `permission-<name>: write` (actions/create-github-app-token@v2's
+			# per-permission inputs). Any one of them makes it a write token.
+			'permission-'*': write'*)
+				mint_write=1
+				mint_write_permission="${stripped%%:*}: write"
+				;;
 			esac
 			# The mint step id may still be arriving (`uses:` first, `id:`
 			# second); keep it current until the step is flushed.
@@ -1781,12 +1873,14 @@ else
 fi
 
 if [ "${#mint_bad_scope[@]}" -eq 0 ]; then
-	ok "every mint step is org-scoped by construction (owner set, no repositories:)"
+	ok "every mint step is scoped by construction: read tokens org-wide, the $write_mint_steps write token(s) narrowed to their target"
 else
-	fail "every mint step is org-scoped by construction (owner set, no repositories:)" \
+	fail "every mint step is scoped by construction: read tokens org-wide, write tokens narrowed to their target" \
 		"the App installation is org-scoped, so 'owner: metacraft-labs' with no" \
-		"'repositories:' is what makes the credential need no rotation as siblings are" \
-		"added; narrowing it turns every new sibling into a workflow edit" \
+		"'repositories:' is what makes a READ credential need no rotation as siblings" \
+		"are added; narrowing one turns every new sibling into a workflow edit. A" \
+		"WRITE credential is the reverse: org-wide it can write everywhere the App" \
+		"is installed, so it must name the repositories it writes to" \
 		"${mint_bad_scope[@]}"
 fi
 
@@ -1814,6 +1908,302 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5. A step that runs BEFORE the dev shell uses only the tools its runner has.
+#
+# Provisioning happens before `nix develop`, so it runs on the runner's own
+# PATH, and that PATH is not a stock Linux userland:
+#
+#   * nix-darwin runners (`aarch64-darwin`): the nix profile built from infra's
+#     runner `extraPackages` (coreutils-full, git, curl, jq, gh, gnupg, openssh,
+#     direnv). No grep, no sed, no awk, no python3. `provision-repro-lock-
+#     siblings` died there with `grep: command not found` (codetracer-pm
+#     issues/2026-10-22-provision-repro-lock-siblings-runs-grep-and-sed-
+#     outside-the-dev-shell-on-darwin.md).
+#   * self-hosted NixOS runners (`[self-hosted, linux, …]`): the same profile
+#     plus systemd's default service PATH, which does bring the GNU userland
+#     but NO python3 and NO perl. The GPUI window-captures lane read the
+#     isonim-gpui pin with python3 there and has never got past that step
+#     (issues/2026-10-22-gpui-window-captures-lane-reads-the-isonim-gpui-pin-
+#     with-python3-the-runner-lacks.md).
+#
+# jq is on both, and is what such a step reads JSON with.
+#
+# WHAT COUNTS AS "BEFORE THE DEV SHELL". A `run:` step whose `shell:` is not a
+# `nix develop` wrapper, read line by line until the first line that enters an
+# environment (`nix develop`, `nix shell`, `nix run`, `nix-shell`,
+# `repro exec`); from there on a line may be running inside it, and is not
+# judged. So a banned tool AFTER an environment is entered in the same step is
+# not caught -- a known blind spot, kept because the alternative is parsing
+# shell quoting. A local composite action is judged by the runners of the jobs
+# that use it. Windows steps and GitHub-hosted runners are not judged here: the
+# hosted images carry all of these tools, and the Windows images have their
+# own contract in ci/test/windows-runner-bootstrap-test.sh.
+# ---------------------------------------------------------------------------
+echo
+echo "steps that run before the dev shell use only their runner's tools"
+
+readonly DARWIN_MISSING_TOOLS="grep sed awk python3 perl"
+readonly NIXOS_MISSING_TOOLS="python3 perl"
+
+# runs-on value(s) -> darwin | nixos | '' (not judged here)
+runner_class_of() {
+	local value="${1//[\[\],]/ }" token
+	for token in $value; do
+		case "$token" in *darwin* | macos*) echo darwin && return 0 ;; esac
+	done
+	for token in $value; do
+		case "$token" in windows | eph-win-* | windows-*) return 0 ;; esac
+	done
+	for token in $value; do
+		[ "$token" = self-hosted ] && echo nixos && return 0
+	done
+	return 0
+}
+
+# Does $1 (one line of shell) invoke tool $2 as a command? Command position
+# only: after start of line, a pipe, `;`, `&`, `(`, `$(` or a backtick, so a
+# word in an echo'd sentence or a path such as `ci/foo-grep.sh` is not a hit.
+invokes_tool() {
+	[[ " $1" =~ (^|[[:space:]\;\&\|\(\`]|\$\()$2([[:space:]]|$) ]]
+}
+
+raw_steps_judged=0
+raw_tool_violations=()
+declare -A ACTION_RUNNER_CLASSES=()
+declare -A JOB_RUNNER_VALUES=()
+
+# Judge one finished step: $1 = where it is (`<dir>/<file>`), $2 = runner
+# classes, $3 = its shell: value, then "lineno<TAB>text" records of its run: body.
+judge_step() {
+	local where="$1" classes="$2" shell="$3"
+	shift 3
+	[ "$#" -gt 0 ] || return 0
+	case "$shell" in *'nix develop'* | *pwsh* | *powershell* | *cmd*) return 0 ;; esac
+	local class tools rec text lineno tool entered
+	for class in $classes; do
+		case "$class" in
+		darwin) tools="$DARWIN_MISSING_TOOLS" ;;
+		nixos) tools="$NIXOS_MISSING_TOOLS" ;;
+		*) continue ;;
+		esac
+		raw_steps_judged=$((raw_steps_judged + 1))
+		entered=0
+		for rec in "$@"; do
+			lineno="${rec%%	*}"
+			text="${rec#*	}"
+			case "$text" in '#'*) continue ;; esac
+			case "$text" in
+			*'nix develop'* | *'nix shell'* | *'nix run'* | *'nix-shell'* | *'repro exec'*) entered=1 ;;
+			esac
+			[ "$entered" -eq 0 ] || break
+			for tool in $tools; do
+				if invokes_tool "$text" "$tool"; then
+					raw_tool_violations+=("$where:$lineno [$class runner] runs '$tool' before the dev shell: $text")
+				fi
+			done
+		done
+	done
+}
+
+# Walk one YAML file's steps. $2 = the runner classes to judge every step by
+# (a composite action), or '' to take them from each job's `runs-on:` and
+# matrix `runner:` values (a workflow).
+scan_raw_steps() {
+	local file="$1" forced="$2"
+	# `<dir>/<file>` names the step in a report, so a composite action is
+	# named by its directory rather than as one of many `action.yml`s.
+	local where="${file%/*}"
+	where="${where##*/}/${file##*/}"
+	local line line_no=0 job="" indent item_indent=-1 in_run=0 run_indent=0
+	local step_shell="" classes="" text next_job next_indent
+	local -a body=()
+
+	# Pass 1, workflows only: each job's runner values, and which local
+	# composite actions it uses (so an action is judged by its callers).
+	if [ -z "$forced" ]; then
+		while IFS= read -r line; do
+			if [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+				job="${BASH_REMATCH[1]}"
+			elif [[ $line =~ ^[[:space:]]+(-[[:space:]]+)?(runs-on|runner):[[:space:]]*([^#]*) ]]; then
+				JOB_RUNNER_VALUES["$file|$job"]+=" ${BASH_REMATCH[3]}"
+			fi
+		done <"$file"
+		job=""
+		while IFS= read -r line; do
+			if [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+				job="${BASH_REMATCH[1]}"
+			elif [[ $line =~ uses:[[:space:]]*\./\.github/actions/([A-Za-z0-9_-]+) ]]; then
+				ACTION_RUNNER_CLASSES["${BASH_REMATCH[1]}"]+=" $(runner_class_of "${JOB_RUNNER_VALUES["$file|$job"]:-}")"
+			fi
+		done <"$file"
+		job=""
+	fi
+
+	while IFS= read -r line || [ -n "$line" ]; do
+		line_no=$((line_no + 1))
+		indent="${line%%[![:space:]]*}"
+		# Inside a block `run: |` body: everything indented past the key.
+		if [ "$in_run" -eq 1 ]; then
+			if [ -z "${line//[[:space:]]/}" ] || [ "${#indent}" -gt "$run_indent" ]; then
+				text="${line#"$indent"}"
+				[ -n "$text" ] && body+=("$line_no	$text")
+				continue
+			fi
+			in_run=0
+		fi
+		if [ -z "$forced" ] && [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+			# Read the match first: judge_step runs regexes of its own.
+			next_job="${BASH_REMATCH[1]}"
+			judge_step "$where" "$classes" "$step_shell" "${body[@]+"${body[@]}"}"
+			body=()
+			step_shell=""
+			item_indent=-1
+			job="$next_job"
+			classes="$(runner_class_of "${JOB_RUNNER_VALUES["$file|$job"]:-}")"
+			continue
+		fi
+		[ -n "$forced" ] && classes="$forced"
+		# A list item at or left of the current step's indent starts a new step
+		# (or ends the list); either way the open step is finished.
+		if [[ $line =~ ^([[:space:]]*)-[[:space:]] ]] && { [ "$item_indent" -lt 0 ] || [ "${#BASH_REMATCH[1]}" -le "$item_indent" ]; }; then
+			next_indent="${#BASH_REMATCH[1]}"
+			judge_step "$where" "$classes" "$step_shell" "${body[@]+"${body[@]}"}"
+			body=()
+			step_shell=""
+			item_indent="$next_indent"
+		fi
+		if [[ $line =~ ^([[:space:]]*)(-[[:space:]]+)?shell:[[:space:]]*(.*)$ ]]; then
+			step_shell="${BASH_REMATCH[3]}"
+		elif [[ $line =~ ^([[:space:]]*)(-[[:space:]]+)?run:[[:space:]]*(.*)$ ]]; then
+			run_indent=$((${#BASH_REMATCH[1]} + ${#BASH_REMATCH[2]}))
+			case "${BASH_REMATCH[3]}" in
+			'|'* | '>'*) in_run=1 ;;
+			*) body+=("$line_no	${BASH_REMATCH[3]}") ;;
+			esac
+		fi
+	done <"$file"
+	judge_step "$where" "$classes" "$step_shell" "${body[@]+"${body[@]}"}"
+}
+
+for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+	[ -f "$wf" ] && scan_raw_steps "$wf" ""
+done
+for act_dir in "$ACTIONS_DIR"/*/; do
+	act_name="${act_dir%/}"
+	act_name="${act_name##*/}"
+	act_classes="${ACTION_RUNNER_CLASSES[$act_name]:-}"
+	[ -n "${act_classes// /}" ] || continue
+	for act in "$act_dir"action.yml "$act_dir"action.yaml; do
+		[ -f "$act" ] && scan_raw_steps "$act" "$(tr ' ' '\n' <<<"$act_classes" | sort -u | tr '\n' ' ')"
+	done
+done
+unset wf act act_dir act_name act_classes
+
+# Anti-vacuity: a scanner that stopped recognising steps (or runners) would
+# report "no violations" over nothing. Dozens of raw steps run on these two
+# runner classes today.
+if [ "$raw_steps_judged" -ge 20 ] && [ "${#raw_tool_violations[@]}" -eq 0 ]; then
+	ok "no step uses a tool its runner lacks before the dev shell ($raw_steps_judged raw steps judged)"
+else
+	fail "no step uses a tool its runner lacks before the dev shell" \
+		"judged $raw_steps_judged raw steps (a floor of 20 keeps the scan honest)." \
+		"Read the value with a tool the runner declares (jq for JSON, bash" \
+		"builtins for text), or move the step into 'nix develop .#ci'." \
+		"${raw_tool_violations[@]+"${raw_tool_violations[@]}"}"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. The lane that runs this suite runs every suite, whatever fails first.
+#
+# `ci-contract-suites` (codetracer.yml) is a list of steps, one per contract
+# suite, and GitHub skips every later step once one fails. From 2026-09-20 the
+# Windows-runner suite, its first, failed on every run, and THIS suite, its
+# third, went unread behind it while its expectations drifted from repro.lock
+# (codetracer-pm issues/2026-10-22-ci-contract-suites-recognise-windows-jobs-
+# by-a-retired-runner-label.md). Each step after the checkout therefore carries
+# exactly RUN_ALL_IF, and the checkout carries `id: checkout` so the condition
+# names a step that exists. A step added without it would quietly restore the
+# old behaviour for every suite after it, so it is checked rather than hoped
+# for.
+# ---------------------------------------------------------------------------
+echo
+echo "the ci-contract-suites lane runs every suite"
+
+readonly CONTRACT_LANE_WORKFLOW="$WORKFLOW_DIR/codetracer.yml"
+readonly CONTRACT_LANE_JOB="ci-contract-suites"
+# The expression is GitHub Actions' own syntax, quoted verbatim.
+# shellcheck disable=SC2016
+readonly RUN_ALL_IF='if: ${{ !cancelled() && steps.checkout.outcome == '"'success'"' }}'
+# The lane runs seventeen suites today; a floor keeps a scanner that stopped
+# finding steps from reporting "no violations" over none.
+readonly MIN_CONTRACT_LANE_STEPS=10
+
+lane_steps=0
+lane_defects=()
+lane_checkout_id=""
+in_lane=0
+lane_closed=0
+step_name=""
+step_has_if=0
+step_is_checkout=0
+
+flush_lane_step() {
+	[ -n "$step_name" ] || return 0
+	lane_steps=$((lane_steps + 1))
+	if [ "$lane_steps" -eq 1 ]; then
+		[ "$step_is_checkout" -eq 1 ] ||
+			lane_defects+=("its first step '$step_name' is not the actions/checkout step the condition depends on")
+	elif [ "$step_has_if" -eq 0 ]; then
+		lane_defects+=("step '$step_name' does not carry '$RUN_ALL_IF'")
+	fi
+}
+
+while IFS= read -r line || [ -n "$line" ]; do
+	if [[ $line =~ ^\ \ ([A-Za-z0-9_-]+):[[:space:]]*(#.*)?$ ]]; then
+		if [ "$in_lane" -eq 1 ]; then
+			flush_lane_step
+			lane_closed=1
+			break
+		fi
+		[ "${BASH_REMATCH[1]}" = "$CONTRACT_LANE_JOB" ] && in_lane=1
+		continue
+	fi
+	[ "$in_lane" -eq 1 ] || continue
+	if [[ $line =~ ^\ \ \ \ \ \ -\ (.*)$ ]]; then
+		flush_lane_step
+		step_name="${BASH_REMATCH[1]#name: }"
+		step_has_if=0
+		step_is_checkout=0
+		continue
+	fi
+	[ -n "$step_name" ] || continue
+	case "$line" in
+	"        $RUN_ALL_IF") step_has_if=1 ;;
+	'        uses: actions/checkout@'*) step_is_checkout=1 ;;
+	'        id: '*)
+		[ "$lane_steps" -eq 0 ] && lane_checkout_id="${line#        id: }"
+		;;
+	esac
+done <"$CONTRACT_LANE_WORKFLOW"
+# The lane as the last job of the file: its last step ends at end of file.
+if [ "$in_lane" -eq 1 ] && [ "$lane_closed" -eq 0 ]; then
+	flush_lane_step
+fi
+
+[ "$lane_checkout_id" = checkout ] ||
+	lane_defects+=("its checkout step's id is '${lane_checkout_id:-<none>}', not 'checkout', so steps.checkout.outcome names nothing")
+
+if [ "$lane_steps" -ge "$MIN_CONTRACT_LANE_STEPS" ] && [ "${#lane_defects[@]}" -eq 0 ]; then
+	ok "every step after the checkout in $CONTRACT_LANE_JOB runs even when an earlier suite failed ($((lane_steps - 1)) suites)"
+else
+	fail "every step after the checkout in $CONTRACT_LANE_JOB runs even when an earlier suite failed" \
+		"found $lane_steps step(s) (a floor of $MIN_CONTRACT_LANE_STEPS keeps the scan honest)." \
+		"Without the condition GitHub skips every suite after the first red one," \
+		"and their verdicts go unread." \
+		"${lane_defects[@]+"${lane_defects[@]}"}"
+fi
+
+# ---------------------------------------------------------------------------
 # Self-accounting: a contract that is deleted or short-circuited must not leave
 # this script reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
@@ -1836,7 +2226,11 @@ echo
 # flake.lock locked.rev"), added with the trace-format conversion. It reports
 # exactly once, either as the agreement or as the vacuity refusal, so this
 # number grows by one and not by two.
-readonly EXPECTED_ASSERTIONS=32
+# 32 -> 34 (2026-10-22): every build input is public, and section 6 (the
+# ci-contract-suites lane runs every suite).
+# 34 -> 35: the build-input selector runs on a bash-only PATH.
+# 35 -> 36: section 5, raw steps use only their runner's tools.
+readonly EXPECTED_ASSERTIONS=36
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
