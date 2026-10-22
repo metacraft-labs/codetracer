@@ -1155,22 +1155,23 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
   # regardless — a fact this repository has measured twice (see
   # `tui_session.serveSourceWindow`). So the effect's window sits queued until
   # something polls, and a poll AFTER this request would overwrite the window
-  # this caller just asked for with the one the effect asked for at
-  # construction — the first 20, since the effect sends no `start`/`count`.
+  # this caller just asked for with the one the effect asked for — its own
+  # viewport's window (`listWindow`), once a host has measured the pane with
+  # `setViewport`. An unmeasured pane's effect asks for nothing.
   #
   # STATED AS A MECHANISM RATHER THAN AS A MEASUREMENT, because it was
   # PREVENTED rather than observed: this flush was written before the first run
   # on a fixture large enough to show it. The recording that would have shown
-  # it is `noir_space_ship`, which has 70 events against the effect's 20, and
+  # it is `noir_space_ship`, which has 70 events against the 20 the effect's
+  # request answered when this flush was written, and
   # `tui/tests/test_event_log_jump.nim` asserts all 70 reach the ViewModel —
   # so the case that would catch a regression here exists and is green.
   #
   # Flushing before the request puts the effect's write where it belongs — in
   # the past — so the last writer is the caller. Bounded rather than looped to
-  # quiescence: `poll(0)` advances one round, the effect fires at most twice per
-  # session (once at construction, once when a position first exists), and an
-  # unbounded drain in a harness is a hang waiting for a producer that never
-  # stops.
+  # quiescence: `poll(0)` advances one round, the effect fires only when the
+  # viewport, the sort or the search changes, and an unbounded drain in a
+  # harness is a hang waiting for a producer that never stops.
   for _ in 0 ..< 4:
     drain()
   var args = %*{

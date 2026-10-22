@@ -130,7 +130,8 @@ type
     total*: int
 
   MarkerFilterBar* = object
-    ## §5.4 filter-bar state derived from `searchQuery`.
+    ## §5.4 filter-bar state, parsed from the filter input
+    ## (`setFilterInput`); `freeText` is what goes to `searchQuery`.
     ## `boundaryFilter` and `unmatchedOnly` correspond to the two
     ## shorthands; `freeText` is the residual after shorthand
     ## extraction.
@@ -305,7 +306,7 @@ type
     ##   sortAscending    — whether sort is ascending
     ##
     ## Derived memos:
-    ##   totalPages       — total pages based on event count and page size
+    ##   totalPages       — total pages of the log, or of the search's matches
     ##   visibleRows      — the held rows the viewport shows
     ##   isLoading        — whether a request is in flight
     ##
@@ -808,9 +809,23 @@ proc parseFilterBar*(raw: string): MarkerFilterBar =
 
 proc setFilterInput*(vm: EventLogVM; raw: string) =
   ## Update the filter input. Recognises the §5.4 shorthands.
-  vm.filterBar.val = parseFilterBar(raw)
-  vm.searchQuery.val = raw
-  vm.currentPage.val = 0
+  ##
+  ## The free text left after the shorthands is the log's search
+  ## (`ct/event-load`'s `search`). The shorthands are not: `boundary:<id>`
+  ## and `unmatched` select marker rows by their boundary and their
+  ## counterpart set (Correlation-Markers §5.4), which `visibleMarkerRows`
+  ## reads from the marker cache. Sent as text, the engine would match them
+  ## against event content and path, find nothing, and empty the pane.
+  ##
+  ## As `setSearchQuery` does, the pane shows the search's results from the
+  ## top: the engine cuts the window from the matching events, and the old
+  ## scroll offset may lie past their end. The scroll goes through the
+  ## viewport, not `currentPage`, which is derived from it and moves no window.
+  let bar = parseFilterBar(raw)
+  batch(proc() =
+    vm.filterBar.val = bar
+    vm.searchQuery.val = bar.freeText
+    vm.setViewport(vm.viewport.val.scrolledTo(0)))
 
 proc rowMatchesFilter*(row: MarkerEventRow; filter: MarkerFilterBar; isUnmatched: bool): bool =
   ## Predicate used by the `visibleMarkerRows` memo. Encapsulated as
@@ -1030,9 +1045,15 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let toastState = createSignal(MarkerToastState(kind: mtHidden, discoveredCount: 0, workspaceId: ""))
     let dismissedWorkspaces = createSignal(newSeq[string]())
 
-    # Derived: total pages from event count and page size.
+    # Derived: total pages from the event count and page size. Under a search
+    # the pages are cut from the MATCHING events (`ct/event-load`'s `total` is
+    # then the number of matches, which the store keeps in `recordsFiltered`),
+    # so counting the whole log would offer pages past the last match, each of
+    # them empty. The search is this ViewModel's only filter.
     let totalPages = createMemo[int] proc(): int =
-      let total = totalEventCount.val
+      let total =
+        if searchQuery.val.len > 0: store.eventLog.recordsFiltered.val
+        else: totalEventCount.val
       let ps = pageSize.val
       if ps <= 0:
         return 0
@@ -1153,7 +1174,8 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     # Keying on the window, the search and the sort alone means a move
     # issues no request, so there is no race to lose.
     # Nothing is given up by dropping ``rrTicks``: the backend's ``event_load``
-    # reads only ``start``/``count`` and never looked at it. Growth in a live
+    # cuts its window from ``start``/``count``, the sort and the search, and a
+    # position (``atRRTicks``) only locates "now" in that list. Growth in a live
     # session is not this effect's job either — ``event_log.nim``'s
     # CtCompleteMove subscriber emits ``CtEventLoad`` for a first load or a
     # source revision, which is where a genuinely growing event set is picked
