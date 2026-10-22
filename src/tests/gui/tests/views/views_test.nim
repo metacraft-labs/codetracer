@@ -200,13 +200,15 @@ suite "DebugControlsViewState":
 
       dispose()
 
-  test "toolbar step dispatch prefers legacy DAP bridge":
+  test "toolbar step dispatch uses the host's step command":
+    # The host's route is handed in at construction (`DebugCommands`), as the
+    # desktop hands in its DAP step route; the click reaches it alone.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
-      let vm = createDebugControlsVM(store)
       var bridgedAction = ""
-      vm.onDapStep = proc(action: cstring) =
-        bridgedAction = $action
+      var commands = defaultDebugCommands(store)
+      commands.step = proc(actionId: string) = bridgedAction = actionId
+      let vm = createDebugControlsVM(store, commands)
 
       vm.invokeToolbarStep("next")
       drain()
@@ -216,7 +218,7 @@ suite "DebugControlsViewState":
 
       dispose()
 
-  test "toolbar step dispatch falls back to backend with threadId":
+  test "toolbar step dispatch through the default commands reaches the backend with threadId":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let store = createReplayDataStore(mock.toBackendService())

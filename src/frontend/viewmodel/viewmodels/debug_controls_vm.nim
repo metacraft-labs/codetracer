@@ -185,30 +185,32 @@ type
 
     # -- Keyboard-chord lookup, for the toolbar tooltips --
     #
-    # A THIRD BRIDGE CALLBACK, and for the reason the two above exist. The
-    # chords live in `data.config.shortcutMap`, whose `Config` is
-    # `frontend/types.nim`'s JS-flavoured ref object; `store/types.nim:3-8`
-    # states the layering rule this VM keeps — "intentionally independent of
-    # the legacy frontend types to avoid circular imports and keep the
-    # ViewModel layer self-contained" — and importing it here would also break
-    # the `vm-native` lane outright, since `frontend/types.nim` pulls in
-    # kdom. So the host injects a plain `proc(string): string`, exactly as it
-    # injects `onDapStep` / `onAction`.
+    # A HOST-INJECTED CALLBACK. The chords live in `data.config.shortcutMap`,
+    # whose `Config` is `frontend/types.nim`'s JS-flavoured ref object;
+    # `store/types.nim:3-8` states the layering rule this VM keeps —
+    # "intentionally independent of the legacy frontend types to avoid
+    # circular imports and keep the ViewModel layer self-contained" — and
+    # importing it here would also break the `vm-native` lane outright, since
+    # `frontend/types.nim` pulls in kdom. So the host injects a plain
+    # `proc(string): string`. Unlike `commands`, it is assigned after
+    # construction: the bindings change whenever a new `Config` is installed,
+    # which `shortcutsRevision` announces.
     shortcutFor*: proc(actionId: string): string
       ## Returns the keyboard chord currently bound to a toolbar action id
       ## ("next", "run-to-entry", …), rendered the way `menu.nim`'s
       ## `loadShortcut` renders it, or "" when nothing is bound.
       ##
-      ## Nil until `ui/debug.nim` wires it. Nil and "" are the same answer —
-      ## a tooltip with no chord in it — so no caller needs to distinguish.
+      ## Nil until the host wires it (the desktop's
+      ## `ui/debug_toolbar.wireDebugToolbarShortcuts`). Nil and "" are the
+      ## same answer — a tooltip with no chord in it — so no caller needs to
+      ## distinguish.
     shortcutsRevision*: Signal[int]
       ## Bumped by the host whenever `shortcutFor` starts answering
       ## differently — i.e. when a new `Config` is installed.
       ##
-      ## THE ONE MUTABLE SIGNAL THIS VM OWNS, against the "holds no mutable
-      ## signals of its own" note at the top of this file, and it earns the
-      ## exception: `shortcutFor` is an opaque closure over `data.config`, so
-      ## the reactive graph cannot see through it to the config it reads.
+      ## It exists because `shortcutFor` is an opaque closure over
+      ## `data.config`, so the reactive graph cannot see through it to the
+      ## config it reads.
       ## Without a signal to depend on, `toolbarTooltip`'s render effect would
       ## run once at mount and then never again, and a rebind would leave the
       ## painted tooltip showing the OLD chord — the same stale-label defect
@@ -361,9 +363,12 @@ proc liveToolbarActionAllowed(actionId: string): bool =
 proc invokeToolbarStep*(vm: DebugControlsVM; actionId: string) =
   ## Dispatch a production toolbar step action.
   ##
-  ## The legacy DAP bridge is still the preferred route because it also emits
-  ## operation-status events.  If the bridge is not installed yet, fall back to
-  ## the shared ReplayDataStore backend so the button still reaches DAP.
+  ## A live MCR session's steps go to the live recorder. Otherwise the step
+  ## takes the host's route, `commands.step` (the desktop's goes through DAP
+  ## and emits operation-status events; `defaultDebugCommands`' goes through
+  ## the store's `requestStep`), and the action is remembered for the history
+  ## entry its move creates. A host whose commands have no `step` gets the
+  ## VM's own action procs, which also go through the store.
   if vm.store.session.val.debugSessionMode == liveMcr:
     if actionId.liveToolbarActionAllowed and
         (if actionId == "continue": vm.canContinue.val else: vm.canStepForward.val):

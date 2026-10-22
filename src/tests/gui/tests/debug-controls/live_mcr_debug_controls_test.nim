@@ -6,14 +6,27 @@ import vm_test_helpers
 import isonim/core/[computation, owner, signals]
 import backend/mock_backend
 import app/app_vm
+import session_vm
 import store/types
 import store/replay_data_store
 import viewmodels/debug_controls_vm
 
-proc makeAppWithMock(autoRespond: bool = true):
+proc makeAppWithMock(autoRespond: bool = true;
+                     hostStep: proc(actionId: string) = nil):
     tuple[app: AppViewModel, mock: MockBackendService] =
+  ## `hostStep`, when given, is the host's own step route. It replaces the
+  ## `step` of `defaultDebugCommands` in the session's `debugCommands` before
+  ## the panel ViewModels are built — the order the desktop uses to install
+  ## its DAP step route (`ui_js.nim`: set `debugCommands`, then
+  ## `initializePanelViewModels`).
   let mock = newMockBackendService(autoRespond = autoRespond)
-  let app = createAppViewModel(mock.toBackendService())
+  let app = createAppViewModel(mock.toBackendService(),
+                               initializePanels = false)
+  if not hostStep.isNil:
+    var commands = defaultDebugCommands(app.session.store)
+    commands.step = hostStep
+    app.session.debugCommands = commands
+  app.session.initializePanelViewModels()
   drain()
   mock.clearReceivedCommands()
   (app, mock)
@@ -72,11 +85,12 @@ suite "M3 Live MCR debug controls":
 
   test "live MCR mode uses live backend routing for toolbar actions":
     createRoot proc(teardown: proc()) =
-      let (app, mock) = makeAppWithMock()
-      let vm = app.session.debugControlsVM
+      # The host's step route is installed, and live MCR must still bypass
+      # it: a live session's steps go to the live recorder, not the replay.
       var bridgeAction = ""
-      vm.onDapStep = proc(action: cstring) =
-        bridgeAction = $action
+      let (app, mock) = makeAppWithMock(
+        hostStep = proc(actionId: string) = bridgeAction = actionId)
+      let vm = app.session.debugControlsVM
       app.configureSession(liveMcr)
       mock.clearReceivedCommands()
 
@@ -101,17 +115,17 @@ suite "M3 Live MCR debug controls":
       drain()
       check mock.commandsNamed(LiveMcrStepCommand).len == 0
       check mock.commandsNamed("reverseContinue").len == 0
+      check bridgeAction == ""
       app.dispose()
       teardown()
 
   test "restore to history then jump to live keeps mode and head indicator consistent":
     createRoot proc(teardown: proc()) =
-      let (app, mock) = makeAppWithMock()
+      var bridgedAction = ""
+      let (app, mock) = makeAppWithMock(
+        hostStep = proc(actionId: string) = bridgedAction = actionId)
       let store = app.session.store
       let vm = app.session.debugControlsVM
-      var bridgedAction = ""
-      vm.onDapStep = proc(action: cstring) =
-        bridgedAction = $action
       app.configureSession(liveMcr, rrTicks = 400'u64, head = 400'u64)
       mock.clearReceivedCommands()
 
