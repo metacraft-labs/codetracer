@@ -5267,6 +5267,18 @@ m71-gpui-window-record:
 gpui-window-captures *which:
   bash ci/test/gpui-window-captures.sh {{which}}
 
+# PLAT-35's GPUI arm on Linux, as a REAL window: one `codetracer-gpui-window`
+# per scenario in `src/tests/visual/scenarios.json`, on GuiAssert's headless
+# sway, at the scenario's declared viewport, written to
+# `build/plat35/gpui-window/<view>.{ppm,png}` for the Electron/GPUI parity
+# pairs. A scenario with no settled frame at its declared size fails by name.
+# Needs a built `replay-server` and the `calc` recording, and links the
+# grammar archive `tui-prereqs` provides (a dependency below); the
+# `gpui-window-captures` CI job runs this after its own captures, which build
+# the same windowed shim and record `calc`. `view` names one scenario.
+plat35-capture-gpui-window *view: tui-prereqs
+  bash ci/test/plat35-gpui-window-capture.sh {{view}}
+
 # PLAT-69: the GPUI window as a normal desktop window — its top bar is the
 # title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`
 # for GuiAssert's headless GNOME): the window moved, resized, maximized and

@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 45
+# RECORDED-DARK-CEILING: 47
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -724,3 +724,38 @@ ci/test/plat35-gpui-capture.sh
 # Issue: 2026-10-05-identity-live-device-grant-has-no-issuer-in-ci.
 ci/test/identity-live-device-grant.sh
 ci/test/identity-device-approve.mjs
+
+# =============================================================================
+# PLAT-37 ON macOS — BLOCKED ON A HOST NO CI LANE HAS, 2026-10-22, CEILING 45 -> 47
+# =============================================================================
+# THE MISSING CAPABILITY: **a live macOS GUI session whose window server
+# grants `kTCCServiceScreenCapture` to `com.metacraft-labs.guiassert.capture`.**
+# Both gates open a real window (`codetracer-gpui`, or the Electron front-end
+# through `ct`), attest it with `CGWindowListCopyWindowInfo` and capture that
+# window's own surface through ScreenCaptureKit. ScreenCaptureKit refuses
+# without the TCC grant, and a TCC grant is given interactively, per host,
+# through System Settings; it cannot be provisioned by a workflow step.
+#
+# Checked against every job in `codetracer.yml`: the macOS jobs
+# (`reprobuild-macos-smoke`, `origin-dap-macos{,-nightly}`, `dmg-build`,
+# `dmg-lib-check`, the macOS legs of `test-non-gui` and `test-ui-tests`) run on
+# `aarch64-darwin`, none of them captures a window, and none of their hosts is
+# recorded as holding the grant. The Linux window lanes (`gpui-window-captures`,
+# headless sway) cannot stand in: these gates exist precisely to measure the
+# macOS window server, which a wlroots capture does not reach.
+#
+# The scripts' own headers say the same thing from the other side:
+# `plat37-macos-window-capture.sh` is "HOST-CONDITIONAL EVIDENCE, NEVER A
+# REQUIRED GATE" ("do not wire this into a required check"), and every record
+# it writes carries `standing: HOST-CONDITIONAL EVIDENCE`. So this is BLOCKED,
+# not UNWIRED: the recipe side exists (both run from a workstation with
+# `bash ci/test/plat37-macos-*.sh`), and what is missing is a runner.
+#
+# WHAT WOULD MAKE THEM GREEN: a self-hosted macOS runner with a logged-in GUI
+# session and the ScreenCapture grant held by GuiAssert's capture helper, and
+# a non-required (`continue-on-error`) job on it calling a `just` recipe for
+# each script. Then both lines go and the ceiling drops by two.
+#
+# Issue: codetracer-pm issues/2026-10-17-plat37-macos-capture-gates-are-reachable-from-no-ci-lane.md
+ci/test/plat37-macos-window-capture.sh
+ci/test/plat37-macos-electron-capture.sh

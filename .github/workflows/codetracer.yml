@@ -4209,6 +4209,18 @@ jobs:
         # compositor tools); the recipe enters it itself.
         run: nix develop .#devShells.x86_64-linux.default --command just gpui-window-captures
 
+      - name: PLAT-35's GPUI arm as a real window, one per parity scenario
+        # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
+        # Linux are a real window on GuiAssert's headless sway -- this job's
+        # compositor, windowed shim and GuiAssert checkout. One window per
+        # scenario in `src/tests/visual/scenarios.json`; a scenario with no
+        # settled frame at its declared size fails by name. Runs after the
+        # step above, which builds the same windowed shim and records the
+        # `calc` trace it opens; `!cancelled()` so a red capture above does
+        # not hide whether this one works.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
+
       - name: Upload the frames
         if: failure()
         uses: actions/upload-artifact@v4
@@ -4219,6 +4231,7 @@ jobs:
             build/plat47-gpui/
             build/plat48-gpui/
             build/plat69/
+            build/plat35/gpui-window/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json
             src/tests/visual/plat48-gpui-window.json
@@ -7220,6 +7233,21 @@ jobs:
           RR_BACKEND_REF: dev
         run: ./ci/setup-rr-backend.sh
 
+      - name: Assert the ct-native-replay build-siblings builds can start
+        # `just test-gui` below builds the siblings through
+        # `scripts/build-siblings.sh`, codetracer-native-backend among them,
+        # and the RR specs then record and replay through the
+        # `ct-native-replay` it reports as built. That script once printed
+        # PASS for a binary linked against the machine's registry LLDB, which
+        # died before `main` on a glibc mismatch, and every native-trace spec
+        # failed inside `ct record` naming the recording rather than the
+        # build. `ci/test/build-siblings-native-backend-runs-test.sh` holds
+        # the built binary to starting with an empty environment, against the
+        # same sibling checkout `Setup rr-backend` just provided at
+        # `../codetracer-native-backend` -- this is the job whose result
+        # depends on it.
+        run: "nix develop .#devShells.x86_64-linux.default --command just test-build-siblings-native-backend"
+
       - name: Run TypeScript Playwright UI tests (RR-based only)
         env:
           CODETRACER_E2E_CT_PATH: ${{ github.workspace }}/result/bin/ct
@@ -7978,6 +8006,19 @@ jobs:
         # No CT_TEST_CERTIFICATE_VECTORS: setting it would walk an exported
         # tree UNPINNED, which is exactly what this job exists to rule out.
         run: nix develop .#devShells.x86_64-linux.default --command just test-ct-test-certificates
+
+      - name: "`ct test run` from the Nix package's own bin/ (CTC-3i)"
+        # The packaged `ct` is built --mm:refc and hands `ct test run` to the
+        # ORC `ct-test` installed beside it. `ci/test/nix-package-ct-test-run.sh`
+        # builds the package's `bin/` with the package's own build commands,
+        # runs `ct test run` through the wrapped `ct` on a committed Go
+        # fixture, and requires a published certificate that `ct test verify`
+        # from the same `ct` reports as covering the worktree -- the
+        # certificate this job's lane issues and verifies from the source
+        # tree, issued instead from what a user installs. Needs nix, git, go
+        # and python3, all in the default dev shell.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-nix-package-ct-test-run
 
       - name: Show the pinned conformance walk
         # The lane prints one headline per suite; this re-runs the walker the
