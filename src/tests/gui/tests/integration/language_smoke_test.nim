@@ -1,7 +1,7 @@
 ## test_language_smoke.nim
 ##
 ## Language-specific sudoku smoke tests — headless ViewModel equivalents of
-## the Playwright tests in ``tsc-ui-tests/tests/sudoku/``.
+## the Playwright tests in ``src/tests/gui/tests/sudoku/``.
 ##
 ## For each supported language, this suite exercises the full debugging
 ## workflow against real traces of the sudoku solver test programs:

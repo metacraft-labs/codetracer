@@ -7,19 +7,15 @@
  * - The build panel renders within the Golden Layout container
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 
 test.describe("Build Output Panel", () => {
   test.setTimeout(120_000);
   // Use a trace source that triggers a build step with both stdout and stderr output.
   // noir_space_ship produces build output during its compilation phase.
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
-
-  test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
-  test.afterAll(() => restoreUserLayout());
 
   test("build panel renders within GL layout", async ({ ctPage }) => {
     const buildPane = new BuildPane(ctPage);

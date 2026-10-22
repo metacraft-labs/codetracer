@@ -148,8 +148,7 @@ when defined(js):
     ## ``method render`` calls this synchronously while Karax is still
     ## computing the VDOM, so the shell ``<div>`` may not yet be in
     ## the live DOM tree.  The proc retries via ``setTimeout`` until
-    ## the container appears (mirrors the ``tryMountIsoNimStatePanel``
-    ## retry loop in ``state.nim``).
+    ## the container appears.
     if noSourceVMInstance.isNil:
       return
     let key = cstring("no-source-" & $self.id)

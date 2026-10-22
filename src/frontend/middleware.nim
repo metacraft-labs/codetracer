@@ -187,13 +187,22 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       $value.location.rrTicks &
       ", emitting to viewsApi"
     when not defined(ctInExtension):
-      if not data.ui.isNil and not data.ui.status.isNil:
+      # The move belongs to the session that owns `dapApi`, which is not
+      # necessarily the tab on screen: events are routed by the session they
+      # were tagged with (`event_helpers.deliverDapEvent`). Its own status bar
+      # takes the move; the bar draws only while its tab is shown
+      # (`ui/status.nim`). With no owning session (a `DapApi` no tab holds)
+      # the tab on screen keeps taking it, as before that routing.
+      var owner = data.sessionOwning(dapApi)
+      if owner.isNil:
+        owner = data.sessions[data.activeSessionIndex]
+      if not owner.ui.isNil and not owner.ui.status.isNil:
         cdebug "[PIPELINE] middleware.CtCompleteMove: refreshing status before viewsApi fan-out"
-        data.ui.status.stopSignal = value.stopSignal
-        data.ui.status.location = value.location
-        data.ui.status.state.stableBusy = false
-        inc data.ui.status.completeMoveId
-        data.ui.status.redraw()
+        owner.ui.status.stopSignal = value.stopSignal
+        owner.ui.status.location = value.location
+        owner.ui.status.state.stableBusy = false
+        inc owner.ui.status.completeMoveId
+        owner.ui.status.redraw()
       else:
         # Stays at ERROR, for the same reason as the twin
         # branch in `ui_js.configureMiddleware`.  This handler is installed
@@ -229,8 +238,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     lastCompleteMove = value
 
     when not defined(ctInExtension):
-      data.status.stableBusy = false
-      data.status.hasStarted = true
+      # The same session's run state as its status bar above (`owner`).
+      owner.status.stableBusy = false
+      owner.status.hasStarted = true
   )
 
   dapApi.on(CtLoadedTerminal, proc(kind: CtEventKind, value: seq[ProgramEvent]) = viewsApi.emit(CtLoadedTerminal, value))
@@ -239,7 +249,10 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   dapApi.on(CtUpdatedTrace, proc(kind: CtEventKind, value: TraceUpdate) = viewsApi.emit(CtUpdatedTrace, value))
   dapApi.on(CtTracepointResults, proc(kind: CtEventKind, value: TracepointResultsAggregate) = viewsApi.emit(CtTracepointResults, value))
   dapApi.on(CtUpdatedFlow, proc(kind: CtEventKind, value: FlowUpdate) = viewsApi.emit(CtUpdatedFlow, value))
-  dapApi.on(CtNotification, proc(kind: CtEventKind, value: Notification) = viewsApi.emit(CtNotification, value))
+  # `ct/notification` and `ct/launch-failed`: wired by the one proc every
+  # session's wiring goes through, so the first session and each later tab
+  # forward them identically.
+  wireSessionNotifications(dapApi, viewsApi)
   dapApi.on(CtLoadAsmFunctionResponse, proc(kind: CtEventKind, value: Instructions) = viewsApi.emit(CtLoadAsmFunctionResponse, value.toJs))
   dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) = viewsApi.emit(CtUpdateExpansionResponse, value))
 

@@ -4105,7 +4105,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1792635500,
-        "narHash": "sha256-XeKFW4XJiV8q7rWTnTsYc7e4EJ/U4EfJTzrMs/JHCsU=",
+        "narHash": "sha256-VbsVlSLsthllxHiAaEAP0aEs3dHc/sV1brPQrlefwsI=",
         "owner": "metacraft-labs",
         "repo": "isonim",
         "rev": "d2193dc4935039f5faa0836e0a26eed9e15f1a72",
@@ -4121,11 +4121,11 @@
     "isonim-gpui": {
       "flake": false,
       "locked": {
-        "lastModified": 1792578381,
-        "narHash": "sha256-fGgZf9ZuW+gLBwbUBVL5CrmheS33h7Pm7kYB0yOL7fE=",
+        "lastModified": 1792659895,
+        "narHash": "sha256-6VsMe+4nA6VAL7j3AM7PgbczDdGGiU+1Zsw8BXFEVlo=",
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "9f5bd4e0c79c0d074f81cc77cf77024a01ef0d39",
+        "rev": "b2958f8f971effe4de239952fddcda4f65229e7a",
         "type": "github"
       },
       "original": {

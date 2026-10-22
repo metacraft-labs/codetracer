@@ -47,7 +47,6 @@ test.use({
   launchMode: "edit",
   editFolderPath: repo,
   editWorkingDirectory: repo,
-  noUserLayout: true,
   codetracerPrefixOverride: process.env.PLAT47_DESKTOP_PREFIX ?? "",
 });
 test.setTimeout(300_000);

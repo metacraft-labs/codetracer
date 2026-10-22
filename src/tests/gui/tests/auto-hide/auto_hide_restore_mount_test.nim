@@ -97,7 +97,7 @@ when defined(js):
 
   const StateLabel = cstring"stateComponent-0"
     ## The component label `Content.State` mounts into — the id
-    ## `state.tryMountIsoNimStatePanel` resolves its container by, and the id
+    ## `panel_host.ensurePanelMountedById` finds the State pane's container by, and the id
     ## a restored panel's config carries.
 
   proc freshWorld() =
@@ -181,7 +181,7 @@ when defined(js):
       showDockedPanel(panel)
 
       # THE DISCRIMINATING ASSERTION.  `stateComponent-0` is the id
-      # `state.tryMountIsoNimStatePanel` resolves its container by; until it
+      # `panel_host.ensurePanelMountedById` finds the State pane's container by; until it
       # exists in the document there is nothing for any pane to mount into,
       # and before this fix it never came into existence at all.
       check not document.getElementById(StateLabel).isNil
@@ -660,12 +660,12 @@ else:
     test "the mount dispatch still carries its arms":
       ## POSITIVE CONTROL for the case above (§4): "there is exactly one
       ## `mountPaneForState`" and "the registration calls it" are both
-      ## satisfied by an empty proc.  These are three of the panes the factory
-      ## is known to be the only mount site for.
+      ## satisfied by an empty proc.  The State and Call Trace panes are the
+      ## panel host's: a restored container reaches them by its id.
       let dispatch = codeOnly(region(source(LayoutPath),
         "proc mountPaneForState", "\nproc "))
-      check dispatch.contains("tryMountIsoNimStatePanel()")
-      check dispatch.contains("tryMountIsoNimCalltrace()")
+      check dispatch.contains("ensurePanelMountedById(containerId, state.content,")
+      check dispatch.contains("tryMountIsoNimEventLogPanel()")
       check dispatch.contains("discard component.afterInit()")
 
     test "restoreAutoHideState no longer promises a fallback that does not exist":

@@ -365,19 +365,19 @@ ARMS = [
     Arm(
         id="M9",
         path=VIEW,
-        find="  indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,\n",
-        replace="  if false: indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,\n",
+        find="  indexEach[VariableViewState, R, N](r, rowContainer,\n",
+        replace="  if false: indexEach[VariableViewState, R, N](r, rowContainer,\n",
         grader=G_PROBE,
         killer="(the row-count floor)",
         expect="verdict-fails",
-        why="THE ROWS STOP BEING WIRED to the panel. `renderStatePanelImpl` "
-            "is the extraction PLAT-18 made so the slice draws the SAME "
+        why="THE ROWS STOP BEING WIRED to the panel. `renderStatePanel` "
+            "is the one generic panel so the slice draws the SAME "
             "markup as the product instead of a copy of it; if the "
             "instantiation stops producing rows, every byte count in this "
             "milestone is a measurement of an empty pane",
         control_name="the container is bound before the list is attached",
-        control_find="  indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,\n",
-        control_replace="  let rows = rowContainer\n  indexEach[VariableViewState, RendererT, NodeT](r, rows,\n",
+        control_find="  indexEach[VariableViewState, R, N](r, rowContainer,\n",
+        control_replace="  let rows = rowContainer\n  indexEach[VariableViewState, R, N](r, rows,\n",
     ),
 
     # -------------------------------------------------------------------

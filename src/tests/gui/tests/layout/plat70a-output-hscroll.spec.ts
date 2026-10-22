@@ -124,7 +124,6 @@ test.describe("PLAT-70 Part A: the desktop's output panes scroll sideways", () =
   test.use({
     sourcePath: recording("wide_lines"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     ...(prefix ? { codetracerPrefixOverride: prefix } : {}),
   });
 

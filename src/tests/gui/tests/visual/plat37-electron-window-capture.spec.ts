@@ -959,17 +959,18 @@ function pngSize(file: string): { width: number; height: number } {
 
 for (const scenario of definition.scenarios) {
   test.describe(`plat37-electron ${scenario.id}`, () => {
-    // `noUserLayout: true` — THE PRODUCT'S OWN FIRST-RUN LAYOUT, NOT THE
-    // BUNDLED TREE. Without it the launch fixture calls
-    // `layout-reset.ensureDefaultLayout`, which copies
-    // `src/config/default_layout.json` VERBATIM into the run's
-    // `$CODETRACER_HOME/config`. The index process then finds a saved layout
-    // and loads it as-is, so `index/config.installModeDefault` — and with it
-    // `mode_default_layout.modeDefaultLayout` — never runs.
+    // NO LAYOUT OPTION: THE PRODUCT'S OWN FIRST-RUN LAYOUT, NOT THE BUNDLED
+    // TREE. The launch fixture removes the saved layout by default, so the
+    // index process runs `index/config.installModeDefault` — and with it
+    // `mode_default_layout.modeDefaultLayout` — exactly as on a machine that
+    // has never run CodeTracer (`layout-reset.prepareUserLayout`). Do not set
+    // `bundledLayout` here: that copies `src/config/default_layout.json`
+    // VERBATIM into the run's `$CODETRACER_HOME/config`, and the index process
+    // then loads it as-is.
     //
-    // That matters here and nowhere else in this lane, because the bundled
-    // tree is the one the product's own source calls "nobody's layout": it
-    // gives TEST RESULTS and CONSTRAINTS a top-level column of their own
+    // That matters for this lane above all, because the bundled tree is the
+    // one the product's own source calls "nobody's layout": it gives TEST
+    // RESULTS and CONSTRAINTS a top-level column of their own
     // (`src/config/default_layout.json`, third column, 25%), which the
     // editing surface wants and a REPLAY does not. Debug mode's default
     // moves TESTS into the FILES stack (`frontend.paneHomesForMode`) and
@@ -978,26 +979,24 @@ for (const scenario of definition.scenarios) {
     // `sharedDefaultLayout` is generated from — the arrangement every
     // CodeTracer front-end opens with.
     //
-    // MEASURED COST OF NOT SETTING IT (2026-10-12/13 passes, re-read
-    // 2026-10-14): every Electron frame carried a standing TESTS ("no tests
-    // found") / CONSTRAINTS ("No circuit has been compiled for this project
-    // yet.") column at x1165-1440 that no mode draws. The screen oracle
-    // counted 7 panes against the GPUI window's 5, and that census was filed
-    // as PARITY-S1, "GPUI draws 5 panes where Electron draws 7", with GPUI
-    // named the deficient side. It was an artefact of this line. The control
-    // that settles it is PLAT-45's own first-run capture
+    // MEASURED COST OF THE BUNDLED TREE (2026-10-12/13 passes, re-read
+    // 2026-10-14, when the fixture still installed it by default and this
+    // spec had not opted out): every Electron frame carried a standing TESTS
+    // ("no tests found") / CONSTRAINTS ("No circuit has been compiled for
+    // this project yet.") column at x1165-1440 that no mode draws. The screen
+    // oracle counted 7 panes against the GPUI window's 5, and that census was
+    // filed as PARITY-S1, "GPUI draws 5 panes where Electron draws 7", with
+    // GPUI named the deficient side. It was an artefact of the launch layout.
+    // The control that settles it is PLAT-45's own first-run capture
     // (`src/tests/visual/answers/plat45-default-arrangement.electron.json`),
-    // taken with `noUserLayout: true` against the real app: five stacks,
+    // taken on the first-run path against the real app: five stacks,
     // `[9,41,48] [2] [4,17] [6,35] [8,24]`, TESTS a tab of FILES and no
-    // CONSTRAINTS component anywhere.
-    //
-    // Eleven of the sixteen specs under `tests/visual/` already set this;
-    // this lane was the capture whose frames parity is measured against, and
-    // the one that did not.
+    // CONSTRAINTS component anywhere. Since 2026-10-22 that path is the
+    // fixture's default for every spec (codetracer-pm issue
+    // `2026-10-14-gui-test-fixture-defaults-every-launch-to-the-bundled-layout-the-product-calls-nobodys-layout.md`).
     test.use({
       sourcePath: recordingPath,
       launchMode: "trace-folder",
-      noUserLayout: true,
     });
     test.setTimeout(600_000);
 

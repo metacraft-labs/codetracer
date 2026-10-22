@@ -50,6 +50,11 @@ type
     depth*: int
     isHistoryExpanded*: bool
     history*: seq[VariableHistoryRowView]
+    moreElements*: bool
+      ## The locals budget cut this collection short: `heldElements` of
+      ## `elementsTotal` are held, and `StateVM.loadMore` fetches the next.
+    heldElements*: int
+    elementsTotal*: int
 
   StateViewState* = object
     ## Renderer-agnostic snapshot of the state panel.
@@ -112,6 +117,9 @@ proc flattenVariables(
       depth: depth,
       isHistoryExpanded: histExpanded,
       history: historyRows,
+      moreElements: v.moreElements,
+      heldElements: v.children.len,
+      elementsTotal: v.elementsTotal,
     )
     # Only recurse into children when the node is expanded and has
     # children to show.

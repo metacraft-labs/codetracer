@@ -586,6 +586,26 @@ type
 
 var unpinPanelTarget*: UnpinPanelTargetProc
 
+proc releaseReparentedPanel*(panel: AutoHidePanel) =
+  ## The GoldenLayout half of an unpin: called by EVERY component
+  ## registration in `layout.nim` (`editorComponent` and `genericUiComponent`)
+  ## once it has moved `panel.liveElement`'s children into the new GL
+  ## container.  From then on the pane lives in the layout, so it stops being
+  ## an auto-hide panel and its strip tab goes.
+  ##
+  ## `unpinPanel`'s `finally` reads "still in `autoHideState.panels`" as "the
+  ## re-attach did not complete" and puts the panel back on its strip.  A
+  ## registration that reparents without calling this therefore leaves the
+  ## pane in BOTH places — its GL tab and its strip tab.  That is what the
+  ## editor registration did: an unpinned editor came back to the layout and
+  ## kept its strip tab, where `Auto-Hide-Panes.md` §3.2-§3.3 has Unpin
+  ## restore the panel to GL and nothing else.
+  if autoHideState.isNil or panel.isNil:
+    return
+  autoHideState.panels = autoHideState.panels.filterIt(it != panel)
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
+
 proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   ## Re-attach a pinned panel back into Golden Layout and remove it
   ## from the auto-hide state. The live DOM element is reparented into
@@ -681,8 +701,10 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
     #
     # A successful re-attach is the one case that may leave it set, and only
     # because the panel is no longer in `autoHideState.panels` at all by then:
-    # `layout.nim`'s `genericUiComponent` registration runs synchronously
-    # inside `addItem`, reparents the live element and filters the panel out.
+    # the `layout.nim` registration (`editorComponent` or
+    # `genericUiComponent`) runs synchronously inside `addItem`, reparents the
+    # live element and calls `releaseReparentedPanel`, which filters the
+    # panel out.
     # If the panel is STILL registered, the re-attach did not complete —
     # `addItem` added nothing, or the registration did not take the
     # reparenting branch — and the panel must go back to being an ordinary

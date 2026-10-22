@@ -6,6 +6,8 @@ import
   rr_gdb
 
 from viewmodel/viewmodels/menu_vm import MenuVM
+import context_menu_item
+export context_menu_item
 
 type
   defaultstring = cstring
@@ -81,41 +83,6 @@ type
     cwd*: cstring
     configType*: cstring
 
-  UIBreakpoint* = object
-    line*: int
-    ## M1 — Column-Aware Replay Navigation: 1-indexed column when the
-    ## breakpoint is anchored at a specific column on the line; ``0``
-    ## preserves the legacy line-only semantics.  Multiple
-    ## column-aware breakpoints can coexist on the same line (the
-    ## breakpoint registry on the replay-server keys ``(path, line,
-    ## column)``); the GUI exposes them through the same gutter
-    ## marker for now.
-    column*: int
-    ## M9 — Column-Aware Conditional Breakpoint: optional condition
-    ## expression evaluated by the replay engine at the candidate
-    ## stop step.  Empty string preserves the unconditional behaviour
-    ## M1 shipped with; a non-empty string is forwarded on the DAP
-    ## ``setBreakpoints`` request so the replay engine can evaluate
-    ## it against the locals at the matched step.  Composes
-    ## orthogonally with ``column``.
-    condition*: cstring
-    ## M10 — Column-Aware Tracepoint / Logpoint: when non-empty, the
-    ## entry describes a DAP *logpoint* (tracepoint) at
-    ## ``(line, column)`` rather than a breakpoint.  The replay engine
-    ## emits a DAP ``output`` event carrying ``logMessage`` as
-    ## execution passes through the matched step and CONTINUES
-    ## without stopping.  ``""`` (the default) preserves the M1
-    ## breakpoint behaviour; the GUI keeps the same gutter marker
-    ## table for both surfaces.  Spec:
-    ## codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
-    logMessage*: cstring
-    path*: cstring
-    fun*: cstring
-    level*: int
-    id*: int
-    enabled*: bool
-    error*: bool
-
   BreakpointMenu* = ref object
     program*: int
     frame*: seq[int]
@@ -126,33 +93,6 @@ type
     options*: JsAssoc[int, cstring]
     actions*: JsAssoc[int, proc()]
     dom*: dom.Node
-
-  ContextMenuItem* = ref object
-    name*: cstring
-    hint*: cstring
-    handler*: proc(ev: kdom.Event) {.closure.}
-    disabled*: bool
-      ## RESERVED FOR "APPLICABLE HERE, UNAVAILABLE NOW".
-      ##
-      ## An entry that has no meaning in the current mode is not disabled — it
-      ## is ABSENT. A greyed-out list of ten debug operations is still a menu
-      ## about debugging, and it fails the complaint that produced this field
-      ## ("the right click menu content over the editor area is not context
-      ## dependent") exactly as squarely as an enabled one. The rule is the
-      ## toolbar's, stated once in
-      ## `codetracer-specs/Planned-Features/Edit-Mode-Toolbar.md` §8: hidden
-      ## when the verb does not apply, disabled when it applies and the command
-      ## cannot run right now.
-    disabledReason*: cstring
-      ## WHY, IN WORDS, AND ON THE ROW. Not a tooltip: `.ct-menu-item--disabled`
-      ## sets `pointer-events: none`, so a disabled row cannot be hovered — a
-      ## reason parked in `title` would be unreachable by construction. It is
-      ## rendered as the row's sublabel instead.
-      ##
-      ## A disabled entry with an empty reason is a defect (the toolbar's
-      ## EMT-D14, asserted there and asserted here by
-      ## `ci/test/editor-context-menu-modes.sh`): "an action whose absence
-      ## cannot be explained is one whose absence was a guess".
 
   EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents, EventEvm, EventProcess
 
@@ -313,7 +253,11 @@ type
     lastAction*:            cstring
     cLocation*:             Location
     error*:                 DebuggerError
-    breakpointTable*: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]
+    pointStore*: JsObject
+      ## The session's `ReplayDataStore`, where its breakpoints are held
+      ## (`services/debugger_service`, Shared-DOM-Front-Ends D7.4). Opaque here
+      ## because this module cannot import the ViewModel types; the renderer
+      ## sets it when it builds the session. Nil until then.
     currentJump*: int
     stopSignal*:            RRGDBStopSignal
     frameInfo*:             FrameInfo
@@ -321,8 +265,6 @@ type
     operationCount*:        int
     lastRRTickTime*:        float
     avgRRTickTime*:         float
-    expressionMap*:         JsAssoc[cstring, seq[FlowExpression]]
-    showInlineValues*:      bool
     valueHistory*:          JsAssoc[cstring, ValueHistory]
     skipInternal*:          bool
     skipNoSource*:          bool
@@ -2223,13 +2165,6 @@ type
 
   Data* = ref object
     redraw*:                proc: void
-    onBreakpointsVerified*: proc(path: cstring; lines: seq[int])
-      ## PLAT-40: where the debugger service hands the ENGINE's answer to a
-      ## `setBreakpoints` request — the lines it verified for `path`. The
-      ## renderer installs it to call `ReplayDataStore.applyVerifiedBreakpoints`
-      ## on the ViewModel session's store, the same decoder the native
-      ## front-ends reach, so the point list holds what the engine bound.
-      ## Nil until the ViewModel session exists; the service checks.
     ipc*:                   JsObject
     config*:                Config
     lastNoInfoMessage*:     cstring
@@ -2303,13 +2238,9 @@ type
 
   PointListData* = ref object
     init*: bool
-    breakpointTable*: js
     tracepointTable*: js
-    lastBreakpoint*: int
     lastTracepoint*: int
-    breakpoints*: seq[UIBreakpoint]
     tracepoints*: JsAssoc[int, Tracepoint]
-    redrawBreakpoints*: bool
     redrawTracepoints*: bool
 
   ProblemSeverity* = enum
@@ -2473,6 +2404,22 @@ template `startOptions=`*(d: Data, v: StartOptions) = d.sessions[d.activeSession
 template dapApi*(d: Data): untyped = d.sessions[d.activeSessionIndex].dapApi
 template `dapApi=`*(d: Data, v: DapApi) = d.sessions[d.activeSessionIndex].dapApi = v
 
+proc sessionOwning*(d: Data; dapApi: DapApi): ReplaySession =
+  ## The replay session whose `DapApi` is `dapApi`, or nil when no open
+  ## session owns it.
+  ##
+  ## A handler registered on one session's `DapApi` runs for that session's
+  ## events whichever tab is on screen (`event_helpers.deliverDapEvent` routes
+  ## each event by the session it was tagged with), so it must act on this
+  ## session's state, not on the `Data` forwarders above, which name the tab on
+  ## screen.
+  if dapApi.isNil:
+    return nil
+  for session in d.sessions:
+    if not session.isNil and session.dapApi == dapApi:
+      return session
+  nil
+
 template asyncSendCache*(d: Data): untyped = d.sessions[d.activeSessionIndex].asyncSendCache
 template `asyncSendCache=`*(d: Data, v: auto) =
   d.sessions[d.activeSessionIndex].asyncSendCache = v
@@ -2550,13 +2497,11 @@ when defined(ctRenderer):
       debugger: DebuggerService(
         locals: @[],
         registerState: JsAssoc[cstring, cstring]{},
-        breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{},
         valueHistory: JsAssoc[cstring, ValueHistory()]{},
         paths: @[],
         skipInternal: true,
         skipNoSource: false,
-        historyIndex: 1,
-        showInlineValues: true),
+        historyIndex: 1),
       editor: EditorService(
         open: JsAssoc[cstring, TabInfo]{},
         loading: @[],
@@ -2638,14 +2583,31 @@ when defined(ctRenderer):
   console.log "data.viewsApi"
   console.log data.viewsApi
 
+  let firstSessionDapApi = data.dapApi
   data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
     # Guard against -1 sentinel: activeSessionIndex is -1 when no session is
     # active (e.g. extension webview receives a CtCompleteMove before the
     # session is fully initialized).  Dropping the event is safe; the component
     # path (register -> api.subscribe) handles it independently.
     if data.activeSessionIndex >= 0:
-      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
-      discard data.services.editor.onCompleteMove(data.services.editor, value))
+      # This is the first session's move, and it arrives here even while
+      # another tab is on screen, because events are routed by the session
+      # they were tagged with. Its debugger state is its own, so it is
+      # updated whichever tab is shown. The editor service opens the moved-to
+      # file in the layout on screen, so it follows the move only while this
+      # session's tab is that layout: never in another tab's editor.
+      # The callbacks are installed by `services/*_service.nim` when they
+      # load; a session whose services have none yet takes no service update.
+      let owner = data.sessionOwning(firstSessionDapApi)
+      if owner.isNil or owner.services.isNil:
+        return
+      let debugger = owner.services.debugger
+      if not debugger.isNil and not debugger.onCompleteMove.isNil:
+        discard debugger.onCompleteMove(debugger, value)
+      let editor = owner.services.editor
+      if owner == data.sessions[data.activeSessionIndex] and
+          not editor.isNil and not editor.onCompleteMove.isNil:
+        discard editor.onCompleteMove(editor, value))
 
   data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
     ## Handle the macro expansion response from the backend (S6).

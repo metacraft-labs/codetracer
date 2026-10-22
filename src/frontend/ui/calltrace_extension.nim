@@ -1,0 +1,1194 @@
+## ui/calltrace_extension.nim — the Call Trace pane inside the VS Code
+## extension's webviews, until the extension is rebuilt on mirrored session
+## ViewModels (Headless-SDK-Front-Ends HSF-X2, which deletes this module).
+##
+## Compiled only with `-d:ctInExtension` (`ui/calltrace.nim` selects it):
+## the webview has no session of its own, so its ViewModel runs over a stub
+## store fed from the extension's mediator events. The desktop and the web
+## page use `ui/calltrace.nim`'s component over the session's ViewModel.
+
+import
+  ui_imports, value, ../utils, isonim_panel_mount,
+  ../communication, ../../common/ct_event
+
+# PLAT-2: the ONE door every `src/frontend/ui/` surface reaches the value
+# presenter through. See `callArgText` below.
+import presented_value
+
+from std / dom import nil # imports dom, without directly its items: you need to use `dom.Node`
+
+# ---------------------------------------------------------------------------
+# ViewModel layer — IsoNim is now the primary renderer for the calltrace.
+# The CalltraceVM drives the IsoNim reactive DOM tree; the legacy Karax
+# render() returns an empty stub once the IsoNim view is mounted.
+# ---------------------------------------------------------------------------
+import std/[json, tables, options]
+from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+from ../viewmodel/store/types as vm_types import nil
+from ../viewmodel/store/replay_data_store import
+  ReplayDataStore, createReplayDataStore, updateCalltraceSection,
+  updateDebuggerPosition, makeCallArg, requestCalltraceSection,
+  CallLineWire, callLineOf
+from ../viewmodel/store/request_tracker import markComplete
+from ../viewmodel/viewmodels/calltrace_vm import
+  CalltraceVM, createCalltraceVM,
+  setViewport, Viewport, scrolledTo, setRawIgnorePatterns,
+  setBackendSearchResults, selectEntry, selectCall, CalltraceSearchResult
+from isonim/web/dom_api import nil
+from isonim/core/batch as isoBatch import batch
+from isonim/core/signals import val, `val=`
+from ../viewmodel/views/isonim_calltrace_view import renderCalltracePanel
+from isonim/web/web_renderer import WebRenderer
+
+proc mountIsoNimCalltrace(container: dom_api.Element; vm: CalltraceVM) =
+  ## The extension's webview host: the one generic Call Trace view, appended.
+  let panel = renderCalltracePanel[WebRenderer, dom_api.Element](
+    WebRenderer(), vm)
+  dom_api.appendChild(dom_api.Node(container), dom_api.Node(panel))
+
+# Module-level CalltraceVM instance. Created once in `register()` and
+# fed data whenever the legacy event-bus handlers fire.  The IsoNim
+# view is the primary renderer once mounted.
+var calltraceVMInstance: CalltraceVM
+var calltraceVMStore: ReplayDataStore
+
+# WAS `var isoNimCalltraceMounted: bool = false`, and then a module-level pair
+# `mountedCalltraceVM` / `mountedCalltraceHost`. See `isoNimPanelMountIsLive`
+# in `ui/isonim_panel_mount.nim`: a boolean that records "I mounted once"
+# cannot answer "is it mounted now", and one remembered host cannot answer for
+# the `calltraceComponent-0` every tab of the window has. What was mounted now
+# lives on each host (the mount mark plus `recordIsoNimPanelHostSource`).
+
+proc calltracePanelIsLive(host: dom_api.Element): bool =
+  ## Does `host` — this tab's `calltraceComponent-0` — hold a Call Trace view
+  ## built on the ViewModel that is current?
+  isoNimPanelMountIsLive(
+    mountedVMIsCurrent = isoNimPanelHostHolds(host, calltraceVMInstance),
+    hostCarriesMark = isoNimPanelContainerIsMounted(host))
+
+let returnValueName: cstring = "<return value>"
+
+const
+  CALL_OFFSET_WIDTH_PX  = 20
+  CALL_HEIGHT_PX        = 24
+  CALL_BUFFER           = 20
+  START_BUFFER          = 10
+  EXPAND_CALLS_KIND     = CtExpandCalls
+  COLLAPSE_CALLS_KIND   = CtCollapseCalls
+
+proc getCurrentMonacoTheme(editor: MonacoEditor): cstring {.importjs:"#._themeService._theme.themeName".}
+proc getBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
+proc replaceChildren(node: js) {.importjs:"#.replaceChildren()".}
+proc redrawCallLines(self: CalltraceComponent)
+proc loadLines(self: CalltraceComponent, fromScroll: bool)
+proc calltraceValueDomHostId(prefix: cstring, parts: varargs[cstring]): cstring
+proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent)
+proc renderCallExpandedValuesDom*(self: CallExpandedValuesComponent): Node
+
+proc initCalltraceVM()
+
+when defined(ctInExtension):
+  var calltraceComponentForExtension* {.exportc.}: CalltraceComponent
+
+  proc bindCalltraceExtensionHost(component: CalltraceComponent) =
+    if component.extensionRendererId.len == 0:
+      return
+
+    let host = document.getElementById(component.extensionRendererId)
+    if host.isNil:
+      return
+
+    # Initialise the calltrace VM and mount it into the container the extension
+    # webview provides.  initCalltraceVM is idempotent — it returns early if the
+    # VM was already created, and always calls tryMountIsoNimCalltrace at the end.
+    initCalltraceVM()
+
+  proc makeCalltraceComponentForExtension*(id: cstring): CalltraceComponent {.exportc.} =
+    if calltraceComponentForExtension.isNil:
+      if data.sessions.len == 0:
+        return
+      calltraceComponentForExtension = makeCalltraceComponent(data, 0, inExtension = true)
+    if calltraceComponentForExtension.extensionRendererId.len == 0:
+      calltraceComponentForExtension.extensionRendererId = id
+      calltraceComponentForExtension.bindCalltraceExtensionHost()
+    result = calltraceComponentForExtension
+
+proc calltraceJump(self: CalltraceComponent, location: types.Location) =
+  self.api.emit(CtCalltraceJump, location)
+  self.api.emit(InternalNewOperation, NewOperation(stableBusy: true, name: "calltrace-jump"))
+
+proc isAtStart(self: CalltraceComponent): bool =
+  self.startCallLineIndex < START_BUFFER
+
+proc getStartBufferLen(self: CalltraceComponent): int =
+  if self.isAtStart():
+    self.startCallLineIndex
+  else:
+    START_BUFFER
+
+proc toggleCalls*(
+  self: CalltraceComponent,
+  kind: CtEventKind,
+  callKey: cstring,
+  nonExpandedKind: CalltraceNonExpandedKind,
+  count: int
+) =
+  let target = CollapseCallsArgs(callKey: callKey, nonExpandedKind: nonExpandedKind, count: count)
+  self.api.emit(kind, target)
+
+proc `$`*(c: CallCount): string =
+  case c.kind:
+  of Equal:
+    $c.i
+  of GreaterOrEqual:
+    &">= {c.i}"
+  of LessOrEqual:
+    &"<= {c.i}"
+  of Greater:
+    &"> {c.i}"
+  of Less:
+    &"< {c.i}"
+
+# A CALLTRACE COMPONENT OUTLIVES ITS PANE. It keeps its `CtCompleteMove`
+# subscription whether or not the pane is in the current layout, and a mode
+# transition removes the pane without removing the component. `jq` is
+# `document.querySelector`, so the two measurements below used to read a
+# geometry property off `null` and throw from inside a move handler — the shape
+# `ui/step_list.nim`'s `panelHeight` was measured doing, nine times over three
+# round trips, with the rest of each move's handling lost behind it.
+#
+# The defaults are the same "one screen-ish" numbers the measurements produce
+# on a normal pane, and they keep the load requests non-degenerate: a zero
+# depth or a zero height asks the backend for nothing.
+const
+  DEFAULT_CALLTRACE_PANEL_DEPTH = 10
+  DEFAULT_CALLTRACE_PANEL_HEIGHT = 16
+
+proc panelDepth*(self: CalltraceComponent): int =
+  let host = jq("#calltraceComponent-" & $self.id)
+  if host.isNil:
+    return DEFAULT_CALLTRACE_PANEL_DEPTH
+  let depth = cast[int](host.offsetWidth) div CALL_OFFSET_WIDTH_PX
+  if depth <= 0: DEFAULT_CALLTRACE_PANEL_DEPTH else: depth
+
+proc panelHeight*(self: CalltraceComponent): int =
+  let host = jq("#calltraceComponent-" & $self.id)
+  if host.isNil:
+    return DEFAULT_CALLTRACE_PANEL_HEIGHT
+  let rows = cast[int](host.offsetHeight) div CALL_HEIGHT_PX
+  if rows <= 0: DEFAULT_CALLTRACE_PANEL_HEIGHT else: rows
+
+proc scrollRawPosition*(self: CalltraceComponent): int =
+  cast[int](jq("#calltraceScroll-" & $self.id).toJs.scrollTop)
+
+proc scrollLineIndex*(self: CalltraceComponent): int =
+  (self.scrollRawPosition() / CALL_HEIGHT_PX).floor
+
+proc domIdToken(raw: cstring): string =
+  for ch in $raw:
+    if ch in {'a'..'z'} or ch in {'A'..'Z'} or ch in {'0'..'9'} or ch in {'-', '_'}:
+      result.add(ch)
+    else:
+      result.add("_")
+      result.add(toHex(ord(ch), 2))
+
+proc calltraceValueDomHostId(prefix: cstring, parts: varargs[cstring]): cstring =
+  var id = $prefix
+  for part in parts:
+    id.add("-")
+    id.add(domIdToken(part))
+  result = cstring(id)
+
+proc mountCalltraceValueDom(hostId: cstring, value: ValueComponent) =
+  let host = document.getElementById(hostId)
+  if host.isNil:
+    return
+
+  host.innerHTML = cstring""
+  host.appendChild(value.renderValueDom())
+
+proc getLastKey(assoc: JsAssoc[cstring, ValueComponent]): cstring =
+  var keys: seq[cstring] = @[]
+
+  for key in assoc.keys:
+    keys.add(key)
+
+  result = keys[keys.len - 1]
+
+proc calltraceText(value: cstring): Node =
+  document.createTextNode(value)
+
+proc calltraceNewElement(tag: cstring, className: cstring = cstring""): Node =
+  result = document.createElement(tag)
+  if className.len > 0:
+    result.setAttribute(cstring"class", className)
+
+proc setExpandedValueOffsetDom(
+  depth: int,
+  isLastValue: bool = false,
+  backIndentCount: int = 0,
+  callHasChildren: bool = false,
+  callIsLastChild: bool = false,
+  callIsCollapsed: bool = false,
+  callIsLastElement: bool = false
+): Node =
+  var emptyOffsetCount = depth - 1
+
+  if isLastValue and backIndentCount > 0:
+    emptyOffsetCount -= (backIndentCount - 1)
+
+  result = calltraceNewElement(cstring"div", cstring"call-offsets")
+
+  if callIsLastElement:
+    for i in 0..<depth:
+      result.appendChild(calltraceNewElement(cstring"div", cstring"empty-offset"))
+  else:
+    for i in 0..<emptyOffsetCount:
+      result.appendChild(calltraceNewElement(cstring"div", cstring"empty-offset"))
+    if isLastValue:
+      for i in 0..<backIndentCount - 1:
+        result.appendChild(calltraceNewElement(
+          cstring"div",
+          cstring"empty-offset empty-offset-bottom-border"))
+    if isLastValue and (not callHasChildren or callIsCollapsed):
+      if callIsLastChild:
+        result.appendChild(calltraceNewElement(
+          cstring"div",
+          cstring"empty-offset empty-offset-right-border empty-offset-bottom-border"))
+      else:
+        result.appendChild(calltraceNewElement(
+          cstring"div",
+          cstring"empty-offset empty-offset-right-border"))
+    else:
+      result.appendChild(calltraceNewElement(
+        cstring"div",
+        cstring"empty-offset empty-offset-right-border"))
+
+proc wireOfCall(call: Call): CallLineWire =
+  ## The `CallLineWire` fields a `Call` carries by itself: its names, its
+  ## low- and high-level location, its tick, source revision, frame depth and
+  ## key. The fields that belong to a calltrace LINE rather than to the call
+  ## (`depth`, `count`, `hiddenChildren`) are left for the caller.
+  ##
+  ## Shared by the calltrace section decoder (`syncCalltraceData`) and the
+  ## search-result decoder (`registerSearchRes`), so a search result is
+  ## located exactly as the row for the same call is — through `callLineOf`
+  ## — and the two send the same `ct/calltrace-jump`.
+  let loc = call.location
+  CallLineWire(
+    rawName: $call.rawName,
+    highLevelFunctionName: $loc.highLevelFunctionName,
+    path: $loc.path, line: loc.line,
+    highLevelPath: $loc.highLevelPath, highLevelLine: loc.highLevelLine,
+    rrTicks: cast[uint64](loc.rrTicks),
+    sourceGeneration: loc.sourceGeneration,
+    sourceDigest: $loc.sourceDigest,
+    callstackDepth: loc.callstackDepth,
+    loadedChildren: call.children.len,
+    callKey: $call.key)
+
+proc searchResultOf(call: Call): CalltraceSearchResult =
+  ## One backend search match as the CalltraceVM's results list holds it:
+  ## named and located as the calltrace row for the same call would be
+  ## (`callLineOf`), so a click on it carries that frame's identity
+  ## (`Click-Navigation.md` §2.2), not just the tick it starts at.
+  let row = callLineOf(wireOfCall(call), 0'i64)
+  CalltraceSearchResult(
+    name: row.name,
+    key: row.callKey,
+    rrTicks: row.rrTicks,
+    location: row.location,
+    codeGeneration: row.codeGeneration)
+
+proc registerSearchRes(self: CalltraceComponent, searchResults: seq[Call]) =
+  let current = if self.searchText.isNil: cstring"" else: self.searchText
+
+  self.lastSearch = now()
+
+  if current.len > 0:
+    self.searchResults = searchResults
+    self.isSearching = true
+    self.lastChange = self.lastSearch
+  else:
+    self.searchResults = @[]
+    self.isSearching = false
+
+  # Sync search results into the CalltraceVM so the IsoNim view
+  # can render them in the `.call-search-results` container.
+  if calltraceVMInstance != nil:
+    var vmResults: seq[CalltraceSearchResult] = @[]
+    for call in searchResults:
+      if not call.isNil:
+        vmResults.add searchResultOf(call)
+    calltraceVMInstance.setBackendSearchResults(vmResults)
+
+  self.redraw()
+
+func findCall(call: Call, key: cstring): Call =
+  if call.key == key:
+    return call
+  for child in call.children:
+    let res = child.findCall(key)
+    if not res.isNil:
+      return res
+  return nil
+
+proc calltraceScroll(self: CalltraceComponent, height: int) =
+  let calltraceElement = jqFind(cstring"#" & "calltraceScroll-" & $self.id)
+  if not calltraceElement.isNil and not calltraceElement.toJs[0].isNil:
+    calltraceElement.toJs[0].scrollTop = height
+
+# ---------------------------------------------------------------------------
+# ViewModel bridge procs — sync legacy event data into the parallel store.
+# Placed before onUpdatedCalltrace / onCompleteMove so they are visible at
+# the call sites without forward declarations.
+# ---------------------------------------------------------------------------
+
+proc tryMountIsoNimCalltrace*() =
+  ## Mount the IsoNim calltrace view into the GoldenLayout-managed
+  ## calltrace component container. The container is created by
+  ## GoldenLayout with the id `calltraceComponent-0`. The IsoNim view
+  ## is the primary renderer — no Karax renderer is involved.
+  ##
+  ## After mounting:
+  ## - `calltracePanelIsLive(host)` answers true for that host until it is
+  ##   rebuilt or the ViewModel is replaced; another tab's host is asked
+  ##   separately
+  ## - onUpdatedCalltrace / onCompleteMove still feed data into the
+  ##   store, and IsoNim's reactive effects update the DOM automatically
+  ##
+  ## Safe to call multiple times — mounts only once.
+  cdebug "[PIPELINE] tryMountIsoNimCalltrace: called, vmIsNil=" &
+    $calltraceVMInstance.isNil
+  if calltraceVMInstance.isNil:
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: skipping (VM nil)"
+    return
+
+  # Wait for the DOM container to exist. GoldenLayout creates it when
+  # the component is registered. IsoNim mounts directly into it.
+  let key = cstring"calltraceComponent-0"
+  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
+  let tab = data.activeSessionIndex
+  var calltraceRetryCount = 0
+  proc doMount() =
+    calltraceRetryCount += 1
+    let container = findIsoNimPaneHost(key, tab)
+    if dom_api.isNodeNil(dom_api.Node(container)):
+      if calltraceRetryCount mod 10 == 0:
+        # Legitimate, hence DEBUG: polling for a container
+        # GoldenLayout has not created yet is the design.  Only exhausting
+        # the budget below is a failure.
+        cdebug "[PIPELINE] tryMountIsoNimCalltrace: retry #" & $calltraceRetryCount &
+          ", container=nil"
+      if calltraceRetryCount > 200:
+        # WARN, AND IT ENDS THIS POLL RATHER THAN THE SESSION — see the longer
+        # note on the same cap in `ui/state.nim`.
+        #
+        # This claimed the panel "is never mounted for the rest of the
+        # session". `ui/layout.nim`'s `Content.Calltrace` factory arm calls
+        # `tryMountIsoNimCalltrace()` after the container has been built, and
+        # that call declares its own `var calltraceRetryCount = 0`, so the cap
+        # is per-attempt; `calltracePanelIsLive(host)` reports mounted, not failed.
+        #
+        # Calltrace is the sharpest case, and `layout.nim` says why: its
+        # `register` method has ALWAYS made this call, but on the desktop
+        # `register` runs at component-construction time, which is EARLIER
+        # than the container by construction. The losing poll is therefore not
+        # bad luck — that window cannot be won, and widening the budget would
+        # not change it.
+        cwarn "[PIPELINE] tryMountIsoNimCalltrace: container absent after 200 " &
+          "retries; abandoning THIS poll — the register-time window closes " &
+          "before the container exists; layout.nim's factory arm mounts it"
+        return
+      discard setTimeout(proc() = doMount(), 10)
+      return
+
+    if calltracePanelIsLive(container):
+      return
+
+    let containerNode = dom_api.Node(container)
+    while not dom_api.isNodeNil(containerNode.firstChild):
+      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: container found, mounting now"
+    mountIsoNimCalltrace(container, calltraceVMInstance)
+    markIsoNimPanelContainerMounted(container)
+    recordIsoNimPanelHostSource(container, calltraceVMInstance)
+    cdebug "[PIPELINE] tryMountIsoNimCalltrace: mount COMPLETE in #calltraceComponent-0"
+
+  doMount()
+
+proc initCalltraceVMFromSession*(vm: CalltraceVM) =
+  ## Hand the pane the session's `CalltraceVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
+  if calltraceVMInstance != nil:
+    clog "CalltraceVM: replacing existing instance with shared-store version"
+    # No flag to reset. `calltracePanelIsLive` compares the host's recorded VM
+    # against `calltraceVMInstance`, so the assignment below IS the
+    # invalidation and the remount happens for the same reason it used to.
+  calltraceVMStore = store
+  calltraceVMInstance = vm
+  cdebug "[PIPELINE] initCalltraceVMFromSession: storeId=" & $store.storeId
+  clog "CalltraceVM: parallel ViewModel instance created (shared store)"
+  tryMountIsoNimCalltrace()
+
+proc initCalltraceVM() =
+  ## Lazily create the parallel CalltraceVM instance backed by a stub
+  ## BackendService.  This fallback is used when no shared store has
+  ## been provided via `initCalltraceVMFromSession` (e.g. in the VS Code
+  ## extension where the SessionViewModel is not yet wired).
+  if calltraceVMInstance != nil:
+    return
+
+  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+    # Return an immediately-resolved future so the store's loading
+    # state transitions correctly but no real I/O happens.
+    when defined(js):
+      result = newPromise proc(resolve: proc(resp: JsonNode)) =
+        resolve(%*{})
+    else:
+      var fut = newFuture[JsonNode]("stub-backend")
+      fut.complete(%*{})
+      result = fut
+
+  let stubBackend = BackendService(
+    sendProc: stubSend,
+    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+    disconnectProc: proc() = discard,
+  )
+
+  calltraceVMStore = createReplayDataStore(stubBackend)
+  calltraceVMInstance = createCalltraceVM(calltraceVMStore)
+  cdebug "[PIPELINE] initCalltraceVM (stub): storeId=" & $calltraceVMStore.storeId
+  clog "CalltraceVM: parallel ViewModel instance created (stub backend)"
+  tryMountIsoNimCalltrace()
+
+proc currentCallLineIndexOf(results: CtUpdatedCalltraceResponseBody): int64 =
+  ## The answer's `currentCallLineIndex`, or -1 when the engine sent none.
+  ## Read off the object itself rather than through the typed field: the
+  ## engine sends `null` for "unknown" (an `Option<usize>`), and a `null` in
+  ## a Nim `int` field compares as 0 in JavaScript, which would name the
+  ## trace's first row.
+  let raw = results.toJs[cstring"currentCallLineIndex"]
+  if jsTypeOf(raw) == cstring"number": int64(raw.to(int)) else: -1
+
+proc syncCalltraceData*(results: CtUpdatedCalltraceResponseBody) =
+  ## Mirror the legacy calltrace section data into the ViewModel store
+  ## so the CalltraceVM's visibleLines memo sees the same data.
+  let diagSyncStoreId = if calltraceVMStore.isNil: -1 else: calltraceVMStore.storeId
+  # One progress line, not two: the previous pair logged `storeId`, the
+  # line count and `totalCalls` twice, the first being a strict subset of
+  # the second.
+  cdebug fmt"[PIPELINE] syncCalltraceData: storeId={diagSyncStoreId} received {results.callLines.len} lines, totalCalls={results.totalCallsCount}, storeIsNil={calltraceVMStore.isNil}, vmIsNil={calltraceVMInstance.isNil}"
+  if calltraceVMStore.isNil:
+    # Stays at ERROR: this silently DROPS a backend calltrace response.
+    # The store is created by `initCalltraceVMFromSession` (or the stub
+    # `initCalltraceVM`) before `configureMiddleware` registers the
+    # `CtUpdatedCalltrace` subscription that calls us, so a nil store here
+    # is an initialisation-ordering defect, not a benign race — and its
+    # symptom is a permanently empty calltrace panel with no other trace.
+    cerror "[PIPELINE] syncCalltraceData: store is nil, returning early"
+    return
+
+  proc hasRenderableCall(callLine: CallLine): bool =
+    not callLine.isNil and
+      not callLine.content.isNil and
+      not callLine.content.call.isNil
+
+  let backendStartIndex = cast[int64](results.startCallLineIndex)
+  var vmLines: seq[vm_types.CallLine] = @[]
+  for i, callLine in results.callLines:
+    if not hasRenderableCall(callLine):
+      continue
+    # THE STORE DECIDES WHAT THE ROW SAYS (`callLineOf`), exactly as it does
+    # for the terminal and the native window, which decode the same response
+    # from its JSON. This side only copies the typed fields across.
+    var wire = wireOfCall(callLine.content.call)
+    wire.depth = callLine.depth
+    wire.count = callLine.content.count
+    wire.hiddenChildren = callLine.content.hiddenChildren
+    vmLines.add callLineOf(wire, backendStartIndex + i.int64)
+  # Mirror the backend's startCallLineIndex into the store so that the
+  # visibleLines memo can correctly slice based on the global index.
+  # Without this, after a calltrace-jump (search-result click) the
+  # backend returns a section centered around the jumped-to position,
+  # but the store stored startIndex=0 so the visible window kept showing
+  # rows [0..24] of the section, not rows around the jumped-to function.
+  # Mirror the per-call argument values into the store so the IsoNim
+  # calltrace view can render one ``.call-arg`` element per arg per row
+  # (matching the legacy call-argument markup that Playwright's
+  # ``CallTraceEntry.arguments()`` reads). Without this, the args column
+  # collapses to a static ``()`` and the ``variable inspection board via
+  # call trace argument`` test fails to find the named arg.
+  #
+  # The args data has TWO independent sources, mirroring the lookup
+  # the old Karax call-line renderer used:
+  #
+  #   1. ``results.args`` — a TableLike keyed by callKey, populated by
+  #      the backend for callstack-loaded calls.
+  #   2. ``call.args`` — embedded directly on each Call object when the
+  #      call was loaded via the materialized-trace pipeline (the case
+  #      for Python / Ruby DB traces, where ``results.args`` is empty
+  #      but each ``CallLine.content.call.args`` carries the argument
+  #      seq).
+  #
+  # We collect both and feed the merged table into the store; rows
+  # without args entries simply render no ``.call-arg`` children.
+  proc callArgText(arg: CallArg): string =
+    ## ONE call argument, rendered by PLAT-2's pipeline at the
+    ## `calltrace-arg` budget (`common/value_presentation/surfaces.nim`).
+    ##
+    ## WHAT WAS HERE, AND WHY IT HAD TO GO. This used to be
+    ## `safeCallArgText`: thirty lines of `case arg.value.kind` over ten
+    ## SCALAR `TypeKind`s, with `else: ""`. It was the fifth of the seven
+    ## independent "value -> string" implementations PLAT-2 measured, and it
+    ## survived the milestone's first pass — this file is byte-identical to
+    ## the pre-PLAT-2 tree apart from this block.
+    ##
+    ## It was not inert. Its output is written into the ViewModel store as a
+    ## `vm_types.CallArg`, and `viewmodel/views/isonim_calltrace_view.nim`'s
+    ## "Add value to scratchpad" wraps that STRING back into a
+    ## `TypeKind.Raw` `Value` and pushes it into the scratchpad — a surface
+    ## already on the pipeline. So one pane showed the same value spelled two
+    ## ways depending on which half of it the reader looked at, which is
+    ## precisely the risk PLAT-2's brief names ("a migration that leaves two
+    ## paths, so a visualiser works in some surfaces").
+    ##
+    ## `else: ""` was the visible half of that: a call argument that was a
+    ## sequence, an instance, a tuple, a table, a variant, a pointer or an
+    ## enum rendered as a BLANK chip. It reads like every other surface now.
+    if arg.isNil:
+      return ""
+    if ($arg.text).len > 0:
+      # The ENGINE's own pre-rendered spelling, kept as-is and not re-rendered.
+      #
+      # Every path the Rust engine has writes `text: ""` here
+      # (`db-backend/src/db.rs::to_call_arg` and
+      # `trace_reader.rs::to_call_arg`), so on a real recording this branch
+      # never fires and the presenter below renders every argument. What does
+      # populate it is `frontend/storybook_components.nim`, which builds
+      # `CallArg(name: …, text: …)` fixtures with no `value` at all — there is
+      # nothing for the presenter to render there, and dropping the branch
+      # would blank the storybook.
+      return $arg.text
+    if arg.value.isNil:
+      return ""
+    callArgValue(arg.value).root.text
+
+  proc convertCallArgs(args: seq[CallArg]): seq[vm_types.CallArg] =
+    result = @[]
+    for arg in args:
+      # Pre-rendering the text here keeps the view layer pure and avoids
+      # re-evaluating recursive ``Value`` trees on every reactive update.
+      let rendered = callArgText(arg)
+      result.add(makeCallArg($arg.name, rendered))
+
+  proc returnArg(call: Call): seq[vm_types.CallArg] =
+    ## PLAT-49 part B: the call's return value as `__return`, the rule the
+    ## native decoder applies too (`replay_data_store.callReturnTextOf`): a
+    ## call that returned none (`TypeKind.None`) shows no ` => `.
+    if call.returnValue.isNil or call.returnValue.kind == TypeKind.None:
+      return
+    let text = callArgValue(call.returnValue).root.text
+    if text.len > 0:
+      result.add makeCallArg("__return", text)
+
+  var vmArgs = initTable[string, seq[vm_types.CallArg]]()
+  for key, callArgs in results.args:
+    vmArgs[$key] = convertCallArgs(callArgs)
+  for callLine in results.callLines:
+    if callLine.isNil or callLine.content.isNil:
+      continue
+    let call = callLine.content.call
+    if call.isNil:
+      continue
+    let key = $call.key
+    if key in vmArgs:
+      # response-table entry takes precedence (matches legacy lookup)
+      vmArgs[key].add returnArg(call)
+      continue
+    let all = convertCallArgs(call.args) & returnArg(call)
+    if all.len == 0:
+      continue
+    vmArgs[key] = all
+  calltraceVMStore.updateCalltraceSection(
+    vmLines,
+    startIndex = backendStartIndex,
+    totalCount = cast[uint64](results.totalCallsCount),
+    args = vmArgs,
+  )
+  # Where the call the debugger is in sits in the whole trace, as the
+  # terminal and GPUI decoder already mirror it (`replay_data_store
+  # .applyCalltraceSection`). The search-result reveal reads it to bring a
+  # clicked result's row into the pane when it lies outside this section
+  # (`CalltraceVM.jumpToSearchResult`, codetracer#860).
+  calltraceVMStore.calltrace.currentLineIndex.val = currentCallLineIndexOf(results)
+  cdebug fmt"[PIPELINE] syncCalltraceData: synced {vmLines.len} calltrace lines into store ({vmArgs.len} arg entries), startIndex={backendStartIndex}, scrollPosition={results.scrollPosition}"
+
+proc syncCalltraceDebuggerPosition*(rrTicks: int, path: cstring, line: int;
+                                    sourceGeneration: int = 0;
+                                    sourceDigest: cstring = cstring"") =
+  ## Mirror the legacy debugger position into the ViewModel store so
+  ## the CalltraceVM's reactive pipeline sees the same rrTicks value.
+  ##
+  ## Updating `store.debugger` invalidates the CalltraceVM's auto-load
+  ## effect, which then issues a `requestCalltraceSection` with the
+  ## up-to-date totalCallsCount-aware window.  If the initial auto-load
+  ## was dropped before DAP launch completed, seed a first section from
+  ## this real complete-move position while the store is still empty.
+  if calltraceVMStore.isNil:
+    return
+  let ticks = cast[uint64](rrTicks)
+  let diagStoreId = calltraceVMStore.storeId
+  calltraceVMStore.updateDebuggerPosition(
+    ticks, $path, line,
+    sourceGeneration = sourceGeneration,
+    sourceDigest = $sourceDigest)
+  if calltraceVMStore.calltrace.lines.val.len == 0:
+    # The VM can issue its first auto-load before DAP launch completes;
+    # replay-server drops that request, so seed the initial section once
+    # the complete-move location proves the handler is ready.
+    calltraceVMStore.requestCalltraceSection(
+      startIndex = 0'i64,
+      height = 90,
+      depth = 20,
+      rrTicks = ticks,
+      file = $path,
+      line = line,
+    )
+  cdebug fmt"[PIPELINE] syncCalltraceDebuggerPosition: storeId={diagStoreId} synced debugger rrTicks={ticks}"
+
+method onUpdatedCalltrace*(self: CalltraceComponent, results: CtUpdatedCalltraceResponseBody) {.async.} =
+  self.totalCallsCount = results.totalCallsCount
+
+  # Feed the same data into the parallel ViewModel store.
+  syncCalltraceData(results)
+
+  for key, res in results.args:
+    self.args[key] = res
+
+  for key, ret in results.returnValues:
+    self.returnValues[key] = ret
+
+  for i, call in results.callLines:
+    self.loadedCallKeys[call.content.call.key] = i
+
+  self.callLines = results.callLines
+  self.originalCallLines = results.callLines
+
+  let element = document.getElementById(fmt"calltrace-toggle-loading-{self.id}")
+
+  if element != nil:
+    element.style.display = "none"
+
+  # The mark itself is the CalltraceVM's: it follows the call's key and
+  # retires when the section does not hold the call (#811), whatever route
+  # the section arrived by.
+  if self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
+    self.activeCallIndex = results.startCallLineIndex + self.loadedCallKeys[self.lastSelectedCallKey]
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectCall($self.lastSelectedCallKey)
+
+  if self.forceCollapse:
+    let scrollTo = max(results.scrollPosition - 2, 0)
+
+    if results.scrollPosition > 0:
+      self.calltraceScroll(scrollTo * CALL_HEIGHT_PX)
+    self.forceCollapse = false
+  else:
+    self.redrawCallLines()
+
+  self.redraw()
+
+# proc processStackFrame*(self: CalltraceComponent, index: int, frame: DapStackFrame) =
+#   # TODO
+#   discard
+
+# method onUpdatedStackTrace(self: CalltraceComponent, frames: seq[DapStackFrame]) =
+#   self.callLines = @[]
+#   self.args = JsAssoc[cstring, seq[CallKey]]()
+#   self.returnValues = JsAssoc[cstring, Value]()
+#   for i, frame in self.stackFrameToCallLine:
+#     self.processStackFrame(i, frame)
+#   self.redrawCallLines()
+#   self.redraw()
+
+method register*(self: CalltraceComponent, api: MediatorWithSubscribers) =
+  self.api = api
+
+  # The replay session store owns the production CalltraceVM.  Creating the
+  # stub-backed fallback during component registration can run reactive memos
+  # before the session store has been installed, aborting startup before the
+  # caption bar and Golden Layout panels finish hydrating.  The real VM is
+  # installed by configureMiddleware through initCalltraceVMFromSession.
+  if calltraceVMInstance != nil:
+    tryMountIsoNimCalltrace()
+
+  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+    discard self.onCompleteMove(response)
+  )
+  api.subscribe(CtUpdatedCalltrace, proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
+    discard self.onUpdatedCalltrace(response)
+  )
+  api.subscribe(CtCalltraceSearchResponse, proc(kind: CtEventKind, response: seq[Call], sub: Subscriber) =
+    self.registerSearchRes(response)
+  )
+  api.emit(InternalLastCompleteMove, EmptyArg())
+
+proc registerCalltraceComponent*(component: CalltraceComponent, api: MediatorWithSubscribers) {.exportc.} =
+  component.register(api)
+
+proc loadLines(self: CalltraceComponent, fromScroll: bool) =
+  if not self.usesMaterializedTracesTrace or not (not self.usesMaterializedTracesTrace and fromScroll) or not self.loadedCallKeys.hasKey(self.lastSelectedCallKey):
+    let depth = self.panelDepth()
+    let height = self.panelHeight()
+    let startBuffer = self.getStartBufferLen()
+    let calltraceLoadArgs = CalltraceLoadArgs(
+      location: self.location,
+      startCallLineIndex: self.startCallLineIndex - startBuffer,
+      depth: depth,
+      height: height + CALL_BUFFER + startBuffer,
+      rawIgnorePatterns: self.rawIgnorePatterns,
+      optimizeCollapse: true,
+      autoCollapsing: not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse,
+      renderCallLineIndex: 0,
+    )
+
+    echo "LOAD CALLTRACE SECTION"
+    self.api.emit(CtLoadCalltraceSection, calltraceLoadArgs)
+
+    # Also send the request via the ViewModel store's backend as a
+    # fallback. The mediator path (self.api.emit) may fail if the
+    # middleware subscription hasn't been set up yet (early registration).
+    # The store backend uses DapApi directly, bypassing the mediator.
+    if calltraceVMStore != nil:
+      calltraceVMStore.requestCalltraceSection(
+        startIndex = int64(self.startCallLineIndex - startBuffer),
+        height = height + CALL_BUFFER + startBuffer,
+        depth = depth,
+        rrTicks = cast[uint64](self.location.rrTicks),
+        file = $self.location.path,
+        line = self.location.line,
+        rawIgnorePatterns = $self.rawIgnorePatterns,
+        optimizeCollapse = true,
+        autoCollapsing = not self.loadedCallKeys.hasKey(self.lastSelectedCallKey) and self.forceCollapse,
+      )
+
+    self.loadedCallKeys = JsAssoc[cstring, int]{}
+  else:
+    cwarn "ignore"
+
+proc scroll(self: CalltraceComponent) =
+  let index = self.scrollLineIndex()
+  self.startCallLineIndex = index
+
+  # Feed the scroll position into the CalltraceVM so its auto-load
+  # effect triggers a fresh requestCalltraceSection.  This replaces
+  # the direct self.loadLines(fromScroll=true) call.
+  if calltraceVMInstance != nil:
+    calltraceVMInstance.setViewport(
+      calltraceVMInstance.viewport.val.scrolledTo(index))
+  else:
+    self.loadLines(fromScroll=true)
+
+# debouncing algorithm based on
+# multiple answers to https://stackoverflow.com/questions/25991367/difference-between-throttling-and-debouncing-a-function
+# and made after first throttling based on
+# https://johnkavanagh.co.uk/articles/throttling-scroll-events-in-javascript/
+const DELAY: int64 = 100 # milliseconds
+
+proc afterScroll(self: CalltraceComponent) =
+  let currentTime: int64 = now()
+  let lastTimePlusDelay = (self.lastScrollFireTime.toJs + DELAY.toJs).to(int64)
+
+  if lastTimePlusDelay <= currentTime:
+    self.scroll()
+
+proc eventuallyScroll(self: CalltraceComponent) =
+  let currentTime: int64 = now()
+
+  self.lastScrollFireTime = currentTime
+
+  let element = document.getElementById(fmt"calltrace-toggle-loading-{self.id}")
+  if element != nil:
+    element.style.display = "block"
+
+  discard windowSetTimeout(
+    proc =
+      self.afterScroll(),
+      cast[int](DELAY)
+  )
+
+proc setCalltraceMutationObserver(self: CalltraceComponent) =
+  let calltrace = "\"" & fmt"calltrace-data-label-{self.id}" & "\""
+  let activeCalltrace = jq(fmt"[data-label={calltrace}]")
+  if not activeCalltrace.isNil:
+    self.resizeObserver = createResizeObserver(proc(entries: seq[Element]) =
+      for entry in entries:
+        let timeout = setTimeout((proc =
+          try:
+            let index = self.scrollLineIndex()
+            self.startCallLineIndex = index
+            # Report the pane's size and scroll position as one viewport,
+            # so the auto-load effect re-requests data for the new size once.
+            if calltraceVMInstance != nil:
+              calltraceVMInstance.setViewport(Viewport(
+                rows: self.panelHeight(), cols: self.panelDepth(),
+                firstRow: index))
+            else:
+              self.loadLines(fromScroll=false)
+          except:
+            cwarn "scroll or load lines exception in mutation observer: ok if in editor mode"),
+          100
+        )
+      )
+    self.resizeObserver.observe(cast[Node](activeCalltrace))
+
+proc redrawCallLines(self: CalltraceComponent) =
+  ## Historical selection/scroll paths still call this proc, but the
+  ## calltrace panel no longer has a live Karax renderer to redraw.
+  ## `layout.nim` classifies `Content.Calltrace` as IsoNim-owned, and the
+  ## extension build registers only an empty stub.  The real DOM is updated by
+  ## `mountIsoNimCalltrace` reactive effects fed through `syncCalltraceData`.
+  discard
+
+proc changeLastCallSelection(self: CalltraceComponent) =
+  self.lastSelectedCallKey = self.callsByLine[self.selectedCallNumber].call.key
+
+proc changeCallSelection(self: CalltraceComponent, key: cstring) =
+  self.selectedCallNumber = self.lineIndex[key]
+  self.changeLastCallSelection()
+  self.redraw()
+
+proc getSelectedCall(self: CalltraceComponent): Call =
+  self.callsByLine[self.selectedCallNumber].call
+
+method onLeft*(self: CalltraceComponent) {.async.} =
+  let call = self.getSelectedCall()
+
+  if not call.parent.isNil:
+    self.changeCallSelection(call.parent.key)
+
+method onRight*(self: CalltraceComponent) {.async.} =
+  var call: Call = self.getSelectedCall()
+
+  if call.children.len() > 0:
+    self.changeCallSelection(call.children[0].key)
+
+method onUp*(self: CalltraceComponent) {.async.} =
+  if self.activeCallIndex > 0:
+    self.activeCallIndex -= 1
+
+    if self.activeCallIndex < self.startCallLineIndex:
+      self.calltraceScroll(max((self.activeCallIndex - self.panelHeight() + 1), 0) * CALL_HEIGHT_PX)
+    else:
+      self.redrawCallLines()
+
+method onDown*(self: CalltraceComponent) {.async.} =
+  if self.activeCallIndex < self.totalCallsCount - 1:
+    self.activeCallIndex += 1
+
+    if self.activeCallIndex >= self.startCallLineIndex + self.panelHeight() - 1:
+      self.calltraceScroll(self.activeCallIndex * CALL_HEIGHT_PX)
+    else:
+      self.redrawCallLines()
+
+method onEnter*(self: CalltraceComponent) {.async.} =
+  let buffer = self.getStartBufferLen()
+
+  if self.activeCallIndex - self.startCallLineIndex + buffer < self.callLines.len():
+    let callIndex = self.callLines[self.activeCallIndex - self.startCallLineIndex + buffer].content.call.key
+
+    if self.loadedCallKeys.hasKey($callIndex):
+      let callLinesIndex = self.loadedCallKeys[$callIndex]
+
+      case self.callLines[callLinesIndex].content.kind:
+      of CallLineContentKind.Call:
+        let call = self.callLines[callLinesIndex].content.call
+
+        self.lastSelectedCallKey = call.key
+        self.calltraceJump(call.location)
+
+      of CallLineContentKind.CallstackInternalCount:
+        let content = self.callLines[callLinesIndex].content
+
+        self.toggleCalls(EXPAND_CALLS_KIND, content.call.key, CalltraceNonExpandedKind.CallstackInternal, content.count)
+        self.loadLines(fromScroll=false)
+
+      of CallLineContentKind.StartCallstackCount:
+        let content = self.callLines[callLinesIndex].content
+
+        self.depthStart = content.call.depth
+        self.toggleCalls(EXPAND_CALLS_KIND, "0", CalltraceNonExpandedKind.Callstack, content.count)
+        self.loadLines(fromScroll=false)
+
+      of CallLineContentKind.NonExpanded:
+        discard
+
+      of CallLineContentKind.WithHiddenChildren:
+        discard
+
+      of CallLineContentKind.EndOfProgramCall:
+        discard
+
+method onPageUp*(self: CalltraceComponent) {.async.} =
+  let index = max((self.startCallLineIndex - self.panelHeight()), 0)
+
+  self.calltraceScroll(index * CALL_HEIGHT_PX)
+  self.activeCallIndex = index
+  self.redrawCallLines()
+
+method onPageDown*(self: CalltraceComponent) {.async.} =
+  let index = self.startCallLineIndex + self.panelHeight() - 1
+
+  self.calltraceScroll(index * CALL_HEIGHT_PX)
+  self.activeCallIndex = index
+  self.redrawCallLines()
+
+method onFocus*(self: CalltraceComponent) {.async.} =
+  if self.activeCallIndex == NO_INDEX:
+    self.activeCallIndex = self.startCallLineIndex
+  elif self.activeCallIndex < self.startCallLineIndex or self.activeCallIndex > self.startCallLineIndex + self.panelHeight():
+    self.calltraceScroll(self.activeCallIndex * CALL_HEIGHT_PX)
+
+  self.redrawCallLines()
+
+method onGotoStart*(self: CalltraceComponent) {.async.} =
+  self.activeCallIndex = 0
+  self.startCallLineIndex = self.activeCallIndex
+
+  self.calltraceScroll(0)
+
+method onGotoEnd*(self: CalltraceComponent) {.async.} =
+  self.activeCallIndex = self.totalCallsCount - 1
+  self.startCallLineIndex = self.totalCallsCount - self.panelHeight()
+
+  self.calltraceScroll(self.activeCallIndex * CALL_HEIGHT_PX)
+
+method onFindOrFilter*(self: CalltraceComponent) {.async.} =
+  let forms = document.getElementsByClass(fmt"calltrace-search-form-{self.id}")
+
+  if forms.len() > 0:
+    let form = forms[0].Element
+    let inputElement = form.getElementsByTagName("input".cstring)
+    if inputElement.len() > 0:
+      inputElement[0].focus()
+
+method onCompleteMove*(self: CalltraceComponent, response: MoveState) {.async.} =
+  self.location = response.location
+
+  # Wrap every signal write that feeds the CalltraceVM's autoLoad effect
+  # in a single `batch(...)`.  The autoLoad effect depends on
+  # the viewport, the debugger position (rrTicks/file/line), and
+  # rawIgnorePatterns — without
+  # batching, each individual write schedules its own autoLoad re-run,
+  # producing several backend round-trips per CtCompleteMove that
+  # overwrite the calltrace store mid-render and leave Playwright holding
+  # stale `.calltrace-call-line` locators (the python/ruby sudoku
+  # navigation regression).
+  let location = response.location
+  let hasVM = calltraceVMInstance != nil
+  let vm = calltraceVMInstance
+  let viewportHeight = self.panelHeight()
+  let viewportDepth = self.panelDepth()
+  let hasIgnorePatterns = hasVM and not self.rawIgnorePatterns.isNil
+  let ignorePatterns = if hasIgnorePatterns: $self.rawIgnorePatterns else: ""
+  isoBatch.batch proc() =
+    syncCalltraceDebuggerPosition(
+      location.rrTicks, location.path, location.line,
+      location.sourceGeneration, location.sourceDigest)
+    if hasVM:
+      vm.setViewport(Viewport(rows: viewportHeight, cols: viewportDepth,
+                              firstRow: vm.viewport.val.firstRow))
+      if hasIgnorePatterns:
+        vm.setRawIgnorePatterns(ignorePatterns)
+
+  # LRS-5's second deletion round: the DECISION this milestone had to take
+  # rather than inherit (design §3.5's rule-7 correction).
+  #
+  # This flag used to be set from `toLangFromFilename(self.location.path)` --
+  # the language of the ACTIVE FILE -- and `usesMaterializedTraces` of that.
+  # It is the wrong input for what the flag gates, and it was measurably wrong
+  # before this milestone: in a wasm-recorded Rust program the active path is a
+  # `.rs` file, `usesMaterializedTraces(LangRust)` is `false`, and this pane
+  # therefore took the NATIVE path through a MATERIALIZED recording.  Deleting
+  # `LangRustWasm` would have left that unchanged rather than caused it, which
+  # is why LRS-4's review recorded it as a pre-existing gap and left the
+  # decision here.
+  #
+  # The decision: read the RECORDING, like the other four sites.  Three
+  # reasons, in order of force.
+  #
+  # 1. What the flag gates is WHICH BACKEND this pane talks to -- the
+  #    db-backend's materialized calltrace/event stream, or the native replay
+  #    path.  That is a property of the container, not of the file on screen.
+  # 2. The flag is LATCHED (`...Set` above): it is taken once, from whichever
+  #    file happened to be active at the first complete-move.  A per-recording
+  #    decision taken from an accidental per-move input is a race, not a
+  #    design.
+  # 3. Its own name says `...Trace`.
+  #
+  # What changes observably for a user: a recording whose active file is of a
+  # different language than the recording's own summary.  Stepping into a `.c`
+  # extension source from a Python (materialized) recording used to latch
+  # `false` here and drive this pane down the native path inside a
+  # materialized recording; it now stays materialized.  The converse -- a
+  # native C recording whose first active file is a `.py` helper, which used
+  # to latch `true` -- now stays native.  In both directions this pane now
+  # agrees with the REPL, `lineStepJump`, the re-record path and the stored
+  # calltrace mode instead of disagreeing with all four.
+  if not self.usesMaterializedTracesTraceSet:
+    self.usesMaterializedTracesTrace = self.data.trace.usesMaterializedTraces
+    self.usesMaterializedTracesTraceSet = true
+
+  # For materialized traces: if the call key is already loaded, just
+  # update the active index and scroll position without re-requesting.
+  echo "ON COMPLETE MOVE; is db?: ", self.usesMaterializedTracesTrace
+  if self.usesMaterializedTracesTrace and self.loadedCallKeys.hasKey(response.location.key):
+    self.lastSelectedCallKey = response.location.key
+    let buffer = self.getStartBufferLen()
+
+    self.activeCallIndex = self.startCallLineIndex + self.loadedCallKeys[response.location.key]
+
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectCall($response.location.key)
+
+    if self.loadedCallKeys[response.location.key] >= self.panelHeight() - 1 + buffer:
+      self.calltraceScroll(((self.activeCallIndex - buffer) - (self.panelHeight() / 2).floor) * CALL_HEIGHT_PX)
+  elif not self.usesMaterializedTracesTrace or not self.loadedCallKeys.hasKey(response.location.key):
+    self.lastSelectedCallKey = response.location.key
+    # Follow the new current call now: the row marked before the move is
+    # not where the debugger is, and the section that holds the call marks
+    # it when it loads, by whichever route it arrives.
+    if calltraceVMInstance != nil:
+      calltraceVMInstance.selectCall($response.location.key)
+    self.forceCollapse = true
+    # When the IsoNim view is the active renderer, the CalltraceVM's
+    # auto-load effect (in `createCalltraceVM`) is the single source of
+    # truth for calltrace section requests.  It depends on
+    # `store.debugger.val` so the position write above already
+    # invalidates it, scheduling exactly one request with the correct
+    # totalCallsCount-aware window.  The legacy `loadLines` was kept as
+    # a parallel safety net but its smaller response (panelHeight +
+    # CALL_BUFFER ≈ 45 lines vs the auto-load's totalCalls-aware ~100)
+    # arrived after the auto-load response and clobbered the store with
+    # truncated data, so Playwright's `findEntry` raced an oscillating
+    # DOM during navigation tests (python/ruby sudoku — TODO 5.1(a)).
+    # Skip the legacy call when the VM is wired; the legacy path is
+    # only needed for the (unused) Karax-only fallback.
+    # Exception: in the extension the CalltraceVM uses a stub backend —
+    # it resolves requests immediately with no data.  `loadLines` is the
+    # only path that emits CtLoadCalltraceSection via the VS Code
+    # messaging channel, which the extension middleware routes to the
+    # real DAP server.  Without this call the calltrace panel stays
+    # empty even though calltraceVMInstance is non-nil.
+    when defined(ctInExtension):
+      self.loadLines(fromScroll=false)
+    else:
+      if calltraceVMInstance.isNil:
+        self.loadLines(fromScroll=false)
+  self.redraw()
+
+proc setContinuationLinks*(self: CalltraceComponent, links: seq[ContinuationLinkInfo]) =
+  ## Called by the backend when continuation links are discovered.
+  ## Builds the lookup table mapping registration GEIDs to their links
+  ## so the call view can show jump icons next to await expressions.
+  self.continuationLinks = links
+  self.continuationsByCallKey = JsAssoc[cstring, ContinuationLinkInfo]{}
+  for link in links:
+    # Map the registration GEID to the link.
+    # The call key format depends on the trace type;
+    # for now, use the GEID as the key string.
+    let key = cstring($link.registrationGEID)
+    self.continuationsByCallKey[key] = link
+
+proc setAsyncThreads*(self: CalltraceComponent, threads: seq[AsyncThreadInfo]) =
+  ## Called by the backend when async thread groupings are discovered.
+  self.asyncThreads = threads
+
+# CalltraceComponent.render() removed: IsoNim is the primary renderer.
+# Generic callers are expected to use direct IsoNim mount paths. All
+# real rendering is handled by tryMountIsoNimCalltrace().
+
+when defined(ctInExtension):
+  method redrawForExtension*(self: CalltraceComponent) =
+    self.bindCalltraceExtensionHost()
+
+proc renderRemoveButtonDom(
+  self: CallExpandedValuesComponent,
+  key: cstring,
+  row: Node
+): Node =
+  proc removeFromParent(node: Node) {.importjs: "(function(node) { if (node.parentNode) node.parentNode.removeChild(node); })(#)".}
+  result = calltraceNewElement(cstring"div", cstring"remove-expanded-value")
+  result.setAttribute(cstring"id", cstring(fmt"expanded-value-remove-button-{key}"))
+  result.addEventListener(cstring"click", proc(ev: Event) =
+    discard jsDelete(self.values[key])
+    row.removeFromParent())
+  result.appendChild(calltraceText(cstring"x"))
+
+proc renderExpandedValueDom(
+  self: CallExpandedValuesComponent,
+  key: cstring,
+  value: ValueComponent,
+  isLastValue: bool = false,
+  isReturnValue: bool
+): Node =
+  result = calltraceNewElement(cstring"div", cstring"value-expanded")
+  result.appendChild(setExpandedValueOffsetDom(
+    self.depth,
+    isLastValue,
+    self.backIndentCount,
+    self.callHasChildren,
+    self.callIsLastChild,
+    self.callIsCollapsed,
+    self.callIsLastElement))
+
+  let valueClass =
+    if isReturnValue:
+      cstring"call-expanded-value return-value"
+    else:
+      cstring"call-expanded-value"
+  let valueContainer = calltraceNewElement(cstring"div", valueClass)
+  let hostId = calltraceValueDomHostId(
+    cstring"call-expanded-value-dom",
+    key,
+    value.baseExpression)
+  let host = calltraceNewElement(cstring"div", cstring"calltrace-direct-value-host")
+  host.setAttribute(cstring"id", hostId)
+  host.setAttribute(cstring"style", cstring"width: 100%;")
+  host.appendChild(value.renderValueDom())
+  valueContainer.appendChild(host)
+  valueContainer.appendChild(renderRemoveButtonDom(self, key, result))
+  result.appendChild(valueContainer)
+
+proc renderCallExpandedValuesDom*(self: CallExpandedValuesComponent): Node =
+  ## Build the legacy expanded call-value container directly. The rich value
+  ## rows are owned by ValueComponent.renderValueDom(); this helper preserves
+  ## only the calltrace-specific container, offset, and remove-button shell.
+  let hasReturnValue = self.values.hasKey(returnValueName)
+  var lastKey = cstring""
+
+  result = calltraceNewElement(cstring"div", cstring"call-expanded-values-container")
+
+  if not hasReturnValue and self.values.len > 0:
+    lastKey = getLastKey(self.values)
+
+  for key, value in self.values:
+    if key == returnValueName:
+      continue
+    let isLastValue = key == lastKey
+    result.appendChild(renderExpandedValueDom(self, key, value, isLastValue, false))
+
+  if hasReturnValue:
+    result.appendChild(renderExpandedValueDom(
+      self,
+      returnValueName,
+      self.values[returnValueName],
+      true,
+      true))

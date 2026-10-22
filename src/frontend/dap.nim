@@ -48,6 +48,11 @@ when not defined(ctInExtension):
       ipc*: Jsobject
       seq*: int
       sessionId*: int  ## M8: id of the owning ReplaySession, attached to outgoing DAP requests.
+      notificationsWired*: bool
+        ## Whether `event_helpers.wireSessionNotifications` has already
+        ## connected this API's `ct/notification` and `ct/launch-failed` to its
+        ## session's views mediator. Every session's API is wired once, and a
+        ## second wiring would show each notification twice.
       pendingResponses*: JsAssoc[cstring, proc(outcome: DapRequestOutcome)]
         ## M49 — in-flight `asyncSendCtRequest` continuations, keyed by
         ## the request's wire `seq`.
@@ -89,6 +94,8 @@ else:
       context*: VsCodeContext
       editor*: JsObject
       sessionId*: int  ## M8: id of the owning ReplaySession (unused in extension mode for now).
+      notificationsWired*: bool
+        ## See the field of the same name in the desktop arm above.
       # flowFunction*: proc(editor: JsObject)
       # completeMoveFunction*: proc(editor: JsObject, response: MoveState, dapApi: DapApi)
 
@@ -175,6 +182,7 @@ const EVENT_KIND_TO_DAP_MAPPING*: array[CtEventKind, cstring] = [
   InternalNewOperation: "",
   InternalTraceMapUpdate: "",
   CtNotification: "ct/notification",
+  CtLaunchFailed: "ct/launch-failed",
   TracepointLocals: "tracepoint-locals",
   CtTracepointResults: "ct/tracepoint-results",
   CtFlowJump: "ct/flow-jump",

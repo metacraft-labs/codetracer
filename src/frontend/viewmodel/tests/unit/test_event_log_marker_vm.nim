@@ -25,6 +25,7 @@
 ## Compile + run:
 ##   nim c -r src/frontend/viewmodel/tests/unit/test_event_log_marker_vm.nim
 
+import ../../viewport
 import std/[json, options, strutils, tables, unicode, unittest]
 
 import isonim/core/async_compat
@@ -216,6 +217,9 @@ suite "M25b — EventLogVM populates marker row metadata":
     mock.expect("ct/event-load", parseJson(SAMPLE_EVENT_LOAD_RESPONSE))
     let store = createReplayDataStore(mock.toBackendService())
     let vm = createEventLogVM(store)
+    # A measured pane (Viewport-Driven-Loading V1): an unmeasured one asks
+    # for nothing.
+    vm.setViewport(Viewport(rows: 20))
     drain()
 
     check mock.findCommand("ct/event-load").isSome

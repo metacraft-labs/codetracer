@@ -35,6 +35,7 @@
 ## | Source access       | `SourceVM` (`viewmodels/source_vm`) and `SourceProvider` (`sdk/source_provider`) |
 ## | `BackendService`    | `backend/backend_service`, `backend/mock_backend`, `backend/dap_commands` |
 ## | Session lifecycle   | `DebuggerSession`, `SessionViewModel`, `AppViewModel`                     |
+## | Seek coalescing     | `ScrubQueue` (`sdk/scrub_queue`)                                          |
 ## | `TraceSource`       | `sdk/trace_source`                                                        |
 ## | Clock               | `isonim/core/clock`, `isonim/testing/test_utils` (`withFakeTime`)         |
 ## | Types               | `store/types` — the trace, location, frame, value, event and span models  |
@@ -372,6 +373,12 @@ export debugger_session
 # ---------------------------------------------------------------------------
 import sdk/trace_source
 export trace_source
+
+# The scrubber's seek coalescer (Shared-DOM-Front-Ends D8): at most one seek
+# outstanding, a newer target superseding the waiting one. Pure data, so a host
+# drives it from its own pointer events and transport.
+import sdk/scrub_queue
+export scrub_queue
 
 # ---------------------------------------------------------------------------
 # The plugin surface (PLAT-7, Extensibility-Model.md §2.1, §4.2, §5)

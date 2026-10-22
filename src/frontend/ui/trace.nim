@@ -12,6 +12,8 @@ import
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+from ./editor_points import gutterMarkFor, EditorMark, emNone, emBreakpoint,
+  emBreakpointDisabled, emTracepoint
 import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
@@ -1165,17 +1167,15 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
       not isDeleteChunk:
     highlightHtml = cstring"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
 
-  if self.data.services.debugger.hasBreakpoint(path, realLine):
-    let breakpoint = self.data.services.debugger.breakpointTable[path][realLine]
-
-    if breakpoint.enabled:
-      if not breakpoint.error:
-        breakpointHtml = cstring"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
-      else:
-        breakpointHtml = cstring"<div class='gutter-breakpoint-error' onmousedown='event.stopPropagation()'></div>"
-
-    else:
-      breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
+  # The line's mark is the session store's (`editor_points.gutterMarkFor`),
+  # the same `EditorMark` the terminal and GPUI draw for this line.
+  case gutterMarkFor($path, realLine)
+  of emBreakpoint:
+    breakpointHtml = cstring"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
+  of emBreakpointDisabled:
+    breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
+  of emNone, emTracepoint:
+    discard
 
   var runTestHtml = cstring""
   if not isDeleteChunk and gutterHasTest(path, realLine):

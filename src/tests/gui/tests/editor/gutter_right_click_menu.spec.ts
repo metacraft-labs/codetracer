@@ -26,7 +26,7 @@
  *   1. a click on line 31's `.gutter-line` adds an enabled breakpoint;
  *   2. a right click on its `.gutter-breakpoint-enabled` marker disables it —
  *      the marker turns `.gutter-breakpoint-disabled`, the frontend's
- *      `breakpointTable` holds it `enabled: false` — and NO menu is open;
+ *      the session's breakpoint rows holds it `enabled: false` — and NO menu is open;
  *   3. the first right click on line 31's text offers "Enable breakpoint" and
  *      not "Disable breakpoint";
  *   4. the mirror: a right click on the now-disabled marker re-enables it,
@@ -43,7 +43,7 @@
  *      `.gutter-no-breakpoint` placeholder `trace.editorLineNumber` draws
  *      where a marker would be, does nothing ("On a line without a
  *      breakpoint it does nothing", gesture 8): no menu opens, no marker
- *      appears on the line and `breakpointTable` gains no entry for it.
+ *      appears on the line and the session's breakpoint rows gains no entry for it.
  *      Until `isGutterToggleTarget` matched the placeholder, Monaco's
  *      listener took the press for an ordinary margin right click and opened
  *      the editor's menu.
@@ -80,7 +80,6 @@ function recording(): string {
 test.use({
   sourcePath: recording(),
   launchMode: "trace-folder",
-  noUserLayout: true,
 });
 test.setTimeout(300_000);
 
@@ -98,11 +97,14 @@ const EMPTY_LINE = 36;
 const emptyGutterOf = (page: Page) =>
   page.locator(`.monaco-editor .margin-view-overlays .gutter[data-line='${EMPTY_LINE}']`).first();
 
-/** The breakpoint `breakpointTable` holds on `line` (default 31) of any
- *  `main.py`, or null. */
+/** The breakpoint the session holds on `line` (default 31) of any `main.py`
+ *  (`ctBreakpointRows`, the session store's rows), or null. */
 async function breakpointOnLine(page: Page, line: number = LINE): Promise<{ enabled: boolean } | null> {
   return page.evaluate((line) => {
-    const table = (globalThis as any).data?.services?.debugger?.breakpointTable ?? {};
+    const g = globalThis as any;
+    const rows: any[] = g.ctBreakpointRows ? g.ctBreakpointRows() : [];
+    const table: any = {};
+    for (const r of rows) (table[r.path] ??= {})[r.line] = r;
     for (const file of Object.keys(table)) {
       if (!file.endsWith("main.py")) continue;
       const bp = table[file]?.[line];

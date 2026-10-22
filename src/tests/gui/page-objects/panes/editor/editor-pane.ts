@@ -376,7 +376,7 @@ export class EditorPane {
       return await this.page.evaluate(
         ({ path, lineNumber }) => {
           const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-          const table = w?.data?.services?.debugger?.breakpointTable;
+          const table = (w?.ctBreakpointRows ? w.ctBreakpointRows().reduce((t: any, r: any) => { (t[r.path] ??= {})[r.line] = r; return t; }, {}) : undefined);
           if (!table) return false;
 
           const aliases = [path];

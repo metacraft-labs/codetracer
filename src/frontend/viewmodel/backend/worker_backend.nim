@@ -254,6 +254,19 @@ proc deliver*(w: WorkerBackend; raw: string) =
       # instead of vanishing.
       w.emitControl(message)
   of "event":
+    # THE SDK'S ENVELOPE AS WELL AS THE DAP ONE. Every subscriber in the
+    # ViewModel layer reads an event's name from `kind` and its payload from
+    # `data` (`replay_data_store.installBackendEventHandlers`, `FlowVM`'s
+    # `ct/updated-flow` handler, `DebuggerSession.followBackendMoves`) — the
+    # shape `RealBackendService` delivers. A DAP event carries them as `event`
+    # and `body`, so over this transport none of those handlers ever fired, and
+    # each consumer re-read the event itself (BlockTracer's decorators,
+    # Shared-DOM-Front-Ends D8). The two fields are added, not swapped, so a
+    # handler written against the DAP shape still reads it.
+    if not message.hasKey("kind") and message.hasKey("event"):
+      message["kind"] = message["event"]
+    if not message.hasKey("data") and message.hasKey("body"):
+      message["data"] = message["body"]
     w.emitEvent(message)
   of "worker-error":
     let detail = message{"error"}.getStr("unknown worker error")

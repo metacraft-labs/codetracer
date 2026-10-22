@@ -15,7 +15,10 @@
 #     `$XDG_CACHE_HOME/codetracer/vscode-484fdf69`), `src/vs/**/*.ts` only, or
 #     `$CT_VSCODE_DIR` when a checkout is already at hand;
 #   * CUA-Keymap.md from the specification checkout
-#     (`$CT_SPECS_DIR`, else `../codetracer-specs`).
+#     (`$CT_SPECS_DIR`, else the workspace sibling `../codetracer-pm`, the
+#     name `codetracer-specs` was renamed to and the default
+#     `src/frontend/test_support/spec_documents.nim`'s `SpecRepoDirName`
+#     holds).
 #
 # A MISSING INPUT IS RED, NEVER A SKIP: a gate that passes when it could not
 # look is the false green this campaign keeps finding (Verification-Harness-
@@ -29,7 +32,7 @@ set -euo pipefail
 COMMIT=484fdf69b8509c1c9370d913b32e9f6d3a68cc99
 
 monaco="${CT_MONACO_DIR:-node_modules/monaco-editor/esm/vs}"
-specs="${CT_SPECS_DIR:-../codetracer-specs}"
+specs="${CT_SPECS_DIR:-../codetracer-pm}"
 spec="$specs/spec/GUI/CUA-Keymap.md"
 
 if [ ! -d "$monaco" ]; then
@@ -39,7 +42,7 @@ if [ ! -d "$monaco" ]; then
 fi
 if [ ! -f "$spec" ]; then
 	echo "cua-keymap-extractor: no CUA-Keymap.md at '$spec'" \
-		"(set CT_SPECS_DIR to a codetracer-specs checkout)" >&2
+		"(set CT_SPECS_DIR to a codetracer-pm checkout)" >&2
 	exit 1
 fi
 

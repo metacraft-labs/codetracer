@@ -673,4 +673,9 @@ lint_step "contract suite: every Rust crate with tests is run (enumerated baseli
 lint_step "contract suite: Playwright recipe arguments stay intact" \
 	bash ci/test/e2e-argument-forwarding-test.sh
 
+# The agent instructions must name the directory those Playwright recipes run,
+# and no spec may sit where no Playwright config collects it. Pure bash + git.
+lint_step "contract suite: AGENTS.md names the Playwright suite the recipes run" \
+	bash ci/test/agents-md-playwright-dir-test.sh
+
 lint_summary

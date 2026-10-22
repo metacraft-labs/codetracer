@@ -79,7 +79,7 @@
   durable fix is to update nix-blockchain-development itself; local testing with
   Sui 1.70.2 and metacraft-labs/nixos-modules b4c1815 built successfully when
   using a large Nix build dir such as `/var/tmp`.
-- ViewModel headless tests are organized under `src/frontend/viewmodel/tests/` in three subdirectories: `unit/` (pure VM tests with MockBackendService), `scenarios/` (headless mirrors of GUI tests in `tsc-ui-tests/tests/`), and `integration/` (tests using real replay-server). Every GUI test category has a corresponding scenario file. See `tests/README.md` for the naming convention and mapping table.
+- ViewModel headless tests are organized under `src/frontend/viewmodel/tests/` in three subdirectories: `unit/` (pure VM tests with MockBackendService), `scenarios/` (headless mirrors of GUI tests in `src/tests/gui/tests/`), and `integration/` (tests using real replay-server). Every GUI test category has a corresponding scenario file. See `tests/README.md` for the naming convention and mapping table.
 - When adding new UI component modules under `src/frontend/ui/`, import them from `src/frontend/ui_js.nim` (the main entry point) so their registration, direct render entrypoints, and IsoNim mount helpers are compiled into the JS output. The old base `Component.render()` fallback was removed during the IsoNim migration; generic render dispatch should not be reintroduced.
 - Ruby loops were originally detected only for 'while' and 'until'.
 - 'each' loops can be recognized by handling 'call' nodes with a block whose method name is 'each'.
@@ -163,7 +163,7 @@
 - Tab-vs-window policy: `newTracePolicy` config field and `--new-tab`/`--new-window` CLI flags control whether a second `ct run`/`ct replay` opens a new tab or a new window. The mechanism uses Electron's `requestSingleInstanceLock()` + `second-instance` event in `src/frontend/index.nim`. The renderer's `onOpenTraceInTabReady` handler (in `ui_js.nim`) creates a new session tab and triggers `load-recent-trace`.
 - The `uiIpcHandlers` macro in `ui_js.nim` converts message strings to camelCase handler names (e.g., `"open-trace-in-tab-ready"` -> `onOpenTraceInTabReady`). For simple string messages, the handler receives `(sender, response)` from ipcRenderer.
 - Multi-session trace loading: to load a trace into a new session tab, create the session via the "+" button (which sets activeSessionIndex), then send `CODETRACER::load-recent-trace` IPC with the target traceId. The main process's `onLoadRecentTrace` calls `prepareForLoadingTrace` then `loadExistingRecord` (sends init + trace-loaded to renderer). The renderer's `onTraceLoaded` stores the trace in `data.sessions[activeSessionIndex]`. `prepareForLoadingTrace` no longer stops previous replays — multiple DAP connections run simultaneously. Each session stores its `replayId` (from `dap-replay-selected`), and `closeSession` sends `close-replay-session` IPC with that replayId to stop it.
-- `recordTestProgram` is exported from `tsc-ui-tests/lib/fixtures.ts` so tests can pre-record additional programs and load them into new sessions via IPC.
+- `recordTestProgram` is exported from `src/tests/gui/lib/fixtures.ts` so tests can pre-record additional programs and load them into new sessions via IPC.
 - `#session-tab-bar` must live OUTSIDE `#ROOT` in `index.html`; `destroyCurrentLayout` clears `#ROOT` innerHTML during session switches, which would destroy the direct IsoNim tab bar host if the tab bar were nested inside `#ROOT`.
 - Session tab bar DOM is owned by `viewmodel/views/isonim_session_tabs_view.nim` and refreshed via explicit `requestSessionTabsRender(data)` calls from session/trace mutation paths; it no longer has a Karax `setRenderer` host stub. Caption-bar progress now follows the same pattern with `requestCaptionBarProgressRender(component)` from progress and hover mutation paths; `directDomRedrawCallbacks` has been removed entirely.
 - The global debug shell is no longer a child of the Karax menu renderer. `index.html` owns the static `#debug` host, `ui/debug.nim::requestDebugShellRender` mounts `viewmodel/views/isonim_debug_shell_view.nim` into it once, and `#isonim-debug-controls` remains the separate toolbar mount.
@@ -982,8 +982,9 @@ and a correlation marker's counterpart is by definition in another process.
     Anything that asks "is panel X in the layout?" must also consult the
     auto-hide state (`~/.config/codetracer/auto_hide_state.json`), or pinning
     FILES makes the loader declare the layout incompatible and delete it.
-  * The GUI fixture copies the bundled default over `default_layout.json` on
-    EVERY test setup (`src/tests/gui/lib/layout-reset.ts`), and the index
+  * The GUI fixture resets `default_layout.json` on EVERY test setup (removes
+    it, or installs the bundled tree under `bundledLayout`;
+    `src/tests/gui/lib/layout-reset.ts` `prepareUserLayout`), and the index
     process reads the layout file exactly once at startup. A layout-loading
     spec must therefore write `default_edit_layout.json` from a `beforeEach`
     that requests no fixture — writing after `ctPage.reload()` tests nothing.
@@ -1347,7 +1348,10 @@ inside the directory.
   (`lib/fixtures.ts` mkdtemps it at module scope). So anything a test leaves
   in `~/.config/codetracer` is input to every later test in that worker. The
   `ctPage` fixture resets all three pieces of the saved arrangement before a
-  launch: `default_layout.json` (`ensureDefaultLayout`), `auto_hide_state.json`
+  launch: `default_layout.json` (`prepareUserLayout` — REMOVED by default, so
+  the launch takes the product's first-run path and opens the Debug mode's
+  default; `bundledLayout: true` installs the raw bundled tree no mode draws,
+  `preserveUserLayout: true` keeps the saved one), `auto_hide_state.json`
   (`resetAutoHideState`) and — since a `ct review` launch reads it —
   `default_edit_layout.json` (`resetEditLayout`). Specs that seed one of those
   themselves must do it in a fixture-free `beforeEach` (which runs BEFORE the

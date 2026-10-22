@@ -532,7 +532,7 @@ when defined(js):
       showDockedPanel(live)
 
       # THE DISCRIMINATING ASSERTION.  `stateComponent-0` is the id
-      # `state.tryMountIsoNimStatePanel` resolves its container by; a restore
+      # `panel_host.ensurePanelMountedById` finds the State pane's container by; a restore
       # that produces no such node in the document produces an empty pane,
       # whatever the JSON says.  See
       # `auto-hide/auto_hide_restore_mount_test.nim` for the rest of #691.

@@ -4,8 +4,8 @@
 ## recording scenarios.
 ##
 ## Replicates key assertions from the Playwright GUI tests:
-##   - ``tsc-ui-tests/tests/multi-replay/comprehensive-tabbed-replay.spec.ts``
-##   - ``tsc-ui-tests/tests/replay-session/replay-session-scoping.spec.ts``
+##   - ``src/tests/gui/tests/multi-replay/comprehensive-tabbed-replay.spec.ts``
+##   - ``src/tests/gui/tests/replay-session/replay-session-scoping.spec.ts``
 ##
 ## Instead of verifying DOM elements, these tests verify the DATA exposed
 ## by the ViewModel layer (debugger position, calltrace lines, locals,

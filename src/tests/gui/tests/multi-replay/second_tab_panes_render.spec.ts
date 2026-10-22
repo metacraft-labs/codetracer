@@ -25,9 +25,12 @@
  *       nothing, and not the replay tab's project (the flow #835 was
  *       reported on; `Welcome-Screen.md` §"New file, and what it creates");
  *   (b) "+" → open a SECOND, DIFFERENT recording: the second tab's State,
- *       Call Trace, Event Log, Terminal, Scratchpad, Agent Activity, VCS,
- *       Test Results and Constraints panes are mounted — their hosts are not
- *       empty;
+ *       Call Trace, Event Log, Terminal, Scratchpad, Agent Activity, VCS and
+ *       Test Results panes are mounted — their hosts are not empty. No
+ *       Constraints pane: a replay opens on the Debug mode's default, which
+ *       does not place one (`frontend.modeDefaultOmittedContentIds`); the
+ *       launch fixture opens the first tab on that default too, as a user's
+ *       first run does. The Constraints pane's mount in a later tab is (a)'s;
  *   (c) the first tab's panes still render after all of that.
  *
  * WHAT (b) DOES NOT YET ASSERT, AND WHY. Rule 2 also wants those panes to show
@@ -315,7 +318,6 @@ test.describe("IsoNim panes render in every tab, not only the first", () => {
       "agentActivityComponent-0": nonEmpty,
       "vCSComponent-0": nonEmpty,
       "testResultsComponent-0": nonEmpty,
-      "constraintsComponent-0": nonEmpty,
     };
     const reading = await settledPanes(ctPage, 1, secondTab, 90);
     console.log(`# session-container-1 after loading basics.py: ${await inventory(ctPage, 1)}`);
@@ -338,7 +340,6 @@ test.describe("IsoNim panes render in every tab, not only the first", () => {
       "terminalComponent-0": nonEmpty,
       "vCSComponent-0": nonEmpty,
       "testResultsComponent-0": nonEmpty,
-      "constraintsComponent-0": nonEmpty,
     };
     const first = await settledPanes(ctPage, 0, firstTab, 20);
     expectPanes(first, firstTab, "the first replay tab (session-container-0) after switching back", await inventory(ctPage, 0));

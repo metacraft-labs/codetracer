@@ -1,9 +1,12 @@
 import
-  std / [jsconsole, os],
+  std / [jsconsole, os, options],
   ../dap,
   ../lib/[ logging, jslib ],
   ../../common/ct_event,
   service_imports
+
+from ../viewmodel/store/replay_data_store import ReplayDataStore
+import ../viewmodel/sdk/breakpoints
 
 proc restart*(self: DebuggerService) =
   self.locals = @[]
@@ -19,19 +22,6 @@ proc loadLocals*(self: DebuggerService, rrTicks: int, countBudget: int, minCount
     $rrTicks,
     seq[Variable])
   return self.locals
-
-proc evaluateExpression*(self: DebuggerService, rrTicks: int, expression: cstring): Future[Value] {.async.} =
-  let value = await self.data.asyncSend("evaluate-expression", EvaluateExpressionArg(rrTicks: rrTicks, expression: expression), &"{rrTicks}:{expression}", Value)
-  return value
-
-proc loadParsedExprs*(self: DebuggerService, line: int, path: cstring) {.async.} =
-  var table = await self.data.asyncSend("load-parsed-exprs", LoadParsedExprsArg(line: line, path: path), &"{path}:{line}", JsAssoc[cstring, seq[FlowExpression]])
-  if self.expressionMap.isNil:
-    self.expressionMap = JsAssoc[cstring, seq[FlowExpression]]{}
-    self.expressionMap = table
-  else:
-    for key, item in table:
-      self.expressionMap[key] = item
 
 proc calltraceSearch*(self: DebuggerService, response: CallSearchArg): Future[seq[Call]] {.async.} =
   let calls = await self.data.asyncSend("calltrace-search", response, &"{response}", seq[Call])
@@ -319,264 +309,165 @@ proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount
   )
 
 
-func hasBreakpoint*(self: DebuggerService, path: cstring, line: int): bool =
-  self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line)
+# ---------------------------------------------------------------------------
+# Breakpoints — the session store's, through the shared producer
+# ---------------------------------------------------------------------------
+#
+# THE STORE HOLDS THE ONLY BREAKPOINT STATE (Shared-DOM-Front-Ends D7.4). This
+# service kept its own `breakpointTable` and sent it with `dapSetBreakpoints`,
+# and the store learned only the lines the engine verified — so a disabled
+# breakpoint, a column and a condition existed on this side and nowhere a
+# ViewModel could read them, and the editor drew its gutter from the table
+# while every other front-end drew from the store. Each operation below is now
+# a plan over the store's rows (`sdk/breakpoints`, the planners the terminal and
+# GPUI use) sent through the session's backend, and the rows are replaced by
+# what the engine answered. The procs keep their names for their callers (the
+# program menu, the editor's menus, the renderer's `onAddBreakpoint`).
 
-const NO_B_COLUMN = 0
+proc store(self: DebuggerService): ReplayDataStore =
+  ## The session store this service's breakpoints live in, or nil before the
+  ## renderer has built the session (`ui_js` sets `pointStore`).
+  if self.isNil or self.pointStore.isNil: nil
+  else: cast[ReplayDataStore](self.pointStore)
+
+proc breakpointOf*(self: DebuggerService, path: cstring,
+                   line: int): Option[BreakpointSpec] =
+  ## The breakpoint on `path:line`, armed or not.
+  let st = self.store
+  if st.isNil: none(BreakpointSpec)
+  else: breakpointAt(st, $path, line)
+
+proc hasBreakpoint*(self: DebuggerService, path: cstring, line: int): bool =
+  self.breakpointOf(path, line).isSome
+
+proc breakpointsIn*(self: DebuggerService, path: cstring): seq[BreakpointSpec] =
+  ## `path`'s breakpoints, armed and disabled.
+  let st = self.store
+  if not st.isNil:
+    result = heldBreakpoints(st, $path)
 
 proc dapSetBreakpoints*(self: DebuggerService) =
-  ## M1 — when a registered breakpoint carries a non-zero column the
-  ## DAP request surfaces it; legacy breakpoints (``column == 0``)
-  ## fall back to the original line-only payload so older replay
-  ## servers (and the existing CI smoke fixtures) keep working.
-  ##
-  ## M9 — when a registered breakpoint carries a non-empty condition
-  ## expression, the DAP request ships it alongside the line/column.
-  ## The replay engine evaluates the condition at the candidate stop
-  ## step (see `db.condition_satisfied_at`).  Empty-string conditions
-  ## are normalised on the replay side to preserve the back-compat
-  ## semantic ("no condition").
-  ##
-  ## M10 — when a registered entry carries a non-empty ``logMessage``
-  ## the replay engine treats it as a DAP *tracepoint* (logpoint):
-  ## execution passing through the matched ``(line, column)`` emits a
-  ## DAP ``output`` event carrying the message and CONTINUES without
-  ## stopping.  Empty ``logMessage`` preserves the breakpoint
-  ## behaviour M1/M9 shipped with.
-  for path, breakpointList in self.breakpointTable:
-    closureScope:
-      var args = DapSetBreakpointsArguments(
-        source: DapSource(
-          name: extractFilename($path),
-          path: path,
-          sourceReference: nil
-        )
-      )
-      for line, b in breakpointList:
-        if b.enabled:
-          args.breakpoints.add(
-            DapSourceBreakpoint(
-              line: line,
-              column: b.column,
-              condition: b.condition,
-              logMessage: b.logMessage
-            )
-          )
-          args.lines.add(line)
-      # THE ANSWER IS READ (PLAT-40). This was fire-and-forget, so the engine's
-      # verdict on each breakpoint — which line it bound, whether it bound at
-      # all — reached nothing, and the ViewModel's point list never held the
-      # breakpoints a user set here. The verified lines now go to the store's
-      # one decoder, `applyVerifiedBreakpoints`, through `onBreakpointsVerified`.
-      let answeredPath = path
-      let data = self.data
-      discard data.dapApi.asyncSendCtRequest(DapSetBreakpoints, args.toJs).then(
-        proc(body: JsObject) =
-          if data.onBreakpointsVerified.isNil or body.isNil or
-             jsUndefined == body or body.breakpoints.isNil or
-             jsUndefined == body.breakpoints:
-            return
-          var verified: seq[int] = @[]
-          let answered = body.breakpoints
-          for i in 0 ..< answered.length.to(int):
-            let bp = answered[i]
-            if bp.verified.to(bool):
-              verified.add bp.line.to(int)
-          data.onBreakpointsVerified(answeredPath, verified))
+  ## Send every file's breakpoints again — the engine restarted and holds none
+  ## of them (`middleware`'s subsystem restart).
+  let st = self.store
+  if not st.isNil:
+    resendBreakpoints(st)
 
 proc addBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
-  if not self.hasBreakpoint(path, line):
-    if not self.breakpointTable.hasKey(path):
-      self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
-    self.breakpointTable[path][line] = UIBreakpoint(
-      line: line,
-      column: NO_B_COLUMN,
-      condition: cstring"",
-      path: path,
-      level: if not c: 0 else: 1,
-      enabled: true)
-    data.pointList.breakpoints.add(self.breakpointTable[path][line])
-
-    # if not c:
-    #   self.internalAddBreakpoint(path, line)
-    # else:
-    #   if self.data.trace.lang == LangNim:
-    #     self.internalAddBreakpointC(path, line)
-
-    # TODO self.data.services.editor.open[self.data.services.editor.active].viewLine = line
-  self.dapSetBreakpoints()
-  self.data.redraw()
-
+  ## A whole-line breakpoint on `path:line`, unless the line has one.
+  let st = self.store
+  if st.isNil or self.hasBreakpoint(path, line):
+    return
+  toggleBreakpoint(st, $path, line)
 
 proc addColumnTracepoint*(self: DebuggerService, path: cstring, line: int, column: int,
                           logMessage: cstring) =
-  ## M10 — Column-Aware Tracepoint / Logpoint: register a DAP
-  ## *logpoint* anchored at ``(path, line, column)`` carrying
-  ## ``logMessage``.  When execution passes through the matched step
-  ## the replay engine emits a DAP ``output`` event carrying the
-  ## message and CONTINUES without stopping — the defining
-  ## difference between a tracepoint (logpoint) and a breakpoint.
-  ##
-  ## Stored in the same ``breakpointTable[path][line]`` slot as a
-  ## column-aware breakpoint; the ``logMessage`` field distinguishes
-  ## the two surfaces.  Mirrors ``addColumnBreakpoint`` (M1) for the
-  ## tracepoint half of the column-aware navigation surface, the
-  ## final piece of the Column-Aware Replay Navigation campaign.
-  ##
-  ## See ``codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org``
-  ## §M10 for the contract.
-  if not self.breakpointTable.hasKey(path):
-    self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
-  self.breakpointTable[path][line] = UIBreakpoint(
-    line: line,
-    column: column,
-    condition: cstring"",
-    logMessage: logMessage,
-    path: path,
-    level: 0,
-    enabled: true)
-  data.pointList.breakpoints.add(self.breakpointTable[path][line])
-  self.dapSetBreakpoints()
-  self.data.redraw()
-
+  ## M10 — Column-Aware Tracepoint / Logpoint: a DAP *logpoint* anchored at
+  ## `(path, line, column)` carrying `logMessage`. When execution passes
+  ## through the matched step the replay engine emits a DAP `output` event
+  ## carrying the message and CONTINUES without stopping. It replaces the
+  ## line's breakpoint, as a column breakpoint does. See
+  ## `codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org`
+  ## §M10.
+  let st = self.store
+  if not st.isNil:
+    setAnchoredBreakpoint(st, $path, line, column, logMessage = $logMessage)
 
 proc addColumnBreakpoint*(self: DebuggerService, path: cstring, line: int, column: int,
                           condition: cstring = cstring"") =
-  ## M1 — Column-Aware Replay Navigation: register a breakpoint
-  ## anchored at ``(path, line, column)``.  Stored in the same
-  ## ``breakpointTable[path][line]`` slot as a line-only breakpoint
-  ## (one column-anchored breakpoint per line in the UI for now);
-  ## the recorded column is round-tripped through DAP so the
-  ## replay-server matches the exact recorded ``DbStep.column`` at
-  ## continue-time.
-  ##
-  ## Used by tests (and a future GUI affordance) to set
-  ## column-precision breakpoints; the existing
-  ## ``addBreakpoint``/``toggleBreakpoint`` path remains line-only
-  ## so the gutter-click default behaviour is unchanged.
-  ##
-  ## M9 — Column-Aware Conditional Breakpoint: the optional
-  ## ``condition`` parameter is forwarded to the replay engine on
-  ## the DAP ``setBreakpoints`` request.  When non-empty the engine
-  ## evaluates it against the locals recorded at the matched step
-  ## and only fires the breakpoint when the expression holds.
-  ## Composes orthogonally with ``column`` — both filters apply.
-  ## ``condition = ""`` preserves the M1 unconditional behaviour.
-  if not self.breakpointTable.hasKey(path):
-    self.breakpointTable[path] = JsAssoc[int, UIBreakpoint]{}
-  self.breakpointTable[path][line] = UIBreakpoint(
-    line: line,
-    column: column,
-    condition: condition,
-    path: path,
-    level: 0,
-    enabled: true)
-  data.pointList.breakpoints.add(self.breakpointTable[path][line])
-  self.dapSetBreakpoints()
-  self.data.redraw()
-
+  ## M1 — Column-Aware Replay Navigation: a breakpoint anchored at
+  ## `(path, line, column)`, replacing the line's breakpoint; the replay
+  ## server matches the exact recorded `DbStep.column` at continue-time. M9:
+  ## a non-empty `condition` is evaluated by the engine at the candidate stop
+  ## step, and the breakpoint fires only when it holds.
+  let st = self.store
+  if not st.isNil:
+    setAnchoredBreakpoint(st, $path, line, column, condition = $condition)
 
 proc deleteBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
-  if self.hasBreakpoint(path, line):
-    # TODO move point list
-    for i, b in data.pointList.breakpoints:
-      if b == self.breakpointTable[path][line]:
-        delete(data.pointList.breakpoints, i..i)
-        data.pointList.redrawBreakpoints = true
-      break
-    self.breakpointTable[path].del(line)
-
-    # if not c:
-    #   self.internalDeleteBreakpoint(path, line)
-
-    # else:
-    #   if self.data.trace.lang == LangNim:
-    #     self.internalDeleteBreakpointC(path, line)
-
-  self.dapSetBreakpoints()
-  self.data.redraw()
-
+  let st = self.store
+  if not st.isNil:
+    discard deleteBreakpoint(st, $path, line)
 
 proc toggleBreakpoint*(self: DebuggerService, path: cstring, line: int, c: bool = false) =
-  if not self.hasBreakpoint(path, line):
-    self.addBreakpoint(path, line, c)
-  else:
-    self.deleteBreakpoint(path, line, c)
-
+  let st = self.store
+  if not st.isNil:
+    toggleBreakpoint(st, $path, line)
 
 proc isEnabled*(self: DebuggerService, path: cstring, line: int): bool =
-  if self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line):
-    return self.breakpointTable[path][line].enabled
-  else:
-    return false
+  let b = self.breakpointOf(path, line)
+  b.isSome and b.get.enabled
 
 proc enable*(self: DebuggerService, path: cstring, line: int) =
-  if self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line):
-    # TODO move point list
-    #for i, b in data.pointList.breakpoints:
-    #  if b == self.breakpointTable[path][line]:
-        # TODO set disabled?
-        # data.pointList.breakpoints.delete(i, i)
-        # data.pointList.redrawBreakpoints = true
-    #    break
-
-    # TODO better way
-    var breakpoint = self.breakpointTable[path][line]
-    breakpoint.enabled = true
-    self.breakpointTable[path][line] = breakpoint
-
-    self.dapSetBreakpoints()
+  ## Arm the breakpoint on `path:line`; nothing when the line has none.
+  let st = self.store
+  if not st.isNil:
+    discard setBreakpointEnabled(st, $path, line, true)
 
 proc disable*(self: DebuggerService, path: cstring, line: int) =
-  if self.breakpointTable.hasKey(path) and self.breakpointTable[path].hasKey(line):
-    # TODO move point list
-    #for i, b in data.pointList.breakpoints:
-    #  if b == self.breakpointTable[path][line]:
-        # TODO set disabled?
-        # data.pointList.breakpoints.delete(i, i)
-        # data.pointList.redrawBreakpoints = true
-    #    break
+  ## Disarm the breakpoint on `path:line`: it stays on the point list and in
+  ## the gutter, dimmed, and is not sent to the engine.
+  let st = self.store
+  if not st.isNil:
+    discard setBreakpointEnabled(st, $path, line, false)
 
-    # TODO better way
-    var breakpoint = self.breakpointTable[path][line]
-    breakpoint.enabled = false
-    self.breakpointTable[path][line] = breakpoint
-    self.dapSetBreakpoints()
+proc setAllEnabled*(self: DebuggerService, path: cstring, enabled: bool) =
+  ## Arm or disarm every breakpoint of `path` ("" for every file).
+  let st = self.store
+  if not st.isNil:
+    setAllBreakpointsEnabled(st, enabled, $path)
+
+proc deleteAllBreakpoints*(self: DebuggerService, path: cstring = cstring"") =
+  ## Delete every breakpoint of `path`, or of every file when `path` is "".
+  let st = self.store
+  if not st.isNil:
+    clearBreakpoints(st, $path)
+
+proc newJsArray(): JsObject {.importjs: "(new Array())".}
+
+proc breakpointRowsForTests(): JsObject {.exportc: "ctBreakpointRows".} =
+  ## The active session's breakpoints as plain objects — `{path, line,
+  ## column, enabled, condition, logMessage}` — for the GUI tests, which read
+  ## breakpoint state from the page. The rows are the session store's
+  ## (`sdk/breakpoints`); there is no other breakpoint state to read.
+  result = newJsArray()
+  if data.isNil or data.services.isNil or data.services.debugger.isNil:
+    return
+  let st = data.services.debugger.store
+  if st.isNil:
+    return
+  for file in breakpointFiles(st):
+    let path = cstring(file)
+    let held = heldBreakpoints(st, file)
+    for i in 0 ..< held.len:
+      let line = held[i].line
+      let column = held[i].column
+      let enabled = held[i].enabled
+      let condition = cstring(held[i].condition)
+      let logMessage = cstring(held[i].logMessage)
+      discard result.push(js{
+        path: path, line: line, column: column, enabled: enabled,
+        condition: condition, logMessage: logMessage})
+
+proc deleteBreakpointForTests(path: cstring; line: int): bool {.exportc: "ctDeleteBreakpoint".} =
+  ## Delete the active session's breakpoint on `path:line` — for the GUI
+  ## tests, which cannot call the name-mangled service procs. False when the
+  ## line has none.
+  if data.isNil or data.services.isNil or data.services.debugger.isNil:
+    return false
+  let st = data.services.debugger.store
+  if st.isNil:
+    return false
+  deleteBreakpoint(st, $path, line)
 
 proc toggleAssemblyBreakpoint*(self: DebuggerService, address: cstring) =
   discard
 
 proc onAddBreakResponse*(self: DebuggerService, response: BreakpointInfo, c: bool) =
-  if self.breakpointTable.hasKey(response.path):
-    if self.breakpointTable[response.path].hasKey(response.line):
-      if response.id != NO_INDEX:
-        var b = self.breakpointTable[response.path][response.line]
-        b.id = response.id
-      else:
-        var b = self.breakpointTable[response.path][response.line]
-        b.id = NO_INDEX
-        b.error = true
-      # error: ignore? we should already have this editor component
-      refreshEditorLine(self.data.ui.editors[response.path], response.line)
-
-proc deleteAllBreakpoints*(self: DebuggerService, editor: EditorViewComponent) =
-  ## THE LIST IS EMPTIED AT THE END, not spliced while it is being walked.
-  ##
-  ## This used to take a copy of `pointList.breakpoints`, walk the COPY's
-  ## indices, and `delete(data.pointList.breakpoints, i..i)` at each one — so
-  ## after the first removal every index addressed the wrong element, and the
-  ## last iteration of a three-breakpoint run indexed past the end of a
-  ## one-element seq. It was invisible because the only caller assigned `@[]`
-  ## over the wreckage immediately afterwards; the second caller would not have
-  ## been so lucky. `breakpointTable` was always correct, because it is keyed by
-  ## the breakpoint's own path and line rather than by a position in a seq.
-  for b in data.pointList.breakpoints:
-    if data.services.debugger.breakpointTable.hasKey(b.path):
-      data.services.debugger.breakpointTable[b.path].del(b.line)
-    editor.refreshEditorLine(b.line)
-  data.pointList.breakpoints = @[]
-  data.pointList.redrawBreakpoints = true
-  self.dapSetBreakpoints()
+  ## The legacy add-break answer: the line is redrawn; the breakpoint's state
+  ## is the store's.
+  if self.data.ui.editors.hasKey(response.path):
+    refreshEditorLine(self.data.ui.editors[response.path], response.line)
 
 proc sourceLineJump*(self: DebuggerService, path: cstring, line: int, behaviour: JumpBehaviour) =
   self.data.ipc.send "CODETRACER::source-line-jump", SourceLineJumpTarget(

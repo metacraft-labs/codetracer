@@ -73,7 +73,7 @@ export edit_toolbar_marks
 # A generic view is instantiated where it is called, and the `ui` macro's
 # expansion names `createRenderEffect` and the control-flow components there:
 # exported so a caller needs no IsoNim import of its own to render this view.
-export computation, components
+export signals, computation, components
 
 const
   EditToolbarSurfaceAttr* = "data-topbar-surface"

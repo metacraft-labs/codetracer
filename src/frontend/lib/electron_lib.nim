@@ -123,7 +123,7 @@ when defined(ctIndex) or defined(ctTest) or
 
   proc setupLdLibraryPath* =
     # originally in src/tester/tester.nim
-    # adapted for javascript backend, as in tsc-ui-tests/lib/ct_helpers.ts
+    # adapted for javascript backend, as in src/tests/gui/lib/fixtures.ts
     # for more info, please read the comment for `setupLdLibraryPath` there
     nodeProcess.env["LD_LIBRARY_PATH"] = nodeProcess.env["CT_LD_LIBRARY_PATH"]
 

@@ -48,8 +48,10 @@
 ## ## DebugControlsVM DRIVES NOTHING HERE, AND THAT IS A PROPERTY OF THE
 ## ## HEADLESS HOST RATHER THAN OF THIS SUITE
 ##
-## `DebugControlsVM.stepForward` calls `onDapStep` / `onAction`, hooks the
-## DESKTOP host installs. `HeadlessDebugSession` installs neither — measured by
+## `DebugControlsVM.stepForward` issues its step through the VM's store
+## (`store.requestStep`); a toolbar click would go through the `DebugCommands`
+## the host handed to `createDebugControlsVM`, and this suite makes none. That
+## step does not move the position of `HeadlessDebugSession` — measured by
 ## calling `controls.stepForward()` before the walk below and observing the
 ## position unchanged, which this suite asserts as its first case rather than
 ## assuming. So the session is the DRIVER and `DebugControlsVM` is the
@@ -384,9 +386,9 @@ suite "CTUI-5: the source pane follows a real debugger, forward and back":
       ck h.vm.totalLineCount.val >= entry.line
 
       # ---- DebugControlsVM reports; it does not drive ---------------------
-      # Measured rather than assumed, and asserted so that the day a host
-      # wires `onDapStep` into the headless session this file says so instead
-      # of quietly starting to double-step.
+      # Measured rather than assumed, and asserted so that the day a step
+      # through the VM starts reaching the headless session's replay, this
+      # file says so instead of quietly starting to double-step.
       let before = h.reportedLocation()
       h.controls.stepForward()
       discard h.session.drainEvents()

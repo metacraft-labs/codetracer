@@ -160,6 +160,35 @@ type
     rlsComplete
     rlsError
 
+  StopLocation* = object
+    ## The debugger's stop as an editor shows it: the move's whole location
+    ## (the engine's `MoveState.location`), the C-level location a Nim
+    ## recording also stops at (`cLocation`), and the instruction offset of
+    ## the selected frame (`frameInfo`). `DebuggerState` carries the position
+    ## every pane follows; this carries what only an editor needs to place
+    ## the execution line in a source, a C source, a macro expansion, an
+    ## instruction listing or a call's own function body.
+    path*: string
+    line*: int
+    highLevelLine*: int
+    functionName*: string
+    key*: string
+      ## The call the stop is in.
+    functionFirst*: int
+    functionLast*: int
+      ## The first and last line of that call's function.
+    asmName*: string
+      ## The function's name in the instruction listing.
+    isExpanded*: bool
+    expansionFirstLine*: int
+      ## A macro expansion's first line, when the stop is inside one.
+    rrTicks*: uint64
+    cPath*: string
+    cLine*: int
+    cAsmName*: string
+    frameOffset*: int
+      ## The selected frame's instruction offset, -1 for none.
+
   DebuggerState* = object
     ## Snapshot of the debugger's position in the recording.
     location*: Location
@@ -293,6 +322,14 @@ type
     line*: int
     value*: string
     rrTicks*: uint64
+    noPosition*: bool
+      ## The producer reported no position for this event (no
+      ## `directLocationRRTicks`, or a negative one). `rrTicks` is then 0 and
+      ## means nothing: the row is shown as recorded, but it is not a place to
+      ## go, so no front-end may navigate to it. Kept as a fact, the way
+      ## `ReplayDataStore.positionReported` keeps "no answer yet" apart from
+      ## tick 0. False by default, so a row built anywhere else stays a
+      ## navigable one.
     maxRRTicks*: uint64
     sourceGeneration*: int
     sourceDigest*: string
@@ -327,6 +364,12 @@ type
       ## Alt+click (`ui/editor.lineActionClickAt`, Column-Aware Navigation
       ## M6), which the replay stops at only on a step at that column. 0 (the
       ## zero value, every other producer) is a line breakpoint.
+    condition*: string
+      ## A breakpoint's CONDITION (Column-Aware Navigation M9): the engine
+      ## stops only at a step where it holds. "" for an unconditional one.
+    logMessage*: string
+      ## A LOGPOINT's message (M10): passing the line logs it and does not
+      ## stop. "" for a breakpoint that stops.
 
     # -- PLAT-11 -----------------------------------------------------------
     #

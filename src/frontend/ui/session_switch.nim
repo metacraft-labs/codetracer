@@ -14,6 +14,7 @@ import
   std/[strformat, jsffi, asyncjs],
   ../types,
   ../dap,
+  ../event_helpers,
   ../renderer,
   menu,
   debug_toolbar,
@@ -200,33 +201,19 @@ proc createNewSession*(data: Data) =
   ## a new tab backed by its own ReplaySession.
   let sessionId = data.sessions.len
   var session = newReplaySession(ReplaySessionId(sessionId))
-  # M8/issue #327: tag the per-session DapApi with the session index so
-  # outgoing DAP requests carry the correct `sessionId` field and the
-  # main-process router in ipc_subsystems/dap.nim can switch the Backend
-  # Manager to the right replay.  Defaulting to 0 here would make every
-  # non-default session impersonate session 0 on the wire.
-  #
-  # Desktop sessions need the Electron IPC bridge copied from the app-wide
-  # data object. Extension builds use a different DapApi shape and fill in the
-  # VS Code handles elsewhere.
-  when defined(ctInExtension):
-    session.dapApi = DapApi(sessionId: sessionId)
-  else:
-    session.dapApi = DapApi(sessionId: sessionId, ipc: data.ipc)
-  session.viewsApi = setupSinglePageViewsApi(
-    cstring("single-page-frontend-to-views-" & $sessionId))
+  # The tab's own DAP API and views mediator, wired so its backend notices
+  # reach its own status bar: see `event_helpers.attachSessionApis`.
+  attachSessionApis(session, sessionId, data.ipc)
   session.services = Services(
     eventLog: EventLogService(),
     debugger: DebuggerService(
       locals: @[],
       registerState: JsAssoc[cstring, cstring]{},
-      breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{},
       valueHistory: JsAssoc[cstring, ValueHistory()]{},
       paths: @[],
       skipInternal: true,
       skipNoSource: false,
-      historyIndex: 1,
-      showInlineValues: true),
+      historyIndex: 1),
     editor: EditorService(
       open: JsAssoc[cstring, TabInfo]{},
       loading: @[],
@@ -506,6 +493,13 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    Empty welcome sessions also own the singleton shared components, so
   #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
+  # THE STATUS BAR FOLLOWS THE TARGET SESSION, whatever else is redrawn below.
+  # `#status` shows only the active tab's `StatusComponent`; a notification
+  # that reached the target while it was hidden — a replay that could not
+  # start — has been waiting for this render, and the branch below is skipped
+  # for a session that has neither a layout nor a welcome screen.
+  if not data.ui.status.isNil:
+    data.ui.status.redraw()
   # THE TOPBAR FOLLOWS THE TARGET SESSION'S MODE. `data.ui.mode` is per
   # session and the topbar is one bar shared by every tab, so without this a
   # Debug tab reached from an Edit tab kept the edit bar, and an Edit tab

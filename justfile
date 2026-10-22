@@ -310,6 +310,25 @@ build-ui-js output:
     --out:{{output}} \
     js src/frontend/ui_js.nim
 
+# The VS Code extension's two bundles (Shared-DOM-Front-Ends D5): the webview
+# panel (`vscode_panel.js`: one panel over a mirror of the host's session; no
+# `ui_js`, `Data`, Monaco or jQuery) and the extension host's side
+# (`vscode_host.js`: the primary sessions, CommonJS, run by Node). The
+# extension builds both from this checkout (its `CODETRACER_DIR`).
+# `ci/test/renderer-extension-build.sh` builds them through these recipes.
+build-vscode-panel output:
+  nim \
+    -d:chronicles_enabled=off \
+    --out:{{output}} \
+    js src/frontend/entries/vscode_panel.nim
+
+build-vscode-host output:
+  nim \
+    -d:nodejs \
+    -d:chronicles_enabled=off \
+    --out:{{output}} \
+    js src/frontend/entries/vscode_host.nim
+
 # HMR-enabled renderer build. Adds `-d:ctHmr` (which transitively
 # activates `-d:isonimHmr`) so {.uiComponent.} pragmas register slots
 # and `mountUiHot` boundaries listen for swaps. The runtime gate is
@@ -1836,12 +1855,15 @@ test-frontend-js:
   # unified-diff pane needs an id no OTHER tab uses -- its host is the
   # document-global `editorComponent-<id>` / `unifiedDiffComponent-<id>`.
   # Covers `utils.generateId` and `utils.claimWindowUniqueLayoutIds`, and that
-  # the singleton chrome keeps its per-tab id 0. `utils.nim` compiles for node;
-  # same `window` alias as above.
+  # the singleton chrome keeps its per-tab id 0. `utils.nim` compiles for node,
+  # but its module graph reaches IsoNim's `core/nondet`, which snapshots the
+  # page (`location`, viewport, `matchMedia`) as soon as a `window` exists. A
+  # bare `window = globalThis` alias has none of that and the suite dies at
+  # load, so it runs over jsdom's real page globals instead.
   echo "Running component ids across sessions tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer -d:ctInExtension \
     --out:"$component_ids_across_sessions_test" js src/frontend/tests/component_ids_across_sessions_test.nim
-  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$component_ids_across_sessions_test"
+  node src/frontend/tests/jsdom-run.mjs "$component_ids_across_sessions_test"
   echo ""
   # *Stop* leaves Debug mode for Edit mode. `renderer.nim`'s `stopAction` was
   # `discard` from the initial open-source commit while `SHIFT+F5` dispatched
@@ -1876,10 +1898,13 @@ test-frontend-js:
   # is waiting on it. Under `-d:ctInExtension` that table does not exist —
   # VS Code's debug client does the correlation — so compiling this with the
   # flag would silently test the wrong arm.
+  #
+  # The status shell reaches IsoNim's `core/nondet` too, so this runs over
+  # jsdom for the same reason as the component ids suite above.
   echo "Running DAP refusal surfacing tests..."
   nim -d:nodejs -d:chronicles_enabled=off -d:ctRenderer \
     --out:"$dap_refusal_test" js src/frontend/tests/dap_refusal_surfaces_test.nim
-  node -e 'globalThis.window = globalThis; require(process.argv[1])' "$dap_refusal_test"
+  node src/frontend/tests/jsdom-run.mjs "$dap_refusal_test"
   echo ""
   echo "Running ACP notification tests..."
   just test-acp-notifications
@@ -1956,9 +1981,15 @@ test-e2e *args:
   esac
   just ensure-storybook-static "$@"
   bash "${CODETRACER_REPO_ROOT_PATH}/ci/lib/npm-install.sh" "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui"
-  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui" && \
-    env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 \
-      "$@"
+  cd "${CODETRACER_REPO_ROOT_PATH}/src/tests/gui"
+  # Playwright transpiles specs WITHOUT type-checking them, so a spec that
+  # calls a helper with the wrong arguments, or a method its page object does
+  # not have, loads and fails (or skips itself) at runtime instead of here.
+  # `test-gui`, `test-gui-prebuilt` and the CI GUI job reach the suite through
+  # this recipe, so the whole suite is type-checked once per run, whatever
+  # subset of it the arguments select.
+  npx tsc --noEmit
+  env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 "$@"
 
 dev-tools-test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/src/tests/gui && \
@@ -3887,6 +3918,9 @@ test-renderer-browser:
 # senders through the real response fan-out and asserts one request per stop,
 # in the stopped-in file's language, and that every answer is judged against
 # the stop its own request was sent at.
+# `later_session_launch_failure_test.nim` delivers a refusal tagged for a tab
+# that is not on screen and asserts it reaches that tab's status bar only, and
+# is painted into `#status` when that tab is shown.
 #
 # NEEDS the checkout's `node_modules/jsdom`, which the dev shell links from the
 # Nix-built node modules on entry; the runner fails (rather than skipping) when
@@ -5242,6 +5276,18 @@ m71-gpui-window-record:
 gpui-window-captures *which:
   bash ci/test/gpui-window-captures.sh {{which}}
 
+# PLAT-35's GPUI arm on Linux, as a REAL window: one `codetracer-gpui-window`
+# per scenario in `src/tests/visual/scenarios.json`, on GuiAssert's headless
+# sway, at the scenario's declared viewport, written to
+# `build/plat35/gpui-window/<view>.{ppm,png}` for the Electron/GPUI parity
+# pairs. A scenario with no settled frame at its declared size fails by name.
+# Needs a built `replay-server` and the `calc` recording, and links the
+# grammar archive `tui-prereqs` provides (a dependency below); the
+# `gpui-window-captures` CI job runs this after its own captures, which build
+# the same windowed shim and record `calc`. `view` names one scenario.
+plat35-capture-gpui-window *view: tui-prereqs
+  bash ci/test/plat35-gpui-window-capture.sh {{view}}
+
 # PLAT-69: the GPUI window as a normal desktop window — its top bar is the
 # title bar — as GuiAssert scenarios on a headless sway (`PLAT69_TARGET=gnome`
 # for GuiAssert's headless GNOME): the window moved, resized, maximized and
@@ -5717,6 +5763,20 @@ test-ct-host-admission: build-once
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-host-admission.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh ct-host-admission
+
+# `ct host --manifest` given a recording manifest of kind mcr_slices imports the
+# slice its replayStart names (sliceKey) or, when it names none, the slice
+# CODETRACER_START_SLICE_KEY names; refuses one it does not list; and without
+# either opens the first:
+# src/tests/ct_host_manifest/test_ct_host_manifest_opens_the_named_slice.nim
+# hosts two different recordings as two slices and reads which one the real
+# session serves over its socket.
+test-ct-host-manifest: build-once
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-ct-host-manifest.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh ct-host-manifest
 
 
 # RS-M12: assert no recorder writes a sidecar manifest any more.

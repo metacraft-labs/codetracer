@@ -1001,7 +1001,8 @@ test.describe("Independent sidebar presentation", () => {
     await modes(ctPage, true, false);
     expect(electronApp).not.toBeNull();
     await electronApp!.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w.isVisible())!;
+      const win = BrowserWindow.getAllWindows()
+        .find((w: { isDestroyed(): boolean; isVisible(): boolean }) => !w.isDestroyed() && w.isVisible())!;
       win.setSize(1400, 900);
       win.maximize();
       win.unmaximize();

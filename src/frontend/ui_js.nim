@@ -39,7 +39,7 @@ import
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
   index/layout_config_repair,
-  ui/[test_results, constraints, generated_code, point_list],
+  ui/[test_results, constraints, generated_code, point_list, editor_points],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -266,6 +266,7 @@ proc hideWelcomeScreenSurface() =
 # individual panels so they all share a single real backend connection.
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
+import ui/panel_host   # the panes it mounts render the session's ViewModels
 import viewmodel/sdk/[debugger_session, trace_source]
 from viewmodel/viewport import timeoutScheduler
 from viewmodel/sdk/stop_loader import claimLocalsLoading
@@ -2042,12 +2043,26 @@ proc applyVisualReplayTabsToResolvedConfig*(data: Data) =
     return
   data.ui.resolvedConfig = newConfig
 
+  # A LIVE LAYOUT WAS READ WITH `saveLayout()`, so `newConfig` is RESOLVED, and
+  # `loadLayout` takes an unresolved config: handed straight over, GoldenLayout
+  # throws `value.trimStart is not a function` on the first size it parses and
+  # the panes are never built. `restoreSavedLayout` converts first (its header
+  # has the whole story). This path runs whenever the trace finishes loading
+  # after the layout is up, which a slow replay start makes the usual order.
   if layoutLive:
-    try:
-      data.swapLayout(newConfig)
-    except CatchableError:
-      cerror "applyVisualReplayTabsToResolvedConfig: loadLayout failed: " &
-        getCurrentExceptionMsg()
+    data.restoreSavedLayout(newConfig, "the layout with the Visual Replay tabs")
+
+proc applyVisualReplayTabsNow() =
+  applyVisualReplayTabsToResolvedConfig(data)
+
+# THE LIVE-LAYOUT ORDER, ON DEMAND: `layout/visual_replay_tabs_on_a_live_layout`
+# re-places the Visual Replay tabs after the panes are up, which is the order a
+# slow replay start produces and the one a fast one never reaches.
+{.emit: """
+window.__ctApplyVisualReplayTabs = function() {
+  `applyVisualReplayTabsNow`();
+};
+""".}
 
 proc callInitLayoutUnchecked(config: GoldenLayoutResolvedConfig) =
   initLayout(config)
@@ -2102,9 +2117,6 @@ proc tryInitLayout*(data: Data) =
 
 # We receive a DAP "Response" from the index process
 proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
-  # M8: Extract sessionId from the message for future multi-session routing.
-  # During M8 there is only one session, so we log but do not route.
-  let sessionId = getSessionIdFromMessage(raw)
   # M49 — settle the `asyncSendCtRequest` continuation waiting on this
   # request's `seq` first. This is what makes `BackendService.send`
   # resolve with the response the backend actually sent; before it, the
@@ -2137,12 +2149,13 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
   # risk handing a response to an identically numbered request in the
   # wrong session. The main process already tags every response with the
   # session that issued it (`ipc_subsystems/dap.nim::resolveSessionId`),
-  # so the owner is known without any new wire field.
-  var responseDap = data.dapApi
-  for session in data.sessions:
-    if not session.dapApi.isNil and session.dapApi.sessionId == sessionId:
-      responseDap = session.dapApi
-      break
+  # so the owner is known without any new wire field. `dapApiForFrame` is the
+  # lookup events are routed by too. A response for a tab that has since been
+  # closed still falls back to the tab on screen, as it did before that
+  # lookup was shared.
+  var responseDap = dapApiForFrame(data, raw)
+  if responseDap.isNil:
+    responseDap = data.dapApi
   #
   # `deliverDapResponse` also stamps a TRACKED answer (`ct/load-locals`) with
   # the identity of the request it answers before the fan-out, so a
@@ -2151,12 +2164,9 @@ proc onDapReceiveResponse*(sender: JsObject, raw: JsObject) =
 
 # We receive a DAP "Event" from the index process
 proc onDapReceiveEvent*(sender: JsObject, raw: JsObject) =
-  # M8: Extract sessionId from the message for future multi-session routing.
-  let sessionId = getSessionIdFromMessage(raw)
-  try:
-    receiveEvent(data.dapApi, raw["event"].to(cstring), raw["body"])
-  except ValueError:
-    console.log(cstring"dap: ignoring event for unmapped event type: ", raw["event"])
+  # Routed to the session the main process tagged the event with, not to the
+  # tab on screen: see `event_helpers.deliverDapEvent`.
+  deliverDapEvent(data, raw)
 
 proc onReady(event: dom.Event) =
   if cast[cstring](cast[js](dom.document).readyState) == cstring"complete":
@@ -2347,12 +2357,10 @@ when not defined(ctInExtension):
         activeSessionVM.debugCommands = desktopDebugCommands(data,
           activeSessionVM.store, toolbarApi)
         activeSessionVM.initializePanelViewModels()
-      # PLAT-40: the debugger service's `setBreakpoints` answers go to the
-      # ViewModel store's one breakpoint decoder — the point list then holds
-      # what the engine verified, as it does on the native front-ends.
-      let pointStore = activeSessionVM.store
-      data.onBreakpointsVerified = proc(path: cstring; lines: seq[int]) =
-        pointStore.applyVerifiedBreakpoints($path, lines)
+      # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
+      # the debugger service plans each change over its rows and the engine's
+      # answer replaces them, as on the native front-ends (PLAT-40).
+      data.services.debugger.pointStore = cast[JsObject](activeSessionVM.store)
       point_list.setPointListVM(activeSessionVM.pointListVM)
       # Apply any `supportsStepBack` capability that arrived before this VM
       # existed (its DAP `initialize` response can beat this assignment), so the
@@ -2524,8 +2532,10 @@ when not defined(ctInExtension):
 
       initPanelVM("bindDebugToolbar"):
         debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
-      initPanelVM("initCalltraceVMFromSession"):
-        calltrace.initCalltraceVMFromSession(activeSessionVM.calltraceVM)
+      initPanelVM("setPanelSession"):
+        # The panes the panel host mounts render this session's ViewModels;
+        # a pane whose container was built before now is mounted here.
+        panel_host.setPanelSession(activeSessionVM)
       initPanelVM("initEventLogVMFromSession"):
         event_log.initEventLogVMFromSession(activeSessionVM.eventLogVM)
         # §5.3 — an Event Log boundary chip whose counterpart lives in
@@ -2538,6 +2548,11 @@ when not defined(ctInExtension):
         flow.initFlowVMFromSession(activeSessionVM.flowVM)
       initPanelVM("initEditorVMFromSession"):
         editor.initEditorVMFromSession(activeSessionVM.editorVM)
+        # The editor's surface reads the session's values and flow, as the
+        # terminal's and GPUI's do (`editor_points.webEditorSurface`).
+        editor_points.setEditorSessionVMs(activeSessionVM.editorVM,
+          activeSessionVM.stateVM, activeSessionVM.flowVM,
+          activeSessionVM.scratchpadVM)
       initPanelVM("initTimelineVMFromSession"):
         trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
       initPanelVM("initTerminalOutputVMFromSession"):
@@ -2594,12 +2609,6 @@ when not defined(ctInExtension):
       # order-dependent and can miss events).
       # -----------------------------------------------------------------
       cdebug "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
-      data.viewsApi.subscribe(CtUpdatedCalltrace,
-        proc(kind: CtEventKind, response: CtUpdatedCalltraceResponseBody, sub: Subscriber) =
-          cdebug ("[PIPELINE] viewsApi.CtUpdatedCalltrace: received " &
-            $response.callLines.len & " lines, totalCalls=" &
-            $response.totalCallsCount)
-          calltrace.syncCalltraceData(response))
 
       # The locals answer's direct subscription, and the request tracking
       # that lets it tell which request each answer is for.
@@ -2635,12 +2644,15 @@ when not defined(ctInExtension):
             else:
               none(uint64)
           isoBatch.batch proc() =
-            calltrace.syncCalltraceDebuggerPosition(
-              rrTicks, path, line, sourceGeneration, sourceDigest)
             state.syncStoreDebuggerPosition(
               rrTicks, path, line, sourceGeneration, sourceDigest)
             if geid.isSome and not activeSessionVM.isNil:
               activeSessionVM.store.updateCurrentGeid(geid)
+            # The stop's whole location, which the editor places its
+            # execution line from (`ReplayDataStore.stop`).
+            if not activeSessionVM.isNil:
+              activeSessionVM.store.applyStopLocation(
+                parseJsonFromJsObject(rawResponse))
 
           if not data.ui.status.isNil:
             cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
@@ -4598,10 +4610,8 @@ proc configureIPC(data: Data) =
     "asm-load-received"
     "load-locals-received"
     "expand-value-received"
-    "evaluate-expression-received"
     "expand-values-received"
     "search-calltrace-received"
-    "load-parsed-exprs-received"
     "updated-events": seq[EventElement] => eventLog
     "updated-events-content": cstring => eventLog
     "updated-trace": TraceUpdate => [ui]
@@ -4961,9 +4971,7 @@ proc removeBreakpointAtPosition*(data: Data) =
 
 proc removeAllBreakpoints*(data: Data) =
   data.pointsOperationsSetup()
-  for line, point in debuggerService.breakpointTable[activeEditorPath]:
-    debuggerService.deleteBreakpoint(activeEditorPath, line)
-    editor.refreshEditorLine(line)
+  debuggerService.deleteAllBreakpoints(activeEditorPath)
 
 proc enableBreakpointAtPosition*(data: Data) =
   data.pointsOperationsSetup()
@@ -4972,9 +4980,7 @@ proc enableBreakpointAtPosition*(data: Data) =
 
 proc enableAllBreakpoints*(data: Data) =
   data.pointsOperationsSetup()
-  for line, point in debuggerService.breakpointTable[activeEditorPath]:
-    debuggerService.enable(activeEditorPath, line)
-    editor.refreshEditorLine(line)
+  debuggerService.setAllEnabled(activeEditorPath, true)
 
 proc disableBreakpointAtPosition*(data: Data) =
   data.pointsOperationsSetup()
@@ -4983,9 +4989,7 @@ proc disableBreakpointAtPosition*(data: Data) =
 
 proc disableAllBreakpoints*(data: Data) =
   data.pointsOperationsSetup()
-  for line, point in debuggerService.breakpointTable[activeEditorPath]:
-    debuggerService.disable(activeEditorPath, line)
-    editor.refreshEditorLine(line)
+  debuggerService.setAllEnabled(activeEditorPath, false)
 
 proc addTracepointAtPosition*(data: Data) =
   data.pointsOperationsSetup()

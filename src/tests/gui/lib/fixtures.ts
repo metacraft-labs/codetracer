@@ -37,8 +37,7 @@ import { requiresRR } from "./lang-support";
 import { ctUserConfigDir, ctUserDataDir } from "./ct-home";
 import {
   ensureDefaultConfig,
-  ensureDefaultLayout,
-  removeUserLayout,
+  prepareUserLayout,
   resetAutoHideState,
   resetEditLayout,
   restoreUserLayout,
@@ -341,19 +340,30 @@ interface CodetracerOptions {
    */
   preserveEditLayout: boolean;
   /**
-   * PLAT-45: launch with NO saved layout at all — the user's
-   * `default_layout.json` is removed rather than replaced with the bundled
-   * one, so the index process copies `<prefix>/config/default_layout.json`
-   * itself on first run, exactly as it does on a machine that has never run
-   * CodeTracer. This is what makes "the generated default is the one the
-   * desktop loads" a statement about the product's own first-run path.
+   * Launch on the RAW bundled tree: `src/config/default_layout.json` is
+   * copied verbatim into the saved `default_layout.json`, so the desktop
+   * loads it as-is instead of deriving the Debug mode's default from it.
+   *
+   * Without this (the default) the saved layout is REMOVED and the launch
+   * takes the product's own first-run path, exactly as on a machine that has
+   * never run CodeTracer: the index process installs the Debug mode's default
+   * (`index/config.installModeDefault`) — TESTS a tab of the FILES stack, no
+   * CONSTRAINTS — which is what a user opens a recording with.
+   *
+   * No CodeTracer mode draws the bundled tree (`index/mode_default_layout.nim`
+   * calls it "nobody's layout": a standing TEST RESULTS stack over a
+   * CONSTRAINTS stack). Set this only in a spec whose subject is that tree.
+   * Panes the bottom auto-hide strip registers (BUILD, PROBLEMS, FIND IN
+   * FILES) are in neither tree and need no option. Contradicts
+   * `preserveUserLayout`; setting both fails the launch.
+   * See `layout-reset.prepareUserLayout`.
    */
-  noUserLayout: boolean;
+  bundledLayout: boolean;
   /**
    * PLAT-45: leave the user's saved `default_layout.json` exactly as an
-   * earlier test of the same worker left it — neither replaced with the
-   * bundled default nor removed — so a spec can observe the desktop
-   * RESTORING its own last layout on the next start.
+   * earlier test of the same worker left it — neither removed nor replaced
+   * with the bundled tree — so a spec can observe the desktop RESTORING its
+   * own last layout on the next start.
    */
   preserveUserLayout: boolean;
   /**
@@ -1969,7 +1979,7 @@ export const test = base.extend<
   preserveAutoHideState: [false, { option: true }],
   editLayoutPath: ["", { option: true }],
   preserveEditLayout: [false, { option: true }],
-  noUserLayout: [false, { option: true }],
+  bundledLayout: [false, { option: true }],
   preserveUserLayout: [false, { option: true }],
   // `CODETRACER_TEST_PREFIX` runs EVERY spec against a prepared prefix (e.g.
   // one from `scripts/plat45-desktop-prefix.sh` carrying this checkout's
@@ -2067,7 +2077,7 @@ export const test = base.extend<
         preserveAutoHideState,
         editLayoutPath: seedEditLayoutFrom,
         preserveEditLayout,
-        noUserLayout,
+        bundledLayout,
         preserveUserLayout,
         codetracerPrefixOverride,
         configTheme,
@@ -2082,22 +2092,23 @@ export const test = base.extend<
       activeLaunchEnv = launchEnv;
       activeRendererInitScript = rendererInitScript;
 
-      // Ensure each test starts with the bundled default layout in the
-      // worker-local config directory.  Earlier tests in the same worker may
-      // have mutated the saved layout
-      // (e.g. auto-hide pin-to-edge, build/problems panel pop-out, layout
-      // resilience).  Without this reset, that mutated layout persists
-      // via default_layout.json and subsequent tests see a stale layout that
-      // may be missing the components they require (filesystem, state, etc.).
+      // Ensure each test starts from a known saved layout in the worker-local
+      // config directory.  Earlier tests in the same worker may have mutated
+      // it (e.g. auto-hide pin-to-edge, build/problems panel pop-out, layout
+      // resilience); without this reset that layout persists via
+      // default_layout.json and later tests see a stale arrangement.
+      //
+      // By default the saved layout is REMOVED, so the launch takes the
+      // product's own first-run path and opens the Debug mode's default —
+      // what a user sees. `bundledLayout` installs the raw bundled tree
+      // instead, `preserveUserLayout` keeps what an earlier launch saved
+      // (`layout-reset.prepareUserLayout`). Outside the try below on purpose:
+      // a contradictory option pair, or a bundled tree that cannot be
+      // installed, would otherwise only be logged and the spec would run on a
+      // layout it did not ask for.
+      prepareUserLayout({ bundledLayout, preserveUserLayout }, codetracerInstallDir);
       try {
         ensureDefaultConfig(codetracerInstallDir, configTheme);
-        if (preserveUserLayout) {
-          // PLAT-45: the saved arrangement is the subject; leave it.
-        } else if (noUserLayout) {
-          removeUserLayout();
-        } else {
-          ensureDefaultLayout(codetracerInstallDir);
-        }
         // The saved auto-hide state is the other half of the saved
         // arrangement — see `resetAutoHideState`. Without this a test that
         // pins a panel leaves it pinned for every later test in the worker.
@@ -2121,10 +2132,10 @@ export const test = base.extend<
           seedEditLayout(seedEditLayoutFrom);
         }
       } catch (ex) {
-        // Non-fatal: a missing bundled layout file would surface as a
+        // Non-fatal: a missing bundled config file would surface as a
         // launch-time error anyway.  Log and continue so the test still
         // produces a meaningful failure.
-        console.warn(`fixtures: ensureDefaultLayout failed: ${(ex as Error).message}`);
+        console.warn(`fixtures: resetting the saved arrangement failed: ${(ex as Error).message}`);
       }
 
       const needsRR = sourcePath ? requiresRR(sourcePath) : false;
@@ -2281,8 +2292,10 @@ export {
 };
 
 // Export recordTestProgram so multi-trace tests can pre-record additional
-// programs and load them into new sessions via IPC.
-export { recordTestProgram };
+// programs and load them into new sessions via IPC, and traceFolderForId so
+// they can name the folder a recording id was written to (a session manifest
+// references its traces by folder).
+export { recordTestProgram, traceFolderForId };
 
 // Re-export performance timing utilities for use in tests
 export { timed, timedVoid } from "./performance-limits";

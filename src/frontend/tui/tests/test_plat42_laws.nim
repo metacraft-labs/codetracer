@@ -223,6 +223,21 @@ suite "PLAT-42: LAW-E2 — inline values reflow, on both media":
         ck annStyles{"position"}.getStr == "absolute"
         ck annStyles{"left"}.getStr == $wantLeft & "px"
         ck annStyles{"top"}.getStr == "2px"
+        # THE CHIP IS ONE TEXT RUN: a declared one-line inline formatting
+        # context (nowrap on the CHIP, no text-overflow), whose name and
+        # value are plain text spans, the value spaced by its own 7 px
+        # `padding-left` -- the shape the renderer fuses with the gap kept.
+        # A value that declared `white-space` itself would stop being plain
+        # text and round on its own again.
+        let chipPlan = colPlan["children"][annAt]["children"][0]
+        ck chipPlan["attributes"]{InlineTextRunsAttribute}.getStr == "1"
+        ck chipPlan["styles"]{"white_space"}.getStr == "nowrap"
+        ck chipPlan["styles"]{"text_overflow"}.getStr == ""
+        ck chipPlan["children"].len == 2
+        if chipPlan["children"].len == 2:
+          let valuePlan = chipPlan["children"][1]
+          ck valuePlan["styles"]{"padding_left"}.getStr == "7px"
+          ck valuePlan["styles"]{"white_space"}.getStr == ""
         chipLefts.add annStyles{"left"}.getStr
 
   test "the corpus's values are not all at one x (the OVERLAY twin)":

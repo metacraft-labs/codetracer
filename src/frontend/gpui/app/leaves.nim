@@ -1799,6 +1799,22 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
     r.setStyle(ann, "flex-shrink", "0")
     for v in row.values:
       let chip = r.createElement("div")
+      # EACH CHIP IS A ONE-LINE INLINE FORMATTING CONTEXT, so its name and
+      # its value are drawn as ONE text run and rounded once. Drawn as two
+      # text elements they rounded twice, once per span, and a row of chips
+      # accumulated the residue (the chip rows were the editor rows still
+      # drifting from the desktop after the code itself was fused). The 7 px
+      # between name and value is the value's own `padding-left`, and the
+      # renderer keeps it exactly: a span's horizontal padding fuses as an
+      # inset only in a context that declares `white-space: nowrap` and no
+      # `text-overflow` (the renderer's `inlineTextRunsAttribute` rule),
+      # which is why `nowrap` is declared HERE, on the chip, and not on the
+      # value. White-space is inherited by the text inside, so the value is
+      # still drawn on one line; a value that set it itself would no longer
+      # be plain text and would keep its own element. The "view more" box
+      # is a sized box and keeps its own element in front of the run.
+      r.setAttribute(chip, InlineTextRunsAttribute, "1")
+      r.setStyle(chip, "white-space", "nowrap")
       r.setStyle(chip, "display", "flex")
       r.setStyle(chip, "items", "center")
       r.setStyle(chip, "flex-shrink", "0")
@@ -1843,7 +1859,6 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.setStyle(value, "font-weight", "600")
       r.setStyle(value, "padding-left", "7px")
       r.setStyle(value, "flex-shrink", "0")
-      r.setStyle(value, "white-space", "nowrap")
       r.appendChild(value, r.createTextNode(
         if long: v.value.runeSubstr(0, InlineValueMaxCols - 1) & "…"
         else: v.value))
@@ -2534,10 +2549,13 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     # piece of text (`isonim_gpui/renderer`), which rounds the run once.
     #
     # The row is NOT fusable end to end, and does not need to be: the toggle
-    # icon, the 8 px spacer, the `(` carrying `.call-args`' 5 px and the `=>`
-    # in the interface face each keep their own element, so their spacing and
-    # their face are preserved exactly. Only the plain spans between them
-    # fuse. Nor does fusing cost per-span identity — it happens in the render
+    # icon, the 8 px spacer and the `=>` in the interface face each keep
+    # their own element, so their spacing and their face are preserved
+    # exactly. Only the text spans between them fuse. The `(` carrying
+    # `.call-args`' 5 px fuses WITH its neighbours: the row declares
+    # `white-space: nowrap` and no `text-overflow`, so the renderer carries
+    # a span's own horizontal padding as an inset of the run (the
+    # `inlineTextRunsAttribute` rule) and the 5 px is kept exactly. Nor does fusing cost per-span identity — it happens in the render
     # plan's CONSUMER, so every segment, with its `data-call-part` and its
     # `data-call-arg`, is still in the plan for hit-testing to resolve.
     r.setAttribute(el, InlineTextRunsAttribute, "1")

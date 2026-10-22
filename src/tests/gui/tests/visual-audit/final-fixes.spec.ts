@@ -20,13 +20,8 @@ import {
   test,
   expect,
   wait,
-  codetracerInstallDir,
 } from "../../lib/fixtures";
 import { LayoutPage } from "../../page-objects/layout-page";
-import {
-  ensureDefaultLayout,
-  restoreUserLayout,
-} from "../../lib/layout-reset";
 import {
   FIND_IN_FILES_TAB_TITLE,
   stripTab,
@@ -72,13 +67,6 @@ async function dismissOverlay(
 test.describe("Visual Review — All Components", () => {
   test.setTimeout(300_000);
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
-
-  test.beforeAll(() => {
-    ensureDefaultLayout(codetracerInstallDir);
-  });
-  test.afterAll(() => {
-    restoreUserLayout();
-  });
 
   test("01 Normal layout", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
@@ -530,13 +518,6 @@ test.describe("Visual Review — All Components", () => {
 test.describe("Visual Review — Collapsed Mode", () => {
   test.setTimeout(180_000);
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
-
-  test.beforeAll(() => {
-    ensureDefaultLayout(codetracerInstallDir);
-  });
-  test.afterAll(() => {
-    restoreUserLayout();
-  });
 
   test("11-13 Collapsed strip, icon zone, and side-edge tabs", async ({
     ctPage,

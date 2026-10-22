@@ -107,7 +107,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   var entries: seq[SignalRegistryEntry] = @[]
 
   entries.addMany("ReplayDataStore",
-    ["session", "debugger", "currentGeid", "timeline", "agentSessions"],
+    ["session", "debugger", "stop", "positionReported", "currentGeid", "timeline",
+     "agentSessions"],
     vscBackendAuthoritative,
     "Top-level replay/debugger and agent-service facts owned by the backend authority.")
   # `currentLineIndex` (PLAT-51) joins the group: it holds the engine's own
@@ -221,9 +222,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("CalltraceVM", ["searchQuery", "rawIgnorePatterns"],
     vscSharedSessionViewState,
     "Calltrace filter/search settings are logical shared view state.")
-  entries.addEntry("CalltraceVM", "backendSearchResults",
+  entries.addMany("CalltraceVM", ["backendSearchResults", "backendSearchTotal"],
     vscBackendAuthoritative,
-    "Search result payloads come from backend queries.")
+    "Search result payloads and the whole-trace match count come from " &
+    "the ct/search-calltrace answer.")
   entries.addEntry("CalltraceVM", "revealScroll", vscRendererLocal,
     "codetracer#860: the scroll this pane's own search-result activation " &
     "asks its view for; one reader's pane position, not session intent.")
@@ -304,7 +306,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     vscSharedSessionViewState,
     "User-pinned chains, breadcrumb navigation, badge/chain preferences, and side-panel visibility are shared logical view state.")
   entries.addMany("OriginChainVM",
-    ["activeChain", "loading", "inFlightSummary", "lastResolvedSummaries"],
+    ["activeChain", "rowChains", "loading", "inFlightSummary",
+     "lastResolvedSummaries"],
     vscBackendAuthoritative,
     "Resolved chains/summaries and their request-lifecycle loading flags come from ct/originChain + ct/originSummary backend responses.")
   entries.addMany("OriginChainVM",
@@ -375,7 +378,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # the VM owns the window instead of a flow sub-store; nothing here is user
   # intent, so a peer must receive them from the backend owner as a set and
   # never merge them.
-  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks", "styledLines"],
+  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks", "styledLines",
+                             "layoutWindow", "windowReturns", "windowPath",
+                             "windowFunction"],
     vscBackendAuthoritative,
     "The loaded flow window: backend loop array, the loop picked from it, the tick it was loaded for, and its per-line facts.")
   entries.addDerived("FlowVM", ["isLoading", "totalIterations"])

@@ -56,7 +56,8 @@ const debugToolbarActions*: array[13, tuple[id: string; action: ClientAction]] =
   ## `ClientAction` whose chord its tooltip shows.
   ##
   ## The ids are the toolbar's own dispatch ids — the strings
-  ## `DebugControlsVM.invokeToolbarStep` and `onAction` already switch on —
+  ## `DebugControlsVM.invokeToolbarStep` and `DebugCommands.step` already
+  ## switch on —
   ## so this table cannot drift from the buttons without the buttons
   ## breaking too.
 
@@ -73,7 +74,8 @@ proc toolbarChord*(chordOf: proc(action: ClientAction): string;
   ## The chord currently bound to one debug-toolbar control, or "" —
   ## `chordOf` is the router's (`ui/chord_display`, PLAT-68).
   ##
-  ## This is what `ui/debug.nim` injects into `DebugControlsVM.shortcutFor`,
+  ## This is what `ui/debug_toolbar.nim` (`wireDebugToolbarShortcuts`)
+  ## injects into `DebugControlsVM.shortcutFor`,
   ## and therefore what ends up inside the parentheses in a tooltip.
   let action = toolbarClientAction(actionId)
   if action.isNone:

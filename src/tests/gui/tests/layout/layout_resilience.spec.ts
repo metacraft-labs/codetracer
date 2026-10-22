@@ -404,9 +404,10 @@ test.describe("Recovery from missing type", () => {
 // mean something.
 //
 // They also target `default_edit_layout.json` deliberately: the `ctPage`
-// fixture copies the bundled default over `default_layout.json` on every
-// test setup (`lib/layout-reset.ts` `ensureDefaultLayout`), so a broken
-// replay-mode layout would be erased before the app ever saw it.
+// fixture resets `default_layout.json` on every test setup — removes it, or
+// installs the bundled tree under `bundledLayout`
+// (`lib/layout-reset.ts` `prepareUserLayout`) — so a broken replay-mode
+// layout would be erased before the app ever saw it.
 
 test.describe("Recovery from an out-of-range activeItemIndex", () => {
   test.describe.configure({ retries: 2 });

@@ -30,7 +30,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { test, recordTestProgram, testProgramsPath } from "../../lib/fixtures";
+import { test, recordTestProgram, testProgramsPath, traceFolderForId } from "../../lib/fixtures";
 
 /**
  * Materialise a session.toml from two recorded traces' folders.
@@ -58,8 +58,25 @@ function writeSessionManifest(
   return manifestPath;
 }
 
+/**
+ * The folder `ct record` wrote recording `recordingId` to. A recording that
+ * reported an id but left no folder is a recorder defect, not an unavailable
+ * recorder, so it fails rather than skips.
+ */
+function recordedFolder(recordingId: string): string {
+  const folder = traceFolderForId(recordingId);
+  if (!fs.existsSync(folder)) {
+    throw new Error(`ct record reported ${recordingId} but wrote no folder at ${folder}`);
+  }
+  return folder;
+}
+
 test.describe("M24 — session.toml multi-trace loading", () => {
-  test("e2e_session_loads_two_traces_in_codetracer: process tree shows two entries", async ({ ctPage }, testInfo) => {
+  // No fixtures: the body records and writes the manifest itself and does not
+  // drive a window yet. Requesting `ctPage` would launch a single-trace
+  // CodeTracer this spec never looks at, and with no `sourcePath` to launch
+  // that fixture fails before the body runs.
+  test("e2e_session_loads_two_traces_in_codetracer: process tree shows two entries", async ({}, testInfo) => {
     if (process.env.CODETRACER_DB_TESTS_ONLY === "1") {
       // Allowed by the M24 milestone: SKIP narrowly when the test
       // shard is explicitly db-only.
@@ -67,21 +84,19 @@ test.describe("M24 — session.toml multi-trace loading", () => {
     }
 
     // Record two trivial Python programs to use as the manifest's
-    // [[trace]] entries. Both recordings produce a single `.ct`
-    // container, so the manifest references them by absolute path.
+    // [[trace]] entries. Each recording lands in its own folder under the
+    // worker's `$CODETRACER_HOME/data`, and the manifest references those
+    // folders by absolute path.
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-m24-session-"));
 
-    let recA;
-    let recB;
+    // `recordTestProgram` runs `ct record` and returns the recording id it
+    // printed; it throws only when `ct record` fails or prints no id, which
+    // is the recorder-unavailable case the skip below is for.
+    let recA: string;
+    let recB: string;
     try {
-      recA = await recordTestProgram({
-        name: "py_console_logs",
-        path: path.join(testProgramsPath("python"), "console_logs.py"),
-      });
-      recB = await recordTestProgram({
-        name: "py_checklist",
-        path: path.join(testProgramsPath("python"), "checklist.py"),
-      });
+      recA = recordTestProgram(path.join(testProgramsPath, "py_console_logs", "main.py"));
+      recB = recordTestProgram(path.join(testProgramsPath, "py_checklist", "basics.py"));
     } catch (err) {
       // Allowed by the M24 milestone: SKIP narrowly when the recorder
       // is unavailable (M5). We surface the underlying error so the
@@ -92,14 +107,14 @@ test.describe("M24 — session.toml multi-trace loading", () => {
 
     const manifestPath = writeSessionManifest(tempDir, [
       {
-        recordingId: recA.recordingId ?? recA.id ?? "trace-a",
-        tracePath: recA.outputFolder,
+        recordingId: recA,
+        tracePath: recordedFolder(recA),
         role: "frontend",
         prefix: "fe",
       },
       {
-        recordingId: recB.recordingId ?? recB.id ?? "trace-b",
-        tracePath: recB.outputFolder,
+        recordingId: recB,
+        tracePath: recordedFolder(recB),
         role: "backend",
         prefix: "be",
       },

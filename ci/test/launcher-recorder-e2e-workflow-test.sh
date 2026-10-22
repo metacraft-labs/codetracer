@@ -1455,6 +1455,15 @@ core_workspace_violations() {
 # input, looked up root.inputs[name] -> node (node keys can carry a `_N`
 # suffix, so reading nodes[name] can land on another repo's node). A parse or
 # tooling failure is reported as that, never as a statement about a pin.
+#
+# An input declared with `follows` is locked as a PATH, not a node key:
+# `"runquota": ["reprobuild", "runquota-src"]` means "root's `reprobuild`
+# input, then THAT node's `runquota-src` input". This used to read the first
+# element as the node, so once `runquota` started following reprobuild's copy
+# it was compared against reprobuild's own rev -- a different repository --
+# and reported every correct runquota pin as wrong. The path is walked from the
+# root, one input at a time, as Nix resolves it.
+# https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-flake.html#lock-files
 flake_lock_revs() {
 	python3 - "$FLAKE_LOCK" "$@" <<'PY'
 import json, sys
@@ -1471,7 +1480,18 @@ for name in sys.argv[2:]:
     if key is None:
         continue
     if isinstance(key, list):
-        key = key[0]
+        node = data["root"]
+        for step in key:
+            node = nodes.get(node, {}).get("inputs", {}).get(step)
+            if isinstance(node, list):
+                # A follows path inside a follows path: resolve it from the root.
+                inner = data["root"]
+                for s in node:
+                    inner = nodes.get(inner, {}).get("inputs", {}).get(s)
+                node = inner
+            if node is None:
+                break
+        key = node
     print("%s %s" % (name, nodes.get(key, {}).get("locked", {}).get("rev", "")))
 PY
 }

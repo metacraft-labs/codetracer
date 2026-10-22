@@ -161,7 +161,6 @@ test.describe("PLAT-52: the desktop's line view", () => {
   test.use({
     sourcePath: recording("terminal_colours"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -227,7 +226,6 @@ test.describe("PLAT-52: the desktop's screen view", () => {
   test.use({
     sourcePath: recording("terminal_screen"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 

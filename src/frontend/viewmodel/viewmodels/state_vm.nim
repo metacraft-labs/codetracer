@@ -29,6 +29,7 @@
 ##   echo vm.currentVariables.val # globals from the store
 
 import std/[json, options, sets, tables, strutils]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
@@ -37,7 +38,7 @@ import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types as store_types]
 from ../store/stop_timeline import stopIdentityOf
-from ../store/locals_answer import variableFromValue
+from ../store/locals_answer import variableFromValue, presentedValueText
 import ../viewport
 export viewport
 import origin_chain_types
@@ -46,8 +47,8 @@ import value_changes
 # `common_types`, which is also included by `frontend/types.nim` under
 # different `langstring`/`TableLike` bindings — so every type in it exists
 # twice and the two copies are incompatible. Value-history rows therefore
-# cross into this VM as `ValueHistoryRow` (see below), normalised by the
-# host at `ui/state.nim`.
+# cross into this VM as `ValueHistoryRow` (see below), decoded from the wire
+# JSON by `historyRowsOf` (or, in the VS Code extension, by `ui/state.nim`).
 
 type
   StateTab* = enum
@@ -107,6 +108,9 @@ type
     ##   isLoading        — whether a locals request is in flight
     ##
     ## The store reference is kept for the auto-load effect.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
     collabCore*: CollaborativeSessionCore
     runtimeRole*: ViewModelRuntimeRole
@@ -322,6 +326,9 @@ func stateEmptyText*(tab: StateTab): string =
 proc selectTab*(vm: StateVM; tab: StateTab) =
   ## Switch to a different tab. The `currentVariables` memo updates
   ## automatically because it depends on `activeTab`.
+  if vm.actionSink.forwards("state", "selectTab",
+      %*{"tab": sinkArg(tab)}):
+    return
   if not vm.collabCore.isNil:
     discard vm.collabCore.dispatchLocalViewOp(
       vokSetStateTab,
@@ -335,6 +342,8 @@ proc toggleExpand*(vm: StateVM; path: string) =
   ## Toggle whether a variable path is expanded or collapsed.
   ## If the path is currently in the expanded set it is removed;
   ## otherwise it is added.
+  if vm.actionSink.forwards("state", "toggleExpand", %*{"path": path}):
+    return
   if not vm.collabCore.isNil:
     let expanded = not (path in vm.expandedPaths.val)
     let observedAddTags =
@@ -361,6 +370,8 @@ proc toggleExpand*(vm: StateVM; path: string) =
 proc selectPath*(vm: StateVM; path: string) =
   ## Set the currently selected variable path.
   ## Pass an empty string to clear the selection.
+  if vm.actionSink.forwards("state", "selectPath", %*{"path": path}):
+    return
   if not vm.collabCore.isNil:
     discard vm.collabCore.dispatchLocalViewOp(
       vokSetRegister,
@@ -397,6 +408,9 @@ proc addWatch*(vm: StateVM; expression: string) =
   ## the origin chain. The actual `ct/originChain` dispatch is wired
   ## via the host bridge so the `OriginChainVM` observes the same
   ## response and updates its `activeChain` signal.
+  if vm.actionSink.forwards("state", "addWatch",
+      %*{"expression": expression}):
+    return
   if expression.len == 0:
     return
   if isOriginWatch(expression) and not vm.onShowOriginProc.isNil and
@@ -429,6 +443,9 @@ proc addWatch*(vm: StateVM; expression: string) =
 
 proc removeWatch*(vm: StateVM; expression: string) =
   ## Remove a watch expression by value. No-op if not found.
+  if vm.actionSink.forwards("state", "removeWatch",
+      %*{"expression": expression}):
+    return
   if not vm.collabCore.isNil:
     let watch = vm.collabCore.liveWatchForExpression(expression)
     if watch.isNone:
@@ -457,6 +474,9 @@ proc editWatch*(vm: StateVM; old, expression: string) =
   ## list (Variable-State-Pane.md: watch expressions "add, edit, remove").
   ## No-op when `old` is not a watch; an edit to an expression already
   ## watched removes `old` (the list stays free of duplicates).
+  if vm.actionSink.forwards("state", "editWatch",
+      %*{"old": old, "expression": expression}):
+    return
   if expression.len == 0 or old == expression:
     return
   if not vm.collabCore.isNil:
@@ -476,12 +496,27 @@ proc editWatch*(vm: StateVM; old, expression: string) =
 proc setViewport*(vm: StateVM; v: Viewport) =
   ## The size the state pane was given (Viewport-Driven-Loading V1); the
   ## stop loader's value budget follows it.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "state", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
   vm.viewport.val = v
 
 const
   LoadMoreCount* = LocalsMinCountLimit
-    ## Elements one "Load More" adds — the locals request's per-collection
-    ## floor, so a collection grows by the same step it was first cut to.
+    ## Elements one "Load More" adds while the state pane has not been
+    ## measured — the locals request's per-collection floor, so a collection
+    ## grows by the same step it was first cut to.
+
+func loadMoreCountFor*(v: Viewport): int =
+  ## Elements one "Load More" adds for a state pane showing `v`
+  ## (Viewport-Driven-Loading V2, "Value children": the expanded node's
+  ## visible region, never a fixed number): the rows the pane shows — the
+  ## most of a node's new children that can be on screen at once — plus the
+  ## `LeadRows` every windowed list fetches past its last visible row.
+  ## `LoadMoreCount` for an unmeasured pane.
+  if not v.measured: LoadMoreCount
+  else: v.rows + LeadRows
 
 proc variableAt(locals: seq[Variable]; path: string;
                 indices: var seq[int]): Option[Variable] =
@@ -525,10 +560,12 @@ proc appendElements(v: var Variable; path: openArray[int];
 
 proc loadMore*(vm: StateVM; path: string) =
   ## "Load More" (UI-Data-Loading-Guidelines Pattern 3): the next
-  ## `LoadMoreCount` elements of the collection at row `path`, which the
-  ## locals budget cut short (`Variable.moreElements`), appended to its
-  ## children. Asked once at a time per row; an answer about a stop the
+  ## `loadMoreCountFor(viewport)` elements of the collection at row `path`,
+  ## which the locals budget cut short (`Variable.moreElements`), appended to
+  ## its children. Asked once at a time per row; an answer about a stop the
   ## debugger has since left is dropped. A row with nothing more does nothing.
+  if vm.actionSink.forwards("state", "loadMore", %*{"path": path}):
+    return
   let store = vm.store
   if store.isNil or path.len == 0 or path in vm.loadingMore.val:
     return
@@ -549,7 +586,8 @@ proc loadMore*(vm: StateVM; path: string) =
     theVm.loadingMore.val = b
   onComplete(store.backend.send("ct/load-value-elements", %*{
       "expression": expression, "path": indices, "startIndex": start,
-      "count": LoadMoreCount, "rrTicks": store.debugger.val.rrTicks}),
+      "count": loadMoreCountFor(vm.viewport.val),
+      "rrTicks": store.debugger.val.rrTicks}),
     onSuccess = proc(resp: JsonNode) =
       done()
       if not responseSucceeded(resp) or
@@ -577,6 +615,9 @@ proc loadMore*(vm: StateVM; path: string) =
       done())
 
 proc toggleHistory*(vm: StateVM; expression: string) =
+  if vm.actionSink.forwards("state", "toggleHistory",
+      %*{"expression": expression}):
+    return
   # Build a fresh HashSet to avoid same-reference equality on the JS target.
   # See updateHistory for full explanation.
   var h = initHashSet[string]()
@@ -611,6 +652,41 @@ proc updateHistory*(vm: StateVM; expression: string;
   h[expression] = rows
   vm.valueHistory.val = h
 
+proc historyRowsOf*(body: JsonNode): seq[ValueHistoryRow] =
+  ## Decode the `body` of a `ct/load-history` answer
+  ## (`{"results": [{"location": {"rrTicks"}, "value"}, …]}`) into the rows the
+  ## pane shows, each value presented as the locals rows present theirs.
+  if body.isNil or body.kind != JObject:
+    return
+  for r in body.getOrDefault("results").getElems:
+    let value = r.getOrDefault("value")
+    result.add ValueHistoryRow(
+      locationTicks: r{"location", "rrTicks"}.getBiggestInt(0),
+      valueText: (if value.isNil: "" else: presentedValueText(value)))
+
+proc loadValueHistory*(vm: StateVM; expression: string) =
+  ## Ask the engine for the history of `expression`'s value at the current
+  ## stop (`ct/load-history`) and store the answer under the same key
+  ## (`updateHistory`). A host installs it as `onToggleHistory`, so opening a
+  ## row's history and the new-stop refresh both ask through it. A failed
+  ## request leaves the history unanswered rather than empty: an empty history
+  ## is an answer ("the value never changed") that the engine did not give.
+  if vm.isNil or vm.store.isNil or vm.store.backend.isNil or
+     expression.len == 0:
+    return
+  let dbg = vm.store.debugger.val
+  let fut = vm.store.backend.send("ct/load-history", %*{
+    "expression": expression,
+    "location": {"path": dbg.location.file, "line": dbg.location.line,
+                 "rrTicks": dbg.rrTicks},
+    "isForward": false})
+  let theVm = vm
+  async_compat.onComplete(fut,
+    proc(response: JsonNode) =
+      if responseSucceeded(response):
+        theVm.updateHistory(expression, historyRowsOf(responseBody(response))),
+    proc(message: string) = discard)
+
 # ---------------------------------------------------------------------------
 # Value Origin Tracking (M4) actions — keep adjacent to `toggleHistory`
 # because each variable row exposes both an "open history" and an
@@ -627,6 +703,9 @@ proc onShowOrigin*(vm: StateVM; expression: string; location: store_types.Locati
   ## The host bridge is invoked AFTER the wire send so that the
   ## OriginChainVM observes the request fire-and-forget — it tracks
   ## the response via its own event handler.
+  if vm.actionSink.forwards("state", "onShowOrigin",
+      %*{"expression": expression, "location": sinkArg(location)}):
+    return
   if not vm.store.isNil and not vm.store.backend.isNil:
     let args = originChainArgs(expression = expression)
     discard vm.store.backend.send("ct/originChain", args)
@@ -934,6 +1013,9 @@ proc jumpToHistoryEntry*(vm: StateVM; ticks: int64) =
   ## PLAT-51: a value-history entry is a NAVIGATION ROW (Variable-State-Pane
   ## .md; Click-Navigation.md §2): go to the tick its value was recorded at
   ## (`ct/goto-ticks`, the seek the terminal's and GPUI's history rows send).
+  if vm.actionSink.forwards("state", "jumpToHistoryEntry",
+      %*{"ticks": ticks}):
+    return
   if vm.isNil or vm.store.isNil or ticks < 0:
     return
   vm.store.requestHistoricalNavigation("ct/goto-ticks", %*{"ticks": ticks})

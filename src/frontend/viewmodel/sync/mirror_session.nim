@@ -29,7 +29,10 @@ import ../backend/backend_service
 import ../collab/runtime_role
 import ../collab/[codec, session_core, types as collab_types]
 import ../session_vm
-import ../viewmodels/debug_controls_vm
+import ../viewmodels/[debug_controls_vm, action_sink, calltrace_vm, state_vm,
+                      event_log_vm, terminal_output_vm, scratchpad_vm,
+                      trace_log_vm, flow_vm, point_list_vm,
+                      filesystem_vm]
 import action_relay, sync_subscriber, transport
 
 when defined(js):
@@ -89,9 +92,30 @@ proc onHostMessage(m: MirrorSession; msg: JsonNode) =
   else:
     discard
 
+proc relay*(m: MirrorSession; vm, action: string;
+            args: JsonNode = newJObject())
+
+proc relayActions(m: MirrorSession) =
+  ## Hand every panel ViewModel's user actions to the primary
+  ## (`viewmodels/action_sink`): the views call the ViewModels as anywhere,
+  ## and the actions run where the session is.
+  let sink: ActionSink = proc(vm, action: string; args: JsonNode) =
+    m.relay(vm, action, args)
+  let s = m.session
+  if not s.calltraceVM.isNil: s.calltraceVM.actionSink = sink
+  if not s.stateVM.isNil: s.stateVM.actionSink = sink
+  if not s.eventLogVM.isNil: s.eventLogVM.actionSink = sink
+  if not s.terminalOutputVM.isNil: s.terminalOutputVM.actionSink = sink
+  if not s.scratchpadVM.isNil: s.scratchpadVM.actionSink = sink
+  if not s.traceLogVM.isNil: s.traceLogVM.actionSink = sink
+  if not s.flowVM.isNil: s.flowVM.actionSink = sink
+  if not s.pointListVM.isNil: s.pointListVM.actionSink = sink
+  if not s.fileTreeVM.isNil: s.fileTreeVM.actionSink = sink
+
 proc createMirrorSession*(
     channel: SyncChannel;
-    debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil
+    debugCommandsFor: proc(session: SessionViewModel): DebugCommands = nil;
+    relayActions = false
 ): MirrorSession =
   ## A mirror over `channel`. It follows the session the host activates, or
   ## the one `switchTo` names.
@@ -103,6 +127,11 @@ proc createMirrorSession*(
   ## and the synced-signal registry walks the ViewModels that exist then.
   ## Without it the toolbar has the defaults over the inert backend, and
   ## its steps go nowhere.
+  ##
+  ## `relayActions`: the panels' user actions run on the primary
+  ## (Shared-DOM-Front-Ends D6) — a VS Code webview, whose host owns the
+  ## session and the replay. Off for a mirror whose page drives the replay
+  ## itself (`ct host`).
   let m = MirrorSession(channel: channel)
   createRoot proc(dispose: proc()) =
     m.disposeRoot = dispose
@@ -110,6 +139,8 @@ proc createMirrorSession*(
     if not debugCommandsFor.isNil:
       m.session.debugCommands = debugCommandsFor(m.session)
     m.session.initializePanelViewModels()
+    if relayActions:
+      m.relayActions()
   m.subscriber = createSyncSubscriber(m.session)
   channel.setHandler(proc(msg: JsonNode) = m.onHostMessage(msg))
   # THE VIEW STATE IS THE PRIMARY'S. A tab chosen, a row expanded or a watch

@@ -952,7 +952,8 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
           location: Location(file: "src/main.nr", line: 17, column: 3,
                              callstackDepth: 1))
       vm.setBackendSearchResults(matches)
-    mountIsoNimCalltrace(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderCalltracePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountState(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1542,7 +1543,8 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "calltrace":
         let vm = createCalltraceVM(store); vm.applyCalltrace()
-        mountIsoNimCalltrace(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderCalltracePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "event-log":
         let vm = createEventLogVM(store); vm.applyEventLog()

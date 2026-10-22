@@ -13,7 +13,7 @@
  *      then Alt+clicks the same line at a different column.  The
  *      Alt+click MUST replace the first breakpoint's column (not add
  *      a second one), and the bound column on
- *      `data.services.debugger.breakpointTable[path][line]` MUST be
+ *      the session's breakpoint row for `(path, line)` (`ctBreakpointRows`) MUST be
  *      the column of the Alt+click.
  *
  *   2. Issuing Continue after the replacement halts at the SECOND

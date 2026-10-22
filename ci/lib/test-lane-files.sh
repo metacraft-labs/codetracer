@@ -190,6 +190,7 @@ tui-real-terminal
 gpui-shell
 ui-selection
 ct-host-admission
+ct-host-manifest
 screen-oracle
 EOF
 }
@@ -236,6 +237,7 @@ test_lane_description() {
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, end to end: the real ct host refuses a client without its session secret or from a foreign origin' ;;
+	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -932,7 +934,12 @@ test_lane_files() {
 		# `origin_chain_wiring_test.nim` holds `ui/state.nim` to installing the
 		# origin badge's chain fetch and the "Pin to scratchpad" bridge into the
 		# Scratchpad pane's ViewModel (codetracer#856).
+		# `later_session_launch_failure_test.nim` holds a replay that cannot
+		# start to saying so in its own tab: the refusal a later tab's session
+		# is sent reaches that tab's status bar, once, ends its busy state, and
+		# is drawn into `#status` only while that tab is the one on screen.
 		echo src/frontend/tests/locals_answer_identity_test.nim
+		echo src/frontend/tests/later_session_launch_failure_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
 		echo src/frontend/tests/loop_built_handlers_test.nim
 		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
@@ -1191,7 +1198,12 @@ test_lane_files() {
 		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
 			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
 			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
-				'/test_opfs_volume\.nim$'
+				'/test_opfs_volume\.nim$' \
+				'/test_vscode_host\.nim$'
+		# `test_vscode_host` (HSF-X2) drives `entries/vscode_host`, the VS Code
+		# extension host's side, which is a hard `{.error.}` off the JS target:
+		# a debug session's `customRequest` and a webview's `postMessage` are
+		# JavaScript functions. It runs in `vm-unit-js`, added there below.
 		;;
 
 	vm-unit-js)
@@ -1430,6 +1442,7 @@ test_lane_files() {
 		# and the only place in the tree where the WEB instantiation's
 		# browser-facing half is exercised at all.
 		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
+		printf '%s\n' src/frontend/viewmodel/tests/unit/test_vscode_host.nim
 		;;
 
 	vm-unit-wasm)
@@ -1918,6 +1931,16 @@ test_lane_files() {
 		# rather than part of `ct-trace-units`, whose recipe builds neither.
 		# `just test-ct-host-admission` builds them.
 		_tlf_find src/tests/ct_host 'test_*.nim'
+		;;
+
+	ct-host-manifest)
+		# `ct host --manifest` choosing the slice of a recording manifest it
+		# imports (CLI/ct/host.md, "The start position"), against the real
+		# `ct host` and the node index it starts. Its own directory and lane for
+		# the reason `ct-host-admission` has one: it needs a built
+		# `src/build-debug/bin/ct` (or CODETRACER_CT_BIN), `node` and
+		# socket.io-client. `just test-ct-host-manifest` builds them.
+		_tlf_find src/tests/ct_host_manifest 'test_*.nim'
 		;;
 
 	tui-real-terminal)

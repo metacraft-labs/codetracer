@@ -60,6 +60,8 @@
 ## conversion noise.
 
 import std/[sets, sequtils]
+import std/json
+import ./action_sink
 
 import isonim/core/[signals, computation, owner]
 # Selective import: ``isonim/core/batch`` re-exports a ``HashSet`` that
@@ -73,6 +75,9 @@ import ../../../common/trace_source_paths
 type
   FilesystemVM* = ref object of ViewModel
     ## Reactive state for the Filesystem panel.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -248,6 +253,9 @@ proc toggleExpanded*(vm: FilesystemVM; path: string) =
   ## expanded set become expanded; folders already expanded collapse.
   ## File paths are silently allowed (a future click handler may key
   ## on them too).
+  if vm.actionSink.forwards("fileTree", "toggleExpanded",
+      %*{"path": path}):
+    return
   var current = vm.expandedPaths.val
   if path in current:
     current.excl(path)
@@ -259,6 +267,8 @@ proc toggleExpanded*(vm: FilesystemVM; path: string) =
 
 proc expandPath*(vm: FilesystemVM; path: string) =
   ## Mark ``path`` as expanded.  Idempotent.
+  if vm.actionSink.forwards("fileTree", "expandPath", %*{"path": path}):
+    return
   var current = vm.expandedPaths.val
   if path in current:
     return
@@ -269,6 +279,9 @@ proc expandPath*(vm: FilesystemVM; path: string) =
 
 proc collapsePath*(vm: FilesystemVM; path: string) =
   ## Mark ``path`` as collapsed.  Idempotent.
+  if vm.actionSink.forwards("fileTree", "collapsePath",
+      %*{"path": path}):
+    return
   var current = vm.expandedPaths.val
   if path notin current:
     return
@@ -311,6 +324,9 @@ proc expandToFile*(vm: FilesystemVM; filePath: string) =
   ## Deeper ancestors that are still behind a stub become reachable when
   ## the requested content arrives and ``setRoot`` re-runs the effect in
   ## ``createFilesystemVM``.
+  if vm.actionSink.forwards("fileTree", "expandToFile",
+      %*{"filePath": filePath}):
+    return
   if filePath.len == 0:
     return
   var ancestors: seq[string] = @[]
@@ -320,6 +336,8 @@ proc expandToFile*(vm: FilesystemVM; filePath: string) =
 
 proc openFile*(vm: FilesystemVM; path: string) =
   ## Open a file entry through the installed editor bridge.
+  if vm.actionSink.forwards("fileTree", "openFile", %*{"path": path}):
+    return
   if path.len == 0 or vm.onOpenFile.isNil:
     return
   vm.onOpenFile(path)

@@ -1,6 +1,7 @@
 import
   std/[ cstrutils, jsre, options ],
-  ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom,
+  ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom, panel_host,
+  ../viewmodel/session_vm,
   shortcut_labels,
   trace_macro, trace_static,
   column_click_resolver, editor_scope,
@@ -23,14 +24,24 @@ from ../viewmodel/viewmodels/diff_document import editorLanguageForPath
 from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 
 # ---------------------------------------------------------------------------
-# ViewModel layer — wired in parallel with the legacy event-bus code.
-# The EditorVM receives the same data but does not affect rendering yet.
+# ViewModel layer (Shared-DOM-Front-Ends D7.4 (a)). The editor's debugging
+# state is the session's: the execution line, the gutter marks and the values
+# come from the shared editor surface (`editor_points.webEditorSurface`), the
+# breakpoints from the session store's one producer (`sdk/breakpoints`), and
+# Monaco's line styles are re-applied by an effect over the surface's inputs
+# (`watchEditorPoints`). The text is Monaco's own buffer; whether web editing
+# goes through the shared editing core is PLAT-67's question. The inline flow
+# is still drawn by `ui/flow.nim`'s FlowComponent (D7.4 (b) is open).
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
   EditorVM, createEditorVM
+import ./editor_points
+from isonim/core/owner import createRoot
+from isonim/core/computation import createEffect
+from isonim/core/signals import val
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
@@ -38,9 +49,8 @@ when defined(js):
 # The IsoNim editor view owns direct editor containers for top-level and
 # expansion editors; Monaco still manages the container's internal DOM.
 
-# Module-level EditorVM instance. Created once and fed data whenever
-# the legacy event-bus handlers fire. Rendering still reads from legacy
-# data so behaviour is unchanged.
+# Module-level EditorVM instance: the session's (`initEditorVMFromSession`),
+# or a stub-backed one before the session exists.
 var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
 
@@ -51,6 +61,61 @@ var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
+
+proc applyColumnBreakpointDecorations*(self: EditorViewComponent)
+proc applyEventualStylesLines*(self: EditorViewComponent)
+
+var disposePointWatch: proc()
+var drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
+  ## The mark each open editor's gutter last drew per line (`EditorMark`'s
+  ## ordinal), so a change to the store's rows redraws only the lines whose
+  ## mark changed.
+
+proc watchEditorPoints(store: ReplayDataStore) =
+  ## Redraw the gutter lines and the column marks of every open editor when
+  ## the session store's point rows change — the answer to a breakpoint
+  ## request arrives after the click, so the gutter follows the store rather
+  ## than the click.
+  if not disposePointWatch.isNil:
+    disposePointWatch()
+    disposePointWatch = nil
+  drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
+  createRoot proc(dispose: proc()) =
+    disposePointWatch = dispose
+    createEffect proc() =
+      let rows = store.pointList.rows.val
+      if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+        return
+      for path, editor in data.ui.editors:
+        if editor.isNil or editor.monacoEditor.isNil:
+          continue
+        var now = JsAssoc[int, int]{}
+        for r in rows:
+          if cstring(r.path) == path and r.line >= 1:
+            now[r.line] = ord(gutterMarkFor($path, r.line))
+        let before =
+          if drawnMarks.hasKey(path): drawnMarks[path] else: JsAssoc[int, int]{}
+        for line, mark in now:
+          if not before.hasKey(line) or before[line] != mark:
+            editor.refreshEditorLine(line)
+        for line, mark in before:
+          if not now.hasKey(line):
+            editor.refreshEditorLine(line)
+        drawnMarks[path] = now
+        editor.applyColumnBreakpointDecorations()
+
+    # MONACO FOLLOWS THE EDITOR SURFACE (Shared-DOM-Front-Ends D7.4 (a)): the
+    # execution line, the flow's line styles and the marks are re-applied
+    # whenever an input of the surface changes — the stop, the position, the
+    # flow's styled lines — rather than when this component hears a move.
+    createEffect proc() =
+      discard store.stop.val
+      discard store.debugger.val
+      if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+        return
+      for path, editor in data.ui.editors:
+        if not editor.isNil and not editor.monacoEditor.isNil:
+          editor.applyEventualStylesLines()
 
 proc initEditorVMFromSession*(vm: EditorVM) =
   ## Hand the pane the session's `EditorVM` — the one
@@ -64,6 +129,10 @@ proc initEditorVMFromSession*(vm: EditorVM) =
     clog "EditorVM: replacing existing instance with shared-store version"
   editorVMStore = store
   editorVMInstance = vm
+  # The gutter and the editor's breakpoint actions read and write the
+  # session store's points (`editor_points`, `sdk/breakpoints`).
+  setEditorPointStore(store)
+  watchEditorPoints(store)
   clog "EditorVM: parallel ViewModel instance created (shared store)"
 
 proc initEditorVM() =
@@ -132,6 +201,18 @@ proc renderExpandedEditorDirect(self: EditorViewComponent)
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
   x >= location.left and x <= location.right and y >= location.top and y <= location.bottom
+
+proc nameAt(self: EditorViewComponent; line, column: int): string =
+  ## The word Monaco finds at `line:column` of this editor's text, or "".
+  if self.monacoEditor.isNil or line <= 0 or column <= 0:
+    return ""
+  let model = self.monacoEditor.getModel()
+  if model.isNil:
+    return ""
+  let word = model.toJs.getWordAtPosition(js{lineNumber: line, column: column})
+  if word.isNil or jsUndefined == word:
+    return ""
+  $word.word.to(cstring)
 
 proc clearViewZones*(self: EditorViewComponent) =
   self.monacoEditor.changeViewZones do (view: js):
@@ -417,18 +498,13 @@ proc applyColumnBreakpointDecorations*(self: EditorViewComponent) =
   ## ``editorLineNumber`` in ``ui/trace.nim``.
   if self.monacoEditor.isNil:
     return
-  let debuggerService = self.data.services.debugger
-  if debuggerService.isNil:
-    self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
-      self.columnBreakpointDecorations, @[])
-    return
-  let path = self.path
   var newDecorations: seq[DeltaDecoration] = @[]
-  if debuggerService.breakpointTable.hasKey(path):
+  # The session store's armed column breakpoints (`editor_points`).
+  let anchored = anchoredBreakpointsIn($self.path)
+  if anchored.len > 0:
     let textModel = self.monacoEditor.getModel()
-    for line, b in debuggerService.breakpointTable[path]:
-      if b.column <= 0 or not b.enabled:
-        continue
+    for b in anchored:
+      let line = b.line
       var column = b.column
       var endColumn = column + 1
       # Clamp to the actual line length so the marker never extends
@@ -460,12 +536,11 @@ proc setColumnBreakpoint*(
     tabInfo: TabInfo;
     line: int;
     column: int) =
-  ## M6 — invoke the column-aware breakpoint path on the underlying
-  ## ``DebuggerService`` and refresh the editor row so the gutter dot
-  ## and the new column-anchored decoration both render.
-  self.data.services.debugger.addColumnBreakpoint(tabInfo.name, line, column)
-  self.applyColumnBreakpointDecorations()
-  self.refreshEditorLine(line)
+  ## M6 — a breakpoint anchored at the column, through the session's one
+  ## breakpoint producer (`sdk/breakpoints`). The gutter dot and the
+  ## column-anchored decoration follow the store's rows
+  ## (`watchEditorPoints`).
+  setAnchoredBreakpoint(editorPointStore(), $tabInfo.name, line, column)
 
 
 proc lineActionClickAt*(
@@ -498,8 +573,7 @@ proc lineActionClickAt*(
   of ColumnAwareClick:
     self.setColumnBreakpoint(tabInfo, resolution.line, resolution.column)
   of GutterClick:
-    self.data.services.debugger.toggleBreakpoint(tabInfo.name, resolution.line)
-    self.refreshEditorLine(resolution.line)
+    toggleBreakpoint(editorPointStore(), $tabInfo.name, resolution.line)
 
 
 proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
@@ -512,8 +586,7 @@ proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
 
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    self.data.services.debugger.toggleBreakpoint(tabInfo.name, lineNumber)
-    self.refreshEditorLine(lineNumber)
+    toggleBreakpoint(editorPointStore(), $tabInfo.name, lineNumber)
 
 proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
   # PLAT-50: THE PARENT'S DATASET IS READ AFTER MOVING TO IT, as
@@ -531,12 +604,12 @@ proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js
     dataset = element.dataset
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    let path = tabInfo.name
-    if self.data.services.debugger.isEnabled(path, lineNumber):
-      self.data.services.debugger.disable(path, lineNumber)
-    else:
-      self.data.services.debugger.enable(path, lineNumber)
-    self.refreshEditorLine(lineNumber)
+    let path = $tabInfo.name
+    let held = breakpointOn(path, lineNumber)
+    # An empty slot does nothing (`isGutterToggleTarget`): no row, no request.
+    if held.isSome:
+      discard setBreakpointEnabled(editorPointStore(), path, lineNumber,
+                                   not held.get.enabled)
 
 proc isGutterToggleTarget(target: js): bool =
   ## Whether a right click on `target` is the gutter's enable / disable toggle
@@ -556,13 +629,9 @@ proc isGutterToggleTarget(target: js): bool =
   ##
   ## Matching it gives "does nothing" from the two listeners as they are:
   ## Monaco's menu stands down, and the container listener's
-  ## `lineActionContextMenu` changes nothing. With no breakpoint on the line
-  ## `DebuggerService.isEnabled` answers false, so it calls
-  ## `DebuggerService.enable`, which acts only on a line `breakpointTable`
-  ## already holds: no entry is added and no `dapSetBreakpoints` is sent. The
-  ## `refreshEditorLine` after it adds and removes a zero-height view zone to
-  ## make Monaco redraw the line, which draws the same placeholder again. The
-  ## class is drawn only by `trace.editorLineNumber`, in the gutter, so no
+  ## `lineActionContextMenu` changes nothing: with no breakpoint on the line
+  ## the store holds no row for it, so nothing is planned and nothing is sent.
+  ## The class is drawn only by `trace.editorLineNumber`, in the gutter, so no
   ## surface where the menu should open carries it.
   ##
   ## NOT THE LINE NUMBER. `gutter-line` is the element holding the line's
@@ -597,11 +666,10 @@ func has(tab: TabInfo, instruction: Instruction, i: int, offset: int): bool =
     result = offset >= instruction.offset
 
 method position*(self: EditorViewComponent): int =
-  if self.data.services.debugger.frameInfo.hasSelected and
-    self.data.services.debugger.frameInfo.offset != NO_OFFSET:
-
+  let offset = editorStop().frameOffset
+  if offset >= 0 and offset != NO_OFFSET:
     for i, instruction in self.tabInfo.instructions.instructions:
-      if self.tabInfo.has(instruction, i, self.data.services.debugger.frameInfo.offset):
+      if self.tabInfo.has(instruction, i, offset):
         return i + 1
 
   return NO_OFFSET
@@ -610,39 +678,39 @@ proc colorLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   var lines: seq[MonacoLineStyle] = @[]
   var tabInfo = self.tabInfo
 
+  # THE EXECUTION LINE IS THE SESSION'S (Shared-DOM-Front-Ends D7.4 (a)):
+  # the source view's is the editor surface's — the line the terminal and
+  # GPUI mark for the same position — and the C source, instruction and
+  # call views place it from the stop's whole location (`editorStop`).
+  let stop = editorStop()
   case self.editorView:
-  of ViewSource, ViewTargetSource:
-    var debuggerLine = NO_LINE
-    var debuggerPath = cstring""
-    if self.editorView == ViewSource:
-      debuggerLine = self.data.services.debugger.location.line
-      debuggerPath = self.data.services.debugger.location.path
+  of ViewSource:
+    if stop.isExpanded:
+      if stop.line > 0 and cstring(stop.path) == tabInfo.name:
+        # e.g. 2 - 1 + 1 -> 2. 2 - 2 + 1 -> 1
+        let line = stop.line - stop.expansionFirstLine + 1
+        lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
     else:
-      debuggerLine = self.data.services.debugger.cLocation.line
-      debuggerPath = self.data.services.debugger.cLocation.path
+      let line = webEditorSurface($tabInfo.name, 1, 0, nil).executionLine
+      if line > 0:
+        lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
 
-    if debuggerLine != NO_LINE and debuggerPath == tabInfo.name:
-      let line = if not self.data.services.debugger.location.isExpanded:
-        debuggerLine
-      else:
-        self.data.services.debugger.location.line - self.data.services.debugger.location.expansionFirstLine + 1 # e.g. 2 - 1 + 1 -> 2. 2 - 2 + 1 -> 1
-      lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
+  of ViewTargetSource:
+    if stop.cLine > 0 and cstring(stop.cPath) == tabInfo.name:
+      lines.add(MonacoLineStyle(line: stop.cLine, class: cstring(fmt"on on-{stop.cLine}")))
 
   of ViewInstructions:
-    cdebug "editor: asmName " & self.data.services.debugger.location.asmName
-    cdebug "editor: instructions name " & self.name
-    if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo} and self.data.services.debugger.location.asmName == self.name or
-       self.data.trace.lang == LangNim and self.data.services.debugger.cLocation.asmName == self.name:
+    if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo} and cstring(stop.asmName) == self.name or
+       self.data.trace.lang == LangNim and cstring(stop.cAsmName) == self.name:
       var position = self.position()
       if position != NO_POSITION:
         lines.add(MonacoLineStyle(line: position, class: cstring(fmt"on on-{position}")))
 
   of ViewCalltrace:
-      let currentLocation = self.data.services.debugger.location
-      let currentLocationName = currentLocation.path & cstring":" & currentLocation.functionName & cstring"-" & currentLocation.key
+      let currentLocationName = cstring(stop.path & ":" & stop.functionName & "-" & stop.key)
       if currentLocationName == self.name:
-        if currentLocation.line != NO_LINE and currentLocation.line in currentLocation.functionFirst .. currentLocation.functionLast:
-          lines.add(MonacoLineStyle(line: currentLocation.line - currentLocation.functionFirst + 1, class: cstring"on"))
+        if stop.line > 0 and stop.line in stop.functionFirst .. stop.functionLast:
+          lines.add(MonacoLineStyle(line: stop.line - stop.functionFirst + 1, class: cstring"on"))
 
   else:
     discard
@@ -833,8 +901,8 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   lines
 
 proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
-  let currentPosition = self.data.services.debugger.location.highLevelLine
-  let currentRRTicks = self.data.services.debugger.location.rrTicks
+  let currentPosition = editorStop().highLevelLine
+  let currentRRTicks = int(editorStop().rrTicks)
   let flow = self.flow
   var lines: seq[MonacoLineStyle] = @[]
 
@@ -1186,7 +1254,7 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
 
     result = if not currentWord.word.isNil: cast[cstring](currentWord.word) else: cstring""
 
-    let lang = fromPath(self.data.services.debugger.location.path)
+    let lang = fromPath(cstring(editorStop().path))
 
     if lang == LangRust:
       let xidRegex = newRegExp(r"^\w$")
@@ -1734,30 +1802,28 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # beside it.
     #
     # Delete/Add Breakpoint Menu Item
-    if data.services.debugger.hasBreakpoint(path, line):
+    let held = breakpointOn($path, line)
+    if held.isSome:
       toggleBreakpoint = ContextMenuItem(
         name: "Delete breakpoint",
         hint: "<click on the red dot>",
         handler: proc(e: Event) =
-          self.data.services.debugger.deleteBreakpoint(path, line)
-          self.refreshEditorLine(line)
+          discard deleteBreakpoint(editorPointStore(), $path, line)
       )
       # Enable/Disable Breakpoint
-      if data.services.debugger.isEnabled(path, line):
+      if held.get.enabled:
         toggleBreakpointState = ContextMenuItem(
           name: "Disable breakpoint",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.disable(path, line)
-            self.refreshEditorLine(line)
+            discard setBreakpointEnabled(editorPointStore(), $path, line, false)
         )
       else:
         toggleBreakpointState = ContextMenuItem(
           name: "Enable breakpoint",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.enable(path, line)
-            self.refreshEditorLine(line)
+            discard setBreakpointEnabled(editorPointStore(), $path, line, true)
         )
 
       contextMenu &= toggleBreakpointState
@@ -1768,47 +1834,31 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         name: "Add breakpoint",
         hint: "<click line number gutter>",
         handler: proc(e: Event) =
-          data.services.debugger.addBreakpoint(path, line)
-          self.refreshEditorLine(line)
+          toggleBreakpoint(editorPointStore(), $path, line)
       )
 
     contextMenu &= toggleBreakpoint
 
-    # Delete Breakpoints in file
-    #
-    # "IN FILE" IS NOW TRUE OF BOTH HALVES OF THIS ENTRY.  It used to be true
-    # of neither: the row appeared whenever the PROJECT held a breakpoint, and
-    # its handler walked every breakpoint in the project passing `path` — this
-    # file's path — to `deleteBreakpoint`, so a breakpoint at line 40 of
-    # another file deleted whatever this file had at line 40 and left the other
-    # one standing.  It also called `pointList.breakpoints.delete(i, i)` while
-    # walking indices taken from a copy of that same seq, so after the first
-    # removal every index was off by one.
-    let breakpointsInFile = data.pointList.breakpoints.filterIt(it.path == path)
-    if breakpointsInFile.len > 0:
+    # Delete Breakpoints in file: offered when THIS file holds one, and it
+    # deletes this file's breakpoints only.
+    if breakpointsInFile($path).len > 0:
       deleteBreakpoints = ContextMenuItem(
         name: "Delete breakpoints in file",
         hint: "",
+        # One `setBreakpoints` with none for this file (`clearBreakpoints`).
         handler: proc(e: Event) =
-          # `deleteBreakpoint` maintains `pointList.breakpoints` itself, so the
-          # lines are collected FIRST and this loop never mutates what it reads.
-          for b in data.pointList.breakpoints.filterIt(it.path == path):
-            data.services.debugger.deleteBreakpoint(path, b.line)
-            self.refreshEditorLine(b.line)
+          clearBreakpoints(editorPointStore(), $path)
       )
 
       contextMenu &= deleteBreakpoints
 
     # Delete ALL Breakpoints in project
-    if data.pointList.breakpoints.len > 0:
+    if anyBreakpoints():
       deleteAllBreakpoints = ContextMenuItem(
         name: "Delete ALL breakpoints",
         hint: "",
-        # `deleteAllBreakpoints` empties `pointList.breakpoints` itself now, so
-        # the assignment that used to be here was masking the index corruption
-        # inside it rather than finishing its work.
         handler: proc(e: Event) =
-          data.services.debugger.deleteAllBreakpoints(self)
+          clearBreakpoints(editorPointStore())
       )
 
       contextMenu &= deleteAllBreakpoints
@@ -1816,8 +1866,8 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # TRACEPOINTS AND THE SCRATCHPAD ARE DEBUG-ONLY, and unlike breakpoints
     # they are not project state.  A tracepoint is an expression evaluated
     # against a recorded trace (`toggleTrace` -> `updateExpansion`), and
-    # "Add value to scratchpad" reads `services.debugger.locals`, which is the
-    # frame the session is stopped in.  Neither has any referent before a
+    # "Add value to scratchpad" values the name at the stop the session is
+    # in (`editor_points.valueInScope`).  Neither has any referent before a
     # recording exists, so neither is offered — a disabled "Add tracepoint"
     # would be a row about debugging in a menu that is meant to be about
     # editing.
@@ -1862,34 +1912,17 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
       contextMenu &= addDeleteTracepoint
 
-      # Add expression to Scratchpad
-      let key = &"{self.path}:{self.lastMouseMoveLine}"
-
-      if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-        for item in data.services.debugger.expressionMap[key]:
-          let startCol = cast[int](item.startCol)
-          var endCol = cast[int](item.endCol)
-          var expression: cstring
-          case item.kind:
-          of TkField:
-            expression = item.base
-
-          of TkIndex:
-            expression = item.collection
-            endCol -= 2
-
-          else:
-            expression = item.expression
-
-          if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-            for local in data.services.debugger.locals:
-              if local.expression == expression:
-                let baseValue = local.value
-                addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
-                  self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: baseValue))
-                  self.data.redraw())
-                contextMenu &= addToScratchpad
-            break
+      # Add the clicked name's value to the Scratchpad: the name under the
+      # pointer, valued at the stop by the session (`valueInScope`).
+      let clickedName = self.nameAt(self.lastMouseMoveLine, self.lastMouseClickCol)
+      let clickedValue = valueInScope(clickedName)
+      if clickedValue.isSome:
+        let name = clickedName
+        let valueText = clickedValue.get
+        addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
+          discard editor_points.addToScratchpad(name, valueText)
+          self.data.redraw())
+        contextMenu &= addToScratchpad
   else:
     # NO MODE GATE HERE, and it is not an oversight.  This arm is reached only
     # when the right-click landed inside a tracepoint's results table
@@ -2103,89 +2136,47 @@ proc getSourceLineDomIndex(self:EditorViewComponent, position: int): int =
 
   return result
 
-proc legacyValueViewZoneDom(self: EditorViewComponent, value: ValueComponent): Node =
-  ## DOM entrypoint for inline Monaco value view zones.
-  ##
-  ## The value module owns the remaining value-tree DOM materialization.  Editor
-  ## only supplies the legacy root-left style required by Monaco view zones.
-  value.renderValueDomWithLeft(&"{self.currentTooltip[0] * 9}px")
+proc valueTooltipDom(name, valueText: string; column: int): Node =
+  ## The value of a clicked name, as a row under its line: `name = value`,
+  ## indented to the name's column.
+  let row = document.createElement(cstring"div")
+  row.class = cstring"ct-editor-value-tooltip"
+  row.style.paddingLeft = cstring(&"{max(0, column - 1) * 9}px")
+  let nameSpan = document.createElement(cstring"span")
+  nameSpan.class = cstring"value-name"
+  nameSpan.textContent = cstring(name & " = ")
+  let valueSpan = document.createElement(cstring"span")
+  valueSpan.class = cstring"value-expanded-text"
+  valueSpan.textContent = cstring(valueText)
+  row.appendChild(nameSpan)
+  row.appendChild(valueSpan)
+  cast[Node](row)
 
-proc addLegacyValueViewZone(self: EditorViewComponent, value: ValueComponent, line: int) =
+proc renderValueTooltip(self: EditorViewComponent) =
+  ## Editor-Pane.md gesture 5: a plain click on a name shows its value at
+  ## the stop, in a row under the clicked line. The name is the word Monaco
+  ## finds at the click; its value is the session's (`valueInScope`), the
+  ## values every front-end shows. A click on anything with no value in
+  ## scope shows nothing.
+  if self.monacoEditor.isNil:
+    return
+  self.currentTooltip = (0, 0, 0)
+  if not self.viewZones.isNil:
+    self.clearViewZones()
+  let name = self.nameAt(self.lastMouseClickLine, self.lastMouseClickCol)
+  let value = valueInScope(name)
+  if value.isNone:
+    return
+  let line = self.lastMouseClickLine
+  self.currentTooltip = (self.lastMouseClickCol, self.lastMouseClickCol, line)
   let viewZone = js{
     afterLineNumber: line,
-    heightInPx: 0,
-    domNode: self.legacyValueViewZoneDom(value)
+    heightInLines: 1,
+    domNode: valueTooltipDom(name, value.get, self.lastMouseClickCol)
   }
-
   self.monacoEditor.changeViewZones do (view: js):
     var zoneId = cast[int](view.addZone(viewZone))
     self.viewZones[line] = zoneId
-
-proc renderValueView(self: EditorViewComponent, value: ValueComponent, line: int) =
-  self.addLegacyValueViewZone(value, line)
-
-proc customRedraw(self: ValueComponent) =
-  let editor = data.ui.editors[data.services.debugger.location.path]
-  var line = editor.lastMouseClickLine
-
-  editor.clearViewZones()
-  editor.addLegacyValueViewZone(self, line)
-
-proc renderValueTooltip(self: EditorViewComponent) {.async.} =
-  let key = &"{self.path}:{self.lastMouseClickLine}"
-
-  self.currentTooltip = (0, 0, 0)
-
-  if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-    self.clearViewZones()
-    if self.data.services.debugger.showInlineValues:
-      for item in data.services.debugger.expressionMap[key]:
-        let startCol = cast[int](item.startCol)
-        var endCol = cast[int](item.endCol)
-        var expression: cstring
-        case item.kind:
-        of TkField:
-          expression = item.expression
-
-        of TkIndex:
-          expression = item.collection
-          endCol -= 2
-
-        else:
-          expression = item.expression
-
-        if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-          var baseValue: Value
-
-          for local in self.data.services.debugger.locals:
-            if local.expression == expression:
-              baseValue = local.value
-              break
-
-          if baseValue.isNil:
-            baseValue = await self.data.services.debugger.evaluateExpression(self.data.services.debugger.location.rrTicks, item.expression)
-
-          if not baseValue.isNil:
-            let value = ValueComponent(
-              expanded: JsAssoc[cstring, bool]{expression: false},
-              charts: JsAssoc[cstring, ChartComponent]{},
-              showInLine: JsAssoc[cstring, bool]{},
-              baseExpression: expression,
-              baseValue: baseValue,
-              stateID: -1,
-              nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-              valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-              data: data,
-              customRedraw: customRedraw
-            )
-            self.currentTooltip = (startCol, endCol, self.lastMouseClickLine)
-            if not self.viewZones.isNil:
-              self.clearViewZones()
-            self.renderValueView(value, self.lastMouseClickLine)
-            break
-
-  elif not self.monacoEditor.isNil:
-    self.clearViewZones()
 
 const DELAY: int64 = 400 # milliseconds
 
@@ -2327,7 +2318,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
 
   zoneDom.appendChild(editorDom)
 
-  var lang = fromPath(self.data.services.debugger.location.path)
+  var lang = fromPath(cstring(editorStop().path))
   let theme = monacoThemeName(self.data.config.theme)
   if not self.diffEditors.hasKey(lineNumber):
     discard setTimeout(proc () =
@@ -2336,7 +2327,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
         MonacoEditorOptions(
           value: source,
           language: cstring(editorLanguageForPath(
-            $self.data.services.debugger.location.path, lang.toCLang())),
+            editorStop().path, lang.toCLang())),
           readOnly: true,
           theme: theme,
           automaticLayout: true,
@@ -3151,9 +3142,17 @@ proc eventFlowLocationForEditor(
   ))
 
 proc initialDebuggerFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
-  if self.data.isNil or self.data.services.isNil or self.data.services.debugger.isNil:
+  ## The stop the session is at, as the flow's first location.
+  let stop = editorStop()
+  if stop.path.len == 0:
     return
-  self.usableInitialFlowLocation(self.data.services.debugger.location)
+  self.usableInitialFlowLocation(types.Location(
+    path: cstring(stop.path), line: stop.line,
+    highLevelPath: cstring(stop.path), highLevelLine: stop.highLevelLine,
+    functionName: cstring(stop.functionName), key: cstring(stop.key),
+    functionFirst: stop.functionFirst, functionLast: stop.functionLast,
+    rrTicks: int(stop.rrTicks), isExpanded: stop.isExpanded,
+    expansionFirstLine: stop.expansionFirstLine))
 
 proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   if self.service.isNil:
@@ -3172,26 +3171,25 @@ proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool
     if location.found:
       return location
 
-proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
-  if self.data.isNil or self.data.ui.isNil:
-    return
-  if self.data.ui.componentMapping[Content.Calltrace].len == 0:
-    return
+from isonim/core/signals import val
 
-  for _, component in self.data.ui.componentMapping[Content.Calltrace]:
-    let calltrace = CalltraceComponent(component)
-    if calltrace.isNil:
-      continue
-    for callLine in calltrace.callLines:
-      if callLine.isNil or callLine.content.isNil:
-        continue
-      if callLine.content.kind != CallLineContentKind.Call or callLine.content.call.isNil:
-        continue
-      let location = callLine.content.call.location
-      let usableLocation = self.usableInitialFlowLocation(location)
-      if usableLocation.found:
-        if usableLocation.location.rrTicks > 0:
-          return usableLocation
+proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  ## The first call of the section the session's store holds whose location
+  ## the flow can use (the call-trace pane renders the same lines).
+  let session = panelSession()
+  if session.isNil or session.store.isNil:
+    return
+  for line in session.store.calltrace.lines.val:
+    let location = types.Location(
+      path: cstring(line.location.file), line: line.location.line,
+      highLevelPath: cstring(line.location.file),
+      highLevelLine: line.location.line,
+      rrTicks: int(line.rrTicks),
+      sourceGeneration: line.location.sourceGeneration,
+      sourceDigest: cstring(line.location.sourceDigest))
+    let usableLocation = self.usableInitialFlowLocation(location)
+    if usableLocation.found and usableLocation.location.rrTicks > 0:
+      return usableLocation
 
 proc initialEventLogFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   if self.data.isNil:
@@ -3889,7 +3887,7 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
 
   if self.data.ui.activeFocus == self:
-    discard self.renderValueTooltip()
+    self.renderValueTooltip()
 
   # Tracepoint results (#566): this used to unconditionally call
   # `refreshTraceViewZoneDom()` for every expanded tracepoint, on every
@@ -4367,13 +4365,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       case view:
       of ViewInstructions:
         if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
-          self.data.openInstructions(self.data.services.debugger.location.asmName)
+          self.data.openInstructions(response.location.asmName)
         elif self.data.trace.lang == LangNim:
-          self.data.openInstructions(self.data.services.debugger.cLocation.asmName)
+          self.data.openInstructions(response.cLocation.asmName)
 
       of ViewTargetSource:
         if self.data.trace.lang == LangNim:
-          self.data.openTargetSource(self.data.services.debugger.cLocation.path)
+          self.data.openTargetSource(response.cLocation.path)
 
       else:
         discard
@@ -4390,7 +4388,6 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
      sameSourceRevisionPath(response.location.highLevelPath, sourceFilePath))
 
   if moveTargetsEditor:
-    self.data.services.debugger.stableBusy = false
     if not response.location.isExpanded:
       self.service.active = canonicalSourceRevisionPath(response.location.path)
     else:
@@ -4501,9 +4498,6 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
         clog cstring("[NSS-1.64] EditorVC.onCompleteMove: elif branch -- redrawFlow only (no fresh fetch)")
       self.flow.redrawFlow()
       self.adjustEditorWidth()
-
-  if self.data.trace.lang != LangRubyDb:
-    discard data.services.debugger.loadParsedExprs(self.service.currentLine, response.cLocation.path)
 
   if not self.flow.isNil:
     discard self.flow.onCompleteMove(response)

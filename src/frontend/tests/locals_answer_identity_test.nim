@@ -161,10 +161,11 @@ let dapApi = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 0)
 let viewsApi = setupSinglePageViewsApi(cstring"test-views")
 setupMiddlewareApis(dapApi, viewsApi)
 
-# The State component registers FIRST, over the stub-backed StateVM
-# `register` builds — the order a host that never builds the session's store
-# (the VS Code extension) is left in, and the order the desktop is in when
-# `createUIComponents` beats `configureMiddleware`.
+# The State component registers FIRST, before the session's StateVM exists —
+# the order the desktop is in when `createUIComponents` beats
+# `configureMiddleware`. Its moves are delivered by hand (`moveTo`), as the
+# VS Code extension's subscription delivers them: the component's
+# `onCompleteMove` -> `loadLocals` is that host's sender.
 let component = StateComponent(
   id: 0,
   values: JsAssoc[cstring, ValueComponent]{},
@@ -312,8 +313,9 @@ proc sessionChecks() {.async.} =
   await settle()
   ck shown() == @["initial_shield=20"]
   ck dropped() - droppedBefore == 1
-  # The legacy component's own subscription received the answer as well.
-  ck component.locals.len == 1
+  # The component keeps no copy of the answer: on the desktop and the web it
+  # subscribes to nothing, and the pane renders the session's store.
+  ck component.locals.len == 0
 
   # ---- an answer overtaken by a later one is still judged by its own stop
   block:

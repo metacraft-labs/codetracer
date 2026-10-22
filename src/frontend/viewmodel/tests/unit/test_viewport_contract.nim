@@ -221,6 +221,80 @@ suite "EventLogVM on the viewport contract":
       check asked[1]["search"].getStr == "tick"
       dispose()
 
+  test "a search typed in the filter bar asks for its results from the top":
+    # The engine cuts the window from the MATCHING events, so a search asked
+    # at the old scroll offset answers rows past the end of a short result
+    # list: an empty pane over results that exist. `setSearchQuery` scrolls
+    # to the top; the filter bar's `setFilterInput` must too, through the
+    # viewport — `currentPage` is derived from it and moves no window.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = false)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 30, firstRow: 200))
+      vm.setFilterInput("tick")
+      let asked = mock.sent("ct/event-load")
+      check asked.len == 2
+      check asked[^1]["search"].getStr == "tick"
+      check asked[^1]["start"].getInt == 0
+      check vm.viewport.val.firstRow == 0
+      check vm.currentPage.val == 0
+      dispose()
+
+  test "the filter bar's shorthands are not sent as search text":
+    # `boundary:<id>` and `unmatched` select marker rows on the client
+    # (Correlation-Markers §5.4). The engine's `search` matches event content
+    # and path, so sent as text they would match nothing and empty the pane.
+    # Only the free text beside them is the log's search.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService(autoRespond = false)
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 30))
+      vm.setFilterInput("boundary:order-processing tick")
+      var asked = mock.sent("ct/event-load")
+      check asked.len == 2
+      check asked[^1]["search"].getStr == "tick"
+      check vm.filterBar.val.boundaryFilter == "order-processing"
+      # Only shorthands: no search at all, so the pane asks for the
+      # unsearched window again.
+      vm.setFilterInput("boundary:order-processing unmatched")
+      asked = mock.sent("ct/event-load")
+      check asked.len == 3
+      check not asked[^1].hasKey("search")
+      check vm.filterBar.val.unmatchedOnly
+      dispose()
+
+  test "a search's pages are counted from its matches, not from the log":
+    # The engine's `total` is the size of the SEARCHED list. A pager that
+    # kept counting the whole log would offer pages past the last match,
+    # each of them empty. The backend answers the way `event_load` does:
+    # `total` is 100 events, or the 15 that match when the request searches.
+    createRoot proc(dispose: proc()) =
+      let backend = BackendService(
+        sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
+          let total = if args.hasKey("search"): 15 else: 100
+          newCompletedFuture[JsonNode](%*{"events": [], "total": total}),
+        onEventProc: proc(handler: EventHandler) = discard)
+      let store = createReplayDataStore(backend)
+      let vm = createEventLogVM(store)
+      vm.setViewport(Viewport(rows: 10))
+      drain()
+      check vm.totalPages.val == 10
+      vm.setSearchQuery("tick")
+      drain()
+      check vm.totalPages.val == 2
+      # The whole log's size is still known, for a footer's "of N".
+      check vm.totalEventCount.val == 100
+      # And the pager stops at the last page of matches.
+      vm.nextPage()
+      vm.nextPage()
+      check vm.currentPage.val == 1
+      vm.setSearchQuery("")
+      drain()
+      check vm.totalPages.val == 10
+      dispose()
+
   test "an unmeasured pane asks for nothing":
     createRoot proc(dispose: proc()) =
       let (store, mock) = storeWithMock()

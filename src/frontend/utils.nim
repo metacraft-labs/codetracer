@@ -593,9 +593,6 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
   if tabInfo.lastSyncedSource.isNil:
     tabInfo.lastSyncedSource = tabInfo.source
 
-  if not self.data.services.debugger.breakpointTable.hasKey(location.path):
-    self.data.services.debugger.breakpointTable[location.path] = JsAssoc[int, UIBreakpoint]{}
-
   if not location.isExpanded:
     self.open[name] = tabInfo
     # self.data.ui.editors[name].tabInfo = tabInfo

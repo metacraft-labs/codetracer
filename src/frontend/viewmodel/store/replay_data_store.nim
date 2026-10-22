@@ -339,6 +339,18 @@ type
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
+    stop*: Signal[StopLocation]
+      ## The stop's whole location, for an editor (`applyStopLocation`).
+    positionReported*: Signal[bool]
+      ## Whether the engine has stated a position for this session yet.
+      ##
+      ## `debugger.rrTicks` starts at 0, and 0 is also a real position — the
+      ## first step of the trace, where `run-to-entry` lands — so "no answer
+      ## yet" and "parked on tick 0" cannot be told apart from the tick. A host
+      ## that shows a served or cached frame until the engine answers reads
+      ## this instead (BlockTracer's `arrived`, moved here by
+      ## Shared-DOM-Front-Ends D8). Set by every write of an engine-reported
+      ## position (`updateDebuggerPosition`), whatever tick it names.
     currentGeid*: Signal[Option[uint64]]
     timeline*: Signal[TimelineState]
     agentSessions*: Signal[AgentSessionsState]
@@ -968,12 +980,14 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
       )),
+      stop: createSignal(StopLocation(frameOffset: -1)),
       debugger: createSignal(DebuggerState(
         location: Location(file: "", line: 0, column: 0),
         rrTicks: 0'u64,
         status: dsIdle,
         threadId: 0'u32,
       )),
+      positionReported: createSignal(false),
       currentGeid: createSignal(none(uint64)),
       timeline: createSignal(TimelineState(
         minRRTicks: 0'u64,
@@ -1194,6 +1208,9 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
       s.locals.loadingState.val = lsError,
   )
 
+proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int
+  ## Forward-declared: `requestCalltraceSection` decodes its own answer.
+
 proc requestCalltraceSection*(store: ReplayDataStore;
                               startIndex: int64;
                               height: int;
@@ -1242,14 +1259,23 @@ proc requestCalltraceSection*(store: ReplayDataStore;
   let fut = store.backend.send("ct/load-calltrace-section", args)
 
   let s = store
-  fut.onComplete(
-    onSuccess = proc() =
+  onComplete(fut,
+    proc(response: JsonNode) =
       s.requestTracker.markComplete(key, argsStr)
-      s.calltrace.loadingState.val = lsIdle,
-    onError = proc() =
+      # THE STORE DECODES ITS OWN ANSWER, on every transport, through the one
+      # section decoder (`applyCalltraceResponse`). The desktop used to read
+      # it from the legacy call-trace component's event subscription instead,
+      # so a host without that component showed an empty pane. A body that is
+      # not a section (an older engine answering only with the event) leaves
+      # the store as it was.
+      if responseSucceeded(response):
+        discard s.applyCalltraceResponse(responseBody(response))
+        s.calltrace.loadingState.val = lsIdle
+      else:
+        s.calltrace.loadingState.val = lsError,
+    proc(message: string) =
       s.requestTracker.markComplete(key, argsStr)
-      s.calltrace.loadingState.val = lsError,
-  )
+      s.calltrace.loadingState.val = lsError)
 
 # ---------------------------------------------------------------------------
 # Bridge procs — used by the legacy UI layer to feed data into the store
@@ -1267,6 +1293,9 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
   let current = store.debugger.val
+  # The engine has spoken, whatever it said — tick 0 included.
+  if not store.positionReported.val:
+    store.positionReported.val = true
   when defined(js):
     vmDebug "[PIPELINE] updateDebuggerPosition: storeId=" &
       $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
@@ -1307,6 +1336,39 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # about a stop the debugger has left.
   store.stops.observe(store.debugger.val)
 
+proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
+  ## Adopt the whole location a `ct/complete-move` event reports
+  ## (`MoveState`: `location`, `cLocation`, `frameInfo`) as `stop` — what an
+  ## editor needs beyond the position (`StopLocation`). The desktop's renderer
+  ## calls it with each move it receives; `applyCompleteMove` calls it for
+  ## the hosts that read the event themselves.
+  if body.isNil or body.kind != JObject:
+    return
+  var stop = StopLocation(frameOffset: -1)
+  let loc = body.getOrDefault("location")
+  if not loc.isNil and loc.kind == JObject:
+    stop.path = loc.getOrDefault("path").getStr("")
+    stop.line = loc.getOrDefault("line").getInt(0)
+    stop.highLevelLine = loc.getOrDefault("highLevelLine").getInt(0)
+    stop.functionName = loc.getOrDefault("functionName").getStr("")
+    stop.key = loc.getOrDefault("key").getStr("")
+    stop.functionFirst = loc.getOrDefault("functionFirst").getInt(0)
+    stop.functionLast = loc.getOrDefault("functionLast").getInt(0)
+    stop.asmName = loc.getOrDefault("asmName").getStr("")
+    stop.isExpanded = loc.getOrDefault("isExpanded").getBool(false)
+    stop.expansionFirstLine = loc.getOrDefault("expansionFirstLine").getInt(0)
+    stop.rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
+  let c = body.getOrDefault("cLocation")
+  if not c.isNil and c.kind == JObject:
+    stop.cPath = c.getOrDefault("path").getStr("")
+    stop.cLine = c.getOrDefault("line").getInt(0)
+    stop.cAsmName = c.getOrDefault("asmName").getStr("")
+  let frame = body.getOrDefault("frameInfo")
+  if not frame.isNil and frame.kind == JObject and
+     frame.getOrDefault("hasSelected").getBool(false):
+    stop.frameOffset = frame.getOrDefault("offset").getInt(-1)
+  store.stop.val = stop
+
 proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   ## Adopt the position a `ct/complete-move` event reports, and mark the
   ## debugger idle again.
@@ -1343,9 +1405,16 @@ proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   store.updateDebuggerPosition(rrTicks, file, line, geid,
                                sourceGeneration = sourceGeneration,
                                sourceDigest = sourceDigest)
-  var dbg = store.debugger.val
-  dbg.status = dsIdle
-  store.debugger.val = dbg
+  store.applyStopLocation(body)
+  # A FRESH object: on the JS backend `var dbg = store.debugger.val` is the
+  # signal's own reference, so writing it back compares equal to itself and
+  # the status change never fires — the debugger stayed `dsStepping` and every
+  # step control stayed disabled after the first move.
+  let moved = store.debugger.val
+  if moved.status != dsIdle:
+    store.debugger.val = DebuggerState(
+      rrTicks: moved.rrTicks, location: moved.location, status: dsIdle,
+      threadId: moved.threadId)
 
 proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
   ## Update the current visual replay GEID independently of rrTicks. MCR
@@ -1562,6 +1631,19 @@ func firstTicks(node: JsonNode; names: varargs[string]): uint64 =
       return if raw > 0.0: uint64(raw) else: 0'u64
   0'u64
 
+func hasTicks(node: JsonNode; names: varargs[string]): bool =
+  ## Whether this object reports a tick under any of `names` — a number that
+  ## is not negative (-1 is how some producers spell "no position"). Tick 0 is
+  ## a position; absence is not.
+  if node.isNil or node.kind != JObject:
+    return false
+  for name in names:
+    let child = node.getOrDefault(name)
+    if child.isNil: continue
+    if child.kind == JInt: return child.getBiggestInt(0) >= 0
+    if child.kind == JFloat: return child.getFloat(0.0) >= 0.0
+  false
+
 func firstInt(node: JsonNode; names: varargs[string]): int =
   ## The first of `names` this object carries as a number, or 0.
   ##
@@ -1611,6 +1693,8 @@ proc eventLogRowFromJson*(node: JsonNode; positionIndex: int): EventLogRow =
   result.line = firstInt(node, "highLevelLine", "high_level_line")
   result.rrTicks = firstTicks(node, "directLocationRRTicks",
                               "direct_location_rr_ticks")
+  result.noPosition = not hasTicks(node, "directLocationRRTicks",
+                                   "direct_location_rr_ticks")
   result.sourceGeneration = firstInt(node, "sourceGeneration",
                                      "source_generation")
   result.sourceDigest = firstStr(node, "sourceDigest", "source_digest")
@@ -1982,10 +2066,20 @@ type
   BreakpointAnchor* = tuple[line, column: int]
     ## PLAT-50: where a breakpoint is — a line, and the column it is anchored
     ## at (0: the whole line).
+  BreakpointSpec* = object
+    ## One breakpoint as a front-end holds it: where it is, what it asks of
+    ## the engine, and whether it is armed. A DISABLED one is not sent (the
+    ## engine holds only the enabled ones) and stays a row of the point list.
+    line*: int
+    column*: int
+      ## The column it is anchored at; 0 for the whole line.
+    condition*: string
+    logMessage*: string
+    enabled*: bool
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
-                               verified: openArray[BreakpointAnchor];
-                               disabled: openArray[BreakpointAnchor] = []) =
+                               specs: openArray[BreakpointSpec];
+                               resolution = "verified") =
   ## Replace `path`'s breakpoint rows with the anchors the ENGINE verified.
   ##
   ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
@@ -2003,6 +2097,12 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   ## (only enabled ones are sent, as the desktop's `dapSetBreakpoints` sends
   ## them) and stays a row of the point list — and a dimmed mark in the
   ## gutter — until it is deleted.
+  ##
+  ## `specs` is the set held for `path` after the engine answered: the
+  ## enabled ones at the line and column it BOUND, the disabled ones as they
+  ## were. A breakpoint carries its condition and log message (Column-Aware
+  ## Navigation M9 and M10) onto its row. `resolution` is `requested` for a
+  ## set held before the engine has answered (`sdk/breakpoints.requestBreakpoints`).
   var rows: seq[PointListEntry] = @[]
   for r in store.pointList.rows.val:
     if not (r.kind == PointKindBreakpoint and r.path == path):
@@ -2011,23 +2111,32 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   let slash = max(path.rfind('/'), path.rfind('\\'))
   if slash >= 0: name = path[slash + 1 .. ^1]
   var lines: seq[int] = @[]
-  proc label(a: BreakpointAnchor): string =
-    name & ":" & $a.line & (if a.column > 0: ":" & $a.column else: "")
-  for a in verified:
-    if a.line >= 1 and a.line notin lines:
-      lines.add a.line
-      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
-                              path: path, line: a.line,
-                              column: max(0, a.column), enabled: true,
-                              resolution: "verified")
-  for a in disabled:
-    if a.line >= 1 and a.line notin lines:
-      lines.add a.line
-      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
-                              path: path, line: a.line,
-                              column: max(0, a.column), enabled: false,
-                              resolution: "verified")
+  # The armed ones first: a line carrying both an armed and a disabled
+  # breakpoint stops, so the armed one is the line's row.
+  for armed in [true, false]:
+    for sp in specs:
+      if sp.enabled != armed or sp.line < 1 or sp.line in lines:
+        continue
+      lines.add sp.line
+      rows.add PointListEntry(kind: PointKindBreakpoint,
+        label: name & ":" & $sp.line &
+               (if sp.column > 0: ":" & $sp.column else: ""),
+        path: path, line: sp.line, column: max(0, sp.column),
+        enabled: sp.enabled, resolution: resolution,
+        condition: sp.condition, logMessage: sp.logMessage)
   store.applyPointRows(rows)
+
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verified: openArray[BreakpointAnchor];
+                               disabled: openArray[BreakpointAnchor] = []) =
+  ## The anchor form: `verified` armed, `disabled` held unarmed, none of them
+  ## conditional.
+  var specs: seq[BreakpointSpec] = @[]
+  for a in verified:
+    specs.add BreakpointSpec(line: a.line, column: a.column, enabled: true)
+  for a in disabled:
+    specs.add BreakpointSpec(line: a.line, column: a.column, enabled: false)
+  store.applyVerifiedBreakpoints(path, specs)
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
                                verifiedLines: openArray[int];
