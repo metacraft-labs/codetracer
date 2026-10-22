@@ -266,7 +266,7 @@ suite "IsoNim Event Log Filter Dropdown — structure":
 
   test "an empty dropdown still renders its container and its list id":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[], @[])
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[])
     check panel.attributes["class"] == "dropdown-container"
     # The list id is a const the production caller positions against; a
     # renamed id is a silent break in `ui/event_log.nim`.
@@ -276,7 +276,7 @@ suite "IsoNim Event Log Filter Dropdown — structure":
 
   test "tabs render in order with the selected one marked":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[
       FilterTabRecord(label: "Trace events", isSelected: false),
       FilterTabRecord(label: "Recorded events", isSelected: true)], @[])
     let tabs = panel.findByClass("toggle-buttons")
@@ -287,7 +287,7 @@ suite "IsoNim Event Log Filter Dropdown — structure":
 
   test "a tag row renders its own checkmark and one per kind":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[], @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[
       tagRow("Write", "indeterminate",
              [("storage", "checked"), ("memory", "unchecked")])])
     check panel.countByClass("dropdown-list-row") == 1
@@ -304,18 +304,18 @@ suite "IsoNim Event Log Filter Dropdown — structure":
     # "checked" / "unchecked" / "indeterminate" are the CSS selector values.
     for state in ["checked", "unchecked", "indeterminate"]:
       let r = MockRenderer()
-      let panel = renderFilterDropdownPanel(r, @[], @[tagRow("T", state, [])])
+      let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[tagRow("T", state, [])])
       checkpoint("state " & state)
       check panel.findByClass("ct-checkmark").attributes["data-state"] == state
 
   test "the enable toggle reflects filtersEnabled in label and data-checked":
     let r = MockRenderer()
-    let on = renderFilterDropdownPanel(r, @[], @[], filtersEnabled = true)
+    let on = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[], filtersEnabled = true)
     check on.findByClass("ct-toggle-label").textContent == "On"
     check on.findByClass("ct-toggle").attributes["data-checked"] == "true"
 
     let r2 = MockRenderer()
-    let off = renderFilterDropdownPanel(r2, @[], @[], filtersEnabled = false)
+    let off = renderFilterDropdownPanel[MockRenderer, MockNode](r2, @[], @[], filtersEnabled = false)
     check off.findByClass("ct-toggle-label").textContent == "Off"
     check off.findByClass("ct-toggle").attributes["data-checked"] == "false"
 
@@ -324,7 +324,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
   test "clicking a tab reports its index":
     let r = MockRenderer()
     var clicked = -1
-    let panel = renderFilterDropdownPanel(r, @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[
       FilterTabRecord(label: "Trace events"),
       FilterTabRecord(label: "Recorded events")], @[],
       cb = FilterDropdownCallbacks(
@@ -335,7 +335,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
   test "toggling a tag reports the row index":
     let r = MockRenderer()
     var toggled = -1
-    let panel = renderFilterDropdownPanel(r, @[], @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[
       tagRow("A", "checked", []), tagRow("B", "unchecked", [])],
       cb = FilterDropdownCallbacks(
         onTagToggle: proc(i: int) = toggled = i))
@@ -350,7 +350,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
     let r = MockRenderer()
     var seenTag = -1
     var seenKind = -1
-    let panel = renderFilterDropdownPanel(r, @[], @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[
       tagRow("A", "checked", [("a0", "checked")]),
       tagRow("B", "checked", [("b0", "checked"), ("b1", "unchecked")])],
       cb = FilterDropdownCallbacks(
@@ -366,7 +366,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
   test "clicking the enable toggle fires onToggleEnabled":
     let r = MockRenderer()
     var fired = 0
-    let panel = renderFilterDropdownPanel(r, @[], @[],
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[],
       cb = FilterDropdownCallbacks(
         onToggleEnabled: proc() = inc fired))
     panel.findByClass("ct-toggle").fireEvent("click")
@@ -374,7 +374,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
 
   test "every handler is nil-safe":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[
       FilterTabRecord(label: "Trace events")], @[
       tagRow("A", "checked", [("a0", "checked")])])
     panel.findByClass("toggle-buttons").children[0].fireEvent("click")
