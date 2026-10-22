@@ -13,7 +13,9 @@
 ##      pane, the Monaco editor, the palette and its field — stamped where
 ##      those are created) — and a focused native text field no view
 ##      stamped as an input element of its own (`withNativeTextField`), so
-##      a field's keys are never a list pane's;
+##      a field's keys are never a list pane's. Inside the editor element
+##      only the editor's own text area stays the editor's: Monaco's find
+##      widget and a tracepoint editor are fields like any other;
 ##   3. resolves it with the shared `KeymapRouter` — the active base, the
 ##      user's rows, the pushed layers (the palette while it is open);
 ##   4. runs the operation, ONCE: a `ClientAction` the desktop already
@@ -171,6 +173,29 @@ proc scopeChainOf(start: JsObject): seq[ScopeElement] =
   for i in countdown(reversed.high, 0):
     result.add reversed[i]
 
+proc focusInWritableMonaco(): bool {.importjs: """
+  (function(){
+    const a = document.activeElement;
+    const m = globalThis.monaco;
+    if (!a || !m || !m.editor || typeof m.editor.getEditors !== 'function')
+      return false;
+    const ro = m.editor.EditorOption ? m.editor.EditorOption.readOnly
+                                     : undefined;
+    return m.editor.getEditors().some(e => {
+      const node = e.getDomNode();
+      return !!node && node.contains(a) &&
+             !(ro !== undefined && e.getOption(ro));
+    });
+  })()""".}
+  ## Whether the focus is inside a WRITABLE Monaco instance — the editor in
+  ## Edit mode, or one nested in the read-only editor (a tracepoint editor).
+  ## Asked of the instances' DOM nodes, not of `hasTextFocus()`: the
+  ## tracepoint editor moves the focus to its IME textarea when it opens and
+  ## after each edit (`trace.focusTraceEditor`), where its instance does not
+  ## report the text focus, and the field's keys must stay its own there
+  ## too. `monaco.editor.getEditors` lists every instance
+  ## (https://microsoft.github.io/monaco-editor/typedoc/functions/editor.getEditors.html).
+
 proc focusedFieldFactsOf(active: JsObject): FocusedFieldFacts =
   ## What `withNativeTextField` needs to know about the focused DOM element.
   ## `type` is read as the PROPERTY, which the DOM normalises (lower case,
@@ -180,8 +205,11 @@ proc focusedFieldFactsOf(active: JsObject): FocusedFieldFacts =
     return FocusedFieldFacts()
   proc str(v: JsObject): string =
     if v.isNil or v.isUndefined: "" else: $v.to(cstring)
+  proc flag(v: JsObject): bool =
+    not v.isNil and not v.isUndefined and v.to(bool)
   let editable = active[cstring"isContentEditable"]
   let getAttr = active[cstring"hasAttribute"]
+  let monaco = focusedMonaco()
   FocusedFieldFacts(
     tagName: str(active[cstring"tagName"]),
     inputType: str(active[cstring"type"]),
@@ -189,7 +217,11 @@ proc focusedFieldFactsOf(active: JsObject): FocusedFieldFacts =
                      editable.to(bool),
     id: str(active[cstring"id"]),
     carriesScope: not getAttr.isNil and not getAttr.isUndefined and
-                  active.hasAttribute(cstring(ScopeKindAttribute)).to(bool))
+                  active.hasAttribute(cstring(ScopeKindAttribute)).to(bool),
+    readOnly: flag(active[cstring"readOnly"]),
+    disabled: flag(active[cstring"disabled"]),
+    monacoText: focusInWritableMonaco(),
+    editorText: not monaco.isNil and monaco.hasTextFocus())
 
 proc desktopScopePath*(): ScopePath =
   ## **THE DESKTOP'S SCOPE PATH** (§6.2), read off the DOM focus chain. The

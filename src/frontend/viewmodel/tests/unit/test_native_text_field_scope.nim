@@ -16,18 +16,28 @@
 ## What this file holds the shared half to:
 ##   * `isNativeTextField` / `withNativeTextField`: which focused DOM element
 ##     is a text field (text-entry `<input>` types, `<textarea>`,
-##     contenteditable), and that one already carrying its own scope
-##     attribute, or sitting inside an editor element (Monaco's own hidden
-##     textarea), is left exactly as the attributes say;
+##     contenteditable, a writable Monaco instance's input; not a read-only
+##     or disabled one), and that one already carrying its own scope
+##     attribute, or being the editor's own text area (Monaco's input while
+##     the instance holds the text focus), is left exactly as the attributes
+##     say — while the other fields inside the editor element (Monaco's find
+##     widget, a tracepoint editor) are fields;
 ##   * the shipped CUA router: with the field on the path, `Enter` is the
 ##     field's (`textInputFocus`, not `listFocus`), and `Shift+Enter` and the
 ##     letters are too. The path WITHOUT the field still resolves `Enter` to
 ##     `list.activate` — the positive control showing the table above really
-##     discriminates the defect.
+##     discriminates the defect;
+##   * every shipped base, the modal ones included: `Enter` and `Backspace`
+##     in a field are its `input.commit` / `input.delete-backward`, and a
+##     letter is a character, in a list pane's field (the Call Trace search
+##     box, codetracer-pm issue 2026-10-21, "Pressing Enter in the desktop
+##     Call Trace search box sends no search") and in a field inside the
+##     read-only editor (the find widget).
 ##
 ## The DOM half (reading those facts off `document.activeElement`) is
 ## `ui/key_router.desktopScopePath`, graded end to end by
-## `src/tests/gui/tests/agent-activity/enter_submits_prompt.spec.ts`.
+## `src/tests/gui/tests/agent-activity/enter_submits_prompt.spec.ts` and
+## `src/tests/gui/tests/keymaps/plat68b-desktop-text-fields.spec.ts`.
 ##
 ## ## No mocks
 ## The shipped CUA base and the shipped router, driven with canonical key
@@ -60,10 +70,13 @@ proc debugFacts(): SessionFacts =
                editor: sourceViewFacts())
 
 proc field(tag: string; inputType = ""; contentEditable = false; id = "";
-           carriesScope = false): FocusedFieldFacts =
+           carriesScope = false; readOnly = false; disabled = false;
+           monacoText = false; editorText = false): FocusedFieldFacts =
   FocusedFieldFacts(tagName: tag, inputType: inputType,
                     contentEditable: contentEditable, id: id,
-                    carriesScope: carriesScope)
+                    carriesScope: carriesScope, readOnly: readOnly,
+                    disabled: disabled, monacoText: monacoText,
+                    editorText: editorText)
 
 proc op(res: EditingResolution): string =
   case res.kind
@@ -125,12 +138,40 @@ suite "the scope path a focused native text field produces":
     check withNativeTextField(fif, field("INPUT", "text",
                                          carriesScope = true)) == fif
 
-  test "inside an editor element nothing is added (Monaco's own textarea)":
+  test "a read-only or disabled field takes no text":
+    check not isNativeTextField(field("INPUT", "text", readOnly = true))
+    check not isNativeTextField(field("TEXTAREA", readOnly = true))
+    check not isNativeTextField(field("INPUT", "search", disabled = true))
+
+  test "a writable Monaco instance's input takes text, whatever the DOM says":
+    # EditContext's `div.native-edit-context`; the `readonly` IME textarea.
+    check isNativeTextField(field("DIV", monacoText = true))
+    check isNativeTextField(field("TEXTAREA", readOnly = true,
+                                  monacoText = true))
+
+  test "the editor's own text area adds nothing":
+    # Monaco's input while its instance holds the text focus — read-only
+    # (Debug mode) and writable (Edit mode).
     check withNativeTextField(EditorChain,
-      field("TEXTAREA", id = "inputarea")) == EditorChain
-    # Monaco's find widget's field sits inside the editor element too.
-    let find = EditorChain & @[element(ekOverlay, "find")]
-    check withNativeTextField(find, field("TEXTAREA")) == find
+      field("TEXTAREA", id = "inputarea", editorText = true)) == EditorChain
+    check withNativeTextField(EditorChain,
+      field("DIV", monacoText = true, editorText = true)) == EditorChain
+
+  test "any other field inside the editor element is a field":
+    # Monaco's find widget's textarea and a tracepoint editor's input: the
+    # editor's instance does not hold the text focus.
+    let field0 = element(ekInput, NativeTextFieldInput)
+    check withNativeTextField(EditorChain, field("TEXTAREA")) ==
+      EditorChain & @[field0]
+    check withNativeTextField(EditorChain, field("DIV", monacoText = true)) ==
+      EditorChain & @[field0]
+    var r = initKeymapRouter(bkCua, Desktop)
+    let keys = r.contextFor(debugFacts(),
+                            withNativeTextField(EditorChain, field("TEXTAREA")))
+    check keys.values[ckEditorFocus] == "true"
+    check keys.values[ckEditorTextFocus] == "false"
+    check keys.values[ckTextInputFocus] == "true"
+    check coherent(keys)
 
   test "a chain that already ends in an input element is not doubled":
     let wrapped = @[Window, pane("state"), element(ekInput, "filter")]
@@ -187,3 +228,38 @@ suite "the CUA router in a text field inside a list pane":
     # Control: `n` in the list pane itself still steps.
     check r.route(debugFacts(), OldPromptPath, nmNormal, "n", 1_000).op ==
       "debugger.step-over"
+
+suite "a field's keys under every base":
+  let
+    CallTraceField = withNativeTextField(@[Window, pane("calltrace")],
+                                         field("INPUT", "text"))
+    FindWidgetField = withNativeTextField(EditorChain, field("TEXTAREA"))
+
+  test "Enter commits, Backspace deletes and a letter types, in every base":
+    # The modal bases' `Enter` / `Backspace` in a field are
+    # `navigation_keymap.ModalSurfaceRows`'s; without them they were the
+    # navigation table's `list.expand` / `list.collapse`.
+    for base in BaseKeymap:
+      for (name, path) in [("call trace box", CallTraceField),
+                           ("find widget", FindWidgetField)]:
+        var r = initKeymapRouter(base, Desktop)
+        checkpoint($base & " / " & name)
+        let enter = r.route(debugFacts(), path, nmNormal, "Enter", 1_000)
+        check enter.op == "input.commit"
+        check enter.leftToElement
+        let back = r.route(debugFacts(), path, nmNormal, "Backspace", 1_000)
+        check back.op == "input.delete-backward"
+        check back.leftToElement
+        for key in ["f", "n", "r"]:
+          check r.route(debugFacts(), path, nmNormal, key, 1_000).op ==
+            "char:" & key
+
+  test "positive control: the editor's own text area keeps the editor's keys":
+    var r = initKeymapRouter(bkCua, Desktop)
+    check r.route(debugFacts(), EditorChain, nmNormal, "Enter", 1_000).op ==
+      "editor.toggle-tracepoint"
+    check r.route(debugFacts(), EditorChain, nmNormal, "f", 1_000).op ==
+      "debugger.step-out"
+    var vim = initKeymapRouter(bkVim, Desktop)
+    check vim.route(debugFacts(), @[Window, pane("calltrace")], nmNormal,
+                    "Enter", 1_000).op == "list.expand"

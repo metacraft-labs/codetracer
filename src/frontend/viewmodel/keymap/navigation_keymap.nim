@@ -174,7 +174,14 @@ const
     ##   * the command line and the find field are single-line inputs, and
     ##     Vim's own command-line editing keys are these (`:help
     ##     cmdline-editing`: the arrows, `<Home>` / `<End>`, `<Up>` / `<Down>`
-    ##     history, `<Tab>` completion, `<Del>`, `CTRL-W`);
+    ##     history, `<Tab>` completion, `<Del>`, `CTRL-W`), and so are
+    ##     `<CR>`, which executes the line (`:help c_<CR>`), and `<BS>`, which
+    ##     deletes the character before the cursor (`:help c_<BS>`). Those two
+    ##     are also the COMMAND and SEARCH rows below, which the terminal's
+    ##     prompt reaches; they are here so that EVERY field takes them in
+    ##     NORMAL too — a desktop text field (Base-Keymaps-And-Layer-Stack.md
+    ##     §6.2), which has no prompt mode, would otherwise answer `Enter` with
+    ##     §4.2's `list.expand` and `Backspace` with `list.collapse`;
     ##   * the palette and a context menu are lists of choices, walked as
     ##     Vim's own popup menu is (`:help popupmenu-keys`: the arrows,
     ##     `<PageUp>` / `<PageDown>`, `<CR>`, `<Esc>`);
@@ -197,6 +204,8 @@ const
     BaseRow(chords: "Tab", operation: "input.complete", table: InputTable),
     BaseRow(chords: "Delete", operation: "input.delete-forward", table: InputTable),
     BaseRow(chords: "Ctrl+W", operation: "input.delete-word-backward", table: InputTable),
+    BaseRow(chords: "Enter", operation: "input.commit", table: InputTable),
+    BaseRow(chords: "Backspace", operation: "input.delete-backward", table: InputTable),
     BaseRow(chords: "Up", operation: "palette.focus-previous", table: PaletteTable),
     BaseRow(chords: "Down", operation: "palette.focus-next", table: PaletteTable),
     BaseRow(chords: "PageUp", operation: "palette.focus-page-up", table: PaletteTable),

@@ -135,6 +135,25 @@ type
       ## The element itself carries `ScopeKindAttribute`: it is already a
       ## scope element of the path, under whatever kind and id its view gave
       ## it.
+    readOnly*: bool
+      ## The DOM's `readOnly` of an `<input>` / `<textarea>`: it holds a caret
+      ## but takes no text.
+    disabled*: bool
+      ## The DOM's `disabled`: it takes no focus or text at all.
+    monacoText*: bool
+      ## The focus is inside a WRITABLE Monaco instance (the editor in Edit
+      ## mode, a tracepoint editor nested in the read-only editor). Monaco's
+      ## input is not an element the DOM calls a field: its EditContext input
+      ## (`div.native-edit-context`) carries no `contenteditable`, and its IME
+      ## helper is a `readonly` textarea, so the tag, `readOnly` and
+      ## `isContentEditable` all say "no text" and the instance is asked
+      ## instead (https://developer.mozilla.org/en-US/docs/Web/API/EditContext_API).
+    editorText*: bool
+      ## The focus is the EDITOR'S OWN text area: the Monaco instance of the
+      ## focus chain's editor element reports `hasTextFocus()`, which it does
+      ## for its input only — not for its find widget, nor for an instance
+      ## nested in it
+      ## (https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor.ICodeEditor.html#hasTextFocus).
 
 const
   TextEntryInputTypes = ["", "text", "search", "email", "url", "tel",
@@ -150,7 +169,10 @@ func isNativeTextField*(f: FocusedFieldFacts): bool =
   ## Whether the focused element accepts text the way §4.2's
   ## `textInputFocus` means it ("the focused element accepts text: a
   ## writable editor, a prompt, a find field, the palette"): a `<textarea>`,
-  ## a text-entry `<input>`, or contenteditable content.
+  ## a text-entry `<input>`, contenteditable content, or a writable Monaco
+  ## instance's input. A read-only or disabled field takes none.
+  if f.monacoText: return true
+  if f.readOnly or f.disabled: return false
   if f.contentEditable: return true
   case f.tagName.toLowerAscii
   of "textarea": true
@@ -176,16 +198,25 @@ func withNativeTextField*(chain: ScopePath; f: FocusedFieldFacts): ScopePath =
   ## Left exactly as `chain` says:
   ##   * an element that carries its own scope attribute — it is already on
   ##     the path, under the kind and id its view chose;
-  ##   * anything inside an editor element — Monaco's own hidden textarea
-  ##     and its find widget's fields, whose keys the editor's path and
-  ##     tables already decide (§5.3);
+  ##   * the EDITOR'S OWN text area (`editorText`, with the chain ending at
+  ##     the editor element) — Monaco's input, whose keys the editor's path
+  ##     and tables decide (§5.3). Every other field inside the editor
+  ##     element is a field like any other and gains its input element
+  ##     under the editor: Monaco's find widget and a tracepoint editor keep
+  ##     `editorFocus` (the editor's `Ctrl+Enter`, `F9`), not the read-only
+  ##     editor's letters and `Enter`. Treating them as the editor made a
+  ##     letter typed into the find widget run CUA's read-only-editor key
+  ##     (`f`, `debugger.step-out`, which also took the focus away), and
+  ##     `Enter` there open a tracepoint editor instead of finding the next
+  ##     match (codetracer-pm issue 2026-10-21, "Pressing Enter in the
+  ##     desktop Call Trace search box sends no search");
   ##   * a chain that already ends in an input element (a stamped wrapper
   ##     around the field), so the input is never doubled.
   result = chain
   if f.carriesScope or not isNativeTextField(f):
     return
-  for e in chain:
-    if e.kind == ekEditor: return
+  if f.editorText and chain.len > 0 and chain[^1].kind == ekEditor:
+    return
   if chain.len > 0 and chain[^1].kind == ekInput:
     return
   result.add ScopeElement(kind: ekInput,
