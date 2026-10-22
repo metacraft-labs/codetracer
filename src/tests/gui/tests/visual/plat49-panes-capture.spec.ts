@@ -159,7 +159,7 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
     ],
   };
   const page = ctPage;
-  await page.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", {
+  await page.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", undefined, {
     timeout: 120_000,
   });
   // The element's box from the DOM at once: the status bar re-renders while
