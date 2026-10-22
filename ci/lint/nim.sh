@@ -905,6 +905,23 @@ lint_step "DAP command sync: the allow-list names everything the engine dispatch
 lint_step "Mutation harnesses refuse an unknown flag or arm id before touching a file" \
 	bash ci/test/harness-argument-refusal.sh
 
+# Each harness refuses to grade while a recorded control digest disagrees with
+# the tree, and nothing told the change that MOVED the digest: 6 harnesses had
+# stale entries on 2026-09-20, 30 of the 49 control files on 2026-10-21, and
+# 244 in-repo entries over 34 files at 4183c5f84 (codetracer-pm issue
+# 2026-10-21, "30 of 49 mutation-control digest files are stale on agents";
+# Verification-Harness-Traps §39c). The guard names every control file whose
+# digests disagree with the tree, with its harness and subject, unless the owed
+# re-grade is in mutation-control-drift.known-stale.txt at exactly those digests
+# — and the ledger fails in both directions, so it cannot outlive the debt.
+# Pure bash, git and sha256sum, a few seconds. Contract suite first, for the
+# reason the first block of this file gives.
+lint_step "Mutation control drift guard: contract suite" \
+	bash ci/test/mutation-control-drift-test.sh
+
+lint_step "Mutation control digests agree with the tree, or the owed re-grade is ledgered" \
+	bash ci/test/mutation-control-drift.sh
+
 # Canary for the chronicles/distinct-type breakage that takes every editor in
 # the project down. Currently QUARANTINED against an upstream nimsuggest crash;
 # ci/test/nimsuggest-check.sh carries the diagnosis, tells a toolchain defect
