@@ -47,14 +47,15 @@ from ../viewmodel/viewmodels/trace_log_vm import setViewport
 const
   PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
                      Content.PixelHistory, Content.ShaderDebug,
-                     Content.VideoPlayer, Content.PointList, Content.StepList,
-                     Content.CalltraceEditor, Content.Build,
-                     Content.BuildErrors, Content.SearchResults,
-                     Content.TraceLog, Content.TerminalOutput,
-                     Content.AgentWorkspace, Content.RequestPanel,
-                     Content.AgentActivity, Content.Scratchpad, Content.Repl,
-                     Content.Filesystem, Content.TestResults,
-                     Content.Constraints, Content.CommandPalette}
+                     Content.VideoPlayer, Content.PointList,
+                     Content.StepList, Content.CalltraceEditor,
+                     Content.Build, Content.BuildErrors,
+                     Content.SearchResults, Content.TraceLog,
+                     Content.TerminalOutput, Content.AgentWorkspace,
+                     Content.RequestPanel, Content.AgentActivity,
+                     Content.Scratchpad, Content.Repl, Content.Filesystem,
+                     Content.TestResults, Content.Constraints,
+                     Content.CommandPalette, Content.Verification}
     ## The panes `mountPanel` renders.
   RequestRowFallbackPx = 24.0
     ## The Request panel's row pitch until a row is rendered to measure.

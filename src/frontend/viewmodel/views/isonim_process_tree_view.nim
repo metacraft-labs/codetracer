@@ -37,13 +37,14 @@
 ## rotates the active recording, its `StateVM`, and the host's DAP
 ## routing thread id.
 
-import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
-import isonim/testing/mock_dom
+import isonim/core/[signals, computation]
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
+
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Public types
@@ -116,10 +117,11 @@ proc selectHandler(callbacks: ProcessTreeCallbacks; recordingId: string): proc()
 # Shared markup
 # ---------------------------------------------------------------------------
 
-template renderProcessTreeImpl(
-    r: untyped;
+proc renderProcessTree*[R, N](
+    r: R;
     model: ProcessTreeModel;
-    callbacks: ProcessTreeCallbacks): untyped =
+    callbacks: ProcessTreeCallbacks = ProcessTreeCallbacks()): N =
+  ## The tree, for every renderer (Shared-DOM-Front-Ends D6).
   ui(r):
     tdiv(
         id = ProcessTreeHostId,
@@ -148,42 +150,16 @@ template renderProcessTreeImpl(
           span(class = "ct-process-tree-threads"):
             text threadCountLabel(entry.threadCount)
 
-# ---------------------------------------------------------------------------
-# MockRenderer
-# ---------------------------------------------------------------------------
-
-proc renderProcessTree*(
-    r: MockRenderer;
+proc renderProcessTreeInto*[R, N](
+    r: R;
+    container: N;
     model: ProcessTreeModel;
-    callbacks: ProcessTreeCallbacks = ProcessTreeCallbacks()): MockNode =
-  renderProcessTreeImpl(r, model, callbacks)
-
-# ---------------------------------------------------------------------------
-# WebRenderer (browser only)
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc renderProcessTree*(
-      r: WebRenderer;
-      model: ProcessTreeModel;
-      callbacks: ProcessTreeCallbacks = ProcessTreeCallbacks()):
-        isonim_dom.Element =
-    renderProcessTreeImpl(r, model, callbacks)
-
-  proc renderProcessTreeInto*(
-      container: isonim_dom.Element;
-      model: ProcessTreeModel;
-      callbacks: ProcessTreeCallbacks = ProcessTreeCallbacks()) =
-    ## Clear `container` and render the current tree inside it.
-    ##
-    ## A fresh `WebRenderer` per pass keeps IsoNim's reactive effects
-    ## scoped to that pass rather than accumulating across re-renders —
-    ## the same discipline `mountToggleInto` follows.
-    let containerNode = isonim_dom.Node(container)
-    while not isonim_dom.isNodeNil(containerNode.firstChild):
-      discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
-    if not shouldRenderTree(model):
-      return
-    let r = WebRenderer()
-    let el = renderProcessTree(r, model, callbacks)
-    discard isonim_dom.appendChild(containerNode, isonim_dom.Node(el))
+    callbacks: ProcessTreeCallbacks = ProcessTreeCallbacks()) =
+  ## Clear `container` and render the current tree inside it — nothing when
+  ## the session has a single process (`shouldRenderTree`).
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
+  r.clearChildren(container)
+  if not shouldRenderTree(model):
+    return
+  r.appendChild(container, renderProcessTree[R, N](r, model, callbacks))

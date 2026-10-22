@@ -103,7 +103,7 @@ proc renderedTree(model: ProcessTreeModel;
   ## Render through IsoNim's own headless renderer — the same view code
   ## the browser runs, minus the browser.
   let r = MockRenderer()
-  r.renderProcessTree(model, callbacks)
+  renderProcessTree[MockRenderer, MockNode](r, model, callbacks)
 
 proc renderedMarkup(model: ProcessTreeModel): string =
   flatten(renderedTree(model))

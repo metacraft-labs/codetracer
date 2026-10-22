@@ -1873,16 +1873,6 @@ proc mountPaneForState(state: GoldenItemState) =
         unified_diff.syncIntoVM(UnifiedDiffComponent(component))
         unified_diff.tryMountUnifiedDiffTab(component.id)
 
-      # VN-M5. The verification panel is an IsoNim view with no legacy
-      # renderer at all, so there is nothing to sync into a VM first: the
-      # `VerificationComponent` carries no state. Its mount puts TWO IsoNim
-      # roots in the container — the run, and the counterexample the run
-      # produced — and the second is empty until a session is opened from
-      # the first.
-      if state.content == Content.Verification:
-        verification.tryMountIsoNimVerificationPanel()
-
-
       # ``Content.AgentActivityDeepReview`` has no renderer of its own since
       # AA-1 deleted the roll-up.  The id survives as the review's layout
       # identity for the Agent Activity pillar (see the note on the
