@@ -50,8 +50,9 @@
  *    (`send_launch_failure_notification`, `src/db-backend/src/dap_server.rs`).
  *
  * Every other fixture is expected to replay. A fixture recorded on another
- * OS or ISA takes the debugserver's cross-platform path, which carries known
- * defect A (`ISSUE_CROSS_PLATFORM_BINARY_PATH`).
+ * OS or ISA takes the debugserver's cross-platform path, and on a Linux
+ * x86-64 host the macos-arm64 and windows-x86_64 fixtures carry the known
+ * defects below (`crossPlatformKnownDefect`).
  */
 
 import * as fs from "node:fs";
@@ -63,13 +64,29 @@ import { parseStatusLocation, type SimpleLocation, type StatusBar } from "../pag
 import { ctfsContainerVersion, ctfsVersionRefusal, readableCtfsVersions } from "./ctfs-container";
 
 /**
- * Defect A: on a portable trace from another OS or ISA, `ct-native-replay`
- * creates its LLDB target from the binary path on the recording host, fails,
- * and exits after the replay server has connected to it. The GUI shows only
- * a transport error.
+ * `ct-mcr debugserver` serves the macOS arm64 fixture (a cooperative
+ * recording) from its static checkpoint mode, describing the process as the
+ * host's ISA with zeroed registers, so LLDB drops the arm64 executable and no
+ * entry breakpoint resolves.
  */
-export const ISSUE_CROSS_PLATFORM_BINARY_PATH =
-  "codetracer-pm/issues/2026-10-22-ct-native-replay-targets-the-recording-hosts-binary-path-on-a-portable-trace.md";
+export const ISSUE_STATIC_MODE_FOREIGN_ISA =
+  "codetracer-pm/issues/2026-10-22-ct-mcr-static-checkpoint-mode-serves-a-foreign-isa-trace-as-the-host-isa.md";
+
+/**
+ * `ct-mcr debugserver`'s cross-platform loader reads only `tstart.mem` /
+ * `cp0.mem`, so the Windows fixture's `cp.entry.*` initial state is not
+ * loaded and the server falls through to the static checkpoint mode.
+ */
+export const ISSUE_CROSS_PLATFORM_INITIAL_STATE =
+  "codetracer-pm/issues/2026-10-22-ct-mcr-cross-platform-replay-ignores-a-windows-stage0-recordings-initial-state.md";
+
+/**
+ * `ct-mcr export --portable` bundles no dSYM or PDB, so neither fixture's
+ * portable trace has a line table: with the two defects above fixed, a
+ * replay still could not show a line of the program.
+ */
+export const ISSUE_PORTABLE_EXPORT_NO_LINE_TABLE =
+  "codetracer-pm/issues/2026-10-22-portable-export-bundles-no-dsym-or-pdb-debug-info.md";
 
 /**
  * Defect B: the Electron GUI does not show a replay launch failure of a
@@ -112,8 +129,11 @@ export interface McrKnownDefect {
   causeInWorkerLog: (workerLog: string) => string | null;
   /** What the defect is, for the not-verified report. */
   summary: string;
-  /** `codetracer-pm/issues/<file>` recording the defect. */
-  issue: string;
+  /**
+   * The `codetracer-pm/issues/<file>`s recording the defect, the cause first
+   * and then any defect that would keep the case unverified after it is fixed.
+   */
+  issues: string[];
 }
 
 /** The outcome a spec expects from opening a fixture. */
@@ -155,13 +175,18 @@ export const LINUX_TRACE_MODE_REFUSAL =
   /error: (trace mode serves a Linux interpose recording through the stage0 emulator replay, and this recording has no stage0 boundary the emulator can start from|trace mode cannot serve this recording: the stage0 driver serves a process that recorded one thread, and this one recorded \d+ threads; [^"]*XMR-B1)/;
 
 /**
- * Defect A's whole notification: `launch_failure_text`'s `launch error:`
- * rendering of the transport error the replay server gets when the worker
- * exits under it. Anchored at both ends so that no other launch error
- * matches.
+ * The whole notification both cross-platform defects show: the replay
+ * worker answered the first query, `RunToEntry`, with
+ * `error: run query error: "MCR run-to-entry could not resolve an entry breakpoint"`
+ * (`run_mcr_lldb_connection_loop`, codetracer-native-backend
+ * `src/lib_non_windows.inc.rs`), which the replay server reports as
+ * `dispatch_replay_query ct rr worker error: <answer>` and
+ * `launch_failure_text` renders with `{err:?}`. Anchored at both ends so that
+ * no other launch error matches: a worker that drops the connection instead
+ * (EOF, connection reset) or never starts shows a different one.
  */
-const CROSS_PLATFORM_WORKER_RESET =
-  /^launch error: "dispatch_replay_query IO error: Connection reset by peer \(os error 104\)"$/;
+const CROSS_PLATFORM_ENTRY_BREAKPOINT_REFUSAL =
+  /^launch error: "dispatch_replay_query ct rr worker error: error: run query error: \\"MCR run-to-entry could not resolve an entry breakpoint\\""$/;
 
 /**
  * Notification texts that report a failed `launch`: every rendering
@@ -172,26 +197,119 @@ const CROSS_PLATFORM_WORKER_RESET =
 const LAUNCH_FAILURE_NOTIFICATION =
   /^(launch error: |failed to initialize replay-worker transport|replay worker for pid \d+ refused to start|Free tier: |.*: this recording cannot be opened by this build)/;
 
-/**
- * Defect A's cause, as `ct-native-replay` logs it (`replay()` and
- * `setup_lldb_with_binary` in codetracer-native-backend
- * `src/lib_non_windows.inc.rs`): it chose the recording host's binary path
- * for its LLDB target, and creating the target from that path failed.
- * Returns the line that says so when the path is the one it chose and does
- * not exist on this host, and `null` otherwise.
- */
-function crossPlatformBinaryPathCause(workerLog: string): string | null {
-  const chosen = new Set<string>();
-  for (const match of workerLog.matchAll(/MCR: using binary (.+) for LLDB target$/gm)) {
-    chosen.add(match[1]);
+/** The main binaries `ct-mcr debugserver` reported extracting, as the worker logged them. */
+function reportedMainBinaries(workerLog: string): Set<string> {
+  const reported = new Set<string>();
+  for (const match of workerLog.matchAll(/MCR debugserver: debugserver: main binary: (?<binary>.+)$/gm)) {
+    reported.add(match.groups?.binary ?? "");
   }
-  for (const match of workerLog.matchAll(/can't create target for binary (.+) in rr trace folder .+$/gm)) {
-    const binary = match[1];
-    if (chosen.has(binary) && !fs.existsSync(binary)) {
-      return match[0];
+  return reported;
+}
+
+/**
+ * The common half of both cross-platform causes, as `ct-native-replay` logs
+ * it: the worker built its LLDB target from the main binary `ct-mcr
+ * debugserver` reported extracting into its sysroot (`MCR debugserver:
+ * debugserver: main binary: <path>`, then `MCR: using binary <path> for LLDB
+ * target`, the same path), and AFTER that its `RunToEntry` failed resolving
+ * the entry breakpoint (`run query error: "MCR run-to-entry could not resolve
+ * an entry breakpoint"`). Returns the failure's log offset and the target
+ * path, or `null` when the log does not show that sequence: a worker that
+ * chose another binary, failed some other way, or failed before choosing.
+ */
+function extractedTargetThenEntryFailure(workerLog: string): { offset: number; binary: string } | null {
+  const reported = reportedMainBinaries(workerLog);
+  const failure = /\[ERROR\] - run query error: "MCR run-to-entry could not resolve an entry breakpoint"$/m.exec(
+    workerLog,
+  );
+  if (failure === null) return null;
+  for (const match of workerLog.matchAll(/MCR: using binary (?<binary>.+) for LLDB target$/gm)) {
+    const binary = match.groups?.binary ?? "";
+    if (binary !== "" && reported.has(binary) && match.index < failure.index) {
+      return { offset: failure.index, binary };
     }
   }
   return null;
+}
+
+/**
+ * Finds `debugserverLine` (a `ct-mcr debugserver` stdout line, as the worker
+ * logs it after `MCR debugserver: `) in `workerLog` before `offset`, and none
+ * of `absentLines`; returns whether it does.
+ */
+function debugserverSaid(
+  workerLog: string,
+  offset: number,
+  debugserverLine: string,
+  absentLines: string[] = [],
+): boolean {
+  const before = workerLog.slice(undefined, offset);
+  const said = (line: string): boolean => before.includes(`MCR debugserver: ${line}\n`);
+  return said(debugserverLine) && !absentLines.some(said);
+}
+
+/**
+ * The known defect a session on `fixture` shows on this host, when the
+ * fixture is one of the two cross-platform fixtures this host cannot
+ * replay; `undefined` otherwise. Each cause requires the common half
+ * (`extractedTargetThenEntryFailure`) AND the debugserver's own account of
+ * the path it took for that fixture, so neither fixture's evidence satisfies
+ * the other's defect.
+ */
+function crossPlatformKnownDefect(fixture: McrPortableFixture, host: McrHost): McrKnownDefect | undefined {
+  if (host.platform !== "linux" || host.arch !== "x64") return undefined;
+  if (fixture.platform === "macos-arm64") {
+    return {
+      symptom: CROSS_PLATFORM_ENTRY_BREAKPOINT_REFUSAL,
+      causeInWorkerLog: (workerLog) => {
+        const common = extractedTargetThenEntryFailure(workerLog);
+        if (common === null) return null;
+        // Served by the static checkpoint mode: the cross-platform notice,
+        // and no emulator path.
+        const staticMode = debugserverSaid(
+          workerLog,
+          common.offset,
+          "debugserver: cross-platform replay (posMacos/paAarch64 on posLinux/paX86_64)",
+          ["debugserver: cross-platform replay via emulator"],
+        );
+        return staticMode
+          ? `target ${common.binary} (extracted), served by the static checkpoint mode, then ` +
+              `"MCR run-to-entry could not resolve an entry breakpoint"`
+          : null;
+      },
+      summary:
+        "ct-mcr debugserver serves this foreign-ISA cooperative recording from its static " +
+        "checkpoint mode as an x86-64 process with zeroed registers, so LLDB drops the arm64 " +
+        "executable and RunToEntry finds no entry breakpoint",
+      issues: [ISSUE_STATIC_MODE_FOREIGN_ISA, ISSUE_PORTABLE_EXPORT_NO_LINE_TABLE],
+    };
+  }
+  if (fixture.platform === "windows-x86_64") {
+    return {
+      symptom: CROSS_PLATFORM_ENTRY_BREAKPOINT_REFUSAL,
+      causeInWorkerLog: (workerLog) => {
+        const common = extractedTargetThenEntryFailure(workerLog);
+        if (common === null) return null;
+        const fellThrough =
+          debugserverSaid(
+            workerLog,
+            common.offset,
+            "debugserver: emulator setup failed: failed to load initial state: trace contains no memory snapshot (tstart.mem / cp0.mem)",
+          ) && debugserverSaid(workerLog, common.offset, "debugserver: falling through to static checkpoint mode");
+        return fellThrough
+          ? `target ${common.binary} (extracted), emulator setup failed on "no memory snapshot ` +
+              `(tstart.mem / cp0.mem)" and fell through to the static checkpoint mode, then ` +
+              `"MCR run-to-entry could not resolve an entry breakpoint"`
+          : null;
+      },
+      summary:
+        "ct-mcr debugserver's cross-platform loader does not load this Windows stage0 " +
+        "recording's cp.entry.* initial state, falls through to the static checkpoint mode, " +
+        "and RunToEntry finds no entry breakpoint (the bundled PE has no symbols either)",
+      issues: [ISSUE_CROSS_PLATFORM_INITIAL_STATE, ISSUE_PORTABLE_EXPORT_NO_LINE_TABLE],
+    };
+  }
+  return undefined;
 }
 
 /** The replay worker logs of one session, and where they were looked for. */
@@ -331,18 +449,7 @@ export function expectedMcrPortableOutcome(
     };
   }
   if (!samePlatform) {
-    return {
-      kind: "replay",
-      knownDefect: {
-        symptom: CROSS_PLATFORM_WORKER_RESET,
-        causeInWorkerLog: crossPlatformBinaryPathCause,
-        summary:
-          `ct-native-replay targets the recording host's binary path for this portable trace ` +
-          `(recorded on ${fixture.platform}), cannot create its LLDB target and exits; ` +
-          `the GUI shows only "Connection reset by peer"`,
-        issue: ISSUE_CROSS_PLATFORM_BINARY_PATH,
-      },
-    };
+    return { kind: "replay", knownDefect: crossPlatformKnownDefect(fixture, host) };
   }
   return { kind: "replay" };
 }
@@ -425,7 +532,7 @@ export function knownDefectReport(
   if (!observation.notifications.some((text) => defect.symptom.test(text))) return null;
   const cause = defect.causeInWorkerLog(workerLogs.text);
   if (cause === null) return null;
-  return `not verified: ${fixture.platform}: ${defect.summary} (worker log: ${cause}); ${defect.issue}`;
+  return `not verified: ${fixture.platform}: ${defect.summary} (worker log: ${cause}); ${defect.issues.join("; ")}`;
 }
 
 function describeObservation(observation: McrSessionObservation): string {
