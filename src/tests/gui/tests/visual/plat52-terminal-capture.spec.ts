@@ -163,8 +163,9 @@ async function readHeldLines(page: any): Promise<Line[]> {
 
 /**
  * EVERY line of the output, in order. The line view holds a WINDOW of the
- * lines — the ones it shows plus the 20 / 10 buffers
- * (Viewport-Driven-Loading Q3) — inside a `pre` padded to the whole output,
+ * lines — the ones it shows plus 20 lines after and 10 before them
+ * (`listWindow` in `src/frontend/viewmodel/viewport.nim`) — inside a `pre`
+ * padded to the whole output,
  * so its scroll range is every line's. The reference needs every line, so
  * this scrolls the view from the top to the bottom a page at a time, as a
  * user would, waits at each stop for the window that covers it, and keys
