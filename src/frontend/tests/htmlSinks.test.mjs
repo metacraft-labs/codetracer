@@ -130,11 +130,6 @@ console.log = () => {};
 require(probePath);
 console.log = realLog;
 
-// The DataTables the bundle ships (`frontend_imports.js` requires
-// `datatables.net`), bound to this jsdom window: its CommonJS entry builds
-// itself on the global `window` set above, through the same `jquery`.
-const DataTable = require(path.join(REPO, 'node_modules/datatables.net'));
-
 const doc = dom.window.document;
 const menuContainer = doc.getElementById('context-menu-container');
 
@@ -239,46 +234,6 @@ const HOSTILE_OUTPUT = {
 };
 const HOSTILE_OUTPUT_COUNT = 4;
 
-/**
- * Site 9 — the desktop Event Log's output cell.  Origin: the recorded
- * program's own output, a trace-log message, and the file names its
- * syscalls named.  `expected` is what the cell must read: the text exactly
- * as the program wrote it, behind the view's own prefix (Event-Log-Pane.md,
- * "Event Row Display").
- */
-const HOSTILE_EVENT_OUTPUTS = {
-  // The capture the issue was filed from: a Python program's
-  // `print("event 001 <<FIRST>>")` showed `stdout: event 001 <` + `>`.
-  'Python stdout "event 001 <<FIRST>>" (the issue\'s own capture)': {
-    kind: 'Write', stdout: true, content: 'event 001 <<FIRST>>',
-    expected: 'stdout: event 001 <<FIRST>>' },
-  'program stdout that is an img payload': {
-    kind: 'Write', stdout: true, content: '<img src=x onerror=alert(1)>',
-    expected: 'stdout: <img src=x onerror=alert(1)>' },
-  'program stderr that tries to close the cell first': {
-    kind: 'WriteStderr', content: '</td><img src=x onerror=alert(1)>',
-    expected: 'stderr: </td><img src=x onerror=alert(1)>' },
-  'a trace-log message (TraceLogEvent content) that is an svg payload': {
-    kind: 'TraceLogEvent', content: '<svg onload=alert(1)>',
-    expected: '<svg onload=alert(1)>' },
-  'a written file whose NAME is an img payload (WriteFile metadata)': {
-    kind: 'WriteFile', metadata: '/tmp/<img src=x onerror=alert(1)>.log', content: 'ok',
-    expected: 'write to /tmp/<img src=x onerror=alert(1)>.log: ok' },
-  'output that already looks escaped, which must not be decoded': {
-    kind: 'Write', stdout: true, content: 'a &lt;b&gt; & "c" \'d\'',
-    expected: 'stdout: a &lt;b&gt; & "c" \'d\'' },
-};
-const HOSTILE_EVENT_OUTPUT_COUNT = 6;
-
-/** Site 9 — the location (Full Path) cell.  Origin: a recorded source path. */
-const HOSTILE_EVENT_PATHS = {
-  'a source path with an img payload':
-    '/home/u/<img src=x onerror=alert(1)>/main.py:7',
-  'a source path that is an iframe':
-    '<iframe src="javascript:alert(1)">:3',
-};
-const HOSTILE_EVENT_PATH_COUNT = 2;
-
 // ---------------------------------------------------------------------------
 
 console.log('\x1b[1mRenderer HTML sinks — path, menu label, program output\x1b[0m');
@@ -293,9 +248,7 @@ describe('C. Controls — the DOM is real, the probe is the shipped code');
 }
 
 for (const name of ['__ctFileConflictOverlay', '__ctFileConflictMarkup',
-                    '__ctShowContextMenu', '__ctAnsiToHtml', '__ctAnsiEscapeFlag',
-                    '__ctEventLogRow', '__ctEventLogOutputText',
-                    '__ctEventLogOutputRender', '__ctEventLogLocationRender']) {
+                    '__ctShowContextMenu', '__ctAnsiToHtml', '__ctAnsiEscapeFlag']) {
   assertEqual(typeof globalThis[name], 'function',
     `the compiled probe published ${name}`);
 }
@@ -441,111 +394,6 @@ assertEqual(checkedOutput, HOSTILE_OUTPUT_COUNT,
     'ANSI colour still produces the <span> this sink exists for');
   assertEqual(coloured.textContent, 'red',
     'carrying the text and nothing else');
-}
-
-describe(`D. The desktop Event Log's DataTables cells — ${HOSTILE_EVENT_OUTPUT_COUNT} outputs, ${HOSTILE_EVENT_PATH_COUNT} paths`);
-
-// DataTables inserts a column's `render` result — and, for a column with no
-// `render`, the row's data — as HTML
-// (https://datatables.net/reference/option/columns.render).  So the test is
-// not "does the string contain a `<`": it is the shipped row projection and
-// the shipped `render` callbacks, installed on a REAL DataTables over this
-// jsdom document, and the cells it actually builds.  The pre-fix twin is the
-// same table with the pre-fix column definitions: the output column's render
-// returning the description unescaped, and the location column with no
-// render at all.
-assertEqual(typeof DataTable, 'function',
-  'the datatables.net package the bundle requires loaded over this jsdom window');
-
-/**
- * Draw `rows` through a real DataTables with `columns`; return each row's
- * `<td>`s.  The options are the dense table's display-relevant ones minus
- * server-side processing: `serverSide` only changes WHERE the rows come from
- * (the `ajax` callback), not how a cell is rendered.
- */
-function drawEventLogTable(rows, columns) {
-  const table = doc.createElement('table');
-  doc.body.appendChild(table);
-  const api = new DataTable(table, {
-    data: rows, columns, paging: false, searching: false, ordering: false,
-    info: false, deferRender: true,
-  });
-  const cells = [...table.querySelectorAll('tbody tr')]
-    .map((tr) => [...tr.querySelectorAll('td')]);
-  // Detach rather than destroy: `destroy()` restores the ORIGINAL markup,
-  // and the cells read above are the ones DataTables built.
-  table.remove();
-  void api;
-  return cells;
-}
-
-const shippedOutputColumn = { data: 'content', render: globalThis.__ctEventLogOutputRender };
-const preFixOutputColumn = {
-  data: 'content',
-  // What `event_log.nim`'s output column returned before the fix: the
-  // description (or a trace-log event's content), as a string of markup.
-  render: (content, type, row) => globalThis.__ctEventLogOutputText(row),
-};
-const shippedLocationColumn = { data: 'fullPath', render: globalThis.__ctEventLogLocationRender };
-const preFixLocationColumn = { data: 'fullPath' };
-
-function checkEventLogCell(name, shippedCell, preFixCell, expected) {
-  // The positive twin: the pre-fix column, same DataTables, same row, did NOT
-  // show the recorded text — the parser made an element out of some of it.
-  assert(preFixCell !== undefined
-      && (preFixCell.querySelectorAll('*').length > 0
-          || preFixCell.textContent !== expected),
-    `${name}: the PRE-FIX column DOES render it as markup`);
-  assertEqual(shippedCell?.querySelectorAll('*').length ?? -1, 0,
-    `${name}: the shipped column renders no element from it`);
-  assert(shippedCell !== undefined && !hasEventHandlerAttr(shippedCell),
-    `${name}: and no event-handler attribute`);
-  assertEqual(shippedCell?.textContent ?? null, expected,
-    `${name}: and reads exactly as the program wrote it`);
-}
-
-let checkedEventOutputs = 0;
-for (const [name, ev] of Object.entries(HOSTILE_EVENT_OUTPUTS)) {
-  const row = globalThis.__ctEventLogRow(
-    ev.kind, ev.content, ev.metadata ?? '', ev.stdout ?? false, 'main.py', 'main.py:7');
-  const [[shipped]] = drawEventLogTable([row], [shippedOutputColumn]);
-  const [[preFix]] = drawEventLogTable([row], [preFixOutputColumn]);
-  checkEventLogCell(name, shipped, preFix, ev.expected);
-  checkedEventOutputs++;
-}
-assertEqual(checkedEventOutputs, HOSTILE_EVENT_OUTPUT_COUNT,
-  'every hostile event output was rendered (no silent skip)');
-
-let checkedEventPaths = 0;
-for (const [name, fullPath] of Object.entries(HOSTILE_EVENT_PATHS)) {
-  const row = globalThis.__ctEventLogRow(
-    'TraceLogEvent', 'x = 1', '', false, '/home/u/proj/main.py', fullPath);
-  const [[shipped]] = drawEventLogTable([row], [shippedLocationColumn]);
-  const [[preFix]] = drawEventLogTable([row], [preFixLocationColumn]);
-  checkEventLogCell(name, shipped, preFix, fullPath);
-  checkedEventPaths++;
-}
-assertEqual(checkedEventPaths, HOSTILE_EVENT_PATH_COUNT,
-  'every hostile location was rendered (no silent skip)');
-
-// The escaping must not cost an ordinary row anything: plain output, and an
-// empty location (a row whose reply carried no path and whose event names no
-// source), still read as before.
-{
-  const row = globalThis.__ctEventLogRow('Write', '2 + 3 = 5', '', true, '', '');
-  const [[output, location]] = drawEventLogTable(
-    [row], [shippedOutputColumn, shippedLocationColumn]);
-  assertEqual(output?.textContent ?? null, 'stdout: 2 + 3 = 5',
-    'an ordinary write still reads `stdout: <text>`');
-  assertEqual(location?.textContent ?? null, '',
-    'and a row with no location shows an empty location cell');
-  // A trace-log row with no content at all: the pre-fix render handed the
-  // `null` straight back; the escaping render must not throw on it, which
-  // under `errMode: "throw"` would abort the whole draw.
-  const empty = globalThis.__ctEventLogRow('TraceLogEvent', null, '', false, '', '');
-  const [[emptyOutput]] = drawEventLogTable([empty], [shippedOutputColumn]);
-  assertEqual(emptyOutput?.textContent ?? null, '',
-    'and a trace-log row with no content draws an empty output cell');
 }
 
 describe('S. Source scan — the sinks stay written this way');
@@ -754,28 +602,16 @@ assertEqual(filesMatching(/^ +result\.escape_html = true$/m),
 assertEqual(filesMatching(/escape_html\s*=\s*false/), '',
   'no source turns escape_html off');
 
-// --- site 9: the desktop Event Log's DataTables columns ---------------------
+// --- the desktop Event Log: its cells are text nodes -----------------------
 //
-// Arm D drives the two `render` callbacks; this is what keeps the dense
-// table's columns wired to them.  `event_log.nim` reaches isonim through
-// `ui_imports`, so it cannot be imported by the probe, and the scan is what
-// covers the column table itself — the same treatment `renderer.nim`'s menu
-// copy gets above.  Read from the comment-stripped source, so a sentence
-// about the render cannot satisfy it.
+// The Event Log's rows used to be DataTables cells, which insert a column's
+// render result as HTML; the pane is now the generic IsoNim view, which draws
+// every recorded string with the DSL's `text` (a text node). Pinned so a cell
+// that went back to markup is a red run.
 {
-  const eventLogNim = shipped.get('src/frontend/ui/event_log.nim') ?? '';
-  assert(/data: cstring"fullPath",\s+visible: shown,\s+render: eventLogLocationRender,/.test(eventLogNim),
-    'the Event Log location column renders through the escaping eventLogLocationRender');
-  assert(/data: cstring"content",\s+title: cstring"output",\s+visible: shown,\s+render: eventLogOutputRender,/.test(eventLogNim),
-    'and the output column through the escaping eventLogOutputRender');
-  // The columns' data fields, as a CLOSED set: a new column that hands
-  // DataTables a recorded string is a red run here rather than a sink nobody
-  // looked at.  `rrEventId` and `directLocationRRTicks` are `int`s; `kind`'s
-  // render writes only the view's own row-expander `<span>`.
-  assertEqual(
-    [...eventLogNim.matchAll(/data: cstring"(\w+)"/g)].map((m) => m[1]).sort().join(','),
-    'content,directLocationRRTicks,fullPath,kind,kind,rrEventId,rrEventId',
-    'and the Event Log tables name no other data field');
+  const viewNim = shipped.get('src/frontend/viewmodel/views/isonim_event_log_view.nim') ?? '';
+  assert(viewNim.length > 0 && !/innerHTML|insertAdjacentHTML|verbatim/.test(viewNim),
+    'the Event Log view writes no markup: its cells are text nodes');
 }
 
 describe('S2. The other innerHTML sinks — each one\'s input, and what fixes it');
@@ -888,7 +724,10 @@ assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
 // Request panel's copy has been named `setPickerChevron` since 167227860; the
 // VCS view's is still `setInnerHtml`.  Both names are scanned, so a third
 // helper under either name, or a call with another argument, is a red run.
-assertEqual(filesMatching(/proc (setInnerHtml|setPickerChevron)\(r: WebRenderer/),
+// Since 09239daa3 the VCS view's helper is ONE generic proc,
+// `setInnerHtml[R, N](r: R; …)`, whose write is the `importjs`
+// `setInnerHtmlJS` — so the declaration is matched in either shape.
+assertEqual(filesMatching(/proc (setInnerHtml|setPickerChevron)(\[R, N\])?\(r: (WebRenderer|R);/),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim,'
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim',
   'the scan finds both chevron helpers');
@@ -896,6 +735,12 @@ assertEqual(matchesAcross(/r\.(setInnerHtml|setPickerChevron)\([^)]*\)/g),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setPickerChevron(chevronHost, chevronSvg) | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:r.setInnerHtml(chevronHost, chevronSvg)',
   'and every call passes chevronSvg — the call set is closed');
+// The generic helper's raw `importjs` write takes any string, so the closed
+// call set above only holds while the helper is its one caller.
+assertEqual(matchesAcross(/\bsetInnerHtmlJS\(/g),
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS( | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS(',
+  'and it is named only by its declaration and that one call');
 assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronDownSvg | '
   + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronUpSvg | '
@@ -930,7 +775,7 @@ describe('S3. The whole innerHTML population, pinned');
 /** Every shipped front-end file that writes innerHTML: `[file, clears, live]`. */
 const INNER_HTML_BY_FILE = [
   ['src/frontend/renderer.nim', 1, 0],
-  ['src/frontend/storybook_components.nim', 7, 2],
+  ['src/frontend/storybook_components.nim', 7, 0],
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
   ['src/frontend/ui/auto_hide.nim', 3, 0],
@@ -990,8 +835,6 @@ const INNER_HTML_BY_FILE = [
  * literal `&#x2715;`.  Its icon is now drawn by CSS, so the write is gone.)
  */
 const INNER_HTML_LIVE_WRITES = [
-  'src/frontend/storybook_components.nim: denseHost.innerHTML = `denseHtml`;',
-  'src/frontend/storybook_components.nim: if (detailedHost) detailedHost.innerHTML = `detailedHtml`;',
   'src/frontend/ui/datatable.nim: endRowField.innerHTML = cstring($(self.endRow))',
   'src/frontend/ui/datatable.nim: rowsCountField.innerHTML = cstring($(self.rowsCount))',
   'src/frontend/ui/editor.nim: el.innerHTML = frames[i]',
@@ -1004,7 +847,7 @@ const INNER_HTML_LIVE_WRITES = [
   "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)\"\"\".}",
   'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
-  'src/frontend/viewmodel/views/isonim_vcs_view.nim: node.innerHTML = cstring(html)',
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim: {.importjs: "#.innerHTML = #".}',
 ];
 
 const foundByFile = new Map();
@@ -1061,8 +904,10 @@ assertEqual(
   assert(!/pinBtn\.innerHTML/.test(
     sources.get('src/frontend/ui/auto_hide.nim')),
     'auto_hide\'s floating unpin button writes no markup — CSS draws its icon');
-  assert(/htmlEscape\(/.test(sources.get('src/frontend/storybook_components.nim')),
-    'the storybook table builder escapes the values it interpolates');
+  // The storybook's Event Log is the generic view now; the table markup it
+  // used to build (and escape) is gone with DataTables.
+  assert(!/denseHost\.innerHTML/.test(sources.get('src/frontend/storybook_components.nim')),
+    'the storybook builds no Event Log table markup');
 }
 
 // The sink deleted rather than fixed: an exported proc whose whole body was
@@ -1194,7 +1039,14 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 // assertions for each of 6 hostile outputs and 2 hostile locations, the two
 // corpus counts and the three plain-row checks) and its three column-wiring
 // assertions in arm S.  Raised in the same diff that adds them.
-const EXPECTED_ASSERTIONS = 208;
+// 208 -> 209 on 2026-10-22, for the assertion that the VCS view's raw
+// `setInnerHtmlJS` write (the generic chevron helper's, since 09239daa3) is
+// named only by its declaration and the helper's one call, so the chevron's
+// closed call set still covers the sink.  Raised in the same diff.
+// 209 -> 165 on 2026-10-22: the desktop Event Log is no longer a DataTables
+// table, so arm D and its probe entry points (41) and the column-wiring scan
+// (3) went with it; the scan that its view writes no markup came in (+1).
+const EXPECTED_ASSERTIONS = 165;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

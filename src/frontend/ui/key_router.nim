@@ -58,7 +58,7 @@ import ../../common/key_names
 import ../viewmodel/viewmodels/video_player_vm
 from ../viewmodel/views/list_scrubber_dom import viewOperation
 from ../viewmodel/views/context_menu_bridge import contextMenuIsOpen,
-                                                  hideContextMenu
+                                                  contextMenuOperation
 
 type
   NativeKind = enum
@@ -279,9 +279,10 @@ proc syncPaletteLayer() =
 proc syncContextMenuLayer() =
   ## The right-click menu's table is pushed exactly while the menu shows, as
   ## the terminal and GPUI push theirs (CUA-Keymap.md §3.8: once open, the
-  ## menu takes `Escape`). Without it `Escape` over a list pane resolved to
-  ## the pane's `list.clear-selection`, which ran and stopped the event, so
-  ## the menu stayed open.
+  ## menu takes the arrows, `Enter` and `Escape`). Without it `Escape` over a
+  ## list pane resolved to the pane's `list.clear-selection`, which ran and
+  ## stopped the event, so the menu stayed open, and the arrows moved the
+  ## list under the menu.
   let open = contextMenuIsOpen()
   let at = deskRouter.stack.indexOfLayer(ContextMenuTable, "window")
   if open and at < 0:
@@ -434,11 +435,10 @@ proc runDesktopOperation(res: EditingResolution): NativeKind =
   let table = if res.layer.find(':') >= 0: res.layer[res.layer.find(':') + 1 .. ^1]
               else: ""
   let fromUser = res.layer.startsWith("user")
-  if res.operation == "context-menu.close":
-    # Performed here rather than left to the menu: the menu is a plain
-    # `<div>` that never takes the focus, so no element under the focus
-    # would close it.
-    hideContextMenu()
+  # The right-click menu's operations are performed here rather than left
+  # to the menu: it is a plain `<div>` that never takes the focus, so no
+  # element under the focus would move its highlight, choose or close it.
+  if contextMenuIsOpen() and contextMenuOperation(res.operation):
     return nkHandled
   # The DOM element's own operations stay its own.
   if not fromUser and table in NativeTables:

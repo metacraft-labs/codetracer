@@ -33,6 +33,60 @@ when defined(js):
     if not container.isNil:
       container.style.display = cstring"none"
 
+  proc moveContextMenuHighlight(step: int; fromEnd: bool) {.importjs: """
+    (function(step, fromEnd){
+      const c = document.getElementById('context-menu-container');
+      if (!c) return;
+      const rows = Array.from(c.querySelectorAll('.context-menu-item'));
+      const n = rows.length;
+      if (n === 0) return;
+      const ACTIVE = 'ct-menu-item--active';
+      let i = fromEnd ? -1 : rows.findIndex(r => r.classList.contains(ACTIVE));
+      if (i < 0) i = step > 0 ? -1 : n;
+      for (let k = 0; k < n; k++) {
+        i = (((i + step) % n) + n) % n;
+        if (!rows[i].classList.contains('ct-menu-item--disabled')) {
+          rows.forEach(r => r.classList.remove(ACTIVE));
+          rows[i].classList.add(ACTIVE);
+          if (rows[i].scrollIntoView) rows[i].scrollIntoView({block: 'nearest'});
+          return;
+        }
+      }
+    })(#, #)""".}
+    ## Move the keyboard highlight (`.ct-menu-item--active`, the design
+    ## system's keyboard-navigation row) `step` ENABLED rows on, wrapping, as
+    ## the shared `ContextMenuState.move` does for the terminal and GPUI; with
+    ## `fromEnd` it starts outside the list, so `step` 1 is the first enabled
+    ## row and -1 the last. Disabled rows are skipped: they cannot be chosen.
+
+  proc acceptContextMenuHighlight() {.importjs: """
+    (function(){
+      const c = document.getElementById('context-menu-container');
+      const row = c && c.querySelector(
+        '.context-menu-item.ct-menu-item--active:not(.ct-menu-item--disabled)');
+      if (row) row.click();
+    })()""".}
+    ## Choose the highlighted row through its own `onclick` — the one path a
+    ## pointer takes, which runs the entry's handler and closes the menu.
+    ## With no row highlighted nothing is chosen, as on the terminal.
+
+  proc contextMenuOperation*(operation: string): bool =
+    ## Perform a `ContextMenuTable` operation (CUA-Keymap.md §3.8) on the
+    ## right-click menu: the desktop's counterpart of the terminal's and
+    ## GPUI's `context-menu.*` dispatch. Answers whether `operation` was one;
+    ## `context-menu.open` (a global operation) is not.
+    case operation
+    of "context-menu.focus-next": moveContextMenuHighlight(1, false)
+    of "context-menu.focus-previous": moveContextMenuHighlight(-1, false)
+    of "context-menu.focus-first": moveContextMenuHighlight(1, true)
+    of "context-menu.focus-last": moveContextMenuHighlight(-1, true)
+    of "context-menu.accept": acceptContextMenuHighlight()
+    of "context-menu.close": hideContextMenu()
+    of "context-menu.enter-submenu", "context-menu.leave-submenu":
+      discard  # this menu has no submenus; the key is still the menu's
+    else: return false
+    true
+
   proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
     let container = kdom.document.getElementById(cstring"context-menu-container")
     if container.isNil:

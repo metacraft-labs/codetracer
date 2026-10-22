@@ -996,6 +996,17 @@ test_lane_files() {
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		#
+		# `electron_vcs_content_id_async_test.nim` drives the Electron
+		# renderer's VCS facade (`host/desktop_electron.electronVcs`) over real
+		# git repositories and asserts the status bar's two git reads —
+		# `contentId` and `repositoryRoot` — leave the event loop running
+		# while git does (Status-Bar.md, "A refresh never stalls the
+		# window"), with the synchronous recipe's answers. Here because this
+		# is the lane whose suites run under node: the renderer's own lanes
+		# compile for a browser and cannot spawn git. Needs `git` and `sh` on
+		# PATH; writes only under one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/electron_vcs_content_id_async_test.nim
+		#
 		# `settle_once_test.nim` drives `index/settle_once.nim` — the rule that
 		# `traces.onRunTest` and `onRunTestSuite` answer a test run EXACTLY ONCE —
 		# with real async handlers that reject, throw, or settle and then fail,

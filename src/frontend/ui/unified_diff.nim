@@ -886,12 +886,13 @@ proc monacoFlowDecorations(decorations: seq[ReviewFlowDecoration]):
 #     side by side at all. RV-5 therefore showed ONE pass and made the loop
 #     control the only way to see the others.
 #
-# What replaces it is the debugger's own arrangement: one Monaco **content
-# widget** per annotated line, holding the `.flow-parallel` row that
-# `ui/flow.renderFlow` builds out of `ui/flow_value_dom.nim` — the same module,
-# the same elements — anchored at ONE `left` offset for every line, past the
+# What replaces it is the parallel arrangement: one Monaco **content widget**
+# per annotated line, holding a `.flow-parallel` row built out of
+# `ui/flow_value_dom.nim` — the shared flow views, the same elements the
+# debugger's chips are — anchored at ONE `left` offset for every line, past the
 # longest line of the document, with one `.flow-parallel-values` column per
-# recorded pass.
+# recorded pass. (The debugger's own builder of this row, `ui/flow.renderFlow`,
+# had no call site and was removed.)
 
 proc udAddContentWidget(editor: MonacoEditor, widget: js)
   {.importjs: "#.addContentWidget(#)".}
@@ -1096,9 +1097,8 @@ proc reviewValueBandDom(self: UnifiedDiffComponent;
                 " flow-loop-step-container active-flow-step"))
     columnDom.setAttribute(cstring"data-iteration", cstring($column.iteration))
     if column.values.len == 0:
-      # A pass that never reached this line. `renderFlow` draws exactly this
-      # span in the same slot, and keeping the empty column is what stops the
-      # next pass's values sliding under this pass's heading.
+      # A pass that never reached this line. Keeping the empty column is
+      # what stops the next pass's values sliding under this pass's heading.
       columnDom.appendChild(flowValueEmptyDom(style(), cstring""))
     # A column wider than the pane drops whole chips from its end rather than
     # squeezing them — see `reviewChipsThatFit`. The marker says it happened.
@@ -1203,8 +1203,7 @@ proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
   ## Two placements, and which one is used is MEASURED rather than chosen:
   ##
   ##   * **Beside the code**, in a content widget at a common left offset —
-  ##     `FlowParallel`, the placement `ui/flow.renderFlow` uses and the one
-  ##     §4.4 describes. Used whenever the pane is wide enough to hold a whole
+  ##     `FlowParallel`, the placement §4.4 describes. Used whenever the pane is wide enough to hold a whole
   ##     column past the widest annotated line.
   ##   * **On its own row under the line**, in a Monaco view zone — the
   ##     placement the debugger's `FlowMultiline` mode uses

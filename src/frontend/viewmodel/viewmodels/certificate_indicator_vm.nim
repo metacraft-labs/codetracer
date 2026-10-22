@@ -992,15 +992,44 @@ type
     ## is recomputed from the *current* facts and never served from a cache
     ## that outlived them.
 
+  CertificateFactsGatherer* = proc(done: proc(facts: CertificateIndicatorFacts))
+                                  {.closure.}
+    ## Re-reads the world and calls ``done`` once with the facts — later, when
+    ## gathering them waits on the host (the Electron renderer's git runs in
+    ## child processes: Status-Bar.md, "A refresh never stalls the window"),
+    ## or before it returns. ``done`` receives only COMPLETE facts: a gatherer
+    ## never hands over a set with a fact still being computed, because that
+    ## fact would read as *unverifiable*.
+
   CertificateIndicatorVm* = ref object
-    ## Holds the last computed model and the reader that produced it.
+    ## Holds the last computed model and the gatherer that produced it.
     ##
     ## The model is cached only so the view can render without re-reading the
     ## filesystem on every one of the 60+ redraws a trace open triggers (see
     ## ``ui/status.nim``'s render bookkeeping). ``refresh`` is the only thing
     ## that fills it, so a stale model is only ever as stale as the last
     ## trigger — which is why the triggers are enumerated above.
-    reader: CertificateFactsReader
+    ##
+    ## ## A refresh that completes later
+    ##
+    ## Gathering may complete on a later turn of the event loop. Until it
+    ## does the model is the previous answer — before the first one, "not
+    ## looked yet" — and never a partial one. At most one gather is in flight:
+    ## a trigger that arrives meanwhile is not dropped (the facts may have
+    ## moved after the gather started) but coalesced, so exactly one more
+    ## gather follows the one in flight, however many triggers arrived. When
+    ## a gather completes the model is updated and ``onRefreshed`` is told.
+    gatherer: CertificateFactsGatherer
+    inFlight: bool
+    followUp: bool
+      ## A trigger arrived while a gather was in flight.
+    followUpTrigger: CertificateIndicatorTrigger
+      ## The latest such trigger, which the follow-up refresh is attributed to.
+    onRefreshed*: proc(changed: bool)
+      ## Called each time a gather completes and the model has been updated
+      ## from it — synchronously inside ``refresh`` when the gatherer answered
+      ## at once, later otherwise — with whether the model changed. The view
+      ## sets it to repaint and re-arm its store watches. ``nil`` is allowed.
     model*: CertificateIndicatorModel
     revision*: int
       ## Increments on every refresh that CHANGED the model. A counter rather
@@ -1019,16 +1048,18 @@ type
       ## open a panel or disturb the user's layout (Status-Bar.md,
       ## "Interaction").
 
-proc newCertificateIndicatorVm*(reader: CertificateFactsReader):
+proc newCertificateIndicatorVmWith*(gatherer: CertificateFactsGatherer):
     CertificateIndicatorVm =
-  ## A ViewModel that has not looked yet.
+  ## A ViewModel that has not looked yet, refreshing through ``gatherer``.
   ##
   ## The initial model is the ``cisNoCertificates`` one rather than a zero
   ## value, so a status bar that renders before the first refresh shows an
   ## honest "no certificates" instead of a blank or a stray "Certified" from
-  ## whatever the enum's first value happens to be.
+  ## whatever the enum's first value happens to be. Its summary says it has
+  ## not looked, which is also what it shows while the first gather is in
+  ## flight.
   result = CertificateIndicatorVm(
-    reader: reader,
+    gatherer: gatherer,
     model: CertificateIndicatorModel(
       state: cisNoCertificates,
       label: NoCertificatesLabel,
@@ -1040,6 +1071,23 @@ proc newCertificateIndicatorVm*(reader: CertificateFactsReader):
     refreshes: 0,
     lastTrigger: citStartup,
     disclosed: false)
+
+proc newCertificateIndicatorVm*(reader: CertificateFactsReader):
+    CertificateIndicatorVm =
+  ## A ViewModel over a synchronous ``reader`` — the native and headless
+  ## callers'. The reader is wrapped into a gatherer that completes inside
+  ## the call, so ``refresh`` keeps answering whether the model changed,
+  ## there and then. A ``nil`` reader gives a ViewModel that never looks.
+  let gatherer: CertificateFactsGatherer =
+    if reader.isNil: nil
+    else:
+      proc(done: proc(facts: CertificateIndicatorFacts)) {.closure.} =
+        done(reader())
+  newCertificateIndicatorVmWith(gatherer)
+
+proc refreshInFlight*(self: CertificateIndicatorVm): bool =
+  ## Whether a gather has been started and has not completed.
+  self.inFlight
 
 proc `==`(a, b: CertificateDetailRow): bool =
   a.label == b.label and a.value == b.value
@@ -1053,25 +1101,89 @@ proc sameModel(a, b: CertificateIndicatorModel): bool =
     a.authenticityNote == b.authenticityNote and a.detail == b.detail and
     a.certificateName == b.certificateName and a.searched == b.searched
 
-proc refresh*(self: CertificateIndicatorVm;
-              trigger = citManualRefresh): bool {.discardable.} =
-  ## Re-read the facts and recompute. Returns whether the model changed.
-  ##
-  ## Always re-reads. There is no "has anything changed?" short-circuit in
-  ## front of the reader, and there must not be: every such short-circuit is a
-  ## second, weaker theory of when the facts moved, and the failure it produces
-  ## is the indicator going on claiming a validity it has lost — which is the
-  ## one failure this deliverable names.
-  self.lastTrigger = trigger
-  inc self.refreshes
-  if self.reader.isNil:
-    return false
-  let next = evaluateCertificateIndicator(self.reader())
+proc apply(self: CertificateIndicatorVm;
+           facts: CertificateIndicatorFacts): bool =
+  ## Recompute from complete facts. Returns whether the model changed.
+  let next = evaluateCertificateIndicator(facts)
   if sameModel(next, self.model):
     return false
   self.model = next
   inc self.revision
   true
+
+proc startGather(self: CertificateIndicatorVm;
+                 trigger: CertificateIndicatorTrigger): tuple[completed, changed: bool] =
+  ## Start one gather. Reports whether it completed before returning, and if
+  ## so whether it changed the model.
+  self.inFlight = true
+  self.lastTrigger = trigger
+  var starting = true
+  var completedInline = false
+  var changedInline = false
+  var delivered = false
+  let vm = self
+  try:
+    self.gatherer(proc(facts: CertificateIndicatorFacts) =
+      # Once per gather, whatever the gatherer does.
+      if delivered:
+        return
+      delivered = true
+      vm.inFlight = false
+      let changed = vm.apply(facts)
+      if starting:
+        completedInline = true
+        changedInline = changed
+      if not vm.onRefreshed.isNil:
+        vm.onRefreshed(changed)
+      if vm.followUp and not vm.inFlight:
+        # Facts may have moved after this gather started: exactly one more,
+        # attributed to the latest trigger. (`inFlight` is re-checked because
+        # `onRefreshed` may itself have started a refresh.)
+        vm.followUp = false
+        discard vm.startGather(vm.followUpTrigger))
+  except:
+    # A BARE ARM, so a host exception on the JS backend (no `m_type`) is
+    # handled too; it is re-raised unchanged.
+    #
+    # A gatherer that raises while starting must not leave the ViewModel
+    # believing a gather is in flight forever, which would swallow every
+    # later trigger as a follow-up. The exception is the caller's, as it was
+    # the reader's before gathering became asynchronous.
+    if not delivered:
+      self.inFlight = false
+    raise
+  starting = false
+  (completedInline, changedInline)
+
+proc refresh*(self: CertificateIndicatorVm;
+              trigger = citManualRefresh): bool {.discardable.} =
+  ## Re-read the facts and recompute. Returns whether the model changed —
+  ## which is known here only when the gather completed before returning (a
+  ## synchronous reader). Otherwise it returns ``false`` and the answer
+  ## arrives through ``onRefreshed`` when the gather completes; until then
+  ## the model is the previous one, never a partial one.
+  ##
+  ## A trigger while a gather is in flight starts nothing: it records that
+  ## one more gather must follow, attributed to the latest trigger, and that
+  ## follow-up starts when the one in flight completes. However many
+  ## triggers arrive, exactly one follows — the facts it reads are the
+  ## current ones whichever trigger asked.
+  ##
+  ## Always re-reads. There is no "has anything changed?" short-circuit in
+  ## front of the gatherer, and there must not be: every such short-circuit
+  ## is a second, weaker theory of when the facts moved, and the failure it
+  ## produces is the indicator going on claiming a validity it has lost —
+  ## which is the one failure this deliverable names.
+  self.lastTrigger = trigger
+  inc self.refreshes
+  if self.gatherer.isNil:
+    return false
+  if self.inFlight:
+    self.followUp = true
+    self.followUpTrigger = trigger
+    return false
+  let (completed, changed) = self.startGather(trigger)
+  completed and changed
 
 proc toggleDisclosure*(self: CertificateIndicatorVm) =
   ## Selecting the indicator.
@@ -1079,6 +1191,12 @@ proc toggleDisclosure*(self: CertificateIndicatorVm) =
   ## Opening the disclosure refreshes first, because the detail is a claim
   ## about the current state and showing a remembered one at the moment the
   ## user asks is the worst time to be stale. Closing does not.
+  ##
+  ## The disclosure toggles AT ONCE either way. When the refresh completes
+  ## later (the Electron renderer), the detail shows the previous answer
+  ## until it does and then updates in place (``onRefreshed``); making the
+  ## user's click wait for git would be the stall this ViewModel was changed
+  ## to avoid.
   if not self.disclosed:
     self.refresh(citManualRefresh)
   self.disclosed = not self.disclosed

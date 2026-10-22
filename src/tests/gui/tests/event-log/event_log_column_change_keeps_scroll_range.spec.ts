@@ -30,6 +30,12 @@
  * three column changes. Attach the listener to each replacement scroll body;
  * The fix for #850 already supplies the measurement correction.
  *
+ * THE LIST SINCE HSF-D6. The dense table is no longer a DataTables table: it
+ * is the generic IsoNim view's list, whose scroll area is as tall as the whole
+ * list at the rows' measured pitch, and a column change re-renders cells
+ * inside rows it keeps. The contract above is the same, and so are the
+ * assertions below; the scroll body is `.eventLog-scroll-body`.
+ *
  * WHAT IS ASSERTED, and why each part is there:
  *   - the scroll body's visible height is the same after three column changes as
  *     before them: a rebuilt table is sized to the pane, as the first one is;
@@ -78,7 +84,7 @@ type ScrollGeometry = {
 async function scrollGeometry(page: Page): Promise<ScrollGeometry> {
   return page.evaluate(() => {
     const body = document.querySelector(
-      ".eventLog-dense-table .dt-scroll-body",
+      ".eventLog-dense-table .eventLog-scroll-body",
     ) as HTMLElement | null;
     const row = body?.querySelector("tbody tr[data-rr-ticks]") as HTMLElement | null;
     return {
@@ -106,7 +112,7 @@ async function headerTitles(page: Page): Promise<string[]> {
 async function lastRowVisible(page: Page): Promise<boolean> {
   return page.evaluate((mark) => {
     const pane = document.querySelector(".eventLog-dense-table") as HTMLElement | null;
-    const body = pane?.querySelector(".dt-scroll-body") as HTMLElement | null;
+    const body = pane?.querySelector(".eventLog-scroll-body") as HTMLElement | null;
     if (!pane || !body) return false;
     const row = Array.from(body.querySelectorAll("tbody tr")).find((tr) =>
       ((tr as HTMLElement).innerText ?? "").includes(mark),
@@ -130,7 +136,7 @@ async function scrollToEnd(page: Page): Promise<void> {
     async () => {
       const top = await page.evaluate(() => {
         const body = document.querySelector(
-          ".eventLog-dense-table .dt-scroll-body",
+          ".eventLog-dense-table .eventLog-scroll-body",
         ) as HTMLElement | null;
         if (!body) return -1;
         body.scrollTop = body.scrollHeight;
@@ -151,7 +157,7 @@ async function scrollToEnd(page: Page): Promise<void> {
 async function scrollToStart(page: Page): Promise<void> {
   await page.evaluate(() => {
     const body = document.querySelector(
-      ".eventLog-dense-table .dt-scroll-body",
+      ".eventLog-dense-table .eventLog-scroll-body",
     ) as HTMLElement | null;
     if (!body) return;
     body.scrollTop = 0;
@@ -201,7 +207,7 @@ async function changeColumns(
     async () => {
       after = await headerTitles(page);
       const rows = await page
-        .locator(".eventLog-dense-table .dt-scroll-body tbody tr[data-rr-ticks]")
+        .locator(".eventLog-dense-table .eventLog-scroll-body tbody tr[data-rr-ticks]")
         .count();
       return rows > 0 && JSON.stringify(after) !== JSON.stringify(before);
     },

@@ -409,6 +409,18 @@ type
     visibleRows*: Memo[seq[EventLogRow]]
       ## The held rows the viewport shows (`viewport.firstRow` onwards,
       ## `viewport.rows` of them); every held row while unmeasured.
+    rowHeightPx*: Signal[float]
+      ## A row's measured advance in CSS pixels, from the desktop's rendered
+      ## rows (`setRowHeightPx`): the list's scroll height is the log's size
+      ## times it, and the held window sits `loadedStart` rows down.
+    reloadToken*: Signal[int]
+      ## Bumped by `reload`: the log changed under an unchanged request (a
+      ## tracepoint run added or removed trace-log rows), so the window is
+      ## asked for again.
+    liveStops: seq[EventLogRow]
+      ## The live session's debugger stops this ViewModel added
+      ## (`appendLiveDebuggerStop`), in order. The engine's windows do not
+      ## carry them, so each window answer is followed by them again.
 
     # -- Host bridge --
     onSwitchProcessProc*: proc(recordingId: string)
@@ -443,8 +455,49 @@ proc appendLiveDebuggerStop*(vm: EventLogVM; row: EventLogRow) =
   ## The append itself is `ReplayDataStore.appendLiveEventRow` — the dedup rule
   ## and the index assignment belong beside the rows, not on one of the
   ## ViewModels that reads them, so a host with no `EventLogVM` (a VS Code
-  ## surface, BlockTracer) can add a live stop too.
-  discard vm.store.appendLiveEventRow(row)
+  ## surface, BlockTracer) can add a live stop too. The ViewModel keeps the
+  ## stop as well, to put it back after each window the engine answers.
+  if vm.store.appendLiveEventRow(row):
+    vm.liveStops.add row
+
+func liveDebuggerStopRow*(dbg: DebuggerState; earlierStops: int): EventLogRow =
+  ## The `debugger-stop` row of a live session's stop at `dbg`. Its identity
+  ## is the stop's tick; a stop at tick 0 (every position of a db-backend
+  ## trace) is told apart from the next by a synthetic id past any tick.
+  let path = dbg.location.file
+  let line = dbg.location.line
+  let id =
+    if dbg.rrTicks > 0'u64: dbg.rrTicks
+    else: 1_000_000_000'u64 + uint64(earlierStops)
+  EventLogRow(
+    eventId: id,
+    kindId: 10, # `EventLogKind.Open`, which the desktop always gave a stop.
+    kind: "debugger-stop",
+    file: path,
+    line: line,
+    value: "debugger stop at " & path & ":" & $line,
+    rrTicks: id,
+    maxRRTicks: id,
+    sourceGeneration: dbg.location.sourceGeneration,
+    sourceDigest: dbg.location.sourceDigest)
+
+proc setRowHeightPx*(vm: EventLogVM; h: float) =
+  ## The measured row advance (`rowHeightPx`), kept when it changes by less
+  ## than a hundredth of a pixel so an unchanged layout re-runs nothing.
+  if h > 0.0 and abs(h - vm.rowHeightPx.val) > 0.01:
+    vm.rowHeightPx.val = h
+
+proc reload*(vm: EventLogVM) =
+  ## Ask for the current window again: the log changed although the request
+  ## did not (a tracepoint run's trace-log rows came or went).
+  vm.reloadToken.val = vm.reloadToken.val + 1
+
+proc resetLog*(vm: EventLogVM) =
+  ## A new recording: drop the previous one's rows, counts and live stops,
+  ## and ask for the new log's window.
+  vm.liveStops = @[]
+  vm.store.clearEventLog()
+  vm.reload()
 
 proc doubleClickRow*(vm: EventLogVM; row: int) =
   ## Navigate to the source location of the event at `row`.
@@ -616,6 +669,54 @@ proc isFiltered*(vm: EventLogVM): bool =
   ## Whether the list the pane pages through is narrower than the log: a
   ## search or a kind filter is in effect.
   vm.searchQuery.val.len > 0 or vm.selectedKinds.val.len > 0
+
+proc listTotal*(vm: EventLogVM): int =
+  ## The size of the list the pane pages through: the filtered count under a
+  ## search or a kind filter, the whole log's otherwise.
+  if vm.isFiltered: vm.store.eventLog.recordsFiltered.val
+  else: vm.store.eventLog.recordsTotal.val
+
+func eventLogText*(r: EventLogRow): string =
+  ## The event's text as an Event Log shows it: a write is prefixed with the
+  ## stream it went to — `stdout: 2 + 3 = 5` — and every other event is its
+  ## content, without its line terminator (a cell holding the `\n` of a
+  ## `print` draws a blank line under every event in a medium that honours
+  ## it).
+  let content = r.value.strip(leading = false, chars = {'\n', '\r'})
+  if r.kind == "stdout": "stdout: " & content
+  else: content
+
+const EventLogKindSource =
+  staticRead("../../../common/common_types/codetracer_features/events.nim")
+
+proc declaredEventLogKinds(src: string): seq[string] {.compileTime.} =
+  ## The member names of `EventLogKind`, in ordinal order, read from its
+  ## declaration (the ViewModel layer cannot import the enum: its module
+  ## needs the legacy front-end's `langstring`). Anchored on the declaration,
+  ## as `timeline_vm.ErrorEventKindId`'s check is.
+  let at = src.find("EventLogKind* {.pure.} = enum")
+  doAssert at >= 0, "EventLogKind is no longer declared where event_log_vm reads it"
+  for line in src[at .. ^1].splitLines:
+    let t = line.strip
+    if t.startsWith("EventLogKind*") or t.len == 0 or t.startsWith("#"):
+      continue
+    if '*' in t or '=' in t:
+      break
+    result.add t.split({',', ' '})[0]
+
+const EventLogKindNames* = declaredEventLogKinds(EventLogKindSource)
+  ## `EventLogKind`'s names by ordinal (`kindId`).
+
+func eventLogKindName*(r: EventLogRow): string =
+  ## The row's kind as one word: its semantic kind when the producer gave one
+  ## (`debugger-stop`), else the recorded kind's name (`Write`, `ReadFile`).
+  ## What the desktop's rows carry as `data-event-kind`.
+  if r.kind.len > 0 and r.kind notin ["stdout", "event"]:
+    r.kind
+  elif r.kindId >= 0 and r.kindId < EventLogKindNames.len:
+    EventLogKindNames[r.kindId]
+  else:
+    $r.kindId
 
 # ---------------------------------------------------------------------------
 # M25b — Marker-row metadata + counterpart cache helpers
@@ -1107,6 +1208,8 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
             if v.rows > 0: max(0, v.firstRow) div v.rows else: 0))
     let searchQuery = createSignal("")
     let selectedKinds = createSignal(newSeq[bool]())
+    let rowHeightPx = createSignal(24.0)
+    let reloadToken = createSignal(0)
     let sortColumn = createSignal(0)
     let sortAscending = createSignal(true)
     let columns = createSignal(defaultEventLogColumns())
@@ -1189,6 +1292,8 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       pageSize: pageSize,
       searchQuery: searchQuery,
       selectedKinds: selectedKinds,
+      rowHeightPx: rowHeightPx,
+      reloadToken: reloadToken,
       sortColumn: sortColumn,
       sortAscending: sortAscending,
       columns: columns,
@@ -1274,6 +1379,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       let v = viewport.val
       let query = searchQuery.val
       let kinds = selectedKinds.val
+      let token = reloadToken.val
       let col = sortColumn.val
       let asc = sortAscending.val
       let shown = vm.columns.val.visibleColumns
@@ -1300,7 +1406,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         if vm.followsStop: int64(store.debugger.val.rrTicks) else: -1'i64
       if atTicks >= 0:
         args["atRRTicks"] = %atTicks
-      let key = $args
+      let key = $args & "#" & $token
       if key == lastKey:
         return
       lastKey = key
@@ -1318,11 +1424,39 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           # `applyEventLogResponse` leaves the store alone when the payload
           # has no `events` key, so a marker-only answer cannot empty the log.
           storeRef.applyEventLogResponse(response, start, searched = searched)
+          # The live session's stops, which no engine window carries, after
+          # the window that replaced them.
+          for stop in vmRef.liveStops:
+            discard storeRef.appendLiveEventRow(stop)
           if atTicks >= 0 and responseSucceeded(response):
             storeRef.eventLog.currentIndex.val =
               responseBody(response).getOrDefault("indexAtTick").getInt(-1)
           vmRef.applyMarkerRowsResponse(response),
         proc(message: string) =
           discard)
+
+    # A LIVE SESSION'S STOPS ARE EVENTS OF ITS LOG: each stop the debugger
+    # makes in a live recording is a `debugger-stop` row, visible at once
+    # (the recorded events of the live head arrive later, if at all). A
+    # mirror leaves this to its primary, whose rows it receives.
+    createEffect proc() =
+      let dbg = store.debugger.val
+      let mode = store.session.val.debugSessionMode
+      if not vm.actionSink.isNil or
+          mode notin {liveMcr, liveMaterialized, historicalFromLive}:
+        return
+      let path = dbg.location.file
+      let line = dbg.location.line
+      if path.len == 0 or line <= 0:
+        return
+      let stop = liveDebuggerStopRow(dbg, vm.liveStops.len)
+      if vm.liveStops.len > 0:
+        let last = vm.liveStops[^1]
+        if last.rrTicks == stop.rrTicks and last.file == stop.file and
+            last.line == stop.line and
+            last.sourceGeneration == stop.sourceGeneration and
+            last.sourceDigest == stop.sourceDigest:
+          return
+      untrack proc() = vm.appendLiveDebuggerStop(stop)
 
     vm

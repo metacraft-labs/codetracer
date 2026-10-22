@@ -29,15 +29,30 @@
 ## How the indicator then decides between W, H and S is the ViewModel's
 ## (`evaluateCertificateIndicator`, Status-Bar.md's table).
 ##
-## ## Why synchronous
+## ## Synchronous and asynchronous, one read
 ##
-## `awaitSync` settles the facade's futures for the local instantiations,
-## whose work really is synchronous underneath. That keeps the discovery rules
-## in `certificate_store.nim` as one synchronous implementation shared by the
-## product and by the tests, instead of a promise-shaped copy for each. A
-## genuinely remote instantiation does not settle, and the facade's own
-## `pkTimeout` outcome then arrives here as a refusal — which becomes
-## *unverifiable*, which is the correct answer for "I could not look".
+## The facts are read by ONE body (`factsPass`), and the discovery rules in
+## `certificate_store.nim` stay one synchronous implementation shared by the
+## product and the tests. What differs is only how a facade future is
+## settled, which a per-refresh `FactsSession` decides:
+##
+## * `platformCertificateFacts` / `platformCertificateFactsReader` —
+##   SYNCHRONOUS, for the native and headless callers (GPUI and the
+##   ViewModel suites), whose local instantiations really are synchronous
+##   underneath. `awaitSync` settles each future; a genuinely remote
+##   instantiation does not settle, and the facade's own `pkTimeout` outcome
+##   then arrives as a refusal — *unverifiable*, the correct answer for "I
+##   could not look".
+## * `gatherCertificateFacts` / `platformCertificateFactsGatherer` —
+##   ASYNCHRONOUS, for the Electron renderer, whose `vcs.contentId` and
+##   `vcs.repositoryRoot` run git in child processes and answer later. Waiting
+##   there was what froze the window for up to 1.2 s on every refresh
+##   (Status-Bar.md, "A refresh never stalls the window"). An answer not yet
+##   in is recorded as pending and the read runs again when it arrives; only
+##   a read with nothing pending is handed over, so a partially gathered set
+##   of facts is never displayed. The store reads (`fs.*`) are still settled
+##   inline: on the desktop they are local `fs` calls, not the cost that was
+##   paid.
 
 import std/strutils
 
@@ -199,28 +214,136 @@ proc lastPathSegment(path: string): string =
   path[start + 1 .. last]
 
 type
-  CachedContentAnswer = object
+  FactsSession = ref object
+    ## Everything ONE refresh asks the facade about the repository — its root
+    ## and every content id — memoised for that refresh only. A refresh
+    ## builds a new session, so no answer outlives the facts it was computed
+    ## from (the refresh requirement), while within a refresh each id runs
+    ## git once however many records and passes ask for it.
+    ##
+    ## SYNCHRONOUS OR ASYNCHRONOUS, ONE BODY. In a synchronous session
+    ## (`platformCertificateFacts`, the native and headless callers) every
+    ## facade future is settled with `awaitSync`, exactly as before. In an
+    ## asynchronous one (`gatherCertificateFacts`, the Electron renderer) a
+    ## future that has not settled is recorded as PENDING, the question is
+    ## answered "still being computed" for now, and the pass is marked
+    ## incomplete; the gatherer runs the read again once every pending answer
+    ## is in. Everything else — which ids are asked, how an answer is read,
+    ## what the facts are — is the same code on both paths.
+    host: Platform
+    asynchronous: bool
+    rootAsked: bool
+    rootSettled: bool
+    root: PlatformOutcome[string]
+    caches: seq[ContentFactCache]
+      ## One per content state, made once the root is known.
+    pending: int
+      ## Asynchronous only: answers asked for and not yet in. Counted only
+      ## for a future that was still unsettled AFTER its drain — an answer
+      ## delivered during the drain is simply in, and never decrements.
+    incomplete: bool
+      ## The current pass read at least one answer that was not in yet, so
+      ## the facts it built must not be shown (Status-Bar.md: "a partially
+      ## gathered set of facts is never displayed").
+    inPass: bool
+    waiting: bool
+      ## A pass ended incomplete with answers pending: resume when they are in.
+    resume: proc() {.closure.}
+
+  CachedContentAnswer = ref object
+    ## A ref so the facade's callback can fill in the entry the oracle
+    ## already returned, when the answer arrives after the question.
     algorithm: string
     paths: seq[string]
+    settled: bool
+      ## The answer is in. Until then the oracle says "still being computed".
     answer: ContentAnswer
     conditions: seq[NoContentIdState]
       ## The Content-Id §3 conditions, when the state has no content id.
 
   ContentFactCache = ref object
-    ## One content state (W, H or S) of one repository, for the life of ONE
-    ## facts read — a refresh builds new ones, so nothing outlives the facts
-    ## it was computed from. Memoised per (algorithm, scope) because the
-    ## verifier asks once per record per pass and each answer runs git.
-    host: Platform
+    ## One content state (W, H or S) of one repository, within one session.
+    ## Memoised per (algorithm, scope) because the verifier asks once per
+    ## record per pass and each answer runs git.
+    session: FactsSession
     root: string
     source: VcsBlobSource
     entries: seq[CachedContentAnswer]
+
+proc newFactsSession(host: Platform; asynchronous: bool): FactsSession =
+  FactsSession(host: host, asynchronous: asynchronous)
+
+proc answerArrived(session: FactsSession) =
+  ## A PENDING answer is in. When it was the last one and a pass is waiting
+  ## for it, run the read again.
+  dec session.pending
+  if session.pending == 0 and session.waiting and not session.inPass:
+    session.waiting = false
+    session.resume()
+
+proc settleThrough[T](session: FactsSession;
+                      future: PlatformFuture[PlatformOutcome[T]];
+                      deliver: proc(outcome: PlatformOutcome[T])) =
+  ## Hand `future`'s outcome to `deliver` — now if it is settled, later if
+  ## the session is asynchronous and it is not.
+  ##
+  ## Synchronous: `awaitSync`, unchanged — an unsettled future becomes its
+  ## `pkTimeout` outcome, which the indicator reads as "could not look".
+  ##
+  ## Asynchronous: subscribe, drain once (which settles anything a local
+  ## instantiation already answered, as `awaitSync` does), and only if the
+  ## answer is still not in count it pending. The count is taken AFTER the
+  ## drain on purpose: a callback that ran inside the drain has delivered,
+  ## and decrementing for it would release a waiting pass early.
+  if not session.asynchronous:
+    deliver(awaitSync(future))
+    return
+  var arrived = false
+  var counted = false
+  proc arrive(outcome: PlatformOutcome[T]) =
+    if arrived:
+      return
+    arrived = true
+    deliver(outcome)
+    if counted:
+      counted = false
+      session.answerArrived()
+  future.onComplete(
+    proc(value: PlatformOutcome[T]) = arrive(value),
+    proc(message: string) =
+      arrive(failed[T](pkTransport, "the platform call failed", message)))
+  drainPlatformCallbacks()
+  if not arrived:
+    counted = true
+    inc session.pending
+    session.incomplete = true
 
 proc stateName(source: VcsBlobSource): string =
   case source
   of vbsWorkingTree: "the working tree"
   of vbsHead: "HEAD"
   of vbsIndex: "the staged content"
+
+proc record(entry: CachedContentAnswer; name: string;
+            outcome: PlatformOutcome[VcsContentId]) =
+  ## Read the facade's answer into the entry. Every answer that is not an id
+  ## stays "not computed", with the reason.
+  if not outcome.ok:
+    entry.answer = ContentAnswer(computed: false,
+      reason: name & "'s content id could not be computed: " &
+              $outcome.error)
+  else:
+    let id = outcome.value
+    case id.kind
+    of vcikComputed:
+      entry.answer = ContentAnswer(computed: true, id: id.id)
+    of vcikNoContentId:
+      entry.answer = ContentAnswer(computed: false,
+        reason: name & " has no content id: " & id.reason)
+      entry.conditions = id.conditions
+    of vcikCannotCompute:
+      entry.answer = ContentAnswer(computed: false, reason: id.reason)
+  entry.settled = true
 
 proc ask(cache: ContentFactCache; algorithm: string;
          paths: seq[string]): CachedContentAnswer =
@@ -231,42 +354,84 @@ proc ask(cache: ContentFactCache; algorithm: string;
   ## condition named), a refusal, a failure, or a host that raised. The
   ## verifier reports each as unevaluated — never a match, and never the
   ## reassuring default of some other state's id.
+  ##
+  ## In an asynchronous session the entry may come back unsettled; asking
+  ## for one still unsettled marks the pass incomplete, so it is never
+  ## shown.
   for entry in cache.entries:
     if entry.algorithm == algorithm and entry.paths == paths:
+      if not entry.settled:
+        cache.session.incomplete = true
       return entry
-  result = CachedContentAnswer(algorithm: algorithm, paths: paths)
+  let entry = CachedContentAnswer(algorithm: algorithm, paths: paths)
+  cache.entries.add entry
   let name = stateName(cache.source)
   try:
-    let outcome = awaitSync(cache.host.vcs.contentId(cache.root, cache.source,
-                                                     algorithm, paths))
-    if not outcome.ok:
-      result.answer = ContentAnswer(computed: false,
-        reason: name & "'s content id could not be computed: " &
-                $outcome.error)
-    else:
-      let id = outcome.value
-      case id.kind
-      of vcikComputed:
-        result.answer = ContentAnswer(computed: true, id: id.id)
-      of vcikNoContentId:
-        result.answer = ContentAnswer(computed: false,
-          reason: name & " has no content id: " & id.reason)
-        result.conditions = id.conditions
-      of vcikCannotCompute:
-        result.answer = ContentAnswer(computed: false, reason: id.reason)
+    cache.session.settleThrough(
+      cache.session.host.vcs.contentId(cache.root, cache.source, algorithm,
+                                       paths),
+      proc(outcome: PlatformOutcome[VcsContentId]) =
+        entry.record(name, outcome))
   except CatchableError as err:
-    result.answer = ContentAnswer(computed: false,
+    entry.answer = ContentAnswer(computed: false,
       reason: "computing " & name & "'s content id raised: " & err.msg)
+    entry.settled = true
   except:
-    result.answer = ContentAnswer(computed: false,
+    entry.answer = ContentAnswer(computed: false,
       reason: "computing " & name & "'s content id raised: " &
               getCurrentExceptionMsg())
-  cache.entries.add result
+    entry.settled = true
+  entry
 
 proc oracle(cache: ContentFactCache): ContentOracle =
+  let name = stateName(cache.source)
   result = proc(algorithm: string; paths: seq[string]): ContentAnswer
       {.closure.} =
-    cache.ask(algorithm, paths).answer
+    let entry = cache.ask(algorithm, paths)
+    if entry.settled:
+      entry.answer
+    else:
+      # Only ever read by a pass that is then discarded (`incomplete`).
+      ContentAnswer(computed: false,
+                    reason: name & "'s content id is still being computed")
+
+proc cacheFor(session: FactsSession; root: string;
+              source: VcsBlobSource): ContentFactCache =
+  for cache in session.caches:
+    if cache.source == source and cache.root == root:
+      return cache
+  result = ContentFactCache(session: session, root: root, source: source)
+  session.caches.add result
+
+proc repositoryRootOf(session: FactsSession; workspaceDir: string):
+    tuple[known: bool; root: string] =
+  ## The repository containing `workspaceDir`, asked once per session.
+  ##
+  ## Wrapped for the reason `platformStoreAccess` is, and with the same
+  ## verdict: a host that raises has established NOTHING about the
+  ## repository, which is `known = false` and therefore *unverifiable* —
+  ## never a default.
+  if not session.rootAsked:
+    session.rootAsked = true
+    try:
+      session.settleThrough(session.host.vcs.repositoryRoot(workspaceDir),
+        proc(outcome: PlatformOutcome[string]) =
+          session.root = outcome
+          session.rootSettled = true)
+    except CatchableError as err:
+      session.root = failed[string](pkFailed, "the repository root raised",
+                                    err.msg)
+      session.rootSettled = true
+    except:
+      session.root = failed[string](pkFailed, "the repository root raised",
+                                    getCurrentExceptionMsg())
+      session.rootSettled = true
+  elif not session.rootSettled:
+    session.incomplete = true
+  if not session.rootSettled or not session.root.ok or
+     session.root.value.len == 0:
+    return (false, "")
+  (true, session.root.value)
 
 const LocalStoreAlgorithms = ["git-tree-sha1", "git-tree-sha256"]
   ## The tree algorithms a repository computes one of; the host answers
@@ -315,10 +480,41 @@ proc noContentIdRemedy*(conditions: seq[NoContentIdState]): string =
       " so the path can be represented."
   steps.join(" ")
 
+proc sessionVcsState(session: FactsSession; workspaceDir: string):
+    WorkspaceVcsState =
+  ## `workspaceVcsState` within a session (see there).
+  if not session.host.can(capVcsRead):
+    return WorkspaceVcsState(known: false)
+  let (known, root) = session.repositoryRootOf(workspaceDir)
+  if not known:
+    # Also the answer while the root is still pending in an asynchronous
+    # session — a pass that is then discarded, never shown.
+    return WorkspaceVcsState(known: false)
+  let w = session.cacheFor(root, vbsWorkingTree)
+  result = WorkspaceVcsState(
+    known: true,
+    # The repository root's directory name -- the same source the producer
+    # uses for `vcs.repo` (`certificate_issuance.probeVcs`: the toplevel's
+    # last path part). Informational: requiring the two to match would be
+    # this consumer's choice (Verification.md §4.1), and it chooses not to —
+    # content alone binds, so a clone under another directory name shares
+    # certificates (`certificate_verification.verifyCertificates`).
+    repo: lastPathSegment(root),
+    workingTree: w.oracle,
+    head: session.cacheFor(root, vbsHead).oracle,
+    index: session.cacheFor(root, vbsIndex).oracle)
+  for algorithm in LocalStoreAlgorithms:
+    let asked = w.ask(algorithm, @[])
+    if asked.conditions.len > 0:
+      result.workingTreeProblem = describeConditions(asked.conditions)
+      result.workingTreeRemedy = noContentIdRemedy(asked.conditions)
+      break
+
 proc workspaceVcsState*(host: Platform; workspaceDir: string):
     WorkspaceVcsState =
   ## Establish the repository and its three content facts, or report honestly
-  ## that it could not be.
+  ## that it could not be. Synchronous: every facade answer is settled with
+  ## `awaitSync` (see the module header).
   ##
   ## `known = false` is returned for every failure, and never a default. This
   ## mirrors `certificate_issuance.probeVcs` on the producing side: a consumer
@@ -331,43 +527,7 @@ proc workspaceVcsState*(host: Platform; workspaceDir: string):
   ## The one thing computed up front is whether W has a content id at all,
   ## asked whole-repository in each tree algorithm: a Content-Id §3 state is
   ## a property of the tree, not of a record, and it is reported by name.
-  if not host.can(capVcsRead):
-    return WorkspaceVcsState(known: false)
-
-  var root: PlatformOutcome[string]
-  # Wrapped for the reason `platformStoreAccess` is, and with the same verdict:
-  # a host that raises has established NOTHING about the repository, which is
-  # `known = false` and therefore *unverifiable* — never a default.
-  try:
-    root = awaitSync(host.vcs.repositoryRoot(workspaceDir))
-    if not root.ok or root.value.len == 0:
-      return WorkspaceVcsState(known: false)
-  except CatchableError:
-    return WorkspaceVcsState(known: false)
-  except:
-    return WorkspaceVcsState(known: false)
-
-  proc factsOf(source: VcsBlobSource): ContentFactCache =
-    ContentFactCache(host: host, root: root.value, source: source)
-  let w = factsOf(vbsWorkingTree)
-  result = WorkspaceVcsState(
-    known: true,
-    # The repository root's directory name -- the same source the producer
-    # uses for `vcs.repo` (`certificate_issuance.probeVcs`: the toplevel's
-    # last path part). Informational: requiring the two to match would be
-    # this consumer's choice (Verification.md §4.1), and it chooses not to —
-    # content alone binds, so a clone under another directory name shares
-    # certificates (`certificate_verification.verifyCertificates`).
-    repo: lastPathSegment(root.value),
-    workingTree: w.oracle,
-    head: factsOf(vbsHead).oracle,
-    index: factsOf(vbsIndex).oracle)
-  for algorithm in LocalStoreAlgorithms:
-    let asked = w.ask(algorithm, @[])
-    if asked.conditions.len > 0:
-      result.workingTreeProblem = describeConditions(asked.conditions)
-      result.workingTreeRemedy = noContentIdRemedy(asked.conditions)
-      break
+  sessionVcsState(newFactsSession(host, asynchronous = false), workspaceDir)
 
 proc storeRoots(host: Platform): CertificateStoreRoots =
   ## The local store's roots as this host resolves them (SB-2a's facade
@@ -405,26 +565,15 @@ proc localStoreQuery*(host: Platform; workspaceDir: string;
       if answer.computed and answer.id notin result.contentIds:
         result.contentIds.add answer.id
 
-proc platformCertificateFacts*(host: Platform; workspaceDir: string;
-                               platformTriple: string;
-                               verifier: CertificateSignatureVerifier = nil):
+proc factsPass(session: FactsSession; workspaceDir: string;
+               platformTriple: string;
+               verifier: CertificateSignatureVerifier):
     CertificateIndicatorFacts =
-  ## Everything the indicator is a function of, read once.
-  ##
-  ## `platformTriple` is passed in rather than derived here because it is a
-  ## fact about the machine this build is *running* on, and a `nim js` bundle's
-  ## compile-time `hostCPU` is a fact about the machine it was *built* on. An
-  ## empty string is a supported value meaning "the host could not say", and
-  ## the ViewModel reports that as unverifiable — a certificate covers exactly
-  ## the platform that ran the tests, and a consumer that did not know its own
-  ## would be guessing about the one field a green Linux run says nothing about
-  ## (Verification.md §5).
-  ##
-  ## `verifier` is likewise injected. `nil` — the default, and what the
-  ## renderer passes, because a browser has no `ssh-keygen` — means signatures
-  ## cannot be checked at all, which is *undecidable* and lands as
-  ## unverifiable. It is never silently read as valid.
-  let vcs = workspaceVcsState(host, workspaceDir)
+  ## One read of everything the indicator is a function of, through
+  ## `session`'s memoised answers. The body of both the synchronous reader
+  ## and every pass of the asynchronous gatherer.
+  let vcs = sessionVcsState(session, workspaceDir)
+  let host = session.host
   let query = localStoreQuery(host, workspaceDir, vcs)
   var store = readCertificateStore(platformStoreAccess(host), workspaceDir,
                                    query)
@@ -444,6 +593,28 @@ proc platformCertificateFacts*(host: Platform; workspaceDir: string;
     platform: platformTriple,
     signatureVerifier: verifier)
 
+proc platformCertificateFacts*(host: Platform; workspaceDir: string;
+                               platformTriple: string;
+                               verifier: CertificateSignatureVerifier = nil):
+    CertificateIndicatorFacts =
+  ## Everything the indicator is a function of, read once, synchronously.
+  ##
+  ## `platformTriple` is passed in rather than derived here because it is a
+  ## fact about the machine this build is *running* on, and a `nim js` bundle's
+  ## compile-time `hostCPU` is a fact about the machine it was *built* on. An
+  ## empty string is a supported value meaning "the host could not say", and
+  ## the ViewModel reports that as unverifiable — a certificate covers exactly
+  ## the platform that ran the tests, and a consumer that did not know its own
+  ## would be guessing about the one field a green Linux run says nothing about
+  ## (Verification.md §5).
+  ##
+  ## `verifier` is likewise injected. `nil` — the default, and what the
+  ## renderer passes, because a browser has no `ssh-keygen` — means signatures
+  ## cannot be checked at all, which is *undecidable* and lands as
+  ## unverifiable. It is never silently read as valid.
+  factsPass(newFactsSession(host, asynchronous = false), workspaceDir,
+            platformTriple, verifier)
+
 proc platformCertificateFactsReader*(host: Platform; workspaceDir: string;
                                      platformTriple: string;
                                      verifier: CertificateSignatureVerifier = nil):
@@ -456,3 +627,88 @@ proc platformCertificateFactsReader*(host: Platform; workspaceDir: string;
   ## validity it has lost.
   proc(): CertificateIndicatorFacts {.closure.} =
     platformCertificateFacts(host, workspaceDir, platformTriple, verifier)
+
+proc gatherCertificateFacts*(host: Platform; workspaceDir: string;
+                             platformTriple: string;
+                             verifier: CertificateSignatureVerifier;
+                             done: proc(facts: CertificateIndicatorFacts)) =
+  ## The facts `platformCertificateFacts` reads, gathered WITHOUT waiting for
+  ## the facade: `done` is called once, when every answer the facts depend on
+  ## is in — on a later turn of the event loop when the host answers later
+  ## (the Electron renderer's git), before this returns when it answers at
+  ## once (Status-Bar.md, "A refresh never stalls the window").
+  ##
+  ## ## Passes until nothing is pending
+  ##
+  ## Which content ids are needed is not known up front: the root comes
+  ## first, then W, H and S whole-repository (which name the store
+  ## directories to read), then — once the store has been read — each
+  ## record's own algorithm and scope. So the read runs as passes over one
+  ## session. A pass runs the whole read (store reads included, so a record
+  ## that landed meanwhile is seen) AND the decision
+  ## (`evaluateCertificateIndicator`), because the decision is what asks for
+  ## a record's scoped id; an answer not yet in is "still being computed"
+  ## and marks the pass incomplete. When every pending answer is in, the next
+  ## pass runs. The first pass that reads nothing still being computed is
+  ## handed to `done`: a partially gathered set of facts is never handed
+  ## over, because a fact still being computed would read as *unverifiable*.
+  ##
+  ## It terminates because each pass either asks for nothing new (and then
+  ## completes once its answers are in) or asks for content ids of a finite
+  ## set — the root's states, in the algorithms and scopes of the records in
+  ## the store — each asked once per session. The facts handed over keep
+  ## their session: the ViewModel's own evaluation then reads only answers
+  ## that are in.
+  ##
+  ## A pass that RAISES ends the gathering with facts that read
+  ## *unverifiable* ("could not look"), so a refresh is never left waiting
+  ## forever on an answer that will not come.
+  let session = newFactsSession(host, asynchronous = true)
+  var finished = false
+  session.resume = proc() =
+    while not finished:
+      session.incomplete = false
+      session.inPass = true
+      var facts: CertificateIndicatorFacts
+      var raised = ""
+      try:
+        facts = factsPass(session, workspaceDir, platformTriple, verifier)
+        # Touch every oracle the decision consults; the model is discarded,
+        # the ViewModel computes its own from the facts handed over.
+        discard evaluateCertificateIndicator(facts)
+      except CatchableError as err:
+        raised = err.msg
+      except:
+        raised = getCurrentExceptionMsg()
+      session.inPass = false
+      if raised.len > 0:
+        finished = true
+        done(CertificateIndicatorFacts(
+          store: CertificateStore(unreadable: true,
+            unreadableReason: "gathering the certificate facts raised: " &
+                              raised),
+          vcs: WorkspaceVcsState(known: false),
+          platform: platformTriple,
+          signatureVerifier: verifier))
+        return
+      if not session.incomplete:
+        finished = true
+        done(facts)
+        return
+      if session.pending > 0:
+        session.waiting = true      # `answerArrived` resumes
+        return
+      # Incomplete with nothing pending: an answer arrived DURING the pass
+      # (a native drain delivers other futures' callbacks), after the pass
+      # had read it as still being computed. Read again now.
+  session.resume()
+
+proc platformCertificateFactsGatherer*(host: Platform; workspaceDir: string;
+                                       platformTriple: string;
+                                       verifier: CertificateSignatureVerifier = nil):
+    CertificateFactsGatherer =
+  ## `platformCertificateFactsReader`'s asynchronous counterpart, for a
+  ## ViewModel built with `newCertificateIndicatorVmWith`: every call gathers
+  ## afresh, in a new session, so nothing outlives the refresh it answered.
+  proc(done: proc(facts: CertificateIndicatorFacts)) {.closure.} =
+    gatherCertificateFacts(host, workspaceDir, platformTriple, verifier, done)

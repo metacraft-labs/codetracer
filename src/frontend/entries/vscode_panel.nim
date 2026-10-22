@@ -55,7 +55,8 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
     renderStatePanel[WebRenderer, dom_api.Element](r, s.stateVM)
   of "calltrace":
     renderCalltracePanel[WebRenderer, dom_api.Element](r, s.calltraceVM)
-  of "eventLog": renderEventLogPanel(r, s.eventLogVM)
+  of "eventLog":
+    renderEventLogPanel[WebRenderer, dom_api.Element](r, s.eventLogVM)
   of "terminalOutput":
     let panel = renderTerminalOutputPanel[WebRenderer, dom_api.Element](
       r, s.terminalOutputVM)

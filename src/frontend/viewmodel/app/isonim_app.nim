@@ -96,7 +96,9 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   isonim_dom.appendChild(isonim_dom.Node(shell.sections[1].content),
     isonim_dom.Node(renderCalltracePanel[WebRenderer, isonim_dom.Element](
       r, session.calltraceVM)))
-  mountIsoNimEventLog(shell.sections[2].content, session.eventLogVM)
+  isonim_dom.appendChild(isonim_dom.Node(shell.sections[2].content),
+    isonim_dom.Node(renderEventLogPanel[WebRenderer, isonim_dom.Element](
+      r, session.eventLogVM)))
   mountIsoNimFlow(shell.sections[3].content, session.flowVM)
   # (PLAT-51: the Timeline panel is removed from every product.)
   discard isonim_dom.appendChild(isonim_dom.Node(shell.sections[4].content), isonim_dom.Node(

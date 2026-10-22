@@ -41,7 +41,13 @@ import styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 104
+const ExpectedAssertions = 90
+  ## 104 -> 90, measured 2026-10-22 with `__name__`'s history under both
+  ## engine rules: since `12d7cd18b` a value's history keeps an entry only
+  ## when the value CHANGED, so `__name__` (bound once) has 1 entry where it
+  ## had 15 (one per step of the module's call), and the value-history
+  ## case's per-entry loop asserts 14 fewer times. Its first check now says
+  ## so exactly.
 
 var countedAssertions = 0
 
@@ -303,7 +309,9 @@ suite "PLAT-51 GPUI: values, the caret, menus, the omnibox, the pointer":
                           pre = @["--replay-ops=next=3"], trace = trace)
     let entries = plan.nodesWith(StateHistoryEntryAttribute)
     checkpoint(trace)
-    ck entries.len > 0
+    # `__name__` is bound once and never changes: its history is ONE entry
+    # (a history keeps an entry only when the value changed).
+    ck entries.len == 1
     ck trace.contains("history __name__")
     # Each entry names a recording position (its ticks).
     for e in entries:
