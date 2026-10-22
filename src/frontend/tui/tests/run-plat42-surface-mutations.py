@@ -58,6 +58,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 RULE = "src/common/flow_line_rule.nim"
 FLOWVM = "src/frontend/viewmodel/viewmodels/flow_vm.nim"
 SESSION = "src/frontend/viewmodel/headless_session.nim"
+BREAKPOINTS = "src/frontend/viewmodel/sdk/breakpoints.nim"
 
 LAWS = "src/frontend/tui/tests/test_plat42_laws.nim"
 FLOW_TERM = "src/frontend/tui/tests/test_plat42_flow_overlay_terminal.nim"
@@ -66,13 +67,14 @@ FACTS = "src/frontend/viewmodel/tests/unit/test_flow_line_facts.nim"
 EDITING = "src/frontend/gpui/tests/test_gpui_editing_surface.nim"
 LINE_TERM = "src/frontend/tui/tests/test_plat42_line_status_terminal.nim"
 
-SUBJECTS = [SURFACE, LEAVES, PANE, HOST, STDIO, RULE, FLOWVM, RUNTIME, SESSION]
+SUBJECTS = [SURFACE, LEAVES, PANE, HOST, STDIO, RULE, FLOWVM, RUNTIME, SESSION,
+            BREAKPOINTS]
 SUITES = [LAWS, FLOW_TERM, VALUES_TERM, FACTS, EDITING, LINE_TERM]
 
 ARMS = [
     # --- a surface drawn on EVERY row -------------------------------------
-    ("P1", SURFACE, "      if held and result.pointer == eptExecution:",
-     "      if held:", [EDITING],
+    ("P1", SURFACE, "  if held and result.pointer == eptExecution:",
+     "  if held:", [EDITING],
      "inline values drawn on every held row, not only the execution line"),
     ("B1", LEAVES,
      "  if row.pointer == eptExecution:\n    r.setStyle(column, \"background\", ExecutionRowBand)",
@@ -117,10 +119,12 @@ ARMS = [
     # breakpoint, column breakpoints keep their column) and hands them to
     # `sendBreakpoints` since PLAT-50; the `sendBreakpointLines(path, lines,
     # …)` line this needle named is gone, and the scan said so.
-    ("L2", SESSION,
-     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, anchors, disabled)\n",
-     "    anchors.add (line, 0)\n  s.sendBreakpoints(path, "
-     "(if removing: @[] else: @[(line, 0)]), disabled)\n",
+    # The toggle is planned by the shared producer (`sdk/breakpoints`), which
+    # the headless session sends: dropping the file's other breakpoints from
+    # the plan is the same defect as sending only the toggled line.
+    ("L2", BREAKPOINTS,
+     "    else: result.add sp\n  if not removing:\n",
+     "    else: discard sp\n  if not removing:\n",
      [LINE_TERM],
      "a toggle sends only its own line: setBreakpoints clears the others"),
     ("L3", RUNTIME,

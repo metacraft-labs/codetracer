@@ -10,22 +10,22 @@
 ##   * the TERMINAL editor is wired to the shared ViewModels — `SourceVM` for
 ##     the text and the execution line, `EditorVM` for the §14 degradation and
 ##     the overlay toggles, `StateVM` for the inline values;
-##   * the WEB editor is wired to almost none of them. It delegates text to
-##     Monaco and reads the legacy Karax `data.services.debugger` for the
-##     position and `DebuggerService.breakpointTable` for the marks.
-##     `ui/editor.nim` CONSTRUCTS an `EditorVM` and its own header says
-##     *"the EditorVM receives the same data but does not affect rendering
-##     yet"*; the only fields of it anything on that side reads are three
-##     `data-*` attributes in `isonim_editor_view.nim`. `SourceVM` has exactly
-##     one production caller in the repository and it is `tui/host/tui_session.nim`.
+##   * the WEB editor was wired to almost none of them: it delegated text to
+##     Monaco and read the legacy Karax `data.services.debugger` for the
+##     position and `DebuggerService.breakpointTable` for the marks (measured
+##     2026-09-16).
 ##
-## So there is no set of ViewModels that BOTH existing editors use, and a
-## milestone claiming a third front-end joined them would be claiming something
-## about the web that is not true. What this module does instead, said exactly:
-## **it is wired to the shared ViewModels the TERMINAL editor uses, and the
-## terminal's own derivation is rewritten to call it**, so the two are one
-## function rather than two that agree. The web is the outstanding half and is
-## named as such in PLAT-22's status rather than rounded up.
+## That was the measurement this module was written against, and it is
+## SUPERSEDED (Shared-DOM-Front-Ends D7.4 (a)). The web editor now reads its
+## surface here too: `editorSurfaceForView` is the entry point for an editor
+## that holds the file's text itself (Monaco), computing every row with the
+## same rule (`rowFactsFor`) as `editorSurfaceFor`, from the same session
+## store — its debugger position and stop (`ReplayDataStore.stop`), its point
+## rows (the one producer is `sdk/breakpoints`), `StateVM`'s values and
+## `FlowVM`'s flow. `test_editor_surface_web_terminal` holds the web and the
+## terminal to the same rows for one position. The terminal still reads its
+## text through `SourceVM`, whose one production caller is
+## `tui/host/tui_session.nim`; the web keeps Monaco's.
 ##
 ## ## WHY THE DERIVATION IS HERE AND NOT IN THE GPUI FRONT-END
 ##

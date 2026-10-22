@@ -35,10 +35,13 @@
 ## rather than deleted so the reason the two arms were ever different stays
 ## readable.
 ##
-## The WEB front-end is neither arm. It is Monaco plus the legacy Karax path
-## and it is not brought onto this model by this milestone;
-## `view_vocabulary/editor_surface.nim`'s header carries the measurement and
-## PLAT-34's status carries the boundary.
+## The WEB front-end is neither arm. It EDITS through Monaco's own buffer, not
+## through this module, and it READS the shared editor surface
+## (`view_vocabulary/editor_surface.editorSurfaceForView`, through
+## `ui/editor_points`) for the execution line, the gutter marks and the values
+## — Shared-DOM-Front-Ends D7.4 (a). Whether web editing is routed through
+## this core is PLAT-67's question (the shared editor on the desktop behind a
+## developer flag) and is not decided here.
 ##
 ## =========================================================================
 ## THE CLOCK IS A PARAMETER AND IT HAS NO DEFAULT

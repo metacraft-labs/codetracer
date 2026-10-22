@@ -24,8 +24,14 @@ from ../viewmodel/viewmodels/diff_document import editorLanguageForPath
 from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 
 # ---------------------------------------------------------------------------
-# ViewModel layer — wired in parallel with the legacy event-bus code.
-# The EditorVM receives the same data but does not affect rendering yet.
+# ViewModel layer (Shared-DOM-Front-Ends D7.4 (a)). The editor's debugging
+# state is the session's: the execution line, the gutter marks and the values
+# come from the shared editor surface (`editor_points.webEditorSurface`), the
+# breakpoints from the session store's one producer (`sdk/breakpoints`), and
+# Monaco's line styles are re-applied by an effect over the surface's inputs
+# (`watchEditorPoints`). The text is Monaco's own buffer; whether web editing
+# goes through the shared editing core is PLAT-67's question. The inline flow
+# is still drawn by `ui/flow.nim`'s FlowComponent (D7.4 (b) is open).
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
@@ -43,9 +49,8 @@ when defined(js):
 # The IsoNim editor view owns direct editor containers for top-level and
 # expansion editors; Monaco still manages the container's internal DOM.
 
-# Module-level EditorVM instance. Created once and fed data whenever
-# the legacy event-bus handlers fire. Rendering still reads from legacy
-# data so behaviour is unchanged.
+# Module-level EditorVM instance: the session's (`initEditorVMFromSession`),
+# or a stub-backed one before the session exists.
 var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
 
