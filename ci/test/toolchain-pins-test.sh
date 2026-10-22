@@ -128,10 +128,23 @@ write_lock() {
 		fork_owner=*) fork_owner="${arg#fork_owner=}" ;;
 		esac
 	done
-	python3 - "$out" "$fork_owner" <<'PY'
-import json, sys
+	python3 - "$out" "$fork_owner" "$PIN_SRC" <<'PY'
+import json, re, sys
 
-out, fork_owner = sys.argv[1], sys.argv[2]
+out, fork_owner, pin_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# The three toolchain-determining revisions come from the declaration
+# make_fixture copies (see the note above the nodes), never from literals here.
+pin = {}
+with open(pin_path) as handle:
+    for line in handle:
+        m = re.match(r"^(LOCK_[A-Z_]+)=([0-9a-f]{40})\s*$", line)
+        if m:
+            pin[m.group(1)] = m.group(2)
+for key in ("LOCK_CODETRACER_TOOLCHAINS", "LOCK_FENIX", "LOCK_NOIR"):
+    if key not in pin:
+        sys.exit("write_lock: %s declares no 40-hex %s, so the fixture lock "
+                 "cannot agree with it" % (pin_path, key))
 
 nodes = {
     "root": {
@@ -151,10 +164,16 @@ nodes = {
     # the baseline "a matching pin passes" arm fail for a reason that has
     # nothing to do with the arm — the guard would be correctly reporting a
     # declaration that lags its lock, in a fixture that meant to say neither.
-    # They move together with `ci/toolchain.pin` or not at all.
-    "codetracer-toolchains_7": {"locked": {"rev": "942c995a36469853351af605da90025314ffc58e"}},
-    "fenix_4": {"locked": {"rev": "dd2c80d0b88463ccc0402c86e9e72dbb354ac091"}},
-    "noir": {"locked": {"rev": "ca080a58b05106e37a7b5178a11a8f4503951a2b"}},
+    #
+    # They used to be literals kept in step with the pin by hand, and that
+    # rotted: dde31f257 and 75f76f2b3 moved LOCK_NOIR twice while these lines
+    # kept ca080a58, so 17 arms failed on "ci/toolchain.pin records noir=..."
+    # rather than on anything they test. They are now READ from that file, so
+    # "the fixture lock agrees with the declaration" holds by construction;
+    # arms that need a disagreement (arm 7) still create one explicitly.
+    "codetracer-toolchains_7": {"locked": {"rev": pin["LOCK_CODETRACER_TOOLCHAINS"]}},
+    "fenix_4": {"locked": {"rev": pin["LOCK_FENIX"]}},
+    "noir": {"locked": {"rev": pin["LOCK_NOIR"]}},
     "reprobuild": {"inputs": {"nim-fork-src": "nim-fork-src"}, "locked": {"rev": "2f124aebbc8a9e61e87de1aa13e15298a83f88c6"}},
     "nim-fork-src": {"locked": {"rev": "0b5b5ec507d2d9c731d222184c625851377a02c8"}},
     # The decoys: same NAME as a root input, different rev. Reading these

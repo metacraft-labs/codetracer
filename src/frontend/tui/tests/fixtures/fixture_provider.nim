@@ -746,8 +746,17 @@ proc missingPrereqMessage*(spec: FixtureSpec; detail: string): string =
   MissingPrereqSkipPrefix & " " & spec.name & " (" & spec.recorder & ") — " &
     detail & " " & spec.buildHint
 
-proc resolveFixture*(spec: FixtureSpec): FixtureResolution =
+proc resolveFixture*(spec: FixtureSpec;
+                     locateCt: proc (): string {.nimcall.} = findCtBinary):
+                    FixtureResolution =
   ## Resolve one declared fixture to a trace directory, recording it if needed.
+  ##
+  ## `locateCt` is how the record step finds `ct`; every production caller
+  ## takes the default, `findCtBinary`. It is a parameter so a suite can stage
+  ## "`ct` is not built" on a host where it is: `findCtBinary` falls back to
+  ## paths inside the checkout, so no environment variable can hide a built
+  ## `ct`, and the behaviour when it is absent — keep the cache, skip by name —
+  ## is exactly what has to be tested (`../test_fixture_cache_stale_recorder.nim`).
   result.spec = spec
 
   let root = repoRoot()
@@ -800,7 +809,17 @@ proc resolveFixture*(spec: FixtureSpec): FixtureResolution =
   #    is the one case the "unknown current identity means keep" rule must not
   #    cover — keeping a recording nothing here can open is not keeping a warm
   #    cache, it is moving the failure to `launch`.
+  #
+  #    A MISS IS NOT A DELETION. Every reason below for not adopting the entry
+  #    is a decision to RE-RECORD it, and that decision can only be carried out
+  #    with `ct` and the recorder both present. Until step 3 has established
+  #    that, the entry stays where it is and the skip names why it was not
+  #    adopted. Deleting it earlier turned a stale-recorder hit on a host with
+  #    no `ct` into a MISSING-PREREQ skip AND an empty cache, for every later
+  #    suite in the lane (codetracer-pm `issues/2026-10-21-tui-fixture-
+  #    provider-deletes-a-stale-fixture-it-cannot-re-record.md`).
   var refusal = ""
+  var staleness = ""
   if fileExists(cached / FixtureStampFile) and isUsableTraceDir(cached):
     refusal = cachedRecordingRefusal(cached)
     if refusal.len == 0:
@@ -810,22 +829,31 @@ proc resolveFixture*(spec: FixtureSpec): FixtureResolution =
         result.outcome = foRecorded
         result.tracePath = cached
         return
+      let stampedText =
+        if stamped.len > 0: "by recorder " & stamped
+        else: "by a recorder its stamp does not identify"
+      staleness = "the recording cached at " & cached & " was made " &
+        stampedText & ", not by the installed " & current &
+        ", and is kept until it can be re-recorded"
 
   # A cache miss from here on, for one of four reasons: nothing cached, an
   # unfinished directory, a different recorder, or a container this build
-  # refuses. The last is the only one worth naming in a skip, because it is
-  # the only one where something IS cached under the fixture's name.
+  # refuses. The last two are named in a skip, because they are the ones
+  # where a finished recording IS cached under the fixture's name, and a
+  # reader seeing "nothing is cached" would go looking in the wrong place.
   let missed =
     if refusal.len > 0:
       "the recording cached at " & cached & " cannot be read by this build (" &
       refusal & ")"
+    elif staleness.len > 0:
+      staleness
     else:
       "nothing usable is cached at " & cached
 
   # 3. Record. `ct` is only required HERE — a warm cache needs no recorder at
   #    all, and failing a run for a missing recorder it never had to use would
   #    be the mirror image of the defect this file is written against.
-  let ctBin = findCtBinary()
+  let ctBin = locateCt()
   if ctBin.len == 0:
     result.outcome = foMissingPrereq
     result.detail =

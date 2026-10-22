@@ -934,18 +934,17 @@ const INNER_HTML_BY_FILE = [
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
   ['src/frontend/ui/auto_hide.nim', 3, 0],
-  // The value-cell mount clear moved here from `ui/calltrace.nim` when the
-  // Call Trace pane started mounting where its container is made.
-  ['src/frontend/ui/calltrace_extension.nim', 1, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
-  ['src/frontend/ui/event_log.nim', 1, 0],
   ['src/frontend/ui/file_conflict_dialog.nim', 0, 1],
-  ['src/frontend/ui/flow.nim', 2, 0],
+  ['src/frontend/ui/flow.nim', 1, 0],
   ['src/frontend/ui/hcr_live_edit_panel.nim', 0, 1],
   ['src/frontend/ui/layout.nim', 3, 0],
-  ['src/frontend/ui/request_panel.nim', 1, 0],
-  ['src/frontend/ui/trace.nim', 6, 3],
+  // HSF-X2 removed the VS Code extension's components, and with them
+  // `ui/calltrace_extension.nim`'s, `ui/event_log.nim`'s and
+  // `ui/request_panel.nim`'s clears and one each of `ui/flow.nim`'s and
+  // `ui/trace.nim`'s.
+  ['src/frontend/ui/trace.nim', 5, 3],
   ['src/frontend/ui/welcome_screen.nim', 2, 0],
   ['src/frontend/viewmodel/views/context_menu_bridge.nim', 1, 0],
   // TRIAGED 2026-09-30, and the fact that it needed triaging is the finding.

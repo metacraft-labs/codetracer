@@ -85,7 +85,7 @@ suite "VCS panel — review mode view (DR-R1)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanel(vm)
 
@@ -116,7 +116,7 @@ suite "VCS panel — review mode view (DR-R1)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -139,7 +139,7 @@ suite "VCS panel — review mode view (DR-R1)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanel(vm)
       check vm.viewMode.val == vmUnifiedDiff
@@ -186,7 +186,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanelWithContexts(vm)
 
@@ -223,7 +223,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanel(vm)
       vm.setTraceContexts(@[VCSTraceContextRow(id: 0, label: "only run")])
@@ -243,7 +243,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanelWithContexts(vm)
       check vm.selectedTraceContextId.val == 1
@@ -273,7 +273,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
       var reported = -1
       let callbacks = VCSCallbacks(
         onSetTraceContext: proc(id: int) = (reported = id))
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       populateReviewPanelWithContexts(vm)
 
@@ -293,7 +293,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanelWithContexts(vm)
 
@@ -310,7 +310,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
 
   test "a normal git session shows neither the selector nor the stats":
     ## Regression guard for the panel's header region.  `renderHeader` is
-    ## reached only from the review branch of `renderVCSPanelImpl` — the normal
+    ## reached only from the review branch of `renderVCSPanel` — the normal
     ## branch renders `renderBranchPicker` instead — so DR-R2's two elements
     ## cannot leak into a git session today.  The guard is against a future
     ## refactor that unifies the two headers: VCS-Panel.md's "Normal
@@ -323,7 +323,7 @@ suite "VCS panel — trace-context selector in the header (DR-R2)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -361,7 +361,7 @@ suite "VCS panel — the reviewed commit in the Changed Files header (DR-R8)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanel(vm)
       vm.setHeader("Review: parser cleanup", statsText = "2 files +16 -3",
@@ -382,7 +382,7 @@ suite "VCS panel — the reviewed commit in the Changed Files header (DR-R8)":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       populateReviewPanel(vm)
       vm.setHeader("Review: parser cleanup", statsText = "2 files +16 -3")
@@ -395,13 +395,13 @@ suite "VCS panel — the reviewed commit in the Changed Files header (DR-R8)":
   test "a normal git session renders no Changed Files header at all":
     ## Regression guard: `reviewCommit` is review state, and a live working
     ## tree has no reviewed commit.  The normal branch of
-    ## `renderVCSPanelImpl` renders the commit graph rather than the review's
+    ## `renderVCSPanel` renders the commit graph rather than the review's
     ## Changed Files section, so the header carrying it must be absent — even
     ## with review state left over from a previous session on this VM.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(true)
       vm.setHeader("main", reviewCommit = "deadbeefcafe...")
@@ -483,7 +483,7 @@ suite "VCS panel — diff targets name one file (#753)":
       let callbacks = VCSCallbacks(
         onOpenFileDiff: proc(target: string) = targets.add(target),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")

@@ -320,9 +320,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     requiresStableId = true,
     stableIdNote = "Currently stores a visible row index; should target eventId.")
   entries.addMany("EventLogVM",
-    ["currentPage", "pageSize", "searchQuery", "sortColumn", "sortAscending"],
+    ["currentPage", "pageSize", "searchQuery", "selectedKinds", "sortColumn",
+     "sortAscending"],
     vscSharedSessionViewState,
-    "Event-log query/page/sort settings are logical shared view state.")
+    "Event-log query/kind-filter/page/sort settings are logical shared view state.")
   entries.addMany("EventLogVM", ["eventRows", "totalEventCount",
       "loadingState"],
     vscBackendAuthoritative,

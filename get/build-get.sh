@@ -26,25 +26,25 @@ now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # header (policy §2.5), then the rest of the canonical installer verbatim.
 sh_src="$repo_root/install-on-distributions.sh"
 {
-  head -n 1 "$sh_src"
-  printf '#\n'
-  printf '# CodeTracer installer — served from https://get.codetracer.com/sh\n'
-  printf '# Source: metacraft-labs/codetracer install-on-distributions.sh @ %s (assembled %s)\n' "$rev" "$now"
-  printf '# Inspect before running:  curl -fsSL https://get.codetracer.com/sh | less\n'
-  printf '# It registers the Metacraft Labs package repository (deb./rpm.metacraft-labs.com) where one applies.\n'
-  printf '#\n'
-  tail -n +2 "$sh_src"
-} > "$out/sh"
+	head -n 1 "$sh_src"
+	printf '#\n'
+	printf '# CodeTracer installer — served from https://get.codetracer.com/sh\n'
+	printf '# Source: metacraft-labs/codetracer install-on-distributions.sh @ %s (assembled %s)\n' "$rev" "$now"
+	printf '# Inspect before running:  curl -fsSL https://get.codetracer.com/sh | less\n'
+	printf '# It registers the Metacraft Labs package repository (deb./rpm.metacraft-labs.com) where one applies.\n'
+	printf '#\n'
+	tail -n +2 "$sh_src"
+} >"$out/sh"
 
 # /pwsh — the repo's PowerShell installer if it exists, else the coming-soon stub.
 if [ -f "$repo_root/install.ps1" ]; then
-  {
-    printf '# CodeTracer installer — served from https://get.codetracer.com/pwsh\n'
-    printf '# Source: metacraft-labs/codetracer install.ps1 @ %s (assembled %s)\n#\n' "$rev" "$now"
-    cat "$repo_root/install.ps1"
-  } > "$out/pwsh"
+	{
+		printf '# CodeTracer installer — served from https://get.codetracer.com/pwsh\n'
+		printf '# Source: metacraft-labs/codetracer install.ps1 @ %s (assembled %s)\n#\n' "$rev" "$now"
+		cat "$repo_root/install.ps1"
+	} >"$out/pwsh"
 else
-  cp "$here/pwsh.stub.ps1" "$out/pwsh"
+	cp "$here/pwsh.stub.ps1" "$out/pwsh"
 fi
 
 echo "Assembled $out:"

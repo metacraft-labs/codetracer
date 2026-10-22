@@ -43,7 +43,7 @@ export platform_facade, topbar_actions
 # platform accessor, which is not a thing a second platform should have to do.
 #
 # `ctWeb` is a build of the SAME sources for a different host, exactly as
-# `ctmacos` and `ctInExtension` are. It is not a fourth product and it does not
+# `ctmacos` is. It is not a fourth product and it does not
 # select a different front end; it selects which host module gets linked, which
 # is the one thing a browser genuinely constrains.
 when defined(js) and defined(ctWeb):

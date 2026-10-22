@@ -26,8 +26,6 @@ method register*(self: ValueComponent, api: MediatorWithSubscribers) =
         self.baseAddress != NO_ADDRESS and response.address == self.baseAddress:
       discard self.onUpdatedHistory(response))
 
-proc registerValueComponent*(component: ValueComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
 
 proc intValue*(i: int): Value {.exportc.} =
   Value(
@@ -497,13 +495,11 @@ proc historyClick(self: ValueComponent, location: types.Location) =
 
 proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event) =
   ev.stopPropagation()
-  if self.state.inExtension:
-    ev.preventDefault()
   let contextMenu = self.createHistoryContextMenu(self.baseExpression, event.value, ev)
   let e = ev.toJs
 
   if contextMenu != []:
-    showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.state.inExtension)
+    showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
 
 proc appendText(parent: Node, value: cstring)
 
@@ -637,7 +633,6 @@ proc renderInlineHistoryDom(self: ValueComponent, expression: cstring): Node =
     let container = document.getElementById(cstring(fmt"history-{expression}"))
     if not container.isNil:
       container.toJs.scrollTop = self.historyScrollTop
-      self.state.redrawForExtension()
   , 0)
 
   result = newElement(cstring"div", cstring"history-container")
@@ -712,7 +707,6 @@ method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = tr
     discard
 
   if redraw:
-    self.state.redrawForExtension()
     self.state.redraw()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
@@ -1140,7 +1134,7 @@ proc renderValueRowDom(
 
   let atomParent = newElement(cstring"div", atomClass)
   atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
-    # `preventDefault` used to be conditional on `inExtension`, so everywhere
+    # `preventDefault` used to be conditional on the extension, so everywhere
     # else — the State pane, the value tooltips drawn over the editor — the
     # browser menu opened on top of ours.  The third sibling of the leak fixed
     # in `ui/editor.nim`; see the comment there, including why Shift stands
@@ -1150,9 +1144,8 @@ proc renderValueRowDom(
     ev.preventDefault()
     let contextMenu = self.createContextMenuItems(value, ev)
     let e = ev.toJs
-    let inExtension = not self.state.isNil and self.state.inExtension
     if contextMenu != []:
-      showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), inExtension)
+      showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
   )
 
   let nameContainer = newElement(cstring"div", cstring"value-name-container")

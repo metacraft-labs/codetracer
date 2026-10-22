@@ -163,9 +163,15 @@ export class CallTraceEntry {
       : EXPAND_CHILDREN_OPTIONS;
   }
 
-  async contextMenuEntries(): Promise<string[]> {
+  /** Right-clicks the call's text and waits for the context menu to show. */
+  async openContextMenu(): Promise<ContextMenu> {
     await this.callTextLocator().click({ button: "right" });
     await this.contextMenu.waitForVisible();
+    return this.contextMenu;
+  }
+
+  async contextMenuEntries(): Promise<string[]> {
+    await this.openContextMenu();
     const entries = await this.contextMenu.getEntries();
     await this.contextMenu.dismiss();
     return entries.map((e) => e.text);

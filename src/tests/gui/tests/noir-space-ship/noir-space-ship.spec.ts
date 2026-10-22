@@ -1119,6 +1119,31 @@ test.describe("NoirSpaceShip", () => {
     expect(argumentOptions).toEqual(expectedArgumentOptions);
   });
 
+  test("Escape closes the call trace context menu", async ({ ctPage }) => {
+    // Once open, the context menu takes `Escape` (`context-menu.close`,
+    // CUA-Keymap.md §3.8) — not the call trace under it. The desktop's key
+    // router used to resolve `Escape` to the list's `list.clear-selection`,
+    // run it and stop the event, so the menu never closed.
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    const callTrace = (await layout.callTraceTabs())[0];
+    await callTrace.clickTab();
+    callTrace.invalidateEntries();
+    const callEntry = (await callTrace.getEntries(true))[0];
+    expect(callEntry).toBeDefined();
+
+    const menu = await callEntry.openContextMenu();
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    await ctPage.keyboard.press("Escape");
+
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+    // ONE operation ran, the menu's: what the router resolved, in order
+    // (`ui/key_router.traceOperation`).
+    expect(await ctPage.evaluate(() =>
+      ((globalThis as any).__ctKeyTrace ?? []).slice())).toEqual(["context-menu.close"]);
+  });
+
   test("flow context menu options", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();

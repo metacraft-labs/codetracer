@@ -287,29 +287,6 @@ proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value
   of fvmAfter: AfterValueMode
   of fvmBeforeAndAfter: BeforeAndAfterValueMode
 
-when defined(ctInExtension):
-  var flowComponentForExtension* {.exportc.}: FlowComponent = makeFlowComponent(data, 13, inExtension = true)
-
-  proc bindFlowExtensionHost(component: FlowComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    # The extension flow surface has no panel markup of its own; keep the
-    # exported component usable without retaining an empty Karax renderer.
-    host.innerHTML = cstring""
-
-  proc makeFlowComponentForExtension*(id: cstring): FlowComponent {.exportc.} =
-    if flowComponentForExtension.extensionRendererId.len == 0:
-      flowComponentForExtension.extensionRendererId = id
-      flowComponentForExtension.bindFlowExtensionHost()
-    result = flowComponentForExtension
-
-  method redrawForExtension*(self: FlowComponent) =
-    self.bindFlowExtensionHost()
 
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api
@@ -342,8 +319,6 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
 # real rendering is handled by tryMountIsoNimFlowPanel().
 
 
-proc registerFlowComponent*(component: FlowComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
 
 proc getStepDomOffsetLeft*(self: FlowComponent, step: FlowStep): float =
   let flowLine = self.flowLines[step.position]
@@ -951,7 +926,6 @@ proc getOriginLoopIndex*(self: FlowComponent, loopIndex: int): int =
     self.getOriginLoopIndex(parentId)
 
 proc calculateFlowLineLeftOffset(self:FlowComponent, flowLine: FlowLine): int =
-  if self.inExtension: return 0
   case self.data.config.flow.realFlowUI:
   of FlowParallel, FlowInline:
     var flowLineOffset =
@@ -1963,17 +1937,16 @@ proc clearInline(self: FlowComponent) =
       line.contentWidget = nil
 
 proc clearParallel(self: FlowComponent) =
-  if not self.inExtension:
-    var tab = self.data.services.editor.open[self.editorUI.path]
+  var tab = self.data.services.editor.open[self.editorUI.path]
 
-    if not tab.monacoEditor.isNil:
-      for _, viewZone in self.loopViewZones:
-        removeMonacoViewZone(tab.monacoEditor, viewZone)
-      # clear flow line content widgets
-      for _, flowLine in self.flowLines:
-        if not flowLine.contentWidget.isNil:
-          tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
-          flowLine.contentWidget = nil
+  if not tab.monacoEditor.isNil:
+    for _, viewZone in self.loopViewZones:
+      removeMonacoViewZone(tab.monacoEditor, viewZone)
+    # clear flow line content widgets
+    for _, flowLine in self.flowLines:
+      if not flowLine.contentWidget.isNil:
+        tab.monacoEditor.removeContentWidget(flowLine.contentWidget.toJs)
+        flowLine.contentWidget = nil
   self.flowDom = JsAssoc[int, Node]{}
   self.lineWidgets = JsAssoc[int, JsObject]{}
   self.flowLoops = JsAssoc[int, FlowLoop]{}
@@ -2002,7 +1975,7 @@ proc clearStepNodes*(self: FlowComponent) =
   self.stepNodes = JsAssoc[int, kdom.Node]{}
 
 proc removeViewZones(self: FlowComponent, zones: JsAssoc[int, int]) =
-  if self.inExtension or self.editorUI.isNil or self.editorUI.monacoEditor.isNil:
+  if self.editorUI.isNil or self.editorUI.monacoEditor.isNil:
     return
 
   for _, zoneId in zones:
@@ -2033,8 +2006,7 @@ proc resetFlow*(self: FlowComponent) =
   self.clearParallel()
 
   self.clearLoopStates()
-  if not self.inExtension:
-    self.clearWidgets()
+  self.clearWidgets()
   self.clearFlowLines()
   self.clearStepNodes()
   self.clearViewZones()
@@ -3969,7 +3941,7 @@ proc doRenderActiveLoopIterationValues(data: LoopIterationRenderData) {.cdecl.} 
   if data.self.isNil or data.self.flow.isNil or not data.self.flowIsLive:
     return
   data.self.renderActiveLoopIterationValues()
-  if not data.self.inExtension and not data.self.editorUI.isNil:
+  if not data.self.editorUI.isNil:
     data.self.editorUI.adjustEditorWidth()
     data.self.resizeFlowSlider()
 
@@ -3997,10 +3969,7 @@ proc scheduleActiveLoopIterationValueRender*(self: FlowComponent) =
 proc renderFlowLines*(self: FlowComponent) =
   # cdebug "flow: renderFlowLines"
   let editorContentLeft =
-    if self.inExtension:
-      0.0
-    else:
-      self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
+    self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   self.createLoopStates()
 
@@ -4018,7 +3987,6 @@ proc renderFlowLines*(self: FlowComponent) =
       let loopId = step.loop
 
       # TODO: We need to calculate the position beforehand
-      # it will be used both in the extension and standalone
       self.prepareFlowLineVariables(step)
 
       if not self.stepNodes.hasKey(step.stepCount) and
@@ -4075,13 +4043,10 @@ proc scheduleFlowRedraw(self: FlowComponent, delay: int) =
 
 proc createFlowLines(self: FlowComponent) =
   let editorContentLeft =
-    if self.inExtension:
-      0.0
-    else:
-      self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
+    self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   for line, stepCounts in self.flow.positionStepCounts:
-    if self.inExtension or line < self.tab.sourceLines.len:
+    if line < self.tab.sourceLines.len:
       for stepCount in stepCounts:
         let step = self.flow.steps[stepCount]
         if step.loop == 0 and step.iteration == 0:
@@ -4136,11 +4101,10 @@ proc recalculateAndRedrawFlow*(self: FlowComponent) =
     return
   if not self.flow.isNil:
     self.createFlowLines()
-    if not self.inExtension:
-      self.calculateLineHeight()
+    self.calculateLineHeight()
     self.renderFlowLines()
 
-    if self.mutationObserver.isNil and not self.inExtension:
+    if self.mutationObserver.isNil:
       setEditorMutationObserver(self)
 
 proc adjustFlow(self: FlowComponent) =
@@ -4165,7 +4129,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     if update.location.toJs.isNil:
       cdebug "flow: update location is nil: stopping"
       return
-    let updateLocationName = if self.inExtension or self.editorUI.editorView != ViewInstructions:
+    let updateLocationName = if self.editorUI.editorView != ViewInstructions:
         update.location.highLevelPath
       else:
         # should be always path:name
@@ -4190,21 +4154,19 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     let locationMatchesRequest =
       not self.location.toJs.isNil and
       $self.location.highLevelPath == $self.editorUI.name
-    if not self.inExtension and
-        self.editorUI.name != updateLocationName and
+    if self.editorUI.name != updateLocationName and
         not locationMatchesRequest:
       cdebug "flow: editor name not equal to update location name: stopping"
       return
 
     self.status = update.status
 
-    let editorView = if self.inExtension: EditorView.ViewSource else: self.editorUI.editorView
+    let editorView = self.editorUI.editorView
     if ord(editorView) < 0 or ord(editorView) >= update.view_updates.len:
       cerror "flow: editorView index out of bounds: " & $ord(editorView) & " updates len: " & $update.view_updates.len
       return
 
-    if not self.inExtension:
-      self.editorUI.flowUpdate = update
+    self.editorUI.flowUpdate = update
 
     if update.location.key != self.key or self.flow.isNil:
       # Full rebuild required when:
@@ -4236,9 +4198,6 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       self.handoffFlow = nil
       self.updateFlowOnMove(self.location.rrTicks, self.location.line)
       self.recalculate = true
-      # NOTE: a no-op in the app (`FlowComponent` overrides only
-      # `redrawForExtension`); kept because it rebinds the extension host.
-      self.redraw()
       # One deferred rebuild to capture offsets Monaco has not yet laid out.
       self.scheduleFlowRedraw(100)
       self.scheduleActiveLoopIterationValueRender()
@@ -4274,21 +4233,20 @@ proc makeLoopSliderChildDom(self: FlowComponent, position: int, includeEmptyText
   result.setAttribute(cstring"class", cstring"flow-loop-slider")
   result.setAttribute(cstring"id", cstring(&"flow-loop-slider-{position}"))
 
-  if not self.inExtension:
-    var leftValue = cast[Element](self.flowLoops[position].flowDom).clientWidth
-    var widthValue = cstring"0px"
+  var leftValue = cast[Element](self.flowLoops[position].flowDom).clientWidth
+  var widthValue = cstring"0px"
 
-    if leftValue != 0:
-      widthValue = cstring(fmt"{calculateLoopSliderWidth(self, leftValue)}px")
-    else:
-      self.shouldRecalcFlow = true
+  if leftValue != 0:
+    widthValue = cstring(fmt"{calculateLoopSliderWidth(self, leftValue)}px")
+  else:
+    self.shouldRecalcFlow = true
 
-    result.style.width = fmt"calc({widthValue} - {SLIDER_OFFSET}ch)".cstring
-    result.style.fontSize = cstring($data.ui.fontSize)
-    result.style.fontFamily = cstring"SpaceGrotesk"
-    result.style.marginLeft = cstring"4ch"
-    result.style.height = cstring($self.lineHeight & "px")
-    result.style.lineHeight = cstring($self.lineHeight & "px")
+  result.style.width = fmt"calc({widthValue} - {SLIDER_OFFSET}ch)".cstring
+  result.style.fontSize = cstring($data.ui.fontSize)
+  result.style.fontFamily = cstring"SpaceGrotesk"
+  result.style.marginLeft = cstring"4ch"
+  result.style.height = cstring($self.lineHeight & "px")
+  result.style.lineHeight = cstring($self.lineHeight & "px")
 
   if includeEmptyText:
     result.appendChild(document.createTextNode(cstring""))
@@ -4298,10 +4256,9 @@ proc makeLoopSliderContainerDom(self: FlowComponent, position: int): Node =
   result.setAttribute(cstring"class", cstring"flow-loop-slider-container")
   result.setAttribute(cstring"id", cstring(&"flow-loop-slider-container-{position}"))
 
-  if not self.inExtension:
-    let flowDomWidth = self.flowLoops[position].flowDom.toJs.clientWidth
-    result.style.left = cstring(fmt"calc({flowDomWidth}px - 2ch)")
-    result.style.fontSize = cstring($data.ui.fontSize & "px")
+  let flowDomWidth = self.flowLoops[position].flowDom.toJs.clientWidth
+  result.style.left = cstring(fmt"calc({flowDomWidth}px - 2ch)")
+  result.style.fontSize = cstring($data.ui.fontSize & "px")
 
   result.appendChild(self.makeLoopSliderChildDom(position))
 
@@ -4394,27 +4351,25 @@ proc createFlowViewZone(self: FlowComponent, position: int, heightInPx: float, i
   zoneDom.class = "flow-view-zone"
   zoneDom.style.display = "flex"
 
-  if not self.inExtension:
-    let viewZone = js{
-          afterLineNumber: position,
-          heightInPx: heightInPx + 3,
-          domNode: zoneDom
-        }
+  let viewZone = js{
+        afterLineNumber: position,
+        heightInPx: heightInPx + 3,
+        domNode: zoneDom
+      }
 
-    if isLoop:
-      var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
-      self.loopViewZones[position] = zoneId
-    else:
-      var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
-      self.viewZones[position] = zoneId
+  if isLoop:
+    var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
+    self.loopViewZones[position] = zoneId
+  else:
+    var zoneId = addMonacoViewZone(self.editorUI.monacoEditor, viewZone)
+    self.viewZones[position] = zoneId
 
   # calculate previous position indentations count
   let lineNumberDom = document.createElement("div")
 
   lineNumberDom.class = "line-numbers"
   lineNumberDom.style.height = "100%"
-  if not self.inExtension:
-    lineNumberDom.style.width = jq(".line-numbers").style.width
+  lineNumberDom.style.width = jq(".line-numbers").style.width
   lineNumberDom.style.position = "absolute"
   lineNumberDom.style.left = "0px"
   zoneDom.appendChild(lineNumberDom)
@@ -4474,17 +4429,7 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
 
   # Defer until the hosting view zone has been laid out. `shouldRecalcFlow`
   # records that a recalculation is still owed.
-  #
-  # ONLY outside the extension, and that has always been the rule: the
-  # extension has no `resizeFlowSlider` path to come back on
-  # (`doRenderActiveLoopIterationValues` schedules it behind
-  # `if not data.self.inExtension`, and `resizeEditorHandler` needs an
-  # `editorUI.monacoEditor` the extension does not have), so deferring there
-  # means never building the slider at all.  `requireMeasurable` below carries
-  # the same condition into `ensureFlowLoopSlider`, which would otherwise apply
-  # lesson 1 unconditionally and reintroduce exactly that.
-  let canDeferForWidth = not self.inExtension
-  if canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+  if maxIteration > FLOW_ITERATION_START and
      self.loopControlWidth(position) == 0:
     self.shouldRecalcFlow = true
     return
@@ -4513,7 +4458,7 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
       # Maybe later on add to all of the EventLog components?
       cast[EventLogComponent](data.ui.componentMapping[Content.EventLog][0]).isFlowUpdate = true
     ,
-    requireMeasurable = canDeferForWidth
+    requireMeasurable = true
   )
   # The width gate above measures the CONTAINER; `ensureFlowLoopSlider`
   # measures the slider element itself, and the two can disagree — the slider's
@@ -4528,7 +4473,7 @@ proc ensureLoopSlider*(self: FlowComponent, position: int) =
   # happens to run. Benign today — `resizeFlowSlider` applies `loopSliderStyle`
   # before calling back in — but "benign today" is how #562 was introduced, and
   # this is one assignment.
-  if not slid and canDeferForWidth and maxIteration > FLOW_ITERATION_START and
+  if not slid and maxIteration > FLOW_ITERATION_START and
      not flowLoopSliderIsMeasurable(element):
     self.shouldRecalcFlow = true
   if not slid and maxIteration <= FLOW_ITERATION_START:
@@ -4551,8 +4496,7 @@ proc makeSlider(self: FlowComponent, position: int) =
   self.addSliderWidget(position)
   self.ensureLoopSlider(position)
 
-  if not self.inExtension:
-    setEditorResizeObserver(self, position)
+  setEditorResizeObserver(self, position)
 
 proc resizeLineSlider(self: FlowComponent, position: int) =
   let editor = self.editorUI.monacoEditor
@@ -5120,61 +5064,3 @@ proc switchFlowType*(self: FlowComponent, flowType: FlowUI) =
     self.data.config.flow.realFlowUI = flowType
     self.recalculateAndRedrawFlow()
     self.updateFlowDom()
-
-when defined(ctInExtension):
-  proc vsUpdatedFlow*(editor: JsObject, update: FlowUpdate) {.exportc.} =
-    discard
-    # discard cast[FlowComponent](vsCodeEditor.flow).onUpdatedFlow(update)
-
-  proc completeMove*(editor: JsObject, response: MoveState, dapApi: DapApi) {.exportc.} =
-    discard
-    # vsCodeEditor.flow = FlowComponent(
-    #   id: 0,
-    #   flow: nil,
-    #   # tab: self.tabInfo,
-    #   location: response.location,
-    #   multilineZones: JsAssoc[int, MultilineZone]{},
-    #   flowDom: JsAssoc[int, Node]{},
-    #   shouldRecalcFlow: false,
-    #   flowLoops: JsAssoc[int, FlowLoop]{},
-    #   flowLines: JsAssoc[int, FlowLine]{},
-    #   activeStep: FlowStep(rrTicks: -1),
-    #   selectedLine: -1,
-    #   selectedLineInGroup: -1,
-    #   selectedStepCount: -1,
-    #   multilineValuesDoms: JsAssoc[int, JsAssoc[cstring, Node]]{},
-    #   loopLineSteps: JsAssoc[int, int]{},
-    #   inlineDecorations: JsAssoc[int, InlineDecorations]{},
-    #   # editorUI: self,
-    #   # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
-    #   # editor: self.service,
-    #   # service: self.data.services.flow,
-    #   # data: self.data,
-    #   lineGroups: JsAssoc[int, Group]{},
-    #   # status: FlowUpdateState(kind: FlowWaitingForStart),
-    #   statusWidget: nil,
-    #   sliderWidgets: JsAssoc[int, js]{},
-    #   lineWidgets: JsAssoc[int, js]{},
-    #   multilineWidgets: JsAssoc[int, JsAssoc[cstring, js]]{},
-    #   stepNodes: JsAssoc[int, Node]{},
-    #   loopStates: JsAssoc[int, LoopState]{},
-    #   viewZones: JsAssoc[int, int]{},
-    #   loopViewZones: JsAssoc[int, int]{},
-    #   loopColumnMinWidth: 15,
-    #   shrinkedLoopColumnMinWidth: 8,
-    #   pixelsPerSymbol: 8,
-    #   distanceBetweenValues: 10,
-    #   distanceToSource: 50,
-    #   inlineValueWidth: 80,
-    #   bufferMaxOffsetInPx: 300,
-    #   maxWidth: 0,
-    #   modalValueComponent: JsAssoc[cstring, ValueComponent]{},
-    #   valueMode: BeforeValueMode
-    # )
-
-    # dapApi.sendCtRequest(CtLoadFlow, response.location.toJs)
-
-when defined(ctInExtension):
-  when defined(ctInCentralExtensionContext):
-    {.emit: "module.exports.vsUpdatedFlow = vsUpdatedFlow".}
-    {.emit: "module.exports.completeMove = completeMove".}

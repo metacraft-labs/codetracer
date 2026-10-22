@@ -237,6 +237,7 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "sortBy": v.sortBy(a.arg("order", EventLogOrder()))
     of "toggleColumnsMenu": v.toggleColumnsMenu()
     of "setSearchQuery": v.setSearchQuery(a.arg("query", ""))
+    of "setSelectedKinds": v.setSelectedKinds(a.arg("kinds", newSeq[bool]()))
     of "setFilterInput": v.setFilterInput(a.arg("raw", ""))
     of "dismissToast": v.dismissToast(a.arg("workspaceId", ""))
     # Kept for mirrors that predate the `viewport` action.

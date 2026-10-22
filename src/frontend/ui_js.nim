@@ -100,8 +100,6 @@ import
 # Find in Files' toggles: the operations the pane's field keys run.
 from viewmodel/viewmodels/search_results_vm import SearchOptionOperations
 
-when defined(ctInExtension):
-  import vscode
 
 # Desktop-test machinery: it drives an agentic worktree by running arbitrary
 # programs, and its own guard declares it absent from a web build because
@@ -111,8 +109,8 @@ when not defined(ctWeb):
   import ui/agentic_worktree_test_hooks
 
 # The Electron desktop's edit-mode topbar (#812). The web studio composes its
-# own in `ui/web_noir_build`, and the extension has no topbar.
-when not defined(ctWeb) and not defined(ctInExtension):
+# own in `ui/web_noir_build`.
+when not defined(ctWeb):
   import ui/desktop_edit_toolbar
 
 from dom import Element, getAttribute, Node, preventDefault, document,
@@ -1485,8 +1483,8 @@ proc applyModeLayout(data: Data; leaving, entering: LayoutMode) =
 
 # The Electron desktop's edit-mode composer. The web arm installs its own
 # beside `installEditModeToolbar`, far below, which is the only place that has
-# the `invoke` it needs; the extension has no topbar and installs none.
-when not defined(ctWeb) and not defined(ctInExtension):
+# the `invoke` it needs.
+when not defined(ctWeb):
   debug_toolbar.installEditToolbarComposer(proc() =
     installDesktopEditModeToolbar())
 
@@ -2202,7 +2200,6 @@ proc onReady(event: dom.Event) =
           jq(".low-level").toJs.scrollTop = cast[int](jqall(".assembly-offset")[index].toJs.offsetTop) - 300, 500)
 
 
-
 proc onInit*(
     sender: js,
     response: jsobject(
@@ -2257,516 +2254,516 @@ proc onInit*(
   if not response.bypass:
     redrawAll()
 
-when not defined(ctInExtension):
-  import
-    communication, middleware, dap
+import
+  communication, middleware, dap
 
-  when defined(js):
-    proc recordVmBackendRequest(command: cstring; args: JsObject) {.importjs: """
-      (function(command, args) {
-        window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
-        const requests = window.__CODETRACER_TEST__.vmBackendRequests || [];
-        requests.push({ command, args: JSON.parse(JSON.stringify(args || {})) });
-        window.__CODETRACER_TEST__.vmBackendRequests = requests;
-      })(#, #);
-    """.}
+when defined(js):
+  proc recordVmBackendRequest(command: cstring; args: JsObject) {.importjs: """
+    (function(command, args) {
+      window.__CODETRACER_TEST__ = window.__CODETRACER_TEST__ || {};
+      const requests = window.__CODETRACER_TEST__.vmBackendRequests || [];
+      requests.push({ command, args: JSON.parse(JSON.stringify(args || {})) });
+      window.__CODETRACER_TEST__.vmBackendRequests = requests;
+    })(#, #);
+  """.}
 
-  const middlewareLoggingEnabled = true # TODO: maybe overridable dynamically
+const middlewareLoggingEnabled = true # TODO: maybe overridable dynamically
 
-  # === LocalToViewTransport
+# === LocalToViewTransport
 
-  # for now sending through mediator.emit => for each subscriber, subscriber.emit directly
-  # as there are many subscribers
-  # IMPORTANT:
-  # internalRawReceive for it is called by the LocalViewToMiddlewareTransport when
-  # a local view emits
+# for now sending through mediator.emit => for each subscriber, subscriber.emit directly
+# as there are many subscribers
+# IMPORTANT:
+# internalRawReceive for it is called by the LocalViewToMiddlewareTransport when
+# a local view emits
 
-  # === end of LocalToViewsTransport
+# === end of LocalToViewsTransport
 
-  proc configureMiddleware =
-    setupMiddlewareApis(data.dapApi, data.viewsApi)
+proc configureMiddleware =
+  setupMiddlewareApis(data.dapApi, data.viewsApi)
 
-    data.dapApi.ipc = data.ipc
+  data.dapApi.ipc = data.ipc
 
-    data.dapApi.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
-      cdebug "[PIPELINE] DapInitializeResponse: received response"
-      var supportsStepBack = false
-      if not response.isNil and not jsMissing(response["supportsStepBack"]):
-        supportsStepBack = response["supportsStepBack"].to(bool)
-      cdebug "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
-      # Remember the capability so it survives even when the response beats the
-      # `activeSessionVM` creation below; apply immediately when the VM already
-      # exists (e.g. a per-trace re-initialize after load).
-      pendingSupportsStepBack = supportsStepBack
-      if not activeSessionVM.isNil:
-        activeSessionVM.store.setSupportsStepBack(supportsStepBack)
+  data.dapApi.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
+    cdebug "[PIPELINE] DapInitializeResponse: received response"
+    var supportsStepBack = false
+    if not response.isNil and not jsMissing(response["supportsStepBack"]):
+      supportsStepBack = response["supportsStepBack"].to(bool)
+    cdebug "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
+    # Remember the capability so it survives even when the response beats the
+    # `activeSessionVM` creation below; apply immediately when the VM already
+    # exists (e.g. a per-trace re-initialize after load).
+    pendingSupportsStepBack = supportsStepBack
+    if not activeSessionVM.isNil:
+      activeSessionVM.store.setSupportsStepBack(supportsStepBack)
+  )
+
+  data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+    clientName: "codetracer"
+  )))
+
+  # -----------------------------------------------------------------------
+  # ViewModel layer: create a SessionViewModel backed by the real DapApi.
+  # This must happen BEFORE component.register() calls, because register()
+  # lazily creates panel VMs — if the shared store is already in place the
+  # panels will use it instead of falling back to stub backends.
+  # -----------------------------------------------------------------------
+  if activeSessionVM.isNil:
+    let dapRef = data.dapApi
+    let realBackend = newDapBackendService(dapRef,
+      onSend = proc(command: cstring; argsJs: JsObject) =
+        when defined(js):
+          if data.startOptions.inTest:
+            recordVmBackendRequest(command, argsJs))
+    # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
+    # builds `DebugControlsVM` with them: steps through the DAP mediator
+    # with the status bar's operation status, the replay server's restart,
+    # Stop, and test runs in a new window. A mirror takes them too: under
+    # `ct host` the page still drives the replay, and the server's session
+    # follows the moves it makes.
+    let toolbarApi = setupLocalViewToMiddlewareApi(
+      cstring"debug toolbar api", data.viewsApi)
+    if serverOwnsSession():
+      # SERVER-MANAGED (`ct host`): the server owns the session and this
+      # page mirrors it over its socket. The mirror's ViewModels are the
+      # ones the panels read; the panes' measured viewports and the call
+      # trace's actions run on the server's session, the other panels'
+      # actions on the page (`createHostedPageMirror`). Its locals are the
+      # server's, so the page's own decoders stand down
+      # (`claimLocalsLoading`).
+      activeMirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
+        debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
+          desktopDebugCommands(data, session.store, toolbarApi))
+      activeSessionVM = activeMirror.session
+      activeSessionVM.store.claimLocalsLoading()
+    else:
+      activeDebuggerSession = newDebuggerSession(realBackend)
+      activeSessionVM = activeDebuggerSession.session
+    # The DOM reports a pane's size on every resize and scroll event, so the
+    # windowed ViewModels debounce those reports on the browser's timer
+    # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
+    # viewports travel to the server's session.
+    activeSessionVM.store.viewportScheduler = timeoutScheduler()
+    if activeMirror.isNil:
+      # The panel ViewModels are the session's, built once by
+      # `initializePanelViewModels` — in edit mode too, where no trace is
+      # open and the session is not yet attached. The stop loader is the one
+      # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
+      # exists (its effect would otherwise send on its first run), and the
+      # request's language hook is installed before anything can ask.
+      state.installSourceLanguage(activeSessionVM.store)
+      activeSessionVM.store.claimLocalsLoading()
+      activeSessionVM.debugCommands = desktopDebugCommands(data,
+        activeSessionVM.store, toolbarApi)
+      activeSessionVM.initializePanelViewModels()
+    # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
+    # the debugger service plans each change over its rows and the engine's
+    # answer replaces them, as on the native front-ends (PLAT-40).
+    data.services.debugger.pointStore = cast[JsObject](activeSessionVM.store)
+    # Apply any `supportsStepBack` capability that arrived before this VM
+    # existed (its DAP `initialize` response can beat this assignment), so the
+    # reverse-step toolbar buttons reflect the backend's real capability.
+    activeSessionVM.store.setSupportsStepBack(pendingSupportsStepBack)
+    activeCollabFrontEndAdapter = initWebUiCollabAdapter(
+      activeSessionVM.collabCore.localPrincipalId,
+      activeSessionVM.collabCore.localActorId
     )
+    activeSessionVM.collabCore.installFrontEndAdapterProjection(
+      activeCollabFrontEndAdapter)
+    cdebug "[PIPELINE] configureMiddleware: SessionVM + RealBackendService created"
+    clog "SessionViewModel: created with real DapApi backend"
+    if pendingCollabJoinBootstrapRaw.len > 0:
+      discard activateCollabJoinBootstrap(pendingCollabJoinBootstrapRaw)
 
-    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
-      clientName: "codetracer"
-    )))
+    # Hand the panels with legacy bridge code the session's ViewModels, or,
+    # for the panels `initializePanelViewModels` does not cover yet, build
+    # theirs over the session's store. If register() already created
+    # stub-backed VM instances during createUIComponents(), these calls
+    # replace them.
+    template initPanelVM(label: string; body: untyped) =
+      try:
+        cdebug "[PIPELINE] configureMiddleware: calling " & label
+        body
+      except CatchableError as e:
+        # Stays at ERROR: this is a real failure, not progress.  A panel
+        # VM that threw during construction leaves its panel wired to a
+        # stub (or to nothing), and every later symptom — an empty
+        # calltrace, a state panel that never fills — is downstream of
+        # this line.  It must stay at ERROR even though the surrounding
+        # `[PIPELINE]` progress traces were demoted to DEBUG.
+        cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
 
-    # -----------------------------------------------------------------------
-    # ViewModel layer: create a SessionViewModel backed by the real DapApi.
-    # This must happen BEFORE component.register() calls, because register()
-    # lazily creates panel VMs — if the shared store is already in place the
-    # panels will use it instead of falling back to stub backends.
-    # -----------------------------------------------------------------------
-    if activeSessionVM.isNil:
-      let dapRef = data.dapApi
-      let realBackend = newDapBackendService(dapRef,
-        onSend = proc(command: cstring; argsJs: JsObject) =
-          when defined(js):
-            if data.startOptions.inTest:
-              recordVmBackendRequest(command, argsJs))
-      # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
-      # builds `DebugControlsVM` with them: steps through the DAP mediator
-      # with the status bar's operation status, the replay server's restart,
-      # Stop, and test runs in a new window. A mirror takes them too: under
-      # `ct host` the page still drives the replay, and the server's session
-      # follows the moves it makes.
-      let toolbarApi = setupLocalViewToMiddlewareApi(
-        cstring"debug toolbar api", data.viewsApi)
-      if serverOwnsSession():
-        # SERVER-MANAGED (`ct host`): the server owns the session and this
-        # page mirrors it over its socket. The mirror's ViewModels are the
-        # ones the panels read, and their user actions — the panes' measured
-        # viewports among them — run on the server's session
-        # (`createHostedPageMirror`); its locals are the server's, so the
-        # page's own decoders stand down (`claimLocalsLoading`).
-        activeMirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
-          debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
-            desktopDebugCommands(data, session.store, toolbarApi))
-        activeSessionVM = activeMirror.session
-        activeSessionVM.store.claimLocalsLoading()
-      else:
-        activeDebuggerSession = newDebuggerSession(realBackend)
-        activeSessionVM = activeDebuggerSession.session
-      # The DOM reports a pane's size on every resize and scroll event, so the
-      # windowed ViewModels debounce those reports on the browser's timer
-      # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
-      # viewports travel to the server's session.
-      activeSessionVM.store.viewportScheduler = timeoutScheduler()
-      if activeMirror.isNil:
-        # The panel ViewModels are the session's, built once by
-        # `initializePanelViewModels` — in edit mode too, where no trace is
-        # open and the session is not yet attached. The stop loader is the one
-        # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
-        # exists (its effect would otherwise send on its first run), and the
-        # request's language hook is installed before anything can ask.
-        state.installSourceLanguage(activeSessionVM.store)
-        activeSessionVM.store.claimLocalsLoading()
-        activeSessionVM.debugCommands = desktopDebugCommands(data,
-          activeSessionVM.store, toolbarApi)
-        activeSessionVM.initializePanelViewModels()
-      # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
-      # the debugger service plans each change over its rows and the engine's
-      # answer replaces them, as on the native front-ends (PLAT-40).
-      data.services.debugger.pointStore = cast[JsObject](activeSessionVM.store)
-      # Apply any `supportsStepBack` capability that arrived before this VM
-      # existed (its DAP `initialize` response can beat this assignment), so the
-      # reverse-step toolbar buttons reflect the backend's real capability.
-      activeSessionVM.store.setSupportsStepBack(pendingSupportsStepBack)
-      activeCollabFrontEndAdapter = initWebUiCollabAdapter(
-        activeSessionVM.collabCore.localPrincipalId,
-        activeSessionVM.collabCore.localActorId
-      )
-      activeSessionVM.collabCore.installFrontEndAdapterProjection(
-        activeCollabFrontEndAdapter)
-      cdebug "[PIPELINE] configureMiddleware: SessionVM + RealBackendService created"
-      clog "SessionViewModel: created with real DapApi backend"
-      if pendingCollabJoinBootstrapRaw.len > 0:
-        discard activateCollabJoinBootstrap(pendingCollabJoinBootstrapRaw)
+    initPanelVM("initStateVMFromSession"):
+      state.initStateVMFromSession(activeSessionVM.stateVM)
+      # M29 §14.8 — attach the OriginChainVM to the SessionVM so
+      # the chain panel's breadcrumb chips route process switches
+      # through `SessionViewModel.onSwitchProcess` (and so the
+      # derived `crossProcessSpans` memo sees a live chain).
+      let ocvm = state.activeOriginChainVM()
+      if not ocvm.isNil:
+        activeSessionVM.attachOriginChainVM(ocvm)
+    # M42 §14.8 — multi-process session surface.
+    #
+    # `ct/listProcesses` is the only description of a session's
+    # recordings the renderer ever receives. The backend dispatches it
+    # as an unsolicited DAP event exactly once per session load
+    # (`dap_server.rs::dispatch_session_load_event`), so this
+    # subscription is what makes `processTree` non-empty in a real
+    # session — there is no polling fallback and no second source.
+    initPanelVM("subscribeListProcesses"):
+      dap.on[JsObject](dapRef, CtListProcesses,
+        proc(kind: CtEventKind, raw: JsObject) =
+          if activeSessionVM.isNil or raw.isNil:
+            return
+          try:
+            activeSessionVM.consumeListProcessesEvent(parseJsonFromJsObject(raw))
+          except CatchableError as e:
+            cerror "ct/listProcesses: failed to decode payload: " & e.msg)
 
-      # Hand the panels with legacy bridge code the session's ViewModels, or,
-      # for the panels `initializePanelViewModels` does not cover yet, build
-      # theirs over the session's store. If register() already created
-      # stub-backed VM instances during createUIComponents(), these calls
-      # replace them.
-      template initPanelVM(label: string; body: untyped) =
-        try:
-          cdebug "[PIPELINE] configureMiddleware: calling " & label
-          body
-        except CatchableError as e:
-          # Stays at ERROR: this is a real failure, not progress.  A panel
-          # VM that threw during construction leaves its panel wired to a
-          # stub (or to nothing), and every later symptom — an empty
-          # calltrace, a state panel that never fills — is downstream of
-          # this line.  It must stay at ERROR even though the surrounding
-          # `[PIPELINE]` progress traces were demoted to DEBUG.
-          cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
+    # The `ct/originChain` reply had the same fate as `ct/listProcesses`
+    # before M42: `OriginChainVM.onShowOrigin` fires the request and
+    # discards the future (`asyncSendCtRequest` resolves immediately —
+    # real replies arrive out-of-band on the DAP channel), and nothing
+    # called `applyChainResponse`, so `activeChain` stayed `none` and
+    # the Origin Chain side panel never had a chain to draw. The
+    # backend emits `ct/updated-origin-chain` alongside every chain
+    # response — including the session-composed cross-process one, whose
+    # wire shape is deliberately identical — so one subscription feeds
+    # the VM for both the single- and multi-recording paths.
+    # EVERY `ct/originChain` IS NAMED BY THE TRANSPORT as it is sent —
+    # the VM's own (`OriginChainVM.onShowOrigin`) and the legacy menus'
+    # (`ui/value.nim`, `ui/key_router.nim`, `ui/flow.nim`), which emit it
+    # on the mediator and never touch the VM — so only the answer to the
+    # LATEST request, not cancelled since, is applied
+    # (`OriginChainVM.applyChainAnswer`). The companion
+    # `ct/updated-origin-chain` event carries no identity and the same body
+    # as the response, so the chain is taken from the response alone.
+    initPanelVM("subscribeUpdatedOriginChain"):
+      trackCtRequests(CtOriginChain,
+        onSent = proc(requestId: cstring) =
+          let ocvm = state.activeOriginChainVM()
+          if not ocvm.isNil:
+            ocvm.noteChainRequestSent($requestId),
+        onAnswered = proc(requestId: cstring) = discard)
+      # The `ct/originChain` response carries the identical chain body
+      # and is the request's direct correlate, so it is consumed too:
+      # the companion event is emitted only on success, and a failed
+      # query would otherwise leave the panel silently shut with no
+      # trace of why.
+      dap.on[JsObject](dapRef, CtOriginChainResponse,
+        proc(kind: CtEventKind, raw: JsObject) =
+          let ocvm = state.activeOriginChainVM()
+          if ocvm.isNil or raw.isNil:
+            return
+          try:
+            let body = parseJsonFromJsObject(raw)
+            if body.kind == JObject and body.hasKey("hops"):
+              # Spec §3.2.2 — "Show value origin" opens the dedicated side
+              # panel, whichever menu asked; a chain only arrives because a
+              # user asked for one. The origin badge is the one asker that
+              # does not: it expands its row in place (§3.2.1), so the VM
+              # never makes its request the side panel's
+              # (`noteChainRequestSent`) and `applyChainAnswer` declines its
+              # answer, which reaches the row through the request's own
+              # future instead.
+              if ocvm.applyChainAnswer(parseOriginChain(body),
+                                       $ctRequestIdOf(raw)):
+                ocvm.openSidePanel()
+            else:
+              # Only the side panel's own request ends its wait: a row's
+              # failed fetch leaves a pending "Show value origin" alone.
+              discard ocvm.rejectChainAnswer($ctRequestIdOf(raw))
+              cerror "ct/originChain: query returned no chain: " & $body
+          except CatchableError as e:
+            cerror "ct/originChain: failed to decode response: " & e.msg)
 
-      initPanelVM("initStateVMFromSession"):
-        state.initStateVMFromSession(activeSessionVM.stateVM)
-        # M29 §14.8 — attach the OriginChainVM to the SessionVM so
-        # the chain panel's breadcrumb chips route process switches
-        # through `SessionViewModel.onSwitchProcess` (and so the
-        # derived `crossProcessSpans` memo sees a live chain).
-        let ocvm = state.activeOriginChainVM()
-        if not ocvm.isNil:
-          activeSessionVM.attachOriginChainVM(ocvm)
-      # M42 §14.8 — multi-process session surface.
-      #
-      # `ct/listProcesses` is the only description of a session's
-      # recordings the renderer ever receives. The backend dispatches it
-      # as an unsolicited DAP event exactly once per session load
-      # (`dap_server.rs::dispatch_session_load_event`), so this
-      # subscription is what makes `processTree` non-empty in a real
-      # session — there is no polling fallback and no second source.
-      initPanelVM("subscribeListProcesses"):
-        dap.on[JsObject](dapRef, CtListProcesses,
-          proc(kind: CtEventKind, raw: JsObject) =
-            if activeSessionVM.isNil or raw.isNil:
-              return
-            try:
-              activeSessionVM.consumeListProcessesEvent(parseJsonFromJsObject(raw))
-            except CatchableError as e:
-              cerror "ct/listProcesses: failed to decode payload: " & e.msg)
+    # The process tree's click handler rotates the ViewModel's active
+    # recording; this bridge is what makes that rotation visible in
+    # the backend. Requests are routed to a recording purely by the
+    # composed `threadId` they carry
+    # (`dap_server.rs::handle_request_via_session`), so switching
+    # process means re-pointing that id and then moving the cursor
+    # into the new recording so the editor and State Pane follow.
+    initPanelVM("installSwitchProcessBridge"):
+      activeSessionVM.onSwitchProcessProc = proc(recordingId: string) =
+        if activeSessionVM.isNil:
+          return
+        let entryOpt = activeSessionVM.entryForRecording(recordingId)
+        if entryOpt.isNone:
+          cerror "switch process: unknown recording " & recordingId
+          return
+        let threadId = entryOpt.get.routingThreadId()
+        if threadId == 0:
+          cerror "switch process: recording " & recordingId &
+            " advertises no thread id; leaving routing unchanged"
+          return
+        setActiveSessionThreadId(threadId)
+        data.dapApi.sendCtRequest(CtRunToEntry, JsObject{})
 
-      # The `ct/originChain` reply had the same fate as `ct/listProcesses`
-      # before M42: `OriginChainVM.onShowOrigin` fires the request and
-      # discards the future (`asyncSendCtRequest` resolves immediately —
-      # real replies arrive out-of-band on the DAP channel), and nothing
-      # called `applyChainResponse`, so `activeChain` stayed `none` and
-      # the Origin Chain side panel never had a chain to draw. The
-      # backend emits `ct/updated-origin-chain` alongside every chain
-      # response — including the session-composed cross-process one, whose
-      # wire shape is deliberately identical — so one subscription feeds
-      # the VM for both the single- and multi-recording paths.
-      # EVERY `ct/originChain` IS NAMED BY THE TRANSPORT as it is sent —
-      # the VM's own (`OriginChainVM.onShowOrigin`) and the legacy menus'
-      # (`ui/value.nim`, `ui/key_router.nim`, `ui/flow.nim`), which emit it
-      # on the mediator and never touch the VM — so only the answer to the
-      # LATEST request, not cancelled since, is applied
-      # (`OriginChainVM.applyChainAnswer`). The companion
-      # `ct/updated-origin-chain` event carries no identity and the same body
-      # as the response, so the chain is taken from the response alone.
-      initPanelVM("subscribeUpdatedOriginChain"):
-        trackCtRequests(CtOriginChain,
-          onSent = proc(requestId: cstring) =
-            let ocvm = state.activeOriginChainVM()
-            if not ocvm.isNil:
-              ocvm.noteChainRequestSent($requestId),
-          onAnswered = proc(requestId: cstring) = discard)
-        # The `ct/originChain` response carries the identical chain body
-        # and is the request's direct correlate, so it is consumed too:
-        # the companion event is emitted only on success, and a failed
-        # query would otherwise leave the panel silently shut with no
-        # trace of why.
-        dap.on[JsObject](dapRef, CtOriginChainResponse,
-          proc(kind: CtEventKind, raw: JsObject) =
-            let ocvm = state.activeOriginChainVM()
-            if ocvm.isNil or raw.isNil:
-              return
-            try:
-              let body = parseJsonFromJsObject(raw)
-              if body.kind == JObject and body.hasKey("hops"):
-                # Spec §3.2.2 — "Show value origin" opens the dedicated side
-                # panel, whichever menu asked; a chain only arrives because a
-                # user asked for one. The origin badge is the one asker that
-                # does not: it expands its row in place (§3.2.1), so the VM
-                # never makes its request the side panel's
-                # (`noteChainRequestSent`) and `applyChainAnswer` declines its
-                # answer, which reaches the row through the request's own
-                # future instead.
-                if ocvm.applyChainAnswer(parseOriginChain(body),
-                                         $ctRequestIdOf(raw)):
-                  ocvm.openSidePanel()
-              else:
-                # Only the side panel's own request ends its wait: a row's
-                # failed fetch leaves a pending "Show value origin" alone.
-                discard ocvm.rejectChainAnswer($ctRequestIdOf(raw))
-                cerror "ct/originChain: query returned no chain: " & $body
-            except CatchableError as e:
-              cerror "ct/originChain: failed to decode response: " & e.msg)
-
-      # The process tree's click handler rotates the ViewModel's active
-      # recording; this bridge is what makes that rotation visible in
-      # the backend. Requests are routed to a recording purely by the
-      # composed `threadId` they carry
-      # (`dap_server.rs::handle_request_via_session`), so switching
-      # process means re-pointing that id and then moving the cursor
-      # into the new recording so the editor and State Pane follow.
-      initPanelVM("installSwitchProcessBridge"):
-        activeSessionVM.onSwitchProcessProc = proc(recordingId: string) =
+    # Spec §14.8 — the State Pane's "Switch process" right-click
+    # entry. Offered only while a cross-process correlation is
+    # active: the targets are the sibling recordings the open origin
+    # chain reaches, minus the one already being viewed.
+    initPanelVM("installSwitchProcessMenuBridges"):
+      let svm = state.activeStateVM()
+      if not svm.isNil:
+        svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
+          result = @[]
           if activeSessionVM.isNil:
             return
-          let entryOpt = activeSessionVM.entryForRecording(recordingId)
-          if entryOpt.isNone:
-            cerror "switch process: unknown recording " & recordingId
-            return
-          let threadId = entryOpt.get.routingThreadId()
-          if threadId == 0:
-            cerror "switch process: recording " & recordingId &
-              " advertises no thread id; leaving routing unchanged"
-            return
-          setActiveSessionThreadId(threadId)
-          data.dapApi.sendCtRequest(CtRunToEntry, JsObject{})
-
-      # Spec §14.8 — the State Pane's "Switch process" right-click
-      # entry. Offered only while a cross-process correlation is
-      # active: the targets are the sibling recordings the open origin
-      # chain reaches, minus the one already being viewed.
-      initPanelVM("installSwitchProcessMenuBridges"):
-        let svm = state.activeStateVM()
-        if not svm.isNil:
-          svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
-            result = @[]
-            if activeSessionVM.isNil:
-              return
-            let activeId = activeSessionVM.activeProcessRecordingId.val
-            var seen: seq[string] = @[]
-            for span in activeSessionVM.crossProcessSpans.val:
-              if span.recordingId.len == 0 or span.recordingId == activeId:
-                continue
-              if span.recordingId in seen:
-                continue
-              seen.add(span.recordingId)
-              result.add(ProcessSwitchTarget(
-                recordingId: span.recordingId, role: span.role))
-          svm.onSwitchProcessProc = proc(recordingId: string) =
-            if not activeSessionVM.isNil:
-              activeSessionVM.onSwitchProcess(recordingId)
-
-      initPanelVM("mountProcessTree"):
-        mountProcessTree(activeSessionVM)
-
-      initPanelVM("bindDebugToolbar"):
-        debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
-      initPanelVM("setPanelSession"):
-        # The panes the panel host mounts render this session's ViewModels;
-        # a pane whose container was built before now is mounted here.
-        panel_host.setPanelSession(activeSessionVM)
-      initPanelVM("initEventLogVMFromSession"):
-        event_log.initEventLogVMFromSession(activeSessionVM.eventLogVM)
-        # §5.3 — an Event Log boundary chip whose counterpart lives in
-        # a sibling recording rotates the session, exactly as clicking
-        # that recording in the process tree would.
-        event_log.installEventLogSwitchProcessBridge(proc(recordingId: string) =
+          let activeId = activeSessionVM.activeProcessRecordingId.val
+          var seen: seq[string] = @[]
+          for span in activeSessionVM.crossProcessSpans.val:
+            if span.recordingId.len == 0 or span.recordingId == activeId:
+              continue
+            if span.recordingId in seen:
+              continue
+            seen.add(span.recordingId)
+            result.add(ProcessSwitchTarget(
+              recordingId: span.recordingId, role: span.role))
+        svm.onSwitchProcessProc = proc(recordingId: string) =
           if not activeSessionVM.isNil:
-            activeSessionVM.onSwitchProcess(recordingId))
-      initPanelVM("initFlowVMFromSession"):
-        flow.initFlowVMFromSession(activeSessionVM.flowVM)
-      initPanelVM("initEditorVMFromSession"):
-        editor.initEditorVMFromSession(activeSessionVM.editorVM)
-        # The editor's surface reads the session's values and flow, as the
-        # terminal's and GPUI's do (`editor_points.webEditorSurface`).
-        editor_points.setEditorSessionVMs(activeSessionVM.editorVM,
-          activeSessionVM.stateVM, activeSessionVM.flowVM,
-          activeSessionVM.scratchpadVM)
-      initPanelVM("initTimelineVMFromSession"):
-        trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
-      initPanelVM("initTerminalOutputVMFromSession"):
-        terminal_output.initTerminalOutputVMFromSession(activeSessionVM.terminalOutputVM)
-      initPanelVM("initBuildVMFromSession"):
-        build.initBuildVMFromSession(activeSessionVM.buildVM)
-        build.buildVMInstance.runBuild = proc() = data.update(build=true)
-      initPanelVM("initErrorsVMFromSession"):
-        errors.initErrorsVMFromSession(activeSessionVM.errorsVM)
-      initPanelVM("initSearchResultsVMFromSession"):
-        search_results.initSearchResultsVMFromSession(activeSessionVM.searchResultsVM)
-      initPanelVM("initNoSourceVMFromSession"):
-        no_source.initNoSourceVMFromSession(activeSessionVM.noSourceVM)
-      initPanelVM("initStepListVMFromSession"):
-        step_list.initStepListVMFromSession(activeSessionVM.stepListVM)
-      initPanelVM("initReplVMFromSession"):
-        repl.initReplVMFromSession(activeSessionVM.replVM)
-      initPanelVM("initRequestPanelVMFromSession"):
-        request_panel.initRequestPanelVMFromSession(activeSessionVM.requestPanelVM)
-      initPanelVM("initTraceLogVMFromSession"):
-        trace_log.initTraceLogVMFromSession(activeSessionVM.traceLogVM)
-      initPanelVM("initScratchpadVMFromSession"):
-        scratchpad.initScratchpadVMFromSession(activeSessionVM.scratchpadVM)
-      initPanelVM("initFilesystemVMFromSession"):
-        filesystem.initFilesystemVMFromSession(activeSessionVM.fileTreeVM)
-      initPanelVM("initCommandPaletteVMFromSession"):
-        command.initCommandPaletteVMFromSession(activeSessionVM.commandPaletteVM)
-      initPanelVM("initFrameViewerVMWithStore"):
-        frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
-      initPanelVM("initPixelHistoryVMWithStore"):
-        pixel_history.initPixelHistoryVMWithStore(activeSessionVM.store)
-      initPanelVM("initShaderDebugVMWithStore"):
-        shader_debug.initShaderDebugVMWithStore(activeSessionVM.store)
-      initPanelVM("initVideoPlayerVMWithStore"):
-        video_player.initVideoPlayerVMWithStore(activeSessionVM.store)
-      initPanelVM("initAgentActivityVMWithStore"):
-        agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
-      initPanelVM("initAgentWorkspaceVMWithStore"):
-        agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-      when not defined(ctWeb):
-        initPanelVM("installAgenticWorktreeTestHooks"):
-          agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
-            activeSessionVM.store)
+            activeSessionVM.onSwitchProcess(recordingId)
 
-      # -----------------------------------------------------------------
-      # Direct viewsApi subscriptions: bypass the component mediator
-      # routing so the ViewModel store receives data even when the
-      # component-level subscriptions are not yet wired up (the mediator
-      # routing between early-registered components and viewsApi is
-      # order-dependent and can miss events).
-      # -----------------------------------------------------------------
-      cdebug "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
+    initPanelVM("mountProcessTree"):
+      mountProcessTree(activeSessionVM)
 
-      # The locals answer's direct subscription, and the request tracking
-      # that lets it tell which request each answer is for.
-      state.wireLocalsAnswers(data.viewsApi)
+    initPanelVM("bindDebugToolbar"):
+      debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
+    initPanelVM("setPanelSession"):
+      # The panes the panel host mounts render this session's ViewModels;
+      # a pane whose container was built before now is mounted here.
+      panel_host.setPanelSession(activeSessionVM)
+    initPanelVM("initEventLogVMFromSession"):
+      event_log.initEventLogVMFromSession(activeSessionVM.eventLogVM)
+      # §5.3 — an Event Log boundary chip whose counterpart lives in
+      # a sibling recording rotates the session, exactly as clicking
+      # that recording in the process tree would.
+      event_log.installEventLogSwitchProcessBridge(proc(recordingId: string) =
+        if not activeSessionVM.isNil:
+          activeSessionVM.onSwitchProcess(recordingId))
+    initPanelVM("initFlowVMFromSession"):
+      flow.initFlowVMFromSession(activeSessionVM.flowVM)
+    initPanelVM("initEditorVMFromSession"):
+      editor.initEditorVMFromSession(activeSessionVM.editorVM)
+      # The editor's surface reads the session's values and flow, as the
+      # terminal's and GPUI's do (`editor_points.webEditorSurface`).
+      editor_points.setEditorSessionVMs(activeSessionVM.editorVM,
+        activeSessionVM.stateVM, activeSessionVM.flowVM,
+        activeSessionVM.scratchpadVM)
+    initPanelVM("initTimelineVMFromSession"):
+      trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
+    initPanelVM("initTerminalOutputVMFromSession"):
+      terminal_output.initTerminalOutputVMFromSession(activeSessionVM.terminalOutputVM)
+    initPanelVM("initBuildVMFromSession"):
+      build.initBuildVMFromSession(activeSessionVM.buildVM)
+      build.buildVMInstance.runBuild = proc() = data.update(build=true)
+    initPanelVM("initErrorsVMFromSession"):
+      errors.initErrorsVMFromSession(activeSessionVM.errorsVM)
+    initPanelVM("initSearchResultsVMFromSession"):
+      search_results.initSearchResultsVMFromSession(activeSessionVM.searchResultsVM)
+    initPanelVM("initNoSourceVMFromSession"):
+      no_source.initNoSourceVMFromSession(activeSessionVM.noSourceVM)
+    initPanelVM("initStepListVMFromSession"):
+      step_list.initStepListVMFromSession(activeSessionVM.stepListVM)
+    initPanelVM("initReplVMFromSession"):
+      repl.initReplVMFromSession(activeSessionVM.replVM)
+    initPanelVM("initRequestPanelVMFromSession"):
+      request_panel.initRequestPanelVMFromSession(activeSessionVM.requestPanelVM)
+    initPanelVM("initTraceLogVMFromSession"):
+      trace_log.initTraceLogVMFromSession(activeSessionVM.traceLogVM)
+    initPanelVM("initScratchpadVMFromSession"):
+      scratchpad.initScratchpadVMFromSession(activeSessionVM.scratchpadVM)
+    initPanelVM("initFilesystemVMFromSession"):
+      filesystem.initFilesystemVMFromSession(activeSessionVM.fileTreeVM)
+    initPanelVM("initCommandPaletteVMFromSession"):
+      command.initCommandPaletteVMFromSession(activeSessionVM.commandPaletteVM)
+    initPanelVM("initFrameViewerVMWithStore"):
+      frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
+    initPanelVM("initPixelHistoryVMWithStore"):
+      pixel_history.initPixelHistoryVMWithStore(activeSessionVM.store)
+    initPanelVM("initShaderDebugVMWithStore"):
+      shader_debug.initShaderDebugVMWithStore(activeSessionVM.store)
+    initPanelVM("initVideoPlayerVMWithStore"):
+      video_player.initVideoPlayerVMWithStore(activeSessionVM.store)
+    initPanelVM("initAgentActivityVMWithStore"):
+      agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
+    initPanelVM("initAgentWorkspaceVMWithStore"):
+      agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
+    when not defined(ctWeb):
+      initPanelVM("installAgenticWorktreeTestHooks"):
+        agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
+          activeSessionVM.store)
 
-      data.viewsApi.subscribe(CtCompleteMove,
-        proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-          cdebug ("[PIPELINE] viewsApi.CtCompleteMove: rrTicks=" &
-            $response.location.rrTicks & " file=" & $response.location.path &
-            " line=" & $response.location.line)
-          # Batch the calltrace + state store writes so the parallel
-          # ViewModels' autoLoad effects fire at most once per move.
-          # Without batching each write schedules its own observer
-          # invalidation, producing several backend round-trips that can
-          # clobber the store mid-render and leave Playwright with stale
-          # locators (the python/ruby sudoku navigation regression).
-          let rrTicks = response.location.rrTicks
-          let path = response.location.path
-          let line = response.location.line
-          let sourceGeneration = response.location.sourceGeneration
-          let sourceDigest = response.location.sourceDigest
-          let rawResponse = response.toJs
-          let geidValue = rawResponse["geid"]
-          let currentGeidValue = rawResponse["currentGeid"]
-          let locationGeidValue = response.location.toJs["geid"]
-          let geid =
-            if not jsMissing(geidValue):
-              some(geidValue.to(int).uint64)
-            elif not jsMissing(currentGeidValue):
-              some(currentGeidValue.to(int).uint64)
-            elif not jsMissing(locationGeidValue):
-              some(locationGeidValue.to(int).uint64)
-            else:
-              none(uint64)
-          isoBatch.batch proc() =
-            state.syncStoreDebuggerPosition(
-              rrTicks, path, line, sourceGeneration, sourceDigest)
-            if geid.isSome and not activeSessionVM.isNil:
-              activeSessionVM.store.updateCurrentGeid(geid)
-            # The stop's whole location, which the editor places its
-            # execution line from (`ReplayDataStore.stop`).
-            if not activeSessionVM.isNil:
-              activeSessionVM.store.applyStopLocation(
-                parseJsonFromJsObject(rawResponse))
+    # -----------------------------------------------------------------
+    # Direct viewsApi subscriptions: bypass the component mediator
+    # routing so the ViewModel store receives data even when the
+    # component-level subscriptions are not yet wired up (the mediator
+    # routing between early-registered components and viewsApi is
+    # order-dependent and can miss events).
+    # -----------------------------------------------------------------
+    cdebug "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
 
-          if not data.ui.status.isNil:
-            cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
-            data.ui.status.stopSignal = response.stopSignal
-            data.ui.status.location = response.location
-            data.ui.status.state.stableBusy = false
-            inc data.ui.status.completeMoveId
-            data.ui.status.redraw()
+    # The locals answer's direct subscription, and the request tracking
+    # that lets it tell which request each answer is for.
+    state.wireLocalsAnswers(data.viewsApi)
+
+    data.viewsApi.subscribe(CtCompleteMove,
+      proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+        cdebug ("[PIPELINE] viewsApi.CtCompleteMove: rrTicks=" &
+          $response.location.rrTicks & " file=" & $response.location.path &
+          " line=" & $response.location.line)
+        # Batch the calltrace + state store writes so the parallel
+        # ViewModels' autoLoad effects fire at most once per move.
+        # Without batching each write schedules its own observer
+        # invalidation, producing several backend round-trips that can
+        # clobber the store mid-render and leave Playwright with stale
+        # locators (the python/ruby sudoku navigation regression).
+        let rrTicks = response.location.rrTicks
+        let path = response.location.path
+        let line = response.location.line
+        let sourceGeneration = response.location.sourceGeneration
+        let sourceDigest = response.location.sourceDigest
+        let rawResponse = response.toJs
+        let geidValue = rawResponse["geid"]
+        let currentGeidValue = rawResponse["currentGeid"]
+        let locationGeidValue = response.location.toJs["geid"]
+        let geid =
+          if not jsMissing(geidValue):
+            some(geidValue.to(int).uint64)
+          elif not jsMissing(currentGeidValue):
+            some(currentGeidValue.to(int).uint64)
+          elif not jsMissing(locationGeidValue):
+            some(locationGeidValue.to(int).uint64)
           else:
-            # Stays at ERROR.  The "it just arrived early"
-            # reading of this branch does not survive checking: the only
-            # thing that registers this subscription is
-            # `configureMiddleware`, and both of its call sites
-            # (`onTraceLoaded`, `onNoTrace`) run strictly after
-            # `createUIComponents`, which constructs `data.ui.status`
-            # unconditionally.  So a `CtCompleteMove` cannot reach this
-            # handler before the status bar exists on the ordinary path,
-            # and a clean trace open reaches this branch ZERO times
-            # (measured off the `CODETRACER_TEST_CONSOLE_DUMP_PATH` dump).
-            #
-            # It therefore costs no log noise to keep, and what it would
-            # report is real: `data.ui` was rebuilt without its status
-            # component (`renderer.resetLayoutState` replaces `data.ui`
-            # wholesale) or a session switch left a session's chrome
-            # unbuilt.  The symptom is a status bar frozen on a stale
-            # location with nothing else in the log to say why.
-            cerror "[PIPELINE] viewsApi.CtCompleteMove: status component is nil")
+            none(uint64)
+        isoBatch.batch proc() =
+          state.syncStoreDebuggerPosition(
+            rrTicks, path, line, sourceGeneration, sourceDigest)
+          if geid.isSome and not activeSessionVM.isNil:
+            activeSessionVM.store.updateCurrentGeid(geid)
+          # The stop's whole location, which the editor places its
+          # execution line from (`ReplayDataStore.stop`).
+          if not activeSessionVM.isNil:
+            activeSessionVM.store.applyStopLocation(
+              parseJsonFromJsObject(rawResponse))
 
-      # The standalone isonim_app shell remains disabled here because it would
-      # create a duplicate DOM tree in #isonim-app. The per-panel mounts in
-      # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
-      # rendering path and mount directly into GoldenLayout containers.
+        if not data.ui.status.isNil:
+          cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
+          data.ui.status.stopSignal = response.stopSignal
+          data.ui.status.location = response.location
+          data.ui.status.state.stableBusy = false
+          inc data.ui.status.completeMoveId
+          data.ui.status.redraw()
+        else:
+          # Stays at ERROR.  The "it just arrived early"
+          # reading of this branch does not survive checking: the only
+          # thing that registers this subscription is
+          # `configureMiddleware`, and both of its call sites
+          # (`onTraceLoaded`, `onNoTrace`) run strictly after
+          # `createUIComponents`, which constructs `data.ui.status`
+          # unconditionally.  So a `CtCompleteMove` cannot reach this
+          # handler before the status bar exists on the ordinary path,
+          # and a clean trace open reaches this branch ZERO times
+          # (measured off the `CODETRACER_TEST_CONSOLE_DUMP_PATH` dump).
+          #
+          # It therefore costs no log noise to keep, and what it would
+          # report is real: `data.ui` was rebuilt without its status
+          # component (`renderer.resetLayoutState` replaces `data.ui`
+          # wholesale) or a session switch left a session's chrome
+          # unbuilt.  The symptom is a status bar frozen on a stale
+          # location with nothing else in the log to say why.
+          cerror "[PIPELINE] viewsApi.CtCompleteMove: status component is nil")
 
-    # SUBSCRIBE THE COMPONENTS THAT ARE NOT SUBSCRIBED YET, and only those.
-    #
-    # This loop used to call `register` on every component in the mapping,
-    # reusing `component.api` when one was already there. `register` is purely
-    # ADDITIVE — `Component.register` calls `api.subscribe` once per event
-    # kind, `subscribe` appends to `m.handlers[kind]`, and because a component
-    # mediator is `isRemote` it also emits `CtSubscribe`, which appends the
-    # mediator to `data.viewsApi.subscribers[kind]`. So re-registering a
-    # component that was already registered doubles BOTH lists, and one
-    # `emit` then fans out to two subscriber entries, each of which runs two
-    # handlers.
-    #
-    # MEASURED, in a browser, on the assembled web bundle: a single
-    # `viewsApi.emit(CtNotification, ...)` reached `StatusComponent.onNotification`
-    # FOUR times — `subscribers: 2`, then `handlers: 2` on each delivery. The
-    # user-visible form was a report of "3 duplicate notifications" on
-    # noirstudio.dev, three rather than four only because
-    # `ui/status.nim`'s `NOTIFICATION_LIMIT` caps the stack at three.
-    #
-    # IT WAS NEVER ONLY THE NOTIFICATIONS. Counting `subscribe:` per mediator
-    # across one `/noir` load, five mediators subscribe to anything and THREE
-    # of them had a duplicated event kind:
-    #
-    #   Debug #0         CtCompleteMove x2
-    #   Status #0        InternalStatusUpdate x2, CtCompleteMove x2,
-    #                    CtNotification x2
-    #   RequestPanel #0  CtUpdatedHttpRequests x2
-    #
-    # So every debugger step ran the Debug and Status move handlers twice and
-    # every HTTP-request delta was folded into the Request panel twice. The
-    # notification stack is simply the one subscriber that APPENDS to a list
-    # on each delivery instead of assigning state, so it is where the
-    # duplication became visible rather than merely wasteful. After this
-    # change the same measurement reports zero duplicated kinds and the status
-    # bar's coalesced render requests drop from 14 to 11 for an identical
-    # load.
-    #
-    # This is the same defect family as #612, arriving through a different
-    # door: that one was dead components left subscribed, this one is live
-    # components subscribed twice.
-    #
-    # FIXED HERE RATHER THAN BY DE-DUPLICATING THE NOTIFICATION LIST, because
-    # a filter over the toast stack would hide the duplication and leave
-    # Debug and RequestPanel still running twice.
-    #
-    # The guard is the invariant `types.registerComponent` already enforces
-    # (`component.api.isNil`) and that `Component.unregister` already states:
-    # "`registerComponent` skips components that already carry an `api`". A
-    # component that was torn down has had `api` set back to nil by
-    # `unregister`, so it is still picked up here — which is the case this
-    # loop exists for: components built before `data.viewsApi` existed.
-    for content, components in data.ui.componentMapping:
-      for i, component in components:
-        if not component.api.isNil:
-          continue
-        component.register(setupLocalViewToMiddlewareApi(
-          cstring(fmt"{content} #{component.id} api"), data.viewsApi))
+    # The standalone isonim_app shell remains disabled here because it would
+    # create a duplicate DOM tree in #isonim-app. The per-panel mounts in
+    # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
+    # rendering path and mount directly into GoldenLayout containers.
 
-    # Replay the last known debugger position so that newly-created
-    # VMs (which start with rrTicks=0) learn the current position.
-    # CtCompleteMove may have already fired before the VMs were created
-    # and before register() wired up the component subscriptions.
-    # InternalLastCompleteMove asks the middleware to re-emit CtCompleteMove,
-    # which triggers onCompleteMove -> loadLines -> CtLoadCalltraceSection
-    # now that all subscriptions are in place.
-    if not activeSessionVM.isNil:
-      # Immediate replay: catches the case where CtCompleteMove already
-      # fired and lastCompleteMove is set in the middleware.
-      cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)"
+  # SUBSCRIBE THE COMPONENTS THAT ARE NOT SUBSCRIBED YET, and only those.
+  #
+  # This loop used to call `register` on every component in the mapping,
+  # reusing `component.api` when one was already there. `register` is purely
+  # ADDITIVE — `Component.register` calls `api.subscribe` once per event
+  # kind, `subscribe` appends to `m.handlers[kind]`, and because a component
+  # mediator is `isRemote` it also emits `CtSubscribe`, which appends the
+  # mediator to `data.viewsApi.subscribers[kind]`. So re-registering a
+  # component that was already registered doubles BOTH lists, and one
+  # `emit` then fans out to two subscriber entries, each of which runs two
+  # handlers.
+  #
+  # MEASURED, in a browser, on the assembled web bundle: a single
+  # `viewsApi.emit(CtNotification, ...)` reached `StatusComponent.onNotification`
+  # FOUR times — `subscribers: 2`, then `handlers: 2` on each delivery. The
+  # user-visible form was a report of "3 duplicate notifications" on
+  # noirstudio.dev, three rather than four only because
+  # `ui/status.nim`'s `NOTIFICATION_LIMIT` caps the stack at three.
+  #
+  # IT WAS NEVER ONLY THE NOTIFICATIONS. Counting `subscribe:` per mediator
+  # across one `/noir` load, five mediators subscribe to anything and THREE
+  # of them had a duplicated event kind:
+  #
+  #   Debug #0         CtCompleteMove x2
+  #   Status #0        InternalStatusUpdate x2, CtCompleteMove x2,
+  #                    CtNotification x2
+  #   RequestPanel #0  CtUpdatedHttpRequests x2
+  #
+  # So every debugger step ran the Debug and Status move handlers twice and
+  # every HTTP-request delta was folded into the Request panel twice. The
+  # notification stack is simply the one subscriber that APPENDS to a list
+  # on each delivery instead of assigning state, so it is where the
+  # duplication became visible rather than merely wasteful. After this
+  # change the same measurement reports zero duplicated kinds and the status
+  # bar's coalesced render requests drop from 14 to 11 for an identical
+  # load.
+  #
+  # This is the same defect family as #612, arriving through a different
+  # door: that one was dead components left subscribed, this one is live
+  # components subscribed twice.
+  #
+  # FIXED HERE RATHER THAN BY DE-DUPLICATING THE NOTIFICATION LIST, because
+  # a filter over the toast stack would hide the duplication and leave
+  # Debug and RequestPanel still running twice.
+  #
+  # The guard is the invariant `types.registerComponent` already enforces
+  # (`component.api.isNil`) and that `Component.unregister` already states:
+  # "`registerComponent` skips components that already carry an `api`". A
+  # component that was torn down has had `api` set back to nil by
+  # `unregister`, so it is still picked up here — which is the case this
+  # loop exists for: components built before `data.viewsApi` existed.
+  for content, components in data.ui.componentMapping:
+    for i, component in components:
+      if not component.api.isNil:
+        continue
+      component.register(setupLocalViewToMiddlewareApi(
+        cstring(fmt"{content} #{component.id} api"), data.viewsApi))
+
+  # Replay the last known debugger position so that newly-created
+  # VMs (which start with rrTicks=0) learn the current position.
+  # CtCompleteMove may have already fired before the VMs were created
+  # and before register() wired up the component subscriptions.
+  # InternalLastCompleteMove asks the middleware to re-emit CtCompleteMove,
+  # which triggers onCompleteMove -> loadLines -> CtLoadCalltraceSection
+  # now that all subscriptions are in place.
+  if not activeSessionVM.isNil:
+    # Immediate replay: catches the case where CtCompleteMove already
+    # fired and lastCompleteMove is set in the middleware.
+    cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)"
+    data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
+    # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
+    # typically arrives 1-5 seconds after configureMiddleware.  This
+    # retry ensures VMs learn the position even when the backend
+    # responds after the immediate replay above found nothing.
+    discard windowSetTimeout(proc() =
+      cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
       data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
-      # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
-      # typically arrives 1-5 seconds after configureMiddleware.  This
-      # retry ensures VMs learn the position even when the backend
-      # responds after the immediate replay above found nothing.
-      discard windowSetTimeout(proc() =
-        cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
-        data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
-      , 3_000)
+    , 3_000)
 
-    # discard windowSetTimeout(proc =
-    #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
+  # discard windowSetTimeout(proc =
+  #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
 
-  # once:
-    # configureMiddleware()
+# once:
+  # configureMiddleware()
 
 cast[js](dom.document).onreadystatechange = onReady
 
@@ -3102,40 +3099,38 @@ proc onTraceLoaded(
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
-  when not defined(ctInExtension):
-    if not middlewareConfigured:
-      configureMiddleware()
-      middlewareConfigured = true
-    attachLoadedTrace($data.trace.outputFolder)
-    # A session started with a diff (`ct run --diff`): its diff flow is the
-    # session's to load, once (the stop loader's `spDiffFlow`), not the
-    # editor's redraw hook's.
-    if not data.startOptions.diff.isNil and not activeSessionVM.isNil and
-       not activeSessionVM.flowVM.isNil:
-      activeSessionVM.flowVM.diffSession.val = true
+  if not middlewareConfigured:
+    configureMiddleware()
+    middlewareConfigured = true
+  attachLoadedTrace($data.trace.outputFolder)
+  # A session started with a diff (`ct run --diff`): its diff flow is the
+  # session's to load, once (the stop loader's `spDiffFlow`), not the
+  # editor's redraw hook's.
+  if not data.startOptions.diff.isNil and not activeSessionVM.isNil and
+     not activeSessionVM.flowVM.isNil:
+    activeSessionVM.flowVM.diffSession.val = true
 
   dapSessionSelectionReady = true
   flushPendingDapSessionSelections()
 
   data.switchToDebug()
   renderer.requestInitialPanelData(data)
-  when not defined(ctInExtension):
-    # The status bar is global chrome outside GoldenLayout. During startup the
-    # debugger service can receive the first CtCompleteMove before the status
-    # host has settled, so retry a few times using the debugger service's last
-    # known location. This preserves the old "data.redraw after complete move"
-    # startup effect without depending on the ViewModel subscription order.
-    var statusRefreshAttempts = 0
-    proc refreshStatusFromDebugger() =
-      inc statusRefreshAttempts
-      if not data.ui.status.isNil:
-        data.ui.status.location = data.services.debugger.location
-        data.ui.status.stopSignal = data.services.debugger.stopSignal
-        data.ui.status.state.stableBusy = data.status.stableBusy
-        data.ui.status.redraw()
-      if statusRefreshAttempts < 10:
-        discard windowSetTimeout(refreshStatusFromDebugger, 500)
-    discard windowSetTimeout(refreshStatusFromDebugger, 0)
+  # The status bar is global chrome outside GoldenLayout. During startup the
+  # debugger service can receive the first CtCompleteMove before the status
+  # host has settled, so retry a few times using the debugger service's last
+  # known location. This preserves the old "data.redraw after complete move"
+  # startup effect without depending on the ViewModel subscription order.
+  var statusRefreshAttempts = 0
+  proc refreshStatusFromDebugger() =
+    inc statusRefreshAttempts
+    if not data.ui.status.isNil:
+      data.ui.status.location = data.services.debugger.location
+      data.ui.status.stopSignal = data.services.debugger.stopSignal
+      data.ui.status.state.stableBusy = data.status.stableBusy
+      data.ui.status.redraw()
+    if statusRefreshAttempts < 10:
+      discard windowSetTimeout(refreshStatusFromDebugger, 500)
+  discard windowSetTimeout(refreshStatusFromDebugger, 0)
 
   if not data.startOptions.isInstalled and not response.dontAskAgain and not data.config.skipInstall:
     data.viewsApi.installMessage()
@@ -3599,10 +3594,9 @@ proc onNoTrace(
   data.refreshCommandPaletteMenuIndex()
   data.refreshCommandPaletteFileIndex()
 
-  when not defined(ctInExtension):
-    if not middlewareConfigured:
-      configureMiddleware()
-      middlewareConfigured = true
+  if not middlewareConfigured:
+    configureMiddleware()
+    middlewareConfigured = true
 
   # Check if coming from welcome screen (where layout was already initialized)
   let wasFromWelcomeScreen = not data.ui.layout.isNil
@@ -3630,11 +3624,11 @@ proc onNoTrace(
 
   # The welcome/new-tab handoff can reuse already-mounted panel instances.
   # Resync the panels against the freshly loaded edit-mode services so the
-  # Files and VCS panes reflect the selected folder immediately.
+  # Files and VCS panes reflect the selected folder immediately; a mounted
+  # VCS pane follows its ViewModel, which the refresh resyncs.
   filesystem.refreshIsoNimFilesystemPanel()
   for _, component in data.ui.componentMapping[Content.VCS]:
     vcs.resetAndRefreshVCS(VCSComponent(component))
-    vcs.tryMountIsoNimVCSPanel(component.id)
 
   # Open the file AFTER layout is initialized. Folder edit mode has no
   # explicit path, so seed the editor from the indexed project files instead
@@ -5834,25 +5828,12 @@ data.actions[ClientAction.aReportProblem] = proc(actionData: JsObject) =
     data.ui.status.showBugReport = not data.ui.status.showBugReport
     data.ui.status.redraw()
 
-when defined(ctWeb) and not defined(ctInExtension):
-  # `not defined(ctInExtension)` for the same reason the other two ENTRY arms
-  # carry it — `when not defined(ctInExtension) and not defined(ctWeb)` (the
-  # dev server) and `when defined(ctInExtension)` (the extension), both below —
-  # and it is a structural point rather than a tidy-up: the three entry arms
-  # must be MUTUALLY EXCLUSIVE. The defect this arm was added to fix IS an
-  # entry-arm structure problem: "not Electron" was written as though it meant
-  # "the browsersync dev server", the web build fell into it by default, and
-  # the page could not start. Three arms that are not mutually exclusive is the
-  # same mistake with the sign flipped. No build defines both `ctWeb` and
-  # `ctInExtension` today, which is exactly why it is worth closing — one
-  # clause makes the property hold by construction rather than by nobody having
-  # tried the combination.
-  #
-  # (The `when defined(ctWeb)` / `when defined(ctInExtension)` arms at the top
-  # of this file are IMPORT arms, not entry arms, and are deliberately left
-  # alone. Two import arms both selecting is harmless — it brings in names, it
-  # does not run anything — so exclusivity is only load-bearing here, where the
-  # arm decides which entry point starts the application.)
+when defined(ctWeb):
+  # The entry arms must be MUTUALLY EXCLUSIVE: this one and the dev server's
+  # `when not defined(ctWeb)` below. The defect this arm was added to fix was
+  # an entry-arm structure problem: "not Electron" was written as though it
+  # meant "the browsersync dev server", the web build fell into it by default,
+  # and the page could not start.
   #
   # The entry layer, imported HERE and not in the module's import list, because
   # it is web-only: `ui/web_entry_surface.nim` reads `window.location` and
@@ -7175,7 +7156,7 @@ when defined(ctWeb) and not defined(ctInExtension):
 # the change here: everything below assumes a page that loaded socket.io and
 # had `frontendSocketPort` / `frontendSocketParameters` injected into it by
 # `views/server_index.ejs`, which is true of `just serve` and false of a CDN.
-when not defined(ctInExtension) and not defined(ctWeb):
+when not defined(ctWeb):
   if not inElectron:
     var io {.importc.}: proc(address: cstring, options: JsObject): js
     var frontendSocketPort {.importc.}: int
@@ -7391,10 +7372,6 @@ when not defined(ctInExtension) and not defined(ctWeb):
 
     fetchDescriptorThen(proc() = startIPC())
 
-when defined(ctInExtension):
-  once:
-    # configureIPC(data)
-    configure(data)
 
 if inElectron:
   once:

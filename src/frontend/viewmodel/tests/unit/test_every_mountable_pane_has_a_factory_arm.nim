@@ -272,10 +272,12 @@ suite "the factory mounts every mountable pane":
 
     # And the deletion took only what it claimed: every other arm survives
     # it, so the missing count is a measurement and not an artefact of a
-    # butchered source.
+    # butchered source. The other arms are the panes not yet on the panel
+    # host, fewer with each pane converted; one is enough for the check to
+    # mean something.
     let survivors = layoutSource().dispatchArms().filterIt(
       it notin ArmsAddedByThisChange and it notin panelHostKinds())
-    counted survivors.len >= 3
+    counted survivors.len >= 1
     counted survivors.allIt(it in dispatchArms(preFix))
 
   test "the desktop-blank panes are dispatched, each by name; the retired one is not":

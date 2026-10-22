@@ -73,7 +73,3 @@ proc noteEditorSourceChanged*(path: cstring) =
 method register*(self: ConstraintsComponent, api: MediatorWithSubscribers) =
   self.api = api
   initConstraintsVM()
-
-proc registerConstraintsComponent*(component: ConstraintsComponent,
-                                   api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)

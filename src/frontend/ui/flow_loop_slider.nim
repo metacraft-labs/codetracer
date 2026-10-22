@@ -94,14 +94,8 @@ proc ensureFlowLoopSlider*(element: Node; maxIteration, iteration: int;
   ## `requireMeasurable` is that last refusal, and it is a parameter because
   ## lesson 1 is only half a rule on its own. "Never construct at zero width"
   ## is safe exactly when somebody comes BACK — and only a host that has a
-  ## re-scheduling path can. `ui/flow.nim`'s extension host has none: its
-  ## `resizeFlowSlider` is reachable only from `doRenderActiveLoopIterationValues`
-  ## behind `if not data.self.inExtension`, from `resizeEditorHandler`, which
-  ## needs an `editorUI.monacoEditor` the extension does not have, and from
-  ## `ui/editor.nim`. So refusing there is refusing forever, and the extension
-  ## would simply never grow a slider. `ui/flow.ensureLoopSlider` therefore
-  ## passes `not self.inExtension`, which is exactly the branch the code had
-  ## before the construction moved into this module.
+  ## re-scheduling path can; `ui/flow.ensureLoopSlider` has one
+  ## (`resizeFlowSlider`) and passes true.
   if element.isNil:
     return false
   if maxIteration <= FlowLoopSliderFirstIteration:

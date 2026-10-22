@@ -41,20 +41,20 @@ trap 'rm -rf "$scratch"' EXIT
 # (`index/mode_default_layout.modeDefaultLayout`), so the generator runs it
 # rather than re-implementing it.
 nim js -d:nodejs --hints:off --warnings:off --verbosity:0 \
-  --nimcache:"$scratch/nimcache" -o:"$scratch/generate_default_layout.js" \
-  src/frontend/headless_app/generate_default_layout.nim >"$scratch/build.log" 2>&1 || {
-    echo "FAIL: the default-layout generator does not build:" >&2
-    tail -20 "$scratch/build.log" >&2
-    exit 1
-  }
+	--nimcache:"$scratch/nimcache" -o:"$scratch/generate_default_layout.js" \
+	src/frontend/headless_app/generate_default_layout.nim >"$scratch/build.log" 2>&1 || {
+	echo "FAIL: the default-layout generator does not build:" >&2
+	tail -20 "$scratch/build.log" >&2
+	exit 1
+}
 
 if ! node "$scratch/generate_default_layout.js" --check=.; then
-  mkdir -p "$scratch/out/src/config" "$scratch/out/src/frontend/headless_app"
-  node "$scratch/generate_default_layout.js" --out="$scratch/out"
-  for f in src/config/default_layout.json \
-           src/frontend/headless_app/shared_default_layout.generated.json; do
-    diff -u "$f" "$scratch/out/$f" | head -40 >&2 || true
-  done
-  echo "remedy: just generate-default-layout" >&2
-  exit 1
+	mkdir -p "$scratch/out/src/config" "$scratch/out/src/frontend/headless_app"
+	node "$scratch/generate_default_layout.js" --out="$scratch/out"
+	for f in src/config/default_layout.json \
+		src/frontend/headless_app/shared_default_layout.generated.json; do
+		diff -u "$f" "$scratch/out/$f" | head -40 >&2 || true
+	done
+	echo "remedy: just generate-default-layout" >&2
+	exit 1
 fi

@@ -1913,6 +1913,10 @@ proc followVcsViewport(r: GpuiRenderer)
   ## Forward-declared for `drawArrangement` and the in-hand scroll gestures;
   ## defined beside the VCS refresh it shares `gVcsDirectory` with.
 
+proc followListViewports(r: GpuiRenderer)
+  ## Forward-declared for `drawArrangement`; defined beside the panes'
+  ## redraws it calls.
+
 proc drawArrangement(r: GpuiRenderer): bool =
   ## Lay the window out from the layout it should show NOW — the committed
   ## one, or, while a divider is dragged, the committed one with the pending
@@ -1964,6 +1968,7 @@ proc drawArrangement(r: GpuiRenderer): bool =
   # terminal's rule for the source pane, Layout-ViewModel §4.3a).
   if not gGestures.active:
     followVcsViewport(r)
+    followListViewports(r)
   if not gRoot.isNil:
     drawOverlay(r)
     drawTopBar(r)
@@ -2666,27 +2671,59 @@ proc wireSearch(s: HeadlessDebugSession)
 # PLAT-51: the Event Log's and the Call Trace's scrollbar scrubbers
 # ---------------------------------------------------------------------------
 
-proc visibleBodyOf(kind: PaneKind): PxRect =
-  ## The pane's body in window pixels when it is the visible tab of a drawn
-  ## box, else a zero rectangle.
-  let i = gGeom.tabsNodeOfPane($kind)
+proc visibleBodyIn(g: WindowGeometry; kind: PaneKind): PxRect =
+  ## The pane's body in `g`'s window pixels when it is the visible tab of a
+  ## drawn box, else a zero rectangle.
+  let i = g.tabsNodeOfPane($kind)
   if i < 0:
     return PxRect()
-  let n = gGeom.nodes[i]
+  let n = g.nodes[i]
   if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
      n.panes[n.active] != $kind:
     return PxRect()
   n.body
 
-proc eventLogRows(): int =
-  ## The rows the event log's body shows: between its toolbar and header and
+proc visibleBodyOf(kind: PaneKind): PxRect =
+  ## The pane's body in the drawn window (`visibleBodyIn` over `gGeom`).
+  visibleBodyIn(gGeom, kind)
+
+func eventLogRowsIn(body: PxRect): int =
+  ## The rows an event-log body shows: between its toolbar and header and
   ## its pager, at the desktop's pitch.
-  let body = visibleBodyOf(paneEventLog)
   max(1, int(floor(float(body.h - 8 - EventChromeAbovePx - EventChromeBelowPx) /
                    EventRowPitch)))
 
+proc eventLogRows(): int =
+  eventLogRowsIn(visibleBodyOf(paneEventLog))
+
 proc callTraceRows(): int =
   callTraceRowsIn(visibleBodyOf(paneCalltrace))
+
+proc reportListViewports(session: HeadlessDebugSession;
+                         g: WindowGeometry): tuple[calltrace, events: bool] =
+  ## THE CALL TRACE AND THE EVENT LOG REPORT WHAT THEY SHOW, from the window
+  ## geometry `g` (Viewport-Driven-Loading V2). The open reads one row of
+  ## each (`native_host.loadRecordingPanes`), and a windowed pane asks for
+  ## nothing until its view gives it a viewport — so without this report the
+  ## call trace drew only `<toplevel>`, and the event log its first event,
+  ## until the reader scrolled. The call trace reports through `CalltraceVM`
+  ## at the row it is scrolled to (`gpui_host.pageCalltrace`); the event log
+  ## reports the window from the row it shows first through `EventLogVM`
+  ## (`pageEventLog`, whose request names the stop so the answer also says
+  ## which row is "now"). A pane that is
+  ## not the visible tab of its box reports nothing and keeps its last
+  ## window, as the desktop's panel host does for a hidden pane. Answers
+  ## which of the two read a new window.
+  if session.isNil:
+    return
+  let c = visibleBodyIn(g, paneCalltrace)
+  if c.w > 0 and c.h > 0:
+    result.calltrace = session.pageCalltrace(callTraceRowsIn(c), 0, c.w,
+                                             CallIndentPx).loaded
+  let e = visibleBodyIn(g, paneEventLog)
+  if e.w > 0 and e.h > 0:
+    result.events = session.pageEventLog(
+      session.session.store.eventLog.loadedStart.val, eventLogRowsIn(e)).loaded
 
 proc eventLogScrubber(): ScrubberModel =
   ## The WHOLE log (the engine's count), the window's first row — the pane
@@ -5860,6 +5897,28 @@ proc followVcsViewport(r: GpuiRenderer) =
         traceGesture("vcs history read to " & $vm.commits.val.len)
       break
 
+proc followListViewports(r: GpuiRenderer) =
+  ## The call trace and the event log follow the bodies they were laid out
+  ## with (`reportListViewports`) after each committed arrangement — a
+  ## resize, a moved divider, a tab brought to the front — and a pane that
+  ## read a new window is drawn again from it.
+  let loaded = reportListViewports(gSession, gGeom)
+  if loaded.calltrace:
+    inc gCalltraceLoads
+    # A selected call STAYS selected: it names a trace index, and the
+    # debugger has not moved (a move selects again, `refreshReplayWindow`).
+    # Selecting again over the new section would CLEAR it whenever the
+    # reader had scrolled away from the current call, since a section that
+    # does not hold it answers `none` (`currentCallInSectionOf`). Only a
+    # pane with nothing selected asks again — one that was a hidden tab at
+    # the open, whose one-row section could not show the current call.
+    if gSession.session.calltraceVM.selectedEntry.val.isNone:
+      gSession.selectCurrentCall()
+    redrawCalltrace(r)
+  if loaded.events:
+    inc gEventLogLoads
+    redrawPaneOf(r, paneEventLog)
+
 proc vcsTick() {.cdecl.} =
   ## The first trigger: every `VCSRefreshIntervalMs` the loop calls this
   ## (`gpui_set_tick`, on the loop's own thread).
@@ -8988,7 +9047,8 @@ proc runOpen(cmd: GpuiCommand): int =
   # is drawn (`drawTerminalPane`), as the terminal's does.
   session.openTerminalOutput()
   discard session.loadStopPanes()
-  session.selectCurrentCall()
+  # The current call is selected once the call trace holds the section its
+  # pane shows (`reportListViewports`, with the first frame's geometry).
   # PLAT-37. THE BREAKPOINT IS RESOLVED AGAINST THE RECORDING'S OWN SOURCE,
   # never against a literal. `--replay-ops=setBreakpoint@<row>` names an
   # offset into the FIRST ROW THE EDITOR ACTUALLY DREW, which is why the
@@ -9084,6 +9144,11 @@ proc runOpen(cmd: GpuiCommand): int =
     syncInHandRows(g)
     let e = g.tabsNodeOfPane($paneEditor)
     if e >= 0: editorPaneHeightPx = g.nodes[e].body.h
+    # The call trace and the event log read the windows their panes show
+    # (the open read one row of each), and the current call is selected
+    # in the section the call trace now holds.
+    discard reportListViewports(session, g)
+    session.selectCurrentCall()
   # PLAT-70: the shown file's document, so the editor's horizontal view is
   # its EXACT content width from the first frame (Horizontal-Overflow §4.1).
   gSourceService = sourceService

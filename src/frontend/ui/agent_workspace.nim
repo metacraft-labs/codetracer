@@ -37,10 +37,9 @@ from ../viewmodel/viewmodels/agent_workspace_vm import
 when defined(js):
   from isonim/web/dom_api as isonim_dom_api import nil
   import ../viewmodel/views/isonim_agent_workspace_view
-  when not defined(ctInExtension):
-    import isonim/web/web_renderer
-    import ./panel_host
-    from ../viewmodel/session_vm import SessionViewModel
+  import isonim/web/web_renderer
+  import ./panel_host
+  from ../viewmodel/session_vm import SessionViewModel
 
 # ---------------------------------------------------------------------------
 # Monaco FFI helpers (similar to deepreview.nim but prefixed to avoid
@@ -419,7 +418,7 @@ proc toggleCoverageOverlay(self: AgentWorkspaceComponent) =
   self.updateDecorations()
   self.syncLegacyAgentWorkspaceIntoVM()
 
-when defined(js) and not defined(ctInExtension):
+when defined(js):
   proc hostComponentId(host: isonim_dom_api.Element): int {.importjs:
     "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
     ## The `<id>` of the host's `agentWorkspaceComponent-<id>`.

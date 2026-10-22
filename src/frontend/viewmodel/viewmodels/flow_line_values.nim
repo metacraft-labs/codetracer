@@ -52,3 +52,23 @@ proc flowLineValues*(window: FlowLayoutWindow; rrTicks: int;
     let text = valuesText(values, maxValues)
     if text.len > 0:
       result.add FlowLineValue(line: group.line, text: text)
+
+type
+  FlowLoopLine* = object
+    line*: int
+      ## 1-based line the loop's control is attached to.
+    locationInside*: bool
+      ## Whether the debugger's line is in the loop's body, so the editor
+      ## shows the control there open.
+
+proc flowLoopLines*(window: FlowLayoutWindow; debuggerLine: int):
+    seq[FlowLoopLine] =
+  ## The window's loops, each where its control goes. Loop 0 is the function
+  ## itself (`FlowLayoutWindow.loops[0]`), not a loop the user steps through.
+  for i in 1 ..< window.loops.len:
+    let loop = window.loops[i]
+    if loop.registeredLine <= 0:
+      continue
+    result.add FlowLoopLine(
+      line: loop.registeredLine,
+      locationInside: debuggerLine >= loop.first and debuggerLine <= loop.last)
