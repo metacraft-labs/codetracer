@@ -599,6 +599,33 @@ else
 		"expected: $actual_build_inputs" "actual: $path_free_inputs"
 fi
 
+# The selector runs in a raw `shell: bash` step BEFORE the dev shell, and on
+# the nix-darwin runners that PATH has no `grep` and no `sed`: written with
+# them, the selector died there with `grep: command not found` (codetracer-pm
+# issues/2026-10-22-provision-repro-lock-siblings-runs-grep-and-sed-outside-
+# the-dev-shell-on-darwin.md). So it is run again with a PATH holding nothing
+# but bash -- once with the lock named, once relying on its default lock path
+# -- and must give the same answer. A run on a host that does have grep and
+# sed cannot see this; the stripped PATH is what makes the check portable.
+minimal_path_dir="$(mktemp -d)"
+ln -s "$(command -v bash)" "$minimal_path_dir/bash"
+minimal_path_named="$(env -i PATH="$minimal_path_dir" "$minimal_path_dir/bash" \
+	"$BUILD_INPUT_SELECTOR" "$REPRO_LOCK" 2>&1)" || true
+minimal_path_default="$(env -i PATH="$minimal_path_dir" "$minimal_path_dir/bash" \
+	"$BUILD_INPUT_SELECTOR" 2>&1)" || true
+rm -rf "$minimal_path_dir"
+if [ "$minimal_path_named" = "$actual_build_inputs" ] &&
+	[ "$minimal_path_default" = "$actual_build_inputs" ]; then
+	ok "the build-input selector needs nothing but bash (the pre-dev-shell PATH on nix-darwin)"
+else
+	fail "the build-input selector needs nothing but bash (the pre-dev-shell PATH on nix-darwin)" \
+		"provision-repro-lock-siblings runs it before 'nix develop', where a" \
+		"nix-darwin runner has no grep or sed" \
+		"expected:              $actual_build_inputs" \
+		"actual (lock named):   $minimal_path_named" \
+		"actual (default lock): $minimal_path_default"
+fi
+
 # Every build input is cloned by a step that is deliberately given NO
 # credential (see the comment on that step in the action), so each one must be
 # a public repository. The lock records that: a private build input would fail
@@ -1996,7 +2023,8 @@ echo
 # number grows by one and not by two.
 # 32 -> 34 (2026-10-22): every build input is public, and section 6 (the
 # ci-contract-suites lane runs every suite).
-readonly EXPECTED_ASSERTIONS=34
+# 34 -> 35: the build-input selector runs on a bash-only PATH.
+readonly EXPECTED_ASSERTIONS=35
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

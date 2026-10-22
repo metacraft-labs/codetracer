@@ -150,6 +150,8 @@ runs:
         root="${GITHUB_WORKSPACE}"
         siblings_root="$(cd "${root}/.." && pwd)"
         cd "${root}"
+        # The selector uses bash builtins only: this step runs before the dev
+        # shell, and a nix-darwin runner has no grep or sed on its PATH here.
         build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
         echo "Provisioning the lock's build-input siblings: ${build_inputs}"
         nix develop .#ci --command \
