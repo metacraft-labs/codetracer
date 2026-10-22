@@ -28,6 +28,9 @@
 //! breakpoints added first, they were deleted with it and the run went to
 //! the end with no tracepoint hit (zero values).
 //!
+//! A second test repeats step 3 after a `ct/event-load`: the terminal must not
+//! depend on whether the event log or the terminal was loaded first.
+//!
 //! No mocks: the recorder records a real program, db-backend, ct-native-replay
 //! and `ct-mcr debugserver` are the shipping binaries, the client speaks DAP
 //! over stdio.  Recording under MCR's default attach needs a host with CPUID
@@ -35,11 +38,14 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
+use ct_dap_client::client::scaled;
 use ct_dap_client::test_support::{
     ExpectedTrace, TracepointTestRunner, assert_tracepoint_results_match, terminal_events_to_string,
 };
 use ct_dap_client::types::tracepoint::{RunTracepointsArg, TraceSession, Tracepoint, TracepointMode};
+use serde_json::json;
 
 mod test_harness;
 use test_harness::{Language, TestRecording};
@@ -65,9 +71,19 @@ fn tracepoint(id: usize, file: &str, line: usize, expression: &str) -> Tracepoin
     }
 }
 
-#[test]
-fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
-    let name = "c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs";
+/// What the tests of this file share: the MCR recording of `c_flow_test.c`
+/// and the program's own standard output, run natively (the oracle for the
+/// terminal).
+struct McrFixture {
+    db_backend: PathBuf,
+    source_path: PathBuf,
+    recording: TestRecording,
+    real_stdout: String,
+}
+
+/// Records `c_flow_test.c` under MCR and runs it natively.  `None` when a
+/// prerequisite is missing and the harness allows the test to skip.
+fn mcr_fixture(name: &str, trace_label: &str) -> Option<McrFixture> {
     let ct_native_replay = match test_harness::find_ct_native_replay() {
         Some(p) => p,
         None => {
@@ -76,7 +92,7 @@ fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
                 "ct-native-replay was not found",
                 "build it with `just ensure-ct-native-replay` (codetracer-native-backend sibling) or set CT_NATIVE_REPLAY_PATH",
             );
-            return;
+            return None;
         }
     };
     if !test_harness::is_mcr_available() {
@@ -85,7 +101,7 @@ fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
             "the MCR recorder CLI (ct-mcr / ct_cli / CODETRACER_CT_MCR_CMD) was not found",
             "build the MCR CLI with `just build-ct-mcr` in codetracer-native-recorder, then put ct-mcr/ct_cli on PATH or set CODETRACER_CT_MCR_CMD",
         );
-        return;
+        return None;
     }
 
     let db_backend = PathBuf::from(env!("CARGO_BIN_EXE_replay-server"));
@@ -96,7 +112,7 @@ fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
     assert_eq!(lines[RETURN_LINE - 1].trim(), "return final_result;");
     assert_eq!(lines[FOR_BODY_LINE - 1].trim(), "sum += i;");
 
-    let recording = TestRecording::create_mcr(&source_path, Language::C, "mcr-tracepoint", &ct_native_replay)
+    let recording = TestRecording::create_mcr(&source_path, Language::C, trace_label, &ct_native_replay)
         .expect("MCR recording failed");
     println!("MCR trace recorded at: {}", recording.trace_dir.display());
 
@@ -107,6 +123,26 @@ fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
         real_stdout.contains("Final: 94\n") && real_stdout.contains("for sum: 45\n"),
         "the program's arithmetic is not what this test expects: {real_stdout:?}"
     );
+    Some(McrFixture {
+        db_backend,
+        source_path,
+        recording,
+        real_stdout,
+    })
+}
+
+#[test]
+fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
+    let name = "c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs";
+    let Some(McrFixture {
+        db_backend,
+        source_path,
+        recording,
+        real_stdout,
+    }) = mcr_fixture(name, "mcr-tracepoint")
+    else {
+        return;
+    };
 
     let mut runner =
         TracepointTestRunner::new(&db_backend, &recording.trace_dir).expect("DAP init failed for MCR trace");
@@ -147,5 +183,77 @@ fn c_mcr_tracepoints_hit_every_visit_and_terminal_output_is_the_programs() {
         });
     }
     assert_tracepoint_results_match(&results, &expected).expect("tracepoint values");
+    runner.finish().expect("disconnect failed");
+}
+
+/// The terminal of a recording must not depend on which panel a client loads
+/// first (codetracer-pm issue
+/// `2026-10-12-ct-load-terminal-is-empty-after-ct-event-load-on-a-native-recording.md`).
+/// The test above loads the terminal first; this one sends `ct/event-load`
+/// (what the event log panel asks for) first, which fills the handler's full
+/// event cache, and only then `ct/load-terminal`.  The terminal must still be
+/// the program's standard output, and the standard-output writes the event
+/// list carries must be that output too: two views of one recording must not
+/// disagree.
+#[test]
+fn c_mcr_terminal_output_is_the_programs_after_event_load() {
+    let name = "c_mcr_terminal_output_is_the_programs_after_event_load";
+    let Some(McrFixture {
+        db_backend,
+        recording,
+        real_stdout,
+        ..
+    }) = mcr_fixture(name, "mcr-event-load-terminal")
+    else {
+        return;
+    };
+
+    let mut runner =
+        TracepointTestRunner::new(&db_backend, &recording.trace_dir).expect("DAP init failed for MCR trace");
+
+    // The event log first, as the event log panel asks for it.
+    let client = runner.client();
+    client
+        .send_request("ct/event-load", json!({ "start": 0, "count": 1000 }))
+        .expect("send ct/event-load");
+    let reply = client
+        .recv_response(scaled(Duration::from_secs(30)))
+        .expect("ct/event-load response");
+    assert!(reply.success, "ct/event-load failed: {:?}", reply.message);
+    let events = reply
+        .body
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let is_stdout = |e: &serde_json::Value| e.get("stdout").and_then(serde_json::Value::as_bool) == Some(true);
+    let event_writes: String = events
+        .iter()
+        .filter(|e| is_stdout(e))
+        .filter_map(|e| e.get("content").and_then(serde_json::Value::as_str))
+        .collect();
+    println!(
+        "ct/event-load: total={} events={} stdout_events={} kinds={:?}",
+        reply.body.get("total").cloned().unwrap_or_default(),
+        events.len(),
+        events.iter().filter(|e| is_stdout(e)).count(),
+        events
+            .iter()
+            .map(|e| e.get("kind").cloned().unwrap_or_default())
+            .collect::<Vec<_>>()
+    );
+
+    // Then the terminal.
+    let terminal = runner.client().load_terminal().expect("ct/load-terminal");
+    let captured = terminal_events_to_string(&terminal);
+    println!("ct/load-terminal after ct/event-load: {captured:?}");
+    assert_eq!(
+        captured, real_stdout,
+        "after ct/event-load, the recording's terminal output must still be the program's standard output"
+    );
+    assert_eq!(
+        event_writes, real_stdout,
+        "the standard-output writes ct/event-load answers must be the program's standard output"
+    );
     runner.finish().expect("disconnect failed");
 }
