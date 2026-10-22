@@ -69,7 +69,7 @@ Scope update: instead of adding a dedicated browser → backend heartbeat channe
 
 2. **Browser/E2E coverage**
    - Add Playwright/WDIO scenarios (or extend existing UI tests) that verify normal IPC traffic refreshes activity and the host shuts down after intentional silence with a short timeout.
-   - Ensure tests run with `CODETRACER_TEST_IN_BROWSER=1` and headless host launch, mirroring existing reload test setup.
+   - Ensure tests run in web mode with headless host launch, mirroring existing reload test setup: the reload test selects it per spec with `test.use({ deploymentMode: "web" })` (`CODETRACER_TEST_IN_BROWSER=1` only sets the default for specs that do not choose).
    - Tests:
      - Given the browser connects and sends routine IPC events, when observing network traffic, then those emits appear at a cadence sufficient to keep the host alive beyond the timeout.
      - Given a short idle timeout and an intentional pause (no messages), then the host process terminates and the test asserts exit code `0`.

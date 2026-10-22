@@ -107,9 +107,11 @@ export default defineConfig({
       },
     },
   ],
-  // Deployment mode (electron vs web) is controlled per-test via
-  // test.use({ deploymentMode: "web" }) or defaults to "electron".
-  // To run all tests in web mode, set CODETRACER_TEST_IN_BROWSER=1.
+  // Deployment mode (electron vs web) is the `deploymentMode` fixture option
+  // in lib/fixtures.ts. Its default comes from CODETRACER_TEST_IN_BROWSER
+  // (read by lib/deployment-mode.ts): "1" runs in web mode (ct host +
+  // chromium); unset, "" or "0" run Electron; any other value fails the run.
+  // A spec's own test.use({ deploymentMode: ... }) wins over the variable.
 
   // Single project — the ctPage fixture auto-skips RR-based tests when
   // CODETRACER_RR_BACKEND_PRESENT is not set, using language detection
