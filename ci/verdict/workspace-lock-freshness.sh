@@ -533,7 +533,7 @@ derived_lock_store() {
 		echo "::error::workspace-lock-freshness: a \`lock-store:\` input under '${WORKFLOW_DIR}' is neither 'committed' nor 'record-store' (${bad% }), so the lock CI reads cannot be determined. Pass --lock-store explicitly or fix the input." >&2
 		return 2
 	fi
-	if printf '%s\n' "$values" | grep -q -x record-store; then
+	if grep -q -x record-store <<<"$values"; then
 		echo record-store
 	else
 		echo committed

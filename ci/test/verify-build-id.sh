@@ -117,7 +117,7 @@ for host in "${hosts[@]}"; do
 	url="${host%/}/build-id.txt"
 	body="${cache}/body"
 	waited=0
-	while : ; do
+	while :; do
 		meta="$(fetch_body "${url}" "${body}")"
 		if "${grader}" "${expected}" "${host}" "${body}" \
 			>"${cache}/verdict.log" 2>&1; then

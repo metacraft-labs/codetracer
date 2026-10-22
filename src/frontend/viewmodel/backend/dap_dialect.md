@@ -567,6 +567,9 @@ allow-lists were touched, and no command string was added anywhere.
 | `ct/load-recent-folder` | same — `CODETRACER::load-recent-folder` | **FIXED.** `onLoadRecentFolder`. |
 | `ct/new-record` | same — `CODETRACER::new-record` | **FIXED.** `onSubmitNewRecord`, carrying a `NewRecordRequest`. |
 | `ct/launch-config` | same family; the main process already answers `CODETRACER::launch-configs-loaded` (`index/traces.nim`), so the request half was the missing piece. | **FIXED.** `onLaunchConfig`, carrying a `LaunchConfigRequest`. The one real mismatch: the VM is keyed by `slug`, the IPC by `configIndex`, so the request carries the entry's position in the list the host installed. |
+| `ct/line-step-jump` | **genuinely dead, and NOT a rename of `ct/local-step-jump`.** That arm deserialises `LocalStepJump` (`task.rs:2578`), which needs `step_count`, `target_iteration`, `first_loop_line`, `active_iteration` and `reverse`. `StepListVM` sends `delta`/`path`/`line`/`rrTicks` and has none of the loop-iteration context. Redirecting it would fail `load_args` at runtime. | **Known failure.** The engine needs a command for this, or the VM needs the iteration model. This is exactly why the nearest-name substitution is the wrong instinct. |
+| `ct/load-step-lines` | **genuinely dead as a command** — absent from `VALID_DAP_COMMANDS`, no arm in either `dap_server.rs` dispatch table, no analogue to redirect to. But **the loader is not missing**: `step_lines_loader.rs` implements `load_lines` in full and `DapHandler` already constructs one (`dap_handler.rs:532`); `load_step_lines` (:5076) has no caller, its loader call and its `send_event` are commented out, and the commented call passes `&self.db` where the signature now takes `Arc<dyn TraceReader>`. A dispatch arm and an event, not new construction. | **Known failure**, and note *what* is registered: the two cases used to assert `{path, line, rrTicks, count}`, which **no declaration on either side of the wire contains** — both peers' `LoadStepLinesArg` is `{location, forwardCount, backwardCount}`. Corrected 2026-09-05 so the rows pin the declared shape; they stay red on the command name. **No spec requires this panel** — absent from `GUI-Overview.md`'s Core Panes, from `Layout-System.md`'s `PaneKind`, and from `CodeTracer-DAP-Extensions.md`. |
+| `ct/asm-instruction-jump` | **genuinely dead.** No engine arm. `low_level_code_vm.nim`'s comment hopes it will "either jump to the corresponding source line or step to the matching asm offset" — two different commands, neither chosen. | **Known failure.** |
 
 > **The "four new seams" estimate in this table was wrong, and worth recording
 > as a reading error rather than quietly deleting.** It said `WelcomeScreenVM`
@@ -589,9 +592,6 @@ allow-lists were touched, and no command string was added anywhere.
 fix was to stop sending them, not to bless them; §7's nine are still nine and
 `test_mock_backend_validates_dap_commands.nim` still rejects all nine with its
 count asserted.
-| `ct/line-step-jump` | **genuinely dead, and NOT a rename of `ct/local-step-jump`.** That arm deserialises `LocalStepJump` (`task.rs:2578`), which needs `step_count`, `target_iteration`, `first_loop_line`, `active_iteration` and `reverse`. `StepListVM` sends `delta`/`path`/`line`/`rrTicks` and has none of the loop-iteration context. Redirecting it would fail `load_args` at runtime. | **Known failure.** The engine needs a command for this, or the VM needs the iteration model. This is exactly why the nearest-name substitution is the wrong instinct. |
-| `ct/load-step-lines` | **genuinely dead as a command** — absent from `VALID_DAP_COMMANDS`, no arm in either `dap_server.rs` dispatch table, no analogue to redirect to. But **the loader is not missing**: `step_lines_loader.rs` implements `load_lines` in full and `DapHandler` already constructs one (`dap_handler.rs:532`); `load_step_lines` (:5076) has no caller, its loader call and its `send_event` are commented out, and the commented call passes `&self.db` where the signature now takes `Arc<dyn TraceReader>`. A dispatch arm and an event, not new construction. | **Known failure**, and note *what* is registered: the two cases used to assert `{path, line, rrTicks, count}`, which **no declaration on either side of the wire contains** — both peers' `LoadStepLinesArg` is `{location, forwardCount, backwardCount}`. Corrected 2026-09-05 so the rows pin the declared shape; they stay red on the command name. **No spec requires this panel** — absent from `GUI-Overview.md`'s Core Panes, from `Layout-System.md`'s `PaneKind`, and from `CodeTracer-DAP-Extensions.md`. |
-| `ct/asm-instruction-jump` | **genuinely dead.** No engine arm. `low_level_code_vm.nim`'s comment hopes it will "either jump to the corresponding source line or step to the matching asm offset" — two different commands, neither chosen. | **Known failure.** |
 
 **Tests deliberately left red.** They are *not* weakened to green, because a
 test that asserts wrong behaviour misleads the next reader more than a red one
@@ -599,8 +599,8 @@ does. The executable list is `ci/lib/known-test-failures.tsv`; as of 2026-09-02
 it holds **4 rows — 2 cases × 2 lanes**, both in `views/isonim_views_test.nim`
 and both asserting `ct/load-step-lines`:
 
-- `loadStepLinesFor emits ct/load-step-lines with location + count`
-- `loadStepLinesFor falls back to default panel height when unset`
+* `loadStepLinesFor emits ct/load-step-lines with location + count`
+* `loadStepLinesFor falls back to default panel height when unset`
 
 This paragraph previously claimed 15, split as "`isonim_views_test.nim` — 6:
 `ct/load-step-lines` ×2, `ct/line-step-jump` ×2, `ct/asm-instruction-jump` ×2"
@@ -722,7 +722,7 @@ the symptom was noise, and the defect was a table with no guard.
 
 Two things changed:
 
-- the table moved to `src/common/ct_event.nim`, next to the enum it returns.
+* the table moved to `src/common/ct_event.nim`, next to the enum it returns.
   It needs nothing from the JS FFI, and `dap.nim` imports `std/jsffi`
   unconditionally, so nothing behind it can be reached from a headless
   ViewModel test that must also run on the native (C) lane — and the one table
@@ -736,7 +736,7 @@ Two things changed:
   `CtEventKind` the command resolves to, not merely that resolving it does not
   raise — the guard below reconciles which commands have an arm and says
   nothing about which kind an arm returns;
-- `ci/test/dap-command-sync.py` gained a fourth check. Every command that is in
+* `ci/test/dap-command-sync.py` gained a fourth check. Every command that is in
   `EVENT_KIND_TO_DAP_MAPPING` (so a `BackendService` caller can put it on the
   wire) **and** in the engine's dispatch (so something answers it) must have an
   arm, or be named in one of two residue maps with a reason.
@@ -744,10 +744,10 @@ Two things changed:
 The two maps are separate because the reasons are not the same kind of reason,
 and that distinction is the useful output of the exercise:
 
-- `RESPONSE_RESIDUE_NO_RESPONSE` — **9 commands**, every one of them a §7a
+* `RESPONSE_RESIDUE_NO_RESPONSE` — **9 commands**, every one of them a §7a
   "silent" row. The engine sends no response, so no frame can bear the command
   and an arm would be dead code. Legitimate.
-- `RESPONSE_RESIDUE_KNOWN_GAPS` — **15 commands** whose handlers *do* call
+* `RESPONSE_RESIDUE_KNOWN_GAPS` — **15 commands** whose handlers *do* call
   `respond_dap`: `ct/calltrace-jump`, `ct/event-jump`, `ct/event-load`,
   `ct/goto-ticks`, `ct/load-calltrace-section`, `ct/load-flow`,
   `ct/load-history`, `ct/load-terminal`, `ct/search-calltrace`,

@@ -154,13 +154,13 @@ for lane in renderer-electron renderer-web; do
 	fi
 
 	flags="$(test_lane_extra_flags "${lane}")"
-	if [[ "${flags}" != *"-d:nodejs"* ]]; then
+	if [[ ${flags} != *"-d:nodejs"* ]]; then
 		ok "${lane} does not pass -d:nodejs"
 	else
 		bad "${lane} passes -d:nodejs, under which the renderer cannot compile"
 	fi
 
-	if [[ "${flags}" == *"-d:ctRenderer"* ]]; then
+	if [[ ${flags} == *"-d:ctRenderer"* ]]; then
 		ok "${lane} passes -d:ctRenderer (the product's own renderer define)"
 	else
 		bad "${lane} does not pass -d:ctRenderer; this would compile a different product"
@@ -248,8 +248,8 @@ build_arm() {
 }
 build_arm renderer-electron
 build_arm renderer-web
-electron_js="${bundle[renderer-electron]:-}"
-web_js="${bundle[renderer-web]:-}"
+electron_js="${bundle["renderer-electron"]:-}"
+web_js="${bundle["renderer-web"]:-}"
 if [ -z "${electron_js}" ] || [ -z "${web_js}" ]; then
 	echo
 	echo "RESULT: FAILED — an arm did not build; the property checks below cannot run"
@@ -387,7 +387,8 @@ fi
 # them; the assertion above is what guarantees that.
 # ---------------------------------------------------------------------------
 declared_unguarded=4
-actual_unguarded="$(python3 - "${web_js}" <<'PY'
+actual_unguarded="$(
+	python3 - "${web_js}" <<'PY'
 import re, sys
 s = open(sys.argv[1], encoding='utf8', errors='replace').read()
 n = 0
@@ -409,7 +410,8 @@ fi
 # The counter-check: a bundle in which NOTHING is guarded would also satisfy a
 # budget of 4 if four sites happened to exist. Assert the guarded ones are
 # really there, so the classifier is known to be working on this file.
-guarded="$(python3 - "${web_js}" <<'PY'
+guarded="$(
+	python3 - "${web_js}" <<'PY'
 import re, sys
 s = open(sys.argv[1], encoding='utf8', errors='replace').read()
 print(sum(1 for m in re.finditer(r'require\(', s)

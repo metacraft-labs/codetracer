@@ -628,12 +628,13 @@ lint_step "contract suite: the runner defect register still cites real things" \
 	bash ci/test/runner-register-citations-test.sh
 
 # THE RUST TEST-ASSERTION GATE. `tools/check-test-assertions.sh` is a vendored
-# copy of a lint codetracer-specs has shipped "for the product repos" since M0.
-# This repository invoked it NOWHERE, and could not have: the specs repo is
+# copy of a lint codetracer-pm (then named codetracer-specs) has shipped "for
+# the product repos" since M0. This repository invoked it NOWHERE, and could
+# not have: the specs repo is
 # never checked out here. A guard was written, shipped, and connected to
 # nothing -- which is how assertion-less Rust tests came to live inside a
 # required gate. The glob at the top does not reach `tools/`.
-lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-specs)" \
+lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-pm)" \
 	shellcheck tools/check-test-assertions.sh
 
 # Registered here rather than left to be discovered, for the reason the lint

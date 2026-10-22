@@ -30,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       rr_backend_ref:
-        description: 'rr-backend git ref to test against (default: dev)'
+        description: 'rr-backend git ref to test against (default: the commit flake.lock locks)'
         required: false
         default: ''
       shell_recorders_ref:
@@ -108,10 +108,13 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones the cross-repo siblings adjacent to this checkout at their
-        # pinned `dev` refs (recursive submodules), replacing
+        # pinned refs (recursive submodules), replacing
         # the former Checkout-manifests / Resolve-lock / per-sibling
         # clone-repo machinery. The rr_backend_ref workflow_dispatch input
-        # overrides codetracer-native-backend's ref (empty => `dev`).
+        # overrides codetracer-native-backend's ref. Empty means the commit
+        # flake.lock and repro.lock lock, not `dev`: native-backend is an
+        # `/agents` input in flake.nix, so `dev` is a tree the Nix lane does
+        # not build. Refresh it with the lock.
         # The native-backend submodule unfold below is still bespoke
         # because the path:-flake-input visibility fix is specific to this
         # repo's flake.
@@ -124,7 +127,7 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'dev' }}
+            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'a859cfb96bbc57b9dc0760ef70c50be95f2eb030' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -132,7 +135,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
-            codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
+            codetracer-trace-format-nim=c62f759f29b335436515bfc594d53e33b88d2bd4
             codetracer-native-recorder=dev
 
       - name: Unfold native-backend submodules into parent index

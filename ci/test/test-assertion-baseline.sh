@@ -32,13 +32,16 @@
 #
 # # Why a recorded baseline and not "zero violations"
 #
-# The tree is not at zero and this suite cannot take it there. The two entries
-# below are platform-gate stubs: bodies that exist so a `#[cfg]`-excluded test
-# still has a name on the platforms where the real test cannot compile. Their
-# only statement is an `eprintln!("SKIPPED: ...")`. "Fixing" them means adding an
-# assertion about the very `cfg` that already gated compilation -- decorating
-# honest code to satisfy a checker -- so they are RECORDED, with an owner, in
-# `codetracer-specs/Testing/Known-Test-Failures.md`.
+# When this was written the tree was not at zero and this suite could not take
+# it there. The two entries it started with were platform-gate stubs: bodies
+# that existed so a `#[cfg]`-excluded test still had a name on the platforms
+# where the real test cannot compile, whose only statement was an
+# `eprintln!("SKIPPED: ...")`. "Fixing" them meant adding an assertion about the
+# very `cfg` that already gated compilation -- decorating honest code to satisfy
+# a checker -- so they were RECORDED, with an owner, in
+# `codetracer-pm/spec/Testing/Known-Test-Failures.md`. Both have since gone
+# (see recorded_violations), and the record is kept so the next honest
+# exception has a place to go that is not "turn the gate off".
 #
 # The record fails in BOTH directions, the shape `scripts/test-build-alignment.sh`
 # uses for the tup/nix flag divergence:
@@ -50,13 +53,22 @@
 #
 # Entries are `path::function`, never line numbers, which drift honestly.
 #
+# The vendored lint's own repository was renamed from `codetracer-specs` to
+# `codetracer-pm` (its Known-Test-Failures record now sits under `spec/`), and
+# this suite kept looking for `../codetracer-specs`, so assertion 1 silently
+# reported "not on disk" on every workspace that had the renamed sibling.
+#
 # # Why this cannot pass vacuously
 #
-# The baseline is NON-EMPTY, which makes it the lint's own canary: a lint that
-# rotted into a no-op finds zero violations, and zero does not equal the two
-# recorded here, so this suite goes red. The census assertions below are the
-# second layer -- they fail if the scan stopped reading the tree at all, which
-# is how the `#\[test` pre-filter used to skip every file whose tests are all
+# The baseline USED to be the canary: while it was non-empty, a lint that
+# rotted into a no-op found zero violations, zero did not equal the record, and
+# this suite went red. The last entry left on 2026-10-01 (dd5b3f6bf deleted the
+# non-Unix stub `dap_server_socket_transport_is_unix_only`), so the baseline is
+# now empty and an empty scan would MATCH it. The canary is therefore explicit:
+# section 3 runs the lint over a two-test fixture and requires it to flag the
+# assertion-less test and only that one. The census assertions are the second
+# layer -- they fail if the scan stopped reading the tree at all, which is how
+# the `#\[test` pre-filter used to skip every file whose tests are all
 # `#[tokio::test]`.
 #
 # # No mocks
@@ -72,7 +84,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly REPO_ROOT
 readonly LINT="$REPO_ROOT/tools/check-test-assertions.sh"
-readonly SPECS_ORIGIN="$REPO_ROOT/../codetracer-specs/tools/check-test-assertions.sh"
+readonly SPECS_ORIGIN="$REPO_ROOT/../codetracer-pm/tools/check-test-assertions.sh"
 
 assertions=0
 failures=0
@@ -96,11 +108,13 @@ fail() {
 # The recorded baseline: every test function in this repository that the lint
 # flags, and that we have decided not to change. `path::function`, sorted.
 #
-# To change it you must say why in codetracer-specs/Testing/Known-Test-Failures.md.
+# To change it you must say why in codetracer-pm/spec/Testing/Known-Test-Failures.md.
 # ---------------------------------------------------------------------------
+#
+# Empty since dap_backend_server.rs::dap_server_socket_transport_is_unix_only
+# was deleted (dd5b3f6bf). An entry goes between the EOF markers, one per line.
 recorded_violations() {
 	cat <<-'EOF'
-		src/db-backend/tests/dap_backend_server.rs::dap_server_socket_transport_is_unix_only
 	EOF
 }
 
@@ -122,19 +136,19 @@ if [ -f "$SPECS_ORIGIN" ]; then
 	vendored_sha="$(sha256sum <"$LINT" | cut -d' ' -f1)"
 	origin_sha="$(sha256sum <"$SPECS_ORIGIN" | cut -d' ' -f1)"
 	if [ "$vendored_sha" = "$origin_sha" ]; then
-		ok "vendored copy is byte-identical to codetracer-specs (sha256 $vendored_sha)"
+		ok "vendored copy is byte-identical to codetracer-pm (sha256 $vendored_sha)"
 	else
-		fail "vendored copy is byte-identical to codetracer-specs" \
+		fail "vendored copy is byte-identical to codetracer-pm" \
 			"vendored: $vendored_sha" \
 			"specs:    $origin_sha" \
-			"Edit codetracer-specs/tools/check-test-assertions.sh, then re-copy it here." \
+			"Edit codetracer-pm/tools/check-test-assertions.sh, then re-copy it here." \
 			"Its self-test (just test-check-test-assertions, in that repo) is what proves" \
 			"a change to it still works; this copy has no self-test of its own."
 	fi
 else
 	# Not a skip of the guarding: everything below still runs. This one
 	# assertion cannot be evaluated without the sibling, and says so.
-	ok "codetracer-specs not on disk — drift comparison not evaluated here (lint still runs below)"
+	ok "codetracer-pm not on disk — drift comparison not evaluated here (lint still runs below)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -186,6 +200,42 @@ check_floor ".rs files scanned" "$files_scanned" 300
 check_floor "files carrying tests" "$files_with_tests" 200
 check_floor "test functions examined" "$tests_examined" 1200
 
+# THE CANARY. The census above proves the scan READ the tree; it cannot prove
+# the scan can still FLAG anything, and with an empty baseline a lint that
+# flags nothing would match the record in section 3. So run it over a fixture
+# with exactly one assertion-less test beside one assertive test and require
+# that one, and only that one. This is a fixture input, not a mock: the real
+# vendored lint runs on a real .rs file, written to a temp dir at run time so
+# no repository scan (this one, cargo's, the pre-commit hooks') ever sees it.
+canary_dir="$(mktemp -d "${TMPDIR:-/tmp}/test-assertion-canary.XXXXXX")" || exit 1
+trap 'rm -rf "$canary_dir"' EXIT
+mkdir -p "$canary_dir/tests"
+cat >"$canary_dir/tests/canary.rs" <<'RS'
+#[test]
+fn canary_asserts_nothing() {
+    let _ = 1 + 1;
+}
+
+#[test]
+fn canary_asserts() {
+    assert_eq!(1 + 1, 2);
+}
+RS
+canary_out="$(cd "$canary_dir" && bash "$LINT" tests 2>&1)"
+canary_status=$?
+# shellcheck disable=SC2016  # the backticks are the lint's own output format
+canary_flagged="$(printf '%s\n' "$canary_out" |
+	sed -n 's/^\(.*\):[0-9][0-9]*: test `\([^`]*\)`.*/\1::\2/p' | LC_ALL=C sort -u)"
+if [ "$canary_status" -eq 1 ] && [ "$canary_flagged" = "tests/canary.rs::canary_asserts_nothing" ]; then
+	ok "the lint flags the canary's assertion-less test, and only that one"
+else
+	fail "the lint flags the canary's assertion-less test, and only that one" \
+		"expected exit 1 flagging exactly tests/canary.rs::canary_asserts_nothing;" \
+		"got exit $canary_status flagging: '${canary_flagged:-<nothing>}'" \
+		"A lint that flags nothing would match an empty baseline below and pass." \
+		"$canary_out"
+fi
+
 # ---------------------------------------------------------------------------
 # 3. The violations are exactly the recorded ones.
 # ---------------------------------------------------------------------------
@@ -206,20 +256,27 @@ actual_violations() {
 actual="$(actual_violations)"
 recorded="$(recorded_violations | sed 's/^[[:space:]]*//' | grep -v '^$' | LC_ALL=C sort -u)"
 
+# One entry per line, and NOTHING for an empty set. `printf '%s\n' ""` prints a
+# blank line, so diffing an empty side against a non-empty one used to report
+# that blank line as an entry -- an "NEW assertion-less test: " with no name
+# after it, which is how an emptied actual set read when the last baseline
+# entry was fixed.
+as_lines() { [ -z "$1" ] || printf '%s\n' "$1"; }
+
 if [ "$actual" = "$recorded" ]; then
-	ok "flagged set matches the baseline ($(printf '%s\n' "$recorded" | grep -c .) entr(y/ies))"
+	ok "flagged set matches the baseline ($(as_lines "$recorded" | grep -c .) entr(y/ies))"
 else
-	delta="$(diff <(printf '%s\n' "$recorded") <(printf '%s\n' "$actual") |
+	delta="$(diff <(as_lines "$recorded") <(as_lines "$actual") |
 		sed -n 's/^< /  FIXED — remove it from the baseline: /p;s/^> /  NEW assertion-less test: /p')"
 	fail "flagged set matches the baseline" \
 		"A test that asserts nothing reports success for work it never did." \
 		"$delta" \
 		"Baseline lives in recorded_violations() in this file; the reasons live in" \
-		"codetracer-specs/Testing/Known-Test-Failures.md."
+		"codetracer-pm/spec/Testing/Known-Test-Failures.md."
 fi
 
 echo
-readonly EXPECTED_ASSERTIONS=7
+readonly EXPECTED_ASSERTIONS=8
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

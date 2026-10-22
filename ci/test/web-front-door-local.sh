@@ -266,8 +266,8 @@ expect_origin() {
 	shift 3
 	local got
 	got="$(curl -sS -D - "$@" "${front}${path}" 2>/dev/null | tr -d '\r')"
-	if printf '%s' "${got}" | grep -q "ORIGIN-SENTINEL ${name} " &&
-		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door: *origin$'; then
+	if grep -q "ORIGIN-SENTINEL ${name} " <<<"${got}" &&
+		grep -qi '^x-codetracer-front-door: *origin$' <<<"${got}"; then
 		ok "${label} reaches ${name}, marked \`X-CodeTracer-Front-Door: origin\`"
 	else
 		bad "${label} reaches ${name}, marked \`X-CodeTracer-Front-Door: origin\`"
@@ -281,8 +281,8 @@ expect_origin() {
 expect_static() {
 	local label="$1" path="$2" got
 	got="$(curl -sS -D - "${front}${path}" 2>/dev/null | tr -d '\r')"
-	if printf '%s' "${got}" | grep -q 'ORIGIN-SENTINEL' ||
-		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door:'; then
+	if grep -q 'ORIGIN-SENTINEL' <<<"${got}" ||
+		grep -qi '^x-codetracer-front-door:' <<<"${got}"; then
 		bad "${label} stays static"
 		printf '%s\n' "${got}" | head -8 | sed 's/^/      /'
 	else
@@ -298,11 +298,11 @@ expect_static_session() {
 	shift 2
 	local got
 	got="$(curl -sS -D - "$@" "${front}${path}" 2>/dev/null | tr -d '\r')"
-	if printf '%s' "${got}" | grep -q 'STATIC-BUNDLE-SENTINEL' &&
-		! printf '%s' "${got}" | grep -q 'ORIGIN-SENTINEL' &&
-		printf '%s' "${got}" | grep -qi '^x-codetracer-front-door: *static$' &&
-		! printf '%s' "${got}" | grep -qi '^cache-control:.*no-store' &&
-		! printf '%s' "${got}" | grep -qi '^vary:.*cookie'; then
+	if grep -q 'STATIC-BUNDLE-SENTINEL' <<<"${got}" &&
+		! grep -q 'ORIGIN-SENTINEL' <<<"${got}" &&
+		grep -qi '^x-codetracer-front-door: *static$' <<<"${got}" &&
+		! grep -qi '^cache-control:.*no-store' <<<"${got}" &&
+		! grep -qi '^vary:.*cookie' <<<"${got}"; then
 		ok "${label} is the static bundle, tagged \`static\`, not made private"
 	else
 		bad "${label} is the static bundle, tagged \`static\`, not made private"
@@ -340,14 +340,14 @@ api_paths_reach() {
 	local cc_lines
 	cc_lines="$(printf '%s' "${last_response}" | grep -ci '^cache-control:' || true)"
 	if [ "${cc_lines}" -eq 1 ] &&
-		printf '%s' "${last_response}" | grep -qi '^cache-control: *private, *no-store'; then
+		grep -qi '^cache-control: *private, *no-store' <<<"${last_response}"; then
 		ok 'the static `_headers` rules do not reach a forwarded API response'
 	else
 		bad "the static \`_headers\` rules do not reach a forwarded API response (${cc_lines} Cache-Control line(s))"
 	fi
 	expect_origin "GET /api/v1 (the prefix itself)" "${name}" "/api/v1"
 	expect_origin "GET /auth/desktop" "${name}" "/auth/desktop?desktop-port=4242"
-	if printf '%s' "${last_response}" | grep -q 'GET /auth/desktop?desktop-port=4242 '; then
+	if grep -q 'GET /auth/desktop?desktop-port=4242 ' <<<"${last_response}"; then
 		ok "the query string is forwarded unchanged"
 	else
 		bad "the query string is forwarded unchanged"
@@ -424,7 +424,7 @@ ok "wrangler served the bundle with a session platform"
 
 echo "-- the fork"
 anon="$(curl -sS -D - "${front}/" 2>/dev/null | tr -d '\r')"
-if printf '%s' "${anon}" | grep -q 'STATIC-BUNDLE-SENTINEL'; then
+if grep -q 'STATIC-BUNDLE-SENTINEL' <<<"${anon}"; then
 	ok "an anonymous / is answered by the STATIC bundle"
 else
 	bad "an anonymous / is answered by the STATIC bundle"
@@ -432,7 +432,7 @@ fi
 
 auth="$(curl -sS -D - -H 'Cookie: session_id=local-probe' \
 	"${front}/" 2>/dev/null | tr -d '\r')"
-if printf '%s' "${auth}" | grep -q 'ORIGIN-SENTINEL SESS '; then
+if grep -q 'ORIGIN-SENTINEL SESS ' <<<"${auth}"; then
 	ok "a / carrying a session cookie is answered by the SESSION platform"
 else
 	bad "a / carrying a session cookie is answered by the SESSION platform"
@@ -445,26 +445,26 @@ fi
 # visitor who has never signed in.
 decoy="$(curl -sS -D - -H 'Cookie: other_session_id=x' \
 	"${front}/" 2>/dev/null | tr -d '\r')"
-if printf '%s' "${decoy}" | grep -q 'STATIC-BUNDLE-SENTINEL'; then
+if grep -q 'STATIC-BUNDLE-SENTINEL' <<<"${decoy}"; then
 	ok '`other_session_id=x` does NOT flip the fork'
 else
 	bad '`other_session_id=x` does NOT flip the fork — the cookie is matched by substring'
 fi
 
 echo "-- the headers on an authenticated render"
-if printf '%s' "${auth}" | grep -qi 'cache-control: *private, *no-store'; then
+if grep -qi 'cache-control: *private, *no-store' <<<"${auth}"; then
 	ok 'it carries `private, no-store`'
 else
 	bad 'it carries `private, no-store`'
 fi
-if printf '%s' "${auth}" | grep -qi '^vary:.*cookie'; then
+if grep -qi '^vary:.*cookie' <<<"${auth}"; then
 	ok "it varies on Cookie"
 else
 	bad "it varies on Cookie"
 fi
 # The upstream's own caching headers are DELETED, not merely overridden:
 # `Cache-Control` is not the only header that can admit a response to a cache.
-if printf '%s' "${auth}" | grep -qi '^expires:'; then
+if grep -qi '^expires:' <<<"${auth}"; then
 	bad "the upstream's \`Expires\` is deleted"
 else
 	ok "the upstream's \`Expires\` is deleted"
@@ -480,8 +480,8 @@ else
 fi
 # The anonymous request AFTER the authenticated one: still static.
 after="$(curl -sS -D - "${front}/" 2>/dev/null | tr -d '\r')"
-if printf '%s' "${after}" | grep -q 'STATIC-BUNDLE-SENTINEL' &&
-	! printf '%s' "${after}" | grep -q 'ORIGIN-SENTINEL'; then
+if grep -q 'STATIC-BUNDLE-SENTINEL' <<<"${after}" &&
+	! grep -q 'ORIGIN-SENTINEL' <<<"${after}"; then
 	ok "an anonymous / after an authenticated one is still the static bundle"
 else
 	bad "an anonymous / after an authenticated one is still the static bundle"

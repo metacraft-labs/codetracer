@@ -154,7 +154,8 @@ if [ -n "$missing_contract" ]; then
 		echo
 		echo "This script reads the asset names from the runtime's own source so a"
 		echo "rename cannot leave it checking names nothing loads. If those bindings"
-		echo "moved or changed shape, update the three \`sed\` expressions here in the"
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
+		echo 'moved or changed shape, update the three `sed` expressions here in the'
 		echo "same change. Failing is deliberate: a guard that silently finds nothing"
 		echo "to check is worse than no guard."
 	} >&2
@@ -195,18 +196,20 @@ check_asset() {
 	local built="$out_root/$config_subdir/$name"
 
 	if [ ! -f "$src" ]; then
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
 		fail "$name" \
 			"source of truth:  $src  -- DOES NOT EXIST" \
-			"effect: there is nothing to publish; \`ct\` has no bundled default." \
+			'effect: there is nothing to publish; `ct` has no bundled default.' \
 			"fix:    restore the file, or -- if the asset really is gone -- remove" \
 			"        its binding from src/common/config.nim, which is where this" \
 			"        check reads the required names from."
 		return
 	fi
 	if [ ! -s "$src" ]; then
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
 		fail "$name" \
 			"source of truth:  $src  -- IS EMPTY" \
-			"effect: publishing it would still leave \`ct\` without a usable default."
+			'effect: publishing it would still leave `ct` without a usable default.'
 		return
 	fi
 
@@ -215,9 +218,10 @@ check_asset() {
 		if [ -L "$built" ]; then
 			how="IS A DANGLING SYMLINK (-> $(readlink "$built"))"
 		fi
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
 		fail "$name" \
 			"built tree:  $built  -- $how" \
-			"effect: \`ct\` dies on a pristine profile with an uncaught OSError from" \
+			'effect: `ct` dies on a pristine profile with an uncaught OSError from' \
 			"        loadConfig (src/common/config.nim), naming this exact path." \
 			"fix:    src/config/Tupfile publishes it on the tup branch and repro.nim" \
 			"        (targets config-default-config-yaml / config-default-layout-json)" \
@@ -225,15 +229,17 @@ check_asset() {
 		return
 	fi
 	if [ ! -f "$built" ]; then
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
 		fail "$name" \
 			"built tree:  $built  -- EXISTS BUT IS NOT A REGULAR FILE" \
-			"effect: \`ct\` cannot read it; loadConfig fails the same way."
+			'effect: `ct` cannot read it; loadConfig fails the same way.'
 		return
 	fi
 	if [ ! -s "$built" ]; then
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
 		fail "$name" \
 			"built tree:  $built  -- IS EMPTY" \
-			"effect: loadConfig parses an empty document and \`ct\` starts with no" \
+			'effect: loadConfig parses an empty document and `ct` starts with no' \
 			"        key bindings or defaults at all."
 		return
 	fi
@@ -242,12 +248,13 @@ check_asset() {
 	src_hash="$(hash_of "$src")"
 	built_hash="$(hash_of "$built")"
 	if [ "$src_hash" != "$built_hash" ]; then
+		# shellcheck disable=SC2016 # literal markdown backticks in a message
 		fail "$name" \
 			"built tree:  $built  -- CONTENT DIFFERS FROM SOURCE" \
 			"source $src_hash  $src" \
 			"built  $built_hash  $built" \
 			"effect: the shipped default is a stale copy of a file that has since" \
-			"        changed, so \`ct\` runs with defaults nobody reviewed." \
+			'        changed, so `ct` runs with defaults nobody reviewed.' \
 			"fix:    the publication rule is not re-running on change."
 	fi
 }

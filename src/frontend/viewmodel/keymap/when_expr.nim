@@ -256,4 +256,3 @@ func `$`*(e: WhenExpr): string =
       if x.kind == wkOr: "(" & $x & ")" else: $x
     side(e.left) & " && " & side(e.right)
   of wkOr: $e.left & " || " & $e.right
-

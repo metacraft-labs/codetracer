@@ -96,7 +96,7 @@ else
 
 	out="$(bash "$SCRIPT" --force --only codetracer-native-backend 2>&1)"
 	rc=$?
-	if echo "$out" | grep -qE 'PASS +codetracer-native-backend +built target/debug/ct-native-replay'; then
+	if grep -qE 'PASS +codetracer-native-backend +built target/debug/ct-native-replay' <<<"$out"; then
 		pass "build-siblings reports codetracer-native-backend built"
 	else
 		fail "build-siblings did not report a PASS for codetracer-native-backend (exit $rc):"
@@ -106,7 +106,7 @@ else
 	if [ -x "$BIN" ]; then
 		run_out="$(env -i PATH=/usr/bin:/bin "$BIN" --help 2>&1)"
 		run_rc=$?
-		if [ "$run_rc" -eq 0 ] && echo "$run_out" | grep -q '^Usage: ct-native-replay'; then
+		if [ "$run_rc" -eq 0 ] && grep -q '^Usage: ct-native-replay' <<<"$run_out"; then
 			pass "ct-native-replay --help runs with an empty environment"
 		else
 			fail "ct-native-replay --help did not run with an empty environment (exit $run_rc):"
@@ -158,8 +158,8 @@ else
 		# 3a.
 		plant_broken_binary
 		out3="$(bash "$SCRIPT" --only codetracer-native-backend 2>&1)"
-		if echo "$out3" | grep -q 'rebuilding — the artifact is not the file the stamp was written for' &&
-			echo "$out3" | grep -qE 'PASS +codetracer-native-backend +built'; then
+		if grep -q 'rebuilding — the artifact is not the file the stamp was written for' <<<"$out3" &&
+			grep -qE 'PASS +codetracer-native-backend +built' <<<"$out3"; then
 			pass "a binary replaced after its build is rebuilt, not skipped"
 		else
 			fail "a binary replaced after its build was not rebuilt:"
@@ -183,8 +183,8 @@ else
 				mv "$STAMP.edit" "$STAMP"
 			out3="$(bash "$SCRIPT" --only codetracer-native-backend 2>&1)"
 			# shellcheck disable=SC2016  # the backticks are literal text in the message
-			if echo "$out3" | grep -q 'rebuilding — `target/debug/ct-native-replay --help` does not run' &&
-				echo "$out3" | grep -qE 'PASS +codetracer-native-backend +built'; then
+			if grep -q 'rebuilding — `target/debug/ct-native-replay --help` does not run' <<<"$out3" &&
+				grep -qE 'PASS +codetracer-native-backend +built' <<<"$out3"; then
 				pass "a binary that matches its build stamp but cannot start is rebuilt, not skipped"
 			else
 				fail "a binary that matches its build stamp but cannot start was not rebuilt:"

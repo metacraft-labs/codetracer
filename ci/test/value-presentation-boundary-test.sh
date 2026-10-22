@@ -469,7 +469,8 @@ assert_fires "${t}" "stub-is-a-reexport" \
 # THE COMPILER ARM. The purity rule the effect system enforces, watched failing.
 # ---------------------------------------------------------------------------
 if ! command -v nim >/dev/null 2>&1; then
-	skip_loudly "purity is compiler-enforced: no \`nim\` on PATH, so the strongest of the purity checks was NOT exercised"
+	# shellcheck disable=SC2016 # literal markdown backticks
+	skip_loudly 'purity is compiler-enforced: no `nim` on PATH, so the strongest of the purity checks was NOT exercised'
 else
 	planted="${work}/planted"
 	mkdir -p "${planted}"

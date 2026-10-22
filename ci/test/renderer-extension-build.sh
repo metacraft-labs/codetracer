@@ -164,7 +164,7 @@ for recipe in build-ui-js build-ui-js-hmr; do
 	# was renamed away yields an empty body, and every `grep -q` below would
 	# then report a clean absence rather than a missing subject.
 	if [ -n "${body}" ]; then
-		ok "${recipe}: found the recipe in justfile ($(printf '%s\n' "${body}" | grep -c . ) non-blank lines)"
+		ok "${recipe}: found the recipe in justfile ($(printf '%s\n' "${body}" | grep -c .) non-blank lines)"
 	else
 		bad "${recipe}: NOT FOUND in justfile — this gate has no subject"
 		continue

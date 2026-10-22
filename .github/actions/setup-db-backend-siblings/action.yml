@@ -151,6 +151,6 @@ runs:
         # reason, and the refresh rule, are above the `uses:` line.
         siblings: |
           codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
-          codetracer-trace-format-nim=a61f331dd3cc88471b1b10ad49e264c58caff661
+          codetracer-trace-format-nim=c62f759f29b335436515bfc594d53e33b88d2bd4
           codetracer-native-recorder=dev
           ${{ inputs.extra-siblings }}

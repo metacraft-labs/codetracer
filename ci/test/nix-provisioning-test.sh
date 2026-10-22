@@ -242,7 +242,17 @@ done
 #
 # 33 -> 35: release.yml's `linux` and `publish` jobs. Each runs
 # ./.github/actions/setup-nix right after its checkout.
-readonly EXPECTED_NIX_JOBS=35
+#
+# 35 -> 39: four codetracer.yml jobs added since, each a new job rather than a
+# scanner change (the scanner run over `56afb78d9`'s workflows classifies 35;
+# today's list differs by exactly these four, plus cross-repo-tests.yml's
+# `shell-recorder-tests` renamed to `recorder-tests` by `4eb8a4b42`, which nets
+# to zero). Each provisions Nix before its first `nix` command:
+#   - `gpui-window-captures` (`7fbb8d483`): setup-db-backend-siblings, env-flavor nix;
+#   - `dev-shell-hygiene` (`2fc6c5764`): ./.github/actions/setup-nix;
+#   - `ct-test-certificates` (`3aed1d7cd`): ./.github/actions/setup-nix;
+#   - `wasm-recordings` (`76a99d802`): setup-dev-env.
+readonly EXPECTED_NIX_JOBS=39
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
