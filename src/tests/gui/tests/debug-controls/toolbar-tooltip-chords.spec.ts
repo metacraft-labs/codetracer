@@ -1,43 +1,8 @@
 /**
- * !!! UNEXECUTED AS WRITTEN — THIS FILE HAS NEVER BEEN RUN. !!!
- *
- * Every other assertion in this change was executed and has recorded mutation
- * arms (see `src/frontend/tests/debug_toolbar_tooltips_test.nim` and the
- * "tooltips read the binding" suite in `isonim_views_test.nim`). THIS ONE HAS
- * NOT. An unexecuted spec is not evidence — it is the same category as a
- * mutation arm that never mutated, and the presence of a plausible-looking
- * file is exactly the kind of thing that reads as coverage when it is not.
- * Treat every claim below as UNVERIFIED until someone runs it and deletes this
- * banner.
- *
- * WHY IT COULD NOT BE RUN, precisely, so the next reader does not repeat the
- * attempt blind. `just test-gui` requires `build-once`, which failed in this
- * workspace for three reasons, none of them related to this change and all of
- * them reproduced deterministically on a second run:
- *
- *   1. `db-replay-server-cargo` dies with
- *      `dyld: Symbol not found: _SSL_set_quic_tls_cbs`, referenced from
- *      `ngtcp2-1.17.0` and expected in `openssl-3.4.3` — an ABI mismatch
- *      inside the dev shell. Upstream of it, `nix` refused the flake with a
- *      `narHash` mismatch on the `ethereum.nix` input, so direnv fell back to
- *      a CACHED shell; the stale closure is the likely cause of the mismatch.
- *   2. `docs-book` / `docs-book-assets` fail with
- *      `cannot open file: docs_scaffold` (the `isonim-docs` nimble dependency
- *      is not installed, though the sibling repo is present).
- *   3. `codetracer-visual-replay/ct_gfx_player` is not built.
- *
- * No `src/build-debug` output is produced, so there is no app to drive.
- *
- * ALSO NOTE, for anyone running this from an agent worktree: `just test-gui`
- * resolves sibling repos against the worktree's PARENT directory. A worktree
- * under `.agent-wt/` fails the `runquota` check outright, and `runquota` has
- * an empty override column in `scripts/require-siblings.sh` by design, so no
- * environment variable papers over it. Run from a checkout that sits beside
- * the sibling repos.
- *
- * TO RUN IT:
- *   just storybook-build   # only needed for the sibling storybook spec
+ * RUN IT with
  *   just test-gui tests/debug-controls/toolbar-tooltip-chords.spec.ts
+ * from a checkout that sits beside its sibling repos: `just test-gui`
+ * resolves them against the checkout's parent directory.
  *
  * ---------------------------------------------------------------------------
  *
@@ -424,6 +389,59 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
 
     expect(controlsThatRaised).toBe(TOOLBAR_BUTTON_IDS.length);
     expect(controlsThatRaised).toBe(13);
+  });
+
+  test("a DISABLED control still raises its tooltip on a rest, and stays inert", async ({ ctPage }) => {
+    const page = ctPage as unknown as Page;
+    // `Debugger-Controls.md` requires a tooltip on EVERY debug-control button:
+    // a control that cannot act yet still says what it does and which chord
+    // it is bound to. The two history controls are the ones a fresh trace
+    // shows disabled (no history yet), and they were the two whose tooltip
+    // never appeared: the shared `button:disabled` rule took them out of
+    // hit-testing with `pointer-events: none`, so they never matched `:hover`.
+    //
+    // NON-VACUITY: the subject is a control the page itself reports disabled.
+    // If a fresh trace ever starts with history, this test is no longer about
+    // a disabled control and says so here rather than passing on an enabled one.
+    const subjects = await page.evaluate((ids: string[]) => {
+      return ids.filter((id) => document.getElementById(id)?.hasAttribute("disabled"));
+    }, ["history-back-image", "history-forward-image"]);
+    expect(subjects).toEqual(["history-back-image", "history-forward-image"]);
+
+    for (const id of subjects) {
+      await restOffToolbar(page);
+      await sleep(400);
+      await restOn(page, id);
+      await sleep(REST_MS);
+      expect(await isTooltipShown(page, id), `#${id} is disabled and raised no tooltip`).toBe(true);
+      expect(await visibleTooltipCount(page)).toBe(1);
+
+      // The tooltip must not have cost the control its inertness: a click on
+      // the disabled button reaches no handler on it (the browser dispatches
+      // no `click` to a disabled form control) and leaves it disabled.
+      await page.evaluate((elementId: string) => {
+        const w = window as unknown as { __disabledClicks?: number };
+        w.__disabledClicks = 0;
+        const el = document.getElementById(elementId);
+        document.addEventListener(
+          "click",
+          (event) => {
+            if (el && event.composedPath().includes(el)) w.__disabledClicks! += 1;
+          },
+          { capture: true },
+        );
+      }, id);
+      const box = await page.locator(`#${id}`).boundingBox();
+      if (!box) throw new Error(`#${id} has no box — it is not laid out`);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await sleep(CROSSING_MS);
+      const after = await page.evaluate((elementId: string) => ({
+        clicks: (window as unknown as { __disabledClicks?: number }).__disabledClicks,
+        disabled: document.getElementById(elementId)?.hasAttribute("disabled"),
+      }), id);
+      expect(after.clicks, `#${id}: a click reached the disabled control`).toBe(0);
+      expect(after.disabled).toBe(true);
+    }
   });
 
   test("EVERY control's tooltip names a chord, and none is a bare label", async ({ ctPage }) => {
