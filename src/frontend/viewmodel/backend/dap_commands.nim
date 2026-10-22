@@ -174,6 +174,22 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   # `threads` and `variables`.
   "source",
 
+  # Data breakpoints (watchpoints) — the standard DAP requests
+  # (https://microsoft.github.io/debug-adapter-protocol/specification#Requests_DataBreakpointInfo
+  # and #Requests_SetDataBreakpoints). The engine has answered both since
+  # 09b8e3443 (`dap_server.rs`, `handle_request`'s `setDataBreakpoints` /
+  # `dataBreakpointInfo` arms, admission rules in `libs/ct-data-breakpoints`);
+  # before that `setDataBreakpoints` fell through to
+  # `dap_command_to_step_action` and was answered `not supported here`. Their
+  # senders are the Python API's `Trace.add_watchpoint` through
+  # `backend-manager` (`python_bridge.rs`, `main.rs`, `backend_manager.rs`) and
+  # `codetracer-bench`'s `watchpoint` op, which speak DAP to the engine
+  # directly. No ViewModel sends them through `BackendService`, so they have
+  # no `CtEventKind` and are part of `ci/test/dap-command-sync.py`'s
+  # EXPECTED_RESIDUE, like `scopes` and `source` above.
+  "dataBreakpointInfo",
+  "setDataBreakpoints",
+
   # CodeTracer extension requests the engine answers.
   # `ct/originMode` — `dap_server.rs:2098` (M21 eager-origin indicator).
   "ct/originMode",
