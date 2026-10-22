@@ -2330,9 +2330,11 @@ when not defined(ctInExtension):
       if serverOwnsSession():
         # SERVER-MANAGED (`ct host`): the server owns the session and this
         # page mirrors it over its socket. The mirror's ViewModels are the
-        # ones the panels read; its locals are the server's, so the page's
-        # own decoders stand down (`claimLocalsLoading`).
-        activeMirror = createMirrorSession(newSocketSyncChannel(pageSocket),
+        # ones the panels read, and their user actions — the panes' measured
+        # viewports among them — run on the server's session
+        # (`createHostedPageMirror`); its locals are the server's, so the
+        # page's own decoders stand down (`claimLocalsLoading`).
+        activeMirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
           debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
             desktopDebugCommands(data, session.store, toolbarApi))
         activeSessionVM = activeMirror.session
