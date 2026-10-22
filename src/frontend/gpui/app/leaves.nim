@@ -900,7 +900,7 @@ func tokenColour*(cls: TokenClass): string =
 const
   EditorColumnPx* = 9.792
     ## SINCE 2026-10-17 THE DESIGN FACE'S OWN ADVANCE: Space Mono at 16 px,
-    ## 612 / 1000 em (`design_font_metrics.MonoAdvance`), which the desktop's
+    ## 612 / 1000 em (its one `hmtx` advance), which the desktop's
     ## spans measure too ("def" is 29 px). The history below is of 9.70, the
     ## advance measured off frames set in the platform's monospace.
     ## **ONE COLUMN OF THE EDITOR'S MONOSPACED FACE, IN PIXELS — MEASURED, not

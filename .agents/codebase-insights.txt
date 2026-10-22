@@ -6462,7 +6462,8 @@ Two traps in the same area, both live:
     so guides draw for container nodes too. TUI mouse: press on a region's last
     column/row whose neighbour is its sibling = divider drag (`dividerAt`);
     release elsewhere drops (`dropDivider`), same cell = click/focus.
-  * `ci/test/frontend-reachability.sh` ratchet (1296) counts exported symbols no
+  * `ci/test/frontend-reachability.sh` ratchet (ceiling: the
+    `CT_REACHABILITY_MAX` setter in `ci/lint/nim.sh`) counts exported symbols no
     PRODUCT code reaches — a new exported API used only by tests fails
     `ci/lint/nim.sh`; wire it (or remove the last product use of an old one and
     you strand it: `regionOfPane` nearly went that way).
@@ -7240,11 +7241,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   (`navigation_keymap.ModalSurfaceRows`' `Enter` → `editor.toggle-tracepoint`),
   and a §4.2 row on the same key must say what it is for (`Enter` →
   `list.expand` is `!editorTextFocus`), so the two are disjoint.
-- `frontend-reachability-guard.py` always reads the REPOSITORY's allow-list,
-  even on `reachability-ratchet-test.sh`'s fixture, so any allow-list entry is
-  "stale" there and reddens that contract suite. Fix an unreached export (wire
-  it, move a test-only helper into test support, delete it) instead of
-  allow-listing it.
+- `frontend-reachability-guard.py` takes `--allowlist <file>` (since
+  2026-10-22); a synthetic tree must pass its own, as
+  `reachability-ratchet-test.sh` does, or every entry of the repository's list
+  is reported "stale" there and the run exits 2. On a declaration line the
+  guard drops only the name(s) declared there and counts everything else
+  (types, initializers, one-line bodies); before 2026-10-22 it dropped the
+  whole line, which put 89 false findings into the count.
 - The trace format v7 engine refuses meta.dat v6. A v6 fixture recording is
   upgraded by its version byte alone (the `CTMD` magic, then a u16 LE
   version), as `2dbbbcdda` did for the committed fixtures: v7 changed no

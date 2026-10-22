@@ -41,10 +41,6 @@ type
       ## by expression — what the desktop's `state.syncOriginSummaries`
       ## reads off the same answer for the state rows' origin badges.
 
-proc valueTypeName*(valueNode: JsonNode): string =
-  ## `Value.typ.langType`, or "" when the response carries no type.
-  json_adapter.typeNameOf(valueNode)
-
 proc valuePresentation*(valueNode: JsonNode; budget: Budget): Presentation =
   ## One wire value, presented at `budget`. THE decoding entry point.
   present(json_adapter.toPValue(valueNode), budget)

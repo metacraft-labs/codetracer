@@ -270,8 +270,11 @@ type
 proc shownAnnotationTargets*(selected: openArray[Annotation];
                              codeWidth, renderedCells: int):
                             seq[AnnotationTarget] =
-  ## `annotationTargets` over values already chosen for the line
-  ## (`shownAnnotationSpan`'s counterpart).
+  ## Where each of the already-chosen values `selected` is drawn
+  ## (`shownAnnotationSpan`'s counterpart), by the span's own arithmetic:
+  ## `/* ` then `name: value` pairs joined by `, `, cut where the span was cut
+  ## (a value the `…` replaced is not a target; one the cut runs through is,
+  ## over the cells still drawn).
   let full = annotationText(selected)
   if full.len == 0:
     return
@@ -290,12 +293,3 @@ proc shownAnnotationTargets*(selected: openArray[Annotation];
     result.add AnnotationTarget(startCell: at, endCell: min(at + w, drawn),
                                 value: v)
     at += w
-
-proc annotationTargets*(lineText: string; values: openArray[Annotation];
-                        codeWidth, renderedCells: int): seq[AnnotationTarget] =
-  ## Where each value of `annotationSpan`'s text is, by the same arithmetic:
-  ## `/* ` then `name: value` pairs joined by `, `, cut where the span was cut
-  ## (a value the `…` replaced is not a target; one the cut runs through is,
-  ## over the cells still drawn).
-  shownAnnotationTargets(annotationsForLine(lineText, values), codeWidth,
-                         renderedCells)

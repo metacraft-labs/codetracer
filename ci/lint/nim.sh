@@ -309,7 +309,8 @@ lint_step "reachability prose guard: contract suite" \
 # 2026-09-12, how the equality that replaced it could be reverted to a ceiling
 # with the arms in this suite carrying the measurement that decided it rather
 # than a preference. Four synthetic unreached exports, no Nim toolchain,
-# milliseconds.
+# milliseconds — and, since 2026-10-22, a second synthetic tree (arm 5) pinning
+# what a declaration line counts, which is what the ceiling's number is made of.
 lint_step "reachability ratchet: contract suite (a ceiling, and it still bites above it)" \
 	bash ci/test/reachability-ratchet-test.sh
 
@@ -657,8 +658,69 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #   front door's accessors (`device_grant`, `jwt`, `session`, `token`,
 #   `endpoint_codec`, `endpoint_protocol`), tested and awaiting their product
 #   callers; they are left for those features' owners, inside the ceiling.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1285 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1285 bash ci/test/frontend-reachability.sh
+#
+# 1285 -> 1196 ON 2026-10-22, after `agents` had drifted to 1298 (red on the
+# branch itself, at `d46def9e3`). Every count below is a DIFF OF TWO RUNS of the
+# guard, and each says which tree and which rule it was measured on.
+#   -89, a CLASSIFICATION FIX, not a hiding. `mentions_in` skipped EVERY
+#       identifier on a declaration line so that a symbol would not reach
+#       itself, and with it everything the line uses: a one-line signature's
+#       parameter and return types, a const's initializer, a one-line routine's
+#       body. `CallRowPitch* = CallRowToggleEmRatio * float(CodeFontPx)` in
+#       `gpui/app/leaves.nim` did not count as reading `gpui/chrome.CodeFontPx`.
+#       The same signature WRAPPED did count, from its continuation line. The
+#       guard now drops only the name(s) declared on the line. At `d46def9e3`:
+#       1298 under the old rule, 1209 under the new — 89 removed (64 types, 21
+#       values, 4 routines), 0 added. WHERE THE 89 WENT, which is not the same
+#       place: 13 now have a reader in ANOTHER module (`CodeFontPx` above), and
+#       76 are read only on their OWN module's one-line declarations
+#       (`CallRowToggleEmRatio`, the other operand), so they moved to bucket C,
+#       "only its own module reaches it" — the bucket a wrapped signature
+#       already put them in, uncounted unless `--include-own-module`.
+#       `reachability-ratchet-test.sh` arm 5 pins the rule and fails against
+#       the old one.
+#   THE BASE, RE-MEASURED: `2fc6c5764`, where 1285 was set, carries 1203 under
+#       the corrected rule. So the tree had added +6 REAL findings net (49 in,
+#       43 out, by path, name and line): 17 reached by nothing, which the next three
+#       paragraphs account for one by one, and 32 tested-only. The ceiling was
+#       NOT moved to 1209 to absorb them.
+#   -3, ALLOW-LISTED, the list's first entries: `keybindings.onKeybindingsImport`,
+#       `onKeybindingsRequest` and `traces.onRunTestSuite` are IPC handlers that
+#       `indexIpcHandlers` (index/base_handlers.nim) names from the message
+#       strings in `ipc_utils.configureIpcMain` — reached, by a name no source
+#       line spells. The older handlers of that shape are still counted; they
+#       are their own triage pass. Adding the entries exposed that the guard
+#       always read the REPOSITORY's allow-list, so the ratchet suite's fixture
+#       reported them stale and exited 2; the guard now takes `--allowlist` and
+#       the suite passes its own empty one.
+#   -10, DELETED, reached by nothing — not product, not tests, not a string,
+#       `exportc` or macro (`git grep -i -w` over the repository and its
+#       workspace siblings): `design_font_metrics.monoTextPx` (and `MonoAdvance`,
+#       which only it read), `window_chrome.launchedContentSize`,
+#       `inline_annotations.annotationTargets` (`shownAnnotationTargets` is the
+#       one `source_pane` calls), `types.LogMessage` (and its `MessageLevel`; its
+#       last reader went with `DebugComponent.message` in `b7f451152`),
+#       `locals_answer.valueTypeName`, `replay_data_store.requestSymbols` (the
+#       native host reads symbols synchronously through `applySymbolsResponse`),
+#       `sync_host.sessionIds` and `removePrimary` (the one product host,
+#       `hosted_primary`, hosts a single session for the server's life),
+#       `vcs_vm.setHistoryViewport` (NOTHING SETS `historyViewport` now, so the
+#       history reads `VcsHistoryUnmeasured` commits — the field's comment says
+#       so), and `edit_toolbar_marks.attachEditToolbarMarks` (the toolbar
+#       attaches per button through `attachEditMark`). Twelve exports in all;
+#       `MonoAdvance` and `MessageLevel` were uncounted while their one reader
+#       lived, so the count falls by ten.
+#   LEFT, AND WHY: three `$` (`keymap/scope_path` x2, `keymap/when_expr`) and
+#       one `==` (`keymap/layer_stack`) are new "nothing" findings that a name
+#       scan cannot judge: an operator is used by `echo`, `&`, `fmt`, `check`
+#       and comparisons without its name being written, so deleting one on this
+#       guard's word risks breaking a caller it cannot see. The 32 tested-only
+#       additions are exports with a suite and no product caller yet
+#       (`viewmodel/platform`'s session helpers, `viewmodel/sync`, `gpui/app`
+#       and others), left for their features, inside the ceiling.
+#   1209 - 3 - 10 = 1196, measured, 7 under the corrected base.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1196 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1196 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #

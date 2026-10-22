@@ -185,8 +185,12 @@ type
 
   VCSVM* = ref object of ViewModel
     historyViewport*: Signal[Viewport]
-      ## What the history list was given (`setHistoryViewport`): it decides
-      ## how many commits the native refresh reads.
+      ## What the history list was given: it decides how many commits the
+      ## native refresh reads (`historyCommitCount`). NOTHING WRITES IT YET.
+      ## Its setter had no caller in any front-end and was deleted on
+      ## 2026-10-22 (the reachability guard's "nothing reaches it" bucket),
+      ## so every refresh reads `VcsHistoryUnmeasured` commits until a history
+      ## view reports its viewport into this signal.
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
     headerIcon*: Signal[string]
@@ -587,12 +591,6 @@ const
     ## The commits a history list reads before its pane has reported a size —
     ## the view binding's fallback (Viewport-Driven-Loading V2). Once it has,
     ## the count follows the pane (`historyCommitCount`).
-
-proc setHistoryViewport*(vm: VCSVM; v: Viewport) =
-  ## The size and scroll position the history list was given
-  ## (Viewport-Driven-Loading V1). Reaching the end of what was read asks the
-  ## next refresh for more (`historyCommitCount`) — the native Load More.
-  vm.historyViewport.val = v
 
 func historyCommitCount*(v: Viewport): int =
   ## How many commits the history reads for a list showing `v`: every row up

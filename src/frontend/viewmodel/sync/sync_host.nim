@@ -52,10 +52,6 @@ proc newSyncHost*(schedule: Scheduler = nil): SyncHost =
   SyncHost(sessions: initOrderedTable[string, HostedSession](),
            schedule: schedule)
 
-proc sessionIds*(host: SyncHost): seq[string] =
-  for id in host.sessions.keys:
-    result.add id
-
 proc primary*(host: SyncHost; id: string): SessionViewModel =
   ## The primary session `id`, or nil.
   if host.sessions.hasKey(id): host.sessions[id].session else: nil
@@ -128,19 +124,6 @@ proc addPrimary*(host: SyncHost; id: string; session: SessionViewModel) =
   host.sessions[id] = HostedSession(session: session, publisher: publisher)
   if host.active.len == 0:
     host.activate(id)
-
-proc removePrimary*(host: SyncHost; id: string) =
-  ## Stop hosting `id` (its debug session ended). Mirrors following it keep
-  ## what they show until they are told to follow another.
-  if not host.sessions.hasKey(id):
-    return
-  host.sessions[id].publisher.dispose()
-  host.sessions.del(id)
-  if host.active == id:
-    host.active = ""
-    for other in host.sessions.keys:
-      host.activate(other)
-      break
 
 proc dispose*(host: SyncHost) =
   for h in host.sessions.values:

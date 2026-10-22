@@ -200,13 +200,6 @@ proc subscribeWindow*(resized: proc(width, height: int);
   ## False when no window is being launched (the plan and capture paths).
   subscribeWindowOn(launchedWindow(), resized, chromeChanged, activated)
 
-proc launchedContentSize*(): tuple[ok: bool; width, height: int] =
-  ## The launched window's content size now, as the renderer reports it.
-  let win = launchedWindow()
-  if win.id == 0:
-    return (false, 0, 0)
-  (true, int(win.width + 0.5), int(win.height + 0.5))
-
 proc setWindowTitle*(title: string): bool {.discardable.} =
   ## The launched window's title, changed while it is open (a session tab
   ## shown). False with no window.

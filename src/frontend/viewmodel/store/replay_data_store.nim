@@ -816,20 +816,6 @@ proc applySymbolsResponse*(store: ReplayDataStore; payload: JsonNode) =
       firstCallTicks: node{"firstCallTicks"}.getBiggestInt(0).int64)
   store.symbols.val = symbols
 
-proc requestSymbols*(store: ReplayDataStore) =
-  ## Ask the engine for the recording's functions, once per recording.
-  let key = "load-symbols"
-  if store.requestTracker.isDuplicate(key, "") or store.symbols.val.len > 0:
-    return
-  store.requestTracker.markPending(key, "")
-  let s = store
-  async_compat.onComplete(store.backend.send("ct/load-symbols", newJObject()),
-    onSuccess = proc(response: JsonNode) =
-      s.requestTracker.markComplete(key, "")
-      s.applySymbolsResponse(response),
-    onError = proc(msg: string) =
-      s.requestTracker.markComplete(key, ""))
-
 proc requestRequestSpansSince*(store: ReplayDataStore) =
   ## Poll for spans committed since the stored cursor.
   ##

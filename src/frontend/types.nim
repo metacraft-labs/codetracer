@@ -225,16 +225,6 @@ type
 
   Overlay* {.pure.} = enum None, LowLevel, Hit
 
-  MessageLevel* = enum MsgInfo, MsgWarn, MsgError
-
-  LogMessage* = object
-    message*: string
-    level*: MessageLevel
-    time*: BiggestInt
-    # just finish it
-    # when we finish messages, jumping busy stuff etc and breakpoints
-    # and simple diffing and testing before
-
   TagKind* = enum TagLine, TagRegex
 
   Tag* = object

@@ -33,8 +33,18 @@
 # THE RATCHET IS ENGAGED, AND FOR TWO YEARS OF READERS' SAKE: IT WAS NOT.
 # --------------------------------------------------------------------------
 # `ci/lint/nim.sh` now invokes this script as
-# `env CT_REACHABILITY_MAX=1285 bash ci/test/frontend-reachability.sh`, so 1286
-# findings fail `lint-nim` and 1285 do not.
+# `env CT_REACHABILITY_MAX=1196 bash ci/test/frontend-reachability.sh`, so 1197
+# findings fail `lint-nim` and 1196 do not.
+#
+# THE CEILING MOVED 1285 -> 1196 ON 2026-10-22, DOWN, after `agents` had drifted
+# to 1298 (red on the branch). Most of the drop is a CLASSIFICATION FIX in the
+# guard, not a better tree: it skipped every identifier on a declaration line,
+# so the types, initializers and one-line bodies a declaration USES were never
+# counted (-89, measured as a diff of two runs at `d46def9e3`: 13 now read from
+# another module, 76 moved to bucket C, read only by their own). Under the
+# corrected rule the ceiling's own commit carries 1203, so the tree had added 6
+# real findings; three IPC handlers were allow-listed and ten dead exports
+# deleted, which leaves it 7 under that base. Account in `ci/lint/nim.sh`.
 #
 # THE CEILING MOVED 1292 -> 1285 ON 2026-10-04: a classification fix (thirteen helpers
 # in the two test-support trees) and two deletions. Account in `ci/lint/nim.sh`.

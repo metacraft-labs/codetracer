@@ -31,8 +31,6 @@ const
     536, 244, 860, 613, 618, 644, 644, 376, 527, 461, 612, 539, 802, 594, 612,
     521, 430, 239, 430, 620]
   GroteskUnitsPerEm = 1000
-  MonoAdvance* = 612
-    ## Space Mono's one advance, units per em 1000.
   LabelLetterSpacing* = -0.14
     ## The desktop's tab and strip labels (`.lm_tab` `letter-spacing`).
 
@@ -49,7 +47,3 @@ func groteskTextPx*(s: string; sizePx: float; letterSpacing = 0.0): int =
               else: GroteskRegularAdvance[ord('M')])
   int(round(float(units) * sizePx / float(GroteskUnitsPerEm) +
             letterSpacing * float(s.len)))
-
-func monoTextPx*(columns: int; sizePx: float): float =
-  ## How wide `columns` cells of Space Mono are at `sizePx`.
-  float(columns * MonoAdvance) * sizePx / float(GroteskUnitsPerEm)
