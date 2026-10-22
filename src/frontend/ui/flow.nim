@@ -748,7 +748,35 @@ proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool
 
         self.redraw()
 
-proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
+proc displayTooltip(
+    self: FlowComponent,
+    containerId: cstring,
+    content: Node,
+    showNow: bool = false) =
+  ## Attach a tippy popup showing `content` to the element whose id is
+  ## `containerId`, replacing any popup this component already owns.
+  ##
+  ## `containerId` is a RAW id, and the anchor is looked up with
+  ## `getElementById` rather than handed to tippy as a `#<id>` selector:
+  ## the id carries the flow expression's name, and a name with a character
+  ## that is special in CSS (`.`, `[`, `>`, `$` …) turns the selector into
+  ## a different selector, or an invalid one that throws. When no element
+  ## carries the id there is no popup, and a warning says why.
+  ##
+  ## With `showNow = false` (hover) the popup keeps tippy's default trigger
+  ## (`mouseenter focus`): the caller runs inside the anchor's `mouseover`,
+  ## so the `mouseenter` that follows it shows the popup, and leaving the
+  ## anchor hides it.
+  ##
+  ## With `showNow = true` the popup is opened by a control that is NOT the
+  ## anchor (the eye icon). A hover trigger would never fire there, because
+  ## the pointer is on the button, so the instance is created with
+  ## `trigger: "manual"` and shown at once. It stays open until a press
+  ## outside it (tippy's default `hideOnClick: true`); being `interactive`,
+  ## presses inside it do not close it. Tippy registers that outside-press
+  ## listener in the capture phase, so the `mousedown` that opened the popup
+  ## has already passed it and cannot close it again.
+  ## https://atomiks.github.io/tippyjs/v6/all-props/#trigger
   when not defined(server) and not defined(ctInCentralExtensionContext):
     let tippy = require("tippy.js")
     let followCursor = tippy.followCursor
@@ -758,18 +786,35 @@ proc displayTooltip(self: FlowComponent, containerId: cstring, content: Node) =
         tippy.destroy()
         self.tippyElement = nil
 
+    let anchor = document.getElementById(containerId)
+    if anchor.isNil:
+      cwarn "flow: displayTooltip: no element has id " & $containerId &
+        "; no popup"
+      return
+
     if self.tippyElement.isNil:
-      let obj = ui_imports.misc_lib.tippy(cstring(&"#{containerId}"), JsAssoc[cstring, JsObject]{
+      var options = JsAssoc[cstring, JsObject]{
         allowHTML: cast[JsObject](true),
-        followCursor: cast[JsObject](cstring"horizontal"),
         content: cast[JsObject](content),
         appendTo: cast[JsObject](document.body),
-        plugins: cast[JsObject](@[followCursor]),
         interactive: cast[JsObject](true),
         theme: cast[JsObject](cstring"internal_default_light"),
-      })
+      }
+      if showNow:
+        options[cstring"trigger"] = cast[JsObject](cstring"manual")
+      else:
+        # Following the cursor only makes sense while the cursor is on the
+        # anchor, which is the hover case alone.
+        options[cstring"followCursor"] = cast[JsObject](cstring"horizontal")
+        options[cstring"plugins"] = cast[JsObject](@[followCursor])
+      # Passed as a one-element array so tippy returns an ARRAY of instances,
+      # which is what `tippyElement`'s users (here and `clear`) iterate.
+      let obj = ui_imports.misc_lib.tippy(@[anchor].toJs, options)
 
       self.tippyElement = obj
+      if showNow:
+        for instance in obj:
+          instance.show()
   else:
     cerror "flow: displayTooltip: tippy import not implemented for browser"
 
@@ -791,11 +836,17 @@ proc customRedraw(self: ValueComponent) =
 proc renderModalValueDom(self: FlowComponent, containerId: cstring): Node =
   self.modalValueComponent[containerId].renderValueDom()
 
-proc openTooltip*(self: FlowComponent, containerId: cstring, value: Value) =
+proc openTooltip*(
+    self: FlowComponent,
+    containerId: cstring,
+    value: Value,
+    showNow: bool = false) =
+  ## `showNow` is `displayTooltip`'s: true when a control other than the
+  ## anchor opens the popup.
   let valueDom = self.renderModalValueDom(containerId)
 
   self.tooltipId = containerId
-  self.displayTooltip(containerId, valueDom)
+  self.displayTooltip(containerId, valueDom, showNow)
 
 func ensureTokens(self: FlowComponent, line: int) =
   if self.tab.isNil or self.tab.sourceLines.len == 0:
@@ -1644,7 +1695,7 @@ proc flowEventValue*(self: FlowComponent, event: FlowEvent, stepCount: int, styl
       let popup = document.createElement(cstring"div")
       popup.setAttribute(cstring"class", cstring"flow-event-value-popup")
       popup.appendChild(document.createTextNode(fullText))
-      self.displayTooltip(eventAnchorId, popup)
+      self.displayTooltip(eventAnchorId, popup, showNow = true)
     )
     result.appendChild(viewMore)
 
@@ -1687,6 +1738,15 @@ proc flowSimpleValue*(
       .substr(4, ($self.data.config.flow.realFlowUI).len - 1)
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
+  # The ids of the value boxes. Each is ONE token, and it is the exact id the
+  # eye button and the hover popup look their box up by (`displayTooltip`).
+  # Dual mode used to give each box two space-separated tokens, which no
+  # id lookup matched, so neither popup opened there. The dual
+  # halves keep `-{name}` as their suffix because the GUI page objects find
+  # a value box by `[id$="-<name>"]` and `[id*="-<name>"]`.
+  let valueBoxId = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-{name}")
+  let valueBoxIdBefore = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-before-{name}")
+  let valueBoxIdAfter = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-after-{name}")
 
   proc openTypedValuePopup(anchorId: cstring, value: Value) =
     ## Open the full value in a popup drawn by the TYPED value renderer
@@ -1697,9 +1757,11 @@ proc flowSimpleValue*(
     ## a struct opens as an expandable tree here exactly as it does there.
     if not self.modalValueComponent.hasKey(anchorId):
       self.ensureValueComponent(anchorId, name, value)
-    self.openTooltip(anchorId, value)
+    self.openTooltip(anchorId, value, showNow = true)
 
-  proc renderViewOption(value: Value): Node =
+  proc renderViewOption(value: Value, anchorId: cstring): Node =
+    ## The eye button. `anchorId` is the id of the value box the popup is
+    ## attached to, which must be the box that shows `value`.
     result = document.createElement(cstring"span")
     result.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-view-more-button flow-hide-content"))
     result.applyStyle(style)
@@ -1708,12 +1770,6 @@ proc flowSimpleValue*(
     # width. It used to set `max-width: none`, which is what let a long value
     # draw over the source lines below it; the full value belongs in a popup,
     # not in a chip that has grown out of its own box.
-    #
-    # Dropping the `getElementById` lookup also retires a latent bug: in
-    # `BeforeAndAfterValueMode` the value boxes are given SPACE-SEPARATED
-    # two-token ids (see `idBefore`/`idAfter` below), which `getElementById`
-    # can never match — so in dual mode the old handler silently did nothing.
-    let anchorId = cstring(&"flow-{flowMode}-value-box-{i}-{stepCount}-{name}")
     let popupValue = value
     result.addEventListener(cstring"mousedown", proc(e: Event) =
       e.stopPropagation()
@@ -1795,16 +1851,17 @@ proc flowSimpleValue*(
   case flowValueMode:
   of BeforeValueMode:
     if flowValue(beforeValue).truncated:
-      result.appendChild(renderViewOption(beforeValue))
+      result.appendChild(renderViewOption(beforeValue, valueBoxId))
   of AfterValueMode:
     if flowValue(afterValue).truncated:
-      result.appendChild(renderViewOption(afterValue))
+      result.appendChild(renderViewOption(afterValue, valueBoxId))
   of BeforeAndAfterValueMode:
     if flowValue(beforeValue).truncated or flowValue(afterValue).truncated or
        flowValueWidth(beforeValue) + flowValueWidth(afterValue) > FLOW_VALUE_LIMIT:
       # The "after" value is the one the step produced, so it is the one
-      # the popup opens on when both halves are drawn.
-      result.appendChild(renderViewOption(afterValue))
+      # the popup opens on when both halves are drawn, anchored on the
+      # box that shows it.
+      result.appendChild(renderViewOption(afterValue, valueBoxIdAfter))
 
   if showName:
     let nameSpan = flowValueNameDom(name)
@@ -1824,7 +1881,6 @@ proc flowSimpleValue*(
 
   if flowValueMode == BeforeValueMode:
     let before = &"flow-{flowMode}-value-before-only"
-    let id = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
     # The `flow-parallel-value-box` token is part of the DOM contract:
     # the GUI smoke-test helper `assertFlowValueVisible` (and any
     # consumer checking [class*="flow-parallel-value-box"]) needs it
@@ -1832,24 +1888,20 @@ proc flowSimpleValue*(
     # AfterValueMode and dual cases below already include it; emit it
     # here too so the contract is uniform across all flow value
     # branches.
-    appendValueSpan(result, cstring(id), &"flow-{flowMode}-value-box " & before, beforeValue)
+    appendValueSpan(result, valueBoxId, &"flow-{flowMode}-value-box " & before, beforeValue)
   elif flowValueMode == AfterValueMode:
     let after = &"flow-{flowMode}-value-after-only"
-    let id = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-    appendValueSpan(result, cstring(id), &"flow-{flowMode}-value-box " & after, afterValue)
+    appendValueSpan(result, valueBoxId, &"flow-{flowMode}-value-box " & after, afterValue)
   else:
     let before = &"flow-{flowMode}-value-dual"
-    let idBefore = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-before flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-    let idAfter = &"flow-{flowMode}-value-box-{i}-{stepCount}-{name}-after flow-{flowMode}-value-box-{i}-{stepCount}-{name}"
-
-    appendValueSpan(result, cstring(idBefore), &"flow-{flowMode}-value-box flow-dual-value-before " & before, beforeValue)
+    appendValueSpan(result, valueBoxIdBefore, &"flow-{flowMode}-value-box flow-dual-value-before " & before, beforeValue)
 
     let arrowSpan = document.createElement(cstring"span")
     arrowSpan.setAttribute(cstring"class", cstring(&"flow-{flowMode}-value-name flow-dual-arrow"))
     arrowSpan.appendChild(document.createTextNode(cstring"=>"))
     result.appendChild(arrowSpan)
 
-    appendValueSpan(result, cstring(idAfter), &"flow-{flowMode}-value-box " & before, afterValue)
+    appendValueSpan(result, valueBoxIdAfter, &"flow-{flowMode}-value-box " & before, afterValue)
 
   # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 2) — attach the
   # icon-only origin badge per annotated value.  The per-value summary

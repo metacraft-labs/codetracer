@@ -34,6 +34,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { test } from "../../lib/fixtures";
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
@@ -61,6 +62,93 @@ test.use({
 test.setTimeout(420_000);
 
 type Box = { x: number; y: number; w: number; h: number };
+type GroundSide = "right" | "left" | "top" | "bottom";
+/** Where a ground-band probe sampled, and the run along the band it chose from. */
+interface BandProbe { x: number; y: number; along: [number, number] }
+
+/**
+ * A point inside GoldenLayout's 50 px ground band on `side` at which the drop
+ * target IS that band — computed from the live DOM by GoldenLayout 2.6.0's own
+ * rules, so the probe follows whatever layout the app opened on.
+ *
+ * `LayoutManager.calculateItemAreas` lists the ground's four side areas
+ * (`GroundItem.createSideAreas`, in the order top, left, bottom, right), then
+ * for each visible stack its whole element and its header;
+ * `LayoutManager.getArea` picks, of the areas holding the point, the one with
+ * the SMALLEST surface (a tie keeps the earlier one) — codetracer-pm
+ * `spec/Architecture/Layout-ViewModel.md` §4.2.2. A stack's header (stack
+ * width × ~24 px) or a small stack is smaller than a 50 px × full-height band,
+ * so a fixed point (the layout's mid-height) can land on a header instead —
+ * the first-run layout's split right column puts one exactly there. (A
+ * stack's 25 % body segments are not in that list: they only pick the segment
+ * once the stack has won.)
+ *
+ * The probe keeps its distance from the edge (`inset`) and walks ALONG the
+ * band one pixel at a time, simulating `getArea` at each point; it returns the
+ * middle of the longest run where the band wins, or null when there is none
+ * (the root is a stack, so there are no side areas, or every point is taken).
+ * Call it during a drag: GoldenLayout computes its areas once the dragged tab
+ * has left its stack.
+ */
+async function groundBandProbe(page: Page, side: GroundSide,
+                               inset: number): Promise<BandProbe | null> {
+  return await page.evaluate(({ side, inset }) => {
+    const gl = document.querySelector<HTMLElement>(".lm_goldenlayout");
+    const rootItem = gl?.querySelector(":scope > .lm_item");
+    if (gl === null || rootItem == null || rootItem.classList.contains("lm_stack")) return null;
+    interface Area { x1: number; y1: number; x2: number; y2: number; surface: number }
+    const areaOf = (r: DOMRect): Area =>
+      ({ x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, surface: r.width * r.height });
+    const g = areaOf(gl.getBoundingClientRect());
+    const size = 50; // `createSideAreas`' areaSize
+    const withSurface = (a: Omit<Area, "surface">): Area =>
+      ({ ...a, surface: (a.x2 - a.x1) * (a.y2 - a.y1) });
+    const sides: Record<GroundSide, Area> = {
+      top: withSurface({ ...g, y2: g.y1 + size }),
+      left: withSurface({ ...g, x2: g.x1 + size }),
+      bottom: withSurface({ ...g, y1: g.y2 - size }),
+      right: withSurface({ ...g, x1: g.x2 - size }),
+    };
+    const areas: Area[] = [sides.top, sides.left, sides.bottom, sides.right];
+    for (const s of Array.from(gl.querySelectorAll<HTMLElement>(".lm_stack"))) {
+      if (s.style.display === "none") continue; // `Stack.getArea` skips it
+      areas.push(areaOf(s.getBoundingClientRect()));
+      const header = s.querySelector(":scope > .lm_header");
+      if (header !== null) areas.push(areaOf(header.getBoundingClientRect()));
+    }
+    const { [side]: band } = sides;
+    const winner = (x: number, y: number): Area | null => {
+      let best: Area | null = null;
+      for (const a of areas) {
+        if (x >= a.x1 && x < a.x2 && y >= a.y1 && y < a.y2 && (best === null || best.surface > a.surface)) best = a;
+      }
+      return best;
+    };
+    const vertical = side === "left" || side === "right";
+    const across = Math.round(side === "right" ? g.x2 - inset : side === "left" ? g.x1 + inset
+      : side === "bottom" ? g.y2 - inset : g.y1 + inset);
+    const from = Math.ceil(vertical ? g.y1 : g.x1);
+    const to = Math.floor(vertical ? g.y2 : g.x2) - 1;
+    let best: [number, number] | null = null;
+    let runStart = -1;
+    for (let t = from; t <= to + 1; t += 1) {
+      const wins = t <= to && winner(vertical ? across : t, vertical ? t : across) === band;
+      if (wins && runStart < 0) runStart = t;
+      if (!wins && runStart >= 0) {
+        if (best === null || t - 1 - runStart > best[1] - best[0]) best = [runStart, t - 1];
+        runStart = -1;
+      }
+    }
+    if (best === null) return null;
+    const mid = Math.round((best[0] + best[1]) / 2);
+    return { x: vertical ? across : mid, y: vertical ? mid : across, along: best };
+  }, { side, inset });
+}
+// How far in from the edge each band is probed: 45 px is inside the 50 px
+// band and clear of the desktop's own 40 px drag-to-pin band
+// (`layout.setupDragToPinListeners`, left, right and bottom), where a release
+// would also auto-hide the pane; the top has no pin band.
+const groundBandInset: Record<GroundSide, number> = { right: 45, left: 45, top: 40, bottom: 45 };
 
 test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) => {
   const out: Record<string, unknown> = {
@@ -324,14 +412,18 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
     const band: Record<string, unknown> = {};
     if (root) {
       band.layout = { x: Math.round(root.x), y: Math.round(root.y), w: Math.round(root.w), h: Math.round(root.h) };
-      // 45 px in: inside GoldenLayout's 50 px band and clear of the
-      // desktop's own 40 px drag-to-pin band (`layout.setupDragToPinListeners`,
-      // left, right and bottom), where a release would also auto-hide it.
-      for (const [name, px, py] of [["right", root.x + root.w - 45, root.y + root.h * 0.5],
-                                    ["left", root.x + 45, root.y + root.h * 0.5],
-                                    ["top", root.x + root.w * 0.5, root.y + 40],
-                                    ["bottom", root.x + root.w * 0.5, root.y + root.h - 45]] as [string, number, number][]) {
-        await page.mouse.move(px, py, { steps: 3 });
+      // Each band at a point where GoldenLayout picks the band, not a header
+      // or a stack that lies across it (`groundBandProbe`); the point is
+      // recorded beside the reading.
+      const probes: Record<string, BandProbe | null> = {};
+      for (const name of ["right", "left", "top", "bottom"] as GroundSide[]) {
+        const probe = await groundBandProbe(page, name, groundBandInset[name]);
+        probes[name] = probe;
+        if (!probe) {
+          band[name] = null;
+          continue;
+        }
+        await page.mouse.move(probe.x, probe.y, { steps: 3 });
         await page.waitForTimeout(300);
         band[name] = await page.evaluate(() => {
           const ind = document.querySelector(".lm_dropTargetIndicator") as HTMLElement | null;
@@ -340,6 +432,7 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
           return { x: px(ind.style.left), y: px(ind.style.top), w: px(ind.style.width), h: px(ind.style.height) };
         });
       }
+      band.probe = probes;
     }
     zones.rootBand = band;
     // Over the header: the placeholder's index among the tabs.
@@ -364,11 +457,17 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
     await page.mouse.move(src2.x + src2.width / 2, src2.y + src2.height / 2);
     await page.mouse.down();
     await page.mouse.move(src2.x + src2.width / 2 + 30, src2.y + src2.height / 2 + 30, { steps: 5 });
-    await page.mouse.move(rootBox.x + rootBox.w - 45, rootBox.y + rootBox.h * 0.5, { steps: 8 });
+    await page.waitForTimeout(150);
+    // The same rule as the probe above, over the layout as it stands with
+    // the tab lifted out.
+    const dropProbe = await groundBandProbe(page, "right", groundBandInset.right);
+    // No point where the band wins: put the tab back and record no drop.
+    const dropAt = dropProbe ?? { x: src2.x + src2.width / 2, y: src2.y + src2.height / 2 };
+    await page.mouse.move(dropAt.x, dropAt.y, { steps: 8 });
     await page.waitForTimeout(300);
     await page.mouse.up();
     await page.waitForTimeout(1500);
-    zones.rootDrop = await page.evaluate(() => {
+    zones.rootDrop = dropProbe === null ? null : await page.evaluate(() => {
       const gl = document.querySelector(".lm_goldenlayout") as HTMLElement | null;
       const top = gl?.querySelector(":scope > .lm_item") as HTMLElement | null;
       if (!top) return null;
@@ -384,6 +483,7 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
         lastShare: r ? Math.round((r.width / g.width) * 100) / 100 : 0,
       };
     });
+    if (zones.rootDrop) (zones.rootDrop as Record<string, unknown>).probe = dropProbe;
   }
   out.dropZones = zones;
 
@@ -437,8 +537,33 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
   expect(em.headerAfterMoveOutputLeft.indexOf("output"))
     .toBeLessThan(em.headerAfterMoveOutputLeft.indexOf(""));
   expect(em.headerRestored).toEqual(em.headerBefore);
-  const rb = (out.dropZones as any).rootBand;
-  if (rb && rb.right) expect(Math.abs(rb.right.w - 50)).toBeLessThanOrEqual(2);
+  // Every ground band is read (a missing reading fails, it does not skip),
+  // and each is GoldenLayout's 50 px band along its whole edge.
+  const must = <T>(v: T | null | undefined, what: string): T => {
+    expect(v, what).toBeTruthy();
+    return v as T;
+  };
+  const { rootBand: rb, rootDrop: rd } = out.dropZones as {
+    rootBand?: Partial<Record<GroundSide | "layout", Box | null>> & { probe?: Record<string, BandProbe | null> };
+    rootDrop?: { rootIsRow: boolean; lastTabs: string[]; lastFullHeight: boolean } | null;
+  };
+  const lay = must(rb?.layout, "the layout's box was read");
+  for (const side of ["right", "left", "top", "bottom"] as GroundSide[]) {
+    const b = must(rb?.[side], `the ${side} ground band was read (probe ${JSON.stringify(rb?.probe?.[side])})`);
+    const vertical = side === "left" || side === "right";
+    expect(Math.abs((vertical ? b.w : b.h) - 50), `the ${side} band's thickness`).toBeLessThanOrEqual(2);
+    expect(Math.abs((vertical ? b.h : b.w) - (vertical ? lay.h : lay.w)), `the ${side} band's length`)
+      .toBeLessThanOrEqual(2);
+    const edgeGap = side === "right" ? b.x + b.w - (lay.x + lay.w) : side === "left" ? b.x - lay.x
+      : side === "bottom" ? b.y + b.h - (lay.y + lay.h) : b.y - lay.y;
+    expect(Math.abs(edgeGap), `the ${side} band lies on the layout's ${side} edge`).toBeLessThanOrEqual(2);
+  }
+  // A drop there splits the whole layout: the event log alone, full height,
+  // as the root row's last child.
+  const drop = must(rd, "the drop on the right ground band was made and read");
+  expect(drop.rootIsRow).toBe(true);
+  expect(drop.lastTabs).toEqual(["EVENT LOG"]);
+  expect(drop.lastFullHeight).toBe(true);
   // Finding 14: the location column, when the table has one, is hidden.
   const loc = ((out.eventLog as any).columns as any[]).find((c) => c.title === "location");
   if (loc) expect(loc.visible).toBe(false);
