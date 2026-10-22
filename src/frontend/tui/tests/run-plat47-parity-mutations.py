@@ -82,7 +82,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | FILES is filled on the interactive path (the D3 root cause) | F1 |
   | the calltrace pane lists the TRACE, marks the call the debugger is in | C1, C4 |
   | GPUI's calltrace rows read `name #index`, as the desktop's `.call-text` | C3 |
-  | the fallback is the stack, and it says so, in both front-ends | C2 (terminal caption), C5 (GPUI's stack) |
+  | the fallback is the stack, and it says so, in both front-ends | C2 (terminal caption), C5 (the shared stop loader's stack) |
   | no brackets, no rule, colour and weight; reverse+bold in monochrome | B1, B2, B4, B3 |
   | the focused pane's ring: the desktop's colour, closed on every edge | K1, K2, K3 |
   | GPUI's outline colour and active-tab weight | K4, K5 |
@@ -181,7 +181,10 @@ ROLES = "src/frontend/tui/app/theme/roles.nim"
 EDTHEME = "src/frontend/tui/app/theme/editor_theme.nim"
 GUTTER = "src/frontend/tui/app/views/gutter.nim"
 SESSION = "src/frontend/tui/host/tui_session.nim"
-NATIVE = "src/frontend/tui/host/native_host.nim"
+# The per-stop loads every front-end runs (`d883db0e2`, one per-stop loader
+# for every front-end): the no-call-trace stack fallback moved here from
+# `tui/host/native_host.nim`, which now only asks the loader for it.
+STOPLOADER = "src/frontend/viewmodel/sdk/stop_loader.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 CTVIEW = "src/frontend/tui/app/views/call_trace.nim"
 SRCPANE = "src/frontend/tui/app/views/source_pane.nim"
@@ -244,7 +247,7 @@ TOKENS_GATE = "ci/test/design-tokens-fresh.sh"
 DESKTOP_GATE = "scripts/plat45-capture-electron.sh"
 
 SUBJECTS = [DESK, FRONT, GENERATED, TOKENS, EMITTER, ROLES, EDTHEME, GUTTER,
-            SESSION, NATIVE, SHELL, CTVIEW, PANEVIEWS, TABSTRIP, CHROME, CAPS,
+            SESSION, STOPLOADER, SHELL, CTVIEW, PANEVIEWS, TABSTRIP, CHROME, CAPS,
             SOURCEVM, CELLS, SRCPANE, RUNTIME, LEXER, WHITE, DESKCONFIG,
             LEXICAL, MONARCH, JSREGEX, MONARCH_JSON, ISOLATION, VCSPARSE,
             VCSVM, VCSPANE, VCSSOURCE, INTERACTION, BINDING, FRAMEOVERLAY,
@@ -493,11 +496,16 @@ ARMS = [
         "        discard content\n",
         C_FALLBACK,
         "the terminal's stack fallback no longer says it is one"),
-    Arm("C5", NATIVE,
-        "  vm.fallbackStack.val = names\n",
-        "  vm.fallbackStack.val = newSeq[string]()\n",
+    # C5 RE-AIMED 2026-10-22: `d883db0e2` moved the fallback's load from
+    # `native_host` into the SDK's stop loader (`loadCallStackFallback`),
+    # which both native front-ends run; the defect is the same line there.
+    Arm("C5", STOPLOADER,
+        "      vm.fallbackStack.val = names\n",
+        "      vm.fallbackStack.val = newSeq[string]()\n",
         C_FALLBACK,
-        "GPUI's calltrace VM is never handed the stack when there is no trace"),
+        "the calltrace VM GPUI renders is never handed the stack when there "
+        "is no trace: the shared stop loader answers the fallback with "
+        "nothing"),
     # --- tab strips -----------------------------------------------------------
     Arm("B1", TABSTRIP,
         '  ActiveTabOpen* = " "\n  ActiveTabClose* = " "\n',
