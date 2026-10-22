@@ -133,11 +133,11 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
   let loaded = s.loadRecordingPanes()
   let stop = s.loadStopPanes()
   # VIEWPORT-DRIVEN LOADING (HSF-V1): the open reads only what it needs to
-  # learn the recording's extent; each pane then holds the window it shows.
-  # The event log's ViewModel is told a 40-row pane; the call trace is paged
-  # as the terminal's call-trace pane pages it (`tui_session.pageCallTrace`).
+  # learn the recording's extent; each pane then holds the window its
+  # viewport shows. The panes' ViewModels are told a 40-row pane, and the
+  # store applies each window's answer whatever transport resolved it.
   s.session.eventLogVM.setViewport(Viewport(rows: 40))
-  s.requestAndLoadCalltrace(height = 40, depth = RecordingCalltraceDepth)
+  s.session.calltraceVM.setViewport(Viewport(rows: 40, cols: RecordingCalltraceDepth))
   pumpCallbacks()
 
   test "the census is ARMED: over a store no producer has written, each pane is a report":
@@ -335,14 +335,18 @@ suite "PLAT-40 2 — one decoder: what a call-trace row IS":
     # §30b: one predicate, one function, every consumer calling it. The
     # desktop decodes a TYPED response and the native front-ends a JSON one,
     # so the two cannot share the parse — they share the decision.
-    let desktop = readFile(repo / "src/frontend/ui/calltrace.nim")
+    # The desktop's pane reads the session's store since HSF-D1 (`ui/calltrace`
+    # decodes nothing); the extension's stub-store pane keeps a typed decode.
+    let desktop = readFile(repo / "src/frontend/ui/calltrace_extension.nim")
     let native = readFile(repo / "src/frontend/viewmodel/headless_session.nim")
     let store = readFile(repo / "src/frontend/viewmodel/store/replay_data_store.nim")
-    ck "callLineOf(CallLineWire(" in desktop
+    ck "callLineOf(" in desktop
     ck "makeCallLine(" notin desktop
     ck "applyCalltraceResponse(" in native
     ck "parseCallLine" notin native
-    let apply = store[store.find("proc applyCalltraceResponse*(") .. ^1]
+    # The DEFINITION — the store forward-declares the proc above
+    # `requestCalltraceSection`, which decodes its own answer through it.
+    let apply = store[store.rfind("proc applyCalltraceResponse*(") .. ^1]
     ck "callLineOf(" in apply[0 ..< apply.find("\nproc ")]
 
   decoderSession.close()
@@ -389,7 +393,9 @@ suite "PLAT-40 3 — the producer partition":
 
   const Declared = {
     "calltrace": @[
-      ("src/frontend/ui/calltrace.nim", "syncCalltraceData"),
+      # The VS Code extension's stub-store pane (HSF-D1 moved it out of
+      # `ui/calltrace.nim`; the desktop's pane reads the session's store).
+      ("src/frontend/ui/calltrace_extension.nim", "syncCalltraceData"),
       ("src/frontend/viewmodel/collab/backend_snapshots.nim",
        "projectBackendSnapshotToStore"),
       ("src/frontend/viewmodel/store/replay_data_store.nim",
@@ -442,9 +448,17 @@ suite "PLAT-40 3 — the producer partition":
       ck (declared - production).len == 0
       ck production.len == Declared[pane].len
       ck declared.len == Declared[pane].len
-      # NO TEST-ONLY DEFINITION MASQUERADES AS A PRODUCER.
-      checkpoint("defined under tests/: " & $testDefined)
-      ck testDefined.len == 0
+      # NO TEST-ONLY DEFINITION MASQUERADES AS A PRODUCER. A test's own
+      # fixture may seed the store it built (`test_calltrace_navigation`'s
+      # `setup`); it is reported, and it may not carry a declared producer's
+      # name, which is how a test definition would pass for one.
+      checkpoint("defined under tests/ (fixtures): " & $testDefined)
+      var producerNames = initHashSet[string]()
+      for d in Declared[pane]: producerNames.incl d[1]
+      var masquerading = 0
+      for w in testDefined:
+        if w.name in producerNames: inc masquerading
+      ck masquerading == 0
 
 # ===========================================================================
 suite "PLAT-40 4 — DIFF-9: the surfaces that draw each pane, compared as domain values":
