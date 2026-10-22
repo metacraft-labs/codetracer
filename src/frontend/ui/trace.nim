@@ -29,6 +29,11 @@ var timelineVMStore: ReplayDataStore
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
+var traceResultsChanged*: proc()
+  ## Called whenever the trace service's sessions or their results change —
+  ## a new run, a run's results arriving. The Trace Log (``ui/trace_log``)
+  ## installs it to keep the session's ``TraceLogVM`` rows current.
+
 proc initTimelineVMFromSession*(vm: TimelineVM) =
   ## Hand the pane the session's `TimelineVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
@@ -594,6 +599,8 @@ proc runTracepoints*(data: Data) {.exportc.} =
     id: data.services.trace.traceSessions.len))
   data.pointList.lastTracepoint = 0
   data.pointList.redrawTracepoints = true
+  if not traceResultsChanged.isNil:
+    traceResultsChanged()
   data.dapApi.sendCtRequest(
     CtRunTracepoints,
     RunTracepointsArg(
@@ -641,6 +648,8 @@ method onTracepointResultsAggregate*(
 
   let session = data.services.trace.traceSessions[response.sessionId]
   session.results[response.sessionId] = response.results
+  if not traceResultsChanged.isNil:
+    traceResultsChanged()
 
   if traceComponent.tracepoint.isNil:
     return

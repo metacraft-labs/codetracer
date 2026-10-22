@@ -910,7 +910,8 @@ proc mountSearchResults(container: isonim_dom.Element; fixture: string): Dispose
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createSearchResultsVM(store)
     if fixture != "empty": vm.applySearchResults()
-    mountIsoNimSearchResults(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderSearchResultsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountEventLog(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1205,7 +1206,8 @@ proc mountTraceLog(container: isonim_dom.Element; fixture: string): DisposeProc 
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createTraceLogVM(store)
     if fixture != "empty": vm.applyTraceLog()
-    mountIsoNimTraceLogPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderTraceLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountStepList(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1404,7 +1406,8 @@ proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
                                detail: "file result",
                                shortcut: "file"),
       ])
-    mountIsoNimSearch(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountShell(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1579,7 +1582,8 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "search":
         let vm = createSearchVM(store); vm.applySearch()
-        mountIsoNimSearch(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "point-list":
         let vm = createPointListVM(store); vm.selectPoint(some(0))

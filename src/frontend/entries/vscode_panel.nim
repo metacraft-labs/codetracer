@@ -56,9 +56,14 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
   of "calltrace":
     renderCalltracePanel[WebRenderer, dom_api.Element](r, s.calltraceVM)
   of "eventLog": renderEventLogPanel(r, s.eventLogVM)
-  of "terminalOutput": renderTerminalOutputPanel(r, s.terminalOutputVM)
+  of "terminalOutput":
+    let panel = renderTerminalOutputPanel[WebRenderer, dom_api.Element](
+      r, s.terminalOutputVM)
+    decorateTerminalOutput(panel, s.terminalOutputVM)
+    panel
   of "scratchpad": renderScratchpadPanel(r, s.scratchpadVM)
-  of "traceLog": renderTraceLogPanel(r, s.traceLogVM)
+  of "traceLog":
+    renderTraceLogPanel[WebRenderer, dom_api.Element](r, s.traceLogVM)
   of "flow": renderFlowPanel(r, s.flowVM)
   of "pointList":
     renderPointListPanel[WebRenderer, dom_api.Element](r, s.pointListVM)

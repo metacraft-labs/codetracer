@@ -36,16 +36,25 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_point_list_view, isonim_step_list_view,
                             isonim_calltrace_editor_view, isonim_build_view,
                             isonim_errors_view]
+import ../viewmodel/views/[isonim_search_results_view, isonim_trace_log_view,
+                            isonim_terminal_output_view]
+from ../viewmodel/viewmodels/terminal_output_vm import nil
+from ../viewmodel/viewmodels/trace_log_vm import setViewport
 
 const
   PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
                      Content.PixelHistory, Content.ShaderDebug,
                      Content.VideoPlayer, Content.PointList, Content.StepList,
                      Content.CalltraceEditor, Content.Build,
-                     Content.BuildErrors}
+                     Content.BuildErrors, Content.SearchResults,
+                     Content.TraceLog, Content.TerminalOutput}
     ## The panes `mountPanel` renders.
   StateRowFallbackPx = 22.0
     ## The State pane's row pitch until a row is rendered to measure.
+  TraceRowFallbackPx = 22.0
+    ## The Trace Log's row pitch until a row is rendered to measure.
+  TerminalLineFallbackPx = 18.0
+    ## A terminal line's height until one is drawn to measure.
 
 type
   PanelRenderer* = proc(r: WebRenderer; session: SessionViewModel): dom_api.Element
@@ -157,6 +166,34 @@ proc measureOf(kind: Content; session: SessionViewModel): PaneMeasure =
       fallbackRowPx: proc(): float = StateRowFallbackPx,
       report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
       changed: proc() = discard session.store.locals.locals.val)
+  of Content.TraceLog:
+    # The rows it shows (Viewport-Driven-Loading Q4): their locals are read
+    # by window. A hidden pane reports none and reads nothing.
+    let vm = session.traceLogVM
+    PaneMeasure(
+      scroller: cstring".trace-log-table-body",
+      row: cstring".trace-log-row",
+      pxPerLevel: 0.0,
+      countPartialRow: true,
+      reportHidden: true,
+      fallbackRowPx: proc(): float = TraceRowFallbackPx,
+      report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
+      changed: proc() = discard vm.entries.val)
+  of Content.TerminalOutput:
+    # The line view asks for the lines it shows (Viewport-Driven-Loading
+    # Q3): the `pre` holding the lines is the scroller. A hidden pane (no
+    # height) reports none and asks nothing until it is shown.
+    let vm = session.terminalOutputVM
+    PaneMeasure(
+      scroller: cstring"pre",
+      row: cstring".terminal-line",
+      pxPerLevel: 0.0,
+      countPartialRow: true,
+      reportHidden: true,
+      fallbackRowPx: proc(): float = TerminalLineFallbackPx,
+      report: proc(v: Viewport; rowPx: float) =
+        terminal_output_vm.setViewport(vm, v),
+      changed: proc() = discard vm.lines.val)
   else:
     PaneMeasure()
 
@@ -228,6 +265,19 @@ proc render(m: PanelMount; session: SessionViewModel) =
       let panel = renderErrorsPanel[WebRenderer, dom_api.Element](
         r, session.errorsVM)
       dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.SearchResults:
+      let panel = renderSearchResultsPanel[WebRenderer, dom_api.Element](
+        r, session.searchResultsVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.TraceLog:
+      let panel = renderTraceLogPanel[WebRenderer, dom_api.Element](
+        r, session.traceLogVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+    of Content.TerminalOutput:
+      let panel = renderTerminalOutputPanel[WebRenderer, dom_api.Element](
+        r, session.terminalOutputVM)
+      dom_api.appendChild(node, dom_api.Node(panel))
+      decorateTerminalOutput(panel, session.terminalOutputVM)
     else:
       let renderPane = renderers[mount.kind]
       if not renderPane.isNil:

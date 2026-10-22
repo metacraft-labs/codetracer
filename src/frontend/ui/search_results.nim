@@ -3,11 +3,12 @@
 ## ---------------------------------------------------------------------------
 ## ViewModel layer — IsoNim is the primary renderer.
 ##
-## The pane is the IsoNim view
-## (``viewmodel/views/isonim_search_results_view.nim``) over the shared
-## ``SearchResultsVM`` — the model the terminal and GPUI draw too — mounted
-## into the GoldenLayout container. The ``SearchResultsComponent`` keeps its
-## identity for the layout's mount and auto-hide wiring. A search runs in the
+## The pane is the generic view
+## (``viewmodel/views/isonim_search_results_view.nim``) over the session's
+## ``SearchResultsVM`` — the model the terminal and GPUI draw too — mounted by
+## the panel host (``ui/panel_host``) into the container GoldenLayout or the
+## auto-hide strip creates. The ``SearchResultsComponent`` keeps its identity
+## for the layout's and the auto-hide wiring. A search runs in the
 ## main process through the one shared runner
 ## (``viewmodel/host/find_in_files``); its batches arrive through
 ## ``search_service`` and go straight into the ViewModel.
@@ -16,29 +17,22 @@
 import ui_imports, auto_hide, ../[types, communication]
 
 import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
-import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import SearchResultLine
 from ../viewmodel/viewmodels/search_results_vm import
-  SearchResultsVM, createSearchResultsVM, search, acceptBatch, stepResult,
+  SearchResultsVM, search, acceptBatch, stepResult,
   openResult, toggleOption, searchOptionOf,
   TextMatchOptions
-from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_search_results_view import
-  mountIsoNimSearchResults
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by the build, errors, terminal-output and event-log
-# migrations.
-var searchResultsVMInstance*: SearchResultsVM
-var searchResultsVMStore: ReplayDataStore
-var searchResultsComponentRef: SearchResultsComponent
-var isoNimSearchResultsMounted*: bool = false
-
-proc tryMountIsoNimSearchResultsPanel*()
 proc requestFixedSearchRender*()
 proc installSearchVMCallbacks*(vm: SearchResultsVM)
+
+proc paneVM(): SearchResultsVM =
+  ## The ViewModel the pane renders: the shown session's
+  ## (``ui/panel_host``), or nil before the renderer has one.
+  let session = panelSession()
+  if session.isNil: nil else: session.searchResultsVM
 
 # ---------------------------------------------------------------------------
 # Fixed-search overlay — direct DOM renderer.
@@ -173,54 +167,10 @@ proc installSearchVMCallbacks*(vm: SearchResultsVM) =
   vm.onJumpToResult = proc(row: SearchResultLine) =
     discard data.openLocation(cstring(row.path), row.line)
 
-# ---------------------------------------------------------------------------
-# VM bootstrap
-# ---------------------------------------------------------------------------
-
 proc initSearchResultsVMFromSession*(vm: SearchResultsVM) =
-  ## Hand the pane the session's `SearchResultsVM` — the one
-  ## `initializePanelViewModels` built on the session's store, so every
-  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ##
-  ## If a stub-backed instance already exists (created before the session
-  ## was available), it is replaced so the panel uses the real backend.
-  let store = vm.store
-  if searchResultsVMInstance != nil:
-    clog "SearchResultsVM: replacing existing instance with shared-store version"
-    isoNimSearchResultsMounted = false
-  searchResultsVMStore = store
-  searchResultsVMInstance = vm
-  installSearchVMCallbacks(searchResultsVMInstance)
-  clog "SearchResultsVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimSearchResultsPanel()
-
-proc initSearchResultsVM*() =
-  ## Lazily create the parallel ``SearchResultsVM`` backed by a stub
-  ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initSearchResultsVMFromSession``.
-  if searchResultsVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  searchResultsVMStore = createReplayDataStore(stubBackend)
-  searchResultsVMInstance = createSearchResultsVM(searchResultsVMStore)
-  installSearchVMCallbacks(searchResultsVMInstance)
-  clog "SearchResultsVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimSearchResultsPanel()
+  ## Wire the session's ``SearchResultsVM`` to this window. The panel host
+  ## mounts the pane over it (``ui/panel_host``).
+  installSearchVMCallbacks(vm)
 
 proc rowOf(r: SearchResultRow): SearchResultLine =
   ## A main-process row as the pane's value.
@@ -232,21 +182,22 @@ proc rowOf(r: SearchResultRow): SearchResultLine =
 proc acceptFindInFilesBatch(batch: SearchResultsBatch) =
   ## The main process's batch, into the pane — dropped by the ViewModel
   ## unless it belongs to the latest search.
-  if searchResultsVMInstance.isNil:
+  let vm = paneVM()
+  if vm.isNil:
     return
   var rows: seq[SearchResultLine] = @[]
   for r in batch.rows:
     rows.add rowOf(r)
-  discard searchResultsVMInstance.acceptBatch(
+  discard vm.acceptBatch(
     batch.id, rows, batch.done,
     (if batch.note.isNil: "" else: $batch.note))
 
 proc stepSearchResult*(delta: int) =
   ## `search.next-result` / `search.previous-result` (`F4` / `Shift+F4`):
   ## the next / previous result, wrapping, opened at its line.
-  if searchResultsVMInstance.isNil:
+  let vm = paneVM()
+  if vm.isNil:
     return
-  let vm = searchResultsVMInstance
   let i = vm.stepResult(delta)
   if i >= 0:
     discard vm.openResult(i)
@@ -255,86 +206,23 @@ proc toggleSearchOption*(operation: string) =
   ## `search.toggle-case` / `-whole-word` / `-regex` (`Alt+C` / `Alt+W` /
   ## `Alt+R` in the pane's field): the toggle flips, and a search that ran
   ## runs again with it.
-  if searchResultsVMInstance.isNil:
+  let vm = paneVM()
+  if vm.isNil:
     return
   let (known, which) = searchOptionOf(operation)
   if known:
-    searchResultsVMInstance.toggleOption(which)
+    vm.toggleOption(which)
 
 proc startFindInFiles(query: string) =
   ## The omnibar's ``:grep``: the pane's own search.
-  if searchResultsVMInstance.isNil:
-    initSearchResultsVM()
-  searchResultsVMInstance.search(query)
-
-proc tryMountIsoNimSearchResultsPanel*() =
-  ## Mount the IsoNim search results view into the GoldenLayout-managed
-  ## (or standalone auto-hide) container.  The container's id is
-  ## ``searchResultsComponent-{id}``; the panel is a singleton (id
-  ## always 0) but we still resolve through the registered component's
-  ## id field for symmetry with the other IsoNim mounts.
-  ##
-  ## Safe to call multiple times — mounts only once.  Retries until the
-  ## DOM container appears (capped at 200 attempts, ~2 s) since
-  ## GoldenLayout creates the host slightly after the layout state
-  ## changes.
-  if searchResultsVMInstance.isNil:
-    return
-  if searchResultsComponentRef.isNil:
-    return
-
-  let key = cstring("searchResultsComponent-" & $searchResultsComponentRef.id)
-  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-  let tab = data.activeSessionIndex
-  var retryCount = 0
-  proc doMount() =
-    retryCount += 1
-    let container = findIsoNimPaneHost(key, tab)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimSearchResultsPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    # Per HOST, not per id: tab 0's mount set the latch for a host this
-    # tab does not share. See `isoNimPanelNeedsMountInHost`.
-    if not isoNimPanelNeedsMountInHost(
-        latchSaysMounted = isoNimSearchResultsMounted,
-        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-      return
-
-    # Replace any prior content (the layout bridge may have planted a
-    # stub element before the IsoNim mount fires).
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimSearchResultsMounted = true
-    markIsoNimPanelContainerMounted(container)
-    try:
-      mountIsoNimSearchResults(container, searchResultsVMInstance)
-    except:
-      cerror "tryMountIsoNimSearchResultsPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
-
-
-  doMount()
-
-# SearchResultsComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths; all real
-# DOM construction happens in
-# ``viewmodel/views/isonim_search_results_view.nim``.
+  let vm = paneVM()
+  if not vm.isNil:
+    vm.search(query)
 
 method register*(self: SearchResultsComponent, api: MediatorWithSubscribers) =
-  ## Register the SearchResultsComponent with the mediator.  Bring up the
-  ## IsoNim SearchResultsVM lazily so the mount procedure can find it;
-  ## the shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## The pane subscribes to nothing: its rows are the session's
+  ## ``SearchResultsVM``, which the main process's batches fill.
   self.api = api
-  initSearchResultsVM()
-  if searchResultsComponentRef.isNil:
-    searchResultsComponentRef = self
-    tryMountIsoNimSearchResultsPanel()
 
 # ---------------------------------------------------------------------------
 # The ``search_service`` hooks (it cannot import this module; see the note

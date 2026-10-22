@@ -3706,11 +3706,11 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "search-component"
+      check "search-component" in panel.attributes["class"].split(" ")
 
       dispose()
 
@@ -3720,7 +3720,7 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let modeBar = findByClass(panel, "search-mode-selector")
       check modeBar != nil
@@ -3752,7 +3752,7 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let input = findByClass(panel, "search-query-input")
       check input != nil
@@ -3766,7 +3766,7 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let results = findByClass(panel, "search-results")
       check results != nil
@@ -3786,7 +3786,7 @@ suite "IsoNim Search Panel — mode switching":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let fileBtn = findByClass(panel, "mode-file")
       fileBtn.fireEvent("click")
@@ -3805,7 +3805,7 @@ suite "IsoNim Search Panel — mode switching":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let results = findByClass(panel, "search-results")
       check results.styles["display"] == "none"
@@ -3822,7 +3822,7 @@ suite "IsoNim Search Panel — mode switching":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "search-selected-indicator")
       check indicator.textContent == ""
@@ -4600,7 +4600,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -4615,7 +4615,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       let preNode = findByTag(panel, "pre")
       check preNode != nil
@@ -4631,7 +4631,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       let overlay = findByClass(panel, "empty-overlay")
 
       check overlay.styles["display"] == "block"
@@ -4645,7 +4645,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setLines(@[])  # marks initialLoad = false but leaves lines empty
 
       let overlay = findByClass(panel, "empty-overlay")
@@ -4666,7 +4666,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[makeTerminalFragment("hello")]),
@@ -4690,7 +4690,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[
@@ -4714,7 +4714,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       # Three fragments at increasing rrTicks; pin the focus to the
       # middle one and expect past / active / future in order.
@@ -4742,7 +4742,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[
@@ -4766,7 +4766,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[makeTerminalLine(0, @[makeTerminalFragment("x")])])
       check findAllByClass(panel, "terminal-line").len == 1
@@ -4792,7 +4792,7 @@ suite "IsoNim Terminal Output Panel — interactions":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[
@@ -4839,7 +4839,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, _) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[31mred\e[0m <img src=x onerror=alert(1)> " &
                       "\e[1;48;5;4mbold on blue\e[0m\n", 10, 0)])
@@ -4869,7 +4869,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[terminalEvent("first\n", 10, 0),
                      terminalEvent("second\n", 20, 1),
                      terminalEvent("third\n", 30, 2)])
@@ -4888,7 +4888,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, _) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[terminalEvent("hello\n", 10, 0)])
       check panel.attributes["data-terminal-view"] == "lines"
       check findByClass(panel, "terminal-view-toggle").styles["display"] ==
@@ -4902,7 +4902,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, _) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[?1049h\e[2J\e[1;1Hframe one", 10, 0),
         terminalEvent("\e[1;1Hframe two", 20, 1),
@@ -4936,7 +4936,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
         terminalEvent("\e[1;1Hb", 20, 1),
@@ -4994,7 +4994,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
         terminalEvent("\e[1;1Hb", 20, 1)])
@@ -5959,7 +5959,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -5978,7 +5978,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # "Inactive" is no longer a root class (see the vocabulary note above);
       # it is the body showing the pre-search overlay and nothing else, plus
@@ -5998,7 +5998,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       let bar = findByClass(panel, "fif-search-bar")
       # The panel's input is the SEARCH input (Enter → `vm.onSearch`), which
@@ -6032,7 +6032,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # The panel-wide "No results" badge went away with the header row.
       # What must still hold is that an empty result set produces no count
@@ -6051,7 +6051,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let empty = findByClass(panel, "fif-empty")
       # With no recent searches the overlay is the call-to-action prompt;
       # with recent searches it lists them instead (asserted below).
@@ -6066,7 +6066,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "fif-body")
 
       vm.setLoading(true)
@@ -6106,7 +6106,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[
         makeResult(path = "a.nim", line = 1),
@@ -6130,7 +6130,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # Noun agreement is the property; only the badge carrying it moved.
       # The redesign lost it (the file badge read "1 matches"), so the view
@@ -6155,7 +6155,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       check vm.resultCount.val == 0
       check findAllByClass(panel, "fif-match-row").len == 0
 
@@ -6179,7 +6179,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "fif-body")
       check "fif-empty" in body.children[0].attributes["class"].split(' ')
       check vm.active.val == false
@@ -6208,7 +6208,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[
         makeResult(path = "a.nim", line = 1, text = "let x = 1"),
@@ -6236,7 +6236,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # "z" before "a" so first-appearance order is distinguishable from
       # sorted order — the property is that groups follow the result stream.
@@ -6268,7 +6268,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[makeResult(path = "main.nim", line = 42,
                                  text = "let foo = 1")])
@@ -6288,7 +6288,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[makeResult(), makeResult(line = 2)])
       check findAllByClass(panel, "fif-match-row").len == 2
@@ -6322,7 +6322,7 @@ suite "IsoNim Search Results Panel — the runner's match highlighted":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setQuery("foo")
       vm.setResults(@[makeResult(text = "let foo = 1", matchStart = 4,
@@ -6341,7 +6341,7 @@ suite "IsoNim Search Results Panel — the runner's match highlighted":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setQuery("FOO")
       vm.setResults(@[makeResult(text = "let foo = 1", matchStart = 4,
@@ -6357,7 +6357,7 @@ suite "IsoNim Search Results Panel — the runner's match highlighted":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # The query occurs in the text: a view that searched the line itself
       # would highlight it.
@@ -6385,7 +6385,7 @@ suite "IsoNim Search Results Panel — the options":
       vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
         asked.add((runId, query, options))
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let caseBox = findByClass(panel, "fif-option-case")
       let wordBox = findByClass(panel, "fif-option-word")
       check "fif-option-on" notin caseBox.attributes["class"].split(' ')
@@ -6433,7 +6433,7 @@ suite "IsoNim Search Results Panel — interactions":
       vm.onJumpToResult = proc(row: SearchResultLine) =
         opened.add((row.path, row.line))
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[makeResult(path = "src/main.nim", line = 17,
                                  text = "let foo = 1")])
@@ -6460,7 +6460,7 @@ suite "IsoNim Search Results Panel — interactions":
       vm.onJumpToResult = proc(row: SearchResultLine) =
         opened.add((row.path, row.line))
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[
         makeResult(path = "a.nim", line = 5, text = "first"),
@@ -9229,7 +9229,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
 
       check "component-container" in panel.attributes["class"]
       check "traceLog" in panel.attributes["class"]
@@ -9249,7 +9249,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "trace-log-table-header") != nil
       let body = findByClass(panel, "trace-log-table-body")
@@ -9264,7 +9264,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let header = findByClass(panel, "trace-log-table-header")
       let cols = findAllByClass(header, "trace-col-rr-ticks")
       let locCols = findAllByClass(header, "trace-col-location")
@@ -9287,7 +9287,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let placeholder = findByClass(panel, "trace-log-empty")
       check placeholder != nil
       check placeholder.textContent == EmptyStateText
@@ -9307,7 +9307,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "trace-log-table-body")
       check body.children.len == 0
 
@@ -9324,7 +9324,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(150, path = "src/sub/foo.nim",
                                  line = 42, functionName = "myFn",
                                  locals = "a=1 b=hello"))
@@ -9363,7 +9363,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(500, minRRTicks = 0, maxRRTicks = 1000))
 
       let body = findByClass(panel, "trace-log-table-body")
@@ -9381,7 +9381,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let placeholder = findByClass(panel, "trace-log-empty")
       check "hidden" notin placeholder.attributes["class"]
 
@@ -9405,7 +9405,7 @@ suite "IsoNim Trace Log Panel — selection":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
       vm.addEntry(makeTraceEntry(200))
       vm.addEntry(makeTraceEntry(300))
@@ -9431,7 +9431,7 @@ suite "IsoNim Trace Log Panel — selection":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
 
       vm.selectEntry(0)
@@ -9469,7 +9469,7 @@ suite "IsoNim Trace Log Panel — clearEntries":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
       vm.addEntry(makeTraceEntry(200))
       vm.selectEntry(1)
@@ -9515,7 +9515,7 @@ suite "IsoNim Trace Log Panel — interactions":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100, eventId = 11))
       vm.addEntry(makeTraceEntry(200, eventId = 22, line = 99,
                                  path = "src/main.nim"))
@@ -9539,7 +9539,7 @@ suite "IsoNim Trace Log Panel — interactions":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
       vm.addEntry(makeTraceEntry(200))
 

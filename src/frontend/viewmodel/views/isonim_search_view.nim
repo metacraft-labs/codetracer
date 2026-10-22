@@ -2,10 +2,9 @@
 ##
 ## IsoNim DOM-rendering view for the Search / Command Palette panel.
 ##
-## Renders a live, reactive DOM tree driven by `SearchVM` signals.
-## Both renderer overloads (Mock and Web) produce the same structure,
-## hoisted into a single template that is materialised into one
-## concrete proc per renderer.
+## Renders a live, reactive DOM tree driven by `SearchVM` signals. ONE generic
+## view (Shared-DOM-Front-Ends D3), `renderSearchPanel[R, N]`, rendered under
+## `MockRenderer` in the headless tests and `WebRenderer` in the storybook.
 ##
 ## Structure:
 ##   div.search-component
@@ -19,7 +18,7 @@
 import std/options
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -27,6 +26,9 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/search_vm
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Static labels and class names
@@ -82,12 +84,29 @@ proc onSetMode(vm: SearchVM; mode: SearchMode): proc() =
   result = proc() = vm.setMode(m)
 
 # ---------------------------------------------------------------------------
-# Panel template
+# The panel
 # ---------------------------------------------------------------------------
 
-template renderSearchPanelImpl(r, vm, rootClass: untyped): untyped =
+proc renderSearchResultRow[R, N](r: R; vm: SearchVM;
+                                 entry: proc(): SearchPanelResultEntry;
+                                 index: int): N =
+  ## One result row. `indexEach` reuses it as the results change, so its
+  ## text reads `entry()`.
   ui(r):
-    tdiv(class = rootClass):
+    tdiv(class = searchResultClass(vm, index),
+         onclick = onResultClick(vm, index)):
+      span(class = "search-result-label"):
+        text entry().label
+      span(class = "search-result-detail"):
+        text entry().detail
+      span(class = "search-result-shortcut"):
+        text entry().shortcut
+
+proc renderSearchPanel*[R, N](r: R; vm: SearchVM): N =
+  ## The Search / Command Palette panel (see the module header).
+  var rowsHost: N
+  let panel = ui(r):
+    tdiv(class = "search-component isonim-search"):
       tdiv(class = "search-mode-selector"):
         button(class = modeButtonClass(vm, smCommand),
                onclick = onSetMode(vm, smCommand)):
@@ -107,33 +126,12 @@ template renderSearchPanelImpl(r, vm, rootClass: untyped): untyped =
               value = vm.query.val)
       tdiv(class = "search-results",
            display = displayIf(vm.resultsVisible.val)):
-        for i, resultEntry in vm.results.val:
-          tdiv(class = searchResultClass(vm, i),
-               onclick = onResultClick(vm, i)):
-            span(class = "search-result-label"):
-              text resultEntry.label
-            span(class = "search-result-detail"):
-              text resultEntry.detail
-            span(class = "search-result-shortcut"):
-              text resultEntry.shortcut
+        tdiv(ref = rowsHost, class = "search-result-rows"):
+          discard
         span(class = selectedIndicatorClass(vm)):
           text selectedIndicatorText(vm)
-
-# ---------------------------------------------------------------------------
-# Renderer overloads
-# ---------------------------------------------------------------------------
-
-proc renderSearchPanel*(r: MockRenderer; vm: SearchVM): MockNode =
-  renderSearchPanelImpl(r, vm, "search-component")
-
-when defined(js):
-  proc renderSearchPanel*(r: WebRenderer; vm: SearchVM): isonim_dom.Element =
-    renderSearchPanelImpl(r, vm, "search-component isonim-search")
-
-  proc mountIsoNimSearch*(container: isonim_dom.Element; vm: SearchVM) =
-    ## Mount the IsoNim Search panel as a child of `container`.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderSearchPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+  indexEach[SearchPanelResultEntry, R, N](r, rowsHost,
+    proc(): seq[SearchPanelResultEntry] = vm.results.val,
+    proc(entry: proc(): SearchPanelResultEntry; index: int): N =
+      renderSearchResultRow[R, N](r, vm, entry, index))
+  panel

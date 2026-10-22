@@ -1846,9 +1846,8 @@ proc mountPaneForState(state: GoldenItemState) =
         ensurePanelMountedById(containerId, state.content,
                                data.activeSessionIndex)
 
-      # EventLog and TerminalOutput mount from `register` and nowhere else,
-      # and both are in
-      # `isDirectMountComponent`. They are joined here so the invariant
+      # EventLog mounts from `register` and nowhere else, and is in
+      # `isDirectMountComponent`. It is joined here so the invariant
       # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
       # direct-mount `Content` has an arm — holds without an allowlist of
       # unexamined exemptions. Their mounts are idempotent and additionally
@@ -1856,22 +1855,12 @@ proc mountPaneForState(state: GoldenItemState) =
       if state.content == Content.EventLog:
         tryMountIsoNimEventLogPanel()
 
-      if state.content == Content.TerminalOutput:
-        tryMountIsoNimTerminalOutputPanel()
-
       if state.content == Content.Shell:
         let shellComponent = ShellComponent(component)
         if shellComponent.shell.isNil:
           discard shellComponent.createShell()
 
 
-
-      # SearchResults is an IsoNim view over `SearchResultsVM`, mounted by
-      # ``search_results.tryMountIsoNimSearchResultsPanel`` against the
-      # ``searchResultsComponent-{id}`` container; the ViewModel is the
-      # only store of its rows, so a re-mount has nothing to re-sync.
-      if state.content == Content.SearchResults:
-        search_results.tryMountIsoNimSearchResultsPanel()
 
 
       # Repl is now an IsoNim view -- its DOM is mounted by
@@ -1897,15 +1886,6 @@ proc mountPaneForState(state: GoldenItemState) =
           RequestPanelComponent(component))
         request_panel.tryMountIsoNimRequestPanel()
 
-      # TraceLog is now an IsoNim view -- its DOM is mounted by
-      # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
-      # ``traceLogComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``TraceLogComponent`` remains
-      # as the event-bus carrier (its ``register`` method still
-      # subscribes to tracepoint-result events) and
-      # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
-      # accumulated when the panel becomes visible.
       # TestResults and Constraints are IsoNim views with no legacy half,
       # so there is nothing to sync -- the mount is the whole hook.
       if state.content == Content.TestResults:
@@ -1913,10 +1893,6 @@ proc mountPaneForState(state: GoldenItemState) =
 
       if state.content == Content.Constraints:
         constraints.tryMountIsoNimConstraintsPanel()
-
-      if state.content == Content.TraceLog:
-        trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
-        trace_log.tryMountIsoNimTraceLogPanel()
 
       # Scratchpad is now an IsoNim view -- its DOM is mounted by
       # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
@@ -2580,9 +2556,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       ensurePanelMountedById(convertComponentLabel(panel.content, 0),
                              Content.BuildErrors, data.activeSessionIndex)
       return
-    if panel.content == Content.SearchResults:
-      search_results.isoNimSearchResultsMounted = false
-      search_results.tryMountIsoNimSearchResultsPanel()
+    if panel.content in PanelHostKinds:
+      # The panel host's panes: the mount survives the reparenting, and a
+      # host it has not reached yet is mounted now.
+      ensurePanelMountedById(label, panel.content, data.activeSessionIndex)
       return
     if panel.content == Content.RequestPanel:
       let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
@@ -2813,12 +2790,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       if panelDef.content in PanelHostKinds:
         # The panel host mounts the pane into the container just built.
         discard mountPanel(cast[dom_api.Element](innerDiv), panelDef.content)
-      elif panelDef.content == Content.SearchResults:
-        try:
-          search_results.isoNimSearchResultsMounted = false
-          search_results.tryMountIsoNimSearchResultsPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimSearchResultsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
       elif panelDef.content == Content.RequestPanel:
         try:
           let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
@@ -2871,8 +2842,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
       return
     if contentId == int(Content.SearchResults):
-      search_results.isoNimSearchResultsMounted = false
-      search_results.tryMountIsoNimSearchResultsPanel()
+      ensurePanelMountedById(cstring"searchResultsComponent-0",
+                             Content.SearchResults, data.activeSessionIndex)
       return
 
   # Expose a helper to pin a GL content item to an auto-hide edge.

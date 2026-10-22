@@ -70,11 +70,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 32
+const ExpectedAssertions = 31
   ## HSF-D6: 36 -> 32. The control-data test counts the removed arms and the
   ## panel host's shared arm as two group assertions, and the surviving arms
   ## as two, instead of one per pane — so this count no longer changes when a
-  ## pane joins the panel host.
+  ## pane joins the panel host. 32 -> 31: Terminal Output's own mount-proc
+  ## check went with its poll.
   ## PLAT-51: 42 -> 36. The Timeline panel is removed: its arm, its mount
   ## proc and its give-up lines went (the control-data loop -1, the mount
   ## proc -1, the give-up triple -3, the two `clog` guards -2), and one
@@ -314,8 +315,7 @@ suite "the factory mounts every mountable pane":
     # it, since this suite does not build `layout.nim`.
     let source = layoutSource()
     counted source.contains("trace, event_log, terminal_output,")
-    for procName in ["tryMountIsoNimEventLogPanel",
-                     "tryMountIsoNimTerminalOutputPanel"]:
+    for procName in ["tryMountIsoNimEventLogPanel"]:
       counted dispatchRegion(source).contains(procName & "()")
     # The panel host's panes: mounted by the factory synchronously, and here
     # by id for a container the factory never saw.

@@ -99,7 +99,8 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   mountIsoNimEventLog(shell.sections[2].content, session.eventLogVM)
   mountIsoNimFlow(shell.sections[3].content, session.flowVM)
   # (PLAT-51: the Timeline panel is removed from every product.)
-  mountIsoNimSearch(shell.sections[4].content, session.searchVM)
+  discard isonim_dom.appendChild(isonim_dom.Node(shell.sections[4].content), isonim_dom.Node(
+    renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), session.searchVM)))
   isonim_dom.appendChild(isonim_dom.Node(shell.sections[5].content),
     isonim_dom.Node(renderPointListPanel[WebRenderer, isonim_dom.Element](
       r, session.pointListVM)))

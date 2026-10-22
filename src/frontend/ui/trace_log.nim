@@ -1,30 +1,14 @@
 ## Trace Log Panel — tabular tracepoint-result inspector.
 ##
 ## ---------------------------------------------------------------------------
-## ViewModel layer — IsoNim is the primary renderer.
-##
-## The legacy Karax ``method render`` was dropped in favour of an IsoNim
-## view (``viewmodel/views/isonim_trace_log_view.nim``) that mounts
-## directly into the GoldenLayout container.  The legacy
-## ``TraceLogComponent`` retains its Component shell so any historical
-## non-render legacy callers (event-bus subscriptions, generic
-## ``Component.afterInit`` wiring) still resolve; every state mutation
-## now mirrors into the parallel ``TraceLogVM`` so the IsoNim view is
-## the single source of truth for the panel's DOM.
-##
-## Lifecycle:
-## 1. ``utils.nim::makeTraceLogComponent`` constructs the legacy
-##    ``TraceLogComponent`` and registers it under
-##    ``Content.TraceLog`` (one instance per panel id).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.TraceLog`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimTraceLogPanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``traceLogComponent-{id}`` container and the reactive effects
-##    keep the DOM in sync with the VM.
-## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initTraceLogVMFromSession`` so the
-##    panel uses the production ``ReplayDataStore``.
+## The pane is the generic view (``viewmodel/views/isonim_trace_log_view.nim``)
+## over the session's ``TraceLogVM``, mounted by the panel host
+## (``ui/panel_host``) into the container GoldenLayout creates; the host also
+## reports the rows it shows (``TraceLogVM.setViewport``), which reads their
+## locals by window. The rows are the latest tracepoint run's stops: this
+## module turns the trace service's sessions into ``TraceLogEntry`` rows
+## whenever its results change (``trace.traceResultsChanged``), mounted or
+## not. The ``TraceLogComponent`` keeps its identity for the layout.
 ## ---------------------------------------------------------------------------
 
 import
@@ -32,36 +16,12 @@ import
   ../[ types, communication ],
   ../../common/ct_event
 
-import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ./presented_value
-import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import TraceLogEntry
-from ../viewmodel/viewmodels/trace_log_vm import
-  TraceLogVM, createTraceLogVM, NO_SELECTED_INDEX,
-  setEntries, addEntry, clearEntries, selectEntry, jumpToEntry
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_trace_log_view import
-    mountIsoNimTraceLogPanel
-
-# ---------------------------------------------------------------------------
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by step_list / search_results / no_source / repl /
-# low_level_code / request_panel.
-# ---------------------------------------------------------------------------
-
-var traceLogVMInstance*: TraceLogVM
-var traceLogVMStore: ReplayDataStore
-var traceLogComponentRef: TraceLogComponent
-# Track which TraceLogComponent ids have already mounted their IsoNim
-# view.  The GL container is keyed by ``traceLogComponent-{id}`` so
-# each panel instance gets its own mount.
-var isoNimTraceLogMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
-
-proc tryMountIsoNimTraceLogPanel*()
+from ../viewmodel/viewmodels/trace_log_vm import TraceLogVM, setEntries
+from ../viewmodel/session_vm import SessionViewModel
+import ./panel_host
+from ./trace import traceResultsChanged
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers.
@@ -130,207 +90,37 @@ proc legacyStopToVm(stop: Stop;
     tracepointId: stop.tracepointId,
   )
 
-proc collectLatestSessionEntries(self: TraceLogComponent): seq[TraceLogEntry] =
-  ## Walk the latest trace session's results and project each
-  ## ``Stop`` into a ``TraceLogEntry``.  Mirrors the inner loops of
-  ## the legacy ``refreshTraces`` proc which rebuilt the DataTables
-  ## row source on each redraw.  Returns an empty seq if no trace
-  ## session has been captured yet (matches the legacy
-  ## ``traceSessions.len > 0`` guard).
+proc collectLatestSessionEntries(): seq[TraceLogEntry] =
+  ## The latest tracepoint run's stops, as rows. Empty before any run.
   result = @[]
-  if self.isNil or self.service.isNil:
+  if data.isNil or data.services.trace.isNil or
+     data.services.trace.traceSessions.len == 0:
     return
-  if self.service.traceSessions.len == 0:
-    return
-  let session = self.service.traceSessions[^1]
-  let minTicks =
-    if not self.data.isNil: self.data.minRRTicks else: 0
-  let maxTicks =
-    if not self.data.isNil: self.data.maxRRTicks else: 0
+  let session = data.services.trace.traceSessions[^1]
+  let minTicks = data.minRRTicks
+  let maxTicks = data.maxRRTicks
   for _, sessionResults in session.results:
     for stop in sessionResults:
       result.add(legacyStopToVm(stop, minTicks, maxTicks))
 
-# ---------------------------------------------------------------------------
-# IsoNim VM bridge
-# ---------------------------------------------------------------------------
-
-proc syncLegacyTraceLogIntoVM*(self: TraceLogComponent) =
-  ## Bulk-replay the legacy ``traceSessions`` cache into the VM.
-  ## Used by the layout when the panel container becomes visible (or
-  ## is rebuilt) so the panel reflects every entry already
-  ## accumulated by the previous trace session.  Per-entry updates
-  ## go through ``addEntry`` directly via the event-bus carrier;
-  ## this proc covers the bulk-replace scenario (e.g. opening the
-  ## panel after some captures already happened).
-  if traceLogVMInstance.isNil or self.isNil:
+proc syncTraceLogFromService*() =
+  ## Put the latest run's stops in the session's ``TraceLogVM`` — what the
+  ## pane shows, whether or not it is mounted.
+  let session = panelSession()
+  if session.isNil or session.traceLogVM.isNil:
     return
-  traceLogVMInstance.setEntries(collectLatestSessionEntries(self))
-
-# ---------------------------------------------------------------------------
-# VM bootstrap
-# ---------------------------------------------------------------------------
+  session.traceLogVM.setEntries(collectLatestSessionEntries())
 
 proc initTraceLogVMFromSession*(vm: TraceLogVM) =
-  ## Hand the pane the session's `TraceLogVM` — the one
-  ## `initializePanelViewModels` built on the session's store, so every
-  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ##
-  ## If a stub-backed instance already exists (created before the session
-  ## was available), it is replaced so the panel uses the real backend.
-  let store = vm.store
-  if traceLogVMInstance != nil:
-    clog "TraceLogVM: replacing existing instance with shared-store version"
-    isoNimTraceLogMountedIds = JsAssoc[int, bool]{}
-  traceLogVMStore = store
-  traceLogVMInstance = vm
-  clog "TraceLogVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimTraceLogPanel()
+  ## The session's ``TraceLogVM`` is installed: show the runs already made.
+  syncTraceLogFromService()
 
-proc initTraceLogVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initStepListVM`` / ``initReplVM`` /
-  ## ``initLowLevelCodeVM`` / ``initRequestPanelVM`` — a stub backend
-  ## so the panel can still render before ``configureMiddleware``
-  ## runs.
-  if traceLogVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  traceLogVMStore = createReplayDataStore(stubBackend)
-  traceLogVMInstance = createTraceLogVM(traceLogVMStore)
-  clog "TraceLogVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimTraceLogPanel()
-
-# ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc tryMountIsoNimTraceLogPanel*() =
-    ## Mount the IsoNim Trace Log panel view into the GoldenLayout-
-    ## managed container.  The container's id is
-    ## ``traceLogComponent-{id}`` — each open Trace Log panel
-    ## instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes (mirrors
-    ## ``tryMountIsoNimRequestPanel``).
-    if traceLogVMInstance.isNil:
-      return
-    if traceLogComponentRef.isNil:
-      return
-    let componentId = traceLogComponentRef.id
-
-    let key = cstring("traceLogComponent-" & $componentId)
-    # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-    let tab = data.activeSessionIndex
-    var retryCount = 0
-    proc doMount() =
-      retryCount += 1
-      let container = findIsoNimPaneHost(key, tab)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimTraceLogPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Per HOST, not per id: tab 0's mount set the latch for a host this
-      # tab does not share. See `isoNimPanelNeedsMountInHost`.
-      if not isoNimPanelNeedsMountInHost(
-          latchSaysMounted = isoNimTraceLogMountedIds.hasKey(componentId),
-          hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-        return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimTraceLogMountedIds[componentId] = true
-      markIsoNimPanelContainerMounted(container)
-      try:
-        mountIsoNimTraceLogPanel(container, traceLogVMInstance)
-      except:
-        cerror "tryMountIsoNimTraceLogPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-      # Re-sync any rows the legacy component already carries so the
-      # freshly-mounted view reflects the latest list.
-      if not traceLogComponentRef.isNil:
-        syncLegacyTraceLogIntoVM(traceLogComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimTraceLogPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initTraceLogVM*``) compile on every backend.
-    discard
-
-# ---------------------------------------------------------------------------
-# Component registration — IsoNim primary renderer; no Karax method
-# render.  Generic callers are expected to use direct IsoNim mount paths.
-# ---------------------------------------------------------------------------
-
-method unregister*(self: TraceLogComponent) =
-  ## Release the module-global slot and the mounted marker before the base
-  ## implementation drops the event-bus subscriptions.
-  ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY, AND SILENTLY. Both
-  ## globals are write-once: `register` assigns `traceLogComponentRef` only
-  ## `if isNil`, and the mount returns early at its
-  ## `isoNimTraceLogMountedIds.hasKey` guard. Neither was ever cleared. After a
-  ## teardown `traceLogComponentRef` still points at a component whose DOM
-  ## container is gone, and the marker for its id survives into the next
-  ## component handed the same id — GoldenLayout reuses them, and ids restart
-  ## from 0 after a layout reset — whose mount then returns at the guard and
-  ## draws nothing.
-  ##
-  ## It is an ordinary transition, not an exotic one:
-  ## `ui/session_switch.nim:337` unregisters EVERY component of a closing
-  ## session and `ui/layout.nim` unregisters a closed panel. And the failure is
-  ## silent, which is what made it survive — a pane that returns early at a
-  ## guard is indistinguishable from a pane with nothing to show.
-  ##
-  ## The VM is deliberately NOT reset: it is a singleton by design and holds
-  ## state about the trace rather than about this panel, so dropping it would
-  ## make closing and reopening the pane lose data that is still true.
-  ##
-  ## Modelled on `ui/constraints.nim`, which is the worked example, and
-  ## `ui/scratchpad.nim`, which is the original.
-  if traceLogComponentRef == self:
-    traceLogComponentRef = nil
-  discard jsDelete(isoNimTraceLogMountedIds[self.id])
-  procCall unregister(Component(self))
+traceResultsChanged = syncTraceLogFromService
 
 method register*(self: TraceLogComponent, api: MediatorWithSubscribers) =
-  ## Register the TraceLogComponent with the mediator.  Bring up the
-  ## IsoNim TraceLogVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## The pane subscribes to nothing: its rows are the session's
+  ## ``TraceLogVM``.
   self.api = api
-  initTraceLogVM()
-  if traceLogComponentRef.isNil:
-    traceLogComponentRef = self
-    tryMountIsoNimTraceLogPanel()
 
 proc registerTraceLogComponent*(component: TraceLogComponent,
                                  api: MediatorWithSubscribers) {.exportc.} =

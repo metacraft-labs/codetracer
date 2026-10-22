@@ -4,15 +4,13 @@ import
   ../../common/ct_event
 
 # ---------------------------------------------------------------------------
-# ViewModel layer — IsoNim is the primary renderer.
-#
-# The legacy Karax `method render` was dropped in favour of an IsoNim
-# view (`viewmodel/views/isonim_terminal_output_view.nim`) that mounts
-# directly into the GoldenLayout container. The legacy
-# `TerminalOutputComponent` retains its event-bus subscriptions so the
-# frontend's existing wiring (CtLoadedTerminal, CtUpdatedEvents,
-# CtCompleteMove) keeps feeding data; the component now mirrors every
-# update into a `TerminalOutputVM` whose signals drive the IsoNim view.
+# The pane is the generic view (`viewmodel/views/isonim_terminal_output_view`)
+# over the session's `TerminalOutputVM`. On the desktop and the web page the
+# panel host (`ui/panel_host`) mounts it and reports the lines it shows; the
+# ViewModel loads those lines by window and follows the store's position, so
+# the component subscribes to nothing. The VS Code extension's webview has no
+# session store: there the component still feeds a stub-backed ViewModel from
+# its events (CtLoadedTerminal, CtUpdatedEvents, CtCompleteMove).
 # ---------------------------------------------------------------------------
 
 import std/json
@@ -29,8 +27,9 @@ from ../viewmodel/viewmodels/terminal_output_vm import
 import std/tables
 import isonim/core/signals
 from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_terminal_output_view import
-  mountIsoNimTerminalOutput
+when defined(ctInExtension):
+  from ../viewmodel/views/isonim_terminal_output_view import
+    mountIsoNimTerminalOutput
 
 # PLAT-52: no `ansi_up` here any more. A program's output reaches the DOM as
 # text nodes (`textContent`) inside spans whose style comes from the decoded
@@ -42,10 +41,9 @@ from ../viewmodel/views/isonim_terminal_output_view import
 # the pattern used by the event-log and calltrace migrations.
 var terminalOutputVMInstance: TerminalOutputVM
 var terminalOutputVMStore: ReplayDataStore
-var terminalOutputComponentRef: TerminalOutputComponent
-var isoNimTerminalOutputMounted*: bool = false
 
-proc tryMountIsoNimTerminalOutputPanel*()
+when defined(ctInExtension):
+  proc mountTerminalOutputForExtension()
 proc rememberTerminalViews(vm: TerminalOutputVM; data: Data)
 
 # ---------------------------------------------------------------------------
@@ -59,99 +57,37 @@ proc initTerminalOutputVMFromSession*(vm: TerminalOutputVM) =
   ##
   ## If a stub-backed instance already exists (created before the session
   ## was available), it is replaced so the panel uses the real backend.
-  let store = vm.store
-  if terminalOutputVMInstance != nil:
-    clog "TerminalOutputVM: replacing existing instance with shared-store version"
-    isoNimTerminalOutputMounted = false
-  terminalOutputVMStore = store
+  terminalOutputVMStore = vm.store
   terminalOutputVMInstance = vm
   rememberTerminalViews(vm, data)
-  clog "TerminalOutputVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimTerminalOutputPanel()
 
-proc initTerminalOutputVM() =
-  ## Lazily create the parallel ``TerminalOutputVM`` backed by a stub
-  ## ``BackendService``. Fallback when no shared store has been
-  ## provided via ``initTerminalOutputVMFromSession``.
-  if terminalOutputVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  terminalOutputVMStore = createReplayDataStore(stubBackend)
-  terminalOutputVMInstance = createTerminalOutputVM(terminalOutputVMStore)
-  clog "TerminalOutputVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimTerminalOutputPanel()
-
-proc tryMountIsoNimTerminalOutputPanel*() =
-  ## Mount the IsoNim terminal-output view into the GoldenLayout-managed
-  ## container. The container is created by GoldenLayout under the id
-  ## ``terminalComponent-{id}`` (note the truncation — the default
-  ## layout JSON in ``src/config/default_layout.json`` and the
-  ## Playwright page object ``terminal-output-pane.ts`` both use the
-  ## ``terminalComponent`` prefix rather than the
-  ## ``convertComponentLabel`` ``terminalOutputComponent`` form).
-  ## The terminal panel is a singleton (id always 0) but we still
-  ## resolve through the registered component's id field for symmetry
-  ## with the other IsoNim mounts.
-  ##
-  ## Safe to call multiple times — mounts only once. The retry loop
-  ## handles GoldenLayout's asynchronous container creation: the
-  ## container appears slightly after the layout state changes so we
-  ## back off and retry until it lands (capped at 200 attempts, ~2 s).
-  if terminalOutputVMInstance.isNil:
-    return
-  if terminalOutputComponentRef.isNil:
-    return
-
-  let key = cstring("terminalComponent-" & $terminalOutputComponentRef.id)
-  # The tab whose host this mount is for — see `findIsoNimPaneHost`.
-  let tab = data.activeSessionIndex
-  var retryCount = 0
-  proc doMount() =
-    retryCount += 1
-    let container = findIsoNimPaneHost(key, tab)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimTerminalOutputPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
+when defined(ctInExtension):
+  proc initTerminalOutputVM() =
+    ## Lazily create the parallel ``TerminalOutputVM`` backed by a stub
+    ## ``BackendService``. Fallback when no shared store has been
+    ## provided via ``initTerminalOutputVMFromSession``.
+    if terminalOutputVMInstance != nil:
       return
 
-    # Per HOST, not per id: tab 0's mount set the latch for a host this
-    # tab does not share. See `isoNimPanelNeedsMountInHost`.
-    if not isoNimPanelNeedsMountInHost(
-        latchSaysMounted = isoNimTerminalOutputMounted,
-        hostCarriesMark = isoNimPanelContainerIsMounted(container)):
-      return
+    let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
+      when defined(js):
+        result = newPromise proc(resolve: proc(resp: JsonNode)) =
+          resolve(%*{})
+      else:
+        var fut = newFuture[JsonNode]("stub-backend")
+        fut.complete(%*{})
+        result = fut
 
-    # Replace any prior content (Karax may have planted a stub element
-    # before the IsoNim mount fires).
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
+    let stubBackend = BackendService(
+      sendProc: stubSend,
+      onEventProc: proc(handler: proc(event: JsonNode)) = discard,
+      disconnectProc: proc() = discard,
+    )
 
-    isoNimTerminalOutputMounted = true
-    markIsoNimPanelContainerMounted(container)
-    try:
-      mountIsoNimTerminalOutput(container, terminalOutputVMInstance)
-    except:
-      cerror "tryMountIsoNimTerminalOutputPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
-
-  doMount()
+    terminalOutputVMStore = createReplayDataStore(stubBackend)
+    terminalOutputVMInstance = createTerminalOutputVM(terminalOutputVMStore)
+    clog "TerminalOutputVM: parallel ViewModel instance created (stub backend)"
+    mountTerminalOutputForExtension()
 
 # ---------------------------------------------------------------------------
 # The recorded writes, handed to the shared model.
@@ -168,17 +104,32 @@ proc tryMountIsoNimTerminalOutputPanel*() =
 when defined(ctInExtension):
   var terminalOutputComponentForExtension* {.exportc.}: TerminalOutputComponent
 
+  var mountedTerminalOutputVM: TerminalOutputVM
+  var mountedTerminalOutputHost: dom_api.Element
+
+  proc mountTerminalOutputForExtension() =
+    ## Mount the pane into the element the extension's webview names
+    ## (`extensionRendererId`) — the webview is not the panel host.
+    if terminalOutputVMInstance.isNil or
+       terminalOutputComponentForExtension.isNil:
+      return
+    let host = dom_api.getElementById(
+      dom_api.document, terminalOutputComponentForExtension.extensionRendererId)
+    if dom_api.isNodeNil(dom_api.Node(host)):
+      return
+    if mountedTerminalOutputVM == terminalOutputVMInstance and
+       mountedTerminalOutputHost == host:
+      return
+    let hostNode = dom_api.Node(host)
+    while not dom_api.isNodeNil(hostNode.firstChild):
+      discard dom_api.removeChild(hostNode, hostNode.firstChild)
+    mountedTerminalOutputVM = terminalOutputVMInstance
+    mountedTerminalOutputHost = host
+    mountIsoNimTerminalOutput(host, terminalOutputVMInstance)
+
   proc bindTerminalOutputExtensionHost(component: TerminalOutputComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    # Mount the IsoNim terminal-output panel into the container the extension
-    # webview provides.  tryMountIsoNimTerminalOutputPanel is idempotent.
-    tryMountIsoNimTerminalOutputPanel()
+    if component.extensionRendererId.len > 0:
+      mountTerminalOutputForExtension()
 
   proc makeTerminalOutputComponentForExtension*(id: cstring): TerminalOutputComponent {.exportc.} =
     if terminalOutputComponentForExtension.isNil:
@@ -328,34 +279,26 @@ when defined(ctInExtension):
     self.bindTerminalOutputExtensionHost()
 
 method register*(self: TerminalOutputComponent, api: MediatorWithSubscribers) =
+  ## On the desktop and the web page the pane subscribes to nothing (see the
+  ## module header). The VS Code extension's webview feeds its stub-backed
+  ## ViewModel from the events below: its stub store cannot serve the line
+  ## window, so it asks for every write once.
   self.api = api
-
-  # Lazily create the VM and remember the component so the IsoNim
-  # mount procedure can find both. ``initTerminalOutputVM`` is a no-op
-  # if a shared-store instance was already installed by
-  # ``configureMiddleware``.
-  initTerminalOutputVM()
-  if terminalOutputComponentRef.isNil:
-    terminalOutputComponentRef = self
-    tryMountIsoNimTerminalOutputPanel()
-
-  api.subscribe(CtLoadedTerminal, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
-    discard self.onLoadedTerminal(response)
-  )
-  # The VS Code extension's stub store cannot serve the line window, so the
-  # extension still asks for every write once; elsewhere the pane asks for
-  # the lines it shows (`TerminalOutputVM.setViewport`).
   when defined(ctInExtension):
+    initTerminalOutputVM()
+    api.subscribe(CtLoadedTerminal, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
+      discard self.onLoadedTerminal(response)
+    )
     api.subscribe(CtUpdatedEvents, proc(kind: CtEventKind, response: seq[ProgramEvent], sub: Subscriber) =
       if self.initialUpdate:
         self.getLines()
         self.initialUpdate = false
     )
-  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    self.location = response.location
-    syncTerminalOutputDebuggerPosition(response.location.rrTicks)
-  )
-  api.emit(InternalLastCompleteMove, EmptyArg())
+    api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+      self.location = response.location
+      syncTerminalOutputDebuggerPosition(response.location.rrTicks)
+    )
+    api.emit(InternalLastCompleteMove, EmptyArg())
 
 # think if it's possible to directly exportc in this way the method
 proc registerTerminalOutputComponent*(component: TerminalOutputComponent, api: MediatorWithSubscribers) {.exportc.} =
