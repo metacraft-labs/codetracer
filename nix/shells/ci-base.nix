@@ -111,6 +111,31 @@ let
     pkgs.liberation_ttf
   ];
   fontsConf = pkgs.makeFontsConf { fontDirectories = fontPackages; };
+
+  # Runs a shellHook body with its STDOUT sent to stderr.
+  #
+  # `nix develop --command <cmd>` writes the hook's stdout and <cmd>'s stdout
+  # to the same stream, so a caller that captures `$(nix develop … --command
+  # …)` reads every progress line the hook printed as part of the command's
+  # answer. That is not hypothetical: "  workspace: detected (…)" and the
+  # tree-sitter-nim helper's "src/parser.c is up to date" were prepended to
+  # CODETRACER_REPO_ROOT_PATH in ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+  # (codetracer-pm issues/2026-10-22-codetracer-dev-shell-hook-writes-
+  # diagnostics-to-stdout.md). A hook has no output of its own -- only
+  # exports and diagnostics -- so the whole body goes to stderr, and the
+  # helpers and sourced scripts it runs (detect-siblings.sh, the git-hook
+  # installer, pip, the tree-sitter helper) are covered without each of them
+  # having to remember a `>&2`.
+  #
+  # A `{ …; }` group, not a subshell: the body's exports, functions and
+  # PATH edits must still land in the shell the user gets. A `$(…)` inside the
+  # body is unaffected -- command substitution gives its command a stdout of
+  # its own.
+  hookOnStderr = body: ''
+    {
+    ${body}
+    } >&2
+  '';
 in
 with pkgs;
 {
@@ -486,7 +511,7 @@ with pkgs;
   # (pre-commit install, Python-recorder venv setup, workspace +
   # sibling-repo detection, reprobuild ASP solver paths) lives in
   # main.nix's shellHook.
-  shellHook = ''
+  shellHook = hookOnStderr ''
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
     #
