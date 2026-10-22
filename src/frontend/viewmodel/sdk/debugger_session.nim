@@ -191,6 +191,22 @@ proc classifyBackendFailure*(response: JsonNode): DebuggerSessionErrorKind =
   else:
     dseBackendError
 
+func classifyStartFailure*(engineReached: bool): DebuggerSessionErrorKind =
+  ## Why a launch that never settled failed, from the one fact the transport
+  ## knows: whether the engine itself was ever reached.
+  ##
+  ## Not every engine failure arrives as a message. A deployed engine that
+  ## refuses a container's format can log the refusal to its own console and
+  ## answer the handshake with success, and an engine whose worker script
+  ## never loaded answers nothing at all. Both leave a session `dspLaunching`
+  ## with nothing to classify, and they are different faults with different
+  ## remedies: the first is the trace (`dseUnsupportedTraceKind`), the second
+  ## is the transport (`dseWorkerFailed`). A host that holds a deadline over
+  ## the launch, and knows whether its engine reported itself loaded (the
+  ## worker's `wasm-loaded`), settles the session with this through
+  ## `failStart`. Moved here from BlockTracer (Shared-DOM-Front-Ends D8).
+  if engineReached: dseUnsupportedTraceKind else: dseWorkerFailed
+
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
@@ -482,6 +498,16 @@ proc launch*(s: DebuggerSession; trace: TraceSource;
   if issued > 0 and settled == issued and not handshakeFailed and
      s.phase.val == dspLaunching:
     s.markReady(trace)
+
+proc failStart*(s: DebuggerSession; kind: DebuggerSessionErrorKind;
+                message: string) =
+  ## Settle a launch the host has given up on: `phase` becomes `dspFailed`
+  ## with `kind` (usually `classifyStartFailure`). A no-op on a session that
+  ## is already ready, failed or disposed, so a late deadline cannot undo an
+  ## answer that did arrive.
+  if s.phase.val notin {dspCreated, dspLaunching}:
+    return
+  s.failWith(kind, message)
 
 proc raiseIfFailed*(s: DebuggerSession) =
   ## Raise the typed error for a failed session. For consumers that want

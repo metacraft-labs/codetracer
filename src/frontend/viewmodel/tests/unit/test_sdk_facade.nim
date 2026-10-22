@@ -632,3 +632,81 @@ suite "Embed SDK facade — clock (spec §3.1 row 7)":
     withFakeTime:
       tc.advance(10.0)
       check tc.now() == 10.0
+
+# ---------------------------------------------------------------------------
+# Shared-DOM-Front-Ends D8 — what BlockTracer did well, moved upstream
+# ---------------------------------------------------------------------------
+
+suite "Embed SDK facade — upstreamed from BlockTracer (Shared-DOM-Front-Ends D8)":
+
+  test "tick 0 reported by the engine is not the same as no answer yet":
+    let store = createReplayDataStore(mockBackend().toBackendService())
+    check not store.positionReported.val
+    check store.debugger.val.rrTicks == 0'u64
+    # The first step of the trace: tick 0, which is where the store started.
+    store.applyCompleteMove(%*{"location": {"path": "main.nr", "line": 1,
+                                            "rrTicks": 0}})
+    check store.positionReported.val
+    check store.debugger.val.rrTicks == 0'u64
+    store.dispose()
+
+  test "a reported move leaves the debugger idle after a step":
+    let store = createReplayDataStore(mockBackend().toBackendService())
+    store.debugger.val = DebuggerState(
+      rrTicks: 5'u64, location: Location(file: "main.nr", line: 2),
+      status: dsStepping)
+    store.applyCompleteMove(%*{"location": {"path": "main.nr", "line": 3,
+                                            "rrTicks": 9}})
+    check store.debugger.val.status == dsIdle
+    check store.debugger.val.rrTicks == 9'u64
+    store.dispose()
+
+  test "a launch the host gave up on is classified by whether the engine was reached":
+    check classifyStartFailure(engineReached = false) == dseWorkerFailed
+    check classifyStartFailure(engineReached = true) == dseUnsupportedTraceKind
+    let mock = mockBackend()
+    mock.deferResponses = true
+    let session = newDebuggerSession(mock.toBackendService())
+    session.launch(localFolderTrace("/trace"))
+    check session.phase.val == dspLaunching
+    session.failStart(classifyStartFailure(engineReached = true),
+                      "the engine rejected the container")
+    check session.phase.val == dspFailed
+    check session.failure.val == some(dseUnsupportedTraceKind)
+    session.dispose()
+
+  test "a late deadline does not undo a launch that succeeded":
+    let session = newDebuggerSession(mockBackend().toBackendService())
+    session.launch(localFolderTrace("/trace"))
+    check session.isReady
+    session.failStart(dseWorkerFailed, "deadline")
+    check session.isReady
+    check session.failure.val.isNone
+    session.dispose()
+
+  test "the store applies its own call-trace section answer":
+    let mock = mockBackend()
+    mock.deferResponses = true
+    let store = createReplayDataStore(mock.toBackendService())
+    store.requestCalltraceSection(0'i64, 10, 20, rrTicks = 1'u64)
+    check store.calltrace.lines.val.len == 0
+    mock.settleDeferred(%*{
+      "type": "response", "command": "ct/load-calltrace-section",
+      "success": true, "body": {
+        "startCallLineIndex": 0, "totalCallsCount": 1,
+        "callLines": [{"depth": 0, "content": {"kind": 0, "count": 0,
+          "hiddenChildren": false, "call": {"key": "1", "rawName": "main",
+            "children": [], "location": {"path": "main.nr", "line": 1,
+              "highLevelFunctionName": "main", "rrTicks": 1}}}}]}})
+    check store.calltrace.lines.val.len == 1
+    check store.calltrace.lines.val.len == 1 and
+          store.calltrace.lines.val[0].callKey == "1"
+    store.dispose()
+
+  test "the scrubber's seek coalescer is on the facade":
+    var q = ScrubQueue()
+    check q.request(10) == 10      # nothing outstanding: sent at once
+    check q.request(20) == 0       # one in flight: waits
+    check q.request(30) == 0       # superseded, not queued
+    q.settled()
+    check q.drain() == 30          # the newest target, not the one passed
