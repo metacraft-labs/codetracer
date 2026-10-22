@@ -26,8 +26,11 @@
 ## 3. **THE PRODUCER PARTITION.** For each pane, the production procedures that
 ##    write its rows are EXACTLY a declared set — both set differences empty,
 ##    the cardinality asserted on both sides — and no procedure defined under a
-##    `tests/` directory writes them. A pane fed only by a test helper is the
-##    campaign's signature defect.
+##    `tests/` directory masquerades as a producer. A test's own fixture may
+##    seed the store it built (`calltrace_guides_chromium_test`'s
+##    `mountPanel`); it is reported, never counted as a producer, and it may
+##    not carry a declared producer's name. A pane fed only by a test helper is
+##    the campaign's signature defect.
 ## 4. **`DIFF-9` — ONE PRODUCER, THE SURFACES THAT DRAW THE PANE.** The shipped
 ##    terminal's screen is composited in this process (`plainFrame`, the
 ##    compositor `--headless` prints) under the arrangement
