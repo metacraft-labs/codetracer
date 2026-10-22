@@ -39,7 +39,7 @@ import
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
   # editor's declared width out of the layout config with it.
   index/layout_config_repair,
-  ui/[test_results, constraints, generated_code, point_list],
+  ui/[test_results, constraints, generated_code, point_list, editor_points],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -2553,6 +2553,10 @@ when not defined(ctInExtension):
         flow.initFlowVMFromSession(activeSessionVM.flowVM)
       initPanelVM("initEditorVMFromSession"):
         editor.initEditorVMFromSession(activeSessionVM.editorVM)
+        # The editor's surface reads the session's values and flow, as the
+        # terminal's and GPUI's do (`editor_points.webEditorSurface`).
+        editor_points.setEditorSessionVMs(activeSessionVM.editorVM,
+          activeSessionVM.stateVM, activeSessionVM.flowVM)
       initPanelVM("initTimelineVMFromSession"):
         trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
       initPanelVM("initTerminalOutputVMFromSession"):
@@ -2648,6 +2652,11 @@ when not defined(ctInExtension):
               rrTicks, path, line, sourceGeneration, sourceDigest)
             if geid.isSome and not activeSessionVM.isNil:
               activeSessionVM.store.updateCurrentGeid(geid)
+            # The stop's whole location, which the editor places its
+            # execution line from (`ReplayDataStore.stop`).
+            if not activeSessionVM.isNil:
+              activeSessionVM.store.applyStopLocation(
+                parseJsonFromJsObject(rawResponse))
 
           if not data.ui.status.isNil:
             cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"

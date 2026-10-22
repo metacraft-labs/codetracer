@@ -19,11 +19,42 @@ import isonim/core/signals
 import ../viewmodel/store/[replay_data_store, types]
 import ../viewmodel/sdk/breakpoints
 import ../view_vocabulary/editor_surface
+from ../viewmodel/viewmodels/editor_vm import EditorVM
+from ../viewmodel/viewmodels/state_vm import StateVM
+from ../viewmodel/viewmodels/flow_vm import FlowVM
+from ../../common/value_presentation/surfaces import FlowBudget
 
 export breakpoints, editor_surface
 
 var pointStore: ReplayDataStore
   ## The session store the editor shows; nil before the renderer has one.
+var sessionEditor: EditorVM
+var sessionState: StateVM
+var sessionFlow: FlowVM
+  ## The session's ViewModels the editor's surface reads
+  ## (`webEditorSurface`); nil until the renderer has a session.
+
+const WebEditorMedium* = "web"
+  ## The medium the web editor's surface is built for.
+
+proc setEditorSessionVMs*(editor: EditorVM; state: StateVM; flow: FlowVM) =
+  sessionEditor = editor
+  sessionState = state
+  sessionFlow = flow
+
+proc editorStop*(): StopLocation =
+  ## The debugger's stop as an editor shows it (`ReplayDataStore.stop`).
+  if pointStore.isNil: StopLocation(frameOffset: -1)
+  else: pointStore.stop.val
+
+proc webEditorSurface*(path: string; firstLine, lastLine: int;
+                       lineText: proc(line: int): string): EditorSurface =
+  ## The web editor's surface over `firstLine .. lastLine` of `path`, whose
+  ## text Monaco holds — `editor_surface.editorSurfaceForView`, the rules the
+  ## terminal and GPUI draw with.
+  editorSurfaceForView(path, firstLine, lastLine, lineText, pointStore,
+                       sessionEditor, sessionState, sessionFlow, FlowBudget,
+                       WebEditorMedium)
 
 proc setEditorPointStore*(store: ReplayDataStore) =
   pointStore = store

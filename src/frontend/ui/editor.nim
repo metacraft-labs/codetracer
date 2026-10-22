@@ -58,6 +58,7 @@ var isoNimEditorMountedIds = JsAssoc[int, bool]{}
 # ---------------------------------------------------------------------------
 
 proc applyColumnBreakpointDecorations*(self: EditorViewComponent)
+proc applyEventualStylesLines*(self: EditorViewComponent)
 
 var disposePointWatch: proc()
 var drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
@@ -97,6 +98,19 @@ proc watchEditorPoints(store: ReplayDataStore) =
             editor.refreshEditorLine(line)
         drawnMarks[path] = now
         editor.applyColumnBreakpointDecorations()
+
+    # MONACO FOLLOWS THE EDITOR SURFACE (Shared-DOM-Front-Ends D7.4 (a)): the
+    # execution line, the flow's line styles and the marks are re-applied
+    # whenever an input of the surface changes — the stop, the position, the
+    # flow's styled lines — rather than when this component hears a move.
+    createEffect proc() =
+      discard store.stop.val
+      discard store.debugger.val
+      if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+        return
+      for path, editor in data.ui.editors:
+        if not editor.isNil and not editor.monacoEditor.isNil:
+          editor.applyEventualStylesLines()
 
 proc initEditorVMFromSession*(vm: EditorVM) =
   ## Hand the pane the session's `EditorVM` — the one
@@ -635,11 +649,10 @@ func has(tab: TabInfo, instruction: Instruction, i: int, offset: int): bool =
     result = offset >= instruction.offset
 
 method position*(self: EditorViewComponent): int =
-  if self.data.services.debugger.frameInfo.hasSelected and
-    self.data.services.debugger.frameInfo.offset != NO_OFFSET:
-
+  let offset = editorStop().frameOffset
+  if offset >= 0 and offset != NO_OFFSET:
     for i, instruction in self.tabInfo.instructions.instructions:
-      if self.tabInfo.has(instruction, i, self.data.services.debugger.frameInfo.offset):
+      if self.tabInfo.has(instruction, i, offset):
         return i + 1
 
   return NO_OFFSET
@@ -648,39 +661,39 @@ proc colorLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   var lines: seq[MonacoLineStyle] = @[]
   var tabInfo = self.tabInfo
 
+  # THE EXECUTION LINE IS THE SESSION'S (Shared-DOM-Front-Ends D7.4 (a)):
+  # the source view's is the editor surface's — the line the terminal and
+  # GPUI mark for the same position — and the C source, instruction and
+  # call views place it from the stop's whole location (`editorStop`).
+  let stop = editorStop()
   case self.editorView:
-  of ViewSource, ViewTargetSource:
-    var debuggerLine = NO_LINE
-    var debuggerPath = cstring""
-    if self.editorView == ViewSource:
-      debuggerLine = self.data.services.debugger.location.line
-      debuggerPath = self.data.services.debugger.location.path
+  of ViewSource:
+    if stop.isExpanded:
+      if stop.line > 0 and cstring(stop.path) == tabInfo.name:
+        # e.g. 2 - 1 + 1 -> 2. 2 - 2 + 1 -> 1
+        let line = stop.line - stop.expansionFirstLine + 1
+        lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
     else:
-      debuggerLine = self.data.services.debugger.cLocation.line
-      debuggerPath = self.data.services.debugger.cLocation.path
+      let line = webEditorSurface($tabInfo.name, 1, 0, nil).executionLine
+      if line > 0:
+        lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
 
-    if debuggerLine != NO_LINE and debuggerPath == tabInfo.name:
-      let line = if not self.data.services.debugger.location.isExpanded:
-        debuggerLine
-      else:
-        self.data.services.debugger.location.line - self.data.services.debugger.location.expansionFirstLine + 1 # e.g. 2 - 1 + 1 -> 2. 2 - 2 + 1 -> 1
-      lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
+  of ViewTargetSource:
+    if stop.cLine > 0 and cstring(stop.cPath) == tabInfo.name:
+      lines.add(MonacoLineStyle(line: stop.cLine, class: cstring(fmt"on on-{stop.cLine}")))
 
   of ViewInstructions:
-    cdebug "editor: asmName " & self.data.services.debugger.location.asmName
-    cdebug "editor: instructions name " & self.name
-    if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo} and self.data.services.debugger.location.asmName == self.name or
-       self.data.trace.lang == LangNim and self.data.services.debugger.cLocation.asmName == self.name:
+    if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo} and cstring(stop.asmName) == self.name or
+       self.data.trace.lang == LangNim and cstring(stop.cAsmName) == self.name:
       var position = self.position()
       if position != NO_POSITION:
         lines.add(MonacoLineStyle(line: position, class: cstring(fmt"on on-{position}")))
 
   of ViewCalltrace:
-      let currentLocation = self.data.services.debugger.location
-      let currentLocationName = currentLocation.path & cstring":" & currentLocation.functionName & cstring"-" & currentLocation.key
+      let currentLocationName = cstring(stop.path & ":" & stop.functionName & "-" & stop.key)
       if currentLocationName == self.name:
-        if currentLocation.line != NO_LINE and currentLocation.line in currentLocation.functionFirst .. currentLocation.functionLast:
-          lines.add(MonacoLineStyle(line: currentLocation.line - currentLocation.functionFirst + 1, class: cstring"on"))
+        if stop.line > 0 and stop.line in stop.functionFirst .. stop.functionLast:
+          lines.add(MonacoLineStyle(line: stop.line - stop.functionFirst + 1, class: cstring"on"))
 
   else:
     discard
@@ -871,8 +884,8 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   lines
 
 proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
-  let currentPosition = self.data.services.debugger.location.highLevelLine
-  let currentRRTicks = self.data.services.debugger.location.rrTicks
+  let currentPosition = editorStop().highLevelLine
+  let currentRRTicks = int(editorStop().rrTicks)
   let flow = self.flow
   var lines: seq[MonacoLineStyle] = @[]
 
@@ -1224,7 +1237,7 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
 
     result = if not currentWord.word.isNil: cast[cstring](currentWord.word) else: cstring""
 
-    let lang = fromPath(self.data.services.debugger.location.path)
+    let lang = fromPath(cstring(editorStop().path))
 
     if lang == LangRust:
       let xidRegex = newRegExp(r"^\w$")
@@ -2347,7 +2360,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
 
   zoneDom.appendChild(editorDom)
 
-  var lang = fromPath(self.data.services.debugger.location.path)
+  var lang = fromPath(cstring(editorStop().path))
   let theme = monacoThemeName(self.data.config.theme)
   if not self.diffEditors.hasKey(lineNumber):
     discard setTimeout(proc () =
@@ -2356,7 +2369,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
         MonacoEditorOptions(
           value: source,
           language: cstring(editorLanguageForPath(
-            $self.data.services.debugger.location.path, lang.toCLang())),
+            editorStop().path, lang.toCLang())),
           readOnly: true,
           theme: theme,
           automaticLayout: true,
@@ -3171,9 +3184,17 @@ proc eventFlowLocationForEditor(
   ))
 
 proc initialDebuggerFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
-  if self.data.isNil or self.data.services.isNil or self.data.services.debugger.isNil:
+  ## The stop the session is at, as the flow's first location.
+  let stop = editorStop()
+  if stop.path.len == 0:
     return
-  self.usableInitialFlowLocation(self.data.services.debugger.location)
+  self.usableInitialFlowLocation(types.Location(
+    path: cstring(stop.path), line: stop.line,
+    highLevelPath: cstring(stop.path), highLevelLine: stop.highLevelLine,
+    functionName: cstring(stop.functionName), key: cstring(stop.key),
+    functionFirst: stop.functionFirst, functionLast: stop.functionLast,
+    rrTicks: int(stop.rrTicks), isExpanded: stop.isExpanded,
+    expansionFirstLine: stop.expansionFirstLine))
 
 proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   if self.service.isNil:
@@ -4386,13 +4407,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       case view:
       of ViewInstructions:
         if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
-          self.data.openInstructions(self.data.services.debugger.location.asmName)
+          self.data.openInstructions(response.location.asmName)
         elif self.data.trace.lang == LangNim:
-          self.data.openInstructions(self.data.services.debugger.cLocation.asmName)
+          self.data.openInstructions(response.cLocation.asmName)
 
       of ViewTargetSource:
         if self.data.trace.lang == LangNim:
-          self.data.openTargetSource(self.data.services.debugger.cLocation.path)
+          self.data.openTargetSource(response.cLocation.path)
 
       else:
         discard

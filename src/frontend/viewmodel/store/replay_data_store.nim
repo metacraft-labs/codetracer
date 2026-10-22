@@ -339,6 +339,8 @@ type
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
+    stop*: Signal[StopLocation]
+      ## The stop's whole location, for an editor (`applyStopLocation`).
     positionReported*: Signal[bool]
       ## Whether the engine has stated a position for this session yet.
       ##
@@ -978,6 +980,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
       )),
+      stop: createSignal(StopLocation(frameOffset: -1)),
       debugger: createSignal(DebuggerState(
         location: Location(file: "", line: 0, column: 0),
         rrTicks: 0'u64,
@@ -1333,6 +1336,39 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # about a stop the debugger has left.
   store.stops.observe(store.debugger.val)
 
+proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
+  ## Adopt the whole location a `ct/complete-move` event reports
+  ## (`MoveState`: `location`, `cLocation`, `frameInfo`) as `stop` — what an
+  ## editor needs beyond the position (`StopLocation`). The desktop's renderer
+  ## calls it with each move it receives; `applyCompleteMove` calls it for
+  ## the hosts that read the event themselves.
+  if body.isNil or body.kind != JObject:
+    return
+  var stop = StopLocation(frameOffset: -1)
+  let loc = body.getOrDefault("location")
+  if not loc.isNil and loc.kind == JObject:
+    stop.path = loc.getOrDefault("path").getStr("")
+    stop.line = loc.getOrDefault("line").getInt(0)
+    stop.highLevelLine = loc.getOrDefault("highLevelLine").getInt(0)
+    stop.functionName = loc.getOrDefault("functionName").getStr("")
+    stop.key = loc.getOrDefault("key").getStr("")
+    stop.functionFirst = loc.getOrDefault("functionFirst").getInt(0)
+    stop.functionLast = loc.getOrDefault("functionLast").getInt(0)
+    stop.asmName = loc.getOrDefault("asmName").getStr("")
+    stop.isExpanded = loc.getOrDefault("isExpanded").getBool(false)
+    stop.expansionFirstLine = loc.getOrDefault("expansionFirstLine").getInt(0)
+    stop.rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
+  let c = body.getOrDefault("cLocation")
+  if not c.isNil and c.kind == JObject:
+    stop.cPath = c.getOrDefault("path").getStr("")
+    stop.cLine = c.getOrDefault("line").getInt(0)
+    stop.cAsmName = c.getOrDefault("asmName").getStr("")
+  let frame = body.getOrDefault("frameInfo")
+  if not frame.isNil and frame.kind == JObject and
+     frame.getOrDefault("hasSelected").getBool(false):
+    stop.frameOffset = frame.getOrDefault("offset").getInt(-1)
+  store.stop.val = stop
+
 proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   ## Adopt the position a `ct/complete-move` event reports, and mark the
   ## debugger idle again.
@@ -1369,6 +1405,7 @@ proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
   store.updateDebuggerPosition(rrTicks, file, line, geid,
                                sourceGeneration = sourceGeneration,
                                sourceDigest = sourceDigest)
+  store.applyStopLocation(body)
   # A FRESH object: on the JS backend `var dbg = store.debugger.val` is the
   # signal's own reference, so writing it back compares equal to itself and
   # the status change never fires — the debugger stayed `dsStepping` and every

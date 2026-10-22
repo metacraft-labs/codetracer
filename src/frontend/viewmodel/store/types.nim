@@ -160,6 +160,35 @@ type
     rlsComplete
     rlsError
 
+  StopLocation* = object
+    ## The debugger's stop as an editor shows it: the move's whole location
+    ## (the engine's `MoveState.location`), the C-level location a Nim
+    ## recording also stops at (`cLocation`), and the instruction offset of
+    ## the selected frame (`frameInfo`). `DebuggerState` carries the position
+    ## every pane follows; this carries what only an editor needs to place
+    ## the execution line in a source, a C source, a macro expansion, an
+    ## instruction listing or a call's own function body.
+    path*: string
+    line*: int
+    highLevelLine*: int
+    functionName*: string
+    key*: string
+      ## The call the stop is in.
+    functionFirst*: int
+    functionLast*: int
+      ## The first and last line of that call's function.
+    asmName*: string
+      ## The function's name in the instruction listing.
+    isExpanded*: bool
+    expansionFirstLine*: int
+      ## A macro expansion's first line, when the stop is inside one.
+    rrTicks*: uint64
+    cPath*: string
+    cLine*: int
+    cAsmName*: string
+    frameOffset*: int
+      ## The selected frame's instruction offset, -1 for none.
+
   DebuggerState* = object
     ## Snapshot of the debugger's position in the recording.
     location*: Location

@@ -107,7 +107,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   var entries: seq[SignalRegistryEntry] = @[]
 
   entries.addMany("ReplayDataStore",
-    ["session", "debugger", "positionReported", "currentGeid", "timeline",
+    ["session", "debugger", "stop", "positionReported", "currentGeid", "timeline",
      "agentSessions"],
     vscBackendAuthoritative,
     "Top-level replay/debugger and agent-service facts owned by the backend authority.")
