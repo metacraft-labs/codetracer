@@ -78,6 +78,7 @@ proc consumeListProcessesEvent*(session: SessionViewModel; body: JsonNode) =
 
 when defined(js):
   import isonim/web/dom_api as isonim_dom
+  import isonim/web/web_renderer
 
   proc bodyOf(d: isonim_dom.Document): isonim_dom.Node {.importjs: "#.body".}
     ## `isonim/web/dom_api` exposes no `document.body` accessor.
@@ -132,7 +133,8 @@ when defined(js):
       let host = ensureProcessTreeHost()
       if isonim_dom.isNodeNil(isonim_dom.Node(host)):
         return
-      renderProcessTreeInto(host, model, callbacks)
+      renderProcessTreeInto[WebRenderer, isonim_dom.Element](
+        WebRenderer(), host, model, callbacks)
 
 else:
   proc mountProcessTree*(session: SessionViewModel) =

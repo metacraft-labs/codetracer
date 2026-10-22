@@ -158,7 +158,12 @@ when defined(ctIndex) or defined(ctTest) or defined(ctInCentralExtensionContext)
       # would be problem for reading, but there is `readProcessOutput` for it
       # and it doesn't use this `startProcess` !
     let futureHandler = proc(resolve: proc(res: Result[NodeSubProcess, JsObject])) =
-      console.log options
+      # Name what is started, never its options: they carry the child's whole
+      # environment (`ready` hands the session-manager a copy of ours), which
+      # holds the replay's credentials, such as its storage replay token, and
+      # this output reaches the supervisor's log (the ReplayAgent logs every
+      # line a replay prints).
+      infoPrint "index: starting process ", path
       let process = nodeStartProcess.spawn(path, args, options)
       process.toJs.on("spawn", proc() =
         resolve(Result[NodeSubProcess, JsObject].ok(process)))

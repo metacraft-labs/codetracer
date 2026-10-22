@@ -172,6 +172,8 @@ proc renderStepListPanel*[R, N](r: R; vm: StepListVM): N =
   ## The Step List panel, under any renderer (Shared-DOM-Front-Ends D3),
   ## mounted on the desktop by `ui/panel_host`. The rows are rebuilt from
   ## `vm.lineSteps` whenever it or the current location changes.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
   var linesContainer: N
   let panel = renderStepListShell[R, N](r, linesContainer)
 

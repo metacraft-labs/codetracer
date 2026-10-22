@@ -203,6 +203,8 @@ proc renderFunction[R, N](r: R; fn: ConstraintFunction): N =
   ## the one number in this pane that is known to match `nargo info` on both
   ## halves. It doubles as the listing's heading, which is why the rows sit
   ## under it rather than beside it.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
   let listing = ui(r):
     tdiv(class = "constraints-function"):
       discard
@@ -218,6 +220,8 @@ proc renderFunction[R, N](r: R; fn: ConstraintFunction): N =
 
 proc renderConstraintsPanel*[R, N](r: R; vm: ConstraintsVM): N =
   ## The Constraints panel, mounted on the desktop by `ui/panel_host`.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
   var headlineNode, bodyContainer, noticeNode, provenanceNode,
       absenceNode: N
 

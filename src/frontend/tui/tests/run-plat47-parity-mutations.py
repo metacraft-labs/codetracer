@@ -576,27 +576,43 @@ ARMS = [
 
 ARMS += [
     # --- the execution band ------------------------------------------------------
+    # X1/X2 RE-AIMED 2026-10-22: M73 (`d1b009363`) ends the band at the
+    # code's last column (`codeW`, the pane's last column unless the vertical
+    # bar holds it) instead of `area.col + area.width - codeCol`; the claim
+    # is unchanged. X1, X2, P1, P2, P5 and P6 were each killed at codetracer
+    # `e353dcb7b`, in a grade of 64 of the 73 arms (all 64 killed) over a
+    # provisional record that was then retracted: T4's gate and
+    # `test_plat47_gpui_parity.nim` (K4-K6, Q3, H1, H2, H4, P7) are red
+    # unmutated there, for reasons recorded in codetracer-pm `issues/`.
     Arm("X1", SRCPANE,
-        "      g.restyle(row, codeCol, area.col + area.width - codeCol,\n",
-        "      g.restyle(row, codeCol, min(12, area.col + area.width - codeCol),\n",
+        "      g.restyle(row, codeCol, codeW,\n",
+        "      g.restyle(row, codeCol, min(12, codeW),\n",
         C_COLOURS,
         "the execution band ends a few cells in, as CTUI-5's text-length band "
         "did, instead of reaching the pane's right edge like Monaco's"),
     Arm("X2", SRCPANE,
-        "      g.restyle(row, codeCol, area.col + area.width - codeCol,\n",
-        "      g.restyle(row, area.col, area.width,\n",
+        "      g.restyle(row, codeCol, codeW,\n",
+        "      g.restyle(row, area.col, codeCol - area.col + codeW,\n",
         C_COLOURS,
         "the band covers the gutter too, where the desktop draws none"),
     # --- the call trace pages ----------------------------------------------------
+    # P1/P2 (and P5/P6 below) RE-AIMED 2026-10-22: HSF-V2 (`2a3cfeb5f`)
+    # makes the pane REPORT its viewport to `CalltraceVM.setViewport`, which
+    # asks for the section, instead of each front-end requesting it. The
+    # claims are the same: the window the pane scrolled to is reported (P1),
+    # at the row it is scrolled to (P2).
     Arm("P1", SESSION,
-        "  if top >= first and last <= first + model.rows.len:\n    return\n",
-        "  if true:\n    return\n",
+        "  let held = (model.firstIndex.int, model.rows.len)\n"
+        "  s.calltrace.setViewport(cellPaneViewport(\n",
+        "  let held = (model.firstIndex.int, model.rows.len)\n"
+        "  if true: return\n"
+        "  s.calltrace.setViewport(cellPaneViewport(\n",
         C_PAGES,
         "the pane never loads a section past the first: the trace ends where "
         "the open-time section ended"),
     Arm("P2", SESSION,
-        "      startIndex = start.int64, height = body + 2 * CallTraceBuffer,\n",
-        "      startIndex = 0'i64, height = body + 2 * CallTraceBuffer,\n",
+        "    body, rt.paneBodyCols(paneCalltrace), top,\n",
+        "    body, rt.paneBodyCols(paneCalltrace), 0,\n",
         C_PAGES,
         "a page request always reads the trace's head, not the rows scrolled to"),
     # P3 (the title counts the whole trace, not the loaded section) retired
@@ -780,13 +796,16 @@ ARMS += [
         "GPUI's panes carry no border: the outline is not drawn at all"),
     # --- GPUI's call trace (B3) --------------------------------------------------
     Arm("P5", GPUIHOST,
-        "  if result.top >= first and last <= first + held:\n    return\n",
-        "  if true:\n    return\n",
+        "  let held = (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len)\n"
+        "  vm.setViewport(cellPaneViewport(body, widthPx, result.top,\n",
+        "  let held = (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len)\n"
+        "  if true: return\n"
+        "  vm.setViewport(cellPaneViewport(body, widthPx, result.top,\n",
         C_G_PAGES,
         "GPUI never reads a section past the first"),
     Arm("P6", GPUIHOST,
-        "    session.requestAndLoadCalltrace(startIndex = int64(start),\n",
-        "    session.requestAndLoadCalltrace(startIndex = 0'i64,\n",
+        "  vm.setViewport(cellPaneViewport(body, widthPx, result.top,\n",
+        "  vm.setViewport(cellPaneViewport(body, widthPx, 0,\n",
         C_G_PAGES,
         "GPUI's page request always reads the trace's head"),
     Arm("P7", GPUIMAIN,
