@@ -334,6 +334,12 @@ type
     currentPage*: Signal[int]
     pageSize*: Signal[int]
     searchQuery*: Signal[string]
+    selectedKinds*: Signal[seq[bool]]
+      ## The kind filter: one flag per `EventLogKind`, by ordinal (the
+      ## desktop's Filter drop-down) — empty when every kind shows, which is
+      ## the unfiltered log. Sent as `ct/event-load`'s `selectedKinds`, so the
+      ## engine cuts the window, `total` and `indexAtTick` from the selected
+      ## kinds only.
     sortColumn*: Signal[int]
     sortAscending*: Signal[bool]
     columns*: Signal[EventLogColumns]
@@ -583,6 +589,33 @@ proc setSearchQuery*(vm: EventLogVM; query: string) =
   batch(proc() =
     vm.searchQuery.val = query
     vm.setViewport(vm.viewport.val.scrolledTo(0)))
+
+proc normalizedKinds(kinds: seq[bool]): seq[bool] =
+  ## Every kind selected is no filter at all: kept as the empty selection, so
+  ## the unfiltered log has one spelling and asks the engine nothing extra.
+  for selected in kinds:
+    if not selected:
+      return kinds
+  @[]
+
+proc setSelectedKinds*(vm: EventLogVM; kinds: seq[bool]) =
+  ## Filter the log by kind (one flag per `EventLogKind` ordinal; empty or
+  ## all-true for every kind): the engine returns only the selected kinds'
+  ## events, and the pane shows them from the top, as a search does.
+  if vm.actionSink.forwards("eventLog", "setSelectedKinds",
+      %*{"kinds": kinds}):
+    return
+  let normalized = normalizedKinds(kinds)
+  if normalized == vm.selectedKinds.val:
+    return
+  batch(proc() =
+    vm.selectedKinds.val = normalized
+    vm.setViewport(vm.viewport.val.scrolledTo(0)))
+
+proc isFiltered*(vm: EventLogVM): bool =
+  ## Whether the list the pane pages through is narrower than the log: a
+  ## search or a kind filter is in effect.
+  vm.searchQuery.val.len > 0 or vm.selectedKinds.val.len > 0
 
 # ---------------------------------------------------------------------------
 # M25b — Marker-row metadata + counterpart cache helpers
@@ -1073,6 +1106,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
           currentPage.val =
             if v.rows > 0: max(0, v.firstRow) div v.rows else: 0))
     let searchQuery = createSignal("")
+    let selectedKinds = createSignal(newSeq[bool]())
     let sortColumn = createSignal(0)
     let sortAscending = createSignal(true)
     let columns = createSignal(defaultEventLogColumns())
@@ -1097,10 +1131,11 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     # the pages are cut from the MATCHING events (`ct/event-load`'s `total` is
     # then the number of matches, which the store keeps in `recordsFiltered`),
     # so counting the whole log would offer pages past the last match, each of
-    # them empty. The search is this ViewModel's only filter.
+    # them empty. The kind filter narrows the list the same way.
     let totalPages = createMemo[int] proc(): int =
       let total =
-        if searchQuery.val.len > 0: store.eventLog.recordsFiltered.val
+        if searchQuery.val.len > 0 or selectedKinds.val.len > 0:
+          store.eventLog.recordsFiltered.val
         else: totalEventCount.val
       let ps = pageSize.val
       if ps <= 0:
@@ -1153,6 +1188,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       currentPage: currentPage,
       pageSize: pageSize,
       searchQuery: searchQuery,
+      selectedKinds: selectedKinds,
       sortColumn: sortColumn,
       sortAscending: sortAscending,
       columns: columns,
@@ -1237,6 +1273,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     createEffect proc() =
       let v = viewport.val
       let query = searchQuery.val
+      let kinds = selectedKinds.val
       let col = sortColumn.val
       let asc = sortAscending.val
       let shown = vm.columns.val.visibleColumns
@@ -1255,6 +1292,8 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
         args["sortKey"] = %($shown[col])
       if query.len > 0:
         args["search"] = %query
+      if kinds.len > 0:
+        args["selectedKinds"] = %kinds
       # The stop, for a pane that follows it: read only then, so a move
       # re-asks only there.
       let atTicks =
@@ -1269,7 +1308,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       let vmRef = vm
       let storeRef = store
       let start = w.start
-      let searched = query.len > 0
+      let searched = query.len > 0 or kinds.len > 0
       onComplete(future,
         proc(response: JsonNode) =
           # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
