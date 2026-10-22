@@ -226,6 +226,8 @@ proc renderErrorsPanel*[R, N](r: R; vm: ErrorsVM): N =
   ## The errors panel, under any renderer (Shared-DOM-Front-Ends D3),
   ## mounted on the desktop by `ui/panel_host`. The rows are rebuilt from
   ## `vm.visibleRefs` whenever it or the grouping changes.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
   var listContainer: N
 
   let panel = renderErrorsShell[R, N](r, vm, "problems-panel isonim-problems",

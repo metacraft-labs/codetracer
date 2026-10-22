@@ -219,6 +219,8 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
   ## browser's final plugin DOM: wholerow, ocl twisty, anchor, theme icon),
   ## and, for an expanded folder, its children. Collapsed subtrees are not
   ## built.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild, removeChild, addEventListener
   let expandedFlag = vm.isExpanded(entry.path)
   let nodeId = jstreeNodeId(entry)
   let isFolder = entry.isFolder
@@ -286,6 +288,8 @@ proc renderFilesystemPanel*[R, N](r: R; vm: FilesystemVM): N =
   ## tree + empty-overlay + diff-files-list) is
   ## built once via the DSL.  A single outer ``createRenderEffect``
   ## rebuilds the dynamic content whenever any source signal changes.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
   var treeContainer, emptyContainer, loadingContainer, errorContainer,
       filesystemContainer, diffContainer: N
 

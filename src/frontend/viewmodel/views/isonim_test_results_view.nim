@@ -209,6 +209,8 @@ proc applyOpenButton[R, N](r: R; vm: TestResultsVM;
                           handle: RowActionHandles[N]) =
   ## The open button's four shift-sensitive faces, from ONE call to
   ## `openButtonMode` inside the VM's own accessors.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
   r.setAttribute(handle.openButton, "class", openButtonClass(vm, handle.row))
   r.setAttribute(handle.openButton, "title", openButtonTitle(vm, handle.row))
   r.setAttribute(handle.openButton, "aria-label",
@@ -221,6 +223,8 @@ proc applyOpenButton[R, N](r: R; vm: TestResultsVM;
 
 proc renderRow[R, N](r: R; vm: TestResultsVM; row: TestResultsRow;
                      handle: var RowActionHandles[N]): N =
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild, setAttribute
   let mark = stateMark(row.state)
   let where = rowWhere(row)
   let duration = rowDuration(row)
@@ -324,6 +328,8 @@ when defined(js):
 proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
   ## The Test Results panel, under any renderer (Shared-DOM-Front-Ends D3),
   ## mounted on the desktop by `ui/panel_host`.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
   var headlineNode, bodyContainer, failureNode, absenceNode, emptyContainer,
       runButton: N
   var openHandles: seq[RowActionHandles[N]] = @[]
