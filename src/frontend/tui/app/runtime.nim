@@ -5050,8 +5050,8 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     case res.operation
     of "context-menu.focus-previous": rt.app.contextMenu.move(-1)
     of "context-menu.focus-next": rt.app.contextMenu.move(1)
-    of "context-menu.focus-first": rt.app.contextMenu.move(-1000)
-    of "context-menu.focus-last": rt.app.contextMenu.move(1000)
+    of "context-menu.focus-first": rt.app.contextMenu.moveToEnd(last = false)
+    of "context-menu.focus-last": rt.app.contextMenu.moveToEnd(last = true)
     of "context-menu.accept":
       let chosen = rt.app.contextMenu.choose(-1)
       if chosen.chosen:
