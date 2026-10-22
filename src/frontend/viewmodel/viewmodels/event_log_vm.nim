@@ -432,6 +432,10 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
   let rows = vm.eventRows.val
   if row >= 0 and row < rows.len:
     let event = rows[row]
+    # An event the producer gave no position is not a place to go: jumping to
+    # its placeholder tick 0 would move the session to the start of the trace.
+    if event.noPosition:
+      return
     let rrTicks =
       if event.rrTicks != 0'u64: event.rrTicks
       else: event.eventId

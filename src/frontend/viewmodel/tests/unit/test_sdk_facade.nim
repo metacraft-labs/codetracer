@@ -710,3 +710,30 @@ suite "Embed SDK facade — upstreamed from BlockTracer (Shared-DOM-Front-Ends D
     check q.request(30) == 0       # superseded, not queued
     q.settled()
     check q.drain() == 30          # the newest target, not the one passed
+
+  test "an event with no reported position is shown but is not a place to go":
+    # BlockTracer used to drop such rows before they reached its Event Log;
+    # since its log is the SDK's, the SDK keeps the distinction. Tick 0 is a
+    # position (the first step); -1, or no tick at all, is "none reported".
+    let mock = mockBackend()
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createEventLogVM(store)
+    store.applyEventLogResponse(%*{"events": [
+      {"kind": 0, "content": "at the first step", "highLevelPath": "main.nr",
+       "highLevelLine": 1, "directLocationRRTicks": 0, "eventIndex": 0},
+      {"kind": 0, "content": "rung: no position", "highLevelPath": "",
+       "highLevelLine": 0, "directLocationRRTicks": -1, "eventIndex": 1},
+      {"kind": 0, "content": "no tick at all", "eventIndex": 2}]})
+    let rows = store.eventLog.rows.val
+    check rows.len == 3
+    check rows.len == 3 and not rows[0].noPosition
+    check rows.len == 3 and rows[1].noPosition and rows[1].rrTicks == 0'u64
+    check rows.len == 3 and rows[2].noPosition
+    mock.clearReceivedCommands()
+    vm.doubleClickRow(1)
+    vm.doubleClickRow(2)
+    check mock.findCommand("ct/event-jump").isNone
+    vm.doubleClickRow(0)
+    check mock.findCommand("ct/event-jump").isSome
+    vm.dispose()
+    store.dispose()

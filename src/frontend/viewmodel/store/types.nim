@@ -293,6 +293,14 @@ type
     line*: int
     value*: string
     rrTicks*: uint64
+    noPosition*: bool
+      ## The producer reported no position for this event (no
+      ## `directLocationRRTicks`, or a negative one). `rrTicks` is then 0 and
+      ## means nothing: the row is shown as recorded, but it is not a place to
+      ## go, so no front-end may navigate to it. Kept as a fact, the way
+      ## `ReplayDataStore.positionReported` keeps "no answer yet" apart from
+      ## tick 0. False by default, so a row built anywhere else stays a
+      ## navigable one.
     maxRRTicks*: uint64
     sourceGeneration*: int
     sourceDigest*: string

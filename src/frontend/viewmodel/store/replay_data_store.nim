@@ -1594,6 +1594,19 @@ func firstTicks(node: JsonNode; names: varargs[string]): uint64 =
       return if raw > 0.0: uint64(raw) else: 0'u64
   0'u64
 
+func hasTicks(node: JsonNode; names: varargs[string]): bool =
+  ## Whether this object reports a tick under any of `names` — a number that
+  ## is not negative (-1 is how some producers spell "no position"). Tick 0 is
+  ## a position; absence is not.
+  if node.isNil or node.kind != JObject:
+    return false
+  for name in names:
+    let child = node.getOrDefault(name)
+    if child.isNil: continue
+    if child.kind == JInt: return child.getBiggestInt(0) >= 0
+    if child.kind == JFloat: return child.getFloat(0.0) >= 0.0
+  false
+
 func firstInt(node: JsonNode; names: varargs[string]): int =
   ## The first of `names` this object carries as a number, or 0.
   ##
@@ -1643,6 +1656,8 @@ proc eventLogRowFromJson*(node: JsonNode; positionIndex: int): EventLogRow =
   result.line = firstInt(node, "highLevelLine", "high_level_line")
   result.rrTicks = firstTicks(node, "directLocationRRTicks",
                               "direct_location_rr_ticks")
+  result.noPosition = not hasTicks(node, "directLocationRRTicks",
+                                   "direct_location_rr_ticks")
   result.sourceGeneration = firstInt(node, "sourceGeneration",
                                      "source_generation")
   result.sourceDigest = firstStr(node, "sourceDigest", "source_digest")
