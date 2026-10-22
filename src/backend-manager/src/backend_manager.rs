@@ -63,6 +63,29 @@ use crate::{
 /// not decoded as a different language.
 const LOAD_LOCALS_DEFAULT_LANG: &str = "c";
 
+/// The field the single-client forwarder adds to every message a replay
+/// sends, naming that replay (the id `ct/start-replay` answered with).
+///
+/// The forwarder multiplexes every replay onto ONE frontend connection, and a
+/// DAP event carries nothing that says which replay emitted it: the frontend
+/// had to assume "the replay last selected", which is wrong whenever two
+/// replays run at once — an event of one replay that arrives after a request
+/// for the other was attributed to the other. `ct host` gives every connected
+/// client its own replay (`CLI/ct/host.md`, "Sessions are isolated"), so an
+/// event attributed to the wrong replay is shown to the wrong client. The tag
+/// names the source exactly; a frontend that does not read it is unaffected,
+/// since DAP consumers ignore fields they do not know.
+pub const REPLAY_ID_TAG: &str = "ctReplayId";
+
+/// `message` with [`REPLAY_ID_TAG`] set to `replay_id` when it is a JSON
+/// object (every DAP message is); anything else is passed through untouched.
+fn tag_with_replay_id(mut message: Value, replay_id: usize) -> Value {
+    if let Some(object) = message.as_object_mut() {
+        object.insert(REPLAY_ID_TAG.to_string(), json!(replay_id));
+    }
+    message
+}
+
 /// Write handle for a single connected daemon client, together with its
 /// unique identifier.  Used by the daemon-mode response router.
 struct ClientHandle {
@@ -186,10 +209,12 @@ impl BackendManager {
                 sleep(Duration::from_millis(10)).await;
 
                 let mut res = res2.lock().await;
-                for rx in res.children_receivers.iter_mut().flatten() {
+                for (replay_id, rx_opt) in res.children_receivers.iter_mut().enumerate() {
+                    let Some(rx) = rx_opt else { continue };
                     if !rx.is_empty()
                         && let Some(message) = rx.recv().await
                     {
+                        let message = tag_with_replay_id(message, replay_id);
                         let write_res =
                             socket_write.write_all(&DapParser::to_bytes(&message)).await;
 
@@ -330,10 +355,12 @@ impl BackendManager {
                 sleep(Duration::from_millis(10)).await;
 
                 let mut res = res2.lock().await;
-                for rx in res.children_receivers.iter_mut().flatten() {
+                for (replay_id, rx_opt) in res.children_receivers.iter_mut().enumerate() {
+                    let Some(rx) = rx_opt else { continue };
                     if !rx.is_empty()
                         && let Some(message) = rx.recv().await
                     {
+                        let message = tag_with_replay_id(message, replay_id);
                         let write_res =
                             socket_write.write_all(&DapParser::to_bytes(&message)).await;
 
@@ -6959,5 +6986,26 @@ impl BackendManager {
 
     pub async fn message_selected(&self, message: Value) -> Result<(), Box<dyn Error>> {
         self.message(self.selected, message).await
+    }
+}
+
+#[cfg(test)]
+mod replay_id_tag_tests {
+    use super::{REPLAY_ID_TAG, tag_with_replay_id};
+    use serde_json::json;
+
+    #[test]
+    fn a_replays_message_names_the_replay_and_keeps_its_fields() {
+        let event = json!({"type": "event", "event": "ct/complete-move", "seq": 7, "body": {"x": 1}});
+        let tagged = tag_with_replay_id(event, 3);
+        assert_eq!(tagged[REPLAY_ID_TAG], json!(3));
+        assert_eq!(tagged["event"], json!("ct/complete-move"));
+        assert_eq!(tagged["seq"], json!(7));
+        assert_eq!(tagged["body"], json!({"x": 1}));
+    }
+
+    #[test]
+    fn a_message_that_is_not_an_object_passes_through() {
+        assert_eq!(tag_with_replay_id(json!("raw"), 1), json!("raw"));
     }
 }

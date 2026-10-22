@@ -7196,6 +7196,40 @@ when not defined(ctInExtension) and not defined(ctWeb):
 })()""".}
     proc encodeQueryValue(value: cstring): cstring {.importjs: "encodeURIComponent(#)".}
 
+    # THIS TAB'S CLIENT ID, kept for the tab's life.
+    #
+    # `ct host` gives every client its own replay and its own session
+    # (`index/host_clients.nim`; `CLI/ct/host.md`, "Sessions are isolated"),
+    # and knows a client by the id its page presents as `?ct_client=` in the
+    # socket handshake. `sessionStorage` is per tab and survives a reload, so
+    # a reload resumes this tab's session and another tab gets its own. A
+    # storage that refuses (a privacy mode) gives an id for this page load
+    # only: the session is then not resumed on reload, but it is still not
+    # anyone else's.
+    proc hostClientId(): cstring {.importjs: """(function () {
+  var key = 'codetracer.hostClientId';
+  var fresh = function () {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) {
+      return ('0' + b.toString(16)).slice(-2);
+    }).join('');
+  };
+  try {
+    var id = window.sessionStorage.getItem(key);
+    if (!id || id.length > 64 || id.replace(/[A-Za-z0-9_-]/g, '') !== '') {
+      id = fresh();
+      window.sessionStorage.setItem(key, id);
+    }
+    return id;
+  } catch (e) {
+    return fresh();
+  }
+})()""".}
+
     proc startIPC =
       let host = domwindow.location.hostname.to(cstring)
       let parameters = if frontendSocketParameters.len > 0:
@@ -7226,7 +7260,8 @@ when not defined(ctInExtension) and not defined(ctWeb):
           cstring""
       var socket = io(
         address,
-        js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}") & sessionQuery})
+        js{withCredentials: false, query: cstring(fmt"socketParam={parameters}&pathname={domwindow.location.pathname.to(cstring)}") & sessionQuery &
+          cstring"&ct_client=" & encodeQueryValue(hostClientId())})
       socketdebug = socket
       pageSocket = socket.toJs
       socket.on(cstring"disconnect") do (reason: cstring):

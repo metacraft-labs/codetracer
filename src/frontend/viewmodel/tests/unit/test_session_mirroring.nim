@@ -445,6 +445,102 @@ suite "several primaries, one set of mirrors":
       host.dispose()
       done()
 
+suite "mirrors pinned each to its own primary (a ct host client each)":
+  # `CLI/ct/host.md`, "Sessions are isolated": every `ct host` client has a
+  # session of its own on the server's one host, and its page follows that
+  # session only (`sync_host.attach(…, follow)`, `hosted_primary`).
+
+  proc settleBoth(a, b: InMemoryLink) =
+    for _ in 0 ..< 10:
+      a.settle()
+      b.settle()
+
+  test "each follows its own; a move of one is not shown to the other":
+    createRoot proc(done: proc()) =
+      let (first, _) = newPrimary()
+      let (second, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("first", first)
+      host.addPrimary("second", second)
+      let linkA = newInMemoryLink()
+      let linkB = newInMemoryLink()
+      host.attach(linkA.a, follow = "first")
+      host.attach(linkB.a, follow = "second")
+      let a = createMirrorSession(linkA.b)
+      let b = createMirrorSession(linkB.b)
+      settleBoth(linkA, linkB)
+      ck a.following == "first"
+      ck b.following == "second"
+
+      first.moveTo(111, "first.nim", 11)
+      second.moveTo(222, "second.nim", 22)
+      settleBoth(linkA, linkB)
+      ck a.session.store.debugger.val.rrTicks == 111
+      ck b.session.store.debugger.val.rrTicks == 222
+
+      first.moveTo(333, "first.nim", 33)
+      settleBoth(linkA, linkB)
+      ck a.session.store.debugger.val.rrTicks == 333
+      ck b.session.store.debugger.val.rrTicks == 222
+
+      # The host's active session is not theirs to follow.
+      host.activate("second")
+      settleBoth(linkA, linkB)
+      ck a.following == "first"
+      ck a.session.store.debugger.val.rrTicks == 333
+      a.dispose()
+      b.dispose()
+      host.dispose()
+      done()
+
+  test "a pinned mirror can neither subscribe to nor act on another's session":
+    createRoot proc(done: proc()) =
+      let (first, _) = newPrimary()
+      let (second, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("first", first)
+      host.addPrimary("second", second)
+      let linkB = newInMemoryLink()
+      host.attach(linkB.a, follow = "second")
+      let b = createMirrorSession(linkB.b)
+      linkB.settle()
+      first.moveTo(111, "first.nim", 11)
+      linkB.settle()
+
+      b.switchTo("first")
+      linkB.settle()
+      ck b.unknownSession == "first"
+      ck b.session.store.debugger.val.rrTicks != 111
+
+      linkB.b.send(serializeAction("state", "addWatch",
+        %*{"expression": actionArg("w")}, "first"))
+      linkB.settle()
+      ck first.stateVM.watchExpressions.val.len == 0
+      b.dispose()
+      host.dispose()
+      done()
+
+  test "a mirror pinned before its session is hosted follows it once it is":
+    createRoot proc(done: proc()) =
+      let (first, _) = newPrimary()
+      let (second, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("first", first)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "second")
+      let mirror = createMirrorSession(link.b)
+      link.settle()
+      # Not the active session in its place: nothing until its own exists.
+      ck mirror.following == ""
+      second.moveTo(222, "second.nim", 22)
+      host.addPrimary("second", second)
+      link.settle()
+      ck mirror.following == "second"
+      ck mirror.session.store.debugger.val.rrTicks == 222
+      mirror.dispose()
+      host.dispose()
+      done()
+
 suite "a mirror whose panels act on the primary (a VS Code webview)":
 
   test "a view's call on the mirror's ViewModel runs on the primary":

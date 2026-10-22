@@ -3,7 +3,8 @@ import
   ../../lib/[ jslib ],
   ../../../common/ct_logging,
   ../../../ct/acp/acp,
-  ../../../frontend/index/electron_vars
+  ../../../frontend/index/electron_vars,
+  ../served_client
 
 proc getEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.split(' ').filter(Boolean) : [])(#)".}
@@ -110,11 +111,54 @@ proc getSessionState(sessionId: cstring; state: var SessionState): bool =
 proc saveSessionState(sessionId: cstring; state: SessionState) =
   sessionsById[sessionId] = state
 
+# WHOSE AGENT SESSION. `ct host` serves several clients from this one index
+# process and this one agent connection (`index/host_clients`; `CLI/ct/host.md`
+# "Sessions are isolated"). A page names its agent session with an id of its
+# own (`agent-session-<component id>`), which every page chooses alike, so the
+# page's id is scoped by the client that sent it (`currentClientKey`). The
+# agent's callbacks arrive on the agent connection, not in a client's request,
+# so each ACP session records the client that opened it and its callbacks run
+# as that client's (`runAsSessionOwner`): what they send reaches that client
+# alone. On the desktop there are no clients: the key is "", the owner nil,
+# and everything behaves as before.
+var acpSessionOwners: Table[cstring, JsObject] = initTable[cstring, JsObject]()
+
+proc scopedClientSession(clientSessionId: cstring): cstring =
+  ## The page's session id, scoped by the client being served.
+  let client = currentClientKey()
+  if client.len == 0: clientSessionId
+  else: client & cstring"/" & clientSessionId
+
 proc acpSessionForClient(clientSessionId: cstring): cstring =
-  if acpSessionIdsByClient.hasKey(clientSessionId):
-    acpSessionIdsByClient[clientSessionId]
+  let key = scopedClientSession(clientSessionId)
+  if acpSessionIdsByClient.hasKey(key):
+    acpSessionIdsByClient[key]
   else:
     cstring""
+
+proc mayUseAcpSession(acpSessionId: cstring): bool =
+  ## Whether the client being served may prompt, stop or cancel
+  ## `acpSessionId`: its own, or one no client owns (the desktop's).
+  let owner = acpSessionOwners.getOrDefault(acpSessionId)
+  owner.isNil or owner == currentClient()
+
+proc callWith(fn: js; arg: JsObject): JsObject {.importjs: "#(#)".}
+
+proc runAsSessionOwner(handler: js): js =
+  ## `handler` (an agent callback taking `{sessionId, …}`), run as the client
+  ## that opened that ACP session, when one did.
+  functionAsJS(proc(params: JsObject): JsObject =
+    let acpSessionId =
+      if not params.isNil and not params.isUndefined and
+         jsHasKey(params, cstring"sessionId"):
+        params[cstring"sessionId"].to(cstring)
+      else:
+        cstring""
+    let owner = acpSessionOwners.getOrDefault(acpSessionId)
+    if owner.isNil:
+      callWith(handler, params)
+    else:
+      callWith(wrapAsClient(owner, handler), params))
 
 proc clientSessionForAcp(acpSessionId: cstring): cstring =
   if clientSessionIdsByAcp.hasKey(acpSessionId):
@@ -578,11 +622,11 @@ proc ensureAcpConnection(): Future[void] {.async.} =
     # acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
 
     acpClient = newClientSideConnection(asFactory(makeClient(
-      handleRequestPermission,
-      handleSessionUpdate,
-      handleWriteTextFile,
-      handleReadTextFile,
-      handleCreateTerminal
+      runAsSessionOwner(handleRequestPermission),
+      runAsSessionOwner(handleSessionUpdate),
+      runAsSessionOwner(handleWriteTextFile),
+      runAsSessionOwner(handleReadTextFile),
+      runAsSessionOwner(handleCreateTerminal)
     )), acpStream)
     let initResp = await acpClient.initialize(initRequest())
 
@@ -623,6 +667,10 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
 
   if sessionId.len == 0:
     errorPrint cstring"[acp_ipc] prompt missing sessionId/clientSessionId"
+    return
+
+  if not mayUseAcpSession(sessionId):
+    errorPrint cstring(fmt"[acp_ipc] prompt refused: sessionId={sessionId} is another client's")
     return
 
   var state: SessionState
@@ -908,8 +956,11 @@ proc onAcpSessionInit*(sender: js, response: JsObject) {.async.} =
       activePrompt: false
     )
     saveSessionState(acpSessionId, state)
-    acpSessionIdsByClient[clientSessionId] = acpSessionId
+    acpSessionIdsByClient[scopedClientSession(clientSessionId)] = acpSessionId
     clientSessionIdsByAcp[acpSessionId] = clientSessionId
+    let owner = currentClient()
+    if not owner.isNil:
+      acpSessionOwners[acpSessionId] = owner
 
     var workspace = cstring""
     if jsHasKey(sessionResp, cstring"_ah") and jsHasKey(sessionResp[cstring"_ah"], cstring"workspaceDir"):
@@ -950,7 +1001,8 @@ proc onAcpStop*(sender: js, response: JsObject) {.async.} =
     else:
       requestedSessionId
 
-  if sessionId.len == 0 or not sessionsById.hasKey(sessionId):
+  if sessionId.len == 0 or not sessionsById.hasKey(sessionId) or
+     not mayUseAcpSession(sessionId):
     discard
     return
 
@@ -994,7 +1046,8 @@ proc onAcpCancelPrompt*(sender: js, response: JsObject) {.async.} =
     else:
       requestedSessionId
 
-  if sessionId.len == 0 or not sessionsById.hasKey(sessionId):
+  if sessionId.len == 0 or not sessionsById.hasKey(sessionId) or
+     not mayUseAcpSession(sessionId):
     discard
     return
 

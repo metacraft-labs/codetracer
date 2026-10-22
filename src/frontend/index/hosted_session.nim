@@ -1,5 +1,6 @@
-## index/hosted_session.nim — the `ct host` server's connection between the
-## session it owns for its page (`sync/hosted_primary`) and the replay.
+## index/hosted_session.nim — the `ct host` server's connection between a
+## session it owns for a client (`sync/hosted_primary`) and that client's
+## replay.
 ##
 ## The server's session is a second client of the replay the page drives: it
 ## talks to the Backend Manager over the index's own connection
@@ -57,9 +58,11 @@ proc newIndexDapBackendService*(sessionId: int): BackendService =
   BackendService(sendProc: send, onEventProc: onEvent,
                  disconnectProc: disconnect)
 
-proc openHostedSession*(sessionId: int; traceFolder: string): HostedPrimary =
-  ## The server's session over the replay `sessionId`, naming each file's
-  ## language as the page names it (`ui/state.installSourceLanguage`).
-  openHostedPrimary(newIndexDapBackendService(sessionId), traceFolder,
+proc openHostedSession*(sessions: HostedSessions; id: string; replayId: int;
+                        traceFolder: string): HostedPrimary =
+  ## Session `id` among `sessions`, over the replay `replayId` (a client's,
+  ## `host_clients`), naming each file's language as the page names it
+  ## (`ui/state.installSourceLanguage`).
+  openHostedPrimary(sessions, id, newIndexDapBackendService(replayId), traceFolder,
     proc(file: string): string =
       langWireName(common_lang.toLangFromFilename(file)))

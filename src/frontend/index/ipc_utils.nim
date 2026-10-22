@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
-  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
+  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, host_clients, base_handlers, bootstrap_cache, lsp_bridge,
   review_dataset, keybindings,
   ns9_panes,
   hcr_launch,
@@ -552,14 +552,16 @@ proc ready*(): Future[void] {.async.} =
   var config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
   infoPrint "index: config loaded"
   when defined(server):
-    # replay bootstrap state on reconnect (server builds only)
-    ipc.replayBootstrap = proc() =
-      if data.bootstrapMessages.len == 0:
-        debugPrint "ipc replay bootstrap: nothing cached"
-      else:
-        debugPrint cstring(fmt"ipc replay bootstrap: {data.bootstrapMessages.len} messages")
-        replayBootstrap(data.bootstrapMessages, proc(id: cstring, payload: cstring) =
-          ipc.emit(id, payload))
+    # Every client gets a replay of its own (`host_clients`): the first takes
+    # the one this startup opens, the others are started here; a client
+    # stops only its own, and its replays are stopped when it is released.
+    let clients = serverClients
+    clients.startReplay = startReplayProcess
+    clients.stopReplay = stopReplayProcess
+    replayStopAllowed = proc(replayId: int): bool =
+      clients.mayStopReplay(replayId)
+    replayStopped = proc(replayId: int) =
+      clients.forgetStoppedReplay(replayId)
 
   when not defined(server):
     # Skip the install dialog entirely when running in test mode
@@ -610,20 +612,6 @@ proc ready*(): Future[void] {.async.} =
       else:
         value
 
-    proc recordBootstrap(id, key, serialized: cstring) =
-      ## Cache a payload for replay on socket reconnect.
-      ##
-      ## ``key`` differentiates multiple payloads on the same channel
-      ## (used by ``dap-receive-event`` so distinct DAP events do not
-      ## clobber each other in the cache).  For the legacy single-
-      ## payload channels listed in ``bootstrapEvents`` the key is empty.
-      if id in bootstrapEvents:
-        let payload = BootstrapPayload(id: id, key: cstring"", payload: serialized)
-        upsertBootstrap(data.bootstrapMessages, payload)
-      elif id == cstring"CODETRACER::dap-receive-event" and key.len > 0:
-        let payload = BootstrapPayload(id: id, key: key, payload: serialized)
-        upsertBootstrap(data.bootstrapMessages, payload)
-
     proc dapReceiveEventKey(response: js): cstring =
       ## Extract the inner DAP event name from a ``dap-receive-event``
       ## payload, returning an empty string when the event is not one
@@ -645,8 +633,13 @@ proc ready*(): Future[void] {.async.} =
           dapReceiveEventKey(response)
         else:
           cstring""
-      recordBootstrap(id, dapKey, serialized)
-      ipc.emit(id, serialized)
+      # Which client hears it, and what each keeps for its next socket, is
+      # `host_clients.deliver`'s decision (`ipc.route`): the asking client,
+      # the client whose replay spoke, or every client.
+      if not ipc.route.isNil:
+        ipc.route(id, dapKey, serialized)
+      else:
+        ipc.emit(id, serialized)
 
   # bootstrap payloads that may need replay after reconnect
   let layout = await mainWindow.loadLayoutConfig(string(fmt"{userLayoutDir / $config.layout}.json"))

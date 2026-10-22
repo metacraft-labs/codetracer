@@ -1,9 +1,8 @@
 import
   std / [ async, jsffi, os, strformat, strutils, sequtils, jsconsole ],
-  electron_vars,
+  electron_vars, served_client,
   ../[ config, types, lang ],
   ../lib/[ jslib, electron_lib, misc_lib ],
-  ./bootstrap_cache,
   ./layout_config_repair,
   ./mode_default_layout,
   ../../common/[ paths, ct_logging, trace_source_paths, review_source_paths ]
@@ -27,7 +26,6 @@ type
     recordProcess*: NodeSubProcess
     layout*: js
     helpers*: Helpers
-    bootstrapMessages*: seq[BootstrapPayload]
     workspaceFolder*: cstring  # The folder opened in edit mode (persists across mode switches)
 
   DebugInstance* = object
@@ -58,7 +56,6 @@ var data* = ServerData(
   tabs: JsAssoc[cstring, ServerTab]{},
   closedTabs: @[],
   closedPanels: @[],
-  bootstrapMessages: @[],
   startOptions: StartOptions(
     loading: true,
     screen: true,
@@ -110,7 +107,13 @@ proc notifySourceFileChanged(filename: cstring, lang: Lang) =
     return
   if tab.fileWatched and not tab.waitsPrompt:
     tab.waitsPrompt = true
-    mainWindow.webContents.send "CODETRACER::change-file", js{path: filename}
+    # The file and its watch are every client's (`data.tabs` is the server's,
+    # and the watch is registered once, while serving whichever `ct host`
+    # client opened the file first), so the change is told to every client.
+    # A page without the file open answers `no-reload-file` and moves on
+    # (`renderer.onChangeFile`).
+    forEveryClient(proc() =
+      mainWindow.webContents.send "CODETRACER::change-file", js{path: filename})
 
 proc addUniquePathCandidate(paths: var seq[cstring], path: cstring) =
   if path.len == 0:

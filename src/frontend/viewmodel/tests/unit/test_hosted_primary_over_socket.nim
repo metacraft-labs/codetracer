@@ -5,6 +5,8 @@
 ## Node process, on a loopback port — the transport `ct host` uses.
 ##
 ## WHAT IS REAL: socket.io's server and client and the WebSocket between them;
+## `HostedSessions` (one host with a session per client, each page pinned to
+## its own, as `ct host` serves its clients);
 ## `socket_transport`'s channel; `hosted_primary` (the primary attaching on
 ## the replay's first stop and following its moves, `DebuggerSession`,
 ## `followBackendMoves`, `ReplayDataStore.applyCompleteMove`); `sync_host`,
@@ -29,7 +31,7 @@ import ../../backend/mock_backend
 import ../../session_vm
 import ../../sdk/debugger_session
 import ../../store/types
-import ../../sync/[hosted_primary, mirror_session, socket_transport,
+import ../../sync/[hosted_primary, mirror_session, socket_transport, sync_host,
                    synced_signals]
 import ../../viewmodels/state_vm
 
@@ -179,6 +181,59 @@ proc main() {.async.} =
   ck primary.store.debugger.val.rrTicks == 25,
     "the first server's session did not"
   ck other.debugger.history.val.len == 1, "and their histories are their own"
+
+  # ---- one server, two clients: each page follows its own session
+  #
+  # `ct host` hosts a session per client on ONE host (`HostedSessions`,
+  # `index/host_clients`; `CLI/ct/host.md` "Sessions are isolated"), and each
+  # page is pinned to its client's.
+  let sessions = newHostedSessions()
+  let mockA = newMockBackendService(autoRespond = true)
+  let mockB = newMockBackendService(autoRespond = true)
+  let hostedA = sessions.openHostedPrimary("client-a", mockA.toBackendService(),
+                                           "/trace")
+  let hostedB = sessions.openHostedPrimary("client-b", mockB.toBackendService(),
+                                           "/trace")
+  var connections = 0
+  let sharedPort = await startServer(proc(socket: JsObject) =
+    # The first page is client A's, the second client B's.
+    if connections == 0: hostedA.connectPage(socket)
+    else: hostedB.connectPage(socket)
+    inc connections)
+  let pageA = await connectClient(sharedPort)
+  ck await eventually(proc(): bool = connections == 1), "client A's page connected"
+  let pageB = await connectClient(sharedPort)
+  ck await eventually(proc(): bool = connections == 2), "client B's page connected"
+  let mirrorA = createMirrorSession(newSocketSyncChannel(pageA))
+  let mirrorB = createMirrorSession(newSocketSyncChannel(pageB))
+  mockA.emitEvent(completeMove(10, 3))
+  mockB.emitEvent(completeMove(70, 8))
+  ck await eventually(proc(): bool =
+    mirrorA.session.store.debugger.val.rrTicks == 10 and
+    mirrorB.session.store.debugger.val.rrTicks == 70),
+    "each page shows its own client's stop"
+  ck mirrorA.following == "client-a" and mirrorB.following == "client-b",
+    "each page follows its own client's session"
+  mockA.emitEvent(completeMove(20, 5))
+  ck await eventually(proc(): bool =
+    mirrorA.session.store.debugger.val.rrTicks == 20), "A's page follows A's move"
+  await sleep(200)
+  ck mirrorB.session.store.debugger.val.rrTicks == 70,
+    "B's page does not see A's move"
+  mirrorB.switchTo("client-a")
+  ck await eventually(proc(): bool = mirrorB.unknownSession == "client-a"),
+    "B's page cannot subscribe to A's session"
+  ck mirrorB.session.store.debugger.val.rrTicks == 70,
+    "and is shown nothing of it"
+  hostedA.close()
+  ck sync_host.primary(sessions.host, "client-a").isNil,
+    "a closed session leaves the host"
+  ck not sync_host.primary(sessions.host, "client-b").isNil, "the other one stays"
+  mirrorA.dispose()
+  mirrorB.dispose()
+  closeClient(pageA)
+  closeClient(pageB)
+  hostedB.close()
 
   again.dispose()
   closeClient(reloaded)

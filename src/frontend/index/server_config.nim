@@ -16,7 +16,7 @@ proc flushStdoutSync() {.importjs:
 
 from ../viewmodel/platform/web_deployment import cacheClassFor, headerFor
 import ../viewmodel/platform/deployment_descriptor
-import hosted_session   # the session the server owns for its page
+import host_clients   # every client its own replay and session
 
 proc nodeRelative(fromPath, toPath: cstring): cstring {.importjs:
   "require('path').relative(require('path').resolve(#), #)".}
@@ -92,7 +92,21 @@ when defined(server):
   let express* = cast[ExpressLib](require("express"))
 
   var readyVar*: js
+  var serverClients*: HostClients
+    ## The server's clients (`host_clients`); made by `setupServer`, before
+    ## any client can connect.
   proc nowMs(): int {.importjs: "Date.now()".}
+  proc handshakeQueryValue(socket: JsObject; name: cstring): cstring {.importjs: """
+    (function (socket, name) {
+      var query = socket && socket.handshake && socket.handshake.query;
+      var value = query ? query[name] : undefined;
+      return typeof value === 'string' ? value : '';
+    })(#, #)""".}
+
+  proc handshakeClientId(socket: JsObject): string =
+    ## The client id the page presented in its handshake (`ct_client`), or ""
+    ## when it presented none (`host_clients.connect` then makes a new one).
+    $handshakeQueryValue(socket, ClientIdParameter.cstring)
   proc setInterval*(cb: proc(): void, delay: int): JsObject {.importjs: "setInterval(#, #)".}
 
   proc setupServer* =
@@ -124,8 +138,8 @@ when defined(server):
           # invented value here would be a statement nothing acts on.
           traceId: "", projectId: "",
           runtime: ProjectRuntime(kind: prkStatic),
-          # The server owns the session; the page mirrors it
-          # (`hosted_session`).
+          # The server owns each client's session; the page mirrors its own
+          # (`host_clients`).
           placement: spServer),
         connection: ConnectionParameters(
           frontendSocketPort: data.startOptions.frontendSocket.port,
@@ -347,13 +361,13 @@ when defined(server):
     })
     var lastConnectionMs = nowMs()
     var lastActivityMs = lastConnectionMs
-    var socketAttached = false
     var idleTimer: JsObject
-    var activeSocket: base_handlers.WebSocket
-    var hosted: HostedPrimary
-      ## The session this server owns for the page (`hosted_session`). Made on
-      ## the first connection — the trace is known by then — and kept across
-      ## connections, so a reloaded page resumes it.
+    # EVERY CLIENT ITS OWN SESSION (`host_clients`, `CLI/ct/host.md`
+    # "Sessions are isolated"): a client per id its page holds, each with its
+    # own replay and its own server-owned session, kept across that page's
+    # reloads for as long as the idle timeout, and released after it.
+    serverClients = newHostClients(ipc, data.startOptions.idleTimeoutMs)
+    serverClients.installRouting()
 
     proc resetActivity() =
       lastActivityMs = nowMs()
@@ -362,28 +376,22 @@ when defined(server):
       lastConnectionMs = nowMs()
       resetActivity()
 
-    proc emitConnectionDisconnection(target: base_handlers.WebSocket, reason: cstring, message: cstring) =
-      if target.isNil:
-        return
-      let payload = block:
-        let reasonPart = cstring("""{"reason":""" & "\"" & $reason & "\"")
-        if message.len > 0:
-          reasonPart & cstring(""","message":""" & "\"" & $message & "\"" & "}")
-        else:
-          reasonPart & cstring("}")
-      target.emit(cstring"CODETRACER::connection-disconnected", payload)
-
     proc startIdleTimer(timeoutMs: int) =
       let interval = idleCheckInterval(timeoutMs)
       if interval < 0:
         return
       idleTimer = setInterval(proc =
         let now = nowMs()
-        if shouldExitIdle(socketAttached, lastConnectionMs, lastActivityMs, now, timeoutMs):
-          let reason = if socketAttached: "no activity" else: "no connection"
+        # A client gone for the timeout is released, before deciding whether
+        # the server itself is idle: its replay is not kept for a page that is
+        # not coming back.
+        serverClients.releaseGone(now.float)
+        let attached = serverClients.attachedCount > 0
+        if shouldExitIdle(attached, lastConnectionMs, lastActivityMs, now, timeoutMs):
+          let reason = if attached: "no activity" else: "no connection"
           infoPrint fmt"ct host idle timeout reached ({reason}); exiting."
-          if socketAttached and not activeSocket.isNil:
-            emitConnectionDisconnection(activeSocket, cstring"idle-timeout", cstring"Host timed out after inactivity.")
+          if attached:
+            serverClients.disconnectAll(cstring"idle-timeout", cstring"Host timed out after inactivity.")
           nodeProcess.exit(0)
       , interval)
 
@@ -391,10 +399,6 @@ when defined(server):
 
     socketIOServer.on(cstring"connection") do (client: base_handlers.WebSocket):
       debugPrint "connection"
-      if not activeSocket.isNil and activeSocket != client:
-        emitConnectionDisconnection(activeSocket, cstring"superseded", cstring"Another browser tab took over the connection.")
-      activeSocket = client
-      socketAttached = true
       resetConnection()
 
       client.onAny(proc() =
@@ -404,14 +408,9 @@ when defined(server):
       # Fallback activity hook until full heartbeats land: listen for generic activity ping.
       client.on(cstring"__activity__") do ():
         resetActivity()
-      ipc.attachSocket(client)
 
-      # The page mirrors the server's session. It talks to the replay the page
-      # itself drives — the default session, 0, the one `ct host` serves.
-      if hosted.isNil and not data.trace.isNil:
-        hosted = openHostedSession(0, $data.trace.outputFolder)
-      if not hosted.isNil:
-        hosted.connectPage(client.toJs)
+      # The client this socket serves: the id its page holds, or a new one.
+      discard serverClients.connect(client, handshakeClientId(client.toJs))
 
       # THE FACADE ENDPOINT, on the SAME socket — §6.1.
       #
@@ -436,12 +435,7 @@ when defined(server):
 
       client.on(cstring"disconnect") do ():
         debugPrint "socket disconnect"
-        if not hosted.isNil:
-          hosted.disconnectPage(client.toJs)
-        ipc.detachSocket()
-        socketAttached = false
-        if client == activeSocket:
-          activeSocket = nil
+        serverClients.disconnect(client)
         lastConnectionMs = nowMs()
         lastActivityMs = lastConnectionMs
 

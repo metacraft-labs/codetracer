@@ -20,8 +20,11 @@ var
   # Multiple replays can run simultaneously; this tracks which one is
   # the BM's "active" selection for DAP event routing.
   selectedReplayId = -1
-  pendingReplayStart: Future[int] = nil
-  replayStartResolver: proc(replayId: int) = nil
+  replayStartResolvers: seq[proc(replayId: int)] = @[]
+    ## One per `ct/start-replay` written and not yet answered, in the order
+    ## they were written: the Backend Manager answers them in that order, and
+    ## the answer names no request. A single slot let a second start (another
+    ## `ct host` client's replay, `host_clients`) take the first's answer.
   prefetchedTrace*: Trace = nil
 
 proc asyncSleep(ms: int): Future[void] =
@@ -29,15 +32,8 @@ proc asyncSleep(ms: int): Future[void] =
     discard windowSetTimeout(resolve, ms)
   )
 
-proc newReplayStartFuture(): Future[int] =
-  let future = newPromise(proc (resolve: proc (replayId: int)) =
-    replayStartResolver = resolve
-  )
-  pendingReplayStart = future
-  future
-
 proc handleReplayStartResponse(body: JsObject) =
-  if replayStartResolver.isNil:
+  if replayStartResolvers.len == 0:
     return
 
   var replayId = -1
@@ -54,11 +50,27 @@ proc handleReplayStartResponse(body: JsObject) =
   else:
     debugPrint("index: session-manager failed to start replay: ", body)
 
-  replayStartResolver(replayId)
-  replayStartResolver = nil
-  pendingReplayStart = nil
+  let resolve = replayStartResolvers[0]
+  replayStartResolvers.delete(0)
+  resolve(replayId)
 
 registerStartReplayHandler(handleReplayStartResponse)
+
+proc startReplayProcess*(): Future[int] =
+  ## Ask the Backend Manager for a new replay process (`ct/start-replay`);
+  ## resolves with its replay id, or -1 when it could not start one. The
+  ## replay is not selected and has no trace yet: its client's `launch` names
+  ## the trace.
+  if backendManagerSocket.isNil:
+    errorPrint "index: no session-manager connection to start a replay on"
+    return newPromise(proc (resolve: proc (replayId: int)) = resolve(-1))
+  result = newPromise(proc (resolve: proc (replayId: int)) =
+    replayStartResolvers.add resolve)
+  backendManagerSocket.write(wrapJsonForSending js{
+    "type": cstring"request",
+    "command": cstring"ct/start-replay",
+    "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
+  })
 
 proc pathExists(path: cstring): bool
 
@@ -840,18 +852,10 @@ proc prepareForLiveTrace*(trace: Trace,
   data.trace = trace
   data.pluginClient.trace = trace
 
-  let replayStartFuture = newReplayStartFuture()
   infoPrint "index: requesting live replay worker for ", $trace.recordingId,
     " folder ", $liveRecordingDir
 
-  let packet = wrapJsonForSending js{
-    "type": cstring"request",
-    "command": cstring"ct/start-replay",
-    "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
-  }
-  backendManagerSocket.write(packet)
-
-  let replayId = await replayStartFuture
+  let replayId = await startReplayProcess()
   if replayId < 0:
     errorPrint "Unable to start live replay worker"
     return
@@ -863,6 +867,7 @@ proc prepareForLiveTrace*(trace: Trace,
     "arguments": replayId
   }
   backendManagerSocket.write(selectPacket)
+  noteReplaySelected(replayId)
 
   mainWindow.webContents.send(
     "CODETRACER::dap-live-session-selected",
@@ -931,7 +936,6 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
     if data.trace.compileCommand.len == 0:
       data.trace.compileCommand = data.config.defaultBuild
 
-  let replayStartFuture = newReplayStartFuture()
   infoPrint "index: requesting new replay for trace ", $recordingId
   if not data.trace.isNil:
     infoPrint "index: ct/start-replay for trace folder ", $data.trace.outputFolder
@@ -941,14 +945,7 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
   # and stopped only when its session is explicitly closed (see
   # stopReplayForSession).
 
-  let packet = wrapJsonForSending js{
-    "type": cstring"request",
-    "command": cstring"ct/start-replay",
-    "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
-  }
-  backendManagerSocket.write(packet)
-
-  let replayId = await replayStartFuture
+  let replayId = await startReplayProcess()
   if replayId < 0:
     errorPrint "Unable to start replay for new trace"
     return
@@ -967,17 +964,24 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
     "arguments": replayId
   }
   backendManagerSocket.write(selectPacket)
+  noteReplaySelected(replayId)
   mainWindow.webContents.send(
     "CODETRACER::dap-replay-selected",
     js{trace: data.trace, replayId: replayId})
 
-proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
-  ## IPC handler: renderer requests that a session's replay be stopped.
-  ## Payload: { replayId: int }
-  let replayId = response["replayId"].to(int)
-  if replayId < 0:
-    return
+var
+  replayStopAllowed*: proc(replayId: int): bool = nil
+    ## Whether the client asking may stop `replayId`. `ct host` allows a
+    ## client its own replays only (`host_clients`): its clients are separate
+    ## sessions, and one must not end another's. Nil, the desktop, allows
+    ## every one: its windows are one user's.
+  replayStopped*: proc(replayId: int) = nil
+    ## Told after a client's request stopped `replayId`.
 
+proc stopReplayProcess*(replayId: int) =
+  ## Stop the replay `replayId` (`ct/stop-replay`) and what serves it.
+  if replayId < 0 or backendManagerSocket.isNil:
+    return
   infoPrint "index: ct/stop-replay for replayId ", $replayId
 
   let stopPacket = wrapJsonForSending js{
@@ -986,12 +990,27 @@ proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
     "arguments": replayId
   }
   backendManagerSocket.write(stopPacket)
+  noteReplayStopped(replayId)
 
   stopVisualReplayPlayer(replayId)
 
   # Clear the legacy alias if it matches.
   if selectedReplayId == replayId:
     selectedReplayId = -1
+
+proc onCloseReplaySession*(sender: js, response: JsObject) {.async.} =
+  ## IPC handler: renderer requests that a session's replay be stopped.
+  ## Payload: { replayId: int }
+  let replayId = response["replayId"].to(int)
+  if replayId < 0:
+    return
+  if not replayStopAllowed.isNil and not replayStopAllowed(replayId):
+    warnPrint "index: refused to stop replay ", $replayId,
+      ": it is not the asking client's"
+    return
+  stopReplayProcess(replayId)
+  if not replayStopped.isNil:
+    replayStopped(replayId)
 
 proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
   ## M-REC-3: returns the UUIDv7 recording-id as a cstring; empty

@@ -1746,10 +1746,16 @@ test-acp-notifications:
   source ci/lib/codetracer-home.sh
   ct_export_scratch_codetracer_home acp-notifications
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
-  trap 'rm -f "$notification_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
+  trap 'rm -f "$notification_test" "$sessions_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   nim js -d:nodejs -d:server -d:chronicles_enabled=off \
     --out:"$notification_test" src/frontend/tests/acp_notification_test.nim
   node "$notification_test"
+  # `ct host`'s clients each keep their own ACP sessions (CLI/ct/host.md,
+  # "Sessions are isolated").
+  nim js -d:nodejs -d:server -d:chronicles_enabled=off \
+    --out:"$sessions_test" src/frontend/tests/acp_sessions_per_client_test.nim
+  node "$sessions_test"
 
 test-frontend-js:
   #!/usr/bin/env bash
@@ -5757,6 +5763,9 @@ test-ui-selection: build-once build-tui
 # (or was given in CODETRACER_HOST_SESSION_SECRET) and only from its own page's
 # origin: src/tests/ct_host/test_ct_host_socket_requires_session_secret_and_origin.nim
 # drives the real `ct host` over HTTP, engine.io polling and WebSocket.
+# src/tests/ct_host/test_ct_host_sessions_are_isolated_per_client.nim plays three
+# clients' pages against one real `ct host`: each gets its own replay and session
+# (CLI/ct/host.md, "Sessions are isolated").
 test-ct-host-admission: build-once
   #!/usr/bin/env bash
   set -euo pipefail

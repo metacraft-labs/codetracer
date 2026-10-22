@@ -24,7 +24,7 @@
 
 import
   std / [async, jsffi, os, sequtils, strutils],
-  electron_vars,
+  electron_vars, served_client,
   ../lib / [jslib, electron_lib],
   ../config as frontend_config,
   ../viewmodel/host/keybindings_location,
@@ -108,7 +108,9 @@ proc startKeybindings*() =
       fs.watchFile(cstring(path), js{interval: WatchIntervalMs,
                                      persistent: false}) do (curr: js, prev: js):
         importNotes = @[]
-        sendKeybindings()
+        # The file is every client's (`ct host` serves several), though the
+        # watch began while one client was being served.
+        forEveryClient(proc() = sendKeybindings())
     except CatchableError:
       warnPrint "keybindings: cannot watch ", path, ": ", getCurrentExceptionMsg()
 

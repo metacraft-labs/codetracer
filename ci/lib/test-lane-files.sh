@@ -236,7 +236,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
-	ct-host-admission) echo 'ct host admission, end to end: the real ct host refuses a client without its session secret or from a foreign origin' ;;
+	ct-host-admission) echo 'ct host admission and session isolation, end to end: the real ct host refuses a client without its session secret or from a foreign origin, and gives every client its own replay and session' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
@@ -1140,12 +1140,15 @@ test_lane_files() {
 		# `std/jsffi`-based. It is also the ONLY suite in this lane compiled
 		# WITHOUT `-d:ctInExtension`, for that first reason.
 		# ACP notification handling runs the index module with -d:server so
-		# the Electron window can be supplied without a display.
+		# the Electron window can be supplied without a display;
+		# `acp_sessions_per_client_test.nim` does the same to hold `ct host`'s
+		# clients to one ACP session each (`index/served_client` contexts).
 		# `component_ids_across_sessions_test.nim` (#835) imports `utils.nim`,
 		# whose `generateId` reads every tab's `componentMapping` through the same
 		# JS-only `Data`; it holds editor and diff ids unique across the window.
 		printf '%s\n' \
 			src/frontend/tests/acp_notification_test.nim \
+			src/frontend/tests/acp_sessions_per_client_test.nim \
 			src/frontend/tests/component_ids_across_sessions_test.nim \
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
@@ -1927,7 +1930,8 @@ test_lane_files() {
 		;;
 
 	ct-host-admission)
-		# `ct host`'s admission rule (CLI/ct/host.md, "Admission"), against
+		# `ct host`'s admission rule (CLI/ct/host.md, "Admission") and its
+		# per-client session isolation ("Sessions are isolated"), against
 		# the real `ct host` and the node index it starts. Like `ui-selection`
 		# it needs a built `src/build-debug/bin/ct` (or CODETRACER_CT_BIN),
 		# `node` and socket.io-client, which is why it is a lane of its own

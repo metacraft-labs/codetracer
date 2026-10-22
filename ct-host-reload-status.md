@@ -8,11 +8,12 @@
 
 ## Key files
 
-- `src/frontend/index/server_config.nim` — Express/socket.io server wiring; sets `ipc.socket` on connection.
-- `src/frontend/index/base_handlers.nim` — IPC plumbing; `FrontendIPC` type and `indexIpcHandlers` macro that currently binds handlers to a single socket.
+- `src/frontend/index/server_config.nim` — Express/socket.io server wiring; hands each connection to `host_clients.connect` (one client per `ct_client` id, each with its own replay and session).
+- `src/frontend/index/base_handlers.nim` / `ipc_registry.nim` — IPC plumbing; handlers are bound to every client socket (`addClientSocket`), each through its client's context (`served_client.nim`).
+- `src/frontend/index/host_clients.nim` — the clients, their replays and sessions, per-client routing and bootstrap caches.
 - `src/frontend/index/ipc_utils.nim` — `ready()` registers handlers and defines the `mainWindow.webContents.send` shim for server mode.
 - `src/frontend/index/bootstrap_cache.nim` — cached bootstrap payloads for reconnects with replay ordering helpers.
-- `src/frontend/ui_js.nim` — Browser-side socket bootstrap; reconnect path that currently creates a fresh socket on reload.
+- `src/frontend/ui_js.nim` — Browser-side socket bootstrap; sends the tab's client id (`ct_client`, from `sessionStorage`) so a reload resumes its own session.
 - `src/frontend/index/electron_vars.nim`/`window.nim` — Globals and send/recv setup that will need to route through the new registry.
 
 ## Progress

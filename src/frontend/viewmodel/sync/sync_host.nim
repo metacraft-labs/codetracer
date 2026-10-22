@@ -6,20 +6,29 @@
 ##
 ## A host may hold several primary sessions at once — one per active edit or
 ## replay session — and every mirror follows one of them. Which one is the
-## host's decision (`activate`: in VS Code, the active debug session), and a
-## switch re-points every mirror; the session left keeps its position and its
-## panes, because it is an independent graph that simply has no one watching.
+## host's decision, in one of two ways:
+##
+## * SHARED: the host has an active session (`activate`: in VS Code, the
+##   active debug session), and a switch re-points every mirror; the session
+##   left keeps its position and its panes, because it is an independent
+##   graph that simply has no one watching.
+## * PINNED: a mirror attached with `attach(channel, follow = id)` follows
+##   `id` and only `id`, whatever the active session is (a `ct host` client:
+##   each has a session of its own, `CLI/ct/host.md` "Sessions are
+##   isolated"). It is told to follow `id` once `id` is hosted, and it can
+##   neither subscribe to nor act on another session.
 ##
 ## Messages a mirror sends:
 ##
-##   {"type": "hello"}                      → `activate` for the active session
+##   {"type": "hello"}                      → `activate` for the session it follows
 ##   {"type": "subscribe", "session": id}   → a snapshot of `id`, then its batches
 ##   {"type": "action", "session": id, …}   → run on that primary (`action_relay`)
 ##
 ## Messages a host sends besides the publisher's batches and snapshots:
 ##
 ##   {"type": "activate", "session": id}       — follow `id` from now on
-##   {"type": "session-unknown", "session": id} — no such primary here
+##   {"type": "session-unknown", "session": id} — no such primary here, or
+##                                               none this mirror may follow
 ##
 ## Works on both the C and JS backends.
 
@@ -36,6 +45,9 @@ type
   Attached = ref object
     channel: SyncChannel
     following: string
+    pinned: string
+      ## The one session this mirror may follow; "" when it follows the
+      ## host's active session.
 
   SyncHost* = ref object
     sessions: OrderedTable[string, HostedSession]
@@ -59,12 +71,28 @@ proc primary*(host: SyncHost; id: string): SessionViewModel =
 proc publisher*(host: SyncHost; id: string): SyncPublisher =
   if host.sessions.hasKey(id): host.sessions[id].publisher else: nil
 
+proc mayFollow(a: Attached; id: string): bool =
+  a.pinned.len == 0 or a.pinned == id
+
 proc subscribe(host: SyncHost; a: Attached; id: string) =
+  if not a.mayFollow(id):
+    # Another client's session: not unknown, but not this mirror's to see,
+    # and the reply must not tell the two apart.
+    a.channel.send(%*{"type": "session-unknown", "session": id})
+    return
   a.following = id
   if not host.sessions.hasKey(id):
     a.channel.send(%*{"type": "session-unknown", "session": id})
     return
   a.channel.send(host.sessions[id].publisher.snapshot())
+
+proc sessionFor(host: SyncHost; a: Attached): string =
+  ## The session `a` is told to follow now: its own when pinned and hosted,
+  ## else the active one when it is not pinned; "" when there is none yet.
+  if a.pinned.len > 0:
+    (if host.sessions.hasKey(a.pinned): a.pinned else: "")
+  else:
+    host.active
 
 proc onMirrorMessage(host: SyncHost; a: Attached; msg: JsonNode) =
   if msg.isNil or msg.kind != JObject:
@@ -74,28 +102,31 @@ proc onMirrorMessage(host: SyncHost; a: Attached; msg: JsonNode) =
     # A mirror created after its channel was attached — a page builds its
     # mirror well after its socket connected — missed the `activate` sent at
     # attach. It asks, and is told again.
-    if host.active.len > 0:
-      a.channel.send(%*{"type": "activate", "session": host.active})
+    let id = host.sessionFor(a)
+    if id.len > 0:
+      a.channel.send(%*{"type": "activate", "session": id})
   of "subscribe":
     host.subscribe(a, msg{"session"}.getStr(""))
   of "action":
     var id = msg{"session"}.getStr("")
     if id.len == 0:
       id = a.following
-    if host.sessions.hasKey(id) and
+    if a.mayFollow(id) and host.sessions.hasKey(id) and
        host.sessions[id].session.applyAction(msg):
       inc host.actionsApplied
   else:
     discard
 
-proc attach*(host: SyncHost; channel: SyncChannel) =
-  ## Serve the mirror at the other end of `channel`. If a session is active
-  ## the mirror is told to follow it.
-  let a = Attached(channel: channel)
+proc attach*(host: SyncHost; channel: SyncChannel; follow = "") =
+  ## Serve the mirror at the other end of `channel`. With `follow` it follows
+  ## that session only (PINNED); without, the host's active one. It is told
+  ## which, when that session is hosted.
+  let a = Attached(channel: channel, pinned: follow)
   host.attached.add a
   channel.setHandler(proc(msg: JsonNode) = host.onMirrorMessage(a, msg))
-  if host.active.len > 0:
-    channel.send(%*{"type": "activate", "session": host.active})
+  let id = host.sessionFor(a)
+  if id.len > 0:
+    channel.send(%*{"type": "activate", "session": id})
 
 proc detach*(host: SyncHost; channel: SyncChannel) =
   ## Stop serving `channel` (its webview or page went away).
@@ -104,14 +135,16 @@ proc detach*(host: SyncHost; channel: SyncChannel) =
       host.attached.delete(i)
 
 proc activate*(host: SyncHost; id: string) =
-  ## Make `id` the session every mirror follows.
+  ## Make `id` the session every mirror that is not pinned follows.
   host.active = id
   for a in host.attached:
-    a.channel.send(%*{"type": "activate", "session": id})
+    if a.pinned.len == 0:
+      a.channel.send(%*{"type": "activate", "session": id})
 
 proc addPrimary*(host: SyncHost; id: string; session: SessionViewModel) =
   ## Host `session` as primary `id`. Its batches go to every mirror
-  ## following it. The first session added becomes the active one.
+  ## following it, and the mirrors pinned to it are told to follow it. The
+  ## first session added becomes the active one.
   doAssert not host.sessions.hasKey(id), "a primary session '" & id &
     "' is already hosted"
   let h = host
@@ -122,13 +155,17 @@ proc addPrimary*(host: SyncHost; id: string; session: SessionViewModel) =
           a.channel.send(msg),
     host.schedule)
   host.sessions[id] = HostedSession(session: session, publisher: publisher)
+  for a in host.attached:
+    if a.pinned == id:
+      a.channel.send(%*{"type": "activate", "session": id})
   if host.active.len == 0:
     host.activate(id)
 
 proc removePrimary*(host: SyncHost; id: string) =
   ## Stop hosting primary `id` (its debug session ended). The session is the
   ## caller's to dispose. When it was the active one, the next session hosted
-  ## becomes active; with none left, mirrors keep what they show.
+  ## becomes active; with none left, mirrors keep what they show. Mirrors
+  ## pinned to it keep what they show too: nothing publishes to them.
   if not host.sessions.hasKey(id):
     return
   host.sessions[id].publisher.dispose()
