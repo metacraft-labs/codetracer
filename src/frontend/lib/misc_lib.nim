@@ -51,9 +51,12 @@ type
     all*: bool
 
 when defined(ctRenderer):
-  proc tippy*(query: cstring, options: JsAssoc[cstring, JsObject]): JsObject {.importc.}
+  proc tippy*(targets: JsObject, options: JsAssoc[cstring, JsObject]): JsObject {.importc.}
+    ## `tippy(targets, props)`. `targets` is what tippy accepts: a CSS
+    ## selector, an Element, or an array of Elements. An array yields an
+    ## ARRAY of instances, one per element.
+    ## https://atomiks.github.io/tippyjs/v6/constructor/#target-types
 
 var yaml*: Yaml
 when not defined(ctRenderer) and not defined(ctInExtension):
   yaml = cast[Yaml](require("js-yaml"))
-
