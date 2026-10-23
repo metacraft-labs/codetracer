@@ -125,7 +125,9 @@ READER = "src/tests/visual/screen_oracle/terminal_reading.nim"
 GMAIN = "src/frontend/gpui/main.nim"
 GLEAVES = "src/frontend/gpui/app/leaves.nim"
 GLIST = "src/frontend/gpui/list_scrubber.nim"
-DEVLOG = "src/frontend/ui/event_log.nim"
+# The desktop Event Log is one view over its ViewModel since 2026-10-23; its
+# track press goes through the shared list scrubber to the view's `jumpTo`.
+DEVLOG = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
 DCONFIG = "src/frontend/index/config.nim"
 DSTATE = "src/frontend/viewmodel/views/isonim_state_view.nim"
 ENGINE = "src/db-backend/src/dap_handler.rs"
@@ -548,8 +550,8 @@ ARMS = [
         G_OMNIBOX, "GPUI's omnibox field is on the input surface"),
     # --- the desktop, the real Electron app --------------------------------
     Arm("D1", DEVLOG,
-        "        setScrollTopJs(body, float(max(0, min(row, rows))) / float(rows) *\n",
-        "        discard (body, float(max(0, min(row, rows))) / float(rows) *\n",
+        "        scrollBody.setScrollTop(float(max(0, row)) * rowPx()))\n",
+        "        discard row)\n",
         D_EVENTLOG, "the desktop's event-log track press moves nothing"),
     Arm("D2", DCONFIG,
         "  sanitizeLayoutConfig(config, -1, retiredContentIds())\n",
