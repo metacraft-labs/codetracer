@@ -143,10 +143,16 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    keeps the trace index, recordings and config out of their profile as well.
 8. **Stopping.** The user quits with `q`; closing the pane also ends it. Each
    running TUI owns one `replay-server` child, which exits with it. The
-   orphan-sensitive pty suites (`test_real_no_orphans`, `test_real_pty_lifecycle`)
-   count every `replay-server` on the host, so they FAIL while the user's TUI pane
-   is open. Check `pgrep -a replay-server` before running them or before calling
-   such a failure a regression, and never kill a replay-server you did not start.
+   orphan-sensitive pty suites (`test_real_no_orphans`, `test_real_pty_lifecycle`,
+   `test_real_signal_handling`, and the engine counts in `test_plat47_vcs_focus_refresh`
+   and `test_plat49_panes`) count only the engines their own sessions started:
+   each session carries a per-run token in its environment
+   (`CODETRACER_TUI_TEST_RUN_TOKEN`, `real_terminal/lifecycle_support.nim`), and
+   the detector matches it in `/proc/<pid>/environ`. The user's open TUI pane and
+   other worktrees' engines therefore neither fail them nor hide a leak, so a
+   survivor they report is this run's. A new pty suite whose engines are checked
+   must spawn through `tuiSession` or call `carryRunMark()` on its builder. Never
+   kill a replay-server you did not start.
 
 GPUI: build the windowed shim in the same isonim-gpui checkout the build compiles
 against (`repro exec . -- bash -c 'cd rust && cargo build --features gpui-backend'`

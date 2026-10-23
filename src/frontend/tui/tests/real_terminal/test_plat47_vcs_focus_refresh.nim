@@ -135,6 +135,7 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane refreshes on focus":
       # binary remembers on quit.
       .envSet("CODETRACER_TUI_LAYOUT_DIR",
               getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-focus-pane")
+      .carryRunMark()
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     # THE REQUEST: DECSET 1004, written by `terminal_driver.start`.
@@ -193,6 +194,9 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane refreshes on focus":
       .envSet("COLORTERM", "truecolor")
       .envSet("CODETRACER_TUI_LAYOUT_DIR",
               getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-focus-signal")
+      # THIS RUN'S MARK: `noSurvivingReplayServer` below counts only engines
+      # that carry it, so without it this session's leak would pass unseen.
+      .carryRunMark()
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     # On while the session is live, and not yet given back.

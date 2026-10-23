@@ -23,7 +23,7 @@
 ## the child was alive, and its exit code, which is what tells "still opening
 ## the trace" from "the engine refused" from "the binary died".
 
-import std/[monotimes, os, posix, strutils, times]
+import std/[monotimes, os, posix, strtabs, strutils, sysrand, times]
 
 import term_assert
 
@@ -105,6 +105,108 @@ proc wedgeFolder*(): string =
     bytes[i] = char((state shr 16) and 0xff'u32)
   writeFile(blob, bytes)
 
+# ---------------------------------------------------------------------------
+# This run's mark
+# ---------------------------------------------------------------------------
+#
+# ## WHOSE ENGINES ARE COUNTED: THE ONES THIS RUN MARKED
+#
+# The question every survivor check asks is "did a session THIS RUN started
+# leave its engine behind?". It is NOT "is any `replay-server` alive on this
+# host?", and a shared workstation answers that second question with yes all
+# day: other worktrees' suites, a mutation grade in this very tree, the
+# developer's own TUI pane. Each starts and stops engines on its own clock.
+#
+# The detector used to answer the second question and subtract a baseline
+# taken when this module loaded. That excused only the engines ALREADY running
+# at that instant; one another process started while the suite ran was
+# counted as this suite's leak, and the lane went red on a quiet product
+# (codetracer-pm `issues/2026-10-21-tui-orphan-suites-count-replay-servers-
+# other-worktrees-start-during-the-run.md`). Worse, the noise looked exactly
+# like a real leak, so a real one on a busy host would have been waved away.
+#
+# So every session these suites start carries a PER-RUN MARK in its
+# environment (`RunTokenEnvVar`=`runToken()`), the TUI hands its environment
+# down to the `replay-server` it spawns (`stdio_backend.startReplayServer`
+# calls `startProcess` with no `env`, i.e. inherited), and the detector keeps
+# only engines whose `/proc/<pid>/environ` holds that exact entry. The
+# baseline is gone: an engine that was running before the run cannot carry a
+# token minted when it started, so excluding it needs no snapshot, and the
+# check no longer depends on WHEN anything else on the host started.
+#
+# A leaked engine keeps the mark: `environ` is fixed at `execve`, and
+# reparenting to `init` — the very thing that makes a leak invisible to
+# `waitpid` — does not touch it. That is why the mark is in the environment
+# and not in a process group or session, which a leaked child can leave.
+
+const
+  RunTokenEnvVar* = "CODETRACER_TUI_TEST_RUN_TOKEN"
+    ## The environment variable that marks a process as started by THIS run.
+    ##
+    ## Read by nothing in the product; it exists only to be found in
+    ## `/proc/<pid>/environ` by `markedReplayServerPids`.
+
+proc mintRunToken(): string =
+  ## A token no other run on this host can hold.
+  ##
+  ## THREE INGREDIENTS, because each alone has a collision the others close:
+  ## the pid is unique among LIVE processes but recycled; the wall-clock
+  ## nanoseconds separate two runs that drew the same recycled pid; and 16
+  ## bytes from the kernel's CSPRNG (`std/sysrand`, `getrandom(2)`) separate
+  ## two runs whose clocks agree — containers, or a clock that was set back.
+  ## RAISES rather than falling back to something weaker: a token that might
+  ## collide is a detector that might count another run's engine, which is
+  ## the defect this exists to remove.
+  var entropy: array[16, byte]
+  if not urandom(entropy):
+    raise newException(OSError,
+      "could not read the kernel's random source to mint the run token")
+  let now = getTime()
+  result = $getCurrentProcessId() & "-" & $now.toUnix & "." &
+           $now.nanosecond & "-"
+  for b in entropy:
+    result.add toHex(b)
+
+let runTokenValue = mintRunToken()
+  ## Minted ONCE, when the module loads, so every session this process starts
+  ## carries the same mark and the detector recognises all of them.
+
+proc runToken*(): string =
+  ## This run's mark: the value `RunTokenEnvVar` carries in every session the
+  ## suites start.
+  runTokenValue
+
+proc carryRunMark*(builder: TuiTestBuilder): TuiTestBuilder =
+  ## Put this run's mark in a session's environment.
+  ##
+  ## EVERY SESSION WHOSE ENGINE A SURVIVOR CHECK LOOKS FOR MUST GO THROUGH
+  ## THIS (`tuiSession` does). A session without it is invisible to the
+  ## detector — its leak would pass every check — which is why the five full
+  ## sessions in `test_real_no_orphans.nim` assert that each live session's
+  ## engine IS found while it runs.
+  builder.envSet(RunTokenEnvVar, runTokenValue)
+
+proc markedEnvironment*(): StringTableRef =
+  ## This process's environment plus this run's mark, for a `startProcess`
+  ## that should count as one of this run's engines.
+  result = newStringTable(modeCaseSensitive)
+  for key, value in envPairs():
+    result[key] = value
+  result[RunTokenEnvVar] = runTokenValue
+
+proc unmarkedEnvironment*(): StringTableRef =
+  ## This process's environment WITHOUT any run mark, for a `startProcess`
+  ## that must look like somebody else's engine.
+  ##
+  ## Stripped explicitly rather than trusted absent: if this suite was
+  ## started by something that itself set `RunTokenEnvVar`, an inherited
+  ## copy would carry THAT run's token. It could not match `runToken()`
+  ## either, but a negative arm should not rest on that argument.
+  result = newStringTable(modeCaseSensitive)
+  for key, value in envPairs():
+    if key != RunTokenEnvVar:
+      result[key] = value
+
 proc tuiSession*(args: seq[string]; cols, rows: int; handshakeMs = 0;
                  term = "xterm-256color"): TuiTestSession =
   ## The shipped binary in a real pty, with a KNOWN environment and its raw
@@ -115,12 +217,18 @@ proc tuiSession*(args: seq[string]; cols, rows: int; handshakeMs = 0;
   ## runner is in, and a case that asserted anything about the emission under
   ## an inherited `COLORTERM=truecolor` would be asserting the runner's
   ## environment.
+  ##
+  ## EVERY SESSION CARRIES THIS RUN'S MARK (`carryRunMark`), which the TUI
+  ## hands down to the `replay-server` it spawns: the survivor checks count
+  ## only engines that carry it, so a session started without it would leak
+  ## invisibly.
   var builder = newTuiTest(tuiBinary(), args)
     .width(cols).height(rows)
     .transcript()
     .envRemove("COLORTERM", "TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE")
     .envSet("TERM", term)
     .envSet("LANG", "en_US.UTF-8")
+    .carryRunMark()
   # BLOCKED **OR** SET, NEVER BOTH — kept deliberately, though the harness no
   # longer requires it.
   #
@@ -223,9 +331,17 @@ proc settleOnDebugger*(sess: var TuiTestSession; cols, rows: int;
 # ---------------------------------------------------------------------------
 # Surviving children
 # ---------------------------------------------------------------------------
+#
+# Counted by THIS RUN'S MARK: see "This run's mark" above for why, and for
+# what an engine has to carry to be found.
 
 proc replayServerPids*(): seq[int] =
-  ## Every live `replay-server` on this host, by pid.
+  ## EVERY live `replay-server` on this host, by pid — whoever started it.
+  ##
+  ## NOT A LEAK DETECTOR. On a shared host this includes other worktrees'
+  ## engines and the developer's own; `markedReplayServerPids` is the one the
+  ## survivor checks use. This one is kept for the negative arm, which has to
+  ## show that an engine the detector ignores is nevertheless alive.
   ##
   ## `/proc` rather than `pgrep`, so the answer does not depend on a tool being
   ## installed, and `comm` rather than `cmdline`, because `comm` is the
@@ -251,17 +367,40 @@ proc replayServerPids*(): seq[int] =
       # a process that is gone is not a surviving child.
       discard
 
-let baselineReplayServers = replayServerPids()
-  ## The `replay-server` processes that were already running when this module
-  ## was loaded.
+proc carriesRunMark(pid: int): bool =
+  ## Whether `pid`'s environment holds EXACTLY `RunTokenEnvVar=<runToken()>`.
   ##
-  ## A BASELINE RATHER THAN A ZERO, because a developer's own session — or a
-  ## `vm-gui-headless` run in another terminal — is not this suite's leak. What
-  ## the suites assert is that no pid OUTSIDE this set survives, which is a
-  ## statement about the sessions they started.
+  ## `/proc/<pid>/environ` is the environment the process was `exec`ed with,
+  ## as NUL-separated `KEY=VALUE` entries. The whole entry is compared, not a
+  ## substring, so a token that is a prefix of another — or a variable whose
+  ## VALUE happens to contain this one — is not a match.
+  ##
+  ## UNREADABLE MEANS NOT OURS. The file is readable only by the process's own
+  ## uid (and `ptrace` permission), so a `replay-server` another user runs
+  ## raises here, and so does one that exited after the `comm` read. Neither
+  ## is an engine this run started and is still running, and this run's own
+  ## engines always run as this uid — the TUI is our child and spawns them.
+  let wanted = RunTokenEnvVar & "=" & runTokenValue
+  try:
+    for entry in readFile("/proc" / $pid / "environ").split('\0'):
+      if entry == wanted:
+        return true
+  except CatchableError:
+    discard
+  false
+
+proc markedReplayServerPids*(): seq[int] =
+  ## The live `replay-server` processes THIS RUN's sessions started: the
+  ## host-wide `comm` walk, kept only where the run's mark is in the
+  ## environment. Whatever else runs on the host, it is not in this list.
+  result = @[]
+  for pid in replayServerPids():
+    if carriesRunMark(pid):
+      result.add pid
 
 proc survivingReplayServers*(graceMs = 3000): seq[int] =
-  ## `replay-server` processes that this run started and that are still alive.
+  ## `replay-server` processes this run's sessions started that are still
+  ## alive — only those, whatever else runs on the host.
   ##
   ## Polled rather than sampled once: a child is reaped asynchronously after
   ## its parent exits, so an immediate read would report a leak that is merely
@@ -269,10 +408,7 @@ proc survivingReplayServers*(graceMs = 3000): seq[int] =
   ## clean run costs one read.
   let deadline = getMonoTime() + initDuration(milliseconds = graceMs)
   while true:
-    result = @[]
-    for pid in replayServerPids():
-      if pid notin baselineReplayServers:
-        result.add pid
+    result = markedReplayServerPids()
     if result.len == 0 or getMonoTime() >= deadline:
       return
     sleep(50)

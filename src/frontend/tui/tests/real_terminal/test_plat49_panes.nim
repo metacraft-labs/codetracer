@@ -86,6 +86,10 @@ proc open(args: seq[string] = @[]): TuiTestSession =
     .envSet("XDG_STATE_HOME", state)
     .envSet("CODETRACER_HOME", state / "ct-home")
     .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
+    # THIS RUN'S MARK, which the TUI hands down to every engine it spawns:
+    # the "+" case counts engines with `markedReplayServerPids`, and an
+    # unmarked session's engine would be invisible to it.
+    .carryRunMark()
     .spawn()
   settleOnDebugger(result, Cols, Rows)
 
@@ -451,7 +455,11 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     ck plus > 0
     # One session: no tab drawn, the "+" alone (the desktop's single-session).
     ck not row0.contains(" × ")
-    let before = replayServerPids().len
+    # THIS RUN'S ENGINES ONLY (`markedReplayServerPids`), not every
+    # `replay-server` on the host: another worktree's suite starting or
+    # stopping one between `before` and the checks below would otherwise move
+    # the count by one in either direction, and the case would blame the "+".
+    let before = markedReplayServerPids().len
     # PLAT-51 (Multi-Window-Tab-Management.md rule 3): the "+" opens a tab
     # showing the WELCOME SCREEN; the recordings beside calc are its recent
     # traces, and a click on one opens it in that tab.
@@ -467,7 +475,7 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     discard sess.waitForCall("step #", "(i=0)", timeoutMs = 30000)
     ck sess.rowText(0).contains("calc-")
     ck sess.rowText(0).contains("trace: call_pages")
-    ck replayServerPids().len == before + 1
+    ck markedReplayServerPids().len == before + 1
     # The first tab: calc's panes again.
     let (_, c0) = sess.snap().findRow("calc-2f0")
     ck c0 > 0
@@ -482,9 +490,9 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     sess.click(0, at + "call_pages-d6745afd1e2e ".len)
     discard sess.waitFor(" × ", present = false, timeoutMs = 10000, below = 1)
     let deadline = getMonoTime() + initDuration(seconds = 10)
-    while getMonoTime() < deadline and replayServerPids().len > before:
+    while getMonoTime() < deadline and markedReplayServerPids().len > before:
       sleep(100)
-    ck replayServerPids().len == before
+    ck markedReplayServerPids().len == before
     ck sess.rowText(0).cellFind(" + ") > 0
     sess.quit()
 

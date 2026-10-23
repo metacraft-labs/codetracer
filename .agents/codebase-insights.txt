@@ -7251,9 +7251,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   version), as `2dbbbcdda` did for the committed fixtures: v7 changed no
   header byte, and a v6 recording carries none of the new event kinds.
 - The orphan-sensitive pty suites (`test_real_no_orphans`,
-  `test_real_pty_lifecycle`, `test_real_signal_handling`) see EVERY
-  `replay-server` on the host. On a shared host run them in a private PID
-  namespace: `unshare -r -p -f --mount-proc <runner>`.
+  `test_real_pty_lifecycle`, `test_real_signal_handling`, plus the engine
+  checks in `test_plat47_vcs_focus_refresh` and `test_plat49_panes`) count only
+  `replay-server` processes whose `/proc/<pid>/environ` carries this run's
+  `CODETRACER_TUI_TEST_RUN_TOKEN` (`lifecycle_support.markedReplayServerPids`).
+  Other worktrees' engines no longer redden them, and no private PID namespace
+  is needed. A session spawned without `tuiSession` / `carryRunMark()` is
+  invisible to them, so its leak would pass.
 - A pty suite's wait failure prints the status line, which carries the
   recording's source path and tick; `run-plat68-keymaps-mutations.py`'s
   `portable_cause` drops that snapshot from a recorded cause so causes match
