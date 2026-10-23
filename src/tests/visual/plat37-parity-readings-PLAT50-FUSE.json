@@ -1,0 +1,289 @@
+{
+  "_comment": [
+    "PLAT-37 parity readings, PLAT50-FUSE pass (segmented inline-run fusion A/B).",
+    "THIS FILE EXISTS TO CLOSE codetracer-pm/issues/2026-10-18-the-parity-campaigns-per-view-lane-grades-exist-only-in-gitignored-build-so-an-ab-calibration-cannot-be-rechecked.md",
+    "The six per-view lane grades had never been written to any tracked file; only the MEANS were.",
+    "They are recovered here from the pass's own ink.{before,armA,after}.<view>.json, with CROP_PX and a content digest for every graded buffer.",
+    "Every figure names the commit it was measured against, per the workspace standard."
+  ],
+  "schemaVersion": 1,
+  "standing": "RECOVERED RECORD, not a fresh capture. Every number is read back from the PLAT50-FUSE pass's persisted inkflip JSON. No frame was re-captured and no comparison was invented here.",
+  "recoveredAt": "2026-10-23T08:06:15.284316+00:00",
+  "whyRecoveredNow": "The host reached 100% disk: 7.4 G free against 7.4 G of campaign capture directories. Raw .rgba/.png were stripped from every SUPERSEDED pass; PLAT50-FUSE (final arm) and FLOOR (instruments) were kept intact. The grades were extracted BEFORE anything was deleted, so the cleanup could not destroy the only copy -- which is precisely the failure the issue predicted.",
+  "subject": {
+    "codetracer": "2e9894e876 (agents, tree clean)",
+    "isonim-gpui": "058d5e13da (agents, tree clean)",
+    "codetracer-pm": "2bafdcb3d9 (latest, tree clean)",
+    "reprobuild": "05a9308f8a (agents, tree clean)",
+    "workspaceThisPass": "codetracer/build/plat37-parity-PLAT50-FUSE/ (gitignored; RETAINED, so a re-grade from pixels is still possible)"
+  },
+  "geometry": {
+    "CROP_PX": 56,
+    "cropProvenance": "DERIVED, not read from a log -- measure-after.sh takes CROP_PX as a required parameter and persists it nowhere (provenance gap 1 of the issue). Recovered as (GPUI capture height - Electron capture height): laptop 1856-1800 = 56, wide 2216-2160 = 56. The two window sizes agreeing is the control.",
+    "whyNotThe58OfEarlierPasses": "58 was what the lane needed while the GPUI window content area was one point too tall (PLAT37-ISSUE-U). 56 is both what it reads now and the sharp FLIP minimum the 2026-10-25 alignment sweep independently found.",
+    "laptopExtent": "2880x1800 (state, calltrace, editorWithMark)",
+    "wideExtent": "3840x2160 (shell, editor, eventLog)"
+  },
+  "instrument": {
+    "what": "inkflip, a thin CLI over codetracer-image-diff's flip(). The SAME binary on all three arms, so the arms are on one scale.",
+    "quantity": "frameFracOver0_10 -- the fraction of the frame FLIP judges perceptibly different at all. Identical to the WHOLE region's fracOver0_10 in every file checked.",
+    "scaleAgreementWithTheLane": "report.py's docstring hedges that this scale 'is not the campaign's lane-grade'. Measured, the two coincide to 8 decimals on twelve independent values. The hedge is wrong; it is the third provenance gap named in the issue and should be corrected at the source.",
+    "p50AndMaxErrorRemark": "p50 is 0.0 in every arm, as in every pass. maxError is constant within an alignment. Neither is a progress signal and neither is cited as one."
+  },
+  "armMeaning": {
+    "before": "Fusion opt-in absent. The baseline this A/B calibrates against.",
+    "armA": "Opt-in present but set to \"0\" -- provably inert. The control.",
+    "after": "Segmented inline-run fusion enabled (data-inline-text-runs=\"1\")."
+  },
+  "arms": {
+    "before": {
+      "perView": {
+        "state": {
+          "fracOver0_10": 0.11405844907407407,
+          "mean": 0.05615677312016487,
+          "p90": 0.14944718778133392,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "calltrace": {
+          "fracOver0_10": 0.1288971836419753,
+          "mean": 0.061839621514081955,
+          "p90": 0.2028302103281021,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "editorWithMark": {
+          "fracOver0_10": 0.11340451388888889,
+          "mean": 0.055635374039411545,
+          "p90": 0.14700037240982056,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "shell": {
+          "fracOver0_10": 0.0761428192515432,
+          "mean": 0.03991347551345825,
+          "p90": 0.021730266511440277,
+          "maxError": 0.9901668429374695,
+          "extent": "3840x2160"
+        },
+        "editor": {
+          "fracOver0_10": 0.09883367091049383,
+          "mean": 0.050504446029663086,
+          "p90": 0.09664914011955261,
+          "maxError": 0.9901668429374695,
+          "extent": "3840x2160"
+        },
+        "eventLog": {
+          "fracOver0_10": 0.15143446180555556,
+          "mean": 0.07791045308113098,
+          "p90": 0.2996118366718292,
+          "maxError": 0.9904035329818726,
+          "extent": "3840x2160"
+        }
+      },
+      "sixViewMeanFracOver0_10": 0.11379518
+    },
+    "armA": {
+      "perView": {
+        "state": {
+          "fracOver0_10": 0.10578125,
+          "mean": 0.050460223108530045,
+          "p90": 0.11834261566400528,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "calltrace": {
+          "fracOver0_10": 0.12030401234567902,
+          "mean": 0.05603141337633133,
+          "p90": 0.16796699166297913,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "editorWithMark": {
+          "fracOver0_10": 0.10512731481481481,
+          "mean": 0.04993882402777672,
+          "p90": 0.11554832011461258,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "shell": {
+          "fracOver0_10": 0.067568359375,
+          "mean": 0.03401356562972069,
+          "p90": 0.01693756878376007,
+          "maxError": 0.9901668429374695,
+          "extent": "3840x2160"
+        },
+        "editor": {
+          "fracOver0_10": 0.09025921103395061,
+          "mean": 0.04460453614592552,
+          "p90": 0.06540123373270035,
+          "maxError": 0.9901668429374695,
+          "extent": "3840x2160"
+        },
+        "eventLog": {
+          "fracOver0_10": 0.14259886188271606,
+          "mean": 0.07191663980484009,
+          "p90": 0.26615622639656067,
+          "maxError": 0.9904035329818726,
+          "extent": "3840x2160"
+        }
+      },
+      "sixViewMeanFracOver0_10": 0.10527317
+    },
+    "after": {
+      "perView": {
+        "state": {
+          "fracOver0_10": 0.10398996913580247,
+          "mean": 0.04842342063784599,
+          "p90": 0.11278603971004486,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "calltrace": {
+          "fracOver0_10": 0.1185036651234568,
+          "mean": 0.05401649326086044,
+          "p90": 0.15998303890228271,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "editorWithMark": {
+          "fracOver0_10": 0.10333603395061729,
+          "mean": 0.04790202155709267,
+          "p90": 0.11212477833032608,
+          "maxError": 0.9901668429374695,
+          "extent": "2880x1800"
+        },
+        "shell": {
+          "fracOver0_10": 0.06620490933641976,
+          "mean": 0.032470352947711945,
+          "p90": 0.016044344753026962,
+          "maxError": 0.9901668429374695,
+          "extent": "3840x2160"
+        },
+        "editor": {
+          "fracOver0_10": 0.08889576099537037,
+          "mean": 0.04306132346391678,
+          "p90": 0.060964684933423996,
+          "maxError": 0.9901668429374695,
+          "extent": "3840x2160"
+        },
+        "eventLog": {
+          "fracOver0_10": 0.14122974537037036,
+          "mean": 0.0703871101140976,
+          "p90": 0.25845634937286377,
+          "maxError": 0.9904035329818726,
+          "extent": "3840x2160"
+        }
+      },
+      "sixViewMeanFracOver0_10": 0.10369335
+    }
+  },
+  "headline": {
+    "sixViewMeanBefore": 0.11379518,
+    "sixViewMeanArmAcontrol": 0.10527317,
+    "sixViewMeanAfter": 0.10369335,
+    "deltaBeforeToAfter": 0.01010183,
+    "campaignStartSixView": 0.3725,
+    "readAsProgressNotVerdict": "0.3725 -> 0.10369 is the campaign arc on this proxy. fracOver0_10 is not a pass/fail gate and this lane does not gate."
+  },
+  "worstResidualRegionsInFinalArm": {
+    "note": "Top 10 by shareOfError within their own view. This is where the remaining difference lives, and it is the honest answer to 'what is left'.",
+    "rows": [
+      {
+        "shareOfError": 0.61165,
+        "view": "shell",
+        "region": "pane:calltrace",
+        "fracOver0_10": 0.2904
+      },
+      {
+        "shareOfError": 0.46122,
+        "view": "editor",
+        "region": "pane:calltrace",
+        "fracOver0_10": 0.2904
+      },
+      {
+        "shareOfError": 0.44398,
+        "view": "eventLog",
+        "region": "pane:editor",
+        "fracOver0_10": 0.26563
+      },
+      {
+        "shareOfError": 0.39361,
+        "view": "editorWithMark",
+        "region": "pane:calltrace",
+        "fracOver0_10": 0.29616
+      },
+      {
+        "shareOfError": 0.38937,
+        "view": "state",
+        "region": "pane:calltrace",
+        "fracOver0_10": 0.29615
+      },
+      {
+        "shareOfError": 0.34838,
+        "view": "calltrace",
+        "region": "pane:calltrace",
+        "fracOver0_10": 0.29615
+      },
+      {
+        "shareOfError": 0.28184,
+        "view": "eventLog",
+        "region": "pane:calltrace",
+        "fracOver0_10": 0.2904
+      },
+      {
+        "shareOfError": 0.23811,
+        "view": "state",
+        "region": "pane:state",
+        "fracOver0_10": 0.22159
+      },
+      {
+        "shareOfError": 0.22043,
+        "view": "editorWithMark",
+        "region": "pane:state",
+        "fracOver0_10": 0.20496
+      },
+      {
+        "shareOfError": 0.19638,
+        "view": "calltrace",
+        "region": "pane:state",
+        "fracOver0_10": 0.2101
+      }
+    ]
+  },
+  "bufferDigests": {
+    "why": "PLAT37-ISSUE-W's remedy: a content digest beside every figure, so a later disagreement can be classified as a different measurement or a different capture.",
+    "algorithm": "md5 of the decoded RGBA8 buffer actually handed to FLIP",
+    "views": {
+      "state": {
+        "gpui": "4f8bf8c398e689d060d6f2f18f3728f8",
+        "electron": "836998506131cfc1fefee031c3565f41"
+      },
+      "calltrace": {
+        "gpui": "05fdede82abf445a4968e9040688c7fe",
+        "electron": "6156817400dd1de88f5f10b692a49716"
+      },
+      "editorWithMark": {
+        "gpui": "6b9c84e51d43b48cf952fcdd9f5d3adb",
+        "electron": "c58daa8de3b0ea508e51c0527526452a"
+      },
+      "shell": {
+        "gpui": "0879363c0fc090f2d2c19e8eb9ba4a62",
+        "electron": "dfd1a659602ecdc20d77e074f5ec9e91"
+      },
+      "editor": {
+        "gpui": "c839c207720a426186ff7f1633fe3fb6",
+        "electron": "6fa2dcc335f1eaf0cf5fa79054858665"
+      },
+      "eventLog": {
+        "gpui": "4fc49e8363096b7d3c1f2e822d75643a",
+        "electron": "1f985a453d5842a84d857bdeb00874be"
+      }
+    }
+  },
+  "whatThisFileDoesNotEstablish": [
+    "That the grades were independently re-derived. They are read back from the pass's own persisted JSON. The final arm's .rgba buffers are retained so a re-grade IS possible, but it was not run here.",
+    "That visual parity is achieved. fracOver0_10 is a whole-frame proxy for perceptible difference. No screenshot in this campaign has been VISUALLY reviewed against its Electron counterpart by any agent -- a separate, still-open gap, and the reason two widget-level differences (an extra leading toolbar icon; status-bar divergence) went unnoticed by the metric for the whole campaign.",
+    "Anything about the Linux lane. Every figure here is aarch64-darwin."
+  ]
+}
