@@ -191,11 +191,10 @@ proc focusInWritableMonaco(): bool {.importjs: """
   })()""".}
   ## Whether the focus is inside a WRITABLE Monaco instance — the editor in
   ## Edit mode, or one nested in the read-only editor (a tracepoint editor).
-  ## Asked of the instances' DOM nodes, not of `hasTextFocus()`: the
-  ## tracepoint editor moves the focus to its IME textarea when it opens and
-  ## after each edit (`trace.focusTraceEditor`), where its instance does not
-  ## report the text focus, and the field's keys must stay its own there
-  ## too. `monaco.editor.getEditors` lists every instance
+  ## Asked of the instances' DOM nodes, not of `hasTextFocus()`, so that it
+  ## holds for every element inside a writable instance and not only for
+  ## its text input: wherever inside the field the focus is, the field's
+  ## keys stay its own. `monaco.editor.getEditors` lists every instance
   ## (https://microsoft.github.io/monaco-editor/typedoc/functions/editor.getEditors.html).
 
 proc focusedFieldFactsOf(active: JsObject): FocusedFieldFacts =

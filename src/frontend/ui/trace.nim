@@ -278,17 +278,18 @@ proc traceViewZoneHeight(self: TraceComponent): int =
   self.traceEditorHeight() + self.traceResultsPanelHeight() + TRACE_VIEWZONE_EXTRA_HEIGHT_PX
 
 proc focusTraceEditor(self: TraceComponent) =
+  ## Puts the caret in the tracepoint editor's input, so that typing writes
+  ## the tracepoint (Editor-Pane.md *Editor.TracepointCreation*). Monaco's
+  ## own `focus()` is the whole of it: it focuses the instance's input
+  ## element, as a click on the text does. Do not also focus a `textarea`
+  ## found under the editor's DOM node — the first one there is Monaco's
+  ## read-only IME helper, which takes no typing.
   if self.monacoEditor.isNil:
     return
 
   setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     if not self.monacoEditor.isNil:
       self.monacoEditor.focus()
-      let domNode = self.monacoEditor.toJs.getDomNode()
-      if not domNode.isNil:
-        let textarea = domNode.querySelector("textarea")
-        if not textarea.isNil:
-          textarea.focus()
   , 1, self)
 
 proc focusTraceEditorAfterLayout(self: TraceComponent, delay: int = 0) =

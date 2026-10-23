@@ -184,26 +184,25 @@ test.describe("PLAT-68: a field inside the editor element is a field", () => {
     await ctPage.keyboard.press("Enter");
     expect(await keyTrace(ctPage)).toEqual(["editor.toggle-tracepoint"]);
     await expect.poll(() => activeIsInside(ctPage, ".trace"), { timeout: 20_000 }).toBe(true);
-    // The caret in the tracepoint editor's text, as a click there puts it:
-    // the editor opens with the focus on Monaco's read-only IME textarea,
-    // which takes no typing whatever the router does.
-    await ctPage.evaluate(() => {
+    // Editor-Pane.md *Editor.TracepointCreation*: the tracepoint editor
+    // opens so that the user can write the tracepoint, so the caret is in
+    // its input as soon as it opens — no click first. Monaco reports that as
+    // the instance's text focus; any other focused element inside the
+    // instance (its read-only IME helper, say) takes no typing.
+    await expect.poll(() => ctPage.evaluate(() => {
       const d = (globalThis as any).data;
       const host = document.activeElement?.closest(".trace");
       const ed = (d.ui.traceMonacoEditors ?? []).find((e: any) => host?.contains(e.getDomNode()));
-      // Kept for `value` below: after an edit the tracepoint editor moves
-      // the focus back to its IME textarea, where the instance no longer
-      // reports the text focus.
       (globalThis as any).__plat68TracepointEditor = ed;
-      ed?.focus();
-    });
-    await expect.poll(() => ctPage.evaluate(() => {
-      const d = (globalThis as any).data;
-      return (d.ui.traceMonacoEditors ?? []).some((e: any) => e.hasTextFocus());
-    })).toBe(true);
+      return !!ed && !!ed.hasTextFocus();
+    }), { timeout: 20_000 }).toBe(true);
     const value = () => ctPage.evaluate(() => {
       const ed = (globalThis as any).__plat68TracepointEditor;
       return ed ? String(ed.getValue()) : null;
+    });
+    const hasTextFocus = () => ctPage.evaluate(() => {
+      const ed = (globalThis as any).__plat68TracepointEditor;
+      return !!ed && !!ed.hasTextFocus();
     });
     await clearTrace(ctPage);
     await ctPage.keyboard.type("fn", { delay: 20 });
@@ -215,5 +214,13 @@ test.describe("PLAT-68: a field inside the editor element is a field", () => {
     // tracepoint editor still open and focused.
     await expect.poll(value).toBe("fn\n");
     expect(await activeIsInside(ctPage, ".trace")).toBe(true);
+    // The caret stays in the input across an edit and the relayout it
+    // triggers (the zone grows by a line, and the editor restores its focus
+    // afterwards): a further letter goes on writing the expression.
+    await ctPage.waitForTimeout(500);
+    expect(await hasTextFocus()).toBe(true);
+    await ctPage.keyboard.type("x", { delay: 20 });
+    await expect.poll(value).toBe("fn\nx");
+    expect(await hasTextFocus()).toBe(true);
   });
 });

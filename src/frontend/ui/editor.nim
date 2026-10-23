@@ -4557,7 +4557,9 @@ method onEnter*(self: EditorViewComponent) {.async.} =
     self.traces[line].monacoEditor.insertTextAtCurrentPosition("\n")
 
     discard setTimeout(proc() =
-      self.traces[line].monacoEditor.toJs.getDomNode().querySelector("textarea").focus(),
+      # Monaco's `focus()` puts the caret in the instance's input; the
+      # first `textarea` under its DOM node is a read-only IME helper.
+      self.traces[line].monacoEditor.focus(),
       1
     )
     data.ui.activeFocus = self.traces[line]
