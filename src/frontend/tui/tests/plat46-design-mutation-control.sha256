@@ -2,7 +2,7 @@
 # the subjects AND the suites the arms are graded by (§16c).
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
-ac1765ef010c344e12e6f44cc271de52488c61e774b3372fa65d8e7fd7329b21  src/frontend/tui/app/theme/roles.nim
+d0153ffc72216bd99242628a00e2e6c52f15c494a7710c760a986f2b9c8d1281  src/frontend/tui/app/theme/roles.nim
 e616143d22849befeba60171bd7fad5b867a6b9abf98f18dedfefd6fe83c2111  src/frontend/tui/app/theme/palette.nim
 6edc28cf1a7b3e433c5f6a229a5a86f275fbb555bd8e42a5813a11b103bde4ce  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
@@ -15,5 +15,5 @@ e15f41205e78d8ffd2fb926fac2c1bc17e494eadc2f5fea4e82c2d6c4c0fdaf8  scripts/tokens
 b08db66ee580bbfe31df84a5ed57771456d6ac79c5a108a09e34286d4ce7f1e8  src/frontend/tui/app/tests/test_capability_resolution.nim
 43f8243f4031dbc6c1b2613377a33803c03c2729e59b1b0700bbdca64bdfa366  src/frontend/tui/tests/test_plat46_terminal_probe.nim
 0ddff5a4623fef279d71bd7bb37a2f40bbf4d63eba3907078bfec1e00634d68a  src/frontend/tui/tests/real_terminal/test_plat46_design_tokens.nim
-09b62f366cca1170b7f9748e6b2ddd1ae46dd2be621438a19c7d94aca0377d05  ci/test/tui-design-tokens-boundary.sh
-037f8d69d9864c8c0730b1784e91fc460ae4348b2f000f368a9fea17fb0881a6  ci/test/design-tokens-fresh.sh
+2b9b85d0fb2260e69e45713365807b1bf1b004aca5449043889e903a5519585c  ci/test/tui-design-tokens-boundary.sh
+a0a6a6cf6b97582c12f2d32414824a2986cfcba5037acbbef4a096a919bd8104  ci/test/design-tokens-fresh.sh
