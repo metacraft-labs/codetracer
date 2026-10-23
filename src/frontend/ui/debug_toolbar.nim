@@ -6,9 +6,10 @@
 ## what only this renderer can do:
 ##
 ## - `desktopDebugCommands`: the actions' desktop routes — a step through the
-##   DAP mediator with the operation status the status bar shows, the replay
-##   server's restart, leaving the session, the test run in a new window —
-##   handed to the session before it builds the VM (D6);
+##   DAP mediator of the tab on screen (`toolbarApiFor`) with the operation
+##   status the status bar shows, the replay server's restart, leaving the
+##   session, the test run in a new window — handed to the session before it
+##   builds the VM (D6);
 ## - `bindDebugToolbar` / `ensureDebugToolbar`: the topbar rendered into the
 ##   menu shell's host (`renderTopbar`), in a reactive root this module
 ##   disposes when the host's session changes;
@@ -104,12 +105,68 @@ proc dapStep*(api: MediatorWithSubscribers; action: string) =
     api.emit(InternalNewOperation,
              NewOperation(name: cstring(action), stableBusy: true))
 
-proc desktopDebugCommands*(data: Data; store: ReplayDataStore;
-                           api: MediatorWithSubscribers): DebugCommands =
-  ## The desktop's routes, for `SessionViewModel.debugCommands`.
+var toolbarApis: seq[tuple[viewsApi, api: MediatorWithSubscribers]]
+  ## The toolbar's mediator onto each tab's views mediator, made the first
+  ## time the toolbar dispatches into that tab and reused after it.
+
+proc toolbarApiFor*(data: Data): MediatorWithSubscribers =
+  ## The mediator the toolbar's replay actions are emitted on: one onto the
+  ## views mediator of the tab ON SCREEN, looked up when the action is
+  ## dispatched; nil while there is no tab.
+  ##
+  ## LOOKED UP PER DISPATCH, NEVER CAPTURED. The window has one toolbar and
+  ## every replay tab has its own `viewsApi` and `DapApi`
+  ## (`event_helpers.attachSessionApis`), so a mediator captured when the
+  ## toolbar's routes are built belongs to whichever tab was on screen then:
+  ## a step clicked in a later tab moved the first tab's replay, out of
+  ## sight, while the step's chord (`renderer.step`, which sends on
+  ## `data.dapApi`) moved the tab on screen. Before the toolbar was a
+  ## ViewModel, `switchSession` re-pointed it at the target tab's own
+  ## mediator on every switch; reading the active tab here keeps that
+  ## contract with no re-pointing step to forget.
+  ##
+  ## What this guarantees is the TAB: the request goes to the views mediator
+  ## of the tab on screen and never to another tab's. That mediator hands it
+  ## to its tab's replay through the handlers `middleware.setupMiddlewareApis`
+  ## subscribes on it, which today the window installs for its first tab
+  ## only, so in a later tab the request stops at that tab's mediator rather
+  ## than moving a replay the user cannot see.
+  if data.isNil or data.activeSessionIndex < 0 or
+      data.activeSessionIndex >= data.sessions.len:
+    return nil
+  let session = data.activeSession
+  if session.isNil or session.viewsApi.isNil:
+    return nil
+  for entry in toolbarApis:
+    if entry.viewsApi == session.viewsApi:
+      return entry.api
+  # A miss is a tab the toolbar has not dispatched into yet: drop the entries
+  # of tabs closed since, so a closed tab's mediators are not kept alive.
+  var live: seq[tuple[viewsApi, api: MediatorWithSubscribers]]
+  for entry in toolbarApis:
+    for tab in data.sessions:
+      if not tab.isNil and tab.viewsApi == entry.viewsApi:
+        live.add(entry)
+        break
+  toolbarApis = live
+  result = setupLocalViewToMiddlewareApi(cstring"debug toolbar api",
+                                         session.viewsApi)
+  toolbarApis.add((session.viewsApi, result))
+
+proc desktopDebugCommands*(data: Data; store: ReplayDataStore): DebugCommands =
+  ## The desktop's routes, for `SessionViewModel.debugCommands`. The ones that
+  ## reach a replay go to the tab on screen (`toolbarApiFor`).
   result = defaultDebugCommands(store)
-  result.step = proc(actionId: string) = dapStep(api, actionId)
+  result.step = proc(actionId: string) =
+    # No tab, no step: `dapStep` reads the active tab's status first.
+    let api = toolbarApiFor(data)
+    if api.isNil:
+      return
+    dapStep(api, actionId)
   result.runToEntry = proc() =
+    let api = toolbarApiFor(data)
+    if api.isNil:
+      return
     api.emit(CtRunToEntry, EmptyArg())
     api.emit(InternalNewOperation,
              NewOperation(name: "run to entry", stableBusy: true))
@@ -123,6 +180,9 @@ proc desktopDebugCommands*(data: Data; store: ReplayDataStore;
       newWindow: true, path: data.services.debugger.location.path,
       testName: ""))
   result.historyJump = proc(entry: JumpEntry) =
+    let api = toolbarApiFor(data)
+    if api.isNil:
+      return
     api.historyJump(types.Location(
       path: cstring(entry.location.file), line: entry.location.line,
       rrTicks: int(entry.rrTicks),

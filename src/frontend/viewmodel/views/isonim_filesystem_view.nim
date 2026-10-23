@@ -30,7 +30,8 @@
 ##           span.filesystem-entry-label                 (basename)
 ##           div.filesystem-entry-children               (recursive)
 ##       div.filesystem-empty-overlay[.hidden]
-##           text "No filesystem loaded yet."
+##           text "No filesystem loaded yet.", or "No project folder is
+##           open." for a session with no project folder (New File)
 ##       div.filesystem-loading-overlay[.hidden]   (while lsLoading)
 ##           text "Loading..."
 ##       div.filesystem-error-overlay[.hidden]     (while lsError)
@@ -60,6 +61,7 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/filesystem_vm
+import ../viewmodels/no_project_folder
 
 # The generic view expands the DSL where it is instantiated.
 export signals, computation, components
@@ -80,6 +82,20 @@ const FilesystemEmptyStateText* = "No filesystem loaded yet."
   ## builder share one source of truth.  Name-spaced (vs. the
   ## ``EmptyStateText`` in trace_log_view) so importing both modules
   ## from the test suite does not collide.
+
+const FilesystemNoProjectFolderText* = NoProjectFolderText
+  ## The empty state of a session with NO project folder (Welcome screen →
+  ## New File; ``FilesystemVM.showNoProjectFolder``).  `Welcome-Screen.md`
+  ## §"New file, and what it creates" calls it "an empty project": no tree,
+  ## no loading indicator, and this sentence — the one the Test Results and
+  ## Constraints panes show for the same session — where the generic empty
+  ## state would say "No filesystem loaded yet." and so promise a tree that
+  ## is not coming.
+
+proc emptyStateText*(vm: FilesystemVM): string =
+  ## The sentence the empty-state overlay shows for ``vm``'s state.
+  if vm.noProjectFolder.val: FilesystemNoProjectFolderText
+  else: FilesystemEmptyStateText
 
 const FilesystemLoadFailedText* = "The file tree could not be loaded: "
   ## Lead-in of the error overlay shown when a root load failed
@@ -338,6 +354,10 @@ proc renderFilesystemPanel*[R, N](r: R; vm: FilesystemVM): N =
       r.appendChild(treeContainer, renderEntry[R, N](r, vm, root, 1, true))
 
     # -- Empty-state overlay --
+    # Its sentence depends on WHY the tree is empty (no project folder, or a
+    # load that found nothing), so it is rewritten on every run.
+    r.clearChildren(emptyContainer)
+    r.appendChild(emptyContainer, r.createTextNode(emptyStateText(vm)))
     if showEmpty:
       r.setAttribute(emptyContainer, "class", "filesystem-empty-overlay")
     else:

@@ -210,14 +210,86 @@ async function settledNewFilePanes(page: Page, index: number): Promise<Record<st
  * so it must show exactly this: not blank (this issue), and not the replay
  * tab's project either.
  *
- * Measured 2026-10-21 on m1: the VCS pane of BOTH shows the repository of
- * the Electron process's directory, because `ui/git_cli.gitWorkingDirectory`
- * returns "" for a session with no folder and git then runs in the process
- * cwd. That is a separate question about the no-folder case itself (it
- * holds without any replay open), not this one, so the baseline is the
- * product's no-replay behaviour, whatever it is, rather than a literal.
+ * What that behaviour must BE is the no-folder case itself, and is asserted
+ * separately by `expectFolderlessPanes` in both tests: measured 2026-10-22 on
+ * m1 at codetracer `c716405c0`, the VCS pane of both listed 50 commits of the
+ * Electron process's directory (git ran with the empty working directory a
+ * folderless session hands it) and Files showed "No filesystem loaded yet."
+ * (codetracer-pm issue 2026-10-21-new-file-session-shows-a-loading-files-pane-…).
  */
 let noReplayNewFileBaseline: Record<string, string> | null = null;
+
+/**
+ * What a folderless session's Files and VCS panes SHOW, read from the overlay
+ * classes rather than from text: each Files host always carries every overlay
+ * (empty, loading, error) and only hides the ones that do not apply, so its
+ * `textContent` reads "No filesystem loaded yet. Loading..." whichever state
+ * it is in, and cannot tell "loading" from "empty".
+ */
+interface FolderlessReading {
+  /** Files hosts whose loading overlay is shown (not `.hidden`). */
+  filesLoadingShown: number;
+  /** Texts of the Files empty-state overlays that are shown. */
+  filesEmptyShown: string[];
+  /** Tree rows drawn in Files. */
+  filesEntries: number;
+  /** The VCS host's no-repository message ("" when absent). */
+  vcsNoRepoText: string;
+  /** Commit rows drawn in VCS. */
+  vcsCommitRows: number;
+}
+
+async function readFolderlessPanes(page: Page, index: number): Promise<FolderlessReading> {
+  return page.evaluate((index) => {
+    const container = document.getElementById(`session-container-${index}`);
+    if (!container) throw new Error(`session-container-${index} is missing`);
+    const files = Array.from(container.querySelectorAll('[id="filesystemComponent"]'));
+    const shown = (sel: string) =>
+      files.flatMap((h) => Array.from(h.querySelectorAll(sel))).filter((el) => !el.classList.contains("hidden"));
+    const vcs = container.querySelector('[id="vCSComponent-0"]');
+    return {
+      filesLoadingShown: shown(".filesystem-loading-overlay").length,
+      filesEmptyShown: shown(".filesystem-empty-overlay").map((el) => (el.textContent ?? "").trim()),
+      filesEntries: files.reduce((n, h) => n + h.querySelectorAll(".filesystem-entry").length, 0),
+      vcsNoRepoText: (vcs?.querySelector(".vcs-no-repo")?.textContent ?? "").replace(/\s+/g, " ").trim(),
+      vcsCommitRows: vcs ? vcs.querySelectorAll(".vcs-commit-entry").length : 0,
+    };
+  }, index);
+}
+
+/**
+ * codetracer-pm issue 2026-10-21 "A New File session's Files pane never
+ * leaves Loading…, and its VCS pane shows the launch directory's
+ * repository", against `Welcome-Screen.md` §"New file, and what it creates":
+ * the session has no project folder, so Files shows an EMPTY PROJECT (no
+ * tree, not loading) and VCS shows the same "No project folder is open."
+ * absence as Test Results and Constraints — never the history of the
+ * repository the app was launched from.
+ */
+async function expectFolderlessPanes(page: Page, index: number, where: string): Promise<void> {
+  let reading = await readFolderlessPanes(page, index);
+  // Polled: the panes settle asynchronously after New File.
+  await retry(
+    async () => {
+      reading = await readFolderlessPanes(page, index);
+      return (
+        reading.filesLoadingShown === 0 &&
+        reading.filesEmptyShown.length > 0 &&
+        /no project folder is open/i.test(reading.vcsNoRepoText)
+      );
+    },
+    { maxAttempts: 30, delayMs: 500 },
+  ).catch(() => undefined);
+  console.log(`# ${where} folderless panes: ${JSON.stringify(reading)}`);
+  expect(reading.filesLoadingShown, `${where}: Files must not stay "Loading..."`).toBe(0);
+  expect(reading.filesEntries, `${where}: Files must draw no tree`).toBe(0);
+  expect(reading.filesEmptyShown.length, `${where}: Files must show its empty project`).toBeGreaterThan(0);
+  for (const text of reading.filesEmptyShown) {
+    expect(text, `${where}: the Files empty project`).toMatch(/no project folder is open/i);
+  }
+  expect(reading.vcsNoRepoText, `${where}: VCS with no project folder`).toMatch(/no project folder is open/i);
+  expect(reading.vcsCommitRows, `${where}: VCS must list no commits`).toBe(0);
+}
 
 async function openNewFileFromWelcome(page: Page): Promise<void> {
   const newFileOption = page.locator(".start-option.new-file");
@@ -240,6 +312,7 @@ test.describe.serial("a New File tab beside a replay is the same as New File alo
       for (const label of NEW_FILE_PANES) {
         expect(noReplayNewFileBaseline[label], `${label} in the no-replay New File session`).not.toBe("");
       }
+      await expectFolderlessPanes(ctPage, index, "New File with no replay open");
     });
   });
 
@@ -274,6 +347,7 @@ test.describe.serial("a New File tab beside a replay is the same as New File alo
       expect(newFileTab["testResultsComponent-0"]).toMatch(/no project folder is open/i);
       expect(newFileTab["constraintsComponent-0"]).toMatch(/no project folder is open/i);
       expect(newFileTab["filesystemComponent"]).not.toMatch(/py_console_logs|main\.py/);
+      await expectFolderlessPanes(ctPage, 1, "the New File tab beside a replay");
     });
   });
 });

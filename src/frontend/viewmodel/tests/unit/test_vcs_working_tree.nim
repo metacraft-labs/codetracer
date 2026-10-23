@@ -254,6 +254,67 @@ suite "PLAT-47 deliverable 4: one working tree for every VCS pane":
       dispose()
     removeDir(dir)
 
+  test "a session with no project folder runs no git and says no folder is open":
+    # codetracer-pm issue 2026-10-21 "A New File session's Files pane never
+    # leaves Loading…, and its VCS pane shows the launch directory's
+    # repository". A New File session has no project folder, so the
+    # directory the panel is handed is EMPTY. Before the fix that empty
+    # directory reached git as "the platform's default" — the process's own
+    # working directory — and the panel drew whatever repository the app
+    # happened to be launched from. The process cwd is put inside a real
+    # repository here so the unfixed code shows exactly that defect (one
+    # commit, three changed files) instead of an unrelated "not a repo".
+    #
+    # The facade is the real desktop one, wrapped only to COUNT the git
+    # queries the panel makes: the expectation is that it makes none, which
+    # no reading of the panel's state alone could show.
+    let repo = fixtureRepo()
+    let previousDir = getCurrentDir()
+    setCurrentDir(repo)
+    try:
+      createRoot proc(dispose: proc()) =
+        let facade = newDesktopNativePlatform().vcs
+        var gitQueries = 0
+        let realIsRepository = facade.isRepository
+        let realStatus = facade.status
+        let realLog = facade.log
+        facade.isRepository = proc(path: string): PlatformFuture[PlatformOutcome[bool]] =
+          inc gitQueries
+          realIsRepository(path)
+        facade.status = proc(repository: string): PlatformFuture[PlatformOutcome[VcsStatus]] =
+          inc gitQueries
+          realStatus(repository)
+        facade.log = proc(repository: string; maxCount: int;
+                          path: string): PlatformFuture[PlatformOutcome[seq[VcsCommit]]] =
+          inc gitQueries
+          realLog(repository, maxCount, path)
+        let vm = createVCSVM()
+        vm.refreshFromFacade(facade, "")
+        checkpoint("isGitRepo=" & $vm.isGitRepo.val & " error=" &
+                   vm.errorMessage.val & " commits=" & $vm.commits.val.len &
+                   " gitQueries=" & $gitQueries)
+        ck gitQueries == 0
+        ck not vm.isGitRepo.val
+        ck vm.errorMessage.val == "No project folder is open."
+        ck vm.commits.val.len == 0
+        ck vm.workingTreeFiles.val.len == 0
+        ck vm.branches.val.len == 0
+        # And what the desktop's view draws from it: the absence, and not
+        # one commit row of the launch directory's history.
+        let root = renderVCSPanel[MockRenderer, MockNode](MockRenderer(), vm)
+        var noRepo, commitRows: seq[MockNode] = @[]
+        root.allByClass(VCSNoRepoClass, noRepo)
+        root.allByClass("vcs-commit-entry", commitRows)
+        ck noRepo.len == 1
+        ck noRepo.len > 0 and
+           textOf(noRepo[0]).contains("No project folder is open.")
+        ck commitRows.len == 0
+        ck not textOf(root).contains("Initial fixture commit")
+        dispose()
+    finally:
+      setCurrentDir(previousDir)
+      removeDir(repo.parentDir)
+
   test "the reader handles every kind of line git emits":
     let s = parsePorcelainV2(
       "# branch.oid 0123\n" &
