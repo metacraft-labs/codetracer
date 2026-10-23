@@ -708,9 +708,17 @@ proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
   when defined(ctRenderer):
     data.registerComponent(result, Content.UnifiedDiff)
 
+proc fileClickOpensFullFile(data: Data): bool =
+  ## The configuration's `vcs.fileClickOpensFullFile` (VCS-Panel.md,
+  ## "Configuration"); false when the config file has no `vcs:` entry.
+  not data.config.isNil and not data.config.vcs.isNil and
+    data.config.vcs.fileClickOpensFullFile
+
 proc makeVCSComponent*(data: Data, id: int): VCSComponent =
   result = VCSComponent(
     id: id,
+    # The View mode toggle starts where the configuration puts it.
+    openFileMode: data.fileClickOpensFullFile(),
     currentBranch: cstring"",
     branches: @[],
     commits: @[],

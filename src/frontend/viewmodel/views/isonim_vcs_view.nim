@@ -72,14 +72,18 @@ type
     ## ``shift`` = Shift held → select range from last-clicked to ``index``.
     ## Neither → exclusive select (clears others) or collapse if already sole.
     onToggleCommitExpand*: proc(index: int; ctrl: bool; shift: bool)
+    ## A plain click on commit ``index``: open its whole-commit unified diff
+    ## (``target`` is ``commit:<hash>``) and expand it in the tree
+    ## (VCS-Panel.md, "Commit History", the owner's 2026-10-23 decision).
+    onOpenCommit*: proc(index: int; target: string)
     ## Called when the scroll sentinel becomes visible so the next page of
     ## commits can be appended.
     onLoadMoreCommits*: proc()
     ## Row click.  ``path`` is the repository-relative file path; ``target``
-    ## is the same diff target the row's "View Diff" button dispatches
-    ## (``file:<path>`` or ``commit:<hash>:<path>``), so the host can honour
-    ## the unified-diff view mode without having to re-derive which commit the
-    ## row belonged to.  ``status`` is the row's diff status letter: the open
+    ## is what the click opens in unified-diff mode: ``file:<path>`` for a
+    ## working-tree or review row, and the commit's whole-commit document,
+    ## ``commit:<hash>``, for a row under an expanded commit — the host
+    ## scrolls that document to ``path`` (VCS-Panel.md, "Changed Files").  ``status`` is the row's diff status letter: the open
     ## decision needs it (a deleted file has no source to open — see
     ## ``VCSVM.openActionFor``), and only the row knows it, since row indices
     ## mean different things in the changed-files list and in an expanded
@@ -211,6 +215,16 @@ proc invokeToggleCommitExpand(vm: VCSVM; callbacks: VCSCallbacks;
     else:
       vm.selectedCommitIndices.val = @[index]
 
+proc invokeOpenCommit(vm: VCSVM; callbacks: VCSCallbacks; index: int;
+                      target: string) =
+  ## Open commit ``index``'s whole-commit diff. With no host callback (the
+  ## headless renderers) the commit is expanded, which is the half of the
+  ## click the ViewModel owns.
+  if callbacks.onOpenCommit != nil:
+    callbacks.onOpenCommit(index, target)
+  elif index notin vm.selectedCommitIndices.val:
+    vm.selectedCommitIndices.val = @[index]
+
 proc invokeSelectFile(callbacks: VCSCallbacks; index: int;
                       path, target, status: string) =
   if callbacks.onSelectFile != nil:
@@ -319,10 +333,6 @@ proc attachFileDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
                                target: string) =
   r.attachDiffClick(btn, callbacks, target)
 
-proc attachCommitDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
-                                 target: string) =
-  r.attachDiffClick(btn, callbacks, target)
-
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
   let branchName = branch
@@ -345,21 +355,48 @@ proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
 # through to the toggle callback, enabling ctrl+click (toggle one) and
 # shift+click (select range) multi-select.
 
-proc attachCommitClick[R, N](r: R; header: N;
-                             vm: VCSVM; callbacks: VCSCallbacks; index: int) =
-  ## Expand or collapse commit `index` on a click on its header. A browser
-  ## click carries the modifier keys of a multi-select; elsewhere it has none.
+proc attachCommitClick[R, N](r: R; header: N; vm: VCSVM;
+                             callbacks: VCSCallbacks; index: int;
+                             target: string) =
+  ## A plain click on commit `index`'s header opens its whole-commit diff
+  ## (`target`) and expands it; Ctrl/Meta- and Shift-clicks only change which
+  ## commits are expanded, which needs the browser's modifier keys.
   # Bound where instantiated: on JS this module also sees WebRenderer's.
   mixin addEventListener
   template plainClick() =
     r.addEventListener(header, "click", proc() =
-      vm.invokeToggleCommitExpand(callbacks, index, false, false))
+      vm.invokeOpenCommit(callbacks, index, target))
   when defined(js):
     when N is isonim_dom.Element:
       isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
         proc(ev: isonim_dom.Event) =
-          vm.invokeToggleCommitExpand(callbacks, index,
-                                      ev.ctrlOrMetaKey(), ev.shiftKey()))
+          let ctrl = ev.ctrlOrMetaKey()
+          let shift = ev.shiftKey()
+          if ctrl or shift:
+            vm.invokeToggleCommitExpand(callbacks, index, ctrl, shift)
+          else:
+            vm.invokeOpenCommit(callbacks, index, target))
+    else:
+      plainClick()
+  else:
+    plainClick()
+
+proc attachCommitToggle[R, N](r: R; toggle: N; vm: VCSVM;
+                              callbacks: VCSCallbacks; index: int) =
+  ## The commit's expand control: expand or collapse it in the tree, and
+  ## nothing else — the click does not reach the header, which would open the
+  ## commit's diff.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  template plainClick() =
+    r.addEventListener(toggle, "click", proc() =
+      vm.invokeToggleCommitExpand(callbacks, index, true, false))
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(toggle), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          ev.stopPropagation()
+          vm.invokeToggleCommitExpand(callbacks, index, true, false))
     else:
       plainClick()
   else:
@@ -761,13 +798,18 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
   let rowIndex = index
   let rowPath = file.path
   let rowStatus = file.status
+  # The row opens the commit's whole-commit document, scrolled to this file;
+  # its "View Diff" button opens this file's diff on its own (VCS-Panel.md,
+  # "Changed Files").
+  let documentTarget = "commit:" & commitHash
   let rowTarget = "commit:" & commitHash & ":" & rowPath
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
     tdiv(ref = rowNode, class = "vcs-accordion-file",
          onclick = proc() =
-           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus))
+           callbacks.invokeSelectFile(rowIndex, rowPath, documentTarget,
+                                      rowStatus))
 
   r.appendRenderedChild(rowNode, renderLaneSpacer(r, continuationCells))
 
@@ -819,27 +861,32 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
   let header = ui(r):
     tdiv(ref = headerNode, class = commitHeaderClass(isSelected))
 
-  r.attachCommitClick(headerNode, vm, callbacks, index)
+  let commitTarget = "commit:" & commit.hash
+  r.attachCommitClick(headerNode, vm, callbacks, index, commitTarget)
 
   # Graph lanes column — must be appended outside the ui block (see note above).
   r.appendRenderedChild(headerNode,
     renderGraphLanes(r, commit.graphCells, commit.dotLane,
                      commit.connectors, index == 0))
 
-  # Commit message, relative timestamp, and whole-commit unified diff button.
-  var commitDiffBtn: typeof(r.createElement("span"))
-  let commitTarget = "commit:" & commit.hash
+  # The expand control, the commit message and the relative timestamp. The
+  # header itself opens the commit's diff (`attachCommitClick`), so there is
+  # no separate button for it.
+  var toggleNode: typeof(r.createElement("span"))
   let body = ui(r):
     tdiv(class = "vcs-commit-body"):
+      span(ref = toggleNode,
+           class = (if isSelected: "vcs-commit-toggle vcs-commit-toggle-open"
+                    else: "vcs-commit-toggle"),
+           title = (if isSelected: "Collapse" else: "Expand"),
+           `aria-expanded` = (if isSelected: "true" else: "false")):
+        text (if isSelected: "▾" else: "▸")
       span(class = "vcs-commit-msg"):
         text commit.message
       span(class = "vcs-commit-time-col"):
         text abbreviateRelTime(commit.relativeTime)
-      span(ref = commitDiffBtn, class = "vcs-commit-diff-btn"):
-        tdiv(class = "custom-tooltip"):
-          text "View Commit Diff"
   r.appendRenderedChild(headerNode, body)
-  r.attachCommitDiffClick(commitDiffBtn, callbacks, commitTarget)
+  r.attachCommitToggle(toggleNode, vm, callbacks, index)
 
   r.attachCommitTooltip(headerNode, commit.hash, commit.fullHash,
                         commit.author, commit.date)

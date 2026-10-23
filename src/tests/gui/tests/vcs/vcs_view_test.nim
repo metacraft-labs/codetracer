@@ -20,6 +20,7 @@ import isonim/core/[signals, computation, owner]
 import isonim/testing/mock_dom
 import viewmodels/vcs_vm
 import views/isonim_vcs_view
+import views/isonim_unified_diff_view
 
 proc findByClass(node: MockNode; className: string): MockNode =
   if node.kind == mnkElement and
@@ -460,28 +461,34 @@ proc namesExactlyOneFile(target: string): bool =
 
 suite "VCS panel — diff targets name one file (#753)":
 
-  test "test_vcs_panel_mints_no_multi_file_diff_target":
-    ## The regression guard for #753, at the route rather than at the renderer.
+  test "test_vcs_panel_commit_routes":
+    ## The routes of the owner's 2026-10-23 decision on #753 (VCS-Panel.md,
+    ## "Commit History", "Changed Files"): a commit row's header opens the
+    ## commit's whole-commit document, `commit:<hash>`; its expand control only
+    ## expands; a file under it targets that document with the file's path, so
+    ## the host scrolls to it; and the per-file "View Diff" buttons still open
+    ## one file each.
     ##
-    ## `Unified-Diff-Design.milestones.org` recorded the multi-file document as
-    ## "a defensive fallback rather than a reachable surface", on the grounds
-    ## that "Every diff tab the UI can open names exactly one file
-    ## (`VCSVM.openActionFor` builds `file:<path>` or `commit:<hash>:<path>`)".
-    ## `openActionFor` governs only the *changed-file row* route; the commit
-    ## row carried its own button straight to `invokeOpenFileDiff`, bypassing
-    ## it with the pathless `commit:<hash>`.  So the claim was about one route
-    ## and was read as being about all of them.
-    ##
-    ## This asserts the claim itself instead of the reasoning behind it: fire
-    ## *every* diff affordance the rendered panel offers and require each
-    ## resulting target to name a file.  A new route that forgets the rule
-    ## fails here without anyone remembering to add a case for it.
+    ## Until that decision this case asserted the opposite — that no route
+    ## minted the pathless `commit:<hash>`. The per-file half of it is kept:
+    ## every `-diff-btn` affordance the panel renders is fired, and each must
+    ## name exactly one file, so a new button that opens a whole commit has to
+    ## be the header's job, not a button's.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
       var targets: seq[string] = @[]
+      var opened: seq[(int, string)] = @[]
+      var toggled: seq[(int, bool, bool)] = @[]
+      var selected: seq[(string, string)] = @[]
       let callbacks = VCSCallbacks(
         onOpenFileDiff: proc(target: string) = targets.add(target),
+        onOpenCommit: proc(index: int; target: string) =
+          opened.add((index, target)),
+        onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
+          toggled.add((index, ctrl, shift)),
+        onSelectFile: proc(index: int; path, target, status: string) =
+          selected.add((path, target)),
       )
       let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
@@ -492,8 +499,6 @@ suite "VCS panel — diff targets name one file (#753)":
         VCSCommitRow(hash: "abc123", message: "touch several files",
                      relativeTime: "1h"),
       ], selectedIndices = @[0])
-      # A commit touching more than one file — the shape that produced the
-      # reporter's screen, where seven headers stacked above one document.
       vm.setCommitFiles(0, @[
         VCSFileRow(status: "M", path: "src/main.nim", baseName: "main.nim",
                    additions: 2, deletions: 1),
@@ -501,22 +506,136 @@ suite "VCS panel — diff targets name one file (#753)":
                    additions: 19, deletions: 0),
       ])
 
-      # Every affordance in the panel whose job is to open a diff.  Matching on
-      # the shared `-diff-btn` suffix keeps this honest: a future button is
-      # swept up by it rather than silently skipped.
+      # The per-file buttons: each names one file.
       var buttons: seq[MockNode] = @[]
       findAllByClass(panel, "diff-btn", buttons)
-      check buttons.len > 0
+      check buttons.len == 2
       for button in buttons:
         button.fireEvent("click")
-
-      check targets.len > 0
+      check targets == @["commit:abc123:src/main.nim",
+                         "commit:abc123:scripts/build.sh"]
       for target in targets:
         checkpoint("diff target: " & target)
         check namesExactlyOneFile(target)
-
-      # And specifically: the commit row no longer offers a whole-commit diff.
+      # The hover button that opened the whole commit is gone: the header
+      # does it now.
       check findByClass(panel, "vcs-commit-diff-btn") == nil
-      check "commit:abc123" notin targets
 
+      # The header opens the whole commit.
+      findByClass(panel, "vcs-commit-header-selected").fireEvent("click")
+      check opened == @[(0, "commit:abc123")]
+      check toggled.len == 0
+
+      # The expand control only toggles the expansion, as a Ctrl-click would.
+      findByClass(panel, "vcs-commit-toggle").fireEvent("click")
+      check toggled == @[(0, true, false)]
+      check opened.len == 1
+
+      # A file under the commit targets the commit's document, with its path.
+      var candidates: seq[MockNode] = @[]
+      findAllByClass(panel, "vcs-accordion-file", candidates)
+      # This file's lookup matches class substrings; keep the rows themselves.
+      var rows: seq[MockNode] = @[]
+      for node in candidates:
+        if node.attributes.getOrDefault("class") == "vcs-accordion-file":
+          rows.add(node)
+      check rows.len == 2
+      rows[1].fireEvent("click")
+      check selected == @[("scripts/build.sh", "commit:abc123")]
+
+      dispose()
+
+proc diffFile(index: int; path, status: string): VCSDiffFileRow =
+  ## One changed file with one modified line, the shape `diffRows` hands a
+  ## diff tab's ViewModel.
+  VCSDiffFileRow(
+    fileIndex: index, status: status, path: path, additions: 1, deletions: 1,
+    hunks: @[VCSHunkRow(oldStart: 1, oldCount: 1, newStart: 1, newCount: 1,
+      lines: @[
+        VCSDiffLineRow(lineType: "removed", content: "old", oldLine: 1),
+        VCSDiffLineRow(lineType: "added", content: "new", newLine: 1)])])
+
+suite "unified diff — headings and the whole-commit document (#753)":
+  ## VCS-Panel.md, "Unified Diff View (Editor Integration)" and "Whole-Commit
+  ## Document": the owner's 2026-10-23 decision.
+
+  test "the heading's file name opens the full file":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setUnifiedDiff(true, @[diffFile(0, "src/main.nim", "M")])
+      var opened: seq[string] = @[]
+      let tab = renderUnifiedDiffTab[MockRenderer, MockNode](
+        MockRenderer(), vm, "unifiedDiffEditor-1",
+        UnifiedDiffCallbacks(onOpenFullFile: proc(path: string) =
+          opened.add(path)))
+      let link = findByClass(tab, "unified-diff-file-header-link")
+      check link != nil
+      check link.textContent == "src/main.nim"
+      link.fireEvent("click")
+      check opened == @["src/main.nim"]
+      dispose()
+
+  test "a deleted file's heading opens nothing":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setUnifiedDiff(true, @[diffFile(0, "src/gone.nim", "D")])
+      var opened: seq[string] = @[]
+      let tab = renderUnifiedDiffTab[MockRenderer, MockNode](
+        MockRenderer(), vm, "unifiedDiffEditor-1",
+        UnifiedDiffCallbacks(onOpenFullFile: proc(path: string) =
+          opened.add(path)))
+      # The positive control above finds the link; here there is none.
+      check findByClass(tab, "unified-diff-file-header-link") == nil
+      let path = findByClass(tab, "unified-diff-file-header-path")
+      check path != nil
+      path.fireEvent("click")
+      check opened.len == 0
+      dispose()
+
+  test "a document has one section per file, in order, each its file's diff":
+    createRoot proc(dispose: proc()) =
+      let r = MockRenderer()
+      let document = createVCSVM()
+      let files = @[diffFile(0, "src/main.nim", "M"),
+                    diffFile(1, "lib/util.nim", "A")]
+      document.setUnifiedDiff(true, files)
+      check document.isDiffDocument()
+      var filled: seq[(int, string)] = @[]
+      let root = renderUnifiedDiffDocument[MockRenderer, MockNode](r, document,
+        proc(index: int; path: string; host: MockNode) =
+          filled.add((index, path))
+          # What the browser host does: the file's own single-file tab.
+          let sectionVM = createVCSVM()
+          sectionVM.setUnifiedDiff(true, @[files[index]])
+          r.appendChild(host, renderUnifiedDiffTab[MockRenderer, MockNode](
+            r, sectionVM, "unifiedDiffEditor-section-" & $index)))
+      check filled == @[(0, "src/main.nim"), (1, "lib/util.nim")]
+      # This file's lookup matches class substrings, which also finds the
+      # sections' container; the sections are the nodes carrying a path.
+      var sections: seq[MockNode] = @[]
+      for node in findAllByClass(root, "unified-diff-document-section"):
+        if node.attributes.hasKey("data-path"):
+          sections.add(node)
+      check sections.len == 2
+      check sections[0].attributes["data-path"] == "src/main.nim"
+      check sections[1].attributes["data-path"] == "lib/util.nim"
+      # Each section's heading is its own file's, and each has an editor.
+      check findByClass(sections[0], "unified-diff-file-header-path")
+        .textContent == "src/main.nim"
+      check findByClass(sections[1], "unified-diff-file-header-path")
+        .textContent == "lib/util.nim"
+      check findAllByClass(root, "unified-diff-editor").len == 2
+      dispose()
+
+  test "a scroll request reaches the document":
+    createRoot proc(dispose: proc()) =
+      let r = MockRenderer()
+      let document = createVCSVM()
+      document.setUnifiedDiff(true, @[diffFile(0, "a.nim", "M"),
+                                      diffFile(1, "b.nim", "M")])
+      let root = renderUnifiedDiffDocument[MockRenderer, MockNode](r, document,
+        proc(index: int; path: string; host: MockNode) = discard)
+      check root.attributes["data-scrolled-to"] == ""
+      document.requestDocumentScroll("b.nim")
+      check root.attributes["data-scrolled-to"] == "b.nim"
       dispose()
