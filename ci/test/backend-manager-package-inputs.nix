@@ -18,12 +18,41 @@ pkgs.runCommand "backend-manager-package-inputs-test"
     nativeBuildInputs = backend.nativeBuildInputs;
   }
   ''
-    for file in Cargo.toml src/lib.rs; do
-      if [ ! -f "${backend.src}/codetracer/libs/ct-home/$file" ]; then
-        echo "backend-manager source is missing libs/ct-home/$file" >&2
-        exit 1
-      fi
-    done
+    # Every path dependency the crate's manifest declares, and every one
+    # theirs declare in turn, must be in the package source: a dependency
+    # added to Cargo.toml but not copied there breaks only the Nix build.
+    # Read from the manifests rather than listed here, so a new one cannot
+    # be forgotten in both places at once.
+    python3 -I -B - "${backend.src}/codetracer/src/backend-manager" <<'PY'
+    import pathlib, sys, tomllib
+
+    def path_deps(manifest):
+        tables = [manifest]
+        tables += list(manifest.get("target", {}).values())
+        for table in tables:
+            for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                for name, spec in table.get(key, {}).items():
+                    if isinstance(spec, dict) and "path" in spec:
+                        yield name, spec["path"]
+
+    root = pathlib.Path(sys.argv[1])
+    seen, missing, todo = set(), [], [root]
+    while todo:
+        crate = todo.pop()
+        manifest = tomllib.loads((crate / "Cargo.toml").read_text())
+        for name, rel in path_deps(manifest):
+            dep = (crate / rel).resolve()
+            if dep in seen:
+                continue
+            seen.add(dep)
+            if (dep / "Cargo.toml").is_file():
+                todo.append(dep)
+            else:
+                missing.append(f"{name} ({rel}, needed by {crate.name})")
+    if missing:
+        sys.exit("backend-manager source is missing path dependencies: " + "; ".join(missing))
+    print(f"backend-manager source holds all {len(seen)} path dependencies")
+    PY
     # The script executor security tests copy and import the real API, rather
     # than a stand-in, from this layout relative to CARGO_MANIFEST_DIR.
     python3 -I -B - ${backend.src}/codetracer/python-api <<'PY'

@@ -19,6 +19,10 @@ ct-home = { path = "../../libs/ct-home" }
 # were broken for the whole life of the feature without one test going
 # red.  The mock now asks the same function the real backend asks.
 ct-data-breakpoints = { path = "../../libs/ct-data-breakpoints" }
+# Opens a file a recording carries beneath its directory without following
+# a symlink below it; shared with `src/db-backend`, whose reads of a
+# recording's own source copies apply the same rule.
+ct-open-beneath = { path = "../../libs/ct-open-beneath" }
 clap = { version = "4.5.42", features = ["derive"] }
 libc = "0.2"
 # Chunk-size lines of chunked gateway responses (already in the tree via

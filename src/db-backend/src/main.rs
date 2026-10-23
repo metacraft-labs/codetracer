@@ -156,6 +156,8 @@ mod catalog_autoload;
 // SessionHandler via the `crate::session_handler` path.
 mod session_handler;
 mod session_manifest;
+// Where a session may read source text from; see `source_access.rs`.
+mod source_access;
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod stack_unwinder;
 mod step_lines_loader;

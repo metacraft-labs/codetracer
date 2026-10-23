@@ -38,6 +38,8 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
+use crate::session::HostSourceReads;
+
 /// Default timeout for script execution in seconds.
 ///
 /// 120 s is generous enough for large Python DB traces (which can be
@@ -524,6 +526,10 @@ pub fn find_python3(path: Option<&std::ffi::OsStr>) -> Result<PathBuf, String> {
 ///   when the package is not importable on its own).
 /// * `timeout_seconds` - Maximum execution time in seconds before the
 ///   subprocess is killed.
+/// * `session_id` - A persistent debugging session to reuse, if any.
+/// * `host_source_reads` - The host-read setting of the client that asked
+///   for the script; the script's trace session is opened with it (see
+///   `crate::session::SessionKey`).
 ///
 /// # Errors
 ///
@@ -538,8 +544,16 @@ pub async fn execute_script(
     python_api: &PythonApiLookup,
     timeout_seconds: u64,
     session_id: Option<&str>,
+    host_source_reads: HostSourceReads,
 ) -> Result<ScriptResult, String> {
-    let wrapper = build_wrapper_script(script, trace_path, socket_path, python_api, session_id);
+    let wrapper = build_wrapper_script_for(
+        script,
+        trace_path,
+        socket_path,
+        python_api,
+        session_id,
+        host_source_reads,
+    );
 
     let python = find_python3(std::env::var_os("PATH").as_deref())?;
     let mut child = Command::new(&python)
@@ -657,20 +671,28 @@ pub async fn execute_script(
 /// 2. Sets `CODETRACER_DAEMON_SOCK` and `CODETRACER_TRACE_PATH` environment
 ///    variables for any downstream code that needs them.
 /// 3. Opens the trace via `codetracer.open_trace()`, passing the daemon socket
-///    explicitly so the Python API does not need to discover it.
+///    explicitly so the Python API does not need to discover it, and the
+///    requesting client's host-read setting, so the script's trace session
+///    is the one that client would get (`crate::session::SessionKey`).
 /// 4. Executes the user script with `trace` in scope.
 /// 5. Closes the trace in a `finally` block.
-fn build_wrapper_script(
+fn build_wrapper_script_for(
     script: &str,
     trace_path: &str,
     socket_path: &str,
     python_api: &PythonApiLookup,
     session_id: Option<&str>,
+    host_source_reads: HostSourceReads,
 ) -> String {
     // Escape backslashes and quotes in the path strings so they are safe inside
     // Python string literals.  This prevents injection when paths contain
     // special characters (e.g. backslashes on Windows or quotes in file names).
     let sock_escaped = escape_for_python(socket_path);
+    let host_reads_literal = if host_source_reads.is_allowed() {
+        "True"
+    } else {
+        "False"
+    };
     let trace_escaped = escape_for_python(trace_path);
     let indented = indent_script(script);
 
@@ -723,12 +745,31 @@ except ImportError as _ct_import_error:
              + "; looked for its python-api directory in: {searched_escaped}"
              + "; set {PYTHON_API_PATH_ENV} to that directory or install the package"
              + " into the site-packages of " + sys.executable)
-trace = open_trace("{trace_escaped}", daemon_socket="{sock_escaped}")
+trace = open_trace("{trace_escaped}", daemon_socket="{sock_escaped}", host_source_reads={host_reads_literal})
 try:
 {indented}
 finally:
 {finally_block}
 "#
+    )
+}
+
+/// [`build_wrapper_script_for`] with host reads off, the tests' wrapper.
+#[cfg(test)]
+fn build_wrapper_script(
+    script: &str,
+    trace_path: &str,
+    socket_path: &str,
+    python_api: &PythonApiLookup,
+    session_id: Option<&str>,
+) -> String {
+    build_wrapper_script_for(
+        script,
+        trace_path,
+        socket_path,
+        python_api,
+        session_id,
+        HostSourceReads::Refused,
     )
 }
 
@@ -1535,6 +1576,7 @@ mod tests {
             &lookup,
             60,
             None,
+            HostSourceReads::Refused,
         )
         .await
         .expect("python3 spawns");
@@ -1696,7 +1738,7 @@ mod tests {
         std::fs::write(
             stand_in.join("codetracer/__init__.py"),
             "class _Trace:\n    def close(self):\n        pass\n\n\
-             def open_trace(path, daemon_socket=None):\n    return _Trace()\n",
+             def open_trace(path, daemon_socket=None, host_source_reads=False):\n    return _Trace()\n",
         )
         .expect("write stand-in");
         tighten(&stand_in);

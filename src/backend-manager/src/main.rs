@@ -1974,14 +1974,20 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         .write_all(&DapParser::to_bytes(&response))
                         .await?;
                 }
-                // --- ct/read-source: returns mock source file content ---
+                // --- source (DAP) / ct/read-source: mock source file content ---
                 //
                 // Returns different content based on the requested path,
-                // simulating a multi-file project.
-                "ct/read-source" => {
+                // simulating a multi-file project.  The daemon's
+                // `ct/py-read-source` sends DAP `source` (the path in
+                // `source.path`), which the real replay server answers;
+                // `ct/read-source` (the path in `path`) is kept for clients
+                // that still send it.
+                "source" | "ct/read-source" => {
                     let args = msg.get("arguments");
                     let path = args
-                        .and_then(|a| a.get("path"))
+                        .and_then(|a| a.get("source"))
+                        .and_then(|s| s.get("path"))
+                        .or_else(|| args.and_then(|a| a.get("path")))
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("main.nim");
 
@@ -1995,7 +2001,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 
                     let response = json!({
                         "type": "response",
-                        "command": "ct/read-source",
+                        "command": command,
                         "request_seq": seq,
                         "success": true,
                         "body": {
@@ -2628,6 +2634,20 @@ async fn ensure_daemon_connected(
 // Trace CLI implementations
 // ---------------------------------------------------------------------------
 
+/// `args` for a daemon request the `ct trace` commands make for a trace,
+/// marked as reading the recording's listed sources from this host.
+///
+/// These commands run on the user's own behalf, like the desktop GUI, so they
+/// keep the replay backend's host reads, which the daemon otherwise turns off
+/// for a client that does not ask (`session::HostSourceReads`).  The setting
+/// that keeps a recording's listed host files away from an agent is the MCP
+/// server's `--allow-host-source-reads`, left off for an agent reading
+/// recordings someone else produced.
+fn cli_trace_request(mut args: Value) -> Value {
+    session::HostSourceReads::Allowed.mark_request(&mut args);
+    args
+}
+
 /// Implements `ct trace query`.
 ///
 /// Reads the script (from a file or inline `-c`), connects to the daemon,
@@ -2693,12 +2713,12 @@ async fn run_trace_query(
         &mut stream,
         "ct/exec-script",
         1,
-        json!({
+        cli_trace_request(json!({
             "tracePath": trace_path_str,
             "script": script,
             "timeout": timeout_secs,
             "sessionId": session_id,
-        }),
+        })),
         timeout_secs + 30, // daemon-side timeout + overhead for open-trace
     )
     .await?;
@@ -2760,7 +2780,7 @@ async fn run_session_close(
         &mut stream,
         "ct/close-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -2800,7 +2820,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -2819,7 +2839,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -2899,7 +2919,7 @@ async fn run_trace_origin(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -2985,7 +3005,7 @@ async fn run_trace_origin(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -3089,12 +3109,12 @@ async fn run_trace_query(
         &mut stream,
         "ct/exec-script",
         1,
-        json!({
+        cli_trace_request(json!({
             "tracePath": trace_path_str,
             "script": script,
             "timeout": timeout_secs,
             "sessionId": session_id,
-        }),
+        })),
         timeout_secs + 30,
     )
     .await?;
@@ -3148,7 +3168,7 @@ async fn run_session_close(
         &mut stream,
         "ct/close-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -3181,7 +3201,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -3199,7 +3219,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;

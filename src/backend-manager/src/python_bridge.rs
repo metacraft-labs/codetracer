@@ -16,8 +16,8 @@
 //! with the daemon's dispatch and routing logic lives in `backend_manager.rs`.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
+use crate::session::SessionKey;
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
@@ -322,7 +322,10 @@ pub struct PyBridgeState {
     ///
     /// Keyed by the canonical trace path (same key used by the session
     /// manager).  Created lazily on first breakpoint/watchpoint operation.
-    pub breakpoint_states: HashMap<PathBuf, BreakpointState>,
+    /// Keyed by session, not by trace path: two sessions of one trace
+    /// (one per host-read setting) have separate backends, so separate
+    /// breakpoint tables.
+    pub breakpoint_states: HashMap<SessionKey, BreakpointState>,
 }
 
 impl PyBridgeState {
@@ -342,12 +345,10 @@ impl PyBridgeState {
         seq
     }
 
-    /// Returns the breakpoint state for the given trace path, creating it
-    /// if it does not already exist.
-    pub fn breakpoint_state_mut(&mut self, trace_path: &Path) -> &mut BreakpointState {
-        self.breakpoint_states
-            .entry(trace_path.to_path_buf())
-            .or_default()
+    /// Returns the breakpoint state for the given session, creating it if
+    /// it does not already exist.
+    pub fn breakpoint_state_mut(&mut self, session: &SessionKey) -> &mut BreakpointState {
+        self.breakpoint_states.entry(session.clone()).or_default()
     }
 }
 
@@ -445,7 +446,7 @@ pub enum PendingPyRequestKind {
     Events,
     /// `ct/py-terminal` -> backend `ct/load-terminal`.
     Terminal,
-    /// `ct/py-read-source` -> backend `ct/read-source`.
+    /// `ct/py-read-source` -> backend DAP `source`.
     ReadSource,
     /// `ct/py-processes` -> backend `ct/list-processes`.
     Processes,
@@ -492,11 +493,11 @@ pub enum PendingPyRequestKind {
     ///
     /// * `index` — where in that array THIS breakpoint's answer sits.
     /// * `bp_id` — the id to hand back to the client on success.
-    /// * `trace_path` — key of the [`BreakpointState`] to roll back on
+    /// * `session` — key of the [`BreakpointState`] to roll back on
     ///   failure, so a refused breakpoint does not linger in the
     ///   daemon's table and get re-sent with every later add.
     AddBreakpoint {
-        trace_path: PathBuf,
+        session: SessionKey,
         bp_id: i64,
         index: usize,
     },
@@ -530,10 +531,10 @@ pub enum PendingPyRequestKind {
     ///
     /// Fields mirror [`Self::AddBreakpoint`]: `index` is where this
     /// watchpoint's verdict sits in the backend's per-entry array,
-    /// `wp_id` is the id to hand back on success, and `trace_path` keys
+    /// `wp_id` is the id to hand back on success, and `session` keys
     /// the [`BreakpointState`] to roll back on refusal.
     AddWatchpoint {
-        trace_path: PathBuf,
+        session: SessionKey,
         wp_id: i64,
         index: usize,
     },
@@ -555,7 +556,7 @@ pub enum PendingPyRequestKind {
     /// that — so the two tables still agree, and answers the client
     /// `success: false` rather than a `removed: true` that is not true.
     RemoveWatchpoint {
-        trace_path: PathBuf,
+        session: SessionKey,
         wp_id: i64,
         expression: String,
     },
@@ -1327,7 +1328,7 @@ pub fn format_terminal_response(backend_response: &Value) -> (bool, Value) {
     (true, serde_json::json!({"output": output}))
 }
 
-/// Formats a backend `ct/read-source` response into the simplified
+/// Formats a backend DAP `source` response into the simplified
 /// `ct/py-read-source` response body.
 ///
 /// Extracts the `content` string from the response body.
@@ -1355,7 +1356,18 @@ pub fn format_read_source_response(backend_response: &Value) -> (bool, Value) {
         .and_then(Value::as_str)
         .unwrap_or("");
 
-    (true, serde_json::json!({"content": content}))
+    // Where the backend found the text (`payload`, the recording's own copy;
+    // `working-tree`, the recorded path on the replay host), passed through
+    // when the backend names it so a client can tell the two apart.
+    let mut body = serde_json::json!({"content": content});
+    if let Some(origin) = backend_response
+        .get("body")
+        .and_then(|b| b.get("sourceOrigin"))
+        .cloned()
+    {
+        body["sourceOrigin"] = origin;
+    }
+    (true, body)
 }
 
 /// Formats a backend `ct/list-processes` response into the simplified
@@ -1673,6 +1685,7 @@ pub fn extract_location_from_stack_trace(msg: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::HostSourceReads;
     use serde_json::json;
 
     /// The watchpoint list the daemon sends as the `setDataBreakpoints`
@@ -2733,7 +2746,7 @@ mod tests {
     #[test]
     fn test_py_bridge_state_breakpoint_state_lazy_creation() {
         let mut state = PyBridgeState::new();
-        let trace_path = PathBuf::from("/traces/my-trace");
+        let trace_path = SessionKey::new("/traces/my-trace", HostSourceReads::Refused);
 
         // First access creates the state.
         let bp_state = state.breakpoint_state_mut(&trace_path);

@@ -825,6 +825,7 @@ impl DapTestClient {
             restore_location: None,
             rename_list: None,
             trace_source: None,
+            host_source_reads: None,
         };
         let launch = self
             .client
@@ -1078,6 +1079,7 @@ impl DapStdioTestClient {
             restore_location: None,
             rename_list: None,
             trace_source: None,
+            host_source_reads: None,
         };
         let launch = self
             .client
@@ -1131,6 +1133,7 @@ impl DapStdioTestClient {
             restore_location: None,
             rename_list: None,
             trace_source: None,
+            host_source_reads: None,
         };
         let launch = self
             .client
@@ -1190,6 +1193,7 @@ impl DapStdioTestClient {
             restore_location: None,
             rename_list: None,
             trace_source: None,
+            host_source_reads: None,
         };
         let launch = self
             .client

@@ -26,6 +26,7 @@ use crate::mixed_altitude::{Altitude, AltitudeState, active_altitude, is_vm_cros
 use crate::program_search_tool::ProgramSearchTool;
 use crate::recreator_session::{RecreatorArgs, RecreatorReplaySession};
 use crate::replay::ReplaySession;
+use crate::source_access::{SourceAccess, SourceAccessHandle};
 use crate::sourcemap_cache::{SourcemapCache, TranslatedLocation, translation_enabled};
 use crate::trace_reader::TraceReader;
 // use crate::response::{};
@@ -374,6 +375,13 @@ pub struct Handler {
     /// on-disk source files exactly as before.
     pub bundled_sources_root: Option<std::path::PathBuf>,
 
+    /// Where this session may read source text from (see
+    /// [`crate::source_access`]): the host-read setting from the `launch`
+    /// argument `hostSourceReads`, and the roots of the recording's own
+    /// copies. Shared with every source loader of the session: the handler's,
+    /// the flow preloader's and the replay session's own.
+    pub source_access: SourceAccessHandle,
+
     /// IS-M2 — the container's **VM crossing spans**, cached once at trace open.
     ///
     /// Loaded by [`Handler::load_crossing_spans`] (filtered to
@@ -560,6 +568,25 @@ impl Handler {
         reader: Arc<dyn TraceReader>,
         indirect_send: bool,
     ) -> Handler {
+        Self::construct_with_reader_and_source_access(
+            trace_kind,
+            ct_rr_args,
+            reader,
+            indirect_send,
+            SourceAccess::default(),
+        )
+    }
+
+    /// [`Self::construct_with_reader`] for a session with a source-reading
+    /// rule (see [`crate::source_access`]). The rule is in force before the
+    /// handler reads any source, construction included.
+    pub fn construct_with_reader_and_source_access(
+        trace_kind: TraceKind,
+        ct_rr_args: RecreatorArgs,
+        reader: Arc<dyn TraceReader>,
+        indirect_send: bool,
+        source_access: SourceAccess,
+    ) -> Handler {
         let replay: Box<dyn ReplaySession> = if trace_kind == TraceKind::Materialized {
             Box::new(MaterializedReplaySession::new(Arc::clone(&reader)))
         } else {
@@ -572,7 +599,14 @@ impl Handler {
                 ct_rr_args.clone(),
             ))
         };
-        Self::construct_with_replay(trace_kind, ct_rr_args, reader, replay, indirect_send)
+        Self::construct_with_replay_and_source_access(
+            trace_kind,
+            ct_rr_args,
+            reader,
+            replay,
+            indirect_send,
+            source_access,
+        )
     }
 
     /// Build a `Handler` from a pre-constructed [`TraceReader`] AND a
@@ -598,9 +632,38 @@ impl Handler {
         replay: Box<dyn ReplaySession>,
         indirect_send: bool,
     ) -> Handler {
+        Self::construct_with_replay_and_source_access(
+            trace_kind,
+            ct_rr_args,
+            reader,
+            replay,
+            indirect_send,
+            SourceAccess::default(),
+        )
+    }
+
+    /// [`Self::construct_with_replay`] for a session with a source-reading
+    /// rule. Every source loader the handler holds, and the ones `replay`
+    /// makes for itself, share one [`SourceAccessHandle`] holding it, made
+    /// here before the first source read (`StepLinesLoader::new` reads every
+    /// stepped file).
+    pub fn construct_with_replay_and_source_access(
+        trace_kind: TraceKind,
+        ct_rr_args: RecreatorArgs,
+        reader: Arc<dyn TraceReader>,
+        mut replay: Box<dyn ReplaySession>,
+        indirect_send: bool,
+        source_access: SourceAccess,
+    ) -> Handler {
+        let source_access = SourceAccessHandle::new(source_access);
+        replay.set_source_access(source_access.clone());
+        let mut flow_preloader = FlowPreloader::new();
+        flow_preloader.set_source_access(source_access.clone());
+        let mut sourcemap_cache = SourcemapCache::new();
+        sourcemap_cache.set_host_reads(source_access.get().host_reads);
         let calltrace = Calltrace::new(&*reader);
         let trace = CoreTrace::default();
-        let mut expr_loader = ExprLoader::new(trace.clone());
+        let mut expr_loader = ExprLoader::with_source_access(trace.clone(), source_access.clone());
         let step_lines_loader = StepLinesLoader::new(&*reader, &mut expr_loader);
         // A materialized trace can begin with reload annotations.
         let initial_step_id = reader.first_step_id().unwrap_or(StepId(0));
@@ -615,7 +678,7 @@ impl Handler {
             indirect_send,
             // sender,
             event_db: EventDb::new(),
-            flow_preloader: FlowPreloader::new(),
+            flow_preloader,
             expr_loader,
             trace,
             calltrace,
@@ -635,7 +698,7 @@ impl Handler {
             cached_terminal_events: None,
             cached_terminal_lines: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
-            sourcemap_cache: SourcemapCache::new(),
+            sourcemap_cache,
             sourcemap_cache_dir: None,
             origin_summary_cache: HashMap::new(),
             origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
@@ -647,6 +710,7 @@ impl Handler {
             trace_folder: None,
             request_span_tail: None,
             bundled_sources_root: None,
+            source_access,
             crossing_spans: Vec::new(),
             altitude_state: AltitudeState::default(),
         };
@@ -1450,7 +1514,11 @@ impl Handler {
         // remaining case instead of letting it fail as a worker-transport
         // error that says nothing about flow or about emulator traces.
         Ok(match self.trace_kind {
-            TraceKind::Materialized => Box::new(MaterializedReplaySession::new(Arc::clone(&self.reader))),
+            TraceKind::Materialized => {
+                let mut replay = MaterializedReplaySession::new(Arc::clone(&self.reader));
+                replay.set_source_access(self.source_access.clone());
+                Box::new(replay)
+            }
             // A flow is one walk from one replay position, so its worker's
             // death ends the flow (reported by `CallFlowPreloader::load_flow`)
             // instead of being papered over by a fresh worker at the start of
@@ -2530,6 +2598,9 @@ impl Handler {
     /// majority of recordings, which have no spans at all.
     pub fn set_trace_folder(&mut self, trace_dir: &Path) {
         self.trace_folder = Some(trace_dir.to_path_buf());
+        // The trace folder's `files/` holds the recording's copies of its
+        // sources; every loader of the session reads them from here on.
+        self.source_access.set_files_root(Some(trace_dir.join("files")));
     }
 
     /// IS-M2 — load and cache the container's **VM crossing spans** at trace open.
@@ -3963,6 +4034,11 @@ impl Handler {
         }
         // Fall back to the recorded workdir's `meta_dat/sources/` for traces
         // that ship on-disk-relative bundled sources (and legacy layouts).
+        // That directory is on THIS host, under a working directory the
+        // recording names, so a session with host reads off never uses it.
+        if !self.source_access.get().host_reads_allowed() {
+            return None;
+        }
         let candidate = self.reader.workdir().join("meta_dat").join("sources");
         if candidate.is_dir() { Some(candidate) } else { None }
     }
@@ -4125,6 +4201,7 @@ impl Handler {
                 ct_path.display(),
                 root.display()
             );
+            self.source_access.set_bundled_root(Some(root.clone()));
             self.bundled_sources_root = Some(root);
         }
     }
@@ -4225,6 +4302,7 @@ impl Handler {
                 "bundled-sources(vfs): extracted {extracted} bundled source(s) from {container_key} to {}",
                 root.display()
             );
+            self.source_access.set_bundled_root(Some(root.clone()));
             self.bundled_sources_root = Some(root);
         }
         extracted
@@ -4429,19 +4507,25 @@ impl Handler {
         }
         let requested = PathBuf::from(&path);
         // Absent means yes, so a generic DAP client keeps today's behaviour.
-        let allow_working_tree = args.allow_working_tree.unwrap_or(true);
+        // A session launched with host reads off never reads the working
+        // tree, whatever the client asks (see `crate::source_access`).
+        let host_reads_allowed = self.source_access.get().host_reads_allowed();
+        let allow_working_tree = args.allow_working_tree.unwrap_or(true) && host_reads_allowed;
 
+        // Both payload roots are read through `source_access::read_beneath`:
+        // the same candidates `resolve_bundled_source` walks, each opened
+        // beneath its root without following a symlink below it, so a link
+        // planted in the bundle or in `files/` cannot be served as
+        // `sourceOrigin: "payload"`.
         let mut resolved: Option<(String, crate::dap_ext::SourceOriginKind)> = None;
         if let Some(root) = self.meta_dat_sources_root()
-            && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&root, &requested)
-            && let Some(text) = crate::expr_loader::source_text(&bundled)
+            && let Some(text) = crate::source_access::read_beneath(&root, &requested)
         {
             resolved = Some((text, crate::dap_ext::SourceOriginKind::Payload));
         }
         if resolved.is_none()
             && let Some(trace_folder) = self.trace_folder.clone()
-            && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&trace_folder.join("files"), &requested)
-            && let Some(text) = crate::expr_loader::source_text(&bundled)
+            && let Some(text) = crate::source_access::read_beneath(&trace_folder.join("files"), &requested)
         {
             resolved = Some((text, crate::dap_ext::SourceOriginKind::Payload));
         }
@@ -4479,6 +4563,11 @@ impl Handler {
             None => {
                 let message = if allow_working_tree {
                     format!("no source available for {path}")
+                } else if !host_reads_allowed {
+                    format!(
+                        "no recorded source available for {path}: {}",
+                        crate::source_access::HOST_READS_REFUSED
+                    )
                 } else {
                     format!("no recorded source available for {path}, and the working tree was not consulted")
                 };
@@ -4765,7 +4854,8 @@ impl Handler {
     /// Every `PathId` the fuzzy ladder resolves `path` to, oldest version
     /// first. GDH-M7: see `MaterializedReplaySession::load_path_ids`.
     fn load_path_ids(&self, path: &str) -> Vec<PathId> {
-        self.reader.fuzzy_path_ids_for(path)
+        self.reader
+            .fuzzy_path_ids_for_under(path, self.source_access.get().host_reads)
     }
 
     /// The step on `line` that a jump with `behaviour` should land on.
@@ -6360,6 +6450,15 @@ impl Handler {
             info!("sourcemap_cache: translation disabled via CT_SOURCEMAP_TRANSLATION");
             return;
         }
+        // The maps found here are files on THIS host beside each recorded
+        // path (`<path>.map`, a `sourceMappingURL`), and a map can carry
+        // `sourcesContent`. A session with host reads off does not look for
+        // them; recorder-baked views (`srcviews.dat`) are the recording's
+        // own and still load.
+        if !self.source_access.get().host_reads_allowed() {
+            info!("sourcemap_cache: host source reads are off; sibling source maps are not looked up");
+            return;
+        }
         self.sourcemap_cache_dir = Some(trace_dir.to_path_buf());
         let workdir = self.reader.workdir().to_path_buf();
         // Snapshot the path entries up-front so we don't borrow
@@ -6685,6 +6784,12 @@ impl Handler {
 
         if autoload_disabled() {
             info!("catalog_autoload: skipped via CT_CATALOG_AUTOLOAD_DISABLED");
+            return;
+        }
+        // The scan reads every recorded path on this host to fingerprint it,
+        // so a session with host reads off does not run it.
+        if !self.source_access.get().host_reads_allowed() {
+            info!("catalog_autoload: host source reads are off; recorded paths are not scanned");
             return;
         }
         // If the trace already has a sibling renames.toml, the user's
@@ -8252,6 +8357,206 @@ mod tests {
         let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
         assert_eq!(body.dap.content, "recorded\n");
         assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// A session launched with host reads off (`hostSourceReads: false`)
+    /// never reads the working tree, whatever `allowWorkingTree` the request
+    /// carries, and its refusal says why; the recording's own copy is still
+    /// served, and a symlink planted in the payload is not followed.
+    #[test]
+    #[cfg(unix)]
+    fn source_never_reads_the_working_tree_in_a_session_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("hsr-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let recorded = root.join("worktree").join("recorded.src");
+        std::fs::create_dir_all(recorded.parent().expect("has a parent"))?;
+        std::fs::write(&recorded, "host copy\n")?;
+        let payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded, 0);
+        std::fs::create_dir_all(payload.parent().expect("has a parent"))?;
+        std::fs::write(&payload, "recorded\n")?;
+        let foreign = root.join("worktree").join("listed_host_file.py");
+        std::fs::write(&foreign, "print('host only')\n")?;
+        // A payload entry that is a symlink to the host file.
+        let planted = crate::expr_loader::bundled_source_path(&root.join("files"), &root.join("planted.py"), 0);
+        std::os::unix::fs::symlink(&foreign, &planted)?;
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(setup_db()));
+        let mut handler = Handler::construct_with_reader_and_source_access(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            reader,
+            false,
+            SourceAccess {
+                host_reads: crate::source_access::HostSourceReads::Refused,
+                ..SourceAccess::default()
+            },
+        );
+        handler.set_trace_folder(&root);
+
+        for (seq, allow) in [(1, None), (2, Some(true)), (3, Some(false))] {
+            let response = request_source(&mut handler, seq, &foreign.to_string_lossy(), allow)?;
+            assert!(
+                !response.success,
+                "allowWorkingTree {allow:?} read the host: {response:?}"
+            );
+            assert!(
+                response
+                    .message
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("host source reads are off"),
+                "the refusal does not say why: {response:?}"
+            );
+        }
+        let response = request_source(&mut handler, 4, &root.join("planted.py").to_string_lossy(), Some(true))?;
+        assert!(!response.success, "a symlink in the payload was followed: {response:?}");
+
+        let response = request_source(&mut handler, 5, &recorded.to_string_lossy(), None)?;
+        assert!(response.success);
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "recorded\n");
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// With host reads off, resolving a requested path to the recording's
+    /// path ids never resolves anything on this host: an absolute recorded
+    /// path that is a symlink to the requested file is matched (stage 5,
+    /// reverse canonicalization) only when host reads are on.
+    #[test]
+    #[cfg(unix)]
+    fn path_matching_does_not_resolve_host_paths_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("hsr-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("real"))?;
+        let real = root.join("real").join("module.py");
+        std::fs::write(&real, "x = 1\n")?;
+        let link = root.join("link.py");
+        std::os::unix::fs::symlink(&real, &link)?;
+
+        let trace = vec![
+            TraceLowLevelEvent::Path(link.clone()),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        let mut db = Db::new(&root.join("workdir"));
+        TraceProcessor::new(&mut db).postprocess(&trace)?;
+        let reader = InMemoryTraceReader::new(db);
+        let requested = real.to_string_lossy().to_string();
+        assert_eq!(
+            reader.fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Allowed),
+            vec![PathId(0)],
+            "the control: with host reads the symlinked recorded path is matched"
+        );
+        assert!(
+            reader
+                .fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Refused)
+                .is_empty(),
+            "without host reads a host symlink was resolved to match a path"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// A continuation token is client data: its `filesystem` digests name
+    /// paths the client chose. In a session with host reads off, checking
+    /// one never reads the named host file, so the answer reveals neither
+    /// its digest nor whether it exists; with host reads on (the control) the
+    /// same token is checked against the host file, as before.
+    #[test]
+    fn a_continuation_token_does_not_read_a_host_file_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("hsr-token-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        let host = root.join("id_ed25519");
+        std::fs::write(&host, "host-only key material\n")?;
+
+        let token_for = |handler: &Handler| -> Result<String, Box<dyn Error>> {
+            Ok(crate::origin_query::OriginContinuationToken {
+                v: crate::origin_query::OriginContinuationToken::CURRENT_VERSION,
+                query_variable: "x".to_string(),
+                query_step_id: 0,
+                current_step: 0,
+                current_frame: 0,
+                current_var_name: "x".to_string(),
+                hops_emitted: 0,
+                max_hops: 4,
+                patterns_fingerprint: handler.load_origin_patterns().fingerprint().hex.clone(),
+                source_digests: vec![crate::origin_query::SourceDigest {
+                    path: host.to_string_lossy().to_string(),
+                    origin: crate::origin_query::SourceOriginKind::Filesystem,
+                    sha256_hex: "0".repeat(64),
+                }],
+                issued_at: 0,
+            }
+            .encode()?)
+        };
+        let args_for = |token: String| task::CtOriginChainArguments {
+            variable_name: "x".to_string(),
+            variable_path: Vec::new(),
+            frame_id: -1,
+            step_id: 0,
+            thread_id: 0,
+            max_hops: 4,
+            lazy: false,
+            continuation_token: Some(token),
+            session_id: String::new(),
+            classify_source: true,
+        };
+        let current_digest = |result: &Result<task::OriginChain, crate::origin_query::OriginError>| {
+            result
+                .as_ref()
+                .err()
+                .and_then(|e| e.detail.as_ref())
+                .and_then(|d| d.get("currentDigest"))
+                .cloned()
+        };
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(setup_db()));
+        let mut refused = Handler::construct_with_reader_and_source_access(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            reader,
+            false,
+            SourceAccess {
+                host_reads: crate::source_access::HostSourceReads::Refused,
+                ..SourceAccess::default()
+            },
+        );
+        let token = token_for(&refused)?;
+        let result = refused.compute_origin_chain(&args_for(token));
+        assert_eq!(
+            current_digest(&result),
+            None,
+            "a session without host reads hashed the host file a token named: {result:?}"
+        );
+
+        let mut allowed = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(setup_db()));
+        let token = token_for(&allowed)?;
+        let result = allowed.compute_origin_chain(&args_for(token));
+        assert_eq!(
+            current_digest(&result),
+            Some(serde_json::json!(crate::origin_query::sha256_hex(
+                b"host-only key material\n"
+            ))),
+            "the control did not check the token against the host file: {result:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
