@@ -596,12 +596,19 @@ build_sibling() {
 	local log="$LOG_DIR/${log_name}.log"
 	echo "[build-siblings] $key: building → $artifact (log: $log)" >&2
 
-	# Prepend codetracer's nim/nimble paths so transitive Nim builds work in
+	# Append codetracer's nim/nimble paths so transitive Nim builds work in
 	# sibling dev shells that don't bundle Nim (every blockchain recorder).
+	# APPEND, not prepend: a sibling whose environment pins its own Nim must
+	# build with it.  Prepending replaced it with codetracer's Nim fork, whose
+	# config puts its own dist/ nim-stew 0.5.0 on the search path, so ct_cli
+	# was compiled by a compiler codetracer-native-recorder does not declare
+	# and failed (codetracer-pm issue 2026-10-22-build-siblings-build-ct-mcr-
+	# fails-to-compile-ct-cli-against-serialization-0-5-5.md).
+	# ci/test/sibling-toolchain-precedence-test.sh pins both halves.
 	local wrapped_cmd="$cmd"
 	if [ -n "${EXTRA_NIM_PATH:-}" ]; then
 		# shellcheck disable=SC2016
-		wrapped_cmd='export PATH="$EXTRA_NIM_PATH:$PATH"; '"$cmd"
+		wrapped_cmd='export PATH="$PATH:$EXTRA_NIM_PATH"; '"$cmd"
 	fi
 
 	local rc=0

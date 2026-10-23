@@ -8960,6 +8960,19 @@ jobs:
         # builders are stubs.
         run: bash ci/test/sibling-artifact-freshness-test.sh
 
+      - name: Check that a sibling is built with its own Nim, not codetracer's
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # scripts/build-siblings.sh put codetracer's nim/nimble AHEAD of each
+        # sibling environment's PATH, so codetracer-native-recorder's ct_cli
+        # was compiled by codetracer's Nim fork instead of the recorder's
+        # pinned nim-2.2.8 and failed (`cannot export: macros.isCaseObject`).
+        # codetracer's toolchain is now a fallback appended after the
+        # sibling's. This suite runs the real script with a stub `repro exec`
+        # that activates a different stub nim per repo, and pins both that the
+        # sibling's own nim wins and that a sibling without one still gets
+        # codetracer's. Stock bash and git, no network.
+        run: bash ci/test/sibling-toolchain-precedence-test.sh
+
       - name: Self-test the private-registry credential preflight
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # This suite is also run by `visual-replay-regression-gate`, but that
