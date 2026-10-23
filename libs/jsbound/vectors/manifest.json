@@ -142,6 +142,20 @@
       "name": "xhr_event"
     },
     {
+      "bytes": "loading.bin",
+      "class": "valid",
+      "description": "one Loading record at seq 1",
+      "expected": "loading.json",
+      "name": "loading"
+    },
+    {
+      "bytes": "doc_task.bin",
+      "class": "valid",
+      "description": "one DocTask record at seq 1",
+      "expected": "doc_task.json",
+      "name": "doc_task"
+    },
+    {
       "bytes": "gap.bin",
       "class": "valid",
       "description": "a Gap covering seq 2..4 between seq 1 and seq 5",
@@ -182,6 +196,13 @@
       "description": "an XMLHttpRequest's ProgressEvents (XhrEvent): loadstart inside send(), the upload object's progress, load and loadend each in a network task, the response's progress events with the values the page reads, the last at DONE, then load and loadend",
       "expected": "xhr_events.json",
       "name": "xhr_events"
+    },
+    {
+      "bytes": "document_loading.bin",
+      "class": "valid",
+      "description": "a document that loads while the pointer moves: Loading before each task recorded before load (phase 1 while parsing, 2 once parsed), DocTask for a script that runs (1) and one that ran with no record of its own (4), DOMContentLoaded and load, and a task after load with no Loading",
+      "expected": "document_loading.json",
+      "name": "document_loading"
     },
     {
       "bytes": "storage_shape_reads.bin",
@@ -656,6 +677,38 @@
       "description": "XhrEvent.length_computable is 2, one past its greatest value (0 to 1)",
       "expected": "enum_xhr_event_length_computable_2.json",
       "name": "enum_xhr_event_length_computable_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_loading_phase_4.bin",
+      "class": "refusal",
+      "description": "Loading.phase is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_loading_phase_4.json",
+      "name": "enum_loading_phase_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_loading_phase_0.bin",
+      "class": "refusal",
+      "description": "Loading.phase is 0, one before its least value (1 to 3)",
+      "expected": "enum_loading_phase_0.json",
+      "name": "enum_loading_phase_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_doc_task_kind_5.bin",
+      "class": "refusal",
+      "description": "DocTask.kind is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_doc_task_kind_5.json",
+      "name": "enum_doc_task_kind_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_doc_task_kind_0.bin",
+      "class": "refusal",
+      "description": "DocTask.kind is 0, one before its least value (1 to 4)",
+      "expected": "enum_doc_task_kind_0.json",
+      "name": "enum_doc_task_kind_0"
     }
   ],
   "vocab": 1

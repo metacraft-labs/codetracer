@@ -185,7 +185,20 @@
       "total": "2097152"
     },
     {
-      "last_seq": "22",
+      "elements": 14,
+      "phase": 1,
+      "record": "Loading",
+      "scripts": 2,
+      "seq": "23"
+    },
+    {
+      "kind": 1,
+      "record": "DocTask",
+      "seq": "24",
+      "src": "https://shop.example/assets/app.js"
+    },
+    {
+      "last_seq": "24",
       "reason": 1,
       "record": "End"
     }

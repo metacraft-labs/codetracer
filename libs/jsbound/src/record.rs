@@ -219,6 +219,13 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     ("XhrEvent", "target", 1, 2),
     ("XhrEvent", "event", 1, 7),
     ("XhrEvent", "length_computable", 0, 1),
+    // 1 parsing, 2 parsed and DOMContentLoaded not yet dispatched, 3 after
+    // DOMContentLoaded and before load.
+    ("Loading", "phase", 1, 3),
+    // 1 a script runs (written before its first record), 2 DOMContentLoaded,
+    // 3 load, 4 a script ran that wrote no record while it ran (written when
+    // it settled).
+    ("DocTask", "kind", 1, 4),
 ];
 
 /// The value set of `record`.`field`, if it is an enumerated field.
@@ -458,6 +465,8 @@ define_records! {
         total: u64,
         length_computable: u8,
     },
+    0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32 },
+    0x58 => DocTask { seq: u64, kind: u8, src: String },
     0x5F => End { last_seq: u64, reason: u8 },
 }
 
@@ -491,6 +500,31 @@ pub mod xhr_event {
     pub const TIMEOUT: u8 = 6;
     /// `loadend`.
     pub const LOADEND: u8 = 7;
+}
+
+/// `Loading.phase` values (spec §5.2, §6 "The document's own tasks").
+pub mod loading_phase {
+    /// The document is being parsed (`readyState` `loading`).
+    pub const PARSING: u8 = 1;
+    /// Parsed; `DOMContentLoaded` not yet dispatched.
+    pub const PARSED: u8 = 2;
+    /// `DOMContentLoaded` dispatched; `load` not yet.
+    pub const CONTENT_LOADED: u8 = 3;
+}
+
+/// `DocTask.kind` values (spec §5.2, §6 "The document's own tasks").
+pub mod doc_task {
+    /// A script element runs (`src` names it); written before the first
+    /// record it makes, so its records follow.
+    pub const SCRIPT: u8 = 1;
+    /// `DOMContentLoaded`.
+    pub const DOM_CONTENT_LOADED: u8 = 2;
+    /// The window's `load`.
+    pub const LOAD: u8 = 3;
+    /// A script element ran that wrote no record while it ran (a module, or a
+    /// script whose first boundary read was in a microtask); written when it
+    /// settled, after the records of its microtasks.
+    pub const SCRIPT_SETTLED: u8 = 4;
 }
 
 /// `End.reason` values (spec §5.2).
@@ -531,7 +565,9 @@ impl Record {
             | Record::Error { seq, .. }
             | Record::Scrubbed { seq, .. }
             | Record::Mark { seq, .. }
-            | Record::XhrEvent { seq, .. } => Some(*seq),
+            | Record::XhrEvent { seq, .. }
+            | Record::Loading { seq, .. }
+            | Record::DocTask { seq, .. } => Some(*seq),
         }
     }
 
@@ -575,7 +611,7 @@ mod tests {
         sets.sort_unstable();
         assert_eq!(fields, sets);
         assert!(VALUE_SETS.iter().all(|&(_, _, lo, hi)| lo <= hi));
-        // Vacuity: the table has its twenty-one enumerated fields.
-        assert_eq!(u8_fields.len(), 21);
+        // Vacuity: the table has its twenty-three enumerated fields.
+        assert_eq!(u8_fields.len(), 23);
     }
 }

@@ -1,0 +1,153 @@
+{
+  "records": [
+    {
+      "build_hash": "9c1e4b7a2d5f8e3c6b9a0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a",
+      "capabilities": "[]",
+      "framework": "",
+      "prev_session": "",
+      "protocol_level": 0,
+      "record": "Header",
+      "recorder_id": "codetracer-boundary-shim/0.1.0",
+      "session_id": "5f0c2a9e7b6d4e1f8a3c9b2d1e0f7a6b",
+      "vocab": 1
+    },
+    {
+      "arms": "{\"hero\":\"b\"}",
+      "color_scheme": 1,
+      "dpr": 1.5,
+      "fonts_digest": "a1b2c3d4",
+      "locale": "en-GB",
+      "record": "Env",
+      "reduced_motion": 0,
+      "referrer_origin": "https://search.example",
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "tz": "Europe/Sofia",
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0",
+      "ua_major": 141,
+      "url": "https://shop.example/checkout",
+      "viewport_h": 800,
+      "viewport_w": 1280
+    },
+    {
+      "elements": 3,
+      "phase": 1,
+      "record": "Loading",
+      "scripts": 0,
+      "seq": "1"
+    },
+    {
+      "kind": 5,
+      "record": "Task",
+      "seq": "2",
+      "task_id": "1"
+    },
+    {
+      "label": "",
+      "props": "{\"clientX\":0,\"clientY\":0}",
+      "record": "Input",
+      "seq": "3",
+      "target": "path:html",
+      "task_id": "1",
+      "type": "pointerover"
+    },
+    {
+      "elements": 3,
+      "phase": 1,
+      "record": "Loading",
+      "scripts": 0,
+      "seq": "4"
+    },
+    {
+      "kind": 1,
+      "record": "DocTask",
+      "seq": "5",
+      "src": "https://shop.example/slow.js"
+    },
+    {
+      "bits": "4789859678685233152",
+      "record": "Clock",
+      "seq": "6",
+      "src": 1
+    },
+    {
+      "elements": 9,
+      "phase": 2,
+      "record": "Loading",
+      "scripts": 1,
+      "seq": "7"
+    },
+    {
+      "kind": 5,
+      "record": "Task",
+      "seq": "8",
+      "task_id": "2"
+    },
+    {
+      "label": "",
+      "props": "{\"clientX\":0,\"clientY\":0}",
+      "record": "Input",
+      "seq": "9",
+      "target": "path:html",
+      "task_id": "2",
+      "type": "pointerover"
+    },
+    {
+      "elements": 9,
+      "phase": 2,
+      "record": "Loading",
+      "scripts": 1,
+      "seq": "10"
+    },
+    {
+      "elements": 9,
+      "phase": 2,
+      "record": "Loading",
+      "scripts": 1,
+      "seq": "11"
+    },
+    {
+      "kind": 4,
+      "record": "DocTask",
+      "seq": "12",
+      "src": "https://shop.example/module.js"
+    },
+    {
+      "elements": 9,
+      "phase": 2,
+      "record": "Loading",
+      "scripts": 2,
+      "seq": "13"
+    },
+    {
+      "kind": 2,
+      "record": "DocTask",
+      "seq": "14",
+      "src": ""
+    },
+    {
+      "elements": 9,
+      "phase": 3,
+      "record": "Loading",
+      "scripts": 2,
+      "seq": "15"
+    },
+    {
+      "kind": 3,
+      "record": "DocTask",
+      "seq": "16",
+      "src": ""
+    },
+    {
+      "kind": 1,
+      "record": "Task",
+      "seq": "17",
+      "task_id": "3"
+    },
+    {
+      "last_seq": "17",
+      "reason": 1,
+      "record": "End"
+    }
+  ],
+  "termination": "Complete"
+}
