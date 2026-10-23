@@ -940,6 +940,11 @@ test_lane_files() {
 		# is drawn into `#status` only while that tab is the one on screen.
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		echo src/frontend/tests/later_session_launch_failure_test.nim
+		# `debug_toolbar_follows_active_tab_test.nim` holds the window's one
+		# debugger toolbar to driving the tab on screen: its step, Run to
+		# Entry and history jump reach the active tab's views mediator, not
+		# the one that was active when the toolbar's routes were built.
+		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
