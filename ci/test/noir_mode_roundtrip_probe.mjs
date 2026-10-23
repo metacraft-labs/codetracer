@@ -190,8 +190,8 @@ const snapshotScript = () => {
   // `#filesystemComponent-0`, got no host, and reported `filesEntries:
   // 'absent'` — which `noir-mode-roundtrip.sh`'s `num()` turns into -1 and
   // every `-gt 0` comparison then fails. Measured on the deployed build: the
-  // host is `#filesystemComponent`, it carries `data-ct-isonim-mounted="1"`,
-  // and it holds 12 `a.jstree-anchor` rows. The pane was never the problem.
+  // host is `#filesystemComponent`, a view is mounted in it, and it holds 12
+  // `a.jstree-anchor` rows. The pane was never the problem.
   //
   // `[id^="filesystemComponent"]` is the form `jump_follow_probe.mjs:262` and
   // `noir_demo_path_probe.mjs:221` already use, and `pane_children_probe.mjs`
@@ -230,13 +230,13 @@ const snapshotScript = () => {
     return 'commits';
   })();
 
-  // The mark `ui/isonim_panel_mount.nim` writes onto a container it has mounted
-  // a view into. Recorded so a failure can distinguish "the view never mounted"
-  // from "the view mounted and rendered nothing" — the first is this defect,
-  // the second would be a different one.
+  // Whether the panel host has mounted a view into the pane's container (it
+  // holds an element). Recorded so a failure can distinguish "the view never
+  // mounted" from "the view mounted and rendered nothing" — the first is this
+  // defect, the second would be a different one.
   const paneMounted = (sel) => {
     const host = document.querySelector(sel);
-    return host ? host.getAttribute('data-ct-isonim-mounted') === '1' : 'absent';
+    return host ? host.childElementCount > 0 : 'absent';
   };
 
   return {

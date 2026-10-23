@@ -563,10 +563,6 @@ when defined(js):
       if (r.top < 0) { el.classList.add('agent-add-context-dropdown--below'); }
     })(#)
   """.}
-  proc flipDropdownIfNeeded(el: MockNode) = discard
-  proc setIconHtml(el: isonim_dom.Element; html: string) =
-    el.innerHTML = cstring(html)
-  proc setIconHtml(el: MockNode; html: string) = discard
   proc showImageLightbox(src: cstring) {.importjs: """
     (function(src) {
       var ex = document.getElementById('ct-img-lightbox');
@@ -628,10 +624,6 @@ when defined(js):
       return dispose;
     })(#, #)
   """.}
-  proc setupClickOutsideHandler(wrapper: MockNode; onClose: proc()): Disposer =
-    ## There is no document to listen on under `MockRenderer`; the returned
-    ## disposer keeps the call sites identical for both renderers.
-    result = proc() = discard
   proc setupBranchSearch(searchInput: isonim_dom.Element;
                           listContainer: isonim_dom.Element) {.importjs: """
     (function(inp, list) {
@@ -646,7 +638,6 @@ when defined(js):
       inp.focus();
     })(#, #)
   """.}
-  proc setupBranchSearch(searchInput: MockNode; listContainer: MockNode) = discard
   proc setupPasteImageHandler(ta: isonim_dom.Element;
                                onLoading: proc(): int;
                                onLoaded: proc(idx: int; dataUrl: cstring)) {.importjs: """
@@ -668,8 +659,6 @@ when defined(js):
       });
     })(#, #, #)
   """.}
-  proc setupPasteImageHandler(ta: MockNode; onLoading: proc(): int;
-                               onLoaded: proc(idx: int; dataUrl: cstring)) = discard
   proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element): JsObject
     {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)""".}
   proc callJsFunction(fn: JsObject) {.importjs: "#()".}
@@ -1581,7 +1570,9 @@ proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
       span(class = "ct-menu-item-label"):
         text label
   when defined(js):
-    setIconHtml(iconRef, icon)
+    when R is WebRenderer:
+        # The icon is the view's own static SVG markup.
+        r.setInnerHtml(iconRef, icon)
   item
 
 proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
@@ -1622,16 +1613,17 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddTrace()))
     when defined(js):
-      # After items are in the DOM, check if the menu overflows the viewport
-      # top and flip it below the button if needed.
-      jsSetTimeout(proc() = flipDropdownIfNeeded(menuRef), 0)
-      # Register a document-level click handler that closes the dropdown when
-      # the user clicks outside the wrapper. setTimeout(0) defers registration
-      # past the current click event so the opening click doesn't fire it.
-      # The buttons effect that drew this menu owns the listener: its next run
-      # (the menu closing, or any re-render of the buttons) disposes it.
-      onCleanup(setupClickOutsideHandler(wrapperRef,
-        proc() = vm.addContextDropdownOpen.val = false))
+      when R is WebRenderer:
+        # After items are in the DOM, check if the menu overflows the viewport
+        # top and flip it below the button if needed.
+        jsSetTimeout(proc() = flipDropdownIfNeeded(menuRef), 0)
+        # Register a document-level click handler that closes the dropdown when
+        # the user clicks outside the wrapper. setTimeout(0) defers registration
+        # past the current click event so the opening click doesn't fire it.
+        # The buttons effect that drew this menu owns the listener: its next run
+        # (the menu closing, or any re-render of the buttons) disposes it.
+        onCleanup(setupClickOutsideHandler(wrapperRef,
+          proc() = vm.addContextDropdownOpen.val = false))
   panel
 
 const AvailableAgentModels = ["Codex GPT5"]
@@ -1681,9 +1673,10 @@ proc renderModelButton[R](r: R; vm: AgentActivityVM;
     for model in AvailableAgentModels:
       r.appendRenderedChild(listRef, renderModelOption(r, vm, model))
     when defined(js):
-      # Owned by the buttons effect, like the "+" menu's listener above.
-      onCleanup(setupClickOutsideHandler(wrapperRef,
-        proc() = vm.modelDropdownOpen.val = false))
+      when R is WebRenderer:
+        # Owned by the buttons effect, like the "+" menu's listener above.
+        onCleanup(setupClickOutsideHandler(wrapperRef,
+          proc() = vm.modelDropdownOpen.val = false))
   panel
 
 const SettingsRuntimeOptions = ["devcontainer", "Local shell", "Micro-VM (Firecracker)", "GPT·o-series", "Docker image"]
@@ -1802,9 +1795,10 @@ proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
     r.appendRenderedChild(wrapperRef, list)
     onCleanup(proc() = r.removeChild(wrapperRef, list))
     when defined(js):
-      onCleanup(setupClickOutsideHandler(wrapperRef, proc() =
-        if vm.settingsActiveDropdown.val == dropdownId:
-          vm.settingsActiveDropdown.val = ""))
+      when R is WebRenderer:
+        onCleanup(setupClickOutsideHandler(wrapperRef, proc() =
+          if vm.settingsActiveDropdown.val == dropdownId:
+            vm.settingsActiveDropdown.val = ""))
   panel
 
 proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
@@ -1992,15 +1986,17 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
               text "New branch"
   if isOpen:
     when defined(js):
-      setIconHtml(searchIconRef, BranchSearchIcon)
-      setIconHtml(createIconRef, BranchCreateIcon)
+      when R is WebRenderer:
+        r.setInnerHtml(searchIconRef, BranchSearchIcon)
+        r.setInnerHtml(createIconRef, BranchCreateIcon)
     for branch in vm.branches.val:
       r.appendRenderedChild(listRef, renderBranchOption(r, vm, callbacks, branch))
     when defined(js):
-      setupBranchSearch(searchRef, listRef)
-      # Owned by the buttons effect, like the "+" menu's listener above.
-      onCleanup(setupClickOutsideHandler(wrapperRef,
-        proc() = vm.branchDropdownOpen.val = false))
+      when R is WebRenderer:
+        setupBranchSearch(searchRef, listRef)
+        # Owned by the buttons effect, like the "+" menu's listener above.
+        onCleanup(setupClickOutsideHandler(wrapperRef,
+          proc() = vm.branchDropdownOpen.val = false))
   panel
 
 proc renderIdleState[R](r: R; vm: AgentActivityVM;

@@ -83,7 +83,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 36
+const ExpectedAssertions = 35
   ## The directory guard, the empty-scan assertion, three predicate controls,
   ## and two per panel-host pane (15 x 2).
 

@@ -1429,8 +1429,12 @@ test_lane_files() {
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
 				'/test_every_status_surface_has_an_entry_point\.nim$' \
+				'/test_view_census\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
 				'/test_vcs_content_id\.nim$'
+		# `test_view_census` (HSF-D6) is a source scan of the same shape as the
+		# two below: it walks `src/frontend` with `std/os`, which the JS target
+		# lacks, and with the walk elided it would pass having read nothing.
 		# `test_vcs_content_id` (SB-2a) is `test_vcs_working_tree`'s twin: its
 		# claim is the NATIVE facade computing W, H and S against real
 		# repositories it builds with the system git (`std/osproc`), which a

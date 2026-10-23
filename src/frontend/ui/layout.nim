@@ -2,8 +2,8 @@ import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, options,
   state, editor, debug_toolbar, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
-  # Panes the component factory below mounts by their `tryMountIsoNim…`
-  # proc. See the factory arms below.
+  # Panes the component factory below creates; their views are mounted by
+  # the panel host (`ui/panel_host`).
   trace, event_log, terminal_output,
   calltrace_editor, repl, request_panel, trace_log, scratchpad, filesystem,
   test_results, constraints,
@@ -1847,14 +1847,26 @@ proc mountPaneForState(state: GoldenItemState; host: Element = nil) =
       # The panel host's panes: reached here only for a container rebuilt
       # outside GoldenLayout (an auto-hide panel restored from its saved
       # state), which the factory never saw.
-      if state.content in PanelHostKinds and not paneHost.isNil:
-        ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)
+      # A pane whose container is not in the active tab has nothing to mount
+      # into here; GoldenLayout's factory mounts it when it builds one.
+      if paneHost.isNil:
+        cwarn "layout: no container " & $containerId & " for " &
+          $state.content & " in the active tab"
+      else:
+        if state.content in PanelHostKinds:
+          ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)
 
-      if state.content == Content.Shell and not paneHost.isNil:
-        let shellComponent = ShellComponent(component)
-        if shellComponent.shell.isNil:
-          discard shellComponent.createShell(paneHost)
+        if state.content == Content.Shell:
+          let shellComponent = ShellComponent(component)
+          if shellComponent.shell.isNil:
+            discard shellComponent.createShell(paneHost)
 
+        # CaptionBarProgress: rendered by its IsoNim view directly into the
+        # container. Progress and hover mutation paths refresh it explicitly.
+        if state.content == Content.CaptionBarProgress:
+          mountCaptionBarProgress(
+            cast[dom_api.Element](paneHost),
+            CaptionBarProgressComponent(component))
 
       # ``Content.AgentActivityDeepReview`` has no renderer of its own since
       # AA-1 deleted the roll-up.  The id survives as the review's layout
@@ -1863,18 +1875,9 @@ proc mountPaneForState(state: GoldenItemState; host: Element = nil) =
       # constructs its component and gets an empty pane; there is nothing to
       # mount into it until AA-2/AA-3 render the session's own content.
 
-
       # Content.FrameViewer pane dispatch was retired in M3.  The legacy
       # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
       # other panes (Video Player, Pixel History, Shader Debug) share.
-
-      # CaptionBarProgress: render via IsoNim WebRenderer directly
-      # into the GL container. Progress and hover mutation paths refresh
-      # this direct mount explicitly.
-      if state.content == Content.CaptionBarProgress and not paneHost.isNil:
-        mountCaptionBarProgress(
-          cast[dom_api.Element](paneHost),
-          CaptionBarProgressComponent(component))
 
       discard component.afterInit()
 
@@ -2653,9 +2656,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         host.appendChild(wrapper)
 
       # Every standalone auto-hide panel (Build, BuildErrors,
-      # SearchResults, RequestPanel) is an IsoNim view.  Each mounts itself
-      # against the inner div the next time its ``tryMountIsoNim*``
-      # runs; the reactive root keeps the DOM in sync automatically.
+      # SearchResults, RequestPanel) is an IsoNim view, mounted by the panel
+      # host into the inner div just built; its reactive root keeps the DOM
+      # in sync.
       if panelDef.content in PanelHostKinds:
         # The panel host mounts the pane into the container just built.
         discard mountPanel(cast[dom_api.Element](innerDiv), panelDef.content)

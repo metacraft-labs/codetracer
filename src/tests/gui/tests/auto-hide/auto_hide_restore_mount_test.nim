@@ -31,8 +31,9 @@
 ##   it is satisfied by attaching ANY node, including a bare `<div>` with no id
 ##   that no pane could ever mount into.
 ## * **`document.getElementById(<the label from the stored config>)` resolves.**
-##   That id is the whole contract between the layout and the panes: every
-##   `tryMountIsoNim…Panel` finds its container with exactly that lookup
+##   That id is the whole contract between the layout and a restored pane:
+##   `mountPaneForState` finds its container with that id
+##   (`ui/pane_host_lookup.findPaneHost`, per tab)
 ##   (`ui/layout.nim`'s `mountComponentContainer` is what creates it for a
 ##   GoldenLayout pane).  It is false before the fix, false for a detached
 ##   element, false for an unlabelled one, and true only when a labelled
@@ -650,7 +651,7 @@ else:
       # The GoldenLayout registration still routes through it...
       let registration = region(
         body, "registerComponent(cstring\"genericUiComponent\")", "\nproc ")
-      check registration.contains("mountPaneForState(state)")
+      check registration.contains("mountPaneForState(state, ")
       # ...and so does the reveal of a panel rebuilt from its config.
       let onShown = region(body, "autoHideState.onPanelShown = proc",
                            "\n  autoHideState.onChanged = proc")
@@ -660,12 +661,14 @@ else:
     test "the mount dispatch still carries its arms":
       ## POSITIVE CONTROL for the case above (§4): "there is exactly one
       ## `mountPaneForState`" and "the registration calls it" are both
-      ## satisfied by an empty proc.  The State and Call Trace panes are the
-      ## panel host's: a restored container reaches them by its id.
+      ## satisfied by an empty proc.  The panel host's panes are mounted into
+      ## the restored container found in the active tab; the shell and the
+      ## caption-bar progress pane are mounted by their own arms.
       let dispatch = codeOnly(region(source(LayoutPath),
         "proc mountPaneForState", "\nproc "))
-      check dispatch.contains("ensurePanelMountedById(containerId, state.content,")
-      check dispatch.contains("tryMountIsoNimEventLogPanel()")
+      check dispatch.contains("findPaneHost(containerId, data.activeSessionIndex)")
+      check dispatch.contains("ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)")
+      check dispatch.contains("createShell(paneHost)")
       check dispatch.contains("discard component.afterInit()")
 
     test "restoreAutoHideState no longer promises a fallback that does not exist":

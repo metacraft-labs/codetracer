@@ -313,17 +313,19 @@ suite "the factory mounts every mountable pane":
       counted content notin dispatchArms(source)
 
   test "the mount procs the arms call are reachable from layout.nim":
-    # The arms are `tryMountIsoNimX()` calls, which compile only if the proc is
-    # exported and the module imported. Both were changed by this commit, and a
-    # revert of either would make the arm text above true and the build false —
-    # so the scan asserts them rather than trusting that a green build implies
-    # it, since this suite does not build `layout.nim`.
+    # The arms are calls into the panel host (and the shell's and the
+    # caption-bar progress pane's own mounts), which compile only if the procs
+    # are exported and the modules imported. A revert of either would make the
+    # arm text above true and the build false — so the scan asserts them
+    # rather than trusting that a green build implies it, since this suite
+    # does not build `layout.nim`.
     let source = layoutSource()
     counted source.contains("trace, event_log, terminal_output,")
     counted "EventLog" in panelHostKinds()
     # The panel host's panes: mounted by the factory synchronously, and here
-    # by id for a container the factory never saw.
-    counted dispatchRegion(source).contains("ensurePanelMountedById(containerId, state.content,")
+    # into the container a restored panel rebuilt, found in the active tab.
+    counted dispatchRegion(source).contains(
+      "ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)")
     counted source.contains("discard mountPanel(")
     counted "Calltrace" in panelHostKinds()
     counted "State" in panelHostKinds()
@@ -344,8 +346,8 @@ suite "the factory mounts every mountable pane":
     # Too loud, and FALSE: all three then said ERROR and called the cap
     # terminal — "never mounted for the rest of the session", "nothing calls
     # the mount again". The factory arms this suite asserts are what falsify
-    # that. Each `tryMountIsoNim*` re-enters with a fresh retry counter, so the
-    # cap ends one ATTEMPT; the `*PanelIsLive` guards report mounted, never
+    # that. Each poller (since deleted) re-entered with a fresh retry counter,
+    # so the cap ended one ATTEMPT; the `*PanelIsLive` guards report mounted, never
     # failed; and the losing pollers run BEFORE the container can exist, so
     # they lose by construction. The lines fire in healthy sessions, which is
     # why `ci/test/noir-replay-in-browser.sh` records them instead of asserting
