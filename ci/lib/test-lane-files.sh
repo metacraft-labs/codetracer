@@ -119,6 +119,86 @@ _tlf_reject_matching_file() {
 	done
 }
 
+# The standard-library modules that do not compile off the JavaScript target:
+# each opens with `when not defined(js):` followed by a `{.fatal.}` or
+# `{.error.}` pragma ("Module asyncjs is designed to be used with the
+# JavaScript backend", "This module only works on the JavaScript platform").
+# A suite that imports one at top level can only be compiled by `nim js`.
+# `ci/test/vm-unit-js-only-suites-test.sh` holds this list against the active
+# toolchain's stdlib, so a module added there cannot be missing here unnoticed.
+_TLF_JS_ONLY_STDLIB_MODULES='asyncjs|dom|jsbigints|jsconsole|jscore|jsfetch|jsffi|jsformdata|jsheaders|jsre'
+
+# The `grep -E` rule over `_tlf_top_level_imports` output that marks a suite
+# JS-only. Three spellings, each requiring the name to be the stdlib module
+# itself — bare, or `std/` / `js/` prefixed — and not a longer name or a
+# project path that happens to end in it (`../helpers/dom`, `jsffi_compat`):
+#   import std/asyncjs | import asyncjs | import json, std/jsffi as f
+#   import std/[json, asyncjs, options]
+#   from std/asyncjs import ...
+# The delimiters are spelled out rather than written `\b`, which `grep -E`
+# does not guarantee.
+_TLF_JS_ONLY_IMPORT_RE="^import[[:space:]]([^[]*[[:space:],])?((std|js)/)?(${_TLF_JS_ONLY_STDLIB_MODULES})([[:space:],]|\$)"
+_TLF_JS_ONLY_IMPORT_RE+="|^import[[:space:]](.*[[:space:],])?(std|js)/\\[([^]]*[[:space:],])?(${_TLF_JS_ONLY_STDLIB_MODULES})([[:space:],]|]|\$)"
+_TLF_JS_ONLY_IMPORT_RE+="|^from[[:space:]]+((std|js)/)?(${_TLF_JS_ONLY_STDLIB_MODULES})[[:space:]]"
+
+# _tlf_top_level_imports FILE — every column-0 `import` / `from` statement in
+# FILE, one per line, comments stripped and continuation lines joined (a
+# statement continues while a `[` is open or the line ends in a comma, which
+# is how the unit suites wrap long `import ../../sync/[a, b,` lists). Indented
+# imports — `when defined(js):` arms — are deliberately not statements of the
+# file as a whole: the C backend never sees them.
+_tlf_top_level_imports() {
+	awk '
+		function depth(s,   o, c) { o = gsub(/\[/, "[", s); c = gsub(/\]/, "]", s); return o - c }
+		function emit() { gsub(/[[:space:]]+/, " ", stmt); print stmt; open_stmt = 0 }
+		{
+			line = $0
+			sub(/#.*/, "", line)
+			if (open_stmt) {
+				stmt = stmt " " line
+				d += depth(line)
+				if (d <= 0 && stmt !~ /,[[:space:]]*$/) emit()
+				next
+			}
+			if (line ~ /^(import|from)[[:space:]]/) {
+				stmt = line
+				d = depth(line)
+				open_stmt = 1
+				if (d <= 0 && stmt !~ /,[[:space:]]*$/) emit()
+			}
+		}
+		END { if (open_stmt) emit() }
+	' "$1"
+}
+
+# _tlf_js_only_suites MODE — filter stdin (a list of paths). MODE `keep` keeps
+# the suites that import a JS-only stdlib module at top level; `reject` keeps
+# the rest. One predicate for both directions, so the native lane's
+# subtraction and the JS lane's addition are the same set by construction.
+_tlf_js_only_suites() {
+	local mode="$1" f
+	while read -r f; do
+		[ -n "${f}" ] || continue
+		[ -f "${f}" ] || continue
+		if _tlf_top_level_imports "${f}" | grep -qE -- "${_TLF_JS_ONLY_IMPORT_RE}"; then
+			[ "${mode}" = keep ] && printf '%s\n' "${f}"
+		else
+			[ "${mode}" = reject ] && printf '%s\n' "${f}"
+		fi
+	done
+	return 0
+}
+
+# _tlf_vm_unit_candidates — the ViewModel unit suites that belong to neither
+# the recorder-gated lane nor the collab lane, on EITHER backend. `vm-unit` is
+# this minus the JS-only suites, and `vm-unit-js` adds those JS-only suites
+# back; see the notes at both lanes.
+_tlf_vm_unit_candidates() {
+	_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
+		_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
+		_tlf_reject '/test_collab_[a-z0-9_]*\.nim$'
+}
+
 # _tlf_reject PATTERN... — filter stdin, dropping any line matching any of the
 # given `grep -E` patterns. Every call site must say WHY each pattern is there;
 # an unexplained exclusion is the defect this whole file is about.
@@ -461,8 +541,8 @@ test_lane_parity_partner() {
 	# The WASM lane recompiles `vm-unit`'s suites on a third backend on
 	# purpose (PLAT-17: "run the existing suites on the third backend"), so a
 	# suite it shares with `vm-unit` is a parity pair, not a clash. Without
-	# this line every `vm-unit` suite `vm-unit-js` excludes — six of them —
-	# read as claimed by two different backends.
+	# this line every `vm-unit` suite `vm-unit-js` excludes would read as
+	# claimed by two different backends.
 	vm-unit-wasm) echo "vm-unit" ;;
 	*) echo "" ;;
 	esac
@@ -1230,13 +1310,6 @@ test_lane_files() {
 		# scored the whole file `DID NOT RUN`. That is the one red in `vm-unit`
 		# on `dev`: a suite in a lane that does not provide what it needs.
 		#
-		# `test_opfs_volume` (NS2) is the one rejection that runs in the JS
-		# lane and NOT here — the mirror image of `test_platform_desktop_native`
-		# below. Its subject, `viewmodel/host/opfs_volume.nim`, is the browser's
-		# origin-private filesystem and is a hard `{.error.}` on the C target,
-		# exactly as the native desktop instantiation is on the JS one. So it is
-		# subtracted here and ADDED to `vm-unit-js`, which is the only lane that
-		# can run it.
 		# `headless_session` joins `recorder_gate` in the subtraction for the
 		# same reason, one dependency further down: importing it means the
 		# suite SPAWNS a real `replay-server`, and this lane's recipe
@@ -1247,15 +1320,39 @@ test_lane_files() {
 		# produced no `[OK]` line and scored `DID NOT RUN`. That is exactly
 		# the shape described above for `test_js_subdir_trace_vm.nim`; naming
 		# the second dependency keeps it from recurring.
-		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
-			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
-			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
-				'/test_opfs_volume\.nim$' \
-				'/test_vscode_host\.nim$'
-		# `test_vscode_host` (HSF-X2) drives `entries/vscode_host`, the VS Code
-		# extension host's side, which is a hard `{.error.}` off the JS target:
-		# a debug session's `customRequest` and a webview's `postMessage` are
-		# JavaScript functions. It runs in `vm-unit-js`, added there below.
+		# (Both subtractions live in `_tlf_vm_unit_candidates`, which
+		# `vm-unit-js` shares.)
+		#
+		# The JAVASCRIPT-ONLY suites are subtracted by dependency too, for the
+		# same reason and after the same defect. A suite that imports a stdlib
+		# module which is a `{.fatal.}` off the JS target (`std/asyncjs`,
+		# `std/jsffi`, `std/dom`, ...: `_TLF_JS_ONLY_STDLIB_MODULES`) cannot be
+		# compiled by this lane's C backend at all. They used to be rejected by
+		# filename, one line per suite (`test_opfs_volume`, `test_vscode_host`),
+		# and `test_hosted_primary_over_socket.nim`, which imports
+		# `std/[asyncjs, json, jsffi, options]`, was added without a line: this
+		# lane compiled it and reported `COMPILE ERROR ... Module asyncjs is
+		# designed to be used with the JavaScript backend` on every run
+		# (codetracer-pm issue 2026-10-20, "The native `vm-unit` lane collects
+		# `test_hosted_primary_over_socket.nim`"). Matching the import routes
+		# the next such suite to `vm-unit-js` without anyone naming it. Only a
+		# column-0 import counts: a `when defined(js):` arm is code the C
+		# backend never compiles, and several native suites have one. The
+		# suites this subtracts today, each because what it drives exists only
+		# on the JS target:
+		#   `test_opfs_volume` (NS2) — `viewmodel/host/opfs_volume.nim`, the
+		#       browser's origin-private filesystem. The mirror image of
+		#       `test_platform_desktop_native`, which `vm-unit-js` rejects.
+		#   `test_vscode_host` (HSF-X2) — `entries/vscode_host`, the VS Code
+		#       extension host's side: a debug session's `customRequest` and a
+		#       webview's `postMessage` are JavaScript functions.
+		#   `test_hosted_primary_over_socket` — a server-owned session
+		#       (`sync/hosted_primary`) and its mirrors over a real socket.io
+		#       WebSocket, server and client in one Node process.
+		# `ci/test/vm-unit-js-only-suites-test.sh` asserts that no suite in this
+		# lane imports a JS-only module, and proves the discovery on synthetic
+		# suites nobody listed.
+		_tlf_vm_unit_candidates | _tlf_js_only_suites reject
 		;;
 
 	vm-unit-js)
@@ -1484,17 +1581,25 @@ test_lane_files() {
 		# limitation, and rejecting the four would have been recording the
 		# harness's habit as a fact about the product.
 		#
-		# And ONE file this lane has that `vm-unit` does not. `test_opfs_volume`
-		# (NS2) drives `viewmodel/host/opfs_volume.nim` — the browser's
+		# And the files this lane has that `vm-unit` does not: the JavaScript-
+		# only suites, which `vm-unit` subtracts by dependency (see the note
+		# there) and this lane adds back by the SAME predicate,
+		# `_tlf_js_only_suites`, over the same candidates. So the two lanes
+		# cannot disagree about which suites are JS-only, and a new one is
+		# discovered here rather than named. (This used to be two hard-coded
+		# `printf` lines, the mirror of `vm-unit`'s two filename rejections.)
+		# The one with the longest history is `test_opfs_volume` (NS2): it
+		# drives `viewmodel/host/opfs_volume.nim` — the browser's
 		# origin-private filesystem — against a fake `navigator.storage`
 		# installed into the global object, so every `{.importjs.}` body in that
-		# module runs unmodified under node. Its subject is a hard `{.error.}`
-		# on the C target, so it is subtracted from `vm-unit` above and added
-		# here rather than being derived. This is the only lane that can run it,
-		# and the only place in the tree where the WEB instantiation's
+		# module runs unmodified under node. This is the only lane that can run
+		# it, and the only place in the tree where the WEB instantiation's
 		# browser-facing half is exercised at all.
-		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
-		printf '%s\n' src/frontend/viewmodel/tests/unit/test_vscode_host.nim
+		#
+		# The two halves are disjoint by construction (`vm-unit` holds no
+		# JS-only suite), so nothing is listed twice. Each half is sorted; the
+		# concatenation is not, as it was not before.
+		_tlf_vm_unit_candidates | _tlf_js_only_suites keep
 		;;
 
 	vm-unit-wasm)
@@ -1627,9 +1732,11 @@ test_lane_files() {
 		#       `test_project_actions.nim`, both of which run here.
 		#
 		# NOT EXCLUDED, and each was checked rather than assumed:
-		#   `test_opfs_volume` is already absent, inherited from `vm-unit`:
-		#       its subject is a hard `{.error.}` on the C target and wasm
-		#       IS the C target, so no edit here can be forgotten.
+		#   The JavaScript-only suites (`test_opfs_volume`, `test_vscode_host`,
+		#       `test_hosted_primary_over_socket`) are already absent,
+		#       inherited from `vm-unit`, which subtracts every suite importing
+		#       a stdlib module that is fatal off the JS target. wasm IS the C
+		#       target, so no edit here can be forgotten.
 		#   `test_plugin_surfaces` (PLAT-9) writes a real executable, puts
 		#       its directory on the real `PATH` and asserts a contributed
 		#       surface stops being degraded. It needs a FILESYSTEM and a

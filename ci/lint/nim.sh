@@ -50,6 +50,14 @@ lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
 	bash ci/test/recipe-owned-lanes-test.sh
 
+# The lanes' BACKEND honesty: `vm-unit` compiles with C, so it must not collect
+# a suite that imports a stdlib module which is fatal off the JS target, and
+# every such suite must be in `vm-unit-js` instead. It holds the JS-only module
+# list against this shell's `nim` stdlib and proves the discovery on synthetic
+# suites. Pure bash + awk over the tree, seconds.
+lint_step "test-lane backends: JS-only ViewModel suites run in vm-unit-js, never in vm-unit" \
+	bash ci/test/vm-unit-js-only-suites-test.sh
+
 # THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
 # in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
 # sixty-three SHELL gates that nothing measured. Twelve of them were reachable
