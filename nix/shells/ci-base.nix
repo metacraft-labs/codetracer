@@ -505,6 +505,23 @@ with pkgs;
     # and the key is LOST — silently, with `wtype` exiting 0. Every
     # invocation in this repo's lanes leads with `-s`.
     wtype
+  ]
+  ++ pkgs.lib.optionals stdenv.isDarwin [
+    # `setsid`, and nothing else from util-linux. The `ct host` end-to-end
+    # suites (src/tests/ct_host/ct_host_harness.nim `startHost`, and
+    # src/tests/ct_host_manifest/) start the server as
+    # `/usr/bin/env setsid bash -c ...`, so that stopping its session stops
+    # the node index it starts. Linux hosts ship `setsid` in util-linux;
+    # macOS has none, so on macOS `env` exited 127, `ct host` never ran, and
+    # every case failed with "printed no CODETRACER_HOST_URL". nixpkgs builds
+    # util-linux's `setsid` for darwin (it calls setsid(2), which macOS has).
+    # Only that one binary is exposed: util-linux's `kill`, `getopt`,
+    # `script`, `hexdump`, `column`, ... would otherwise shadow the macOS
+    # tools of the same names for every command run in this shell.
+    (pkgs.runCommand "setsid-${pkgs.util-linux.version}" { } ''
+      mkdir -p "$out/bin"
+      ln -s ${pkgs.util-linux.bin}/bin/setsid "$out/bin/setsid"
+    '')
   ];
 
   # Build-critical environment exports only. Developer convenience
