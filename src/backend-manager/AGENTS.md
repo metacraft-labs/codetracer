@@ -51,6 +51,13 @@ Add to `.claude/mcp.json` in your project root:
 
 If `backend-manager` is not on your PATH, use the full path to the binary.
 
+`read_source_file` serves the source copies a recording embeds. To also read
+the files a recording's source list names from this machine, which most
+recordings need because most recorders embed no copies, add
+`"--allow-host-source-reads"` to `args`. Leave it out for an agent that reads
+recordings of other people's programs or traffic: a recording's source list
+can name any file on the machine that replays it.
+
 ### Other MCP Clients
 
 Any MCP-compatible client can connect by spawning `backend-manager trace mcp`
@@ -136,7 +143,9 @@ in a different one.
 - `exec_script` - Execute a Python script against a trace.
 - `trace_info` - Get metadata about a trace.
 - `list_source_files` - List source files in a trace.
-- `read_source_file` - Read a source file from a trace.
+- `read_source_file` - Read a source file from a trace: an embedded copy, or
+  with `--allow-host-source-reads` a file the trace's source list names, read
+  from this machine.
 
 ### Available MCP Prompts
 
