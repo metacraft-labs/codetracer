@@ -89,3 +89,34 @@ suite "the call trace from the keyboard":
     let jump = mock.findCommand("ct/calltrace-jump")
     check jump.isSome
     check jump.isSome and jump.get.args["rrTicks"].getInt == 2
+
+  test "a native row sends back the replay position it was loaded with":
+    # A native call-trace row is a frame of the stack at the stop it was
+    # loaded at, and its `rrTicks` and `callstackDepth` are shared by every
+    # stop between two MCR events or in rr's branch-free code. The worker's
+    # `replayPosition` names the stop exactly; the row must carry it from
+    # the section it came in and send it back with its jump, unchanged
+    # (Click-Navigation.md §3.3).
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createCalltraceVM(store)
+    const position = "mcr:w=1-2;s=7;geid=3426;insn=199018"
+    let body = %*{
+      "startCallLineIndex": 0,
+      "totalCallsCount": 1,
+      "callLines": [{
+        "depth": 0,
+        "content": {"count": 0, "hiddenChildren": false, "call": {
+          "rawName": "scale", "key": "4", "children": [],
+          "location": {"path": "/src/twin.c", "line": 23, "rrTicks": 3426,
+                       "callstackDepth": 4,
+                       "replayPosition": position}}}}]}
+    check store.applyCalltraceResponse(body) == 1
+    check store.calltrace.lines.val[0].location.replayPosition == position
+    mock.clearReceivedCommands()
+    vm.doubleClickEntry(0)
+    let jump = mock.findCommand("ct/calltrace-jump")
+    check jump.isSome
+    check jump.isSome and jump.get.args["replayPosition"].getStr == position
+    check jump.isSome and jump.get.args["callstackDepth"].getInt == 4
+    check jump.isSome and jump.get.args["rrTicks"].getInt == 3426

@@ -2287,8 +2287,60 @@ impl ReplaySession for EmulatorReplaySession {
         Ok(true)
     }
 
-    fn jump_to_call(&mut self, _location: &Location) -> Result<Location, Box<dyn Error>> {
-        todo!("F5c-3: jump to enclosing call entry")
+    /// Move into the call a calltrace row names — the calltrace row click
+    /// and the calltrace search result (`ct/calltrace-jump`,
+    /// `dap_handler::Handler::calltrace_jump`, which sends every
+    /// non-materialized trace kind here).
+    ///
+    /// A row of this session is a frame of [`Self::load_callstack`] at the
+    /// step it was loaded at: its `rr_ticks` is that step (an emulator step
+    /// number, see [`Self::jump_to_rr_ticks`]) and its `callstack_depth` is
+    /// the frame's depth in that stack, 0 being the innermost frame. The pair
+    /// is the frame's identity (`Click-Navigation.md` §2.2): the step alone is
+    /// shared by every frame of the stack it was loaded from.
+    ///
+    /// ## What is served
+    ///
+    /// The innermost frame of the row's step, wherever the session is now —
+    /// including a call that has already returned or has not started yet,
+    /// which is what a frame-depth move along the CURRENT stack cannot reach
+    /// (codetracer-pm issue
+    /// `2026-10-21-native-calltrace-jump-moves-only-along-the-current-stack.md`).
+    /// The session re-executes to the row's step and is then in that frame.
+    ///
+    /// It lands at the step the row names, not at the call's first step: no
+    /// MCR recorder emits a call-entry index, so the entry step of the call is
+    /// not known here (the same gap [`Self::callstack_jump`] describes). The
+    /// row's step is inside the call, which is what a calltrace activation
+    /// asks for ("moves the session into that frame", §3.3).
+    ///
+    /// ## What is refused
+    ///
+    /// An outer frame (`callstack_depth > 0`) is refused BEFORE anything
+    /// moves, for the reason [`Self::callstack_jump`] refuses one: reaching
+    /// the caller needs the step at which it sat at its call site, which is
+    /// not recorded. Seeking to the row's step and stopping there would put
+    /// the session in the innermost frame of that step — a different frame
+    /// than the row named — while reporting success. A negative tick (the
+    /// `unset` sentinel) is refused by [`Self::jump_to_rr_ticks`].
+    fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
+        if location.callstack_depth != 0 {
+            return Err(format!(
+                "EmulatorReplaySession::jump_to_call cannot move into the caller frame at depth \
+                 {depth} of step {step}: an MCR replay can only re-execute forward from the \
+                 recorded CP0 snapshot, and the step at which that caller was at its call site \
+                 is not recorded. Only the innermost frame (depth 0) of a step can be reached.",
+                depth = location.callstack_depth,
+                step = location.rr_ticks.0,
+            )
+            .into());
+        }
+        // A row of the current step is the frame the session is in: nothing
+        // to re-execute (`jump_to` would replay from CP0 to the same step).
+        if location.rr_ticks.0 < 0 || location.rr_ticks.0 != self.current_step_id.0 {
+            self.jump_to_rr_ticks("jump_to_call", location.rr_ticks.0)?;
+        }
+        Ok(self.build_location())
     }
 
     /// Replay to the step that produced `event` — the Event Log row click
@@ -2311,13 +2363,14 @@ impl ReplaySession for EmulatorReplaySession {
         Ok(true)
     }
 
-    /// Move to the calltrace frame at `depth` — the calltrace row click
-    /// (`ct/calltrace-jump`, `dap_handler::Handler::calltrace_jump`).
+    /// Move to the frame at `depth` of the CURRENT call stack.
     ///
-    /// Note that the emulator is one of the *only* session kinds that can
-    /// reach this at all: `calltrace_jump` sends `TraceKind::Materialized`
-    /// down a `jump_to(location.rr_ticks)` branch and everything else —
-    /// including `TraceKind::Emulator` — into `callstack_jump(depth)`.
+    /// `ct/calltrace-jump` no longer comes here: a calltrace row names a frame
+    /// of the stack it was loaded at, which need not be the current one, so
+    /// `Handler::calltrace_jump` sends it to [`Self::jump_to_call`] instead
+    /// (codetracer-pm issue
+    /// `2026-10-21-native-calltrace-jump-moves-only-along-the-current-stack.md`).
+    /// That method refuses an outer frame for the reason given below.
     ///
     /// ## Depth 0 is served exactly; anything else is refused
     ///
@@ -4691,6 +4744,109 @@ mod tests {
         );
     }
 
+    /// INDEPENDENT. A calltrace row of the innermost frame names its step,
+    /// and `jump_to_call` re-executes to it from wherever the session is —
+    /// here from a LATER step, which a move along the current stack cannot
+    /// reach (codetracer-pm issue
+    /// `2026-10-21-native-calltrace-jump-moves-only-along-the-current-stack.md`).
+    /// The `path`/`line` fields are nonsense on purpose: the row's step is
+    /// the destination.
+    #[test]
+    fn jump_to_call_lands_on_the_rows_step_from_a_later_one() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 2;
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let expected = recording_state_after(&bytes, TARGET as usize);
+
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        session.jump_to(StepId(5)).expect("setup jump must succeed");
+        assert_ne!(
+            capture_emulator_state(),
+            expected,
+            "precondition: step 5 differs from step {TARGET}"
+        );
+
+        let landed = session
+            .jump_to_call(&Location {
+                path: "definitely/not/a/real/path.c".to_string(),
+                line: 99_999,
+                rr_ticks: RRTicks(TARGET),
+                callstack_depth: 0,
+                ..Location::default()
+            })
+            .expect("the innermost frame of a recorded step must be reached");
+        assert_eq!(session.current_step_id(), StepId(TARGET));
+        assert_eq!(
+            landed.rr_ticks,
+            RRTicks(TARGET),
+            "the answer is where the session landed"
+        );
+        assert_eq!(
+            capture_emulator_state(),
+            expected,
+            "jump_to_call must land on the recording's state after {TARGET} instructions",
+        );
+    }
+
+    /// NEGATIVE. An outer frame of a step is refused BEFORE anything moves:
+    /// seeking to the step and stopping there would put the session in the
+    /// innermost frame of that step — not the frame the row named — while
+    /// reporting success.
+    #[test]
+    fn jump_to_call_refuses_an_outer_frame_without_moving() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        session.jump_to(StepId(3)).expect("setup jump must succeed");
+        let before_state = capture_emulator_state();
+
+        let err = session
+            .jump_to_call(&Location {
+                rr_ticks: RRTicks(1),
+                callstack_depth: 1,
+                ..Location::default()
+            })
+            .expect_err("an outer frame must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("jump_to_call") && msg.contains("depth 1") && msg.contains("forward"),
+            "the refusal must name the operation, the depth and why, got `{msg}`",
+        );
+        assert_eq!(
+            session.current_step_id(),
+            StepId(3),
+            "a refused jump must not move the session"
+        );
+        assert_eq!(
+            capture_emulator_state(),
+            before_state,
+            "a refused jump must not touch emulator state"
+        );
+    }
+
+    /// NEGATIVE. A row with no step (the `unset` sentinel) is refused rather
+    /// than served as step 0.
+    #[test]
+    fn jump_to_call_refuses_an_unset_tick_instead_of_landing_on_step_zero() {
+        let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let mut session = EmulatorReplaySession::new_from_ctfs_bytes(bytes).unwrap();
+        session.jump_to(StepId(2)).expect("setup jump must succeed");
+
+        let err = session
+            .jump_to_call(&Location {
+                rr_ticks: RRTicks(NO_STEP_ID),
+                ..Location::default()
+            })
+            .expect_err("an unset destination must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("jump_to_call") && msg.contains("-1"),
+            "the refusal must name the operation and the sentinel it saw, got `{msg}`",
+        );
+        assert_eq!(session.current_step_id(), StepId(2));
+    }
+
     /// NEGATIVE. Value history has nothing to be built from here. An empty
     /// `Ok` would assert "this value never changed", which is a claim
     /// about the program nobody measured.
@@ -4910,17 +5066,23 @@ mod tests {
         );
     }
 
-    /// REACHABILITY. `ct/calltrace-jump` — a calltrace row click. This is
-    /// the one whose `trace_kind` guard routes the emulator *into* the
-    /// `callstack_jump` branch rather than away from it, so the emulator
-    /// is one of the only session kinds that reaches it at all.
+    /// REACHABILITY. `ct/calltrace-jump` — a calltrace row click and a
+    /// calltrace search result. `Handler::calltrace_jump` sends the emulator
+    /// to `EmulatorReplaySession::jump_to_call`, which used to be a `todo!()`
+    /// (a trap on wasm32); before that it went to `callstack_jump`, which
+    /// only moves along the CURRENT stack and so could not reach a row's
+    /// step at all (codetracer-pm issue
+    /// `2026-10-21-native-calltrace-jump-moves-only-along-the-current-stack.md`).
     ///
-    /// Depth 0 completes; an outer frame comes back as a refusal the
-    /// transport can turn into an error response, not as a trap.
+    /// The innermost frame of another step lands on that step's recorded
+    /// state; an outer frame comes back as a refusal the transport can turn
+    /// into an error response, with the session where it was.
     #[test]
-    fn calltrace_row_click_completes_at_depth_zero_and_refuses_an_outer_frame() {
+    fn calltrace_row_click_lands_on_the_rows_step_and_refuses_an_outer_frame() {
         let _guard = FFI_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        const TARGET: i64 = 4;
         let bytes = synthetic_mcr_ctfs_bytes_for_step(PC_COMPUTE_ENTRY, STACK_INIT_RSP, STACK_INIT_RBP);
+        let expected = recording_state_after(&bytes, TARGET as usize);
 
         let mut handler = emulator_handler(bytes.clone());
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -4928,12 +5090,19 @@ mod tests {
             .calltrace_jump(
                 jump_request("ct/calltrace-jump"),
                 Location {
+                    rr_ticks: RRTicks(TARGET),
                     callstack_depth: 0,
                     ..Location::default()
                 },
                 sender,
             )
-            .expect("a calltrace click on the innermost frame must be served");
+            .expect("a calltrace click on the innermost frame of a step must be served");
+        assert_eq!(handler.step_id, StepId(TARGET), "the click must move to the row's step");
+        assert_eq!(
+            capture_emulator_state(),
+            expected,
+            "the click must land on the recording's state at step {TARGET}",
+        );
 
         // The command must RESPOND, not merely act.
         //
@@ -4946,12 +5115,12 @@ mod tests {
         // even though the jump still lands and both events still fire.
         assert_response_for(&receiver.try_iter().collect::<Vec<_>>(), "ct/calltrace-jump");
 
-        let mut handler = emulator_handler(bytes);
         let (sender, _receiver) = std::sync::mpsc::channel();
         let err = handler
             .calltrace_jump(
                 jump_request("ct/calltrace-jump"),
                 Location {
+                    rr_ticks: RRTicks(2),
                     callstack_depth: 2,
                     ..Location::default()
                 },
@@ -4961,6 +5130,11 @@ mod tests {
         assert!(
             err.to_string().contains("depth 2"),
             "the refusal must reach the transport intact, got `{err}`",
+        );
+        assert_eq!(
+            handler.replay.current_step_id(),
+            StepId(TARGET),
+            "a refused click must not move the session",
         );
     }
 

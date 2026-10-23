@@ -44,12 +44,14 @@ binary(nim_mcr_streaming_flow_test)     | ct-mcr, ct-native-replay | mcr-dap-flo
 binary(pascal_mcr_streaming_flow_test)  | ct-mcr, ct-native-replay | mcr-dap-flow
 binary(rust_mcr_streaming_flow_test)    | ct-mcr, ct-native-replay | mcr-dap-flow
 binary(mcr_streaming_unified_reader_test) | ct-mcr, ct-native-replay | mcr-dap-flow
+binary(native_calltrace_jump_test) and test(/^c_mcr_[a-z0-9_]+$/) | ct-mcr (CPUID faulting), ct-native-replay | mcr-dap-flow
 
 binary(go_flow_integration)             | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
 binary(lean_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(nim_flow_integration)            | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(rust_flow_integration)           | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
 binary(origin_rr_smoke)                 | rr, ct-native-replay | rr-backend-tests (cross-repo-tests.yml)
+binary(native_calltrace_jump_test) and test(/^(c|go)_rr_[a-z0-9_]+$/) | rr, ct-native-replay, dlv | rr-backend-tests (cross-repo-tests.yml)
 
 binary(origin_aiken_dap_test)           | codetracer-cardano-recorder | recorder-tests (cross-repo-tests.yml)
 binary(origin_cairo_dap_test)           | codetracer-cairo-recorder | recorder-tests (cross-repo-tests.yml)

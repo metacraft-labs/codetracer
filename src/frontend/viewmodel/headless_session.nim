@@ -613,31 +613,39 @@ proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
 # Navigation — calltrace and event jumps
 # ---------------------------------------------------------------------------
 
-proc calltraceJump*(s: HeadlessDebugSession; file: string; line: int;
-                    rrTicks: uint64) =
-  ## Jump to a specific calltrace entry by its location.
-  ## This mirrors the GUI's double-click-on-calltrace-entry action.
-  ## Sends ``ct/calltrace-jump`` and waits for the ``stopped`` +
-  ## ``ct/complete-move`` events that carry the new debugger position.
+proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
+  ## Go to the call a call-trace row names, as the desktop's double-click on
+  ## that row does (`CalltraceVM.doubleClickEntry`). Every front end built on
+  ## this session (the TUI, GPUI, the headless app) reaches the call trace's
+  ## jump through here.
   ##
-  ## The handler does send a DAP response (see ``Handler::calltrace_jump``),
-  ## but this helper synchronises on the events rather than on the reply, so
-  ## it uses ``sendDapRequestNoResponse`` and lets ``waitForEvent`` drop the
-  ## response.  The note that previously stood here -- that the handler sends
-  ## no response at all -- described a defect that has since been fixed.
-  let args = %*{
-    "file": file,
-    "line": line,
-    "rrTicks": rrTicks,
-  }
-  s.backend.sendDapRequestNoResponse("ct/calltrace-jump", args)
+  ## The payload is `calltraceJumpArgs`, the one the desktop sends, so it
+  ## carries the row's frame identity: `callstackDepth`, and on a native
+  ## (rr / MCR) recording the `replayPosition` the replay worker stamped on the
+  ## row. The backend refuses a native row without it, because the row's tick
+  ## alone does not name the stop it was loaded at (Click-Navigation.md §2.2,
+  ## §3.3). This helper used to send `{file, line, rrTicks}` only.
+  ##
+  ## Waits for the response, then for the `stopped` and `ct/complete-move`
+  ## events the move sent before it. A refusal raises `IOError` with the
+  ## backend's reason. Before it raises, a `ct/complete-move` sent with the
+  ## refusal is applied to the store: the backend reports where the session
+  ## is when it had to run the replay to find out that it could not serve the
+  ## row.
+  let resp = s.backend.sendDapRequest("ct/calltrace-jump",
+    calltraceJumpArgs(callLine.location, callLine.rrTicks,
+                      callLine.codeGeneration))
+  if not resp.getOrDefault("success").getBool(false):
+    var reportedMove = false
+    for event in s.backend.eventQueue:
+      if event.getOrDefault("event").getStr("") == "ct/complete-move":
+        reportedMove = true
+    if reportedMove:
+      s.consumeCompleteMoveEvent()
+    raise newException(IOError, "ct/calltrace-jump was refused: " &
+      resp.getOrDefault("message").getStr("(no reason given)"))
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
-
-proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
-  ## Convenience: jump to a calltrace entry using a CallLine object.
-  s.calltraceJump(callLine.location.file, callLine.location.line,
-                  callLine.rrTicks)
 
 # ---------------------------------------------------------------------------
 # Breakpoints

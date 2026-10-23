@@ -633,6 +633,17 @@ pub struct Location {
     pub is_expanded: bool,
 
     pub missing_path: bool,
+
+    /// The replay worker's exact identity of the stop a native call-stack
+    /// frame was read at: what `ct-native-replay`'s `LoadCallstack` stamps on
+    /// every frame (codetracer-native-backend `frame_position.rs`), empty
+    /// elsewhere. Opaque to this backend and to the client, which sends it
+    /// back with `ct/calltrace-jump` (`calltrace_vm.nim` `calltraceJumpArgs`)
+    /// so the worker can return to exactly that stop: `rr_ticks` cannot,
+    /// since every stop between two MCR events shares one geid and
+    /// branch-free code shares one rr tick count
+    /// (`Click-Navigation.md` §3.3).
+    pub replay_position: String,
 }
 
 /// Response for `LoadLocationWithSourcemap` query from the native replay backend.
@@ -693,6 +704,7 @@ impl Location {
             expansion_last_line: -1,
             is_expanded: false,
             missing_path: false,
+            replay_position: String::new(),
         }
     }
 }

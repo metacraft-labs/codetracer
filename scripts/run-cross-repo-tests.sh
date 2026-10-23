@@ -13,6 +13,9 @@
 #   lean-flow   Run Lean build/record/replay tests
 #   origin-rr   Run the rr value-origin tests (origin_rr_dap_test rr::)
 #   origin-rr-smoke  Run the rr origin API smoke (origin_rr_smoke)
+#   calltrace-jump-rr  Run the rr and Delve call-trace jump tests
+#               (native_calltrace_jump_test, its `_rr_` tests; its MCR ones run
+#               in mcr-dap-flow)
 #
 # Selectors (backend-manager tests, need ct-native-replay + replay-server):
 #   backend-manager-rr  Run backend-manager's rr tests (real_recording_integration):
@@ -132,13 +135,13 @@ expand_selectors() {
 	for sel in "${SELECTORS[@]}"; do
 		case "$sel" in
 		all)
-			expanded+=(nim-flow rust-flow go-flow lean-flow origin-rr origin-rr-smoke backend-manager-rr c-flow cpp-flow d-flow pascal-flow)
+			expanded+=(nim-flow rust-flow go-flow lean-flow origin-rr origin-rr-smoke calltrace-jump-rr backend-manager-rr c-flow cpp-flow d-flow pascal-flow)
 			;;
-		nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | backend-manager-rr | c-flow | cpp-flow | d-flow | pascal-flow)
+		nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | calltrace-jump-rr | backend-manager-rr | c-flow | cpp-flow | d-flow | pascal-flow)
 			expanded+=("$sel")
 			;;
 		*)
-			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, origin-rr, origin-rr-smoke, backend-manager-rr, c-flow, cpp-flow, d-flow, pascal-flow, all)"
+			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, origin-rr, origin-rr-smoke, calltrace-jump-rr, backend-manager-rr, c-flow, cpp-flow, d-flow, pascal-flow, all)"
 			;;
 		esac
 	done
@@ -535,7 +538,7 @@ mkdir -p "$LOG_DIR"
 # Returns "db-backend" or "rr-backend" depending on where the test lives
 selector_test_location() {
 	case "$1" in
-	nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke) echo "db-backend" ;;
+	nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | calltrace-jump-rr) echo "db-backend" ;;
 	backend-manager-rr) echo "backend-manager" ;;
 	c-flow | cpp-flow | d-flow | pascal-flow) echo "rr-backend" ;;
 	*) die "Unknown selector: $1" ;;
@@ -551,6 +554,7 @@ selector_to_test_name() {
 	lean-flow) echo "test_lean" ;;
 	origin-rr) echo "rr::test_origin_rr" ;;
 	origin-rr-smoke) echo "test_origin_rr_smoke" ;;
+	calltrace-jump-rr) echo "_rr_calltrace_jump_" ;;
 	*) die "Unknown db-backend selector: $1" ;;
 	esac
 }
@@ -714,6 +718,14 @@ run_test() {
 		# tests actually ran.
 		if [[ $selector == origin-rr* && $exit_code -eq 0 ]] &&
 			! grep -q "^test $test_name.* ok$" "$log_file"; then
+			log "$selector: no $test_name test ran; refusing to report it as passed"
+			exit_code=1
+		fi
+		# The same for the call-trace jump tests, whose names carry the filter
+		# in the middle and whose output interleaves with the `test` lines, so
+		# it is read from the binaries' summaries instead.
+		if [[ $selector == calltrace-jump-rr && $exit_code -eq 0 ]] &&
+			! grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$log_file"; then
 			log "$selector: no $test_name test ran; refusing to report it as passed"
 			exit_code=1
 		fi

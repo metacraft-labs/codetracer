@@ -588,9 +588,15 @@ proc calltraceJumpArgs*(location: Location; rrTicks: uint64;
   ## The backend deserialises it as its `Location` struct
   ## (`src/db-backend/src/task.rs`), so the keys are that struct's camelCase
   ## field names — `path`, not `file` — with the high-level pair mirroring
-  ## the primary path and line. `codeGeneration` is not a `Location` field;
-  ## the backend's `Location` is deliberately not `deny_unknown_fields`, so
-  ## the extra key reaches the handler without being refused.
+  ## the primary path and line. `replayPosition` is a native row's exact
+  ## stop, which the replay worker stamped on the row and needs back: on a
+  ## native recording `rrTicks` and `callstackDepth` are shared by every stop
+  ## between two recorded events (MCR) or in branch-free code (rr), so
+  ## without it two sibling calls of one function cannot be told apart
+  ## (Click-Navigation.md §3.3). It is empty for every other row.
+  ## `codeGeneration` is not a `Location` field; the backend's `Location` is
+  ## deliberately not `deny_unknown_fields`, so the extra key reaches the
+  ## handler without being refused.
   %*{
     "path": location.file,
     "line": location.line,
@@ -601,6 +607,7 @@ proc calltraceJumpArgs*(location: Location; rrTicks: uint64;
     "sourceGeneration": location.sourceGeneration,
     "sourceDigest": location.sourceDigest,
     "codeGeneration": codeGeneration,
+    "replayPosition": location.replayPosition,
   }
 
 proc doubleClickEntry*(vm: CalltraceVM; lineIndex: int64) =

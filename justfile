@@ -6558,7 +6558,9 @@ ensure-ct-native-replay:
 # ``src/db-backend/tests/*_mcr_streaming_flow_test.rs``, and
 # ``mcr_streaming_unified_reader_test.rs``, which reads a real ct-mcr
 # recording through the unified follow reader and needs the same two
-# binaries.
+# binaries, and the MCR call-trace jump tests of
+# ``native_calltrace_jump_test.rs`` (its ``c_mcr_`` tests; its rr ones run in
+# rr-backend-tests through run-cross-repo-tests.sh's ``calltrace-jump-rr``).
 #
 # The ``ensure-*`` prerequisites build the sibling binaries; this recipe
 # then makes them discoverable to the Rust tests:
@@ -6628,6 +6630,7 @@ test-mcr-dap-flow: ensure-ct-mcr ensure-ct-native-replay
     repo_root="$PWD"
     db_status=0
     ( cd src/db-backend && cargo test --no-fail-fast --test '*_mcr_streaming_flow_test' --test mcr_streaming_unified_reader_test ) || db_status=$?
+    ( cd src/db-backend && cargo test --no-fail-fast --test native_calltrace_jump_test -- c_mcr_ ) || db_status=$?
 
     # backend-manager's ct-mcr tests (recipe header). Run even when the
     # db-backend tests failed, so one red run reports both; the recipe fails

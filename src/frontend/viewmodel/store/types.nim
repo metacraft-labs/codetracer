@@ -117,6 +117,14 @@ type
       ## Live RR traces use this frame depth when jumping from a calltrace row.
       ## Materialized traces can leave it at the default 0 because they jump by
       ## step/tick instead.
+    replayPosition*: string
+      ## A native call-stack row's exact stop, as the replay worker stamped it
+      ## (the backend's `Location.replayPosition`): opaque here, and sent
+      ## back unchanged with the row's `ct/calltrace-jump`
+      ## (`calltrace_vm.calltraceJumpArgs`), so the worker can return to the
+      ## stop the row was loaded at. The tick cannot: every stop between two
+      ## MCR events shares one geid, and branch-free code shares one rr tick
+      ## count (Click-Navigation.md §3.3). Empty for every other row.
 
   # -------------------------------------------------------------------
   # Aggregate state objects — one per logical domain

@@ -1459,9 +1459,10 @@ impl Handler {
                 return Err(format!(
                     "`{}`: flow is not supported on emulator traces yet. The emulator replays \
                      in-process, so it cannot be driven by the rr replay worker this command \
-                     builds for recreator traces (`EmulatorReplaySession::jump_to_call` is \
-                     still unimplemented). Refusing by name rather than failing later as a \
-                     worker-transport error.",
+                     builds for recreator traces, and the emulator cannot widen a flow to the \
+                     entry of a call (`EmulatorReplaySession::jump_to_call` reaches only the \
+                     step a row names: no call-entry index is recorded). Refusing by name \
+                     rather than failing later as a worker-transport error.",
                     command,
                 )
                 .into());
@@ -1485,6 +1486,12 @@ impl Handler {
             // a location with function_first == 0. The Db has authoritative
             // boundary data from the trace's Call/Function records.
             let mut location = arg.location;
+            // The flow's `jump_to_call` widens a location to the entry of the
+            // call that contains it. A location carrying a call-stack
+            // frame's `replay_position` asks the worker for a call-trace
+            // row's jump instead (`calltrace_jump`), so it is dropped here
+            // whatever the client sent.
+            location.replay_position.clear();
             if self.trace_kind == TraceKind::Materialized
                 && location.function_first <= 0
                 && location.function_last <= 0
@@ -3246,17 +3253,93 @@ impl Handler {
         location: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        if self.trace_kind == TraceKind::Materialized {
-            let step_id = StepId(location.rr_ticks.0); // using this field
-            // for compat with rr/gdb core support
-            self.replay.jump_to(step_id)?;
-            self.step_id = self.replay.current_step_id();
-        } else {
-            // TODO: eventually calltrace in the future
-            // for now support only callstack-mode
-            self.replay.callstack_jump(location.callstack_depth)?;
-            let _ = self.replay.load_location(&mut self.expr_loader)?;
-            self.step_id = self.replay.current_step_id();
+        // A call-trace row names a FRAME (Click-Navigation.md §2.1/§2.2), and
+        // the jump must land in that frame wherever the session is now.
+        match self.trace_kind {
+            TraceKind::Materialized => {
+                // A materialized row's `rr_ticks` is its call's entry step,
+                // which identifies the call by itself.
+                let step_id = StepId(location.rr_ticks.0); // using this field
+                // for compat with rr/gdb core support
+                self.replay.jump_to(step_id)?;
+                self.step_id = self.replay.current_step_id();
+            }
+            TraceKind::Recreator => {
+                // A native row is a frame of the call stack the replay worker
+                // served at the moment the row was loaded (the recreator
+                // branch of `load_calltrace_section`): `rr_ticks` is that
+                // moment (rr ticks, or the MCR geid) and `callstack_depth`
+                // the frame's depth in that stack.
+                //
+                // This used to be `callstack_jump(depth)` alone, which moves
+                // along the CURRENT stack. A row loaded at another moment —
+                // the call trace the pane held before the session moved —
+                // names a call that need not be on the current stack, and
+                // the session then stayed where it was or went to whatever
+                // frame of the current stack had that depth (codetracer-pm
+                // issue
+                // `2026-10-21-native-calltrace-jump-moves-only-along-the-current-stack.md`).
+                // The row's moment is not `rr_ticks`: every stop between two
+                // MCR events shares one geid, and branch-free code shares one
+                // rr tick count, so two calls of one function at one depth can
+                // have rows that agree on every coordinate. The worker stamps
+                // each frame with the exact stop (`replay_position`), the
+                // client sends it back, and `jump_to_call` on such a location
+                // moves to the row's frame — along the current stack when the
+                // stop is the current one, otherwise by returning to that stop
+                // first — or refuses (codetracer-native-backend,
+                // `frame_position.rs`).
+                //
+                // A row without one (a client or a worker that predates it)
+                // names no stop, and serving it would land in whichever stop
+                // shares its coordinate: it is refused, by name, rather than
+                // guessed (Click-Navigation.md §2.2, §3.3).
+                if location.replay_position.is_empty() {
+                    return Err(format!(
+                        "ct/calltrace-jump: the call-trace row of {}:{} (depth {}) names no replay \
+                         position, so the stop it was loaded at cannot be found again; reload the \
+                         call trace (the row came from a replay worker or client that does not \
+                         send one)",
+                        location.path, location.line, location.callstack_depth
+                    )
+                    .into());
+                }
+                if let Err(refusal) = self.replay.jump_to_call(&location) {
+                    // The worker may have run the replay while finding out
+                    // that it cannot serve the row (it returns to where it
+                    // was when it can, and says so). Report where the
+                    // session is, then the refusal, so the client never shows
+                    // a position the session has left. A failure to report
+                    // it is added to the refusal, never put in its place.
+                    let reported = self
+                        .replay
+                        .load_location(&mut self.expr_loader)
+                        .map(|_| ())
+                        .and_then(|()| {
+                            self.step_id = self.replay.current_step_id();
+                            self.complete_move(false, sender.clone())
+                        });
+                    return Err(match reported {
+                        Ok(()) => refusal,
+                        Err(report) => {
+                            format!("{refusal}; and where the session is now could not be reported: {report}").into()
+                        }
+                    });
+                }
+                let _ = self.replay.load_location(&mut self.expr_loader)?;
+                self.step_id = self.replay.current_step_id();
+            }
+            TraceKind::Emulator => {
+                // An emulator row's `rr_ticks` is an emulator step number and
+                // its depth counts from the innermost frame
+                // (`EmulatorReplaySession::load_callstack`). `jump_to_call`
+                // re-executes to that step for the innermost frame and
+                // refuses an outer one, which forward-only replay cannot
+                // reach.
+                let _ = self.replay.jump_to_call(&location)?;
+                let _ = self.replay.load_location(&mut self.expr_loader)?;
+                self.step_id = self.replay.current_step_id();
+            }
         }
         self.complete_move(false, sender.clone())?;
 

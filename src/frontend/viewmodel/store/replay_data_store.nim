@@ -2523,7 +2523,8 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
                    codeGeneration: int = 0;
                    callstackDepth: int = 0;
                    hasChildren: bool = false; isExpanded: bool = false;
-                   callKey: string = ""): CallLine =
+                   callKey: string = "";
+                   replayPosition: string = ""): CallLine =
   ## Convenience constructor for CallLine — avoids the need for callers
   ## to import store/types.
   CallLine(
@@ -2536,7 +2537,8 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
       line: line,
       sourceGeneration: sourceGeneration,
       sourceDigest: sourceDigest,
-      callstackDepth: callstackDepth),
+      callstackDepth: callstackDepth,
+      replayPosition: replayPosition),
     codeGeneration: codeGeneration,
     hasChildren: hasChildren,
     isExpanded: isExpanded,
@@ -2570,6 +2572,8 @@ type
     sourceGeneration*: int
     sourceDigest*: string
     callstackDepth*: int
+    replayPosition*: string
+      ## `location.replayPosition`: a native row's exact stop.
     count*: int
       ## `content.count` — the backend's child count for the line.
     hiddenChildren*: bool
@@ -2602,7 +2606,8 @@ proc callLineOf*(w: CallLineWire; globalIndex: int64): CallLine =
     name = name, depth = w.depth, rrTicks = w.rrTicks, file = file,
     line = line, sourceGeneration = w.sourceGeneration,
     sourceDigest = w.sourceDigest, codeGeneration = w.sourceGeneration,
-    callstackDepth = w.callstackDepth, hasChildren = hasChildren,
+    callstackDepth = w.callstackDepth, replayPosition = w.replayPosition,
+    hasChildren = hasChildren,
     isExpanded = hasChildren and (not w.hiddenChildren or w.loadedChildren > 0),
     callKey = w.callKey)
   result.index = globalIndex
@@ -2636,6 +2641,7 @@ proc callLineWireOf*(entry: JsonNode): Option[CallLineWire] =
     w.sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
     w.sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
     w.callstackDepth = loc.getOrDefault("callstackDepth").getInt(0)
+    w.replayPosition = loc.getOrDefault("replayPosition").getStr("")
   some(w)
 
 const NoneValueKind = 30
