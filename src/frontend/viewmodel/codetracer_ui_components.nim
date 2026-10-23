@@ -32,7 +32,9 @@
 ##
 ## The host arranges and measures (UI-Components §3.2: no layout engine here):
 ## it tells each ViewModel what its pane shows (`setViewport`,
-## Viewport-Driven-Loading V3), as the desktop's panel host does. The views emit
+## Viewport-Driven-Loading V3), as the desktop's panel host does, converting
+## the pixels it measures with `pane_viewport`, exported below so every DOM host
+## asks for the same window from a pane of the same shape. The views emit
 ## CodeTracer's class names; the host supplies the stylesheet that draws them.
 ##
 ## `ci/test/sdk-facade-boundary.sh` holds this module to its own rule set:
@@ -51,3 +53,9 @@ export isonim_state_view
 
 import views/isonim_event_log_view
 export isonim_event_log_view
+
+# The conversion a host makes from the pixels it measures on a mounted pane to
+# the `Viewport` its ViewModel is told (`pixelPaneViewport`). Rendering-free
+# arithmetic; exported here because measuring is the host's half of mounting.
+import pane_viewport
+export pane_viewport
