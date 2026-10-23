@@ -566,6 +566,10 @@ type
     afterReturn*: FlowValueText
       ## The step's `return` value, if it recorded one (`value` nil if not).
     events*: seq[FlowLayoutEvent]
+    originSummaries*: JsonNode
+      ## Value Origin Tracking's per-variable summaries
+      ## (`FlowStep.origin_summaries`), as the wire carries them; nil when the
+      ## step has none. Content for a surface's origin badges.
 
   FlowLayoutLoop* = object
     ## One `Loop` of the loaded window.

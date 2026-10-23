@@ -291,7 +291,7 @@ proc jumpToLocalStep*(self: DebuggerService, path: cstring, line: int, stepCount
   # hard to believe
   let firstLoopLine = if path.len > 0 and self.data.ui.editors.hasKey(path) and not self.data.ui.editors[path].flow.isNil:
       let flow = self.data.ui.editors[path].flow.flow
-      let loopId = flow.steps[stepCount].loop
+      let loopId = flow.steps[stepCount].loopIndex
       flow.loops[loopId].first
     else:
       # e.g. step list jump for now

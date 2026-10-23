@@ -667,7 +667,8 @@ proc flowLayoutWindowOf*(view: JsonNode; envelope: JsonNode = nil):
       afterReturn: flowValueOf(FlowReturnExpression,
         if after.isNil or after.kind != JObject: nil
         else: after{FlowReturnExpression}),
-      events: flowEventsOf(st{"events"}))
+      events: flowEventsOf(st{"events"}),
+      originSummaries: st{"originSummaries"})
 
 proc flowWindowReturnsOf*(view: JsonNode): seq[FlowWindowReturn] =
   ## The values the window's steps returned. A `None` return (no value) is not

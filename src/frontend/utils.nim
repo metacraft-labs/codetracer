@@ -779,7 +779,7 @@ proc makeFlowComponent*(data: Data, position: int): FlowComponent =
     shouldRecalcFlow: false,
     flowLoops: JsAssoc[int, FlowLoop]{},
     flowLines: JsAssoc[int, FlowLine]{},
-    activeStep: FlowStep(rrTicks: -1),
+    activeStep: FlowLayoutStep(rrTicks: -1),
     selectedLine: -1,
     selectedLineInGroup: -1,
     selectedStepCount: -1,

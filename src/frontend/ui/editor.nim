@@ -39,12 +39,14 @@ from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 # goes through the shared editing core is PLAT-67's question. The inline flow
 # is still drawn by `ui/flow.nim`'s FlowComponent (D7.4 (b) is open).
 # ---------------------------------------------------------------------------
-import std/json
+import std/[json, tables]
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
   EditorVM, createEditorVM
 import ./editor_points
+# The shared flow line-styling rule over the flow model's window.
+from ../viewmodel/viewmodels/flow_vm import flowStyledLinesOf
 from isonim/core/owner import createRoot
 from isonim/core/computation import createEffect
 from isonim/core/signals import val
@@ -748,13 +750,13 @@ proc flowStyleLines(self: EditorViewComponent, conditionFlowLines: seq[MonacoLin
   var lines: seq[MonacoLineStyle] = @[]
   var flow = self.flow
 
-  if not flow.isNil and not flow.flow.isNil and not self.flowUpdate.isNil:
+  if not flow.isNil and not flow.flow.isNil:
     # The per-line decision lives in `ui/flow_line_styles.nim` so it can be
     # unit-tested headlessly, and so the guard it carries is shared with every
     # other reader of `branchesTaken`. Before RV-5 this loop indexed
     # `branchesTaken[0][0]` with no bounds check — a latent `IndexDefect` that
     # aborted the whole of `applyEventualStylesLines`.
-    for styled in flowStyledLines(flow.flow, self.flowUpdate.finished):
+    for styled in flowStyledLinesOf(flow.flow[], flow.flow.finished):
       if isLineStyleSet(conditionFlowLines, styled.position):
         lines.add(MonacoLineStyle(
           line: styled.position,
@@ -873,9 +875,14 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   if not flow.isNil and not flow.flow.isNil and
      loopId >= 0 and loopId < flow.flow.branchesTaken.len and
      loopIteration >= 0 and loopIteration < flow.flow.branchesTaken[loopId].len:
+    # The flow model keeps a branch's state as `BranchState`'s ordinal.
     let branchTable = flow.flow.branchesTaken[loopId][loopIteration].table
-    if not branchTable.isNil:
-      for position, typ in branchTable:
+    if branchTable.len > 0:
+      for position, state in branchTable:
+        let typ =
+          if state >= ord(low(BranchState)) and state <= ord(high(BranchState)):
+            BranchState(state)
+          else: Unknown
         if (position >= flow.flow.location.functionFirst and position <= flow.flow.location.functionLast) or
           (flow.flow.location.functionFirst == -1 and flow.flow.location.functionLast == -1):
           case typ:
@@ -955,12 +962,12 @@ proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
     if currentStepCount != NO_STEP_COUNT:
       for flowLoop in flow.flowLoops:
         var currentLoopStep = flowLoop.loopStep
-        if currentLoopStep.loop >= 0 and currentLoopStep.loop < flow.flow.loops.len:
-          var loop = flow.flow.loops[currentLoopStep.loop]
+        if currentLoopStep.loopIndex >= 0 and currentLoopStep.loopIndex < flow.flow.loops.len:
+          var loop = flow.flow.loops[currentLoopStep.loopIndex]
           var closestStep = self.flow.getClosestIterationStepCount(loop, currentLoopStep.stepCount)
           if closestStep >= 0 and closestStep < flow.flow.steps.len:
             var step = flow.flow.steps[closestStep]
-            lines.add(self.conditionToLine(step.loop, step.iteration))
+            lines.add(self.conditionToLine(step.loopIndex, step.iteration))
 
   lines
 
@@ -2262,7 +2269,7 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     shouldRecalcFlow: false,
     flowLoops: JsAssoc[int, FlowLoop]{},
     flowLines: JsAssoc[int, FlowLine]{},
-    activeStep: FlowStep(rrTicks: -1),
+    activeStep: FlowLayoutStep(rrTicks: -1),
     selectedLine: -1,
     selectedLineInGroup: -1,
     selectedStepCount: -1,
@@ -2930,7 +2937,7 @@ proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
     ),
     number: position,
     variablesPositions: JsAssoc[cstring, int]{},
-    sortedVariables: JsAssoc[cstring, Value]{},
+    sortedVariables: JsAssoc[cstring, FlowValueText]{},
     decorationsIds: @[],
     decorationsDoms: JsAssoc[cstring, Node]{},
     stepLoopCells: JsAssoc[int, JsAssoc[int, Node]]{},
@@ -4374,7 +4381,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     self.service.currentLine = response.location.line
 
     if not self.flow.isNil:
-      self.flow.activeStep = FlowStep(rrTicks: -1)
+      self.flow.activeStep = FlowLayoutStep(rrTicks: -1)
 
     # When the debugger position changes within an already-open editor,
     # a stale FlowComponent may still be present from the previous
@@ -4458,11 +4465,11 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
                 newTicks >= minTicks and newTicks <= maxTicks
               else:
                 # DB trace (rrTicks=0): use source-line range
-                var minPos = self.flow.flow.steps[0].position
+                var minPos = self.flow.flow.steps[0].line
                 var maxPos = minPos
                 for step in self.flow.flow.steps:
-                  if step.position < minPos: minPos = step.position
-                  if step.position > maxPos: maxPos = step.position
+                  if step.line < minPos: minPos = step.line
+                  if step.line > maxPos: maxPos = step.line
                 response.location.line >= minPos and response.location.line <= maxPos
         if canReuseFlow:
           discard  # FlowComponent.onCompleteMove (below) handles in-place update

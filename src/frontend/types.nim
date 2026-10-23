@@ -6,6 +6,10 @@ import
   rr_gdb
 
 from viewmodel/viewmodels/menu_vm import MenuVM
+from viewmodel/viewmodels/flow_layout import FlowLayoutStep, FlowLayoutLoop,
+  FlowLayoutWindow, FlowValueText, FlowLayoutEvent
+export FlowLayoutStep, FlowLayoutLoop, FlowLayoutWindow, FlowValueText,
+  FlowLayoutEvent
 import context_menu_item
 export context_menu_item
 
@@ -1445,7 +1449,7 @@ type
     totalLineWidth*: int
     indentationsCount*: int
     variablesPositions*: JsAssoc[cstring, int]
-    sortedVariables*: JsAssoc[cstring, Value]
+    sortedVariables*: JsAssoc[cstring, FlowValueText]
     decorationsIds*: seq[cstring]
     decorationsDoms*: JsAssoc[cstring, kdom.Node]
     stepLoopCells*: JsAssoc[int, JsAssoc[int, kdom.Node]]
@@ -1462,11 +1466,15 @@ type
     legendDom*: kdom.Node
     loopStepCounts*: JsAssoc[int, seq[int]]
 
+  FlowWindowRef* = ref FlowLayoutWindow
+    ## A flow window held by reference, so the component and its readers share
+    ## one decoded window instead of copying it.
+
   FlowLoop* = ref object
     flowDom*: kdom.Node
     flowZones*: MultilineZone
     sliderDom*: kdom.Node
-    loopStep*: FlowStep
+    loopStep*: FlowLayoutStep
 
   FlowComponent* = ref object of Component
     bufferMaxOffsetInPx*: int
@@ -1475,7 +1483,9 @@ type
     editor*: EditorService
     editorUI*: EditorViewComponent
     focusedLine*: int
-    flow*: FlowViewUpdate
+    flow*: FlowWindowRef
+      ## The flow window this component draws: the session `FlowVM`'s decoded
+      ## window for this editor's view (`flow_layout.FlowLayoutWindow`).
     ## Set when `EditorViewComponent.loadFlow` replaces this component with a
     ## newer one for the same editor.  A superseded component still owns the
     ## loop-control DOM the user can see and click until the replacement has
@@ -1498,7 +1508,7 @@ type
     fontSize*: int
     shouldRecalcFlow*: bool
     flowDom*: JsAssoc[int, kdom.Node]
-    activeStep*: FlowStep
+    activeStep*: FlowLayoutStep
     groups*: seq[Group]
     inlineDecorations*: JsAssoc[int, InlineDecorations]
     inlineValueWidth*: int

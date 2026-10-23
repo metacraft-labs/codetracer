@@ -26,7 +26,7 @@ when defined(ctWeb):
 
 import
   asyncjs, strformat, strutils, sequtils, jsffi, algorithm, jsconsole, macros,
-  options, json,
+  options, json, tables,
   ui/[agent_activity, agent_workspace, layout, editor, trace, event_log,
       state, calltrace, menu, status,
       debug_toolbar, flow, filesystem, vcs, value, repl,
@@ -5160,8 +5160,7 @@ proc switchFocusedLoopLevelAtPosition*(data: Data) =
   let monaco = activeEditor.monacoEditor
   let currentEditorPosition = monaco.getPosition().toJs.lineNumber.to(int)
 
-  if not toSeq(flow.flow.positionStepCounts.keys())
-    .any(key => key == currentEditorPosition):
+  if not flow.flow.positionStepCounts.hasKey(currentEditorPosition):
       cwarn "flow: no flow at this position"
       return
 
@@ -5182,8 +5181,8 @@ proc switchFocusedLoopLevelAtPosition*(data: Data) =
     let sliderPositionLoop = sliderPosition.loopIndex
     let sliderPositionIteration = sliderPosition.iteration
     let step = flow.flow.steps.filterIt(
-      it.position == firstLoopFirstLine and
-      it.loop == sliderPositionLoop and
+      it.line == firstLoopFirstLine and
+      it.loopIndex == sliderPositionLoop and
       it.iteration == sliderPositionIteration)[0]
     var stepNode = flow.stepNodes[step.stepCount]
 
