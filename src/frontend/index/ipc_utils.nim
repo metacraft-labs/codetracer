@@ -295,7 +295,23 @@ proc searchBatchToJs(batch: FindInFilesBatch): JsObject =
   ## payload: the run id the renderer drops stale batches by, the rows, and
   ## whether this is the last batch.
   var rows: seq[JsObject] = @[]
-  for r in batch.rows:
+  # Iterated by index with an explicit copy, not `for r in batch.rows`.
+  # jsffi's `js{...}` literal expands to an immediately-called anonymous
+  # proc, so it CAPTURES `r` — and a `for x in seq` loop variable is
+  # `lent T`, which cannot be captured:
+  #
+  #   Error: 'r' is of type <lent SearchResultLine> which cannot be captured
+  #   as it would violate memory safety
+  #
+  # The tup build never sees this: `NIM_COMMON_FLAGS` in `src/Tuprules.tup`
+  # passes `-d:nimNoLentIterators`, which makes `items` yield copies. The
+  # Nix derivations (`nix/packages/default.nix`) do not pass it, so only the
+  # packaged build (`nix build .#codetracer`) fails, and it fails on the
+  # dev shell's Nim as well as on the packaged one. That flag divergence is
+  # recorded in `scripts/test-build-alignment.sh`. This loop compiles under
+  # both lanes, so it does not depend on how that divergence is resolved.
+  for rowIndex in 0 ..< batch.rows.len:
+    let r = batch.rows[rowIndex]
     rows.add js{text: cstring(r.text), path: cstring(r.path), line: r.line,
                 matchStart: r.matchStart, matchLength: r.matchLength}
   js{id: batch.runId, rows: rows.toJs, done: batch.done,
