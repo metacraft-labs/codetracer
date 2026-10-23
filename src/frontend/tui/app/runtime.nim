@@ -635,8 +635,10 @@ proc enableLayoutBinding*(rt: TuiRuntime): LayoutBinding =
   ## one the desktop persists — and it is PLAT-4-level work rather than a
   ## binding's to make.
   ##
-  ## The binding is seeded from the ACTIVE SESSION's own tree, so the first
-  ## frame after this call is the frame that would have been painted without it.
+  ## The binding is seeded from the ACTIVE SESSION's own tree in Debug mode,
+  ## and from the current product mode's default otherwise (an Edit-mode
+  ## runtime — `ct edit` — has no session), so the first frame after this call
+  ## is the frame that would have been painted without it.
   result = rt.app.enableLayoutBinding(rt.width, rt.height)
   # THE FOCUSED PANE IS THE RUNTIME'S, not a second one. `LayoutBinding.focus`
   # is what `:dock`, `:move-tab` and `:resize` act on, and `Tab` / `Ctrl+w` are
@@ -714,9 +716,46 @@ proc layoutPersistPlanOf*(rt: TuiRuntime): LayoutPersistPlan =
   ## rather than a coincidence of spelling: **quarantine is the intent that
   ## touches nothing**, which is exactly the answer "the flag is off" needs. A
   ## host that called this without checking would still write no file.
+  ##
+  ## **THE DOCUMENT IS THE DEBUG ARRANGEMENT**, in whichever mode the session
+  ## exits. The terminal keeps ONE document and it is not keyed by mode
+  ## (Mode-Transitions.md §4.6, "the terminal's `ct edit` arrangement lives in
+  ## the register only"), and the replay loop restores it into Debug mode. So
+  ## while the binding holds Edit mode's arrangement the plan is made from the
+  ## Debug arrangement the mode register holds (`shell.switchBound`): a user
+  ## who rearranged Debug mode and quit from Edit mode keeps that arrangement,
+  ## one who never touched Debug mode gets the untouched answer (remove), and
+  ## Edit's arrangement is never written. A register with no Debug cell —
+  ## unreachable, since a bound runtime with a document starts in Debug mode —
+  ## answers the intent that touches nothing.
   if not rt.layoutPersistenceEnabled():
     return LayoutPersistPlan(intent: lpiQuarantine, text: "")
-  layoutPersistPlan(rt.app.layoutBinding, rt.layoutDocumentQuarantined)
+  let b = rt.app.layoutBinding
+  if b.product == pmDebug:
+    return layoutPersistPlan(b, rt.layoutDocumentQuarantined)
+  let debug = rt.app.modes.bound[pmDebug]
+  if not debug.stored:
+    return LayoutPersistPlan(intent: lpiQuarantine, text: "")
+  layoutPersistPlan(debug.layout, debug.userModified,
+                    rt.layoutDocumentQuarantined)
+
+proc debugArrangementOf*(rt: TuiRuntime): Layout =
+  ## The DEBUG arrangement of a bound runtime, in whichever mode is on screen:
+  ## the binding's own while it holds Debug mode, the mode register's Debug
+  ## cell while it holds Edit mode (`toggleBoundArrangement`). This is what a
+  ## host writes onto a replay session's slot — when it leaves a tab, when it
+  ## opens a new one — because a slot's `Layout` is a REPLAY arrangement
+  ## (`HeadlessApp` has no edit slot), so writing the binding there while it
+  ## holds Edit mode's panes would put them into the session's replay
+  ## arrangement. A Debug cell never stored — Edit mode entered without ever
+  ## leaving Debug mode, which the replay loop cannot do — answers Debug
+  ## mode's default at the current size. Precondition: the binding is enabled.
+  let b = rt.app.layoutBinding
+  if b.product == pmDebug:
+    return b.layout
+  let debug = rt.app.modes.bound[pmDebug]
+  if debug.stored: debug.layout
+  else: layoutValueForMode(pmDebug, selectProfile(rt.width, rt.height))
 
 proc afterLayoutCommit(rt: TuiRuntime) =
   ## A layout command or gesture committed a change. Two consequences, both
@@ -729,14 +768,71 @@ proc afterLayoutCommit(rt: TuiRuntime) =
   ##   * **the host writes it through** (`layoutCommitted`), so the terminal's
   ##     remembered arrangement is current after every change rather than only
   ##     after a clean exit.
+  ##
+  ## **BOTH ARE DEBUG MODE'S, AND ONLY DEBUG MODE'S COMMITS REACH THEM.** The
+  ## slot's `Layout` is the session's REPLAY arrangement (`HeadlessApp` has no
+  ## edit slot) and the document is the Debug arrangement
+  ## (`layoutPersistPlanOf`). A commit made while the binding holds Edit
+  ## mode's arrangement — a VCS tab clicked in a replay toggled into Edit mode
+  ## — is that arrangement's alone: it is kept in the binding, and in the mode
+  ## register across a switch, and written onto neither. Writing it to the
+  ## slot would put Edit's panes into the session's replay arrangement, and
+  ## writing it through would overwrite the user's remembered Debug
+  ## arrangement with an Edit one. The commit is still COUNTED: the host's
+  ## `layoutCommits` watch re-measures the source pane after any arrangement
+  ## change, in either mode.
   if not rt.layoutBindingEnabled():
+    return
+  inc rt.layoutCommits
+  if rt.app.layoutBinding.product != pmDebug:
     return
   let slot = rt.app.shell.activeSlot()
   if not slot.isNil:
     slot.layout = rt.app.layoutBinding.layout.clone()
-  inc rt.layoutCommits
   if not rt.layoutCommitted.isNil:
     rt.layoutCommitted(rt)
+
+proc toggleBoundArrangement(rt: TuiRuntime; profile: LayoutProfile): bool =
+  ## `Ctrl+F5` WITH A LAYOUT BINDING: swap the binding's arrangement with the
+  ## mode register's cell for the entering mode (Mode-Transitions.md §4.6, "a
+  ## switch carries the gestures with it"). Returns whether the mode changed.
+  ##
+  ## The binding is the only arrangement a bound runtime draws and the one a
+  ## click is hit-tested against, so it must hold the CURRENT mode's
+  ## arrangement in both modes. Before codetracer-pm issue 2026-10-21's fix the
+  ## toggle moved only the register's trees and `shellModel` drew those over
+  ## the binding: the replay loop toggled into Edit mode drew Edit's tree and
+  ## hit-tested Debug's, and after one round trip in either loop the frame
+  ## drew a snapshot while every gesture moved only the hit-test.
+  ##
+  ##   * the LEAVING arrangement is stored whole — tree, docked panes, whether
+  ##     it is the user's, the size it was left at — in its mode's cell (§4
+  ##     requirement 2);
+  ##   * the ENTERING mode's cell is loaded into the binding, or the mode's
+  ##     default on a first visit (§4 requirement 1, §4c obligation 3: a first
+  ##     visit is not a degradation and says nothing);
+  ##   * mode and arrangement change in one call (§4 requirement 4);
+  ##   * the entering arrangement starts a NEW undo history
+  ##     (`binding.adoptModeArrangement`): an undo never crosses a switch.
+  ##
+  ## Debug mode's cell keeps the session slot's relationship: every Debug
+  ## commit is written onto the slot (`afterLayoutCommit`), so the cell stored
+  ## on the way out is the slot's arrangement, and nothing written in Edit mode
+  ## reaches the slot.
+  let b = rt.app.layoutBinding
+  let target = toggled(rt.app.modes.product)
+  let leaving = BoundCell(stored: true, layout: b.layout.clone(),
+                          userModified: b.userModified, profile: b.profile)
+  let (changed, entering) = rt.app.modes.switchBound(leaving, target)
+  if not changed:
+    return false
+  if entering.stored:
+    b.adoptModeArrangement(entering.layout, target, entering.profile,
+                           entering.userModified, rt.width, rt.height)
+  else:
+    b.adoptModeArrangement(layoutValueForMode(target, profile), target,
+                           profile, false, rt.width, rt.height)
+  true
 
 proc resize*(rt: TuiRuntime; width, height: int) =
   ## Adopt a new terminal geometry, re-deriving the focus ring from the layout
@@ -3379,8 +3475,10 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     # "is instant in both directions, because both modes' state is already in
     # memory".
     let profile = selectProfile(rt.width, rt.height)
-    let changed = rt.app.modes.toggle(rt.app.shellModel(rt.width, rt.height).layout,
-                                      profile)
+    let changed =
+      if rt.layoutBindingEnabled(): rt.toggleBoundArrangement(profile)
+      else: rt.app.modes.toggle(rt.app.shellModel(rt.width, rt.height).layout,
+                                profile)
     if not changed:
       # Unreachable through `toggled`, which never answers the current mode.
       # Reported rather than dropped so a future caller of `switchTo` with an

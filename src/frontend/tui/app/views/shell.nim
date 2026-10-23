@@ -452,6 +452,33 @@ type
     ## `newLayoutHistory` cloning.
     product*: ProductMode
     layouts*: array[ProductMode, LayoutNode]
+    bound*: array[ProductMode, BoundCell]
+      ## THE CELLS A BOUND RUNTIME SWITCHES THROUGH (`switchBound`), one per
+      ## mode, kept apart from `layouts` on purpose. With a layout binding
+      ## enabled the binding is the single authority over the arrangement on
+      ## screen — it is what is drawn AND what a click is hit-tested against —
+      ## so the register holds only the mode that is NOT on screen, and holds
+      ## all of it: the tree, the docked panes, whether it is the user's, and
+      ## the size it was left at. `layouts` is the unbound runtime's register
+      ## (`switchTo`), whose cell for the current mode IS what is drawn; mixing
+      ## the two would let a stored snapshot be drawn over the binding, which is
+      ## the defect codetracer-pm issue 2026-10-21's fix closed: after a round
+      ## trip the frame drew the snapshot and every gesture moved only the
+      ## hit-test.
+
+  BoundCell* = object
+    ## One mode's arrangement as a bound runtime left it.
+    stored*: bool
+      ## False until the mode has been LEFT once in this session; the mode's
+      ## default (`layoutValueForMode`) is then the arrangement to enter.
+    layout*: Layout
+    userModified*: bool
+      ## The binding's own flag for this arrangement (`LayoutBinding.
+      ## userModified`): it is what decides whether a resize re-flows it and
+      ## whether the replay loop's exit writes it or removes the document.
+    profile*: LayoutProfile
+      ## The size it was left at, so entering it at another size applies the
+      ## binding's own re-flow rule (`binding.resize`) rather than a second one.
 
 proc initModeRegister*(product = pmDebug): ModeRegister =
   ModeRegister(product: product)
@@ -499,6 +526,28 @@ proc toggle*(reg: var ModeRegister; leaving: LayoutNode;
   ## is `switchTo` applied to `product_mode.toggled`, never a pair of one-way
   ## commands that can get out of step.
   reg.switchTo(leaving, toggled(reg.product), profile)
+
+proc switchBound*(reg: var ModeRegister; leaving: BoundCell;
+                  target: ProductMode): tuple[changed: bool; entering: BoundCell] =
+  ## The BOUND runtime's switch: `switchTo`'s four requirements, over whole
+  ## arrangements and with the binding as the only thing on screen.
+  ##
+  ## `leaving` is the binding's arrangement as it is now; it is stored in the
+  ## cell for the mode being left (§4 requirement 2). The answer is the
+  ## entering mode's cell, which the caller loads INTO the binding (§4
+  ## requirement 1); `stored = false` there means a first visit, and the
+  ## caller enters the mode's default. Switching to the current mode changes
+  ## nothing and overwrites no cell (§6). `product` and the cell move together
+  ## (§4 requirement 4).
+  ##
+  ## The entering cell is NOT cleared: it is storage, and the next switch out
+  ## of that mode overwrites it with the binding's arrangement before anything
+  ## could read it again. `tui_app.shellModel` never draws a `bound` cell.
+  if target == reg.product:
+    return (false, leaving)
+  reg.bound[reg.product] = leaving
+  reg.product = target
+  (true, reg.bound[target])
 
 proc activeLayout*(reg: ModeRegister): LayoutNode =
   ## The tree this register says is on screen, or `nil` when the current mode
