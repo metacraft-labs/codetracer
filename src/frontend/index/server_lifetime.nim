@@ -29,7 +29,9 @@ import
 
 const ParentCheckIntervalMs = 1_000
   ## How often the server looks for `ct host`. The cost is one small `/proc`
-  ## read; the bound is how long a server outlives a SIGKILLed `ct host`.
+  ## read on Linux and a signal 0 elsewhere, plus one `ps` spawn off Linux when
+  ## node runs behind a wrapper (`zombieOffLinux`); the bound is how long a
+  ## server outlives a SIGKILLed `ct host`.
 
 proc currentPpid(): int {.importjs: "(process.ppid)".}
 
@@ -61,6 +63,24 @@ proc processGone(pid: int; startTime: cstring): bool {.importjs: """
   ## gone: a SIGKILLed `ct host` stays one until whatever started it reaps it,
   ## and signal 0 still succeeds on a zombie. Elsewhere signal 0 is the test;
   ## EPERM means the process exists but belongs to someone else.
+
+proc zombieOffLinux(pid: int): bool {.importjs: """
+  (function (pid) {
+    if (process.platform === 'linux' || process.platform === 'win32') { return false; }
+    try {
+      var out = require('child_process').execFileSync('ps', ['-o', 'stat=', '-p', String(pid)],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 });
+      return out.trim().charAt(0) === 'Z';
+    } catch (e) { return false; }
+  })(#)""".}
+  ## Whether a process that still answers signal 0 is a zombie, where there is
+  ## no `/proc` to say so: `ps -o stat=` prints the state, `Z` for a zombie
+  ## (https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html; the
+  ## `stat` keyword is the BSD and procps spelling of it). It costs a process
+  ## spawn, so it is asked only when nothing cheaper can tell: off Linux, with
+  ## node behind a wrapper (our parent is not the owner, so re-parenting says
+  ## nothing). A `ps` that fails answers "not a zombie", which leaves the
+  ## server as it was rather than ending it on a guess.
 
 proc unrefInterval(callback: proc(), delayMs: int) {.importjs: """
   (function (cb, ms) { var t = setInterval(cb, ms); if (t.unref) { t.unref(); } })(#, #)""".}
@@ -101,14 +121,25 @@ proc installServerLifetime*() =
   # The owner is watched directly, not only through `process.ppid`: when
   # `CODETRACER_NODE_EXE_PATH` names a wrapper that forks node rather than
   # exec'ing it, our parent is the wrapper, which may outlive `ct host` or die
-  # without telling us. The ppid check stays for the direct case off Linux,
-  # where an unreaped zombie still answers signal 0.
+  # without telling us. Off Linux an unreaped zombie still answers signal 0,
+  # so the direct case relies on re-parenting and the wrapper case on `ps`.
   let owner = callerProcessPid
+  # `not (owner > 0)` rather than `owner <= 0`: a `--caller-pid` (or
+  # `CODETRACER_CALLER_PID`) that does not parse is NaN here, and NaN compares
+  # false both ways. It names no owner, so it must not read as one already gone.
+  if not (owner > 0):
+    return
   let ownerStart = processStartTime(owner)
   let parentAtStart = currentPpid()
-  if owner > 0 and not processGone(owner, ownerStart):
+  # An owner already gone is the same event caught early: `ct host` died while
+  # node was starting, before any watch could see it go. Serving on would
+  # leave exactly the orphan the watch exists to prevent.
+  if processGone(owner, ownerStart):
+    shutDown("ct host (pid " & $owner & ") was gone before the server started", 0)
+  else:
     unrefInterval(proc() =
       if (parentAtStart == owner and currentPpid() != parentAtStart) or
-          processGone(owner, ownerStart):
+          processGone(owner, ownerStart) or
+          (parentAtStart != owner and zombieOffLinux(owner)):
         shutDown("ct host (pid " & $owner & ") is gone", 0)
     , ParentCheckIntervalMs)

@@ -54,15 +54,21 @@
 ## SIGKILLed `ct host` is left an unreaped zombie for the whole arm, as it is
 ## under a supervisor slow to reap it.
 ##
+## And `node server_index.js` started directly with a `--caller-pid` that is not
+## its parent: naming a process that has already exited, the server exits (a
+## `ct host` that died while node was starting); naming a live one, it keeps
+## serving for five seconds (the control) and exits once that process is
+## SIGKILLed and left unreaped.
+##
 ## Lane: `ct-host-admission` (`just test-ct-host-admission`).
 
-import std/[json, os, osproc, posix, strutils, tempfiles, times, unittest]
+import std/[json, os, osproc, posix, strtabs, strutils, tempfiles, times, unittest]
 
 import ct_host_harness
 
 # One line: `ci/lib/run-nim-test-lane.sh` reads this spelling as the runtime
 # assertion count.
-const ExpectedAssertions = 44
+const ExpectedAssertions = 49
 
 var countedAssertions = 0
 
@@ -295,6 +301,78 @@ suite "ct host ends what it started when it is stopped or killed":
 
   test "SIGKILL of ct host, with node behind a forking wrapper, ends them all":
     runArm(SIGKILL, forkingWrapper = true)
+
+proc startServerFor(scratch: string; owner: int): Process =
+  ## `node server_index.js` started directly, as `ct host` starts it, but with
+  ## `--caller-pid` naming `owner`, which is NOT its parent: only the watch on
+  ## the owner itself can end it. The idle timeout is far beyond the arm, so it
+  ## cannot be what ends the server.
+  let prefix = ctBinary.parentDir.parentDir
+  var env = newStringTable(modeCaseSensitive)
+  for key, value in envPairs():
+    env[key] = value
+  env["CODETRACER_PREFIX"] = prefix
+  env["NODE_PATH"] = prefix / "node_modules"
+  env["CODETRACER_HOME"] = scratch / "ct-home"
+  env["TMPDIR"] = scratch
+  startProcess(findExe("node"), workingDir = root, env = env,
+    args = @[prefix / "server_index.js", "-1", "--welcome-screen",
+             "--port", $freePort(), "--frontend-socket-port", $freePort(),
+             "--frontend-socket-parameters", "",
+             "--backend-socket-port", $freePort(),
+             "--caller-pid", $owner, "--idle-timeout-ms", "600000"],
+    options = {poParentStreams})
+
+proc exitsWithin(p: Process; seconds: float): bool =
+  let deadline = epochTime() + seconds
+  while p.running:
+    if epochTime() > deadline:
+      return false
+    sleep(100)
+  true
+
+suite "the server ends with its --caller-pid, which need not be its parent":
+  test "an owner already gone when the server starts: the server exits":
+    let scratch = createTempDir("ct-host-owner-gone-", "")
+    # A pid that named a process a moment ago and names none now.
+    let gone = startProcess("/usr/bin/env", args = @["true"])
+    let gonePid = gone.processID
+    discard gone.waitForExit()
+    gone.close()
+    let server = startServerFor(scratch, gonePid)
+    try:
+      ck server.exitsWithin(SurvivorDeadlineS)
+      # Status 0 is the lifetime watch's own exit (`shutDown`); a server that
+      # crashed while starting would have exited too, with another status.
+      ck server.peekExitCode == 0
+    finally:
+      if server.running:
+        server.kill()
+      discard server.waitForExit()
+      server.close()
+      removeDir(scratch)
+
+  test "a live owner keeps the server; its death, not the server's parent's, ends it":
+    let scratch = createTempDir("ct-host-owner-live-", "")
+    let owner = startProcess("/usr/bin/env", args = @["sleep", "600"])
+    let server = startServerFor(scratch, owner.processID)
+    try:
+      # The control: with its owner alive, the watch leaves the server be.
+      sleep(5_000)
+      ck server.running
+      discard posix.kill(Pid(owner.processID), SIGKILL)
+      # Left an unreaped zombie for the rest of the case, as a SIGKILLed
+      # `ct host` is under a supervisor slow to reap it.
+      ck server.exitsWithin(SurvivorDeadlineS)
+      ck server.peekExitCode == 0
+    finally:
+      if server.running:
+        server.kill()
+      discard server.waitForExit()
+      server.close()
+      discard owner.waitForExit()
+      owner.close()
+      removeDir(scratch)
 
 suite "assertion count":
   test "assertion count":
