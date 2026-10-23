@@ -1356,8 +1356,10 @@ when defined(posix):
     ## returns from waiting for the node server as it does after any other
     ## exit. SA_RESTART keeps that wait from failing with EINTR.
     ##
-    ## SIGKILL cannot be forwarded; the node server covers it by watching for
-    ## its parent to go away (`src/frontend/index/server_lifetime.nim`).
+    ## SIGKILL cannot be forwarded, and a forwarded signal stops only a wrapper
+    ## when `CODETRACER_NODE_EXE_PATH` names one that forks node; the node
+    ## server covers both by watching for `ct host` to go away
+    ## (`src/frontend/index/server_lifetime.nim`).
     terminationSignalTarget = Pid(child)
     var action: Sigaction
     action.sa_handler = forwardTerminationSignal

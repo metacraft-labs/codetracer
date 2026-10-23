@@ -80,7 +80,8 @@ proc request*(url: string; headers: openArray[(string, string)] = []): Answer =
 proc readLog*(path: string): string =
   try: readFile(path) except CatchableError: ""
 
-proc startHost*(scratch: string): Host =
+proc startHost*(scratch: string;
+                extraEnv: openArray[(string, string)] = []): Host =
   ## `ct host` in its own session (so stopping it stops the node index it
   ## starts), its output in a file, and the URL line read from that file.
   result.socketPort = freePort()
@@ -97,6 +98,8 @@ proc startHost*(scratch: string): Host =
   env["TMPDIR"] = scratch
   env["CODETRACER_IN_UI_TEST"] = "1"
   env["CT_TEST_LOG"] = result.logPath
+  for (key, value) in extraEnv:
+    env[key] = value
   let wrapper = "exec >\"$CT_TEST_LOG\" 2>&1; exec \"$@\""
   result.process = startProcess("/usr/bin/env", workingDir = root, env = env,
     args = @["setsid", "bash", "-c", wrapper, "bash", ctBinary, "host",

@@ -46,6 +46,14 @@
 ## processes found before the signal is alive and the session holds no
 ## process.
 ##
+## SIGTERM and SIGKILL again with `CODETRACER_NODE_EXE_PATH` naming a wrapper
+## that forks node and waits for it instead of exec'ing it: the forwarded
+## SIGTERM then ends only the wrapper, and node's parent is the wrapper, not
+## `ct host`, so only a watch on `ct host` itself can end the server. Each
+## wrapper arm also checks that node's parent really is not `ct host`. The
+## SIGKILLed `ct host` is left an unreaped zombie for the whole arm, as it is
+## under a supervisor slow to reap it.
+##
 ## Lane: `ct-host-admission` (`just test-ct-host-admission`).
 
 import std/[json, os, osproc, posix, strutils, tempfiles, times, unittest]
@@ -54,7 +62,7 @@ import ct_host_harness
 
 # One line: `ci/lib/run-nim-test-lane.sh` reads this spelling as the runtime
 # assertion count.
-const ExpectedAssertions = 28
+const ExpectedAssertions = 44
 
 var countedAssertions = 0
 
@@ -113,6 +121,7 @@ type
     pid: int
     start: string
     name: string
+    ppid: int
 
   ProcStat = object
     ok: bool
@@ -172,14 +181,14 @@ proc descendants(root: int): seq[ProcId] =
     let parent = frontier.pop()
     for (pid, st) in parents:
       if st.ppid == parent:
-        result.add ProcId(pid: pid, start: st.start, name: exeName(pid))
+        result.add ProcId(pid: pid, start: st.start, name: exeName(pid), ppid: st.ppid)
         frontier.add pid
 
 proc inSession(session: int): seq[ProcId] =
   for pid in allPids():
     let st = readStat(pid)
     if st.ok and st.session == session and st.state notin {'Z', 'X'}:
-      result.add ProcId(pid: pid, start: st.start, name: exeName(pid))
+      result.add ProcId(pid: pid, start: st.start, name: exeName(pid), ppid: st.ppid)
 
 proc names(procs: seq[ProcId]): seq[string] =
   for p in procs:
@@ -198,11 +207,22 @@ proc waitUntilNamed(root: int; name: string; timeoutS: float): seq[ProcId] =
       return
     sleep(100)
 
-proc runArm(signal: cint) =
+proc runArm(signal: cint; forkingWrapper = false) =
   let scratch = createTempDir("ct-host-killed-", "")
   var host: Host
   try:
-    host = startHost(scratch)
+    var extraEnv: seq[(string, string)]
+    if forkingWrapper:
+      # A `node` that FORKS the real one and waits, as a launcher script
+      # without `exec` does: `ct host`'s child is then the wrapper, so a
+      # forwarded signal stops only the wrapper and node is never re-parented
+      # when `ct host` dies.
+      let realNode = findExe("node")
+      let wrapperPath = scratch / "node-wrapper.sh"
+      writeFile(wrapperPath, "#!" & findExe("bash") & "\n\"" & realNode & "\" \"$@\"\n")
+      setFilePermissions(wrapperPath, {fpUserRead, fpUserWrite, fpUserExec})
+      extraEnv.add ("CODETRACER_NODE_EXE_PATH", wrapperPath)
+    host = startHost(scratch, extraEnv)
     let hostPid = host.process.processID
     let hostStat = readStat(hostPid)
     let session = hostStat.session
@@ -224,6 +244,12 @@ proc runArm(signal: cint) =
     ck before.hasNamed("node")
     ck before.hasNamed("session-manager")
     ck before.hasNamed("replay-server")
+    if forkingWrapper:
+      # The wrapper arm's own vacuity guard: node really is behind it.
+      var nodeParent = -1
+      for p in before:
+        if p.name == "node": nodeParent = p.ppid
+      ck nodeParent > 0 and nodeParent != hostPid
 
     # `ct host` ALONE: not its group, not its session.
     ck posix.kill(Pid(hostPid), signal) == 0
@@ -263,6 +289,12 @@ suite "ct host ends what it started when it is stopped or killed":
 
   test "SIGKILL of ct host ends the node server, the session-manager and the replay":
     runArm(SIGKILL)
+
+  test "SIGTERM to ct host alone, with node behind a forking wrapper, ends them all":
+    runArm(SIGTERM, forkingWrapper = true)
+
+  test "SIGKILL of ct host, with node behind a forking wrapper, ends them all":
+    runArm(SIGKILL, forkingWrapper = true)
 
 suite "assertion count":
   test "assertion count":
