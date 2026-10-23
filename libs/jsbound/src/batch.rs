@@ -71,6 +71,21 @@ pub enum BatchError {
     Frame(DecodeError),
 }
 
+impl BatchError {
+    /// The contract name of this refusal, as the shared batch vectors spell
+    /// it and the TypeScript parser (`BatchFormatError.code`) reports it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            BatchError::BadMagic => "BadMagic",
+            BatchError::UnsupportedVersion(_) => "UnsupportedVersion",
+            BatchError::EnvelopeTooLarge(_) => "EnvelopeTooLarge",
+            BatchError::Truncated(_) => "Truncated",
+            BatchError::BadEnvelope(_) => "BadEnvelope",
+            BatchError::Frame(_) => "Frame",
+        }
+    }
+}
+
 impl fmt::Display for BatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

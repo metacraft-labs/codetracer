@@ -387,7 +387,17 @@ enum TraceAction {
     ///
     /// The server connects to the daemon (auto-starting if needed) to
     /// execute tool operations.
-    Mcp,
+    Mcp {
+        /// Let `read_source_file` read a file the recording's source list
+        /// names from this host when the recording carries no copy of it.
+        ///
+        /// Off by default: the source list is part of the recording, so a
+        /// recording made elsewhere can name any file on this machine.  Set
+        /// it when reading your own recordings; leave it unset for an agent
+        /// that reads recordings other people's traffic produced.
+        #[arg(long)]
+        allow_host_source_reads: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -3479,7 +3489,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .await;
             }
-            TraceAction::Mcp => {
+            TraceAction::Mcp {
+                allow_host_source_reads,
+            } => {
                 // MCP server: redirect all logging to stderr only.
                 // stdout is reserved exclusively for JSON-RPC transport.
                 if let Err(e) = flexi_logger::Logger::try_with_str("info")
@@ -3490,6 +3502,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let config = mcp_server::McpServerConfig {
                     daemon_socket_path: daemon_socket_path.clone(),
                     daemon_pid_path: daemon_pid_path.clone(),
+                    host_source_reads: if *allow_host_source_reads {
+                        mcp_server::HostSourceReads::Allowed
+                    } else {
+                        mcp_server::HostSourceReads::Refused
+                    },
                 };
                 return mcp_server::run_mcp_server(config).await;
             }

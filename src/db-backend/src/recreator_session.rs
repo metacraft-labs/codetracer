@@ -149,6 +149,71 @@ impl std::fmt::Display for ReplayWorkerStartError {
 
 impl Error for ReplayWorkerStartError {}
 
+/// A replay worker that went away while a query was in flight: it closed its
+/// connection without answering, or the connection broke under the query.
+///
+/// Returned by [`ReplayWorker::dispatch_replay_query`] instead of a bare
+/// string so that a caller can tell "the worker answered with an error" (the
+/// worker is still there and still positioned) from "the worker is gone" (its
+/// replay position is lost with it). The flow preloader depends on that
+/// difference: a flow whose worker died must be reported as a failure naming
+/// the worker, not completed from a fresh worker that knows nothing of the
+/// position the flow was walking (codetracer-pm issue 2026-10-21 "Rust rr flow
+/// worker segfaults in LLDB, so the flow finds no variables").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayWorkerDied {
+    /// The worker's name (`stable`, `flow`, …), as passed to `replay-worker --name`.
+    pub name: String,
+    /// The worker's index, as passed to `replay-worker --index`.
+    pub index: usize,
+    /// The worker's process id, when the session spawned it.
+    pub pid: Option<u32>,
+    /// The kind of query that was in flight (`JumpToCall`, `Step`, …).
+    pub query: String,
+    /// How the process ended, as far as it could be observed: its exit
+    /// status (`signal: 11 (SIGSEGV) (core dumped)`, `exit status: 3`) or why
+    /// none is known.
+    pub exit: String,
+}
+
+impl std::fmt::Display for ReplayWorkerDied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the `{}` replay worker (index {}", self.name, self.index)?;
+        if let Some(pid) = self.pid {
+            write!(f, ", pid {pid}")?;
+        }
+        write!(f, ") died while answering {}: {}", self.query, self.exit)
+    }
+}
+
+impl Error for ReplayWorkerDied {}
+
+/// How long to wait for a worker that closed its connection to finish
+/// exiting, so its exit status can be reported.
+///
+/// This bounds an unusual case, not the common one. A worker killed by a
+/// signal has normally exited completely by the time its connection reads
+/// EOF: Linux writes the core dump before it closes the dying process's
+/// files, so the socket closes after the core is written and the process can
+/// be reaped at once (measured 2026-10-23 with `systemd-coredump`: EOF 1.2 s
+/// after a SIGSEGV that dumped 250 MB, and `waitpid` succeeded immediately
+/// after it). The wait matters for a worker that closed its end and is still
+/// shutting down, for example tearing down LLDB and its `rr` replay. It is
+/// stopped after the grace period, so a worker that never exits cannot hold
+/// the session. Stopping it earlier would lose its exit status, the evidence
+/// the death report carries.
+const WORKER_EXIT_GRACE: Duration = Duration::from_secs(10);
+
+/// The kind of a serialized replay query, for naming it in a diagnostic
+/// without repeating its payload: `ReplayQuery` is internally tagged
+/// (`#[serde(tag = "kind")]`), so `{"kind":"JumpToCall",…}` → `JumpToCall`.
+fn replay_query_kind(raw_json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(raw_json)
+        .ok()
+        .and_then(|query| query.get("kind")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| "a replay query".to_string())
+}
+
 /// Scan a worker's stderr for the licensing module's machine-readable stop
 /// reason.
 ///
@@ -211,6 +276,9 @@ pub struct RecreatorReplaySession {
     last_c_location: Option<Location>,
     materialization_cache: MaterializationCache,
     materialization_cache_ctfs_path: Option<PathBuf>,
+    /// Whether a query after the worker died may start a replacement. See
+    /// [`RecreatorReplaySession::without_respawn_after_worker_death`].
+    respawn_after_worker_death: bool,
 }
 
 #[derive(Debug)]
@@ -241,6 +309,9 @@ pub struct ReplayWorker {
     recording_id: String,
     process: Option<Child>,
     stream: Option<WorkerStream>,
+    /// How this worker last died with a query in flight, until a later
+    /// [`ReplayWorker::start`] replaces it. See [`ReplayWorkerDied`].
+    last_death: Option<ReplayWorkerDied>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -298,6 +369,7 @@ impl ReplayWorker {
             recording_id: recording_id.to_string(),
             process: None,
             stream: None,
+            last_death: None,
         }
     }
 
@@ -459,6 +531,9 @@ impl ReplayWorker {
             }));
         }
         self.active = true;
+        // A fresh worker replaces the one that died: the death no longer
+        // describes this worker.
+        self.last_death = None;
         Ok(())
     }
 
@@ -712,8 +787,11 @@ impl ReplayWorker {
         debug!("send to worker {raw_json}\n");
         // `clippy::unused_io_amount` catched we need write_all, not write
         if let Err(e) = stream.write_all(&format!("{raw_json}\n").into_bytes()) {
-            self.abandon_connection();
-            return Err(format!("dispatch_replay_query IO error sending {raw_json}: {e}").into());
+            // The worker's end of the socket is gone (EPIPE / ECONNRESET): it
+            // died after answering the previous query.
+            return Err(Box::new(
+                self.record_death(&raw_json, &format!("sending the query failed ({e})")),
+            ));
         }
 
         let mut res = "".to_string();
@@ -746,12 +824,15 @@ impl ReplayWorker {
         debug!("res: `{res}`");
 
         if res.is_empty() {
-            // EOF — the replay worker crashed or disconnected. Mark the
-            // worker as inactive so that the next query attempt can restart it,
-            // and return a clear error rather than an empty string that would
-            // fail JSON parsing downstream.
-            self.active = false;
-            return Err("ct-native-replay worker disconnected (EOF on response)".into());
+            // EOF — the replay worker crashed or disconnected without
+            // answering. It is marked inactive, so the next query attempt can
+            // restart it (a session may refuse that, see
+            // `RecreatorReplaySession::without_respawn_after_worker_death`),
+            // and the error names the worker and how its process ended rather
+            // than leaving an empty string to fail JSON parsing downstream.
+            return Err(Box::new(
+                self.record_death(&raw_json, "it closed its connection without answering"),
+            ));
         }
 
         if res.starts_with("error:") {
@@ -784,6 +865,36 @@ impl ReplayWorker {
 }
 
 impl ReplayWorker {
+    /// How this worker last died with a query in flight, if it has not been
+    /// restarted since.
+    pub fn last_death(&self) -> Option<&ReplayWorkerDied> {
+        self.last_death.as_ref()
+    }
+
+    /// Record that the worker went away while answering `raw_json`: drop the
+    /// connection, reap the process to learn how it ended, and remember the
+    /// death (see [`ReplayWorkerDied`]). `connection` says what was observed
+    /// on the socket.
+    fn record_death(&mut self, raw_json: &str, connection: &str) -> ReplayWorkerDied {
+        self.stream = None;
+        self.active = false;
+        let pid = self.process.as_ref().map(Child::id);
+        let process_end = match self.process.take() {
+            Some(mut child) => reap_worker(&mut child, WORKER_EXIT_GRACE),
+            None => "the session holds no process handle for it".to_string(),
+        };
+        let death = ReplayWorkerDied {
+            name: self.name.clone(),
+            index: self.index,
+            pid,
+            query: replay_query_kind(raw_json),
+            exit: format!("{connection}; {process_end}"),
+        };
+        error!("{death}");
+        self.last_death = Some(death.clone());
+        death
+    }
+
     /// Close the connection to the worker and stop it. Used when the
     /// connection can no longer be trusted to pair answers with queries.
     fn abandon_connection(&mut self) {
@@ -794,6 +905,29 @@ impl ReplayWorker {
         }
         self.process = None;
         self.active = false;
+    }
+}
+
+/// Wait up to `grace` for a worker that closed its connection to exit, and
+/// describe how it ended: `the process ended with signal: 11 (SIGSEGV) (core
+/// dumped)` (std's `ExitStatus` display). A worker still running after `grace`
+/// is stopped, since nothing can be paired with its answers any more.
+fn reap_worker(child: &mut Child, grace: Duration) -> String {
+    let deadline = Instant::now() + grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return format!("the process ended with {status}"),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return format!(
+                    "the process was still running {}s after its connection ended, so it was stopped",
+                    grace.as_secs()
+                );
+            }
+            Err(e) => return format!("its exit status could not be read: {e}"),
+        }
     }
 }
 
@@ -849,7 +983,23 @@ impl RecreatorReplaySession {
             last_c_location: None,
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: default_materialization_cache_ctfs_path(&ct_rr_args.rr_trace_folder),
+            respawn_after_worker_death: true,
         }
+    }
+
+    /// Make the worker's death final for this session: once it died with a
+    /// query in flight, every later query fails with that same
+    /// [`ReplayWorkerDied`] instead of starting a fresh worker.
+    ///
+    /// For sessions whose queries only make sense as a sequence from one
+    /// replay position, such as a flow walk. A replacement worker starts at
+    /// the beginning of the recording, so a walk continued on it would mix a
+    /// position it never reached into its answer: before this existed, a flow
+    /// whose worker died in `JumpToCall` fell back to `RunToEntry` on a
+    /// replacement and returned the first steps of `main` as the flow.
+    pub fn without_respawn_after_worker_death(mut self) -> Self {
+        self.respawn_after_worker_death = false;
+        self
     }
 
     /// A session for a new worker named `name`, with an index reserved through
@@ -869,6 +1019,11 @@ impl RecreatorReplaySession {
     pub fn ensure_active_stable(&mut self) -> Result<(), Box<dyn Error>> {
         // start stable process if not active, store fields, setup ipc? store in stable
         if !self.stable.active {
+            if !self.respawn_after_worker_death
+                && let Some(death) = self.stable.last_death()
+            {
+                return Err(Box::new(death.clone()));
+            }
             eprintln!("[rr-dispatcher] starting worker for '{}'", self.name);
             let res = self.stable.start();
             if let Err(e) = res {
@@ -1264,6 +1419,10 @@ impl ReplaySession for RecreatorReplaySession {
         self.ensure_active_stable()?;
         let response = self.stable.dispatch_replay_query(ReplayQuery::SeekToGeid { geid })?;
         parse_bool_or_status_response(&response)
+    }
+
+    fn worker_death(&self) -> Option<String> {
+        self.stable.last_death().map(ToString::to_string)
     }
 
     fn serves_geid_positions(&self) -> bool {
@@ -1826,6 +1985,7 @@ mod tests {
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
+                last_death: None,
             },
             recreator_exe: PathBuf::new(),
             rr_trace_folder: PathBuf::new(),
@@ -1834,6 +1994,7 @@ mod tests {
             last_c_location: None,
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
+            respawn_after_worker_death: true,
         };
 
         let materialized = session.re_execute_and_materialize(10, 20).unwrap();
@@ -1900,6 +2061,7 @@ mod tests {
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
+                last_death: None,
             },
             recreator_exe: PathBuf::new(),
             rr_trace_folder: PathBuf::new(),
@@ -1908,6 +2070,7 @@ mod tests {
             last_c_location: None,
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
+            respawn_after_worker_death: true,
         };
 
         assert_eq!(
@@ -1924,5 +2087,123 @@ mod tests {
         let db = session.omniscient_db().expect("session exposes live cache");
         assert!(db.is_present());
         assert_eq!(db.last_write_before(0x6000, 8, 13).unwrap().new_value, 77);
+    }
+
+    /// A `ReplayWorker` whose "process" is a real `sh` holding the other end of
+    /// a real socket as its stdin: it reads one query line and then runs
+    /// `then` (for example `kill -KILL $$`).
+    ///
+    /// Not a mock of `ct-native-replay`: what these tests exercise is how the
+    /// session observes a worker going away — EOF on a real socket and a real
+    /// exit status from `waitpid` — and both are the kernel's, whatever the
+    /// process was. Making a real `ct-native-replay` die on cue would need a
+    /// crashing replay, which is what the end-to-end
+    /// `rust_flow_integration` test covers.
+    #[cfg(unix)]
+    fn worker_that_reads_one_query_then(then: &str, name: &str) -> ReplayWorker {
+        use std::os::fd::OwnedFd;
+        let (client, server) = UnixStream::pair().unwrap();
+        // Bounded, so a regression that stops seeing EOF fails instead of hanging.
+        client.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(format!("read -r query; {then}"))
+            .stdin(Stdio::from(OwnedFd::from(server)))
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut worker = ReplayWorker::new(
+            name,
+            1,
+            Path::new("/nonexistent/ct-native-replay"),
+            Path::new("/nonexistent/trace"),
+        );
+        worker.process = Some(child);
+        worker.stream = Some(client);
+        worker.active = true;
+        worker
+    }
+
+    #[cfg(unix)]
+    fn expect_death<'a>(err: &'a (dyn Error + 'static)) -> &'a ReplayWorkerDied {
+        err.downcast_ref::<ReplayWorkerDied>()
+            .unwrap_or_else(|| panic!("expected a ReplayWorkerDied, got: {err}"))
+    }
+
+    /// A worker that dies with a query in flight is reported as a death that
+    /// names it, the query and the signal — not as an anonymous "disconnected",
+    /// which is what let a SIGSEGV in the `flow` worker pass for an empty flow.
+    #[cfg(unix)]
+    #[test]
+    fn a_worker_killed_mid_query_is_reported_as_a_death_naming_it_and_the_signal() {
+        let mut worker = worker_that_reads_one_query_then("kill -KILL $$", "flow");
+        let pid = worker.process.as_ref().unwrap().id();
+
+        let err = worker
+            .dispatch_replay_query(ReplayQuery::RunToEntry)
+            .expect_err("a worker that dies without answering cannot have answered");
+        let death = expect_death(err.as_ref()).clone();
+
+        assert_eq!(death.name, "flow");
+        assert_eq!(death.index, 1);
+        assert_eq!(death.pid, Some(pid));
+        assert_eq!(death.query, "RunToEntry");
+        assert!(
+            death.exit.contains("SIGKILL"),
+            "the exit must name the signal: {}",
+            death.exit
+        );
+        let message = death.to_string();
+        assert!(
+            message.contains("the `flow` replay worker") && message.contains("died while answering RunToEntry"),
+            "got: {message}"
+        );
+        assert!(!worker.active, "a dead worker must not be reported active");
+        assert_eq!(worker.last_death(), Some(&death));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_worker_that_exits_mid_query_is_reported_with_its_exit_status() {
+        let mut worker = worker_that_reads_one_query_then("exit 3", "stable");
+        let err = worker
+            .dispatch_replay_query(ReplayQuery::LoadLocation)
+            .expect_err("a worker that exits without answering cannot have answered");
+        let death = expect_death(err.as_ref());
+        assert_eq!(death.query, "LoadLocation");
+        assert!(
+            death.exit.contains("exit status: 3"),
+            "the exit must carry the status: {}",
+            death.exit
+        );
+    }
+
+    /// A session built `without_respawn_after_worker_death` answers every
+    /// query after the death with that death, instead of starting a fresh
+    /// worker at the beginning of the recording. The worker executable here
+    /// does not exist, so a respawn attempt would fail with a start error
+    /// rather than the death: the assertion distinguishes the two.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_without_respawn_keeps_reporting_its_workers_death() {
+        let mut session = RecreatorReplaySession::new(
+            "flow",
+            1,
+            RecreatorArgs {
+                worker_exe: PathBuf::from("/nonexistent/ct-native-replay"),
+                rr_trace_folder: PathBuf::from("/nonexistent/trace"),
+                ..RecreatorArgs::default()
+            },
+        )
+        .without_respawn_after_worker_death();
+        session.stable = worker_that_reads_one_query_then("kill -KILL $$", "flow");
+
+        let first = session.run_to_entry().expect_err("the worker died answering it");
+        let first = expect_death(first.as_ref()).clone();
+        let later = session
+            .run_to_entry()
+            .expect_err("a dead worker must not be silently replaced");
+        assert_eq!(expect_death(later.as_ref()), &first);
+        assert_eq!(session.worker_death(), Some(first.to_string()));
     }
 }

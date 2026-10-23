@@ -40,9 +40,16 @@
 ##     the quit-key case above and fail this one.
 ##
 ## THE EDIT-MODE LOOP (`main.editInteractive`) answers `dekFocus` with the same
-## `VcsSource.refreshOnFocus` call, but is not driven here: that loop enables
-## no layout binding, so the FILES stack's VCS tab cannot be chosen there and
-## its pane is never on screen to read.
+## `VcsSource.refreshOnFocus` call, and the third case drives it: the shipped
+## binary opens the repository with `--edit` (no recording), the VCS tab is
+## chosen with a real click, and the same interval-pinned budget applies. Until
+## codetracer-pm issue 2026-10-21 ("the terminal's Edit mode keeps a VCS pane
+## up to date that the user cannot show") this path could not be tested at
+## all: that loop enabled no layout binding, so the click was dropped and the
+## pane was never on screen to read. In Edit mode the focus reports must not
+## be TEXT either — the editor has the keyboard there, so a report mistaken
+## for keys would be typed into the open buffer: the buffer's tab carries no
+## dirty marker after them, and no `[I` / `[O` reached the screen.
 ##
 ## No mocks: a real git repository changed by another program, the real
 ## binary on a real recording in a real PTY (TermAssert + libvterm). The
@@ -61,7 +68,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 17
+const ExpectedAssertions = 28
 
 const
   Cols = 200
@@ -135,6 +142,7 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane refreshes on focus":
       # binary remembers on quit.
       .envSet("CODETRACER_TUI_LAYOUT_DIR",
               getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-focus-pane")
+      .carryRunMark()
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     # THE REQUEST: DECSET 1004, written by `terminal_driver.start`.
@@ -193,6 +201,9 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane refreshes on focus":
       .envSet("COLORTERM", "truecolor")
       .envSet("CODETRACER_TUI_LAYOUT_DIR",
               getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-focus-signal")
+      # THIS RUN'S MARK: `noSurvivingReplayServer` below counts only engines
+      # that carry it, so without it this session's leak would pass unseen.
+      .carryRunMark()
       .spawn()
     settleOnDebugger(sess, Cols, Rows)
     # On while the session is live, and not yet given back.
@@ -210,6 +221,59 @@ suite "PLAT-47 deliverable 4: the terminal's VCS pane refreshes on focus":
     ck bytes.rfind("\e[?1004l") > bytes.rfind("\e[?1004h")
     ck sess.transcriptDroppedBytes() == 0
     ck noSurvivingReplayServer()
+    sess.close()
+    removeDir(repo.parentDir)
+
+  test "in Edit mode, CSI I re-reads the project before the interval could have":
+    # The edit loop's `dekFocus` arm, reached the way a user reaches it: the
+    # VCS tab chosen with a click, which needs the layout binding that loop
+    # now enables. No recording and no `replay-server`.
+    let repo = fixtureRepo()
+    var sess = newTuiTest(tuiBinary(), @["--edit", repo])
+      .width(Cols).height(Rows)
+      .transcript()
+      .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
+      .envSet("TERM", "xterm-256color").envSet("LANG", "en_US.UTF-8")
+      .envSet("COLORTERM", "truecolor")
+      .envSet("CODETRACER_TUI_LAYOUT_DIR",
+              getEnv("CODETRACER_TUI_LAYOUT_DIR") / "vcs-focus-edit")
+      .spawn()
+    discard sess.waitFor("[EDIT]")
+    ck sess.transcriptBytes().contains("\e[?1004h")
+    let strip = sess.regionText(1, 0, Cols, 1)
+    let at = strip.find(" VCS ")
+    ck at >= 0
+    sess.sendMouseClick(1, at + 2)
+    discard sess.waitFor("WORKING TREE (3)")
+
+    # PIN THE INTERVAL'S PHASE, exactly as in the replay case above.
+    writeFile(repo / "first.txt", "picked up by the interval\n")
+    discard sess.waitFor("? first.txt", IntervalBudgetMs)
+    let intervalReadAt = getMonoTime()
+
+    sess.send(FocusOut)
+    writeFile(repo / "second.txt", "picked up by the focus regain\n")
+    let changedAt = getMonoTime()
+    sess.send(FocusIn)
+    let screen = sess.waitFor("? second.txt", FocusBudgetMs)
+    let afterFocus = (getMonoTime() - changedAt).inMilliseconds
+    let sinceInterval = (getMonoTime() - intervalReadAt).inMilliseconds
+    checkpoint("edit mode: second.txt on screen " & $afterFocus &
+               " ms after CSI I, " & $sinceInterval &
+               " ms after the interval's re-read")
+    ck afterFocus < FocusBudgetMs
+    ck sinceInterval < VcsIntervalMs
+    ck screen.contains("WORKING TREE (5)")
+    # Neither report was typed into the open buffer.
+    ck screen.contains("[EDIT]")
+    ck not screen.contains(".txt ●")
+    ck not screen.contains("[I")
+    ck not screen.contains("[O")
+
+    # Ctrl+Q, the CUA base's quit (`:` is text in an Edit-mode buffer).
+    sess.send("\x11")
+    ck sess.waitExit(initDuration(seconds = 30)) == some(0)
+    ck sess.transcriptBytes().contains("\e[?1004l")
     sess.close()
     removeDir(repo.parentDir)
 

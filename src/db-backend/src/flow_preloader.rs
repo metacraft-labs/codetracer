@@ -27,6 +27,37 @@ fn should_seek_materialized_call_body_from_line_only_location(location: &Locatio
     location.rr_ticks.0 == 0 && location.event == 0 && location.line > 0
 }
 
+/// Why a call flow cannot be loaded at `location` on a replayed
+/// (non-materialized) trace, or `None` when it can be attempted.
+///
+/// A call flow is the walk of the call that contains a source position, so a
+/// location without one has no call to walk. That is the location a replay
+/// reports once it has run past the end of the recording (`<unknown>:-1`,
+/// carrying the end-of-trace tick count), and the worker cannot be sent there:
+/// every way of reaching it seeks rr to that tick, which rr refuses (no event
+/// of the trace matches), and before the native backend checked rr's answer
+/// the seek's follow-up `stepi` crashed LLDB and killed the worker (codetracer-pm
+/// issue 2026-10-21 "Rust rr flow worker segfaults in LLDB, so the flow finds
+/// no variables"). Refusing here names the cause before any worker is driven.
+///
+/// Materialized traces are not judged by this: their locations are step ids,
+/// and some recorders legitimately emit line 0 for a function's declaration.
+fn replayed_call_flow_refusal(location: &Location) -> Option<String> {
+    if location.line > 0 && !location.path.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "cannot load a call flow at {}:{}: the location has no source position (a replay stands \
+         there once it has run past the end of the recording), so there is no call to walk",
+        if location.path.is_empty() {
+            "<no path>"
+        } else {
+            &location.path
+        },
+        location.line
+    ))
+}
+
 /// Remove `.` components from a path so two spellings of the same file compare
 /// equal. Purely LEXICAL — nothing is read from the filesystem, because a flow
 /// walk must not depend on whether the recorded machine's tree still exists.
@@ -349,6 +380,34 @@ impl<'a> CallFlowPreloader<'a> {
     // TODO:
     // refactor load_flow to several methods
 
+    /// Load the flow for `location`, or an error update saying why it could
+    /// not be loaded: a call flow at a location with no source position on a
+    /// replayed trace (`replayed_call_flow_refusal`), a failure of the walk
+    /// itself, or the death of the replay worker the walk drove.
+    pub fn load_flow(&mut self, location: Location, replay: &mut dyn ReplaySession) -> FlowUpdate {
+        if self.mode == FlowMode::Call
+            && self.trace_kind != TraceKind::Materialized
+            && let Some(refusal) = replayed_call_flow_refusal(&location)
+        {
+            warn!("flow refused: {refusal}");
+            return FlowUpdate::error(&refusal);
+        }
+
+        let flow_update = self.walk_flow(location, replay);
+
+        // A worker that died during the walk must surface as the flow's
+        // failure, whatever the walk made of the query that observed it: the
+        // walk reads many failures as "stop here" or answers them with a
+        // fallback, and either turns a death into a short or substituted flow
+        // that looks successful. Checked last so it also covers a death the
+        // walk swallowed (see `ReplaySession::worker_death`).
+        if let Some(death) = replay.worker_death() {
+            error!("flow failed: {death}");
+            return FlowUpdate::error(&format!("the flow was not loaded: {death}"));
+        }
+        flow_update
+    }
+
     // TODO:
     //   we can add a NonEmptyVec or VecWithSizeAtLeast<1, ..>
     //   and with limiting its API we can make sure
@@ -360,7 +419,7 @@ impl<'a> CallFlowPreloader<'a> {
     //   last
     //
     #[allow(clippy::unwrap_used)]
-    pub fn load_flow(&mut self, location: Location, replay: &mut dyn ReplaySession) -> FlowUpdate {
+    fn walk_flow(&mut self, location: Location, replay: &mut dyn ReplaySession) -> FlowUpdate {
         // Update location on flow load
         if self.mode == FlowMode::Call {
             // let step_id = StepId(location.rr_ticks.0);
@@ -454,7 +513,7 @@ impl<'a> CallFlowPreloader<'a> {
             }
             Err(e) => {
                 error!("flow error: {e:?}");
-                FlowUpdate::error(&format!("{:?}", e))
+                FlowUpdate::error(&e.to_string())
             }
         }
     }
@@ -1590,6 +1649,10 @@ mod tests {
         current_location: Location,
         call_entry_location: Location,
         current_step_id: StepId,
+        /// When set, the replay worker this double stands in for has died:
+        /// every seek fails and `worker_death` reports this text, as
+        /// `RecreatorReplaySession::without_respawn_after_worker_death` does.
+        death: Option<String>,
     }
 
     impl MockReplay {
@@ -1599,6 +1662,7 @@ mod tests {
                 current_location,
                 call_entry_location,
                 calls: vec![],
+                death: None,
             }
         }
     }
@@ -1695,6 +1759,9 @@ mod tests {
 
         fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
             self.calls.push(format!("jump_to_call:{}", location.rr_ticks.0));
+            if let Some(death) = &self.death {
+                return Err(death.clone().into());
+            }
             self.current_step_id = StepId(self.call_entry_location.rr_ticks.0);
             Ok(self.call_entry_location.clone())
         }
@@ -1709,6 +1776,9 @@ mod tests {
 
         fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
             self.calls.push(format!("location_jump:{}", location.rr_ticks.0));
+            if let Some(death) = &self.death {
+                return Err(death.clone().into());
+            }
             self.current_step_id = StepId(location.rr_ticks.0);
             Ok(())
         }
@@ -1727,6 +1797,10 @@ mod tests {
 
         fn current_step_id(&mut self) -> StepId {
             self.current_step_id
+        }
+
+        fn worker_death(&self) -> Option<String> {
+            self.death.clone()
         }
 
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
@@ -1907,5 +1981,104 @@ mod tests {
             replay.calls,
             vec!["location_jump:84", "load_location", "jump_to_call:84"]
         );
+    }
+
+    /// The guard's rule, in both directions: only a location without a source
+    /// position is refused.
+    #[test]
+    fn replayed_call_flow_refusal_refuses_only_locations_without_a_source_position() {
+        assert_eq!(replayed_call_flow_refusal(&make_location(21, 84, 7)), None);
+        // A line-only location (no ticks, no event) still has a position.
+        assert_eq!(replayed_call_flow_refusal(&make_location(5, 0, 0)), None);
+
+        let mut end_of_trace = make_location(-1, 50140, 0);
+        end_of_trace.path = "<unknown>".to_string();
+        // line -1 has no source position.
+        let refusal = replayed_call_flow_refusal(&end_of_trace);
+        assert!(
+            refusal
+                .as_deref()
+                .is_some_and(|r| r.contains("<unknown>:-1") && r.contains("no source position")),
+            "the refusal must name the location and the reason: {refusal:?}"
+        );
+        assert!(replayed_call_flow_refusal(&make_location(0, 12, 3)).is_some());
+
+        let mut no_path = make_location(12, 84, 7);
+        no_path.path.clear();
+        assert!(replayed_call_flow_refusal(&no_path).is_some());
+    }
+
+    /// A call flow at the end-of-trace location of an rr recording is refused
+    /// before the worker is asked anything. Sending the worker there is what
+    /// killed it: the seek's tick is past the last event, rr refuses it, and
+    /// the native backend used to `stepi` LLDB into a crash regardless.
+    #[test]
+    fn a_replayed_call_flow_at_the_end_of_the_trace_is_refused_before_any_query() {
+        let flow_preloader = FlowPreloader::new();
+        let mut end_of_trace = make_location(-1, 50140, 0);
+        end_of_trace.path = "<unknown>".to_string();
+        let mut replay = MockReplay::new(end_of_trace.clone(), make_location(19, 64, 7));
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            end_of_trace.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(end_of_trace, &mut replay);
+
+        assert!(update.error, "expected an error update, got {update:?}");
+        assert!(
+            update.error_message.contains("no source position"),
+            "got: {}",
+            update.error_message
+        );
+        assert!(update.view_updates.is_empty());
+        assert!(
+            replay.calls.is_empty(),
+            "the worker must not be driven toward a location it cannot reach: {:?}",
+            replay.calls
+        );
+    }
+
+    /// A flow whose worker died is an error naming the worker, not the short
+    /// "successful" flow the walk makes of its failed seeks.
+    ///
+    /// Here the death makes `location_jump` and its `jump_to_call` fallback
+    /// fail, so the walk stops before its first step and, unchecked, returns an
+    /// empty flow with `error: false` — the shape of "this call has no
+    /// variables".
+    #[test]
+    fn a_flow_whose_worker_died_is_an_error_naming_the_worker() {
+        let flow_preloader = FlowPreloader::new();
+        let request_location = make_location(21, 84, 7);
+        let mut replay = MockReplay::new(request_location.clone(), make_location(19, 64, 7));
+        let death = "the `flow` replay worker (index 1, pid 4242) died while answering LocationJump: \
+                     it closed its connection without answering; the process ended with signal: 11 \
+                     (SIGSEGV) (core dumped)";
+        replay.death = Some(death.to_string());
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            request_location.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(request_location, &mut replay);
+
+        assert!(
+            update.error,
+            "a dead worker's flow must be an error update, got {update:?}"
+        );
+        assert!(
+            update.error_message.contains(death),
+            "the error must carry the death as reported: {}",
+            update.error_message
+        );
+        assert!(update.view_updates.is_empty());
     }
 }

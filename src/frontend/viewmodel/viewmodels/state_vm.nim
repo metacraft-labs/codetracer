@@ -217,7 +217,9 @@ type
       ## badge only and waits for the response.
     onShowOriginProc*: proc(expression: string; location: store_types.Location)
       ## Optional bridge invoked by `onShowOrigin` — installed by
-      ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
+      ## `origin_chain_bridges.wireOriginChainBridges` to forward into
+      ## `OriginChainVM.onShowOrigin`, which sends the request; while it
+      ## is installed `onShowOrigin` sends none of its own.
     onLoadOriginChainProc*: proc(expression: string;
                                  location: store_types.Location)
       ## Optional bridge the origin badge invokes when it expands a row
@@ -694,23 +696,25 @@ proc loadValueHistory*(vm: StateVM; expression: string) =
 # ---------------------------------------------------------------------------
 
 proc onShowOrigin*(vm: StateVM; expression: string; location: store_types.Location) =
-  ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
-  ## at `location`. Sends the request directly via `BackendService.send`
-  ## so the call site does not need to import the OriginChainVM, and
-  ## also invokes the optional `onShowOriginProc` bridge that the host
-  ## installs to keep the OriginChainVM in sync.
+  ## "Show value origin" for `expression` at `location`: one gesture puts
+  ## exactly one `ct/originChain` request (spec §5.3) on the wire.
   ##
-  ## The host bridge is invoked AFTER the wire send so that the
-  ## OriginChainVM observes the request fire-and-forget — it tracks
-  ## the response via its own event handler.
+  ## When the host has installed `onShowOriginProc`
+  ## (`origin_chain_bridges.wireOriginChainBridges`), the request is the
+  ## OriginChainVM's to send: it owns the side panel, the breadcrumb and
+  ## the request tracking that discards a superseded or cancelled answer.
+  ## Sending here as well would make the backend walk the chain twice,
+  ## each walk spending its own budget (§6.1.7), for an answer the VM
+  ## discards. Only without that bridge — a StateVM with no OriginChainVM
+  ## behind it — is the request sent from here.
   if vm.actionSink.forwards("state", "onShowOrigin",
       %*{"expression": expression, "location": sinkArg(location)}):
     return
-  if not vm.store.isNil and not vm.store.backend.isNil:
-    let args = originChainArgs(expression = expression)
-    discard vm.store.backend.send("ct/originChain", args)
   if not vm.onShowOriginProc.isNil:
     vm.onShowOriginProc(expression, location)
+  elif not vm.store.isNil and not vm.store.backend.isNil:
+    let args = originChainArgs(expression = expression)
+    discard vm.store.backend.send("ct/originChain", args)
 
 proc toggleOriginExpansion*(vm: StateVM; row: VariableId) =
   ## Toggle the in-row inline chain expansion for `row`. The State

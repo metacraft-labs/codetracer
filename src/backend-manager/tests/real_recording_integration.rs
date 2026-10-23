@@ -10540,6 +10540,11 @@ async fn start_mcp_server_with_real_backend_in(
     let mut cmd = Command::new(&bin);
     cmd.arg("trace")
         .arg("mcp")
+        // These recordings are the test's own, and most of their recorders
+        // embed no source copies, so `read_source_file` reads the files
+        // their source lists name from this host, as a developer's server
+        // does (the rule itself: mcp_read_source_file_confinement_test.rs).
+        .arg("--allow-host-source-reads")
         .env("TMPDIR", test_dir)
         .env(
             "CODETRACER_DAEMON_SOCK",
@@ -11877,6 +11882,8 @@ async fn start_hermetic_mcp_server(
     let mut mcp = Command::new(binary_path());
     mcp.arg("trace")
         .arg("mcp")
+        // The test's own recordings: see `start_mcp_server_with_real_backend`.
+        .arg("--allow-host-source-reads")
         .current_dir(mcp_cwd)
         .env("TMPDIR", test_dir)
         .env("CODETRACER_DAEMON_SOCK", &socket_path)

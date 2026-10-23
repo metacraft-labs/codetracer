@@ -371,6 +371,16 @@ proc dockedForMode*(product: ProductMode): seq[DockedPane] =
   of pmDebug: sharedDefaultLayout().docked
   of pmEdit: @[]
 
+proc layoutValueForMode*(product: ProductMode; profile: LayoutProfile): Layout =
+  ## A mode's DEFAULT as a whole `Layout` — `layoutForMode`'s tree with
+  ## `dockedForMode`'s panes beside it — which is what a LAYOUT BINDING is
+  ## seeded with, re-flowed to and reset to for that mode. For Debug mode it is
+  ## `profileLayoutValue`; for Edit mode it is the arrangement `shellModel`
+  ## draws for an unbound Edit-mode runtime, so a binding enabled there leaves
+  ## the first frame of `ct edit` exactly as it was (codetracer-pm issue
+  ## 2026-10-21: the bare `profileLayoutValue` would have painted Debug's).
+  initLayout(layoutForMode(product, profile), dockedForMode(product))
+
 proc resizeShares*(tree: LayoutNode; product: ProductMode;
                    profile: LayoutProfile) =
   ## In place: the shares of `tree` — an UNMODIFIED default at the same fold

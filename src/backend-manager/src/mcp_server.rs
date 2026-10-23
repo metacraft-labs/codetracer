@@ -333,7 +333,7 @@ fn resolve_variable_step_tool() -> Value {
 fn read_source_file_tool() -> Value {
     json!({
         "name": "read_source_file",
-        "description": "Read a source file of a CodeTracer trace: an embedded copy the trace carries, or a file its source list names (see list_source_files), read at its recorded location. Any other path, and any path with a `..` component, is refused as not in the recording.",
+        "description": "Read a source file of a CodeTracer trace: an embedded copy the trace carries, or, only when this server was started with --allow-host-source-reads, a file its source list names (see list_source_files), read at its recorded location on this host. Any other path, and any path with a `..` component, is refused as not in the recording.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -953,6 +953,33 @@ pub struct McpServerConfig {
     pub daemon_socket_path: PathBuf,
     /// Path to the daemon's PID file.
     pub daemon_pid_path: PathBuf,
+    /// Whether `read_source_file` may read a source-list entry from this
+    /// host when the recording carries no copy of it (see
+    /// [`HostSourceReads`]).  Set only by `trace mcp
+    /// --allow-host-source-reads`.
+    pub host_source_reads: HostSourceReads,
+}
+
+/// Whether `read_source_file` (and the `trace:///<path>/source/<file>`
+/// resource) may read a file from the live host because the recording's
+/// source list names it.
+///
+/// The source list is recording content, written by whatever program was
+/// recorded, so it can name any file on the machine that replays it
+/// (`/home/<user>/.ssh/id_ed25519`, a credentials file).  An embedded copy
+/// under the trace's `files/` is the recording's own bytes; a listed path
+/// with no copy is the host's.  The host read is therefore refused unless
+/// the server's operator turned it on with `--allow-host-source-reads`: a
+/// developer reading their own recordings sets it, and an agent that reads
+/// recordings someone else produced runs a server without it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HostSourceReads {
+    /// Only embedded `files/` copies are served (the default).
+    #[default]
+    Refused,
+    /// A source-list entry with no embedded copy is read at its recorded
+    /// location on this host.
+    Allowed,
 }
 
 /// Runs the MCP server on stdio.
@@ -1525,25 +1552,29 @@ fn handle_resources_read<'a>(
             }
 
             // A path the recording does not carry is refused before
-            // anything reads it (see `resolve_recorded_source`).
-            if let Err(refusal) = resolve_recorded_source(trace_path, file_path)
-                && refusal.starts_with(NOT_IN_RECORDING)
-            {
-                return jsonrpc_error(id, -32602, &refusal);
-            }
+            // anything reads it, and so is a listed path with no embedded
+            // copy unless host reads are allowed (see
+            // `resolve_recorded_source`).
+            let location =
+                match resolve_recorded_source(trace_path, file_path, config.host_source_reads) {
+                    Ok(location) => location,
+                    Err(refusal) => return jsonrpc_error(id, -32602, &refusal),
+                };
 
             // Read the source file via ct/py-read-source.  The daemon
             // handles this command by forwarding it to the backend as
-            // ct/read-source and returning the result.  If the backend
-            // does not support ct/read-source, fall back to reading the
-            // file the recording carries (`read_source_from_trace_dir`).
+            // ct/read-source and returning the result.  It is handed the
+            // resolved location, never the requested path, so a backend
+            // that answers ct/read-source reads the file this rule chose.
+            // If the backend does not support ct/read-source, fall back to
+            // reading that location here.
             let read_resp = dap_request(
                 &mut stream,
                 "ct/py-read-source",
                 2,
                 json!({
                     "tracePath": trace_path,
-                    "path": file_path,
+                    "path": location.location(),
                 }),
                 10,
             )
@@ -1564,7 +1595,7 @@ fn handle_resources_read<'a>(
 
             let content = match daemon_content {
                 Some(c) => c,
-                None => match read_source_from_trace_dir(trace_path, file_path) {
+                None => match read_resolved_source(&location) {
                     Ok(c) => c,
                     Err(fs_err) => {
                         let daemon_err = match &read_resp {
@@ -2567,25 +2598,28 @@ async fn handle_read_source_file(
     }
 
     // A path the recording does not carry is refused before anything reads
-    // it, the daemon included (see `resolve_recorded_source`).
-    if let Err(refusal) = resolve_recorded_source(trace_path, file_path)
-        && refusal.starts_with(NOT_IN_RECORDING)
-    {
-        let duration_ms = start.elapsed().as_millis();
-        return jsonrpc_result(id, tool_result_error_with_timing(&refusal, duration_ms));
-    }
+    // it, the daemon included, and so is a listed path with no embedded
+    // copy unless host reads are allowed (see `resolve_recorded_source`).
+    let location = match resolve_recorded_source(trace_path, file_path, config.host_source_reads) {
+        Ok(location) => location,
+        Err(refusal) => {
+            let duration_ms = start.elapsed().as_millis();
+            return jsonrpc_result(id, tool_result_error_with_timing(&refusal, duration_ms));
+        }
+    };
 
-    // Send ct/py-read-source to the daemon.  If the backend does not
-    // support the ct/read-source command (e.g. the replay-server for RR
-    // traces), fall back to reading the file the recording carries:
-    // its embedded copy under `files/`, or a path its source list names.
+    // Send ct/py-read-source to the daemon with the resolved location, never
+    // the requested path: a backend that answers ct/read-source then reads
+    // the file the rule above chose.  If the backend does not support the
+    // command (e.g. the replay-server for RR traces), fall back to reading
+    // that location here.
     let read_resp = dap_request(
         &mut stream,
         "ct/py-read-source",
         2,
         json!({
             "tracePath": trace_path,
-            "path": file_path,
+            "path": location.location(),
         }),
         10,
     )
@@ -2607,10 +2641,10 @@ async fn handle_read_source_file(
     let content = match daemon_content {
         Some(c) => c,
         None => {
-            // Fallback: read the file the recording carries, an embedded
-            // copy under `<trace_dir>/files/<absolute_path>` (leading `/`
-            // stripped) or a path its source list names.
-            match read_source_from_trace_dir(trace_path, file_path) {
+            // Fallback: read the resolved location, an embedded copy under
+            // `<trace_dir>/files/<absolute_path>` (leading `/` stripped) or,
+            // with host reads allowed, a path its source list names.
+            match read_resolved_source(&location) {
                 Ok(c) => c,
                 Err(fs_err) => {
                     // Both the daemon and the filesystem fallback failed.
@@ -3162,6 +3196,11 @@ fn strip_path_root(file_path: &str) -> std::path::PathBuf {
 /// failure on a file that is.
 const NOT_IN_RECORDING: &str = "source file not in the recording";
 
+/// The error prefix of a refusal to read a source-list entry from the host:
+/// the recording names the file but carries no copy of it, and the server
+/// was not started with `--allow-host-source-reads` (see [`HostSourceReads`]).
+const NOT_EMBEDDED: &str = "source file not embedded in the recording";
+
 /// Resolves `file_path` to the on-disk file the recording carries for it.
 ///
 /// `read_source_file` (and the `trace:///<path>/source/<file>` resource)
@@ -3170,24 +3209,40 @@ const NOT_IN_RECORDING: &str = "source file not in the recording";
 /// reach files the recording does not carry. Only two kinds of file qualify:
 ///
 /// 1. **An embedded copy** under `<trace_dir>/files/<path>`, the layout in
-///    which a recording stores copies of its sources. The copy is resolved
-///    through symlinks and must still lie inside `files/`.
+///    which a recording stores copies of its sources. It must be a regular
+///    file reached beneath `files/` without following a symlink anywhere
+///    below `files/` ([`open_beneath`]); a symlink there is refused, wherever
+///    it points.
 /// 2. **A path in the recording's source list** (`paths.dat`, the list
-///    `list_source_files` returns), read at its recorded location. A
+///    `list_source_files` returns), read at its recorded location on this
+///    host, and only when `host_reads` is [`HostSourceReads::Allowed`]. A
 ///    relative recorded path is located against the recorded working
 ///    directory, then against the trace directory's parent. The request may
 ///    name the entry exactly, as the absolute path a relative entry stands
 ///    for under the recorded working directory, or as the path relative to
 ///    that directory an absolute entry has.
 ///
+/// The second kind is the live host's file, not the recording's: the list is
+/// recording content, so a recording can list any file on the machine that
+/// replays it. With host reads refused, a request that names a listed entry
+/// with no embedded copy fails with [`NOT_EMBEDDED`] before the recorded
+/// location is touched (not even its existence is checked).
+///
 /// Anything else is refused with [`NOT_IN_RECORDING`]: an absolute host
 /// path the source list does not name, a relative path that matches no
 /// entry, and every path with a `..` component, which is refused before
 /// any lookup. A source-list entry that itself contains `..` is ignored.
+///
+/// The returned location is what every reader is handed, the daemon's
+/// `ct/py-read-source` included; the requested path is never read. An
+/// embedded copy is opened again by [`read_resolved_source`] under the same
+/// rule, so a symlink swapped into `files/` after this check is refused at
+/// the read rather than followed.
 fn resolve_recorded_source(
     trace_path: &str,
     file_path: &str,
-) -> Result<std::path::PathBuf, String> {
+    host_reads: HostSourceReads,
+) -> Result<ResolvedSource, String> {
     use std::path::{Component, Path};
 
     let requested = Path::new(file_path);
@@ -3206,16 +3261,20 @@ fn resolve_recorded_source(
 
     let trace_dir = Path::new(trace_path);
 
-    // 1. An embedded copy under `files/`. Canonicalizing resolves symlinks,
-    //    so a link planted under `files/` cannot point out of it.
+    // 1. An embedded copy under `files/`, opened beneath it without
+    //    following any symlink below it (`open_beneath`).
     let files_dir = trace_dir.join("files");
-    if let Ok(files_root) = files_dir.canonicalize()
-        && let Ok(embedded) = files_dir.join(strip_path_root(file_path)).canonicalize()
-        && embedded.starts_with(&files_root)
-        && embedded != files_root
-        && embedded.is_file()
-    {
-        return Ok(embedded);
+    if let Ok(files_root) = files_dir.canonicalize() {
+        let relative: std::path::PathBuf = strip_path_root(file_path)
+            .components()
+            .filter(|c| !matches!(c, Component::CurDir))
+            .collect();
+        if open_beneath(&files_root, &relative).is_ok() {
+            return Ok(ResolvedSource::Embedded {
+                files_root,
+                relative,
+            });
+        }
     }
 
     // 2. A path the recording's source list names.
@@ -3249,6 +3308,14 @@ fn resolve_recorded_source(
         {
             continue;
         }
+        if host_reads == HostSourceReads::Refused {
+            return Err(format!(
+                "{NOT_EMBEDDED}: {recorded:?} is in the recording's source list, but the \
+                 recording carries no copy of it under {}; reading it from this host needs \
+                 a server started with --allow-host-source-reads",
+                files_dir.display()
+            ));
+        }
         let mut locations = Vec::new();
         if entry.is_absolute() {
             locations.push(entry.to_path_buf());
@@ -3261,7 +3328,7 @@ fn resolve_recorded_source(
             }
         }
         if let Some(found) = locations.iter().find(|p| p.is_file()) {
-            return Ok(found.clone());
+            return Ok(ResolvedSource::Host(found.clone()));
         }
         let tried: Vec<String> = locations.iter().map(|p| p.display().to_string()).collect();
         return Err(format!(
@@ -3279,16 +3346,178 @@ fn resolve_recorded_source(
     ))
 }
 
-/// Reads a source file the recording carries; see [`resolve_recorded_source`]
-/// for which files those are.
+/// The file [`resolve_recorded_source`] chose for a request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ResolvedSource {
+    /// An embedded copy: `relative` (only normal components) beneath the
+    /// canonical `files_root`.
+    Embedded {
+        files_root: std::path::PathBuf,
+        relative: std::path::PathBuf,
+    },
+    /// A source-list entry at its recorded location on this host, chosen
+    /// only with [`HostSourceReads::Allowed`].
+    Host(std::path::PathBuf),
+}
+
+impl ResolvedSource {
+    /// The path handed to the daemon's `ct/py-read-source`.
+    fn location(&self) -> std::path::PathBuf {
+        match self {
+            ResolvedSource::Embedded {
+                files_root,
+                relative,
+            } => files_root.join(relative),
+            ResolvedSource::Host(path) => path.clone(),
+        }
+    }
+}
+
+/// Reads the file [`resolve_recorded_source`] chose.
 ///
 /// This is the fallback that serves `read_source_file` when the daemon's
 /// `ct/read-source` command is not supported by the backend (e.g. the
-/// replay-server).
-fn read_source_from_trace_dir(trace_path: &str, file_path: &str) -> Result<String, String> {
-    let location = resolve_recorded_source(trace_path, file_path)?;
-    std::fs::read_to_string(&location)
-        .map_err(|e| format!("failed to read {}: {e}", location.display()))
+/// replay-server).  An embedded copy is opened again with
+/// [`open_beneath`], so what was checked is what is read: a component of
+/// the path replaced by a symlink after [`resolve_recorded_source`] ran is
+/// refused here instead of followed out of `files/`.
+fn read_resolved_source(resolved: &ResolvedSource) -> Result<String, String> {
+    use std::io::Read;
+    let location = resolved.location();
+    let mut file = match resolved {
+        ResolvedSource::Embedded {
+            files_root,
+            relative,
+        } => open_beneath(files_root, relative),
+        ResolvedSource::Host(path) => std::fs::File::open(path),
+    }
+    .map_err(|e| format!("failed to read {}: {e}", location.display()))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(|e| format!("failed to read {}: {e}", location.display()))?;
+    Ok(content)
+}
+
+/// Opens the regular file `relative` beneath the directory `root` without
+/// following a symlink in any component of `relative`.
+///
+/// On Unix each component is opened with `openat(2)` relative to the
+/// directory opened before it, with `O_NOFOLLOW` (and `O_DIRECTORY` for the
+/// directories), so the walk never leaves `root` and a symlink, whether
+/// present when the walk starts or swapped in during it, fails the open
+/// (`ELOOP`/`ENOTDIR`) instead of being followed
+/// (https://man7.org/linux/man-pages/man2/open.2.html, `O_NOFOLLOW`). The
+/// last component is opened `O_NONBLOCK` so a FIFO cannot stall the server,
+/// and anything but a regular file is refused after the open. `root` itself
+/// is trusted as given.  `relative` must consist of normal components only.
+///
+/// Elsewhere every component is checked with `symlink_metadata` before the
+/// open, which refuses a symlink present at the check but not one swapped in
+/// between the check and the open.
+fn open_beneath(
+    root: &std::path::Path,
+    relative: &std::path::Path,
+) -> std::io::Result<std::fs::File> {
+    use std::path::Component;
+    let mut names = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(name) => names.push(name),
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "only normal path components are opened beneath files/",
+                ));
+            }
+        }
+    }
+    if names.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "no file named beneath files/",
+        ));
+    }
+
+    #[cfg(unix)]
+    let file = {
+        use std::ffi::CString;
+        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+        let to_c = |bytes: &[u8]| {
+            CString::new(bytes).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "a NUL in a path")
+            })
+        };
+        let root_c = to_c(root.as_os_str().as_bytes())?;
+        // SAFETY: `root_c` is a valid NUL-terminated string; the returned
+        // descriptor is checked and then owned by `OwnedFd`.
+        let fd = unsafe {
+            libc::open(
+                root_c.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: `fd` is a freshly opened descriptor nothing else owns.
+        let mut current = unsafe { OwnedFd::from_raw_fd(fd) };
+        for (index, name) in names.iter().enumerate() {
+            let last = index + 1 == names.len();
+            let name_c = to_c(name.as_bytes())?;
+            let flags = libc::O_RDONLY
+                | libc::O_CLOEXEC
+                | libc::O_NOFOLLOW
+                | if last {
+                    libc::O_NONBLOCK
+                } else {
+                    libc::O_DIRECTORY
+                };
+            // SAFETY: `current` is an open directory descriptor and
+            // `name_c` a valid NUL-terminated single component.
+            let fd = unsafe { libc::openat(current.as_raw_fd(), name_c.as_ptr(), flags) };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: as above.
+            current = unsafe { OwnedFd::from_raw_fd(fd) };
+        }
+        std::fs::File::from(current)
+    };
+
+    #[cfg(not(unix))]
+    let file = {
+        let mut path = root.to_path_buf();
+        for name in &names {
+            path.push(name);
+            if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "a symlink beneath files/ is not followed",
+                ));
+            }
+        }
+        std::fs::File::open(&path)?
+    };
+
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+/// [`resolve_recorded_source`] then [`read_resolved_source`]: the unit
+/// tests' view of what the tool serves.
+#[cfg(test)]
+fn read_source_from_trace_dir(
+    trace_path: &str,
+    file_path: &str,
+    host_reads: HostSourceReads,
+) -> Result<String, String> {
+    read_resolved_source(&resolve_recorded_source(trace_path, file_path, host_reads)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -4058,6 +4287,116 @@ mod tests {
         );
     }
 
+    /// What a server started with `--allow-host-source-reads` serves.
+    fn read_with_host_reads(trace_path: &str, file_path: &str) -> Result<String, String> {
+        read_source_from_trace_dir(trace_path, file_path, HostSourceReads::Allowed)
+    }
+
+    #[test]
+    fn test_host_source_reads_are_refused_by_default() {
+        assert_eq!(HostSourceReads::default(), HostSourceReads::Refused);
+    }
+
+    #[test]
+    fn test_listed_source_without_copy_needs_host_reads() {
+        // The recording lists a host file it carries no copy of: an absolute
+        // entry outside the recorded working directory and a relative one
+        // under it.  Without host reads both are refused before the
+        // recorded location is read; with them both are served.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-host-reads");
+        let workdir = tmp.join("project");
+        let outside = tmp.join("elsewhere/credentials");
+        let trace_dir = trace_dir_listing(
+            &tmp,
+            workdir.to_str().unwrap(),
+            &[outside.to_str().unwrap(), "app.py"],
+        );
+        std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        std::fs::write(&outside, "host secret").unwrap();
+        std::fs::create_dir_all(&workdir).unwrap();
+        std::fs::write(workdir.join("app.py"), "x = 1").unwrap();
+        let trace = trace_dir.to_str().unwrap();
+
+        for path in [outside.to_str().unwrap(), "app.py"] {
+            let err = read_source_from_trace_dir(trace, path, HostSourceReads::Refused)
+                .expect_err("a listed host file is refused without host reads");
+            assert!(err.starts_with(NOT_EMBEDDED), "{path}: {err}");
+            assert!(!err.contains("host secret"), "{path}: {err}");
+        }
+        assert_eq!(
+            read_with_host_reads(trace, outside.to_str().unwrap()).unwrap(),
+            "host secret"
+        );
+        assert_eq!(read_with_host_reads(trace, "app.py").unwrap(), "x = 1");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_embedded_copy_served_without_host_reads() {
+        // A listed file the recording carries a copy of is served from the
+        // copy, with host reads refused; the resolved location is the copy.
+        let tmp = std::env::temp_dir().join("ct-test-read-source-embedded-only");
+        let source = tmp.join("src/lib.py");
+        let trace_dir = trace_dir_listing(&tmp, "", &[source.to_str().unwrap()]);
+        let embedded = trace_dir
+            .join("files")
+            .join(strip_path_root(source.to_str().unwrap()));
+        std::fs::create_dir_all(embedded.parent().unwrap()).unwrap();
+        std::fs::write(&embedded, "# embedded").unwrap();
+        let trace = trace_dir.to_str().unwrap();
+
+        let location =
+            resolve_recorded_source(trace, source.to_str().unwrap(), HostSourceReads::Refused)
+                .unwrap();
+        assert_eq!(location.location(), embedded.canonicalize().unwrap());
+        assert_eq!(
+            read_source_from_trace_dir(trace, source.to_str().unwrap(), HostSourceReads::Refused)
+                .unwrap(),
+            "# embedded"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The race between the check and the read: a directory under `files/`
+    /// is replaced by a symlink pointing out of it after
+    /// `resolve_recorded_source` accepted the embedded copy.  The read must
+    /// refuse rather than follow it to the file outside.
+    #[cfg(unix)]
+    #[test]
+    fn test_embedded_copy_swapped_for_symlink_after_resolve_is_refused() {
+        let tmp = std::env::temp_dir().join("ct-test-read-source-swap");
+        let trace_dir = trace_dir_listing(&tmp, "", &[]);
+        let copy_dir = trace_dir.join("files/src");
+        std::fs::create_dir_all(&copy_dir).unwrap();
+        std::fs::write(copy_dir.join("app.py"), "# embedded").unwrap();
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("app.py"), "host secret").unwrap();
+        let trace = trace_dir.to_str().unwrap();
+
+        let resolved = resolve_recorded_source(trace, "/src/app.py", HostSourceReads::Refused)
+            .expect("the embedded copy is accepted before the swap");
+        assert_eq!(read_resolved_source(&resolved).unwrap(), "# embedded");
+
+        std::fs::rename(&copy_dir, trace_dir.join("files/src-moved")).unwrap();
+        std::os::unix::fs::symlink(&outside, &copy_dir).unwrap();
+        // Vacuity guard: following the swapped path does reach the host file.
+        assert_eq!(
+            std::fs::read_to_string(resolved.location()).unwrap(),
+            "host secret"
+        );
+        let err = read_resolved_source(&resolved).expect_err("the swapped symlink is refused");
+        assert!(!err.contains("host secret"), "got: {err}");
+        // And a fresh resolution no longer accepts it as embedded.
+        let err =
+            read_source_from_trace_dir(trace, "/src/app.py", HostSourceReads::Allowed).unwrap_err();
+        assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn test_read_source_from_trace_dir_success() {
         // Create a temporary trace directory with a source file.
@@ -4066,7 +4405,7 @@ mod tests {
         std::fs::create_dir_all(tmp.join("files/home/user")).unwrap();
         std::fs::write(tmp.join("files/home/user/main.rs"), "fn main() {}").unwrap();
 
-        let result = read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
+        let result = read_with_host_reads(tmp.to_str().unwrap(), "/home/user/main.rs");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "fn main() {}");
 
@@ -4082,8 +4421,8 @@ mod tests {
         std::fs::create_dir_all(tmp.join("files/home/user")).unwrap();
         std::fs::write(tmp.join("files/home/user/main.rs"), "fn main() {}").unwrap();
 
-        let with_slash = read_source_from_trace_dir(tmp.to_str().unwrap(), "/home/user/main.rs");
-        let without_slash = read_source_from_trace_dir(tmp.to_str().unwrap(), "home/user/main.rs");
+        let with_slash = read_with_host_reads(tmp.to_str().unwrap(), "/home/user/main.rs");
+        let without_slash = read_with_host_reads(tmp.to_str().unwrap(), "home/user/main.rs");
 
         assert_eq!(with_slash.unwrap(), "fn main() {}");
         assert_eq!(without_slash.unwrap(), "fn main() {}");
@@ -4097,7 +4436,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("files")).unwrap();
 
-        let result = read_source_from_trace_dir(tmp.to_str().unwrap(), "/nonexistent/file.rs");
+        let result = read_with_host_reads(tmp.to_str().unwrap(), "/nonexistent/file.rs");
         let err_msg = result.unwrap_err();
         assert!(
             err_msg.starts_with(NOT_IN_RECORDING),
@@ -4135,7 +4474,7 @@ mod tests {
         std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
         std::fs::write(&source_path, "print('hello')").unwrap();
 
-        let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), &source);
+        let result = read_with_host_reads(trace_dir.to_str().unwrap(), &source);
         assert_eq!(result.unwrap(), "print('hello')");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4151,9 +4490,8 @@ mod tests {
         std::fs::write(&outside, "not a source").unwrap();
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "not a source");
 
-        let err =
-            read_source_from_trace_dir(trace_dir.to_str().unwrap(), outside.to_str().unwrap())
-                .unwrap_err();
+        let err = read_with_host_reads(trace_dir.to_str().unwrap(), outside.to_str().unwrap())
+            .unwrap_err();
         assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4178,7 +4516,7 @@ mod tests {
             "src/../src/app.py",
             back_in.as_str(),
         ] {
-            let err = read_source_from_trace_dir(trace_dir.to_str().unwrap(), path).unwrap_err();
+            let err = read_with_host_reads(trace_dir.to_str().unwrap(), path).unwrap_err();
             assert!(err.starts_with(NOT_IN_RECORDING), "{path}: {err}");
         }
 
@@ -4195,7 +4533,7 @@ mod tests {
         std::os::unix::fs::symlink(tmp.join("secret.txt"), trace_dir.join("files/link.txt"))
             .unwrap();
 
-        let err = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "link.txt").unwrap_err();
+        let err = read_with_host_reads(trace_dir.to_str().unwrap(), "link.txt").unwrap_err();
         assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4212,11 +4550,10 @@ mod tests {
         std::fs::create_dir_all(workdir.join("src")).unwrap();
         std::fs::write(workdir.join("src/app.py"), "import os").unwrap();
 
-        let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "src/app.py");
+        let result = read_with_host_reads(trace_dir.to_str().unwrap(), "src/app.py");
         assert_eq!(result.unwrap(), "import os");
         let absolute = workdir.join("src/app.py");
-        let result =
-            read_source_from_trace_dir(trace_dir.to_str().unwrap(), absolute.to_str().unwrap());
+        let result = read_with_host_reads(trace_dir.to_str().unwrap(), absolute.to_str().unwrap());
         assert_eq!(result.unwrap(), "import os");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4232,11 +4569,11 @@ mod tests {
         std::fs::write(tmp.join("program/src/main.py"), "x = 1").unwrap();
         std::fs::write(tmp.join("program/other.py"), "y = 2").unwrap();
 
-        let result = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/src/main.py");
+        let result = read_with_host_reads(trace_dir.to_str().unwrap(), "program/src/main.py");
         assert_eq!(result.unwrap(), "x = 1");
         // A sibling the source list does not name stays out of reach.
-        let err = read_source_from_trace_dir(trace_dir.to_str().unwrap(), "program/other.py")
-            .unwrap_err();
+        let err =
+            read_with_host_reads(trace_dir.to_str().unwrap(), "program/other.py").unwrap_err();
         assert!(err.starts_with(NOT_IN_RECORDING), "got: {err}");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4264,7 +4601,7 @@ mod tests {
         std::fs::write(&embedded, "# embedded version").unwrap();
 
         let result =
-            read_source_from_trace_dir(trace_dir.to_str().unwrap(), abs_source.to_str().unwrap());
+            read_with_host_reads(trace_dir.to_str().unwrap(), abs_source.to_str().unwrap());
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
         assert_eq!(
             result.unwrap(),

@@ -655,10 +655,10 @@ proc start*(d: TerminalDriver) =
   try:
     d.rawMode = enableRawMode(d.inFd)
     d.rawOwned = true
-  except OSError:
+  except TermctlError:
     # NOT A TTY. Reported by leaving `rawOwned` false rather than by raising:
     # `main.nim` has already decided whether it has a screen (`stdoutIsTerminal`)
-    # and a driver that raised here would turn "you piped me into a file" into a
+    # and a driver that raised here would turn redirected input into a
     # stack trace out of termios.
     discard
   d.altScreen = enterAltScreen(d.outFd)

@@ -21,6 +21,14 @@
 //! * `refusal`: a valid `base` vector with exactly one edit, which the
 //!   decoder must refuse with the named error.
 //!
+//! The batch vectors ([`batch_catalogue`], listed in `batches.json`) hold
+//! the two batch parsers, [`parse_batch`] here and `parseBatch` in
+//! codetracer-js-recorder, to the same uploaded batch bodies (Boundary-Ingest.md
+//! §4): valid batches, with their envelope and records and whether
+//! [`encode_batch`] gives the bytes back, and one-edit refusals of
+//! `batch_first`, each with the name of the
+//! [`BatchError`](crate::batch::BatchError) it must be refused with.
+//!
 //! Every enumerated field is held at both ends of its value set: the
 //! `enum_greatest` vector carries each at its greatest value, and one
 //! refusal vector per field steps one past it (and, for a set that starts
@@ -30,6 +38,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
+use crate::batch::{encode_batch, parse_batch, Envelope, BATCH_MAGIC, BATCH_VERSION};
 use crate::decode::{decode_log, DecodeErrorKind, Termination};
 use crate::encode::{encode_frame, encode_log};
 use crate::record::{hex, BlobRef, Record, MAX_FRAME_LEN, MAX_INLINE_BLOB, VALUE_SETS, VOCAB};
@@ -1007,8 +1016,446 @@ fn pretty(v: &Value) -> Vec<u8> {
     s
 }
 
+// ── Batch vectors ───────────────────────────────────────────────────────
+
+/// What [`parse_batch`] must make of a batch vector.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BatchExpectation {
+    /// Parses to `envelope` and `records`. `canonical`: [`encode_batch`]
+    /// of them gives the vector's bytes back (false for an envelope that
+    /// leaves a defaulted field out).
+    Parses {
+        envelope: Envelope,
+        records: Vec<Record>,
+        canonical: bool,
+    },
+    /// Refused with the error named `error`
+    /// ([`BatchError::name`](crate::batch::BatchError::name)); `base` is the
+    /// valid batch vector it is one edit from.
+    Refused { base: String, error: &'static str },
+}
+
+/// One shared batch vector: an uploaded batch body (Boundary-Ingest.md §4)
+/// that both batch parsers, this crate's [`parse_batch`] and
+/// codetracer-js-recorder's `parseBatch`, must agree on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatchVector {
+    pub name: String,
+    pub description: String,
+    pub bytes: Vec<u8>,
+    pub expectation: BatchExpectation,
+}
+
+impl BatchVector {
+    /// `valid` or `refusal`.
+    pub fn class(&self) -> &'static str {
+        match self.expectation {
+            BatchExpectation::Parses { .. } => "valid",
+            BatchExpectation::Refused { .. } => "refusal",
+        }
+    }
+
+    /// The expectation as the vector's `.json` file holds it.
+    pub fn expected_json(&self) -> Value {
+        match &self.expectation {
+            BatchExpectation::Parses {
+                envelope,
+                records,
+                canonical,
+            } => json!({
+                "envelope": serde_json::to_value(envelope).expect("an envelope serialises"),
+                "records": records.iter().map(Record::to_json).collect::<Vec<_>>(),
+                "canonical": canonical,
+            }),
+            BatchExpectation::Refused { error, .. } => json!({ "error": error }),
+        }
+    }
+}
+
+fn envelope(batch_seq: u64, first_seq: u64, last_seq: u64) -> Envelope {
+    Envelope {
+        session_id: SESSION_ID.into(),
+        batch_seq,
+        first_seq,
+        last_seq,
+        dropped: vec![],
+        build_hash: BUILD_HASH.into(),
+        is_final: false,
+    }
+}
+
+/// A batch body with `envelope_json` as its envelope, byte for byte.
+fn batch_with_json(envelope_json: &[u8], records: &[Record]) -> Vec<u8> {
+    let mut out = BATCH_MAGIC.to_vec();
+    out.push(BATCH_VERSION);
+    out.extend_from_slice(&(envelope_json.len() as u32).to_le_bytes());
+    out.extend_from_slice(envelope_json);
+    out.extend_from_slice(&crate::encode::encode_frames(records));
+    out
+}
+
+fn first_batch_records() -> Vec<Record> {
+    vec![
+        header(),
+        env(),
+        Record::Task {
+            seq: 1,
+            task_id: 1,
+            kind: 1,
+        },
+        Record::Clock {
+            seq: 2,
+            src: 1,
+            bits: NOW_BITS,
+        },
+        Record::Random {
+            seq: 3,
+            src: 1,
+            bytes: vec![0x00, 0x7f, 0x80, 0xff, 0x10, 0x20, 0x30, 0x40],
+        },
+    ]
+}
+
+fn parses(name: &str, description: &str, envelope: Envelope, records: Vec<Record>) -> BatchVector {
+    BatchVector {
+        name: name.into(),
+        description: description.into(),
+        bytes: encode_batch(&envelope, &records),
+        expectation: BatchExpectation::Parses {
+            envelope,
+            records,
+            canonical: true,
+        },
+    }
+}
+
+/// The first batch's envelope JSON with `from` replaced by `to` (once).
+fn edited_first_json(from: &str, to: &str) -> Vec<u8> {
+    let json = serde_json::to_string(&envelope(0, 1, 3)).expect("an envelope serialises");
+    assert_eq!(
+        json.matches(from).count(),
+        1,
+        "{from} occurs once in {json}"
+    );
+    json.replacen(from, to, 1).into_bytes()
+}
+
+/// Every shared batch vector: the valid ones, then one-edit refusals of
+/// `batch_first`. Every [`BatchError`](crate::batch::BatchError) is
+/// reached, and every envelope rule on which a JSON parser's defaults could
+/// differ from serde's (a `null` for a defaulted field, an integral float,
+/// a repeated field, a byte-order mark) has a vector of its own.
+pub fn batch_catalogue() -> Vec<BatchVector> {
+    let first = parses(
+        "batch_first",
+        "a session's first batch: Header, Env and three seq-bearing records",
+        envelope(0, 1, 3),
+        first_batch_records(),
+    );
+    let mut out = vec![first.clone()];
+    out.push(parses(
+        "batch_final_dropped",
+        "a final batch after a dropped range, ending with End",
+        Envelope {
+            dropped: vec![[5, 7]],
+            is_final: true,
+            ..envelope(2, 8, 9)
+        },
+        vec![
+            Record::Clock {
+                seq: 8,
+                src: 2,
+                bits: NOW_BITS,
+            },
+            Record::Task {
+                seq: 9,
+                task_id: 4,
+                kind: 5,
+            },
+            end(9),
+        ],
+    ));
+    out.push(parses(
+        "batch_end_only",
+        "a final batch carrying only End, with no seq-bearing record",
+        Envelope {
+            is_final: true,
+            ..envelope(3, 0, 0)
+        },
+        vec![end(9)],
+    ));
+    let defaults_records = vec![Record::Task {
+        seq: 4,
+        task_id: 2,
+        kind: 1,
+    }];
+    out.push(BatchVector {
+        name: "batch_defaults".into(),
+        description: "an envelope without dropped and final, which default to [] and false"
+            .into(),
+        bytes: batch_with_json(
+            format!(
+                r#"{{"session_id":"{SESSION_ID}","batch_seq":1,"first_seq":4,"last_seq":4,"build_hash":"{BUILD_HASH}"}}"#
+            )
+            .as_bytes(),
+            &defaults_records,
+        ),
+        expectation: BatchExpectation::Parses {
+            envelope: envelope(1, 4, 4),
+            records: defaults_records,
+            canonical: false,
+        },
+    });
+
+    let base = first.bytes.clone();
+    let records = first_batch_records();
+    let refused =
+        |name: &str, description: &str, bytes: Vec<u8>, error: &'static str| BatchVector {
+            name: name.into(),
+            description: description.into(),
+            bytes,
+            expectation: BatchExpectation::Refused {
+                base: "batch_first".into(),
+                error,
+            },
+        };
+    let edit = |f: &dyn Fn(&mut Vec<u8>)| {
+        let mut b = base.clone();
+        f(&mut b);
+        b
+    };
+    let json = |from: &str, to: &str| batch_with_json(&edited_first_json(from, to), &records);
+    out.push(refused(
+        "batch_bad_magic",
+        "the first byte of the magic changed",
+        edit(&|b| b[0] = b'X'),
+        "BadMagic",
+    ));
+    out.push(refused(
+        "batch_version_2",
+        "batch version 2",
+        edit(&|b| b[4] = 2),
+        "UnsupportedVersion",
+    ));
+    out.push(refused(
+        "batch_envelope_too_large",
+        "an envelope length of 4097",
+        edit(&|b| b[5..9].copy_from_slice(&4097u32.to_le_bytes())),
+        "EnvelopeTooLarge",
+    ));
+    out.push(refused(
+        "batch_short_prefix",
+        "three bytes, shorter than the magic and version",
+        base[..3].to_vec(),
+        "Truncated",
+    ));
+    out.push(refused(
+        "batch_cut_in_envelope_length",
+        "cut inside the envelope length",
+        base[..7].to_vec(),
+        "Truncated",
+    ));
+    out.push(refused(
+        "batch_cut_in_envelope",
+        "cut inside the envelope",
+        base[..20].to_vec(),
+        "Truncated",
+    ));
+    out.push(refused(
+        "batch_cut_in_frame",
+        "the last frame's last byte missing",
+        base[..base.len() - 1].to_vec(),
+        "Truncated",
+    ));
+    out.push(refused(
+        "batch_unknown_field",
+        "an envelope field the envelope does not have",
+        json(r#""final":false"#, r#""final":false,"extra":1"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_missing_batch_seq",
+        "no batch_seq",
+        json(r#""batch_seq":0,"#, ""),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_repeated_field",
+        "batch_seq given twice",
+        json(r#""batch_seq":0,"#, r#""batch_seq":0,"batch_seq":0,"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_float_seq",
+        "batch_seq written as the float 0.0",
+        json(r#""batch_seq":0,"#, r#""batch_seq":0.0,"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_negative_seq",
+        "first_seq -1",
+        json(r#""first_seq":1,"#, r#""first_seq":-1,"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_null_dropped",
+        "dropped null, not omitted",
+        json(r#""dropped":[]"#, r#""dropped":null"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_null_final",
+        "final null, not omitted",
+        json(r#""final":false"#, r#""final":null"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_string_final",
+        "final as the string \"false\"",
+        json(r#""final":false"#, r#""final":"false""#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_dropped_from_zero",
+        "a dropped range starting at seq 0",
+        json(r#""dropped":[]"#, r#""dropped":[[0,2]]"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_dropped_reversed",
+        "a dropped range whose end precedes its start",
+        json(r#""dropped":[]"#, r#""dropped":[[5,3]]"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_dropped_triple",
+        "a dropped range of three numbers",
+        json(r#""dropped":[]"#, r#""dropped":[[5,6,7]]"#),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_upper_session_id",
+        "session_id in uppercase hex",
+        json(SESSION_ID, &SESSION_ID.to_uppercase()),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_short_build_hash",
+        "build_hash one digit short",
+        json(BUILD_HASH, &BUILD_HASH[1..]),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_envelope_array",
+        "an envelope that is a JSON array",
+        batch_with_json(b"[]", &records),
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_envelope_bom",
+        "the envelope preceded by a UTF-8 byte-order mark",
+        {
+            let mut j = vec![0xef, 0xbb, 0xbf];
+            j.extend_from_slice(&edited_first_json(r#""final":false"#, r#""final":false"#));
+            batch_with_json(&j, &records)
+        },
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_envelope_invalid_utf8",
+        "an envelope string holding a byte that is not UTF-8",
+        {
+            let mut j = edited_first_json(SESSION_ID, "SESSIONMARK");
+            let at = j
+                .windows(11)
+                .position(|w| w == b"SESSIONMARK")
+                .expect("the mark");
+            j.splice(at..at + 11, [0xff]);
+            batch_with_json(&j, &records)
+        },
+        "BadEnvelope",
+    ));
+    out.push(refused(
+        "batch_empty_frame",
+        "a frame of length 0 after the records",
+        edit(&|b| b.extend_from_slice(&0u32.to_le_bytes())),
+        "Frame",
+    ));
+    out.push(refused(
+        "batch_unknown_tag",
+        "a frame with an unknown record tag after the records",
+        edit(&|b| {
+            b.extend_from_slice(&1u32.to_le_bytes());
+            b.push(0xfe);
+        }),
+        "Frame",
+    ));
+    out
+}
+
+/// The manifest that lists the batch vectors.
+pub fn batch_manifest(vectors: &[BatchVector]) -> Value {
+    json!({
+        "format": "jsbound shared batch vectors (Boundary-Ingest.md §4)",
+        "vectors": vectors.iter().map(|v| {
+            let mut entry = json!({
+                "name": v.name,
+                "class": v.class(),
+                "bytes": format!("{}.bin", v.name),
+                "expected": format!("{}.json", v.name),
+                "description": v.description,
+            });
+            if let BatchExpectation::Refused { base, .. } = &v.expectation {
+                entry["base"] = json!(base);
+            }
+            entry
+        }).collect::<Vec<_>>(),
+    })
+}
+
+/// Parse `bytes` and say whether the result is what `v` expects (and, for
+/// a canonical valid vector, whether encoding it gives `bytes` back).
+pub fn check_batch(v: &BatchVector, bytes: &[u8]) -> Result<(), String> {
+    match (&v.expectation, parse_batch(bytes)) {
+        (
+            BatchExpectation::Parses {
+                envelope,
+                records,
+                canonical,
+            },
+            Ok(got),
+        ) => {
+            if got.envelope != *envelope {
+                return Err(format!(
+                    "parses to {:?}, expected {envelope:?}",
+                    got.envelope
+                ));
+            }
+            let got_records: Vec<Record> = got.records.into_iter().map(|(_, r)| r).collect();
+            if got_records != *records {
+                return Err(format!(
+                    "parses to records {got_records:?}, expected {records:?}"
+                ));
+            }
+            if *canonical && encode_batch(envelope, records) != bytes {
+                return Err("encode_batch does not give the bytes back".into());
+            }
+            Ok(())
+        }
+        (BatchExpectation::Parses { .. }, Err(e)) => Err(format!("refused: {e}")),
+        (BatchExpectation::Refused { error, .. }, Err(e)) if e.name() == *error => Ok(()),
+        (BatchExpectation::Refused { error, .. }, Err(e)) => {
+            Err(format!("refused with {}, expected {error}: {e}", e.name()))
+        }
+        (BatchExpectation::Refused { error, .. }, Ok(_)) => {
+            Err(format!("parses, expected refusal {error}"))
+        }
+    }
+}
+
 /// Every file of `libs/jsbound/vectors/`, by name: each vector's `.bin` and
-/// `.json`, `manifest.json`, and `SHA256SUMS` over all of them.
+/// `.json`, `manifest.json`, each batch vector's `.bin` and `.json`,
+/// `batches.json`, and `SHA256SUMS` over all of them.
 pub fn render() -> BTreeMap<String, Vec<u8>> {
     let vectors = catalogue();
     let mut files = BTreeMap::new();
@@ -1017,6 +1464,12 @@ pub fn render() -> BTreeMap<String, Vec<u8>> {
         files.insert(format!("{}.json", v.name), pretty(&v.expected_json()));
     }
     files.insert("manifest.json".into(), pretty(&manifest(&vectors)));
+    let batches = batch_catalogue();
+    for v in &batches {
+        files.insert(format!("{}.bin", v.name), v.bytes.clone());
+        files.insert(format!("{}.json", v.name), pretty(&v.expected_json()));
+    }
+    files.insert("batches.json".into(), pretty(&batch_manifest(&batches)));
     let mut sums = String::new();
     for (name, bytes) in &files {
         sums.push_str(&format!("{}  {name}\n", hex(&Sha256::digest(bytes))));

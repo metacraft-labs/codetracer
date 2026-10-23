@@ -4734,23 +4734,17 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   (`NIM_COMMON_FLAGS` + `NIM_REPO_PATH_FLAGS` + `CODETRACER_FLAGS`; `ct` also
   needs `-d:ctEntrypoint`, `db_backend_record.nim` does not).
 
-- `index/startup.nim`'s `init(dataArg: var ServerData, ...)` does `var data =
-  dataArg` and its comment claims "on the JS backend, ServerData is a reference
-  type, so mutations propagate back". IT DOES NOT. `ServerData` is an `object`,
-  and Nim's JS backend emits `nimCopy` for that assignment (see
-  `HEX3Aenv_*.data0 = nimCopy(...)` in `src/build-debug/index.js`), so every
-  write to `data` inside `init` lands in a COPY. The one that bites is the edit
-  branch's `data.workspaceFolder = folder`: after `ct edit <folder>` the global
-  `data.workspaceFolder` is still `nil`, so anything reading it — launch
-  configs (`getLaunchConfigsForWorkspace`, `onRecordWithLaunchConfig`),
-  `loadTrace`'s filesystem categorisation, `pathContentRootFor` — behaves as if
-  no folder were open. The Welcome-screen path is unaffected because
-  `traces.nim`'s `onInitEditMode` assigns the global directly, which is why the
-  same folder behaves differently depending on how it was opened. Measured
-  2026-09-16 while building the HCR launch path, which works around it by
-  reading `data.startOptions.folder` (never copied) in edit mode.
-  `loadTrace` in `traces.nim` carries the identical comment and the identical
-  assumption.
+- Nim's JS backend COPIES an `object` on assignment (`nimCopy`), so the
+  "async proc cannot capture a `var` parameter" workaround `var data = dataArg`
+  silently turns every write into a write to a local copy. `index/startup.init`
+  and `index/traces.loadTrace` did exactly this with `ServerData` (an `object`)
+  until 2026-10-23: a `ct edit <folder>` launch left the global
+  `data.workspaceFolder` nil (measured 2026-09-16 as `hcr-no-workspace-folder`),
+  and `data.save` and `startOptions.isInstalled` never reached the process
+  state. Both now work on the global `config.data` directly, and
+  `src/frontend/tests/index_startup_state_test.nim` holds that. When a proc
+  must change a long-lived `object`, write the global (or make the type a
+  `ref`); never copy it into a local and mutate the local.
 
 - `calls.dat` stores call arguments ONE ENTRY PER ARGUMENT, each with its own
   interned name — `CallStreamRecord.args: Vec<CallArg>` where
@@ -7257,9 +7251,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   version), as `2dbbbcdda` did for the committed fixtures: v7 changed no
   header byte, and a v6 recording carries none of the new event kinds.
 - The orphan-sensitive pty suites (`test_real_no_orphans`,
-  `test_real_pty_lifecycle`, `test_real_signal_handling`) see EVERY
-  `replay-server` on the host. On a shared host run them in a private PID
-  namespace: `unshare -r -p -f --mount-proc <runner>`.
+  `test_real_pty_lifecycle`, `test_real_signal_handling`, plus the engine
+  checks in `test_plat47_vcs_focus_refresh` and `test_plat49_panes`) count only
+  `replay-server` processes whose `/proc/<pid>/environ` carries this run's
+  `CODETRACER_TUI_TEST_RUN_TOKEN` (`lifecycle_support.markedReplayServerPids`).
+  Other worktrees' engines no longer redden them, and no private PID namespace
+  is needed. A session spawned without `tuiSession` / `carryRunMark()` is
+  invisible to them, so its leak would pass.
 - A pty suite's wait failure prints the status line, which carries the
   recording's source path and tick; `run-plat68-keymaps-mutations.py`'s
   `portable_cause` drops that snapshot from a recorded cause so causes match
@@ -7435,3 +7433,16 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   its find widget (Ctrl+F in the editor). Content widgets are type 9, but the
   desktop editor has none on screen in the calc capture (the flow's value
   boxes are outside Monaco's mouse handling).
+- A replayed (rr) flow walk turns failed queries into "stop here" or into a
+  fallback (`location_jump` → `jump_to_call` → `run_to_entry`), so a dead
+  `flow` worker used to come back as a short or substituted flow with
+  `error: false`. Its session is now built `without_respawn_after_worker_death`,
+  and `CallFlowPreloader::load_flow` checks `ReplaySession::worker_death()` last,
+  so a death is reported as `FlowUpdate::error` naming the worker and its exit
+  status. A call flow at a location with no source position (`<unknown>:-1`,
+  where a replay stands after running off the end of the recording) is refused
+  before any worker is driven (`replayed_call_flow_refusal`).
+- The db-backend test harness's `set_breakpoint` helpers require the breakpoint
+  to come back `verified: true`. A fixture anchor that resolves to no code then
+  fails as "breakpoint at X:N was not verified" instead of as an empty flow at
+  the end of the trace. Derive anchors with `find_line_containing`.

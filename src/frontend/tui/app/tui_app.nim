@@ -510,15 +510,28 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # proposed weights (Layout-ViewModel §4.3a) — `binding.presentedLayout`.
   let boundLayout = if bound: app.layoutBinding.presentedLayout
                     else: initLayout(nil)
-  # PLAT-16: THE REGISTER WINS WHEN IT HOLDS A TREE FOR THE CURRENT MODE.
+  # PLAT-16: WITHOUT A BINDING, THE REGISTER WINS WHEN IT HOLDS A TREE FOR THE
+  # CURRENT MODE.
   #
   # It holds one only after a `Ctrl+F5` has been made, and what it holds for
   # Debug mode is the session's own node rather than a copy of it (see
   # `shell.ModeRegister`), so this is not a second layout authority: in Debug
   # mode with no switch ever made, and in Debug mode after a round trip, the
-  # tree is the same object either way. In Edit mode the register is the only
-  # authority there is — a session's `LayoutNode` is a REPLAY arrangement and
-  # `HeadlessApp` has no edit slot to hold a second one.
+  # tree is the same object either way. In Edit mode entered by a switch the
+  # register is the only authority there is — a session's `LayoutNode` is a
+  # REPLAY arrangement and `HeadlessApp` has no edit slot to hold a second
+  # one.
+  #
+  # WITH A BINDING, THE BINDING WINS, ALWAYS. It is what a click is hit-tested
+  # against, so anything else drawn here would put the screen and the hit-test
+  # on two trees. A bound `Ctrl+F5` swaps the binding's arrangement with the
+  # register's cell for the entering mode (`runtime`'s `kaToggleProductMode`,
+  # `shell.switchBound`), so the binding already holds the current mode's
+  # arrangement; the register's `bound` cells are storage for the mode that is
+  # not on screen and are never drawn. Before codetracer-pm issue 2026-10-21's
+  # fix the register won here even when bound: the replay loop toggled into
+  # Edit mode drew Edit's tree and hit-tested Debug's, and after a round trip
+  # the frame drew a snapshot while every gesture moved only the hit-test.
   let registered = app.modes.activeLayout()
   # PLAT-49 part B: the status bar's file info — the file the editor shows
   # (the Edit buffer's in Edit mode) — and the width it takes before the
@@ -567,8 +580,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                                           app.layoutBinding.userModified: ""
                                        else: foldNote(app.modes.product,
                                                       selected))),
-    layout: (if not registered.isNil: registered
-             elif bound: boundLayout.tree
+    layout: (if bound: boundLayout.tree
+             elif not registered.isNil: registered
              elif active.isNil: layoutForMode(app.modes.product, selected)
              else: active.layout.tree),
     docked: (if bound: boundLayout.docked
@@ -641,19 +654,31 @@ proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   ## one, so enabling
   ## the binding changes nothing on screen at the moment it is enabled: the
   ## first frame after this call is the frame that would have been painted
-  ## without it. With no session open it starts from the profile's default,
-  ## which is what `shellModel` would have drawn anyway.
+  ## without it. With no session open it starts from the CURRENT PRODUCT
+  ## MODE'S default (`layoutValueForMode`), which is what `shellModel` would
+  ## have drawn anyway.
+  ##
+  ## THE MODE MATTERS SINCE `ct edit` ENABLES ONE TOO (codetracer-pm issue
+  ## 2026-10-21). `main.editInteractive` sets `modes` to Edit before the
+  ## runtime exists and has no session; seeding from Debug's default there —
+  ## what this did while only the replay loop called it — would have painted
+  ## the call trace, the event log and the footer strip on the first frame of
+  ## an editor. A session's tree is a REPLAY arrangement (`HeadlessApp` has no
+  ## edit slot), so it seeds only a Debug-mode binding; the binding remembers
+  ## its mode (`LayoutBinding.product`) so a resize and `:reset-layout` return
+  ## to the same mode's default rather than to Debug's.
   ##
   ## Explicit rather than automatic in `newTuiApp`, because a host that has not
   ## wired the gesture surface would otherwise gain a layout nothing can drive
   ## and, with it, a second thing that decides what the screen shows.
   let selected = selectProfile(width, height)
   let active = app.shell.activeSlot()
+  let product = app.modes.product
   let seed =
-    if active.isNil or active.layout.tree.isNil:
-      profileLayoutValue(selected)
+    if product != pmDebug or active.isNil or active.layout.tree.isNil:
+      layoutValueForMode(product, selected)
     else: active.layout
-  app.layoutBinding = newLayoutBinding(seed, selected)
+  app.layoutBinding = newLayoutBinding(seed, selected, product = product)
   app.layoutBinding
 
 proc renderScreen*(app: TuiApp; r: TerminalRenderer;

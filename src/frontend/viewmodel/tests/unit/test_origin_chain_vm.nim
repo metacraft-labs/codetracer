@@ -964,8 +964,8 @@ suite "M4 — State Pane renders inline origin badge per row":
       showOriginEntry.action()
       drain()
 
-      # 1. ``StateVM.onShowOrigin`` dispatches ``ct/originChain``
-      #    through ``BackendService.send`` with the variable name.
+      # 1. ``StateVM.onShowOrigin`` dispatches ``ct/originChain`` — the
+      #    bridged ``OriginChainVM`` sends it — with the variable name.
       let req = mock.findCommand("ct/originChain")
       check req.isSome
       check req.get.args["variableName"].getStr == "total"
@@ -1466,6 +1466,56 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       check originChainRequests(w.mock).len == 2
       dispose()
 
+  test "one \"Show value origin\" from the row menu sends one ct/originChain":
+    # One gesture, one backward walk: each `ct/originChain` spends its own
+    # budget (§6.1.7), so a second request for the same expression costs the
+    # backend a whole walk for an answer the OriginChainVM then discards.
+    # With the production bridges installed the request is the
+    # OriginChainVM's to send; `StateVM.onShowOrigin` sends nothing itself.
+    createRoot proc(dispose: proc()) =
+      let w = makeWiredOrigin()
+      w.showEagerRow("c")
+      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), w.state)
+      var row: MockNode = nil
+      proc findRow(node: MockNode) =
+        if row != nil:
+          return
+        if node.kind == mnkElement and
+            node.attributes.getOrDefault("data-variable-name", "") == "c":
+          row = node
+          return
+        for child in node.children:
+          findRow(child)
+      findRow(panel)
+      check row != nil
+      row.fireEvent("contextmenu")
+      var showOrigin: proc() = nil
+      for entry in w.state.lastContextMenu.val:
+        if entry.label == "Show value origin":
+          showOrigin = entry.action
+      check not showOrigin.isNil
+      showOrigin()
+      drain()
+      let requests = originChainRequests(w.mock)
+      check requests.len == 1
+      check requests.len == 1 and requests[0]["variableName"].getStr == "c"
+      check w.origin.sidePanelOpen.val
+      check w.origin.activeChain.val.isSome and
+        w.origin.activeChain.val.get.queryVariable == "c"
+      check w.origin.breadcrumbStack.val.len == 1
+      dispose()
+
+  test "without the OriginChainVM bridge, StateVM.onShowOrigin still sends one ct/originChain":
+    # The headless fallback: a StateVM with no OriginChainVM behind it sends
+    # the request itself, once.
+    let (_, stateVM, _, mock) = makeOriginVM()
+    check stateVM.onShowOriginProc.isNil
+    stateVM.onShowOrigin("total", Location(file: "fixture.py", line: 3))
+    let requests = originChainRequests(mock)
+    check requests.len == 1
+    check requests.len == 1 and requests[0]["variableName"].getStr == "total"
+
   test "a row's chain, asked after a move, leaves the side panel's chain alone":
     # The in-row block and the side panel are separate surfaces (§3.2.1,
     # §3.2.2): the re-ask a move triggers for an expanded row must not
@@ -1473,9 +1523,8 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
     createRoot proc(dispose: proc()) =
       let w = makeWiredOrigin()
       w.showEagerRow("d")
-      # "Show value origin": `StateVM.onShowOrigin` sends on the wire, and its
-      # bridge sends the OriginChainVM's own request.
-      w.mock.expect("ct/originChain", twoHopChainPayload("c"))
+      # "Show value origin": through its bridge, the OriginChainVM sends the
+      # one request.
       w.mock.expect("ct/originChain", twoHopChainPayload("c"))
       w.state.onShowOrigin("c", Location(file: "fixture.py", line: 3))
       drain()
@@ -1594,13 +1643,12 @@ suite "M86 — the origin badge and Pin to scratchpad, through the production br
       originVM.activeChain.val.get.queryVariable == "x"
     check not originVM.loading.val
 
-    # The context menu: `StateVM.onShowOrigin` sends on the wire, and its
-    # bridge sends the OriginChainVM's own request — the side panel's, which
-    # opens the panel and whose failed answer ends the wait.
+    # The context menu: `StateVM.onShowOrigin` sends one request, through its
+    # bridge — the side panel's, which opens the panel and whose failed
+    # answer ends the wait.
     stateVM.onShowOrigin("c", loc)
-    check sentIds == 4
+    check sentIds == 3
     check originVM.sidePanelOpen.val
     check originVM.loading.val
-    check not originVM.rejectChainAnswer("req-3")
-    check originVM.rejectChainAnswer("req-4")
+    check originVM.rejectChainAnswer("req-3")
     check not originVM.loading.val

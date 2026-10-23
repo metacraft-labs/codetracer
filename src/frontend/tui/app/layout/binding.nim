@@ -95,7 +95,8 @@ from std/unicode import runeLen
 import headless_app/layout_interaction
 import headless_app/layout_model
 
-# PLAT-45: `pmDebug`, for the fold depth `resize` compares.
+# PLAT-45: `ProductMode`, for the mode whose default `resize` and
+# `resetToProfile` return to.
 import codetracer_embed
 
 import ../input/motions
@@ -236,6 +237,16 @@ type
     history*: LayoutHistory
     interaction*: Interaction
     profile*: LayoutProfile
+    product*: ProductMode
+      ## WHICH MODE'S DEFAULT this binding re-flows to on a resize and resets
+      ## to on `:reset-layout` (`profile.layoutValueForMode`). Debug mode's for
+      ## the replay loop, which is every binding until codetracer-pm issue
+      ## 2026-10-21; Edit mode's for `main.editInteractive`, whose session is
+      ## a project with no recording. It follows the product mode: a
+      ## `Ctrl+F5` swaps the binding's arrangement with the mode register's
+      ## cell for the entering mode and sets this to that mode
+      ## (`adoptModeArrangement`), so the binding always holds the CURRENT
+      ## mode's arrangement — the one drawn and the one hit-tested.
     focus*: PaneKind
     userModified*: bool
       ## Set by the first command that applies. See the module header on the
@@ -1249,9 +1260,13 @@ proc layout*(b: LayoutBinding): Layout =
   b.history.value
 
 proc newLayoutBinding*(layout: Layout; profile: LayoutProfile;
-                       focus = paneEditor): LayoutBinding =
+                       focus = paneEditor;
+                       product = pmDebug): LayoutBinding =
+  ## `product` names the mode whose default `resize` and `resetToProfile`
+  ## return to; it should be the mode `layout` is an arrangement of.
   LayoutBinding(history: newLayoutHistory(layout), interaction: noInteraction(),
-                profile: profile, focus: focus, userModified: false,
+                profile: profile, product: product, focus: focus,
+                userModified: false,
                 pressRow: -1, pressCol: -1, pointerRow: -1, pointerCol: -1,
                 liveResize: true)
 
@@ -2020,7 +2035,11 @@ proc resetToProfile*(b: LayoutBinding): LayoutAction =
   ## It resets `userModified`, so the layout starts re-flowing on resize
   ## again, and it starts a NEW history: an undo across a reset would take the
   ## user to a layout the profile no longer produces.
-  b.history = newLayoutHistory(profileLayoutValue(b.profile))
+  ##
+  ## THE BINDING'S OWN MODE'S default (`product`): an Edit-mode binding reset
+  ## to Debug's arrangement would put the call trace and the event log into
+  ## `ct edit`, which has no recording for them to show.
+  b.history = newLayoutHistory(layoutValueForMode(b.product, b.profile))
   b.interaction = noInteraction()
   b.userModified = false
   action(lasApplied, "layout reset to the shared default")
@@ -2153,21 +2172,58 @@ proc resize*(b: LayoutBinding; width, height: int): bool =
   # PLAT-45: THE DEFAULT CHANGES ONLY WHEN THE FOLD DEPTH DOES. A profile is
   # now a size, and two sizes that need the same depth produce the same
   # default — so re-flowing on every resize would throw away the active tab
-  # for nothing. The depth is Debug mode's: the binding holds the Debug
-  # arrangement (Edit mode's is the mode register's).
-  let before = depthFor(pmDebug, b.profile)
+  # for nothing. The depth is the BINDING'S OWN MODE'S (`product`): the
+  # binding holds the CURRENT mode's arrangement (Debug's or Edit's), and the
+  # two defaults fold at different sizes — measuring an Edit tree by Debug's
+  # depth would re-flow it into Debug's arrangement.
+  let before = depthFor(b.product, b.profile)
   b.profile = selected
   if b.userModified:
     return false
-  if depthFor(pmDebug, selected) == before:
+  if depthFor(b.product, selected) == before:
     # The same arrangement, re-shared for the new size in place: the active
     # tabs stay as the user chose them, and the editor keeps its minimum
     # rather than the old size's cell counts. Not a re-flow.
-    resizeShares(b.layout.tree, pmDebug, selected)
+    resizeShares(b.layout.tree, b.product, selected)
     return false
-  b.history = newLayoutHistory(profileLayoutValue(selected))
+  b.history = newLayoutHistory(layoutValueForMode(b.product, selected))
   b.interaction = noInteraction()
   true
+
+proc adoptModeArrangement*(b: LayoutBinding; layout: Layout;
+                           product: ProductMode; profile: LayoutProfile;
+                           userModified: bool; width, height: int) =
+  ## A PRODUCT-MODE SWITCH (Mode-Transitions.md §4): the binding takes the
+  ## entering mode's arrangement, as `runtime`'s `Ctrl+F5` hands it over from
+  ## the mode register, so the binding stays the one arrangement that is drawn
+  ## and hit-tested in both modes.
+  ##
+  ##   * **A NEW HISTORY.** An undo must not cross a switch: stepping back past
+  ##     it would install the other mode's tree under this mode's name, which is
+  ##     §4 requirement 4's failure reached by a different key. Each arrival
+  ##     starts its own log, and the leaving mode's log is not kept — the
+  ##     register stores arrangements, not histories.
+  ##   * **No gesture survives.** A drag or a revealed dock belongs to the tree
+  ##     it started on.
+  ##   * **`profile` is the size the arrangement was left at**, and the
+  ##     binding's own `resize` rule is applied from there to `width` x
+  ##     `height`: an untouched arrangement re-flows to this size, a user's
+  ##     arrangement is kept as they left it.
+  b.history = newLayoutHistory(layout)
+  b.product = product
+  b.profile = profile
+  b.userModified = userModified
+  b.interaction = noInteraction()
+  b.dragLayout = Layout()
+  b.pendingPick = none(PaneKind)
+  b.pressRow = -1
+  b.pressCol = -1
+  b.pointerRow = -1
+  b.pointerCol = -1
+  b.glState = GlDragState()
+  b.glPaths = @[]
+  b.pressWasRevealing = false
+  discard b.resize(width, height)
 
 proc saveDocument*(b: LayoutBinding): JsonNode =
   ## The committed layout as a versioned document — tree, docked panes and all.

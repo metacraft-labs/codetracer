@@ -251,6 +251,13 @@ lint_step "shellcheck: stale-artefact guards" \
 	browser-replay/tests/test_dist.sh \
 	ci/test/stale-artefact-guards-test.sh
 
+# `just test-frontend-units` captures this script's stdout as the
+# session-manager path and relies on it failing, by name, when a tool the
+# `cross-process-three-trace` recording needs cannot be built. It sits in
+# scripts/, which the glob at the top does not reach.
+lint_step "shellcheck: cross-process recording provisioning" \
+	shellcheck scripts/provision-cross-process-recording.sh
+
 # Executed here, and not only linted, for the reason the whole sweep exists: a
 # freshness guard that has never been SEEN to refuse a stale artefact is
 # indistinguishable from one that cannot. The suite stales a real binary, a real

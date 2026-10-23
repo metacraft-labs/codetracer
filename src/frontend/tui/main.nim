@@ -816,7 +816,9 @@ proc interactive(command: TuiCommand): int =
     shownId = id
     let slot = app.shell.activeSlot()
     if not slot.isNil:
-      slot.layout = app.layoutBinding.layout.clone()
+      # The DEBUG arrangement, even when the tab is left in Edit mode: a
+      # slot holds a replay arrangement (`runtime.debugArrangementOf`).
+      slot.layout = rt.debugArrangementOf().clone()
     if session.ended:
       # M76: a tab whose session *Stop* ended is an edit tab: nothing of a
       # replay is shown in it, and its workspace is Edit mode.
@@ -867,7 +869,7 @@ proc interactive(command: TuiCommand): int =
     let slot = app.shell.openSession(
       opened.session.backend.toBackendService(),
       title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),
-      layout = app.layoutBinding.layout, adopt = opened.session.sdk)
+      layout = rt.debugArrangementOf(), adopt = opened.session.sdk)
     opened.wireFindInFiles()
     sessions[int(slot.id)] = opened
     # M76: OPENED FROM A TAB WHOSE SESSION *STOP* ENDED — *File › Open
@@ -1365,6 +1367,37 @@ proc editInteractive(command: TuiCommand): int =
     EditListResult(files: listing.files, truncated: listing.truncated))
   wireTopBar(rt)
   let keybindings = wireKeybindings(rt)
+  # THE LAYOUT IS THE USER'S IN EDIT MODE TOO — AND IT IS NOT REMEMBERED.
+  #
+  # Edit mode's arrangement puts Files and VCS in one stack, and without a
+  # binding nothing could choose the VCS tab: `handleToken` hands a mouse
+  # report to the layout only when a binding is enabled, the View menu's pane
+  # items (`showPane`) refuse with "the layout is not rearrangeable in this
+  # session", and the `:` layout verbs are unknown commands. So the VCS pane
+  # this loop keeps refreshed (below) could never be shown (codetracer-pm
+  # issue 2026-10-21). Enabled exactly as the replay loop enables it, and
+  # before `wireLayoutPreferences` for the same reason: `live-resize` is
+  # applied to the binding, so a binding enabled after it would ignore it.
+  #
+  # Frame 0 is unchanged by it: the product mode is already Edit, and an
+  # Edit-mode runtime with no session seeds the binding from Edit mode's own
+  # default (`tui_app.enableLayoutBinding`, `profile.layoutValueForMode`), not
+  # from Debug's.
+  #
+  # NO LAYOUT DOCUMENT IS BOUND, deliberately, and that is the half of the
+  # replay loop's wiring left out: no `restoreLayoutForSession`, no
+  # `rt.layoutCommitted` write-through, no exit save. The terminal's remembered
+  # arrangement (`host/layout_store.layoutDocumentPath`) is ONE document, and
+  # it is not keyed by mode — Mode-Transitions.md §4b's second tier is not
+  # implemented (see `views/shell.switchTo`). It holds the replay loop's Debug
+  # arrangement, so restoring it here would paint Debug's panes into an editor
+  # and saving here would overwrite the user's Debug arrangement with Edit's.
+  # With no document bound, `layoutPersistenceEnabled` is false and
+  # `layoutPersistPlanOf` answers the intent that touches nothing, so an Edit
+  # arrangement lasts for the session — which is what the mode register
+  # already promises for Edit mode (§4b tier 1) — and no file is read or
+  # written.
+  discard rt.enableLayoutBinding()
   wireLayoutPreferences(rt, soUnset, soUnset, soUnset)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
