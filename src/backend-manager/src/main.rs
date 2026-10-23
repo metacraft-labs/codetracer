@@ -187,6 +187,17 @@ enum Commands {
         /// recording however long it takes.
         #[arg(long, value_name = "DURATION")]
         idle_timeout: Option<String>,
+        /// Write the recording under this `recording_id` (a canonical
+        /// lowercase UUIDv7) instead of a freshly minted one.
+        ///
+        /// For a caller that runs the host for exactly one recording whose
+        /// identity it derives itself: CodeTracer's JS boundary replay runner
+        /// derives the id of a materialised trace from the boundary session,
+        /// so that materialising it again writes a byte-identical trace
+        /// (`codetracer-specs/Recording-Backends/JS-Boundary-Recording.md`
+        /// §12).  The host then writes one recording; a second is refused.
+        #[arg(long, value_name = "UUIDV7")]
+        recording_id: Option<String>,
     },
 }
 
@@ -3282,6 +3293,7 @@ async fn run_record_web(
     workdir: Option<&Path>,
     stream_consumer: browser_stream_host::StreamConsumerConfig,
     idle_timeout: Option<std::time::Duration>,
+    recording_id: Option<browser_stream_host::PinnedRecordingId>,
 ) -> Result<(), Box<dyn Error>> {
     let bind_addr: std::net::SocketAddr = bind
         .parse()
@@ -3298,6 +3310,7 @@ async fn run_record_web(
         workdir,
         stream_consumer: stream_consumer.clone(),
         idle_timeout,
+        recording_id: recording_id.clone(),
     };
     let host = browser_stream_host::BrowserStreamHost::new(config);
     let mut running = host.bind().await?;
@@ -3307,6 +3320,9 @@ async fn run_record_web(
         browser_stream_host::DEFAULT_ENDPOINT_PATH,
     );
     eprintln!("writing recorded `.ct` files under: {}", out_dir.display());
+    if let Some(id) = &recording_id {
+        eprintln!("the recording carries the recording id {}", id.as_str());
+    }
     if !stream_consumer.command.is_empty() {
         eprintln!(
             "streaming each recording into: {}",
@@ -3542,6 +3558,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         workdir,
         snapshot_consumer,
         idle_timeout,
+        recording_id,
     }) = &cli.command
     {
         flexi_logger::init();
@@ -3553,12 +3570,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // caller who asked for a specific watchdog and got a different one
         // would have no way to tell.
         let idle_timeout = resolve_record_web_idle_timeout(idle_timeout.as_ref())?;
+        let recording_id = recording_id
+            .as_deref()
+            .map(browser_stream_host::PinnedRecordingId::new)
+            .transpose()
+            .map_err(|e| format!("--recording-id: {e}"))?;
         return run_record_web(
             bind,
             out_dir,
             workdir.as_deref(),
             stream_consumer,
             idle_timeout,
+            recording_id,
         )
         .await;
     }

@@ -35,6 +35,17 @@
 //! the session runs and renamed into place when it ends, so a reader of
 //! `<out_dir>` never meets a half-written recording.
 //!
+//! # The recording id
+//!
+//! Every recording carries a `recording_id` (a canonical UUIDv7) in its
+//! `meta.dat`.  By default the trace writer mints a fresh one per
+//! recording.  A caller that runs the host for exactly one recording whose
+//! identity it must control passes [`BrowserStreamHostConfig::recording_id`]
+//! (`record-web --recording-id`): CodeTracer's JS boundary replay runner
+//! does, so that materialising the same boundary session twice yields a
+//! byte-identical trace (JS-Boundary-Recording.md §12).  Such a host writes
+//! one recording; a second one would share the id, and is refused.
+//!
 //! # Feeding the streaming consumer (opt-in)
 //!
 //! `WASM-Replay-Snapshots-And-Slices.md` §2 derives snapshots *during*
@@ -58,7 +69,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -161,6 +172,48 @@ pub struct BrowserStreamHostConfig {
     /// [`DEFAULT_IDLE_TIMEOUT`] for why the host has to reap itself rather
     /// than trusting its launcher to do it.
     pub idle_timeout: Option<Duration>,
+    /// The `recording_id` the host's recording carries, instead of one the
+    /// writer mints (see the module documentation, "The recording id").
+    /// `None` mints one per recording.
+    pub recording_id: Option<PinnedRecordingId>,
+}
+
+/// A recording id a caller chose for the one recording a host writes.
+///
+/// Clones share one claim, so every connection of a host sees whether the
+/// id has been used: the first recording takes it and any later one is
+/// refused rather than written under the same identity.
+#[derive(Debug, Clone)]
+pub struct PinnedRecordingId {
+    id: String,
+    taken: Arc<AtomicBool>,
+}
+
+impl PinnedRecordingId {
+    /// `id`, which must be a canonical lowercase UUIDv7 (the form
+    /// `meta.dat` requires; `codetracer-trace-format-spec`
+    /// `internal-files.md` "Metadata (meta.dat)").
+    pub fn new(id: &str) -> Result<Self, String> {
+        if !crate::meta_dat::is_canonical_uuid_v7(id) {
+            return Err(format!(
+                "the recording id `{id}` is not a canonical lowercase UUIDv7"
+            ));
+        }
+        Ok(Self {
+            id: id.to_string(),
+            taken: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// The id.
+    pub fn as_str(&self) -> &str {
+        &self.id
+    }
+
+    /// Take the id for a recording; `false` when a recording already has.
+    fn claim(&self) -> bool {
+        !self.taken.swap(true, Ordering::SeqCst)
+    }
 }
 
 /// How long the host tolerates having no connected browser before it
@@ -298,6 +351,7 @@ impl BrowserStreamHostConfig {
             workdir,
             stream_consumer: StreamConsumerConfig::default(),
             idle_timeout: Some(DEFAULT_IDLE_TIMEOUT),
+            recording_id: None,
         }
     }
 }
@@ -482,11 +536,14 @@ async fn handle_connection(
     // shared with the receiver through the `CtfsWriter` trait so the
     // unit-test suite (in `browser_stream_receiver::tests`) can reuse the
     // same plumbing with `InMemoryCtfsWriter`.
-    let writer_handle = Arc::new(Mutex::new(CtfsRecordingWriter::with_stream_consumer(
-        config.out_dir.clone(),
-        config.workdir.clone(),
-        config.stream_consumer.clone(),
-    )));
+    let writer_handle = Arc::new(Mutex::new(
+        CtfsRecordingWriter::with_stream_consumer(
+            config.out_dir.clone(),
+            config.workdir.clone(),
+            config.stream_consumer.clone(),
+        )
+        .with_recording_id(config.recording_id.clone()),
+    ));
     let writer = shared_writer_from(writer_handle.clone());
     let mut receiver = StreamReceiver::new(writer);
 
@@ -617,6 +674,10 @@ pub struct CtfsRecordingWriter {
     pub session_ended: bool,
     /// The `.ct` the session was finalised into, for logging and tests.
     pub last_output_path: Option<PathBuf>,
+    /// The id the recording carries, when its host was given one
+    /// ([`BrowserStreamHostConfig::recording_id`]); the trace writer mints
+    /// one otherwise.
+    recording_id: Option<PinnedRecordingId>,
 }
 
 /// The parts of a recording that only exist between its first record and
@@ -801,7 +862,15 @@ impl CtfsRecordingWriter {
             host_initial_seen: false,
             session_ended: false,
             last_output_path: None,
+            recording_id: None,
         }
+    }
+
+    /// Write the recording under `recording_id` instead of a minted id
+    /// (see the module documentation, "The recording id").
+    pub fn with_recording_id(mut self, recording_id: Option<PinnedRecordingId>) -> Self {
+        self.recording_id = recording_id;
+        self
     }
 
     /// The `.ct` this recording lands in, chosen from the program name the
@@ -832,6 +901,17 @@ impl CtfsRecordingWriter {
         if self.open.is_some() {
             return Ok(());
         }
+        // A pinned id belongs to one recording: claim it before anything is
+        // written, so a second recording is refused without leaving a file.
+        if let Some(pinned) = &self.recording_id
+            && !pinned.claim()
+        {
+            return Err(io::Error::other(format!(
+                "this host was given the recording id {} for one recording, which it has \
+                 already written; a second recording is refused",
+                pinned.as_str(),
+            )));
+        }
         let output_path = self.resolve_output_path();
         let file_name = output_path
             .file_name()
@@ -846,6 +926,11 @@ impl CtfsRecordingWriter {
         }
 
         let mut writer = CtfsTraceWriter::new(&self.program, &self.args);
+        if let Some(pinned) = &self.recording_id {
+            // Before the first record: `meta.dat`, which carries the id, is
+            // committed with it.
+            writer.set_recording_id(pinned.as_str());
+        }
         TraceWriter::set_workdir(&mut writer, &self.workdir);
         TraceWriter::begin_writing_trace_events(&mut writer, &partial_path).map_err(|e| {
             io::Error::other(format!("could not start {}: {e}", partial_path.display()))
@@ -2906,6 +2991,7 @@ mod tests {
             // Not under test here, and a watchdog firing mid-handshake
             // would make this smoke test flaky for an unrelated reason.
             idle_timeout: None,
+            recording_id: None,
         };
         let host = BrowserStreamHost::new(config);
         let running = host.bind().await.expect("bind");
@@ -2941,6 +3027,111 @@ mod tests {
         assert_eq!(events.iter().filter(|e| matches!(e, E::Value(_))).count(), 2);
         let log = decode_log(&stored_boundary_log(&ct));
         assert!(matches!(&log.records[0], Record::Header { program, .. } if program == "smoke"));
+    }
+
+    /// The `recording_id` in a finished recording's `meta.dat`.
+    fn recorded_recording_id(ct: &Path) -> String {
+        let mut reader = codetracer_ctfs::CtfsReader::open(ct)
+            .unwrap_or_else(|e| panic!("open {} as CTFS: {e:?}", ct.display()));
+        let meta = reader
+            .read_file("meta.dat")
+            .unwrap_or_else(|e| panic!("{} has no meta.dat: {e:?}", ct.display()));
+        crate::meta_dat::parse_meta_dat(&meta)
+            .unwrap_or_else(|e| panic!("{}: meta.dat does not parse: {e:?}", ct.display()))
+            .recording_id
+    }
+
+    /// Run a host with `recording_id`, record one session per program name
+    /// (each over its own connection, one after the other), and return the
+    /// output directory.
+    async fn record_sessions(
+        recording_id: Option<PinnedRecordingId>,
+        programs: &[&str],
+    ) -> TempDir {
+        use futures_util::SinkExt;
+
+        let tmp = TempDir::new().expect("create tempdir");
+        let host = BrowserStreamHost::new(BrowserStreamHostConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            out_dir: tmp.path().to_path_buf(),
+            // The same in every run: it is recorded in the metadata, and the
+            // byte comparison below is about the recording id.
+            workdir: PathBuf::from("/ct-pinned-recording-id-test"),
+            stream_consumer: StreamConsumerConfig::default(),
+            idle_timeout: None,
+            recording_id,
+        });
+        let running = host.bind().await.expect("bind");
+        let url = format!("ws://{}/ct-stream", running.local_addr);
+        for program in programs {
+            let (mut ws, _resp) = tokio_tungstenite::connect_async(&url)
+                .await
+                .expect("connect");
+            let batch = [
+                format!(r#"{{"kind":"SessionStart","program":"{program}","args":[]}}"#),
+                r#"{"kind":"Step","siteId":0}"#.to_string(),
+                r#"{"kind":"SessionEnd"}"#.to_string(),
+            ]
+            .join("\n");
+            ws.send(Message::Text(batch)).await.expect("send");
+            ws.close(None).await.ok();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        running.stop().await.expect("stop");
+        tmp
+    }
+
+    /// `record-web --recording-id`: the recording carries the id it was
+    /// given, so a caller that derives the id (the JS boundary replay
+    /// runner, JS-Boundary-Recording.md §12) gets a byte-identical trace when
+    /// it writes the same recording again; and the id is used once.
+    ///
+    /// Control in the same test: a host given no id writes a minted one,
+    /// different in each of two recordings of the same session.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pinned_recording_id_is_written_into_one_recording() {
+        const PINNED: &str = "01890a5d-ac96-774b-bcce-b302099a8057";
+        let pinned = PinnedRecordingId::new(PINNED).expect("a canonical UUIDv7");
+        let tmp = record_sessions(Some(pinned), &["first", "second"]).await;
+        assert_eq!(recorded_recording_id(&tmp.path().join("first.ct")), PINNED);
+        // The second recording would share the id: refused, nothing written.
+        assert_eq!(visible_entries(tmp.path()), vec!["first.ct".to_string()]);
+
+        // Byte identity is what the id is pinned for: the same session
+        // through two hosts given the same id writes the same bytes.
+        let again =
+            record_sessions(Some(PinnedRecordingId::new(PINNED).unwrap()), &["first"]).await;
+        let first = std::fs::read(tmp.path().join("first.ct")).unwrap();
+        assert!(!first.is_empty());
+        assert!(
+            first == std::fs::read(again.path().join("first.ct")).unwrap(),
+            "the same session under the same pinned id is byte-identical",
+        );
+
+        let minted_a = record_sessions(None, &["first"]).await;
+        let minted_b = record_sessions(None, &["first"]).await;
+        let a = recorded_recording_id(&minted_a.path().join("first.ct"));
+        let b = recorded_recording_id(&minted_b.path().join("first.ct"));
+        assert!(crate::meta_dat::is_canonical_uuid_v7(&a), "{a}");
+        assert_ne!(a, b, "without a pinned id every recording mints its own");
+        assert_ne!(a, PINNED);
+    }
+
+    #[test]
+    fn a_recording_id_that_is_not_a_canonical_uuid_v7_is_refused() {
+        for bad in [
+            "",
+            "not-a-uuid",
+            // A v4 UUID: version nibble 4.
+            "01890a5d-ac96-474b-bcce-b302099a8057",
+            // Upper case is not the canonical form.
+            "01890A5D-AC96-774B-BCCE-B302099A8057",
+        ] {
+            assert!(
+                PinnedRecordingId::new(bad).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
     }
 }
 
@@ -3258,6 +3449,7 @@ mod idle_watchdog_tests {
             workdir: tmp.path().to_path_buf(),
             stream_consumer: StreamConsumerConfig::default(),
             idle_timeout,
+            recording_id: None,
         }
     }
 
