@@ -1160,6 +1160,14 @@ test_lane_files() {
 		# one `mkdtemp` directory, which it removes.
 		echo src/frontend/tests/file_tree_operations_test.nim
 		#
+		# `index_startup_state_test.nim` runs the real `startup.init` (an edit
+		# launch) and `traces.loadTrace` (an imported trace) and asserts the
+		# index process's own state holds what they set: the opened folder, the
+		# save and the completed start options, which a copy of `ServerData`
+		# used to swallow. Writes only under one `mkdtemp` directory, which it
+		# removes.
+		echo src/frontend/tests/index_startup_state_test.nim
+		#
 		# `host_session_guard_test.nim` holds `ct host`'s admission rule to
 		# the cases one end-to-end run cannot reach: a supervisor's secret
 		# (used, removed from the environment, refused when weak without

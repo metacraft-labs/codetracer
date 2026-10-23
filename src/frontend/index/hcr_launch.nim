@@ -364,32 +364,15 @@ proc launchUnderHcr(configName: string) {.async.} =
   # --- 1. the configuration ------------------------------------------------
   #
   # `data.workspaceFolder` first, and `data.startOptions.folder` as the
-  # fallback. The fallback was load-bearing until the startup defect below was
-  # fixed for this field (`config.rememberOpenedFolder`, called from `init`'s
-  # edit branch). It is redundant now and kept as a cheap guard. The defect, as
-  # found:
-  #
-  #   `index/startup.nim`'s `init` takes `dataArg: var ServerData` and
-  #   immediately does `var data = dataArg`, with a comment asserting that "on
-  #   the JS backend, ServerData is a reference type, so mutations propagate
-  #   back". It is not a reference type — it is an `object` — and Nim's JS
-  #   backend emits `nimCopy` for that assignment. So the edit branch's
-  #   `data.workspaceFolder = folder` writes to a COPY, and the global stays
-  #   `nil` for the whole session. Measured here on 2026-09-16: a
-  #   `ct edit <folder>` launch reported `hcr-no-workspace-folder` with the
-  #   folder plainly open on screen.
-  #
-  #   The mode-switch path (`index/traces.nim`'s `onInitEditMode`) assigns the
-  #   global directly and is unaffected, which is why the same folder opened
-  #   from the Welcome screen behaves differently from the same folder opened
-  #   from the command line. `onRecordWithLaunchConfig` reads the same field and
-  #   has the same hole.
-  #
-  # Making `init` write the global for EVERY field is a wider change — `trace`,
-  # `save` and `config` are copied the same way — so only the opened folder is
-  # written through, by `rememberOpenedFolder`. Since then the edit branch
-  # leaves `data.workspaceFolder` set, as the Welcome screen's open-folder flow
-  # always did.
+  # fallback, a cheap guard. The fallback used to be load-bearing:
+  # `index/startup.nim`'s `init` worked on a copy of the process state (a
+  # `var ServerData` parameter copied into a local, which the JS backend does
+  # with `nimCopy` because `ServerData` is an `object`), so a `ct edit
+  # <folder>` launch left the global `data.workspaceFolder` nil — measured on
+  # 2026-09-16 as `hcr-no-workspace-folder` with the folder open on screen —
+  # while the same folder opened from the Welcome screen
+  # (`traces.onInitEditMode`, which writes the global) worked. `init` now
+  # works on the global itself, so both launches set the field.
   var workspaceFolder =
     if data.workspaceFolder.isNil: "" else: $data.workspaceFolder
   # Only in EDIT mode: outside it `startOptions.folder` is the process's cwd,

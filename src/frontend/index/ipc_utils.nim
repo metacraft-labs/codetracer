@@ -669,8 +669,8 @@ proc ready*(): Future[void] {.async.} =
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
   data.config = config
-  infoPrint "index: layout/helpers loaded, calling data.init"
+  infoPrint "index: layout/helpers loaded, calling init"
 
   # init the UI directly; delayed timer scheduling can be skipped in server mode
-  discard data.init(config, layout, helpers)
-  infoPrint "index: data.init dispatched"
+  discard init(config, layout, helpers)
+  infoPrint "index: init dispatched"

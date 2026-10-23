@@ -116,13 +116,18 @@ proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
   await wait(1_000)
   await started()
 
-proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
-  # Copy into a local var to work around Nim 2.2's capture check for
-  # var parameters in async procs.  NOTE: `ServerData` is an `object`, and
-  # the JS backend copies it here (`nimCopy`), so assignments to `data`'s
-  # own fields below do NOT reach the caller's `data`. A field later code
-  # must see is written through `config` (`rememberOpenedFolder`).
-  var data = dataArg
+proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
+  ## Start the session this process was launched for: a replay, an edit
+  ## session, the welcome screen, the shell UI or a DeepReview.
+  ##
+  ## Works on the index process's own state, the global `config.data`, which
+  ## every handler after startup reads. It used to take `dataArg: var
+  ## ServerData` and work on `var data = dataArg` (an async proc cannot
+  ## capture a `var` parameter), but `ServerData` is an `object`, so on the
+  ## JS backend that was a COPY (`nimCopy`): the edit session's folder and
+  ## save, and the start options' `isInstalled`, never reached the process
+  ## state. A replay's trace did, but only because `prepareForLoadingTrace`
+  ## assigns the global itself.
   debugPrint "index: init"
   let bypass = true
 
@@ -225,7 +230,7 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
 
     if bypass:
       if not data.trace.isNil:
-        await data.loadTrace(mainWindow, data.trace, data.config, helpers)
+        await loadTrace(mainWindow, data.trace, data.config, helpers)
 
     try:
       let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid), expectPossibleFail=true)
@@ -241,12 +246,9 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
   elif startOptionsSnapshot.edit:
     let file = ($startOptionsSnapshot.name)
     var folder = startOptionsSnapshot.folder
-    # Store workspace folder for later use when switching modes. `data` here
-    # is this proc's copy (see the top of `init`), so the folder is recorded
-    # on the index process's state as well, which is what everything after
-    # startup reads.
+    # The opened folder, which the Files pane's operations, its lazy loads
+    # and a later mode switch read.
     data.workspaceFolder = folder
-    rememberOpenedFolder(folder)
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
     var filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
     var functions: seq[Function] = @[] # TODO load with rg or similar?

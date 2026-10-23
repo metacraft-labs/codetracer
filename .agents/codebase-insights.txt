@@ -4734,23 +4734,17 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   (`NIM_COMMON_FLAGS` + `NIM_REPO_PATH_FLAGS` + `CODETRACER_FLAGS`; `ct` also
   needs `-d:ctEntrypoint`, `db_backend_record.nim` does not).
 
-- `index/startup.nim`'s `init(dataArg: var ServerData, ...)` does `var data =
-  dataArg` and its comment claims "on the JS backend, ServerData is a reference
-  type, so mutations propagate back". IT DOES NOT. `ServerData` is an `object`,
-  and Nim's JS backend emits `nimCopy` for that assignment (see
-  `HEX3Aenv_*.data0 = nimCopy(...)` in `src/build-debug/index.js`), so every
-  write to `data` inside `init` lands in a COPY. The one that bites is the edit
-  branch's `data.workspaceFolder = folder`: after `ct edit <folder>` the global
-  `data.workspaceFolder` is still `nil`, so anything reading it — launch
-  configs (`getLaunchConfigsForWorkspace`, `onRecordWithLaunchConfig`),
-  `loadTrace`'s filesystem categorisation, `pathContentRootFor` — behaves as if
-  no folder were open. The Welcome-screen path is unaffected because
-  `traces.nim`'s `onInitEditMode` assigns the global directly, which is why the
-  same folder behaves differently depending on how it was opened. Measured
-  2026-09-16 while building the HCR launch path, which works around it by
-  reading `data.startOptions.folder` (never copied) in edit mode.
-  `loadTrace` in `traces.nim` carries the identical comment and the identical
-  assumption.
+- Nim's JS backend COPIES an `object` on assignment (`nimCopy`), so the
+  "async proc cannot capture a `var` parameter" workaround `var data = dataArg`
+  silently turns every write into a write to a local copy. `index/startup.init`
+  and `index/traces.loadTrace` did exactly this with `ServerData` (an `object`)
+  until 2026-10-23: a `ct edit <folder>` launch left the global
+  `data.workspaceFolder` nil (measured 2026-09-16 as `hcr-no-workspace-folder`),
+  and `data.save` and `startOptions.isInstalled` never reached the process
+  state. Both now work on the global `config.data` directly, and
+  `src/frontend/tests/index_startup_state_test.nim` holds that. When a proc
+  must change a long-lived `object`, write the global (or make the type a
+  `ref`); never copy it into a local and mutate the local.
 
 - `calls.dat` stores call arguments ONE ENTRY PER ARGUMENT, each with its own
   interned name — `CallStreamRecord.args: Vec<CallArg>` where

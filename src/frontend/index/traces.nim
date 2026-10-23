@@ -533,10 +533,12 @@ proc startVisualReplayForTrace(trace: Trace): Future[VisualReplayPlayerResult] {
       url: "",
       error: "Visual replay player is only available in the main process.")
 
-proc loadTrace*(dataArg: var ServerData, main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
-  # Copy into a local var to work around Nim 2.2's capture check.
-  # On the JS backend, this is a reference copy, so mutations propagate.
-  var data = dataArg
+proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Future[void] {.async.} =
+  ## Send the renderer what it needs to show `trace`, and record its save on
+  ## the index process's own state (`config.data`). It used to take a
+  ## `var ServerData` and work on a local copy of it, which on the JS backend
+  ## is a COPY of the object (see `startup.init`), so `data.save` never
+  ## reached the process state.
   # set title
   when not defined(server):
     main.setTitle(trace.program)
@@ -844,7 +846,7 @@ proc sendInitAndLoadTrace(trace: Trace) {.async.} =
       startOptions: data.startOptions,
       bypass: true})
 
-  await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
+  await loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
 proc prepareForLiveTrace*(trace: Trace,
                           program: cstring,
@@ -914,7 +916,7 @@ proc loadExistingRecord*(recordingId: cstring) {.async.} =
 
   if not data.trace.isNil:
     infoPrint "index: loading trace in mainWindow"
-    await data.loadTrace(mainWindow, data.trace, data.config, data.helpers)
+    await loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
   # (alexander: i think this is not really used anymore: as it's expected to really work only
   #    for ct shell, but that's not currently maintained a lot)
