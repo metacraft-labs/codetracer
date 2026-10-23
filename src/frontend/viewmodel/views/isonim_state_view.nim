@@ -337,9 +337,10 @@ template onToggleOriginBadge*(vm: StateVM; item: proc(): VariableViewState; evTy
 # JS-only wrapper additionally converts each entry into the real
 # ``ContextMenuItem`` type from ``frontend/types.nim`` and forwards the
 # list to ``showContextMenu`` (the same primitive ``ui/value.nim`` uses).
-# The "Show value origin" action calls ``StateVM.onShowOrigin`` which
-# (a) dispatches ``ct/originChain`` through the backend and (b) invokes
-# the host bridge so the side panel opens in lock-step (spec §3.2.2).
+# The "Show value origin" action calls ``StateVM.onShowOrigin``, which puts
+# one ``ct/originChain`` on the wire: through the host bridge, whose
+# ``OriginChainVM`` sends it and opens the side panel (spec §3.2.2), or,
+# with no bridge installed, from the StateVM itself.
 # ---------------------------------------------------------------------------
 
 proc rowLocation(vm: StateVM): store_types.Location =
