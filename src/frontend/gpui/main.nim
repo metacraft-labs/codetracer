@@ -4658,31 +4658,20 @@ proc openRecordingInTab(r: GpuiRenderer; path: string) =
   ## shown. A folder that is not a recording is refused, and said so.
   var opened: HeadlessDebugSession = nil
   try:
-    opened = openGpuiTrace(path)
+    # The open and the first pane loads, renderer-free in the host
+    # (`gpui_host.openTabSession`, where a suite drives it without a window).
+    # A folder that does not open, and an engine that read the recording and
+    # then went quiet while the tab opened (the open's clock is still on
+    # here), are both refused here; the second arrives worded as a stall
+    # after the open, its engine already closed rather than left in a tab
+    # nobody can use.
+    opened = openTabSession(path, FlowOverlayShownByDefault and
+                                  not gOpenCmd.noFlowOverlay)
   except CatchableError as e:
-    traceGesture("open " & path & " refused: " & e.msg.splitLines()[0])
+    let verdict = if e of GpuiTabStalledError: " stalled: " else: " refused: "
+    traceGesture("open " & path & verdict & e.msg.splitLines()[0])
     stderr.writeLine("codetracer-gpui: could not open " & path & ": " &
                      e.msg.splitLines()[0])
-    drawTopBar(r)
-    return
-  if not opened.session.editorVM.isNil:
-    opened.session.editorVM.showFlowOverlay.val =
-      FlowOverlayShownByDefault and not gOpenCmd.noFlowOverlay
-  try:
-    discard opened.loadRecordingPanes(raiseOnStall = true)
-  except DapStalledError as e:
-    # The new tab's engine went quiet on its first pane requests (the open's
-    # clock is still on here). `loadRecordingPanes` raises a stall rather
-    # than recording empty panes, so it is refused like an open that failed,
-    # and its engine is closed rather than left in a tab nobody can use.
-    traceGesture("open " & path & " stalled: " & e.msg.splitLines()[0])
-    stderr.writeLine("codetracer-gpui: could not open " & path &
-                     ": the replay engine stopped answering after the" &
-                     " recording opened (" & e.msg.splitLines()[0] & ")")
-    try:
-      opened.close()
-    except CatchableError:
-      discard
     drawTopBar(r)
     return
   # PLAT-52 / Q3: the Terminal Output's lines are asked for as the pane is
@@ -9348,18 +9337,18 @@ proc main() =
                        " what it says.")
       quit(GpuiExitEngineStalled)
     except DapStalledError as e:
-      # THE ENGINE WENT QUIET AFTER THE RECORDING OPENED — while this run was
-      # loading panes, replaying `--replay-ops` or building `--report-plan`,
+      # THE ENGINE WENT QUIET AFTER THE RECORDING OPENED — in the handshake's
+      # last wait (`EngineStalledAfterOpenError`, which `openGpuiTrace` keeps
+      # as that kind), or while this run was loading panes, replaying
+      # `--replay-ops` or building `--report-plan`,
       # all of which stay on the open's clock (`liftOpenBound`). The same code,
       # because it is the same fact for a script, but NOT the open's remedy:
       # the engine read this recording, so re-recording it would not help.
-      stderr.writeLine("codetracer-gpui: " & cmd.traceFolder &
-                       ": the replay engine stopped answering after the" &
-                       " recording opened (" & e.msg & ")")
-      stderr.writeLine("  the engine read the recording and then went quiet" &
-                       " on a request; run again, or raise " &
-                       GpuiHandshakeEnvVar & " if the host is slow, and" &
-                       " report it with the engine's log if it recurs.")
+      # The terminal's sentence and remedy (`native_host
+      # .stalledAfterOpenReport`), so the two front-ends cannot drift apart.
+      for line in stalledAfterOpenReport("codetracer-gpui", cmd.traceFolder,
+                                         e.msg, GpuiHandshakeEnvVar):
+        stderr.writeLine(line)
       quit(GpuiExitEngineStalled)
     except CatchableError as e:
       stderr.writeLine("codetracer-gpui: " & e.msg.splitLines()[0])

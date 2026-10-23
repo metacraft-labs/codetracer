@@ -164,6 +164,13 @@ type
     ## telling that user to re-record a recording that opened sends them to
     ## redo work that will not help.
 
+  GpuiTabStalledError* = object of DapStalledError
+    ## A recording opened for a new tab (`openTabSession`) whose engine read
+    ## it and then went quiet while the tab was being opened. Its message is
+    ## already the user's sentence (`native_host.StalledAfterOpenPhrase`), its
+    ## `parent` the original stall, and its engine is closed by the time it
+    ## is raised.
+
 proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   ## Spawn `replay-server` on `traceFolder` and complete the DAP handshake.
   ##
@@ -227,6 +234,12 @@ proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
                      interruptFd: -1))
   except GpuiOpenStalledError:
     raise
+  except EngineStalledAfterOpenError:
+    # The engine reached its first stop and THEN went quiet, inside the
+    # handshake's last wait (`newHeadlessDebugSession`). It read the
+    # recording, so this is the post-open stall and keeps that kind: re-labelled
+    # as the open's, it would reach the user as "re-record it" (§8b).
+    raise
   except DapStalledError as e:
     # Re-raised as the open's own kind, carrying the original as `parent`, so
     # the caller can tell this stall from one later in the run (see
@@ -251,6 +264,46 @@ proc liftOpenBound*(session: HeadlessDebugSession) =
   if session.isNil or session.backend.isNil:
     return
   session.backend.bound = DapReadBound(interruptFd: -1)
+
+proc openTabSession*(path: string; showFlowOverlay: bool): HeadlessDebugSession =
+  ## PLAT-49 part B: the open-and-load of a recording the "+" opens in a new
+  ## tab — spawned and handshaken (`openGpuiTrace`), the flow overlay set as
+  ## the run's command line asks, and the recording's panes loaded
+  ## (`loadRecordingPanes`), with the open's clock still on. Renderer-free, so
+  ## a suite opens a tab without a window; `main.openRecordingInTab` adopts
+  ## what it returns into the shell and lifts the clock (`liftOpenBound`).
+  ##
+  ## Raises what `openGpuiTrace` raises for a folder that does not open (its
+  ## engine already reaped by `newHeadlessDebugSession`). An engine that read
+  ## the recording and then went quiet — in the handshake's last wait, or on
+  ## the tab's first pane requests — raises `GpuiTabStalledError` worded as
+  ## the stall after the open, and its engine is CLOSED first (killed if it
+  ## does not exit on its stdin closing, as a busy engine does not) rather
+  ## than left behind a tab nobody can use. A load that fails any other way
+  ## closes the engine too and re-raises what it raised.
+  try:
+    result = openGpuiTrace(path)
+  except EngineStalledAfterOpenError as e:
+    raise newException(GpuiTabStalledError,
+      StalledAfterOpenPhrase & " (" & e.msg.splitLines()[0] & ")", e)
+  if not result.session.editorVM.isNil:
+    result.session.editorVM.showFlowOverlay.val = showFlowOverlay
+  try:
+    discard result.loadRecordingPanes(raiseOnStall = true)
+  except CatchableError as e:
+    # Whatever ends the load, the session is not returned, so its engine is
+    # closed here: nobody else holds it. Only a stall is re-worded; anything
+    # else reaches the caller as it was raised.
+    try:
+      result.close()
+    except CatchableError:
+      discard
+    if e of DapStalledError:
+      raise newException(GpuiTabStalledError,
+        StalledAfterOpenPhrase & " (" & e.msg.splitLines()[0] & ")", e)
+    # `e` by name: the nested `try` above may have caught (and discarded) an
+    # exception of its own since `e` was raised.
+    raise e
 
 const GpuiSourceOverscan* = 6
   ## Lines held above and below the viewport. The terminal's number, and the
