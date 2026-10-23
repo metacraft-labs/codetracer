@@ -131,6 +131,99 @@ when not defined(js):
     ## file this contract describes was moved or deleted.
     readFile(path)
 
+  const RollupClassPrefix = "activity-dr-"
+    ## Every one of the roll-up's 45 classes starts with this, hyphen
+    ## included, and nothing that survived AA-1 does.
+
+  proc nimJsByteArray(s: string): string =
+    ## The body of the array literal the Nim JS backend emits for `s`:
+    ## `"ab"` -> `"97,98"`.  The debug `ui.js` spells most string constants
+    ## this way rather than as a JS string — measured on a debug build of
+    ## codetracer `06c0f829b` (2026-10-23), where the Agent Activity container
+    ## class is emitted as `[99,111,…,32,97,103,101,110,116,45,104,97,45,…]`
+    ## and the text `agent-ha-container` occurs nowhere in the bundle.
+    var parts: seq[string] = @[]
+    for c in s:
+      parts.add($ord(c))
+    parts.join(",")
+
+  const RollupClassBoundaries = ['.', '"', '\'', '`', ' ']
+    ## The characters a class name can follow: a selector's `.`, a string
+    ## literal's opening quote, and the space separating two classes in one
+    ## attribute value or two compound selectors.
+
+  proc rollupClassForms(): seq[string] =
+    ## The shapes a roll-up class takes in a built artefact: the prefix after
+    ## each of `RollupClassBoundaries`, spelled both as text and as a Nim
+    ## byte array (`46` + the prefix's bytes for `.`, `32` for a space, …,
+    ## opening the array with `[` or following an element with `,`), plus
+    ## the prefix as the first element (`[`) of a byte array.  The
+    ## byte-array `.` is not hypothetical: the debug `ui.js` emits selector
+    ## strings such as `".agent-user-copy-button[data-id='"` and
+    ## `" .editor-textarea"` as `[46,97,…]` and `[…,32,46,101,…]`.
+    ##
+    ## The bare prefix is NOT one of them, and must not be: the debug
+    ## `ui.js` carries the absolute path of every source in `/* line N
+    ## "<path>" */` comments, so a checkout under a directory such as
+    ## `fix-agent-activity-drops-…` put `activity-dr` in the bundle 82231
+    ## times without a single class behind it
+    ## (codetracer-pm `issues/2026-10-21-rollup-removal-artefact-check-matches-the-checkout-path.md`).
+    ## A path component reaches the prefix after `/` or `-`, and neither is
+    ## a class boundary.  Only a directory whose own name begins with
+    ## `.activity-dr-` (or contains ` activity-dr-`) could still collide.
+    let bytes = nimJsByteArray(RollupClassPrefix)
+    result = @["[" & bytes]
+    for boundary in RollupClassBoundaries:
+      result.add(boundary & RollupClassPrefix)
+      for opener in ["[", ","]:
+        result.add(opener & $ord(boundary) & "," & bytes)
+
+  proc rollupClassesIn(contents: string): seq[string] =
+    ## The roll-up class forms present in `contents`; empty when the
+    ## artefact carries none, whatever paths it embeds.
+    for form in rollupClassForms():
+      if form in contents:
+        result.add(form)
+
+  suite "AA-1: recognising a roll-up class in a built artefact":
+    ## The matcher behind `test_the_rollup_is_absent_from_the_built_artefacts`,
+    ## held to both halves of its job: a checkout path never counts, and
+    ## every form a class actually takes does.  Without the second half the
+    ## first is satisfied by a matcher that recognises nothing.
+
+    test "test_a_checkout_path_is_not_a_rollup_class":
+      let dir = "/home/u/m/fixes/fix-agent-activity-drops-a-rejected-acp-prom"
+      for contents in [
+          # The line comment the debug `ui.js` puts on every statement.
+          "if (x == 0){ /* line 858:7 \"" & dir &
+            "/codetracer/src/frontend/ui/vcs.nim\" */",
+          # The same path as a Nim string constant and as a byte array.
+          "makeNimstrLit(\"" & dir & "/codetracer/src/x.nim\")",
+          "[" & nimJsByteArray(dir & "/x.nim") & "]",
+          # A directory named for the prefix itself, hyphen and all.
+          "/* line 1:1 \"/home/u/activity-dr-scratch/codetracer/x.nim\" */",
+          "/* line 1:1 \"/home/u/agent-activity-dr-x/codetracer/x.nim\" */"]:
+        check rollupClassesIn(contents).len == 0
+
+    test "test_every_form_of_a_rollup_class_is_recognised":
+      for contents in [
+          ".activity-dr-summary { color: red; }",
+          "el.className = \"activity-dr-files\";",
+          "el.querySelector('.activity-dr-files-row')",
+          "makeNimstrLit(\"component-container activity-dr-panel\")",
+          "x = `activity-dr-${name}`",
+          "setAttribute([99,108,97,115,115], [" &
+            nimJsByteArray("activity-dr-summary") & "]);",
+          "setAttribute([99,108,97,115,115], [" &
+            nimJsByteArray("component-container activity-dr-panel") & "]);",
+          # Selectors, which the bundle also spells as byte arrays: alone,
+          # and as the descendant half of a compound selector.
+          "querySelector(toJSStr([" &
+            nimJsByteArray(".activity-dr-files-row") & "]))",
+          "querySelector(toJSStr([" &
+            nimJsByteArray(".agent-ha-container .activity-dr-body") & "]))"]:
+        check rollupClassesIn(contents).len > 0
+
   suite "AA-1: the id survives the deletion (source contract)":
 
     test "test_the_content_id_and_its_component_survive":
@@ -223,14 +316,17 @@ when not defined(js):
       ## Skipped, loudly, when the tree has not been built: this suite also
       ## runs in the release gate, which has no build tree, and a missing
       ## artefact is not evidence either way.
-      ## The marker is the whole `activity-dr` prefix rather than one class:
-      ## with the view gone not a single one of the 45 has a producer, so any
-      ## occurrence at all means a stale bundle or a resurrected pane.
-      for artefact, marker in {
-          "src/build-debug/ui.js": "activity-dr",
-          "src/build-debug/frontend/styles/default_dark_theme_electron.css":
-            "activity-dr"}.toTable.pairs:
+      ## The check covers the whole `activity-dr-` prefix rather than one
+      ## class: with the view gone not a single one of the 45 has a producer,
+      ## so any class at all means a stale bundle or a resurrected pane.  It
+      ## matches the prefix only where a class can start (`rollupClassesIn`),
+      ## because the bundle also embeds the checkout's own path.
+      for artefact in [
+          "src/build-debug/ui.js",
+          "src/build-debug/frontend/styles/default_dark_theme_electron.css"]:
         if not fileExists(artefact):
           echo "  (skipped: no ", artefact, " — run `just build-once`)"
           continue
-        check not readFile(artefact).contains(marker)
+        let found = rollupClassesIn(readFile(artefact))
+        checkpoint(artefact & " carries " & $found)
+        check found.len == 0
