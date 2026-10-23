@@ -118,9 +118,10 @@ proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
 
 proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
   # Copy into a local var to work around Nim 2.2's capture check for
-  # var parameters in async procs.  On the JS backend, ServerData is a
-  # reference type (JS object), so mutations to 'data' propagate back
-  # to the caller.
+  # var parameters in async procs.  NOTE: `ServerData` is an `object`, and
+  # the JS backend copies it here (`nimCopy`), so assignments to `data`'s
+  # own fields below do NOT reach the caller's `data`. A field later code
+  # must see is written through `config` (`rememberOpenedFolder`).
   var data = dataArg
   debugPrint "index: init"
   let bypass = true
@@ -240,8 +241,12 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
   elif startOptionsSnapshot.edit:
     let file = ($startOptionsSnapshot.name)
     var folder = startOptionsSnapshot.folder
-    # Store workspace folder for later use when switching modes
+    # Store workspace folder for later use when switching modes. `data` here
+    # is this proc's copy (see the top of `init`), so the folder is recorded
+    # on the index process's state as well, which is what everything after
+    # startup reads.
     data.workspaceFolder = folder
+    rememberOpenedFolder(folder)
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
     var filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)
     var functions: seq[Function] = @[] # TODO load with rg or similar?

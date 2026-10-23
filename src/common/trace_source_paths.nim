@@ -6,6 +6,25 @@ proc normalizeSourcePath(path: string): string =
 proc normalizeForCompare(path: string): string =
   normalizeSourcePath(path).strip(leading = false, trailing = true, chars = {'/'})
 
+proc isSamePath*(a, b: string): bool =
+  ## True when ``a`` and ``b`` name the same path, ignoring the separator
+  ## style and a trailing separator: ``/proj/`` is ``/proj``, and
+  ## ``C:\proj`` is ``C:/proj/``.  An empty path is never the same as
+  ## anything, so the synthetic "source folders" container (path ``""``)
+  ## matches no folder.  ``ct edit <dir>`` names the opened folder with a
+  ## trailing ``/`` while ``path.join`` / ``path.resolve`` drop it, so the
+  ## Files tree's root row and the index process can spell one folder two
+  ## ways.
+  if normalizeSourcePath(a).len == 0 or normalizeSourcePath(b).len == 0:
+    return false
+  let na = normalizeForCompare(a)
+  let nb = normalizeForCompare(b)
+  if na.len == 0 or nb.len == 0:
+    # A filesystem root such as "/" normalizes to "": it is the same path
+    # only as another root.
+    return na.len == 0 and nb.len == 0
+  na == nb
+
 proc isAncestorPathOf*(dir, path: string): bool =
   ## True when ``dir`` is a *strict* ancestor directory of ``path``.
   ##

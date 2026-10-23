@@ -1111,7 +1111,7 @@ test.describe("NoirSpaceShip", () => {
     //   source folders > src > main.nr
     const node = await filesystem.nodeByPath("source folders", "src", "main.nr");
 
-    // The jstree context menu can be slow to appear. Retry the right-click.
+    // The menu can be slow to appear on a loaded host. Retry the right-click.
     let options: string[] = [];
     await retry(
       async () => {

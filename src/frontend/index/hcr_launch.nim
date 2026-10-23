@@ -364,9 +364,10 @@ proc launchUnderHcr(configName: string) {.async.} =
   # --- 1. the configuration ------------------------------------------------
   #
   # `data.workspaceFolder` first, and `data.startOptions.folder` as the
-  # fallback. THE FALLBACK IS NOT BELT-AND-BRACES; it is load-bearing, and the
-  # reason is a defect in the startup path that is worth recording rather than
-  # papering over:
+  # fallback. The fallback was load-bearing until the startup defect below was
+  # fixed for this field (`config.rememberOpenedFolder`, called from `init`'s
+  # edit branch). It is redundant now and kept as a cheap guard. The defect, as
+  # found:
   #
   #   `index/startup.nim`'s `init` takes `dataArg: var ServerData` and
   #   immediately does `var data = dataArg`, with a comment asserting that "on
@@ -384,10 +385,11 @@ proc launchUnderHcr(configName: string) {.async.} =
   #   from the command line. `onRecordWithLaunchConfig` reads the same field and
   #   has the same hole.
   #
-  # Fixing `init` is a one-line change with a wide blast radius — the field also
-  # decides how `loadTrace` categorises the filesystem tree and what
-  # `pathContentRootFor` resolves — so it is reported rather than made here, and
-  # this module reads the start options, which are never copied.
+  # Making `init` write the global for EVERY field is a wider change — `trace`,
+  # `save` and `config` are copied the same way — so only the opened folder is
+  # written through, by `rememberOpenedFolder`. Since then the edit branch
+  # leaves `data.workspaceFolder` set, as the Welcome screen's open-folder flow
+  # always did.
   var workspaceFolder =
     if data.workspaceFolder.isNil: "" else: $data.workspaceFolder
   # Only in EDIT mode: outside it `startOptions.folder` is the process's cwd,

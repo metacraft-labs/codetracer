@@ -156,3 +156,25 @@
   position: absolute
   top: 0
   left: 0
+
+// The inline name field of the context menu's Create and Rename
+// (`isonim_filesystem_view.renderNameField`): in place of a row's label, or
+// as the first child of Create's folder. A refused name keeps the field open
+// with the reason beside it.
+.filesystem-name-field
+  display: inline-flex
+  align-items: center
+  gap: 0.5em
+  max-width: 100%
+
+.filesystem-name-input
+  font: inherit
+  color: colors-ui-text-primary-label
+  background-color: colors-ui-surface-primary-secondary
+  border: 1px solid colors-ui-border-primary
+  padding: 0 0.25em
+  min-width: 8em
+
+.filesystem-name-error
+  color: colors-ui-text-error-primary
+  white-space: nowrap

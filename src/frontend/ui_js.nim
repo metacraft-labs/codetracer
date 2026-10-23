@@ -3469,6 +3469,9 @@ proc onUpdatePathContent(
     return
   node[] = response.content[]
   filesystem.refreshIsoNimFilesystemPanel()
+  # A reload after a Files-pane Create, Rename or Delete brings the folder's
+  # sub-folders back as stubs; the ones the user had expanded load again.
+  filesystem.loadExpandedStubsBelow(node)
 
 
 proc onUpdateTrace(sender: js, response: jsobject(trace=Trace)) =
@@ -4595,6 +4598,9 @@ proc configureIPC(data: Data) =
     "saved-as"
     "saved-file"
     "save-file-error"
+    # The answer to a Files-pane Create, Rename or Delete
+    # (`ui/filesystem.onFileTreeOperationDone`).
+    "file-tree-operation-done"
 
     # notifications
     "new-notification"

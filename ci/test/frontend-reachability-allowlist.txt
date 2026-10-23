@@ -54,3 +54,7 @@
 onKeybindingsImport   # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "keybindings-import" (CODETRACER::keybindings-import, the renderer's one-time stepping-preset merge, PLAT-68)
 onKeybindingsRequest  # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "keybindings-request" (CODETRACER::keybindings-request, the renderer asking for keybindings.json)
 onRunTestSuite        # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "run-test-suite" (CODETRACER::run-test-suite, the Test Results pane's header run button)
+onFileTreeCreate      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "file-tree-create" (CODETRACER::file-tree-create, the Files pane's context-menu Create in edit mode)
+onFileTreeRename      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "file-tree-rename" (CODETRACER::file-tree-rename, the Files pane's context-menu Rename in edit mode)
+onFileTreeDelete      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "file-tree-delete" (CODETRACER::file-tree-delete, the Files pane's context-menu Delete in edit mode)
+onFileTreeOperationDone  # renderer IPC handler: `uiIpcHandlers` in ui_js.nim's `configureIPC` builds it from the string "file-tree-operation-done" (CODETRACER::file-tree-operation-done, the index process's answer to a Files-pane Create, Rename or Delete)

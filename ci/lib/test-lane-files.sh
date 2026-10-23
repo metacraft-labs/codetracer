@@ -1071,6 +1071,15 @@ test_lane_files() {
 		# directory, which it removes.
 		echo src/frontend/tests/file_tree_root_load_test.nim
 		#
+		# `file_tree_operations_test.nim` runs the Files pane's Create, Rename
+		# and Delete (`index/file_tree_operations.nim`) over a real temporary
+		# directory: an empty file is created, entries are renamed, an existing
+		# target or a bad name is refused, nothing outside the opened folder is
+		# touched, and Delete on this lane's `-d:server` host (no Electron
+		# shell, so no trash) is refused and deletes nothing. Writes only under
+		# one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/file_tree_operations_test.nim
+		#
 		# `host_session_guard_test.nim` holds `ct host`'s admission rule to
 		# the cases one end-to-end run cannot reach: a supervisor's secret
 		# (used, removed from the environment, refused when weak without

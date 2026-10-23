@@ -76,6 +76,19 @@ var data* = ServerData(
   debugInstances: JsAssoc[cstring, DebugInstance]{}
 )
 
+proc rememberOpenedFolder*(folder: cstring) =
+  ## Record `folder` as the folder opened in edit mode, on the index
+  ## process's own state (`data.workspaceFolder`), which the Files pane's
+  ## Create, Rename and Delete (`index/file_tree_operations`) and lazy loads
+  ## (`index/files.onLoadPathContent`) read.
+  ##
+  ## Through this proc rather than a field write on whatever `data` is in
+  ## scope: `index/startup.init` works on a COPY of `ServerData` (an
+  ## `object`, which the JS backend copies with `nimCopy`), so its edit
+  ## branch's own `data.workspaceFolder = folder` never reached this global
+  ## and a `ct edit <folder>` session had no opened folder at all.
+  data.workspaceFolder = folder
+
 const selfWriteSuppressionMs* = 750.0
   ## How long after one of our own writes filesystem events for that file are
   ## ignored.  Comfortably longer than the 250 ms `fs.watchFile` poll below,

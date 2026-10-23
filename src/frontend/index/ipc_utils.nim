@@ -4,6 +4,7 @@ import
   review_dataset, keybindings,
   ns9_panes,
   hcr_launch,
+  file_tree_operations,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -484,6 +485,11 @@ proc configureIpcMain* =
     "restart"
     # update filesystem component
     "load-path-content"
+    # The Files pane's Create, Rename and Delete in edit mode
+    # (`index/file_tree_operations.nim`; Filesystem-Pane.md § "Context menu").
+    "file-tree-create"
+    "file-tree-rename"
+    "file-tree-delete"
     "open-devtools"
     "search-program"
 

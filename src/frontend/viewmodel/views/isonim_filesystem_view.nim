@@ -12,9 +12,17 @@
 ## intentionally renders a minimal, dependency-free collapsible tree —
 ## one ``filesystem-entry`` row per node, an explicit twisty for
 ## folders, and the diff-files-list / deep-review compact rows below
-## the tree.  The rich jstree affordances (animated open/close,
-## contextmenu, search) remain a follow-up captured in the VM
-## doc-comment.
+## the tree.  jstree's animated open/close and its search plugin have no
+## counterpart yet.
+##
+## A right-click on a row opens the shared CodeTracer context menu
+## (`context_menu_bridge.showContextMenu`, `#context-menu-container`) with
+## the entries `FilesystemVM.fileTreeMenu` decides (codetracer-pm
+## `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Context menu"), and the
+## browser's own menu is suppressed. The diff-list rows have no menu. While
+## Create or Rename is open, the tree also draws the inline name field
+## (`FilesystemVM.nameEdit`): as the first child of Create's folder, or in
+## place of the renamed row's label.
 ##
 ## Both renderer overloads (Mock and Web) produce the same outer
 ## structure mirroring the legacy
@@ -58,6 +66,13 @@ when defined(js):
   # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import kdom except Location
+  from ./context_menu_bridge import showContextMenu
+  from ../../context_menu_item import ContextMenuItem
+
+# The headless tests render through `MockRenderer`; its event type is what
+# the Mock arm of the row's right-click and the name field's keys receive.
+import isonim/testing/mock_dom
 
 import ../store/types
 import ../viewmodels/filesystem_vm
@@ -215,8 +230,165 @@ proc jstreeIconClass*(entry: FilesystemEntryNode): string =
 # ---------------------------------------------------------------------------
 
 when defined(js):
-  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
-  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc fsPreventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc fsStopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
+  proc eventKey(ev: isonim_dom.Event): cstring {.importcpp: "(#.key || '')".}
+  proc fieldValue(e: isonim_dom.Element): cstring {.importcpp: "(#.value || '')".}
+  proc setFieldValue(e: isonim_dom.Element; v: cstring) {.importcpp: "#.value = #".}
+  proc focusFieldSoon(e: isonim_dom.Element) {.importjs: """
+    (function (e) {
+      setTimeout(function () {
+        if (e.isConnected) {
+          e.focus();
+          var n = e.value.length;
+          try { e.setSelectionRange(n, n); } catch (_) {}
+        }
+      }, 0);
+    })(#)""".}
+    ## Focus the name field once the row holding it is in the document (the
+    ## render effect builds a row before attaching it), caret at the end.
+  proc cancelIfStillShown(e: isonim_dom.Element; cancel: proc()) {.importjs: """
+    (function (e, cancel) {
+      setTimeout(function () { if (e.isConnected) { cancel(); } }, 0);
+    })(#, #)""".}
+    ## Leaving the field cancels it — but a field the tree REBUILT (a lazy
+    ## load or a refused name re-renders it) is replaced, not left: Chromium
+    ## may report a blur for the removed element, and by the next task it is
+    ## no longer connected, so only a field the user really left cancels.
+
+  proc toContextMenuItem(entry: FileTreeMenuEntry): ContextMenuItem =
+    ## The shared menu's item for one ViewModel entry: a disabled entry
+    ## keeps its row and shows its reason as the sublabel.
+    let run = entry.run
+    ContextMenuItem(
+      name: cstring(entry.label),
+      hint: cstring"",
+      disabled: entry.disabled,
+      disabledReason: cstring(entry.disabledReason),
+      handler: proc(ev: kdom.Event) =
+        if not run.isNil:
+          run())
+
+  proc showFileTreeMenu(vm: FilesystemVM; path: string; ev: isonim_dom.Event) =
+    var items: seq[ContextMenuItem] = @[]
+    for entry in vm.openFileTreeMenu(path):
+      items.add toContextMenuItem(entry)
+    showContextMenu(items, ev.eventClientX(), ev.eventClientY())
+
+# This module's own names for the two event calls. Generic code that called
+# `preventDefault` would leave it an open symbol (kdom and mock_dom both
+# declare one), and the instantiating module also sees `isonim_state_view`'s,
+# so the call would be ambiguous there.
+template isDomElement(N: typedesc): bool =
+  ## Whether `N` is the browser DOM's element: the web arm of a binding. The
+  ## Mock arm must stay reachable on the JS backend too, where the headless
+  ## suites also run (`vm-js`).
+  when defined(js): N is isonim_dom.Element else: false
+
+proc fsPreventDefault(ev: MockEvent) = ev.preventDefault()
+proc fsStopPropagation(ev: MockEvent) = ev.stopPropagation()
+
+proc bindRowContextMenu[R, N](r: R; vm: FilesystemVM; row: N; path: string) =
+  ## A right-click anywhere on the row (its whole-row band, icon or label)
+  ## opens that row's menu. The browser's own menu is suppressed, and the
+  ## event stops at the row so an enclosing folder's row does not open its
+  ## menu on top. A factory, so each row's closure owns its own `path`.
+  mixin addEventListener
+  when isDomElement(N):
+    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.fsPreventDefault()
+        ev.fsStopPropagation()
+        showFileTreeMenu(vm, path, ev))
+  elif N is MockNode:
+    r.addEventListener(row, "contextmenu", proc(ev: MockEvent) =
+      ev.fsPreventDefault()
+      ev.fsStopPropagation()
+      discard vm.openFileTreeMenu(path))
+
+proc renderNameField[R, N](r: R; vm: FilesystemVM;
+                           edit: FileTreeNameEdit): N =
+  ## The inline name field of Create and Rename: an input holding
+  ## `vm.nameEditDraft` and, after a refused name, the reason beside it.
+  ## Enter commits, Escape or leaving the field cancels. Its keys stop at
+  ## the field, so the tree and the window's shortcuts do not see the
+  ## letters typed into a name.
+  mixin createElement, setAttribute, appendChild, createTextNode,
+        addEventListener, setInputValue, inputValue
+  let field = r.createElement("span")
+  r.setAttribute(field, "class", "filesystem-name-field")
+  let input = r.createElement("input")
+  r.setAttribute(input, "class", "filesystem-name-input")
+  r.setAttribute(input, "type", "text")
+  r.setAttribute(input, "spellcheck", "false")
+  r.setAttribute(input, "aria-label",
+    if edit.kind == fneCreate: "New file name" else: "New name")
+  r.appendChild(field, input)
+  if edit.error.len > 0:
+    let reason = r.createElement("span")
+    r.setAttribute(reason, "class", "filesystem-name-error")
+    r.setAttribute(reason, "role", "alert")
+    r.appendChild(reason, r.createTextNode(edit.error))
+    r.appendChild(field, reason)
+  when isDomElement(N):
+    setFieldValue(input, cstring(vm.nameEditDraft))
+    let inputNode = isonim_dom.Node(input)
+    isonim_dom.addEventListener(inputNode, cstring"keydown",
+      proc(ev: isonim_dom.Event) =
+        ev.fsStopPropagation()
+        let key = $ev.eventKey()
+        if key == "Enter":
+          ev.fsPreventDefault()
+          discard vm.commitNameEdit($fieldValue(input))
+        elif key == "Escape":
+          ev.fsPreventDefault()
+          vm.cancelNameEdit())
+    isonim_dom.addEventListener(inputNode, cstring"input",
+      proc(ev: isonim_dom.Event) =
+        vm.nameEditDraft = $fieldValue(input))
+    isonim_dom.addEventListener(inputNode, cstring"blur",
+      proc(ev: isonim_dom.Event) =
+        cancelIfStillShown(input, proc() =
+          if vm.nameEdit.val.kind != fneNone:
+            vm.cancelNameEdit()))
+    for eventName in [cstring"click", cstring"dblclick", cstring"mousedown",
+                      cstring"contextmenu"]:
+      # The field sits inside the row: a click in it is not a click on the
+      # row, and a right-click in it edits text rather than opening the
+      # row's menu.
+      isonim_dom.addEventListener(inputNode, eventName,
+        proc(ev: isonim_dom.Event) = ev.fsStopPropagation())
+    focusFieldSoon(input)
+  elif N is MockNode:
+    r.setInputValue(input, vm.nameEditDraft)
+    r.addEventListener(input, "keydown", proc(ev: MockEvent) =
+      ev.fsStopPropagation()
+      if ev.key == "Enter":
+        discard vm.commitNameEdit(r.inputValue(input))
+      elif ev.key == "Escape":
+        vm.cancelNameEdit())
+    r.addEventListener(input, "input", proc() =
+      vm.nameEditDraft = r.inputValue(input))
+    # The mock has no focus moves of its own: a "blur" fired by a test is
+    # the user leaving the field.
+    r.addEventListener(input, "blur", proc() =
+      if vm.nameEdit.val.kind != fneNone:
+        vm.cancelNameEdit())
+  field
+
+proc renderCreateFieldNode[R, N](r: R; vm: FilesystemVM;
+                                 edit: FileTreeNameEdit; level: int): N =
+  ## Create's field as a tree node: the first child of the target folder.
+  mixin createElement, setAttribute, appendChild
+  let node = r.createElement("li")
+  r.setAttribute(node, "class",
+                 "jstree-node jstree-leaf filesystem-name-field-node")
+  r.setAttribute(node, "role", "treeitem")
+  r.setAttribute(node, "aria-level", $level)
+  r.appendChild(node, renderNameField[R, N](r, vm, edit))
+  node
 
 proc entryAction(vm: FilesystemVM; path: string; isFolder: bool): proc() =
   ## A row's activation: a folder toggles, a file opens. A factory, so each
@@ -236,7 +408,7 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
   ## and, for an expanded folder, its children. Collapsed subtrees are not
   ## built.
   # Bound where instantiated: on JS this module also sees WebRenderer's.
-  mixin appendChild, removeChild, addEventListener
+  mixin appendChild, removeChild, addEventListener, insertBefore
   let expandedFlag = vm.isExpanded(entry.path)
   let nodeId = jstreeNodeId(entry)
   let isFolder = entry.isFolder
@@ -269,14 +441,27 @@ proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
     when N is isonim_dom.Element:
       isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
         proc(ev: isonim_dom.Event) =
-          ev.preventDefault()
-          ev.stopPropagation()
+          ev.fsPreventDefault()
+          ev.fsStopPropagation()
           activate())
     else:
       r.addEventListener(anchor, "click", activate)
   else:
     r.addEventListener(anchor, "click", activate)
+  bindRowContextMenu[R, N](r, vm, row, entry.path)
+  # The name field, when Create or Rename is open on this row. Reading
+  # `nameEdit` here makes the panel's render effect follow it.
+  let edit = vm.nameEdit.val
+  if edit.kind == fneRename and entry.path.len > 0 and edit.path == entry.path:
+    # Rename: the field replaces the row's label.
+    r.insertBefore(row, renderNameField[R, N](r, vm, edit), anchor)
+    r.removeChild(row, anchor)
   if isFolder and expandedFlag:
+    if edit.kind == fneCreate and entry.path.len > 0 and
+        edit.folder == entry.path:
+      # Create: the field is the folder's first child.
+      r.appendChild(children,
+                    renderCreateFieldNode[R, N](r, vm, edit, level + 1))
     for i in 0 ..< entry.children.len:
       r.appendChild(children, renderEntry[R, N](r, vm, entry.children[i],
                                                 level + 1,

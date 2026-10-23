@@ -26,9 +26,12 @@
 ##    store version of the VM via ``initFilesystemVMFromSession`` so the
 ##    panel uses the production ``ReplayDataStore``.
 ##
-## NOTE: rich jstree affordances (animated open/close, contextmenu
-## plugin, search plugin, drag-and-drop) remain a follow-up.  The
-## IsoNim view renders a dependency-free collapsible tree; the legacy
+## The row context menu (Create, Rename, Delete, Edit) is decided by the
+## VM and drawn by the view; this module wires its requests to the index
+## process (``file-tree-create`` / ``-rename`` / ``-delete``) and handles
+## the answer (``onFileTreeOperationDone``).  jstree's animated
+## open/close, search plugin and drag-and-drop have no counterpart yet.
+## The IsoNim view renders a dependency-free collapsible tree; the legacy
 ## ``changeIcons`` helper is kept exported because ui_js.nim's
 ## ``filesystem-category-loaded`` handler uses it to populate the
 ## devicon class on freshly-loaded subtrees.
@@ -38,7 +41,7 @@ import
   ui_imports,
   # A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
   isonim_panel_mount,
-  ../[ types, communication ],
+  ../[ types, communication, event_helpers ],
   tables,
   sets,
   isonim/core/signals
@@ -53,7 +56,9 @@ from ../viewmodel/viewmodels/filesystem_vm import
   FilesystemVM, createFilesystemVM,
   setRoot, clearRoot, toggleExpanded, expandPath, collapsePath,
   setExpandedPaths, isExpanded, setDiffEntries, emptyEntry, failLoad,
-  showNoProjectFolder
+  showNoProjectFolder, FileTreeHostFacts, ToolbarMode
+from ../lib/electron_presence import inElectron
+from ../../common/trace_source_paths import isSamePath
 from git_cli import sessionHasNoProjectFolder
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
@@ -262,6 +267,13 @@ proc nodeForPathContent*(root: CodetracerFile; parentIndices: seq[int];
       return candidate
   findFileByPath(root, path)
 
+proc isLoadingStub(file: CodetracerFile): bool =
+  ## A folder whose entries were not loaded yet: its only child is the
+  ## "Loading..." placeholder (`index/files.loadFile`).
+  file.children.len > 0 and $file.children[0].text == "Loading..."
+
+proc requestFolderContent(file: CodetracerFile)
+
 proc loadFolderContentIfNeeded*(path: string) =
   ## Ask the index process for the entries of the folder at ``path`` when
   ## it is still a "Loading..." stub — every folder below a root arrives as
@@ -274,28 +286,158 @@ proc loadFolderContentIfNeeded*(path: string) =
   let file = findFileByPath(data.services.editor.filesystem, path)
   if file.isNil:
     return
-  if file.children.len > 0 and $file.children[0].text == "Loading...":
-    let nodeId = "j1_" & $file.index
-    let nodeIndex = file.index
-    let nodeParentIndices = file.parentIndices
-    # Absent (`undefined`) on a node an older index process sent.
-    let payloadPathValue = file.original.payloadPath.toJs
-    let payloadPath =
-      if payloadPathValue.isNull or payloadPathValue.isUndefined: cstring""
-      else: file.original.payloadPath
-    data.ipc.send "CODETRACER::load-path-content", js{
-      path: cstring(path),
-      payloadPath: payloadPath,
-      nodeId: cstring(nodeId),
-      nodeIndex: nodeIndex,
-      nodeParentIndices: nodeParentIndices
-    }
+  if file.isLoadingStub:
+    requestFolderContent(file)
+
+proc requestFolderContent(file: CodetracerFile) =
+  ## Send ``load-path-content`` for the folder node ``file``; the answer
+  ## (``ui_js.onUpdatePathContent``) replaces the node with a fresh listing.
+  let nodeId = "j1_" & $file.index
+  # Absent (`undefined`) on a node an older index process sent.
+  let payloadPathValue = file.original.payloadPath.toJs
+  let payloadPath =
+    if payloadPathValue.isNull or payloadPathValue.isUndefined: cstring""
+    else: file.original.payloadPath
+  data.ipc.send "CODETRACER::load-path-content", js{
+    path: file.original.path,
+    payloadPath: payloadPath,
+    nodeId: cstring(nodeId),
+    nodeIndex: file.index,
+    nodeParentIndices: file.parentIndices
+  }
+
+proc findFolderNamed(file: CodetracerFile; path: string): CodetracerFile =
+  ## The folder row whose path names the same folder as ``path``
+  ## (``isSamePath``). The index process answers with a resolved path
+  ## (``path.resolve`` / ``path.dirname``), which has no trailing separator,
+  ## while the opened folder's own row keeps the one ``ct edit`` gives it
+  ## (``/proj/``): an exact match would miss that row, and a Create in the
+  ## opened folder, or a Rename or Delete of one of its entries, would then
+  ## leave the tree stale.
+  if file.isNil:
+    return nil
+  if not file.original.path.isNil and isSamePath($file.original.path, path):
+    return file
+  for child in file.children:
+    let found = findFolderNamed(child, path)
+    if not found.isNil:
+      return found
+  return nil
+
+proc loadExpandedStubsBelow*(file: CodetracerFile) =
+  ## After ``file``'s listing was replaced (``ui_js.onUpdatePathContent``),
+  ## ask again for every folder below it that the pane shows EXPANDED but
+  ## that came back as a "Loading..." stub.
+  ##
+  ## A listing is one level deep, so its sub-folders arrive as stubs. On a
+  ## first expansion none of them is expanded yet. On a RELOAD — after a
+  ## Create, Rename or Delete in the folder — the user's expanded
+  ## sub-folders are still in the ViewModel's ``expandedPaths``, and nothing
+  ## else would ask for their entries: they would show "Loading..." until
+  ## collapsed and expanded again. Each answer comes back through the same
+  ## handler, so deeper expanded levels load in turn.
+  if file.isNil or filesystemVMInstance.isNil:
+    return
+  for child in file.children:
+    if child.isNil or child.original.path.isNil or child.original.path.len == 0:
+      continue
+    if child.isLoadingStub and filesystemVMInstance.isExpanded($child.original.path):
+      requestFolderContent(child)
+
+proc reloadFolderContent*(path: string) =
+  ## Re-read the folder at ``path`` after a Create, Rename or Delete changed
+  ## it, whether or not it was loaded before. A folder that is not in the
+  ## tree is not shown, so there is nothing to reload.
+  if data.isNil or data.services.editor.filesystem.isNil or path.len == 0:
+    return
+  let file = findFolderNamed(data.services.editor.filesystem, path)
+  if file.isNil:
+    cwarn "file tree: no folder " & path & " to reload"
+    return
+  requestFolderContent(file)
+
+proc stringField(response: JsObject; name: cstring): string =
+  let value = response[name]
+  if value.isNil or value.isUndefined: "" else: $value.to(cstring)
+
+proc onFileTreeOperationDone*(sender: js; response: JsObject) =
+  ## The index process's answer to a Create, Rename or Delete
+  ## (``index/file_tree_operations``): on success reload the folder it names
+  ## — the target folder for Create, the entry's parent for Rename and
+  ## Delete — and open a created file in the editor; on failure leave the
+  ## tree as it is and show the reason as a notification. Open editor tabs
+  ## are not touched either way (Filesystem-Pane.md § "After an operation").
+  let operation = stringField(response, cstring"operation")
+  let error = stringField(response, cstring"error")
+  if error.len > 0:
+    let what =
+      case operation
+      of "create": "Could not create the file: "
+      of "rename": "Could not rename: "
+      of "delete": "Could not move to the trash: "
+      else: "The file operation failed: "
+    data.viewsApi.errorMessage(cstring(what & error))
+    return
+  reloadFolderContent(stringField(response, cstring"folder"))
+  if operation == "create":
+    let created = stringField(response, cstring"path")
+    if created.len > 0:
+      openTab(cstring(created))
+
+const FileTreeRequests = [cstring"CODETRACER::file-tree-create",
+                          cstring"CODETRACER::file-tree-rename",
+                          cstring"CODETRACER::file-tree-delete"]
+
+proc ipcAnswersOne(ipc: JsObject; id: cstring): bool {.importjs: """
+  (function (ipc, id) {
+    if (!ipc) return false;
+    if (ipc.responders === undefined) return true;
+    return !!ipc.responders[id];
+  })(#, #)""".}
+  ## Whether a request `id` sent on `ipc` reaches something that answers it.
+  ## Electron's `ipcRenderer` and the `ct host` socket always lead to an
+  ## index process. The in-page transport of a front end with no index
+  ## process (`ui_js.newWebIpc`, the web IDE) answers only the messages it
+  ## has a responder for, and warns and drops the rest.
+
+proc ipcAnswers(ipc: JsObject; ids: openArray[cstring]): bool =
+  for id in ids:
+    if not ipcAnswersOne(ipc, id):
+      return false
+  true
 
 proc wireFilesystemOpenBridge() =
   if filesystemVMInstance.isNil:
     return
   filesystemVMInstance.onOpenFile = proc(path: string) =
     openTab(cstring(path))
+  # The context menu's host facts and requests (Filesystem-Pane.md
+  # § "Context menu"); the ViewModel decides what they allow.
+  filesystemVMInstance.hostFacts = proc(): FileTreeHostFacts =
+    if data.isNil:
+      return FileTreeHostFacts()
+    let folder =
+      if data.startOptions.folder.isNil: "" else: $data.startOptions.folder
+    FileTreeHostFacts(
+      layout: ToolbarMode(data.ui.mode.ord),
+      # The tree is the opened folder only in a session that opened one
+      # (`ct edit`, Open Folder, a web template). A replay session switched
+      # to the Edit layout keeps `startOptions.edit` false and its
+      # recording's tree.
+      openedFolder: (if data.startOptions.edit: folder else: ""),
+      hasIndexProcess: ipcAnswers(data.ipc, FileTreeRequests),
+      # The renderer is in Electron exactly when its index process is
+      # Electron's main process, which has `shell.trashItem`; `ct host` has
+      # no trash, and its index process refuses a delete in the same words.
+      canTrash: inElectron)
+  filesystemVMInstance.onCreateFile = proc(folder, name: string) =
+    data.ipc.send "CODETRACER::file-tree-create",
+      js{folder: cstring(folder), name: cstring(name)}
+  filesystemVMInstance.onRenamePath = proc(path, newName: string) =
+    data.ipc.send "CODETRACER::file-tree-rename",
+      js{path: cstring(path), newName: cstring(newName)}
+  filesystemVMInstance.onDeletePath = proc(path: string) =
+    data.ipc.send "CODETRACER::file-tree-delete", js{path: cstring(path)}
   filesystemVMInstance.onFolderExpanded = proc(path: string) =
     loadFolderContentIfNeeded(path)
 

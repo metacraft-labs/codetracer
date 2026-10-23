@@ -1172,9 +1172,9 @@ type
   # value type works on both ``test-vm-native`` and ``test-vm-js``
   # without ``cstring`` / ``langstring`` conversion noise.
   #
-  # NOTE: rich jstree-style rendering (animated open/close, contextmenu
-  # plugin, search plugin, drag-and-drop) remains a follow-up.  The
-  # value carries enough state for the IsoNim view to render a
+  # NOTE: jstree's animated open/close, search plugin and drag-and-drop
+  # have no IsoNim counterpart yet (the row context menu does: see
+  # ``filesystem_vm.fileTreeMenu``).  The value carries enough state for the IsoNim view to render a
   # collapsible tree with one row per entry, optional devicon class,
   # and a diff-class modifier so the view can apply the legacy
   # ``diff-file-added`` / ``diff-file-changed`` / ``diff-file-deleted``

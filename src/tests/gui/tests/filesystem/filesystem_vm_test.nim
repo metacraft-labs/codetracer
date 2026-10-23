@@ -1209,3 +1209,488 @@ suite "the roots of an imported trace's file tree (#785)":
         payloadTopLevel: @["src", "lib"]),
       payloadWith(["src", "lib"]))
     check roots == @["src", "lib"]
+
+# ---------------------------------------------------------------------------
+# Files context menu (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md`
+# § "Context menu"; issue 2026-10-21-isonim-files-pane-has-no-context-menu)
+# ---------------------------------------------------------------------------
+#
+# Right-clicking a row opens the shared CodeTracer context menu with Create,
+# Rename, Delete and Edit, always all four and in that order; an entry that
+# cannot act is disabled with its reason, never left out. The decisions —
+# which entries, which are disabled and why, the name rule, the open name
+# field — are the ViewModel's, so every renderer shares them; the view only
+# binds `contextmenu` and draws the field. The view cases render through
+# `MockRenderer` (isonim/testing/mock_dom), the in-memory DOM the headless
+# view tests use: the issue is that a right-click on a row produced nothing,
+# and only the view decides what a row's right-click does. The disk side of
+# the entries is the index process's and is tested over a real directory in
+# `src/frontend/tests/file_tree_operations_test.nim`.
+
+const MenuOrder = @["Create", "Rename", "Delete", "Edit"]
+
+proc makeEditTree(): FilesystemEntryNode =
+  ## An opened folder, as the index process lists it in edit mode:
+  ##
+  ##   source folders            (synthetic, path "")
+  ##   └── /proj
+  ##       ├── /proj/src
+  ##       │   ├── /proj/src/main.nr
+  ##       │   └── /proj/src/lib.nr
+  ##       └── /proj/README.md
+  makeSourceFoldersRoot(@[
+    makeEntry("proj", path = "/proj", isFolder = true, children = @[
+      makeEntry("src", path = "/proj/src", isFolder = true, children = @[
+        makeEntry("main.nr", path = "/proj/src/main.nr"),
+        makeEntry("lib.nr", path = "/proj/src/lib.nr"),
+      ]),
+      makeEntry("README.md", path = "/proj/README.md"),
+    ])
+  ])
+
+type HostCalls = ref object
+  ## What the pane asked the index process and the editor to do.
+  created: seq[(string, string)]
+  renamed: seq[(string, string)]
+  deleted: seq[string]
+  opened: seq[string]
+
+proc filesVMWith(store: ReplayDataStore; facts: FileTreeHostFacts):
+    (FilesystemVM, HostCalls) =
+  ## A FilesystemVM over `makeEditTree`, with the host facts the bridge
+  ## (`ui/filesystem.wireFilesystemOpenBridge`) supplies, and recorders for
+  ## the requests it makes.
+  let vm = createFilesystemVM(store)
+  let calls = HostCalls()
+  vm.hostFacts = proc(): FileTreeHostFacts = facts
+  vm.onCreateFile = proc(folder, name: string) = calls.created.add((folder, name))
+  vm.onRenamePath = proc(path, newName: string) = calls.renamed.add((path, newName))
+  vm.onDeletePath = proc(path: string) = calls.deleted.add(path)
+  vm.onOpenFile = proc(path: string) = calls.opened.add(path)
+  vm.setRoot(makeEditTree())
+  (vm, calls)
+
+proc filesVM(store: ReplayDataStore; editMode: bool; canTrash = true):
+    (FilesystemVM, HostCalls) =
+  ## The two common sessions: the opened folder `/proj` in the Edit layout,
+  ## or a replay (Debug layout, the tree a recording's sources). An index
+  ## process answers in both.
+  filesVMWith(store, FileTreeHostFacts(
+    layout: (if editMode: ToolbarMode.EditMode else: ToolbarMode.DebugMode),
+    openedFolder: (if editMode: "/proj" else: ""),
+    hasIndexProcess: true,
+    canTrash: canTrash))
+
+proc labels(menu: seq[FileTreeMenuEntry]): seq[string] =
+  for entry in menu: result.add entry.label
+
+proc entry(menu: seq[FileTreeMenuEntry]; label: string): FileTreeMenuEntry =
+  for e in menu:
+    if e.label == label: return e
+  raise newException(KeyError, "no menu entry " & label)
+
+template choose(e: FileTreeMenuEntry) =
+  ## Choose a menu entry as a click would. A TEMPLATE, so its `check` belongs
+  ## to the test that uses it (a `check` in a plain proc reports `[OK]` under
+  ## a printed failure); a disabled entry has no action, which fails here
+  ## rather than crashing the suite on a nil closure.
+  let chosen = e
+  check not chosen.run.isNil
+  if not chosen.run.isNil:
+    chosen.run()
+
+proc findRow(node: MockNode; label: string): MockNode =
+  ## The `li.jstree-node` whose own anchor reads `label`.
+  if node.isNil:
+    return nil
+  if node.kind == mnkElement and node.tag == "li":
+    for child in node.children:
+      if child.kind == mnkElement and child.tag == "a" and
+          child.textContent == label:
+        return node
+  for child in node.children:
+    let found = findRow(child, label)
+    if not found.isNil:
+      return found
+  nil
+
+proc anchorOf(row: MockNode): MockNode =
+  for child in row.children:
+    if child.kind == mnkElement and child.tag == "a":
+      return child
+  nil
+
+proc childrenListOf(row: MockNode): MockNode =
+  for child in row.children:
+    if child.kind == mnkElement and child.tag == "ul":
+      return child
+  nil
+
+proc rightClick(row: MockNode): MockEvent =
+  result = MockEvent(`type`: "contextmenu", target: row, currentTarget: row)
+  row.fireEventWith("contextmenu", result)
+
+proc press(node: MockNode; key: string) =
+  node.fireEventWith("keydown", MockEvent(`type`: "keydown", key: key,
+                                          target: node, currentTarget: node))
+
+suite "Files context menu":
+
+  test "the name rule: empty, . and .., and a separator are refused":
+    check fileEntryNameRefusal("main.nr") == ""
+    check fileEntryNameRefusal(".hidden") == ""
+    check fileEntryNameRefusal("a..b") == ""
+    check fileEntryNameRefusal("") != ""
+    check fileEntryNameRefusal(".") != ""
+    check fileEntryNameRefusal("..") != ""
+    check fileEntryNameRefusal("a/b") != ""
+    check fileEntryNameRefusal("a\\b") != ""
+    check fileEntryNameRefusal("/") != ""
+
+  test "isSamePath ignores a trailing separator and the separator style":
+    # `ct edit <dir>` names the opened folder `/proj/`; the index process
+    # answers `/proj`. Both name the root row (Rename/Delete disabled on it,
+    # the folder reloaded after an operation in it).
+    check isSamePath("/proj/", "/proj")
+    check isSamePath("/proj", "/proj//")
+    check isSamePath("C:\\proj\\", "C:/proj")
+    check isSamePath("/", "/")
+    check not isSamePath("/proj", "/proj/src")
+    check not isSamePath("/proj", "/pro")
+    check not isSamePath("", "")
+    check not isSamePath("", "/")
+
+  test "every row lists Create, Rename, Delete and Edit, in that order":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for editMode in [true, false]:
+        let (vm, _) = filesVM(store, editMode)
+        for path in ["/proj/src/main.nr", "/proj/src", "/proj", ""]:
+          check vm.fileTreeMenu(path).labels == MenuOrder
+      dispose()
+
+  test "a replay session: Create, Rename and Delete are read-only, Edit opens a file":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = false)
+      for path in ["/proj/src/main.nr", "/proj/src"]:
+        let menu = vm.fileTreeMenu(path)
+        for label in ["Create", "Rename", "Delete"]:
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == ReadOnlySourcesReason
+      check ReadOnlySourcesReason == "A recording's sources are read-only"
+      let edit = vm.fileTreeMenu("/proj/src/main.nr").entry("Edit")
+      check not edit.disabled
+      edit.run()
+      check calls.opened == @["/proj/src/main.nr"]
+      check calls.created.len == 0 and calls.renamed.len == 0 and
+        calls.deleted.len == 0
+      dispose()
+
+  test "Edit on a folder is disabled: only a file opens in the editor":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for editMode in [true, false]:
+        let (vm, _) = filesVM(store, editMode)
+        for path in ["/proj/src", ""]:
+          let edit = vm.fileTreeMenu(path).entry("Edit")
+          check edit.disabled
+          check edit.disabledReason == OnlyFilesOpenReason
+        check OnlyFilesOpenReason == "Only a file can be opened in the editor"
+      dispose()
+
+  test "edit mode: Create, Rename and Delete are enabled on files and folders":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      for path in ["/proj/src/main.nr", "/proj/src", "/proj/README.md"]:
+        let menu = vm.fileTreeMenu(path)
+        for label in ["Create", "Rename", "Delete"]:
+          check not menu.entry(label).disabled
+          check menu.entry(label).disabledReason == ""
+      check not vm.fileTreeMenu("/proj/src/main.nr").entry("Edit").disabled
+      dispose()
+
+  test "Delete is disabled where the host has no trash":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true, canTrash = false)
+      let delete = vm.fileTreeMenu("/proj/src/main.nr").entry("Delete")
+      check delete.disabled
+      check delete.disabledReason == "This host has no trash"
+      check not vm.fileTreeMenu("/proj/src/main.nr").entry("Rename").disabled
+      check calls.deleted.len == 0
+      dispose()
+
+  test "the source folders container is not a folder on disk":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      let menu = vm.fileTreeMenu("")
+      for label in ["Create", "Rename", "Delete"]:
+        check menu.entry(label).disabled
+        check menu.entry(label).disabledReason == NotOnDiskReason
+      check NotOnDiskReason == "Not a folder on disk"
+      dispose()
+
+  test "Delete asks the index process to move the entry to the trash":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Delete").run()
+      check calls.deleted == @["/proj/src"]
+      dispose()
+
+  test "Create opens a name field in the target folder and expands it":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      check not vm.isExpanded("/proj/src")
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      check vm.nameEdit.val.kind == fneCreate
+      check vm.nameEdit.val.folder == "/proj/src"
+      check vm.nameEdit.val.name == ""
+      check vm.isExpanded("/proj/src")
+      # On a file, the target is the file's folder.
+      vm.cancelNameEdit()
+      vm.fileTreeMenu("/proj/README.md").entry("Create").run()
+      check vm.nameEdit.val.kind == fneCreate
+      check vm.nameEdit.val.folder == "/proj"
+      dispose()
+
+  test "Rename opens a name field holding the current name":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src/main.nr").entry("Rename").run()
+      check vm.nameEdit.val.kind == fneRename
+      check vm.nameEdit.val.path == "/proj/src/main.nr"
+      check vm.nameEdit.val.folder == "/proj/src"
+      check vm.nameEdit.val.name == "main.nr"
+      dispose()
+
+  test "committing a valid name sends it to the index process and closes the field":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      check vm.commitNameEdit("new.nr")
+      check calls.created == @[("/proj/src", "new.nr")]
+      check vm.nameEdit.val.kind == fneNone
+      vm.fileTreeMenu("/proj/src/lib.nr").entry("Rename").run()
+      check vm.commitNameEdit("util.nr")
+      check calls.renamed == @[("/proj/src/lib.nr", "util.nr")]
+      check vm.nameEdit.val.kind == fneNone
+      dispose()
+
+  test "a refused name keeps the field open and says why":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      for bad in ["", ".", "..", "a/b", "a\\b", "main.nr"]:
+        check not vm.commitNameEdit(bad)
+        check vm.nameEdit.val.kind == fneCreate
+        check vm.nameEdit.val.name == bad
+        check vm.nameEdit.val.error.len > 0
+      check vm.nameEdit.val.error == "\"main.nr\" already exists in this folder"
+      vm.cancelNameEdit()
+      # Renaming onto a sibling's name is refused too.
+      vm.fileTreeMenu("/proj/src/lib.nr").entry("Rename").run()
+      check not vm.commitNameEdit("main.nr")
+      check vm.nameEdit.val.kind == fneRename
+      check calls.created.len == 0 and calls.renamed.len == 0
+      dispose()
+
+  test "cancelling the field closes it and sends nothing":
+    # The keys and the blur that cancel it are the view cases below.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      vm.cancelNameEdit()
+      check vm.nameEdit.val.kind == fneNone
+      check calls.created.len == 0
+      dispose()
+
+  test "a right-click on a row opens the Files menu and suppresses the browser's":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = false)
+      vm.expandPath("/proj")
+      vm.expandPath("/proj/src")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      let row = findRow(panel, "main.nr")
+      check not row.isNil
+      let ev = rightClick(row)
+      check ev.defaultPrevented
+      check ev.propagationStopped
+      check vm.lastContextMenu.labels == MenuOrder
+      check vm.lastContextMenu.entry("Create").disabledReason ==
+        ReadOnlySourcesReason
+      check not vm.lastContextMenu.entry("Edit").disabled
+      # A folder row's menu is the folder's.
+      discard rightClick(findRow(panel, "src"))
+      check vm.lastContextMenu.entry("Edit").disabled
+      dispose()
+
+  test "the diff list rows have no menu":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, _) = filesVM(store, editMode = false)
+      vm.setDiffEntries(@[FilesystemDiffEntry(path: "/proj/src/main.nr")])
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      let diffRow = findOverlay(panel, "diff-file-path")
+      check not diffRow.isNil
+      check "contextmenu" notin diffRow.eventHandlers
+      check "contextmenu" notin diffRow.eventListeners
+      dispose()
+
+  test "Create shows the field as the first child of the expanded folder":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.expandPath("/proj")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      discard rightClick(findRow(panel, "src"))
+      vm.lastContextMenu.entry("Create").run()
+      let srcRow = findRow(panel, "src")
+      let list = childrenListOf(srcRow)
+      check not list.isNil
+      check list.children.len == 3
+      let fieldNode = list.children[0]
+      let input = findOverlay(fieldNode, "filesystem-name-input")
+      check not input.isNil
+      check findRow(panel, "main.nr") == list.children[1]
+      # Enter commits the name typed into the field.
+      MockRenderer().setInputValue(input, "new.nr")
+      input.press("Enter")
+      check calls.created == @[("/proj/src", "new.nr")]
+      check findOverlay(panel, "filesystem-name-input").isNil
+      dispose()
+
+  test "a refused name keeps the field open with its reason; Escape closes it":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.expandPath("/proj")
+      vm.expandPath("/proj/src")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      vm.fileTreeMenu("/proj/src").entry("Create").run()
+      var input = findOverlay(panel, "filesystem-name-input")
+      MockRenderer().setInputValue(input, "lib.nr")
+      input.press("Enter")
+      input = findOverlay(panel, "filesystem-name-input")
+      check not input.isNil
+      check MockRenderer().inputValue(input) == "lib.nr"
+      let reason = findOverlay(panel, "filesystem-name-error")
+      check not reason.isNil
+      check "already exists" in reason.textContent
+      input.press("Escape")
+      check findOverlay(panel, "filesystem-name-input").isNil
+      check calls.created.len == 0
+      dispose()
+
+  test "Rename replaces the row's label with the field; leaving it cancels":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVM(store, editMode = true)
+      vm.expandPath("/proj")
+      vm.expandPath("/proj/src")
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      discard rightClick(findRow(panel, "lib.nr"))
+      vm.lastContextMenu.entry("Rename").run()
+      check findRow(panel, "lib.nr").isNil
+      let input = findOverlay(panel, "filesystem-name-input")
+      check not input.isNil
+      check MockRenderer().inputValue(input) == "lib.nr"
+      input.fireEvent("blur")
+      check vm.nameEdit.val.kind == fneNone
+      check not findRow(panel, "lib.nr").isNil
+      check calls.renamed.len == 0
+      dispose()
+
+  test "every editing layout over the opened folder acts on the disk":
+    # Edit mode is `edit_mode_toolbar.isEditing` — Edit, Quick Edit and
+    # Interactive Edit — when the tree is the opened folder.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for layout in [ToolbarMode.EditMode, ToolbarMode.QuickEditMode,
+                     ToolbarMode.InteractiveEditMode]:
+        let (vm, calls) = filesVMWith(store, FileTreeHostFacts(
+          layout: layout, openedFolder: "/proj", hasIndexProcess: true,
+          canTrash: true))
+        let menu = vm.fileTreeMenu("/proj/src/main.nr")
+        for label in ["Create", "Rename", "Delete"]:
+          checkpoint $layout & " " & label
+          check not menu.entry(label).disabled
+        choose menu.entry("Delete")
+        check calls.deleted == @["/proj/src/main.nr"]
+      dispose()
+
+  test "an editing layout over a recording's sources is a replay":
+    # A replay session switched to the Edit layout keeps its recording's
+    # tree: the layout edits, the tree is not the opened folder.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      for facts in [
+          FileTreeHostFacts(layout: ToolbarMode.EditMode, openedFolder: "",
+                            hasIndexProcess: true, canTrash: true),
+          FileTreeHostFacts(layout: ToolbarMode.CalltraceLayoutMode,
+                            openedFolder: "/proj", hasIndexProcess: true,
+                            canTrash: true)]:
+        let (vm, calls) = filesVMWith(store, facts)
+        let menu = vm.fileTreeMenu("/proj/src/main.nr")
+        for label in ["Create", "Rename", "Delete"]:
+          checkpoint $facts.layout & " " & label
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == ReadOnlySourcesReason
+        check not menu.entry("Edit").disabled
+        check calls.deleted.len == 0
+      dispose()
+
+  test "with no index process, Create, Rename and Delete are disabled and nothing is sent":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let (vm, calls) = filesVMWith(store, FileTreeHostFacts(
+        layout: ToolbarMode.EditMode, openedFolder: "/proj",
+        hasIndexProcess: false, canTrash: false))
+      check NoFileOperationsReason == "This front end cannot change files"
+      for path in ["/proj/src/main.nr", "/proj/src", "/proj"]:
+        let menu = vm.fileTreeMenu(path)
+        for label in ["Create", "Rename", "Delete"]:
+          checkpoint path & " " & label
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == NoFileOperationsReason
+          check menu.entry(label).run.isNil
+      check not vm.fileTreeMenu("/proj/src/main.nr").entry("Edit").disabled
+      # "Not a folder on disk" still wins on the container.
+      check vm.fileTreeMenu("").entry("Create").disabledReason == NotOnDiskReason
+      check vm.nameEdit.val.kind == fneNone
+      check calls.created.len == 0 and calls.renamed.len == 0 and
+        calls.deleted.len == 0
+      dispose()
+
+  test "the opened folder's row takes a new file but is not renamed or deleted":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      check OpenedFolderRowReason ==
+        "The opened folder cannot be renamed or deleted from the tree"
+      # Also when the folder is named with a trailing separator.
+      for opened in ["/proj", "/proj/"]:
+        let (vm, calls) = filesVMWith(store, FileTreeHostFacts(
+          layout: ToolbarMode.EditMode, openedFolder: opened,
+          hasIndexProcess: true, canTrash: true))
+        let menu = vm.fileTreeMenu("/proj")
+        check not menu.entry("Create").disabled
+        for label in ["Rename", "Delete"]:
+          checkpoint opened & " " & label
+          check menu.entry(label).disabled
+          check menu.entry(label).disabledReason == OpenedFolderRowReason
+        # A folder below it is an ordinary folder.
+        check not vm.fileTreeMenu("/proj/src").entry("Rename").disabled
+        choose menu.entry("Create")
+        check vm.nameEdit.val.kind == fneCreate
+        check vm.nameEdit.val.folder == "/proj"
+        check calls.renamed.len == 0 and calls.deleted.len == 0
+      dispose()
