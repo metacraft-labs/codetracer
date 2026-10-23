@@ -1331,6 +1331,52 @@ proc importLocalManifest(
   flushFile(stdout)
 
 
+when defined(posix):
+  from std/posix import Pid, Sigaction, sigaction, sigemptyset, SA_RESTART,
+    SIG_DFL, SIGTERM, SIGINT, SIGHUP, kill
+
+  var terminationSignalTarget: Pid = 0
+    ## The node server's pid, once it runs; read by the signal handler, so a
+    ## plain integer and nothing the GC owns.
+
+  proc forwardTerminationSignal(signal: cint) {.noconv, stackTrace: off.} =
+    ## Only `kill(2)`, which is async-signal-safe
+    ## (https://man7.org/linux/man-pages/man7/signal-safety.7.html), and no
+    ## stack-trace frame bookkeeping around it.
+    let target = terminationSignalTarget
+    if target > 0:
+      discard posix.kill(target, signal)
+
+  proc forwardTerminationSignals(child: int) =
+    ## `ct host` and what it started end together (`CLI/ct/host.md`, "Corner
+    ## Cases"). A supervisor or a test fixture stops `ct host` by signalling
+    ## its pid, not its process group, so the signal reaches `ct host` alone;
+    ## it is handed on to the node server, whose own handlers stop the
+    ## session-manager and the replays beneath it. `ct host` itself then
+    ## returns from waiting for the node server as it does after any other
+    ## exit. SA_RESTART keeps that wait from failing with EINTR.
+    ##
+    ## SIGKILL cannot be forwarded; the node server covers it by watching for
+    ## its parent to go away (`src/frontend/index/server_lifetime.nim`).
+    terminationSignalTarget = Pid(child)
+    var action: Sigaction
+    action.sa_handler = forwardTerminationSignal
+    discard sigemptyset(action.sa_mask)
+    action.sa_flags = SA_RESTART
+    for signal in [SIGTERM, SIGINT, SIGHUP]:
+      discard sigaction(signal, action, nil)
+
+  proc stopForwardingTerminationSignals() =
+    ## Once the node server has been reaped its pid may be reused, so a late
+    ## signal must not be handed on to whatever holds that pid now: it ends
+    ## `ct host` the default way instead, the only process left to end.
+    terminationSignalTarget = 0
+    var action: Sigaction
+    action.sa_handler = SIG_DFL
+    discard sigemptyset(action.sa_mask)
+    for signal in [SIGTERM, SIGINT, SIGHUP]:
+      discard sigaction(signal, action, nil)
+
 proc hostCommand*(
     port: int,
     bindAddressFlag: string,
@@ -1533,4 +1579,9 @@ proc hostCommand*(
     env = childEnv,
     options={poParentStreams})
   var electronPid = process.processID
-  echo "status code:", waitForExit(process)
+  when defined(posix):
+    forwardTerminationSignals(electronPid)
+  let exitStatus = waitForExit(process)
+  when defined(posix):
+    stopForwardingTerminationSignals()
+  echo "status code:", exitStatus

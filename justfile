@@ -5782,6 +5782,9 @@ test-ui-selection: build-once build-tui
 # src/tests/ct_host/test_ct_host_sessions_are_isolated_per_client.nim plays three
 # clients' pages against one real `ct host`: each gets its own replay and session
 # (CLI/ct/host.md, "Sessions are isolated").
+# src/tests/ct_host/test_ct_host_killed_leaves_no_process_behind.nim signals or
+# SIGKILLs the real `ct host` alone and checks that its node server,
+# session-manager and replay end with it (CLI/ct/host.md, "Corner Cases").
 test-ct-host-admission: build-once
   #!/usr/bin/env bash
   set -euo pipefail

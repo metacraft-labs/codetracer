@@ -4,6 +4,9 @@ import
   index/[ args, ipc_utils, electron_vars, server_config, config, window ],
   ../common/ct_home
 
+when defined(server):
+  import index/server_lifetime
+
 data.start = now()
 parseArgs()
 
@@ -149,4 +152,7 @@ when not defined(server):
     discard ready()
 else:
   readyVar = functionAsJs(ready)
+  # Before the listeners: a signal that arrives while the server starts must
+  # still stop what it has started (`index/server_lifetime`).
+  installServerLifetime()
   setupServer()

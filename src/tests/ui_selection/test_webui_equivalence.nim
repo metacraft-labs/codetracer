@@ -176,10 +176,13 @@ proc startServer(args: seq[string]; port: int): Server =
 proc stopServer(server: var Server) =
   ## Kill the arm AND the `node server_index.js` it spawned.
   ##
-  ## BOTH, because the child outlives its parent: it watches `--caller-pid` and
-  ## an idle timeout rather than dying with it, so killing only `ct` leaves the
-  ## port bound and the next arm's bind failing. Measured on this host —
-  ## the listener was still answering 200 twenty seconds after `ct` was killed.
+  ## BOTH, because the next arm's bind must not depend on how the child ends.
+  ## The child once outlived its parent — the listener was still answering 200
+  ## twenty seconds after `ct` was killed. `ct host` now hands the signal on
+  ## and the child also watches for its parent to go away
+  ## (`test_ct_host_killed_leaves_no_process_behind.nim` holds that), so the
+  ## `pkill` below normally finds nothing; it stays so that a regression there
+  ## fails that suite rather than this one's bind.
   if server.process.running:
     server.process.terminate()
   discard server.process.waitForExit()
