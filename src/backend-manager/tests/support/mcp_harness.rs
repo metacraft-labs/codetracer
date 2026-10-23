@@ -39,34 +39,414 @@ pub fn server_binary() -> PathBuf {
 
 /// The `replay-server` the daemon starts for the recording: the one named
 /// by `CODETRACER_REPLAY_SERVER_CMD`, else the one built beside this test,
-/// else the sibling db-backend crate's build.  Missing is a failure.
+/// else the sibling db-backend crate's build.  Missing is a failure, and so
+/// is one older than its source ([`locate_replay_server`]).
 pub fn replay_server() -> PathBuf {
-    if let Ok(cmd) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
-        let path = PathBuf::from(cmd);
-        assert!(
-            path.is_file(),
-            "CODETRACER_REPLAY_SERVER_CMD={} is not a file",
-            path.display()
-        );
-        return path;
-    }
-    let exe = std::env::consts::EXE_SUFFIX;
-    let beside = server_binary().with_file_name(format!("replay-server{exe}"));
-    if beside.is_file() {
-        return beside;
-    }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for profile in ["release", "debug"] {
-        let candidate =
-            manifest_dir.join(format!("../db-backend/target/{profile}/replay-server{exe}"));
-        if candidate.is_file() {
-            return candidate.canonicalize().unwrap_or(candidate);
+    replay_server_for(&server_binary())
+}
+
+/// [`replay_server`] for the `session-manager` at `server`: the candidate
+/// beside it is the one beside `server`.  Panics with
+/// [`locate_replay_server`]'s refusal.
+pub fn replay_server_for(server: &Path) -> PathBuf {
+    let explicit = std::env::var_os("CODETRACER_REPLAY_SERVER_CMD").map(PathBuf::from);
+    locate_replay_server(explicit, server, &db_backend_dir())
+        .unwrap_or_else(|refusal| panic!("{refusal}"))
+}
+
+/// The db-backend crate, which builds `replay-server`: the sibling of this
+/// crate in the checkout.
+pub fn db_backend_dir() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../db-backend");
+    dir.canonicalize().unwrap_or(dir)
+}
+
+/// Why [`locate_replay_server`] has no `replay-server` to give.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayServerRefusal {
+    /// None is built at any candidate location (a test that may skip when
+    /// the backend is not built skips on this one alone).
+    NotBuilt(String),
+    /// `CODETRACER_REPLAY_SERVER_CMD` names something that is not a file.
+    NotAFile(String),
+    /// The one found is older than an input it is built from.
+    Stale(String),
+}
+
+impl std::fmt::Display for ReplayServerRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotBuilt(m) | Self::NotAFile(m) | Self::Stale(m) => f.write_str(m),
         }
     }
-    panic!(
-        "replay-server was not found (CODETRACER_REPLAY_SERVER_CMD, beside the test \
-         binary, or src/db-backend/target/{{release,debug}}); build it first"
+}
+
+/// Choose the `replay-server` a test runs, and refuse a stale one.
+///
+/// The candidates, in order: `explicit` (`CODETRACER_REPLAY_SERVER_CMD`),
+/// which must be a file; the one beside `server`; `db_backend`'s
+/// `target/{release,debug}` build; `src/build-debug/bin`.  The first that
+/// exists is the one, and none of the files it is built from may be newer
+/// than it ([`check_replay_server_fresh`]), or this says why, naming the
+/// binary, the newer file and the command that rebuilds it.  A binary that
+/// predates its source answers the protocol of an older revision: one built
+/// before the daemon learned a launch argument does not answer a launch that
+/// carries it, and the test times out on a symptom instead of failing on the
+/// cause.
+pub fn locate_replay_server(
+    explicit: Option<PathBuf>,
+    server: &Path,
+    db_backend: &Path,
+) -> Result<PathBuf, ReplayServerRefusal> {
+    let exe = std::env::consts::EXE_SUFFIX;
+    let chosen = if let Some(path) = explicit {
+        if !path.is_file() {
+            return Err(ReplayServerRefusal::NotAFile(format!(
+                "CODETRACER_REPLAY_SERVER_CMD={} is not a file",
+                path.display()
+            )));
+        }
+        path
+    } else {
+        let mut candidates = vec![server.with_file_name(format!("replay-server{exe}"))];
+        for profile in ["release", "debug"] {
+            candidates.push(db_backend.join(format!("target/{profile}/replay-server{exe}")));
+        }
+        candidates.push(db_backend.join(format!("../build-debug/bin/replay-server{exe}")));
+        match candidates.into_iter().find(|candidate| candidate.is_file()) {
+            Some(candidate) => candidate.canonicalize().unwrap_or(candidate),
+            None => {
+                return Err(ReplayServerRefusal::NotBuilt(format!(
+                    "replay-server was not found (CODETRACER_REPLAY_SERVER_CMD, beside {}, \
+                     {}/target/{{release,debug}} or src/build-debug/bin); build it first: \
+                     cd {} && cargo build --bin replay-server",
+                    server.display(),
+                    db_backend.display(),
+                    db_backend.display()
+                )));
+            }
+        }
+    };
+    check_replay_server_fresh(&chosen, db_backend).map_err(ReplayServerRefusal::Stale)?;
+    Ok(chosen)
+}
+
+/// Where the list of a binary's build inputs came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputSource {
+    /// Cargo's dep-info file beside the binary (`replay-server.d`): every
+    /// file the compiler and the build scripts reported reading, grammar C
+    /// sources and `include_*!` files included.  Authoritative.
+    DepInfo,
+    /// No dep-info file: the manifest scan of [`replay_server_inputs`].
+    ManifestScan,
+}
+
+/// `Ok` when no file `binary` is built from is newer than it; otherwise why
+/// not.  The inputs are those of [`replay_server_inputs`]; an input cargo
+/// listed that no longer exists counts as changed, as it does for cargo.
+///
+/// What this does not establish: it compares modification times, never
+/// content, so a binary newer than every input but built from different
+/// source (built in another checkout and named by
+/// `CODETRACER_REPLAY_SERVER_CMD`, or inputs copied with their times kept)
+/// is accepted.  A checkout that rewrites files gives them the current time,
+/// so the check then asks for a rebuild cargo would do anyway.  When there is
+/// no dep-info file and the db-backend source is not in this tree (the Nix
+/// package build), there is nothing to compare and the binary is used as
+/// found.
+pub fn check_replay_server_fresh(binary: &Path, db_backend: &Path) -> Result<(), String> {
+    let Some((source, inputs)) = replay_server_inputs(binary, db_backend) else {
+        return Ok(());
+    };
+    let built = modified(binary).map_err(|e| {
+        format!(
+            "cannot read the modification time of {}: {e}",
+            binary.display()
+        )
+    })?;
+    let how = match source {
+        InputSource::DepInfo => "cargo's dep-info",
+        InputSource::ManifestScan => "the manifest scan",
+    };
+    let rebuild = format!(
+        "rebuild it (cd {} && cargo build --bin replay-server) or name a current build in \
+         CODETRACER_REPLAY_SERVER_CMD",
+        db_backend.display()
     );
+    for input in &inputs {
+        match modified(input) {
+            Ok(changed) if changed > built => {
+                return Err(format!(
+                    "{} is older than its source: {} changed after it was built ({} \
+                     inputs from {how}); {rebuild}",
+                    binary.display(),
+                    input.display(),
+                    inputs.len()
+                ));
+            }
+            Ok(_) => {}
+            Err(_) if source == InputSource::DepInfo => {
+                return Err(format!(
+                    "{} was built from {}, which no longer exists ({how}); {rebuild}",
+                    binary.display(),
+                    input.display()
+                ));
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(())
+}
+
+/// The files `binary` is built from, and where the list came from; `None`
+/// when there is neither a dep-info file nor a db-backend source to scan.
+///
+/// With cargo's dep-info file beside the binary (`<stem>.d`), that list.
+/// Without one, a scan of `db_backend`'s manifest: the crate and, walking
+/// transitively, every path dependency outside `[dev-dependencies]` that is
+/// either not `optional` or enabled by the default features (followed
+/// through features that enable features, `dep:` names and `name/feature`
+/// entries); of each crate its `Cargo.toml`, `Cargo.lock`, `build.rs` and
+/// `src/`, and for a crate under a `bindings/` directory (a tree-sitter
+/// grammar's Rust binding) the grammar's own `src/`, where its C sources
+/// are.  The scan is a lower bound (a build script may read anything); the
+/// dep-info file is what cargo itself rebuilds from.
+pub fn replay_server_inputs(
+    binary: &Path,
+    db_backend: &Path,
+) -> Option<(InputSource, Vec<PathBuf>)> {
+    let stem = binary.file_stem()?.to_string_lossy().into_owned();
+    let dep_info = binary.with_file_name(format!("{stem}.d"));
+    if let Ok(text) = std::fs::read_to_string(&dep_info)
+        && let Some(files) = parse_dep_info(&text, binary)
+    {
+        return Some((InputSource::DepInfo, files));
+    }
+    if !db_backend.join("src").is_dir() {
+        return None;
+    }
+    let mut files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut pending = vec![canonical(db_backend)];
+    while let Some(krate) = pending.pop() {
+        if !seen.insert(krate.clone()) {
+            continue;
+        }
+        for file in ["Cargo.toml", "Cargo.lock", "build.rs"] {
+            let path = krate.join(file);
+            if path.is_file() {
+                files.push(path);
+            }
+        }
+        walk_files(&krate.join("src"), &mut |path| files.push(path));
+        if let Some(grammar) = grammar_root(&krate) {
+            // The binding crate itself (its `lib.rs` sits beside its
+            // manifest) and the grammar's C sources.
+            walk_files(&krate, &mut |path| files.push(path));
+            walk_files(&grammar.join("src"), &mut |path| files.push(path));
+        }
+        if let Ok(manifest) = std::fs::read_to_string(krate.join("Cargo.toml")) {
+            // A `[lib]` or `[[bin]]` source outside `src/` (a grammar crate
+            // whose library is `bindings/rust/lib.rs`): its directory.
+            for target in target_paths(&manifest) {
+                if let Some(dir) = krate.join(target).parent()
+                    && dir != krate
+                    && !dir.starts_with(krate.join("src"))
+                {
+                    walk_files(dir, &mut |path| files.push(path));
+                }
+            }
+            for dep in built_path_dependencies(&manifest) {
+                pending.push(canonical(&krate.join(dep)));
+            }
+        }
+    }
+    Some((InputSource::ManifestScan, files))
+}
+
+/// The prerequisites of the rule for `binary` in a Makefile-syntax dep-info
+/// file (cargo writes one rule per output, `target: dep dep ...`, a space in
+/// a path escaped as `\ `).  `None` when no rule names `binary`.
+pub fn parse_dep_info(text: &str, binary: &Path) -> Option<Vec<PathBuf>> {
+    let binary = canonical(binary);
+    for line in text.lines() {
+        let words = split_escaped(line);
+        let Some(first) = words.first() else { continue };
+        let Some(target) = first.strip_suffix(':') else {
+            continue;
+        };
+        if canonical(Path::new(target)) == binary {
+            return Some(words[1..].iter().map(PathBuf::from).collect());
+        }
+    }
+    None
+}
+
+fn split_escaped(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            // Cargo escapes only a space (`\ `); any other backslash is a
+            // path character (a Windows separator).
+            '\\' if chars.clone().next() == Some(' ') => {
+                chars.next();
+                word.push(' ');
+            }
+            ' ' | '\t' => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            _ => word.push(c),
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+/// The `path` of each `[lib]` and `[[bin]]` target `manifest` declares.
+fn target_paths(manifest: &str) -> Vec<String> {
+    let mut table = String::new();
+    let mut found = Vec::new();
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            table = line.to_owned();
+        } else if (table == "[lib]" || table == "[[bin]]")
+            && let Some(rest) = line.strip_prefix("path")
+            && let Some(path) = rest.split('"').nth(1)
+        {
+            found.push(path.to_owned());
+        }
+    }
+    found
+}
+
+/// The grammar directory of a tree-sitter binding crate at
+/// `<grammar>/bindings/<language>`.
+fn grammar_root(krate: &Path) -> Option<PathBuf> {
+    let parent = krate.parent()?;
+    (parent.file_name()? == "bindings").then(|| parent.parent().map(Path::to_path_buf))?
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The `path` of every dependency declared inline in a dependency table of
+/// `manifest` other than `[dev-dependencies]`, that is not `optional` or
+/// that the default features enable.  A line-level reading, enough for the
+/// manifests db-backend reaches, whose path dependencies are inline tables on
+/// one line and whose feature lists may span lines.
+pub fn built_path_dependencies(manifest: &str) -> Vec<String> {
+    let mut table = String::new();
+    let mut deps: Vec<(String, String, bool)> = Vec::new();
+    let mut features: std::collections::HashMap<String, Vec<String>> = Default::default();
+    let mut open_feature: Option<(String, String)> = None;
+    for raw in manifest.lines() {
+        let line = raw.split(" #").next().unwrap_or(raw).trim();
+        if let Some((name, mut body)) = open_feature.take() {
+            body.push_str(line);
+            if line.contains(']') {
+                features.insert(name, quoted(&body));
+            } else {
+                open_feature = Some((name, body));
+            }
+            continue;
+        }
+        if line.starts_with('[') {
+            table = line.to_owned();
+            continue;
+        }
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (name, value) = (name.trim().trim_matches('"').to_owned(), value.trim());
+        if table == "[features]" {
+            if value.starts_with('[') && !value.contains(']') {
+                open_feature = Some((name, value.to_owned()));
+            } else {
+                features.insert(name, quoted(value));
+            }
+            continue;
+        }
+        let in_dependencies =
+            table.ends_with("dependencies]") && !table.ends_with("dev-dependencies]");
+        if in_dependencies
+            && let Some(rest) = value.split("path = \"").nth(1)
+            && let Some(path) = rest.split('"').next()
+        {
+            deps.push((name, path.to_owned(), value.contains("optional = true")));
+        }
+    }
+    // The dependencies the default features enable, through features that
+    // enable features.
+    let mut enabled = std::collections::HashSet::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = vec!["default".to_owned()];
+    while let Some(feature) = queue.pop() {
+        if !visited.insert(feature.clone()) {
+            continue;
+        }
+        for entry in features.get(&feature).cloned().unwrap_or_default() {
+            if let Some(dep) = entry.strip_prefix("dep:") {
+                enabled.insert(dep.to_owned());
+            } else if let Some((dep, _)) = entry.split_once('/') {
+                if !dep.ends_with('?') {
+                    enabled.insert(dep.to_owned());
+                }
+            } else if features.contains_key(&entry) {
+                queue.push(entry);
+            } else {
+                enabled.insert(entry);
+            }
+        }
+    }
+    deps.into_iter()
+        .filter(|(name, _, optional)| !optional || enabled.contains(name))
+        .map(|(_, path, _)| path)
+        .collect()
+}
+
+fn quoted(text: &str) -> Vec<String> {
+    text.split('"')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, word)| word.to_owned())
+        .collect()
+}
+
+fn walk_files(dir: &Path, visit: &mut impl FnMut(PathBuf)) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            // Build output and VCS metadata are not sources.
+            let name = entry.file_name();
+            if name == "target" || name.to_string_lossy().starts_with('.') {
+                continue;
+            }
+            walk_files(&path, visit);
+        } else if kind.is_file() {
+            visit(path);
+        }
+    }
+}
+
+fn modified(path: &Path) -> std::io::Result<std::time::SystemTime> {
+    std::fs::metadata(path)?.modified()
 }
 
 /// Write a recording of `source` into `trace_dir/trace.ct` with the
@@ -279,26 +659,79 @@ pub async fn start_daemon_with_env(
     } else {
         "daemon.sock"
     });
-    let daemon = Command::new(server)
+    let stderr_log = root.join("daemon.stderr");
+    let mut daemon = Command::new(server)
         .args(["daemon", "start"])
         .env("TMPDIR", root)
         .env("CODETRACER_DAEMON_SOCKET", &socket)
         .env("CODETRACER_REPLAY_SERVER_CMD", replay_server)
         .envs(env.iter().map(|(k, v)| (*k, *v)))
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(std::fs::File::create(&stderr_log).expect("the daemon's stderr log"))
         .kill_on_drop(true)
         .spawn()
         .expect("start the daemon");
+    wait_for_daemon_socket(&mut daemon, &socket, &stderr_log).await;
+    (daemon, socket)
+}
+
+/// Wait until `daemon` has bound `socket`.  Fails at once, naming the
+/// cause, when the daemon exits first (with what it wrote to `stderr_log`,
+/// which names a socket path too long for `sun_path`), and on a timeout
+/// names the socket path and its length against that limit.
+pub async fn wait_for_daemon_socket(daemon: &mut Child, socket: &Path, stderr_log: &Path) {
     let started = tokio::time::Instant::now();
     while !socket.exists() {
-        assert!(
-            started.elapsed() < Duration::from_secs(15),
-            "the daemon socket never appeared"
-        );
+        if let Ok(Some(status)) = daemon.try_wait() {
+            let stderr = std::fs::read_to_string(stderr_log).unwrap_or_default();
+            panic!(
+                "the daemon exited ({status}) before its socket {} appeared; its stderr: {}",
+                socket.display(),
+                stderr.trim()
+            );
+        }
+        if started.elapsed() >= Duration::from_secs(15) {
+            panic!(
+                "the daemon socket never appeared: {}",
+                socket_path_note(socket)
+            );
+        }
         sleep(Duration::from_millis(50)).await;
     }
-    (daemon, socket)
+}
+
+/// The longest path, in bytes, a Unix socket address holds: the size of
+/// `sockaddr_un.sun_path` less its terminating NUL (unix(7)).  The same
+/// expression as the session manager's `MAX_UNIX_SOCKET_PATH`
+/// (`src/backend_manager.rs`), which this crate's binary does not export;
+/// `the_daemon_names_a_socket_path_longer_than_sun_path` checks the two agree
+/// on the daemon's own message.
+#[cfg(unix)]
+pub const MAX_UNIX_SOCKET_PATH: usize = std::mem::size_of::<libc::sockaddr_un>()
+    - std::mem::offset_of!(libc::sockaddr_un, sun_path)
+    - 1;
+
+/// `socket` and its length in bytes, with the `sun_path` limit when it
+/// exceeds it ([`MAX_UNIX_SOCKET_PATH`]).
+#[cfg(unix)]
+pub fn socket_path_note(socket: &Path) -> String {
+    let len = socket.as_os_str().len();
+    let max = MAX_UNIX_SOCKET_PATH;
+    if len > max {
+        format!(
+            "{} is {len} bytes, longer than the {max} a Unix socket address holds (sun_path); \
+             use a shorter TMPDIR",
+            socket.display()
+        )
+    } else {
+        format!("{} ({len} bytes)", socket.display())
+    }
+}
+
+/// `socket` and its length in bytes.
+#[cfg(not(unix))]
+pub fn socket_path_note(socket: &Path) -> String {
+    format!("{} ({} bytes)", socket.display(), socket.as_os_str().len())
 }
 
 /// `ct trace mcp <extra_args>` on stdio, pointed at the daemon socket

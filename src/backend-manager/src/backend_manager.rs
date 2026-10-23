@@ -29,7 +29,7 @@ use tokio::{
 };
 
 #[cfg(unix)]
-use crate::errors::SocketPathError;
+use crate::errors::{SocketPathError, SocketPathTooLong};
 use crate::{
     config::DaemonConfig,
     dap_init,
@@ -151,6 +151,40 @@ fn has_ctfs_magic(path: &std::path::Path) -> bool {
     f.read_exact(&mut magic).is_ok() && magic == [0xC0, 0xDE, 0x72, 0xAC, 0xE2]
 }
 
+/// The longest path, in bytes, a Unix socket address holds: the size of
+/// `sockaddr_un.sun_path` less its terminating NUL (unix(7)).
+#[cfg(unix)]
+pub(crate) const MAX_UNIX_SOCKET_PATH: usize = std::mem::size_of::<libc::sockaddr_un>()
+    - std::mem::offset_of!(libc::sockaddr_un, sun_path)
+    - 1;
+
+/// `path` if a Unix socket can be bound there, else [`SocketPathTooLong`]
+/// naming it: `bind(2)` would refuse it with an error that names neither the
+/// path nor the limit.
+#[cfg(unix)]
+pub(crate) fn check_unix_socket_path(path: &std::path::Path) -> Result<(), SocketPathTooLong> {
+    use std::os::unix::ffi::OsStrExt;
+    let len = path.as_os_str().as_bytes().len();
+    if len > MAX_UNIX_SOCKET_PATH {
+        return Err(SocketPathTooLong {
+            path: path.to_path_buf(),
+            len,
+            max: MAX_UNIX_SOCKET_PATH,
+        });
+    }
+    Ok(())
+}
+
+/// Bind a Unix socket listener at `path`, refusing a path too long for a
+/// socket address by name ([`check_unix_socket_path`]).  Every listener the
+/// session manager binds (the daemon's socket, a replay backend's socket)
+/// goes through here.
+#[cfg(unix)]
+fn bind_unix_listener(path: &std::path::Path) -> Result<UnixListener, Box<dyn Error>> {
+    check_unix_socket_path(path)?;
+    Ok(UnixListener::bind(path)?)
+}
+
 // TODO: cleanup on exit
 // TODO: Handle signals
 impl BackendManager {
@@ -189,7 +223,7 @@ impl BackendManager {
 
         info!("Socket listening on: {}", socket_path.display());
 
-        let listener = UnixListener::bind(socket_path)?;
+        let listener = bind_unix_listener(&socket_path)?;
         match listener.accept().await {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
@@ -493,7 +527,7 @@ impl BackendManager {
         }
         _ = remove_file(&socket_path).await;
 
-        let listener = UnixListener::bind(&socket_path)?;
+        let listener = bind_unix_listener(&socket_path)?;
         info!("Daemon listening on: {}", socket_path.display());
 
         // --- Accept loop: spawns per-client read and write tasks. ---
@@ -2051,7 +2085,7 @@ impl BackendManager {
             None => return Err(Box::new(SocketPathError)),
         }
 
-        let listener = UnixListener::bind(socket_path)?;
+        let listener = bind_unix_listener(&socket_path)?;
 
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);

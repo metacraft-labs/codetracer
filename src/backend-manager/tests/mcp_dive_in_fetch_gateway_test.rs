@@ -78,6 +78,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+
+#[path = "support/mcp_harness.rs"]
+mod mcp_harness;
 use tokio::time::timeout;
 
 /// The `session-manager` (formerly `backend-manager`) binary next to this
@@ -341,25 +344,19 @@ impl Daemon {
     async fn start(server: &Path, scratch: &Path) -> Daemon {
         let socket = daemon_socket(scratch);
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let child = Command::new(server)
+        let stderr_log = scratch.join("daemon.stderr");
+        let mut child = Command::new(server)
             .args(["daemon", "start"])
             .env("TMPDIR", scratch)
             .env("CODETRACER_HOME", scratch.join("home"))
             .env("CODETRACER_DAEMON_SOCKET", &socket)
             .env("CODETRACER_REPLAY_SERVER_CMD", replay_server(server))
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(std::fs::File::create(&stderr_log).expect("the daemon's stderr log"))
             .kill_on_drop(true)
             .spawn()
             .expect("start the daemon");
-        let started = std::time::Instant::now();
-        while !socket.exists() {
-            assert!(
-                started.elapsed() < Duration::from_secs(15),
-                "the daemon socket never appeared"
-            );
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        mcp_harness::wait_for_daemon_socket(&mut child, &socket, &stderr_log).await;
         Daemon {
             server: server.to_path_buf(),
             socket,
@@ -387,34 +384,12 @@ impl Drop for Daemon {
 
 /// The `replay-server` the daemon starts: `CODETRACER_REPLAY_SERVER_CMD`,
 /// else the one beside the server binary, else the sibling db-backend
-/// crate's build.  Missing is a failure.
+/// crate's build.  Missing is a failure, and so is one older than its source
+/// (`mcp_harness::locate_replay_server`): a stale binary does not answer the
+/// daemon's current launch arguments, and the test would time out on that
+/// symptom.
 fn replay_server(server: &Path) -> PathBuf {
-    if let Ok(cmd) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
-        let path = PathBuf::from(cmd);
-        assert!(
-            path.is_file(),
-            "CODETRACER_REPLAY_SERVER_CMD={} is not a file",
-            path.display()
-        );
-        return path;
-    }
-    let exe = std::env::consts::EXE_SUFFIX;
-    let beside = server.with_file_name(format!("replay-server{exe}"));
-    if beside.is_file() {
-        return beside;
-    }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for profile in ["release", "debug"] {
-        let candidate =
-            manifest_dir.join(format!("../db-backend/target/{profile}/replay-server{exe}"));
-        if candidate.is_file() {
-            return candidate.canonicalize().unwrap_or(candidate);
-        }
-    }
-    panic!(
-        "replay-server was not found (CODETRACER_REPLAY_SERVER_CMD, beside the server \
-         binary, or src/db-backend/target/{{release,debug}}); build it first"
-    );
+    mcp_harness::replay_server_for(server)
 }
 
 /// A recording of `source` written by the production CTFS writer into

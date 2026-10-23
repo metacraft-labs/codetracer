@@ -31,6 +31,8 @@
 //! `return` — never `panic!`. A recorder that runs and *fails*, by
 //! contrast, is a hard error. Genuine M8 bugs surface as failures.
 
+#[path = "support/mcp_harness.rs"]
+mod mcp_harness;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -350,45 +352,23 @@ fn test_mcp_resolve_variable_step_tool_registered() {
 // called the classifier directly would have proved nothing.
 // ---------------------------------------------------------------------------
 
-/// Locate a built `replay-server`, mirroring the probe in
-/// `real_recording_integration.rs`.
+/// Locate a built `replay-server` through the MCP harness's one lookup
+/// (`mcp_harness::locate_replay_server`: `CODETRACER_REPLAY_SERVER_CMD`,
+/// beside the server, the db-backend build), which refuses one older than
+/// the files it is built from: a replay server older than a launch argument
+/// the daemon sends refuses that launch.  `None` only when none is built;
+/// a stale one, or a named path that is not a file, fails the test.
 fn find_replay_server() -> Option<PathBuf> {
-    // An explicit choice wins: an in-tree build can be older than the daemon
-    // under test, and a replay server older than a launch argument the
-    // daemon sends refuses that launch.
-    if let Ok(from_env) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
-        let path = PathBuf::from(from_env);
-        if path.exists() {
-            return Some(path);
-        }
+    let explicit = std::env::var_os("CODETRACER_REPLAY_SERVER_CMD").map(PathBuf::from);
+    match mcp_harness::locate_replay_server(
+        explicit,
+        &mcp_harness::server_binary(),
+        &mcp_harness::db_backend_dir(),
+    ) {
+        Ok(path) => Some(path),
+        Err(mcp_harness::ReplayServerRefusal::NotBuilt(_)) => None,
+        Err(refusal) => panic!("{refusal}"),
     }
-
-    let mut target_dir = std::env::current_exe().ok()?;
-    target_dir.pop();
-    if target_dir.ends_with("deps") {
-        target_dir.pop();
-    }
-    for name in ["replay-server", "db-backend"] {
-        let candidate = target_dir.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX));
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let exe = std::env::consts::EXE_SUFFIX;
-    for relative in [
-        format!("../db-backend/target/debug/replay-server{exe}"),
-        format!("../db-backend/target/release/replay-server{exe}"),
-        format!("../build-debug/bin/replay-server{exe}"),
-    ] {
-        let path = manifest_dir.join(&relative);
-        if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
-        }
-    }
-
-    None
 }
 
 /// The Python interpreter to drive the recorder with.
