@@ -102,6 +102,67 @@ fn explain_dap_read_error(err: impl std::fmt::Display) -> String {
     }
 }
 
+/// Require that a `setBreakpoints` response verified the single breakpoint the
+/// harness asked for at `source_path:line`.
+///
+/// DAP answers `setBreakpoints` with one `Breakpoint` per requested entry, and
+/// `verified: false` means the adapter could not bind it (see
+/// <https://microsoft.github.io/debug-adapter-protocol/specification#Types_Breakpoint>).
+/// The response itself still has `success: true`, so a harness that only waits
+/// for the response accepts a breakpoint that resolves nowhere. The following
+/// `continue` then runs to the end of the trace and every later assertion fails
+/// on whatever the end-of-trace location happens to hold: an empty flow, an
+/// `<unknown>:-1` stop, no locals. That reads like a defect in flow or variable
+/// extraction, and `rust_flow_integration` was misread exactly that way after
+/// its fixture grew a 400-line preamble under a hard-coded line number
+/// (2026-10-21 issue "Rust rr flow worker segfaults in LLDB, so the flow finds
+/// no variables"). Failing here names the real cause: the anchor moved.
+///
+/// The adapter's own `message` (for the rr backend, LLDB's "breakpoint has no
+/// resolved locations at …") is carried into the error.
+pub fn require_verified_breakpoint(response: &DapMessage, source_path: &Path, line: u32) -> Result<(), String> {
+    let DapMessage::Response(response) = response else {
+        return Err(format!(
+            "expected a setBreakpoints response for {}:{line}, got {response:?}",
+            source_path.display()
+        ));
+    };
+    if !response.success {
+        return Err(format!(
+            "setBreakpoints for {}:{line} failed: {}",
+            source_path.display(),
+            response.message.as_deref().unwrap_or("<no message>")
+        ));
+    }
+    let breakpoints = response.body["breakpoints"].as_array().ok_or_else(|| {
+        format!(
+            "setBreakpoints response for {}:{line} has no `breakpoints` array: {}",
+            source_path.display(),
+            response.body
+        )
+    })?;
+    // The harness always sends exactly one breakpoint, so exactly one answer
+    // must come back; anything else is a protocol violation worth naming.
+    let [breakpoint] = breakpoints.as_slice() else {
+        return Err(format!(
+            "setBreakpoints for {}:{line} sent 1 breakpoint but the response holds {}: {}",
+            source_path.display(),
+            breakpoints.len(),
+            response.body
+        ));
+    };
+    if breakpoint["verified"].as_bool() != Some(true) {
+        return Err(format!(
+            "breakpoint at {}:{line} was not verified (adapter message: {}); \
+             if this is a fixture anchor, the line it names no longer holds code \
+             the recording executed",
+            source_path.display(),
+            breakpoint["message"].as_str().unwrap_or("<none>")
+        ));
+    }
+    Ok(())
+}
+
 /// Mark the current process (and any ct-native-replay it spawns) as running
 /// inside a CodeTracer integration test.
 ///
@@ -420,10 +481,11 @@ impl TestRecording {
         // P7.4 slow-but-true-to-end-user smoke variant follow-up.
 
         let temp_dir = std::env::temp_dir().join(format!(
-            "flow_test_{}_{}_{}",
+            "flow_test_{}_{}_{}_{}",
             language.extension(),
             version_label.replace('.', "_"),
-            std::process::id()
+            std::process::id(),
+            next_recording_sequence()
         ));
 
         // Clean up any existing temp directory. In sandboxed builds (nix),
@@ -536,10 +598,11 @@ impl TestRecording {
         // smoke variant follow-up.
 
         let temp_dir = std::env::temp_dir().join(format!(
-            "mcr_flow_test_{}_{}_{}",
+            "mcr_flow_test_{}_{}_{}_{}",
             language.extension(),
             version_label.replace('.', "_"),
-            std::process::id()
+            std::process::id(),
+            next_recording_sequence()
         ));
 
         if temp_dir.exists() && fs::remove_dir_all(&temp_dir).is_err() {
@@ -641,6 +704,20 @@ impl Drop for TestRecording {
         // Clean up temp directory on drop
         fs::remove_dir_all(&self.temp_dir).ok();
     }
+}
+
+/// A number no other recording made by this test process has had.
+///
+/// Every recording directory names the process id, which keeps test BINARIES
+/// apart, and this sequence, which keeps tests WITHIN one binary apart: libtest
+/// runs a binary's tests on threads of one process, and each `TestRecording`
+/// removes its directory on drop. Without it, two tests of one file that both
+/// record the same fixture shared a directory, and whichever finished first
+/// deleted the other's trace mid-replay (seen as a flow with 0 steps once
+/// `rust_flow_integration` gained a second recording test).
+fn next_recording_sequence() -> usize {
+    static SEQUENCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A DAP test client wrapper with helper methods
@@ -777,8 +854,8 @@ impl DapTestClient {
             }),
         );
         self.send(&set_bp)?;
-        self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
-        Ok(())
+        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        require_verified_breakpoint(&response, source_path, line)
     }
 
     /// Continue execution and wait for stopped event
@@ -801,6 +878,16 @@ impl DapTestClient {
 
     /// Request flow data for a location
     pub fn request_flow(&mut self, location: Location) -> Result<FlowData, String> {
+        let body = self.request_flow_update_body(location)?;
+        FlowData::from_event_body(&body)
+    }
+
+    /// Request a call flow for `location` and return the raw body of the
+    /// `ct/updated-flow` event that answers it, error updates included.
+    ///
+    /// For tests that assert on HOW a flow fails (`flow_update_error`), which
+    /// `request_flow` folds into an `Err` string.
+    pub fn request_flow_update_body(&mut self, location: Location) -> Result<serde_json::Value, String> {
         let flow_args = CtLoadFlowArguments {
             flow_mode: FlowMode::Call,
             location,
@@ -814,7 +901,7 @@ impl DapTestClient {
         let flow_update = self.read_until_event("ct/updated-flow", Duration::from_secs(30))?;
 
         match flow_update {
-            DapMessage::Event(e) => FlowData::from_event_body(&e.body),
+            DapMessage::Event(e) => Ok(e.body),
             _ => Err("expected event".to_string()),
         }
     }
@@ -1132,8 +1219,8 @@ impl DapStdioTestClient {
             }),
         );
         self.send(&set_bp)?;
-        self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
-        Ok(())
+        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        require_verified_breakpoint(&response, source_path, line)
     }
 
     /// Continue execution and wait for stopped event
@@ -1156,8 +1243,8 @@ impl DapStdioTestClient {
             }),
         );
         self.send(&set_bp)?;
-        self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
-        Ok(())
+        let response = self.read_until_response("setBreakpoints", Duration::from_secs(5))?;
+        require_verified_breakpoint(&response, source_path, line)
     }
 
     /// Continue a specific recording to its next breakpoint.
@@ -1313,6 +1400,26 @@ impl Drop for DapStdioTestClient {
     }
 }
 
+/// The reason a `ct/updated-flow` body reports for a flow the backend could
+/// not build, or `None` when the body is not an error update.
+///
+/// An error update is `FlowUpdate::error`: `error: true`, the reason in
+/// `errorMessage`. A missing `errorMessage` on an error update still counts as
+/// an error, so a backend that sets the flag without a reason is not mistaken
+/// for a successful (empty) flow.
+pub fn flow_update_error(body: &serde_json::Value) -> Option<String> {
+    if body.get("error").and_then(|e| e.as_bool()) != Some(true) {
+        return None;
+    }
+    Some(
+        body.get("errorMessage")
+            .and_then(|m| m.as_str())
+            .filter(|m| !m.is_empty())
+            .unwrap_or("<error update without an errorMessage>")
+            .to_string(),
+    )
+}
+
 /// Parsed flow data from a flow update event
 #[derive(Debug)]
 pub struct FlowData {
@@ -1342,6 +1449,14 @@ pub struct FlowStep {
 
 impl FlowData {
     fn from_event_body(body: &serde_json::Value) -> Result<Self, String> {
+        // A flow the backend could not build arrives as an update with
+        // `error: true`, its reason in `errorMessage` and no view updates
+        // (`FlowUpdate::error`). Report that reason rather than the
+        // structural "should have at least one view update" failure below,
+        // which hides why the flow failed.
+        if let Some(reason) = flow_update_error(body) {
+            return Err(format!("the flow failed: {reason}"));
+        }
         let view_updates = body
             .get("viewUpdates")
             .and_then(|v| v.as_array())
@@ -1517,8 +1632,9 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 /// result, which reads exactly like a variable-extraction defect and has
 /// repeatedly been mistaken for one.
 ///
-/// Hard-coded `breakpoint_line` constants have gone stale twice in this suite:
-/// the Rust fixture's `12` survived the file growing from 23 to 457 lines, and
+/// Hard-coded `breakpoint_line` constants have gone stale repeatedly in this
+/// suite: the Rust fixture's `12` (MCR streaming flow) and `6` (rr flow
+/// integration) both survived the file growing from 23 to 457 lines, and
 /// the Ada and Fortran fixtures shipped with anchors one line past the
 /// statement their own comments named (`end Calculate_Sum;` instead of
 /// `return Final_Result;`, `end function calculate_sum` instead of the final
@@ -5027,8 +5143,7 @@ impl TestRecording {
             source_path.hash(&mut h);
             format!("{:016x}", h.finish())
         };
-        static CALL_SEQUENCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let call_sequence = CALL_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let call_sequence = next_recording_sequence();
         let temp_dir = std::env::temp_dir().join(format!(
             "flow_test_{}_{}_{}_{}_{}_{}",
             language.extension(),

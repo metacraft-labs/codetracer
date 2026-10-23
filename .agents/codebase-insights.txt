@@ -7435,3 +7435,16 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   its find widget (Ctrl+F in the editor). Content widgets are type 9, but the
   desktop editor has none on screen in the calc capture (the flow's value
   boxes are outside Monaco's mouse handling).
+- A replayed (rr) flow walk turns failed queries into "stop here" or into a
+  fallback (`location_jump` → `jump_to_call` → `run_to_entry`), so a dead
+  `flow` worker used to come back as a short or substituted flow with
+  `error: false`. Its session is now built `without_respawn_after_worker_death`,
+  and `CallFlowPreloader::load_flow` checks `ReplaySession::worker_death()` last,
+  so a death is reported as `FlowUpdate::error` naming the worker and its exit
+  status. A call flow at a location with no source position (`<unknown>:-1`,
+  where a replay stands after running off the end of the recording) is refused
+  before any worker is driven (`replayed_call_flow_refusal`).
+- The db-backend test harness's `set_breakpoint` helpers require the breakpoint
+  to come back `verified: true`. A fixture anchor that resolves to no code then
+  fails as "breakpoint at X:N was not verified" instead of as an empty flow at
+  the end of the trace. Derive anchors with `find_line_containing`.

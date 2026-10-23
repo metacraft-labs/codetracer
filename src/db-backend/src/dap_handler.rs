@@ -1451,10 +1451,14 @@ impl Handler {
         // error that says nothing about flow or about emulator traces.
         Ok(match self.trace_kind {
             TraceKind::Materialized => Box::new(MaterializedReplaySession::new(Arc::clone(&self.reader))),
-            TraceKind::Recreator => Box::new(RecreatorReplaySession::with_reserved_index(
-                "flow",
-                self.ct_rr_args.clone(),
-            )),
+            // A flow is one walk from one replay position, so its worker's
+            // death ends the flow (reported by `CallFlowPreloader::load_flow`)
+            // instead of being papered over by a fresh worker at the start of
+            // the recording.
+            TraceKind::Recreator => Box::new(
+                RecreatorReplaySession::with_reserved_index("flow", self.ct_rr_args.clone())
+                    .without_respawn_after_worker_death(),
+            ),
             TraceKind::Emulator => {
                 return Err(format!(
                     "`{}`: flow is not supported on emulator traces yet. The emulator replays \

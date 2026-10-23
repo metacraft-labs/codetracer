@@ -290,6 +290,18 @@ pub trait ReplaySession: std::fmt::Debug {
         false
     }
 
+    /// How this session's out-of-process replay worker died, if it died with
+    /// a query in flight and has not been replaced since.
+    ///
+    /// A consumer that builds one answer from many queries (the flow walk)
+    /// checks this at the end: individual query failures are often treated as
+    /// "stop here" or answered with a fallback, and a death read that way
+    /// produces a short or substituted result that looks like a successful
+    /// one. Default `None`: an in-process replay has no worker to lose.
+    fn worker_death(&self) -> Option<String> {
+        None
+    }
+
     fn current_step_id(&mut self) -> StepId;
 
     /// Enumerate the processes captured in this trace.
