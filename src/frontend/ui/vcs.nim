@@ -25,6 +25,8 @@ import
 
 import git_cli
 import agent_activity
+from unified_diff import requestDocumentScroll
+from ../viewmodel/viewmodels/diff_target import isWholeCommitTarget
 import ../viewmodel/viewmodels/vcs_vm
 from ../viewmodel/platform/vcs import parsePorcelainV2
 import ../viewmodel/viewmodels/review_entry
@@ -799,6 +801,11 @@ proc dispatchOpenAction(self: VCSComponent; action: VCSOpenAction) =
     discard
   of voaDiffTab:
     self.openUnifiedDiffTab(action.target)
+    # A file under an expanded commit opens the commit's whole-commit
+    # document; bring the file's section to the top (VCS-Panel.md, "Changed
+    # Files").
+    if isWholeCommitTarget(action.target) and action.path.len > 0:
+      requestDocumentScroll(self.data, action.target, action.path)
   of voaSourceFile:
     # VCS-005: open the file itself.  git hands us a repository-relative path
     # and the editor needs an absolute one, otherwise the tab load is issued
@@ -1082,6 +1089,18 @@ proc vcsCallbacks(component: VCSComponent): VCSCallbacks =
       component.refreshVCSData()
       component.syncLegacyVCSIntoVM(),
     onOpenFileDiff: proc(target: string) =
+      component.openUnifiedDiffTab(target),
+    onOpenCommit: proc(index: int; target: string) =
+      ## A plain click on a commit: expand it (exclusively, as a plain click
+      ## always has) and open its whole-commit diff — VCS-Panel.md, "Commit
+      ## History". A click on an expanded commit keeps it expanded.
+      if index notin component.selectedCommitIndices:
+        component.selectedCommitIndices = @[index]
+        component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+        component.loadChangedFilesForIndex(component.getWorkingDirectory(),
+                                           index)
+      component.lastClickedCommitIndex = index
+      component.syncLegacyVCSIntoVM()
       component.openUnifiedDiffTab(target),
     onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
       ## Multi-select accordion toggle.

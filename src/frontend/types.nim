@@ -807,6 +807,16 @@ type
       ## ``diff:file:<path>``, ``diff:commit:<hash>[:<path>]`` or
       ## ``diff:Working Tree``.  It is the tab's identity: asking for the same
       ## target again focuses this tab instead of stacking a duplicate.
+    sectionPath*: cstring
+      ## Non-empty for one section of a whole-commit document (VCS-Panel.md,
+      ## "Whole-Commit Document"): the one file of the parent's target this
+      ## tab shows. The loaded diff is narrowed to it.
+    sectionOf*: UnifiedDiffComponent
+      ## The document tab this section belongs to, or nil for a tab of its
+      ## own. A section is never in GoldenLayout's component mapping.
+    sections*: seq[UnifiedDiffComponent]
+      ## A document tab's sections, one per file, in document order; empty
+      ## for a single-file tab.
     diffData*: DeepReviewData
       ## Parsed hunks for the target.  Filled from the review dataset when the
       ## session is a review and from ``git diff`` otherwise — VCS-Panel.md,
@@ -2262,12 +2272,20 @@ type
     rrBackend*:               RRBackendConfig
     ## "tab" (default) or "window" — see common/config.nim for docs.
     newTracePolicy*:          cstring
+    vcs*:                     VcsConfig
+      ## The `vcs:` entry, or nil in a config file written before it existed.
+      ## Read through `vcsFileClickOpensFullFile`.
     window*:                  WindowConfig
       ## PLAT-69: the `window:` entry, as js-yaml read it. nil (undefined)
       ## in a config file written before the entry existed; its fields are
       ## whatever the user typed, so they are read defensively
       ## (`index/window.windowLaunchOf`) and validated by
       ## `common/window_policy`, never trusted as typed here.
+
+  VcsConfig* = ref object
+    fileClickOpensFullFile*: bool
+      ## VCS-Panel.md, "Configuration": a click on a file in the VCS panel
+      ## opens the full file rather than the unified diff.
 
   WindowConfig* = ref object
     initial*: cstring

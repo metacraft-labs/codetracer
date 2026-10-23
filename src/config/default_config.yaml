@@ -58,6 +58,13 @@ window:
   width: 1900
   height: 1400
 
+# VCS panel. `fileClickOpensFullFile: true` makes a click on a file in the
+# panel open the full file instead of the unified diff (the panel's
+# "Unified Diff / Open File" toggle starts from it). Either way, the file name
+# in a unified diff's per-file heading opens the full file.
+vcs:
+  fileClickOpensFullFile: false
+
 # project open
 default: ""
 

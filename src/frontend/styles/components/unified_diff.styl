@@ -301,6 +301,16 @@
   overflow hidden
   text-overflow ellipsis
 
+// The file name opens the full file (VCS-Panel.md, "Unified Diff View (Editor
+// Integration)"). A link only on hover, so the heading still reads as a
+// heading.
+.unified-diff-file-header-link
+  cursor pointer
+
+  &:hover
+    text-decoration underline
+    color colors-ui-border-action
+
 .unified-diff-file-header-stats
   margin-left auto
   opacity 0.75
@@ -737,3 +747,28 @@
 
 .ct-diff-linenum-removed
   color #f85149 !important
+
+// --- Whole-commit document (VCS-Panel.md, "Whole-Commit Document") --------
+//
+// One scrolling column of per-file sections. Each section is a single-file
+// diff tab whose editor is sized to its content (`ui/unified_diff
+// .fitSectionEditor`), so the column, not the editors, scrolls; the file's
+// heading sticks to the top while its section is in view.
+.unified-diff-document-sections
+  flex 1 1 auto
+  min-height 0
+  overflow-y auto
+
+.unified-diff-document-section
+  .unified-diff-container
+    height auto
+    overflow visible
+
+  .unified-diff-editor
+    flex none
+
+  .unified-diff-file-header-host
+    position sticky
+    top 0
+    z-index 2
+    background-color colors-ui-surface-base-canvas

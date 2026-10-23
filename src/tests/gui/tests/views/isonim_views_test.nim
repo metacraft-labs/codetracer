@@ -11599,15 +11599,17 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var expandedCommit = -1
-      var expandModifiers = (false, false)
-      var selectedFile = ""
+      var openedCommit = (-1, "")
+      var toggled = (-1, false, false)
+      var selectedFile = ("", "")
       var openedDiff = ""
       let callbacks = VCSCallbacks(
+        onOpenCommit: proc(index: int; target: string) =
+          openedCommit = (index, target),
         onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
-          (expandedCommit = index; expandModifiers = (ctrl, shift)),
+          toggled = (index, ctrl, shift),
         onSelectFile: proc(index: int; path, target, status: string) =
-          (discard index; discard target; selectedFile = path),
+          (discard index; selectedFile = (path, target)),
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
@@ -11634,18 +11636,20 @@ suite "IsoNim VCS Panel — structure":
       check fileName != nil
       check fileName.textContent == "main.nim"
 
+      # VCS-Panel.md, "Commit History" (the owner's 2026-10-23 decision on
+      # #753): the commit row opens the commit's whole-commit diff, the expand
+      # control only expands, a file under the commit targets that document
+      # with its path (the host scrolls to it), and the file's own button
+      # opens that one file. No separate commit-diff button is left.
       findByClass(panel, "vcs-commit-header").fireEvent("click")
+      findByClass(panel, "vcs-commit-toggle").fireEvent("click")
       findByClass(panel, "vcs-accordion-file").fireEvent("click")
-      # The commit's diffs are opened per file, from the expanded accordion —
-      # not from the commit row.  #753 removed the commit-level button because
-      # the only target it could mint was the pathless `commit:<hash>`, which
-      # DeepReview-GUI.md §4.1 forbids a diff tab from showing.
       check findByClassOrNil(panel, "vcs-commit-diff-btn") == nil
       findByClass(panel, "vcs-file-diff-btn").fireEvent("click")
 
-      check expandedCommit == 0
-      check expandModifiers == (false, false)
-      check selectedFile == "src/main.nim"
+      check openedCommit == (0, "commit:abc123")
+      check toggled == (0, true, false)
+      check selectedFile == ("src/main.nim", "commit:abc123")
       check openedDiff == "commit:abc123:src/main.nim"
 
       dispose()
@@ -11854,9 +11858,11 @@ suite "IsoNim VCS Panel — structure":
       dispose()
 
   test "test_vcs_row_click_carries_its_diff_target":
-    ## The row click reports the same target as the row's button, so the host
-    ## can honour the unified-diff view mode without having to re-derive which
-    ## commit an accordion row belonged to.
+    ## The row click reports what it opens in unified-diff mode, so the host
+    ## does not re-derive which commit an accordion row belonged to: the
+    ## commit's whole-commit document, scrolled to the row's path
+    ## (VCS-Panel.md, "Changed Files" — the owner's 2026-10-23 decision on
+    ## #753). The row's own button still opens the one file.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
@@ -11881,7 +11887,7 @@ suite "IsoNim VCS Panel — structure":
       if row != nil:
         row.fireEvent("click")
         check rowPath == "src/main.nim"
-        check rowTarget == "commit:abc123:src/main.nim"
+        check rowTarget == "commit:abc123"
 
       dispose()
 

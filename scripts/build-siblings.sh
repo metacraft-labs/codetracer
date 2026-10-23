@@ -233,8 +233,11 @@ STAMP_FORMAT="format build-siblings-stamp/1"
 # that the default is wrong, not a guess that it is unnecessary:
 #   noir — its root Cargo.toml reaches codetracer-trace-format by git `rev=`,
 #     and the trace-format-nim sources its writer compiles come from
-#     `.codetracer-deps/`, fetched at revisions pinned in noir's own
-#     scripts/fetch-trace-format-nim.sh. Both pins are in noir's HEAD.
+#     `.codetracer-deps/`, which the entry's own `just trace-format-nim`
+#     fetches at revisions pinned in noir's scripts/fetch-trace-format-nim.sh.
+#     Both pins are in noir's HEAD, so a pin move changes the stamp and the
+#     rebuild it triggers re-fetches. (`.codetracer-deps/` itself is
+#     gitignored and not stamped: it is an output of the build command.)
 #   codetracer-flow-recorder/cadence-trace-helper — go-helper/go.mod requires
 #     only onflow/cadence and its transitive modules; no cgo, no trace format.
 #   codetracer-wasm-instrumenter — every `path =` dependency in its Cargo.toml
@@ -937,10 +940,28 @@ build_sibling \
 	--help
 
 # noir / nargo.
+#
+# `just trace-format-nim` first, because cargo alone cannot build nargo from a
+# checkout nobody has prepared. nargo links `codetracer_trace_writer_nim`, whose
+# build script compiles the Nim CTFS writer from `codetracer-trace-format-nim`
+# sources; noir's .cargo/config.toml points it at `.codetracer-deps/`, and
+# noir's justfile fills that directory with this recipe
+# (scripts/fetch-trace-format-nim.sh, at the revisions it pins) — "needed once
+# before building `nargo`, and again after the pins move". The entry used to
+# run the bare `cargo build`, so a fresh or CI clone failed in that build
+# script with "Nim FFI entry point not found at …/.codetracer-deps/…"
+# (codetracer-pm issues/2026-10-22-build-siblings-builds-noir-without-fetching-
+# the-trace-format-nim-sources-its-build-reads.md). The recipe leaves a
+# checkout already at its pin alone (no fetch, no network), so running it on
+# every build is cheap, and it is what moves the checkouts when a noir bump
+# moves the pins. It runs in codetracer's shell, like the cargo build: that
+# shell carries the `just`, `git` and `nim` the recipe and build script need.
+# ci/test/build-siblings-noir-fresh-checkout-test.sh holds the entry to
+# building from a checkout with no `.codetracer-deps/`.
 build_sibling \
 	noir \
 	target/release/nargo \
-	"cargo build --release --package nargo_cli --bin nargo" \
+	"just trace-format-nim && cargo build --release --package nargo_cli --bin nargo" \
 	noir \
 	codetracer
 

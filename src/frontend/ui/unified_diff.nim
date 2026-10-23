@@ -320,6 +320,21 @@ proc rawTarget*(self: UnifiedDiffComponent): string =
   let text = $self.diffTarget
   if text.startsWith("diff:"): text[5 .. ^1] else: text
 
+proc scopedKey(self: UnifiedDiffComponent): int =
+  ## The key this tab's ViewModel, source cache and component ref are filed
+  ## under: `tabScopedId`, which makes it unique across the window's tabs. A
+  ## section of a whole-commit document is in no tab's component mapping, so
+  ## it is keyed in its document's tab rather than in whichever tab is on
+  ## screen when it is looked up.
+  if self.isNil:
+    return -1
+  if self.sectionOf.isNil:
+    return data.tabScopedId(self)
+  var session = data.sessionOfComponent(self.sectionOf)
+  if session.isNil and data.sessions.len > 0:
+    session = data.activeSession
+  tabScopedKey(session, self.id)
+
 proc ensureUnifiedDiffVM*(self: UnifiedDiffComponent): VCSVM =
   ## One ``VCSVM`` per diff tab.
   ##
@@ -329,18 +344,18 @@ proc ensureUnifiedDiffVM*(self: UnifiedDiffComponent): VCSVM =
   ## DR-R4's constraint is one model, not a second one that happens to agree.
   if self.isNil:
     return nil
-  if unifiedDiffVMInstances.hasKey(data.tabScopedId(self)):
-    return unifiedDiffVMInstances[data.tabScopedId(self)]
+  if unifiedDiffVMInstances.hasKey(self.scopedKey()):
+    return unifiedDiffVMInstances[self.scopedKey()]
   result = createVCSVM()
-  unifiedDiffVMInstances[data.tabScopedId(self)] = result
+  unifiedDiffVMInstances[self.scopedKey()] = result
 
 proc ensureSourceCache(self: UnifiedDiffComponent): SourceTextCache =
   if self.isNil:
     return nil
-  if unifiedDiffSourceCaches.hasKey(data.tabScopedId(self)):
-    return unifiedDiffSourceCaches[data.tabScopedId(self)]
+  if unifiedDiffSourceCaches.hasKey(self.scopedKey()):
+    return unifiedDiffSourceCaches[self.scopedKey()]
   result = newSourceTextCache()
-  unifiedDiffSourceCaches[data.tabScopedId(self)] = result
+  unifiedDiffSourceCaches[self.scopedKey()] = result
 
 proc forgetUnifiedDiffTab*(componentId: int) =
   ## Drop everything a closed diff tab owned. `componentId` is the tab-scoped
@@ -627,6 +642,16 @@ proc ensureLoaded(self: UnifiedDiffComponent) =
   if not self.loadFromReview():
     if not self.loadFromAgentRegistry():
       self.loadFromGit()
+  # A section of a whole-commit document whose target has no per-file form
+  # loaded the whole target; it shows only its own file
+  # (`diff_target.diffSectionTarget`).
+  let onlyPath = safeStr(self.sectionPath)
+  if onlyPath.len > 0 and not self.diffData.isNil:
+    var kept: seq[DeepReviewFileData] = @[]
+    for file in self.diffData.files:
+      if safeStr(file.path) == onlyPath:
+        kept.add(file)
+    self.diffData.files = kept
 
 # ---------------------------------------------------------------------------
 # Monaco
@@ -1718,7 +1743,7 @@ proc syncIntoVM*(self: UnifiedDiffComponent) =
   ## alone: it is the VM's own state and survives a re-sync.
   if self.isNil:
     return
-  unifiedDiffComponentRefs[data.tabScopedId(self)] = self
+  unifiedDiffComponentRefs[self.scopedKey()] = self
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
@@ -1982,6 +2007,48 @@ proc scheduleDeletedLineTokens(self: UnifiedDiffComponent; attempt: int) =
   discard windowSetTimeout(
     proc() = self.scheduleDeletedLineTokens(attempt + 1), 150)
 
+proc fitSectionHost(diffEditor: js; hostId: cstring; onFirstFit: proc())
+  {.importjs: """(function(de, hostId, onFirstFit) {
+    var host = document.getElementById(hostId);
+    var ed = de.getModifiedEditor();
+    var fitted = false;
+    function fit() {
+      if (!host) return;
+      var h = Math.max(ed.getContentHeight(), 24);
+      if (host.style.height !== h + 'px') {
+        host.style.height = h + 'px';
+        de.layout();
+      }
+      if (!fitted) { fitted = true; onFirstFit(); }
+    }
+    ed.onDidContentSizeChange(fit);
+    fit();
+  })(#, #, #)""".}
+  ## Size a section's editor host to the editor's content, now and whenever
+  ## the content grows or shrinks (an unchanged region expanded, a zone
+  ## added), so the document scrolls as one page instead of each section
+  ## scrolling inside a box.
+
+proc applyDocumentScroll(self: UnifiedDiffComponent)
+
+proc fitSectionEditor(self: UnifiedDiffComponent) =
+  ## A section of a whole-commit document (VCS-Panel.md, "Whole-Commit
+  ## Document") is one of a column of editors: no minimap of its own, no
+  ## scrolling of its own — the wheel scrolls the document — and as tall as
+  ## its content.
+  self.diffEditor.udUpdateDiffOptions(JsObject(js{
+    minimap: js{enabled: false},
+    scrollBeyondLastLine: false,
+    scrollbar: js{
+      vertical: cstring"hidden",
+      alwaysConsumeMouseWheel: false,
+      handleMouseWheel: false
+    }
+  }))
+  let document = self.sectionOf
+  fitSectionHost(self.diffEditor, cstring(editorHostId(self.id)),
+    proc() = document.applyDocumentScroll())
+
 proc initEditor(self: UnifiedDiffComponent) =
   ## Create the Monaco instance once its host element exists.
   if self.editorInitialized:
@@ -2129,6 +2196,9 @@ proc initEditor(self: UnifiedDiffComponent) =
   self.applyFlowDecorations(pair.modified)
   self.rebuildInvocationZones(pair.modified)
 
+  if not self.sectionOf.isNil:
+    self.fitSectionEditor()
+
   self.scheduleDeletedLineTokens(attempt = 0)
 
 proc resetEditor(self: UnifiedDiffComponent) =
@@ -2170,6 +2240,14 @@ proc unifiedDiffComponentFor(host: isonim_dom_api.Element): UnifiedDiffComponent
   UnifiedDiffComponent(data.hostTabComponent(host, Content.UnifiedDiff,
     panelHostComponentId(host)))
 
+proc isCurrent(self: UnifiedDiffComponent; host: isonim_dom_api.Element): bool =
+  ## Whether `self` still shows in `host`: a tab still mapped to its
+  ## container, or a section still part of its document.
+  if self.sectionOf.isNil:
+    unifiedDiffComponentFor(host) == self
+  else:
+    self in self.sectionOf.sections
+
 proc hostIsConnected(host: isonim_dom_api.Element): bool
   {.importjs: "Boolean(#.isConnected)".}
 
@@ -2191,7 +2269,7 @@ proc initEditorWhenAttached(self: UnifiedDiffComponent;
   ## for a container — and stops when the tab is closed or remounted.
   if self.isNil or self.editorInitialized:
     return
-  if unifiedDiffComponentFor(host) != self:
+  if not self.isCurrent(host):
     return
   if host.hostIsConnected():
     self.initEditor()
@@ -2203,6 +2281,137 @@ proc initEditorWhenAttached(self: UnifiedDiffComponent;
   let component = self
   requestFrame(proc() =
     component.initEditorWhenAttached(host, frame + 1))
+
+proc openFullFile(self: UnifiedDiffComponent; path: string) =
+  ## The heading's file name was clicked: open the full file in the editor,
+  ## as the VCS panel's Open File mode does (`vcs.dispatchOpenAction`) — the
+  ## working tree's file, or, in a review opened from a dataset, the
+  ## dataset's own copy under the reviewed repository's path.
+  if path.len == 0:
+    return
+  if self.data.isReviewDatasetSession() or utils.isAbsolutePath(path):
+    self.data.openTab(cstring(path), ViewSource)
+  else:
+    self.data.openTab(
+      cstring($gitRepositoryRoot(self.data) & "/" & path), ViewSource)
+
+proc tabCallbacks(self: UnifiedDiffComponent; vm: VCSVM): UnifiedDiffCallbacks =
+  ## What a diff tab's (or section's) toolbar and heading do.
+  let component = self
+  UnifiedDiffCallbacks(
+    onCopySelectedHunks: proc() = component.copySelectedHunks(),
+    onStageSelectedHunks: proc() = component.stageSelectedHunks(),
+    onClearSelectedHunks: proc() =
+      vm.clearHunkSelection()
+      component.applyDecorations(),
+    onOpenFullFile: proc(path: string) = component.openFullFile(path),
+  )
+
+var documentRoots: JsAssoc[int, isonim_dom_api.Element] =
+  JsAssoc[int, isonim_dom_api.Element]{}
+  ## Each document tab's rendered document, by tab id: where a section that
+  ## has grown re-applies the scroll. Every session tab repeats the same
+  ## container ids, so the element is held rather than looked up.
+
+var nextSectionId = -1
+  ## Section ids count down from -1, so a section's VCSVM, source cache and
+  ## editor host id (`unifiedDiffEditor--3`) never collide with a tab's,
+  ## which GoldenLayout numbers upwards from 0.
+
+proc sectionFor(self: UnifiedDiffComponent; index: int;
+                path: string): UnifiedDiffComponent =
+  ## The document's section for file `index` (`path`), made on first use and
+  ## kept for the tab's lifetime, like the tab's own target.
+  if index < self.sections.len and not self.sections[index].isNil and
+      safeStr(self.sections[index].sectionPath) == path:
+    return self.sections[index]
+  let plan = diffSectionTarget(self.rawTarget(), path)
+  let section = UnifiedDiffComponent(
+    id: nextSectionId,
+    data: self.data,
+    config: self.config,
+    content: Content.UnifiedDiff,
+    diffTarget: cstring("diff:" & plan.target),
+    sectionPath: cstring(plan.onlyPath),
+    sectionOf: self)
+  dec nextSectionId
+  while self.sections.len <= index:
+    self.sections.add(nil)
+  self.sections[index] = section
+  section
+
+proc forgetSection(section: UnifiedDiffComponent) =
+  ## Dispose a section's editor and drop what it owned.
+  if section.isNil:
+    return
+  if section.editorInitialized:
+    section.resetEditor()
+  forgetUnifiedDiffTab(section.scopedKey())
+
+proc forgetDocumentSections*(componentId: int) =
+  ## A closed document tab disposes every section's editor and model
+  ## (VCS-Panel.md, "Whole-Commit Document").
+  let mapping = data.ui.componentMapping[Content.UnifiedDiff]
+  if mapping.isNil or not mapping.hasKey(componentId):
+    return
+  let document = UnifiedDiffComponent(mapping[componentId])
+  if document.isNil:
+    return
+  let sections = document.sections
+  document.sections = @[]
+  let key = document.scopedKey()
+  if documentRoots.hasKey(key):
+    discard jsDelete(documentRoots[key])
+  for section in sections:
+    section.forgetSection()
+
+proc renderSectionInto(self: UnifiedDiffComponent; r: WebRenderer;
+                       index: int; path: string;
+                       host: isonim_dom_api.Element) =
+  ## Fill one section of the document: that file's diff tab, whose editor is
+  ## created as soon as the section is in the page.
+  let section = self.sectionFor(index, path)
+  let vm = section.ensureUnifiedDiffVM()
+  if vm.isNil:
+    return
+  if section.editorInitialized:
+    section.resetEditor()
+  section.syncIntoVM()
+  let tab = renderUnifiedDiffTab[WebRenderer, isonim_dom_api.Element](
+    r, vm, editorHostId(section.id), section.tabCallbacks(vm))
+  isonim_dom_api.appendChild(isonim_dom_api.Node(host), isonim_dom_api.Node(tab))
+  section.initEditorWhenAttached(host)
+
+proc documentElement(self: UnifiedDiffComponent): isonim_dom_api.Element =
+  ## The rendered document of this tab, or nil.
+  let key = self.scopedKey()
+  if documentRoots.hasKey(key): documentRoots[key] else: nil
+
+proc applyDocumentScroll(self: UnifiedDiffComponent) =
+  ## Re-apply the document's scroll request: a section that has just grown to
+  ## its content moved every section below it.
+  if self.isNil or not unifiedDiffVMInstances.hasKey(self.scopedKey()):
+    return
+  let request = unifiedDiffVMInstances[self.scopedKey()].documentScroll.val
+  let host = self.documentElement()
+  if host.isNil or request.path.len == 0:
+    return
+  scrollToSection(host, request.path)
+
+proc requestDocumentScroll*(data: Data; target, path: string) =
+  ## Bring `path` into view in the open diff tab for `target` (VCS-Panel.md,
+  ## "Scrolling to a file"): what a click on a file under an expanded commit
+  ## does after opening or focusing the commit's document. The request is
+  ## kept on the tab's ViewModel, so a tab rendered after it still scrolls.
+  let mapping = data.ui.componentMapping[Content.UnifiedDiff]
+  if mapping.isNil:
+    return
+  for _, component in mapping:
+    let tab = UnifiedDiffComponent(component)
+    if not tab.isNil and tab.rawTarget() == target:
+      let vm = tab.ensureUnifiedDiffVM()
+      if not vm.isNil:
+        vm.requestDocumentScroll(path)
 
 # The panel host mounts each diff tab into the container GoldenLayout creates
 # (`ui/panel_host`); the factory has created the tab's component by then.
@@ -2216,19 +2425,23 @@ setPanelRenderer(Content.UnifiedDiff,
     if component.editorInitialized:
       component.resetEditor()
     component.syncIntoVM()
-    let callbacks = UnifiedDiffCallbacks(
-      onCopySelectedHunks: proc() = component.copySelectedHunks(),
-      onStageSelectedHunks: proc() = component.stageSelectedHunks(),
-      onClearSelectedHunks: proc() =
-        vm.clearHunkSelection()
-        component.applyDecorations(),
-    )
-    renderUnifiedDiffTab[WebRenderer, isonim_dom_api.Element](
-      r, vm, editorHostId(component.id), callbacks))
+    if vm.isDiffDocument():
+      # Several files: one section per file, each its own diff editor.
+      let document = component
+      let root = renderUnifiedDiffDocument[WebRenderer, isonim_dom_api.Element](
+        r, vm,
+        proc(index: int; path: string; sectionHost: isonim_dom_api.Element) =
+          document.renderSectionInto(r, index, path, sectionHost))
+      documentRoots[component.scopedKey()] = root
+      root
+    else:
+      renderUnifiedDiffTab[WebRenderer, isonim_dom_api.Element](
+        r, vm, editorHostId(component.id), component.tabCallbacks(vm)))
 
-# The editor host exists once the tab is rendered into its container.
+# The editor host exists once the tab is rendered into its container. A
+# document's sections create their editors themselves.
 setPanelDecorator(Content.UnifiedDiff,
   proc(host: isonim_dom_api.Element; session: SessionViewModel) =
     let component = unifiedDiffComponentFor(host)
-    if not component.isNil:
+    if not component.isNil and component.sections.len == 0:
       component.initEditorWhenAttached(host))

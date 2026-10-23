@@ -39,6 +39,13 @@ type
     downloadApi* {.defaultVal: "".}:      string
     deleteApi* {.defaultVal: "".}:        string
 
+  VcsConfigObj* = object
+    ## The `vcs:` block (codetracer-specs GUI/Core-Panes/VCS-Panel.md,
+    ## "Configuration").
+    fileClickOpensFullFile* {.defaultVal: false.}: bool
+      ## A click on a file in the VCS panel opens the full file instead of
+      ## the unified diff; the panel's View mode toggle starts from it.
+
   ConfigObject* = object
     ## The config object is the schema for config yaml files
     theme*:                                               string
@@ -75,6 +82,10 @@ type
       path: "",
     ).}:                                                  RRBackendConfig
     skipInstall:                                          bool
+
+    vcs* {.defaultVal: VcsConfigObj(
+      fileClickOpensFullFile: false
+    ).}:                                                  VcsConfigObj
 
     ## PLAT-69: how the window opens (`window_policy`).
     window* {.defaultVal: WindowConfigObj(

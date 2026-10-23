@@ -44,10 +44,14 @@ suite "VCS Component Commit Selection":
       ]
       vm.selectedCommitIndices.val = @[0]
 
+      # A plain click on a commit opens its whole-commit diff (VCS-Panel.md,
+      # "Commit History"); the host expands it, as this callback does.
       var selectedIndices: seq[int] = @[]
+      var targets: seq[string] = @[]
       let callbacks = VCSCallbacks(
-        onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
+        onOpenCommit: proc(index: int; target: string) =
           selectedIndices.add(index)
+          targets.add(target)
           vm.selectedCommitIndices.val = @[index]
       )
 
@@ -64,6 +68,7 @@ suite "VCS Component Commit Selection":
       headers[2].fireEvent("click")
       check selectedIndices.len > 1
       check selectedIndices[^1] == 2
+      check targets == @["commit:abc2", "commit:abc3"]
 
       dispose()
 
