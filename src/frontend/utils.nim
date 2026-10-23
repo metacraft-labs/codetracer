@@ -1003,7 +1003,6 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
       agentWorkspacePath: cstring"",
       agentSessionId: cstring""
     ),
-    containerId: cstring"",
     animationFrame: 0,
     expanded: false,
     lastUpdateMs: 0

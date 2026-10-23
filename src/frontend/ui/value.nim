@@ -34,25 +34,6 @@ proc intValue*(i: int): Value {.exportc.} =
     typ: Type(kind: TypeKind.Int, langType: "Int"),
   )
 
-proc updateWatches*(self: StateComponent, handler: proc(locals: seq[Variable])) {.async.} =
-  # TODO: Fix up with new communication
-  # data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
-  # self.onUpdatedWatches = handler
-  discard
-
-proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstring) =
-  self.deleteWatch(expression)
-
-  if ($newExpression).find("\n") != NO_INDEX:
-    self.api.errorMessage(cstring"newlines forbidden in watch expressions: not registered")
-  else:
-    self.watchExpressions.add(newExpression)
-
-    discard self.updateWatches(proc(locals: seq[Variable]) =
-      self.locals = locals
-      self.redraw()
-    )
-
 proc uiExpanded*(self: ValueComponent, value: Value, expression: cstring): bool =
   if not self.expanded.hasKey(expression):
     self.expanded[expression] = false

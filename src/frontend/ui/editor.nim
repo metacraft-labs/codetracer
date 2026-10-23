@@ -3632,7 +3632,7 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
   # PLAT-68: the instance is a scope element of the one router's path.
   self.markEditorScope(self.monacoEditor)
 
-  document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
+  cast[Element](host).addEventListener(cstring"click", proc(ev: Event) =
     ev.stopPropagation()
     # THE RUN SLOT IS ROUTED FIRST, and the order is the whole of the guard.
     # `gutter-runtest` contains "gutter", so the sweep at the bottom of this
@@ -3656,7 +3656,7 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
         self.lineActionClick(tabInfo, ev.target.toJs)
   )
 
-  document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
+  cast[Element](host).addEventListener(cstring"contextmenu", proc(ev: Event) =
     # The gutter's right-click toggle. Monaco's `onContextMenu` above has
     # already seen this press and, for these same targets, stood down without
     # a menu (`isGutterToggleTarget`), so the toggle here is the whole answer.
