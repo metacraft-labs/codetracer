@@ -272,7 +272,7 @@ else:
       # one ViewModel and view for the whole window (`ui/debug_toolbar.nim`):
       # the menu shell creates its host and `switchSession` fills it — see
       # "switchSession fills the debug toolbar host for the target tab".
-      let activateIndex = indexOfRequired(body, "data.activeSessionIndex = sessionId")
+      let activateIndex = indexOfRequired(body, "data.activeSessionIndex = index")
       let menuIndex = indexOfRequired(body, "discard data.makeMenuComponent()")
       let commandPaletteIndex =
         indexOfRequired(body, "discard data.makeCommandPaletteComponent()")
