@@ -287,16 +287,25 @@ if [ -n "$ct_reprobuild_host" ]; then
 	#     codetracer_trace_writer_nim's build.rs from running a network
 	#     ``nimble install``.
 	#   * CT_EMULATOR_EXTRA_NIM_PATHS / CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS
-	#     inject codetracer's vendored ``stew`` tree (which ships the newer
-	#     results.nim those scripts rely on) so their ``nim c`` resolves
-	#     ``results`` / ``stew`` without a nimble package store.
+	#     inject codetracer's vendored ``stew`` tree and the standalone
+	#     ``results`` package (``libs/nim-result``) so their ``nim c`` resolves
+	#     ``results`` / ``stew`` without a nimble package store. The standalone
+	#     package must be on the path, and LAST: Nim gives the most recently
+	#     added ``--path`` precedence, and ``libs/nim-stew/stew`` carries an
+	#     older ``results.nim`` whose ``unsafeError`` is declared
+	#     ``[T, E: not void]`` and so does not match the ``Result[void, E]``
+	#     values codetracer-trace-format-nim uses. Without it the trace
+	#     writer's archive fails with "undeclared field: 'unsafeError' for type
+	#     results.Result [type declared in libs/nim-stew/stew/results.nim]".
+	#     The Linux tup branch below appends it; this branch did not, so a
+	#     macOS build-once failed there.
 	# Windows skips direnv unconditionally in build.rs and sets up Nim via
 	# env.ps1, so leave that branch untouched.
 	if [ "$ct_reprobuild_host" != "windows" ]; then
 		export CODETRACER_DB_BACKEND_SKIP_DIRENV="${CODETRACER_DB_BACKEND_SKIP_DIRENV:-1}"
 		export CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL="${CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL:-1}"
 		if [ -z "${CT_EMULATOR_EXTRA_NIM_PATHS:-}" ] && [ -d "$PWD/libs/nim-stew/stew" ]; then
-			ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew"
+			ct_nim_paths_lib="$PWD/libs/nim-stew/stew:$PWD/libs/nim-stew:$PWD/libs/nim-result"
 			export CT_EMULATOR_EXTRA_NIM_PATHS="$ct_nim_paths_lib"
 			export CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS="${CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS:-$ct_nim_paths_lib}"
 		fi
