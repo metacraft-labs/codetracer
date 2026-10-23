@@ -953,33 +953,30 @@ pub struct McpServerConfig {
     pub daemon_socket_path: PathBuf,
     /// Path to the daemon's PID file.
     pub daemon_pid_path: PathBuf,
-    /// Whether `read_source_file` may read a source-list entry from this
-    /// host when the recording carries no copy of it (see
-    /// [`HostSourceReads`]).  Set only by `trace mcp
-    /// --allow-host-source-reads`.
+    /// Whether a source-list entry the recording carries no copy of may be
+    /// read from this host, by `read_source_file` and by the replay
+    /// backends behind every other tool (see [`HostSourceReads`]).  Set
+    /// only by `trace mcp --allow-host-source-reads`.
     pub host_source_reads: HostSourceReads,
 }
 
-/// Whether `read_source_file` (and the `trace:///<path>/source/<file>`
-/// resource) may read a file from the live host because the recording's
-/// source list names it.
-///
-/// The source list is recording content, written by whatever program was
-/// recorded, so it can name any file on the machine that replays it
-/// (`/home/<user>/.ssh/id_ed25519`, a credentials file).  An embedded copy
-/// under the trace's `files/` is the recording's own bytes; a listed path
-/// with no copy is the host's.  The host read is therefore refused unless
-/// the server's operator turned it on with `--allow-host-source-reads`: a
-/// developer reading their own recordings sets it, and an agent that reads
-/// recordings someone else produced runs a server without it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum HostSourceReads {
-    /// Only embedded `files/` copies are served (the default).
-    #[default]
-    Refused,
-    /// A source-list entry with no embedded copy is read at its recorded
-    /// location on this host.
-    Allowed,
+/// Whether a recording's listed sources may be read from this host: by
+/// `read_source_file` and the source resource here, and by every replay
+/// backend the daemon starts for this server's requests.  Defined with the
+/// daemon's session identity, which it is part of (see
+/// [`crate::session::HostSourceReads`]).
+pub use crate::session::HostSourceReads;
+
+impl McpServerConfig {
+    /// `args` for a daemon request that names a trace, marked with this
+    /// server's [`HostSourceReads`].  The daemon serves every client on the
+    /// machine and keys its sessions by trace AND setting, so every request
+    /// that opens, queries or reads a trace must carry the setting, or it
+    /// would reach (or start) a backend with the other one.
+    fn trace_request(&self, mut args: Value) -> Value {
+        self.host_source_reads.mark_request(&mut args);
+        args
+    }
 }
 
 /// Runs the MCP server on stdio.
@@ -1532,7 +1529,7 @@ fn handle_resources_read<'a>(
                 &mut stream,
                 "ct/open-trace",
                 1,
-                json!({"tracePath": trace_path}),
+                config.trace_request(json!({"tracePath": trace_path})),
                 30,
             )
             .await
@@ -1562,20 +1559,20 @@ fn handle_resources_read<'a>(
                 };
 
             // Read the source file via ct/py-read-source.  The daemon
-            // handles this command by forwarding it to the backend as
-            // ct/read-source and returning the result.  It is handed the
-            // resolved location, never the requested path, so a backend
-            // that answers ct/read-source reads the file this rule chose.
-            // If the backend does not support ct/read-source, fall back to
+            // forwards it to the backend as a DAP `source` request (with
+            // `allowWorkingTree` set from this server's host-read setting)
+            // and returns the result.  It is handed the resolved location,
+            // never the requested path, so the backend reads the file this
+            // rule chose.  If the backend cannot answer, fall back to
             // reading that location here.
             let read_resp = dap_request(
                 &mut stream,
                 "ct/py-read-source",
                 2,
-                json!({
+                config.trace_request(json!({
                     "tracePath": trace_path,
                     "path": location.location(),
-                }),
+                })),
                 10,
             )
             .await;
@@ -1909,7 +1906,7 @@ async fn fetch_trace_metadata(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         30,
     )
     .await?;
@@ -1927,7 +1924,7 @@ async fn fetch_trace_metadata(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         10,
     )
     .await?;
@@ -2061,11 +2058,11 @@ async fn handle_exec_script(
 
     // Send ct/exec-script to the daemon.
     // Use a generous deadline: script timeout + overhead for trace opening.
-    let mut exec_args = json!({
+    let mut exec_args = config.trace_request(json!({
         "tracePath": trace_path,
         "script": script,
         "timeout": timeout_seconds,
-    });
+    }));
     if let Some(sid) = session_id {
         exec_args["sessionId"] = json!(sid);
     }
@@ -2237,7 +2234,7 @@ async fn handle_trace_info(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         30,
     )
     .await
@@ -2269,7 +2266,7 @@ async fn handle_trace_info(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         10,
     )
     .await
@@ -2420,7 +2417,7 @@ async fn handle_list_source_files(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         30,
     )
     .await
@@ -2452,7 +2449,7 @@ async fn handle_list_source_files(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         10,
     )
     .await
@@ -2570,7 +2567,7 @@ async fn handle_read_source_file(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path}),
+        config.trace_request(json!({"tracePath": trace_path})),
         30,
     )
     .await
@@ -2609,18 +2606,17 @@ async fn handle_read_source_file(
     };
 
     // Send ct/py-read-source to the daemon with the resolved location, never
-    // the requested path: a backend that answers ct/read-source then reads
-    // the file the rule above chose.  If the backend does not support the
-    // command (e.g. the replay-server for RR traces), fall back to reading
-    // that location here.
+    // the requested path: the backend's DAP `source` then reads the file the
+    // rule above chose, under this server's host-read setting.  If the
+    // backend cannot answer, fall back to reading that location here.
     let read_resp = dap_request(
         &mut stream,
         "ct/py-read-source",
         2,
-        json!({
+        config.trace_request(json!({
             "tracePath": trace_path,
             "path": location.location(),
-        }),
+        })),
         10,
     )
     .await;
@@ -2871,7 +2867,7 @@ async fn run_origin_query(
     query: &OriginQuery,
     config: &McpServerConfig,
     loaded_traces: &mut HashMap<String, LoadedTrace>,
-) -> Result<Value, String> {
+) -> Result<OriginAnswer, String> {
     let trace_path = resolve_trace_path_or_url(&query.trace_path).await?;
 
     let mut stream = connect_to_daemon(config)
@@ -2884,7 +2880,7 @@ async fn run_origin_query(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({ "tracePath": trace_path }),
+        config.trace_request(json!({ "tracePath": trace_path })),
         180,
     )
     .await
@@ -3044,7 +3040,64 @@ async fn run_origin_query(
         ));
     }
 
-    Ok(origin_resp.get("body").cloned().unwrap_or(json!({})))
+    let chain = origin_resp.get("body").cloned().unwrap_or(json!({}));
+    let note = host_reads_note(config.host_source_reads, &trace_path, &chain);
+    Ok(OriginAnswer { chain, note })
+}
+
+/// A `ct/originChain` answer, and why some of its hops carry no source text
+/// when the reason is this server's host-read setting.
+struct OriginAnswer {
+    /// The canonical `OriginChain` body, as the backend produced it.
+    chain: Value,
+    /// See [`host_reads_note`].
+    note: Option<String>,
+}
+
+/// Why hops of `chain` carry no source text, when the reason is that this
+/// server was started without `--allow-host-source-reads`: the files those
+/// hops are on are ones the recording lists but carries no copy of, so the
+/// replay backend did not read them (see [`HostSourceReads`]).  `None` when
+/// host reads are allowed, or when every hop without text is on a file the
+/// recording does carry (then the emptiness has another cause, and this
+/// note would mislead).
+fn host_reads_note(host_reads: HostSourceReads, trace_path: &str, chain: &Value) -> Option<String> {
+    if host_reads.is_allowed() {
+        return None;
+    }
+    let mut files: Vec<String> = Vec::new();
+    for hop in chain
+        .get("hops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = hop.get("sourceText").and_then(Value::as_str).unwrap_or("");
+        let Some(path) = hop
+            .get("location")
+            .and_then(|l| l.get("path"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if !text.is_empty() || path.is_empty() || files.iter().any(|f| f == path) {
+            continue;
+        }
+        if let Err(refusal) = resolve_recorded_source(trace_path, path, host_reads)
+            && refusal.starts_with(NOT_EMBEDDED)
+        {
+            files.push(path.to_string());
+        }
+    }
+    if files.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "source text is left empty for {}: the recording carries no copy of {}, and this server \
+         does not read sources from the host (it was started without --allow-host-source-reads)",
+        files.join(", "),
+        if files.len() == 1 { "it" } else { "them" }
+    ))
 }
 
 /// Handles the `get_value_origin` tool.
@@ -3066,8 +3119,12 @@ async fn handle_get_value_origin(
     };
 
     match run_origin_query(&query, config, loaded_traces).await {
-        Ok(chain) => {
+        Ok(OriginAnswer { chain, note }) => {
             let mut text = crate::origin_renderer::render_text(&chain);
+            if let Some(note) = note {
+                text.push_str("\n\nNote: ");
+                text.push_str(&note);
+            }
             text.push_str("\n\nCanonical OriginChain JSON:\n");
             text.push_str(
                 &serde_json::to_string_pretty(&chain).unwrap_or_else(|_| chain.to_string()),
@@ -3103,8 +3160,8 @@ async fn handle_resolve_variable_step(
         Err(e) => return jsonrpc_result(id, tool_result_error(&e)),
     };
 
-    let chain = match run_origin_query(&query, config, loaded_traces).await {
-        Ok(c) => c,
+    let OriginAnswer { chain, note } = match run_origin_query(&query, config, loaded_traces).await {
+        Ok(answer) => answer,
         Err(e) => {
             let duration_ms = start.elapsed().as_millis();
             return jsonrpc_result(id, tool_result_error_with_timing(&e, duration_ms));
@@ -3113,7 +3170,11 @@ async fn handle_resolve_variable_step(
 
     let duration_ms = start.elapsed().as_millis();
     match variable_step_from_chain(&chain, &query.variable) {
-        Some(step) => {
+        Some(mut step) => {
+            // Why `assignment` is empty, when it is this server's setting.
+            if let Some(note) = note {
+                step["sourceTextNote"] = json!(note);
+            }
             let text = serde_json::to_string_pretty(&step).unwrap_or_else(|_| step.to_string());
             jsonrpc_result(id, tool_result_text_with_timing(&text, duration_ms))
         }
@@ -3211,7 +3272,7 @@ const NOT_EMBEDDED: &str = "source file not embedded in the recording";
 /// 1. **An embedded copy** under `<trace_dir>/files/<path>`, the layout in
 ///    which a recording stores copies of its sources. It must be a regular
 ///    file reached beneath `files/` without following a symlink anywhere
-///    below `files/` ([`open_beneath`]); a symlink there is refused, wherever
+///    below `files/` ([`ct_open_beneath::open_beneath`]); a symlink there is refused, wherever
 ///    it points.
 /// 2. **A path in the recording's source list** (`paths.dat`, the list
 ///    `list_source_files` returns), read at its recorded location on this
@@ -3269,7 +3330,7 @@ fn resolve_recorded_source(
             .components()
             .filter(|c| !matches!(c, Component::CurDir))
             .collect();
-        if open_beneath(&files_root, &relative).is_ok() {
+        if ct_open_beneath::open_beneath(&files_root, &relative).is_ok() {
             return Ok(ResolvedSource::Embedded {
                 files_root,
                 relative,
@@ -3375,12 +3436,12 @@ impl ResolvedSource {
 
 /// Reads the file [`resolve_recorded_source`] chose.
 ///
-/// This is the fallback that serves `read_source_file` when the daemon's
-/// `ct/read-source` command is not supported by the backend (e.g. the
-/// replay-server).  An embedded copy is opened again with
-/// [`open_beneath`], so what was checked is what is read: a component of
-/// the path replaced by a symlink after [`resolve_recorded_source`] ran is
-/// refused here instead of followed out of `files/`.
+/// This is the fallback that serves `read_source_file` when the backend
+/// behind the daemon's `ct/py-read-source` cannot answer.  An embedded copy
+/// is opened again with [`ct_open_beneath::open_beneath`], so what was
+/// checked is what is read: a component of the path replaced by a symlink
+/// after [`resolve_recorded_source`] ran is refused here instead of followed
+/// out of `files/`.
 fn read_resolved_source(resolved: &ResolvedSource) -> Result<String, String> {
     use std::io::Read;
     let location = resolved.location();
@@ -3388,7 +3449,7 @@ fn read_resolved_source(resolved: &ResolvedSource) -> Result<String, String> {
         ResolvedSource::Embedded {
             files_root,
             relative,
-        } => open_beneath(files_root, relative),
+        } => ct_open_beneath::open_beneath(files_root, relative),
         ResolvedSource::Host(path) => std::fs::File::open(path),
     }
     .map_err(|e| format!("failed to read {}: {e}", location.display()))?;
@@ -3396,117 +3457,6 @@ fn read_resolved_source(resolved: &ResolvedSource) -> Result<String, String> {
     file.read_to_string(&mut content)
         .map_err(|e| format!("failed to read {}: {e}", location.display()))?;
     Ok(content)
-}
-
-/// Opens the regular file `relative` beneath the directory `root` without
-/// following a symlink in any component of `relative`.
-///
-/// On Unix each component is opened with `openat(2)` relative to the
-/// directory opened before it, with `O_NOFOLLOW` (and `O_DIRECTORY` for the
-/// directories), so the walk never leaves `root` and a symlink, whether
-/// present when the walk starts or swapped in during it, fails the open
-/// (`ELOOP`/`ENOTDIR`) instead of being followed
-/// (https://man7.org/linux/man-pages/man2/open.2.html, `O_NOFOLLOW`). The
-/// last component is opened `O_NONBLOCK` so a FIFO cannot stall the server,
-/// and anything but a regular file is refused after the open. `root` itself
-/// is trusted as given.  `relative` must consist of normal components only.
-///
-/// Elsewhere every component is checked with `symlink_metadata` before the
-/// open, which refuses a symlink present at the check but not one swapped in
-/// between the check and the open.
-fn open_beneath(
-    root: &std::path::Path,
-    relative: &std::path::Path,
-) -> std::io::Result<std::fs::File> {
-    use std::path::Component;
-    let mut names = Vec::new();
-    for component in relative.components() {
-        match component {
-            Component::Normal(name) => names.push(name),
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "only normal path components are opened beneath files/",
-                ));
-            }
-        }
-    }
-    if names.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "no file named beneath files/",
-        ));
-    }
-
-    #[cfg(unix)]
-    let file = {
-        use std::ffi::CString;
-        use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-        use std::os::unix::ffi::OsStrExt;
-        let to_c = |bytes: &[u8]| {
-            CString::new(bytes).map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "a NUL in a path")
-            })
-        };
-        let root_c = to_c(root.as_os_str().as_bytes())?;
-        // SAFETY: `root_c` is a valid NUL-terminated string; the returned
-        // descriptor is checked and then owned by `OwnedFd`.
-        let fd = unsafe {
-            libc::open(
-                root_c.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-            )
-        };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        // SAFETY: `fd` is a freshly opened descriptor nothing else owns.
-        let mut current = unsafe { OwnedFd::from_raw_fd(fd) };
-        for (index, name) in names.iter().enumerate() {
-            let last = index + 1 == names.len();
-            let name_c = to_c(name.as_bytes())?;
-            let flags = libc::O_RDONLY
-                | libc::O_CLOEXEC
-                | libc::O_NOFOLLOW
-                | if last {
-                    libc::O_NONBLOCK
-                } else {
-                    libc::O_DIRECTORY
-                };
-            // SAFETY: `current` is an open directory descriptor and
-            // `name_c` a valid NUL-terminated single component.
-            let fd = unsafe { libc::openat(current.as_raw_fd(), name_c.as_ptr(), flags) };
-            if fd < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            // SAFETY: as above.
-            current = unsafe { OwnedFd::from_raw_fd(fd) };
-        }
-        std::fs::File::from(current)
-    };
-
-    #[cfg(not(unix))]
-    let file = {
-        let mut path = root.to_path_buf();
-        for name in &names {
-            path.push(name);
-            if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "a symlink beneath files/ is not followed",
-                ));
-            }
-        }
-        std::fs::File::open(&path)?
-    };
-
-    if !file.metadata()?.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "not a regular file",
-        ));
-    }
-    Ok(file)
 }
 
 /// [`resolve_recorded_source`] then [`read_resolved_source`]: the unit

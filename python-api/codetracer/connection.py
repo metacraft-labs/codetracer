@@ -225,16 +225,32 @@ class DaemonConnection:
         socket_path: Path to the daemon's Unix socket.  When *None*, the
             path returned by :func:`default_daemon_socket_path`
             (the one the daemon itself resolves) is used.
+        host_source_reads: Whether the trace sessions this connection opens
+            may read a recording's listed sources from the replay host.  The
+            daemon keeps one session per trace AND setting, so every request
+            that names a trace (``tracePath``) carries the setting as
+            ``hostSourceReads``.  Off by default: the backend then reads
+            source text only from the recording's own copies.
     """
 
-    def __init__(self, socket_path: Optional[Union[str, Path]] = None) -> None:
+    def __init__(
+        self,
+        socket_path: Optional[Union[str, Path]] = None,
+        host_source_reads: bool = False,
+    ) -> None:
         if socket_path is None:
             self._socket_path = default_daemon_socket_path()
         else:
             self._socket_path = Path(socket_path)
+        self._host_source_reads = bool(host_source_reads)
         self._sock: Optional[socket.socket] = None
         self._buffer = b""
         self._seq_counter = 0
+
+    @property
+    def host_source_reads(self) -> bool:
+        """Whether this connection's trace sessions may read host sources."""
+        return self._host_source_reads
 
     @property
     def socket_path(self) -> Path:
@@ -356,6 +372,16 @@ class DaemonConnection:
             "seq": seq,
         }
         if arguments is not None:
+            if "tracePath" in arguments:
+                # The session a trace request names is the trace and this
+                # connection's host-read setting.  Only requests the daemon
+                # answers itself carry ``tracePath``; requests it forwards to
+                # a backend do not get the field, as some backend argument
+                # schemas refuse unknown fields.
+                arguments = {
+                    **arguments,
+                    "hostSourceReads": self._host_source_reads,
+                }
             msg["arguments"] = arguments
         self.send(msg)
 

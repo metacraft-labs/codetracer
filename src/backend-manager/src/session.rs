@@ -19,13 +19,129 @@
 //!    the daemon can call `stop_replay`.
 //! 4. **Removal** — [`SessionManager::remove_session`] cleans up the
 //!    session entry and cancels any running timer.
+//!
+//! # Session identity
+//!
+//! A session is named by a [`SessionKey`]: the trace path AND whether the
+//! replay backend behind it may read a recording's listed sources from this
+//! host ([`HostSourceReads`]).  One daemon serves every client on the
+//! machine, and two clients may open the same trace with different settings
+//! (an MCP server started with `--allow-host-source-reads` and one started
+//! without it), so the setting cannot be a property of the daemon, and a
+//! backend started for one setting is never handed to a client that asked
+//! for the other.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use serde_json::Value;
+
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+
+// ---------------------------------------------------------------------------
+// HostSourceReads and SessionKey
+// ---------------------------------------------------------------------------
+
+/// Whether a recording's listed sources may be read from the live host.
+///
+/// The source list is recording content, written by whatever program was
+/// recorded, so it can name any file on the machine that replays it
+/// (`/home/<user>/.ssh/id_ed25519`, a credentials file).  A copy the
+/// recording carries (a trace folder's `files/`, the raw source views a
+/// container bundles) is the recording's own bytes; a listed path with no
+/// copy is the host's.  Host reads are therefore off unless the operator of
+/// the client turned them on: `trace mcp --allow-host-source-reads` for the
+/// MCP server, `hostSourceReads: true` on a daemon request.  A developer
+/// reading their own recordings turns them on; an agent that reads
+/// recordings someone else produced runs without them.
+///
+/// The setting governs the MCP server's `read_source_file` and source
+/// resource, and every replay backend the daemon starts: a backend launched
+/// with host reads off reads source text only from the recording's own
+/// copies (see the replay server's `launch` argument `hostSourceReads`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum HostSourceReads {
+    /// Only the recording's own copies are read (the default).
+    #[default]
+    Refused,
+    /// A source-list entry with no copy in the recording is read at its
+    /// recorded location on this host.
+    Allowed,
+}
+
+impl HostSourceReads {
+    /// The daemon request field (and replay-server `launch` argument) that
+    /// carries the setting.  Only the JSON value `true` means
+    /// [`HostSourceReads::Allowed`]; an absent field, `false` and any other
+    /// value mean [`HostSourceReads::Refused`], so a client that does not
+    /// know the field gets the safe setting.
+    pub const REQUEST_FIELD: &'static str = "hostSourceReads";
+
+    /// The setting a daemon request's `arguments` carry.
+    pub fn from_request(args: Option<&Value>) -> Self {
+        match args.and_then(|a| a.get(Self::REQUEST_FIELD)) {
+            Some(Value::Bool(true)) => Self::Allowed,
+            _ => Self::Refused,
+        }
+    }
+
+    /// Whether host reads are allowed.
+    pub fn is_allowed(self) -> bool {
+        self == Self::Allowed
+    }
+
+    /// Marks a request's `arguments` object with this setting.  Refused is
+    /// written as an explicit `false` rather than left out, so what a client
+    /// asked for is visible on the wire.
+    pub fn mark_request(self, args: &mut Value) {
+        if let Some(object) = args.as_object_mut() {
+            object.insert(
+                Self::REQUEST_FIELD.to_string(),
+                Value::Bool(self.is_allowed()),
+            );
+        }
+    }
+}
+
+/// The identity of a daemon session: the trace and the host-read setting its
+/// replay backend was started with (see the module documentation).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SessionKey {
+    /// The trace path, as the client named it.
+    pub trace_path: PathBuf,
+    /// Whether the session's backend may read listed sources from the host.
+    pub host_source_reads: HostSourceReads,
+}
+
+impl SessionKey {
+    /// A key for `trace_path` with the given setting.
+    pub fn new(trace_path: impl Into<PathBuf>, host_source_reads: HostSourceReads) -> Self {
+        Self {
+            trace_path: trace_path.into(),
+            host_source_reads,
+        }
+    }
+
+    /// The session a daemon request names: its `tracePath` (passed in, as
+    /// every handler has already extracted and validated it) and its
+    /// `hostSourceReads` field.
+    pub fn for_request(trace_path: &str, args: Option<&Value>) -> Self {
+        Self::new(trace_path, HostSourceReads::from_request(args))
+    }
+}
+
+impl std::fmt::Display for SessionKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reads = if self.host_source_reads.is_allowed() {
+            "host source reads allowed"
+        } else {
+            "recording sources only"
+        };
+        write!(f, "{} ({reads})", self.trace_path.display())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // TraceSession
@@ -40,8 +156,8 @@ pub struct TraceSession {
     /// stop the replay when the session expires.
     pub backend_id: usize,
 
-    /// Canonical filesystem path of the trace (used as the session key).
-    pub trace_path: PathBuf,
+    /// The session's identity: the trace path and its host-read setting.
+    pub key: SessionKey,
 
     /// Handle for the currently running TTL sleep task.
     /// Aborted and respawned on every [`SessionManager::reset_ttl`] call.
@@ -68,7 +184,7 @@ impl std::fmt::Debug for TraceSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceSession")
             .field("backend_id", &self.backend_id)
-            .field("trace_path", &self.trace_path)
+            .field("key", &self.key)
             .field("language", &self.language)
             .field("total_events", &self.total_events)
             .field("has_ttl_handle", &self.ttl_handle.is_some())
@@ -85,8 +201,8 @@ impl std::fmt::Debug for TraceSession {
 /// Tracks trace-path to session mappings, enforces the max-sessions limit,
 /// and drives per-session TTL timers that fire through a channel.
 pub struct SessionManager {
-    /// Active sessions keyed by canonical trace path.
-    sessions: HashMap<PathBuf, TraceSession>,
+    /// Active sessions keyed by trace path and host-read setting.
+    sessions: HashMap<SessionKey, TraceSession>,
 
     /// Default TTL for new sessions (and for TTL resets).
     default_ttl: Duration,
@@ -96,9 +212,9 @@ pub struct SessionManager {
 
     /// Sender for TTL expiry notifications.
     ///
-    /// When a session's idle timer fires, its `trace_path` is sent through
-    /// this channel so the daemon loop can call `stop_replay` and clean up.
-    ttl_expiry_tx: mpsc::UnboundedSender<PathBuf>,
+    /// When a session's idle timer fires, its key is sent through this
+    /// channel so the daemon loop can call `stop_replay` and clean up.
+    ttl_expiry_tx: mpsc::UnboundedSender<SessionKey>,
 }
 
 impl std::fmt::Debug for SessionManager {
@@ -114,7 +230,7 @@ impl std::fmt::Debug for SessionManager {
 /// Information about a session returned by [`SessionManager::list_sessions`].
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
-    pub trace_path: PathBuf,
+    pub key: SessionKey,
     pub backend_id: usize,
     pub language: String,
     pub total_events: u64,
@@ -126,13 +242,13 @@ pub struct SessionInfo {
 impl SessionManager {
     /// Creates a new `SessionManager`.
     ///
-    /// Returns the manager and an `UnboundedReceiver<PathBuf>` that the
-    /// daemon loop should poll: each received path identifies a session
+    /// Returns the manager and an `UnboundedReceiver<SessionKey>` that the
+    /// daemon loop should poll: each received key identifies a session
     /// whose TTL has expired.
     pub fn new(
         default_ttl: Duration,
         max_sessions: usize,
-    ) -> (Self, mpsc::UnboundedReceiver<PathBuf>) {
+    ) -> (Self, mpsc::UnboundedReceiver<SessionKey>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let mgr = Self {
             sessions: HashMap::new(),
@@ -156,8 +272,8 @@ impl SessionManager {
         self.default_ttl
     }
 
-    /// Returns `true` if a session for the given trace path exists.
-    pub fn has_session(&self, path: &PathBuf) -> bool {
+    /// Returns `true` if a session with the given key exists.
+    pub fn has_session(&self, path: &SessionKey) -> bool {
         self.sessions.contains_key(path)
     }
 
@@ -167,7 +283,7 @@ impl SessionManager {
     /// The caller is responsible for invoking `start_replay` on the
     /// `BackendManager` *before* calling this method, so that `backend_id`
     /// is valid.
-    pub fn add_session(&mut self, path: PathBuf, backend_id: usize) -> Result<(), SessionError> {
+    pub fn add_session(&mut self, path: SessionKey, backend_id: usize) -> Result<(), SessionError> {
         if self.sessions.len() >= self.max_sessions {
             return Err(SessionError::MaxSessionsReached {
                 max: self.max_sessions,
@@ -175,14 +291,14 @@ impl SessionManager {
         }
 
         if self.sessions.contains_key(&path) {
-            return Err(SessionError::AlreadyLoaded { path: path.clone() });
+            return Err(SessionError::AlreadyLoaded { key: path.clone() });
         }
 
         let ttl_handle = self.spawn_ttl_timer(path.clone());
 
         let session = TraceSession {
             backend_id,
-            trace_path: path.clone(),
+            key: path.clone(),
             ttl_handle: Some(ttl_handle),
             language: String::new(),
             total_events: 0,
@@ -202,7 +318,7 @@ impl SessionManager {
     /// [`TraceMetadata`](crate::trace_metadata::TraceMetadata).
     pub fn add_session_with_metadata(
         &mut self,
-        path: PathBuf,
+        path: SessionKey,
         backend_id: usize,
         metadata: &crate::trace_metadata::TraceMetadata,
     ) -> Result<(), SessionError> {
@@ -213,14 +329,14 @@ impl SessionManager {
         }
 
         if self.sessions.contains_key(&path) {
-            return Err(SessionError::AlreadyLoaded { path: path.clone() });
+            return Err(SessionError::AlreadyLoaded { key: path.clone() });
         }
 
         let ttl_handle = self.spawn_ttl_timer(path.clone());
 
         let session = TraceSession {
             backend_id,
-            trace_path: path.clone(),
+            key: path.clone(),
             ttl_handle: Some(ttl_handle),
             language: metadata.language.clone(),
             total_events: metadata.total_events,
@@ -239,7 +355,7 @@ impl SessionManager {
     /// call `stop_replay`.
     ///
     /// Returns `None` if no session exists for the given path.
-    pub fn remove_session(&mut self, path: &PathBuf) -> Option<usize> {
+    pub fn remove_session(&mut self, path: &SessionKey) -> Option<usize> {
         if let Some(session) = self.sessions.remove(path) {
             if let Some(handle) = session.ttl_handle {
                 handle.abort();
@@ -254,7 +370,7 @@ impl SessionManager {
     ///
     /// The old timer is aborted and a fresh one is spawned with the full
     /// `default_ttl` duration.  Does nothing if the session does not exist.
-    pub fn reset_ttl(&mut self, path: &PathBuf) {
+    pub fn reset_ttl(&mut self, path: &SessionKey) {
         if let Some(session) = self.sessions.get_mut(path) {
             // Cancel the old timer.
             if let Some(handle) = session.ttl_handle.take() {
@@ -273,9 +389,9 @@ impl SessionManager {
     }
 
     /// Returns information about a session, or `None` if not loaded.
-    pub fn get_session(&self, path: &PathBuf) -> Option<SessionInfo> {
+    pub fn get_session(&self, path: &SessionKey) -> Option<SessionInfo> {
         self.sessions.get(path).map(|s| SessionInfo {
-            trace_path: s.trace_path.clone(),
+            key: s.key.clone(),
             backend_id: s.backend_id,
             language: s.language.clone(),
             total_events: s.total_events,
@@ -286,7 +402,7 @@ impl SessionManager {
     }
 
     /// Returns the `backend_id` for a session, or `None`.
-    pub fn get_session_backend_id(&self, path: &PathBuf) -> Option<usize> {
+    pub fn get_session_backend_id(&self, path: &SessionKey) -> Option<usize> {
         self.sessions.get(path).map(|s| s.backend_id)
     }
 
@@ -295,7 +411,7 @@ impl SessionManager {
         self.sessions
             .values()
             .map(|s| SessionInfo {
-                trace_path: s.trace_path.clone(),
+                key: s.key.clone(),
                 backend_id: s.backend_id,
                 language: s.language.clone(),
                 total_events: s.total_events,
@@ -310,11 +426,11 @@ impl SessionManager {
     ///
     /// This is used by the dispatch loop to reset the TTL when a message is
     /// routed to a particular replay.
-    pub fn path_for_backend_id(&self, backend_id: usize) -> Option<PathBuf> {
+    pub fn path_for_backend_id(&self, backend_id: usize) -> Option<SessionKey> {
         self.sessions
             .values()
             .find(|s| s.backend_id == backend_id)
-            .map(|s| s.trace_path.clone())
+            .map(|s| s.key.clone())
     }
 
     // -----------------------------------------------------------------------
@@ -323,7 +439,7 @@ impl SessionManager {
 
     /// Spawns a tokio task that sleeps for `default_ttl` and then sends the
     /// session's path through the expiry channel.
-    fn spawn_ttl_timer(&self, path: PathBuf) -> JoinHandle<()> {
+    fn spawn_ttl_timer(&self, path: SessionKey) -> JoinHandle<()> {
         let ttl = self.default_ttl;
         let tx = self.ttl_expiry_tx.clone();
         tokio::spawn(async move {
@@ -344,8 +460,8 @@ impl SessionManager {
 pub enum SessionError {
     /// The daemon has reached its configured maximum number of sessions.
     MaxSessionsReached { max: usize },
-    /// A session for this trace path is already loaded.
-    AlreadyLoaded { path: PathBuf },
+    /// A session with this key is already loaded.
+    AlreadyLoaded { key: SessionKey },
 }
 
 impl std::fmt::Display for SessionError {
@@ -354,8 +470,8 @@ impl std::fmt::Display for SessionError {
             Self::MaxSessionsReached { max } => {
                 write!(f, "maximum number of sessions ({max}) reached")
             }
-            Self::AlreadyLoaded { path } => {
-                write!(f, "session already loaded for {}", path.display())
+            Self::AlreadyLoaded { key } => {
+                write!(f, "session already loaded for {key}")
             }
         }
     }
@@ -376,8 +492,13 @@ mod tests {
     fn make_session_manager(
         ttl_secs: u64,
         max: usize,
-    ) -> (SessionManager, mpsc::UnboundedReceiver<PathBuf>) {
+    ) -> (SessionManager, mpsc::UnboundedReceiver<SessionKey>) {
         SessionManager::new(Duration::from_secs(ttl_secs), max)
+    }
+
+    /// The default-setting key for a trace path.
+    fn key(path: &str) -> SessionKey {
+        SessionKey::new(path, HostSourceReads::Refused)
     }
 
     #[test]
@@ -387,10 +508,10 @@ mod tests {
             let (mut mgr, _rx) = make_session_manager(300, 10);
             assert_eq!(mgr.session_count(), 0);
 
-            mgr.add_session(PathBuf::from("/trace/a"), 0).unwrap();
+            mgr.add_session(key("/trace/a"), 0).unwrap();
             assert_eq!(mgr.session_count(), 1);
 
-            mgr.add_session(PathBuf::from("/trace/b"), 1).unwrap();
+            mgr.add_session(key("/trace/b"), 1).unwrap();
             assert_eq!(mgr.session_count(), 2);
         });
     }
@@ -400,7 +521,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (mut mgr, _rx) = make_session_manager(300, 10);
-            let p = PathBuf::from("/trace/x");
+            let p = key("/trace/x");
             assert!(!mgr.has_session(&p));
 
             mgr.add_session(p.clone(), 0).unwrap();
@@ -413,7 +534,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (mut mgr, _rx) = make_session_manager(300, 10);
-            let p = PathBuf::from("/trace/y");
+            let p = key("/trace/y");
             mgr.add_session(p.clone(), 42).unwrap();
 
             let backend_id = mgr.remove_session(&p);
@@ -426,15 +547,68 @@ mod tests {
         });
     }
 
+    /// One trace opened with each host-read setting is two sessions, each
+    /// with its own backend: a client that asked for recording sources only
+    /// is never routed to a backend that reads the host.
+    #[test]
+    fn test_same_trace_with_each_host_read_setting_is_two_sessions() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (mut mgr, _rx) = make_session_manager(300, 10);
+            let refused = SessionKey::new("/trace/shared", HostSourceReads::Refused);
+            let allowed = SessionKey::new("/trace/shared", HostSourceReads::Allowed);
+            mgr.add_session(refused.clone(), 3).unwrap();
+            assert!(!mgr.has_session(&allowed));
+            mgr.add_session(allowed.clone(), 4).unwrap();
+            assert_eq!(mgr.get_session_backend_id(&refused), Some(3));
+            assert_eq!(mgr.get_session_backend_id(&allowed), Some(4));
+            assert_eq!(mgr.remove_session(&allowed), Some(4));
+            assert_eq!(mgr.get_session_backend_id(&refused), Some(3));
+        });
+    }
+
+    /// Only a JSON `true` allows host reads; every other value, and an
+    /// absent field, is the safe default.
+    #[test]
+    fn test_host_source_reads_from_request() {
+        use serde_json::json;
+        assert_eq!(
+            HostSourceReads::from_request(Some(&json!({"hostSourceReads": true}))),
+            HostSourceReads::Allowed
+        );
+        for args in [
+            json!({}),
+            json!({"hostSourceReads": false}),
+            json!({"hostSourceReads": "true"}),
+            json!({"hostSourceReads": 1}),
+            json!({"hostSourceReads": null}),
+        ] {
+            assert_eq!(
+                HostSourceReads::from_request(Some(&args)),
+                HostSourceReads::Refused,
+                "{args}"
+            );
+        }
+        assert_eq!(
+            HostSourceReads::from_request(None),
+            HostSourceReads::Refused
+        );
+        let mut args = json!({"tracePath": "/t"});
+        HostSourceReads::Refused.mark_request(&mut args);
+        assert_eq!(args["hostSourceReads"], json!(false));
+        HostSourceReads::Allowed.mark_request(&mut args);
+        assert_eq!(args["hostSourceReads"], json!(true));
+    }
+
     #[test]
     fn test_max_sessions_enforced() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (mut mgr, _rx) = make_session_manager(300, 2);
-            mgr.add_session(PathBuf::from("/a"), 0).unwrap();
-            mgr.add_session(PathBuf::from("/b"), 1).unwrap();
+            mgr.add_session(key("/a"), 0).unwrap();
+            mgr.add_session(key("/b"), 1).unwrap();
 
-            let result = mgr.add_session(PathBuf::from("/c"), 2);
+            let result = mgr.add_session(key("/c"), 2);
             assert!(result.is_err());
             assert!(matches!(
                 result.unwrap_err(),
@@ -448,7 +622,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (mut mgr, _rx) = make_session_manager(300, 10);
-            let p = PathBuf::from("/dup");
+            let p = key("/dup");
             mgr.add_session(p.clone(), 0).unwrap();
 
             let result = mgr.add_session(p.clone(), 1);
@@ -465,15 +639,15 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (mut mgr, _rx) = make_session_manager(300, 10);
-            mgr.add_session(PathBuf::from("/t1"), 0).unwrap();
-            mgr.add_session(PathBuf::from("/t2"), 1).unwrap();
+            mgr.add_session(key("/t1"), 0).unwrap();
+            mgr.add_session(key("/t2"), 1).unwrap();
 
             let list = mgr.list_sessions();
             assert_eq!(list.len(), 2);
 
-            let paths: Vec<_> = list.iter().map(|s| &s.trace_path).collect();
-            assert!(paths.contains(&&PathBuf::from("/t1")));
-            assert!(paths.contains(&&PathBuf::from("/t2")));
+            let keys: Vec<_> = list.iter().map(|s| &s.key).collect();
+            assert!(keys.contains(&&key("/t1")));
+            assert!(keys.contains(&&key("/t2")));
         });
     }
 
@@ -482,7 +656,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let (mut mgr, _rx) = make_session_manager(300, 10);
-            let p = PathBuf::from("/trace/z");
+            let p = key("/trace/z");
             mgr.add_session(p.clone(), 7).unwrap();
 
             assert_eq!(mgr.path_for_backend_id(7), Some(p));
@@ -493,7 +667,7 @@ mod tests {
     #[tokio::test]
     async fn test_ttl_expiry_fires() {
         let (mut mgr, mut rx) = make_session_manager(1, 10);
-        let p = PathBuf::from("/ttl-test");
+        let p = key("/ttl-test");
         mgr.add_session(p.clone(), 0).unwrap();
 
         // Wait for the TTL to fire (1 second + margin).
@@ -505,7 +679,7 @@ mod tests {
     #[tokio::test]
     async fn test_reset_ttl_postpones_expiry() {
         let (mut mgr, mut rx) = make_session_manager(2, 10);
-        let p = PathBuf::from("/ttl-reset-test");
+        let p = key("/ttl-reset-test");
         mgr.add_session(p.clone(), 0).unwrap();
 
         // Wait 1 second (less than TTL), then reset.
@@ -525,7 +699,7 @@ mod tests {
     #[tokio::test]
     async fn test_remove_cancels_ttl() {
         let (mut mgr, mut rx) = make_session_manager(1, 10);
-        let p = PathBuf::from("/ttl-cancel-test");
+        let p = key("/ttl-cancel-test");
         mgr.add_session(p.clone(), 0).unwrap();
 
         // Remove immediately (before TTL fires).
@@ -538,10 +712,7 @@ mod tests {
             Err(_) => { /* timeout — expected */ }
             Ok(None) => { /* channel closed — also fine */ }
             Ok(Some(path)) => {
-                panic!(
-                    "unexpected TTL expiry for removed session: {}",
-                    path.display()
-                );
+                panic!("unexpected TTL expiry for removed session: {path}");
             }
         }
     }

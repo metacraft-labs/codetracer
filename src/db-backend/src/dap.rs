@@ -159,6 +159,16 @@ pub struct LaunchRequestArguments {
     /// to do instead — see [`TraceSourceArgument::unsupported_reason`].
     #[serde(rename = "traceSource", skip_serializing_if = "Option::is_none")]
     pub trace_source: Option<TraceSourceArgument>,
+    /// Whether the session may read the recording's listed sources where
+    /// they point on this host (`crate::source_access`). `false` limits
+    /// every source read of the session to the recording's own copies;
+    /// `true` or no value keeps reading the host, as a client that launches
+    /// this server directly (the desktop GUI) expects. The CodeTracer daemon
+    /// always sends it. A server that predates the field refuses a launch
+    /// carrying it (`deny_unknown_fields`), so a daemon never ends up with a
+    /// backend that silently ignores a refusal.
+    #[serde(rename = "hostSourceReads", skip_serializing_if = "Option::is_none")]
+    pub host_source_reads: Option<bool>,
 }
 
 /// The trace-source vocabulary shared with the embed SDK.

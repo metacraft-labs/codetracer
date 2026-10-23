@@ -399,6 +399,13 @@ name = "ct-home"
 version = "0.1.0"
 
 [[package]]
+name = "ct-open-beneath"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "darling"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1520,6 +1527,7 @@ dependencies = [
  "codetracer_trace_writer",
  "ct-data-breakpoints",
  "ct-home",
+ "ct-open-beneath",
  "flexi_logger",
  "futures-util",
  "httparse",

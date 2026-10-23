@@ -1363,6 +1363,15 @@ pub trait TraceReader: std::fmt::Debug + Send {
     /// The result is in ascending `PathId` order, so index 0 is the oldest
     /// version and the last entry the newest.
     fn fuzzy_path_ids_for(&self, path: &str) -> Vec<PathId> {
+        self.fuzzy_path_ids_for_under(path, crate::source_access::HostSourceReads::Allowed)
+    }
+
+    /// [`Self::fuzzy_path_ids_for`] under a session's source-reading rule:
+    /// with host reads off, stages 4 and 5 are skipped, because both resolve
+    /// paths on this host (`canonicalize` stats the requested path and every
+    /// absolute recorded path, all of which come from the recording or the
+    /// client). The other stages compare strings only.
+    fn fuzzy_path_ids_for_under(&self, path: &str, host_reads: crate::source_access::HostSourceReads) -> Vec<PathId> {
         fn sorted(mut ids: Vec<PathId>) -> Vec<PathId> {
             ids.sort_by_key(|id| id.0);
             ids.dedup();
@@ -1469,8 +1478,9 @@ pub trait TraceReader: std::fmt::Debug + Send {
             return sorted(ids);
         }
 
-        // 4. Canonicalize and retry.
-        if let Ok(canonical) = abs_path.canonicalize()
+        // 4. Canonicalize and retry (a host stat: never with host reads off).
+        if host_reads.is_allowed()
+            && let Ok(canonical) = abs_path.canonicalize()
             && canonical != abs_path
         {
             if let Some(canonical_str) = canonical.to_str() {
@@ -1494,11 +1504,13 @@ pub trait TraceReader: std::fmt::Debug + Send {
             }
         }
 
-        // 5. Reverse canonicalize: stored paths may be symlink-resolved.
+        // 5. Reverse canonicalize: stored paths may be symlink-resolved (a
+        //    host stat of every absolute recorded path: never with host reads
+        //    off).
         let ids: Vec<PathId> = self
             .path_entries_iter()
             .filter_map(|(stored_path, id)| {
-                if stored_path.is_empty() {
+                if stored_path.is_empty() || !host_reads.is_allowed() {
                     return None;
                 }
                 let sp = std::path::Path::new(stored_path);

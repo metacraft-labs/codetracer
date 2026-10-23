@@ -48,6 +48,7 @@ def open_trace(
     path: Union[str, Path],
     *,
     daemon_socket: Optional[Union[str, Path]] = None,
+    host_source_reads: bool = False,
 ) -> "Trace":
     """Open a recorded trace for inspection.
 
@@ -61,6 +62,13 @@ def open_trace(
             When *None*, :func:`codetracer.connection.default_daemon_socket_path`
             decides: the socket the daemon handed to this process, else the
             one the daemon resolves for itself.
+        host_source_reads: Whether the trace session may read the
+            recording's listed sources from the replay host (its working
+            tree).  Off by default: source text, line text and source-derived
+            names then come only from the copies the recording carries.  A
+            source list is recording content and can name any file on the
+            machine that replays it, so turn this on only for recordings of
+            your own programs.
 
     Returns:
         A :class:`Trace` instance connected to the backend daemon.
@@ -69,7 +77,9 @@ def open_trace(
         TraceNotFoundError: If *path* does not exist or is not a valid trace.
         TraceError: If the daemon is not reachable or returns an error.
     """
-    conn = DaemonConnection(socket_path=daemon_socket)
+    conn = DaemonConnection(
+        socket_path=daemon_socket, host_source_reads=host_source_reads
+    )
     conn.connect()
 
     # Resolve the path if it exists on disk; otherwise pass it as-is
@@ -1221,7 +1231,9 @@ class Trace:
         """Read the content of a source file from the trace.
 
         Sends ``ct/py-read-source`` to the daemon, which translates it
-        to ``ct/read-source`` on the backend.
+        to a DAP ``source`` request on the backend.  Unless the trace was
+        opened with ``host_source_reads=True``, only the recording's own
+        copy of the file is read; a file it carries no copy of is refused.
 
         Parameters:
             path: The source file path (as listed in :attr:`source_files`

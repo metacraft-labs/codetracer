@@ -171,6 +171,10 @@ toml = "0.8"
 # is what makes that divergence impossible rather than merely
 # discouraged.
 ct-data-breakpoints = { path = "../../libs/ct-data-breakpoints" }
+# Opens a recording's own source copies (`files/`, the extracted bundle)
+# without following a symlink below their root; shared with
+# `src/backend-manager`'s `read_source_file`.
+ct-open-beneath = { path = "../../libs/ct-open-beneath" }
 
 # tree-sitter dependencies — only needed for syntax highlighting / source
 # analysis.  Gated behind the `syntax-highlight` feature so that WASM builds

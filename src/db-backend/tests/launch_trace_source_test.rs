@@ -191,3 +191,27 @@ fn the_kind_vocabulary_is_exactly_the_sdk_s() {
          src/frontend/viewmodel/sdk/trace_source.nim",
     );
 }
+
+/// Launch arguments the server cannot parse (here a field it does not know,
+/// as a client newer than the server sends) are answered with a failed
+/// launch response naming the field, not with silence: the native loop only
+/// logs an `Err`, and a client then waits out its whole timeout.
+#[test]
+fn an_unparseable_launch_is_refused_with_a_response() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("recording.ct"), b"").unwrap();
+    let (responses, ctx, result) = responses_for(json!({
+        "traceFolder": dir.path(),
+        "aFieldFromTheFuture": true,
+    }));
+    assert!(result.is_ok(), "the refusal must be a response, not an Err");
+    let response = responses
+        .iter()
+        .find(|r| r.command == "launch")
+        .expect("a launch response");
+    assert!(!response.success);
+    let message = response.message.clone().expect("message");
+    assert!(message.contains("aFieldFromTheFuture"), "got: {message}");
+    assert!(ctx.launch_request.is_none(), "a refused launch must not be stored");
+    assert!(ctx.launch_trace_folder.as_os_str().is_empty());
+}

@@ -29,13 +29,22 @@
 ##     stdin closing as a busy engine does, is killed rather than left behind;
 ##   * with no override the shipped default budget applies (it is a clock, not
 ##     an opt-in);
-##   * the engine is reaped: the stalled child does not outlive the front-end;
+##   * the engine is reaped: the stalled child does not outlive the front-end,
+##     and neither does the engine of a window run that ended normally;
 ##   * an engine that says WHY (`ct/launch-failed`) is still reported as that
 ##     refusal, verbatim, with `ExitUnreadableRecording` (5) — the bound must
 ##     not swallow the stated reason into a stall;
 ##   * the NEGATIVE TWIN: the same binary, the same budget override and the
 ##     real `replay-server` on the real `calc` recording still opens and prints
 ##     a plan, so the bound refuses a silent engine and not a working one.
+##   * a stall after the FIRST STOP but inside the handshake (the engine sent
+##     `stopped` and never the `ct/complete-move` the handshake's last wait
+##     reads) is reported as the post-open stall too, not as one while
+##     opening — the open must keep `EngineStalledAfterOpenError`'s kind;
+##   * a NEW TAB (the "+", `openTabSession`, in-process because it needs no
+##     window) whose engine goes quiet after the open is refused as that
+##     stall within about one budget, and its engine is killed rather than
+##     left behind the tab; the real engine on `calc` still opens one;
 ##   * the clock covers the OPEN and not the window: a session
 ##     `openGpuiTrace` returns carries the override's budget, and
 ##     `liftOpenBound` — what the window calls before it takes input — leaves
@@ -114,6 +123,9 @@ const
 # FAKE_ENGINE_MODE=stall  -- answer initialize / configurationDone / launch
 #                            with success, send `initialized`, then go silent.
 # FAKE_ENGINE_MODE=refuse -- the same, then a `ct/launch-failed` event.
+# FAKE_ENGINE_MODE=stoponly -- the same as settle, but send only `stopped`:
+#                            the handshake's last wait (`ct/complete-move`)
+#                            is the one that goes unanswered.
 # FAKE_ENGINE_MODE=settle -- the same as stall, but reach the first stop
 #                            (`stopped` + `ct/complete-move`) and THEN go
 #                            silent: every later request is read and never
@@ -145,7 +157,7 @@ def read():
     while True:
         line = sys.stdin.buffer.readline()
         if not line:
-            if mode == "settle":
+            if mode in ("settle", "stoponly"):
                 # A post-open stall is an engine busy elsewhere: it does not
                 # notice its stdin closing, so only the front-end killing it
                 # ends it. The case asserts that it does.
@@ -164,7 +176,7 @@ note("pid %d" % os.getpid())
 while True:
     msg = read()
     cmd = msg.get("command")
-    if mode == "settle" and cmd not in HANDSHAKE:
+    if mode in ("settle", "stoponly") and cmd not in HANDSHAKE:
         note("ignored " + str(cmd))
         continue
     send({"type": "response", "request_seq": msg["seq"], "success": True,
@@ -175,9 +187,10 @@ while True:
     if cmd == "launch" and mode == "refuse":
         send({"type": "event", "event": "ct/launch-failed",
               "body": {"message": os.environ["FAKE_ENGINE_TEXT"]}})
-    if cmd == "launch" and mode == "settle":
+    if cmd == "launch" and mode in ("settle", "stoponly"):
         send({"type": "event", "event": "stopped",
               "body": {"reason": "entry", "threadId": 1}})
+    if cmd == "launch" and mode == "settle":
         send({"type": "event", "event": "ct/complete-move",
               "body": {"location": {"path": os.environ["FAKE_ENGINE_SOURCE"],
                                     "line": 1}}})
@@ -374,6 +387,32 @@ suite "codetracer-gpui bounds the replay engine's handshake":
       # a failing run does not leak it.
       discard execCmd("kill -9 " & $pid & " 2>/dev/null")
 
+  test "a stall after the first stop, inside the handshake, is the post-open one":
+    # The engine sent `stopped` — it read the recording — and then never the
+    # `ct/complete-move` the handshake's last wait reads. The handshake itself
+    # names that stall `EngineStalledAfterOpenError`; the GPUI open must keep
+    # that kind, not re-label it as a stall WHILE opening and advise a
+    # re-record.
+    let log = scratch / "stoponly.log"
+    let r = runBinary(@["--report-plan", shapedFolder],
+                      fakeEnv("stoponly", log, BudgetMs))
+    let lines = engineLog(log)
+    checkpoint("rc " & $r.rc & " in " & $r.seconds & " s; killed: " &
+               $r.killed & "; stderr: " & r.stderr & "; engine: " &
+               lines.join(" | "))
+    ck "ack launch" in lines
+    ck not r.killed
+    ck r.rc == ExitEngineStalled
+    ck r.seconds < BudgetMs / 1000 + 20
+    ck "stopped answering after the recording opened" in r.stderr
+    ck "re-record" notin r.stderr
+    let pid = enginePid(lines)
+    ck pid > 0
+    let gone = waitGone(pid)
+    ck gone
+    if not gone:
+      discard execCmd("kill -9 " & $pid & " 2>/dev/null")
+
   test "an engine that says why is reported verbatim, exit 5, not a stall":
     let log = scratch / "refuse.log"
     let r = runBinary(@["--report-plan", shapedFolder],
@@ -400,6 +439,42 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     ck "stopped answering" notin r.stderr
     ck r.stdout.strip().startsWith("{")
 
+  test "a window run that ends normally closes its engine too":
+    # The run's own engine ends with the run on EVERY path out of `runOpen`
+    # (§8b), not only a stall's. A window run is asked for (no plan flag) and
+    # ends however this host lets it: the window opens and `--quit-after-ms`
+    # stops its loop (0), or the shim cannot show one and the run is refused
+    # (`ExitNoWindow`, 3). Either way `launchWindow` returns through `runOpen`.
+    # The real engine on `calc`, run by a wrapper that records its own pid,
+    # serves the session through the real engine, and then — once the engine
+    # has seen its input close and exited — stays alive as that same pid
+    # (`exec sleep`). The real engine alone exits on that EOF, so a run that
+    # never closed it would still look clean; the wrapper outlives the EOF
+    # the way a busy engine does, so only the run closing (killing) it ends
+    # it.
+    let pidFile = scratch / "window-engine.pid"
+    let wrapper = scratch / "pid-replay-server"
+    writeFile(wrapper, "#!/bin/sh\necho $$ > " & quoteShell(pidFile) &
+                       "\n" & quoteShell(getEnv("REPLAY_SERVER_BIN")) &
+                       " \"$@\"\nexec sleep 600\n")
+    setFilePermissions(wrapper, {fpUserRead, fpUserWrite, fpUserExec})
+    var env = baseEnv()
+    env["REPLAY_SERVER_BIN"] = wrapper
+    env[HandshakeEnv] = $BudgetMs
+    let r = runBinary(@["--quit-after-ms=1500", calc], env)
+    checkpoint("rc " & $r.rc & " in " & $r.seconds & " s; killed: " &
+               $r.killed & "; stderr: " & r.stderr)
+    ck not r.killed
+    ck r.rc in [0, 3]
+    ck "stopped answering" notin r.stderr
+    let pid = if fileExists(pidFile): parseInt(readFile(pidFile).strip())
+              else: -1
+    ck pid > 0
+    let gone = waitGone(pid)
+    ck gone
+    if not gone:
+      discard execCmd("kill -9 " & $pid & " 2>/dev/null")
+
   test "the open is bounded and the window's session is not":
     # The same entry points the binary uses, in-process, on the real engine
     # and the real `calc` recording.
@@ -421,6 +496,115 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     finally:
       session.close()
       delEnv(HandshakeEnv)
+
+proc withProcessEnv(env: openArray[(string, string)]; body: proc()) =
+  ## Run `body` with `env` set in THIS process — the in-process cases open
+  ## through the same discovery (`REPLAY_SERVER_BIN`) and clock
+  ## (`CODETRACER_GPUI_HANDSHAKE_MS`) the binary reads — and put back exactly
+  ## what was there before, set or unset.
+  var saved: seq[(string, bool, string)]
+  for (k, v) in env:
+    saved.add((k, existsEnv(k), getEnv(k)))
+    putEnv(k, v)
+  try:
+    body()
+  finally:
+    for (k, had, v) in saved:
+      if had: putEnv(k, v) else: delEnv(k)
+
+proc tabStall(mode: string): tuple[raised: bool; kind, msg: string;
+                                    seconds: float; lines: seq[string]] =
+  ## Open `shapedFolder` the way the "+" does (`openTabSession`), in-process,
+  ## on the fake engine in `mode`, and say how it ended.
+  let log = scratch / ("tab-" & mode & ".log")
+  var res: tuple[raised: bool; kind, msg: string; seconds: float;
+                 lines: seq[string]]
+  withProcessEnv([("REPLAY_SERVER_BIN", fakeEngine),
+                  ("FAKE_ENGINE_MODE", mode), ("FAKE_ENGINE_LOG", log),
+                  ("FAKE_ENGINE_TEXT", RefusalText),
+                  ("FAKE_ENGINE_SOURCE", shapedFolder / "main.py"),
+                  (HandshakeEnv, $BudgetMs)]) do ():
+    let started = epochTime()
+    try:
+      let s = openTabSession(shapedFolder, showFlowOverlay = false)
+      s.close()
+    except GpuiTabStalledError as e:
+      res.raised = true
+      res.kind = "GpuiTabStalledError"
+      res.msg = e.msg
+    except CatchableError as e:
+      res.raised = true
+      res.kind = $e.name
+      res.msg = e.msg
+    res.seconds = epochTime() - started
+  res.lines = engineLog(log)
+  res
+
+suite "a new tab (the \"+\") whose engine goes quiet after the open":
+  # `openTabSession` is the open-and-load `main.openRecordingInTab` runs for
+  # the "+", renderer-free so these cases need no window.
+
+  for mode in ["settle", "stoponly"]:
+    test "it is refused as a stall after the open, in one budget (" & mode & ")":
+      let t = tabStall(mode)
+      checkpoint("raised " & $t.raised & " " & t.kind & ": " & t.msg &
+                 " in " & $t.seconds & " s; engine: " & t.lines.join(" | "))
+      ck t.raised
+      ck t.kind == "GpuiTabStalledError"
+      ck "stopped answering after the recording opened" in t.msg
+      ck ($BudgetMs & " ms") in t.msg
+      ck "re-record" notin t.msg
+      ck t.seconds < BudgetMs / 1000 + 10
+      var ignored = 0
+      for l in t.lines:
+        if l.startsWith("ignored "): inc ignored
+      ck ignored <= 1
+      # The tab's engine is closed, not left behind it — this one ignores its
+      # stdin closing, so only being killed ends it.
+      let pid = enginePid(t.lines)
+      ck pid > 0
+      let gone = waitGone(pid)
+      ck gone
+      if not gone:
+        discard execCmd("kill -9 " & $pid & " 2>/dev/null")
+
+  test "the negative twin: the real engine on calc opens a tab":
+    var opened = false
+    withProcessEnv([(HandshakeEnv, $BudgetMs)]) do ():
+      let s = openTabSession(calc, showFlowOverlay = false)
+      try:
+        opened = not s.isNil and s.backend.bound.timeoutMs == BudgetMs
+      finally:
+        s.close()
+    ck opened
+
+  test "the window's end closes every tab's engine but the run's own":
+    # What `runOpen` does once the window's loop returns (`closeTabSessions`):
+    # each session a "+" opened is closed, and with it its engine, while the
+    # run's own is left to `runOpen`'s own close. Two tabs on `calc`, each on
+    # the real engine behind the wrapper the window case uses, which keeps
+    # the engine's pid alive past its input closing, so only being killed
+    # ends it and a session left open shows as a live pid.
+    let wrapper = scratch / "pid-replay-server"
+    requirePrereq(fileExists(wrapper), wrapper & " (the window case writes it)")
+    var kept, tab: HeadlessDebugSession
+    withProcessEnv([(HandshakeEnv, $BudgetMs),
+                    ("REPLAY_SERVER_BIN", wrapper)]) do ():
+      kept = openTabSession(calc, showFlowOverlay = false)
+      tab = openTabSession(calc, showFlowOverlay = false)
+    let keptPid = kept.backend.process.processID
+    let tabPid = tab.backend.process.processID
+    try:
+      closeTabSessions([kept, tab, nil], keep = kept)
+      let gone = waitGone(tabPid)
+      ck gone
+      if not gone:
+        discard execCmd("kill -9 " & $tabPid & " 2>/dev/null")
+      # The run's own session is not this proc's to close.
+      ck alive(keptPid)
+    finally:
+      kept.close()
+    ck waitGone(keptPid)
 
 suite "codetracer-gpui handshake bound: the tally":
   test "every assertion above ran":

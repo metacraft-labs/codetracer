@@ -381,4 +381,10 @@ pub trait ReplaySession: std::fmt::Debug {
     /// Default impl is a no-op for backends that don't support the
     /// primitive.
     fn data_watch_reset(&mut self) {}
+
+    /// Puts the source loaders this session makes for itself (for a
+    /// callstack, a location jump) under the replay session's
+    /// source-reading rule (see [`crate::source_access`]). Sessions that
+    /// make none ignore it.
+    fn set_source_access(&mut self, _source_access: crate::source_access::SourceAccessHandle) {}
 }
