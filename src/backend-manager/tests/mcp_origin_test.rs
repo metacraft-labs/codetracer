@@ -525,6 +525,17 @@ impl Drop for TestDaemon {
 /// Start a daemon whose socket lives under `root`, backed by a real
 /// `replay-server`.  Returns `None` (with a `SKIPPED:` line) when no
 /// `replay-server` has been built.
+///
+/// The daemon is given this checkout's `python-api` as
+/// `CODETRACER_PYTHON_API_PATH`, so `exec_script` imports the package from
+/// the tree under test whatever the build profile and target directory.
+/// Left to its own lookup, a release daemon whose `CARGO_TARGET_DIR` is
+/// outside the checkout (`just test-rust` on the CI runners) has no place to
+/// look: the compiled-checkout fallback exists only in debug builds.  These
+/// tests are about the origin tools, not that lookup, which
+/// `real_recording_integration`'s
+/// `test_real_custom_mcp_exec_script_relative_trace_path` and the
+/// `script_executor` unit tests cover.
 fn start_daemon(binary: &Path, root: &Path) -> Option<TestDaemon> {
     let replay_server = match find_replay_server() {
         Some(p) => p,
@@ -540,9 +551,12 @@ fn start_daemon(binary: &Path, root: &Path) -> Option<TestDaemon> {
     let socket = root.join("daemon.sock");
     let _ = std::fs::remove_file(&socket);
 
+    let python_api = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../python-api");
+
     let child = Command::new(binary)
         .args(["daemon", "start"])
         .env("CODETRACER_DAEMON_SOCKET", &socket)
+        .env("CODETRACER_PYTHON_API_PATH", &python_api)
         .env("CODETRACER_REPLAY_SERVER_CMD", &replay_server)
         .env("TMPDIR", root)
         .stdin(Stdio::null())

@@ -541,6 +541,106 @@ fn setup_test_dir(test_name: &str) -> (PathBuf, PathBuf) {
     (dir, log_path)
 }
 
+/// Stages `<test_dir>/install` as a CodeTracer install prefix and returns the
+/// `session-manager` in it: a copy of the cargo-built binary at
+/// `<prefix>/bin/session-manager` and a copy of this checkout's `python-api`
+/// at `<prefix>/share/codetracer/python-api`.
+///
+/// It is a layout `resolve_python_api_path` finds in every build profile and
+/// wherever the build directory is.  The cargo build directory is a layout
+/// only when it sits inside the checkout (`src/backend-manager/target/...`),
+/// and the compiled-checkout fallback exists only in debug builds, while
+/// `just test-rust` runs this crate in release with a `CARGO_TARGET_DIR` the
+/// CI runners place outside the checkout.  A daemon run straight from the build directory then has no
+/// candidate at all, so a test that needs the daemon to find the Python API
+/// on its own runs it from here.
+///
+/// Both are copies, not symbolic links: the lookup resolves the executable's
+/// links before it looks beside it, and follows a link inside the python-api
+/// tree to its target, so a link would lead back to the build directory or
+/// make the checkout's own directories part of the trust check.  Every staged
+/// entry is given owner-only write permission, because the trust rule refuses
+/// a copy that is writable by group or others and the process umask would
+/// otherwise decide.  `__pycache__` directories are not copied: `-B` keeps the
+/// daemon's scripts from writing them, and they hold nothing the package needs.
+fn stage_install_prefix(test_dir: &Path) -> Result<PathBuf, String> {
+    let prefix = test_dir.join("install");
+    let bin_dir = prefix.join("bin");
+    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("create {}: {e}", bin_dir.display()))?;
+    let source_bin = binary_path();
+    let staged_bin = bin_dir.join(format!("session-manager{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(&source_bin, &staged_bin).map_err(|e| {
+        format!(
+            "copy {} to {}: {e}",
+            source_bin.display(),
+            staged_bin.display()
+        )
+    })?;
+
+    let checkout_api = python_api_dir();
+    let staged_api = prefix.join("share/codetracer/python-api");
+    copy_python_tree(&checkout_api, &staged_api)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut stack = vec![prefix.clone()];
+        while let Some(path) = stack.pop() {
+            let meta = std::fs::symlink_metadata(&path)
+                .map_err(|e| format!("stat {}: {e}", path.display()))?;
+            let mode = if meta.is_dir() || path == staged_bin {
+                0o755
+            } else {
+                0o644
+            };
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+            if meta.is_dir() {
+                for entry in
+                    std::fs::read_dir(&path).map_err(|e| format!("list {}: {e}", path.display()))?
+                {
+                    stack.push(
+                        entry
+                            .map_err(|e| format!("list {}: {e}", path.display()))?
+                            .path(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(staged_bin)
+}
+
+/// Copies the directory tree at `from` to `to` (which must not exist yet),
+/// leaving out `__pycache__` directories.  Only regular files and
+/// directories are expected in `python-api`; anything else is an error
+/// rather than a silently different copy.
+fn copy_python_tree(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| format!("create {}: {e}", to.display()))?;
+    for entry in std::fs::read_dir(from).map_err(|e| format!("list {}: {e}", from.display()))? {
+        let entry = entry.map_err(|e| format!("list {}: {e}", from.display()))?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        let kind = entry
+            .file_type()
+            .map_err(|e| format!("stat {}: {e}", source.display()))?;
+        if kind.is_dir() {
+            if entry.file_name() != "__pycache__" {
+                copy_python_tree(&source, &target)?;
+            }
+        } else if kind.is_file() {
+            std::fs::copy(&source, &target)
+                .map_err(|e| format!("copy {} to {}: {e}", source.display(), target.display()))?;
+        } else {
+            return Err(format!(
+                "{} is neither a file nor a directory",
+                source.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Appends a line to the test log file.
 fn log_line(log_path: &Path, line: &str) {
     let mut f = std::fs::OpenOptions::new()
@@ -631,6 +731,26 @@ async fn start_daemon_with_real_backend(
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
 ) -> (tokio::process::Child, PathBuf) {
+    start_daemon_with_real_backend_from(
+        &binary_path(),
+        test_dir,
+        log_path,
+        db_backend_path,
+        extra_env,
+    )
+    .await
+}
+
+/// [`start_daemon_with_real_backend`], running the daemon from `daemon_bin`
+/// instead of the cargo-built `session-manager` (see
+/// [`stage_install_prefix`]).
+async fn start_daemon_with_real_backend_from(
+    daemon_bin: &Path,
+    test_dir: &Path,
+    log_path: &Path,
+    db_backend_path: &Path,
+    extra_env: &[(&str, &str)],
+) -> (tokio::process::Child, PathBuf) {
     let ct_dir = daemon_paths_in(test_dir);
     std::fs::create_dir_all(&ct_dir).expect("create ct dir");
 
@@ -648,7 +768,8 @@ async fn start_daemon_with_real_backend(
     log_line(
         log_path,
         &format!(
-            "starting daemon, TMPDIR={}, replay-server={}",
+            "starting daemon {}, TMPDIR={}, replay-server={}",
+            daemon_bin.display(),
             test_dir.display(),
             db_backend_path.display()
         ),
@@ -656,7 +777,7 @@ async fn start_daemon_with_real_backend(
 
     let db_backend_str = db_backend_path.to_string_lossy().to_string();
 
-    let mut cmd = Command::new(binary_path());
+    let mut cmd = Command::new(daemon_bin);
     cmd.arg("daemon")
         .arg("start")
         .env("TMPDIR", test_dir)
@@ -10509,23 +10630,38 @@ async fn start_mcp_server_with_real_backend(
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
 ) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
-    start_mcp_server_with_real_backend_in(test_dir, log_path, db_backend_path, extra_env, None)
-        .await
+    start_mcp_server_with_real_backend_in(
+        test_dir,
+        log_path,
+        db_backend_path,
+        extra_env,
+        None,
+        &binary_path(),
+    )
+    .await
 }
 
 /// [`start_mcp_server_with_real_backend`], with the MCP server started in
 /// `mcp_cwd` when one is given (the daemon keeps this test's working
-/// directory), so a test can tell the two apart.
+/// directory), so a test can tell the two apart, and the daemon run from
+/// `daemon_bin` (the MCP server is always the cargo-built binary).
 async fn start_mcp_server_with_real_backend_in(
     test_dir: &Path,
     log_path: &Path,
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
     mcp_cwd: Option<&Path>,
+    daemon_bin: &Path,
 ) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
     // Start the real daemon first.
-    let (daemon, socket_path) =
-        start_daemon_with_real_backend(test_dir, log_path, db_backend_path, extra_env).await;
+    let (daemon, socket_path) = start_daemon_with_real_backend_from(
+        daemon_bin,
+        test_dir,
+        log_path,
+        db_backend_path,
+        extra_env,
+    )
+    .await;
 
     log_line(
         log_path,
@@ -11401,10 +11537,14 @@ async fn test_real_custom_mcp_exec_script() {
 /// that failed to open cannot pass.
 ///
 /// `CODETRACER_PYTHON_API_PATH` must be absent from the daemon's environment,
-/// so the daemon has to find the Python API itself (`resolve_python_api_path`):
-/// at a known layout beside its binary, or, in this debug build, in the
-/// checkout it was compiled from when the build directory is elsewhere
-/// (`CARGO_TARGET_DIR`), and only if that copy passes the ownership check.
+/// so the daemon has to find the Python API itself (`resolve_python_api_path`),
+/// and only if that copy passes the ownership check.  The daemon runs from an
+/// install prefix staged by [`stage_install_prefix`], so it finds the package
+/// at `<prefix>/share/codetracer/python-api` in a release build too and
+/// wherever `CARGO_TARGET_DIR` puts the build: a release binary run from a
+/// build directory outside the checkout has no layout to look in, and the
+/// compiled-checkout fallback exists only in debug builds (`just test-rust`
+/// runs this crate in release).
 ///
 /// No mocks: real recorder, daemon, replay-server, MCP server and Python.
 #[tokio::test]
@@ -11455,12 +11595,14 @@ async fn test_real_custom_mcp_exec_script_relative_trace_path() {
                 .to_string());
         }
 
+        let daemon_bin = stage_install_prefix(&test_dir)?;
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend_in(
             &test_dir,
             &log_path,
             &db_backend,
             &[],
             Some(&test_dir),
+            &daemon_bin,
         )
         .await;
 
@@ -13189,8 +13331,20 @@ async fn test_real_rr_mcp_error_actionable() {
 
         // Start MCP server backed by real daemon + db-backend.
         // No ct-native-replay or recording needed for error-path tests.
-        let (mut mcp, mut daemon, socket_path) =
-            start_mcp_server_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+        // The daemon is given this checkout's Python API, as the other
+        // exec_script tests give it: the error this test asserts on is the
+        // missing trace's, and left to its own lookup a release daemon built
+        // outside the checkout fails earlier, on importing the package
+        // (`test_real_custom_mcp_exec_script_relative_trace_path` covers
+        // that lookup).
+        let api_dir_str = python_api_dir().to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir_str)],
+        )
+        .await;
 
         let mut stdin = mcp.stdin.take().expect("no stdin");
         let stdout = mcp.stdout.take().expect("no stdout");
@@ -17465,7 +17619,8 @@ async fn test_real_py_add_watchpoint_reports_the_backends_own_verdict() {
 /// `ct/open-trace` -- 43 of 47 in one run of the rr-backend-tests selection.
 ///
 /// The check is structural: every `Command::new(...)` of `binary_path()` (or
-/// of a `bin` bound to it) must sit in a function that applies the helper,
+/// of a `bin` bound to it, or of the `daemon_bin` a caller hands the daemon
+/// launcher, such as a staged install prefix's copy) must sit in a function that applies the helper,
 /// so a new spawn site cannot quietly leave it out. Needles are assembled
 /// with `concat!` so this test's own source does not match them.
 #[test]
@@ -17482,6 +17637,7 @@ fn every_session_manager_spawn_gets_the_replay_test_env() {
     let spawn_needles = [
         concat!("Command::new(", "binary_path())"),
         concat!("Command::new(", "&bin)"),
+        concat!("Command::new(", "daemon_bin)"),
     ];
     let applied = concat!("replay_", "test_env(");
     let mut spawns = 0usize;
