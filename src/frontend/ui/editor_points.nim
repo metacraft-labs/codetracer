@@ -22,6 +22,7 @@ import ../view_vocabulary/editor_surface
 from ../viewmodel/viewmodels/editor_vm import EditorVM
 from ../viewmodel/viewmodels/state_vm import StateVM
 from ../viewmodel/viewmodels/flow_vm import FlowVM
+from ../viewmodel/viewmodels/flow_layout import FlowLayoutWindow
 from ../viewmodel/viewmodels/scratchpad_vm import ScratchpadVM, addValue
 from ../../common/value_presentation/surfaces import FlowBudget
 
@@ -38,6 +39,13 @@ var sessionScratchpad: ScratchpadVM
 
 const WebEditorMedium* = "web"
   ## The medium the web editor's surface is built for.
+
+proc sessionFlowWindows*(): seq[FlowLayoutWindow] =
+  ## The session's current flow window, one per editor view
+  ## (`FlowVM.layoutWindows`), loaded per stop by the session's stop loader
+  ## (`spFlow`); empty before a session is attached. Read inside an effect,
+  ## it subscribes to the window.
+  if sessionFlow.isNil: @[] else: sessionFlow.layoutWindows.val
 
 proc setEditorSessionVMs*(editor: EditorVM; state: StateVM; flow: FlowVM;
                           scratchpad: ScratchpadVM = nil) =

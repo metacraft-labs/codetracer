@@ -826,8 +826,9 @@ proc selectCurrentCall*(s: HeadlessDebugSession) =
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
   ## The per-STOP producers — the values in scope where the debugger now is
-  ## (the state pane and the editor's inline values) and the PLAT-47 call
-  ## stack fallback — through the SDK's stop loader, the one per-stop loader
+  ## (the state pane and the editor's inline values), the flow window (the
+  ## editor's flow overlay and the flow pane) and the PLAT-47 call stack
+  ## fallback — through the SDK's stop loader, the one per-stop loader
   ## of every front-end. Each is asked once per stop; the stdio transport's
   ## answers are applied when the platform callbacks are drained, below.
   let loader = s.sdk.stops

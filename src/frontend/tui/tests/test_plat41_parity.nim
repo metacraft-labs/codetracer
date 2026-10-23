@@ -295,12 +295,14 @@ suite "PLAT-41 4 — report to data, per new pane, on a live session":
   test "the flow: no steps on a fresh store, the window's steps once it loads":
     ck paneView(paneFlow, ViewModel(createFlowVM(fresh)), GpuiPanelBudget,
                 "tui").report.len > 0
-    # The flow window is requested by `FlowVM`'s own effect when the debugger
-    # STOPS somewhere; the scenario's stop is three steps in, as both capture
-    # lanes drive it.
+    # The flow window is loaded per stop by the session's stop loader (`spFlow`),
+    # which a host asks once the debugger has stopped (`loadStopPanes`, as
+    # `session_driver.afterMove` does); the scenario's stop is three steps in,
+    # as both capture lanes drive it.
     for _ in 0 ..< rec["scenario"]["nextSteps"].getInt:
       s.stepForward()
       discard s.drainEvents()
+    discard s.loadStopPanes()
     let steps = s.session.flowVM.steps.val
     checkpoint($steps.len & " step row(s)")
     ck steps.len > 0

@@ -1239,7 +1239,6 @@ type
     isExpansion*:   bool # is an expansion editor
     parentLine*:    int
     tabInfo*:       TabInfo
-    flowUpdate*:    FlowUpdate
     flow*:          FlowComponent
     traces*:        JsAssoc[int, TraceComponent]
     expanded*:      JsAssoc[int, EditorViewComponent]
@@ -2953,9 +2952,6 @@ method showHistory*(self: Component, expression: cstring) {.base, async.} =
   discard
 
 method onUpdatedHistory*(self: Component, update: HistoryUpdate) {.base, async.} =
-  discard
-
-method onUpdatedFlow*(self: Component, update: FlowUpdate) {.base, async.} =
   discard
 
 method onUpdatedTable*(self: Component, update: TableUpdate) {.base, async.} =

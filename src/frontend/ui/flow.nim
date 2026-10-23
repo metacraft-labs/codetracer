@@ -56,8 +56,10 @@ from ../viewmodel/views/isonim_flow_inline_view import
 from trace import getConfiguration
 
 # ---------------------------------------------------------------------------
-# Inline flow in the editor is laid out from the `CtUpdatedFlow` window this
-# component receives, whose typed values the tooltips and the scratchpad need.
+# The session's `FlowVM` holds the flow window (`layoutWindows`), loaded per
+# stop by the session's stop loader (`spFlow`). The Flow PANEL
+# (`isonim_flow_view`) and inline flow in the editor both draw from it; the
+# terminal and GPUI draw their overlays from the same window.
 # ---------------------------------------------------------------------------
 import std/[algorithm, json, tables]
 import ./presented_value
@@ -78,7 +80,6 @@ from ../viewmodel/viewmodels/flow_layout import
   stepIndexForTicks, orderIterationSteps, firstBodyStepIn,
   closestIterationStepCount, FlowLayoutLoop, FlowLayoutStep, FlowLayoutWindow,
   FlowLayoutEvent, FlowValueText
-from ../viewmodel/viewmodels/flow_vm import flowLayoutWindowOf
 from isonim/web/dom_api import nil
 
 type
@@ -181,19 +182,6 @@ proc passTable*(window: FlowWindowRef; loopIndex, iteration: int):
   for entry in entries:
     result[entry.line] = entry.stepCount
 
-proc jsonStringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
-
-proc jsonOf(o: JsObject): JsonNode =
-  if o.isNil: newJNull() else: parseJson($jsonStringify(o))
-
-proc windowOf*(update: FlowUpdate; view: EditorView): FlowWindowRef =
-  ## One view of a `ct/updated-flow` answer, decoded by the flow model's
-  ## decoder (`flow_vm.flowLayoutWindowOf`).
-  let envelope = %*{"finished": update.finished,
-    "location": jsonOf(update.location.toJs)}
-  new(result)
-  result[] = flowLayoutWindowOf(
-    jsonOf(update.viewUpdates[view].toJs), envelope)
 
 proc removeMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
   #.changeViewZones(function(accessor) {
@@ -317,16 +305,12 @@ proc getFlowValueMode(self: FlowComponent, beforeValue, afterValue: FlowValueTex
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    # The session's store is moved by `ui_js`; the session's FlowVM asks for
-    # the flow at the new position, and the answer arrives here as
-    # `CtUpdatedFlow`.
+    # The session's store is moved by `ui_js`.
     self.location = response.location
+    # The window for this stop is loaded by the session's stop loader
+    # (`spFlow`) and reaches the editor through the session's `FlowVM`
+    # (`editor.watchSessionFlowWindows`).
     self.redraw()
-  )
-  api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
-    # `onUpdatedFlow` decides internally whether a full `redrawFlow()` is
-    # needed (key changed) or only an in-place value update (key unchanged).
-    discard self.onUpdatedFlow(response)
   )
 
 
@@ -3924,24 +3908,25 @@ proc adjustFlow(self: FlowComponent) =
     if not flowLine.mainLoopContainer.isNil:
       flowLine.mainLoopContainer.style.left = &"{flowLine.offsetLeft}px"
 
-method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
+proc adoptWindows*(self: FlowComponent, windows: seq[FlowLayoutWindow]): bool =
+  ## Draw the session's flow window (`FlowVM.layoutWindows`, one per editor
+  ## view) if it is this editor's, and say whether it was adopted. The window
+  ## is loaded per stop by the session's stop loader; this component only
+  ## places it in Monaco.
   try:
     # A component the editor has already replaced must not adopt a flow window
     # and rebuild itself — the replacement owns the view now. See `flowIsLive`.
     if not self.flowIsLive:
-      cdebug "flow: update delivered to a superseded component: stopping"
-      return
-    if update.isNil:
-      cdebug "flow: update is nil: stopping"
-      return
-    if update.location.toJs.isNil:
-      cdebug "flow: update location is nil: stopping"
-      return
+      cdebug "flow: window delivered to a superseded component: stopping"
+      return false
+    if windows.len == 0:
+      return false
+    let source = windows[0]
     let updateLocationName = if self.editorUI.editorView != ViewInstructions:
-        update.location.highLevelPath
+        cstring(source.highLevelPath)
       else:
         # should be always path:name
-        update.location.highLevelPath & cstring":" & update.location.functionName
+        cstring(source.highLevelPath & ":" & source.functionName)
 
     # Accept the update if EITHER:
     #
@@ -3965,18 +3950,14 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
     if self.editorUI.name != updateLocationName and
         not locationMatchesRequest:
       cdebug "flow: editor name not equal to update location name: stopping"
-      return
-
-    self.status = update.status
+      return false
 
     let editorView = self.editorUI.editorView
-    if ord(editorView) < 0 or ord(editorView) >= update.view_updates.len:
-      cerror "flow: editorView index out of bounds: " & $ord(editorView) & " updates len: " & $update.view_updates.len
-      return
+    if ord(editorView) < 0 or ord(editorView) >= windows.len:
+      cerror "flow: editorView index out of bounds: " & $ord(editorView) & " views: " & $windows.len
+      return false
 
-    self.editorUI.flowUpdate = update
-
-    if update.location.key != self.key or self.flow.isNil:
+    if cstring(source.key) != self.key or self.flow.isNil:
       # Full rebuild required when:
       #   * the location key changed (different file/function/loop structure), OR
       #   * this component has never received flow data yet (self.flow is nil).
@@ -3987,14 +3968,18 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       # in the in-place branch where no DOM is built and handoffFlow is never
       # cleared — causing old zones to accumulate with each navigation.
       self.resetFlow()
-      self.key = update.location.key
+      self.key = cstring(source.key)
       if self.flow.isNil:
-        self.flow = update.windowOf(editorView)
+        # The component's own copy of its view's window: rendering writes
+        # the lines it drew into it (`relevantStepCount`), which the session's
+        # window must not see.
+        new(self.flow)
+        self.flow[] = windows[ord(editorView)]
       self.redrawFlow()
       # Now that the new DOM is built, remove the entire chain of superseded
       # components' Monaco view zones. Walking the chain (not just one level)
-      # is necessary for rapid navigations where multiple loadFlow() calls
-      # queued before any CtUpdatedFlow arrived: each intermediate component
+      # is necessary for rapid navigations where several components were
+      # created before the session's window arrived: each intermediate component
       # carries its own handoffFlow pointer, and without the loop their zones
       # would accumulate as view-zone duplicates.
       var prev = self.handoffFlow
@@ -4009,6 +3994,7 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       # One deferred rebuild to capture offsets Monaco has not yet laid out.
       self.scheduleFlowRedraw(100)
       self.scheduleActiveLoopIterationValueRender()
+      return true
     else:
       # Same location key and component already has DOM: the flow structure
       # (loops, lines) is unchanged. Only step data and active iteration
@@ -4022,12 +4008,12 @@ method onUpdatedFlow*(self: FlowComponent, update: FlowUpdate) {.async.} =
       # NOTE: do NOT replace self.flow here. flowLines.loopStepCounts still holds
       # indices into the existing self.flow.steps array. Replacing self.flow with
       # new step data that may have a different step count would invalidate those
-      # indices and cause an IndexDefect in updateFlowOnMove. The canReuseFlow
-      # path in EditorViewComponent.onCompleteMove no longer emits CtLoadFlow for
-      # same-function navigation, so in-place updates are driven entirely by
-      # FlowComponent.onCompleteMove (which does NOT replace self.flow).
+      # indices and cause an IndexDefect in updateFlowOnMove. A window of the
+      # same call (same key) is the stop loader's answer to a move inside the
+      # function; the in-place update is all it needs.
       self.updateFlowOnMove(self.location.rrTicks, self.location.line)
       self.scheduleActiveLoopIterationValueRender()
+      return true
   except:
     cerror "flow: " & getCurrentExceptionMsg()
 

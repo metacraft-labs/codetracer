@@ -2434,6 +2434,8 @@ proc bindWindowToSession(session: ReplaySession) =
     # terminal's and GPUI's do (`editor_points.webEditorSurface`).
     editor_points.setEditorSessionVMs(vm.editorVM, vm.stateVM, vm.flowVM,
       vm.scratchpadVM)
+    # Inline flow in every editor draws the session's flow window.
+    editor.watchSessionFlowWindows(data)
   initPanelVM("initTimelineVMFromSession"):
     trace.initTimelineVMFromSession(vm.timelineVM)
   initPanelVM("initTerminalOutputVMFromSession"):
@@ -4921,7 +4923,6 @@ proc configureIPC(data: Data) =
     "updated-events-content": cstring => eventLog
     "updated-trace": TraceUpdate => [ui]
     "updated-history": HistoryUpdate => [ui]
-    "updated-flow": FlowUpdate => [ui]
     # "loaded-terminal": seq[ProgramEvent] => [ui]
     # "updated-table": TableUpdate => [ui]
     # "updated-call-args": CallArgsUpdateResults => [ui]

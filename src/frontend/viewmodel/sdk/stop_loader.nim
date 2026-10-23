@@ -17,6 +17,7 @@
 ## | --------------------- | -------------------------------- | ---------- |
 ## | `spLocals`            | `ct/load-locals`, the GUI's budgets (`localsLoadArgs`) and the state pane's watch list | `ReplayDataStore.applyLocalsResponse`, against the stop it was SENT at (PLAT-29), and `StateVM.updateOriginSummaries` |
 ## | `spCallStackFallback` | `stackTrace`, only when the recording has no call trace | `CalltraceVM.fallbackStack` (PLAT-47) |
+## | `spFlow`              | `ct/load-flow` with the `call` query at the stop, once per stop and view granularity (`FlowVM.flowMode`) | `FlowVM.applyFlowUpdate` (`FlowVM.requestWindow`) |
 ## | `spDiffFlow`          | `ct/load-flow` with `flowMode: diff`, ONCE per session, when the session has a diff (`FlowVM.diffSession`) | `FlowVM.applyDiffFlowUpdate` |
 ## | `spLowLevelCode`      | `ct/load-asm-function` for the function the stop is in (`ReplayDataStore.asmFunction`, from `stop`: the C-level location for Nim), while a front-end shows the pane (`LowLevelCodeVM.shown`) | `LowLevelCodeVM.applyAsmAnswer` |
 ##
@@ -24,9 +25,11 @@
 ## (SDF-AREQ7): one request per stop identity and watch list, at 3000/50/7.
 ## The call-stack fallback has NO GUI counterpart — the GUI sends no
 ## `stackTrace` — and is a native-front-end feature (PLAT-47); a host that does
-## not show it simply does not open that pane. The other per-stop loads
-## (call-trace window, flow) are still issued by their ViewModels' own effects;
-## the call trace's moves here with the viewport contract (HSF-V1).
+## not show it simply does not open that pane. The flow window is the inline
+## flow every editor draws (Shared-DOM-Front-Ends D7.4 (b)): the desktop's
+## Monaco overlay, the terminal's and GPUI's, from the one window `FlowVM`
+## holds. The call-trace window is still issued by its ViewModel's own effect;
+## it moves here with the viewport contract (HSF-V1).
 ##
 ## A pane that is not open is not loaded (`setPaneOpen`). A load is issued once
 ## per stop: a second `loadStop` at the same stop and watch list sends nothing,
@@ -58,6 +61,10 @@ type
     ## A consumer of per-stop data, as far as loading is concerned.
     spLocals
       ## The state pane and the editor's inline values: `ct/load-locals`.
+    spFlow
+      ## The flow window of the call the debugger is in — every editor's inline
+      ## flow and the flow pane: `ct/load-flow`, once per stop and view
+      ## granularity.
     spCallStackFallback
       ## The call-trace pane's call STACK, shown when the recording has no
       ## call trace (PLAT-47). Native front-ends only.
@@ -93,9 +100,10 @@ type
       ## The loader's reactive root, so `follow`'s effect is disposed with it.
 
 const
-  DefaultStopPanes* = {spLocals, spDiffFlow, spLowLevelCode}
-    ## What the Electron GUI loads: the locals on every stop, a diff
-    ## session's diff flow once, and the low-level code while it is shown.
+  DefaultStopPanes* = {spLocals, spFlow, spDiffFlow, spLowLevelCode}
+    ## What the Electron GUI loads: the locals and the flow window on every
+    ## stop, a diff session's diff flow once, and the low-level code while it
+    ## is shown.
   CallStackFallbackLevels* = 400
     ## Frames asked for by the call-stack fallback — the native hosts'
     ## `RecordingCalltraceLevels`.
@@ -145,6 +153,14 @@ proc stopKey(l: StopLoader; pane: StopPane): string =
     # gave a call trace: a section that arrives (or is cleared) at the same
     # stop changes what the pane must show.
     result.add "\x02" & $(store.calltrace.lines.val.len > 0)
+  of spFlow:
+    # Once per stop and view granularity. Nothing to ask before the debugger
+    # has a tick (the engine has no window for "no position").
+    let flow = l.session.flowVM
+    if flow.isNil or store.debugger.val.rrTicks == 0'u64:
+      result = ""
+    else:
+      result.add "\x02" & $flow.flowMode.val
   of spDiffFlow:
     # The same key at every stop: the diff flow is asked for once. A
     # session that is not a diff session holds no key, and asks nothing.
@@ -235,6 +251,12 @@ proc loadCallStackFallback(l: StopLoader; key: string) =
       vm.fallbackStack.val = newSeq[string]()
       loader.settle(spCallStackFallback, key, plsFailed))
 
+proc loadFlow(l: StopLoader; key: string) =
+  ## The stop's flow window (`FlowVM.requestWindow`).
+  let loader = l
+  l.session.flowVM.requestWindow(proc(applied: bool) =
+    loader.settle(spFlow, key, if applied: plsApplied else: plsFailed))
+
 proc loadDiffFlow(l: StopLoader; key: string) =
   ## The trace diff's flow: `ct/load-flow` with the `diff` query. The engine
   ## serves it from the diff index written at record time, so it names no
@@ -310,6 +332,7 @@ proc loadStop*(l: StopLoader) =
       continue
     case pane
     of spLocals: l.loadLocals(key)
+    of spFlow: l.loadFlow(key)
     of spCallStackFallback: l.loadCallStackFallback(key)
     of spDiffFlow: l.loadDiffFlow(key)
     of spLowLevelCode: l.loadLowLevelCode(key)
@@ -353,6 +376,9 @@ proc follow*(l: StopLoader) =
       discard loader.localsBudget()
       if spCallStackFallback in loader.openPanes.val:
         discard loader.session.store.calltrace.lines.val.len > 0
+      # The flow window is per view granularity too.
+      if spFlow in loader.openPanes.val and not loader.session.flowVM.isNil:
+        discard loader.session.flowVM.flowMode.val
       # A host may mark the session as a diff after it attached.
       if spDiffFlow in loader.openPanes.val and
          not loader.session.flowVM.isNil:

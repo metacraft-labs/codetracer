@@ -77,7 +77,7 @@ suite "HSF-S1: the stop loader issues each open pane's load once per stop":
     session.store.moveTo(100, 3)
     mock.clearReceivedCommands()
     mock.expect("ct/load-locals", localsAnswer("x", "y"))
-    let loader = createStopLoader(session)       # spLocals only
+    let loader = createStopLoader(session)       # the default panes
     loader.loadStop()
     loader.loadStop()                            # same stop: nothing more
     drainPlatformCallbacks()
@@ -139,6 +139,80 @@ suite "HSF-S1: the stop loader issues each open pane's load once per stop":
     drainPlatformCallbacks()
     check session.store.locals.locals.val.len == 3
 
+proc flowWindowAnswer(ticks: int; line: int): JsonNode =
+  ## A `ct/load-flow` answer: one view with one step that ran `line`.
+  %*{"viewUpdates": [{
+       "location": {"rrTicks": ticks, "line": line, "path": "/src/main.py",
+                    "highLevelPath": "/src/main.py", "key": "k1",
+                    "functionFirst": 1, "functionLast": 9},
+       "positionStepCounts": {$line: [0]},
+       "steps": [{"position": line, "loop": 0, "iteration": 0,
+                  "stepCount": 0, "rrTicks": ticks, "exprOrder": ["x"],
+                  "beforeValues": {"x": {"kind": 0, "i": "1",
+                                         "typ": {"langType": "int"}}},
+                  "afterValues": {}, "events": []}],
+       "loops": [], "branchesTaken": [], "loopIterationSteps": [],
+       "relevantStepCount": [line], "commentLines": []}],
+     "location": {"rrTicks": ticks, "line": line, "path": "/src/main.py"},
+     "error": false, "finished": true}
+
+suite "HSF-D5: the stop loader loads the flow window":
+
+  test "one stop asks for its flow window once, and the window is adopted":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    mock.clearReceivedCommands()
+    mock.expect("ct/load-flow", flowWindowAnswer(40, 3))
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    loader.loadStop()                            # same stop: nothing more
+    drainPlatformCallbacks()
+    check mock.sent("ct/load-flow") == 1
+    let args = mock.findLast("ct/load-flow")
+    check args["location"]["rrTicks"].getInt == 40
+    check args["location"]["line"].getInt == 3
+    check loader.status[spFlow].val == plsApplied
+    let windows = session.flowVM.layoutWindows.val
+    check windows.len == 1
+    check windows[0].rrTicks == 40
+    check windows[0].steps[0].beforeValues[0].expression == "x"
+
+  test "a new stop and a new view granularity ask again":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(40, 3)
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    mock.clearReceivedCommands()
+    session.store.moveTo(41, 4)
+    loader.loadStop()
+    check mock.sent("ct/load-flow") == 1
+    session.flowVM.setMode(fmLine)
+    loader.loadStop()
+    check mock.sent("ct/load-flow") == 2
+
+  test "nothing is asked before the debugger has a tick":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    mock.clearReceivedCommands()
+    let loader = createStopLoader(session, {spFlow})
+    loader.loadStop()
+    check mock.sent("ct/load-flow") == 0
+
+  test "a following loader asks on every stop by itself":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    let loader = createStopLoader(session, {spFlow})
+    loader.follow()
+    mock.clearReceivedCommands()
+    session.store.moveTo(5, 1)
+    session.store.moveTo(6, 2)
+    check mock.sent("ct/load-flow") == 2
+
+  test "the flow window is a default pane":
+    check spFlow in DefaultStopPanes
+
 suite "HSF-S1: an answer is applied to the stop it was asked at":
 
   test "an answer that lands after the debugger moved is dropped":
@@ -148,7 +222,8 @@ suite "HSF-S1: an answer is applied to the stop it was asked at":
     # Deferred from here on, so the oldest outstanding request is the
     # loader's (the other panels' effects answered the move above).
     mock.deferResponses = true
-    let loader = createStopLoader(session)
+    # The locals alone: the flow window's load is the next case's.
+    let loader = createStopLoader(session, {spLocals})
     loader.loadStop()
     check mock.pendingDeferredCount == 1
     session.store.moveTo(11, 2)                  # moved before the answer

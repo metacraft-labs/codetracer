@@ -49,6 +49,7 @@ import ./editor_points
 from ../viewmodel/viewmodels/flow_vm import flowStyledLinesOf
 from isonim/core/owner import createRoot
 from isonim/core/computation import createEffect
+from isonim/core/batch import untrack
 from isonim/core/signals import val
 when defined(js):
   import isonim/web/web_renderer
@@ -1195,9 +1196,6 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
   )
-  api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
-    discard self.onUpdatedFlow(response)
-  )
   # Value Origin Tracking (M4) — keep the editor's `activeOriginHopLines`
   # in sync with the active chain so `originHopStyleLines` returns
   # non-empty when a chain is live (spec §8.1 editor decorations).
@@ -2226,7 +2224,12 @@ proc sourceOrCallJump(self: EditorViewComponent, position: js) =
 
   self.lastScrollFireTime = currentTime
 
-proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Location) =
+proc adoptFlowWindows*(self: EditorViewComponent,
+                       windows: seq[FlowLayoutWindow])
+
+proc loadFlow*(self: EditorViewComponent, location: types.Location) =
+  ## Give this editor a fresh inline-flow component for the stop at
+  ## `location`.
   # # possible to test/debug diff flow TEMP HACK:
   # if flowMode != FlowMode.Diff:
   #  return
@@ -2310,9 +2313,13 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
   )
   self.flow.valueMode = BeforeValueMode
 
-  let taskId = genTaskId(LoadFlow)
-  self.api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: flowMode, location: location))
-  cdebug "start load-flow", taskId
+  # The window itself is loaded per stop by the session's stop loader
+  # (`spFlow`) and reaches this component through `watchSessionFlowWindows`.
+  # If the session already holds the window of this stop — the loader's
+  # answer arrived before the editor built this component — it is drawn now.
+  let windows = sessionFlowWindows()
+  if windows.len > 0 and windows[0].rrTicks == location.rrTicks:
+    self.adoptFlowWindows(windows)
 
 proc createMonacoEditor*(selector: cstring, options: MonacoEditorOptions): MonacoEditor =
   result = monaco.editor.create(jq(selector), options)
@@ -3073,7 +3080,7 @@ proc loadPendingFlowIfReady(self: EditorViewComponent): bool =
       self.tabInfo.location
   if flowLocation.line <= 0:
     return false
-  self.loadFlow(FlowMode.Call, flowLocation)
+  self.loadFlow(flowLocation)
   self.shouldLoadFlow = false
   self.hasPendingFlowLocation = false
   true
@@ -3280,7 +3287,7 @@ proc loadInitialFlowIfReady(self: EditorViewComponent): bool =
   if not initialLocation.found:
     return false
 
-  self.loadFlow(FlowMode.Call, initialLocation.location)
+  self.loadFlow(initialLocation.location)
   true
 
 proc scheduleInitialFlowLoad(self: EditorViewComponent) =
@@ -4474,7 +4481,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
         if canReuseFlow:
           discard  # FlowComponent.onCompleteMove (below) handles in-place update
         else:
-          self.loadFlow(FlowMode.Call, response.location)
+          self.loadFlow(response.location)
         self.shouldLoadFlow = false
         self.hasPendingFlowLocation = false
 
@@ -4538,14 +4545,36 @@ method onEnter*(self: EditorViewComponent) {.async.} =
     )
     data.ui.activeFocus = self.traces[line]
 
-method onUpdatedFlow*(self: EditorViewComponent, update: FlowUpdate) {.async.} =
-  if not self.flow.isNil:
-    await self.flow.onUpdatedFlow(update)
+proc adoptFlowWindows*(self: EditorViewComponent,
+                       windows: seq[FlowLayoutWindow]) =
+  ## Hand the session's flow window to this editor's inline flow, if it has
+  ## one and the window is its file's (`FlowComponent.adoptWindows`).
+  if not self.flow.isNil and self.flow.adoptWindows(windows):
     self.adjustEditorWidth()
     # #594: this is the moment the conditional-branch data actually becomes
     # paintable. `onCompleteMove` ran `editorAfterRedraw` synchronously back
     # when `self.flow.flow` was still nil, so the flow decoration layer was
-    # merely RETAINED there; nothing in `FlowComponent.onUpdatedFlow` applies
+    # merely RETAINED there; nothing in `FlowComponent.adoptWindows` applies
     # line styles. Without this call the colours only ever reappeared by
     # accident, on a later move that happened not to trigger a flow reload.
     self.applyEventualStylesLines()
+
+var disposeFlowWindowsWatch: proc()
+  ## The current `watchSessionFlowWindows` root, so a new session's watch
+  ## replaces the previous session's instead of running beside it.
+
+proc watchSessionFlowWindows*(data: Data) =
+  ## Every editor's inline flow follows the session's flow window
+  ## (`FlowVM.layoutWindows`), which the session's stop loader loads per stop
+  ## (`spFlow`). Called when the session's `FlowVM` is handed to the renderer
+  ## (`flow.initFlowVMFromSession`), again for each new session.
+  if not disposeFlowWindowsWatch.isNil:
+    disposeFlowWindowsWatch()
+    disposeFlowWindowsWatch = nil
+  createRoot proc(dispose: proc()) =
+    disposeFlowWindowsWatch = dispose
+    createEffect proc() =
+      let windows = sessionFlowWindows()   # the one read that subscribes
+      untrack proc() =
+        for _, editor in data.ui.editors:
+          editor.adoptFlowWindows(windows)

@@ -11,11 +11,15 @@
 ## - `isLoading`: whether a flow data request is in flight
 ## - `totalIterations`: total number of iterations available
 ##
-## Also creates an auto-load effect that requests flow data from the
-## backend whenever the debugger location or flowMode changes, **and
-## consumes the response**: the loop shape of the returned window and the
-## trace tick the window was computed for are stored, and the selected
-## iteration is re-derived from them.
+## Holds the flow window of the stop — decoded once (`flowLayoutWindowOf`),
+## for every view, and read by every surface that draws flow: the desktop's
+## inline flow in Monaco, the terminal's and GPUI's overlays, the flow pane,
+## the VS Code host (Shared-DOM-Front-Ends D7.4 (b)). The window is asked for
+## once per stop by the session's stop loader (`sdk/stop_loader`, pane
+## `spFlow`, through `requestWindow`) **and the response is consumed**: the
+## loop shape of the returned window and the trace tick the window was
+## computed for are stored, and the selected iteration is re-derived from
+## them.
 ##
 ## That last part is the whole point (#593/#595). The Omniscience loop
 ## counter is not a free-standing widget: it must show which iteration the
@@ -30,6 +34,7 @@
 ##   let vm = createFlowVM(store)
 ##   echo vm.flowMode.val          # fmCall
 ##   vm.setMode(fmLine)
+##   vm.requestWindow()            # what the stop loader does at each stop
 ##   echo vm.totalIterations.val   # derived from the loaded flow window
 
 import std/[algorithm, json, options, strutils, tables]
@@ -137,8 +142,9 @@ type
     ##   isLoading         — whether a flow data request is in flight
     ##   totalIterations   — total number of iterations from the backend
     ##
-    ## The store reference is kept for the auto-load effect and
-    ## for navigation actions (click-step jump).
+    ## The store reference is kept for the window request (`requestWindow`,
+    ## at the debugger's position) and for navigation actions (click-step
+    ## jump).
     actionSink*: ActionSink
       ## Set in a mirror session: user actions go to the primary
       ## (`action_sink`); nil on a primary.
@@ -270,8 +276,8 @@ proc isDiffFlowUpdate*(update: JsonNode): bool =
 # ---------------------------------------------------------------------------
 
 proc setMode*(vm: FlowVM; mode: FlowMode) =
-  ## Switch to a different flow mode. The auto-load effect will
-  ## request new data because it depends on flowMode.
+  ## Switch to a different flow mode. The stop loader asks for the window
+  ## again, because its `spFlow` key includes the flow mode.
   if vm.actionSink.forwards("flow", "setMode",
       %*{"mode": sinkArg(mode)}):
     return
@@ -833,6 +839,71 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
 # Factory
 # ---------------------------------------------------------------------------
 
+proc requestWindow*(vm: FlowVM;
+                    onDone: proc(applied: bool) {.closure.} = nil) =
+  ## Ask the engine for the flow window of the stop the store is at, in the
+  ## VM's view granularity, and adopt the answer. `onDone` is told whether a
+  ## window was adopted for this request. Called by the session's stop loader
+  ## once per stop (`spFlow`); does nothing before the debugger has a tick.
+  ##
+  ## `CtLoadFlowArguments` (src/db-backend/src/task.rs) requires `flowMode`
+  ## and `location`; `rrTicks` lives inside `location`. `wireMode` is the
+  ## engine's vocabulary (`engineFlowModeWireName`): all three view
+  ## granularities are the same `call` query.
+  let store = vm.store
+  let ticks = store.debugger.val.rrTicks
+  if ticks == 0'u64:
+    if not onDone.isNil: onDone(false)
+    return
+  let position = store.debugger.val.location
+  let args = %*{
+    "flowMode": engineFlowModeWireName(vm.flowMode.val),
+    "location": {
+      "path": position.file,
+      "line": position.line,
+      "rrTicks": ticks,
+      "callstackDepth": position.callstackDepth,
+    },
+  }
+  vm.loadingState.val = lsLoading
+  # Consume the response. Firing the request and dropping the reply is what
+  # made every loop-iteration assertion at this layer vacuous; see the module
+  # header.
+  let appliedBefore = vm.appliedWindows
+  let vmRef = vm
+  onComplete(store.backend.send("ct/load-flow", args),
+    proc(response: JsonNode) =
+      # The reply is only *sometimes* the window. `ct/load-flow`'s real answer
+      # is the queued `ct/updated-flow` event (dap.rs:329); the backend-manager
+      # converts that event into a response for some deployments
+      # (backend_manager.rs:1001), so both paths feed the same applier.
+      #
+      # BUT NOT BOTH FOR ONE REQUEST. A synchronous transport (the native
+      # hosts' stdio adapter) delivers the event before the reply completes,
+      # and a reply adopted after it would replace the real window with
+      # whatever the reply carries — or, when the reply is a bare DAP
+      # envelope, flip a loaded panel to `lsError`.
+      if vmRef.appliedWindows != appliedBefore:
+        if not onDone.isNil: onDone(true)
+        return
+      # A DAP envelope carries the window under `body`.
+      let window =
+        if not response.isNil and response.kind == JObject and
+           response{"viewUpdates"}.isNil and
+           not response{"body"}.isNil: response["body"]
+        else: response
+      vmRef.applyFlowUpdate(window)
+      if not onDone.isNil: onDone(vmRef.appliedWindows != appliedBefore),
+    proc(message: string) =
+      # A failed flow load must not leave the panel claiming to still be
+      # loading forever, and must not leave a stale window's loop shape in
+      # place attributed to the new position.
+      vmRef.loops.val = @[]
+      vmRef.focusedLoop.val = -1
+      vmRef.iterationCount.val = 0
+      vmRef.loadingState.val = lsError
+      if not onDone.isNil: onDone(false))
+
 proc createFlowVM*(store: ReplayDataStore): FlowVM =
   ## Create a FlowVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
@@ -840,8 +911,8 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
   ## Sets up:
   ## 1. Mutable signals with sensible defaults
   ## 2. Derived memos for `isLoading` and `totalIterations`
-  ## 3. An auto-load effect that requests flow data when the debugger
-  ##    location or flowMode changes
+  ## 3. The `ct/updated-flow` event handler that adopts a window (the window
+  ##    is ASKED for by the session's stop loader, `requestWindow`)
   withViewModel proc(dispose: proc()): FlowVM =
     let flowMode = createSignal(fmCall)
     let selectedIteration = createSignal(0)
@@ -919,104 +990,9 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
           else: event
         vmRef.applyFlowUpdate(payload)
 
-    # Auto-load effect: whenever the debugger position or flow mode
-    # changes, request fresh flow data from the backend.
-    #
-    # See the matching dedup in ``event_log_vm.nim`` for the rationale.
-    #
-    # THIS COMMENT USED TO SAY ``updateDebuggerPosition`` "reassigns
-    # ``store.debugger`` without value equality". THAT IS FALSE, and it was
-    # believed long enough to be quoted into a bug brief as though it were a
-    # measurement. IsoNim's ``writeSignal`` (isonim/core/signals.nim) returns
-    # early on ``state.value == value``, and ``DebuggerState`` is a plain
-    # object, so a byte-identical reassignment notifies nobody — measured at
-    # 145 identical writes re-running an effect exactly once, in
-    # ``src/tests/gui/tests/state/state_render_storm_test.nim``, which exists
-    # to keep that from being re-derived wrongly a third time.
-    #
-    # What the guard below is actually for: ``store.debugger`` is reassigned
-    # once per panel per CtCompleteMove, and those writes are not all equal —
-    # each panel syncs the position it saw, so location fields can differ at
-    # one ``rrTicks``. Keying on the tick and the view mode collapses that to
-    # one request. Without it ``ct/load-flow`` is issued several times per
-    # move, which is
-    # both wasteful and (in combination with the ``fmCall`` JSON-arg
-    # mismatch the backend currently rejects) noisy in the host logs.
-    var lastTicks: uint64 = 0
-    var lastMode = ""
-    var hasFired = false
-    createEffect proc() =
-      let ticks = store.debugger.val.rrTicks
-      let mode = flowMode.val
-      # Two different strings, deliberately.
-      #
-      # `wireMode` is the engine's vocabulary — see
-      # `engineFlowModeWireName`. All three view granularities map to
-      # `call`, because that is genuinely the same query.
-      #
-      # `viewMode` is this panel's, and it is what the dedup keys on. Keying
-      # the dedup on the wire name instead would silently stop re-requesting
-      # when the user switched granularity, which is a behaviour change this
-      # fix has no business making.
-      let wireMode = engineFlowModeWireName(mode)
-      let viewMode = $mode
-      if ticks > 0'u64:
-        if hasFired and ticks == lastTicks and viewMode == lastMode:
-          return
-        lastTicks = ticks
-        lastMode = viewMode
-        hasFired = true
-        # `CtLoadFlowArguments` (src/db-backend/src/task.rs) requires
-        # `flowMode` and `location`; `rrTicks` is not a field it reads, it
-        # lives inside `location`. Sending the tick at the top level and no
-        # location at all is why this request never once succeeded.
-        let position = store.debugger.val.location
-        let args = %*{
-          "flowMode": wireMode,
-          "location": {
-            "path": position.file,
-            "line": position.line,
-            "rrTicks": ticks,
-            "callstackDepth": position.callstackDepth,
-          },
-        }
-        loadingState.val = lsLoading
-        # Consume the response. Firing the request and dropping the reply is
-        # what made every loop-iteration assertion at this layer vacuous; see
-        # the module header.
-        let appliedBefore = vm.appliedWindows
-        let future = store.backend.send("ct/load-flow", args)
-        let vmRef = vm
-        onComplete(future,
-          proc(response: JsonNode) =
-            # The reply is only *sometimes* the window. `ct/load-flow`'s real
-            # answer is the queued `ct/updated-flow` event (dap.rs:329); the
-            # backend-manager converts that event into a response for some
-            # deployments (backend_manager.rs:1001), so both paths must feed
-            # the same applier. Consuming only the reply is how a panel ends
-            # up permanently empty against the engine while its tests pass.
-            #
-            # BUT NOT BOTH FOR ONE REQUEST. A synchronous transport (the
-            # native hosts' stdio adapter) delivers the event before the reply
-            # completes, and a reply adopted after it would replace the real
-            # window with whatever the reply carries — or, when the reply is a
-            # bare DAP envelope, flip a loaded panel to `lsError`.
-            if vmRef.appliedWindows != appliedBefore:
-              return
-            # A DAP envelope carries the window under `body`.
-            let window =
-              if not response.isNil and response.kind == JObject and
-                 response{"viewUpdates"}.isNil and
-                 not response{"body"}.isNil: response["body"]
-              else: response
-            vmRef.applyFlowUpdate(window),
-          proc(message: string) =
-            # A failed flow load must not leave the panel claiming to still be
-            # loading forever, and must not leave a stale window's loop shape
-            # in place attributed to the new position.
-            vmRef.loops.val = @[]
-            vmRef.focusedLoop.val = -1
-            vmRef.iterationCount.val = 0
-            vmRef.loadingState.val = lsError)
+    # The window is loaded per stop by the session's stop loader
+    # (`sdk/stop_loader`, pane `spFlow`), which calls `requestWindow`; this VM
+    # holds and decodes it. The `ct/updated-flow` handler above adopts a
+    # window whichever request it answers.
 
     vm
