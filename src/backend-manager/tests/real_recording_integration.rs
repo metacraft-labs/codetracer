@@ -13386,15 +13386,21 @@ async fn test_real_rr_mcp_error_actionable() {
             .expect("should have error text");
         log_line(&log_path, &format!("error text: {text}"));
 
-        // Verify the error message is actionable: it should mention the
-        // failure and provide some guidance.
+        // Verify the error message is actionable: it names the failure and
+        // the path that caused it.  The failure is named by the exception
+        // the Python API documents for a trace that does not exist
+        // (`open_trace` raises `TraceNotFoundError`), which is also what
+        // the MCP error format shows ("Error: TraceNotFoundError: ... at
+        // <path>").  Matching the class rather than words of the message
+        // keeps the check off prose the API is free to reword.
         assert!(
-            text.contains("not found")
-                || text.contains("failed")
-                || text.contains("error")
-                || text.contains("Failed")
-                || text.contains("Cannot"),
-            "M11-RR-4: error text should indicate the trace was not found or failed, got: {text}"
+            text.contains("TraceNotFoundError"),
+            "M11-RR-4: error text should name TraceNotFoundError, got: {text}"
+        );
+        let nonexistent_str = nonexistent_path.to_string_lossy();
+        assert!(
+            text.contains(nonexistent_str.as_ref()),
+            "M11-RR-4: error text should name the missing path {nonexistent_str}, got: {text}"
         );
 
         // Also verify enhanced errors via resources/read for an unloaded
