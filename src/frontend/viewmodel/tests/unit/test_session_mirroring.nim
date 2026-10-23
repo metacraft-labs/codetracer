@@ -317,6 +317,26 @@ suite "a primary and its mirror":
       host.dispose()
       done()
 
+  test "a watch typed on the mirror reaches the primary's watch list":
+    # The page's watch input calls `StateVM.addWatch`, which goes through the
+    # collaboration core as a view operation, not through `relay`: this is
+    # the route a real page takes, and the one the action relay above does
+    # not exercise.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      let mirror = createMirrorSession(link.b)
+      link.settle()
+      mirror.session.stateVM.addWatch("initial_shield")
+      link.settle()
+      ck primary.stateVM.watchExpressions.val == @["initial_shield"]
+      mirror.dispose()
+      host.dispose()
+      done()
+
   test "a viewport set on the mirror reaches the primary":
     createRoot proc(done: proc()) =
       let (primary, _) = newPrimary()
