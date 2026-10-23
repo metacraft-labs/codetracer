@@ -8928,6 +8928,19 @@ jobs:
         # Stock bash, no network.
         run: bash ci/test/sibling-build-failure-test.sh
 
+      - name: Check that test-frontend-units provisions the cross-process recording tools
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # cross_process_origin_vm_test replays the `cross-process-three-trace`
+        # recording, which scripts/materialize-recording.sh produces from the
+        # tree and refuses to produce without ct-instrument, session-manager
+        # and a built codetracer-js-recorder. Nothing on the recipe's path
+        # built them, and build-siblings.sh had no ct-instrument entry, so the
+        # suite failed 3 of 4 cases on every unprovisioned host. This suite
+        # runs the real build-siblings.sh and provisioning script with stub
+        # `repro`/`cargo`/`npm`/`just`, and pins that a missing or unbuildable
+        # sibling fails by name. Stock bash and jq, no network.
+        run: bash ci/test/frontend-units-cross-process-provisioning-test.sh
+
       - name: Check that a stale sibling artifact is rebuilt, not skipped
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # scripts/build-siblings.sh decided "already built" from the artifact

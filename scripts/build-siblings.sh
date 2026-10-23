@@ -237,10 +237,14 @@ STAMP_FORMAT="format build-siblings-stamp/1"
 #     scripts/fetch-trace-format-nim.sh. Both pins are in noir's HEAD.
 #   codetracer-flow-recorder/cadence-trace-helper — go-helper/go.mod requires
 #     only onflow/cadence and its transitive modules; no cgo, no trace format.
+#   codetracer-wasm-instrumenter — every `path =` dependency in its Cargo.toml
+#     files names a crate of its own workspace (crates/*), and it has no git
+#     dependencies; it rewrites wasm modules and writes no trace itself.
 DEFAULT_SIBLING_DEPS="codetracer-trace-format codetracer-trace-format-nim"
 declare -A SIBLING_DEPS=(
 	["noir"]=""
 	["codetracer-flow-recorder/cadence-trace-helper"]=""
+	["codetracer-wasm-instrumenter"]=""
 )
 
 # sha256sum on Linux, shasum on macOS. Neither is an error only for stamping:
@@ -898,6 +902,32 @@ build_sibling \
 	"export CGO_LDFLAGS=\"-L$WS_ROOT/codetracer-trace-format-nim\"; go build -o wazero ./cmd/wazero" \
 	codetracer-wasm-recorder \
 	codetracer
+
+# WebAssembly instrumenter (`ct-instrument`).  scripts/materialize-recording.sh
+# instruments the `cross-process-three-trace` demo's wasm module with it and
+# refuses to record without it, so every suite that replays that recording —
+# `just test-frontend-units` (cross_process_origin_vm_test), the db-backend
+# three-trace DAP tests, `just test-cross-process` — needs this binary.  This
+# script had no entry for it, so `--only codetracer-wasm-instrumenter` matched
+# nothing and nothing outside the CI workflow could produce it
+# (codetracer-pm issues/2026-10-21-test-frontend-units-does-not-provision-the-
+# three-trace-recording-its-cross-process-suite-needs.md).
+#
+# CARGO_TARGET_DIR is pinned to the sibling's own target/ for the reason the
+# test-non-gui "Build ct-instrument" step gives: a runner- or user-wide
+# CARGO_TARGET_DIR would put the binary somewhere this entry's artifact path
+# does not name, and the build would be reported as "succeeded but missing".
+# The materialiser searches the sibling's target/ first.  `--locked` because
+# the instrumenter commits its Cargo.lock (its own `just build-rust` uses it).
+# `$PWD` is expanded by the build wrapper inside the sibling, not here.
+# shellcheck disable=SC2016
+build_sibling \
+	codetracer-wasm-instrumenter \
+	target/release/ct-instrument \
+	'CARGO_TARGET_DIR="$PWD/target" cargo build --release --locked -p ct-instrument-cli' \
+	codetracer-wasm-instrumenter \
+	codetracer-wasm-instrumenter \
+	--help
 
 # noir / nargo.
 build_sibling \

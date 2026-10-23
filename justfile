@@ -1368,6 +1368,16 @@ test-launcher-recorder-e2e-wiring:
 test-sibling-build-failure-report:
   bash ci/test/sibling-build-failure-test.sh
 
+# Verify that `just test-frontend-units` provisions the three tools the
+# `cross-process-three-trace` recording is produced with (ct-instrument,
+# session-manager, a built codetracer-js-recorder), that
+# scripts/build-siblings.sh can build ct-instrument at all, and that a missing
+# or unbuildable sibling fails the recipe by name.  Stock bash and jq; `repro`,
+# `cargo`, `npm` and `just` are stubbed.  See
+# ci/test/frontend-units-cross-process-provisioning-test.sh.
+test-frontend-units-provisioning:
+  bash ci/test/frontend-units-cross-process-provisioning-test.sh
+
 # Verify the DECODED-TRACE reasoning of the gate above, which the gate itself
 # can only exercise after a launcher, a built core, a recorder and `ct-print`
 # are all in place.  The trace-shape discrimination, the empty-recording guard,
@@ -3352,8 +3362,26 @@ test-vm: test-vm-native test-vm-js
 # theirs to fix, and wiring a red lane into a required job breaks every build
 # for everybody:
 #
-#   test-frontend-units          cross_process_origin_vm_test needs an
-#                                uncommitted rr/MCR cross-process recording
+#   test-frontend-units          cross_process_origin_vm_test replays the
+#                                `cross-process-three-trace` recording (the
+#                                JS + WASM + Node demo, not rr/MCR), which
+#                                scripts/materialize-recording.sh produces
+#                                from the tree and which needs ct-instrument,
+#                                session-manager and a built
+#                                codetracer-js-recorder.  The recipe now
+#                                builds all three
+#                                (scripts/provision-cross-process-recording.sh)
+#                                and the suite passes 8/8 with them; it fails,
+#                                naming the sibling, when one is not checked
+#                                out, so a CI lane must check out both
+#                                siblings first.  Measured 2026-10-23 on
+#                                nixos-ci-bare-002, codetracer d6cbfb21a plus
+#                                this provisioning, in a tree with no `ct`
+#                                build: idle_timeout_integration_test reports
+#                                DID NOT RUN (it needs the built host,
+#                                server_index.js), as it does at d6cbfb21a
+#                                without the provisioning, so the lane still
+#                                exits 1 there and is NOT green.
 #   (test-vm-collab-units)       FIXED, PLAT-33.  The drift was real and the
 #                                FIGURE was not: 32 unclassified and 0 stale,
 #                                not "30 unclassified, 1 stale".  Eighteen of
@@ -3529,6 +3557,18 @@ test-frontend-units:
   # not leave its body, so each guarded test ran on anyway.  Pointing at the
   # build tree makes all seven cases run for real.
   export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$PWD/src/build-debug}"
+  # `cross_process_origin_vm_test.nim` replays the `cross-process-three-trace`
+  # recording, which is not committed: scripts/materialize-recording.sh
+  # produces it from this tree on first use and refuses without
+  # `ct-instrument`, `session-manager` and a built codetracer-js-recorder.
+  # Nothing on this recipe's path built them, so the suite failed 3 of its 4
+  # cases on every host that had not built them by hand.  Provision them here;
+  # a sibling that is not checked out or does not build fails the recipe,
+  # naming it, before any suite runs.  The script prints the session-manager
+  # path because cargo may have put it under CARGO_TARGET_DIR, where the
+  # materialiser does not look.
+  CODETRACER_RECORD_WEB_BIN="$(bash scripts/provision-cross-process-recording.sh)"
+  export CODETRACER_RECORD_WEB_BIN
   bash ci/lib/run-nim-test-lane.sh frontend-native-units
 
 # ViewModel unit suites under src/frontend/viewmodel/tests/unit that are
