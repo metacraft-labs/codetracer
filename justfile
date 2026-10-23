@@ -3374,14 +3374,25 @@ test-vm: test-vm-native test-vm-js
 #                                and the suite passes 8/8 with them; it fails,
 #                                naming the sibling, when one is not checked
 #                                out, so a CI lane must check out both
-#                                siblings first.  Measured 2026-10-23 on
-#                                nixos-ci-bare-002, codetracer d6cbfb21a plus
-#                                this provisioning, in a tree with no `ct`
-#                                build: idle_timeout_integration_test reports
-#                                DID NOT RUN (it needs the built host,
-#                                server_index.js), as it does at d6cbfb21a
-#                                without the provisioning, so the lane still
-#                                exits 1 there and is NOT green.
+#                                siblings first.  What still keeps the lane
+#                                red is idle_timeout_integration_test, which
+#                                needs a built host ($CODETRACER_PREFIX/
+#                                server_index.js).  The repro dev env sets
+#                                CODETRACER_PREFIX to
+#                                src/build-<type>-repro, so the
+#                                src/build-debug default below never applies,
+#                                and `just build-once` (tup) does not write
+#                                that tree.  Measured 2026-10-23 on
+#                                nixos-ci-bare-002 at e22ce1215, after
+#                                `just build-once`: under `repro exec` the
+#                                suite reports DID NOT RUN and the lane exits
+#                                1.  With
+#                                CODETRACER_PREFIX=$PWD/src/build-debug, all
+#                                8 files pass (84 cases) and it exits 0.
+#                                Recorded as codetracer-pm issues/2026-10-23-
+#                                test-frontend-units-under-repro-exec-points-
+#                                codetracer-prefix-at-a-tree-build-once-does-
+#                                not-produce.md.
 #   (test-vm-collab-units)       FIXED, PLAT-33.  The drift was real and the
 #                                FIGURE was not: 32 unclassified and 0 stale,
 #                                not "30 unclassified, 1 stale".  Eighteen of
