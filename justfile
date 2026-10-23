@@ -5858,6 +5858,11 @@ test-ui-selection: build-once build-tui
 # src/tests/ct_host/test_ct_host_killed_leaves_no_process_behind.nim signals or
 # SIGKILLs the real `ct host` alone and checks that its node server,
 # session-manager and replay end with it (CLI/ct/host.md, "Corner Cases").
+# src/tests/ct_host/test_ct_host_refuses_an_unreadable_container_by_name.nim
+# hands the real `ct host --trace-path` a container version it does not read and
+# requires one `ct host: error:` line carrying the reader's refusal, a non-zero
+# exit and no stack trace; a `--manifest` naming such a container must end the
+# same way, on the manifest's own error line.
 test-ct-host-admission: build-once
   #!/usr/bin/env bash
   set -euo pipefail

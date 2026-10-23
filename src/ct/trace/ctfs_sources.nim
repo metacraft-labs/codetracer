@@ -501,11 +501,22 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   ## plus a ``files/`` subdirectory.  The CTFS container itself is the
   ## source of truth for both — this proc just unpacks it so the
   ## existing frontend wiring keeps working without a full FFI reader.
-  var reader: CtfsReader
-  try:
-    reader = openCtfs(ctFilePath)
-  except CatchableError:
-    return false
+  ##
+  ## Returns whether a ``paths.json`` sidecar was written.  ``false`` means
+  ## only that the container OPENED and names no sources.
+  ##
+  ## Raises ``ValueError`` (``IOError`` / ``OSError`` for an unreadable file)
+  ## when the container cannot be opened or is refused — an unreadable
+  ## container version, a bad header — carrying ``openCtfs``'s message, which
+  ## names the field it refuses on (``codetracer-trace-format-spec``
+  ## ``ctfs-container.md``: "A reader must name the field it is refusing on").
+  ## That used to be swallowed into ``false``, which no caller could tell
+  ## from "no sources", so the reason never reached the user (codetracer-pm
+  ## issue ``2026-10-04-ct-importer-turns-a-container-refusal-into-false.md``).
+  ## Failures decoding individual members of a container that DID open are
+  ## still reported as ``ct host: warning:`` lines rather than raised: the
+  ## trace stays usable without them.
+  let reader = openCtfs(ctFilePath)
 
   var paths: seq[string] = @[]
   # NOTE: two different files are called ``paths.json`` in this proc. The one

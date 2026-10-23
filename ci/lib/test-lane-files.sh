@@ -316,7 +316,7 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
-	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed' ;;
+	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
@@ -2133,7 +2133,10 @@ test_lane_files() {
 		# it needs a built `src/build-debug/bin/ct` (or CODETRACER_CT_BIN),
 		# `node` and socket.io-client, which is why it is a lane of its own
 		# rather than part of `ct-trace-units`, whose recipe builds neither.
-		# `just test-ct-host-admission` builds them.
+		# `just test-ct-host-admission` builds them. The import refusal suite
+		# (`ct host` naming a container it cannot read, CLI/ct/host.md and
+		# ctfs-container.md) is here for the same reason: it is about the real
+		# binary's exit and output, which only a built `ct` can show.
 		_tlf_find src/tests/ct_host 'test_*.nim'
 		;;
 

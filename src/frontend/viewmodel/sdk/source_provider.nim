@@ -432,6 +432,12 @@ when not defined(js):
       recordedGeneration: int
       allowWorkingTree: bool
       materialized: bool
+      materializeError: string
+        ## Why the container could not be unpacked, when it could not: the
+        ## reader's refusal, verbatim (`materializeCtfsSources` raises it).
+        ## Empty when unpacking succeeded or was not needed. Kept so every
+        ## answer that finds no payload can say why, instead of only "no
+        ## bundled source".
       revisions: Table[string, RegisteredRevision]
         ## Keyed by `path & "\n" & $generation`.
 
@@ -651,11 +657,14 @@ when not defined(js):
       return
     try:
       discard materializeCtfsSources(container, state.traceDir)
-    except CatchableError:
+    except CatchableError as e:
       # A container that cannot be unpacked is reported per-request as
-      # `sfsPathUnavailable`, with the path that was looked for. Raising here
-      # would take a whole session down over one unreadable trace.
-      discard
+      # `sfsPathUnavailable`, with the path that was looked for AND the
+      # reader's reason (`fetchProc`), which names the field it refused on —
+      # `ctfs-container.md`: "A reader must name the field it is refusing on".
+      # Raising here would take a whole session down over one unreadable
+      # trace.
+      state.materializeError = e.msg
 
   proc registerSourceRevision*(provider: SourceProvider; path: string;
                                generation: int; filePath: string;
@@ -760,6 +769,12 @@ when not defined(js):
           (state.traceDir / "files") &
           (if state.allowWorkingTree: " and it is not readable on this machine"
            else: "")
+        # When the payload is missing because the container was refused, say
+        # so: "no bundled source" alone sends the user looking for a file,
+        # when what the trace needs is to be re-recorded.
+        if state.materializeError.len > 0:
+          answer.detail.add "; the container could not be unpacked: " &
+            state.materializeError
         onResult(answer)
         return
 

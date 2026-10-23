@@ -418,6 +418,45 @@ suite "CTFS container version 5":
       check message.contains("version " & $version)
       check message.contains("5")
 
+  test "the source materialiser raises the refusal instead of answering false":
+    ## ``materializeCtfsSources`` is the IMPORT path's reader, and the
+    ## refusal above must reach its callers with the field it names
+    ## (``ctfs-container.md``: "A reader must name the field it is refusing
+    ## on").  It used to catch ``openCtfs``'s exception and answer ``false``,
+    ## which its callers cannot tell from "this container names no sources"
+    ## (codetracer-pm issue
+    ## ``2026-10-04-ct-importer-turns-a-container-refusal-into-false.md``).
+    let root = getTempDir() / "ctfs-container-materialize-" &
+      $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    let ct = writeContainerWithMetaDat(root, "c.ct", 7)
+    for version in [3, 4]:
+      var data = readFile(ct)
+      data[5] = char(version)
+      let patched = root / ("c" & $version & ".ct")
+      writeFile(patched, data)
+      let outDir = root / ("out" & $version)
+      createDir(outDir)
+      var message = ""
+      try:
+        discard materializeCtfsSources(patched, outDir)
+      except ValueError as e:
+        message = e.msg
+      check message.contains(
+        "CTFS container version " & $version & " is not readable")
+      check message.contains("Re-record the trace")
+      # Nothing was unpacked from a container that was refused.
+      check not fileExists(outDir / "paths.json")
+
+    # The control: the same container at its own version still opens, so
+    # the raise above is the version byte's doing and not the fixture's.
+    let okOut = root / "out-ok"
+    createDir(okOut)
+    check materializeCtfsSources(ct, okOut)
+
   test "members are read in each form":
     let root = getTempDir() / "ctfs-container-forms-" & $getCurrentProcessId()
     removeDir(root)

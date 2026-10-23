@@ -483,3 +483,73 @@ suite "CTUI-4 — the refusal reaches the pane as §14's existing row":
       check chosen.kind == spkCtfsMaterialized
       check chosen.name == "ctfs:" & h.traceDir
     check selectSourceProvider([unusable]).isNil
+
+suite "a container the reader refuses names its reason in the answer":
+  ## A provider handed a bare `.ct` folder unpacks it on first fetch
+  ## (`ensureMaterialized`). When the reader REFUSES the container — here, a
+  ## container version it does not read — the per-request answer has to carry
+  ## the refusal's text, or the user is told "no bundled source" for a trace
+  ## whose real problem is that it must be re-recorded
+  ## (`codetracer-trace-format-spec` `ctfs-container.md`: "A reader must name
+  ## the field it is refusing on"; codetracer-pm issue
+  ## `2026-10-04-ct-importer-turns-a-container-refusal-into-false.md`).
+  ##
+  ## The container is hand-built and only its header is real: the CTFS magic
+  ## and a version byte. That is all the reader inspects before it refuses,
+  ## and no correct writer produces a refused version, so there is no
+  ## recorder-made fixture to use instead.
+
+  proc writeContainerHeader(path: string; version: int) =
+    ## One 1024-byte block 0: the CTFS magic (`ctfs-container.md` §1), the
+    ## container version at offset 5, block size 1024 at offset 8, and no
+    ## entries.
+    var data = newString(1024)
+    for i in 0 ..< data.len: data[i] = '\0'
+    for i, b in [0xC0, 0xDE, 0x72, 0xAC, 0xE2]:
+      data[i] = char(b)
+    data[5] = char(version)
+    data[9] = char(4)  # 1024, little-endian
+    writeFile(path, data)
+
+  proc bareContainerFolder(name: string; version: int): string =
+    result = getTempDir() / ("ct-refused-" & name & "-" &
+      $getCurrentProcessId())
+    removeDir(result)
+    createDir(result)
+    writeContainerHeader(result / "trace.ct", version)
+
+  proc fetchFrom(provider: SourceProvider; path: string): SourceFetch =
+    var captured: SourceFetch
+    provider.fetch(
+      SourceLineRequest(path: path, sourceGeneration: 0,
+                        firstLine: 1, lastLine: 10),
+      proc(fetch: SourceFetch) = captured = fetch)
+    captured
+
+  test "the path-unavailable detail carries the container's refusal":
+    let traceDir = bareContainerFolder("v3", 3)
+    defer: removeDir(traceDir)
+    let provider = newCtfsSourceProvider(traceDir, allowWorkingTree = false)
+    check provider.supports()
+    let fetch = provider.fetchFrom(RecordedPath)
+    checkDegradedWithNoText(fetch, sfsPathUnavailable)
+    check fetch.detail.contains(RecordedPath)
+    check fetch.detail.contains("CTFS container version 3 is not readable")
+    check fetch.detail.contains("Re-record the trace")
+    # Asked again, the provider does not unpack twice, and the reason is
+    # still there: it is state, not a one-shot message.
+    let again = provider.fetchFrom(UnrecordedPath)
+    check again.status == sfsPathUnavailable
+    check again.detail.contains("CTFS container version 3 is not readable")
+
+  test "a container the reader accepts adds no refusal to the detail":
+    ## The control: the same header at a version the reader reads opens, so
+    ## the text above is the refusal's and not something every answer says.
+    let traceDir = bareContainerFolder("v5", 5)
+    defer: removeDir(traceDir)
+    let provider = newCtfsSourceProvider(traceDir, allowWorkingTree = false)
+    let fetch = provider.fetchFrom(RecordedPath)
+    checkDegradedWithNoText(fetch, sfsPathUnavailable)
+    check fetch.detail.contains(RecordedPath)
+    check not fetch.detail.contains("not readable")
+    check not fetch.detail.contains("could not be unpacked")

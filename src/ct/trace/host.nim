@@ -95,6 +95,37 @@ proc emitReplayProblemForHostFailure(message: string) =
       "Replay storage objects could not be read from any available replica.")
     flushFile(stdout)
 
+template importOrQuit(importedPath: string; body: untyped): untyped =
+  ## ``body`` — importing ``importedPath``, the ``--trace-path`` the user
+  ## passed — with any failure it raises turned into one ``ct host: error:
+  ## cannot import <importedPath>: <reason>`` line and exit 1, the way the
+  ## neighbouring import failures end. Usable as an expression: ``body``'s
+  ## value is the result.
+  ##
+  ## The reason is printed verbatim because the readers name the field they
+  ## refuse on (``ctfs-container.md``: "A reader must name the field it is
+  ## refusing on"), e.g. *"CTFS container version 3 is not readable: this
+  ## reader reads versions 5 and 6. Re-record the trace"* from ``openCtfs``
+  ## (raised by ``materializeCtfsSources``), or *"meta.dat: version 6 is not
+  ## readable: …"* from ``readCtfsMetaDat`` (raised by ``importTrace``);
+  ## ``src/tests/gui/tests/cross-platform-replay.spec.ts`` matches the first.
+  ## Either one raising uncaught gave the user a Nim stack trace instead of
+  ## the reason (codetracer-pm issue
+  ## ``2026-10-04-ct-importer-turns-a-container-refusal-into-false.md``).
+  ##
+  ## It wraps the ``--trace-path`` imports in ``hostCommand`` rather than the
+  ## steps inside ``importCtFile`` / ``importTraceFolder``, because those two
+  ## are also reached from a manifest (``importLocalManifest``), whose own
+  ## handler already reports a failure as ``failed to load local manifest:
+  ## <reason>`` and must keep doing so; and there the path being imported is
+  ## a resolved or downloaded file, not one the user passed.
+  try:
+    body
+  except CatchableError as e:
+    emitReplayProblemForHostFailure(e.msg)
+    echo "ct host: error: cannot import ", importedPath, ": ", e.msg
+    quit(1)
+
 const DefaultHostBind* = "127.0.0.1"
   ## LOOPBACK, because `CLI/ct/host.md` says so and gives the reason: "a trace
   ## contains the recorded program's memory and I/O". Serving that on a
@@ -389,7 +420,11 @@ proc importCtFile(ctFilePath: string): string =
 
   # M-REC-1.5: importTrace now reads metadata from the CTFS `meta.dat`
   # directly — no more legacy JSON sidecar bridge files.
-  let ctfsSourcesExtracted = materializeCtfsSources(tempDir / "trace.ct", tempDir)
+  # A container the reader refuses raises here with the reader's reason;
+  # the caller reports it (`importOrQuit` for `--trace-path`, the manifest
+  # handler for a manifest).
+  let ctfsSourcesExtracted =
+    materializeCtfsSources(tempDir / "trace.ct", tempDir)
   if ctfsSourcesExtracted:
     echo "ct host: extracted CTFS source metadata"
 
@@ -409,6 +444,9 @@ proc importCtFile(ctFilePath: string): string =
           createDir(filesDir)
           copyFile(entry.path, filesDir / entry.path.extractFilename)
 
+  # `importTrace` reads `meta.dat` itself, so a container that opened above
+  # can still be refused here (a `meta.dat` version this reader does not
+  # read, or none at all); that raises to the caller, as above.
   let trace = importTrace(
     tempDir,
     NO_RECORDING_ID,
@@ -492,6 +530,10 @@ proc importTraceFolder(traceFolderPath: string): string =
   of TraceShapeCtfs:
     # CTFS materialization writes `paths.json` for the frontend; the
     # importTrace path reads metadata fields directly from `meta.dat`.
+    # Whether a sidecar was written does not matter here (a container that
+    # names no sources still imports). A container the reader refuses raises
+    # with the reader's reason, which the caller reports (`importOrQuit` for
+    # `--trace-path`, the manifest handler for a manifest).
     discard materializeCtfsSources(shape.path, fullPath)
   of TraceShapeMaterialized:
     # The materialized shape ships its own `trace_paths.json`; there is
@@ -504,6 +546,9 @@ proc importTraceFolder(traceFolderPath: string): string =
   if shape.kind != TraceShapeMaterialized:
     normalizeImportedTracePaths(fullPath)
 
+  # As in `importCtFile`: `importTrace` reads `meta.dat` (or the
+  # materialized shape's metadata) itself and may refuse it, raising to the
+  # caller.
   let trace = importTrace(
     fullPath,
     NO_RECORDING_ID,
@@ -1477,11 +1522,13 @@ proc hostCommand*(
       echo "ct host: imported as trace id ", traceId
     elif fileExists(tracePath) and tracePath.endsWith(".ct"):
       echo "ct host: importing .ct file: ", tracePath
-      traceId = importCtFile(tracePath)
+      traceId = importOrQuit(tracePath):
+        importCtFile(tracePath)
       echo "ct host: imported as trace id ", traceId
     elif dirExists(tracePath):
       echo "ct host: importing trace folder: ", tracePath
-      traceId = importTraceFolder(tracePath)
+      traceId = importOrQuit(tracePath):
+        importTraceFolder(tracePath)
       echo "ct host: imported as trace id ", traceId
     else:
       echo "ct host: error: --trace-path not found: ", tracePath

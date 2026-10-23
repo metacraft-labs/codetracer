@@ -393,9 +393,13 @@ base.describe("cross-platform portable trace replay", () => {
         // The import reader refuses the fixture before anything is served,
         // so there is no page to look at. What the user sees is ct host's
         // output and its exit. The reason text is matched, not the way ct
-        // host reports it: today it ends in an unhandled exception
-        // (codetracer-pm/issues/2026-10-04-ct-importer-turns-a-container-refusal-into-false.md),
-        // and a clean refusal must pass too. The android-arm64 and ios-arm64
+        // host reports it: ct host prints it on a `ct host: error: cannot
+        // import <path>: <reason>` line and exits 1 (before
+        // codetracer-pm/issues/2026-10-04-ct-importer-turns-a-container-refusal-into-false.md
+        // it was the last line of an unhandled-exception stack trace), and the
+        // way it is framed is held by
+        // src/tests/ct_host/test_ct_host_refuses_an_unreadable_container_by_name.nim,
+        // not here. The android-arm64 and ios-arm64
         // fixtures are such containers until they are re-recorded
         // (codetracer-pm/issues/2026-10-02-example-recordings-fixtures-are-container-v3-v4.md).
         if (expectation.kind === "refused" && expectation.refusedBy === "import-reader") {
