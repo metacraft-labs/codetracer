@@ -1488,6 +1488,7 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   # cached blobs — DR-R5: "Expansion state resets when the tab is closed and
   # does not leak between files."
   if content == Content.UnifiedDiff:
+    unified_diff.forgetDocumentSections(id)
     unified_diff.forgetUnifiedDiffTab(tabScopedKey(data.activeSession, id))
 
   # remove component from registry

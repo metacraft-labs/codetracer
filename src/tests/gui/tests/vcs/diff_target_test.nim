@@ -114,3 +114,30 @@ suite "diff target: commit targets ignore the review context":
   test "a short hash is not over-sliced in the title":
     let plan = diffGitPlan("commit:abc")
     check plan.sessionTitle == "Commit Diff: abc"
+
+suite "diff target: a whole-commit document's sections":
+  ## VCS-Panel.md, "Whole-Commit Document" (the owner's 2026-10-23 decision on
+  ## #753): a target naming several files opens as one document whose
+  ## sections each load one file.
+
+  test "only a commit with no file named is a whole-commit target":
+    check isWholeCommitTarget("commit:abc123")
+    check not isWholeCommitTarget("commit:abc123:src/main.nim")
+    check not isWholeCommitTarget("file:src/main.nim")
+    check not isWholeCommitTarget("agent-diff:msg-7")
+    check not isWholeCommitTarget("Working Tree")
+
+  test "a commit's section asks git for its own file":
+    let section = diffSectionTarget("commit:abc123", "src/main.nim")
+    check section.target == "commit:abc123:src/main.nim"
+    check section.onlyPath == ""
+    # ... which is the target the per-file button opens, so the section and
+    # a tab of its own show the same diff.
+    check diffGitPlan(section.target).args ==
+      @["diff-tree", "-p", "--no-commit-id", "--root", "abc123", "--",
+        "src/main.nim"]
+
+  test "a target with no per-file form is loaded whole and narrowed":
+    let section = diffSectionTarget("agent-diff:msg-7", "lib/a.nim")
+    check section.target == "agent-diff:msg-7"
+    check section.onlyPath == "lib/a.nim"

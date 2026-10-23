@@ -112,3 +112,32 @@ proc diffGitPlan*(target: string; reviewCommitSha = "";
     DiffGitPlan(args: @["diff", "HEAD", "--", target],
                 sessionTitle: "Diff: " & target,
                 newRevision: "")
+
+type
+  DiffSectionTarget* = object
+    ## What one section of a whole-commit document loads (VCS-Panel.md,
+    ## "Whole-Commit Document").
+    target*: string
+      ## The section's own diff target.
+    onlyPath*: string
+      ## When non-empty, the section loads `target` and keeps only this
+      ## file's diff; empty when `target` already names exactly one file.
+
+proc isWholeCommitTarget*(target: string): bool =
+  ## True for `commit:<hash>` — a commit with no file named, which opens as a
+  ## whole-commit document (VCS-Panel.md, "Whole-Commit Document").
+  target.startsWith("commit:") and target[7 .. ^1].find(':') < 0
+
+proc diffSectionTarget*(documentTarget, path: string): DiffSectionTarget =
+  ## The target the section showing `path` of `documentTarget` loads.
+  ##
+  ## A whole commit (`commit:<hash>`) has a per-file form git answers
+  ## directly — `commit:<hash>:<path>`, the target a commit's file row has
+  ## always opened — so each section asks git for its own file rather than
+  ## for the whole commit again. Any other multi-file target (an agent
+  ## message's `agent-diff:<key>`, the working tree) has no per-file form,
+  ## so the section loads the whole target and narrows it to its file.
+  if isWholeCommitTarget(documentTarget):
+    DiffSectionTarget(target: documentTarget & ":" & path)
+  else:
+    DiffSectionTarget(target: documentTarget, onlyPath: path)

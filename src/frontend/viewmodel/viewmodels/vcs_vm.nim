@@ -184,6 +184,15 @@ type
     target*: string ## diff target (`file:<path>`, `commit:<hash>:<path>`, …)
     status*: string ## diff status letter of the row ("M", "A", "D", "R", …)
 
+  VCSDocumentScroll* = object
+    ## A request to bring one file of a whole-commit document into view
+    ## (VCS-Panel.md, "Whole-Commit Document", "Scrolling to a file").
+    path*: string
+      ## The file whose section goes to the top; "" before any request.
+    serial*: int
+      ## Grows with every request, so asking for the same file twice — after
+      ## the reader scrolled away — is a change the view sees.
+
   VCSVM* = ref object of ViewModel
     historyViewport*: Signal[Viewport]
       ## What the history list was given: it decides how many commits the
@@ -258,6 +267,10 @@ type
     ## it false so toggling the view mode never replaces its commit history.
     unifiedDiffActive*: Signal[bool]
     diffFiles*: Signal[seq[VCSDiffFileRow]]
+    documentScroll*: Signal[VCSDocumentScroll]
+      ## The file a whole-commit document tab was last asked to show
+      ## (`requestDocumentScroll`). The view keeps that file's section at the
+      ## top; a single-file tab ignores it.
     selectedHunks*: Signal[seq[(int, int)]]
     hunkToolbarVisible*: Signal[bool]
     hunkCopyFeedback*: Signal[bool]
@@ -771,6 +784,21 @@ proc setUnifiedDiff*(vm: VCSVM; active: bool;
   vm.unifiedDiffActive.val = active
   vm.diffFiles.val = @files
 
+proc isDiffDocument*(vm: VCSVM): bool =
+  ## True when this diff tab shows several files, as a whole-commit document
+  ## of per-file sections (VCS-Panel.md, "Whole-Commit Document"); false for
+  ## a single-file tab, whose target resolved to one file.
+  vm.diffFiles.val.len > 1
+
+proc requestDocumentScroll*(vm: VCSVM; path: string) =
+  ## Ask a whole-commit document to bring `path`'s section to the top: what
+  ## a click on a file under an expanded commit does when the commit's
+  ## document is the click's target. A path the document does not show (a
+  ## file with no hunks) is still recorded; the view scrolls nowhere for it.
+  let previous = vm.documentScroll.val
+  vm.documentScroll.val = VCSDocumentScroll(path: path,
+                                            serial: previous.serial + 1)
+
 proc setHunkState*(vm: VCSVM; selected: openArray[(int, int)];
                    toolbarVisible: bool; copyFeedback: bool) =
   vm.selectedHunks.val = @selected
@@ -1050,6 +1078,7 @@ proc createVCSVM*(): VCSVM =
       viewMode: createSignal(vmUnifiedDiff),
       unifiedDiffActive: createSignal(false),
       diffFiles: createSignal(newSeq[VCSDiffFileRow]()),
+      documentScroll: createSignal(VCSDocumentScroll()),
       selectedHunks: selectedHunks,
       hunkToolbarVisible: createSignal(false),
       hunkCopyFeedback: createSignal(false),
