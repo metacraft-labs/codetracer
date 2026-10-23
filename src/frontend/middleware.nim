@@ -52,9 +52,20 @@ when not defined(ctInExtension):
   import utils
   import services / debugger_service
 
-  proc dapInitializationHandler() =
-    infoPrint "middleware: launching trace recordingId=", $data.trace.recordingId, " folder=", $data.trace.outputFolder
-    if data.activeSession.liveDebugSession:
+  proc dapInitializationHandler(dapApi: DapApi) =
+    # THE SESSION THE `initialized` EVENT CAME FROM, which is not necessarily
+    # the tab on screen: every tab's `DapApi` is wired here
+    # (`setupMiddlewareApis`), and an event reaches the API of the session it
+    # was tagged for (`event_helpers.deliverDapEvent`). It launches that
+    # session's own trace on that session's own API.
+    var session = data.sessionOwning(dapApi)
+    if session.isNil:
+      session = data.activeSession
+    if session.trace.isNil:
+      infoPrint "middleware: initialized before the session has a trace; nothing to launch"
+      return
+    infoPrint "middleware: launching trace recordingId=", $session.trace.recordingId, " folder=", $session.trace.outputFolder
+    if session.liveDebugSession:
       infoPrint "middleware: live debug session selected; skipping replay trace launch"
       return
 
@@ -76,12 +87,12 @@ when not defined(ctInExtension):
     #   having storeable breakpoints between codetracer sessions
     infoPrint "last restart kind ", $data.lastRestartKind
     if data.lastRestartKind == RestartSubsystem:
-      data.services.debugger.dapSetBreakpoints()
+      session.services.debugger.dapSetBreakpoints()
 
     # in db-backend/rust: interpret as Some(Location..) in the first case
     #   and None: in the second case
     let restoreLocation = if data.lastRestartKind == RestartSubsystem:
-        data.services.debugger.location.toJs
+        session.services.debugger.location.toJs
       else:
         # in this case, it should just jump to entry
         cast[JsObject](nil) # Location(path: "", line: NO_LINE)
@@ -93,10 +104,10 @@ when not defined(ctInExtension):
         data.config.rrBackend.path
       else:
         cstring""
-    data.dapApi.sendCtRequest(DapConfigurationDone, js{})
-    data.dapApi.sendCtRequest(DapLaunch, js{
-      traceFolder: data.trace.outputFolder,
-      rawDiffIndex: data.startOptions.rawDiffIndex,
+    session.dapApi.sendCtRequest(DapConfigurationDone, js{})
+    session.dapApi.sendCtRequest(DapLaunch, js{
+      traceFolder: session.trace.outputFolder,
+      rawDiffIndex: session.startOptions.rawDiffIndex,
       ctRRWorkerExe: rrWorkerPath,
       restoreLocation: restoreLocation
     })
@@ -124,7 +135,16 @@ when not defined(ctInExtension):
     # with only tab scratchpad
     viewsApi.emit(InternalAddToScratchpad, value)
 
+when not defined(ctInExtension):
+  var requestFailureNoticesInstalled = false
+    ## Whether the one `onCtRequestFailed` observer below is installed.
+
 proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.exportc.}=
+  ## Connect one replay session's DAP API to its views mediator, both ways.
+  ## Called once for EVERY tab's session (`ui_js.configureSessionMiddleware`),
+  ## each with its own `DapApi` and mediator: a session whose middleware is
+  ## not set up sends none of its panes' requests and receives none of its
+  ## backend's events.
   var lastCompleteMove: MoveState = nil
 
   when not defined(ctInExtension):
@@ -144,13 +164,28 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
     # belongs in the same place, so `errorMessage` is used rather than a new
     # surface — one notification list, whoever noticed the problem.
     #
-    # Installed here, once, for every `DapApi`: the hook is module-level in
-    # `dap`, because every replay session's refusals go to the same status
-    # bar and a per-session hook would silently drop the second tab's.
-    onCtRequestFailed(proc(outcome: DapRequestOutcome) =
-      let text = requestFailureText(outcome)
-      if text.len > 0:
-        viewsApi.errorMessage(text))
+    # Installed ONCE, whichever session is set up first: the hook is
+    # module-level in `dap` and a list, so installing it per session would
+    # show every refusal once per open tab. It routes each refusal to the
+    # views of the tab that sent the request (`DapRequestOutcome.sessionId`),
+    # whose own status bar lists it; a refusal for a tab that has closed
+    # meanwhile goes to the tab on screen rather than nowhere.
+    if not requestFailureNoticesInstalled:
+      requestFailureNoticesInstalled = true
+      onCtRequestFailed(proc(outcome: DapRequestOutcome) =
+        let text = requestFailureText(outcome)
+        if text.len == 0:
+          return
+        var views: MediatorWithSubscribers = nil
+        for session in data.sessions:
+          if not session.isNil and not session.dapApi.isNil and
+             session.dapApi.sessionId == outcome.sessionId:
+            views = session.viewsApi
+            break
+        if views.isNil and data.sessions.len > 0:
+          views = data.viewsApi
+        if not views.isNil:
+          views.errorMessage(text))
 
   # for event in ..
   # dapApi.onRaw(DapStopped, proc(kind: CtEventKind, value: JsObject) = viewsApi.emit(DapStopped, value))
@@ -210,9 +245,9 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
         owner.ui.status.redraw()
       else:
         # Stays at ERROR, for the same reason as the twin
-        # branch in `ui_js.configureMiddleware`.  This handler is installed
+        # branch in `ui_js.configureSessionMiddleware`.  This handler is installed
         # by `setupMiddlewareApis`, whose sole caller is
-        # `configureMiddleware`, whose call sites (the trace, edit and dataset-review
+        # `configureSessionMiddleware`, whose call sites (the trace, edit and dataset-review
         # launch handlers) all run after
         # `createUIComponents` has unconditionally built the status
         # component — so "the event beat the status bar into existence" is
@@ -275,7 +310,7 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
   viewsApi.subscribe(InternalAddToScratchpadFromExpression, proc(kind: CtEventKind, value: cstring, sub: Subscriber) = viewsApi.emit(InternalAddToScratchpadFromExpression, value))
 
   when not defined(ctInExtension):
-    dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler())
+    dapApi.on(DapInitialized, proc(kind: CtEventKind, value: JsObject) = dapInitializationHandler(dapApi))
     viewsApi.subscribe(InternalNewOperation, proc(kind: CtEventKind, value: NewOperation, sub: Subscriber) =
       newOperationHandler(viewsApi, value)
     )

@@ -1,6 +1,7 @@
 import
   std/[ cstrutils, jsre, options ],
   ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom, panel_host,
+  session_viewmodels,
   ../viewmodel/session_vm,
   shortcut_labels,
   trace_macro, trace_static,
@@ -169,15 +170,25 @@ proc initEditorVM() =
   editorVMInstance = createEditorVM(editorVMStore)
   clog "EditorVM: parallel ViewModel instance created (stub backend)"
 
-proc syncEditorDebuggerPosition(rrTicks: int, path: cstring, line: int;
+proc ownPaneStore(self: EditorViewComponent): ReplayDataStore =
+  ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, editorVMInstance, editorVM)
+  if vm.isNil: nil else: vm.store
+
+proc syncEditorDebuggerPosition(store: ReplayDataStore;
+                                rrTicks: int, path: cstring, line: int;
                                 sourceGeneration: int = 0;
                                 sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the EditorVM's activeFileName memo sees the updated location.
-  if editorVMStore.isNil:
+  ##
+  ## `store` is the store of the tab whose component received the move —
+  ## that tab's, shown or not (`ownPaneStore`), never the shown tab's for
+  ## another tab's move.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  editorVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
@@ -4352,7 +4363,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
 
   # Feed the same position into the parallel ViewModel store.
   initEditorVM()
-  syncEditorDebuggerPosition(
+  syncEditorDebuggerPosition(self.ownPaneStore(),
     response.location.rrTicks,
     response.location.path,
     response.location.line,

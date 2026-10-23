@@ -1083,9 +1083,8 @@ suite "FilesystemVM a session with no project folder (New File)":
 
       dispose()
 
-  test "it replaces a tree another project left in the shared VM":
-    # One FilesystemVM serves every tab of a window (`shared_pane_state`),
-    # so a folderless session must drop whatever tree was there.
+  test "it replaces a tree an earlier load left in the VM":
+    # A folderless session must drop whatever tree the VM already held.
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
@@ -1124,10 +1123,8 @@ suite "FilesystemVM a session with no project folder (New File)":
       check not vm.noProjectFolder.val
       check vm.loadingState.val == lsLoading
 
-      vm.showNoProjectFolder()
-      vm.resetToInitial()
-      check not vm.noProjectFolder.val
-      check vm.loadingState.val == lsLoading
+      # (A tab switch no longer resets a shared VM: each tab has its own, so
+      # there is no `resetToInitial` left to check here.)
 
       dispose()
 

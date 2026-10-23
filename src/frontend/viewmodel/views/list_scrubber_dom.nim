@@ -30,6 +30,7 @@
 ## bar follows them.
 
 import std/math
+from isonim/core/owner import onCleanup
 
 import ../viewmodels/scrollbar_scrubber
 import ../viewmodels/horizontal_scroll
@@ -99,7 +100,20 @@ when defined(js):
     {.importjs: "document.addEventListener(#, #)".}
   proc unlistenDoc(name: cstring; handler: proc(ev: JsObject))
     {.importjs: "document.removeEventListener(#, #)".}
-  proc everyMs(handler: proc(); ms: int) {.importjs: "setInterval(#, #)".}
+  proc setIntervalJs(handler: proc(); ms: int): int {.importjs: "setInterval(#, #)".}
+  proc clearIntervalJs(id: int) {.importjs: "clearInterval(#)".}
+
+  proc everyMs(handler: proc(); ms: int) =
+    ## Run `handler` every `ms` for as long as the reactive root the scrubber
+    ## was attached in lives. A pane's view is rendered inside a root its host
+    ## disposes when the pane goes (`ui/panel_host.nim`: a GoldenLayout
+    ## container destroyed, a pane rendered again over another tab's
+    ## session); without the cleanup each of those left an interval running
+    ## for the life of the page, refreshing a detached track from the
+    ## ViewModel of a pane that no longer exists. Attached outside any root,
+    ## the interval runs for the page's life, as it always did.
+    let id = setIntervalJs(handler, ms)
+    onCleanup(proc() = clearIntervalJs(id))
   proc countJump() {.importjs:
     "(window.__ctScrubberJumps = (window.__ctScrubberJumps || 0) + 1)".}
 

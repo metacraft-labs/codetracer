@@ -1,5 +1,5 @@
 import
-  ui_imports, colors, typetraits, strutils, base64,
+  ui_imports, session_viewmodels, colors, typetraits, strutils, base64,
   ../[ types, communication ],
   ../../common/ct_event
 
@@ -35,7 +35,13 @@ from isonim/web/dom_api import nil
 # legacy event-bus handlers can find each other across calls. Mirrors
 # the pattern used by the event-log and calltrace migrations.
 var terminalOutputVMInstance: TerminalOutputVM
+  ## The SHOWN tab's TerminalOutputVM; a component's handlers act on their
+  ## own tab's (`paneVM`).
 var terminalOutputVMStore: ReplayDataStore
+
+proc paneVM(self: TerminalOutputComponent): TerminalOutputVM =
+  ## The TerminalOutputVM of the tab that holds `self` (`ownPaneVM`).
+  ownPaneVM(self, terminalOutputVMInstance, terminalOutputVM)
 
 proc rememberTerminalViews(vm: TerminalOutputVM; data: Data)
 
@@ -134,10 +140,11 @@ proc syncTerminalOutputVM(self: TerminalOutputComponent) =
   ## remembered view choice first — where the ViewModel does not load its
   ## own lines. A ViewModel the engine serves by line window loads its writes
   ## itself, when its screen view is shown.
-  if terminalOutputVMInstance.isNil or terminalOutputVMInstance.windowed:
+  let vm = self.paneVM()
+  if vm.isNil or vm.windowed:
     return
-  rememberTerminalViews(terminalOutputVMInstance, self.data)
-  terminalOutputVMInstance.setEvents(terminalOutputEventsOf(self.cachedEvents))
+  rememberTerminalViews(vm, self.data)
+  vm.setEvents(terminalOutputEventsOf(self.cachedEvents))
 
 proc syncTerminalOutputDebuggerPosition(rrTicks: int) =
   ## Mirror the debugger's rrTicks into the VM's ``currentRRTicks``
@@ -174,11 +181,12 @@ proc onTerminalEventClick(self: TerminalOutputComponent, eventElement: ProgramEv
 
 method onOutputJumpFromShellUi*(self: TerminalOutputComponent, response: int) {.async.} =
   ## The shell asks for line `response`: go to the write that started it.
-  if terminalOutputVMInstance.isNil:
+  let vm = self.paneVM()
+  if vm.isNil:
     return
-  let line = terminalOutputVMInstance.heldLine(response)
+  let line = vm.heldLine(response)
   if line.isSome and line.get.fragments.len > 0:
-    terminalOutputVMInstance.jumpToEvent(line.get.fragments[0].eventIndex)
+    vm.jumpToEvent(line.get.fragments[0].eventIndex)
 
 method restart*(self: TerminalOutputComponent) =
   self.cachedLines = JsAssoc[int, seq[TerminalEvent]]{}
@@ -188,8 +196,11 @@ method restart*(self: TerminalOutputComponent) =
   self.initialUpdate = true
   self.renderedEventIndex = 0
   self.location = types.Location()
-  if not terminalOutputVMInstance.isNil:
-    terminalOutputVMInstance.clearLines()
+  # This tab's own lines only: a trace loaded into one tab restarts that
+  # tab's components, and must not clear what another tab shows.
+  let vm = self.paneVM()
+  if not vm.isNil:
+    vm.clearLines()
 
 # TerminalOutputComponent.render() removed: IsoNim is the primary
 # renderer.  Generic callers are expected to use direct IsoNim mount

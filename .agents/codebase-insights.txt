@@ -7447,10 +7447,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   fails as "breakpoint at X:N was not verified" instead of as an empty flow at
   the end of the trace. Derive anchors with `find_line_containing`.
 - A pane on the panel host (`ui/panel_host.nim`, `PanelHostKinds`) renders
-  nothing until `setPanelSession` is called, and only `ui_js.configureMiddleware`
-  calls it. Every renderer launch handler (`onTraceLoaded`, `onNoTrace`,
+  nothing until `setPanelSession` is called, and only `ui_js.configureSessionMiddleware`
+  (through `bindWindowToSession`) calls it. Every renderer launch handler (`onTraceLoaded`, `onNoTrace`,
   `onStartDeepReview`) must therefore run that routine; a handler that skips it
   shows the pane's tab over an empty container (the dataset review did, and lost
   its VCS and Agent Activity panes). A launch with no replay engine passes
   `withDebugger = false`, which skips the DAP `initialize` (it would time out
   into a status-bar error) and the stepping toolbar.
+- Desktop window tabs each own their ViewModels: `ReplaySession.viewModels` (`ui/session_viewmodels.nim`) holds the tab's `SessionViewModel`, its `DebuggerSession` (or the `ct host` mirror, first tab only), and its Test Results / Constraints VMs. `ui_js.configureSessionMiddleware` builds them once per tab; `bindWindowToSession` (called by `session_switch.switchSession`) points the window-level pane bridges (toolbar, footer panes, module-level `init*VMFromSession` slots) at the shown tab. The panel host renders each mount over the session of the tab whose `#session-container-<n>` holds it. Legacy component handlers that write a VM should resolve their own tab's (`sessionVMOfComponent`), not the module slot, or a hidden tab's answer lands in the shown tab.
+- On macOS a Playwright run's default scratch `CODETRACER_HOME` (under `$TMPDIR`, `/var/folders/.../T/codetracer-gui-home-XXXX`) makes the session-manager socket path exceed `SUN_LEN` (104), and Electron never opens a window (`path must be shorter than SUN_LEN` in the main-process log). Run GUI specs with `CODETRACER_GUI_TEST_CODETRACER_HOME=/tmp/<short>` until the socket path is fixed.
+- `#stable-status` no longer exists in the status bar; wait for a step through `data.sessions[i].status.stableBusy` instead (`multi-replay/second_tab_panes_render.spec.ts`).

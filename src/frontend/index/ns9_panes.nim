@@ -191,15 +191,21 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
       catalogAbsence = "Test discovery failed for this project: " &
         getCurrentExceptionMsg()
 
+  # `tab` is the asking renderer tab, echoed on both answers so each reaches
+  # that tab's panes (`ui_js.ns9PanesTarget`); undefined from a sender that
+  # names none.
+  let tab = response.toJs["tab"]
   mainWindow.webContents.send "CODETRACER::ns9-panes-catalog", js{
     catalog: cstring(catalogJson),
-    absence: cstring(catalogAbsence)
+    absence: cstring(catalogAbsence),
+    tab: tab
   }
 
   let (info, absence) = nargoInfoJson(folder)
   mainWindow.webContents.send "CODETRACER::ns9-panes-constraints", js{
     info: cstring(info),
     provenance: cstring("nargo info --json, run just now"),
-    absence: cstring(absence)
+    absence: cstring(absence),
+    tab: tab
   }
   debugPrint "ns9-panes: answered for ", folder

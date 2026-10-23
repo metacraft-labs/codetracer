@@ -37,6 +37,7 @@
 ## ---------------------------------------------------------------------------
 
 import ui_imports, kdom, ../renderer, command_interpreter, shell, ./agent_activity
+import ./session_viewmodels
 
 import ../communication
 import std/json
@@ -333,18 +334,22 @@ proc syncLegacyCommandPaletteIntoVM*(self: CommandPaletteComponent) =
   ## whatever the legacy ``CommandInterpreter`` already accumulated.
   ## Defensive nil-checks so a partially-initialised palette can call
   ## through this without exploding.
-  if commandPaletteVMInstance.isNil or self.isNil:
+  if self.isNil:
     return
-  commandPaletteVMInstance.setResults(legacyResultsToVm(self.results))
-  commandPaletteVMInstance.setQuery(safeStr(self.inputValue))
-  commandPaletteVMInstance.setSelected(self.selected)
-  commandPaletteVMInstance.setInputPlaceholder(safeStr(self.inputPlaceholder))
-  commandPaletteVMInstance.setActiveCommandName(safeStr(self.activeCommandName))
-  commandPaletteVMInstance.setMode(legacyModeToVm(self))
+  # The ViewModel of this component's own tab (`ownPaneVM`).
+  let vm = ownPaneVM(self, commandPaletteVMInstance, commandPaletteVM)
+  if vm.isNil:
+    return
+  vm.setResults(legacyResultsToVm(self.results))
+  vm.setQuery(safeStr(self.inputValue))
+  vm.setSelected(self.selected)
+  vm.setInputPlaceholder(safeStr(self.inputPlaceholder))
+  vm.setActiveCommandName(safeStr(self.activeCommandName))
+  vm.setMode(legacyModeToVm(self))
   if self.active:
-    commandPaletteVMInstance.open()
+    vm.open()
   else:
-    commandPaletteVMInstance.close()
+    vm.close()
 
 proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent) =
   ## Refresh the Command Palette's IsoNim surface after local legacy-state
@@ -353,9 +358,14 @@ proc requestCommandPalettePanelRefresh*(self: CommandPaletteComponent) =
   self.syncLegacyCommandPaletteIntoVM()
 
 proc wireCommandPaletteResultRunner(self: CommandPaletteComponent) =
-  if commandPaletteVMInstance.isNil or self.isNil:
+  ## Run a chosen result through `self`'s interpreter — the palette of the
+  ## tab whose ViewModel this is.
+  if self.isNil:
     return
-  commandPaletteVMInstance.onResultRun = proc(index: int) =
+  let vm = ownPaneVM(self, commandPaletteVMInstance, commandPaletteVM)
+  if vm.isNil:
+    return
+  vm.onResultRun = proc(index: int) =
     if index >= 0 and index < self.results.len:
       self.selected = index
       self.interpreter.runCommandPanelResult(self.results[index])
@@ -376,11 +386,17 @@ proc initCommandPaletteVMFromSession*(vm: CommandPaletteVM) =
   let store = vm.store
   commandPaletteVMStore = store
   commandPaletteVMInstance = vm
-  if not commandPaletteComponentRef.isNil:
-    commandPaletteComponentRef.wireCommandPaletteResultRunner()
+  # The shown tab's palette component — not the module's first one — runs
+  # this ViewModel's results and is mirrored into it.
+  let shownComponent = data.shownTabComponent(Content.CommandPalette)
+  let component =
+    if shownComponent.isNil: commandPaletteComponentRef
+    else: CommandPaletteComponent(shownComponent)
+  if not component.isNil:
+    component.wireCommandPaletteResultRunner()
   clog "CommandPaletteVM: the session's instance installed"
-  if not commandPaletteComponentRef.isNil:
-    commandPaletteComponentRef.syncLegacyCommandPaletteIntoVM()
+  if not component.isNil:
+    component.syncLegacyCommandPaletteIntoVM()
 
 # ---------------------------------------------------------------------------
 # Mount helper — Web only

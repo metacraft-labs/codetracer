@@ -231,6 +231,15 @@ when defined(js):
     ## The `<n>` of the `session-container-<n>` holding `host`, or
     ## `NotInAnyTab`.
 
+  proc tabOfIsoNimPaneHost*(host: isonim_dom_api.Element): int =
+    ## The tab (`<n>` of `session-container-<n>`) whose container holds
+    ## `host`, or `NotInAnyTab` for a host outside every tab container —
+    ## which session's ViewModels a pane in `host` shows
+    ## (`ui/panel_host.nim`, `ui/session_viewmodels.nim`).
+    if isonim_dom_api.isNodeNil(isonim_dom_api.Node(host)):
+      return NotInAnyTab
+    jsTabOfHost(host)
+
   proc findIsoNimPaneHost*(hostId: cstring;
                            activeTab: int): isonim_dom_api.Element =
     ## THE host of the pane `hostId` (`stateComponent-0`, `vCSComponent-0`, …)

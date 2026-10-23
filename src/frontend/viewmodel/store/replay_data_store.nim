@@ -763,7 +763,7 @@ proc resetForNewSession*(store: ReplayDataStore) =
   ##
   ## WHY A STORE CAN HOLD A REQUEST THAT WAS NEVER ASKED. The panel
   ## ViewModels issue their first request from an effect that runs at
-  ## CONSTRUCTION, and construction happens in `configureMiddleware` —
+  ## CONSTRUCTION, and construction happens in `configureSessionMiddleware` —
   ## before `openSession` has made a worker on the web path, and before
   ## the DAP session is selected on the desktop one. `requestLocals` marks
   ## `"load-locals"` pending, hands the frame to a channel with no peer

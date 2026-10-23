@@ -13,6 +13,7 @@ import
   ./js_helpers,
   ./launch_config,
   ./settle_once,
+  ./tab_answers,
   ../lang
 
 var
@@ -205,9 +206,11 @@ proc loadFunctions(path: cstring): Future[seq[Function]] {.async.} =
   else:
     return cast[seq[Function]](@[])
 
-proc sendFilenames(main: js, paths: seq[cstring], traceFolder: cstring, selfContained: bool) {.async.} =
+proc sendFilenames(main: js, paths: seq[cstring], traceFolder: cstring, selfContained: bool,
+                   tab: JsObject) {.async.} =
   let filenames = await loadFilenames(paths, traceFolder, selfContained)
-  main.webContents.send "CODETRACER::filenames-loaded", js{filenames: filenames}
+  main.webContents.send "CODETRACER::filenames-loaded",
+    withTab(js{filenames: filenames}, tab)
 
 # THE ROOT LOAD ANSWERS ON EVERY EXIT.  The Files pane shows "Loading..."
 # until ``filesystem-loaded`` arrives, and nothing else ends that state, so a
@@ -229,12 +232,16 @@ proc filesystemLoadFailure(paths: seq[cstring]; reason: string): cstring =
   cstring(what & ": " &
     (if reason.len > 0: reason else: "the index process gave no reason"))
 
-proc sendFilesystemFailure(main: js, paths: seq[cstring], reason: string) =
+proc sendFilesystemFailure(main: js, paths: seq[cstring], reason: string,
+                           tab: JsObject) =
   let message = filesystemLoadFailure(paths, reason)
   errorPrint "loading the file tree failed: ", $message
-  main.webContents.send "CODETRACER::filesystem-loaded", js{ error: message }
+  main.webContents.send "CODETRACER::filesystem-loaded",
+    withTab(js{ error: message }, tab)
 
-proc sendFilesystem*(main: js, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
+proc sendFilesystem*(main: js, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool,
+                     tab: JsObject = jsUndefined) {.async.} =
+  ## `tab`: the renderer tab whose load this answers (`tab_answers`).
   var folders: CodetracerFile = nil
   var failure = ""
   try:
@@ -242,11 +249,13 @@ proc sendFilesystem*(main: js, paths: seq[cstring], traceFilesPath: cstring, sel
   except:
     failure = getCurrentExceptionMsg()
   if folders.isNil:
-    sendFilesystemFailure(main, paths, failure)
+    sendFilesystemFailure(main, paths, failure, tab)
   else:
-    main.webContents.send "CODETRACER::filesystem-loaded", js{ folders: folders }
+    main.webContents.send "CODETRACER::filesystem-loaded",
+      withTab(js{ folders: folders }, tab)
 
-proc sendFilesystemWithCategory(main: js, categoryName: cstring, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool) {.async.} =
+proc sendFilesystemWithCategory(main: js, categoryName: cstring, paths: seq[cstring], traceFilesPath: cstring, selfContained: bool,
+                                tab: JsObject) {.async.} =
   var folders: CodetracerFile = nil
   var failure = ""
   try:
@@ -257,9 +266,10 @@ proc sendFilesystemWithCategory(main: js, categoryName: cstring, paths: seq[cstr
     let message = filesystemLoadFailure(paths, failure)
     errorPrint "loading the ", $categoryName, " file tree failed: ", $message
     main.webContents.send "CODETRACER::filesystem-category-loaded",
-      js{ category: categoryName, error: message }
+      withTab(js{ category: categoryName, error: message }, tab)
   else:
-    main.webContents.send "CODETRACER::filesystem-category-loaded", js{ category: categoryName, folders: folders }
+    main.webContents.send "CODETRACER::filesystem-category-loaded",
+      withTab(js{ category: categoryName, folders: folders }, tab)
 
 proc isAbsoluteFilesystemPath(path: string): bool =
   if path.len > 0 and (path[0] == '/' or path[0] == '\\'):
@@ -456,10 +466,11 @@ proc sourceFoldersFromTracePaths*(trace: Trace): Future[seq[cstring]] {.async.} 
     folders.addUniquePath(cstring(root))
   return folders
 
-proc sendSymbols(main: js, traceFolder: cstring) {.async.} =
+proc sendSymbols(main: js, traceFolder: cstring, tab: JsObject) {.async.} =
   try:
     let symbols = await loadSymbols(traceFolder)
-    main.webContents.send "CODETRACER::symbols-loaded", js{symbols: symbols}
+    main.webContents.send "CODETRACER::symbols-loaded",
+      withTab(js{symbols: symbols}, tab)
   except:
     errorPrint "loading symbols: ", getCurrentExceptionMsg()
 
@@ -539,12 +550,15 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
   ## `var ServerData` and work on a local copy of it, which on the JS backend
   ## is a COPY of the object (see `startup.init`), so `data.save` never
   ## reached the process state.
+  # The tab this load answers, taken now: the sends below run after awaits,
+  # and every one of them is for this load's tab (`tab_answers`).
+  let tab = loadTab
   # set title
   when not defined(server):
     main.setTitle(trace.program)
 
   let traceFilesPath = cstring($trace.outputFolder / "files")
-  discard sendFilenames(main, trace.sourceFolders, trace.outputFolder, trace.imported)
+  discard sendFilenames(main, trace.sourceFolders, trace.outputFolder, trace.imported, tab)
   # Choosing the roots reads the trace folder, so it can fail too; the
   # pane must still get its answer (see `sendFilesystem`).
   var filesystemSourceFolders: seq[cstring] = @[]
@@ -557,7 +571,7 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
       rootsFailure = "choosing the source folders failed"
 
   if rootsFailure.len > 0:
-    sendFilesystemFailure(main, trace.sourceFolders, rootsFailure)
+    sendFilesystemFailure(main, trace.sourceFolders, rootsFailure, tab)
   # Check if we have a workspace folder and if trace files are outside it
   elif not data.workspaceFolder.isNil and data.workspaceFolder.len > 0:
     # Check if all trace source folders are inside the workspace
@@ -570,15 +584,15 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
 
     if not allInside and outsideFolders.len > 0:
       # Send trace files as a separate category
-      discard sendFilesystemWithCategory(main, cstring"Trace Files", outsideFolders, traceFilesPath, trace.imported)
+      discard sendFilesystemWithCategory(main, cstring"Trace Files", outsideFolders, traceFilesPath, trace.imported, tab)
     else:
       # All trace files are inside workspace, just update the existing tree
-      discard sendFilesystem(main, filesystemSourceFolders, traceFilesPath, trace.imported)
+      discard sendFilesystem(main, filesystemSourceFolders, traceFilesPath, trace.imported, tab)
   else:
     # No workspace folder set, use normal loading
-    discard sendFilesystem(main, filesystemSourceFolders, traceFilesPath, trace.imported)
+    discard sendFilesystem(main, filesystemSourceFolders, traceFilesPath, trace.imported, tab)
 
-  discard sendSymbols(main, trace.outputFolder)
+  discard sendSymbols(main, trace.outputFolder, tab)
 
   var functions = await loadFunctions(cstring($trace.outputFolder / "function_index.json"))
   var save = await getSave(trace.sourceFolders, config.test)
@@ -614,7 +628,7 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
       visualReplayPlayerError = cstring(visualReplayPlayer.error)
       warnPrint "visual replay player failed: ", visualReplayPlayer.error
 
-  main.webContents.send "CODETRACER::trace-loaded", js{
+  main.webContents.send "CODETRACER::trace-loaded", withTab(js{
     trace: trace,
     functions: functions,
     save: save,
@@ -627,7 +641,7 @@ proc loadTrace*(main: js, trace: Trace, config: Config, helpers: Helpers): Futur
     visualReplayAvailable: visualReplayAvailable,
     visualReplayPlayerUrl: visualReplayPlayerUrl,
     visualReplayPlayerError: visualReplayPlayerError,
-  }
+  }, tab)
 
 proc jsDateNow(): float {.importjs: "Date.now()".}
 proc jsRandom(): float {.importjs: "Math.random()".}
@@ -729,7 +743,7 @@ proc checkRecordLaunch(exe: cstring; recordTarget: cstring;
     let refusal = recordLaunchRefusal(facts, defect)
     errorPrint "index: record launch refused: ", refusal
     mainWindow.webContents.send "CODETRACER::failed-record",
-      js{errorMessage: cstring(refusal)}
+      forLoadTab(js{errorMessage: cstring(refusal)})
     return false
   applyRecordLaunchCwd(options, facts)
   let warning = recordLaunchCwdWarning(facts)
@@ -838,13 +852,13 @@ proc sendInitAndLoadTrace(trace: Trace) {.async.} =
 
   mainWindow.webContents.send(
     "CODETRACER::init",
-    js{
+    forLoadTab(js{
       home: paths.home.cstring,
       config: data.config,
       layout: data.layout,
       helpers: data.helpers,
       startOptions: data.startOptions,
-      bypass: true})
+      bypass: true}))
 
   await loadTrace(mainWindow, data.trace, data.config, data.helpers)
 
@@ -878,14 +892,14 @@ proc prepareForLiveTrace*(trace: Trace,
 
   mainWindow.webContents.send(
     "CODETRACER::dap-live-session-selected",
-    js{
+    forLoadTab(js{
       trace: trace,
       replayId: replayId,
       program: program,
       args: programArgs,
       cwd: cwd,
       liveRecordingDir: liveRecordingDir,
-    })
+    }))
 
   await sendInitAndLoadTrace(trace)
 
@@ -906,13 +920,13 @@ proc loadExistingRecord*(recordingId: cstring) {.async.} =
   infoPrint "index: init frontend"
   mainWindow.webContents.send(
     "CODETRACER::init",
-    js{
+    forLoadTab(js{
       home: paths.home.cstring,
       config: data.config,
       layout: data.layout,
       helpers: data.helpers,
       startOptions: data.startOptions,
-      bypass: true})
+      bypass: true}))
 
   if not data.trace.isNil:
     infoPrint "index: loading trace in mainWindow"
@@ -974,7 +988,7 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
   noteReplaySelected(replayId)
   mainWindow.webContents.send(
     "CODETRACER::dap-replay-selected",
-    js{trace: data.trace, replayId: replayId})
+    forLoadTab(js{trace: data.trace, replayId: replayId}))
 
 var
   replayStopAllowed*: proc(replayId: int): bool = nil
@@ -1048,6 +1062,8 @@ proc replayTx(txHash: cstring, pid: int): Future[(cstring, cstring)] {.async.} =
 proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
   ## IPC field name ``traceId`` preserved (M-REC-5 wire format).  The
   ## payload value is our local recording id.
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
   await loadExistingRecord(response.traceId)
 
@@ -1059,6 +1075,10 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.
   ## metadata so it can create a new session tab and load the trace.
   ## The IPC field name ``traceId`` is preserved here as it is part of
   ## the renderer ↔ main-process wire format owned by M-REC-5.
+  # The load is for the tab the renderer creates on
+  # `open-trace-in-tab-ready`, which is then the tab on screen; no tab
+  # has its id yet, so its messages name none (`tab_answers`).
+  loadTab = jsUndefined
   let recordingId = response.traceId
   infoPrint "index: open-trace-in-tab for recording ", $recordingId
 
@@ -1072,6 +1092,8 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.
   await loadExistingRecord(recordingId)
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   let (rawOutputOrError, recordingId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
   if recordingId.len > 0:
     await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
@@ -1091,6 +1113,8 @@ proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.
     quit(1)
 
 proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
+  # A recorder process asked, not a tab: the tab on screen (`tab_answers`).
+  loadTab = jsUndefined
   let trace = await electron_vars.app.findTraceByRecordProcessId(pid)
   infoPrint "index: trace by record process id has recording id ", trace.recordingId
   prefetchedTrace = trace
@@ -1108,13 +1132,15 @@ proc onStopRecordingProcess*(sender: js, response: js) {.async.} =
       # the renderer's re-record gate stays shut until a recording it launched
       # is accounted for.
       mainWindow.webContents.send "CODETRACER::failed-record",
-        js{errorMessage: cstring"Recording stopped."}
+        forLoadTab(js{errorMessage: cstring"Recording stopped."})
     else:
       warnPrint "Unable to stop recording process"
   else:
     warnPrint "There is not any recording process"
 
 proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   let selection = await selectDir(cstring"Select Trace Output Folder", codetracerTraceDir)
   if selection.len == 0:
     errorPrint "no folder selected"
@@ -1123,7 +1149,7 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
     let trace = await electron_vars.app.findByPath(selection)
     if not trace.isNil:
       mainWindow.webContents.send "CODETRACER::loading-trace",
-        js{trace: trace}
+        forLoadTab(js{trace: trace})
       prefetchedTrace = trace
       data.trace = trace
       data.pluginClient.trace = trace
@@ -1141,6 +1167,8 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
   ## its output path.  If the trace is not yet registered (e.g. a freshly
   ## generated macro trace), it registers it first, then loads it into
   ## the current session.
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   let tracePath = response.tracePath
   if tracePath.len == 0:
     errorPrint "onLoadTraceFile: empty trace path"
@@ -1169,7 +1197,7 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
     trace = await electron_vars.app.findByPath(traceDir)
   if not trace.isNil:
     mainWindow.webContents.send "CODETRACER::loading-trace",
-      js{trace: trace}
+      forLoadTab(js{trace: trace})
     prefetchedTrace = trace
     data.trace = trace
     data.pluginClient.trace = trace
@@ -1184,8 +1212,8 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
     errorPrint "onLoadTraceFile: no trace found at path: ", tracePath,
       " (nor at ", traceDir, ")"
     mainWindow.webContents.send "CODETRACER::trace-load-error",
-      js{error: cstring("No trace found at " & $tracePath &
-         ". The .ct file may need to be imported first.")}
+      forLoadTab(js{error: cstring("No trace found at " & $tracePath &
+         ". The .ct file may need to be imported first.")})
 
 proc initEditModeForFolder(sender: js; folder: cstring) {.async.}
 
@@ -1203,6 +1231,8 @@ proc rememberRecentFolder(folder: cstring) {.async.} =
     warnPrint "could not update recent folder metadata: ", result.error
 
 proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   var selection = selectedOpenFolderForTest()
   if selection.len == 0:
     selection = await selectDir(cstring"Select Folder to Open")
@@ -1213,11 +1243,15 @@ proc onOpenFolderDialog*(sender: js, response: js) {.async.} =
     discard rememberRecentFolder(selection)
 
 proc onLoadRecentFolder*(sender: js, response: jsobject(folderPath=cstring)) {.async.} =
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   await initEditModeForFolder(sender, response.folderPath)
   discard rememberRecentFolder(response.folderPath)
 
 proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
   ## Show file dialog to select a trace folder/file
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   let selection = await selectDir(cstring"Select Trace Folder")
   if selection.len == 0:
     debugPrint "no trace folder selected"
@@ -1230,6 +1264,8 @@ proc onOpenTraceDialog*(sender: js, response: js) {.async.} =
 
 proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
   ## Parse launch.json and send configurations to frontend for menu display
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   debugPrint "onRecordFromLaunch called"
 
   if data.workspaceFolder.isNil or data.workspaceFolder.len == 0:
@@ -1261,11 +1297,13 @@ proc onRecordFromLaunch*(sender: js, response: js) {.async.} =
       env: envJs
     })
 
-  mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+  mainWindow.webContents.send "CODETRACER::launch-configs-loaded", forLoadTab(js{configs: configsJs})
 
 proc onRecordWithLaunchConfig*(sender: js,
     response: jsobject(configIndex=int, recordBackend=cstring)) {.async.} =
   ## Execute recording with a specific launch configuration
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   infoPrint "onRecordWithLaunchConfig called with index: ", $response.configIndex
   infoPrint "workspaceFolder: ", $data.workspaceFolder
 
@@ -1299,7 +1337,7 @@ proc onRecordWithLaunchConfig*(sender: js,
         cstring"")
       if not ensureDirectory(liveTrace.outputFolder):
         mainWindow.webContents.send "CODETRACER::failed-record",
-          js{errorMessage: cstring"failed to create live recording directory"}
+          forLoadTab(js{errorMessage: cstring"failed to create live recording directory"})
         return
       mainWindow.webContents.send "CODETRACER::new-notification",
         newNotification(NotificationInfo, fmt"Starting live session: {config.name}")
@@ -1370,7 +1408,7 @@ proc onRecordWithLaunchConfig*(sender: js,
 
     if error.isNil:
       infoPrint "index: recorded successfully from launch config, now loading trace..."
-      mainWindow.webContents.send "CODETRACER::successful-record"
+      mainWindow.webContents.send "CODETRACER::successful-record", forLoadTab(js{})
       infoPrint "index: calling onLoadTraceByRecordProcessId with pid " & $processResult.value.pid
       await onLoadTraceByRecordProcessId(nil, processResult.value.pid)
       infoPrint "index: onLoadTraceByRecordProcessId completed"
@@ -1379,13 +1417,13 @@ proc onRecordWithLaunchConfig*(sender: js,
       errorPrint "record error message: ", cast[cstring](error)
       if ownsSlot:
         mainWindow.webContents.send "CODETRACER::failed-record",
-          js{errorMessage: cstring"codetracer record command failed"}
+          forLoadTab(js{errorMessage: cstring"codetracer record command failed"})
   else:
     errorPrint "record start process error: ", processResult.error
     let errorSpecificText = if not processResult.error.isNil: cast[cstring](processResult.error.code) else: cstring""
     let errorText = cstring"record start process error: " & errorSpecificText
     mainWindow.webContents.send "CODETRACER::failed-record",
-      js{errorMessage: errorText}
+      forLoadTab(js{errorMessage: errorText})
 
 proc sendNotification*(kind: NotificationKind, message: string) =
   # The renderer subscribes to the namespaced channel (`ui_js.configureIPC`),
@@ -1430,7 +1468,7 @@ proc initEditMode(sender: js; folders: seq[cstring]) {.async.} =
     string(userLayoutDir / "default_edit_layout.json"))
 
   # Send no-trace message to switch to edit mode
-  mainWindow.webContents.send "CODETRACER::no-trace", js{
+  mainWindow.webContents.send "CODETRACER::no-trace", forLoadTab(js{
     path: folder,
     lang: save.project.lang,
     home: paths.home.cstring,
@@ -1442,7 +1480,7 @@ proc initEditMode(sender: js; folders: seq[cstring]) {.async.} =
     filesystem: filesystem,
     functions: functions,
     save: save
-  }
+  })
 
   # Also load and send launch configs for the workspace.
   #
@@ -1470,12 +1508,14 @@ proc initEditMode(sender: js; folders: seq[cstring]) {.async.} =
         configType: config.configType,
         env: envJs
       })
-    mainWindow.webContents.send "CODETRACER::launch-configs-loaded", js{configs: configsJs}
+    mainWindow.webContents.send "CODETRACER::launch-configs-loaded", forLoadTab(js{configs: configsJs})
 
 proc initEditModeForFolder(sender: js; folder: cstring) {.async.} =
   await initEditMode(sender, @[folder])
 
 proc onInitEditMode*(sender: js, response: jsobject(folder=cstring)) {.async.} =
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   await initEditModeForFolder(sender, response.folder)
 
 proc onNewFile*(sender: js, response: js) {.async.} =
@@ -1494,11 +1534,15 @@ proc onNewFile*(sender: js, response: js) {.async.} =
   ## edit session with no workspace, and everything downstream that asks —
   ## `onRecordFromLaunch`, `hcr_launch`, a later mode switch — gets a truthful
   ## answer instead of a stale "the welcome screen is up".
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   await initEditMode(sender, @[])
 
 proc onNewRecord*(sender: js,
     response: jsobject(filename=cstring, args=seq[cstring], options=JsObject,
                        projectOnly=bool, recordBackend=cstring)) {.async.}=
+  # Every message of the load this starts answers the tab that asked.
+  startLoadFor(response.toJs)
   infoPrint "index: new record for", response.filename, " originally ", response.args, " projectOnly?: ", response.projectOnly
   # One recorder at a time.  `data.recordProcess` is a single slot and
   # `ct build` writes into the target project's own build directory, so a
@@ -1510,8 +1554,8 @@ proc onNewRecord*(sender: js,
   if not data.recordProcess.isNil:
     warnPrint "index: a record process is already running; refusing a second one"
     mainWindow.webContents.send "CODETRACER::failed-record",
-      js{errorMessage: cstring"A recording is already running; " &
-                       cstring"wait for it to finish before starting another."}
+      forLoadTab(js{errorMessage: cstring"A recording is already running; " &
+                       cstring"wait for it to finish before starting another."})
     return
   # TODO fix replay
   var recordArgs = response.args
@@ -1571,7 +1615,7 @@ proc onNewRecord*(sender: js,
       # should be working, but there was a problem: TODO maybe debug more
       # but ther other `failed-record` also works here for errors indeed, i noticed it later
       # sendNewNotification(NotificationKind.NotificationError, "index: build: can't find a filename to build: stopping")
-      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring"index: build: can't find a filename or project to build: stopping"}
+      mainWindow.webContents.send "CODETRACER::failed-record", forLoadTab(js{errorMessage: cstring"index: build: can't find a filename or project to build: stopping"})
       return
 
     if response.projectOnly:
@@ -1601,7 +1645,7 @@ proc onNewRecord*(sender: js,
     else:
       errorPrint "index: build error: ", buildProcessResult.error
       # sendNewNotification(NotificationKind.NotificationError, "index: build error: " & $JSON.stringify(buildProcessResult.error))
-      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: cstring("index: build error: " & $JSON.stringify(buildProcessResult.error))}
+      mainWindow.webContents.send "CODETRACER::failed-record", forLoadTab(js{errorMessage: cstring("index: build error: " & $JSON.stringify(buildProcessResult.error))})
       return
   elif recordArgs.len == 0 and selectedRecordTarget.len > 0:
     recordArgs = @[selectedRecordTarget]
@@ -1618,7 +1662,7 @@ proc onNewRecord*(sender: js,
         liveLaunch.outputFolder)
       if not ensureDirectory(liveTrace.outputFolder):
         mainWindow.webContents.send "CODETRACER::failed-record",
-          js{errorMessage: cstring"failed to create live recording directory"}
+          forLoadTab(js{errorMessage: cstring"failed to create live recording directory"})
         return
       sendNotification(NotificationKind.NotificationInfo, "starting live native session")
       await prepareForLiveTrace(
@@ -1660,20 +1704,20 @@ proc onNewRecord*(sender: js,
 
     if error.isNil:
       infoPrint "index: recorded successfully"
-      mainWindow.webContents.send "CODETRACER::successful-record"
+      mainWindow.webContents.send "CODETRACER::successful-record", forLoadTab(js{})
       await onLoadTraceByRecordProcessId(nil, processResult.value.pid)
     else:
       errorPrint "record error: ", error
       if ownsSlot:
         mainWindow.webContents.send "CODETRACER::failed-record",
-          js{errorMessage: cstring"codetracer record command failed"}
+          forLoadTab(js{errorMessage: cstring"codetracer record command failed"})
 
   else:
     errorPrint "record start process error: ", processResult.error
     let errorSpecificText = if not processResult.error.isNil: cast[cstring](processResult.error.code) else: cstring""
     let errorText = cstring"record start process error: " & errorSpecificText
     mainWindow.webContents.send "CODETRACER::failed-record",
-      js{errorMessage: errorText}
+      forLoadTab(js{errorMessage: errorText})
 
 proc restartDbBackend {.async.} =
   # copied and adapted from Petar's code for re-recording + re-replaying up in this file
@@ -1704,7 +1748,8 @@ proc jsLocalTimeText(): cstring {.importjs: "new Date().toLocaleTimeString()".}
   ## rather than in the renderer because this is the process that watched
   ## `ct record-test` finish.
 
-proc sendTestRunSettled(recordingId: cstring; errorMessage: cstring) =
+proc sendTestRunSettled(recordingId: cstring; errorMessage: cstring;
+                        tab: JsObject) =
   ## TELL THE RENDERER THE RUN IS OVER, however it ended.
   ##
   ## `GUI/Core-Panes/Test-Results-Pane.md` §5. `onRunTest` has five exits and
@@ -1721,14 +1766,19 @@ proc sendTestRunSettled(recordingId: cstring; errorMessage: cstring) =
   ## and `onNewRecord` between them. A settle keyed on it would fire for
   ## re-records that have nothing to do with a test, and would still leave
   ## every successful run unsettled.
-  mainWindow.webContents.send "CODETRACER::test-run-settled", js{
+  # `tab`: the Test Results pane of the tab that started the run
+  # (`tab_answers`).
+  mainWindow.webContents.send "CODETRACER::test-run-settled", withTab(js{
     recordingId: recordingId,
     recordedAt: (if recordingId.len > 0: jsLocalTimeText() else: cstring""),
     errorMessage: errorMessage
-  }
+  }, tab)
 
 proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   infoPrint "index: run test: ", response[]
+  # The run, and the recording it loads, answer the tab that asked.
+  let tab = askingTab(response.toJs)
+  startLoadFor(response.toJs)
 
   # SETTLED EXACTLY ONCE, ON EVERY PATH — including the ones that are not a
   # return value. `GUI/Core-Panes/Test-Results-Pane.md` §5 named the residual:
@@ -1743,7 +1793,7 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
   let once = newSettleOnce()
   proc settle(recordingId: cstring; errorMessage: cstring) =
     if once.claim():
-      sendTestRunSettled(recordingId, errorMessage)
+      sendTestRunSettled(recordingId, errorMessage, tab)
 
   proc handle(once: SettleOnce): Future[void] {.async.} =
     let pid = nodeProcess.pid.to(int)
@@ -1842,13 +1892,14 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
       # which the Test Results pane does not subscribe to, so a failed run
       # left the button turning for two minutes under a message saying it had
       # started. That is the reported defect in its most-travelled form.
-      mainWindow.webContents.send "CODETRACER::failed-record", js{errorMessage: errorText}
+      mainWindow.webContents.send "CODETRACER::failed-record", forLoadTab(js{errorMessage: errorText})
       settle(cstring"", errorText)
 
   let settleFailure = proc(detail: string) =
     errorPrint "index: run-test: ", detail
     sendTestRunSettled(cstring"", cstring(
-      "CodeTracer could not finish handling ct record-test's answer: " & detail))
+      "CodeTracer could not finish handling ct record-test's answer: " & detail),
+      tab)
   let loadFailedAfterSettle = proc(detail: string) =
     # The run had already been settled — this is the recording LOAD that
     # follows it failing. The renderer has been told how the run ended; the
@@ -1889,7 +1940,8 @@ proc makeDirRecursive(path: cstring) {.importjs:
   "require('fs').mkdirSync(#, {recursive: true})".}
 
 proc sendTestSuiteSettled(events: cstring; exitCode: int;
-                          stderrText: cstring; errorMessage: cstring) =
+                          stderrText: cstring; errorMessage: cstring;
+                          tab: JsObject) =
   ## TELL THE RENDERER THE SUITE RUN IS OVER, however it ended.
   ##
   ## `events` is what `ct-test --events` wrote (JSON Lines; "" when there is
@@ -1899,12 +1951,13 @@ proc sendTestSuiteSettled(events: cstring; exitCode: int;
   ## started or its answer could not be collected. A message of its own, not
   ## `test-run-settled`: see `DesktopRunKind` for why a settle of one runner
   ## must not end a run of the other.
-  mainWindow.webContents.send "CODETRACER::test-suite-settled", js{
+  # `tab`: the tab whose Test Results pane started the run (`tab_answers`).
+  mainWindow.webContents.send "CODETRACER::test-suite-settled", withTab(js{
     events: events,
     exitCode: exitCode,
     stderr: stderrText,
     errorMessage: errorMessage
-  }
+  }, tab)
 
 proc onRunTestSuite*(sender: JsObject,
                      response: jsobject(workspaceRoot=cstring)) {.async.} =
@@ -1913,10 +1966,11 @@ proc onRunTestSuite*(sender: JsObject,
   # leave the pane on "running…" for ever. Asserted through
   # `settle_once.settleGuarded` (`src/frontend/tests/settle_once_test.nim`).
   let once = newSettleOnce()
+  let tab = askingTab(response.toJs)
   proc settle(events: cstring; exitCode: int; stderrText: cstring;
               errorMessage: cstring) =
     if once.claim():
-      sendTestSuiteSettled(events, exitCode, stderrText, errorMessage)
+      sendTestSuiteSettled(events, exitCode, stderrText, errorMessage, tab)
 
   var eventsPath = cstring""
   proc handle(once: SettleOnce): Future[void] {.async.} =
@@ -1968,7 +2022,7 @@ proc onRunTestSuite*(sender: JsObject,
   let settleFailure = proc(detail: string) =
     errorPrint "index: run-test-suite: ", detail
     sendTestSuiteSettled(cstring"", -1, cstring"", cstring(
-      "CodeTracer could not run ct test run: " & detail))
+      "CodeTracer could not run ct test run: " & detail), tab)
   try:
     await settleGuarded(once, handle, settleFailure)
   finally:

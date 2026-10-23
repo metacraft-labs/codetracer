@@ -469,26 +469,6 @@ proc setCatalog*(vm: TestResultsVM; catalog: TestCatalog) =
 proc setRunAbsence*(vm: TestResultsVM; reason: string) =
   vm.runAbsence.val = reason
 
-proc resetToInitial*(vm: TestResultsVM) =
-  ## Put back what a freshly created VM shows for a project: no catalog, no
-  ## run, no stated absence, no recordings.
-  ##
-  ## For a window tab that has never been shown (`shared_pane_state`): this VM
-  ## is one per window, so without it a new tab would show the catalog and run
-  ## of the tab that was active before it. Tests pin it to
-  ## `createTestResultsVM`'s initial values.
-  ##
-  ## What the HOST installed is left alone, because it belongs to the window
-  ## and not to a project: the runner and row actions (`setRunTests`,
-  ## `setRowActions`), the run in flight (`inFlight`, which the host's
-  ## `endRun` clears whichever tab is showing when the run ends) and the
-  ## modifier-key state.
-  vm.catalog.val = newSeq[TestItem]()
-  vm.summary.val = TestRunSummary()
-  vm.runAbsence.val = ""
-  vm.projectName.val = ""
-  vm.recordings.val = newSeq[TestRecordingRef]()
-
 proc setRunTests*(vm: TestResultsVM; runner: RunTestsProc) =
   ## Install the host's runner. A WRITE TO THE GRAPH, which is the point: the
   ## install happens after the pane has mounted, and the button's class and

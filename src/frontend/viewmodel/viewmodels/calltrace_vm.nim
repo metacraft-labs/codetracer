@@ -943,7 +943,7 @@ proc createCalltraceVM*(store: ReplayDataStore;
       when defined(js):
         # Legitimate, hence DEBUG.  This is the dispose path itself:
         # it runs on session teardown and whenever a stub-backed VM is
-        # replaced by a real-backend one during `configureMiddleware`.
+        # replaced by a real-backend one during `configureSessionMiddleware`.
         # Both are ordinary lifecycle events.  The shouting was a leftover
         # from debugging an unexpected early disposal; the fact that
         # disposal happened is worth tracing, but it is not an error.

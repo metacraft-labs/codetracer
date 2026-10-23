@@ -75,7 +75,7 @@ const processEntry = (page: Page, role: string) =>
  * Read off the process tree, which renders `aria-selected="true"` on the
  * row bound to `SessionViewModel.activeProcessRecordingId` — the signal
  * that actually routes DAP requests (see `dap.nim`'s
- * `setActiveSessionThreadId`).
+ * `DapApi.setRoutingThreadId`).
  *
  * This replaces a probe of `window.data.activeRecording.role`, a global
  * that exists nowhere in the product. It was written into `window` by an

@@ -13,7 +13,7 @@
 ## `installAgentActivityReviewOpenService` are both a record of proc fields
 ## that `ui_js.configure` fills in and a `ui/` module calls. Their headers give
 ## the reason this one is filled in from `configure` rather than from
-## `configureMiddleware`: that routine runs only from the launch handlers
+## `configureSessionMiddleware`: that routine runs only from the launch handlers
 ## (`onTraceLoaded`, `onNoTrace`, `onStartDeepReview`), and wiring placed there
 ## is a silent no-op in any launch mode whose handler skips it.
 ##

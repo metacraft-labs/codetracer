@@ -14,7 +14,8 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
-from ../dap import trackCtRequests, ctRequestIdOf
+from ../dap import trackCtRequests, ctRequestIdOf, ctRequestSessionId
+import ./session_viewmodels
 import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as store_types import nil
@@ -30,8 +31,12 @@ from ../viewmodel/session_vm import SessionViewModel
 import isonim_origin_chain
 import origin_chain_runtime
 
-# The pane's StateVM: the session's (`initStateVMFromSession`), rendered by
-# the panel host (`ui/panel_host`).
+# The pane's StateVM: the SHOWN tab's session's (`initStateVMFromSession`,
+# called again on every tab switch). The panel host renders each tab's State
+# pane over its own tab's session (`ui/panel_host`), so these two name only
+# what the window-level bridges (the watch input, the origin side panel) act
+# on; what a session's moves and answers write goes to that session's own
+# store (`syncStoreDebuggerPositionInto`, `wireLocalsAnswers`).
 var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
 
@@ -76,8 +81,10 @@ proc submitWatchExpression(self: StateComponent) =
 
   # Sync the new watch expression to the StateVM, whose stop loader re-asks
   # with it.
-  if stateVMInstance != nil:
-    stateVMInstance.addWatch($expression)
+  # The watch belongs to this component's own tab (`ownPaneVM`).
+  let ownVM = ownPaneVM(self, stateVMInstance, stateVM)
+  if ownVM != nil:
+    ownVM.addWatch($expression)
 
   input.toJs.value = cstring""
 
@@ -262,11 +269,36 @@ proc installSourceLanguage*(store: ReplayDataStore) =
   store.sourceLanguageOf = proc(file: string): string =
     langWireName(toLangFromFilename(cstring(file)))
 
-proc initStateVMFromSession*(vm: StateVM) =
+proc createSessionOriginChainVM*(vm: StateVM;
+                                 scratchpad: ScratchpadVM = nil): OriginChainVM =
+  ## The OriginChainVM of the session whose `StateVM` is `vm`, built once
+  ## when that session's ViewModels are (`ui_js.configureSessionMiddleware`),
+  ## with the bridges that let the State pane's row renderer dispatch
+  ## ``ct/originChain`` requests through the same VM the side panel uses (M4
+  ## deliverable §3.2.1 + §3.2.3). Each tab's session has its own, so a chain
+  ## asked for in one tab is never shown in another.
+  ##
+  ## `scratchpad` is THAT session's Scratchpad ViewModel: a chain pinned from
+  ## this session's side panel lands in this session's Scratchpad. Nil pins
+  ## into the pane's (`installScratchpadForPins`), for a host with one
+  ## session.
+  result = createOriginChainVM(vm.store)
+  if scratchpad.isNil:
+    wireOriginChainBridges(vm, result)
+  else:
+    let target = scratchpad
+    origin_chain_bridges.wireOriginChainBridges(vm, result,
+      proc(): ScratchpadVM = target)
+
+proc initStateVMFromSession*(vm: StateVM; originChain: OriginChainVM = nil) =
   ## Hand the pane the session's `StateVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ## Called for the shown tab's session on every tab switch.
   ##
+  ## `originChain` is that session's OriginChainVM
+  ## (`createSessionOriginChainVM`); nil builds one here, for a host that keeps
+  ## a single session.
   let store = vm.store
   stateVMStore = store
   stateVMInstance = vm
@@ -278,12 +310,12 @@ proc initStateVMFromSession*(vm: StateVM) =
     theVm.loadValueHistory(expression)
   # The watch list needs no bridge here: the stop loader re-asks
   # `ct/load-locals` when it changes.
-  # Create the companion OriginChainVM and wire the bridges so the
-  # State Pane row renderer can dispatch ``ct/originChain`` requests
-  # through the same VM the side-panel uses (M4 deliverable §3.2.1 +
-  # §3.2.3).
-  originChainVMInstance = createOriginChainVM(store)
-  wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+  # The companion OriginChainVM, its bridges wired so the State Pane row
+  # renderer can dispatch ``ct/originChain`` requests through the same VM the
+  # side-panel uses (M4 deliverable §3.2.1 + §3.2.3).
+  originChainVMInstance =
+    if originChain.isNil: createSessionOriginChainVM(vm)
+    else: originChain
   # The VM this replaces may already own the side panel's render
   # effect; drop it so the panel re-binds to the new VM's signals.
   releaseOriginSidePanelEffect()
@@ -397,9 +429,9 @@ proc toVariableChildren*(val: Value): seq[store_types.Variable] =
 proc localsToStoreRows*(legacyLocals: seq[Variable]): seq[store_types.Variable] =
   ## Map one ``ct/load-locals`` response body onto the store's rows.
   ##
-  ## SEPARATED FROM ``syncStoreLocals`` SO A TEST CAN CALL IT. The sync
-  ## proc needs the module-level ``stateVMStore``, which only exists once
-  ## the app has booted, so every probe that wanted to know what the State
+  ## SEPARATED FROM ``syncStoreLocalsInto`` SO A TEST CAN CALL IT. The sync
+  ## proc needs a session's store, which only exists once the app has
+  ## booted, so every probe that wanted to know what the State
   ## pane *displays* had to re-implement this mapping by hand — and a
   ## hand-written copy cannot notice when the real one is wrong. It did not
   ## notice: `ci/test/watch_expressions_browser_probe.nim` read the refusal
@@ -422,9 +454,11 @@ proc localsToStoreRows*(legacyLocals: seq[Variable]): seq[store_types.Variable] 
       isWatch = (not v.value.isNil and v.value.isWatch),
     ))
 
-proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
-  ## Mirror one `ct/load-locals` answer into the ViewModel store so the
-  ## StateVM's currentVariables memo sees the same data.
+proc syncStoreLocalsInto*(store: ReplayDataStore;
+                          response: CtLoadLocalsResponseBody) =
+  ## Mirror one `ct/load-locals` answer into `store` — the store of the
+  ## session whose request it answers — so its StateVM's currentVariables
+  ## memo sees the same data.
   ##
   ## Both RR and Materialized (DB) traces flow through this path;
   ## the only difference is *which* values arrive, not how the sync
@@ -435,13 +469,13 @@ proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
   ## ``valueDisplayText`` helper now mirrors the legacy atom-value
   ## ``$value`` call which dispatches into the
   ## proper field per ``TypeKind``.
-  if stateVMStore.isNil or response.isNil:
+  if store.isNil or response.isNil:
     return
   # THE SESSION'S STOP LOADER APPLIES THE ANSWER IT ASKED FOR, through the
   # shared decoder (`store/locals_answer`), on the request's own future. This
   # fan-out delivers the same answer a second time; applying it here as well
   # would write the locals twice per stop.
-  if stateVMStore.localsLoadedByHost:
+  if store.localsLoadedByHost:
     return
   # WATCH ANSWERS TRAVEL IN THE SAME LIST. Each row carries `value.isWatch`
   # (set by the backend — see `db-backend/src/watch_expression.rs`); the
@@ -456,23 +490,32 @@ proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
   # sender or a second subscriber from pairing an answer with the wrong
   # request. One the debugger has moved past is dropped rather than drawn
   # beside the new stop.
-  if not stateVMStore.applyLocalsAnswer(vmRows,
-                                        $ctRequestIdOf(response.toJs)):
+  if not store.applyLocalsAnswer(vmRows,
+                                 $ctRequestIdOf(response.toJs)):
     cdebug "[PIPELINE] syncStoreLocals: dropped an answer for a stop the " &
       "debugger has left"
     return
   cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmRows.len} row(s) into store"
 
-var localsAnswersWired = false
+var localsRequestsTracked = false
 
-proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers) =
+proc localsStoreForRequest(requestId: cstring): ReplayDataStore =
+  ## The store of the tab whose `DapApi` sent `requestId` (`dap.ctRequestId`
+  ## names each request by its session), or the shown tab's when no open tab
+  ## sent it.
+  let vm = sessionVMOf(
+    data.sessionWithDapSessionId(ctRequestSessionId(requestId)))
+  if not vm.isNil: vm.store else: stateVMStore
+
+proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers;
+                        store: ReplayDataStore) =
   ## Connect the web renderer's `ct/load-locals` traffic to the store's
   ## request ledger — both ends, and the one direct subscription.
   ##
   ## THE WEB SENDS `ct/load-locals` FROM ONE PLACE PER STOP: the session's
   ## stop loader (`sdk/stop_loader` -> the real backend's `sendCommand` ->
   ## `DapApi.asyncSendCtRequest`), which also applies the answer, so
-  ## `syncStoreLocals` stands down on such a store. Every sender reaches `dap.dispatchCtRequest`, and that
+  ## `syncStoreLocalsInto` stands down on such a store. Every sender reaches `dap.dispatchCtRequest`, and that
   ## is where the tracker records each request's stop under its identity —
   ## so the matching holds however many senders there are. The answer reaches
   ## the store through the direct subscription below, where the mediator
@@ -485,27 +528,35 @@ proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers) =
   ## component sends up. It is kept, as it was in `ui_js.nim`, and the
   ## matching does not depend on how many deliveries there are.)
   ##
-  ## Idempotent: `configureMiddleware` can run again for a new trace.
-  if localsAnswersWired:
-    return
-  localsAnswersWired = true
-  trackCtRequests(CtLoadLocals,
-    onSent = proc(requestId: cstring) =
-      if not stateVMStore.isNil:
-        stateVMStore.noteLocalsRequestSent($requestId),
-    onAnswered = proc(requestId: cstring) =
-      if not stateVMStore.isNil:
-        stateVMStore.forgetLocalsRequest($requestId))
+  ##
+  ## PER SESSION: each tab's session calls this once with its own views
+  ## mediator and store (`ui_js.configureSessionMiddleware`), so an answer
+  ## reaches the store of the tab that asked, shown or not. The request
+  ## tracking is the transport's, one for every tab, and finds each
+  ## request's store by the session its identity names.
+  if not localsRequestsTracked:
+    localsRequestsTracked = true
+    trackCtRequests(CtLoadLocals,
+      onSent = proc(requestId: cstring) =
+        let target = localsStoreForRequest(requestId)
+        if not target.isNil:
+          target.noteLocalsRequestSent($requestId),
+      onAnswered = proc(requestId: cstring) =
+        let target = localsStoreForRequest(requestId)
+        if not target.isNil:
+          target.forgetLocalsRequest($requestId))
   # A DIRECT viewsApi subscription, bypassing the component mediator routing,
   # so the store receives the answer even when the State component's own
   # subscription is not wired up yet.
+  let sessionStore = store
   viewsApi.subscribe(CtLoadLocalsResponse,
     proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
       cdebug ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
         $(if response.isNil: 0 else: response.locals.len) & " variables")
-      syncStoreLocals(response))
+      syncStoreLocalsInto(sessionStore, response))
 
-proc lookupSourceLine(path: cstring; line: int): string =
+proc lookupSourceLine(editors: JsAssoc[cstring, EditorViewComponent];
+                      path: cstring; line: int): string =
   ## Look up the source code at `<path>:<line>` from the editor cache.
   ## Mirrors the legacy ``StateComponent.excerpt`` lookup which read
   ## ``data.ui.editors[path].tabInfo.sourceLines[line - 1]``. Returns
@@ -514,14 +565,16 @@ proc lookupSourceLine(path: cstring; line: int): string =
   ##     lines have not yet been populated, or
   ##   * the requested line is outside the source-lines bounds (1-based
   ##     line numbers, so ``line < 1`` or ``line > sourceLines.len``).
-  ## In either case the caller (``syncStoreCodeStateLine``) routes the
+  ## In either case the caller (``syncStoreCodeStateLineInto``) routes the
   ## empty string into the IsoNim view's ``no-code`` fallback so the
   ## ``#code-state-line-{id}`` element is still emitted.
-  if line < 1:
+  ##
+  ## `editors` are one tab's: the tab whose session stopped there.
+  if line < 1 or editors.isNil:
     return ""
-  if not data.ui.editors.hasKey(path):
+  if not editors.hasKey(path):
     return ""
-  let editor = data.ui.editors[path]
+  let editor = editors[path]
   if editor.isNil or editor.tabInfo.isNil:
     return ""
   let lines = editor.tabInfo.sourceLines
@@ -531,22 +584,26 @@ proc lookupSourceLine(path: cstring; line: int): string =
 
 type
   SourceLineRetryData = ref object
+    store: ReplayDataStore
+    editors: JsAssoc[cstring, EditorViewComponent]
     path: cstring
     line: int
     attempts: int
 
 proc retrySourceLine(data: SourceLineRetryData) {.cdecl.} =
-  if stateVMStore.isNil:
+  if data.store.isNil:
     return
   data.attempts += 1
-  let cur = lookupSourceLine(data.path, data.line)
+  let cur = lookupSourceLine(data.editors, data.path, data.line)
   if cur.len > 0:
-    stateVMStore.updateCodeStateLine(data.line, cur)
+    data.store.updateCodeStateLine(data.line, cur)
     return
   if data.attempts < 30:
     setTimeoutWithArg(retrySourceLine, 100, data)
 
-proc syncStoreCodeStateLine*(path: cstring; line: int) =
+proc syncStoreCodeStateLineInto*(store: ReplayDataStore;
+                                 editors: JsAssoc[cstring, EditorViewComponent];
+                                 path: cstring; line: int) =
   ## Mirror the active source line into the ViewModel store so the
   ## IsoNim state view can render the ``#code-state-line-{id}``
   ## element. The lookup uses the in-memory editor cache populated as
@@ -562,10 +619,13 @@ proc syncStoreCodeStateLine*(path: cstring; line: int) =
   ## as the source arrives.  The retries stop once source is found or
   ## after a small budget — the caller will hit this proc again on
   ## the next move event.
-  if stateVMStore.isNil:
+  ##
+  ## `store` and `editors` are ONE session's — the session the move belongs
+  ## to, shown or not: its source line is looked up in its own tab's editors.
+  if store.isNil:
     return
-  let initial = lookupSourceLine(path, line)
-  stateVMStore.updateCodeStateLine(line, initial)
+  let initial = lookupSourceLine(editors, path, line)
+  store.updateCodeStateLine(line, initial)
   if initial.len > 0:
     return
 
@@ -576,33 +636,39 @@ proc syncStoreCodeStateLine*(path: cstring; line: int) =
   # fallback until then. The captured ``path`` / ``line`` are stable
   # for the duration of this scheduled re-check; any subsequent move
   # cancels the relevance of older retries because the next call to
-  # ``syncStoreCodeStateLine`` overwrites the signal anyway.
+  # ``syncStoreCodeStateLineInto`` overwrites the signal anyway.
   let retryData = SourceLineRetryData(
+    store: store,
+    editors: editors,
     path: path,
     line: line,
     attempts: 0
   )
   setTimeoutWithArg(retrySourceLine, 100, retryData)
 
-proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int;
-                                sourceGeneration: int = 0;
-                                sourceDigest: cstring = cstring"") =
-  ## Mirror the legacy debugger position into the ViewModel store so
-  ## the StateVM's reactive pipeline sees the same rrTicks value.
-  if stateVMStore.isNil:
+proc syncStoreDebuggerPositionInto*(store: ReplayDataStore;
+                                    editors: JsAssoc[cstring, EditorViewComponent];
+                                    rrTicks: int, path: cstring, line: int;
+                                    sourceGeneration: int = 0;
+                                    sourceDigest: cstring = cstring"") =
+  ## Mirror one session's debugger position into that session's store
+  ## (`store`, with `editors` its tab's editors) so its StateVM's reactive
+  ## pipeline sees the same rrTicks value — the session the move belongs to,
+  ## whichever tab is on screen.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  stateVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
-  syncStoreCodeStateLine(path, line)
+  syncStoreCodeStateLineInto(store, editors, path, line)
   cdebug fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
 
 proc redrawDynamically*(self: StateComponent) =
   # IsoNim is the primary renderer. All DOM updates are handled by
   # IsoNim reactive effects when the store signals change (via
-  # syncStoreLocals). No Karax DOM manipulation needed.
+  # syncStoreLocalsInto). No Karax DOM manipulation needed.
   discard
 
 proc toValueHistoryRows(results: seq[HistoryResult]): seq[ValueHistoryRow] =
@@ -634,6 +700,15 @@ method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   for _, value in self.values:
     value.location = response.location
 
-  syncStoreDebuggerPosition(
+  # Into the store of the tab that holds this component — the tab whose move
+  # it is, shown or not — from that tab's editors. A component no tab holds
+  # uses the pane's.
+  let session = self.data.sessionOfComponent(self)
+  let vm = sessionVMOf(session)
+  let store = if vm.isNil: stateVMStore else: vm.store
+  let editors =
+    if session.isNil or session.ui.isNil: data.ui.editors
+    else: session.ui.editors
+  syncStoreDebuggerPositionInto(store, editors,
     response.location.rrTicks, response.location.path, response.location.line,
     response.location.sourceGeneration, response.location.sourceDigest)

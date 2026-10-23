@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, os, strformat, strutils, sequtils, jsconsole ],
-  electron_vars, served_client,
+  electron_vars, served_client, tab_answers,
   ../[ config, types, lang ],
   ../lib/[ jslib, electron_lib, misc_lib ],
   ./layout_config_repair,
@@ -196,7 +196,8 @@ proc reviewSourceLookup(data: ServerData, filename: cstring): ReviewSourceLookup
     result.text = cstring($file.sourceContent)
 
 proc sendTabInfo(main: js, location: types.Location, filename, source: cstring,
-                 editorView: EditorView, messagePath: string, lang: Lang) =
+                 editorView: EditorView, messagePath: string, lang: Lang,
+                 tab: JsObject) =
   ## Hand one loaded document back to the renderer.
   ##
   ## Factored out of `open` so the disk-backed path and the review path answer
@@ -228,7 +229,9 @@ proc sendTabInfo(main: js, location: types.Location, filename, source: cstring,
     sourceLines = sourceLines.slice(location.functionFirst - 1, location.functionLast)
     sourceText = sourceLines.join(jsNl) & jsNl
 
-  main.webContents.send "CODETRACER::" & messagePath, js{
+  # `tab`: the renderer tab whose `tab-load` this answers — its future waits
+  # in that tab's `network` (`tab_answers`).
+  main.webContents.send "CODETRACER::" & messagePath, withTab(js{
     "argId": argId,
     "value": TabInfo(
       overlayExpanded: -1,
@@ -242,9 +245,11 @@ proc sendTabInfo(main: js, location: types.Location, filename, source: cstring,
       path: filename,
       lang: lang
     )
-  }
+  }, tab)
 
-proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int): Future[void] {.async.} =
+proc open*(data: ServerData, main: js, location: types.Location, editorView: EditorView, messagePath: string, replay: bool, exe: seq[cstring], lang: Lang, line: int,
+           tab: JsObject = jsUndefined): Future[void] {.async.} =
+  ## `tab`: the renderer tab that asked (`tab_answers`), named on the answer.
   var source = cstring""
   # var tokens: seq[seq[Token]] = @[]
   var symbols = JsAssoc[cstring, seq[js]]{}
@@ -258,7 +263,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
   let review = data.reviewSourceLookup(filename)
   if review.claimed:
     if review.text.len > 0:
-      sendTabInfo(main, location, filename, review.text, editorView, messagePath, lang)
+      sendTabInfo(main, location, filename, review.text, editorView, messagePath, lang, tab)
       return
     # The dataset names this file but carries no text for it.  Say so instead
     # of falling through to a disk read that resolves against the wrong
@@ -401,7 +406,7 @@ proc open*(data: ServerData, main: js, location: types.Location, editorView: Edi
           data.tabs[filename].fileWatched = false
 
   echo "index_config open: file read succesfully"
-  sendTabInfo(main, location, filename, source, editorView, messagePath, lang)
+  sendTabInfo(main, location, filename, source, editorView, messagePath, lang, tab)
 
 
 proc findConfig(folder: cstring, configPath: cstring): cstring =

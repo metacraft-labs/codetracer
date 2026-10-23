@@ -2013,6 +2013,13 @@ type
   # During the incremental migration (M1-M6) the corresponding fields in
   # Data will be forwarded here via templates so that existing code keeps
   # compiling without changes.
+  PendingTabAnswer* = object
+    ## One answer queued for a hidden tab (`ReplaySession.pendingTabAnswers`):
+    ## the IPC message it is and its handler applied to it. An object, not a
+    ## tuple, so its fields keep their names in the JS a test reads.
+    message*: cstring
+    deliver*: proc()
+
   ReplaySession* = ref object
     id*:              ReplaySessionId
     trace*:           Trace
@@ -2049,15 +2056,26 @@ type
     visualReplayAvailable*: bool
     visualReplayPlayerUrl*: cstring
     visualReplayPlayerError*: cstring
-    # What this tab last showed in the panes whose ViewModels are shared by
-    # every tab of the window (Files, Test Results, Constraints), saved when
-    # the tab is left and put back when it is entered again (#835, rule 6 of
-    # Multi-Window-Tab-Management.md §Tab Behavior). Opaque here: it is a
-    # `viewmodel/viewmodels/shared_pane_state.SharedPaneSnapshot`, read and
-    # written only by `ui/session_switch.nim`; this module cannot import the
-    # ViewModel types it holds. Nil until the tab has been left once, which is
-    # how a tab entered for the first time is told apart.
-    sharedPaneSnapshot*: JsObject
+    # THE SESSION'S OWN VIEWMODELS — its `SessionViewModel` and the
+    # `DebuggerSession` (or `ct host` mirror) that built it, plus the
+    # per-tab panes' ViewModels the session layer does not hold
+    # (Multi-Window-Tab-Management.md §Tab Behavior rule 1: each tab is an
+    # independent session; Shared-DOM-Front-Ends.md D7: one VM set per
+    # session). A `ui/session_viewmodels.SessionViewModels`, which this module
+    # cannot name: the ViewModel layer is built over the types declared here.
+    # Read and written only through `ui/session_viewmodels.nim`. Nil until the
+    # session first gets a trace, an edit session or a dataset review
+    # (`ui_js.onTraceLoaded`, `ui_js.onNoTrace`, `ui_js.onStartDeepReview`),
+    # or is first asked for a per-tab pane ViewModel.
+    viewModels*: RootRef
+    # THE ANSWERS THAT ARRIVED FOR THIS TAB WHILE ANOTHER WAS ON SCREEN, in
+    # arrival order. An answer from the main process names the tab that asked
+    # (`index/tab_answers.nim`); its handler writes through `Data`'s
+    # active-session forwarding and draws the window's chrome, so it runs
+    # when its tab is the one shown: at once if it is, else from here, when
+    # the tab is next shown (`ui/tab_answer_routing.deliverTabAnswer`,
+    # `switchSession`). Dropped with the tab when it closes.
+    pendingTabAnswers*: seq[PendingTabAnswer]
 
   Data* = ref object
     redraw*:                proc: void
@@ -2373,6 +2391,60 @@ when defined(ctRenderer):
     let x = Transport()
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=x)
 
+  proc wireSessionServiceMoves*(data: Data; session: ReplaySession;
+                                source: Services = nil) =
+    ## Make `session`'s own legacy services follow `session`'s moves: its
+    ## debugger service (location, frame, stop signal — what the status bar
+    ## is seeded from and the debugger actions read) and, while its tab is the
+    ## one on screen, its editor service (which opens the moved-to file in the
+    ## layout on screen, so never in another tab's editor).
+    ##
+    ## EVERY TAB'S SESSION, not only the window's first (rule 1 of
+    ## `GUI/Multi-Window-Tab-Management.md` §Tab Behavior: each tab is an
+    ## independent session). The callbacks are installed by
+    ## `services/*_service.nim` on the first session's services when those
+    ## modules load; a tab opened later gets copies of them from `source` (the
+    ## services of a session that has them, `session_switch.createNewSession`
+    ## passes the tab it was opened from). They act on `self` — the service
+    ## object they are called on — so a copy updates this tab's services.
+    ## Before this, a later tab's debugger service never took a move, and the
+    ## status bar refresh in `ui_js.onTraceLoaded` copied its empty location
+    ## over the tab's real one.
+    ##
+    ## A move is routed to the `DapApi` of the session it was tagged for
+    ## (`event_helpers.deliverDapEvent`), so this handler runs for `session`'s
+    ## moves whichever tab is on screen.
+    if session.isNil or session.dapApi.isNil:
+      return
+    if not source.isNil and not session.services.isNil:
+      let target = session.services
+      if not target.debugger.isNil and not source.debugger.isNil and
+         target.debugger.onCompleteMove.isNil:
+        target.debugger.onCompleteMove = source.debugger.onCompleteMove
+      if not target.editor.isNil and not source.editor.isNil and
+         target.editor.onCompleteMove.isNil:
+        target.editor.onCompleteMove = source.editor.onCompleteMove
+    let sessionDapApi = session.dapApi
+    sessionDapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+      # Guard against -1 sentinel: activeSessionIndex is -1 when no session
+      # is active (a CtCompleteMove before the session is fully initialized).
+      # Dropping the event is safe; the component path (register ->
+      # api.subscribe) handles it independently.
+      if data.activeSessionIndex >= 0:
+        # The callbacks are installed by `services/*_service.nim` when they
+        # load; a session whose services have none yet takes no service
+        # update.
+        let owner = data.sessionOwning(sessionDapApi)
+        if owner.isNil or owner.services.isNil:
+          return
+        let debugger = owner.services.debugger
+        if not debugger.isNil and not debugger.onCompleteMove.isNil:
+          discard debugger.onCompleteMove(debugger, value)
+        let editor = owner.services.editor
+        if owner == data.sessions[data.activeSessionIndex] and
+            not editor.isNil and not editor.onCompleteMove.isNil:
+          discard editor.onCompleteMove(editor, value))
+
   var data* = Data(
     lastAgentPrompt: "",
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
@@ -2479,31 +2551,7 @@ when defined(ctRenderer):
   console.log "data.viewsApi"
   console.log data.viewsApi
 
-  let firstSessionDapApi = data.dapApi
-  data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-    # Guard against -1 sentinel: activeSessionIndex is -1 when no session is
-    # active (a CtCompleteMove before the session is fully initialized).
-    # Dropping the event is safe; the component
-    # path (register -> api.subscribe) handles it independently.
-    if data.activeSessionIndex >= 0:
-      # This is the first session's move, and it arrives here even while
-      # another tab is on screen, because events are routed by the session
-      # they were tagged with. Its debugger state is its own, so it is
-      # updated whichever tab is shown. The editor service opens the moved-to
-      # file in the layout on screen, so it follows the move only while this
-      # session's tab is that layout: never in another tab's editor.
-      # The callbacks are installed by `services/*_service.nim` when they
-      # load; a session whose services have none yet takes no service update.
-      let owner = data.sessionOwning(firstSessionDapApi)
-      if owner.isNil or owner.services.isNil:
-        return
-      let debugger = owner.services.debugger
-      if not debugger.isNil and not debugger.onCompleteMove.isNil:
-        discard debugger.onCompleteMove(debugger, value)
-      let editor = owner.services.editor
-      if owner == data.sessions[data.activeSessionIndex] and
-          not editor.isNil and not editor.onCompleteMove.isNil:
-        discard editor.onCompleteMove(editor, value))
+  wireSessionServiceMoves(data, data.sessions[0])
 
   data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
     ## Handle the macro expansion response from the backend (S6).

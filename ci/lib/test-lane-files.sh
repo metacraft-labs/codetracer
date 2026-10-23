@@ -1026,6 +1026,11 @@ test_lane_files() {
 		# the one that was active when the toolbar's routes were built.
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `session_viewmodels_test.nim` holds each window tab to owning its
+		# ViewModels: the panel host renders a tab's panes over that tab's
+		# session, a hidden tab's move updates its own store only, each tab has
+		# its own Test Results ViewModel, and closing a tab disposes its own.
+		echo src/frontend/tests/session_viewmodels_test.nim
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim

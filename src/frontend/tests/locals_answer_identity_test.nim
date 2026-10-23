@@ -46,7 +46,8 @@
 ## views mediator and a component mediator built by `types`' own
 ## constructors, `StateComponent.register` / `onCompleteMove`,
 ## `state.wireLocalsAnswers` (called by `ui_js` in
-## production), and the session `ui_js.configureMiddleware` builds: a
+## production, once per tab's session with that session's mediator and
+## store), and the session `ui_js.configureSessionMiddleware` builds: a
 ## `DebuggerSession` over `newDapBackendService` (the constructor `ui_js`
 ## uses), its panel ViewModels and its stop loader, attached to a trace as
 ## `ui_js.attachLoadedTrace` attaches it. The frame shape the backend answers
@@ -150,7 +151,7 @@ proc localsAnswer(requestSeq: int; marker: int): JsObject =
   }
 
 # ---------------------------------------------------------------------------
-# The renderer, wired as `ui_js.configureMiddleware` wires it
+# The renderer, wired as `ui_js.configureSessionMiddleware` wires it
 # ---------------------------------------------------------------------------
 
 let dapApi = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 0)
@@ -159,7 +160,7 @@ setupMiddlewareApis(dapApi, viewsApi)
 
 # The State component registers FIRST, before the session's StateVM exists —
 # the order the desktop is in when `createUIComponents` beats
-# `configureMiddleware`. Its moves are delivered by hand (`moveTo`): the
+# `configureSessionMiddleware`. Its moves are delivered by hand (`moveTo`): the
 # component's `onCompleteMove` moves the store's debugger position.
 let component = StateComponent(
   id: 0,
@@ -226,7 +227,7 @@ let rustWire = langWireName(toLangFromFilename(cstring"/src/calc.rs"))
 doAssert rustWire != LoadLocalsDefaultLang
 
 # ---------------------------------------------------------------------------
-# The session, built as `ui_js.configureMiddleware` builds it
+# The session, built as `ui_js.configureSessionMiddleware` builds it
 # ---------------------------------------------------------------------------
 
 let session = newDebuggerSession(newDapBackendService(dapApi))
@@ -235,7 +236,7 @@ installSourceLanguage(store)
 store.claimLocalsLoading()
 session.session.initializePanelViewModels()
 initStateVMFromSession(session.session.stateVM)
-wireLocalsAnswers(viewsApi)
+wireLocalsAnswers(viewsApi, store)
 session.attach(localFolderTrace("/trace"))
 # The engine answers every launch with an unsolicited `ct/listProcesses`, a
 # single-trace launch too (`dap_server.rs::dispatch_session_load_event`, over

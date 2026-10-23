@@ -17,7 +17,7 @@
 
 import
   strutils, os,
-  ui_imports,
+  ui_imports, session_viewmodels,
   value, scratchpad,
   ../[ renderer, communication, dap, event_helpers],
   ../lib/isonim_styles,
@@ -205,15 +205,25 @@ proc initFlowVM() =
   clog "FlowVM: parallel ViewModel instance created (stub backend)"
   tryMountIsoNimFlowPanel()
 
-proc syncFlowDebuggerPosition(rrTicks: int, path: cstring, line: int;
+proc ownPaneStore(self: FlowComponent): ReplayDataStore =
+  ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, flowVMInstance, flowVM)
+  if vm.isNil: nil else: vm.store
+
+proc syncFlowDebuggerPosition(store: ReplayDataStore;
+                              rrTicks: int, path: cstring, line: int;
                               sourceGeneration: int = 0;
                               sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the FlowVM's auto-load effect fires with the updated rrTicks.
-  if flowVMStore.isNil:
+  ##
+  ## `store` is the store of the tab whose component received the move —
+  ## that tab's, shown or not (`ownPaneStore`), never the shown tab's for
+  ## another tab's move.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  flowVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
@@ -341,7 +351,7 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     # Feed the same position into the parallel ViewModel store.
     initFlowVM()
-    syncFlowDebuggerPosition(
+    syncFlowDebuggerPosition(self.ownPaneStore(),
       response.location.rrTicks,
       response.location.path,
       response.location.line,

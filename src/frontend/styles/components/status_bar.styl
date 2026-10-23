@@ -405,7 +405,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   // three touch this notice. 44abd587a moved this stack from `bottom: 38px` to
   // `NOTIFICATION_STACK_BOTTOM` — the vertical axis, and nothing else.
   // a0b9f8fb1 stopped the notice appearing three times, by fixing a component
-  // re-subscription in `configureMiddleware`; no CSS at all. `right: 8px` has
+  // re-subscription in `configureSessionMiddleware`; no CSS at all. `right: 8px` has
   // been the anchor since the toasts were first placed (adc508550, March
   // 2025), and the notice only started landing on a pane when 3850bd9b8 moved
   // it out of its own body-level banner into this stack — that commit fixed a

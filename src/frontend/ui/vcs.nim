@@ -21,7 +21,7 @@
 ## VCS-Panel.md, "Unified Diff View (Editor Integration)".
 
 import
-  ui_imports
+  ui_imports, session_viewmodels
 
 import git_cli
 import agent_activity
@@ -383,16 +383,7 @@ proc owningSession(self: VCSComponent): ReplaySession =
   ## tab happens to be in front.
   if self.isNil or self.data.isNil:
     return nil
-  for session in self.data.sessions:
-    if session.isNil or session.ui.isNil:
-      continue
-    let mapping = session.ui.componentMapping[Content.VCS]
-    if mapping.isNil:
-      continue
-    for _, component in mapping:
-      if component == Component(self):
-        return session
-  nil
+  self.data.sessionOfComponent(Component(self))
 
 proc hasNoProjectFolder(self: VCSComponent): bool =
   ## Does this panel's OWN session have no project folder (New File)?
@@ -467,7 +458,7 @@ proc loadMoreCommits*(self: VCSComponent) =
   if not self.isGitRepo:
     return
   self.loadingMore = true
-  let vm = if vcsVMInstances.hasKey(self.id): vcsVMInstances[self.id] else: nil
+  let vm = if vcsVMInstances.hasKey(data.tabScopedId(self)): vcsVMInstances[data.tabScopedId(self)] else: nil
   if not vm.isNil:
     vm.setLoadingMore(true)
   let cwd = self.getWorkingDirectory()
@@ -609,10 +600,10 @@ proc startFileWatching(self: VCSComponent) =
 proc ensureVCSVM(self: VCSComponent): VCSVM =
   if self.isNil:
     return nil
-  if vcsVMInstances.hasKey(self.id):
-    return vcsVMInstances[self.id]
+  if vcsVMInstances.hasKey(data.tabScopedId(self)):
+    return vcsVMInstances[data.tabScopedId(self)]
   result = createVCSVM()
-  vcsVMInstances[self.id] = result
+  vcsVMInstances[data.tabScopedId(self)] = result
 
 proc isDeepReviewMode(self: VCSComponent): bool =
   ## Return true when the VCS panel should show DeepReview changeset data
@@ -692,7 +683,7 @@ proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
 proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   if self.isNil:
     return
-  vcsComponentRefs[self.id] = self
+  vcsComponentRefs[data.tabScopedId(self)] = self
   let vm = ensureVCSVM(self)
   if vm.isNil:
     return
@@ -764,22 +755,6 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   # leave a stale diff behind.
   vm.setUnifiedDiff(false, @[])
   vm.setHunkState(@[], false, false)
-
-proc syncSessionVCSIntoVM*(session: ReplaySession) =
-  ## Hand the shared `VCSVM` (one per component id, so one for every tab)
-  ## what `session`'s OWN VCS panels hold. Called when a tab is entered again
-  ## (`session_switch.syncSessionVCSHook`), so a tab shows its own
-  ## repository, or its own "No project folder is open.", rather than
-  ## whatever the tab shown before it last wrote.
-  if session.isNil or session.ui.isNil:
-    return
-  let mapping = session.ui.componentMapping[Content.VCS]
-  if mapping.isNil:
-    return
-  for _, component in mapping:
-    if component.isNil:
-      continue
-    VCSComponent(component).syncLegacyVCSIntoVM()
 
 proc openUnifiedDiffTab*(self: VCSComponent; target: string) =
   ## Open (or focus) a dedicated editor-area tab showing the unified diff for
@@ -1159,12 +1134,11 @@ proc vcsCallbacks(component: VCSComponent): VCSCallbacks =
 setPanelRenderer(Content.VCS,
   proc(r: WebRenderer; host: isonim_dom_api.Element;
        session: SessionViewModel): isonim_dom_api.Element =
-    let mapping = data.ui.componentMapping[Content.VCS]
+    # The pane of the tab whose container holds `host` — each tab's VCS pane
+    # has its own ViewModel (`tabScopedId`).
     let componentId = panelHostComponentId(host)
-    let component =
-      if not mapping.isNil and mapping.hasKey(componentId):
-        VCSComponent(mapping[componentId])
-      else: nil
+    let component = VCSComponent(
+      data.hostTabComponent(host, Content.VCS, componentId))
     let vm = if component.isNil: nil else: ensureVCSVM(component)
     if vm.isNil:
       return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")

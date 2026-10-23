@@ -39,6 +39,7 @@
 
 import
   ui_imports,
+  session_viewmodels,
   # A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
   isonim_panel_mount,
   ../[ types, communication, event_helpers ],
@@ -59,7 +60,7 @@ from ../viewmodel/viewmodels/filesystem_vm import
   showNoProjectFolder, FileTreeHostFacts, ToolbarMode
 from ../lib/electron_presence import inElectron
 from ../../common/trace_source_paths import isSamePath
-from git_cli import sessionHasNoProjectFolder
+from git_cli import sessionHasNoProjectFolder, startOptionsHaveNoProjectFolder
 
 proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#)".}
 
@@ -545,10 +546,20 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
   if self.isNil:
     return
   filesystemComponentRef = self
-  if filesystemVMInstance.isNil:
+  # The ViewModel of this component's own tab (`ownPaneVM`).
+  let ownVM = ownPaneVM(self, filesystemVMInstance, fileTreeVM)
+  if ownVM.isNil:
     return
-  let sessionData = if self.data.isNil: data else: self.data
-  if sessionHasNoProjectFolder(sessionData):
+  # Whether THIS component's tab has a project folder: `data.startOptions`
+  # is the tab on screen's, and this sync also runs for a tab that is not
+  # shown (its own `filesystem-loaded` answer, a queued refresh).
+  let ownSession = data.sessionOfComponent(self)
+  let noProjectFolder =
+    if ownSession.isNil:
+      sessionHasNoProjectFolder(if self.data.isNil: data else: self.data)
+    else:
+      startOptionsHaveNoProjectFolder(ownSession.startOptions)
+  if noProjectFolder:
     # NEW FILE: the session has no project folder, so its tree is the empty
     # "source folders" container and nothing will ever be loaded into it.
     # Checked BEFORE the tree, because that empty container is a perfectly
@@ -557,24 +568,24 @@ proc syncLegacyFilesystemIntoVM*(self: FilesystemComponent) =
     # with the hidden "Loading..." overlay beside it, was reported as a pane
     # stuck loading (codetracer-pm issue 2026-10-21). `Welcome-Screen.md`
     # §"New file, and what it creates": an empty project, not a tree.
-    filesystemVMInstance.showNoProjectFolder()
+    ownVM.showNoProjectFolder()
   elif not self.service.isNil and not self.service.filesystem.isNil:
     var openedPaths = initHashSet[string]()
     collectLegacyOpenedPaths(self.service.filesystem, openedPaths)
-    filesystemVMInstance.setRoot(legacyFileToVm(self.service.filesystem))
-    var mergedPaths = filesystemVMInstance.expandedPaths.val
+    ownVM.setRoot(legacyFileToVm(self.service.filesystem))
+    var mergedPaths = ownVM.expandedPaths.val
     for path in openedPaths:
       mergedPaths.incl(path)
-    filesystemVMInstance.setExpandedPaths(mergedPaths)
+    ownVM.setExpandedPaths(mergedPaths)
   elif not self.service.isNil and not self.service.filesystemLoadError.isNil and
       self.service.filesystemLoadError.len > 0:
     # The root load answered with a failure: end the pane on it rather
     # than on "Loading..." (GitHub #785).
-    filesystemVMInstance.failLoad($self.service.filesystemLoadError)
+    ownVM.failLoad($self.service.filesystemLoadError)
   else:
     # No answer yet: the pane waits for ``filesystem-loaded``.
-    filesystemVMInstance.clearRoot()
-  filesystemVMInstance.setDiffEntries(legacyDiffEntries())
+    ownVM.clearRoot()
+  ownVM.setDiffEntries(legacyDiffEntries())
 
 proc refreshIsoNimFilesystemPanel*() =
   ## Re-sync the session's ViewModel after IPC handlers mutate the legacy

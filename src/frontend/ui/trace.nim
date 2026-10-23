@@ -1,5 +1,5 @@
 import
-  ui_imports, value, datatable, isonim_panel_mount,
+  ui_imports, value, datatable, isonim_panel_mount, session_viewmodels,
   ../[ types, lang, utils, renderer, communication, dap, event_helpers ],
   ../lib/isonim_styles,
   ../../common/ct_event
@@ -89,15 +89,25 @@ proc initTimelineVM() =
   timelineVMInstance = createTimelineVM(timelineVMStore)
   clog "TimelineVM: parallel ViewModel instance created (stub backend)"
 
-proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int;
+proc ownPaneStore(self: TraceComponent): ReplayDataStore =
+  ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, timelineVMInstance, timelineVM)
+  if vm.isNil: nil else: vm.store
+
+proc syncTimelineDebuggerPosition(store: ReplayDataStore;
+                                  rrTicks: int, path: cstring, line: int;
                                   sourceGeneration: int = 0;
                                   sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the TimelineVM's currentPosition memo sees the updated rrTicks.
-  if timelineVMStore.isNil:
+  ##
+  ## `store` is the store of the tab whose component received the move —
+  ## that tab's, shown or not (`ownPaneStore`), never the shown tab's for
+  ## another tab's move.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  timelineVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
@@ -2038,7 +2048,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
 method onCompleteMove*(self: TraceComponent, response: MoveState) {.async.} =
   # Feed the same position into the parallel ViewModel store.
   initTimelineVM()
-  syncTimelineDebuggerPosition(
+  syncTimelineDebuggerPosition(self.ownPaneStore(),
     response.location.rrTicks,
     response.location.path,
     response.location.line,

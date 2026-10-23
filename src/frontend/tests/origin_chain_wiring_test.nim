@@ -2,7 +2,7 @@
 ##
 ## THE RENDERER WIRES THE ORIGIN BADGE AND "PIN TO SCRATCHPAD" — through
 ## `ui/state.nim` and `ui/scratchpad.nim` themselves, over the session
-## `ui_js.configureMiddleware` builds (codetracer#856).
+## `ui_js.configureSessionMiddleware` builds (codetracer#856).
 ##
 ## ## The defects this pins
 ##
@@ -25,7 +25,7 @@
 ## REAL: `DapApi` and `middleware.setupMiddlewareApis`, the `DebuggerSession`
 ## over `newDapBackendService` and its panel ViewModels, `state
 ## .initStateVMFromSession` and `scratchpad.initScratchpadVMFromSession` (the
-## calls `ui_js.configureMiddleware` makes, in its order), and the bridges
+## calls `ui_js.configureSessionMiddleware` makes, in its order), and the bridges
 ## they install.
 ##
 ## THE ONE STAND-IN: the `ipc` object's `send`, which records the request
@@ -74,7 +74,7 @@ proc originChainRequests(): seq[JsObject] =
       result.add p
 
 # ---------------------------------------------------------------------------
-# The renderer, wired as `ui_js.configureMiddleware` wires it
+# The renderer, wired as `ui_js.configureSessionMiddleware` wires it
 # ---------------------------------------------------------------------------
 
 let dapApi = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 0)

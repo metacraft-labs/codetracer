@@ -33,7 +33,7 @@ import
       build, errors, search_results, welcome_screen, scratchpad,
       trace_log, calltrace_editor, terminal_output, shell,
       no_source, ui_imports, shortcuts, chord_display, step_list,
-      request_panel, session_switch, session_tabs, command, frame_viewer,
+      request_panel, session_switch, tab_answer_routing, session_tabs, command, frame_viewer,
       pixel_history, shader_debug, video_player, agentic_session_launcher],
   # `layout_config_repair` is dependency-free by design (its own header says
   # so) precisely so a non-Electron caller can use it; `onNoTrace` reads the
@@ -115,12 +115,6 @@ when not defined(ctWeb):
 
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
-
-# A TAB ENTERED AGAIN SHOWS ITS OWN VCS PANE. Every tab's VCS panel draws the
-# one `VCSVM` of component id 0, so the tab switch re-syncs it from the entered
-# tab's own panel. Installed here because this module imports both sides and
-# `session_switch` cannot import `vcs` (see `syncSessionVCSHook`).
-session_switch.syncSessionVCSHook = vcs.syncSessionVCSIntoVM
 
 proc configureIPC(data: Data)
 
@@ -253,7 +247,6 @@ proc bootstrapCollabJoinFromLocation() {.importjs: """
 # IPC HANDLERS
 
 var vex* {.importc.}: js
-var middlewareConfigured = false
 var dapSessionSelectionReady = false
 var pendingDapReplaySelection: JsObject
 var pendingDapLiveSelection: JsObject
@@ -265,12 +258,17 @@ proc hideWelcomeScreenSurface() =
   welcome_screen.clearIsoNimWelcomeScreen()
 
 # ---------------------------------------------------------------------------
-# ViewModel layer — SessionViewModel backed by the real DapApi.
-# Created once in configureMiddleware; the shared store is passed to
-# individual panels so they all share a single real backend connection.
+# ViewModel layer — one SessionViewModel PER TAB, each over that tab's own
+# DapApi. Created by `configureSessionMiddleware` when the tab's session first
+# gets a trace or an edit session, owned by its `ReplaySession`
+# (`ui/session_viewmodels.nim`), and handed to the window's pane bridges by
+# `bindWindowToSession` whenever that tab is the one on screen.
 # ---------------------------------------------------------------------------
 import viewmodel/session_vm
-import ui/panel_host   # the panes it mounts render the session's ViewModels
+import ui/session_viewmodels
+import ui/panel_host   # the panes it mounts render their tab's ViewModels
+from ui/isonim_panel_mount import tabOfIsoNimPaneHost
+from isonim/web/dom_api as isonim_dom import nil
 import viewmodel/sdk/[debugger_session, trace_source]
 from viewmodel/viewport import timeoutScheduler
 from viewmodel/sdk/stop_loader import claimLocalsLoading
@@ -292,7 +290,8 @@ from ui/process_tree import
   consumeListProcessesEvent, mountProcessTree
 import viewmodel/viewmodels/state_vm
 import viewmodel/viewmodels/origin_chain_types
-from viewmodel/viewmodels/origin_chain_vm import applyChainResponse, applyChainAnswer,
+from viewmodel/viewmodels/origin_chain_vm import OriginChainVM,
+  applyChainResponse, applyChainAnswer,
   noteChainRequestSent, openSidePanel, rejectChainAnswer
 from isonim/core/signals import val, `val=`
 from isonim/core/computation import val
@@ -302,17 +301,18 @@ from viewmodel/viewmodels/review_open import
   ReviewOpenService, ReviewDatasetRequest, ReviewDatasetRequestKind
 from viewmodel/viewmodels/evidence_call_vm import
   EvidenceDataset, EvidenceDatasetState, edsReady, edsUnavailable
-var activeDebuggerSession: DebuggerSession
-  ## The renderer's one session (Shared-DOM-Front-Ends D1). Built by
-  ## `configureMiddleware`; adopts the trace the host process opened when
-  ## `onTraceLoaded` runs (`attachLoadedTrace`).
-var activeSessionVM: SessionViewModel
-  ## `activeDebuggerSession.session` — or, when the server owns the session,
-  ## `activeMirror.session` — kept as its own name for the many readers of
-  ## the panel ViewModels and the store.
-var activeMirror: MirrorSession
-  ## The mirror of the server's session, in a server-managed deployment
-  ## (`ct host`); nil wherever the page owns its session.
+template shownSessionVM(): SessionViewModel =
+  ## The ViewModels of the tab on screen (`session_viewmodels.activeSessionVM`)
+  ## — for the readers that act on what the user sees: the collaboration
+  ## hooks, a replay selected for the shown tab. A reader that handles an
+  ## event asks for the ViewModels of the session the event belongs to
+  ## instead (`sessionVMOwning`, or the session it was wired for).
+  data.activeSessionVM()
+var serverSessionMirrored = false
+  ## Whether a tab already mirrors the `ct host` server's session. The server
+  ## owns ONE session and the page mirrors it over its one socket, so only the
+  ## first tab configured is that mirror; a tab opened after it holds a
+  ## recording of its own and owns its session in the page.
 var pageSocket: JsObject
   ## The socket to the page's server, when it has one; the mirror's channel
   ## rides on it.
@@ -333,16 +333,6 @@ proc serverOwnsSession(): bool =
     decodePlacement($sessionPlacementName) == spServer
   except DescriptorError:
     false
-# Backend-reported `supportsStepBack` capability from the DAP `initialize`
-# response. The response can arrive (synchronously, via the in-process DAP
-# transport) before `activeSessionVM` exists, in which case the handler cannot
-# apply it to the session store yet — it stashes it here so the value is
-# re-applied once the session VM is created. Without this, reverse-step /
-# reverse-continue toolbar buttons stay wrongly disabled on completed DB
-# replays even though the backend supports backward stepping.
-var pendingSupportsStepBack: bool = false
-var activeCollabFrontEndAdapter: FrontEndAdapter
-var activeIsoNimApp: IsoNimApp
 var pendingCollabJoinBootstrapRaw: cstring = cstring""
 const MIN_FONTSIZE = 6
 const MAX_FONTSIZE = 40
@@ -367,9 +357,10 @@ proc publishCollabJoinState(raw: cstring) {.importjs: """
 
 proc activateCollabJoinBootstrap*(raw: cstring): cstring {.exportc.} =
   ## JS-callable M6 join hook. Invite exchange can complete before the real
-  ## SessionViewModel exists, so this stores the bootstrap and configureMiddleware
-  ## replays it once the collaboration core is available.
-  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+  ## SessionViewModel exists, so this stores the bootstrap and
+  ## `configureSessionMiddleware` replays it once the shown tab's
+  ## collaboration core is available.
+  if shownSessionVM().isNil or shownSessionVM().collabCore.isNil:
     pendingCollabJoinBootstrapRaw = raw
     result = cstring($(%*{
       "activated": false,
@@ -379,7 +370,7 @@ proc activateCollabJoinBootstrap*(raw: cstring): cstring {.exportc.} =
     return
 
   try:
-    let activation = activeSessionVM.collabCore.startCollabJoinSession(
+    let activation = shownSessionVM().collabCore.startCollabJoinSession(
       parseJson($raw))
     pendingCollabJoinBootstrapRaw = cstring""
     result = cstring($(activation.toJson))
@@ -394,7 +385,7 @@ proc activateCollabJoinBootstrap*(raw: cstring): cstring {.exportc.} =
 proc activateCollabHostInvite*(raw: cstring): cstring {.exportc.} =
   ## JS-callable M6 host hook. Creating an invite starts the same browser
   ## collaboration transport as joining through an invite URL.
-  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+  if shownSessionVM().isNil or shownSessionVM().collabCore.isNil:
     result = cstring($(%*{
       "activated": false,
       "pending": true,
@@ -403,7 +394,7 @@ proc activateCollabHostInvite*(raw: cstring): cstring {.exportc.} =
     return
 
   try:
-    let activation = activeSessionVM.collabCore.startCollabHostSession(
+    let activation = shownSessionVM().collabCore.startCollabHostSession(
       parseJson($raw))
     result = cstring($(activation.toJson))
   except CatchableError as e:
@@ -415,9 +406,9 @@ proc activateCollabHostInvite*(raw: cstring): cstring {.exportc.} =
   publishCollabJoinState(result)
 
 proc collabTestDispatchSetRegister*(targetPath, value: cstring): cstring {.exportc.} =
-  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+  if shownSessionVM().isNil or shownSessionVM().collabCore.isNil:
     return cstring($(%*{"status": "missingCore"}))
-  let core = activeSessionVM.collabCore
+  let core = shownSessionVM().collabCore
   let applyResult = core.dispatchLocalViewOp(
     vokSetRegister,
     $targetPath,
@@ -437,9 +428,9 @@ proc collabTestDispatchSetRegister*(targetPath, value: cstring): cstring {.expor
   }))
 
 proc collabTestDispatchDebugCommand*(command, leaseId: cstring): cstring {.exportc.} =
-  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+  if shownSessionVM().isNil or shownSessionVM().collabCore.isNil:
     return cstring($(%*{"status": "missingCore"}))
-  let core = activeSessionVM.collabCore
+  let core = shownSessionVM().collabCore
   let applyResult = core.dispatchLocalViewOp(
     vokDebugCommand,
     "debugger.commands",
@@ -461,9 +452,9 @@ proc collabTestDispatchDebugCommand*(command, leaseId: cstring): cstring {.expor
   }))
 
 proc collabTestState*(): cstring {.exportc.} =
-  if activeSessionVM.isNil or activeSessionVM.collabCore.isNil:
+  if shownSessionVM().isNil or shownSessionVM().collabCore.isNil:
     return cstring($(%*{"status": "missingCore"}))
-  let core = activeSessionVM.collabCore
+  let core = shownSessionVM().collabCore
   var grants = newJArray()
   for grant in core.document.state.capabilityGrants:
     if grant.subject == core.localPrincipalId and grant.revokedByOpId.len == 0:
@@ -868,6 +859,22 @@ proc webTechMenu(data: Data, program: cstring): MenuNode =
     registerMenu(result)
 
 
+var buildRequestSession: ReplaySession
+  ## The tab whose build is running, from the moment it asked for one: the
+  ## window runs one build at a time, and its output (`CODETRACER::build-*`)
+  ## belongs in that tab's Build pane whichever tab is on screen when it
+  ## arrives (`ipcUiTarget`).
+
+proc ipcUiTarget(data: Data; message: cstring): ReplaySession =
+  ## The tab whose components a `=> [ui]` IPC message is dispatched to
+  ## (`uiIpcHandlers`). A build's output goes to the tab that started it, if
+  ## that tab is still open; every other message to the tab on screen, the
+  ## only tab a main-process answer without a tab of its own can be meant for.
+  if ($message).startsWith("CODETRACER::build-") and
+     not buildRequestSession.isNil and buildRequestSession in data.sessions:
+    return buildRequestSession
+  data.activeSession
+
 proc update*(self: Data, build: bool = false) =
   if build:
     let buildComponent = data.buildComponent(0)
@@ -904,6 +911,8 @@ proc update*(self: Data, build: bool = false) =
     if not focusPath.isNil:
       currentPath = cast[cstring](focusPath)
 
+  if build:
+    buildRequestSession = self.activeSession
   console.log(cstring(fmt"[ui] sending CODETRACER::update (build={build}) for path: {currentPath}"))
   ipc.send "CODETRACER::update", js{build: build, currentPath: currentPath}
   redrawAll()
@@ -1757,7 +1766,7 @@ proc configure(data: Data) =
   # is what every `ct test` provider reports as `TraceMetadata.path`.
   #
   # Installed here rather than beside the other panel-VM wiring in
-  # `configureMiddleware`: that routine used to run only from `onTraceLoaded`
+  # `configureSessionMiddleware`: that routine used to run only from `onTraceLoaded`
   # and `onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
   # `CODETRACER::no-trace` — and a `ct review` dataset launch reaches neither
   # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns),
@@ -1788,7 +1797,7 @@ proc configure(data: Data) =
   # second way to open a review.
   #
   # Installed beside AA-2's service, in `configure`, and for the same
-  # reason: `configureMiddleware` runs only from the launch handlers
+  # reason: `configureSessionMiddleware` runs only from the launch handlers
   # (`onTraceLoaded`, `onNoTrace`, `onStartDeepReview`), and a review is the
   # one mode this feature exists for, so a launch path that skipped the
   # routine — as the dataset review's did until 2026-10-23 — would make
@@ -2287,11 +2296,198 @@ const middlewareLoggingEnabled = true # TODO: maybe overridable dynamically
 
 # === end of LocalToViewsTransport
 
-proc configureMiddleware(withDebugger = true) =
-  ## Create the renderer's session and wire every pane to it, once per
-  ## renderer (callers guard it with `middlewareConfigured`).
+# ===========================================================================
+# Each tab's session, and the window's bridges to the tab on screen
+# ===========================================================================
+#
+# A window tab is an independent session (`GUI/Multi-Window-Tab-Management.md`
+# §Tab Behavior rule 1) and owns its ViewModels (`ui/session_viewmodels.nim`;
+# `Refactoring-Plans/Shared-DOM-Front-Ends.md` D7: "created by
+# `initializePanelViewModels`, once per session"). Three procs set that up:
+#
+# * `configureWindowMiddleware` — once per window: what observes every
+#   tab's traffic (request tracking) and the panel host's rule for which
+#   tab a pane belongs to;
+# * `configureSessionMiddleware` — once per TAB, when its session first gets
+#   a trace (`onTraceLoaded`), an edit session (`onNoTrace`) or a dataset
+#   review (`onStartDeepReview`): its
+#   middleware over its own `DapApi` and views mediator, its
+#   `SessionViewModel`, and the subscriptions that keep that ViewModel set
+#   current whether or not the tab is on screen;
+# * `bindWindowToSession` — on every change of the tab on screen
+#   (`session_switch.switchSession`, and a session configured while shown):
+#   the window-level pane bridges — the toolbar, the footer panes, the
+#   module-level `init*VMFromSession` slots the legacy pane code reads — now
+#   name that tab's ViewModels.
+#
+# Until this split, `configureMiddleware` ran once per window
+# (`middlewareConfigured`) and built ONE `SessionViewModel` over the DAP API
+# of whichever tab was active first; every later tab's panes rendered it
+# (codetracer-pm issue `2026-10-21-a-second-replay-tab-shows-the-first-tabs-data-because-the-window-builds-one-session-viewmodel.md`).
+
+var windowMiddlewareConfigured = false
+var sessionsConfigured = 0
+  ## How many tabs' sessions `configureSessionMiddleware` has set up.
+
+template initPanelVM(label: string; body: untyped) =
+  try:
+    cdebug "[PIPELINE] configureSessionMiddleware: calling " & label
+    body
+  except CatchableError as e:
+    # Stays at ERROR: this is a real failure, not progress.  A panel
+    # VM that threw during construction leaves its panel wired to a
+    # stub (or to nothing), and every later symptom — an empty
+    # calltrace, a state panel that never fills — is downstream of
+    # this line.  It must stay at ERROR even though the surrounding
+    # `[PIPELINE]` progress traces were demoted to DEBUG.
+    cerror "[PIPELINE] configureSessionMiddleware: " & label & " failed: " & e.msg
+
+proc originChainVMForRequest(requestId: cstring): OriginChainVM =
+  ## The OriginChainVM of the tab whose `DapApi` sent `requestId`
+  ## (`dap.ctRequestId` names each request by its session), or nil.
+  let vm = sessionVMOf(
+    data.sessionWithDapSessionId(ctRequestSessionId(requestId)))
+  if vm.isNil: nil else: vm.originChainVM
+
+proc configureWindowMiddleware() =
+  ## What the window sets up once, for every tab it will hold.
+  if windowMiddlewareConfigured:
+    return
+  windowMiddlewareConfigured = true
+
+  # A PANE SHOWS THE SESSION OF THE TAB WHOSE CONTAINER HOLDS IT. Every
+  # tab's DOM is in one document (`ui/session_switch.nim` hides and shows
+  # `session-container-<n>`), so the panel host asks each host's container
+  # rather than rendering every host over one window-global session. A host
+  # outside every container (the auto-hide overlay) shows the tab on screen.
+  initPanelVM("setPanelSessionResolver"):
+    panel_host.setPanelSessionResolver(
+      proc(host: isonim_dom.Element): SessionViewModel =
+        data.sessionVMOfTab(tabOfIsoNimPaneHost(host)))
+
+  # EVERY `ct/originChain` IS NAMED BY THE TRANSPORT as it is sent —
+  # the VM's own (`OriginChainVM.onShowOrigin`) and the legacy menus'
+  # (`ui/value.nim`, `ui/key_router.nim`, `ui/flow.nim`), which emit it
+  # on the mediator and never touch the VM — so only the answer to the
+  # LATEST request, not cancelled since, is applied
+  # (`OriginChainVM.applyChainAnswer`). The tracking is the transport's,
+  # one for every tab; each request is noted on the OriginChainVM of the
+  # tab that sent it. The companion `ct/updated-origin-chain` event carries
+  # no identity and the same body as the response, so the chain is taken
+  # from the response alone (`configureSessionMiddleware`).
+  initPanelVM("trackOriginChainRequests"):
+    trackCtRequests(CtOriginChain,
+      onSent = proc(requestId: cstring) =
+        let ocvm = originChainVMForRequest(requestId)
+        if not ocvm.isNil:
+          ocvm.noteChainRequestSent($requestId),
+      onAnswered = proc(requestId: cstring) = discard)
+
+proc bindWindowToSession(session: ReplaySession) =
+  ## Point every window-level pane bridge at `session`'s ViewModels:
+  ## `session` is the tab now on screen. Rule 2 of §Tab Behavior —
+  ## "clicking a tab switches all panels to that session's data".
   ##
-  ## `withDebugger` is false for a window that opens with no replay engine to
+  ## What is bound here is what the WINDOW has one of: the toolbar, the
+  ## process tree, the footer panes outside every tab (Build, Problems,
+  ## Search, Requests), the panes' key handlers (`panel_host.panelSession`),
+  ## and the module-level ViewModel slot each legacy pane module keeps for
+  ## its component's handlers. The panes inside a tab's own container are
+  ## not rebuilt by a switch: the panel host renders each over its own tab's
+  ## session (`configureWindowMiddleware`), and the modules that mount their
+  ## own panes compare the ViewModel recorded on the host with the one they
+  ## now hold, so a tab whose panes already show its session keeps them.
+  if session.isNil:
+    return
+  # The panes whose ViewModels each tab keeps outside its session layer —
+  # Test Results and Constraints, created on first use — whether or not the
+  # tab has a session yet (a "+" tab's welcome screen has none).
+  initPanelVM("bindTestResultsVM"):
+    test_results.bindTestResultsVM(testResultsVMOf(session))
+  initPanelVM("bindConstraintsVM"):
+    constraints.bindConstraintsVM(constraintsVMOf(session))
+  let vm = sessionVMOf(session)
+  if vm.isNil:
+    # A tab with no session yet — a "+" tab's welcome screen. It has no
+    # replay panes to bind; the bridges keep the tab they last named until
+    # this tab's session exists and binds them (`configureSessionMiddleware`).
+    initPanelVM("setPanelSession"):
+      panel_host.setPanelSession(nil)
+    return
+  initPanelVM("initStateVMFromSession"):
+    state.initStateVMFromSession(vm.stateVM, vm.originChainVM)
+  initPanelVM("mountProcessTree"):
+    mountProcessTree(vm)
+  # The stepping toolbar only for a session with a replay to step (a dataset
+  # review has none until it opens a recording; `configureSessionMiddleware`).
+  let vms = viewModelsOf(session)
+  if not vms.isNil and vms.debuggerSurface:
+    initPanelVM("bindDebugToolbar"):
+      debug_toolbar.bindDebugToolbar(vm.debugControlsVM)
+  initPanelVM("setPanelSession"):
+    panel_host.setPanelSession(vm)
+  initPanelVM("initEventLogVMFromSession"):
+    event_log.initEventLogVMFromSession(vm.eventLogVM)
+  initPanelVM("initFlowVMFromSession"):
+    flow.initFlowVMFromSession(vm.flowVM)
+  initPanelVM("initEditorVMFromSession"):
+    editor.initEditorVMFromSession(vm.editorVM)
+    # The editor's surface reads the session's values and flow, as the
+    # terminal's and GPUI's do (`editor_points.webEditorSurface`).
+    editor_points.setEditorSessionVMs(vm.editorVM, vm.stateVM, vm.flowVM,
+      vm.scratchpadVM)
+  initPanelVM("initTimelineVMFromSession"):
+    trace.initTimelineVMFromSession(vm.timelineVM)
+  initPanelVM("initTerminalOutputVMFromSession"):
+    terminal_output.initTerminalOutputVMFromSession(vm.terminalOutputVM)
+  initPanelVM("initBuildVMFromSession"):
+    build.initBuildVMFromSession(vm.buildVM)
+  initPanelVM("initErrorsVMFromSession"):
+    errors.initErrorsVMFromSession(vm.errorsVM)
+  initPanelVM("initSearchResultsVMFromSession"):
+    search_results.initSearchResultsVMFromSession(vm.searchResultsVM)
+  initPanelVM("initNoSourceVMFromSession"):
+    no_source.initNoSourceVMFromSession(vm.noSourceVM)
+  initPanelVM("initStepListVMFromSession"):
+    step_list.initStepListVMFromSession(vm.stepListVM)
+  initPanelVM("initReplVMFromSession"):
+    repl.initReplVMFromSession(vm.replVM)
+  initPanelVM("initRequestPanelVMFromSession"):
+    request_panel.initRequestPanelVMFromSession(vm.requestPanelVM)
+  initPanelVM("initTraceLogVMFromSession"):
+    trace_log.initTraceLogVMFromSession(vm.traceLogVM)
+  initPanelVM("initScratchpadVMFromSession"):
+    scratchpad.initScratchpadVMFromSession(vm.scratchpadVM)
+  initPanelVM("initFilesystemVMFromSession"):
+    filesystem.initFilesystemVMFromSession(vm.fileTreeVM)
+  initPanelVM("initCommandPaletteVMFromSession"):
+    command.initCommandPaletteVMFromSession(vm.commandPaletteVM)
+  initPanelVM("initFrameViewerVMWithStore"):
+    frame_viewer.initFrameViewerVMWithStore(vm.store)
+  initPanelVM("initPixelHistoryVMWithStore"):
+    pixel_history.initPixelHistoryVMWithStore(vm.store)
+  initPanelVM("initShaderDebugVMWithStore"):
+    shader_debug.initShaderDebugVMWithStore(vm.store)
+  initPanelVM("initVideoPlayerVMWithStore"):
+    video_player.initVideoPlayerVMWithStore(vm.store)
+  initPanelVM("initAgentActivityVMWithStore"):
+    agent_activity.initAgentActivityVMWithStore(vm.store)
+  initPanelVM("initAgentWorkspaceVMWithStore"):
+    agent_workspace.initAgentWorkspaceVMWithStore(vm.store)
+  when not defined(ctWeb):
+    initPanelVM("installAgenticWorktreeTestHooks"):
+      agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(vm.store)
+
+# Every tab switch binds the window to the tab it shows.
+session_switch.setSessionBindProc(bindWindowToSession)
+
+proc configureSessionMiddleware(session: ReplaySession; withDebugger = true) =
+  ## Set up `session` — one window tab — once: its middleware, its
+  ## ViewModels and the subscriptions that keep them current. Every handler
+  ## installed here acts on THIS session's ViewModels, never on the tab on
+  ## screen's: an event a hidden tab receives updates the hidden tab.
+  ##
+  ## `withDebugger` is false for a tab that opens with no replay engine to
   ## talk to and no debugging surface to show: a dataset review
   ## (`onStartDeepReview`; DeepReview-GUI.md §1.1, "not a replay session").
   ## It then skips the two steps that address the engine:
@@ -2299,416 +2495,375 @@ proc configureMiddleware(withDebugger = true) =
   ## - The DAP `initialize` request. With no replay selected the Backend
   ##   Manager has no peer to forward it to and never answers, so 30 s later
   ##   the request's timeout put "initialize got no answer from the debugger"
-  ##   in the status bar of a review that never asked for a debugger
-  ##   (measured on a `ct review` launch). A replay opened later sends its own
-  ##   `initialize` (`handleDapReplaySelected`).
-  ## - Binding the debugger toolbar. Its stepping buttons would step a replay
-  ##   that does not exist, each press ending in the same timeout. A review
-  ##   that later opens a recording binds it then (`onTraceLoaded`).
+  ##   in the status bar of a review that never asked for a debugger. A
+  ##   replay opened later sends its own `initialize`
+  ##   (`handleDapReplaySelected`).
+  ## - The debugger toolbar (`SessionViewModels.debuggerSurface`). Its
+  ##   stepping buttons would step a replay that does not exist. A review
+  ##   that later opens a recording gains it then (`onTraceLoaded`).
   ##
-  ## Everything else — the session, its panel ViewModels and the panel host's
-  ## session — is what the review's panes render, and is built either way.
-  setupMiddlewareApis(data.dapApi, data.viewsApi)
+  ## Everything else — the session, its panel ViewModels and the panel
+  ## host's session — is what the review's panes render, and is built either
+  ## way.
+  if session.isNil or session.dapApi.isNil or session.viewsApi.isNil:
+    return
+  let vms = ensureViewModels(session)
+  if vms.wired:
+    return
+  vms.wired = true
+  vms.debuggerSurface = withDebugger
+  configureWindowMiddleware()
+  let firstSession = sessionsConfigured == 0
+  inc sessionsConfigured
+  let dapRef = session.dapApi
+  let viewsApi = session.viewsApi
 
-  data.dapApi.ipc = data.ipc
+  setupMiddlewareApis(dapRef, viewsApi)
 
-  data.dapApi.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
+  dapRef.ipc = data.ipc
+
+  dapRef.on(DapInitializeResponse, proc(kind: CtEventKind, response: JsObject) =
     cdebug "[PIPELINE] DapInitializeResponse: received response"
     var supportsStepBack = false
     if not response.isNil and not jsMissing(response["supportsStepBack"]):
       supportsStepBack = response["supportsStepBack"].to(bool)
     cdebug "[PIPELINE] DapInitializeResponse: supportsStepBack=" & $supportsStepBack
-    # Remember the capability so it survives even when the response beats the
-    # `activeSessionVM` creation below; apply immediately when the VM already
-    # exists (e.g. a per-trace re-initialize after load).
-    pendingSupportsStepBack = supportsStepBack
-    if not activeSessionVM.isNil:
-      activeSessionVM.store.setSupportsStepBack(supportsStepBack)
+    # Backend-reported `supportsStepBack` capability. The response can
+    # arrive (synchronously, via the in-process DAP transport) before this
+    # session's ViewModels exist, so it is remembered on the session and
+    # re-applied once they are built below; applied at once when they
+    # already exist (e.g. a per-trace re-initialize after load). Without
+    # this, the reverse-step / reverse-continue toolbar buttons stay
+    # wrongly disabled on completed DB replays even though the backend
+    # supports backward stepping.
+    vms.supportsStepBack = supportsStepBack
+    if not vms.vm.isNil:
+      vms.vm.store.setSupportsStepBack(supportsStepBack)
   )
 
-  if withDebugger:
-    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+  # The window's first session says hello to its backend as the window
+  # starts, before the host has selected a replay for it. A tab opened
+  # later initializes when its replay is selected
+  # (`handleDapReplaySelected`), as it did before each tab had a session of
+  # its own; sending a second `initialize` here would only be answered by a
+  # backend the host has not yet routed the tab to. A session with no replay
+  # engine (`withDebugger = false`, a dataset review) sends none: it would go
+  # unanswered and time out into a status-bar error.
+  if firstSession and withDebugger:
+    dapRef.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
       clientName: "codetracer"
     )))
 
   # -----------------------------------------------------------------------
-  # ViewModel layer: create a SessionViewModel backed by the real DapApi.
-  # This must happen BEFORE component.register() calls, because register()
-  # lazily creates panel VMs — if the shared store is already in place the
-  # panels will use it instead of falling back to stub backends.
+  # ViewModel layer: this session's SessionViewModel, over this session's
+  # DapApi. Built BEFORE the register loop below, because register()
+  # lazily creates panel VMs — if the session's store is already in place
+  # the panels use it instead of falling back to stub backends.
   # -----------------------------------------------------------------------
-  if activeSessionVM.isNil:
-    let dapRef = data.dapApi
-    let realBackend = newDapBackendService(dapRef,
-      onSend = proc(command: cstring; argsJs: JsObject) =
-        when defined(js):
-          if data.startOptions.inTest:
-            recordVmBackendRequest(command, argsJs))
-    # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
-    # builds `DebugControlsVM` with them: steps through the DAP mediator of
-    # the tab on screen (`debug_toolbar.toolbarApiFor`) with the status bar's
-    # operation status, the replay server's restart, Stop, and test runs in a
-    # new window. A mirror takes them too: under `ct host` the page still
-    # drives the replay, and the server's session follows the moves it makes.
-    if serverOwnsSession():
-      # SERVER-MANAGED (`ct host`): the server owns the session and this
-      # page mirrors it over its socket. The mirror's ViewModels are the
-      # ones the panels read; the panes' measured viewports and the call
-      # trace's actions run on the server's session, the other panels'
-      # actions on the page (`createHostedPageMirror`). Its locals are the
-      # server's, so the page's own decoders stand down
-      # (`claimLocalsLoading`).
-      activeMirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
-        debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
-          desktopDebugCommands(data, session.store))
-      activeSessionVM = activeMirror.session
-      activeSessionVM.store.claimLocalsLoading()
-    else:
-      activeDebuggerSession = newDebuggerSession(realBackend)
-      activeSessionVM = activeDebuggerSession.session
-    # The DOM reports a pane's size on every resize and scroll event, so the
-    # windowed ViewModels debounce those reports on the browser's timer
-    # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
-    # viewports travel to the server's session.
-    activeSessionVM.store.viewportScheduler = timeoutScheduler()
-    if activeMirror.isNil:
-      # The panel ViewModels are the session's, built once by
-      # `initializePanelViewModels` — in edit mode too, where no trace is
-      # open and the session is not yet attached. The stop loader is the one
-      # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
-      # exists (its effect would otherwise send on its first run), and the
-      # request's language hook is installed before anything can ask.
-      state.installSourceLanguage(activeSessionVM.store)
-      activeSessionVM.store.claimLocalsLoading()
-      activeSessionVM.debugCommands = desktopDebugCommands(data,
-        activeSessionVM.store)
-      activeSessionVM.initializePanelViewModels()
-    # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
-    # the debugger service plans each change over its rows and the engine's
-    # answer replaces them, as on the native front-ends (PLAT-40).
-    data.services.debugger.pointStore = cast[JsObject](activeSessionVM.store)
-    # Apply any `supportsStepBack` capability that arrived before this VM
-    # existed (its DAP `initialize` response can beat this assignment), so the
-    # reverse-step toolbar buttons reflect the backend's real capability.
-    activeSessionVM.store.setSupportsStepBack(pendingSupportsStepBack)
-    activeCollabFrontEndAdapter = initWebUiCollabAdapter(
-      activeSessionVM.collabCore.localPrincipalId,
-      activeSessionVM.collabCore.localActorId
-    )
-    activeSessionVM.collabCore.installFrontEndAdapterProjection(
-      activeCollabFrontEndAdapter)
-    cdebug "[PIPELINE] configureMiddleware: SessionVM + RealBackendService created"
-    clog "SessionViewModel: created with real DapApi backend"
+  let realBackend = newDapBackendService(dapRef,
+    onSend = proc(command: cstring; argsJs: JsObject) =
+      when defined(js):
+        if data.startOptions.inTest:
+          recordVmBackendRequest(command, argsJs))
+  # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
+  # builds `DebugControlsVM` with them: steps through the DAP mediator of
+  # the tab on screen (`debug_toolbar.toolbarApiFor`) with the status bar's
+  # operation status, the replay server's restart, Stop, and test runs in a
+  # new window. The toolbar only ever shows the tab on screen's
+  # `DebugControlsVM` (`bindWindowToSession`), so that tab is this session
+  # whenever these routes run. A mirror takes them too: under `ct host` the
+  # page still drives the replay, and the server's session follows the
+  # moves it makes.
+  var sessionVM: SessionViewModel
+  if serverOwnsSession() and not serverSessionMirrored:
+    # SERVER-MANAGED (`ct host`): the server owns the session and this
+    # page mirrors it over its socket. The mirror's ViewModels are the
+    # ones the panels read; the panes' measured viewports and the call
+    # trace's actions run on the server's session, the other panels'
+    # actions on the page (`createHostedPageMirror`). Its locals are the
+    # server's, so the page's own decoders stand down
+    # (`claimLocalsLoading`). Only the window's first such tab: the server
+    # owns one session per client (`serverSessionMirrored`).
+    serverSessionMirrored = true
+    vms.mirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
+      debugCommandsFor = proc(s: SessionViewModel): DebugCommands =
+        desktopDebugCommands(data, s.store))
+    sessionVM = vms.mirror.session
+    sessionVM.store.claimLocalsLoading()
+  else:
+    vms.debuggerSession = newDebuggerSession(realBackend)
+    sessionVM = vms.debuggerSession.session
+  vms.vm = sessionVM
+  let store = sessionVM.store
+  # The DOM reports a pane's size on every resize and scroll event, so the
+  # windowed ViewModels debounce those reports on the browser's timer
+  # (Viewport-Driven-Loading V2, Pattern 6) — a mirror's as well, whose
+  # viewports travel to the server's session.
+  store.viewportScheduler = timeoutScheduler()
+  if vms.mirror.isNil:
+    # The panel ViewModels are the session's, built once by
+    # `initializePanelViewModels` — in edit mode too, where no trace is
+    # open and the session is not yet attached. The stop loader is the one
+    # `ct/load-locals` sender, so the locals are claimed BEFORE the StateVM
+    # exists (its effect would otherwise send on its first run), and the
+    # request's language hook is installed before anything can ask.
+    state.installSourceLanguage(store)
+    store.claimLocalsLoading()
+    sessionVM.debugCommands = desktopDebugCommands(data, store)
+    sessionVM.initializePanelViewModels()
+  # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
+  # the debugger service plans each change over its rows and the engine's
+  # answer replaces them, as on the native front-ends (PLAT-40). The
+  # debugger service is the tab's own (`ReplaySession.services`).
+  session.services.debugger.pointStore = cast[JsObject](store)
+  # Apply any `supportsStepBack` capability that arrived before this VM
+  # existed (its DAP `initialize` response can beat this assignment), so the
+  # reverse-step toolbar buttons reflect the backend's real capability.
+  store.setSupportsStepBack(vms.supportsStepBack)
+  vms.collabAdapter = initWebUiCollabAdapter(
+    sessionVM.collabCore.localPrincipalId,
+    sessionVM.collabCore.localActorId
+  )
+  sessionVM.collabCore.installFrontEndAdapterProjection(vms.collabAdapter)
+  cdebug "[PIPELINE] configureSessionMiddleware: SessionVM + RealBackendService created for session " &
+    $dapRef.sessionId
+  clog "SessionViewModel: created with real DapApi backend for session " &
+    $dapRef.sessionId
+
+  # The session's OriginChainVM (M29 §14.8), attached so the chain panel's
+  # breadcrumb chips route process switches through
+  # `SessionViewModel.onSwitchProcess` (and so the derived
+  # `crossProcessSpans` memo sees a live chain).
+  initPanelVM("createSessionOriginChainVM"):
+    if sessionVM.originChainVM.isNil and not sessionVM.stateVM.isNil:
+      sessionVM.attachOriginChainVM(
+        state.createSessionOriginChainVM(sessionVM.stateVM,
+          sessionVM.scratchpadVM))
+
+  # M42 §14.8 — multi-process session surface.
+  #
+  # `ct/listProcesses` is the only description of a session's
+  # recordings the renderer ever receives. The backend dispatches it
+  # as an unsolicited DAP event exactly once per session load
+  # (`dap_server.rs::dispatch_session_load_event`), so this
+  # subscription is what makes `processTree` non-empty in a real
+  # session — there is no polling fallback and no second source.
+  initPanelVM("subscribeListProcesses"):
+    dap.on[JsObject](dapRef, CtListProcesses,
+      proc(kind: CtEventKind, raw: JsObject) =
+        if raw.isNil:
+          return
+        try:
+          sessionVM.consumeListProcessesEvent(parseJsonFromJsObject(raw))
+        except CatchableError as e:
+          cerror "ct/listProcesses: failed to decode payload: " & e.msg)
+
+  # The `ct/originChain` reply had the same fate as `ct/listProcesses`
+  # before M42: `OriginChainVM.onShowOrigin` fires the request and
+  # discards the future (`asyncSendCtRequest` resolves immediately —
+  # real replies arrive out-of-band on the DAP channel), and nothing
+  # called `applyChainResponse`, so `activeChain` stayed `none` and
+  # the Origin Chain side panel never had a chain to draw. The
+  # backend emits `ct/updated-origin-chain` alongside every chain
+  # response — including the session-composed cross-process one, whose
+  # wire shape is deliberately identical — so one subscription feeds
+  # the VM for both the single- and multi-recording paths. Which request
+  # an answer is for is tracked window-wide (`configureWindowMiddleware`).
+  #
+  # The `ct/originChain` response carries the identical chain body
+  # and is the request's direct correlate, so it is consumed too:
+  # the companion event is emitted only on success, and a failed
+  # query would otherwise leave the panel silently shut with no
+  # trace of why.
+  initPanelVM("subscribeUpdatedOriginChain"):
+    dap.on[JsObject](dapRef, CtOriginChainResponse,
+      proc(kind: CtEventKind, raw: JsObject) =
+        let ocvm = sessionVM.originChainVM
+        if ocvm.isNil or raw.isNil:
+          return
+        try:
+          let body = parseJsonFromJsObject(raw)
+          if body.kind == JObject and body.hasKey("hops"):
+            # Spec §3.2.2 — "Show value origin" opens the dedicated side
+            # panel, whichever menu asked; a chain only arrives because a
+            # user asked for one. The origin badge is the one asker that
+            # does not: it expands its row in place (§3.2.1), so the VM
+            # never makes its request the side panel's
+            # (`noteChainRequestSent`) and `applyChainAnswer` declines its
+            # answer, which reaches the row through the request's own
+            # future instead.
+            if ocvm.applyChainAnswer(parseOriginChain(body),
+                                     $ctRequestIdOf(raw)):
+              ocvm.openSidePanel()
+          else:
+            # Only the side panel's own request ends its wait: a row's
+            # failed fetch leaves a pending "Show value origin" alone.
+            discard ocvm.rejectChainAnswer($ctRequestIdOf(raw))
+            cerror "ct/originChain: query returned no chain: " & $body
+        except CatchableError as e:
+          cerror "ct/originChain: failed to decode response: " & e.msg)
+
+  # The process tree's click handler rotates the ViewModel's active
+  # recording; this bridge is what makes that rotation visible in
+  # the backend. Requests are routed to a recording purely by the
+  # composed `threadId` they carry
+  # (`dap_server.rs::handle_request_via_session`), so switching
+  # process means re-pointing that id and then moving the cursor
+  # into the new recording so the editor and State Pane follow.
+  initPanelVM("installSwitchProcessBridge"):
+    sessionVM.onSwitchProcessProc = proc(recordingId: string) =
+      let entryOpt = sessionVM.entryForRecording(recordingId)
+      if entryOpt.isNone:
+        cerror "switch process: unknown recording " & recordingId
+        return
+      let threadId = entryOpt.get.routingThreadId()
+      if threadId == 0:
+        cerror "switch process: recording " & recordingId &
+          " advertises no thread id; leaving routing unchanged"
+        return
+      # This session's requests only: each tab routes to its own recording.
+      dapRef.setRoutingThreadId(threadId)
+      dapRef.sendCtRequest(CtRunToEntry, JsObject{})
+
+  # Spec §14.8 — the State Pane's "Switch process" right-click
+  # entry. Offered only while a cross-process correlation is
+  # active: the targets are the sibling recordings the open origin
+  # chain reaches, minus the one already being viewed.
+  initPanelVM("installSwitchProcessMenuBridges"):
+    let svm = sessionVM.stateVM
+    if not svm.isNil:
+      svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
+        result = @[]
+        let activeId = sessionVM.activeProcessRecordingId.val
+        var seen: seq[string] = @[]
+        for span in sessionVM.crossProcessSpans.val:
+          if span.recordingId.len == 0 or span.recordingId == activeId:
+            continue
+          if span.recordingId in seen:
+            continue
+          seen.add(span.recordingId)
+          result.add(ProcessSwitchTarget(
+            recordingId: span.recordingId, role: span.role))
+      svm.onSwitchProcessProc = proc(recordingId: string) =
+        sessionVM.onSwitchProcess(recordingId)
+
+  initPanelVM("installEventLogSwitchProcessBridge"):
+    # §5.3 — an Event Log boundary chip whose counterpart lives in
+    # a sibling recording rotates the session, exactly as clicking
+    # that recording in the process tree would.
+    if not sessionVM.eventLogVM.isNil:
+      sessionVM.eventLogVM.onSwitchProcessProc = proc(recordingId: string) =
+        sessionVM.onSwitchProcess(recordingId)
+
+  initPanelVM("installBuildRunner"):
+    if not sessionVM.buildVM.isNil:
+      sessionVM.buildVM.runBuild = proc() = data.update(build=true)
+
+  # -----------------------------------------------------------------
+  # Direct viewsApi subscriptions on THIS session's mediator: bypass the
+  # component mediator routing so the session's store receives data even
+  # when the component-level subscriptions are not yet wired up (the
+  # mediator routing between early-registered components and viewsApi is
+  # order-dependent and can miss events).
+  # -----------------------------------------------------------------
+  cdebug "[PIPELINE] configureSessionMiddleware: registering viewsApi subscriptions"
+
+  # The locals answer's direct subscription, and the request tracking
+  # that lets it tell which request each answer is for.
+  state.wireLocalsAnswers(viewsApi, store)
+
+  viewsApi.subscribe(CtCompleteMove,
+    proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
+      cdebug ("[PIPELINE] viewsApi.CtCompleteMove: session=" &
+        $dapRef.sessionId & " rrTicks=" &
+        $response.location.rrTicks & " file=" & $response.location.path &
+        " line=" & $response.location.line)
+      # Batch the calltrace + state store writes so the parallel
+      # ViewModels' autoLoad effects fire at most once per move.
+      # Without batching each write schedules its own observer
+      # invalidation, producing several backend round-trips that can
+      # clobber the store mid-render and leave Playwright with stale
+      # locators (the python/ruby sudoku navigation regression).
+      let rrTicks = response.location.rrTicks
+      let path = response.location.path
+      let line = response.location.line
+      let sourceGeneration = response.location.sourceGeneration
+      let sourceDigest = response.location.sourceDigest
+      let rawResponse = response.toJs
+      let geidValue = rawResponse["geid"]
+      let currentGeidValue = rawResponse["currentGeid"]
+      let locationGeidValue = response.location.toJs["geid"]
+      let geid =
+        if not jsMissing(geidValue):
+          some(geidValue.to(int).uint64)
+        elif not jsMissing(currentGeidValue):
+          some(currentGeidValue.to(int).uint64)
+        elif not jsMissing(locationGeidValue):
+          some(locationGeidValue.to(int).uint64)
+        else:
+          none(uint64)
+      # This session's tab's editors hold its source lines, shown or not.
+      let editors =
+        if session.ui.isNil: nil else: session.ui.editors
+      isoBatch.batch proc() =
+        state.syncStoreDebuggerPositionInto(store, editors,
+          rrTicks, path, line, sourceGeneration, sourceDigest)
+        if geid.isSome:
+          store.updateCurrentGeid(geid)
+        # The stop's whole location, which the editor places its
+        # execution line from (`ReplayDataStore.stop`).
+        store.applyStopLocation(parseJsonFromJsObject(rawResponse))
+
+      # The status bar of THIS session's tab; it draws only while its tab
+      # is shown (`ui/status.nim`).
+      let status =
+        if session.ui.isNil: nil else: session.ui.status
+      if not status.isNil:
+        cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
+        status.stopSignal = response.stopSignal
+        status.location = response.location
+        status.state.stableBusy = false
+        inc status.completeMoveId
+        status.redraw()
+      else:
+        # Stays at ERROR.  The "it just arrived early"
+        # reading of this branch does not survive checking: the only
+        # thing that registers this subscription is
+        # `configureSessionMiddleware`, and all of its call sites
+        # (`onTraceLoaded`, `onNoTrace`, `onStartDeepReview`) run strictly after
+        # `createUIComponents`, which constructs the tab's status
+        # component unconditionally.  So a `CtCompleteMove` cannot reach
+        # this handler before the status bar exists on the ordinary path,
+        # and a clean trace open reaches this branch ZERO times
+        # (measured off the `CODETRACER_TEST_CONSOLE_DUMP_PATH` dump).
+        #
+        # It therefore costs no log noise to keep, and what it would
+        # report is real: the tab's `ui` was rebuilt without its status
+        # component (`renderer.resetLayoutState` replaces `data.ui`
+        # wholesale) or a session switch left a session's chrome
+        # unbuilt.  The symptom is a status bar frozen on a stale
+        # location with nothing else in the log to say why.
+        cerror "[PIPELINE] viewsApi.CtCompleteMove: status component is nil")
+
+  # The standalone isonim_app shell remains disabled here because it would
+  # create a duplicate DOM tree in #isonim-app. The per-panel mounts in
+  # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
+  # rendering path and mount directly into GoldenLayout containers.
+
+  # THE WINDOW'S BRIDGES FOLLOW THE TAB ON SCREEN. A session configured
+  # while its tab is shown — the ordinary case: a tab's trace or edit
+  # session loads into the tab the user is on — takes them now. Its panes
+  # that GoldenLayout built before its ViewModels existed are rendered over
+  # them either way (`refreshPanelSessions`, inside `setPanelSession`).
+  if session == data.activeSession:
+    bindWindowToSession(session)
     if pendingCollabJoinBootstrapRaw.len > 0:
       discard activateCollabJoinBootstrap(pendingCollabJoinBootstrapRaw)
+  else:
+    panel_host.refreshPanelSessions()
 
-    # Hand the panels with legacy bridge code the session's ViewModels, or,
-    # for the panels `initializePanelViewModels` does not cover yet, build
-    # theirs over the session's store. If register() already created
-    # stub-backed VM instances during createUIComponents(), these calls
-    # replace them.
-    template initPanelVM(label: string; body: untyped) =
-      try:
-        cdebug "[PIPELINE] configureMiddleware: calling " & label
-        body
-      except CatchableError as e:
-        # Stays at ERROR: this is a real failure, not progress.  A panel
-        # VM that threw during construction leaves its panel wired to a
-        # stub (or to nothing), and every later symptom — an empty
-        # calltrace, a state panel that never fills — is downstream of
-        # this line.  It must stay at ERROR even though the surrounding
-        # `[PIPELINE]` progress traces were demoted to DEBUG.
-        cerror "[PIPELINE] configureMiddleware: " & label & " failed: " & e.msg
-
-    initPanelVM("initStateVMFromSession"):
-      state.initStateVMFromSession(activeSessionVM.stateVM)
-      # M29 §14.8 — attach the OriginChainVM to the SessionVM so
-      # the chain panel's breadcrumb chips route process switches
-      # through `SessionViewModel.onSwitchProcess` (and so the
-      # derived `crossProcessSpans` memo sees a live chain).
-      let ocvm = state.activeOriginChainVM()
-      if not ocvm.isNil:
-        activeSessionVM.attachOriginChainVM(ocvm)
-    # M42 §14.8 — multi-process session surface.
-    #
-    # `ct/listProcesses` is the only description of a session's
-    # recordings the renderer ever receives. The backend dispatches it
-    # as an unsolicited DAP event exactly once per session load
-    # (`dap_server.rs::dispatch_session_load_event`), so this
-    # subscription is what makes `processTree` non-empty in a real
-    # session — there is no polling fallback and no second source.
-    initPanelVM("subscribeListProcesses"):
-      dap.on[JsObject](dapRef, CtListProcesses,
-        proc(kind: CtEventKind, raw: JsObject) =
-          if activeSessionVM.isNil or raw.isNil:
-            return
-          try:
-            activeSessionVM.consumeListProcessesEvent(parseJsonFromJsObject(raw))
-          except CatchableError as e:
-            cerror "ct/listProcesses: failed to decode payload: " & e.msg)
-
-    # The `ct/originChain` reply had the same fate as `ct/listProcesses`
-    # before M42: `OriginChainVM.onShowOrigin` fires the request and
-    # discards the future (`asyncSendCtRequest` resolves immediately —
-    # real replies arrive out-of-band on the DAP channel), and nothing
-    # called `applyChainResponse`, so `activeChain` stayed `none` and
-    # the Origin Chain side panel never had a chain to draw. The
-    # backend emits `ct/updated-origin-chain` alongside every chain
-    # response — including the session-composed cross-process one, whose
-    # wire shape is deliberately identical — so one subscription feeds
-    # the VM for both the single- and multi-recording paths.
-    # EVERY `ct/originChain` IS NAMED BY THE TRANSPORT as it is sent —
-    # the VM's own (`OriginChainVM.onShowOrigin`) and the legacy menus'
-    # (`ui/value.nim`, `ui/key_router.nim`, `ui/flow.nim`), which emit it
-    # on the mediator and never touch the VM — so only the answer to the
-    # LATEST request, not cancelled since, is applied
-    # (`OriginChainVM.applyChainAnswer`). The companion
-    # `ct/updated-origin-chain` event carries no identity and the same body
-    # as the response, so the chain is taken from the response alone.
-    initPanelVM("subscribeUpdatedOriginChain"):
-      trackCtRequests(CtOriginChain,
-        onSent = proc(requestId: cstring) =
-          let ocvm = state.activeOriginChainVM()
-          if not ocvm.isNil:
-            ocvm.noteChainRequestSent($requestId),
-        onAnswered = proc(requestId: cstring) = discard)
-      # The `ct/originChain` response carries the identical chain body
-      # and is the request's direct correlate, so it is consumed too:
-      # the companion event is emitted only on success, and a failed
-      # query would otherwise leave the panel silently shut with no
-      # trace of why.
-      dap.on[JsObject](dapRef, CtOriginChainResponse,
-        proc(kind: CtEventKind, raw: JsObject) =
-          let ocvm = state.activeOriginChainVM()
-          if ocvm.isNil or raw.isNil:
-            return
-          try:
-            let body = parseJsonFromJsObject(raw)
-            if body.kind == JObject and body.hasKey("hops"):
-              # Spec §3.2.2 — "Show value origin" opens the dedicated side
-              # panel, whichever menu asked; a chain only arrives because a
-              # user asked for one. The origin badge is the one asker that
-              # does not: it expands its row in place (§3.2.1), so the VM
-              # never makes its request the side panel's
-              # (`noteChainRequestSent`) and `applyChainAnswer` declines its
-              # answer, which reaches the row through the request's own
-              # future instead.
-              if ocvm.applyChainAnswer(parseOriginChain(body),
-                                       $ctRequestIdOf(raw)):
-                ocvm.openSidePanel()
-            else:
-              # Only the side panel's own request ends its wait: a row's
-              # failed fetch leaves a pending "Show value origin" alone.
-              discard ocvm.rejectChainAnswer($ctRequestIdOf(raw))
-              cerror "ct/originChain: query returned no chain: " & $body
-          except CatchableError as e:
-            cerror "ct/originChain: failed to decode response: " & e.msg)
-
-    # The process tree's click handler rotates the ViewModel's active
-    # recording; this bridge is what makes that rotation visible in
-    # the backend. Requests are routed to a recording purely by the
-    # composed `threadId` they carry
-    # (`dap_server.rs::handle_request_via_session`), so switching
-    # process means re-pointing that id and then moving the cursor
-    # into the new recording so the editor and State Pane follow.
-    initPanelVM("installSwitchProcessBridge"):
-      activeSessionVM.onSwitchProcessProc = proc(recordingId: string) =
-        if activeSessionVM.isNil:
-          return
-        let entryOpt = activeSessionVM.entryForRecording(recordingId)
-        if entryOpt.isNone:
-          cerror "switch process: unknown recording " & recordingId
-          return
-        let threadId = entryOpt.get.routingThreadId()
-        if threadId == 0:
-          cerror "switch process: recording " & recordingId &
-            " advertises no thread id; leaving routing unchanged"
-          return
-        setActiveSessionThreadId(threadId)
-        data.dapApi.sendCtRequest(CtRunToEntry, JsObject{})
-
-    # Spec §14.8 — the State Pane's "Switch process" right-click
-    # entry. Offered only while a cross-process correlation is
-    # active: the targets are the sibling recordings the open origin
-    # chain reaches, minus the one already being viewed.
-    initPanelVM("installSwitchProcessMenuBridges"):
-      let svm = state.activeStateVM()
-      if not svm.isNil:
-        svm.crossProcessSwitchTargets = proc(): seq[ProcessSwitchTarget] =
-          result = @[]
-          if activeSessionVM.isNil:
-            return
-          let activeId = activeSessionVM.activeProcessRecordingId.val
-          var seen: seq[string] = @[]
-          for span in activeSessionVM.crossProcessSpans.val:
-            if span.recordingId.len == 0 or span.recordingId == activeId:
-              continue
-            if span.recordingId in seen:
-              continue
-            seen.add(span.recordingId)
-            result.add(ProcessSwitchTarget(
-              recordingId: span.recordingId, role: span.role))
-        svm.onSwitchProcessProc = proc(recordingId: string) =
-          if not activeSessionVM.isNil:
-            activeSessionVM.onSwitchProcess(recordingId)
-
-    initPanelVM("mountProcessTree"):
-      mountProcessTree(activeSessionVM)
-
-    if withDebugger:
-      initPanelVM("bindDebugToolbar"):
-        debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
-    initPanelVM("setPanelSession"):
-      # The panes the panel host mounts render this session's ViewModels;
-      # a pane whose container was built before now is mounted here.
-      panel_host.setPanelSession(activeSessionVM)
-    initPanelVM("initEventLogVMFromSession"):
-      event_log.initEventLogVMFromSession(activeSessionVM.eventLogVM)
-      # §5.3 — an Event Log boundary chip whose counterpart lives in
-      # a sibling recording rotates the session, exactly as clicking
-      # that recording in the process tree would.
-      event_log.installEventLogSwitchProcessBridge(proc(recordingId: string) =
-        if not activeSessionVM.isNil:
-          activeSessionVM.onSwitchProcess(recordingId))
-    initPanelVM("initFlowVMFromSession"):
-      flow.initFlowVMFromSession(activeSessionVM.flowVM)
-    initPanelVM("initEditorVMFromSession"):
-      editor.initEditorVMFromSession(activeSessionVM.editorVM)
-      # The editor's surface reads the session's values and flow, as the
-      # terminal's and GPUI's do (`editor_points.webEditorSurface`).
-      editor_points.setEditorSessionVMs(activeSessionVM.editorVM,
-        activeSessionVM.stateVM, activeSessionVM.flowVM,
-        activeSessionVM.scratchpadVM)
-    initPanelVM("initTimelineVMFromSession"):
-      trace.initTimelineVMFromSession(activeSessionVM.timelineVM)
-    initPanelVM("initTerminalOutputVMFromSession"):
-      terminal_output.initTerminalOutputVMFromSession(activeSessionVM.terminalOutputVM)
-    initPanelVM("initBuildVMFromSession"):
-      build.initBuildVMFromSession(activeSessionVM.buildVM)
-      build.buildVMInstance.runBuild = proc() = data.update(build=true)
-    initPanelVM("initErrorsVMFromSession"):
-      errors.initErrorsVMFromSession(activeSessionVM.errorsVM)
-    initPanelVM("initSearchResultsVMFromSession"):
-      search_results.initSearchResultsVMFromSession(activeSessionVM.searchResultsVM)
-    initPanelVM("initNoSourceVMFromSession"):
-      no_source.initNoSourceVMFromSession(activeSessionVM.noSourceVM)
-    initPanelVM("initStepListVMFromSession"):
-      step_list.initStepListVMFromSession(activeSessionVM.stepListVM)
-    initPanelVM("initReplVMFromSession"):
-      repl.initReplVMFromSession(activeSessionVM.replVM)
-    initPanelVM("initRequestPanelVMFromSession"):
-      request_panel.initRequestPanelVMFromSession(activeSessionVM.requestPanelVM)
-    initPanelVM("initTraceLogVMFromSession"):
-      trace_log.initTraceLogVMFromSession(activeSessionVM.traceLogVM)
-    initPanelVM("initScratchpadVMFromSession"):
-      scratchpad.initScratchpadVMFromSession(activeSessionVM.scratchpadVM)
-    initPanelVM("initFilesystemVMFromSession"):
-      filesystem.initFilesystemVMFromSession(activeSessionVM.fileTreeVM)
-    initPanelVM("initCommandPaletteVMFromSession"):
-      command.initCommandPaletteVMFromSession(activeSessionVM.commandPaletteVM)
-    initPanelVM("initFrameViewerVMWithStore"):
-      frame_viewer.initFrameViewerVMWithStore(activeSessionVM.store)
-    initPanelVM("initPixelHistoryVMWithStore"):
-      pixel_history.initPixelHistoryVMWithStore(activeSessionVM.store)
-    initPanelVM("initShaderDebugVMWithStore"):
-      shader_debug.initShaderDebugVMWithStore(activeSessionVM.store)
-    initPanelVM("initVideoPlayerVMWithStore"):
-      video_player.initVideoPlayerVMWithStore(activeSessionVM.store)
-    initPanelVM("initAgentActivityVMWithStore"):
-      agent_activity.initAgentActivityVMWithStore(activeSessionVM.store)
-    initPanelVM("initAgentWorkspaceVMWithStore"):
-      agent_workspace.initAgentWorkspaceVMWithStore(activeSessionVM.store)
-    when not defined(ctWeb):
-      initPanelVM("installAgenticWorktreeTestHooks"):
-        agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(
-          activeSessionVM.store)
-
-    # -----------------------------------------------------------------
-    # Direct viewsApi subscriptions: bypass the component mediator
-    # routing so the ViewModel store receives data even when the
-    # component-level subscriptions are not yet wired up (the mediator
-    # routing between early-registered components and viewsApi is
-    # order-dependent and can miss events).
-    # -----------------------------------------------------------------
-    cdebug "[PIPELINE] configureMiddleware: registering viewsApi subscriptions"
-
-    # The locals answer's direct subscription, and the request tracking
-    # that lets it tell which request each answer is for.
-    state.wireLocalsAnswers(data.viewsApi)
-
-    data.viewsApi.subscribe(CtCompleteMove,
-      proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-        cdebug ("[PIPELINE] viewsApi.CtCompleteMove: rrTicks=" &
-          $response.location.rrTicks & " file=" & $response.location.path &
-          " line=" & $response.location.line)
-        # Batch the calltrace + state store writes so the parallel
-        # ViewModels' autoLoad effects fire at most once per move.
-        # Without batching each write schedules its own observer
-        # invalidation, producing several backend round-trips that can
-        # clobber the store mid-render and leave Playwright with stale
-        # locators (the python/ruby sudoku navigation regression).
-        let rrTicks = response.location.rrTicks
-        let path = response.location.path
-        let line = response.location.line
-        let sourceGeneration = response.location.sourceGeneration
-        let sourceDigest = response.location.sourceDigest
-        let rawResponse = response.toJs
-        let geidValue = rawResponse["geid"]
-        let currentGeidValue = rawResponse["currentGeid"]
-        let locationGeidValue = response.location.toJs["geid"]
-        let geid =
-          if not jsMissing(geidValue):
-            some(geidValue.to(int).uint64)
-          elif not jsMissing(currentGeidValue):
-            some(currentGeidValue.to(int).uint64)
-          elif not jsMissing(locationGeidValue):
-            some(locationGeidValue.to(int).uint64)
-          else:
-            none(uint64)
-        isoBatch.batch proc() =
-          state.syncStoreDebuggerPosition(
-            rrTicks, path, line, sourceGeneration, sourceDigest)
-          if geid.isSome and not activeSessionVM.isNil:
-            activeSessionVM.store.updateCurrentGeid(geid)
-          # The stop's whole location, which the editor places its
-          # execution line from (`ReplayDataStore.stop`).
-          if not activeSessionVM.isNil:
-            activeSessionVM.store.applyStopLocation(
-              parseJsonFromJsObject(rawResponse))
-
-        if not data.ui.status.isNil:
-          cdebug "[PIPELINE] viewsApi.CtCompleteMove: refreshing status directly"
-          data.ui.status.stopSignal = response.stopSignal
-          data.ui.status.location = response.location
-          data.ui.status.state.stableBusy = false
-          inc data.ui.status.completeMoveId
-          data.ui.status.redraw()
-        else:
-          # Stays at ERROR.  The "it just arrived early"
-          # reading of this branch does not survive checking: the only
-          # thing that registers this subscription is
-          # `configureMiddleware`, and all of its call sites
-          # (`onTraceLoaded`, `onNoTrace`, `onStartDeepReview`) run strictly after
-          # `createUIComponents`, which constructs `data.ui.status`
-          # unconditionally.  So a `CtCompleteMove` cannot reach this
-          # handler before the status bar exists on the ordinary path,
-          # and a clean trace open reaches this branch ZERO times
-          # (measured off the `CODETRACER_TEST_CONSOLE_DUMP_PATH` dump).
-          #
-          # It therefore costs no log noise to keep, and what it would
-          # report is real: `data.ui` was rebuilt without its status
-          # component (`renderer.resetLayoutState` replaces `data.ui`
-          # wholesale) or a session switch left a session's chrome
-          # unbuilt.  The symptom is a status bar frozen on a stale
-          # location with nothing else in the log to say why.
-          cerror "[PIPELINE] viewsApi.CtCompleteMove: status component is nil")
-
-    # The standalone isonim_app shell remains disabled here because it would
-    # create a duplicate DOM tree in #isonim-app. The per-panel mounts in
-    # calltrace.nim, state.nim, event_log.nim, etc. are the canonical
-    # rendering path and mount directly into GoldenLayout containers.
-
-  # SUBSCRIBE THE COMPONENTS THAT ARE NOT SUBSCRIBED YET, and only those.
+  # SUBSCRIBE THE COMPONENTS THAT ARE NOT SUBSCRIBED YET, and only those —
+  # this tab's components, on this tab's mediator.
   #
   # This loop used to call `register` on every component in the mapping,
   # reusing `component.api` when one was already there. `register` is purely
@@ -2758,40 +2913,40 @@ proc configureMiddleware(withDebugger = true) =
   # "`registerComponent` skips components that already carry an `api`". A
   # component that was torn down has had `api` set back to nil by
   # `unregister`, so it is still picked up here — which is the case this
-  # loop exists for: components built before `data.viewsApi` existed.
-  for content, components in data.ui.componentMapping:
-    for i, component in components:
-      if not component.api.isNil:
+  # loop exists for: components built before the tab's `viewsApi` existed.
+  if not session.ui.isNil:
+    for content, components in session.ui.componentMapping:
+      if components.isNil:
         continue
-      component.register(setupLocalViewToMiddlewareApi(
-        cstring(fmt"{content} #{component.id} api"), data.viewsApi))
+      for i, component in components:
+        if component.isNil or not component.api.isNil:
+          continue
+        component.register(setupLocalViewToMiddlewareApi(
+          cstring(fmt"{content} #{component.id} api"), viewsApi))
 
   # Replay the last known debugger position so that newly-created
   # VMs (which start with rrTicks=0) learn the current position.
   # CtCompleteMove may have already fired before the VMs were created
   # and before register() wired up the component subscriptions.
-  # InternalLastCompleteMove asks the middleware to re-emit CtCompleteMove,
-  # which triggers onCompleteMove -> loadLines -> CtLoadCalltraceSection
-  # now that all subscriptions are in place.
-  if not activeSessionVM.isNil:
-    # Immediate replay: catches the case where CtCompleteMove already
-    # fired and lastCompleteMove is set in the middleware.
-    cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (immediate)"
-    data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
-    # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
-    # typically arrives 1-5 seconds after configureMiddleware.  This
-    # retry ensures VMs learn the position even when the backend
-    # responds after the immediate replay above found nothing.
-    discard windowSetTimeout(proc() =
-      cdebug "[PIPELINE] configureMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
-      data.viewsApi.emit(InternalLastCompleteMove, EmptyArg())
-    , 3_000)
+  # InternalLastCompleteMove asks this session's middleware to re-emit
+  # CtCompleteMove, which triggers onCompleteMove -> loadLines ->
+  # CtLoadCalltraceSection now that all subscriptions are in place.
+  #
+  # Immediate replay: catches the case where CtCompleteMove already
+  # fired and lastCompleteMove is set in the middleware.
+  cdebug "[PIPELINE] configureSessionMiddleware: emitting InternalLastCompleteMove (immediate)"
+  viewsApi.emit(InternalLastCompleteMove, EmptyArg())
+  # Delayed replay: the DAP launch is asynchronous — CtCompleteMove
+  # typically arrives 1-5 seconds after this.  This retry ensures VMs
+  # learn the position even when the backend responds after the
+  # immediate replay above found nothing.
+  discard windowSetTimeout(proc() =
+    cdebug "[PIPELINE] configureSessionMiddleware: emitting InternalLastCompleteMove (delayed 3s)"
+    viewsApi.emit(InternalLastCompleteMove, EmptyArg())
+  , 3_000)
 
   # discard windowSetTimeout(proc =
   #   data.dapApi.exampleDap.receiveOnMove(), 1_000)
-
-# once:
-  # configureMiddleware()
 
 cast[js](dom.document).onreadystatechange = onReady
 
@@ -2903,15 +3058,15 @@ proc handleDapReplaySelected(response: JsObject; sendInitialize: bool) =
   # false for a tab that has already held a live session. `Stop` makes reusing a
   # tab the specified flow, so this is now a routine transition rather than an
   # exotic one. `enterCompletedReplayMode` documents what breaks without it.
-  if not activeSessionVM.isNil:
-    activeSessionVM.store.enterCompletedReplayMode()
+  if not shownSessionVM().isNil:
+    shownSessionVM().store.enterCompletedReplayMode()
     # AND A BACKEND IS NOW REACHABLE, which is the fact the store's
     # request tracker has been missing. Every panel VM issued its first
-    # request from `configureMiddleware`, before this point, into a
+    # request from `configureSessionMiddleware`, before this point, into a
     # channel with no peer; those entries are still marked pending and
     # would deduplicate the first real request away. See
     # `resetForNewSession`.
-    activeSessionVM.store.resetForNewSession()
+    shownSessionVM().store.resetForNewSession()
   infoPrint "ui: reinitializing dap for trace ", $trace.recordingId
   if sendInitialize:
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
@@ -2928,12 +3083,12 @@ proc handleDapLiveSessionSelected(response: JsObject; sendInitialize: bool) =
   let trace = response["trace"].to(Trace)
   data.activeSession.replayId = response["replayId"].to(int)
   data.activeSession.liveDebugSession = true
-  if not activeSessionVM.isNil:
-    activeSessionVM.store.setSessionMode(liveMcr)
+  if not shownSessionVM().isNil:
+    shownSessionVM().store.setSessionMode(liveMcr)
     # Same reason as the replay arm above: the boot-time requests were
     # issued before any backend existed and must not deduplicate the
     # first real one away.
-    activeSessionVM.store.resetForNewSession()
+    shownSessionVM().store.resetForNewSession()
   infoPrint "ui: initializing live dap session for trace ", $trace.recordingId
   if sendInitialize:
     data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
@@ -2980,18 +3135,22 @@ proc onDapLiveSessionSelected(sender: js; response: JsObject) =
   else:
     pendingDapLiveSelection = response
 
-proc attachLoadedTrace(folder: string) =
-  ## The host process opened `folder` on the replay engine; the renderer's
-  ## session adopts it (`DebuggerSession.attach`), which starts its stop
-  ## loader. A renderer that loads another trace into the same tab re-attaches,
-  ## so the session's `trace` names what is open.
-  if activeDebuggerSession.isNil:
+proc attachLoadedTrace(session: ReplaySession; folder: string) =
+  ## The host process opened `folder` on the replay engine for `session`'s
+  ## tab; that tab's own debugger session adopts it
+  ## (`DebuggerSession.attach`), which starts its stop loader. A renderer that
+  ## loads another trace into the same tab re-attaches, so the session's
+  ## `trace` names what is open. Another tab's debugger session is never
+  ## touched: each tab's is over its own `DapApi`.
+  let vms = viewModelsOf(session)
+  if vms.isNil or vms.debuggerSession.isNil:
     return
-  if activeDebuggerSession.phase.val == dspReady and
-     activeDebuggerSession.trace.kind == tskLocalFolder and
-     activeDebuggerSession.trace.folder == folder:
+  let debuggerSession = vms.debuggerSession
+  if debuggerSession.phase.val == dspReady and
+     debuggerSession.trace.kind == tskLocalFolder and
+     debuggerSession.trace.folder == folder:
     return
-  activeDebuggerSession.attach(localFolderTrace(folder))
+  debuggerSession.attach(localFolderTrace(folder))
 
 proc onTraceLoaded(
   sender: js,
@@ -3127,22 +3286,26 @@ proc onTraceLoaded(
   if data.startOptions.rawTestStrategy.len > 0:
     data.testRunner = cast[JsObject](runUiTest(data.startOptions.rawTestStrategy))
 
-  if not middlewareConfigured:
-    configureMiddleware()
-    middlewareConfigured = true
-  # A dataset review configured the session without the debugger toolbar
-  # (`configureMiddleware(withDebugger = false)`); a recording opened into it
-  # now has a replay to step, so the toolbar is bound here. A no-op when it is
-  # already bound to this session's controls.
-  if not activeSessionVM.isNil:
-    debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
-  attachLoadedTrace($data.trace.outputFolder)
+  # This tab's session, set up the first time it gets a trace; a trace
+  # loaded into a tab that already has one re-attaches its session below.
+  configureSessionMiddleware(data.activeSession)
+  # A dataset review configured its session without the debugger toolbar
+  # (`configureSessionMiddleware(withDebugger = false)`); a recording opened
+  # into it now has a replay to step, so the session gains its toolbar here,
+  # and the window binds it while this tab is shown.
+  block:
+    let vms = viewModelsOf(data.activeSession)
+    if not vms.isNil and not vms.debuggerSurface:
+      vms.debuggerSurface = true
+      if not vms.vm.isNil:
+        debug_toolbar.bindDebugToolbar(vms.vm.debugControlsVM)
+  attachLoadedTrace(data.activeSession, $data.trace.outputFolder)
   # A session started with a diff (`ct run --diff`): its diff flow is the
   # session's to load, once (the stop loader's `spDiffFlow`), not the
   # editor's redraw hook's.
-  if not data.startOptions.diff.isNil and not activeSessionVM.isNil and
-     not activeSessionVM.flowVM.isNil:
-    activeSessionVM.flowVM.diffSession.val = true
+  if not data.startOptions.diff.isNil and not shownSessionVM().isNil and
+     not shownSessionVM().flowVM.isNil:
+    shownSessionVM().flowVM.diffSession.val = true
 
   dapSessionSelectionReady = true
   flushPendingDapSessionSelections()
@@ -3318,8 +3481,9 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   # in the same place: after `createUIComponents` (whose components the
   # routine subscribes) and before `tryInitLayout` (whose GoldenLayout factory
   # mounts the panel-host panes into the containers it makes).
-  # `configureMiddleware` is what calls `panel_host.setPanelSession`; until it
-  # runs, `mountPanel` holds every container it is given. A dataset review
+  # `configureSessionMiddleware` is what calls `panel_host.setPanelSession`
+  # (through `bindWindowToSession`); until it runs, `mountPanel` holds every
+  # container it is given. A dataset review
   # loads no recording and so never reaches `onTraceLoaded`, and this handler
   # used to skip the routine altogether — harmless while the review's panes
   # mounted themselves, but once Agent Activity, VCS and Files moved onto the
@@ -3327,10 +3491,8 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   # (codetracer-pm issue 2026-10-22, "enter_submits_prompt.spec.ts never finds
   # the Agent Activity tab or its prompt box").  It runs without the two steps
   # that address a replay engine, since a dataset review has none; see
-  # `configureMiddleware`.
-  if not middlewareConfigured:
-    configureMiddleware(withDebugger = false)
-    middlewareConfigured = true
+  # `configureSessionMiddleware`.
+  configureSessionMiddleware(data.activeSession, withDebugger = false)
 
   data.ui.initEventReceived = true
   data.tryInitLayout()
@@ -3655,9 +3817,9 @@ proc onNoTrace(
   data.refreshCommandPaletteMenuIndex()
   data.refreshCommandPaletteFileIndex()
 
-  if not middlewareConfigured:
-    configureMiddleware()
-    middlewareConfigured = true
+  # This tab's session — an edit session has one too: its panes' ViewModels
+  # (Files, the editor, the toolbar) are the session's.
+  configureSessionMiddleware(data.activeSession)
 
   # Check if coming from welcome screen (where layout was already initialized)
   let wasFromWelcomeScreen = not data.ui.layout.isNil
@@ -3678,7 +3840,7 @@ proc onNoTrace(
   data.setEditorsReadOnlyState(false)
   # AN EDIT SESSION HAS STARTED, so the topbar is composed for it now: the
   # mode was assigned directly above rather than through `switchToEdit`, and
-  # `configureMiddleware` bound the toolbar ViewModel before it, while the
+  # `configureSessionMiddleware` bound the toolbar ViewModel before it, while the
   # mode still read Debug. Without this the topbar kept the stepping controls
   # on every `ct edit` launch (#812). The listing is the tree assigned above.
   debug_toolbar.syncTopbarToMode()
@@ -3791,8 +3953,11 @@ proc onNoTrace(
   # replay session is looking at a recording, and "which tests does this
   # workspace have" is a question about a workspace.
   if data.startOptions.edit:
+    # `tab` names the asking tab, and comes back on both answers, so they
+    # reach that tab's Test Results and Constraints whichever tab is on
+    # screen when they arrive (`ns9PanesTarget`).
     data.ipc.send "CODETRACER::ns9-panes",
-      js{ folder: data.startOptions.folder }
+      js{ folder: data.startOptions.folder, tab: int(data.activeSession.id) }
 
   configureShortcuts()
   redrawAll()
@@ -4043,8 +4208,11 @@ proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   # this workspace have" is a question about a workspace, and a replay session
   # is looking at a recording.
   if data.startOptions.edit:
+    # `tab` names the asking tab, and comes back on both answers, so they
+    # reach that tab's Test Results and Constraints whichever tab is on
+    # screen when they arrive (`ns9PanesTarget`).
     data.ipc.send "CODETRACER::ns9-panes",
-      js{ folder: data.startOptions.folder }
+      js{ folder: data.startOptions.folder, tab: int(data.activeSession.id) }
     # AND THE EDIT-MODE TOOLBAR, for the same reason and from the same event.
     # Its inputs are the project LISTING — a save can add the `Nargo.toml`
     # that `projectKinds` recognises — and the mode and the wasm registry.
@@ -4220,20 +4388,35 @@ var noirTestRunCounter = 0
   ## the first event it sees. A clock would make two runs in the same
   ## millisecond indistinguishable, which is exactly what a double-click does.
 
+proc ns9PanesTarget(response: JsObject): ReplaySession =
+  ## The tab an ns9-panes answer is for: the one its `tab` names
+  ## (`ReplaySession.id`, sent with the request and echoed by
+  ## `index/ns9_panes.onNs9Panes` and `ui/web_entry_surface`), while it is
+  ## still open — or the tab on screen, for an answer that names none.
+  if not response.isNil and not response["tab"].isUndefined and
+      not response["tab"].isNull:
+    let tab = response["tab"].to(int)
+    for session in data.sessions:
+      if not session.isNil and int(session.id) == tab:
+        return session
+  data.activeSession
+
 proc onNs9PanesCatalog(
     sender: js,
     response: jsobject(catalog=cstring, absence=cstring)) =
-  ## The project's test catalog, in `contracts.toJson`'s shape.
+  ## The project's test catalog, in `contracts.toJson`'s shape — into the
+  ## Test Results ViewModel of the tab that asked.
   test_results.initTestResultsVM()
-  if test_results.testResultsVMInstance.isNil:
+  let testsVM = testResultsVMOf(ns9PanesTarget(response.toJs))
+  if testsVM.isNil:
     return
   let absence = $response.absence
-  test_results.testResultsVMInstance.setRunAbsence(absence)
+  testsVM.setRunAbsence(absence)
   let raw = $response.catalog
   if raw.len == 0:
     return
   try:
-    test_results.testResultsVMInstance.setCatalog(
+    testsVM.setCatalog(
       testCatalogFromJson(parseJson(raw)))
     # THE EDITOR'S RUN CONTROLS COME FROM THIS CATALOG, and nothing sequences
     # its arrival against a file being opened. An editor that opened first read
@@ -4248,21 +4431,23 @@ proc onNs9PanesCatalog(
     # `absence` exists to make impossible.
     cerror "ns9-panes: the test catalog did not parse: " &
       getCurrentExceptionMsg()
-    test_results.testResultsVMInstance.setRunAbsence(
+    testsVM.setRunAbsence(
       "The host sent a test catalog this build could not read.")
 
 proc onNs9PanesConstraints(
     sender: js,
     response: jsobject(info=cstring, provenance=cstring, absence=cstring)) =
-  ## `nargo info --json`, verbatim, or a stated reason there is none.
+  ## `nargo info --json`, verbatim, or a stated reason there is none — into
+  ## the Constraints ViewModel of the tab that asked.
   constraints.initConstraintsVM()
-  if constraints.constraintsVMInstance.isNil:
+  let constraintsVM = constraintsVMOf(ns9PanesTarget(response.toJs))
+  if constraintsVM.isNil:
     return
   let absence = $response.absence
   if absence.len > 0:
-    constraints.constraintsVMInstance.setAbsence(absence)
+    constraintsVM.setAbsence(absence)
     return
-  constraints.constraintsVMInstance.setReport(
+  constraintsVM.setReport(
     parseNargoInfoJson($response.info, $response.provenance))
 
 # ---------------------------------------------------------------------------
@@ -4338,8 +4523,13 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
     if message.kind == nnkStrLit:
       fullMessage = (namespace & $message).newLit
       handler = (("on-" & $message).toCamelCase).ident
+      # FOR THE TAB IT ANSWERS (`tab_answer_routing.deliverTabAnswer`): now, if
+      # that is the tab on screen or the answer names none; when that tab is
+      # next shown, if it is hidden; never, if it has closed.
       messageCode = quote:
-        `ipc`["on"].call(`ipc`, `fullMessage`, `handler`)
+        `ipc`["on"].call(`ipc`, `fullMessage`) do (sender: js, answer: js):
+          deliverTabAnswer(`data`, cstring(`fullMessage`), answer, proc() =
+            discard functionAsJS(`handler`).call(jsUndefined, sender, answer))
     else:
       # a:t => b
       # echo message.treerepr
@@ -4369,7 +4559,9 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
             #   if i == `data`.ui.list.len or i > 50:
             #     break
             #   var component = `data`.ui.list[i]
-            for content, map in `data`.ui.componentMapping:
+            # THE TAB THE MESSAGE IS FOR (`ipcUiTarget`), not
+            # necessarily the one on screen.
+            for content, map in ipcUiTarget(`data`, `fullMessage`).ui.componentMapping:
               for id, component in map:
                 # echo "=> component for content ", content, " with id ", id
                 # echo "  method  ", `nameLit`
@@ -4379,7 +4571,9 @@ macro uiIpcHandlers*(namespace: static[string], messages: untyped): untyped =
       messageCode = quote:
         `ipc`["on"].call(`ipc`, `fullMessage`) do (sender: js, `response`: js):
           echo "-> received: ", `fullMessage`
-          `handlers`
+          # For the tab it answers, as above.
+          deliverTabAnswer(`data`, cstring(`fullMessage`), `response`, proc() =
+            `handlers`)
       # echo messageCode.repr
     result.add(messageCode)
   # echo result.repr
@@ -4619,7 +4813,65 @@ proc onHcrSessionStatus(sender: js, response: js) =
   setHcrLiveEditStatus(hcrLiveEditOverlay, status,
     cstring($message & (if remedy.len > 0: "  REMEDY: " & $remedy else: "")))
 
+proc wrapSendWithAskingTab(ipc: JsObject; askingTab: proc(): JsObject) {.importjs: """
+(function (ipc, askingTab) {
+  if (!ipc || ipc.__ctAskingTab || typeof ipc.send !== 'function') { return; }
+  var send = ipc.send;
+  ipc.__ctAskingTab = true;
+  ipc.send = function (id, payload) {
+    var rest = Array.prototype.slice.call(arguments, 2);
+    // A COPY with the tab, never the caller's object: a payload a caller
+    // keeps and sends again from another tab must not carry this one's.
+    if (payload !== null && typeof payload === 'object' &&
+        !Array.isArray(payload) && !('tab' in payload)) {
+      var tab = askingTab();
+      if (tab !== undefined) { payload = Object.assign({}, payload, {tab: tab}); }
+    }
+    return send.apply(this, [id, payload].concat(rest));
+  };
+})(#, #)""".}
+
+proc stampAskingTab(data: Data) =
+  ## EVERY REQUEST NAMES THE TAB THAT SENT IT. `data.ipc.send` adds a `tab`
+  ## field — the shown tab's `ReplaySession.id`, which is the tab a request
+  ## comes from: the user acts in the tab on screen — to each object payload
+  ## that has none, and the main process hands it back on the answer
+  ## (`index/tab_answers.nim`), which `deliverTabAnswer` then gives to that
+  ## tab (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rules 1, 2, 6).
+  ## A payload that already names its tab (`ns9-panes`) keeps it; a payload
+  ## that is not an object (or none) is sent as it was.
+  ##
+  ## WHICH ANSWERS STAY WINDOW-SCOPED, and why — they carry no `tab`, so
+  ## `deliverTabAnswer` gives them to the tab on screen:
+  ##
+  ## * `started`, `init` and `no-trace` at startup, `start-shell-ui`,
+  ##   `start-deepreview`, `welcome-screen`: the window's first content,
+  ##   before any tab has asked for anything (the same messages sent by a
+  ##   load DO name its tab);
+  ## * `recent-items`, `ct-install-status`, `keybindings`, `new-notification`,
+  ##   `menu-action`, `close`, `reset-layout-done`: the window's own lists,
+  ##   install state, key map, toasts, menu and lifecycle — one for every tab;
+  ## * `change-file`, `reload-file`: the file watcher reporting a file changed
+  ##   on disk, which concerns every tab that has the file open;
+  ## * `hcr-session-status`: the main process runs ONE live-edit session
+  ##   (`index/hcr_launch`), not one per tab;
+  ## * `open-trace-in-tab-ready`, `open-edit-folder-in-tab-ready`: they ask
+  ##   the window for a NEW tab, and the load that follows answers it as the
+  ##   tab on screen;
+  ## * `dap-receive-*`, `acp-*`: routed by their own ids — the DAP session id
+  ##   (`event_helpers.deliverDapEvent`) and the ACP session id
+  ##   (`agent_activity.componentBySessionId`);
+  ## * the debugger's typed messages (`complete-move`, `updated-*`,
+  ##   `build-*`, …): a tab's backend's events, routed by session
+  ##   (`ipcUiTarget` for the build's).
+  if data.isNil or data.ipc.isNil:
+    return
+  wrapSendWithAskingTab(data.ipc, proc(): JsObject =
+    if data.sessions.len == 0 or data.activeSession.isNil: jsUndefined
+    else: int(data.activeSession.id).toJs)
+
 proc configureIPC(data: Data) =
+  stampAskingTab(data)
   uiIpcHandlers("CODETRACER::"):
     "hcr-apply-edit-result"
     # H6 — where the live-edit SESSION is: launching, ready, or failed by name.
@@ -6328,7 +6580,7 @@ when defined(ctWeb):
       # THE CALL PATH THIS MILESTONE EXISTS FOR, and its position is
       # load-bearing. `enterTemplateEditMode` delivers `CODETRACER::no-trace`
       # SYNCHRONOUSLY through the in-page transport's `deliver`, and
-      # `onNoTrace` calls `configureMiddleware()` — which is what creates
+      # `onNoTrace` calls `configureSessionMiddleware` — which is what creates
       # `build.buildVMInstance` and installs the DESKTOP `runBuild`
       # (`data.update(build=true)`, a message to a host this tab does not
       # have). So by the time control returns here the VM exists and carries
@@ -6377,72 +6629,76 @@ when defined(ctWeb):
           # `runTests` is a `Signal[RunTestsProc]` (test_results_vm.nim:120), so
           # a plain field write would reach no observer and the pane would not
           # re-render when the runner arrives — the defect the Signal was
-          # introduced to fix. Installation is necessarily against the instance
-          # that exists now; only the two callbacks below can defer their read,
-          # and they do.
+          # introduced to fix. Installation is against each tab's instance —
+          # every one that exists and each created later
+          # (`onEachTestResultsVM`); the callbacks below defer their read.
           # AND THE RUNNER ANSWERS. `RunTestsProc` returns the sentence saying
           # why a run did not start, and `startRun` files it into the pane's
           # `.test-results-failure` block. Nothing is discarded here: the three
           # states `startNoirTests` declines in — a build already running, no
           # project, no build view-model — are all states in which `canRun` is
           # TRUE, so the ▶ was live, took the click, and moved nothing.
-          test_results.testResultsVMInstance.setRunTests(
-            proc(): string = web_noir_build.startNoirTests())
+          # ON EVERY TAB'S ViewModel: each tab has its own Test Results
+          # ViewModel (`session_viewmodels.testResultsVMOf`), and the runner and
+          # the row actions are the host's, the same for all of them.
+          test_results.onEachTestResultsVM(proc(testsVM: TestResultsVM) =
+            testsVM.setRunTests(
+              proc(): string = web_noir_build.startNoirTests())
 
-          # THE TWO PER-ROW CONTROLS, pointed at the two things they mean.
-          #
-          # They are installed TOGETHER and as three procs, because the pane
-          # decides between them and the host must be able to honour whichever
-          # it picks. Installing only the recorder would leave `⏵` disabled with
-          # "No host in this build can open a recording" on every row — a
-          # correct sentence about a wiring gap, which is not the same as a
-          # correct product.
-          #
-          # `refresh` passes `openWhenDone = false`: it makes the recording and
-          # leaves the reader in the pane. `recordAndOpen` passes the default,
-          # which is the editor's Run-test behaviour — verdict, artefact, trace,
-          # session.
-          #
-          # `openExisting` calls a proc that DISPATCHES NOTHING. That is the
-          # affordance the user asked for by name ("this is not necessarily a
-          # re-run") and the reason it is a separate host entry point rather
-          # than a flag on the recorder: a flag could be got wrong and still
-          # look right, whereas a proc with no `dispatch` in it cannot re-run a
-          # test by accident.
-          # THE TWO RECORDING ACTIONS SAY WHY THEY DID NOT RUN, exactly as
-          # `openExisting` below already did. They reach
-          # `startNoirTestRecording`, whose five refusals used to be console
-          # lines — so `⟳` over a project with a Build in flight was a click
-          # that changed nothing on screen.
-          test_results.testResultsVMInstance.setRowActions(
-            refresh = proc(testId, selector: string) =
-              let refusal = web_noir_build.startNoirTestRecording(
-                selector, newSessionTab = false, openWhenDone = false)
-              if refusal.len > 0 and
-                 not test_results.testResultsVMInstance.isNil:
-                test_results.testResultsVMInstance.noteRowActionRefusal(
-                  refusal),
-            openExisting = proc(testId, selector: string) =
-              let refusal = web_noir_build.openRetainedTestRecording(selector)
-              if refusal.len > 0 and
-                 not test_results.testResultsVMInstance.isNil:
-                # SAID, NOT SWALLOWED. The pane offered this control believing
-                # a recording was there; if the host disagrees the user is owed
-                # the sentence rather than a click that did nothing.
-                #
-                # `noteRowActionRefusal` and NOT `setRunAbsence` — see its
-                # header. One control failing must not grey out three others,
-                # and a transient refusal must not become a standing claim
-                # about what this deployment can do.
-                test_results.testResultsVMInstance.noteRowActionRefusal(
-                  refusal),
-            recordAndOpen = proc(testId, selector: string) =
-              let refusal = web_noir_build.startNoirTestRecording(
-                selector, newSessionTab = false, openWhenDone = true)
-              if refusal.len > 0 and
-                 not test_results.testResultsVMInstance.isNil:
-                test_results.testResultsVMInstance.noteRowActionRefusal(
-                  refusal))
+            # THE TWO PER-ROW CONTROLS, pointed at the two things they mean.
+            #
+            # They are installed TOGETHER and as three procs, because the pane
+            # decides between them and the host must be able to honour whichever
+            # it picks. Installing only the recorder would leave `⏵` disabled with
+            # "No host in this build can open a recording" on every row — a
+            # correct sentence about a wiring gap, which is not the same as a
+            # correct product.
+            #
+            # `refresh` passes `openWhenDone = false`: it makes the recording and
+            # leaves the reader in the pane. `recordAndOpen` passes the default,
+            # which is the editor's Run-test behaviour — verdict, artefact, trace,
+            # session.
+            #
+            # `openExisting` calls a proc that DISPATCHES NOTHING. That is the
+            # affordance the user asked for by name ("this is not necessarily a
+            # re-run") and the reason it is a separate host entry point rather
+            # than a flag on the recorder: a flag could be got wrong and still
+            # look right, whereas a proc with no `dispatch` in it cannot re-run a
+            # test by accident.
+            # THE TWO RECORDING ACTIONS SAY WHY THEY DID NOT RUN, exactly as
+            # `openExisting` below already did. They reach
+            # `startNoirTestRecording`, whose five refusals used to be console
+            # lines — so `⟳` over a project with a Build in flight was a click
+            # that changed nothing on screen.
+            testsVM.setRowActions(
+              refresh = proc(testId, selector: string) =
+                let refusal = web_noir_build.startNoirTestRecording(
+                  selector, newSessionTab = false, openWhenDone = false)
+                if refusal.len > 0 and
+                   not test_results.testResultsVMInstance.isNil:
+                  test_results.testResultsVMInstance.noteRowActionRefusal(
+                    refusal),
+              openExisting = proc(testId, selector: string) =
+                let refusal = web_noir_build.openRetainedTestRecording(selector)
+                if refusal.len > 0 and
+                   not test_results.testResultsVMInstance.isNil:
+                  # SAID, NOT SWALLOWED. The pane offered this control believing
+                  # a recording was there; if the host disagrees the user is owed
+                  # the sentence rather than a click that did nothing.
+                  #
+                  # `noteRowActionRefusal` and NOT `setRunAbsence` — see its
+                  # header. One control failing must not grey out three others,
+                  # and a transient refusal must not become a standing claim
+                  # about what this deployment can do.
+                  test_results.testResultsVMInstance.noteRowActionRefusal(
+                    refusal),
+              recordAndOpen = proc(testId, selector: string) =
+                let refusal = web_noir_build.startNoirTestRecording(
+                  selector, newSessionTab = false, openWhenDone = true)
+                if refusal.len > 0 and
+                   not test_results.testResultsVMInstance.isNil:
+                  test_results.testResultsVMInstance.noteRowActionRefusal(
+                    refusal)))
 
           # AND THE PANE IS TOLD WHICH RECORDING NOW EXISTS.
           #
@@ -6459,12 +6715,20 @@ when defined(ctWeb):
               test_results.testResultsVMInstance.rememberRecordingForSelector(
                 selector, recordingId, recordedAtText)
 
+          # The run ends in the ViewModel it began in: the tab shown when it
+          # started, which may no longer be the one shown when it settles.
+          var runningTestsVM: TestResultsVM = nil
           web_noir_build.noirTestRunStarted = proc() =
-            if not test_results.testResultsVMInstance.isNil:
-              test_results.testResultsVMInstance.beginRun()
+            runningTestsVM = test_results.testResultsVMInstance
+            if not runningTestsVM.isNil:
+              runningTestsVM.beginRun()
           web_noir_build.noirTestRunSettled = proc() =
-            if not test_results.testResultsVMInstance.isNil:
-              test_results.testResultsVMInstance.endRun()
+            let settledVM =
+              if runningTestsVM.isNil: test_results.testResultsVMInstance
+              else: runningTestsVM
+            runningTestsVM = nil
+            if not settledVM.isNil:
+              settledVM.endRun()
             # THE EDITOR'S RUN-TEST BUTTON STOPS HERE, and this line is the
             # whole of the fix for the control that used to spin forever. It is
             # on SETTLED and not on success, because a refused run and a red
@@ -6722,17 +6986,18 @@ when defined(ctWeb):
             cerror "replay: the bundled debug layout did not parse"
             return
           # THE ENGINE IS READY, and this is the first point on the web path
-          # where that fact and `activeSessionVM` are in the same scope.
+          # where that fact and the shown tab's session (`shownSessionVM`)
+          # are in the same scope.
           #
           # `web_replay_host.openSession` calls this closure only after
           # `outcome.ready` and after the dap responder is installed — i.e.
           # after the worker exists and the channel has a peer. Everything
           # the panel ViewModels asked for BEFORE this moment was issued
-          # from `configureMiddleware` into a channel that dropped it, and
+          # from `configureSessionMiddleware` into a channel that dropped it, and
           # those requests are still recorded as in flight. See
           # `ReplayDataStore.resetForNewSession`.
-          if not activeSessionVM.isNil:
-            activeSessionVM.store.resetForNewSession()
+          if not shownSessionVM().isNil:
+            shownSessionVM().store.resetForNewSession()
           # A REPLAY SESSION HAS A TRACE, and until now `data.trace` was nil.
           #
           # `onNoTrace` sets it nil (there is no recording on an editing

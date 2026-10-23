@@ -13,6 +13,16 @@
 ## exists — GoldenLayout builds the layout before the renderer has a trace —
 ## is held and mounted the moment the session is installed.
 ##
+## WHICH SESSION: the one of the TAB WHOSE CONTAINER HOLDS THE HOST. Every tab
+## of a desktop window is an independent session with its own ViewModels
+## (`GUI/Multi-Window-Tab-Management.md` §Tab Behavior rules 1 and 2;
+## `ui/session_viewmodels.nim`), and every tab's DOM lives in one document, so
+## one window-global session would draw one tab's data into every tab's panes
+## — which is what it did while the window had one `SessionViewModel`. The
+## host process installs the rule (`setPanelSessionResolver`); a host outside
+## every tab container (the auto-hide overlay) shows the tab on screen, and is
+## re-rendered when another tab is shown (`refreshPanelSessions`).
+##
 ## The panes reached this way are `PanelHostKinds`; the others still mount
 ## through `ui/layout.mountPaneForState` until their views are converted.
 
@@ -86,6 +96,8 @@ type
     ## One mounted pane: its host, what it shows, and the root to dispose.
     host: dom_api.Element
     kind: Content
+    session: SessionViewModel
+      ## The session it was rendered over; nil while it waits for one.
     disposeRoot: proc()
     stopMeasuring: StopWatching
     disposed: bool
@@ -118,8 +130,12 @@ var renderers: array[Content, PanelRenderer]
   ## and agent panes): the module that owns it registers how to render it
   ## (`setPanelRenderer`).
   ## Per pane, set by the module that owns the pane's host behaviour.
-var hostSession: SessionViewModel
-  ## The session the panes show; nil until the renderer has one.
+var shownSession: SessionViewModel
+  ## The session of the tab on screen; nil until the renderer has one. What
+  ## a host shows when no resolver is installed (a single-session page), and
+  ## what the panes' key handlers act on (`panelSession`).
+var resolveSession: proc(host: dom_api.Element): SessionViewModel
+  ## Which session a host's pane shows (`setPanelSessionResolver`).
 var waiting: seq[PanelMount]
   ## Mounts whose container exists but whose session did not yet.
 var live: seq[PanelMount]
@@ -268,8 +284,20 @@ proc startMeasuring(m: PanelMount; session: SessionViewModel) =
     spec.changed()
     panelSetTimeout(measure, 0)
 
+proc unrender(m: PanelMount) =
+  ## Stop `m`'s measuring and dispose its reactive root, keeping the mount.
+  if not m.stopMeasuring.isNil:
+    m.stopMeasuring()
+    m.stopMeasuring = nil
+  if not m.disposeRoot.isNil:
+    m.disposeRoot()
+    m.disposeRoot = nil
+
 proc render(m: PanelMount; session: SessionViewModel) =
-  ## Render `m`'s pane into its host, in a root of its own.
+  ## Render `m`'s pane into its host over `session`, in a root of its own,
+  ## replacing whatever it rendered before.
+  m.unrender()
+  m.session = session
   let host = m.host
   let node = dom_api.Node(host)
   while not dom_api.isNodeNil(node.firstChild):
@@ -356,11 +384,32 @@ proc render(m: PanelMount; session: SessionViewModel) =
 proc reportShown(session: SessionViewModel) =
   ## Tell the session's ViewModels which of the panes that load only while
   ## shown are mounted: the stop loader asks for the low-level code only
-  ## then.
+  ## then. Only `session`'s own mounts count — another tab's Low Level Code
+  ## pane does not make this session load its code.
   if session.isNil or session.lowLevelCodeVM.isNil:
     return
   session.lowLevelCodeVM.setShown(
-    live.anyIt(it.kind == Content.LowLevelCode and not it.disposeRoot.isNil))
+    live.anyIt(it.kind == Content.LowLevelCode and it.session == session and
+               not it.disposeRoot.isNil))
+
+proc sessionFor(host: dom_api.Element): SessionViewModel =
+  ## The session `host`'s pane shows: the resolver's answer, or the shown
+  ## session where no resolver is installed.
+  if resolveSession.isNil: shownSession else: resolveSession(host)
+
+proc prepare(session: SessionViewModel) =
+  ## What a session's panes need from the host once, before the first of
+  ## them renders. Idempotent: both only set a mode on the ViewModel.
+  if session.isNil:
+    return
+  # The desktop and the web mark the call the debugger is in after every
+  # move, as the Call Trace component did before it was mounted here.
+  if not session.calltraceVM.isNil:
+    session.calltraceVM.followDebuggerCall()
+  # The Event Log marks the current event, and asks for it after a move, as
+  # the terminal's and GPUI's do (HSF-D6).
+  if not session.eventLogVM.isNil:
+    session.eventLogVM.followStop()
 
 proc panelHostComponentId*(host: dom_api.Element): int {.importjs:
   "(function(e){var p=(e.id||'').split('-');var n=Number(p[p.length-1]);return isNaN(n)?0:n;})(#)".}
@@ -382,11 +431,13 @@ proc mountPanel*(host: dom_api.Element; kind: Content): PanelMount =
   doAssert kind in PanelHostKinds, $kind & " is not mounted by the panel host"
   result = PanelMount(host: host, kind: kind)
   live.add result
-  if hostSession.isNil:
+  let session = sessionFor(host)
+  if session.isNil:
     waiting.add result
   else:
-    result.render(hostSession)
-    reportShown(hostSession)
+    session.prepare()
+    result.render(session)
+    reportShown(session)
 
 proc dispose*(m: PanelMount) =
   ## Dispose the pane's reactive root; its container is GoldenLayout's.
@@ -395,34 +446,52 @@ proc dispose*(m: PanelMount) =
   m.disposed = true
   waiting.keepItIf(it != m)
   live.keepItIf(it != m)
-  if not m.stopMeasuring.isNil:
-    m.stopMeasuring()
-    m.stopMeasuring = nil
-  if not m.disposeRoot.isNil:
-    m.disposeRoot()
-    m.disposeRoot = nil
-  reportShown(hostSession)
+  let session = m.session
+  m.unrender()
+  m.session = nil
+  reportShown(session)
+
+proc refreshPanelSessions*() =
+  ## Ask every live mount again which session it shows, and act on the
+  ## answer: a mount waiting for a session that now exists is rendered, and a
+  ## mount whose host now shows a different session than it rendered — the
+  ## auto-hide overlay after a tab switch, a tab's host rendered before that
+  ## tab had ViewModels of its own — is rendered again over it. A mount whose
+  ## session is unchanged is left alone, so a tab switch does not rebuild the
+  ## panes of the tabs it shows and hides.
+  ##
+  ## Called by the host whenever the answer can have changed: a session got
+  ## its ViewModels, the shown tab changed, a tab was closed.
+  var touched: seq[SessionViewModel] = @[]
+  for m in live:
+    if m.disposed:
+      continue
+    let session = sessionFor(m.host)
+    if session.isNil or session == m.session:
+      continue
+    if not m.session.isNil and m.session notin touched:
+      touched.add m.session
+    session.prepare()
+    m.render(session)
+    if session notin touched:
+      touched.add session
+  waiting = live.filterIt(not it.disposed and it.session.isNil)
+  for session in touched:
+    reportShown(session)
+
+proc setPanelSessionResolver*(
+    resolve: proc(host: dom_api.Element): SessionViewModel) =
+  ## Install which session a host's pane shows — on the desktop, the session
+  ## of the tab whose container holds it (`ui_js`). Nil restores the default:
+  ## every host shows the session `setPanelSession` installed.
+  resolveSession = resolve
+  refreshPanelSessions()
 
 proc setPanelSession*(session: SessionViewModel) =
-  ## Install the session the panes show, and mount every pane whose container
-  ## was waiting for it.
-  hostSession = session
-  if session.isNil:
-    return
-  # The desktop and the web mark the call the debugger is in after every
-  # move, as the Call Trace component did before it was mounted here.
-  if not session.calltraceVM.isNil:
-    session.calltraceVM.followDebuggerCall()
-  # The Event Log marks the current event, and asks for it after a move, as
-  # the terminal's and GPUI's do (HSF-D6).
-  if not session.eventLogVM.isNil:
-    session.eventLogVM.followStop()
-  let pending = waiting
-  waiting = @[]
-  for m in pending:
-    if not m.disposed:
-      m.render(session)
-  reportShown(session)
+  ## Install the session of the tab on screen, and mount or re-render every
+  ## pane whose session that changes (`refreshPanelSessions`).
+  shownSession = session
+  refreshPanelSessions()
 
 proc ensurePanelMounted*(host: dom_api.Element; kind: Content) =
   ## Mount `kind` into `host` unless a live mount already renders there — for
@@ -441,9 +510,14 @@ proc disposePanelsIn*(container: dom_api.Element) =
     m.dispose()
 
 proc panelSession*(): SessionViewModel =
-  ## The session the panes show, or nil before the renderer has one — for a
-  ## pane's key handlers, which act on the same ViewModel the pane renders.
-  hostSession
+  ## The session of the tab on screen, or nil before the renderer has one —
+  ## for a pane's key handlers, which act on the same ViewModel the focused
+  ## (and therefore shown) pane renders.
+  shownSession
+
+proc panelMountSession*(m: PanelMount): SessionViewModel =
+  ## The session `m` rendered over, or nil while it waits for one.
+  if m.isNil: nil else: m.session
 
 proc ensurePanelMountedById*(containerId: cstring; kind: Content;
                              activeTab: int) =

@@ -46,7 +46,7 @@
 ## process happens to be started in — and live git serves everything else.
 
 import
-  ui_imports
+  ui_imports, session_viewmodels
 
 import std/strformat
 import isonim/core/signals
@@ -329,21 +329,22 @@ proc ensureUnifiedDiffVM*(self: UnifiedDiffComponent): VCSVM =
   ## DR-R4's constraint is one model, not a second one that happens to agree.
   if self.isNil:
     return nil
-  if unifiedDiffVMInstances.hasKey(self.id):
-    return unifiedDiffVMInstances[self.id]
+  if unifiedDiffVMInstances.hasKey(data.tabScopedId(self)):
+    return unifiedDiffVMInstances[data.tabScopedId(self)]
   result = createVCSVM()
-  unifiedDiffVMInstances[self.id] = result
+  unifiedDiffVMInstances[data.tabScopedId(self)] = result
 
 proc ensureSourceCache(self: UnifiedDiffComponent): SourceTextCache =
   if self.isNil:
     return nil
-  if unifiedDiffSourceCaches.hasKey(self.id):
-    return unifiedDiffSourceCaches[self.id]
+  if unifiedDiffSourceCaches.hasKey(data.tabScopedId(self)):
+    return unifiedDiffSourceCaches[data.tabScopedId(self)]
   result = newSourceTextCache()
-  unifiedDiffSourceCaches[self.id] = result
+  unifiedDiffSourceCaches[data.tabScopedId(self)] = result
 
 proc forgetUnifiedDiffTab*(componentId: int) =
-  ## Drop everything a closed diff tab owned.
+  ## Drop everything a closed diff tab owned. `componentId` is the tab-scoped
+  ## key (`session_viewmodels.tabScopedKey`) the tables are keyed by.
   ##
   ## DR-R5's deliverable: "Expansion state resets when the tab is closed and
   ## does not leak between files."  Since UD-2 the expansion lives in the
@@ -1717,7 +1718,7 @@ proc syncIntoVM*(self: UnifiedDiffComponent) =
   ## alone: it is the VM's own state and survives a re-sync.
   if self.isNil:
     return
-  unifiedDiffComponentRefs[self.id] = self
+  unifiedDiffComponentRefs[data.tabScopedId(self)] = self
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
@@ -2164,12 +2165,10 @@ proc resetEditor(self: UnifiedDiffComponent) =
   self.flowValueWidgetMax = 0
 
 proc unifiedDiffComponentFor(host: isonim_dom_api.Element): UnifiedDiffComponent =
-  ## The tab `host` (`unifiedDiffComponent-<id>`) belongs to, or nil.
-  let mapping = data.ui.componentMapping[Content.UnifiedDiff]
-  let componentId = panelHostComponentId(host)
-  if mapping.isNil or not mapping.hasKey(componentId):
-    return nil
-  UnifiedDiffComponent(mapping[componentId])
+  ## The tab `host` (`unifiedDiffComponent-<id>`) belongs to, or nil — in the
+  ## window tab whose container holds `host`.
+  UnifiedDiffComponent(data.hostTabComponent(host, Content.UnifiedDiff,
+    panelHostComponentId(host)))
 
 proc hostIsConnected(host: isonim_dom_api.Element): bool
   {.importjs: "Boolean(#.isConnected)".}

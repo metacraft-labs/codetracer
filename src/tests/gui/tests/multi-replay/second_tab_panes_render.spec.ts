@@ -33,19 +33,38 @@
  *       first run does. The Constraints pane's mount in a later tab is (a)'s;
  *   (c) the first tab's panes still render after all of that.
  *
- * WHAT (b) DOES NOT YET ASSERT, AND WHY. Rule 2 also wants those panes to show
- * the SECOND recording's data. They do not, for a reason that is not this
- * defect: the replay panes' ViewModels are one per WINDOW. `ui_js.nim`'s
- * `configureMiddleware` runs once (`middlewareConfigured`) and builds one
- * `SessionViewModel` (`if activeSessionVM.isNil`) over the DapApi / views
- * mediator of the tab that was active at that moment, so a later tab's
- * components get no middleware, and its Call Trace / State / Event Log /
- * Terminal panes read tab 0's ViewModels. Measured with this spec after the
- * mount fix: tab 1's Call Trace lists `py_console_logs`' functions
- * (`MaxLevelFilter`, `setup_logging`), its Terminal reads "Loading record
- * output..." and its Event Log "0 Rows". Making those per tab is a redesign
- * of the ViewModel layer; the spec PRINTS each pane's opening text (the
- * `# tab 1 <pane>:` lines) so the gap stays measured until that lands.
+ * And each tab shows ITS OWN session's data (rules 1, 2 and 6; Multi-Replay-
+ * Window-Architecture M12's two Verification items, named after them below):
+ *
+ *   (d) `test_open_second_trace` — after (b), tab 1's Call Trace, State and
+ *       Event Log show basics.py's run (`demo_1_literals`, "1. literals", its
+ *       module docstring) and none of py_console_logs' (`MaxLevelFilter`,
+ *       `setup_logging`, "print using", main.py's docstring); so does its
+ *       Terminal once brought to the front of its stack (a hidden Terminal
+ *       loads nothing and reads "Loading record output..." in every tab);
+ *       switching back, tab 0 shows py_console_logs' again and none of
+ *       basics.py's. The data is asserted from the same poll that checks the
+ *       panes mounted, before anything else is asked of the renderer;
+ *   (e) `test_step_independent_tabs` — a step in tab 1 moves tab 1 only; a step
+ *       in tab 0 moves tab 0 only; each tab, shown again, is where it was left;
+ *   (f) `test_load_answers_reach_their_tab` — a load asked for in tab 1 and
+ *       answered while tab 0 is on screen goes to tab 1: tab 0 keeps
+ *       py_console_logs' recording and data, tab 1's answers wait for it
+ *       (`ReplaySession.pendingTabAnswers`), and shown, tab 1 has basics.py's.
+ *       The main process names the asking tab on each answer
+ *       (`index/tab_answers.nim`) and the renderer gives it to that tab
+ *       (`ui/tab_answer_routing.deliverTabAnswer`); before that, every answer of
+ *       the load — `trace-loaded`, `filesystem-loaded`, … — went to whichever
+ *       tab was shown.
+ *
+ * (d) and (e) are issue `2026-10-21-a-second-replay-tab-shows-the-first-tabs-
+ * data-because-the-window-builds-one-session-viewmodel.md`. Before its fix the
+ * window built ONE `SessionViewModel` (`ui_js.configureMiddleware`, once per
+ * window) over the first tab's DAP API, so tab 1's Call Trace listed
+ * py_console_logs' functions, its Terminal read "Loading record output..." and
+ * the toolbar stepped tab 0's replay whichever tab was shown. Each
+ * `ReplaySession` now owns its ViewModels, and a tab switch rebinds the
+ * window's pane bridges to the shown tab's (`ui/session_viewmodels.nim`).
  *
  * Every read is scoped to one `#session-container-<n>`. A document-wide
  * selector would find tab 0's rows and pass over a blank tab — that is how
@@ -57,7 +76,9 @@
  * `CODETRACER::load-recent-trace`). Which host a pane mounts into is a
  * property of the real GoldenLayout DOM of two live tabs, which no headless
  * ViewModel owns; the lookup rule itself is unit-tested headless in
- * `src/tests/gui/tests/layout/isonim_panel_mount_test.nim`.
+ * `src/tests/gui/tests/layout/isonim_panel_mount_test.nim`, and which
+ * session's ViewModels a tab's pane host renders, and which session a tagged
+ * event updates, in `src/frontend/tests/session_viewmodels_test.nim`.
  */
 
 import * as path from "node:path";
@@ -75,12 +96,29 @@ interface PaneReading {
 }
 
 /**
+ * `page.evaluate`, failing with what was being read when the renderer does
+ * not answer within `ms` — a renderer busy in a loop would otherwise hold the
+ * test until its overall timeout and say nothing about where it stopped.
+ */
+async function answered<T>(what: string, read: Promise<T>, ms = 20_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the renderer did not answer within ${ms} ms: ${what}`)), ms);
+  });
+  try {
+    return await Promise.race([read, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Read the panes `labels` inside `#session-container-<index>` ONLY. Uses
  * `textContent`, not `innerText`, so a pane sitting in a background
  * GoldenLayout tab (display: none) is still read.
  */
 async function readPanes(page: Page, index: number, labels: string[]): Promise<Record<string, PaneReading>> {
-  return page.evaluate(
+  return answered(`reading ${labels.join(", ")} in session-container-${index}`, page.evaluate(
     ({ index, labels }) => {
       const container = document.getElementById(`session-container-${index}`);
       if (!container) throw new Error(`session-container-${index} is missing`);
@@ -95,25 +133,30 @@ async function readPanes(page: Page, index: number, labels: string[]): Promise<R
       return out;
     },
     { index, labels },
-  );
+  ));
 }
 
 /** Every `<x>Component-<id>` host in a container, with its text length —
  *  printed on failure so a red run names every blank pane at once. */
 async function inventory(page: Page, index: number): Promise<string> {
-  return page.evaluate((index) => {
+  return answered(`the inventory of session-container-${index}`, page.evaluate((index) => {
     const container = document.getElementById(`session-container-${index}`);
     if (!container) return `session-container-${index} is missing`;
     return Array.from(container.querySelectorAll("[id*='Component']"))
       .filter((el) => /Component(-\d+)?$/.test(el.id))
       .map((el) => `${el.id}=${(el.textContent ?? "").replace(/\s+/g, " ").trim().length}`)
       .join(" ");
-  }, index);
+  }, index)).catch((e) => `<${(e as Error).message}>`);
 }
 
 /**
  * Poll until every listed pane in the container is present and passes
  * `ok`, then return the last reading (passing or not) for the assertions.
+ *
+ * THE LAST READING THE RENDERER ANSWERED is what comes back, also when it
+ * stops answering mid-poll (`answered` throws, the poll ends): the
+ * assertions then state what the panes held, rather than the test timing out
+ * with nothing said about them.
  */
 async function settledPanes(
   page: Page,
@@ -146,7 +189,7 @@ function expectPanes(
 }
 
 async function activeSessionIndex(page: Page): Promise<number> {
-  return page.evaluate(() => (window as any).data?.activeSessionIndex ?? -1);
+  return answered("the active tab", page.evaluate(() => (window as any).data?.activeSessionIndex ?? -1));
 }
 
 const nonEmpty = (t: string) => t.length > 0;
@@ -352,37 +395,230 @@ test.describe.serial("a New File tab beside a replay is the same as New File alo
   });
 });
 
+/**
+ * What each recording's own panes say, and what they must never say. The
+ * markers are the programs' own: basics.py's first demo function and the
+ * first line it prints (`py_checklist/basics.py`), py_console_logs' logging
+ * filter class, its setup function and the words every one of its numbered
+ * prints carries (`py_console_logs/main.py`). Each is unique to its program.
+ */
+const BASICS = /demo_1_literals|1\. literals/;
+const CONSOLE_LOGS = /MaxLevelFilter|setup_logging|print using/;
+/** The docstring each program opens with — what the State pane's source line
+ *  shows while the replay stands at the program's entry. */
+const BASICS_SOURCE = /Baseline language probes|basics\.py/;
+const CONSOLE_LOGS_SOURCE = /Demonstrate a variety of Python console output|main\.py/;
+
+/** A pane shows `own` and nothing of `other`. */
+function showsOnly(own: RegExp, other: RegExp): (text: string) => boolean {
+  return (t) => own.test(t) && !other.test(t);
+}
+
+type Recording = "basics" | "consoleLogs";
+
+function markers(own: Recording): [RegExp, RegExp, RegExp, RegExp] {
+  return own === "basics"
+    ? [BASICS, CONSOLE_LOGS, BASICS_SOURCE, CONSOLE_LOGS_SOURCE]
+    : [CONSOLE_LOGS, BASICS, CONSOLE_LOGS_SOURCE, BASICS_SOURCE];
+}
+
+/**
+ * The replay panes of one tab that show its recording without being brought
+ * to the front — Call Trace, State, Event Log — each expected to show `own`'s
+ * recording and nothing of the other's. These are the panes the issue reads.
+ */
+function ownDataPanes(own: Recording): Record<string, (text: string) => boolean> {
+  const [mine, theirs, mySource, theirSource] = markers(own);
+  return {
+    "calltraceComponent-0": showsOnly(mine, theirs),
+    "stateComponent-0": showsOnly(mySource, theirSource),
+    "eventLogComponent-0": showsOnly(mine, theirs),
+  };
+}
+
+/**
+ * The Terminal of one tab, once shown (`showTerminal`): `own`'s output, and no
+ * longer "Loading record output…" — what a hidden pane, or one over a
+ * ViewModel that never received the recording's output, says.
+ */
+function ownTerminal(own: Recording): Record<string, (text: string) => boolean> {
+  const [mine, theirs] = markers(own);
+  return {
+    "terminalComponent-0": (t) => showsOnly(mine, theirs)(t) && !/Loading record output/.test(t),
+  };
+}
+
+/**
+ * Bring tab `index`'s own Terminal to the front of its GoldenLayout stack. The
+ * Terminal pane asks for the lines it shows and nothing while it is hidden
+ * (Viewport-Driven-Loading Q3: a hidden pane reports no rows), so in the
+ * default layout, where it shares a stack, it reads "Loading record output..."
+ * in EVERY tab until it is shown — tab 0's as much as tab 1's.
+ */
+async function showTerminal(page: Page, index: number): Promise<void> {
+  const tab = page
+    .locator(`#session-container-${index} .lm_tab`)
+    .filter({ has: page.locator(".lm_title", { hasText: /terminal/i }) })
+    .first();
+  await expect(tab, `tab ${index}'s Terminal stack item`).toHaveCount(1, { timeout: 30_000 });
+  await tab.click();
+}
+
+/** Print each pane's opening text from a reading already taken, so a red run
+ *  shows whose data it held without asking the renderer again. */
+function printPanes(reading: Record<string, PaneReading>, what: string): void {
+  for (const label of Object.keys(reading)) {
+    console.log(`# ${what} ${label}: ${JSON.stringify((reading[label]?.text ?? "").slice(0, 200))}`);
+  }
+}
+
+/**
+ * From a launched py_console_logs replay in tab 0: "+", record basics.py and
+ * load it into the new tab through the product's own
+ * `CODETRACER::load-recent-trace`, and wait until tab 1's session holds it.
+ */
+async function openSecondRecordingInNewTab(page: Page): Promise<void> {
+  const layout = new LayoutPage(page);
+  await layout.waitForTraceLoaded();
+  await layout.waitForAllComponentsLoaded();
+  expect(await activeSessionIndex(page)).toBe(0);
+
+  // A DIFFERENT program, so "shows the second tab's own data" is
+  // distinguishable from "shows a copy of tab 0".
+  const secondTraceId = recordTestProgram(path.join(testProgramsPath, "py_checklist", "basics.py"));
+
+  await page.locator(".session-tab-add").click();
+  await retry(async () => (await activeSessionIndex(page)) === 1, { maxAttempts: 40, delayMs: 250 });
+  expect(await activeSessionIndex(page)).toBe(1);
+  await page.evaluate((id) => {
+    (window as any).data.ipc.send("CODETRACER::load-recent-trace", { traceId: id });
+  }, secondTraceId);
+  await retry(
+    async () =>
+      page.evaluate(() => {
+        const t = (window as any).data?.sessions?.[1]?.trace;
+        return !!t && String(t.program ?? "").includes("basics.py");
+      }),
+    { maxAttempts: 90, delayMs: 1000 },
+  );
+}
+
+async function switchToTab(page: Page, index: number): Promise<void> {
+  await page.locator(".session-tab").nth(index).click();
+  await retry(async () => (await activeSessionIndex(page)) === index, { maxAttempts: 40, delayMs: 250 });
+  expect(await activeSessionIndex(page)).toBe(index);
+}
+
+interface TabLocation {
+  path: string;
+  line: number;
+  rrTicks: number;
+}
+
+/**
+ * Where tab `index`'s replay stands, as its OWN status bar holds it — each tab
+ * has one (`StatusComponent`), updated by the moves of that tab's session
+ * whether or not the tab is shown (`middleware.setupMiddlewareApis`).
+ */
+async function tabLocation(page: Page, index: number): Promise<TabLocation | null> {
+  return answered(`tab ${index}'s location`, page.evaluate((index) => {
+    const loc = (window as any).data?.sessions?.[index]?.ui?.status?.location;
+    if (!loc || loc.path == null) return null;
+    return { path: String(loc.path), line: Number(loc.line), rrTicks: Number(loc.rrTicks) };
+  }, index));
+}
+
+/**
+ * Poll tab `index`'s location until `ok` holds, and return the last value the
+ * renderer answered with (null if it never answered, or answered that the tab
+ * has no location) — the caller asserts on it, so a failure names where the
+ * tab stood. Which of the two a null means is logged, since an unanswering
+ * renderer and a tab with no position are different failures.
+ */
+async function lastLocation(page: Page, index: number,
+                            ok: (l: TabLocation) => boolean, attempts: number): Promise<TabLocation | null> {
+  let last: TabLocation | null = null;
+  let answers = 0;
+  let lastError = "";
+  await retry(
+    async () => {
+      try {
+        last = await tabLocation(page, index);
+        answers += 1;
+      } catch (e) {
+        lastError = String(e);
+        throw e;
+      }
+      return !!last && ok(last);
+    },
+    { maxAttempts: attempts, delayMs: 1000 },
+  ).catch(() => undefined);
+  console.log(`# tab ${index} location: ${JSON.stringify(last)} after ${answers} answer(s)` +
+    (lastError ? `; last unanswered read: ${lastError}` : ""));
+  return last;
+}
+
+/**
+ * Wait until tab `index` has no step in flight: its own run state
+ * (`ReplaySession.status.stableBusy`), which a step sets and that tab's next
+ * move clears (`middleware.setupMiddlewareApis`).
+ */
+async function waitForStepSettled(page: Page, index: number): Promise<void> {
+  await retry(
+    async () =>
+      answered(`tab ${index}'s run state`, page.evaluate(
+        (index) => (window as any).data?.sessions?.[index]?.status?.stableBusy === false, index)),
+    { maxAttempts: 60, delayMs: 500 },
+  );
+}
+
+/**
+ * Step over once in the tab on screen and return where that tab moved to;
+ * fails when the shown tab's location did not change.
+ */
+async function stepOverInShownTab(page: Page, index: number): Promise<TabLocation> {
+  const before = await tabLocation(page, index);
+  expect(before, `tab ${index} has a location before the step`).not.toBeNull();
+  await waitForStepSettled(page, index);
+  await new LayoutPage(page).clickNextButton();
+  let after: TabLocation | null = before;
+  await retry(
+    async () => {
+      after = await tabLocation(page, index);
+      return !!after && (after.line !== before!.line || after.rrTicks !== before!.rrTicks);
+    },
+    { maxAttempts: 60, delayMs: 500 },
+  ).catch(() => undefined);
+  await waitForStepSettled(page, index);
+  // WHERE THE STEP ENDED, not the first move seen: a step can report more
+  // than one position before it settles (line 7, then 10, measured), and the
+  // first one seen is not where the tab stands. Read until two reads 500 ms
+  // apart agree, and return that.
+  let settled: TabLocation | null = await tabLocation(page, index);
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(500);
+    const again = await tabLocation(page, index);
+    if (JSON.stringify(again) === JSON.stringify(settled)) break;
+    settled = again;
+  }
+  if (JSON.stringify(settled) !== JSON.stringify(after)) {
+    console.log(`# tab ${index}'s step: first seen ${JSON.stringify(after)}, settled ${JSON.stringify(settled)}`);
+  }
+  expect(settled, `a step in the shown tab ${index} moves tab ${index} (from ${JSON.stringify(before)})`)
+    .not.toEqual(before);
+  return settled!;
+}
+
 test.describe("IsoNim panes render in every tab, not only the first", () => {
   test.setTimeout(300_000);
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
 
-  test("a second recording opened in a + tab shows its own panes", async ({ ctPage }) => {
-    const layout = new LayoutPage(ctPage);
-    await layout.waitForTraceLoaded();
-    await layout.waitForAllComponentsLoaded();
-    expect(await activeSessionIndex(ctPage)).toBe(0);
+  test("test_open_second_trace: a second recording opened in a + tab shows its own panes and its own data", async ({ ctPage }) => {
+    await openSecondRecordingInNewTab(ctPage);
 
-    // A DIFFERENT program, so "shows the second tab's own data" is
-    // distinguishable from "shows a copy of tab 0".
-    const secondTraceId = recordTestProgram(path.join(testProgramsPath, "py_checklist", "basics.py"));
-
-    await ctPage.locator(".session-tab-add").click();
-    await retry(async () => (await activeSessionIndex(ctPage)) === 1, { maxAttempts: 40, delayMs: 250 });
-    expect(await activeSessionIndex(ctPage)).toBe(1);
-    await ctPage.evaluate((id) => {
-      (window as any).data.ipc.send("CODETRACER::load-recent-trace", { traceId: id });
-    }, secondTraceId);
-    await retry(
-      async () =>
-        ctPage.evaluate(() => {
-          const t = (window as any).data?.sessions?.[1]?.trace;
-          return !!t && String(t.program ?? "").includes("basics.py");
-        }),
-      { maxAttempts: 90, delayMs: 1000 },
-    );
-
-    // Mounted: each host carries a view. (Whose DATA it shows is the
-    // per-window ViewModel gap described in the header; printed below.)
+    // (b) Mounted: each host carries a view; and (d) the replay panes show
+    // basics.py's run, not py_console_logs'. Read in ONE poll, so whatever
+    // the renderer last answered is what is judged — the data first.
     const secondTab = {
       "stateComponent-0": nonEmpty,
       "calltraceComponent-0": nonEmpty,
@@ -393,20 +629,23 @@ test.describe("IsoNim panes render in every tab, not only the first", () => {
       "vCSComponent-0": nonEmpty,
       "testResultsComponent-0": nonEmpty,
     };
-    const reading = await settledPanes(ctPage, 1, secondTab, 90);
-    console.log(`# session-container-1 after loading basics.py: ${await inventory(ctPage, 1)}`);
-    // The measurement of the residual: does tab 1 show basics.py's own data
-    // ("1. literals", `demo_1_literals`) or tab 0's?
-    for (const label of ["calltraceComponent-0", "eventLogComponent-0", "terminalComponent-0", "stateComponent-0"]) {
-      const text = reading[label]?.text ?? "";
-      const own = /1\. literals|demo_1_literals/.test(text);
-      console.log(`# tab 1 ${label}: ownData=${own} ${JSON.stringify(text.slice(0, 160))}`);
-    }
-    expectPanes(reading, secondTab, "the second replay tab (session-container-1)", await inventory(ctPage, 1));
+    const basicsPanes = ownDataPanes("basics");
+    const reading = await settledPanes(ctPage, 1, { ...secondTab, ...basicsPanes }, 90);
+    printPanes(reading, "tab 1");
+    const inv1 = await inventory(ctPage, 1);
+    console.log(`# session-container-1 after loading basics.py: ${inv1}`);
+    expectPanes(reading, basicsPanes,
+      "the second replay tab (session-container-1) must show basics.py's data, not py_console_logs'", inv1);
+    expectPanes(reading, secondTab, "the second replay tab (session-container-1)", inv1);
+    await showTerminal(ctPage, 1);
+    const terminal1 = await settledPanes(ctPage, 1, ownTerminal("basics"), 60);
+    printPanes(terminal1, "tab 1");
+    expectPanes(terminal1, ownTerminal("basics"),
+      "the second replay tab's Terminal, shown, must show basics.py's output", await inventory(ctPage, 1));
 
-    // (c) The first tab still renders its panes after the round trip.
-    await ctPage.locator(".session-tab").first().click();
-    await retry(async () => (await activeSessionIndex(ctPage)) === 0, { maxAttempts: 40, delayMs: 250 });
+    // (c) The first tab still renders its panes after the round trip, and
+    // (d) they are still py_console_logs', not basics.py's.
+    await switchToTab(ctPage, 0);
     const firstTab = {
       "stateComponent-0": nonEmpty,
       "calltraceComponent-0": nonEmpty,
@@ -415,7 +654,109 @@ test.describe("IsoNim panes render in every tab, not only the first", () => {
       "vCSComponent-0": nonEmpty,
       "testResultsComponent-0": nonEmpty,
     };
-    const first = await settledPanes(ctPage, 0, firstTab, 20);
-    expectPanes(first, firstTab, "the first replay tab (session-container-0) after switching back", await inventory(ctPage, 0));
+    const consolePanes = ownDataPanes("consoleLogs");
+    const first = await settledPanes(ctPage, 0, { ...firstTab, ...consolePanes }, 30);
+    printPanes(first, "tab 0");
+    const inv0 = await inventory(ctPage, 0);
+    expectPanes(first, consolePanes,
+      "the first replay tab (session-container-0) must show py_console_logs' data after switching back", inv0);
+    expectPanes(first, firstTab, "the first replay tab (session-container-0) after switching back", inv0);
+    await showTerminal(ctPage, 0);
+    const terminal0 = await settledPanes(ctPage, 0, ownTerminal("consoleLogs"), 30);
+    printPanes(terminal0, "tab 0");
+    expectPanes(terminal0, ownTerminal("consoleLogs"),
+      "the first replay tab's Terminal, shown, must show py_console_logs' output", await inventory(ctPage, 0));
+  });
+
+  test("test_step_independent_tabs: stepping one tab moves that tab only", async ({ ctPage }) => {
+    await openSecondRecordingInNewTab(ctPage);
+    // Tab 1's own data first, read while the replay has just loaded: what it
+    // shows decides whether there is a tab 1 position to step from at all,
+    // and it is the reading the issue is about (tab 1 showing the first
+    // tab's recording), so a failure is named by it rather than by whatever
+    // stops answering afterwards.
+    const tab1Data = { "calltraceComponent-0": showsOnly(BASICS, CONSOLE_LOGS) };
+    const tab1Loaded = await settledPanes(ctPage, 1, tab1Data, 90);
+    printPanes(tab1Loaded, "tab 1 before stepping");
+    expectPanes(tab1Loaded, tab1Data,
+      "the second replay tab (session-container-1) must show basics.py's data before it is stepped",
+      await inventory(ctPage, 1));
+    // Both replays have reached a stop before anything is stepped — each in
+    // its own tab's status bar. Polled, then asserted, so a run that never
+    // gets there says where each tab's status bar stood.
+    const tab1Start = await lastLocation(ctPage, 1, (l) => l.path.includes("basics.py"), 90);
+    const tab0Start = await lastLocation(ctPage, 0, (l) => l.path.includes("main.py"), 30);
+    console.log(`# start: tab 0 ${JSON.stringify(tab0Start)} tab 1 ${JSON.stringify(tab1Start)}`);
+    expect(tab1Start?.path ?? null, "tab 1's own status bar stands in basics.py, the recording tab 1 loaded")
+      .toContain("basics.py");
+    expect(tab0Start?.path ?? null, "tab 0's own status bar stands in main.py").toContain("main.py");
+
+    // Step in tab 1 (on screen): tab 1 moves, within basics.py; tab 0 does not.
+    const tab1Stepped = await stepOverInShownTab(ctPage, 1);
+    expect(tab1Stepped.path).toContain("basics.py");
+    expect(await tabLocation(ctPage, 0), "tab 0 after a step in tab 1").toEqual(tab0Start);
+
+    // Switch to tab 0 and step there: tab 0 moves, within main.py; tab 1 does not.
+    await switchToTab(ctPage, 0);
+    const tab0Stepped = await stepOverInShownTab(ctPage, 0);
+    expect(tab0Stepped.path).toContain("main.py");
+    expect(await tabLocation(ctPage, 1), "tab 1 after a step in tab 0").toEqual(tab1Stepped);
+
+    // Back to tab 1: it is where it was left, and its panes are still its own.
+    await switchToTab(ctPage, 1);
+    expect(await tabLocation(ctPage, 1), "tab 1 shown again").toEqual(tab1Stepped);
+    expect(await tabLocation(ctPage, 0), "tab 0 while tab 1 is shown again").toEqual(tab0Stepped);
+    const calltrace = { "calltraceComponent-0": showsOnly(BASICS, CONSOLE_LOGS) };
+    const shownAgain = await settledPanes(ctPage, 1, calltrace, 30);
+    expectPanes(shownAgain, calltrace, "tab 1's Call Trace after the round trip", await inventory(ctPage, 1));
+  });
+
+  test("test_load_answers_reach_their_tab: a load answered while another tab is shown reaches the tab that asked", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForTraceLoaded();
+    await layout.waitForAllComponentsLoaded();
+    const secondTraceId = recordTestProgram(path.join(testProgramsPath, "py_checklist", "basics.py"));
+    await ctPage.locator(".session-tab-add").click();
+    await retry(async () => (await activeSessionIndex(ctPage)) === 1, { maxAttempts: 40, delayMs: 250 });
+
+    // Ask from tab 1, and show tab 0 before any answer can arrive: one
+    // evaluate, so no IPC message is handled between the two.
+    await answered("asking from tab 1, then showing tab 0", ctPage.evaluate((id) => {
+      (window as any).data.ipc.send("CODETRACER::load-recent-trace", { traceId: id });
+      (document.querySelectorAll(".session-tab")[0] as HTMLElement).click();
+    }, secondTraceId));
+    expect(await activeSessionIndex(ctPage)).toBe(0);
+
+    // Wait for the load to have answered: its `trace-loaded` either waits on
+    // tab 1 or (the defect) has been applied to the tab on screen.
+    const readTabs = () => answered("both tabs' recordings and queues", ctPage.evaluate(() => {
+      const sessions = (window as any).data?.sessions ?? [];
+      const program = (i: number) => String(sessions[i]?.trace?.program ?? "");
+      const queued = (sessions[1]?.pendingTabAnswers ?? []).map((a: any) => String(a?.message ?? ""));
+      return { tab0: program(0), tab1: program(1), queued };
+    }));
+    let tabs = await readTabs();
+    await retry(async () => {
+      tabs = await readTabs();
+      return tabs.queued.includes("CODETRACER::trace-loaded") || tabs.tab0.includes("basics.py");
+    }, { maxAttempts: 90, delayMs: 1000 }).catch(() => undefined);
+    console.log(`# while tab 0 is shown: ${JSON.stringify(tabs)}`);
+    expect(tabs.tab0, "tab 0 keeps its own recording while tab 1's load is answered").toContain("main.py");
+    expect(tabs.tab0).not.toContain("basics.py");
+    expect(tabs.queued, "tab 1's load answers wait for tab 1").toContain("CODETRACER::trace-loaded");
+    const tab0Data = { "calltraceComponent-0": showsOnly(CONSOLE_LOGS, BASICS) };
+    const tab0Reading = await settledPanes(ctPage, 0, tab0Data, 10);
+    expectPanes(tab0Reading, tab0Data, "tab 0's Call Trace while tab 1's load is answered", await inventory(ctPage, 0));
+
+    // Shown, tab 1 gets what waited for it: basics.py, in its own panes.
+    await switchToTab(ctPage, 1);
+    const tab1Data = { "calltraceComponent-0": showsOnly(BASICS, CONSOLE_LOGS) };
+    const tab1Reading = await settledPanes(ctPage, 1, tab1Data, 90);
+    printPanes(tab1Reading, "tab 1 after it is shown");
+    expectPanes(tab1Reading, tab1Data, "tab 1's Call Trace once it is shown", await inventory(ctPage, 1));
+    tabs = await readTabs();
+    expect(tabs.tab1).toContain("basics.py");
+    expect(tabs.queued).toEqual([]);
+    expect(tabs.tab0, "tab 0 still holds its own recording").toContain("main.py");
   });
 });

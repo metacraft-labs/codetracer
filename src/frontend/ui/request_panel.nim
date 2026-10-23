@@ -47,6 +47,7 @@
 import
   ui_imports,
   auto_hide,
+  session_viewmodels,
   ../[ types, communication ],
   ../../common/ct_event
 
@@ -160,8 +161,9 @@ proc addRequest*(self: RequestPanelComponent,
     startGEID: startGEID,
     sliceFile: cstring"",
   ))
-  if not requestPanelVMInstance.isNil:
-    requestPanelVMInstance.addRequest(
+  let vm = ownPaneVM(self, requestPanelVMInstance, requestPanelVM)
+  if not vm.isNil:
+    vm.addRequest(
       $httpMethod, $url, statusCode, durationMs, responseSize, startGEID)
 
 proc clearRequests*(self: RequestPanelComponent) =
@@ -169,14 +171,16 @@ proc clearRequests*(self: RequestPanelComponent) =
   ## into the VM so the IsoNim view re-renders the empty state.
   self.panelState.requests = @[]
   self.panelState.selectedIndex = -1
-  if not requestPanelVMInstance.isNil:
-    requestPanelVMInstance.clearRequests()
+  let vm = ownPaneVM(self, requestPanelVMInstance, requestPanelVM)
+  if not vm.isNil:
+    vm.clearRequests()
 
 proc selectRequest*(self: RequestPanelComponent, index: int) =
   ## Refresh the selected-row reference.  Mirrored into the VM.
   self.panelState.selectedIndex = index
-  if not requestPanelVMInstance.isNil:
-    requestPanelVMInstance.selectRequest(index)
+  let vm = ownPaneVM(self, requestPanelVMInstance, requestPanelVM)
+  if not vm.isNil:
+    vm.selectRequest(index)
 
 proc jumpToHandler*(self: RequestPanelComponent, index: int) =
   ## Seek the debugger to the captured handler entry point.  The
@@ -185,8 +189,9 @@ proc jumpToHandler*(self: RequestPanelComponent, index: int) =
   ## point and let the VM layer dispatch the canonical
   ## ``ct/seek-to-geid`` envelope (used by headless tests and the
   ## eventual M6 production path).
-  if not requestPanelVMInstance.isNil:
-    requestPanelVMInstance.jumpToHandler(index)
+  let vm = ownPaneVM(self, requestPanelVMInstance, requestPanelVM)
+  if not vm.isNil:
+    vm.jumpToHandler(index)
 
 # ---------------------------------------------------------------------------
 # IsoNim VM bridge
@@ -200,13 +205,17 @@ proc syncLegacyRequestPanelIntoVM*(self: RequestPanelComponent) =
   ## updates go through ``addRequest`` directly; this proc covers
   ## the bulk-replace scenario (e.g. opening the panel after some
   ## captures already happened).
-  if requestPanelVMInstance.isNil or self.isNil:
+  if self.isNil:
     return
-  requestPanelVMInstance.setRequests(legacyEntriesToVm(self.panelState.requests))
-  requestPanelVMInstance.setFilterMethod(safeStr(self.panelState.filterMethod))
-  requestPanelVMInstance.setFilterStatus(safeStr(self.panelState.filterStatus))
-  requestPanelVMInstance.setSearchText(safeStr(self.panelState.searchText))
-  requestPanelVMInstance.selectRequest(self.panelState.selectedIndex)
+  # The ViewModel of this component's own tab (`ownPaneVM`).
+  let vm = ownPaneVM(self, requestPanelVMInstance, requestPanelVM)
+  if vm.isNil:
+    return
+  vm.setRequests(legacyEntriesToVm(self.panelState.requests))
+  vm.setFilterMethod(safeStr(self.panelState.filterMethod))
+  vm.setFilterStatus(safeStr(self.panelState.filterStatus))
+  vm.setSearchText(safeStr(self.panelState.searchText))
+  vm.selectRequest(self.panelState.selectedIndex)
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -417,18 +426,25 @@ proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
   requestPanelVMStore = store
   requestPanelVMInstance = vm
   clog "RequestPanelVM: parallel ViewModel instance created (shared store)"
-  # RS-M3 — a row whose execution lives in another container cannot be reached
-  # by seeking inside this one, so activating it opens that container instead.
-  requestPanelVMInstance.openExternalTrace =
-    proc(tracePath: string; startGeid: int64) =
-      openExternalRequestTrace(tracePath, startGeid)
-  # RS-M4 — the panel is hidden behind an edge strip by default; a recording
-  # that actually serves requests brings it on screen once. The store merges
-  # every delta (the poll's answer and the `ct/updated-http-requests` event),
-  # so its rows are the signal.
-  createEffect proc() =
-    if store.requestSpans.requests.val.len > 0:
-      untrack(proc() = scheduleRequestPanelReveal())
+  # Once per ViewModel: this is called again for the shown tab's session on
+  # every tab switch, and the effect below must not stack.
+  if firstBinding(vm):
+    # RS-M3 — a row whose execution lives in another container cannot be
+    # reached by seeking inside this one, so activating it opens that
+    # container instead.
+    vm.openExternalTrace =
+      proc(tracePath: string; startGeid: int64) =
+        openExternalRequestTrace(tracePath, startGeid)
+    # RS-M4 — the panel is hidden behind an edge strip by default; a
+    # recording that actually serves requests brings it on screen once. The
+    # store merges every delta (the poll's answer and the
+    # `ct/updated-http-requests` event), so its rows are the signal.
+    createEffect proc() =
+      if store.requestSpans.requests.val.len > 0:
+        untrack(proc() = scheduleRequestPanelReveal())
+  # The poll tails the SHOWN tab's store (`requestPanelVMStore`, moved by
+  # every tab switch); a hidden tab's live deltas still reach its own store
+  # through its own session's `ct/updated-http-requests` events.
   startRequestSpanPolling()
 
 
@@ -437,8 +453,16 @@ proc initRequestPanelVMFromSession*(vm: RequestPanelVM) =
 setPanelRenderer(Content.RequestPanel,
   proc(r: WebRenderer; host: dom_api.Element;
        session: SessionViewModel): dom_api.Element =
-    if not requestPanelComponentRef.isNil:
-      syncLegacyRequestPanelIntoVM(requestPanelComponentRef)
+    # `session` is the tab's whose container holds `host`; its own component
+    # is replayed into its own ViewModel.
+    let shown = data.shownTabComponent(Content.RequestPanel)
+    let component =
+      if shown.isNil: requestPanelComponentRef
+      else: RequestPanelComponent(shown)
+    if not component.isNil and
+       ownPaneVM(component, requestPanelVMInstance, requestPanelVM) ==
+         session.requestPanelVM:
+      syncLegacyRequestPanelIntoVM(component)
     renderRequestPanel[WebRenderer, dom_api.Element](
       r, session.requestPanelVM))
 

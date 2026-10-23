@@ -25,6 +25,7 @@
 
 import
   ui_imports,
+  session_viewmodels,
   ../[ types, communication ]
 
 from isonim/web/dom_api import nil
@@ -37,21 +38,85 @@ from ../viewmodel/viewmodels/test_results_vm import
 import ../viewmodel/views/isonim_test_results_view
 
 var testResultsVMInstance*: TestResultsVM
-  ## The pane's ViewModel: one per window, made on first use.
+  ## The SHOWN tab's Test Results ViewModel. Each tab has its own
+  ## (`session_viewmodels.testResultsVMOf`: a tab is an independent session,
+  ## `GUI/Multi-Window-Tab-Management.md` §Tab Behavior rule 1, and keeps
+  ## what it showed while another tab is shown, rule 6); this names the one
+  ## the window's hosts write into now, and is moved by `bindTestResultsVM` on
+  ## every tab switch. Each tab's pane renders its own tab's
+  ## (`testResultsVMForHost`).
+var hostInstallers: seq[proc(vm: TestResultsVM)]
+  ## What a host installs on EVERY tab's ViewModel (`onEachTestResultsVM`).
+var installedVMs: seq[TestResultsVM]
+  ## The ViewModels the installers have already run on.
+
+proc applyHostInstallers(vm: TestResultsVM) =
+  if vm.isNil or vm in installedVMs:
+    return
+  installedVMs.add vm
+  for install in hostInstallers:
+    install(vm)
+
+proc bindTestResultsVM*(vm: TestResultsVM) =
+  ## Make `vm` — the shown tab's — the one the window's hosts write into.
+  if vm.isNil or vm == testResultsVMInstance:
+    return
+  testResultsVMInstance = vm
+  applyHostInstallers(vm)
+
+proc onEachTestResultsVM*(install: proc(vm: TestResultsVM)) =
+  ## Run `install` on every tab's Test Results ViewModel — those that exist
+  ## and each one created from now on: what a host installs (the runner, the
+  ## row actions) belongs to the window, not to one tab's project.
+  hostInstallers.add install
+  for vm in installedVMs:
+    install(vm)
+  if not testResultsVMInstance.isNil and testResultsVMInstance notin installedVMs:
+    applyHostInstallers(testResultsVMInstance)
+
+proc forgetTestResultsVM*(vm: TestResultsVM) =
+  ## Drop `vm` — a closed tab's — from the ViewModels the installers have run
+  ## on, so the window keeps no reference to it and a host installing later
+  ## (`onEachTestResultsVM`) does not write into a disposed ViewModel.
+  if vm.isNil:
+    return
+  var kept: seq[TestResultsVM] = @[]
+  for installed in installedVMs:
+    if installed != vm:
+      kept.add installed
+  installedVMs = kept
+  if testResultsVMInstance == vm:
+    testResultsVMInstance = nil
 
 proc initTestResultsVM*() =
-  if testResultsVMInstance != nil:
+  ## Bind the shown tab's ViewModel, created on first use. A page with no tab
+  ## yet keeps one window-wide instance, as before tabs owned theirs.
+  if data.sessions.len == 0:
+    if testResultsVMInstance.isNil:
+      testResultsVMInstance = createTestResultsVM()
+      applyHostInstallers(testResultsVMInstance)
+      clog "TestResultsVM: instance created"
     return
-  testResultsVMInstance = createTestResultsVM()
-  clog "TestResultsVM: instance created"
+  bindTestResultsVM(testResultsVMOf(data.activeSession))
+
+proc testResultsVMForHost(host: dom_api.Element): TestResultsVM =
+  ## The ViewModel of the tab whose container holds `host` — so tab 1's pane
+  ## shows tab 1's catalog and run whichever tab is on screen. A host outside
+  ## every tab shows the shown tab's.
+  let tab = tabOfIsoNimPaneHost(host)
+  if tab >= 0 and tab < data.sessions.len:
+    result = testResultsVMOf(data.sessions[tab])
+    applyHostInstallers(result)
+  else:
+    initTestResultsVM()
+    result = testResultsVMInstance
 
 # The panel host mounts the pane into the container GoldenLayout creates.
 setPanelRenderer(Content.TestResults,
   proc(r: WebRenderer; host: dom_api.Element;
        session: SessionViewModel): dom_api.Element =
-    initTestResultsVM()
     renderTestResultsPanel[WebRenderer, dom_api.Element](r,
-      testResultsVMInstance))
+      testResultsVMForHost(host)))
 
 method register*(self: TestResultsComponent, api: MediatorWithSubscribers) =
   self.api = api

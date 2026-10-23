@@ -21,7 +21,7 @@
 ## Reference: codetracer-specs/DeepReview/Agentic-Coding-Integration.md
 
 import
-  ui_imports, ../utils, ../communication,
+  ui_imports, session_viewmodels, ../utils, ../communication,
   std/[strformat, jsconsole]
 
 import std/json
@@ -163,17 +163,32 @@ proc ensureAgentWorkspaceVM(self: AgentWorkspaceComponent): AgentWorkspaceVM =
   ## The ViewModel of the pane `self`, on the session's store. `nil` until the
   ## session's store is installed (`initAgentWorkspaceVMWithStore`): the
   ## panel host mounts the pane only once the session exists.
-  if self.isNil or agentWorkspaceVMStore.isNil:
+  ##
+  ## Per tab: on the store of the tab that holds `self`, keyed by that tab as
+  ## well as the component id (`tabScopedId`: every tab's first pane has id 0).
+  if self.isNil:
     return nil
-  if agentWorkspaceVMInstances.hasKey(self.id):
-    return agentWorkspaceVMInstances[self.id]
-  result = createAgentWorkspaceVM(agentWorkspaceVMStore)
-  agentWorkspaceVMInstances[self.id] = result
+  let key = data.tabScopedId(self)
+  if agentWorkspaceVMInstances.hasKey(key):
+    return agentWorkspaceVMInstances[key]
+  let ownTab = sessionVMOf(data.sessionOfComponent(self))
+  let store =
+    if not ownTab.isNil: ownTab.store
+    elif not data.anySessionViewModels(): agentWorkspaceVMStore
+    else: nil
+  if store.isNil:
+    return nil
+  result = createAgentWorkspaceVM(store)
+  agentWorkspaceVMInstances[key] = result
 
 proc initAgentWorkspaceVMWithStore*(store: ReplayDataStore) =
+  ## Install the shown tab's store, and build the ViewModel of every pane that
+  ## has none yet, each on its own tab's store. Called on every tab switch: a
+  ## pane that has its ViewModel keeps it.
   agentWorkspaceVMStore = store
-  agentWorkspaceVMInstances = JsAssoc[int, AgentWorkspaceVM]{}
-  for _, component in agentWorkspaceComponentRefs:
+  for key, component in agentWorkspaceComponentRefs:
+    if component.isNil or agentWorkspaceVMInstances.hasKey(key):
+      continue
     discard ensureAgentWorkspaceVM(component)
     component.syncLegacyAgentWorkspaceIntoVM()
 
@@ -183,7 +198,7 @@ proc initAgentWorkspaceVM*(self: AgentWorkspaceComponent) =
 proc syncLegacyAgentWorkspaceIntoVM*(self: AgentWorkspaceComponent) =
   if self.isNil:
     return
-  agentWorkspaceComponentRefs[self.id] = self
+  agentWorkspaceComponentRefs[data.tabScopedId(self)] = self
   let vm = ensureAgentWorkspaceVM(self)
   if vm.isNil:
     return
@@ -432,11 +447,9 @@ when defined(js):
       if agentWorkspaceVMStore.isNil and not session.isNil:
         agentWorkspaceVMStore = session.store
       let componentId = hostComponentId(host)
-      let mapping = data.ui.componentMapping[Content.AgentWorkspace]
-      let component =
-        if not mapping.isNil and mapping.hasKey(componentId):
-          AgentWorkspaceComponent(mapping[componentId])
-        else: nil
+      # The pane of the tab whose container holds `host`.
+      let component = AgentWorkspaceComponent(
+        data.hostTabComponent(host, Content.AgentWorkspace, componentId))
       component.syncLegacyAgentWorkspaceIntoVM()
       let vm = ensureAgentWorkspaceVM(component)
       if vm.isNil:

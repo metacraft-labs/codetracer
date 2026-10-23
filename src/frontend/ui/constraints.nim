@@ -15,6 +15,7 @@
 
 import
   ui_imports,
+  session_viewmodels,
   ../[ types, communication ]
 
 # `markStale` WAS in this list and was never applied — an import that read,
@@ -31,25 +32,49 @@ from ../viewmodel/session_vm import SessionViewModel
 import ../viewmodel/views/isonim_constraints_view
 
 var constraintsVMInstance*: ConstraintsVM
-  ## The pane's ViewModel: one per window, made on first use.
+  ## The SHOWN tab's Constraints ViewModel. Each tab has its own
+  ## (`session_viewmodels.constraintsVMOf`, as `ui/test_results.nim`'s); this
+  ## names the one the window's hosts write into now, moved by
+  ## `bindConstraintsVM` on every tab switch. Each tab's pane renders its own
+  ## tab's (`constraintsVMForHost`).
+
+proc bindConstraintsVM*(vm: ConstraintsVM) =
+  ## Make `vm` — the shown tab's — the one the window's hosts write into.
+  if not vm.isNil:
+    constraintsVMInstance = vm
 
 proc initConstraintsVM*() =
+  ## Bind the shown tab's ViewModel, created on first use.
+  ##
   ## The VM needs no store: a constraint report comes from `nargo info`, or
   ## from the counts the bundle carries, and from nowhere else. That is why
   ## there is no `initConstraintsVMWithStore` twin — a `ReplayDataStore`
   ## parameter would be a promise this pane does not keep.
-  if constraintsVMInstance != nil:
+  ##
+  ## A page with no tab yet keeps one window-wide instance.
+  if data.sessions.len == 0:
+    if constraintsVMInstance.isNil:
+      constraintsVMInstance = createConstraintsVM()
+      clog "ConstraintsVM: instance created"
     return
-  constraintsVMInstance = createConstraintsVM()
-  clog "ConstraintsVM: instance created"
+  bindConstraintsVM(constraintsVMOf(data.activeSession))
+
+proc constraintsVMForHost(host: dom_api.Element): ConstraintsVM =
+  ## The ViewModel of the tab whose container holds `host`; a host outside
+  ## every tab shows the shown tab's.
+  let tab = tabOfIsoNimPaneHost(host)
+  if tab >= 0 and tab < data.sessions.len:
+    constraintsVMOf(data.sessions[tab])
+  else:
+    initConstraintsVM()
+    constraintsVMInstance
 
 # The panel host mounts the pane into the container GoldenLayout creates.
 setPanelRenderer(Content.Constraints,
   proc(r: WebRenderer; host: dom_api.Element;
        session: SessionViewModel): dom_api.Element =
-    initConstraintsVM()
     renderConstraintsPanel[WebRenderer, dom_api.Element](r,
-      constraintsVMInstance))
+      constraintsVMForHost(host)))
 
 proc noteEditorSourceChanged*(path: cstring) =
   ## A visitor edited `path`, so the counts on screen may no longer describe

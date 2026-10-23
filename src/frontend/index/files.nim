@@ -1,6 +1,6 @@
 import
   std / [ async, jsffi, json, strutils, strformat, sequtils, jsconsole, os ],
-  electron_vars, config,
+  electron_vars, config, tab_answers,
   ../[ types, lang ],
   ../lib/[ jslib, electron_lib ],
   ../../common/[ ct_logging, trace_source_paths ]
@@ -414,11 +414,12 @@ proc onSaveFile*(sender: js, response: jsobject(name=cstring, raw=cstring, saveA
     suppressSelfWrite(response.name)
     discard await writeFileAsync(fsAsync, response.name, response.raw)
     suppressSelfWrite(response.name)
-    mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
+    mainWindow.webContents.send "CODETRACER::saved-file",
+      answerFor(response.toJs, js{name: response.name})
   except:
     errorPrint "save-file error: ", getCurrentExceptionMsg()
     mainWindow.webContents.send "CODETRACER::save-file-error",
-      js{name: response.name, error: cstring(getCurrentExceptionMsg())}
+      answerFor(response.toJs, js{name: response.name, error: cstring(getCurrentExceptionMsg())})
 
 proc untitledSaveSuggestion*(bufferName: string): string =
   ## The name to pre-fill the save dialog with, for a buffer that has no path.
@@ -479,17 +480,18 @@ proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, s
         # would leave that request armed for ever, and would leave the buffer
         # dirty with no account of why.
         mainWindow.webContents.send "CODETRACER::save-file-error",
-          js{name: response.name, error: cstring"saving was cancelled"}
+          answerFor(response.toJs, js{name: response.name, error: cstring"saving was cancelled"})
         return
       destination = chosen
     suppressSelfWrite(destination)
     discard await writeFileAsync(fsAsync, destination, response.raw)
     suppressSelfWrite(destination)
-    mainWindow.webContents.send "CODETRACER::saved-file", js{name: response.name}
+    mainWindow.webContents.send "CODETRACER::saved-file",
+      answerFor(response.toJs, js{name: response.name})
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()
     mainWindow.webContents.send "CODETRACER::save-file-error",
-      js{name: response.name, error: cstring(getCurrentExceptionMsg())}
+      answerFor(response.toJs, js{name: response.name, error: cstring(getCurrentExceptionMsg())})
 
 proc onNoReloadFile*(sender: js, response: jsobject(path=cstring)) =
   if data.tabs.hasKey(response.path):
@@ -545,12 +547,12 @@ proc onPathValidation*(
       message = cstring("Path does not exist.")
 
   mainWindow.webContents.send "CODETRACER::path-validated",
-    js{
+    answerFor(response.toJs, js{
       execPath: response.path,
       isValid: isValid,
       fieldName: response.fieldName,
       message: message
-    }
+    })
 
 
 proc onLoadPathForRecord*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
@@ -571,7 +573,7 @@ proc onLoadPathForRecord*(sender: js, response: jsobject(fieldName=cstring)) {.a
   let selection = await selectFileOrFolder(options)
 
   mainWindow.webContents.send "CODETRACER::record-path",
-    js{ execPath: selection, fieldName: response.fieldName }
+    answerFor(response.toJs, js{ execPath: selection, fieldName: response.fieldName })
 
 
 proc onChooseDir*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
@@ -579,7 +581,7 @@ proc onChooseDir*(sender: js, response: jsobject(fieldName=cstring)) {.async.} =
   if selection != "":
     let dirExists = await pathExists(selection)
     mainWindow.webContents.send "CODETRACER::record-path",
-      js{execPath: selection, fieldName: response.fieldName}
+      answerFor(response.toJs, js{execPath: selection, fieldName: response.fieldName})
 
 proc onAcpPickFiles*(sender: js,
                      response: jsobject(kind=cstring)) {.async.} =
@@ -615,7 +617,7 @@ proc onAcpPickFiles*(sender: js,
       for p in filePaths:
         selections.add(p)
   mainWindow.webContents.send "CODETRACER::acp-files-selected",
-    js{paths: selections.toJs}
+    answerFor(response.toJs, js{paths: selections.toJs})
 
 proc onLoadPathContent*(
   sender: js,
@@ -692,25 +694,30 @@ proc onLoadPathContent*(
       original: CodetracerFileData(text: name, path: response.path))
     content.toJs.path = response.path
 
-  mainWindow.webContents.send "CODETRACER::update-path-content", js{
+  # To the tab whose Files pane asked (`tab_answers`): its node indices are
+  # into THAT tab's tree.
+  mainWindow.webContents.send "CODETRACER::update-path-content", answerFor(response.toJs, js{
     content: content,
     nodeId: response.nodeId,
     nodeIndex: response.nodeIndex,
-    nodeParentIndices: response.nodeParentIndices}
+    nodeParentIndices: response.nodeParentIndices})
 
-proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1): Future[void] {.async.} =
-  await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line)
+proc openTab(main: js, location: types.Location, lang: Lang, editorView: EditorView, line: int = -1,
+             tab: JsObject = jsUndefined): Future[void] {.async.} =
+  await data.open(main, location, editorView, "tab-load-received", data.replay, data.exe, lang, line, tab)
 
 proc onTabLoad*(sender: js, response: jsobject(location=types.Location, name=cstring, editorView=EditorView, lang=Lang)) {.async.} =
   console.log response
   case response.lang:
   of LangC, LangCpp, LangRust, LangNim, LangGo, LangRubyDb:
     if response.editorView in {ViewSource, ViewTargetSource, ViewCalltrace}:
-      discard mainWindow.openTab(response.location, response.lang, response.editorView)
+      discard mainWindow.openTab(response.location, response.lang, response.editorView,
+                                 tab = askingTab(response.toJs))
     else:
      discard
   else:
-    discard mainWindow.openTab(response.location, response.lang, response.editorView)
+    discard mainWindow.openTab(response.location, response.lang, response.editorView,
+                               tab = askingTab(response.toJs))
 
 proc onLoadLowLevelTab*(sender: js, response: jsobject(pathOrName=cstring, lang=Lang, view=EditorView)) {.async.} =
   case response.lang:
@@ -734,9 +741,11 @@ proc onOpenTab*(sender: js, response: js) {.async.} =
   let file = await selectFileOrFolder(options)
   if file != "":
     if file.slice(-4) == cstring".nim":
-      mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangNim}
+      mainWindow.webContents.send "CODETRACER::opened-tab",
+        answerFor(response, js{path: file, lang: LangNim})
     else:
-      mainWindow.webContents.send "CODETRACER::opened-tab", js{path: file, lang: LangUnknown}
+      mainWindow.webContents.send "CODETRACER::opened-tab",
+        answerFor(response, js{path: file, lang: LangUnknown})
 
 var childProcessExec* {.importcpp: "helpers.childProcessExec(#, #)".}: proc(cmd: cstring, options: js = jsUndefined): Future[(cstring, cstring, js)]
 

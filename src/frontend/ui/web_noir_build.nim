@@ -1293,7 +1293,7 @@ proc installNoirBuildCommands*() =
   ## Point the BUILD pane's ▶ and ■ at the wasm toolchain.
   ##
   ## Called after `enterTemplateEditMode`, which is when `buildVMInstance`
-  ## exists: `onNoTrace` runs `configureMiddleware()`, and that is what calls
+  ## exists: `onNoTrace` runs `configureSessionMiddleware`, and that is what calls
   ## `initBuildVMFromSession` and installs the DESKTOP `runBuild`
   ## (`data.update(build=true)`, which sends `CODETRACER::update` to a host
   ## this tab does not have). Overwriting it here rather than branching inside

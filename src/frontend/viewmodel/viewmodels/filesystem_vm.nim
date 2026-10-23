@@ -341,19 +341,6 @@ proc clearRoot*(vm: FilesystemVM) =
   vm.nameEditDraft = ""
   vm.nameEdit.val = FileTreeNameEdit()
 
-proc resetToInitial*(vm: FilesystemVM) =
-  ## Put back what a freshly created VM shows: no tree (waiting for a root
-  ## load), nothing expanded, no diff section.
-  ##
-  ## Unlike `clearRoot` this also forgets the expanded folders, which
-  ## `setRoot` and `setExpandedPaths` otherwise MERGE into: for a window tab
-  ## that has never been shown (`shared_pane_state`), the folders another
-  ## project had open would be re-expanded in this one. The store and the
-  ## open-file / folder-expanded callbacks are the window's and stay.
-  vm.clearRoot()
-  vm.expandedPaths.val = initHashSet[string]()
-  vm.diffEntries.val = newSeq[FilesystemDiffEntry]()
-
 proc failLoad*(vm: FilesystemVM; reason: string) =
   ## End a root load that failed.  The index process answers every root
   ## load on ``CODETRACER::filesystem-loaded``, with the tree or with an
@@ -382,10 +369,10 @@ proc showNoProjectFolder*(vm: FilesystemVM) =
   ## Results and Constraints panes show) rather than the generic "No
   ## filesystem loaded yet.", which promises a tree that is not coming.
   ##
-  ## The tree is dropped: one FilesystemVM serves every tab of a window
-  ## (`shared_pane_state`), so whatever it held was another session's.  The
-  ## expanded folders are left alone, as ``setRoot`` leaves them; the
-  ## session switch restores or resets them.
+  ## The tree is dropped: whatever the VM held was from before the session
+  ## became folderless (a root an earlier load left), and none of it is this
+  ## session's project.  The expanded folders are left alone, as
+  ## ``setRoot`` leaves them.
   vm.rootEntry.val = emptyEntry()
   vm.loadError.val = ""
   vm.loadingState.val = lsIdle

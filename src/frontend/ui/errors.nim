@@ -15,7 +15,7 @@
 ## ---------------------------------------------------------------------------
 
 import
-  ui_imports, auto_hide, ../[types, communication]
+  ui_imports, auto_hide, session_viewmodels, ../[types, communication]
 
 import std/json
 # `Signal.val` is a template, so reading an `ErrorsVM` signal here needs the
@@ -50,11 +50,14 @@ proc initErrorsVMFromSession*(vm: ErrorsVM) =
   ## Hand the pane the session's `ErrorsVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ## Problems the component already holds are replayed into it once.
+  ## Problems the shown tab's component already holds are replayed into it
+  ## once, when the ViewModel is first handed over.
   errorsVMInstance = vm
   installErrorsVMCallbacks(errorsVMInstance)
-  if not errorsComponentRef.isNil:
-    syncLegacyErrorsIntoVM(errorsComponentRef)
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.BuildErrors)
+    if not component.isNil:
+      syncLegacyErrorsIntoVM(ErrorsComponent(component))
 
 proc revealProblemsPanel*() =
   ## Bring the Problems pane on screen **without focusing it**.
@@ -151,11 +154,22 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
   ## reflects every problem already accumulated by the build pipeline.
   ## Per-row updates go through ``appendProblem`` directly (called from
   ## ``build.nim``); this proc covers the bulk-replace scenario.
-  if errorsVMInstance.isNil or self.isNil or self.data.isNil:
+  if self.isNil or self.data.isNil:
     return
-  let buildComp = self.data.buildComponent(0)
+  # THIS TAB'S ViewModel, mirroring this tab's Build component's record.
+  let ownVM = ownPaneVM(self, errorsVMInstance, errorsVM)
+  if ownVM.isNil:
+    return
+  let ownTab = data.sessionOfComponent(self)
+  let buildComp =
+    if ownTab.isNil or ownTab.ui.isNil or
+       ownTab.ui.componentMapping[Content.Build].isNil or
+       not ownTab.ui.componentMapping[Content.Build].hasKey(0):
+      self.data.buildComponent(0)
+    else:
+      BuildComponent(ownTab.ui.componentMapping[Content.Build][0])
   if buildComp.isNil:
-    errorsVMInstance.setProblems(@[])
+    ownVM.setProblems(@[])
     return
 
   # AN EMPTY LEGACY RECORD DOES NOT MEAN "NO PROBLEMS".
@@ -171,9 +185,9 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
   # produced: measured as a pane that reported "no errors" while the compiler's
   # rows were sitting in the VM a moment earlier.
   if buildComp.build.problems.len == 0 and
-     errorsVMInstance.problems.val.len > 0:
-    errorsVMInstance.setFilter(problemFilterToVM(self.filter))
-    errorsVMInstance.setGroupByFile(self.groupByFile)
+     ownVM.problems.val.len > 0:
+    ownVM.setFilter(problemFilterToVM(self.filter))
+    ownVM.setGroupByFile(self.groupByFile)
     return
 
   var rows: seq[BuildProblemLine] = @[]
@@ -184,9 +198,22 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
       line: prob.line,
       col: prob.col,
       message: safeStr(prob.message)))
-  errorsVMInstance.setProblems(rows)
-  errorsVMInstance.setFilter(problemFilterToVM(self.filter))
-  errorsVMInstance.setGroupByFile(self.groupByFile)
+  ownVM.setProblems(rows)
+  ownVM.setFilter(problemFilterToVM(self.filter))
+  ownVM.setGroupByFile(self.groupByFile)
+
+proc syncErrorsAppendProblemInto*(vm: ErrorsVM; problem: BuildProblemLine) =
+  ## Push a single problem row into `vm` — the ErrorsVM of the tab whose
+  ## build produced it (`ui/build.nim`), shown or not.
+  if vm.isNil:
+    return
+  vm.appendProblem(problem)
+
+proc syncErrorsClearInto*(vm: ErrorsVM) =
+  ## Reset `vm`'s problem list as its tab's next build starts.
+  if vm.isNil:
+    return
+  vm.clearProblems()
 
 proc syncErrorsAppendProblem*(problem: BuildProblemLine) =
   ## Push a single problem row into the ``ErrorsVM``.  Called from

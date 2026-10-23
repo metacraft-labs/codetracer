@@ -14,7 +14,7 @@
 ## whose signals drive the IsoNim view.
 ## ---------------------------------------------------------------------------
 
-import ui_imports, value, ../[types, utils, communication]
+import ui_imports, value, session_viewmodels, ../[types, utils, communication]
 
 import std/algorithm
 import ./presented_value
@@ -31,7 +31,13 @@ const STEP_LINE_HEIGHT_PX = 26
 # The session's ViewModel and the registered component, so the legacy
 # event-bus handlers can feed the one and replay the other.
 var stepListVMInstance*: StepListVM
+  ## The SHOWN tab's StepListVM; a component's handlers feed their own
+  ## tab's (`paneVM`).
 var stepListComponentRef: StepListComponent
+
+proc paneVM(self: StepListComponent): StepListVM =
+  ## The StepListVM of the tab that holds `self` (`ownPaneVM`).
+  ownPaneVM(self, stepListVMInstance, stepListVM)
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +138,9 @@ method onUpdatedLoadStepLines*(self: StepListComponent, stepLinesUpdate: LoadSte
   self.lineSteps = self.lineSteps.concat(stepLinesUpdate.results)
   sort(self.lineSteps, func (x, y: LineStep): int = cmp(x.delta, y.delta))
 
-  if not stepListVMInstance.isNil:
-    stepListVMInstance.appendLineSteps(lineStepsToVm(stepLinesUpdate.results))
+  let vm = self.paneVM()
+  if not vm.isNil:
+    vm.appendLineSteps(lineStepsToVm(stepLinesUpdate.results))
 
 proc loadStepLinesFor*(self: StepListComponent, location: types.Location) =
   ## Issue a fresh load-step-lines request for ``location``.  Resets
@@ -143,11 +150,12 @@ proc loadStepLinesFor*(self: StepListComponent, location: types.Location) =
   let count = self.panelHeight()
   self.service.loadStepLines(location, count)
 
-  if not stepListVMInstance.isNil:
-    stepListVMInstance.setViewport(Viewport(rows: count))
+  let vm = self.paneVM()
+  if not vm.isNil:
+    vm.setViewport(Viewport(rows: count))
     let vmLoc = locationToVm(location)
-    stepListVMInstance.setCurrentLocation(vmLoc)
-    stepListVMInstance.clearLineSteps()
+    vm.setCurrentLocation(vmLoc)
+    vm.clearLineSteps()
 
 method onCompleteMove*(self: StepListComponent, response: MoveState) {.async.} =
   ## Fires whenever the live debugger position advances.  Re-fetch the
@@ -167,11 +175,19 @@ proc syncLegacyStepListIntoVM*(self: StepListComponent) =
   ## through ``onUpdatedLoadStepLines`` directly; this proc covers the
   ## bulk-replace scenario (e.g. opening the panel after some debugger
   ## navigation already happened).
-  if stepListVMInstance.isNil or self.isNil:
+  if self.isNil:
     return
-  stepListVMInstance.setLineSteps(lineStepsToVm(self.lineSteps))
-  let dbgLoc = data.services.debugger.location
-  stepListVMInstance.setCurrentLocation(locationToVm(dbgLoc))
+  let vm = self.paneVM()
+  if vm.isNil:
+    return
+  vm.setLineSteps(lineStepsToVm(self.lineSteps))
+  # The location of this component's own tab, from that tab's debugger
+  # service.
+  let ownTab = data.sessionOfComponent(self)
+  let dbgLoc =
+    if ownTab.isNil or ownTab.services.isNil: data.services.debugger.location
+    else: ownTab.services.debugger.location
+  vm.setCurrentLocation(locationToVm(dbgLoc))
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -183,10 +199,13 @@ proc initStepListVMFromSession*(vm: StepListVM) =
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
   ## The panel host (`ui/panel_host`) mounts the pane over this ViewModel;
-  ## rows the component received before now are replayed into it once.
+  ## rows the shown tab's component received before now are replayed into
+  ## it once, when the ViewModel is first handed over.
   stepListVMInstance = vm
-  if not stepListComponentRef.isNil:
-    syncLegacyStepListIntoVM(stepListComponentRef)
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.StepList)
+    if not component.isNil:
+      syncLegacyStepListIntoVM(StepListComponent(component))
 
 # ---------------------------------------------------------------------------
 # Component registration. The pane's view is mounted by the panel host.

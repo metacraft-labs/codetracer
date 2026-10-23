@@ -5,6 +5,7 @@ import
   ns9_panes,
   hcr_launch,
   file_tree_operations,
+  tab_answers,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -177,8 +178,8 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
     edit = nodeEnv(cstring"CODETRACER_HCR_EDIT")
 
   proc refuse(status: cstring, message: cstring) =
-    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
-      status: status, surfaceRow: cstring"", message: message, remedy: cstring""}
+    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", answerFor(response, js{
+      status: status, surfaceRow: cstring"", message: message, remedy: cstring""})
 
   if command.len == 0:
     refuse(cstring"not-configured",
@@ -275,17 +276,18 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
       var detail = $stderr
       if detail.len == 0:
         detail = $stdout
-      mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+      mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", answerFor(response, js{
         status: cstring"command-failed",
         surfaceRow: cstring"",
         message: cstring("the apply-edit command produced no report: " & detail),
-        remedy: cstring""}
+        remedy: cstring""})
       return
-    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+    # The answer goes to the tab whose live-edit panel asked (`tab_answers`).
+    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", answerFor(response, js{
       status: report.status,
       surfaceRow: report.surfaceRow,
       message: report.message,
-      remedy: report.remedy}
+      remedy: report.remedy})
 
 var findInFilesRuns = newFindInFilesService()
   ## The main process's Find in Files runner: the run in flight, cancelled
@@ -346,10 +348,12 @@ proc onSearchProgram*(sender: js, request: JsObject) {.async.} =
     folders.add $data.startOptions.folder
   let scope = findInFilesScope(store, imported, folders)
   infoPrint "onSearchProgram: query=", query, " roots=", $scope.roots
+  # Each batch goes to the tab whose Find in Files asked (`tab_answers`).
+  let tab = askingTab(request)
   discard findInFilesRuns.search(runId, query, options, scope,
     proc(batch: FindInFilesBatch) =
       mainWindow.webContents.send "CODETRACER::search-results-updated",
-                                  searchBatchToJs(batch))
+                                  withTab(searchBatchToJs(batch), tab))
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>

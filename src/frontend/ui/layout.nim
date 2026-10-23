@@ -36,6 +36,7 @@ import kdom except Location
 # The panel host (Shared-DOM-Front-Ends D4): the factory below mounts the
 # converted panes into the container it creates, and disposes them with it.
 import ./panel_host
+from ./session_viewmodels import tabScopedKey
 from isonim/web/dom_api import nil
 from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
 from ../headless_app/desktop_panes import PaneContent, paneOfContent
@@ -1486,7 +1487,7 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   # cached blobs — DR-R5: "Expansion state resets when the tab is closed and
   # does not leak between files."
   if content == Content.UnifiedDiff:
-    unified_diff.forgetUnifiedDiffTab(id)
+    unified_diff.forgetUnifiedDiffTab(tabScopedKey(data.activeSession, id))
 
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])

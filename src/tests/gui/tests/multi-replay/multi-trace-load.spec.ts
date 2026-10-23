@@ -401,11 +401,12 @@ test.describe("Multi-trace loading into sessions", () => {
     // session 1 Event Log that had never mounted (codetracer-pm issue
     // 2026-10-21-isonim-panes-stay-blank-in-every-desktop-tab-but-the-first).
     //
-    // Not asserted: session 1's Event Log now MOUNTS, but its rows do not
-    // arrive, because the replay panes' ViewModels and middleware are one per
-    // window (`ui_js.nim` `configureMiddleware`, `middlewareConfigured`), bound
-    // to session 0. Same known limitation as the editor checks above; the
-    // line below records which side of it a run is on.
+    // Not asserted here: whether those rows are session 1's OWN is held by
+    // `second_tab_panes_render.spec.ts` (`test_open_second_trace`), which
+    // reads each pane of each tab against its recording. Until each tab's
+    // session owned its ViewModels and middleware (`ui/session_viewmodels.nim`;
+    // before, one per window, `ui_js.configureMiddleware`), session 1's rows
+    // never arrived. The line below records which side a run is on.
     const session1EventRows =
       "#session-container-1 div[id^='eventLogComponent'] .eventLog-dense-table tbody tr:not(:has(td.dataTables_empty))";
     const hasEventLogRows = await retry(

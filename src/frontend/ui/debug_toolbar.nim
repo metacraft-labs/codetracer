@@ -127,10 +127,9 @@ proc toolbarApiFor*(data: Data): MediatorWithSubscribers =
   ##
   ## What this guarantees is the TAB: the request goes to the views mediator
   ## of the tab on screen and never to another tab's. That mediator hands it
-  ## to its tab's replay through the handlers `middleware.setupMiddlewareApis`
-  ## subscribes on it, which today the window installs for its first tab
-  ## only, so in a later tab the request stops at that tab's mediator rather
-  ## than moving a replay the user cannot see.
+  ## to its tab's own replay through the handlers
+  ## `middleware.setupMiddlewareApis` subscribes on it, installed for every
+  ## tab's session (`ui_js.configureSessionMiddleware`).
   if data.isNil or data.activeSessionIndex < 0 or
       data.activeSessionIndex >= data.sessions.len:
     return nil

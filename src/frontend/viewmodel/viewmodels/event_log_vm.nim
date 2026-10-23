@@ -1131,7 +1131,7 @@ proc jumpToCounterpart*(vm: EventLogVM; row: MarkerEventRow) =
   # replay-server, not inferred — the jump moved nothing.
   #
   # It looked correct because of a coincidence of routing. `dap.nim` stamps a
-  # `threadId` onto outgoing requests only when `activeSessionThreadId != 0`,
+  # `threadId` onto outgoing requests only when the session's `DapApi.routingThreadId != 0`,
   # i.e. only after a MULTI-process session has rotated — which the
   # `onSwitchProcessProc` call just above does when the counterpart lives in a
   # sibling recording. So the cross-recording path was accidentally

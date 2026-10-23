@@ -1,4 +1,5 @@
 import ../utils, ../communication, ../../common/ct_event, value, ui_imports, shell, editor, times, std/[strformat, jsconsole]
+import ./session_viewmodels
 from unified_diff import registerAgentDiffEntry
 from git_cli import gitWorkingDirectory, gitExec, isGitRepository,
   sessionHasNoProjectFolder
@@ -292,18 +293,30 @@ proc replayReviewSessionInto(vm: AgentActivityVM) =
   ## none, which is every non-review session.
   applyReviewSession(vm, reviewSessionForPanels)
 
-proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
+proc ensureAgentActivityVM(self: AgentActivityComponent;
+                           mountStore: ReplayDataStore = nil): AgentActivityVM =
+  ## `mountStore` is the store of the session the panel host mounts this pane
+  ## with — the pane's own tab's (`panel_host.sessionFor`) — and is used when
+  ## the component's tab has no ViewModels of its own to name yet.
   if self.isNil:
     return nil
-  if agentActivityVMInstances.hasKey(self.id):
-    return agentActivityVMInstances[self.id]
+  if agentActivityVMInstances.hasKey(data.tabScopedId(self)):
+    return agentActivityVMInstances[data.tabScopedId(self)]
 
-  # On the session's store (`initAgentActivityVMWithStore`); the panel host
-  # mounts the pane only once the session exists.
-  if agentActivityVMStore.isNil:
+  # On the store of the tab that holds this pane — each tab's Agent Activity
+  # pane has its own ViewModel over its own session's store, keyed by the tab
+  # as well as the component id (`tabScopedId`: every tab's first pane has
+  # id 0). The panel host mounts the pane only once its session exists.
+  let ownTab = sessionVMOf(data.sessionOfComponent(self))
+  let store =
+    if not ownTab.isNil: ownTab.store
+    elif not mountStore.isNil: mountStore
+    elif not data.anySessionViewModels(): agentActivityVMStore
+    else: nil
+  if store.isNil:
     return nil
-  result = createAgentActivityVM(agentActivityVMStore)
-  agentActivityVMInstances[self.id] = result
+  result = createAgentActivityVM(store)
+  agentActivityVMInstances[data.tabScopedId(self)] = result
   # AA-2: a panel created after `ui_js` installed the service still opens
   # recordings; one created before is back-filled by the installer.
   result.traceOpen = agentActivityTraceOpenService
@@ -314,10 +327,15 @@ proc ensureAgentActivityVM(self: AgentActivityComponent): AgentActivityVM =
   replayReviewSessionInto(result)
 
 proc initAgentActivityVMWithStore*(store: ReplayDataStore) =
-  ## Install the session's store; the per-component VMs are built on it.
+  ## Install the shown tab's store, and build the ViewModel of every pane that
+  ## has none yet, each on its own tab's store (`ensureAgentActivityVM`).
+  ## Called again on every tab switch, so a pane that already has its
+  ## ViewModel keeps it: rebuilding them all, as this did while the window had
+  ## one session, would drop every tab's conversation on each switch.
   agentActivityVMStore = store
-  agentActivityVMInstances = JsAssoc[int, AgentActivityVM]{}
-  for _, component in agentActivityComponentRefs:
+  for key, component in agentActivityComponentRefs:
+    if component.isNil or agentActivityVMInstances.hasKey(key):
+      continue
     discard ensureAgentActivityVM(component)
     component.syncLegacyAgentActivityIntoVM()
 
@@ -420,7 +438,7 @@ proc ensureAgentActivityRuntime(self: AgentActivityComponent) =
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   if self.isNil:
     return
-  agentActivityComponentRefs[self.id] = self
+  agentActivityComponentRefs[data.tabScopedId(self)] = self
   self.ensureAgentActivityRuntime()
   let vm = ensureAgentActivityVM(self)
   if vm.isNil:
@@ -781,11 +799,14 @@ when defined(js):
       if agentActivityVMStore.isNil and not session.isNil:
         agentActivityVMStore = session.store
       let componentId = hostComponentId(host)
+      # The pane of the tab whose container holds `host`.
+      let key = tabScopedKey(data.hostTab(host), componentId)
       let component =
-        if agentActivityComponentRefs.hasKey(componentId):
-          agentActivityComponentRefs[componentId]
+        if agentActivityComponentRefs.hasKey(key):
+          agentActivityComponentRefs[key]
         else: nil
-      let vm = ensureAgentActivityVM(component)
+      let vm = ensureAgentActivityVM(
+        component, if session.isNil: nil else: session.store)
       if vm.isNil:
         return isonim_dom_api.createElement(isonim_dom_api.document,
                                             cstring"div")
@@ -796,7 +817,7 @@ when defined(js):
 
 method register*(self: AgentActivityComponent, api: MediatorWithSubscribers) =
   self.api = api
-  agentActivityComponentRefs[self.id] = self
+  agentActivityComponentRefs[data.tabScopedId(self)] = self
   self.initAgentActivityVM()
   self.syncLegacyAgentActivityIntoVM()
 

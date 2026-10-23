@@ -264,7 +264,7 @@ proc jumpToStepLine*(vm: StepListVM; line: StepLine) =
   ## live bug in ``event_log_vm``'s copy of this payload, which sends
   ## ``rrTicks``/``ticks`` and no ``threadId``).  ``dap.nim`` only stamps
   ## a ``threadId`` when a *multi-process* session is active
-  ## (``activeSessionThreadId != 0``), and overwrites ours when it does —
+  ## (the session's ``DapApi.routingThreadId != 0``), and overwrites ours when it does —
   ## which is the desired precedence, since that value is the routing id.
   ##
   ## KNOWN GAP, deliberately not papered over: legacy's *non*-materialized

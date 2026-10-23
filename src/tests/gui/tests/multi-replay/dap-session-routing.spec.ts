@@ -220,9 +220,10 @@ test.describe("DAP session routing (issue #327)", () => {
    *
    * The bug
    * -------
-   * `configureMiddleware` (src/frontend/ui_js.nim) is called once at
-   * startup with `data.dapApi` resolving through the active-session
-   * forwarder to session 0.  It sets `data.dapApi.ipc = data.ipc` for
+   * `configureMiddleware` (src/frontend/ui_js.nim, since split into a
+   * per-window and a per-tab `configureSessionMiddleware`) was called once
+   * at startup with `data.dapApi` resolving through the active-session
+   * forwarder to session 0.  It set `data.dapApi.ipc = data.ipc` for
    * session 0 only.
    *
    * `createNewSession` (src/frontend/ui/session_switch.nim) constructs
@@ -235,7 +236,7 @@ test.describe("DAP session routing (issue #327)", () => {
    * ----------------------
    *   1. Session 0's DapApi.ipc points at `data.ipc` (the shared
    *      Electron IPC singleton).  This is the baseline established by
-   *      `configureMiddleware`.
+   *      `configureSessionMiddleware`.
    *   2. After creating session 1 via "+", its DapApi.ipc also points
    *      at the same `data.ipc` instance.  Pre-fix this would be
    *      "ipc-nil".
@@ -254,7 +255,7 @@ test.describe("DAP session routing (issue #327)", () => {
       { maxAttempts: 30, delayMs: 1000 },
     );
 
-    // Session 0: configureMiddleware should have wired .ipc.
+    // Session 0: configureSessionMiddleware should have wired .ipc.
     expect(await getDapApiIpcStatus(ctPage, 0)).toBe("ok");
 
     // Create session 1 via the "+" button.

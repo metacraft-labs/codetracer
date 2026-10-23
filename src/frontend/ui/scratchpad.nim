@@ -21,6 +21,7 @@
 
 import
   ui_imports,
+  session_viewmodels,
   state,
   ../[ types, communication ],
   ../../common/ct_event
@@ -78,7 +79,19 @@ proc isLiveScratchpadComponent(self: ScratchpadComponent): bool =
   ## makes the sink itself refuse to mirror on behalf of a stale component,
   ## so a future teardown path that forgets to unregister degrades into a
   ## dropped update instead of a duplicated row.
+  ##
+  ## PER TAB: each tab's registry (`componentMapping`) holds that tab's live
+  ## Scratchpad component — `types.registerComponent` replaces one a reopened
+  ## pane supersedes — so a component a tab holds is live for its own tab's
+  ## ViewModel. The module's newest-registration rule is for a component no
+  ## tab holds.
+  if not data.sessionOfComponent(self).isNil:
+    return true
   scratchpadComponentRef.isNil or scratchpadComponentRef == self
+
+proc paneVM(self: ScratchpadComponent): ScratchpadVM =
+  ## The ScratchpadVM of the tab that holds `self` (`ownPaneVM`).
+  ownPaneVM(self, scratchpadVMInstance, scratchpadVM)
 
 proc valueTextRepr*(value: Value): string =
   ## A single-line rendering of a ``Value`` for the IsoNim scratchpad cell.
@@ -146,8 +159,9 @@ proc removeValue*(self: ScratchpadComponent, i: int) =
     self.programValues.delete(i, i)
   if i >= 0 and i < self.values.len:
     self.values.delete(i, i)
-  if not scratchpadVMInstance.isNil:
-    scratchpadVMInstance.removeValue(i)
+  let vm = self.paneVM()
+  if not vm.isNil:
+    vm.removeValue(i)
 
 proc registerLocals*(self: ScratchpadComponent,
                      response: CtLoadLocalsResponseBody) =
@@ -156,11 +170,12 @@ proc registerLocals*(self: ScratchpadComponent,
   ## sync with whatever the legacy panel would have used to resolve
   ## ``InternalAddToScratchpadFromExpression``.
   self.locals = response.locals
-  if not scratchpadVMInstance.isNil:
+  let vm = self.paneVM()
+  if not vm.isNil:
     var entries: seq[ScratchpadValueEntry] = @[]
     for v in self.locals:
       entries.add(legacyVariableToVm(v))
-    scratchpadVMInstance.setLocals(entries)
+    vm.setLocals(entries)
 
 proc registerValue*(self: ScratchpadComponent,
                     variable: ValueWithExpression) =
@@ -181,8 +196,9 @@ proc registerValue*(self: ScratchpadComponent,
       stateID: -1
     )
   )
-  if not scratchpadVMInstance.isNil and self.isLiveScratchpadComponent:
-    scratchpadVMInstance.addValue(legacyValueToVm(expression, value))
+  let vm = self.paneVM()
+  if not vm.isNil and self.isLiveScratchpadComponent:
+    vm.addValue(legacyValueToVm(expression, value))
 
 # ---------------------------------------------------------------------------
 # IsoNim VM bridge
@@ -196,7 +212,10 @@ proc syncLegacyScratchpadIntoVM*(self: ScratchpadComponent) =
   ## go through ``registerValue`` directly; this proc covers the
   ## bulk-replace scenario (e.g. opening the panel after some values
   ## were already pinned).
-  if scratchpadVMInstance.isNil or self.isNil:
+  if self.isNil:
+    return
+  let vm = self.paneVM()
+  if vm.isNil:
     return
   var entries: seq[ScratchpadValueEntry] =
     newSeqOfCap[ScratchpadValueEntry](self.programValues.len)
@@ -204,15 +223,15 @@ proc syncLegacyScratchpadIntoVM*(self: ScratchpadComponent) =
     entries.add(legacyValueToVm(expression, value))
   # Re-seed the entry list in one shot; using ``addValue`` would
   # trigger one signal write per row.
-  scratchpadVMInstance.clearValues()
+  vm.clearValues()
   for entry in entries:
-    scratchpadVMInstance.addValue(entry)
+    vm.addValue(entry)
   # Refresh the locals lookup so a follow-up
   # ``addFromExpression`` call resolves against the latest snapshot.
   var localsEntries: seq[ScratchpadValueEntry] = @[]
   for v in self.locals:
     localsEntries.add(legacyVariableToVm(v))
-  scratchpadVMInstance.setLocals(localsEntries)
+  vm.setLocals(localsEntries)
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
@@ -222,10 +241,15 @@ proc initScratchpadVMFromSession*(vm: ScratchpadVM) =
   ## Hand the pane the session's `ScratchpadVM` — the one
   ## `initializePanelViewModels` built on the session's store, so every
   ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ## Values the component already holds are replayed into it once.
+  ## Values the shown tab's component already holds are replayed into it
+  ## once, when the ViewModel is first handed over: replaying again on a tab
+  ## switch would drop what the ViewModel gained since (chains pinned to it,
+  ## which no legacy record holds).
   scratchpadVMInstance = vm
-  if not scratchpadComponentRef.isNil:
-    syncLegacyScratchpadIntoVM(scratchpadComponentRef)
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.Scratchpad)
+    if not component.isNil:
+      syncLegacyScratchpadIntoVM(ScratchpadComponent(component))
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@
 ## tab sat with empty panes and no reason — because:
 ##
 ##   * only the first session's `DapApi` forwarded `ct/notification` to its
-##     views (`middleware.setupMiddlewareApis` runs once per window), so a
+##     views (`middleware.setupMiddlewareApis` then ran once per window), so a
 ##     later tab's `DapApi` had no handler for it;
 ##   * every event was handed to the `DapApi` of the tab ON SCREEN, whatever
 ##     session it was tagged with, so a later tab's refusal arriving while
@@ -42,8 +42,9 @@
 ## ## What is real, and the one stand-in
 ##
 ## REAL: `types`' window `Data` and its first session;
-## `middleware.setupMiddlewareApis`, what `ui_js.configureMiddleware` runs for
-## the first tab; the second tab's DAP API and views mediator, built by
+## `middleware.setupMiddlewareApis`, what `ui_js.configureSessionMiddleware` runs for
+## each tab (here, only the first: the second tab's notices are wired by
+## `attachSessionApis` alone, which is what this suite is about); the second tab's DAP API and views mediator, built by
 ## `event_helpers.attachSessionApis` — the call `session_switch.createNewSession`
 ## (the code a "+" click runs) makes for them; each tab's `StatusComponent`,
 ## built by `utils.makeStatusComponent` while its tab is the active one, as
@@ -258,9 +259,11 @@ proc runChecks() {.async.} =
     # The handlers on the first session's `DapApi` (`types`' service update,
     # `setupMiddlewareApis`' status update) once wrote into whichever tab was
     # on screen. Routed by session, they now run while a later tab is shown,
-    # and must touch only the first tab: the later tab's services have no
-    # move callbacks (`createNewSession` installs none), so a move applied to
-    # them threw, and its status bar showed the first tab's location.
+    # and must touch only the first tab: this suite's later tab has services
+    # with no move callbacks (as `createNewSession` built them before it
+    # gave each tab copies, `types.wireSessionServiceMoves`), so a move
+    # applied to them threw, and its status bar showed the first tab's
+    # location.
     showTab(1)
     await settle()
     let laterLocationBefore = laterTab.ui.status.location

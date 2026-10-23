@@ -20,7 +20,7 @@
 ## 4. Callers feed live data into the VM via ``syncNoSourceVM``.
 
 import
-  ui_imports, strutils,
+  ui_imports, strutils, session_viewmodels,
   ../[ communication, event_helpers ],
   ../../common/ct_event
 from ../rr_gdb import RRGDBStopSignal
@@ -80,24 +80,30 @@ proc syncNoSourceVM*(self: NoSourceComponent) =
   ##
   ## Safe to call before the VM exists — early calls are dropped, the
   ## next sync after the VM is created will fill it in.
-  if noSourceVMInstance.isNil:
+  # This component's own tab: its ViewModel and its debugger service.
+  let ownVM = ownPaneVM(self, noSourceVMInstance, noSourceVM)
+  if ownVM.isNil:
     return
+  let ownTab = data.sessionOfComponent(self)
+  let debuggerService =
+    if ownTab.isNil or ownTab.services.isNil: data.services.debugger
+    else: ownTab.services.debugger
 
-  noSourceVMInstance.setMessage($self.message)
+  ownVM.setMessage($self.message)
 
-  let metaInfo = data.services.debugger.location
+  let metaInfo = debuggerService.location
   let location = vmtypes.NoSourceLocationInfo(
     functionName: $metaInfo.highLevelFunctionName,
     path: (if metaInfo.highLevelPath != NO_PATH: $metaInfo.highLevelPath else: ""),
     line: (if metaInfo.highLevelLine != NO_CODE: metaInfo.highLevelLine else: -1),
   )
-  noSourceVMInstance.setLocation(location)
+  ownVM.setLocation(location)
 
-  let jumpHistory = self.data.services.debugger.jumpHistory
+  let jumpHistory = debuggerService.jumpHistory
   if jumpHistory.len >= 2:
     let prev = jumpHistory[^2].location
     let action = jumpHistory[^1].lastOperation
-    noSourceVMInstance.setHistory(vmtypes.NoSourceHistoryInfo(
+    ownVM.setHistory(vmtypes.NoSourceHistoryInfo(
       hasHistory: true,
       previousPath: $prev.path,
       action: $action,
@@ -110,18 +116,18 @@ proc syncNoSourceVM*(self: NoSourceComponent) =
       previousRRTicks: prev.rrTicks,
     ))
   else:
-    noSourceVMInstance.setHistory(vmtypes.NoSourceHistoryInfo())
+    ownVM.setHistory(vmtypes.NoSourceHistoryInfo())
 
   if self.instructions.address != 0:
-    noSourceVMInstance.setOriginatingAddress("0x" & toHex(self.instructions.address))
+    ownVM.setOriginatingAddress("0x" & toHex(self.instructions.address))
   else:
-    noSourceVMInstance.setOriginatingAddress("")
+    ownVM.setOriginatingAddress("")
 
   let signal = self.data.services.debugger.stopSignal
   if signal notin {NoStopSignal, OtherStopSignal}:
-    noSourceVMInstance.setStopSignalText($signal)
+    ownVM.setStopSignalText($signal)
   else:
-    noSourceVMInstance.setStopSignalText("")
+    ownVM.setStopSignalText("")
 
 # ---------------------------------------------------------------------------
 # Mount helper — Web only
@@ -152,11 +158,13 @@ when defined(js):
       dom_api.Node(shell),
       dom_api.Node(placeholder))
 
-    # The shell is the host, and it exists now: mount the view into it.
-    if not noSourceVMInstance.isNil:
-      mountIsoNimNoSource(shell, noSourceVMInstance)
+    # The shell is the host, and it exists now: mount the view into it —
+    # over the ViewModel of this component's own tab, not the shown one's.
+    let vm = ownPaneVM(self, noSourceVMInstance, noSourceVM)
+    if not vm.isNil:
+      mountIsoNimNoSource(shell, vm)
 # ---------------------------------------------------------------------------
-# VM lifecycle hooks called from ui_js.configureMiddleware.
+# VM lifecycle hooks called from ui_js.bindWindowToSession.
 # ---------------------------------------------------------------------------
 
 proc initNoSourceVMFromSession*(vm: NoSourceVM) =

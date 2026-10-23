@@ -30,7 +30,7 @@
 
 import
   std/[strutils, json],
-  ui_imports, value, ../[types, communication]
+  ui_imports, value, session_viewmodels, ../[types, communication]
 
 import isonim/core/signals
 import ../viewmodel/viewmodels/repl_vm
@@ -97,8 +97,11 @@ method onDebugOutput*(self: ReplComponent, response: DebugOutput) {.async.} =
   if self.history.len > 0:
     self.history[^1].output = response
     self.data.redraw()
-  if not replVMInstance.isNil:
-    replVMInstance.onDebugOutput(debugOutputToVm(response))
+  # THIS TAB'S ViewModel: the answer belongs to the tab whose REPL asked,
+  # shown or not (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, replVMInstance, replVM)
+  if not vm.isNil:
+    vm.onDebugOutput(debugOutputToVm(response))
 
 method run*(self: ReplComponent, input: cstring) {.async.} =
   ## Submit a user-entered REPL expression.  Mirrors the legacy
@@ -116,15 +119,16 @@ method run*(self: ReplComponent, input: cstring) {.async.} =
       )
     )
     debugRepl(self.history[^1].input)
-    if not replVMInstance.isNil:
+    let vm = ownPaneVM(self, replVMInstance, replVM)
+    if not vm.isNil:
       # Append directly so we do not double-dispatch ``debugRepl``
       # (the VM action would call it again via the dispatcher).
-      var entries = replVMInstance.history.val
+      var entries = vm.history.val
       entries.add(ReplInteraction(
         input: safeStr(input),
         output: ReplOutput(kind: rokLoading, output: ""),
       ))
-      replVMInstance.history.val = entries
+      vm.history.val = entries
 
 # ---------------------------------------------------------------------------
 # IsoNim VM bridge
@@ -135,9 +139,12 @@ proc syncLegacyReplIntoVM*(self: ReplComponent) =
   ## Used by the layout when the panel container becomes visible (or
   ## is rebuilt) so the panel reflects every interaction already
   ## accumulated by the previous IPC stream.
-  if replVMInstance.isNil or self.isNil:
+  if self.isNil:
     return
-  replVMInstance.setHistory(historyToVm(self.history))
+  let vm = ownPaneVM(self, replVMInstance, replVM)
+  if vm.isNil:
+    return
+  vm.setHistory(historyToVm(self.history))
 
 proc syncReplConfigIntoVM*() =
   ## Refresh the materialized / replEnabled / langName signals from
@@ -185,12 +192,16 @@ proc initReplVMFromSession*(vm: ReplVM) =
   ##
   ## The REPL's dispatcher is the renderer's (`replDispatcher`), so it is
   ## installed here, before the pane can send anything. The history the
-  ## component already holds is replayed into it once.
+  ## shown tab's component already holds is replayed into it once, when the
+  ## ViewModel is first handed over — not again on every tab switch, which
+  ## would overwrite what it gained since.
   vm.dispatcher = replDispatcher()
   replVMInstance = vm
   syncReplConfigIntoVM()
-  if not replComponentRef.isNil:
-    syncLegacyReplIntoVM(replComponentRef)
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.Repl)
+    if not component.isNil:
+      syncLegacyReplIntoVM(ReplComponent(component))
 
 # ---------------------------------------------------------------------------
 # Component registration. The pane's view is mounted by the panel host.
@@ -203,7 +214,7 @@ method unregister*(self: ReplComponent) =
   ## keep the next one from being fed (`ui/session_switch` unregisters every
   ## component of a closing session; `ui/layout` a closed panel).
   ##
-  ## The VM is deliberately NOT reset: it is a singleton by design and holds
+  ## The VM is deliberately NOT reset: it is its tab's session's and holds
   ## state about the trace rather than about this panel, so dropping it would
   ## make closing and reopening the pane lose data that is still true.
   ##
