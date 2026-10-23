@@ -404,9 +404,24 @@ try {
   // THE EDIT, as keystrokes. Not `model.setValue`: that would bypass Monaco's
   // change listener, which is what marks the tab dirty and therefore what
   // `saveTargets` reads. Typing exercises the path a visitor takes.
+  //
+  // A COMPLETE PROGRAM, because the debug leg below presses Run on it. This
+  // used to type `fn main(x: Field, y: pub Field) {` and stop, which leaves
+  // `main` unclosed: Run then compiled it, the BUILD pane said "Expected a
+  // statement but found end of input", and the leg waited 180s for a debugger
+  // that a refused build correctly never opens — two failures that were about
+  // this fixture, not the product (measured on codetracer `a882da133`). The
+  // edit still replaces the whole file, so it differs from the bundled bytes
+  // as the assertions below require; it keeps `main`'s signature and its
+  // first assertion, so `nargo compile` accepts it. It drops `mod utils;` and
+  // `mod tests;` with the rest of the file, which leaves those two files
+  // undeclared rather than broken — Noir compiles only the modules `main.nr`
+  // declares. The closing brace is typed on its own line; Monaco closes no
+  // brace for `.nr` (the old edit was refused for lacking one), so nothing doubles it.
   await page.click('.monaco-editor');
   await page.keyboard.press('Control+A');
-  await page.keyboard.type(`// ${MARKER}\nfn main(x: Field, y: pub Field) {\n`);
+  await page.keyboard.type(
+    `// ${MARKER}\nfn main(x: Field, y: pub Field) {\nassert(x != y);\n}\n`);
   await page.waitForTimeout(500);
 
   const mainBefore = await page.evaluate(
