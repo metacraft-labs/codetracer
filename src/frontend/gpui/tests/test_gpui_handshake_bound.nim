@@ -578,6 +578,34 @@ suite "a new tab (the \"+\") whose engine goes quiet after the open":
         s.close()
     ck opened
 
+  test "the window's end closes every tab's engine but the run's own":
+    # What `runOpen` does once the window's loop returns (`closeTabSessions`):
+    # each session a "+" opened is closed, and with it its engine, while the
+    # run's own is left to `runOpen`'s own close. Two tabs on `calc`, each on
+    # the real engine behind the wrapper the window case uses, which keeps
+    # the engine's pid alive past its input closing, so only being killed
+    # ends it and a session left open shows as a live pid.
+    let wrapper = scratch / "pid-replay-server"
+    requirePrereq(fileExists(wrapper), wrapper & " (the window case writes it)")
+    var kept, tab: HeadlessDebugSession
+    withProcessEnv([(HandshakeEnv, $BudgetMs),
+                    ("REPLAY_SERVER_BIN", wrapper)]) do ():
+      kept = openTabSession(calc, showFlowOverlay = false)
+      tab = openTabSession(calc, showFlowOverlay = false)
+    let keptPid = kept.backend.process.processID
+    let tabPid = tab.backend.process.processID
+    try:
+      closeTabSessions([kept, tab, nil], keep = kept)
+      let gone = waitGone(tabPid)
+      ck gone
+      if not gone:
+        discard execCmd("kill -9 " & $tabPid & " 2>/dev/null")
+      # The run's own session is not this proc's to close.
+      ck alive(keptPid)
+    finally:
+      kept.close()
+    ck waitGone(keptPid)
+
 suite "codetracer-gpui handshake bound: the tally":
   test "every assertion above ran":
     echo "CHECKS: ", CHECKS

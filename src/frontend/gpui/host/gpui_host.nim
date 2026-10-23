@@ -305,6 +305,23 @@ proc openTabSession*(path: string; showFlowOverlay: bool): HeadlessDebugSession 
     # exception of its own since `e` was raised.
     raise e
 
+proc closeTabSessions*(sessions: openArray[HeadlessDebugSession];
+                       keep: HeadlessDebugSession = nil) =
+  ## PLAT-49 part B: the end of a window run closes the sessions its "+"
+  ## opened, and so their engines (`HeadlessDebugSession.close`, which kills
+  ## an engine that does not exit on its stdin closing), every one but `keep`
+  ## — the run's own session, which `main.runOpen` closes on every path out
+  ## of it. One close that fails does not leave the rest running: each is
+  ## attempted, and a failure is dropped, since the run is ending and has no
+  ## one left to report it to.
+  for s in sessions:
+    if s.isNil or s == keep:
+      continue
+    try:
+      s.close()
+    except CatchableError:
+      discard
+
 const GpuiSourceOverscan* = 6
   ## Lines held above and below the viewport. The terminal's number, and the
   ## same reasoning: the overscan is what makes a one-line step a read out of

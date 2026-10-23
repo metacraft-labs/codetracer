@@ -80,7 +80,8 @@ when defined(js):
   {.error: "src/frontend/gpui is native-only: it opens a window.".}
 
 import ./design_fonts
-import std/[cpuinfo, json, math, options, os, sets, strutils, tables, times]
+import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
+            times]
 
 import isonim_gpui/renderer
 # `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
@@ -9290,9 +9291,7 @@ proc runOpen(cmd: GpuiCommand): int =
   result = launchWindow(cmd, windowTitleFor(session), drawn,
                         if dock.status == dpsRefused: nil else: dock.state)
   # PLAT-49 part B: the sessions a "+" opened, and their engines, closed.
-  for id, s in gSessionsOpened:
-    if s != session:
-      s.close()
+  closeTabSessions(toSeq(gSessionsOpened.values), keep = session)
 
 proc main() =
   let cmd = parseGpuiCommand(commandLineParams())
