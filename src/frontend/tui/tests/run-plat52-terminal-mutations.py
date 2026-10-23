@@ -332,9 +332,11 @@ ARMS = [
         "  if w != m.scrubSent:\n",
         "  if false:\n",
         T_REALTIME, "the terminal's screen drag moves no debugger while held"),
+    # PLAT-70 Part H: the line view's bar is every bar's (`runtime.pressBar`
+    # → `applyBarTop`).
     Arm("T3", RUNTIME,
-        "  of thLineTrack:\n    rt.scrubTerminalLines(area, event.row, click = true)\n",
-        "  of thLineTrack:\n    discard rt.terminalWriteJump(0, outcome)\n    rt.scrubTerminalLines(area, event.row, click = true)\n",
+        "    of paneTerminalOutput:\n      rt.app.terminalOutput.scrollTop = top\n",
+        "    of paneTerminalOutput:\n      discard rt.terminalWriteJump(0, outcome)\n      rt.app.terminalOutput.scrollTop = top\n",
         T_SCRUB, "a track click moves the debugger"),
     Arm("T4", TPANE,
         "  case fragmentTense(currentTicks, f.rrTicks)\n",
@@ -353,8 +355,8 @@ ARMS = [
         "     paneEditor,\n",
         T_LEAF, "the terminal reports the pane instead of drawing it"),
     Arm("T8", TPANE,
-        "  if f >= 0.0:\n    let r = min(geo.contentRows - 1, int(floor(f * float(geo.contentRows))))\n",
-        "  if false:\n    let r = min(geo.contentRows - 1, int(floor(f * float(geo.contentRows))))\n",
+        "  scrubberModel(m.lineCount, m.visibleTop(rows), rows, m.currentLine)\n",
+        "  scrubberModel(m.lineCount, m.visibleTop(rows), rows, -1)\n",
         T_MARK, "the current position is not marked on the track"),
     # Both lookups: the screen's writes when they are loaded, else the
     # writes the held lines name (the line view is windowed).

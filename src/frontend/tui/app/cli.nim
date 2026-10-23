@@ -148,6 +148,10 @@ type
       overflowMarkers*: SettingOverride
         ## PLAT-70: `--overflow-markers=on|off` (Horizontal-Overflow.md §4.6),
         ## likewise.
+      layoutFlags*: array[LayoutSetting, string]
+        ## Every layout setting's flag value word for this session — the
+        ## three above and PLAT-70 Part H's scrollbar options
+        ## (`--scrollbar-thickness=thin` …) — "" when absent.
       noFlowOverlay*: bool
         ## `--no-flow-overlay` — the flow overlay hidden for this session.
         ## PLAT-42 built the overlay on both native front-ends and shows it by
@@ -358,6 +362,12 @@ options:
                      mark a text row cut by the pane's left or right edge
                      with ‹ / › (default on; remembered by :set
                      overflow-markers)
+  --scrollbar-thickness=NAME  hairline (default), thin, thick or full
+  --scrollbar-fade=on|off     fade out when left alone (default on)
+  --scrollbar-track=on|off    a faint track under each thumb (default off)
+  --scrollbar-click=NAME      a track press: jump (default) or page
+  --modern-unicode=on|off     finer Legacy Computing glyphs (default off)
+                     each of these five is remembered by :set <name> <value>
   --headless         render one screen as plain text and exit — for CI
   --pane-server      serve CodeTracer's panes to an editor over stdio
                      (JSON-RPC with LSP framing); started by the Neovim and
@@ -479,6 +489,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var noFlowOverlay = false
   var dividers = dcStrip
   var settingOverrides: array[LayoutSetting, SettingOverride]
+  var layoutFlags: array[LayoutSetting, string]
   var editProject = ""
   var editRequested = false
   var keymap = ""
@@ -567,12 +578,14 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
             flags.theme = theme
             flags.themePinned = true
             break options
-          # PLAT-51: the two layout preferences, for this session.
+          # PLAT-51: the layout preferences, for this session (PLAT-70
+          # Part H: and the scrollbar options).
           let flag = parseSettingFlag(arg)
           if flag.isFlag:
             if not flag.ok:
               return TuiCommand(kind: tckUsageError, message: flag.message)
             settingOverrides[flag.setting] = flag.value
+            layoutFlags[flag.setting] = flag.word
             break options
           # PLAT-50: the divider colour, the user's open choice.
           let (isDividers, dividersName) = optionValue(arg, "--dividers")
@@ -842,7 +855,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                focusHighlight: settingOverrides[lsFocusHighlight],
                liveResize: settingOverrides[lsLiveResize],
                overflowMarkers: settingOverrides[lsOverflowMarkers],
-               keymap: keymap)
+               layoutFlags: layoutFlags, keymap: keymap)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
@@ -851,4 +864,4 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                focusHighlight: settingOverrides[lsFocusHighlight],
                liveResize: settingOverrides[lsLiveResize],
                overflowMarkers: settingOverrides[lsOverflowMarkers],
-               keymap: keymap)
+               layoutFlags: layoutFlags, keymap: keymap)

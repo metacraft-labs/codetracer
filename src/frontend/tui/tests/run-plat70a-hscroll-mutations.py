@@ -115,8 +115,10 @@ ARMS = [
     ("D1", [(MOUSE, "      of 2: mbWheelLeft", "      of 2: mbWheelUp")],
      [(PTY, WHEEL_PTY)],
      "HO-6: SGR 66 decoded as the vertical wheel again (the real pty's rows)"),
-    ("C1", [(RUNTIME, "    if not bar.shown or event.row != bar.row:",
-             "    if true:"),
+    # PLAT-70 Part H: a press on any bar is `runtime.routeScrollbars`'s; the
+    # arm hands a press on the editor's horizontal bar to the text instead.
+    ("C1", [(RUNTIME, "    rt.pressBar(bar, event, nowMs, outcome)",
+             "    if bar.pane == paneEditor and bar.axis == axHorizontal: return false else: rt.pressBar(bar, event, nowMs, outcome)"),
             (SOURCE, "  if bar.shown and row == bar.row:",
              "  if false:")],
      [(PTY, WHEEL_PTY)],

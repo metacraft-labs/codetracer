@@ -360,17 +360,11 @@ proc measureContent*(m: var TerminalOutputPaneModel; generation: int) =
 
 proc paintLineScrubber(g: var StyledGrid; geo: TerminalPaneGeometry;
                        m: TerminalOutputPaneModel) =
+  ## The line view's scrollbar: every scrollbar's painter (PLAT-70 Part H).
   if geo.trackCol < 0 or geo.contentRows <= 0:
     return
-  let sm = m.scrubberOf(geo.contentRows)
-  let span = sm.thumbSpan(geo.contentRows * 8, 8)
-  let cells = thumbCells(span, geo.contentRows, vertical = true)
-  for i, cell in cells:
-    g.paint(geo.contentTop + i, geo.trackCol, cell.glyph, styleOf(cell.kind))
-  let f = sm.currentFraction
-  if f >= 0.0:
-    let r = min(geo.contentRows - 1, int(floor(f * float(geo.contentRows))))
-    g.paint(geo.contentTop + r, geo.trackCol, ThumbFullGlyph, MarkStyle)
+  g.paintVerticalScrubber(geo.trackCol, geo.contentTop, geo.contentRows,
+                          m.scrubberOf(geo.contentRows))
 
 proc paintScreen(g: var StyledGrid; geo: TerminalPaneGeometry;
                  m: TerminalOutputPaneModel; area: CellArea): TermScreen =
@@ -399,7 +393,8 @@ proc paintScreenScrubber(g: var StyledGrid; geo: TerminalPaneGeometry;
     if n <= 1 or m.shownWrite < 0: 0
     else: int(round(fractionOfWrite(n, m.shownWrite) * float(units - 8)))
   let cells = thumbCells(ThumbSpan(start: pos, length: 8), w,
-                         vertical = false)
+                         vertical = false,
+                         modern = g.scrollbars.options.modernUnicode)
   for i, cell in cells:
     g.paint(geo.screenTrackRow, geo.screenTrackCol + i, cell.glyph,
             styleOf(cell.kind))

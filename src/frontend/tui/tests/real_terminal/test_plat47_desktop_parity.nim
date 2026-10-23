@@ -101,7 +101,10 @@ proc spawnTui(args: seq[string]; cols, rows: int; colorFgBg = "";
                                   "-" & $spawnCount)
   removeDir(layoutDir)
   createDir(layoutDir)
-  var b = newTuiTest(tuiBinary(), args & @[resolved.tracePath])
+  # PLAT-70 Part H: the bars' look is fixed for this suite — `thin`, the
+  # track drawn, never faded.
+  var b = newTuiTest(tuiBinary(), @["--scrollbar-thickness=thin", "--scrollbar-track=on", "--scrollbar-fade=off"] & args &
+                                  @[resolved.tracePath])
     .envSet("CODETRACER_TUI_LAYOUT_DIR", layoutDir)
     .width(cols).height(rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
@@ -222,7 +225,7 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     # pane's vertical bar while the file is taller than the pane, as the
     # desktop's band ends at Monaco's scrollbar (Scrollbar-Scrubbers.md §4:
     # the track is the pane's rightmost column).
-    const VerticalBarGlyphs = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
+    const VerticalBarGlyphs = ["│", "┃", "╹", "╻", "╿", "╽"]
     let codeCol = colOf(sess, lineOne, Cols, "#!/usr")
     var edge = codeCol
     while edge + 1 < Cols and

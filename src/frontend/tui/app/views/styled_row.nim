@@ -67,10 +67,13 @@ import std/[sequtils, strutils, unicode]
 
 import isonim_tui
 
+import headless_app/layout_model
+
 import ../theme/capabilities
 import ../theme/palette
+import ./scrollbar_frame
 
-export palette
+export palette, scrollbar_frame
 
 type
   FrameOverlayKind* = enum
@@ -110,6 +113,14 @@ type
     width*: int
     height*: int
     cells: seq[StyledCell]
+    scrollbars*: ScrollbarFrame
+      ## PLAT-70 Part H: how this frame's scrollbars are drawn — set by the
+      ## shell before the panes paint (`scrollbar_frame`). The zero value
+      ## draws every bar at rest.
+    painting*: PaneKind
+      ## The pane being painted: what a bar drawn now belongs to.
+    bars*: seq[BarSpot]
+      ## Every scrollbar painted into this grid (`scrollbar_styles.paintBar`).
 
 # ---------------------------------------------------------------------------
 # The grid

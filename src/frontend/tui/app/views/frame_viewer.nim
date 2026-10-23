@@ -517,7 +517,8 @@ proc paintFrameScrubber(g: var StyledGrid; area: CellArea;
   let w = area.width
   let at = frameColumn(model.frameCount, model.frameIndex, w)
   let cells = thumbCells(ThumbSpan(start: at * 8, length: 8), w,
-                         vertical = false)
+                         vertical = false,
+                         modern = g.scrollbars.options.modernUnicode)
   for i, cell in cells:
     g.paint(row, area.col + i, cell.glyph, styleOf(cell.kind))
   for f in model.sceneMarks:

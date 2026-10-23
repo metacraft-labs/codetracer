@@ -248,20 +248,20 @@ suite "PLAT-51 part B: the focus highlight":
     require calc.outcome == foRecorded
     let (rt, s) = open(calc.tracePath)
     defer: s.close()
-    var saved: seq[(string, bool)] = @[]
-    rt.savePreference = proc(name: string; on: bool): string =
-      saved.add (name, on)
+    var saved: seq[(string, string)] = @[]
+    rt.savePreference = proc(name, value: string): string =
+      saved.add (name, value)
       ""
     ck rt.shellScreenOf().focusedStripCells() > 0
     s.command(rt, "set focus-highlight off")
     var screen = rt.shellScreenOf()
     ck screen.focusedStripCells() == 0
     ck screen.ringCells() == 0
-    ck saved == @[("focus-highlight", false)]
+    ck saved == @[("focus-highlight", "off")]
     var outcome = RuntimeOutcome()
     rt.runMenuAction(settingCommandTarget(lsFocusHighlight, true), outcome)
     ck rt.shellScreenOf().focusedStripCells() > 0
-    ck saved.len == 2 and saved[1] == ("focus-highlight", true)
+    ck saved.len == 2 and saved[1] == ("focus-highlight", "on")
     s.command(rt, "set focus-highlight sideways")
     ck rt.app.notification.contains("on or off")
     s.command(rt, "set nonsense on")

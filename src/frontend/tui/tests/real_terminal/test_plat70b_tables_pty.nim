@@ -82,7 +82,11 @@ proc open(extra: seq[string] = @[]): TuiTestSession =
   removeDir(state)
   createDir(state)
   lastState = state
-  result = newTuiTest(tuiBinary(), @["--theme=dark"] & extra & @[trace()])
+  # The scrollbars do not fade (Scrollbar-Scrubbers.md §7.5): a pointer
+  # crossing a pane wakes its faded bars, which would read here as a tooltip
+  # drawn over a cell that fits.
+  result = newTuiTest(tuiBinary(), @["--theme=dark", "--scrollbar-fade=off"] &
+                      extra & @[trace()])
     .width(Cols).height(Rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT", "COLORFGBG")

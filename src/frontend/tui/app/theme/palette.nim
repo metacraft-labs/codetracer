@@ -241,6 +241,35 @@ func blendHalf*(fg, bg: Rgb8): Rgb8 =
   (r: (fg.r + bg.r + 1) div 2, g: (fg.g + bg.g + 1) div 2,
    b: (fg.b + bg.b + 1) div 2)
 
+func blendToward(fg, bg: Rgb8; t: float): Rgb8 =
+  ## `fg` faded `t` of the way into `bg`, per sRGB channel.
+  let u = max(0.0, min(1.0, t))
+  (r: int(float(fg.r) + (float(bg.r) - float(fg.r)) * u + 0.5),
+   g: int(float(fg.g) + (float(bg.g) - float(fg.g)) * u + 0.5),
+   b: int(float(fg.b) + (float(bg.b) - float(fg.b)) * u + 0.5))
+
+proc fadeOnRung(resolved: var CellStyle; plain: CellStyle; depth: ColorDepth;
+                mode: DesignMode; palette: PaletteKind; faded: float32) =
+  ## `CellStyle.faded` on the rung (see there): blended at 24 bits on the
+  ## colour rungs of the design palette; shown or hidden at 1/2 where no
+  ## blend has a colour; untouched in monochrome.
+  if depth == cdMonochrome:
+    return
+  if depth == cdAnsi16 or palette == pkTerminal:
+    if faded >= 0.5 and resolved.bg.len > 0:
+      resolved.fg = resolved.bg
+    return
+  let tc = resolvePlain(plain, cdTrueColor, mode, palette)
+  var okFg, okBg = false
+  let fg = rgbOfSpelling(tc.fg, okFg)
+  let bg = rgbOfSpelling(tc.bg, okBg)
+  if not (okFg and okBg):
+    return
+  let mixed = blendToward(fg, bg, float(faded))
+  resolved.fg =
+    if depth == cdTrueColor: hexOf(mixed)
+    else: indexedSpelling(nearestXterm256(mixed))
+
 proc resolveRoles*(style: CellStyle; depth: ColorDepth; mode: DesignMode;
                    palette = pkDesign): CellStyle =
   ## `resolvePlain`, and then `dim` (see `CellStyle.dim`): on a colour rung of
@@ -250,7 +279,11 @@ proc resolveRoles*(style: CellStyle; depth: ColorDepth; mode: DesignMode;
   ## terminal's own, the cell is SGR 2 instead.
   var plain = style
   plain.dim = false
+  plain.faded = 0
   result = resolvePlain(plain, depth, mode, palette)
+  if style.faded > 0 and not style.dim:
+    result.fadeOnRung(plain, depth, mode, palette, style.faded)
+    return
   if not style.dim:
     return
   if depth == cdMonochrome or palette == pkTerminal:

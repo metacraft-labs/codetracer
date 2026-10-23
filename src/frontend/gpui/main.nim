@@ -203,7 +203,7 @@ OPTIONS:
                       with Shift held — a horizontal scroll)
                       wheel:<pane>:<lines> (M71, M73: the vertical wheel over a
                       pane's centre, positive toward the user)
-                      vbar:editor:track:<permille>, vbar:editor:drag:<from>:
+                      vbar:editor:track:<permille>, vbar:editor:grab:<at>:<by>, vbar:editor:drag:<from>:
                       <to> (M73: the editor's vertical scrubber)
                       hbar:<pane>:track:<permille>, hbar:<pane>:drag:<from>:
                       <to>, hbar:terminalOutput:corner (PLAT-70: a text
@@ -511,6 +511,9 @@ type
     overflowMarkers: SettingOverride
       ## PLAT-70: `--overflow-markers=on|off` (Horizontal-Overflow.md §4.6;
       ## off by default in this window, OQ-H1), likewise.
+    layoutFlags: array[LayoutSetting, string]
+      ## Every layout setting's flag value word for this window — the three
+      ## above and PLAT-70 Part H's scrollbar options — "" when absent.
     subtleDividers: bool
       ## PLAT-50. `--dividers=subtle`: a 1px ui/border/secondary line in the
       ## vertical gaps between panes; `strip` (the default) leaves the gaps
@@ -669,10 +672,12 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       if not flag.ok:
         return GpuiCommand(kind: gckUsageError,
                            message: "codetracer-gpui: " & flag.message)
+      result.layoutFlags[flag.setting] = flag.word
       case flag.setting
       of lsFocusHighlight: result.focusHighlight = flag.value
       of lsLiveResize: result.liveResize = flag.value
       of lsOverflowMarkers: result.overflowMarkers = flag.value
+      else: discard
     elif arg.startsWith("--dividers="):
       case arg["--dividers=".len .. ^1]
       of "strip": result.subtleDividers = false
@@ -2386,7 +2391,7 @@ proc scrubEditorBar(r: GpuiRenderer; x: int; click: bool) =
   let f = trackFractionAt(clamp(x - bar.x, 0, bar.w - 1), bar.w)
   let moved = if click: gEditorView.clickTrack(f)
               else: gEditorView.dragThumb(
-                      f - gEditorView.barModel.thumbLength / 2.0)
+                      gEditorView.barModel.heldThumbStart(f))
   traceGesture("editor-hbar leftCols=" & $gEditorView.leftCol & " of " &
                $gEditorView.maxLeftCol)
   if moved:
@@ -2405,6 +2410,9 @@ proc pressEditorBar(r: GpuiRenderer; x, y: int): bool =
   # continues from an earlier one.
   gTextDrag = false
   gEditorBarDrag = onThumb
+  if onThumb:
+    gEditorView.barModel.beginBarGrab(
+      trackFractionAt(clamp(local, 0, bar.w - 1), bar.w))
   scrubEditorBar(r, x, click = not onThumb)
   true
 
@@ -2563,7 +2571,7 @@ proc scrubTerminalLines(r: GpuiRenderer; y: int; click: bool) =
   let sm = vm.scrubberFor(gTerminal, lay.rows)
   let f = trackFractionAt(y - lay.track.y, lay.track.h)
   gTerminal.scrollTop = if click: sm.clickAt(f)
-                        else: sm.dragTo(f - sm.thumbLength / 2.0)
+                        else: sm.dragTo(sm.heldThumbStart(f))
   gTerminal.follow = false
   drawTerminalPane(r)
 
@@ -2601,7 +2609,7 @@ proc scrubTerminalHBar(r: GpuiRenderer; x: int; click: bool) =
                           lay.hbar.w)
   var v = lay.view
   discard (if click: v.clickTrack(f)
-           else: v.dragThumb(f - v.barModel.thumbLength / 2.0))
+           else: v.dragThumb(v.barModel.heldThumbStart(f)))
   gTerminal.hview = v
   traceGesture("terminal-hscroll leftCol=" & $v.leftCol & " of " &
                $v.maxLeftCol)
@@ -2641,6 +2649,9 @@ proc pressTerminalOutput(r: GpuiRenderer; x, y: int): bool =
     scrubTerminalLines(r, y, click = true)
   of ghLineThumb:
     gTerminal.drag = gtdLineThumb
+    let lay = terminalLayout(body, vm, gTerminal)
+    vm.scrubberFor(gTerminal, lay.rows).beginBarGrab(
+      trackFractionAt(y - lay.track.y, lay.track.h))
     scrubTerminalLines(r, y, click = false)
   of ghScreenTrack:
     gTerminal.drag = gtdScreen
@@ -2650,6 +2661,9 @@ proc pressTerminalOutput(r: GpuiRenderer; x, y: int): bool =
     scrubTerminalHBar(r, x, click = true)
   of ghHBarThumb:
     gTerminal.drag = gtdHBarThumb
+    let lay = terminalLayout(body, vm, gTerminal)
+    lay.view.barModel.beginBarGrab(
+      trackFractionAt(clamp(x - lay.hbar.x, 0, lay.hbar.w - 1), lay.hbar.w))
     scrubTerminalHBar(r, x, click = false)
   of ghCorner:
     # HO-7: the corner square takes no gesture.
@@ -3015,6 +3029,7 @@ proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
       continue
     if hit.onThumb:
       gListDrag = ListScrubDrag(active: true, pane: $kind)
+      sm.beginBarGrab(hit.fraction)
     scrubListPane(r, kind, y, dragging = hit.onThumb)
     return true
   # M71 (#838): the state pane's bar takes the same §3 press — its thumb
@@ -3028,6 +3043,8 @@ proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
                   local < thumb.start + max(1, thumb.length)
     if onThumb:
       gListDrag = ListScrubDrag(active: true, pane: $paneState)
+      stateBarModel().beginBarGrab(
+        trackFractionAt(clamp(local, 0, track.h - 1), track.h))
     scrubStateBar(r, y, dragging = onThumb)
     return true
   false
@@ -3199,6 +3216,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     step = gGestures.pointerMove(committedLayout(), gGeom, x, y)
   of gekPointerUp:
+    # PLAT-70 Part H: the release ends any thumb's grab (the drag that ends
+    # below still reads it for its last position).
+    defer: barGrab.held = false
     if gColumnDrag.active:
       dragEventSeparator(r, x, release = true)
       return
@@ -5366,12 +5386,12 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   # PLAT-70: **View: Toggle Overflow Markers** flips the markers.
   let toggle = parseSettingToggleTarget(action)
   if toggle.ok:
-    setting = (true, toggle.setting,
-               not gLayoutSettings.valueOf(toggle.setting))
+    let on = not gLayoutSettings.valueOf(toggle.setting)
+    setting = (true, toggle.setting, on, (if on: "on" else: "off"))
   if setting.ok:
-    gLayoutSettings.assign(setting.setting, setting.on)
-    let saved = saveLayoutPreference(lpGpui, setting.setting, setting.on)
-    traceGesture("setting " & describe(setting.setting, setting.on) &
+    discard gLayoutSettings.assignValue(setting.setting, setting.value)
+    let saved = saveLayoutPreference(lpGpui, setting.setting, setting.value)
+    traceGesture("setting " & describe(setting.setting, setting.value) &
                  (if saved.len > 0: " (" & saved & ")" else: ""))
     discard drawArrangement(r)
     if setting.setting == lsOverflowMarkers:
@@ -6539,7 +6559,7 @@ proc scrubEditorVBar(r: GpuiRenderer; y: int; click: bool) =
     return
   let f = trackFractionAt(clamp(y - bar.y, 0, bar.h - 1), bar.h)
   let first = if click: v.model.clickAt(f)
-              else: v.model.dragTo(f - v.model.thumbLength / 2.0)
+              else: v.model.dragTo(v.model.heldThumbStart(f))
   scrollEditorTo(r, first + 1)
 
 proc pressEditorVBar(r: GpuiRenderer; x, y: int): bool =
@@ -6554,6 +6574,8 @@ proc pressEditorVBar(r: GpuiRenderer; x, y: int): bool =
   let onThumb = local >= v.thumbTopPx and local < v.thumbTopPx + v.thumbPx
   gTextDrag = false
   gEditorVBarDrag = onThumb
+  if onThumb:
+    v.model.beginBarGrab(trackFractionAt(clamp(local, 0, bar.h - 1), bar.h))
   scrubEditorVBar(r, y, click = not onThumb)
   true
 
@@ -7087,6 +7109,10 @@ proc pressSearch(r: GpuiRenderer; x, y: int): bool =
   of gsMatch: discard openSearchResult(r, hit.index)
   of gsTrack, gsThumb:
     gSearch.dragging = hit.kind == gsThumb
+    if gSearch.dragging:
+      let total = vm.displayRows().len
+      gSearch.scrubberOf(total, searchLayout(body, total).rows).beginBarGrab(
+        hit.fraction)
     gSearch.scrubSearch(vm, body, y, dragging = gSearch.dragging)
     drawSearchPane(r)
   armHoverTick()
@@ -8498,6 +8524,9 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       #   vbar:editor:drag:<from>:<to>       hold the thumb, move it from
       #                                      `from` to `to` permille of the
       #                                      track in ten steps, release
+      #   vbar:editor:grab:<at>:<by>         PLAT-70 Part H: hold the thumb
+      #                                      `at` px below its top, move the
+      #                                      pointer `by` px, release
       if parts.len < 3 or parts[1] != $paneEditor:
         return "no vertical scrubber on '" & (if parts.len > 1: parts[1]
                                                else: "") & "'"
@@ -8516,6 +8545,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         for k in 0 .. 10:
           windowPointer(r, gekPointerMove, x, vy(a + (b - a) * k div 10))
         windowPointer(r, gekPointerUp, x, vy(b))
+      of "grab":
+        let y0 = bar.y + v.thumbTopPx + at(3)
+        windowPointer(r, gekPointerDown, x, y0)
+        windowPointer(r, gekPointerMove, x, y0 + at(4) div 2)
+        windowPointer(r, gekPointerMove, x, y0 + at(4))
+        windowPointer(r, gekPointerUp, x, y0 + at(4))
       else:
         return "unknown vbar event '" & parts[2] & "'"
     of "hbar":
@@ -9413,9 +9448,8 @@ proc runOpen(cmd: GpuiCommand): int =
     if stored.status == lpsRefused:
       stderr.writeLine("codetracer-gpui: " & stored.message)
     gLayoutSettings = stored.settings
-    gLayoutSettings.applyOverride(lsFocusHighlight, cmd.focusHighlight)
-    gLayoutSettings.applyOverride(lsLiveResize, cmd.liveResize)
-    gLayoutSettings.applyOverride(lsOverflowMarkers, cmd.overflowMarkers)
+    for which in LayoutSetting:
+      gLayoutSettings.applyOverride(which, cmd.layoutFlags[which])
   let windowId = WindowId(0)
   let opened = shell.openWindowForSession(windowId, slot.id)
   if opened.kind == wsRefused:

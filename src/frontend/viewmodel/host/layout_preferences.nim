@@ -65,14 +65,20 @@ proc loadLayoutPreferences*(product: LayoutProduct): LayoutPreferencesLoad =
     result.message = decoded.message & " (in " & path & ")"
 
 proc saveLayoutPreference*(product: LayoutProduct; which: LayoutSetting;
-                           on: bool): string =
-  ## Remember one setting; the others keep what is stored. "" on success,
-  ## else why it could not be saved.
+                           value: string): string =
+  ## Remember one setting's value word; the others keep what is stored. ""
+  ## on success, else why it could not be saved.
   var current = loadLayoutPreferences(product)
   var s = if current.status == lpsLoaded: current.settings
           else: productDefaults(product)
-  s.assign(which, on)
+  if not s.assignValue(which, value):
+    return "'" & value & "' is not a value of " & $which
   let failure = writeStaged(layoutPreferencesPath(product),
                             encodeLayoutSettings(s))
   if failure.len == 0: ""
   else: "the " & $which & " setting could not be saved: " & failure
+
+proc saveLayoutPreference*(product: LayoutProduct; which: LayoutSetting;
+                           on: bool): string =
+  ## An on / off setting remembered.
+  saveLayoutPreference(product, which, if on: "on" else: "off")

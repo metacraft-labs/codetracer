@@ -75,7 +75,9 @@ proc openSpec(spec: FixtureSpec; extra: seq[string] = @[]): TuiTestSession =
                               $spawned)
   removeDir(state)
   createDir(state)
-  result = newTuiTest(tuiBinary(), @["--theme=dark"] & extra &
+  # PLAT-70 Part H: the bars' look is fixed for this suite — `thin`, the
+  # track drawn, never faded — so a cell's glyph says track (`│`) or thumb.
+  result = newTuiTest(tuiBinary(), @["--theme=dark", "--scrollbar-thickness=thin", "--scrollbar-track=on", "--scrollbar-fade=off"] & extra &
                       @[resolved.tracePath])
     .width(Cols).height(Rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
@@ -154,7 +156,8 @@ proc tick(sess: var TuiTestSession): int =
     else: break
   if digits.len == 0: -1 else: parseInt(digits)
 
-const TrackGlyphs = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
+const TrackGlyphs = ["│", "┃", "╹", "╻", "╿", "╽"]
+  ## PLAT-70 Part H: a `thin` bar on its track (`open`'s flags).
 
 proc sameText(a, b: Snapshot): bool =
   for r in 0 ..< Rows:

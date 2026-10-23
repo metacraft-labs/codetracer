@@ -336,9 +336,49 @@ type
       ## here too so a caller can tell "nothing happened" from "the engine
       ## refused".
 
+  BarGrab* = object
+    ## PLAT-70 Part H: a thumb held (§7.4) — the bar, and the point of the
+    ## thumb the pointer took (`scrollbar_interaction.grabOffset`).
+    active*: bool
+    pane*: PaneKind
+    axis*: BarAxis
+    offset*: float
+
+  BarHold* = object
+    ## A paging press held on a track: the bar, and when it pages again.
+    pane*: PaneKind
+    axis*: BarAxis
+    hold*: TrackHold
+
+  ScrollbarRuntime* = object
+    ## PLAT-70 Part H (Scrollbar-Scrubbers.md §7): the scrollbars' medium
+    ## state — the options, what the pointer is doing to which bar, the held
+    ## thumb or paging press, each pane's fade, and what each bar showed the
+    ## last time a frame was painted (a scroll wakes its pane's bars).
+    options*: ScrollbarOptions
+    pointer*: BarPointer
+    grab*: BarGrab
+    paging*: BarHold
+    fades*: array[PaneKind, FadeState]
+    started*: bool
+      ## The fades were given the clock (the first tick).
+    pointerPane*: tuple[found: bool, pane: PaneKind]
+      ## The pane the pointer was last in: entering one wakes its bars.
+    shownTops*: array[PaneKind, array[BarAxis, int]]
+      ## Each bar's first visible row / column as last painted, -1 for none.
+    painted*: seq[BarSpot]
+      ## The bars of the last frame painted — what a passing pointer is
+      ## hit-tested against (a press reads the bars afresh).
+    paintedValid*: bool
+    clockMs*: int64
+      ## The latest time the runtime was told (a token, a tick).
+
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
+    scrollbars*: ScrollbarRuntime
+      ## PLAT-70 Part H: the scrollbars' options, pointer, grab, paging and
+      ## fades (§7).
     caps*: TerminalCapabilities
       ## Handed in by `host/capabilities.negotiateCapabilities` before this
       ## object exists, for CTUI-11's "resolved before first paint".
@@ -427,10 +467,10 @@ type
       ## it across a token to know a committed arrangement may have resized
       ## a pane — the ONE moment a pane fetches for its new size (Layout-
       ## ViewModel §4.3a: never mid-drag).
-    savePreference*: proc(name: string; on: bool): string {.closure.}
+    savePreference*: proc(name, value: string): string {.closure.}
       ## PLAT-51: the HOST's write of a layout preference (`:set
-      ## focus-highlight` / `:set live-resize`), "" on success, else why not.
-      ## Nil in a host that keeps no state.
+      ## focus-highlight off`, `:set scrollbar-thickness thin`), "" on
+      ## success, else why not. Nil in a host that keeps no state.
     saveIcons*: proc(mode: IconsMode): string {.closure.}
       ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
       ## success. Nil in a host that keeps no state.
@@ -495,10 +535,6 @@ proc debugBuffer*(rt: TuiRuntime): EditBuffer
 proc editorBuffer(rt: TuiRuntime): EditBuffer
   ## Forward-declared for PLAT-70's horizontal views; defined below.
 proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
-proc scrubSource(rt: TuiRuntime; row: int; dragging: bool;
-                 outcome: var RuntimeOutcome): bool
-  ## M73: FORWARD-DECLARED for `routeListScrubDrag`; defined with the rest of
-  ## the source window's input, after `sourceWithView`.
 proc scopePath*(rt: TuiRuntime): ScopePath
 proc navMode(rt: TuiRuntime): NavigationMode
 proc unmountGoneOwners(rt: TuiRuntime)
@@ -506,6 +542,15 @@ proc unmountGoneOwners(rt: TuiRuntime)
   ## defined with the router's section beside `handleToken`.
   ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
   ## beside `deliverFileJob`, the answer it hands a job to.
+
+proc initScrollbarRuntime*(options = DefaultScrollbarOptions):
+    ScrollbarRuntime =
+  ## Every bar drawn and resting; the fades take the clock at the first tick.
+  result = ScrollbarRuntime(options: options)
+  for pane in PaneKind:
+    result.fades[pane] = initFade(0)
+    for axis in BarAxis:
+      result.shownTops[pane][axis] = -1
 
 proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
                     width, height: int): TuiRuntime =
@@ -534,6 +579,7 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
     lastToken: "", lastKey: "",
     width: width, height: height,
     autoHide: initAutoHideHover(),
+    scrollbars: initScrollbarRuntime(),
     eraseByte: '\x7f')
 
 proc keyOf*(rt: TuiRuntime; token: string): string =
@@ -958,12 +1004,17 @@ proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
   rt.app.eventLog.columns = c
   describeColumns(c)
 
-proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
+proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
                          remember = true): string =
-  ## PLAT-51 deliverables 9 and 11: turn the focus highlight or live resize
-  ## on or off for this session and — from a command, not a CLI flag —
-  ## REMEMBER it (`savePreference`, beside the remembered layout). Answers
-  ## the status line's text.
+  ## PLAT-51 deliverables 9 and 11, PLAT-70 Part H: set one layout setting —
+  ## the focus highlight, live resize, the overflow markers, a scrollbar
+  ## option — for this session and, from a command rather than a CLI flag,
+  ## REMEMBER it (`savePreference`, beside the remembered layout). `value` is
+  ## the setting's word (`on`, `thick` …). Answers the status line's text.
+  var current = LayoutSettings(scrollbars: rt.scrollbars.options)
+  if not current.assignValue(which, value):
+    return "'" & value & "' is not a value of " & $which
+  let on = value == "on"
   case which
   of lsFocusHighlight:
     rt.app.focusHighlightOff = not on
@@ -972,13 +1023,24 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
       rt.app.layoutBinding.liveResize = on
   of lsOverflowMarkers:
     rt.app.overflowMarkersOff = not on
-  result = describe(which, on)
+  of lsScrollbarThickness, lsScrollbarFade, lsScrollbarTrack,
+     lsScrollbarClick, lsModernUnicode:
+    rt.scrollbars.options = current.scrollbars
+    # A changed option shows on every bar at once.
+    for pane in PaneKind:
+      rt.scrollbars.fades[pane].wake(rt.scrollbars.clockMs)
+  result = describe(which, value)
   if remember:
     let saved =
       if rt.savePreference.isNil: "not remembered: this session keeps no state"
-      else: rt.savePreference($which, on)
+      else: rt.savePreference($which, value)
     if saved.len > 0:
       result.add " (" & saved & ")"
+
+proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
+                         remember = true): string =
+  ## An on / off setting.
+  rt.applyLayoutSetting(which, (if on: "on" else: "off"), remember)
 
 proc chooseKeymap*(rt: TuiRuntime; name: string) =
   ## PLAT-43 / PLAT-68: the base-keymap selector — `:keymap <name>` and the
@@ -1034,7 +1096,7 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
       if not sl.ok:
         rt.note(sl.message)
       else:
-        rt.note(rt.applyLayoutSetting(sl.setting, sl.on))
+        rt.note(rt.applyLayoutSetting(sl.setting, sl.value))
       outcome.detail = rt.app.notification
       return
 
@@ -1530,25 +1592,6 @@ proc scrollTerminalOutput(rt: TuiRuntime; delta: int;
   rt.app.terminalOutput.ensureShown(rows)
   outcome.repaint = true
 
-proc scrubTerminalLines(rt: TuiRuntime; area: CellArea; row: int;
-                        click: bool) =
-  ## The line view's scrubber (Scrollbar-Scrubbers.md §3): a click on the
-  ## track centres the line at the clicked fraction of the WHOLE output; a
-  ## dragged thumb follows the pointer. It moves the view, never the
-  ## debugger.
-  let m = rt.app.terminalOutput
-  let geo = terminalPaneGeometry(m, area)
-  if geo.contentRows <= 0:
-    return
-  let sm = m.scrubberOf(geo.contentRows)
-  let f = trackFractionAt(row - geo.contentTop, geo.contentRows)
-  let top =
-    if click: sm.clickAt(f)
-    else: sm.dragTo(f - sm.thumbLength / 2.0)
-  rt.app.terminalOutput.scrollTop = top
-  rt.app.terminalOutput.follow = false
-  rt.app.terminalOutput.ensureShown(geo.contentRows)
-
 proc scrubTerminalScreen(rt: TuiRuntime; area: CellArea; col: int;
                          outcome: var RuntimeOutcome) =
   ## The screen's built-in scrubber held at column `col`. REAL-TIME (the
@@ -1579,16 +1622,6 @@ proc pointerCellX(event: MouseEvent; fallback = -1.0): float =
   ## reports pixels (SGR-pixel, DECSET 1016), else `fallback`.
   if event.pixel: event.px / mouseMetrics().cellW else: fallback
 
-proc heldBarHit(view: HorizontalView; left, cols: int;
-                event: MouseEvent): ScrubberHit =
-  ## PLAT-70: where a held horizontal thumb's pointer is on a bar drawn from
-  ## column `left` for `cols` cells — clamped onto the track, so a pointer
-  ## past either end drags the thumb to that end.
-  horizontalBarHit(view.barModel, left, cols,
-                   clamp(event.col, left, left + max(0, cols - 1)),
-                   clamp(event.pointerCellX(float(event.col) + 0.5),
-                         float(left), float(left + cols) - 0.01))
-
 proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
                               event: MouseEvent;
                               outcome: var RuntimeOutcome): bool =
@@ -1605,18 +1638,10 @@ proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
   of thCorner:
     # PLAT-70 (HO-7): the cell between the two tracks belongs to neither.
     discard
-  of thHBarTrack, thHBarThumb:
-    # PLAT-70 (§4.2): the line view's horizontal bar — the view only.
-    let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
-    var v = geo.view
-    discard v.barScrollTo(ScrubberHit(kind: (if hit.kind == thHBarThumb:
-                                               shThumb else: shTrack),
-                                      fraction: hit.fraction),
-                          dragging = hit.kind == thHBarThumb)
-    rt.app.terminalOutput.hview = v
-    if hit.kind == thHBarThumb:
-      rt.app.hbarDrag = (active: true, pane: paneTerminalOutput)
-    outcome.repaint = true
+  of thHBarTrack, thHBarThumb, thLineTrack, thLineThumb:
+    # PLAT-70 Part H: the line view's two scrollbars are every bar's
+    # (`routeScrollbars` took the press before the pane saw it).
+    discard
   of thViewLines:
     outcome.requestClick(PaneClickRequest(kind: pcTerminalView,
                                           text: $tvLines))
@@ -1625,13 +1650,6 @@ proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
                                           text: $tvScreen))
   of thFragment:
     return rt.terminalWriteJump(hit.eventIndex, outcome)
-  of thLineTrack:
-    rt.scrubTerminalLines(area, event.row, click = true)
-    outcome.repaint = true
-  of thLineThumb:
-    rt.app.terminalDrag = tdLineThumb
-    rt.scrubTerminalLines(area, event.row, click = false)
-    outcome.repaint = true
   of thScreenTrack:
     rt.app.terminalDrag = tdScreen
     rt.app.terminalOutput.scrubSent = -1
@@ -1655,9 +1673,6 @@ proc routeTerminalDrag(rt: TuiRuntime; event: MouseEvent;
   let area = rt.terminalOutputArea(rt.layoutGeometry())
   if event.kind == mekMotion:
     case kind
-    of tdLineThumb:
-      rt.scrubTerminalLines(area, event.row, click = false)
-      outcome.repaint = true
     of tdScreen: rt.scrubTerminalScreen(area, event.col, outcome)
     of tdNone: discard
     return true
@@ -1996,93 +2011,6 @@ proc routeHorizontalWheel(rt: TuiRuntime; event: MouseEvent;
     outcome.repaint = true
   true
 
-proc hbarOf(rt: TuiRuntime; pane: PaneKind):
-    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
-  ## Where `pane`'s horizontal bar is painted this frame — read back from the
-  ## same models and the same geometry functions the painters use.
-  let area = rt.paintedAreaOf(pane)
-  if area.width <= 0:
-    return
-  case pane
-  of paneEditor:
-    var model = rt.app.shellModel(rt.width, rt.height)
-    rt.editorPaneModel(model, follow = false)
-    let under = area
-    if model.product == pmEdit or model.editorWritable:
-      return editBarOf(model.edit, under)
-    return sourceBarOf(model.source, under)
-  of paneBuildOutput:
-    var model = buildPaneModelFor(rt.app.build)
-    model.hview = rt.app.buildView.hview
-    let content = CellArea(col: area.col, row: area.row + 1,
-                           width: area.width, height: max(0, area.height - 1))
-    return buildBarOf(model, content)
-  of paneEventLog, paneCalltrace, paneState:
-    return rt.tableViewOf(pane)
-  else:
-    discard
-
-proc pressHorizontalBar(rt: TuiRuntime; event: MouseEvent;
-                        outcome: var RuntimeOutcome): bool =
-  ## §4.2: a left press on the editor's or Build Output's horizontal bar —
-  ## on the track the clicked column is centred, on the thumb a drag
-  ## starts. The view moves; nothing else does (HO-4). (The Terminal
-  ## Output's bar is hit-tested with its scrubbers,
-  ## `routeTerminalOutputClick`.)
-  if event.kind != mekPress or event.button != mbLeft:
-    return false
-  for pane in [paneEditor, paneBuildOutput, paneEventLog, paneCalltrace,
-               paneState]:
-    if not rt.horizontalViewPane(pane):
-      continue
-    let bar = rt.hbarOf(pane)
-    if not bar.shown or event.row != bar.row:
-      continue
-    let area = rt.paintedAreaOf(pane)
-    if not area.contains(event.row, event.col):
-      continue
-    let hit = horizontalBarHit(bar.view.barModel, bar.left, bar.cols,
-                               event.col, event.pointerCellX)
-    if hit.kind == shNone:
-      return true
-    if hit.kind == shThumb:
-      rt.app.hbarDrag = (active: true, pane: pane)
-    discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
-      v.setViewport(bar.cols)
-      v.barScrollTo(hit, dragging = hit.kind == shThumb))
-    outcome.repaint = true
-    return true
-  false
-
-proc routeHorizontalBarDrag(rt: TuiRuntime; event: MouseEvent;
-                            outcome: var RuntimeOutcome): bool =
-  ## A press held on a horizontal bar's thumb owns the pointer until it is
-  ## released: the view follows it (§4.2), and the release ends the drag.
-  if not rt.app.hbarDrag.active:
-    return false
-  let pane = rt.app.hbarDrag.pane
-  if event.kind == mekPress:
-    rt.app.hbarDrag.active = false
-    return false
-  if event.kind == mekRelease:
-    rt.app.hbarDrag.active = false
-  if pane == paneTerminalOutput:
-    let area = rt.paintedAreaOf(pane)
-    let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
-    let hit = heldBarHit(geo.view, geo.textCol, geo.textWidth, event)
-    var v = geo.view
-    discard v.barScrollTo(hit, dragging = true)
-    rt.app.terminalOutput.hview = v
-  else:
-    let bar = rt.hbarOf(pane)
-    if bar.shown:
-      let hit = heldBarHit(bar.view, bar.left, bar.cols, event)
-      discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
-        v.setViewport(bar.cols)
-        v.barScrollTo(hit, dragging = true))
-  outcome.repaint = true
-  true
-
 proc runViewOperation(rt: TuiRuntime; operation: string;
                       outcome: var RuntimeOutcome): bool =
   ## §4.4's `view.*` operations on the focused output pane: by `WheelColumns`
@@ -2107,51 +2035,6 @@ proc runViewOperation(rt: TuiRuntime; operation: string;
   outcome.repaint = true
   true
 
-proc scrubEventLog(rt: TuiRuntime; area: CellArea; row: int;
-                   dragging: bool): bool =
-  ## PLAT-51 (Scrollbar-Scrubbers.md §3): the Event Log's scrollbar scrubber
-  ## pressed (a jump, centring the row at the fraction of the WHOLE log) or
-  ## its thumb held (the view follows). The VIEW moves; the debugger does
-  ## not. The window it lands on is fetched (`ensureWindow`, one request per
-  ## page not held) and the pages far from it released.
-  var g = newStyledGrid(area.col + area.width, area.row + area.height)
-  let screen = paintEventLog(g, area, rt.app.eventLog)
-  if screen.trackCol < 0 or screen.trackRows <= 0:
-    return false
-  let sm = rt.app.eventLog.scrubberOf(screen.trackRows)
-  let at = clamp(row, screen.trackTop, screen.trackTop + screen.trackRows - 1)
-  let hit = sm.verticalScrubberHit(screen.trackTop, screen.trackRows, at)
-  if hit.kind == shNone:
-    return false
-  let top = sm.scrubTo(hit, dragging)
-  let before = rt.app.eventLog.fetchCount
-  rt.app.eventLog.scrollTop = top
-  rt.app.eventLog.ensureWindow(top, screen.trackRows)
-  rt.app.eventLog.releaseOutside(top, screen.trackRows)
-  rt.app.listScrubFetches += rt.app.eventLog.fetchCount - before
-  true
-
-proc scrubCallTrace(rt: TuiRuntime; area: CellArea; row: int;
-                    dragging: bool; outcome: var RuntimeOutcome): bool =
-  ## PLAT-51: the Call Trace's scrollbar scrubber — the same rule over the
-  ## whole trace (`totalCallsCount`); the host loads the section the view
-  ## then shows (`pagesCallTrace`), as a scroll does.
-  if area.width <= 0 or not area.tracked:
-    return false
-  let body = rt.app.callTrace.callTraceBodyRows(area)
-  let sm = rt.app.callTrace.scrubberOf(body)
-  let at = clamp(row, area.row + 1, area.row + body)
-  let hit = sm.verticalScrubberHit(area.row + 1, body, at)
-  if hit.kind == shNone:
-    return false
-  rt.app.callTrace.scrollTop = sm.scrubTo(hit, dragging)
-  rt.app.callTraceAtEnd = rt.app.callTrace.scrollTop >= sm.maxFirstVisible
-  rt.app.callTrace.follow = false
-  rt.app.callTraceScrolled = true
-  outcome.pagesCallTrace = true
-  outcome.repaint = true
-  true
-
 proc searchPaneScreen(rt: TuiRuntime): tuple[area: CellArea,
                                              screen: SearchPaneScreen] =
   ## PLAT-57: Find in Files' rows below its strip, and where the painter put
@@ -2164,20 +2047,6 @@ proc searchPaneScreen(rt: TuiRuntime): tuple[area: CellArea,
   var g = newStyledGrid(result.area.col + result.area.width,
                         result.area.row + result.area.height)
   result.screen = paintSearchResults(g, result.area, rt.app.search)
-
-proc scrubSearch(rt: TuiRuntime; row: int; dragging: bool): bool =
-  ## PLAT-57: Find in Files' scrollbar scrubber — the VIEW jumps (a press on
-  ## the track) or follows the held thumb, as every list pane's does.
-  let (area, screen) = rt.searchPaneScreen()
-  if area.width <= 0 or screen.trackCol < 0:
-    return false
-  let sm = rt.app.search.scrubberOf(screen.listRows)
-  let at = clamp(row, screen.listTop, screen.listTop + screen.listRows - 1)
-  let hit = sm.verticalScrubberHit(screen.listTop, screen.listRows, at)
-  if hit.kind == shNone:
-    return false
-  rt.app.search.scrollTop = sm.scrubTo(hit, dragging)
-  true
 
 proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-57: the wheel over Find in Files scrolls its rows.
@@ -2197,6 +2066,9 @@ proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
 # ---------------------------------------------------------------------------
 
 const InHandPanes = {paneState, paneFileTree, paneVcs}
+
+const NearBarCells = 3
+  ## PLAT-70 Part H (§7.5): how close to a vertical bar the pointer wakes it.
 
 type InHandTrack = object
   ## An in-hand pane's scrollbar as its painter drew it.
@@ -2262,41 +2134,6 @@ proc vcsHistoryWindow*(rt: TuiRuntime): VcsHistoryWindow =
   vcsHistoryWindow(CellArea(col: under.col, row: under.row + 1,
                             width: under.width, height: under.height - 1),
                    rt.app.vcs)
-
-proc scrubInHand(rt: TuiRuntime; pane: PaneKind; under: CellArea; row: int;
-                 dragging: bool): bool =
-  ## §3: the pane's track pressed (the view jumps, centring the row at the
-  ## fraction) or its thumb held (the view follows). The VIEW moves only.
-  let t = rt.inHandTrack(pane, under)
-  if t.col < 0 or t.rows <= 0:
-    return false
-  let at = clamp(row, t.top, t.top + t.rows - 1)
-  let hit = t.model.verticalScrubberHit(t.top, t.rows, at)
-  if hit.kind == shNone:
-    return false
-  rt.setInHandTop(pane, t.model.scrubTo(hit, dragging))
-  true
-
-proc pressInHandTrack(rt: TuiRuntime; pane: PaneKind; under: CellArea;
-                      event: MouseEvent; outcome: var RuntimeOutcome): bool =
-  ## A press on the pane's track column: the track's, never a row's. A left
-  ## press jumps (the track) or starts a drag (the thumb); any other button
-  ## is taken and does nothing.
-  if not rt.inHandLoaded(pane):
-    return false
-  let t = rt.inHandTrack(pane, under)
-  if t.col < 0 or event.col != t.col or event.row < t.top or
-     event.row >= t.top + t.rows:
-    return false
-  if event.button != mbLeft:
-    return true
-  let hit = t.model.verticalScrubberHit(t.top, t.rows, event.row)
-  if hit.kind == shThumb:
-    rt.app.listScrub = (active: true, pane: pane)
-  discard rt.scrubInHand(pane, under, event.row,
-                         dragging = hit.kind == shThumb)
-  outcome.repaint = true
-  true
 
 proc scrollInHand(rt: TuiRuntime; pane: PaneKind; under: CellArea;
                   delta: int; outcome: var RuntimeOutcome) =
@@ -2524,39 +2361,6 @@ proc routeEventLogResize(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
   true
 
-proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
-                        outcome: var RuntimeOutcome): bool =
-  ## PLAT-51: a press held on a list pane's scrubber thumb owns the pointer
-  ## until it is released: each motion moves the VIEW to the thumb under the
-  ## pointer (one window fetch when it lands on rows not held).
-  if not rt.app.listScrub.active:
-    return false
-  if event.kind == mekPress:
-    rt.app.listScrub.active = false
-    return false
-  let pane = rt.app.listScrub.pane
-  let area = rt.paneAreaOf(pane)
-  if event.kind != mekMotion:
-    rt.app.listScrub.active = false
-  if area.width > 0:
-    case pane
-    of paneEventLog:
-      if rt.scrubEventLog(area, event.row, dragging = true):
-        outcome.repaint = true
-    of paneCalltrace:
-      discard rt.scrubCallTrace(area, event.row, dragging = true, outcome)
-    of paneSearch:
-      discard rt.scrubSearch(event.row, dragging = true)
-    of paneEditor:
-      # M73 (#840): the source pane's vertical bar, held.
-      discard rt.scrubSource(event.row, dragging = true, outcome)
-    of InHandPanes:
-      # M71 (#838): State, Files and VCS — the same drag.
-      discard rt.scrubInHand(pane, area, event.row, dragging = true)
-    else: discard
-  outcome.repaint = true
-  true
-
 proc scrollEventLog(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## The wheel over the Event Log: rows, as a scroll does (Scrollbar-
   ## Scrubbers.md §3.4 — only the track and the thumb are scrubber gestures).
@@ -2577,23 +2381,8 @@ proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
   ## desktop's row click); a right click shows its whole content (the desktop
   ## opens it in a read-only editor view); a left click on a column's header
   ## orders the log by it, again to reverse (the desktop's DataTables order).
-  ## PLAT-51: a left press on the scrollbar scrubber's column jumps the VIEW
-  ## (the track) or starts a drag (the thumb).
-  block scrubber:
-    var g = newStyledGrid(area.col + area.width, area.row + area.height)
-    let s = paintEventLog(g, area, rt.app.eventLog)
-    if s.trackCol >= 0 and event.col == s.trackCol and
-       event.row >= s.trackTop and event.row < s.trackTop + s.trackRows:
-      if event.button != mbLeft:
-        return true
-      let hit = rt.app.eventLog.scrubberOf(s.trackRows).verticalScrubberHit(
-        s.trackTop, s.trackRows, event.row)
-      if hit.kind == shThumb:
-        rt.app.listScrub = (active: true, pane: paneEventLog)
-      discard rt.scrubEventLog(area, event.row,
-                               dragging = hit.kind == shThumb)
-      outcome.repaint = true
-      return true
+  ## (A press on its scrollbar is the bar's — `routeScrollbars`, PLAT-70
+  ## Part H.)
   let (ok, row, screen) = eventRowAt(rt.app.eventLog, area, event.row)
   if not ok:
     # PLAT-70 Part B (Horizontal-Overflow.md §5.2): a press on a separator
@@ -2710,47 +2499,313 @@ proc requestSourceScroll(rt: TuiRuntime; scroll: SourceScroll;
   outcome.sourceScroll = scroll
   outcome.repaint = true
 
-proc scrubSource(rt: TuiRuntime; row: int; dragging: bool;
-                 outcome: var RuntimeOutcome): bool =
-  ## The vertical bar pressed at `row` (§3.2: the line at that fraction of
-  ## the FILE centred) or its thumb held there (§3.3: the window follows) —
-  ## through the shared scrubber model, which the painter drew the bar from
-  ## (`source_pane.sourceTrackOf`), so the press is read back against the
-  ## cells the user saw. The view moves; the debugger does not (§3.5).
-  let area = rt.paintedAreaOf(paneEditor)
-  if area.width <= 0:
+# ---------------------------------------------------------------------------
+# PLAT-70 Part H (Scrollbar-Scrubbers.md §7): EVERY scrollbar of every pane,
+# one implementation. The panes' painters record each bar they draw
+# (`scrollbar_styles.paintBar` → `ShellScreen.bars`); the pointer is
+# hit-tested against those, so the hover states, the grab (its offset kept),
+# the track's two rules, the held page's repeat and the fade's wake are the
+# same code for the Event Log, the editor, Find in Files and the rest. A pane
+# contributes only `applyBarTop` — how its view moves to a first visible row
+# (or column) — because that is the one thing that differs: the Event Log
+# fetches the window it lands on, the editor asks the session to scroll, the
+# Call Trace pages its section in.
+# ---------------------------------------------------------------------------
+
+proc scrollbarFrame*(rt: TuiRuntime): ScrollbarFrame =
+  ## What this frame's bars are drawn with: the options, the pointer's
+  ## state, and each pane's fade.
+  let s = rt.scrollbars
+  result = ScrollbarFrame(options: s.options, pointer: s.pointer)
+  for pane in PaneKind:
+    result.faded[pane] = float32(1.0 - s.fades[pane].visibility(s.options))
+
+proc barScreen(rt: TuiRuntime): ShellScreen =
+  ## The screen as the last frame drew it, for reading bars back: the
+  ## frame's model (`shellScreenOf`) without its side effects — no caret
+  ## follow, no highlight scheduling — so a mouse report never moves
+  ## anything by being hit-tested.
+  var model = rt.app.shellModel(rt.width, rt.height)
+  rt.editorPaneModel(model, follow = false)
+  if rt.maximize.active:
+    model.layout = rt.maximize.layoutFor(model.profile)
+  let (hasFocus, focused) = rt.focus.focusedPane()
+  model.hasFocus = hasFocus
+  model.focused = focused
+  model.scrollbars = rt.scrollbarFrame()
+  shellScreen(model, rt.width, rt.height)
+
+proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
+                 outcome: var RuntimeOutcome) =
+  ## Move pane `bar.pane`'s view so its first visible row (vertical) or
+  ## column (horizontal) is `top`. The VIEW only (§3.5, HO-4).
+  let rows = bar.model.visible
+  case bar.axis
+  of axVertical:
+    case bar.pane
+    of paneEventLog:
+      let before = rt.app.eventLog.fetchCount
+      rt.app.eventLog.scrollTop = top
+      rt.app.eventLog.ensureWindow(top, rows)
+      rt.app.eventLog.releaseOutside(top, rows)
+      rt.app.listScrubFetches += rt.app.eventLog.fetchCount - before
+    of paneCalltrace:
+      rt.app.callTrace.scrollTop = top
+      rt.app.callTraceAtEnd = top >= bar.model.maxFirstVisible
+      rt.app.callTrace.follow = false
+      rt.app.callTraceScrolled = true
+      outcome.pagesCallTrace = true
+    of paneSearch:
+      rt.app.search.scrollTop = top
+    of paneEditor:
+      rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top + 1), outcome)
+    of InHandPanes:
+      rt.setInHandTop(bar.pane, top)
+    of paneTerminalOutput:
+      rt.app.terminalOutput.scrollTop = top
+      rt.app.terminalOutput.follow = false
+      rt.app.terminalOutput.ensureShown(rows)
+    else: discard
+  of axHorizontal:
+    discard rt.scrollPaneView(bar.pane, proc(v: var HorizontalView): bool =
+      v.setViewport(bar.cells)
+      v.scrollBy(top - v.leftCol))
+  outcome.repaint = true
+
+proc barFraction(bar: BarSpot; event: MouseEvent): float =
+  ## The pointer along `bar` as the scrubber model's track fraction — to the
+  ## pixel where the terminal reports pixels (DECSET 1016).
+  if event.pixel:
+    let m = mouseMetrics()
+    let units = bar.cells * 8
+    let pos =
+      if bar.axis == axVertical: (event.py / m.cellH - float(bar.at)) * 8.0
+      else: (event.px / m.cellW - float(bar.at)) * 8.0
+    trackFractionAt(clamp(int(pos), 0, units - 1), units)
+  else:
+    trackFractionAt(bar.cellAlong(event.row, event.col), bar.cells)
+
+proc findBar(bars: seq[BarSpot]; pane: PaneKind; axis: BarAxis):
+    tuple[found: bool, bar: BarSpot] =
+  for b in bars:
+    if b.pane == pane and b.axis == axis:
+      return (true, b)
+
+proc nearBar(bar: BarSpot; row, col: int): bool =
+  ## The pointer is approaching `bar` (§7.5): within `NearBarCells` cells of
+  ## it, level with it.
+  case bar.axis
+  of axVertical:
+    row >= bar.at and row < bar.at + bar.cells and
+      col >= bar.origin - NearBarCells and col <= bar.origin
+  of axHorizontal:
+    col >= bar.at and col < bar.at + bar.cells and
+      row >= bar.origin - 1 and row <= bar.origin
+
+proc noteBarsPainted*(rt: TuiRuntime; bars: seq[BarSpot]) =
+  ## After a frame: a bar whose view moved since the last frame — a wheel, a
+  ## key, a find, a jump — wakes its pane's bars (§7.5: they fade in when the
+  ## pane scrolls, by any means).
+  rt.scrollbars.painted = bars
+  rt.scrollbars.paintedValid = true
+  for b in bars:
+    let top = b.model.firstVisible
+    let shown = rt.scrollbars.shownTops[b.pane][b.axis]
+    if shown >= 0 and shown != top:
+      rt.scrollbars.fades[b.pane].wake(rt.scrollbars.clockMs)
+    rt.scrollbars.shownTops[b.pane][b.axis] = top
+
+proc setBarPointer(rt: TuiRuntime; p: BarPointer;
+                   outcome: var RuntimeOutcome) =
+  if p != rt.scrollbars.pointer:
+    rt.scrollbars.pointer = p
+    outcome.repaint = true
+
+proc pressBar(rt: TuiRuntime; bar: BarSpot; event: MouseEvent; nowMs: int64;
+              outcome: var RuntimeOutcome) =
+  ## A press on `bar` (§7.4). On the thumb (either button) the thumb is
+  ## grabbed where it was taken; on the track the left button follows
+  ## `scrollbar-click` and the middle button the other rule: the jump (the
+  ## press then holds the thumb by its middle) or a page toward the pointer,
+  ## repeated while held.
+  let o = rt.scrollbars.options
+  let f = bar.barFraction(event)
+  let cell = bar.cellAlong(event.row, event.col)
+  rt.scrollbars.fades[bar.pane].wake(nowMs)
+  if o.onThumb(bar, cell):
+    rt.scrollbars.grab = BarGrab(active: true, pane: bar.pane, axis: bar.axis,
+                                 offset: bar.model.grabOffset(f))
+  else:
+    let rule = if event.button == mbLeft: o.click else: o.click.otherRule
+    case rule
+    of tcJump:
+      rt.applyBarTop(bar, bar.model.clickAt(f), outcome)
+      rt.scrollbars.grab = BarGrab(active: true, pane: bar.pane,
+                                   axis: bar.axis,
+                                   offset: bar.model.jumpGrabOffset)
+    of tcPage:
+      let dir = bar.model.pageDirection(f)
+      let top = bar.model.pageToward(f, dir)
+      if top >= 0:
+        rt.applyBarTop(bar, top, outcome)
+      rt.scrollbars.paging = BarHold(pane: bar.pane, axis: bar.axis)
+      rt.scrollbars.paging.hold.start(f, dir, nowMs)
+  let state = if rt.scrollbars.grab.active: bsHeld else: bsHoverTrack
+  rt.setBarPointer(BarPointer(active: true, pane: bar.pane, axis: bar.axis,
+                              state: state), outcome)
+  outcome.repaint = true
+
+proc routeScrollbars(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
+                     outcome: var RuntimeOutcome): bool =
+  ## Every mouse report, before the panes see it: a held thumb or paging
+  ## press owns the pointer until released; otherwise the bar under the
+  ## pointer takes a press, and any motion updates the hover state and wakes
+  ## the bars it comes near. True when the report was a scrollbar's.
+  rt.scrollbars.clockMs = max(rt.scrollbars.clockMs, nowMs)
+  if rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open:
     return false
-  let track = rt.sourceWithView().sourceTrackOf(area)
-  if not track.shown:
+  # Another gesture in flight owns the pointer (a pane dragged, a divider
+  # held, a selection or a column being drawn): no bar is read back, which
+  # also keeps a live drag's frames as cheap as they were.
+  if not rt.scrollbars.grab.active and not rt.scrollbars.paging.hold.active:
+    let b = rt.app.layoutBinding
+    if rt.app.textDrag or rt.app.variablesResize.active or
+       rt.app.eventLogResize.active or
+       (not b.isNil and b.interaction.kind in GestureInteractions):
+      return false
+  # A passing pointer (most reports, under any-motion tracking) is read
+  # against the bars of the frame on screen; a press, a held thumb and a held
+  # paging press against the bars as they are now.
+  let passing = event.kind == mekMotion and event.button != mbLeft and
+                not rt.scrollbars.grab.active and
+                not rt.scrollbars.paging.hold.active
+  let bars = if passing and rt.scrollbars.paintedValid: rt.scrollbars.painted
+             else: rt.barScreen().bars
+  # A HELD THUMB follows the pointer wherever it goes, until released.
+  if rt.scrollbars.grab.active:
+    let g = rt.scrollbars.grab
+    let (found, bar) = bars.findBar(g.pane, g.axis)
+    case event.kind
+    of mekMotion:
+      if found:
+        rt.applyBarTop(bar, bar.model.grabbedTop(bar.barFraction(event),
+                                                 g.offset), outcome)
+    of mekRelease:
+      rt.scrollbars.grab.active = false
+      let over = found and bar.contains(event.row, event.col)
+      rt.setBarPointer(
+        if over: BarPointer(active: true, pane: g.pane, axis: g.axis,
+                            state: (if rt.scrollbars.options.onThumb(
+                                      bar, bar.cellAlong(event.row,
+                                                         event.col)):
+                                      bsHoverThumb else: bsHoverTrack))
+        else: BarPointer(), outcome)
+    of mekPress:
+      rt.scrollbars.grab.active = false
+      rt.setBarPointer(BarPointer(), outcome)
+      return false
+    rt.scrollbars.fades[g.pane].wake(nowMs)
+    outcome.repaint = true
+    return true
+  # A HELD PAGING PRESS: the pointer may move along the track; the release
+  # ends it. The repeat itself is the tick's (`tickScrollbars`).
+  if rt.scrollbars.paging.hold.active:
+    let h = rt.scrollbars.paging
+    let (found, bar) = bars.findBar(h.pane, h.axis)
+    case event.kind
+    of mekMotion:
+      if found:
+        rt.scrollbars.paging.hold.fraction = bar.barFraction(event)
+    of mekRelease, mekPress:
+      rt.scrollbars.paging.hold.active = false
+    return true
+  # The pointer's bar, if any; entering a pane or nearing a bar wakes it.
+  var under = (found: false, bar: BarSpot())
+  for b in bars:
+    if b.contains(event.row, event.col):
+      under = (true, b)
+    elif b.nearBar(event.row, event.col):
+      rt.scrollbars.fades[b.pane].wake(nowMs)
+  var inPane = false
+  for b in bars:
+    if rt.paintedAreaOf(b.pane).contains(event.row, event.col):
+      if not rt.scrollbars.pointerPane.found or
+         rt.scrollbars.pointerPane.pane != b.pane:
+        rt.scrollbars.fades[b.pane].wake(nowMs)
+        outcome.repaint = true
+      rt.scrollbars.pointerPane = (true, b.pane)
+      inPane = true
+      break
+  if not inPane:
+    # Left every pane with a bar: coming back into one wakes it again.
+    rt.scrollbars.pointerPane.found = false
+  if not under.found:
+    rt.setBarPointer(BarPointer(), outcome)
     return false
-  let at = clamp(row, track.top, track.top + track.rows - 1)
-  let hit = track.model.verticalScrubberHit(track.top, track.rows, at)
-  if hit.kind == shNone:
+  let bar = under.bar
+  rt.scrollbars.fades[bar.pane].wake(nowMs)
+  let thumb = rt.scrollbars.options.onThumb(
+    bar, bar.cellAlong(event.row, event.col))
+  rt.setBarPointer(BarPointer(active: true, pane: bar.pane, axis: bar.axis,
+                              state: (if thumb: bsHoverThumb
+                                      else: bsHoverTrack)), outcome)
+  if event.kind != mekPress:
     return false
-  rt.requestSourceScroll(SourceScroll(
-    kind: sskTo, top: track.model.scrubTo(hit, dragging) + 1), outcome)
+  if event.button in {mbLeft, mbMiddle}:
+    rt.pressBar(bar, event, nowMs, outcome)
+  # Any other button on a bar is the bar's, and does nothing.
   true
 
-proc pressSourceTrack(rt: TuiRuntime; event: MouseEvent;
-                      outcome: var RuntimeOutcome): bool =
-  ## A left press on the source pane's vertical bar: a jump on the track, a
-  ## drag started on the thumb (`routeListScrubDrag` follows it). Never a
-  ## click on the text.
-  if event.kind != mekPress or event.button != mbLeft or
-     not rt.sourceWindowShown:
-    return false
-  let area = rt.paintedAreaOf(paneEditor)
-  if not area.contains(event.row, event.col):
-    return false
-  let track = rt.sourceWithView().sourceTrackOf(area)
-  if not track.shown or event.col != track.col or event.row < track.top or
-     event.row >= track.top + track.rows:
-    return false
-  let hit = track.model.verticalScrubberHit(track.top, track.rows, event.row)
-  if hit.kind == shThumb:
-    rt.app.listScrub = (active: true, pane: paneEditor)
-  discard rt.scrubSource(event.row, dragging = hit.kind == shThumb, outcome)
-  true
+proc tickScrollbars*(rt: TuiRuntime; nowMs: int64): RuntimeOutcome =
+  ## The loop's clock for the scrollbars: a held paging press pages again
+  ## when due; every pane's fade moves toward where it is going. `repaint`
+  ## when the screen changed; the host applies the outcome as a token's (a
+  ## page of the editor is a source scroll the session makes).
+  rt.scrollbars.clockMs = max(rt.scrollbars.clockMs, nowMs)
+  if not rt.scrollbars.started:
+    rt.scrollbars.started = true
+    for pane in PaneKind:
+      rt.scrollbars.fades[pane] = initFade(nowMs)
+  let o = rt.scrollbars.options
+  if rt.scrollbars.paging.hold.due(nowMs):
+    let h = rt.scrollbars.paging
+    let (found, bar) = rt.barScreen().bars.findBar(h.pane, h.axis)
+    let top = if found: bar.model.pageToward(h.hold.fraction, h.hold.dir)
+              else: -1
+    if top < 0:
+      rt.scrollbars.paging.hold.active = false
+    else:
+      rt.applyBarTop(bar, top, result)
+      rt.scrollbars.paging.hold.repeated(nowMs)
+      rt.scrollbars.fades[h.pane].wake(nowMs)
+  for pane in PaneKind:
+    let held = (rt.scrollbars.pointer.active and
+                rt.scrollbars.pointer.pane == pane) or
+               (rt.scrollbars.grab.active and rt.scrollbars.grab.pane == pane)
+    let before = rt.scrollbars.fades[pane].level
+    discard rt.scrollbars.fades[pane].stepFade(o, nowMs, held)
+    if rt.scrollbars.fades[pane].level != before:
+      result.repaint = true
+
+proc scrollbarDueMs*(rt: TuiRuntime): int64 =
+  ## When `tickScrollbars` next has something to do, -1 for never: a frame
+  ## from now while a fade moves or a paging press is held, else when the
+  ## first resting bar starts fading out.
+  let s = rt.scrollbars
+  let now = s.clockMs
+  if s.paging.hold.active:
+    return min(s.paging.hold.dueMs, now + FadeFrameMs)
+  result = -1
+  for pane in PaneKind:
+    let f = s.fades[pane]
+    let held = (s.pointer.active and s.pointer.pane == pane) or
+               (s.grab.active and s.grab.pane == pane)
+    let target = f.fadeTarget(s.options, now, held)
+    let due =
+      if f.level != target: now + FadeFrameMs
+      else: f.nextFadeMs(s.options)
+    if due >= 0 and (result < 0 or due < result):
+      result = due
 
 proc followCaretInSource(rt: TuiRuntime; buf: EditBuffer;
                          before: (int, int); outcome: var RuntimeOutcome) =
@@ -2963,11 +3018,6 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     return true
   if not under.contains(event.row, event.col):
     return false   # the divider
-  # M71 (#838): a press on an in-hand pane's scrollbar is the scrollbar's,
-  # never a click on the row it is drawn beside.
-  if region.pane in InHandPanes and
-     rt.pressInHandTrack(region.pane, under, event, outcome):
-    return true
   case region.pane
   of paneFileTree:
     # K17 / K18 (K19: the desktop has no Files menu).
@@ -3131,12 +3181,7 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       rt.openFindInFiles(outcome)
       return true
     of stTrack:
-      let hit = rt.app.search.scrubberOf(screen.listRows).verticalScrubberHit(
-        screen.listTop, screen.listRows, event.row)
-      if hit.kind == shThumb:
-        rt.app.listScrub = (active: true, pane: paneSearch)
-      discard rt.scrubSearch(event.row, dragging = hit.kind == shThumb)
-      outcome.repaint = true
+      # PLAT-70 Part H: the scrollbar's (`routeScrollbars`).
       return true
     of stFile, stNone:
       return false
@@ -3417,26 +3462,14 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         outcome.repaint = true
         return
       of cthTrack, cthThumb:
-        # PLAT-51: the scrollbar scrubber — the VIEW jumps (the track) or
-        # follows the thumb from here (a drag); the debugger does not move.
-        if hit.kind == cthThumb:
-          rt.app.listScrub = (active: true, pane: paneCalltrace)
-        discard rt.scrubCallTrace(area, event.row,
-                                  dragging = hit.kind == cthThumb, outcome)
+        # PLAT-70 Part H: the scrollbar's (`routeScrollbars`).
         return
       of cthNone:
         discard
   # PLAT-70: a horizontal wheel over a text pane moves its view sideways
-  # (Horizontal-Overflow.md §4.3), and a press on the editor's or Build
-  # Output's horizontal bar is the bar's, never a click on the text.
+  # (Horizontal-Overflow.md §4.3). (A press on any pane's scrollbar is the
+  # bar's — `routeScrollbars`, before the panes.)
   if acted.status == lasNoGesture and rt.routeHorizontalWheel(event, outcome):
-    return
-  if acted.status == lasNoGesture and not inGesture and
-     rt.pressHorizontalBar(event, outcome):
-    return
-  # M73 (#840): a press on the source pane's vertical bar is the bar's.
-  if acted.status == lasNoGesture and not inGesture and
-     rt.pressSourceTrack(event, outcome):
     return
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button in {mbWheelUp, mbWheelDown}:
@@ -4538,7 +4571,7 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
   # prompt, `omnibar_sources.layoutSettingCommands`).
   let setting = parseSettingCommandTarget(action)
   if setting.ok:
-    rt.note(rt.applyLayoutSetting(setting.setting, setting.on))
+    rt.note(rt.applyLayoutSetting(setting.setting, setting.value))
     outcome.repaint = true
     return
   # PLAT-70: **View: Toggle Overflow Markers** flips the markers.
@@ -5768,17 +5801,17 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       # PLAT-51: the open frame viewer's own scrubber (it is over the panes).
       if rt.routeFrameViewerMouse(event, result):
         return
-      # PLAT-51: and on a list pane's scrubber thumb, and on the Variables
-      # pane's column separator.
-      if rt.routeListScrubDrag(event, result):
+      # PLAT-70 Part H: every pane's scrollbars — a held thumb or paging
+      # press, a press on a bar, and the hover states and fade wakes of any
+      # motion (Scrollbar-Scrubbers.md §7.4).
+      if rt.layoutBindingEnabled() and
+         rt.routeScrollbars(event, nowMs, result):
         return
+      # PLAT-51: and on the Variables pane's column separator.
       if rt.routeVariablesResize(event, result):
         return
       # PLAT-70 Part B: and on an Event Log column separator.
       if rt.routeEventLogResize(event, result):
-        return
-      # PLAT-70: and on a text pane's horizontal bar thumb.
-      if rt.routeHorizontalBarDrag(event, result):
         return
       if rt.routeTextDrag(event, result):
         return
@@ -6008,7 +6041,9 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   let (hasFocus, focused) = rt.focus.focusedPane()
   model.hasFocus = hasFocus
   model.focused = focused
+  model.scrollbars = rt.scrollbarFrame()
   result = shellScreen(model, rt.width, rt.height)
+  rt.noteBarsPainted(result.bars)
   if rt.prompt.open and result.rows.len > 0:
     # §3.3.6's prompt replaces the status row while it is open. Painted over the
     # finished screen rather than folded into `ShellModel`, because

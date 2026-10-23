@@ -55,7 +55,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 436
+const ExpectedAssertions = 451
 
 const
   LandedThroughMilestone = 14
@@ -847,8 +847,12 @@ suite "CTUI-11 Tier 1: capability resolution":
     # lines: `-h/--help`, `-v/--version` and `-t/--theme` are each written as
     # a pair, PLAT-6 added `--layout-binding` and PLAT-42 `--no-flow-overlay`.
     # PLAT-46 added `--palette`: seventeen. PLAT-51 `--focus-highlight` and
-    # `--live-resize`: nineteen.
-    ck options.len == 19
+    # `--live-resize`: nineteen. PLAT-70 Part H the five scrollbar options:
+    # twenty-four.
+    ck options.len == 24
+    for opt in ["--scrollbar-thickness", "--scrollbar-fade",
+                "--scrollbar-track", "--scrollbar-click", "--modern-unicode"]:
+      ck opt in options
     ck "--focus-highlight" in options
     ck "--live-resize" in options
     ck "--palette" in options

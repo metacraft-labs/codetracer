@@ -114,6 +114,10 @@ type
       ## PLAT-70 Part B: a truncated table cell's full text, shown after the
       ## pointer rested on it (Horizontal-Overflow.md §5.3); no lines, none.
     header*: HeaderModel
+    scrollbars*: ScrollbarFrame
+      ## PLAT-70 Part H: how this frame's scrollbars are drawn — the
+      ## options, the bar the pointer is on, each pane's fade (handed to the
+      ## pane painters on the grid, `StyledGrid.scrollbars`).
     fileInfo*: string
       ## The status bar's file info — the current file's language and
       ## encoding (`headless_app/footer_info`), drawn first on the status row
@@ -345,6 +349,9 @@ type
       ## PLAT-50: where the event-content overlay was painted.
       ## PLAT-48. The open menu's dropdowns, over everything else.
     frameOverlays*: seq[FrameOverlay]
+    bars*: seq[BarSpot]
+      ## PLAT-70 Part H: every scrollbar painted, with its pane — what the
+      ## runtime hit-tests the pointer against.
       ## PLAT-47 deliverable 6: what the compositor draws OVER this frame's
       ## cells — a drag's drop tint and insertion caret (re-colouring, never
       ## replacing, the cells of the region the drop would occupy) and the
@@ -801,6 +808,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   let full = region.area
   if full.width <= 0 or full.height <= 0:
     return
+  g.painting = region.pane
   let frame = paneFrame(full, body)
   let flushRight = not frame.rightDivider
   let inner = frame.box.width
@@ -1124,6 +1132,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
     return
 
   var g = newStyledGrid(width, height)
+  g.scrollbars = model.scrollbars
   # PLAT-46 deliverable 8: EVERY CELL HAS A SURFACE. The canvas under all of
   # it, the header on a card; each pane fills its own rectangle in `paintPane`
   # and the status line its row below.
@@ -1284,6 +1293,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
   for row in 0 ..< height:
     result.rows.add g.rowText(row)
     result.styledRows.add g.rowSpans(row)
+  result.bars = g.bars
 
 proc shellRows*(model: ShellModel; width, height: int;
                 policy = DefaultProjectionPolicy): seq[string] =

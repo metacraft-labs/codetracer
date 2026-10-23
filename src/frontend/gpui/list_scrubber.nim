@@ -167,8 +167,25 @@ proc listScrubHit*(body: PxRect; sm: ScrubberModel; x, y: int;
                onThumb: local >= span.start and local < span.start + span.length,
                fraction: trackFractionAt(local, track.h))
 
+var barGrab*: tuple[held: bool, offset: float]
+  ## PLAT-70 Part H (Scrollbar-Scrubbers.md §3.3, §7.6): where on the thumb
+  ## the press that holds it took it — one at a time in the window, so one
+  ## value serves every bar (the list scrubbers, the editor's two bars,
+  ## Terminal Output's, the State pane's, Find in Files').
+
+proc beginBarGrab*(sm: ScrubberModel; fraction: float) =
+  ## A press on a thumb at track fraction `fraction`: the drag that follows
+  ## keeps the thumb under the pointer by that point, as the desktop's
+  ## Chromium and Monaco scrollbars do, instead of centring it.
+  barGrab = (true, sm.grabOffset(fraction))
+
+proc heldThumbStart*(sm: ScrubberModel; fraction: float): float =
+  ## The thumb's start while it is held at `fraction`.
+  fraction - (if barGrab.held: barGrab.offset else: sm.thumbLength / 2.0)
+
 proc scrubTop*(sm: ScrubberModel; fraction: float; dragging: bool): int =
   ## The new first visible row: §3.2's click (centre the row at the
-  ## fraction) or §3.3's held thumb (the thumb follows the pointer).
-  if dragging: sm.dragTo(fraction - sm.thumbLength / 2.0)
+  ## fraction) or §3.3's held thumb (the thumb follows the pointer by the
+  ## point it was taken by).
+  if dragging: sm.dragTo(sm.heldThumbStart(fraction))
   else: sm.clickAt(fraction)

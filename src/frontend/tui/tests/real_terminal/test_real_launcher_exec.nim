@@ -129,8 +129,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-10-16"
-  MeasuredBinaryBytes = 18_755_344
+  MeasurementDate = "2026-10-24"
+  MeasuredBinaryBytes = 20_359_600
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -261,8 +261,28 @@ const
     ## (`search_results_vm`, ~35 KB) and its painter (`search_results_pane`,
     ## ~11 KB); and growth in `tui_session`, `runtime`, `native_host` and
     ## `tui_app` (~24 KB). The ceiling keeps 8.02% over the anchor.
+    ##
+    ##   20_270_192  2026-10-24: `agents` at a25862343a (PLAT-70 Part B, the
+    ##               table panes), built fresh; ALREADY OVER the 20_259_500
+    ##               ceiling (8.08% over the 18_755_344 anchor: the growth
+    ##               since 2026-10-16, never re-anchored)
+    ##   20_359_600  2026-10-24: the scrollbar options (PLAT-70 Part H),
+    ##               re-measured on review over `agents` fd2dc3495b (with
+    ##               PLAT-70 Part I), which built the same way is 20_295_120
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. The scrollbar options cost +64_480 bytes
+    ## (+0.32%) over `agents` built the same way; the band had been tripped
+    ## by the growth before them. Attributed by summing `nm -S` per Nim
+    ## module: the valued layout settings (`layout_settings`, ~10 KB), the one
+    ## glyph table and bar painter (`scrollbar_styles`, ~11 KB), the fade's
+    ## colour blend (`palette`, ~4 KB), the shared bar model
+    ## (`scrollbar_interaction`, ~1.5 KB), the ASCII bar glyphs
+    ## (`degradation`, ~1.5 KB), the five flags (`cli`, ~4 KB) and growth in
+    ## `shell` and `runtime`, less the per-pane bar paths it replaced
+    ## (`scrubber_track`, -2 KB). No data table is linked in. The ceiling
+    ## keeps 8.02% over the anchor.
 
-  BinaryCeilingBytes = 20_259_500
+  BinaryCeilingBytes = 21_992_400
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second

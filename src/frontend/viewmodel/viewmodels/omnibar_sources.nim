@@ -192,12 +192,14 @@ proc layoutSettingCommands*(): seq[OmnibarEntry] =
   ## PLAT-51: the layout preferences as omnibox commands, on and off —
   ## `:set focus-highlight …` and `:set live-resize …` without the prompt, on
   ## both native front-ends (`layout_settings`).
+  ## PLAT-70 Part H: a setting that takes a value (`scrollbar-thickness`)
+  ## has one entry per value, as the base keymaps have.
   for which in LayoutSetting:
-    for on in [true, false]:
+    for value in settingValues(which):
       result.add OmnibarEntry(kind: OmnibarMode.omCommand,
-                              label: settingCommandLabel(which, on),
-                              detail: ":set " & describe(which, on),
-                              target: settingCommandTarget(which, on))
+                              label: settingCommandLabel(which, value),
+                              detail: ":set " & describe(which, value),
+                              target: settingCommandTarget(which, value))
   # PLAT-70 (Horizontal-Overflow.md §4.6): the markers' toggle, by the
   # specification's name.
   result.add OmnibarEntry(kind: OmnibarMode.omCommand,

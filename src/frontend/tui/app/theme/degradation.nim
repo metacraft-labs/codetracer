@@ -331,7 +331,15 @@ func isScrubberThumb(style: CellStyle): bool =
   ## A cell of a scrubber's thumb: the thumb's own role, or an end cell the
   ## thumb covers in part, drawn in the track's colour on the thumb's ground
   ## (`scrubber_track.ThumbReversedStyle`).
-  style.role == srScrubberThumb or style.surface == srScrubberThumbGround
+  style.role in {srScrubberThumb, srScrollbarThumb, srScrollbarThumbSolid,
+                 srScrollbarThumbHover, srScrollbarThumbHeld} or
+    style.surface == srScrubberThumbGround
+
+func asciiTrack(text: string): string =
+  ## PLAT-70 Part H: a scrollbar track's cells on the ASCII tier — `|` down a
+  ## vertical bar (`▕`, `│`), `-` along a horizontal one (`▁`, `─`).
+  for r in text.runes:
+    result.add(if $r in ["▁", "─"]: "-" else: "|")
 
 proc degradeRow*(row: StyledRow; caps: TerminalCapabilities): StyledRow =
   ## One composited screen row at the resolved tier.
@@ -351,6 +359,9 @@ proc degradeRow*(row: StyledRow; caps: TerminalCapabilities): StyledRow =
     let text =
       if caps.borders == bmAscii and span.style.isScrubberThumb:
         repeat(asciiFor("█"), span.text.runeLen)
+      elif caps.borders == bmAscii and
+           span.style.role in {srScrollbarTrack, srScrollbarTrackRevealed}:
+        asciiTrack(span.text)
       else: degradeText(span.text, caps)
     result.add StyledSpan(text: text, style: degradeStyle(span.style, caps))
 

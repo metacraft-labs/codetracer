@@ -63,7 +63,12 @@ proc open(recording: string): TuiTestSession =
                               $spawned)
   removeDir(state)
   createDir(state)
-  result = newTuiTest(tuiBinary(), @["--theme=dark", recording])
+  # The scrollbars' look is fixed for this suite — `thin`, the track drawn,
+  # never faded — so a bar is on screen whenever its pane overflows, however
+  # long ago the pane last scrolled (Scrollbar-Scrubbers.md §7.5).
+  result = newTuiTest(tuiBinary(), @["--theme=dark", "--scrollbar-thickness=thin",
+                                     "--scrollbar-track=on", "--scrollbar-fade=off",
+                                     recording])
     .width(Cols).height(Rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT", "COLORFGBG")

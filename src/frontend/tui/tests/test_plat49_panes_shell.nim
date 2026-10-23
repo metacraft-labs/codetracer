@@ -551,7 +551,10 @@ suite "PLAT-49 part B: the call trace's rows are their semantic parts":
     # its toggle in the body colour (the `active` icon). No other row.
     # (PLAT-51: up to the pane's scrollbar SCRUBBER, which is its last
     # column — the desktop's selected row also ends at its scrollbar.)
-    const ScrubberRoles = {srScrubberTrack, srScrubberThumb, srScrubberMark}
+    const ScrubberRoles = {srScrubberMark, srScrollbarTrack,
+                           srScrollbarTrackRevealed, srScrollbarThumb,
+                           srScrollbarThumbSolid, srScrollbarThumbHover,
+                           srScrollbarThumbHeld}
     var current = false
     for s in g.rowSpans(4):
       if s.style.bold and s.text.contains("add"): current = true
@@ -561,7 +564,11 @@ suite "PLAT-49 part B: the call trace's rows are their semantic parts":
         ck s.style.role == srChromeText
     ck current
     ck g.styleAt(4, 78).surface == srSurfaceActiveRow
-    ck g.styleAt(4, 79).role in ScrubberRoles
+    # (PLAT-70 Part H: the scrollbar's cell, whatever it draws there.)
+    var onBar = false
+    for b in g.bars:
+      if b.contains(4, 79): onBar = true
+    ck onBar
     for s in g.rowSpans(3):
       ck not s.style.bold
       ck s.style.surface != srSurfaceActiveRow

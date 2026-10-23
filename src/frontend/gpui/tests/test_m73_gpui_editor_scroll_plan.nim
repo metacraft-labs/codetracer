@@ -49,7 +49,7 @@ import ../../tui/tests/fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 43
+const ExpectedAssertions = 45
 
 var countedAssertions = 0
 
@@ -316,6 +316,23 @@ suite "M73 (#840): the GPUI editor's rows move under the user's input":
     checkpoint("thumb dragged to the top: rows " & $top.rowLines)
     ck top.firstLine == 1
     ck top.nodesWith(VMarkAttr)[0].attr(VMarkAttr) == $execAtRest
+
+  test "PLAT-70 Part H: a held thumb keeps the point it was grabbed by":
+    # Grabbed 2 px below its top and moved 40 px: its top moved 40 px (the
+    # view's whole lines round it by at most a line's share of the track),
+    # rather than jumping to centre itself on the pointer first.
+    let thumb0 = rest.nodesWith(VThumbAttr)[0].px("top")
+    let grabbed = windowPlan("vbar:editor:grab:2:40")
+    let thumb1 = grabbed.nodesWith(VThumbAttr)[0].px("top")
+    let total = rest.vmetric.field("total")
+    let trackPx = rest.vmetric.field("trackPx")
+    let lineShare = (trackPx + total - 1) div max(1, total) + 1
+    checkpoint("thumb top " & $thumb0 & " -> " & $thumb1 & " (a line is " &
+               $lineShare & " px)")
+    ck abs(thumb1 - (thumb0 + 40)) <= lineShare
+    # A press that does not move does not move the view.
+    let still = windowPlan("vbar:editor:grab:2:0")
+    ck still.nodesWith(VThumbAttr)[0].px("top") == thumb0
 
   test "one line up from the file's end moves the rows one line, and back":
     # The window at the file's end is drawn bottom-aligned (Monaco's last

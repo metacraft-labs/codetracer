@@ -45,7 +45,7 @@ template ck(cond: untyped) =
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 60
+const ExpectedAssertions = 66
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -106,8 +106,10 @@ suite "PLAT-70 Part A: the terminal's horizontal scroll, in process":
     ck barred > 70_000
     ck disjoint == barred
     ck cornerFree == barred
-    # Painted: the corner cell is blank, the cell above it is the vertical
-    # track, the cell left of it the bar.
+    # Painted: the corner cell is blank, the vertical bar ends in the cell
+    # above it and the horizontal bar in the cell left of it (PLAT-70 Part
+    # H: read from the bars the painter recorded, since with the default
+    # options a bar's track cells are the pane's own blank ground).
     for (w, h) in [(60, 12), (31, 5), (200, 50)]:
       var g = newStyledGrid(w, h)
       let area = CellArea(col: 0, row: 0, width: w, height: h)
@@ -115,11 +117,13 @@ suite "PLAT-70 Part A: the terminal's horizontal scroll, in process":
       let geo = terminalPaneGeometry(m, area)
       let corner = g.rowText(geo.barRow).runeSubStr(geo.trackCol, 1)
       ck corner == " "
-      ck g.rowText(geo.barRow - 1).runeSubStr(geo.trackCol, 1) in
-         ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
-      ck g.rowText(geo.barRow).runeSubStr(geo.trackCol - 1, 1) in
-         [TrackHorizontalGlyph, ThumbFullGlyph, "▏", "▎", "▍", "▌", "▋",
-          "▊", "▉"]
+      var v, hz = -1
+      for b in g.bars:
+        if b.axis == axVertical: v = b.at + b.cells - 1
+        else: hz = b.at + b.cells - 1
+        ck not b.contains(geo.barRow, geo.trackCol)
+      ck v == geo.barRow - 1
+      ck hz == geo.trackCol - 1
     # And a pane whose lines fit draws no bar at all (HO-1).
     var fits = m
     fits.hview = HorizontalView(contentCols: 10)

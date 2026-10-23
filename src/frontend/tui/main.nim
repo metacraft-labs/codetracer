@@ -128,8 +128,8 @@ const SearchPollMs = 10
 proc idleWaitMs(rt: TuiRuntime): int =
   ## How long the loop may block: `IdlePollMs`, or less when the auto-hide
   ## hover has a preview or a dismissal due sooner (PLAT-49 part B) — so a
-  ## preview opens when its delay is up, not up to `IdlePollMs` later — or
-  ## while a search streams (PLAT-57).
+  ## preview opens when its delay is up, not up to `IdlePollMs` later — while
+  ## a search streams (PLAT-57), or while a scrollbar fades (PLAT-70 Part H).
   if nativeFindInFiles.running:
     return SearchPollMs
   # PLAT-70 Part B: a truncated cell's tooltip is due too (500 ms of rest).
@@ -137,9 +137,14 @@ proc idleWaitMs(rt: TuiRuntime): int =
   let hover = rt.cellHoverDueMs()
   if hover >= 0 and (due < 0 or hover < due):
     due = hover
+  # PLAT-70 Part H: a fading scrollbar (a frame every `FadeFrameMs`), a held
+  # paging press, or the moment a resting bar starts fading out.
+  let bars = rt.scrollbarDueMs()
+  if bars >= 0 and (due < 0 or bars < due):
+    due = bars
   if due < 0:
     return IdlePollMs
-  clamp(int(due - nowMs()), 5, IdlePollMs)
+  clamp(int(due - nowMs()), 1, IdlePollMs)
 
 type
   EditHostState = ref object
@@ -293,30 +298,27 @@ proc wireTopBar(rt: TuiRuntime) =
   rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
 
 proc wireLayoutPreferences(rt: TuiRuntime;
-                           focusFlag, liveFlag, markersFlag: SettingOverride) =
-  ## PLAT-51 deliverables 9 and 11: the remembered `focus-highlight` and
-  ## `live-resize` (`host/layout_preferences`, beside the remembered layout)
-  ## and then this session's flags, which beat them; `:set` remembers a new
-  ## choice through `savePreference`. A stored value that is not a setting is
-  ## refused by name on the status line, and the defaults stay.
+                           flags: array[LayoutSetting, string]) =
+  ## PLAT-51 deliverables 9 and 11, PLAT-70 Part H: the remembered layout
+  ## settings (`host/layout_preferences`, beside the remembered layout) and
+  ## then this session's flags (each a value word, "" when absent), which
+  ## beat them; `:set` remembers a new choice through `savePreference`. A
+  ## stored value that is not a setting is refused by name on the status
+  ## line, and the defaults stay.
   let product: LayoutProduct = lpTerminal
   let stored = loadLayoutPreferences(product)
   var settings = stored.settings
   if stored.status == lpsRefused:
     rt.app.notification = stored.message
-  settings.applyOverride(lsFocusHighlight, focusFlag)
-  settings.applyOverride(lsLiveResize, liveFlag)
-  settings.applyOverride(lsOverflowMarkers, markersFlag)
-  discard rt.applyLayoutSetting(lsFocusHighlight, settings.focusHighlight,
-                                remember = false)
-  discard rt.applyLayoutSetting(lsLiveResize, settings.liveResize,
-                                remember = false)
-  discard rt.applyLayoutSetting(lsOverflowMarkers, settings.overflowMarkers,
-                                remember = false)
-  rt.savePreference = proc(name: string; on: bool): string =
+  for which in LayoutSetting:
+    settings.applyOverride(which, flags[which])
+  for which in LayoutSetting:
+    discard rt.applyLayoutSetting(which, settings.valueText(which),
+                                  remember = false)
+  rt.savePreference = proc(name, value: string): string =
     let (known, which) = parseSettingName(name)
     if not known: "unknown setting " & name
-    else: saveLayoutPreference(product, which, on)
+    else: saveLayoutPreference(product, which, value)
 
 proc wireColumnWidths(rt: TuiRuntime) =
   ## PLAT-70 Part B (Horizontal-Overflow.md §5.2): the column widths every
@@ -684,8 +686,7 @@ proc interactive(command: TuiCommand): int =
   # The binding is enabled before the first frame, seeded from the arrangement
   # this session would have painted anyway, so frame 0 is unchanged by it.
   discard rt.enableLayoutBinding()
-  wireLayoutPreferences(rt, command.focusHighlight, command.liveResize,
-                        command.overflowMarkers)
+  wireLayoutPreferences(rt, command.layoutFlags)
   wireColumnWidths(rt)
   rt.layoutCommitted = proc(rt: TuiRuntime) =
     # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
@@ -1152,9 +1153,16 @@ proc interactive(command: TuiCommand): int =
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs())
+      # PLAT-70 Part H: the scrollbars' fades and a held paging press (a
+      # page of the editor is a source scroll the session makes).
+      let bars = rt.tickScrollbars(nowMs())
+      if bars.repaint:
+        session.applyOutcome(rt, bars)
+      let barsChanged = bars.repaint
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or frameOwed or recorded or keysChanged or searched:
+         hoverChanged or frameOwed or recorded or keysChanged or searched or
+         barsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1255,7 +1263,13 @@ proc interactive(command: TuiCommand): int =
         # repaints nothing was never drawn: the step the click made happened
         # and the screen kept the old tick. `frameOwed` carries it to the
         # next token and to the next idle tick.
-        if outcome.repaint or frameOwed or vcsFollowed:
+        # PLAT-70 Part H: a fade keeps moving while tokens arrive (a pointer
+        # passing over the panes is a stream of them).
+        let bars = rt.tickScrollbars(nowMs())
+        if bars.repaint:
+          session.applyOutcome(rt, bars)
+        let barsMoved = bars.repaint
+        if outcome.repaint or frameOwed or vcsFollowed or barsMoved:
           if driver.holdFrame(journal.pendingReplay > 0):
             frameOwed = true
           else:
@@ -1420,7 +1434,8 @@ proc editInteractive(command: TuiCommand): int =
   # already promises for Edit mode (§4b tier 1) — and no file is read or
   # written.
   discard rt.enableLayoutBinding()
-  wireLayoutPreferences(rt, soUnset, soUnset, soUnset)
+  var noFlags: array[LayoutSetting, string]
+  wireLayoutPreferences(rt, noFlags)
   wireColumnWidths(rt)
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
@@ -1465,9 +1480,10 @@ proc editInteractive(command: TuiCommand): int =
       let vcsChanged = vcs.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs())
+      let barsChanged = rt.tickScrollbars(nowMs()).repaint
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or keysChanged:
+         hoverChanged or keysChanged or barsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size
@@ -1502,7 +1518,8 @@ proc editInteractive(command: TuiCommand): int =
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
         # does not wait up to `IdlePollMs` for the process to be signalled.
         discard advanceBuild(rt, edit, report = false)
-        if outcome.repaint or vcsFollowed:
+        let barsMoved = rt.tickScrollbars(nowMs()).repaint
+        if outcome.repaint or vcsFollowed or barsMoved:
           paint(driver, rt)
   ExitOk
 

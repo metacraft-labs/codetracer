@@ -360,7 +360,7 @@ proc painted(rt: TuiRuntime): PaintedEditor =
     for span in screen.styledRows[r]:
       let w = span.text.runeLen
       if lastCol >= c and lastCol < c + w:
-        if span.style.role == srScrubberThumb:
+        if span.style.role.isScrollbarThumbRole:
           result.thumbRows.add r
         break
       c += w

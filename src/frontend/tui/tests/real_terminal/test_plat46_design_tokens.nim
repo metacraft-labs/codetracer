@@ -415,6 +415,12 @@ proc contrastViolations(sess: var TuiTestSession; cols, rows: int;
       if ch in ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "▎", "▍", "▌", "▋", "▊",
                 "▉"]:
         continue
+      # PLAT-70 Part H: so is every scrollbar glyph (Scrollbar-Scrubbers.md
+      # §7.2) — a thumb or a track is a shape over the pane's ground, in the
+      # scrollbar tokens of §7.3, and fades through intermediate colours.
+      if ch in ["┃", "╹", "╻", "╿", "╽", "━", "╸", "╺", "╾", "╼", "▐", "▝",
+                "▗", "▖", "▀", "▔", "█", "🮇", "🮈", "🮂", "🮃", "🮄", "🮅", "🮆"]:
+        continue
       let fg = hexOfColor(cell.fg)
       let bg = hexOfColor(cell.bg)
       if fg.len == 0 or bg.len == 0:

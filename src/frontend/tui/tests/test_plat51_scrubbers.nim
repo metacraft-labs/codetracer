@@ -213,7 +213,7 @@ suite "PLAT-51: the Event Log's scrollbar is a scrubber over the whole log":
     var tops: seq[int] = @[]
     # The thumb is at the top: a press on it starts a drag.
     s.send(rt, sgr(0, sc.trackTop, sc.trackCol))
-    ck rt.app.listScrub.active
+    ck rt.scrollbars.grab.active
     var motions = 0
     for r in sc.trackTop .. sc.trackTop + sc.trackRows - 1:
       s.send(rt, sgr(0, r, sc.trackCol, motion = true))
@@ -221,7 +221,7 @@ suite "PLAT-51: the Event Log's scrollbar is a scrubber over the whole log":
       tops.add rt.app.eventLog.scrollTop
     s.send(rt, sgr(0, sc.trackTop + sc.trackRows - 1, sc.trackCol,
                    release = true))
-    ck not rt.app.listScrub.active
+    ck not rt.scrollbars.grab.active
     var mono = true
     for i in 1 ..< tops.len:
       if tops[i] < tops[i - 1]: mono = false
@@ -321,7 +321,7 @@ suite "PLAT-51: the Call Trace's scrollbar is a scrubber over the whole trace":
     let thumb = sm.thumbSpan(body * 8, 8)
     let startRow = a.row + 1 + thumb.start div 8
     s.send(rt, sgr(0, startRow, trackCol))
-    ck rt.app.listScrub.active and rt.app.listScrub.pane == paneCalltrace
+    ck rt.scrollbars.grab.active and rt.scrollbars.grab.pane == paneCalltrace
     let loadsBefore = rt.app.listScrubFetches
     var tops: seq[int] = @[]
     var motions = 0
@@ -360,19 +360,21 @@ const
     ## `Rows` shows, so the thumb is short and a press mid-track is on the
     ## track, not the thumb.
 
-proc isTrackStyle(st: CellStyle): bool =
-  ## A scrollbar cell: the track, the thumb (either eighth-block form — the
-  ## reversed one is the track colour on the thumb's ground) or the mark.
-  st.role in {srScrubberTrack, srScrubberThumb, srScrubberMark} or
-    st.surface == srScrubberThumbGround
-
 proc isThumbStyle(st: CellStyle): bool =
-  st.role == srScrubberThumb or st.surface == srScrubberThumbGround
+  ## A cell of a scrollbar's thumb (PLAT-70 Part H: `srScrollbarThumb*`).
+  st.role.isScrollbarThumbRole
+
+proc onABar(bars: seq[BarSpot]; row, col: int): bool =
+  for b in bars:
+    if b.contains(row, col): return true
 
 proc trackCells(g: StyledGrid; col, top, rows: int): int =
-  ## How many of column `col`'s rows `top ..< top + rows` are scrollbar cells.
+  ## How many of column `col`'s rows `top ..< top + rows` are a scrollbar's
+  ## cells — the bars the painter recorded (PLAT-70 Part H: with the default
+  ## options a track cell is the pane's own blank ground, so the cells are
+  ## read from the bar, not from a glyph).
   for r in top ..< top + rows:
-    if g.styleAt(r, col).isTrackStyle: inc result
+    if g.bars.onABar(r, col): inc result
 
 proc thumbRows(g: StyledGrid; col, top, rows: int): seq[int] =
   ## The rows of column `col` the thumb covers (any part of), top to bottom.
@@ -485,8 +487,9 @@ proc checkTrackPresses(s: TuiSession; rt: TuiRuntime; pane: PaneKind;
   ck total > body
   # The shell's frame draws the track down that column, every body row.
   var drawn = 0
+  let bars = rt.shellScreenOf().bars
   for r in top ..< top + body:
-    if rt.styleAt(r, col).isTrackStyle: inc drawn
+    if bars.onABar(r, col): inc drawn
   ck drawn == body
   s.click(rt, top + body - 1, col)
   ck topOf() == total - body
@@ -503,11 +506,11 @@ proc checkTrackPresses(s: TuiSession; rt: TuiRuntime; pane: PaneKind;
   # The thumb, at the top again, held and dragged to the bottom.
   s.click(rt, top, col)
   s.send(rt, sgr(0, top, col))
-  ck rt.app.listScrub.active and rt.app.listScrub.pane == pane
+  ck rt.scrollbars.grab.active and rt.scrollbars.grab.pane == pane
   for r in top .. top + body - 1:
     s.send(rt, sgr(0, r, col, motion = true))
   s.send(rt, sgr(0, top + body - 1, col, release = true))
-  ck not rt.app.listScrub.active
+  ck not rt.scrollbars.grab.active
   ck topOf() == total - body
 
 suite "M71 (#838): the State, Files and VCS panes draw a scrollbar when they overflow":

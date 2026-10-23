@@ -85,6 +85,12 @@ type
       ## (Terminal-Output-Pane.md §3): the track, the thumb, the thumb's ground
       ## where an eighth block is drawn reversed, and the current-position
       ## mark.
+    dgScrollbar = "scrollbar"
+      ## PLAT-70 Part H (Scrollbar-Scrubbers.md §7.3): a scrollbar's track
+      ## (at rest, revealed) and thumb (line and solid at rest, under the
+      ## pointer, held). Its own group: the position sliders keep
+      ## `dgScrubber`'s look, and a slider and a scrollbar are never read as
+      ## states of one thing.
 
   SemanticRole* = enum
     ## Every distinction this front-end's screen carries. `srNone` is the zero
@@ -295,6 +301,22 @@ type
     srScrubberMark = "scrubber-mark"
       ## The current recording position on the track, in the execution
       ## pointer's colour.
+    # PLAT-70 Part H (Scrollbar-Scrubbers.md §7.3): a SCROLLBAR's parts
+    # (`dgScrollbar`) — every vertical and horizontal bar of every pane.
+    srScrollbarTrack = "scrollbar-track"
+      ## The `scrollbar-track on` line at rest.
+    srScrollbarTrackRevealed = "scrollbar-track-revealed"
+      ## The track while the pointer is on it or the thumb is held — drawn
+      ## even with `scrollbar-track off`.
+    srScrollbarThumb = "scrollbar-thumb"
+      ## A `hairline` or `thin` thumb at rest.
+    srScrollbarThumbSolid = "scrollbar-thumb-solid"
+      ## A `thick` or `full` thumb at rest — a dimmer token than a line
+      ## thumb's, since it covers more of its cell.
+    srScrollbarThumbHover = "scrollbar-thumb-hover"
+      ## The thumb under the pointer (it can be grabbed).
+    srScrollbarThumbHeld = "scrollbar-thumb-held"
+      ## The thumb held, in the accent.
 
   DividerChoice* = enum
     ## PLAT-50 (the user, 2026-10-02, undecided between the two): the colour a
@@ -768,9 +790,11 @@ const
     srHeat5: fgOnly(dgHeat, dtColorsEditorSyntaxPrimary, attrs = {raBold},
                     mono = {raBold, raReverse}),
 
-    # PLAT-52. The track is a divider line; the thumb the scrollbar thumb's
-    # colour (the desktop's `::-webkit-scrollbar-thumb` reads the subtle
-    # caption tone); the mark the execution pointer's (the gutter's) colour.
+    # PLAT-52: the scrubbers' parts. Since PLAT-70 Part H the position
+    # sliders (the terminal screen's scrubber, the frame viewer's) are their
+    # only users but the mark: a SCROLLBAR draws with the `srScrollbar*`
+    # roles below. The track is a divider line; the thumb the subtle caption
+    # tone; the mark the execution pointer's (the gutter's) colour.
     srScrubberTrack: fgOnly(dgScrubber, dtColorsUiDividerSecondary,
                             mono = {raItalic}),
     srScrubberThumb: fgOnly(dgScrubber, dtColorsUiTextPrimaryCaptionSubtle,
@@ -779,7 +803,26 @@ const
                                   dtColorsUiTextPrimaryCaptionSubtle,
                                   mono = {raReverse, raItalic}),
     srScrubberMark: fgOnly(dgScrubber, dtColorsEditorActionSecondary,
-                           attrs = {raBold}, mono = {raBold, raUnderline})]
+                           attrs = {raBold}, mono = {raBold, raUnderline}),
+    # PLAT-70 Part H (Scrollbar-Scrubbers.md §7.3): a scrollbar is
+    # foreground over the pane's own ground. The track at rest is the
+    # faintest border; revealed (the pointer on it, the thumb held) the
+    # primary border. A line thumb (`hairline`, `thin`) rests at the subtle
+    # caption tone, a solid one (`thick`, `full`) at the divider tone; under
+    # the pointer the caption tone; held, the accent. The mark is
+    # `srScrubberMark`.
+    srScrollbarTrack: fgOnly(dgScrollbar, dtColorsUiBorderSecondary,
+                             mono = {raItalic}),
+    srScrollbarTrackRevealed: fgOnly(dgScrollbar, dtColorsUiBorderPrimary,
+                                     mono = {raItalic, raUnderline}),
+    srScrollbarThumb: fgOnly(dgScrollbar, dtColorsUiTextPrimaryCaptionSubtle,
+                             mono = {raReverse}),
+    srScrollbarThumbSolid: fgOnly(dgScrollbar, dtColorsUiDividerSecondary,
+                                  mono = {raReverse, raItalic}),
+    srScrollbarThumbHover: fgOnly(dgScrollbar, dtColorsUiTextPrimaryCaption,
+                                  mono = {raReverse, raBold}),
+    srScrollbarThumbHeld: fgOnly(dgScrollbar, dtColorsEditorActionPrimary,
+                                 mono = {raReverse, raUnderline})]
 
 func spec*(role: SemanticRole): RoleSpec {.inline.} =
   RoleSpecs[role]

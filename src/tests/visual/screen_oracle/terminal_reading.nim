@@ -42,10 +42,14 @@ const
     ## in both spellings (box-drawing, and `--ascii-borders`).
 
   ScrubberCells = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇",
-                   "▏", "▎", "▍", "▌", "▋", "▊", "▉", "|", "#"]
+                   "▏", "▎", "▍", "▌", "▋", "▊", "▉", "|", "#",
+                   "▕", "┃", "╹", "╻", "╿", "╽", "▐", "▝", "▗", "▔", "▀",
+                   "🮇", "🮈", "🮂", "🮃", "🮄", "🮅", "🮆"]
     ## PLAT-51: what a list pane's scrollbar SCRUBBER draws in the pane's
     ## last column (`views/scrubber_track.nim`: the track, the thumb in
     ## eighth blocks, the current-position mark), and their ASCII tier.
+    ## PLAT-70 Part H: and every vertical glyph of the scrollbar options'
+    ## table (`views/scrollbar_styles.ScrollbarGlyphs`).
 
 func cells(line: string): seq[Rune] = line.toRunes
 

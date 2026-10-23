@@ -7628,3 +7628,35 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   `CT_SPECS_DIR`'s CodeTracer-TUI.md §6.2; a pm checkout whose spec publishes
   options the code has not landed yet (Part H's `--scrollbar-*`) reddens it.
   Grade with a spec checkout that matches the code under test.
+- TUI scrollbars (PLAT-70 Part H): every bar is drawn by
+  `app/views/scrollbar_styles.paintBar` (via `scrubber_track.paintVerticalScrubber`
+  / `paintHorizontalBar`), which reads the options, the pointer state and the
+  fade off the grid (`StyledGrid.scrollbars`, set by `shell.shellScreen` from
+  `ShellModel.scrollbars`) and RECORDS each bar (`StyledGrid.bars` ->
+  `ShellScreen.bars`). `runtime.routeScrollbars` hit-tests the pointer against
+  those records for every pane (hover, grab with offset, jump / page + hold
+  repeat, fade wake); a pane only contributes `runtime.applyBarTop`. The old
+  per-pane scrubber press/drag paths (listScrub, hbarDrag, scrubEventLog …) are
+  gone. `tickScrollbars` returns a RuntimeOutcome the host must apply (an
+  editor page is a source scroll).
+- A pty test that reads scrollbar glyphs must pin the look
+  (`--scrollbar-thickness=thin --scrollbar-track=on --scrollbar-fade=off`):
+  the defaults are a hairline thumb, no track, and bars that fade out after
+  1.2 s of quiet.
+- `CellStyle.faded` (0..1) is resolved in `palette.resolveRoles` like `dim`:
+  blended at 24 bits on colour rungs, hidden from 1/2 on 16 colours.
+- Scrollbar fade-in timing: the TUI loop steps a GONE bar only at its idle tick
+  (`IdlePollMs`, 200 ms apart), so `FadeState.wake` restarts the step clock
+  when the bar was not wanted; otherwise a pointer arriving just before the next
+  tick is credited with up to 200 ms and the 180 ms fade-in is instant. A unit
+  test that sets `steppedMs` by hand hides this; drive it through the runtime.
+- `modern-unicode` applies to the whole terminal UI: also the position sliders
+  (`scrubber_track.thumbCells(..., modern)`: right / upper eighths from Symbols
+  for Legacy Computing instead of a reversed cell).
+- Scratch-workspace copies of codetracer need a `.git` (gitfile) before
+  `just build-once`: `db-backend/build.rs` stamps replay-server's
+  `--build-revision` from git, and without it GPUI suites refuse the engine
+  ("revision handshake unsupported ... unknown unknown"); touch build.rs to
+  re-stamp. Never copy `src/build-debug` between trees (tup rejects the variant).
+- layout_settings now carries VALUED settings (`settingValues`, `parseValue`,
+  `assignValue`, `valueText`); `savePreference` hooks take (name, value: string).

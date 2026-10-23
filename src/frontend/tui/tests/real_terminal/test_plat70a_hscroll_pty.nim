@@ -35,7 +35,7 @@ import ./lifecycle_support
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 42
+const ExpectedAssertions = 43
 
 var countedAssertions = 0
 
@@ -74,7 +74,12 @@ proc open(extra: seq[string] = @[]): TuiTestSession =
                               $spawned)
   removeDir(state)
   createDir(state)
-  result = newTuiTest(tuiBinary(), @["--theme=dark"] & extra & @[trace()])
+  # PLAT-70 Part H: the bars' look is fixed for this suite — `thin`, the
+  # track drawn, never faded — so a cell's glyph says thumb or track.
+  result = newTuiTest(tuiBinary(), @["--theme=dark", "--scrollbar-thickness=thin",
+                                     "--scrollbar-track=on",
+                                     "--scrollbar-fade=off"] &
+                                   extra & @[trace()])
     .width(Cols).height(Rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT", "COLORFGBG")
@@ -184,7 +189,9 @@ proc widestSourceLine(): int =
 
 
 proc isBarGlyph(g: string): bool =
-  g == TrackGlyph or g in ["█", "▏", "▎", "▍", "▌", "▋", "▊", "▉"]
+  ## PLAT-70 Part H: the bars are drawn `thin` with the track on
+  ## (`BarLook`, below): a `─` track under a `━` thumb with half-cell ends.
+  g == TrackGlyph or g in ["━", "╸", "╺", "╾", "╼"]
 
 type Bar = tuple[row, left, cols: int]
 
@@ -194,7 +201,8 @@ proc textCols(s: Snapshot; row, left: int): int =
   ## edge. (A bar row cannot say it: its thumb is drawn with the divider's
   ## glyph.)
   var c = left
-  while c < Cols and s[row][c].glyph notin ["▏", "│", "█", "▁", "▂", "▃",
+  while c < Cols and s[row][c].glyph notin ["▏", "│", "┃", "╹", "╻", "╿", "╽",
+                                             "█", "▁", "▂", "▃",
                                              "▄", "▅", "▆", "▇"]:
     inc c
   c - left
@@ -228,12 +236,16 @@ proc thumbCellsOf(s: Snapshot; bar: Bar): seq[int] =
 proc expectedThumb(content, left, cols, mark: int): seq[int] =
   ## The cells the shared model's thumb covers (`thumbSpan`, in eighths),
   ## plus the mark's cell (the caret's column, Horizontal-Overflow §4.2).
+  ## PLAT-70 Part H: a `thin` thumb is drawn in half cells — a cell is the
+  ## thumb's when the centre of either of its halves is inside the span.
   let sm = scrubberModel(content, left, cols, current = mark)
   let span = sm.thumbSpan(cols * 8, 8)
   for i in 0 ..< cols:
-    let lo = max(i * 8, span.start)
-    let hi = min(i * 8 + 8, span.start + span.length)
-    if hi > lo: result.add i
+    var covered = false
+    for centre in [i * 8 + 2, i * 8 + 6]:
+      if centre >= span.start and centre < span.start + span.length:
+        covered = true
+    if covered: result.add i
   if mark >= 0:
     let f = sm.currentFraction
     let m = min(cols - 1, int(f * float(cols)))
@@ -307,6 +319,9 @@ suite "PLAT-70 Part A: the editor scrolls sideways on a real terminal":
     checkpoint("track click -> leftCol " & $clicked)
     ck clicked > 6
     sess.press(bar.row, at)
+    # The pointer off the bar again: hovered, a bar is drawn widened with its
+    # track revealed (PLAT-70 Part H, Scrollbar-Scrubbers.md §7.4).
+    sess.mouse(35, row, codeLeft + 2)
     s = sess.waitUntil("the track click centred its column",
       proc(s: Snapshot): bool =
         s.cells(row, codeLeft, cols) == line.shown(clicked, cols))
@@ -322,10 +337,15 @@ suite "PLAT-70 Part A: the editor scrolls sideways on a real terminal":
     sess.mouse(0, bar.row, grab)
     sess.mouse(32, bar.row, to)
     sess.mouse(0, bar.row, to, release = true)
+    sess.mouse(35, row, codeLeft + 2)
     var dragged = HorizontalView(contentCols: content, viewportCols: cols,
                                  leftCol: clicked)
     let f = trackFractionAt(to - bar.left, cols)
-    discard dragged.dragThumb(f - dragged.barModel.thumbLength / 2.0)
+    # PLAT-70 Part H (Scrollbar-Scrubbers.md §3.3): the thumb keeps the
+    # point it was grabbed by.
+    let offset = dragged.barModel.grabOffset(
+      trackFractionAt(grab - bar.left, cols))
+    discard dragged.dragThumb(f - offset)
     checkpoint("drag -> leftCol " & $dragged.leftCol)
     s = sess.waitUntil("the drag was followed",
       proc(s: Snapshot): bool =
@@ -335,6 +355,13 @@ suite "PLAT-70 Part A: the editor scrolls sideways on a real terminal":
     # The caret, untouched, is where it was in the document.
     ck s.reverseCol(row, codeLeft, cols) ==
        (if dragged.leftCol <= 10: codeLeft + 10 - dragged.leftCol else: -1)
+    # And back at column 0 it is on its line and column: no press on the bar
+    # was a click on the text under it (HO-4).
+    for _ in 0 .. (dragged.leftCol div 6) + 1:
+      sess.mouse(WheelLeft, row, codeLeft + 5)
+    s = sess.waitUntil("wheel-left brought the view back to column 0",
+      proc(s: Snapshot): bool = s.cells(row, codeLeft, cols) == line.shown(0, cols))
+    ck s.reverseCol(row, codeLeft, cols) == codeLeft + 10
 
   test "caret-follow: End, Home, a caret walked right (§4.5, HO-5)":
     var sess = open()

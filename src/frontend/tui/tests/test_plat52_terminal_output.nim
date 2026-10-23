@@ -51,7 +51,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 131
+const ExpectedAssertions = 130
 
 var countedAssertions = 0
 
@@ -305,8 +305,9 @@ suite "PLAT-52: the terminal draws the Terminal Output pane":
     s.send(rt, "G")
     let tick = s.session.getCurrentRRTicks()
     # A press at the track's END shows the LAST line of the whole output.
+    # (Following, the view is already there and the thumb is at the end: the
+    # press takes the thumb, which moves nothing — PLAT-70 Part H §7.4.)
     s.click(rt, geo.contentTop + geo.contentRows - 1, geo.trackCol)
-    ck not rt.app.terminalOutput.follow
     ck rt.paneRows().join("\n").contains("done")
     # At its START, the first.
     s.click(rt, geo.contentTop, geo.trackCol)

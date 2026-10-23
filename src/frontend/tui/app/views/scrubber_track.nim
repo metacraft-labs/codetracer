@@ -12,21 +12,23 @@
 ##
 ## Moved out of `terminal_output_pane.nim` (PLAT-52, its first user) by
 ## PLAT-51, when the Event Log and the Call Trace adopted the same scrubber.
+##
+## PLAT-70 Part H: a SCROLLBAR is drawn by `scrollbar_styles.paintBar` (the
+## options' glyphs and roles, the pointer's states, the fade); this module
+## keeps the projection — where the mark is, where a press falls — and the
+## eighth-block cells of the position SLIDERS (the terminal screen's
+## scrubber, the frame viewer's), which are not scrollbars.
 
 import std/math
 
 import codetracer_embed
 
 import ./styled_row
+import ./scrollbar_styles
+
+export scrollbar_styles
 
 const
-  TrackVerticalGlyph* = "│"
-  TrackHorizontalGlyph* = "─"
-  ThumbFullGlyph* = "█"
-  LowerEighths* = ["", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-    ## `LowerEighths[k]`: the lower `k` eighths of a cell filled.
-  LeftEighths* = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
-    ## `LeftEighths[k]`: the left `k` eighths of a cell filled.
   TrackStyle* = CellStyle(role: srScrubberTrack)
   ThumbStyle* = CellStyle(role: srScrubberThumb)
   ThumbReversedStyle* = CellStyle(role: srScrubberTrack,
@@ -34,8 +36,6 @@ const
   MarkStyle* = CellStyle(role: srScrubberMark)
   ScrubberTrackCells* = 1
     ## The track's width: one cell, the pane's rightmost column.
-  MinThumbEighths* = 8
-    ## The shortest thumb a pointer can hit: one cell.
 
 type
   ThumbCellKind* = enum
@@ -44,14 +44,18 @@ type
     kind*: ThumbCellKind
     glyph*: string
 
-proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool): seq[ThumbCell] =
+proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool;
+                 modern = false): seq[ThumbCell] =
   ## A track of `cells` cells with a thumb covering `span` (in EIGHTHS of a
   ## cell), cell by cell. A cell the thumb covers fully is a full block; the
   ## cell where the thumb starts part-way is the eighth block of its FAR part
   ## (the lower part of a vertical cell, the right part of a horizontal one —
   ## drawn as the complementary block in the track colour on the thumb's
-  ## ground, since only lower and left eighths exist); the cell where it ends
-  ## part-way is the eighth block of its NEAR part.
+  ## ground, since the classic blocks have only lower and left eighths); the
+  ## cell where it ends part-way is the eighth block of its NEAR part.
+  ## `modern` (the `modern-unicode` setting, Scrollbar-Scrubbers.md §7.1):
+  ## the upper and right eighths are Symbols for Legacy Computing's, drawn
+  ## in the thumb's own colour — no reversed cell.
   let first = span.start
   let last = span.start + span.length          # exclusive, in eighths
   for c in 0 ..< cells:
@@ -73,6 +77,8 @@ proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool): seq[ThumbCell] =
       # reversed.
       if vertical:
         result.add ThumbCell(kind: tcThumb, glyph: LowerEighths[covered])
+      elif modern:
+        result.add ThumbCell(kind: tcThumb, glyph: RightEighthsModern[covered])
       else:
         result.add ThumbCell(kind: tcThumbReversed,
                              glyph: LeftEighths[8 - covered])
@@ -80,7 +86,9 @@ proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool): seq[ThumbCell] =
       # Covers the near part: the UPPER eighths of a vertical cell (the
       # complementary lower block reversed), the LEFT eighths of a horizontal
       # one.
-      if vertical:
+      if vertical and modern:
+        result.add ThumbCell(kind: tcThumb, glyph: UpperEighthsModern[covered])
+      elif vertical:
         result.add ThumbCell(kind: tcThumbReversed,
                              glyph: LowerEighths[8 - covered])
       else:
@@ -119,18 +127,14 @@ proc currentMarkRow*(sm: ScrubberModel; top, rows: int): int =
 
 proc paintVerticalScrubber*(g: var StyledGrid; col, top, rows: int;
                             sm: ScrubberModel) =
-  ## The track down column `col` from row `top` for `rows` rows, the thumb
-  ## over it in eighths, and the current-position mark (§3.5) — the cell of
-  ## the row the debugger is at, in the execution pointer's colour.
+  ## The scrollbar down column `col` from row `top` for `rows` rows, and the
+  ## current-position mark (§3.5) — the cell of the row the debugger is at —
+  ## drawn as the scrollbar options say (`scrollbar_styles.paintBar`).
   if rows <= 0 or col < 0:
     return
-  let span = sm.thumbSpan(rows * 8, MinThumbEighths)
-  let cells = thumbCells(span, rows, vertical = true)
-  for i, cell in cells:
-    g.paint(top + i, col, cell.glyph, styleOf(cell.kind))
   let markRow = sm.currentMarkRow(top, rows)
-  if markRow >= 0:
-    g.paint(markRow, col, ThumbFullGlyph, MarkStyle)
+  g.paintBar(axVertical, col, top, rows, sm,
+             (if markRow >= 0: markRow - top else: -1))
 
 proc verticalScrubberHit*(sm: ScrubberModel; top, rows, row: int): ScrubberHit =
   ## A press at screen row `row` on a track drawn by `paintVerticalScrubber`:
@@ -168,17 +172,13 @@ proc currentMarkCol*(sm: ScrubberModel; left, cols: int): int =
 proc paintHorizontalBar*(g: var StyledGrid; row, left, cols: int;
                          sm: ScrubberModel) =
   ## The overflow-only horizontal bar (§4.7): along `row` from column `left`
-  ## for `cols` cells, the thumb in eighth blocks (`▏▎▍▌▋▊▉█`) so its ends
-  ## are sub-cell — the vertical scrubber's drawing on the other axis — and
-  ## the editor's caret column marked as the vertical scrubber marks "now".
+  ## for `cols` cells, with the editor's caret column marked as the vertical
+  ## scrubber marks "now" — drawn as the scrollbar options say.
   if cols <= 0 or row < 0:
     return
-  let span = sm.thumbSpan(cols * 8, MinThumbEighths)
-  for i, cell in thumbCells(span, cols, vertical = false):
-    g.paint(row, left + i, cell.glyph, styleOf(cell.kind))
   let markCol = sm.currentMarkCol(left, cols)
-  if markCol >= 0:
-    g.paint(row, markCol, ThumbFullGlyph, MarkStyle)
+  g.paintBar(axHorizontal, row, left, cols, sm,
+             (if markCol >= 0: markCol - left else: -1))
 
 proc horizontalBarHit*(sm: ScrubberModel; left, cols, col: int;
                        cellX = -1.0): ScrubberHit =

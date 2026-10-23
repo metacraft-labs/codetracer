@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3449
+const ExpectedAssertions = 3642
   ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
   ## current-line and inspection triangles, the role table traded the `[MOD]`
   ## tag for the editor-text role, and one permitted merge was added.
@@ -83,7 +83,10 @@ const
   AllModes = [dmDark, dmLight]
   AllPalettes = [pkDesign, pkTerminal]
 
-  ExpectedRoleCount = 130
+  ExpectedRoleCount = 136
+    ## PLAT-70 Part H: +6, a scrollbar's parts (`srScrollbarTrack`,
+    ## `srScrollbarTrackRevealed`, `srScrollbarThumb`, `srScrollbarThumbSolid`,
+    ## `srScrollbarThumbHover`, `srScrollbarThumbHeld`, group `dgScrollbar`).
     ## PLAT-51: +2, the focused pane's strip (`srTabBarFocused`) and its
     ## active tab (`srTabActiveFocused`).
     ## PLAT-52: +4, the scrubbers' group (`srScrubberTrack`,
@@ -107,7 +110,8 @@ const
     ## parts (`srCallArgs`, `srCallReturn`, a group of their own) and the
     ## inactive session tab's ground (`srSessionTab`). `srNone` plus 118
     ## painted roles.
-  ExpectedGroupCount = 21
+  ExpectedGroupCount = 22
+    ## PLAT-70 Part H: +1, `dgScrollbar`.
     ## PLAT-52: `dgScrubber`.
   ExpectedMergeCount = 22
     ## PLAT-51: + (chrome-text, editor-text), the omnibox's editor foreground.
@@ -548,8 +552,12 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # PLAT-50: `▏` and `▕`, the divider and edge lines (27); PLAT-52: the
     # thirteen eighth blocks a scrubber's thumb ends are drawn with (40);
     # PLAT-51: the current-line triangle `▸` (`>`) and the inspection
-    # cursor's `▹` (`)`) (42); PLAT-70: the overflow markers `‹` / `›` (44).
-    ck mapped == 44
+    # cursor's `▹` (`)`) (42); PLAT-70: the overflow markers `‹` / `›` (44);
+    # PLAT-70 Part H: the scrollbar glyphs no entry above has — the thin
+    # thumb's half lines and joins, the quadrants, the upper blocks and the
+    # Legacy Computing widths (65); and the right eighths a position
+    # slider's thumb starts with under `modern-unicode` (68).
+    ck mapped == 68
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.

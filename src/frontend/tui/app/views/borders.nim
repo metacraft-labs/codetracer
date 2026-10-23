@@ -144,7 +144,7 @@ const AsciiFallbacks: array[21, (string, string)] = [
   ("●", "*"), ("○", "o"), ("◆", "+"),
   ("▶", ">"), ("▼", "v"), ("▲", "^")]
 
-const ExtraAsciiFallbacks: array[22, (string, string)] = [
+const ExtraAsciiFallbacks: array[46, (string, string)] = [
   # PLAT-70 Part B (Horizontal-Overflow.md §5.1): a cut table cell's `…` is
   # `~` on the ASCII tier (the mark that says "there is more").
   ("█", "#"), ("…", "~"), ("·", "."),
@@ -164,7 +164,19 @@ const ExtraAsciiFallbacks: array[22, (string, string)] = [
   # `#` (Scrollbar-Scrubbers.md §4: "ASCII tier: `#` on `|`").
   ("▁", "#"), ("▂", "#"), ("▃", "#"), ("▄", "#"), ("▅", "#"), ("▆", "#"),
   ("▇", "#"), ("▎", "#"), ("▍", "#"), ("▌", "#"), ("▋", "#"), ("▊", "#"),
-  ("▉", "#")]
+  ("▉", "#"),
+  # PLAT-70 Part H: the scrollbar glyphs (`scrollbar_styles.ScrollbarGlyphs`)
+  # that are not above — a thumb's ends and widths, so the thumb's `#`
+  # (Scrollbar-Scrubbers.md §7.2). (`degradation.degradeRow` writes a whole
+  # thumb as `#` and a track as `|` / `-` by its role; this keeps a mark, and
+  # any of them painted outside a bar, off a terminal that cannot show it.)
+  ("╹", "#"), ("╻", "#"), ("╸", "#"), ("╺", "#"), ("╽", "#"), ("╿", "#"),
+  ("╼", "#"), ("╾", "#"), ("▝", "#"), ("▗", "#"), ("▖", "#"), ("▐", "#"),
+  ("▔", "#"), ("▀", "#"), ("🮇", "#"), ("🮈", "#"), ("🮂", "#"), ("🮃", "#"),
+  ("🮄", "#"), ("🮅", "#"), ("🮆", "#"),
+  # ... and the right eighths a position slider's thumb starts with under
+  # `modern-unicode` (`scrollbar_styles.RightEighthsModern`).
+  ("🮉", "#"), ("🮊", "#"), ("🮋", "#")]
 
 var asciiTable {.compileTime.}: Table[string, string]
 

@@ -69,10 +69,11 @@ export shell
 
 type
   TerminalDragKind* = enum
-    ## PLAT-52: which of the Terminal Output pane's scrubbers a held press is
-    ## on — the line view's scrollbar (it scrolls the VIEW) or the screen's
-    ## built-in one (it previews, and its release moves the debugger).
-    tdNone, tdLineThumb, tdScreen
+    ## PLAT-52: whether a press is held on the Terminal Output screen's
+    ## built-in scrubber (it previews, and its release moves the debugger).
+    ## (The line view's scrollbar is every bar's since PLAT-70 Part H —
+    ## `runtime.routeScrollbars`.)
+    tdNone, tdScreen
 
   TuiApp* = ref object
     ## The terminal front-end's application state.
@@ -169,10 +170,6 @@ type
       ## `follow`) and the screen scrubber's preview are the pane's own.
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
-    listScrub*: tuple[active: bool, pane: PaneKind]
-    hbarDrag*: tuple[active: bool, pane: PaneKind]
-      ## PLAT-70: a press held on a text pane's horizontal bar thumb — the
-      ## view follows the pointer until the release (Horizontal-Overflow §4.2).
     textDrag*: bool
       ## PLAT-68: a left press on the editor's text is held — the pointer's
       ## motion extends the selection from where it was pressed.

@@ -162,7 +162,14 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 109
+  ExpectedAppModules = 112
+    ## 2026-10-24: 111 → 112, re-counting PLAT-70 Part I, which added
+    ## `views/table_hscroll.nim` (a table pane's sideways view and bar)
+    ## without re-counting.
+    ## 2026-10-23 (PLAT-70 Part H): 109 → 111. `views/scrollbar_styles.nim`
+    ## (every scrollbar glyph in one table, and the one bar painter) and
+    ## `views/scrollbar_frame.nim` (what a frame's bars are drawn with, and
+    ## where they were drawn).
     ## 2026-10-23: 107 → 109, re-counting `6ef051354` (HSF-E1, --pane-server),
     ## which added two files here without re-counting: `pane_protocol.nim`
     ## (the pane server's protocol as values; its transport is
@@ -281,7 +288,12 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 270
+  ExpectedStyleLiterals = 277
+    ## 2026-10-23 (PLAT-70 Part H): 270 → 277, measured — the bar painter's
+    ## three styles in `views/scrollbar_styles.nim` (the track, the thumb and
+    ## the mark, each a ROLE carrying the fade), so the theme registry has no
+    ## colour to supply; and the four the table panes' painters added with
+    ## PLAT-70 Part B, which landed without moving this count.
     ## 2026-10-23: 267 → 270, measured, re-counting `6ef051354` (HSF-E1). The
     ## three are FIXTURES, not paint: `tests/test_pane_protocol.nim` builds
     ## one row of three spans (`srChromeMuted`, `srValueModified` and the
@@ -392,7 +404,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 36
+  ExpectedStyledFiles = 37
+    ## 2026-10-23 (PLAT-70 Part H): +1, `views/scrollbar_styles.nim`.
     ## 2026-10-23: +1, `tests/test_pane_protocol.nim` (see above).
     ## 2026-10-15 (PLAT-57): +1, `views/search_results_pane.nim`.
     ## 2026-10-08 (PLAT-51 part B): +1, `views/welcome_view.nim`.

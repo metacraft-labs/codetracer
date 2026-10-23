@@ -369,7 +369,10 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
     createDir(state)
     const M73Cols = 160
     const M73Rows = 48
-    var sess = newTuiTest(tuiBinary(), @["--theme=dark", fixture.tracePath])
+    # PLAT-70 Part H: the bars' look fixed — `thin`, the track drawn, never
+    # faded — so a cell's glyph says track (`│`) or thumb.
+    var sess = newTuiTest(tuiBinary(), @["--theme=dark", "--scrollbar-thickness=thin", "--scrollbar-track=on", "--scrollbar-fade=off",
+                                         fixture.tracePath])
       .width(M73Cols).height(M73Rows)
       .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX",
                  "STY", "NERD_FONT", "NERDFONT", "COLORFGBG")
@@ -434,7 +437,7 @@ suite "CTUI-5 Tier 2: the source pane on a real terminal":
         ## whose every placed row holds a track or thumb glyph.
         result = -1
         if sh.rowOf.len == 0 or sh.textCol < 0: return
-        const TrackGlyphs = ["│", "█", "▁", "▂", "▃", "▄", "▅", "▆", "▇"]
+        const TrackGlyphs = ["│", "┃", "╹", "╻", "╿", "╽"]
         for c in sh.textCol + 1 ..< M73Cols:
           var all = true
           for (r, _) in sh.rowOf:
