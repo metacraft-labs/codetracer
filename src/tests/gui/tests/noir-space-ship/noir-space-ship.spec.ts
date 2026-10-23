@@ -15,6 +15,7 @@ import { LayoutPage } from "../../page-objects/layout-page";
 import type { EditorPane } from "../../page-objects/panes/editor/editor-pane";
 import { TraceLogPanel } from "../../page-objects/panes/editor/trace-log-panel";
 import type { FlowValue } from "../../page-objects/panes/editor/flow-value";
+import type { ScratchpadPane } from "../../page-objects/panes/scratchpad/scratchpad-pane";
 import type { CallTracePane } from "../../page-objects/panes/call-trace/call-trace-pane";
 import type { CallTraceEntry } from "../../page-objects/panes/call-trace/call-trace-entry";
 
@@ -188,6 +189,44 @@ async function loopFlowSnapshot(editor: EditorPane): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The first flow value in `editor` that can be added to the scratchpad AND
+ * would add a row to it, or `null` if none shows up within the retry budget.
+ *
+ * The scratchpad keeps one row per expression and drops a sample equal to
+ * the row's last one (`ScratchpadVM.addValue`, in
+ * `src/frontend/viewmodel/viewmodels/scratchpad_vm.nim`). So adding a flow
+ * value whose expression is already pinned leaves the row count unchanged,
+ * and a test that counts rows has to pick an expression `scratchpad` does not
+ * hold yet. In `noir_space_ship` that matters from the first addition on:
+ * `main`'s first call-trace argument, `initial_shield`, is also the first
+ * flow value of `main.nr` and of `shield.nr`.
+ */
+async function findUnpinnedFlowValue(
+  editor: EditorPane,
+  scratchpad: ScratchpadPane,
+  options: { maxAttempts: number; delayMs: number },
+): Promise<FlowValue | null> {
+  const pinned = new Set<string>();
+  for (const entry of await scratchpad.entries(true)) {
+    pinned.add(await entry.expression());
+  }
+  let found: FlowValue | null = null;
+  await retry(async () => {
+    for (const val of await editor.flowValues()) {
+      if (pinned.has(await val.name())) {
+        continue;
+      }
+      if (await val.supportsScratchpad()) {
+        found = val;
+        return true;
+      }
+    }
+    return false;
+  }, options);
+  return found;
 }
 
 // ---------------------------------------------------------------------------
@@ -921,22 +960,13 @@ test.describe("NoirSpaceShip", () => {
     await scratchpad.waitForEntryCount(expectedCount);
     scratchpad.invalidateCache();
 
-    // Flow value addition
+    // Flow value addition: one the scratchpad does not hold yet, so that it
+    // adds a row (see `findUnpinnedFlowValue`).
     let editor = (await layout.editorTabs())[0];
-    let flowValue: FlowValue | null = null;
-    await retry(
-      async () => {
-        const values = await editor.flowValues();
-        for (const val of values) {
-          if (await val.supportsScratchpad()) {
-            flowValue = val;
-            return true;
-          }
-        }
-        return false;
-      },
-      { maxAttempts: 20, delayMs: 200 },
-    );
+    const flowValue = await findUnpinnedFlowValue(editor, scratchpad, {
+      maxAttempts: 20,
+      delayMs: 200,
+    });
 
     expect(flowValue).not.toBeNull();
 
@@ -1051,18 +1081,9 @@ test.describe("NoirSpaceShip", () => {
 
     // Flow value addition from shield.nr
     const shieldEditor = await navigateToShieldEditor(layout);
-    let shieldFlowValue: FlowValue | null = null;
-    await retry(
-      async () => {
-        const values = await shieldEditor.flowValues();
-        for (const val of values) {
-          if (await val.supportsScratchpad()) {
-            shieldFlowValue = val;
-            return true;
-          }
-        }
-        return false;
-      },
+    const shieldFlowValue = await findUnpinnedFlowValue(
+      shieldEditor,
+      (await layout.scratchpadTabs(true))[0],
       { maxAttempts: 20, delayMs: 300 },
     );
 
