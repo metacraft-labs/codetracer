@@ -1038,6 +1038,17 @@ test_lane_files() {
 		# be spawned. Needs `git` on PATH; writes only under one `mkdtemp`
 		# directory, which it removes.
 		echo src/frontend/tests/git_cli_index_lock_test.nim
+		# `git_cli_refresh_snapshot_test.nim`: the VCS panel's change check
+		# (`ui/git_cli.readRefreshSnapshot`, `requestRefreshCheck`) through
+		# the Electron VCS facade, over real repositories: the answer comes on
+		# a later turn while the event loop runs, it changes exactly when the
+		# repository does, a failed read is an empty part, overlapping
+		# triggers coalesce into one more check, and an answer for a working
+		# directory the panel left is marked stale (VCS-Panel.md, "An
+		# auto-refresh never stalls the window"). Here for the same reason as
+		# the suite above. Needs `git` and `sh` on PATH; writes only under one
+		# `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/git_cli_refresh_snapshot_test.nim
 		echo src/frontend/tests/loop_built_handlers_test.nim
 		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;
@@ -1100,6 +1111,17 @@ test_lane_files() {
 		# compile for a browser and cannot spawn git. Needs `git` and `sh` on
 		# PATH; writes only under one `mkdtemp` directory, which it removes.
 		echo src/frontend/tests/electron_vcs_content_id_async_test.nim
+		# `electron_vcs_refresh_async_test.nim` drives the same facade's
+		# `status` and `log` — the two reads the VCS pane's auto-refresh makes
+		# every 5 s and on focus — over real repositories (clean, modified,
+		# untracked, staged, unmerged, detached, no commits, not a
+		# repository, git missing) and asserts they leave the event loop
+		# running while git does (VCS-Panel.md, "An auto-refresh never stalls
+		# the window"), with git's own answers and without rewriting the
+		# index. Here for the reason the suite above is. Needs `git` and `sh`
+		# on PATH; writes only under one `mkdtemp` directory, which it
+		# removes.
+		echo src/frontend/tests/electron_vcs_refresh_async_test.nim
 		#
 		# `electron_vcs_index_lock_test.nim` drives the same facade's `status`
 		# and `diff` over real repositories whose index has a stale stat cache,
