@@ -352,6 +352,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # participant's pointer state, as a drop-down is.
   entries.addEntry("EventLogVM", "columns", vscSharedSessionViewState,
     "The shown columns and their order are logical shared view state; the sort column indexes them.")
+  entries.addEntry("EventLogVM", "rowHeightPx", vscRendererLocal,
+    "The rows' measured advance is a per-front-end measurement that must never travel.")
+  entries.addEntry("EventLogVM", "reloadToken", vscRendererLocal,
+    "A nudge to ask this front-end's window again; the rows it brings are the backend's.")
   entries.addEntry("EventLogVM", "columnsMenuOpen", vscRendererLocal,
     "An open column menu is this participant's transient UI, like any open drop-down.")
   entries.addEntry("EventLogVM", "filterBar", vscSharedSessionViewState,

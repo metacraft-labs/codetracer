@@ -399,9 +399,9 @@ suite "PLAT-40 3 — the producer partition":
       ("src/frontend/viewmodel/store/replay_data_store.nim",
        "applyCalltraceResponse"),
       ("src/frontend/viewmodel/sync/signal_serializer.nim", "applySignalUpdate")],
+    # The desktop's Event Log is a view over `EventLogVM` since 1c18341dd, so
+    # it writes no rows of its own: every front-end's rows come from the store.
     "eventLog": @[
-      ("src/frontend/ui/event_log.nim", "loadEvents"),
-      ("src/frontend/ui/event_log.nim", "onUpdatedEvents"),
       ("src/frontend/viewmodel/store/replay_data_store.nim", "appendLiveEventRow"),
       ("src/frontend/viewmodel/store/replay_data_store.nim", "applyEventLogResponse"),
       ("src/frontend/viewmodel/store/replay_data_store.nim", "clearEventLog")],

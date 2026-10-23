@@ -608,6 +608,14 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # not all fit, the file info is the one left out — a message the user
   # cannot read is the failure this row exists to prevent (`statusBarText`),
   # and the language of the file on screen is the least urgent fact on it.
+  # The note is measured at the fewest cells it can be READ in
+  # (`noteMinCells`): a note naming an absolute path — the startup's
+  # `describe` — is drawn with that path's directories given way
+  # (`fitNoteCells`), so its full length depends on where the checkout lives,
+  # and measured whole it took the file info away on a long checkout path.
+  # It is counted with the gap `statusBarText` keeps after the indicators
+  # (`noteRowCells`), or the few widths just past the yield point would keep
+  # the file info and cut the note's last facts instead.
   var labelsW = 0
   for d in result.docked:
     if d.edge == leBottom:
@@ -616,8 +624,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   let modeW = textCells("COMMAND " & productIndicator(result.product) &
                         (if result.status.fold.len > 0: " " & result.status.fold
                          else: ""))
-  let noteW = (if app.notification.len > 0: textCells(app.notification) + 2
-               else: 0)
+  let noteW = noteRowCells(app.notification)
   let fileInfo =
     if footerLeadCells(fullInfo) + labelsW + 1 + modeW + noteW <= width:
       fullInfo

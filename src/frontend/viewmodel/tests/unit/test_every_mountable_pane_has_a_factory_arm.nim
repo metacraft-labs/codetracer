@@ -70,7 +70,10 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 31
+const ExpectedAssertions = 32
+  ## HSF-D6: 31 -> 32. The Event Log joined the panel host: its mount-proc
+  ## check became "it is a panel host kind", and its poll's absence is
+  ## asserted with the others' (+1).
   ## HSF-D6: 36 -> 32. The control-data test counts the removed arms and the
   ## panel host's shared arm as two group assertions, and the surviving arms
   ## as two, instead of one per pane — so this count no longer changes when a
@@ -317,8 +320,7 @@ suite "the factory mounts every mountable pane":
     # it, since this suite does not build `layout.nim`.
     let source = layoutSource()
     counted source.contains("trace, event_log, terminal_output,")
-    for procName in ["tryMountIsoNimEventLogPanel"]:
-      counted dispatchRegion(source).contains(procName & "()")
+    counted "EventLog" in panelHostKinds()
     # The panel host's panes: mounted by the factory synchronously, and here
     # by id for a container the factory never saw.
     counted dispatchRegion(source).contains("ensurePanelMountedById(containerId, state.content,")
@@ -358,6 +360,7 @@ suite "the factory mounts every mountable pane":
     # the panel.
     counted not readFile("src/frontend/ui/state.nim").contains("tryMountIsoNimStatePanel")
     counted not readFile("src/frontend/ui/calltrace.nim").contains("tryMountIsoNimCalltrace")
+    counted not readFile("src/frontend/ui/event_log.nim").contains("tryMountIsoNimEventLogPanel")
     let trace = readFile("src/frontend/ui/trace.nim")
     counted not trace.contains("tryMountIsoNimTimelinePanel")
 

@@ -275,6 +275,51 @@ const
     ## for what computing an id writes and why that is not a write in the
     ## facade's sense.
 
+  NoIndexLockGitOptions* = ["--no-optional-locks",
+                            "-c", "diff.autoRefreshIndex=false"]
+    ## The global options every git invocation CodeTracer's front-ends and
+    ## the container facade make starts with — before the subcommand, where
+    ## git reads global options. Build argv with `noIndexLockGitArgs` rather
+    ## than spelling these at a call site.
+    ##
+    ## WHY. A plain `git status` or `git diff` refreshes the index's stat
+    ## cache and writes the index back, and writing it means creating
+    ## `.git/index.lock` first. The VCS pane re-reads the repository every
+    ## few seconds, so a front-end often holds that lock, and one killed while
+    ## it does — a closed window, a test harness tearing the app down —
+    ## leaves the lock behind: every later git command in the user's checkout
+    ## then fails with `Unable to create '.../.git/index.lock': File exists`
+    ## until someone deletes it. Reading through a stale stat cache costs only
+    ## time; it never changes an answer. VCS-Panel.md, "Reading the repository
+    ## never takes the index lock".
+    ##
+    ## TWO OPTIONS, BECAUSE ONE DOES NOT COVER `git diff`.
+    ## `--no-optional-locks` (https://git-scm.com/docs/git#Documentation/git.txt---no-optional-locks)
+    ## stops `git status` from writing the index. Porcelain `git diff` writes
+    ## its refresh through a lock it takes unconditionally, under the control
+    ## of `diff.autoRefreshIndex` alone
+    ## (https://git-scm.com/docs/git-config#Documentation/git-config.txt-diffautoRefreshIndex):
+    ## measured with git 2.54.0, `git --no-optional-locks diff` on a file
+    ## whose mtime alone changed still created `index.lock` and renamed it
+    ## over `index`. With the setting off, `git diff`'s patch output, `--stat`
+    ## and `--numstat` still compare such a file's content and leave it out;
+    ## `--name-only` and `--name-status` do NOT, and list it as modified, so
+    ## a caller that wants the names of changed files reads `--numstat`.
+    ##
+    ## SAFE ON EVERY COMMAND, WRITES INCLUDED. Both options drop only writes
+    ## git makes opportunistically while reading. `git add`, `restore`,
+    ## `apply`, `commit` and `checkout` still take the locks they need, which
+    ## is why the prefix goes on every invocation rather than on a list of
+    ## "read" subcommands that would need keeping in step with every caller.
+
+func noIndexLockGitArgs*(args: openArray[string]): seq[string] =
+  ## `args` — a git command line WITHOUT the program name, the subcommand
+  ## first — preceded by `NoIndexLockGitOptions`. The one way the front-ends
+  ## and the container facade build a git argv, so no call site can forget
+  ## the options (see `NoIndexLockGitOptions` for why they matter).
+  result = @NoIndexLockGitOptions
+  result.add args
+
 proc contentIdRefusal*(profile: PlatformProfile): PlatformOutcome[VcsContentId] =
   ## The refusal of a host whose profile lacks `ContentIdRequires`, naming
   ## the capability so the caller (and a log) can say what is missing.

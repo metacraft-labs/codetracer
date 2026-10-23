@@ -116,6 +116,12 @@ when not defined(ctWeb):
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
+# A TAB ENTERED AGAIN SHOWS ITS OWN VCS PANE. Every tab's VCS panel draws the
+# one `VCSVM` of component id 0, so the tab switch re-syncs it from the entered
+# tab's own panel. Installed here because this module imports both sides and
+# `session_switch` cannot import `vcs` (see `syncSessionVCSHook`).
+session_switch.syncSessionVCSHook = vcs.syncSessionVCSIntoVM
+
 proc configureIPC(data: Data)
 
 proc jsMissing(value: JsObject): bool {.
@@ -2316,13 +2322,11 @@ proc configureMiddleware =
           if data.startOptions.inTest:
             recordVmBackendRequest(command, argsJs))
     # THE TOOLBAR'S ACTIONS ON THIS HOST, handed to the session before it
-    # builds `DebugControlsVM` with them: steps through the DAP mediator
-    # with the status bar's operation status, the replay server's restart,
-    # Stop, and test runs in a new window. A mirror takes them too: under
-    # `ct host` the page still drives the replay, and the server's session
-    # follows the moves it makes.
-    let toolbarApi = setupLocalViewToMiddlewareApi(
-      cstring"debug toolbar api", data.viewsApi)
+    # builds `DebugControlsVM` with them: steps through the DAP mediator of
+    # the tab on screen (`debug_toolbar.toolbarApiFor`) with the status bar's
+    # operation status, the replay server's restart, Stop, and test runs in a
+    # new window. A mirror takes them too: under `ct host` the page still
+    # drives the replay, and the server's session follows the moves it makes.
     if serverOwnsSession():
       # SERVER-MANAGED (`ct host`): the server owns the session and this
       # page mirrors it over its socket. The mirror's ViewModels are the
@@ -2333,7 +2337,7 @@ proc configureMiddleware =
       # (`claimLocalsLoading`).
       activeMirror = createHostedPageMirror(newSocketSyncChannel(pageSocket),
         debugCommandsFor = proc(session: SessionViewModel): DebugCommands =
-          desktopDebugCommands(data, session.store, toolbarApi))
+          desktopDebugCommands(data, session.store))
       activeSessionVM = activeMirror.session
       activeSessionVM.store.claimLocalsLoading()
     else:
@@ -2354,7 +2358,7 @@ proc configureMiddleware =
       state.installSourceLanguage(activeSessionVM.store)
       activeSessionVM.store.claimLocalsLoading()
       activeSessionVM.debugCommands = desktopDebugCommands(data,
-        activeSessionVM.store, toolbarApi)
+        activeSessionVM.store)
       activeSessionVM.initializePanelViewModels()
     # The session store holds the breakpoints (Shared-DOM-Front-Ends D7.4):
     # the debugger service plans each change over its rows and the engine's
@@ -4763,10 +4767,6 @@ proc updateEditors(data: Data) =
       diff.updateOptions(cast[MonacoEditorOptions](options))
 
 proc updateDataTables(data: Data) =
-  for _, component in data.ui.componentMapping[Content.EventLog]:
-    if not component.isNil:
-      EventLogComponent(component).resizeEventLogHandler()
-
   for _, component in data.ui.componentMapping[Content.Trace]:
     if not component.isNil:
       let trace = TraceComponent(component)

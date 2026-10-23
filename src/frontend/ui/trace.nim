@@ -29,10 +29,20 @@ var timelineVMStore: ReplayDataStore
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
-var traceResultsChanged*: proc()
+var traceResultsListeners: seq[proc()]
   ## Called whenever the trace service's sessions or their results change —
-  ## a new run, a run's results arriving. The Trace Log (``ui/trace_log``)
-  ## installs it to keep the session's ``TraceLogVM`` rows current.
+  ## a new run, a run's results arriving, a tracepoint toggled or deleted.
+  ## The Trace Log (``ui/trace_log``) keeps the session's ``TraceLogVM`` rows
+  ## current; the Event Log (``ui/event_log``) asks for its window again,
+  ## which the engine merges the trace-log rows into.
+
+proc onTraceResultsChanged*(listener: proc()) =
+  ## Call `listener` whenever the trace results change.
+  traceResultsListeners.add listener
+
+proc traceResultsChanged() =
+  for listener in traceResultsListeners:
+    listener()
 
 proc initTimelineVMFromSession*(vm: TimelineVM) =
   ## Hand the pane the session's `TimelineVM` — the one
@@ -554,8 +564,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
     id: data.services.trace.traceSessions.len))
   data.pointList.lastTracepoint = 0
   data.pointList.redrawTracepoints = true
-  if not traceResultsChanged.isNil:
-    traceResultsChanged()
+  traceResultsChanged()
   data.dapApi.sendCtRequest(
     CtRunTracepoints,
     RunTracepointsArg(
@@ -569,6 +578,9 @@ method onUpdatedTrace*(traceComponent: TraceComponent, response: TraceUpdate) {.
   # var traceSession = data.services.trace.traceSessions[response.sessionID]
 
   # for tracepoint in traceSession.tracepoints:
+  if response.refreshEventLog:
+    # A tracepoint toggled or deleted: its trace-log rows left the log.
+    traceResultsChanged()
   if not response.refreshEventLog: # response.updateId <= traceSession.tracepoints[^1].tracepointId and
     let tracepoint = traceComponent.tracepoint # self.findTracepoint(traceSession, response.updateId)
     # let traceComponent =
@@ -603,8 +615,7 @@ method onTracepointResultsAggregate*(
 
   let session = data.services.trace.traceSessions[response.sessionId]
   session.results[response.sessionId] = response.results
-  if not traceResultsChanged.isNil:
-    traceResultsChanged()
+  traceResultsChanged()
 
   if traceComponent.tracepoint.isNil:
     return

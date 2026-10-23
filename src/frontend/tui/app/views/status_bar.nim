@@ -154,6 +154,55 @@ proc promptSigil*(mode: UiMode): string =
   of umSearch: "/"
   else: ""
 
+proc notePathParts(note: string): tuple[found: bool;
+                                        before, path, name, after: string] =
+  ## The note's first ABSOLUTE path — a `/` that starts the note or follows a
+  ## space, up to the next space — split as the note around it (`before`,
+  ## `after`) and the path's last component (`name`). `found` is false when
+  ## the note carries none (a relative path is a name the note means, and is
+  ## never shortened).
+  var start = -1
+  var i = 0
+  while i < note.len:
+    if note[i] == '/' and (i == 0 or note[i - 1] == ' '):
+      start = i
+      break
+    inc i
+  if start < 0:
+    return (false, "", "", "", "")
+  var stop = note.find(' ', start)
+  if stop < 0: stop = note.len
+  let path = note[start ..< stop]
+  (true, note[0 ..< start], path, path[path.rfind('/') + 1 .. ^1],
+   note[stop .. ^1])
+
+proc noteMinCells*(note: string): int =
+  ## The fewest cells `note` can be shown in WHOLE by `fitNoteCells`: an
+  ## absolute path's directories given way to `…` (`<before>…/<name><after>`),
+  ## everything else as it is. What a row must leave for the note so the user
+  ## can still read every fact it states — the status row's file info yields
+  ## only to a note that cannot fit even so (`tui_app.shellModel`).
+  let (found, before, path, name, after) = notePathParts(note)
+  if not found or path.rfind('/') <= 0:
+    return textCells(note)
+  min(textCells(note),
+      textCells(before) + textCells("…/") + textCells(name) + textCells(after))
+
+const ModeNoteGap* = 4
+  ## The blank cells `statusBarText` always keeps after the mode indicators,
+  ## ahead of the note's own two separating spaces: the note is given at most
+  ## `width - <indicators> - ModeNoteGap` cells, those two spaces included.
+
+proc noteRowCells*(note: string): int =
+  ## What the status text needs BEYOND the mode indicators to show `note` with
+  ## every fact it states: the gap after the indicators (`ModeNoteGap`), the
+  ## note's two separating spaces, and the note at its fewest cells
+  ## (`noteMinCells`). Nothing when there is no note. `tui_app.shellModel`
+  ## keeps the file info only when the row has this much left beside it, so
+  ## the file info never costs the note a fact.
+  if note.len == 0: 0
+  else: ModeNoteGap + 2 + noteMinCells(note)
+
 proc fitNoteCells*(note: string; width: int): string =
   ## The notification in `width` cells: whole when it fits. When it does not
   ## and it carries an ABSOLUTE PATH (`tui_session.describe`'s `<file>:<line>
@@ -169,22 +218,10 @@ proc fitNoteCells*(note: string; width: int): string =
     return ""
   if textCells(note) <= width:
     return fitCells(note, width)
-  var start = -1
-  var i = 0
-  while i < note.len:
-    if note[i] == '/' and (i == 0 or note[i - 1] == ' '):
-      start = i
-      break
-    inc i
-  if start < 0:
+  let (found, before, path, name, after) = notePathParts(note)
+  if not found:
     return fitCells(note, width)
-  var stop = note.find(' ', start)
-  if stop < 0: stop = note.len
-  let path = note[start ..< stop]
   let slash = path.rfind('/')
-  let before = note[0 ..< start]
-  let name = path[slash + 1 .. ^1]
-  let after = note[stop .. ^1]
   # Keep as much of the directory's END as fits beside the rest.
   let spare = width - textCells(before) - textCells(name) - textCells(after) - 2
   var dir = ""
@@ -242,7 +279,7 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   # exactly the kind of arithmetic a sweep finds and three geometries do not.
   var noteRoom = 0
   if note.len > 0:
-    noteRoom = min(textCells(note) + 2, width - textCells(mode) - 4)
+    noteRoom = min(textCells(note) + 2, width - textCells(mode) - ModeNoteGap)
     if noteRoom < 3:
       noteRoom = 0
   let middleRoom = width - textCells(mode) - 3 - noteRoom

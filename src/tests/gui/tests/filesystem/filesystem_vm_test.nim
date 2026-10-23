@@ -1048,6 +1048,89 @@ suite "FilesystemVM a root load that fails or comes back empty (#785)":
 
       dispose()
 
+suite "FilesystemVM a session with no project folder (New File)":
+  ## codetracer-pm issue 2026-10-21 "A New File session's Files pane never
+  ## leaves Loading…": Welcome screen → New File left FILES reading
+  ## "No filesystem loaded yet. Loading…" for good. The spec
+  ## (``GUI/Welcome-And-Sessions/Welcome-Screen.md`` §"New file, and what it
+  ## creates") says the session has no project folder and *"the Files panel
+  ## shows an empty project rather than a tree"*. There is no load to wait
+  ## for — nothing will ever answer one — so the pane must not be in the
+  ## loading state at all, and its empty state must say why it is empty
+  ## (the same "No project folder is open." the Test Results and Constraints
+  ## panes show) rather than claim nothing has been loaded YET.
+
+  test "a folderless session is an empty project, not a load in progress":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+      vm.showNoProjectFolder()
+
+      check vm.loadingState.val == lsIdle
+      check vm.loadError.val == ""
+      check vm.noProjectFolder.val
+      check vm.isEmpty.val
+      check not isShown(findOverlay(panel, "filesystem-loading-overlay"))
+      check not isShown(findOverlay(panel, "filesystem-error-overlay"))
+      let emptyOverlay = findOverlay(panel, "filesystem-empty-overlay")
+      check isShown(emptyOverlay)
+      check emptyOverlay.textContent == FilesystemNoProjectFolderText
+      check FilesystemNoProjectFolderText == "No project folder is open."
+      check findOverlay(panel, "filesystem-tree").children.len == 0
+      check findOverlay(panel, "filesystem").attributes["aria-busy"] == "false"
+
+      dispose()
+
+  test "it replaces a tree another project left in the shared VM":
+    # One FilesystemVM serves every tab of a window (`shared_pane_state`),
+    # so a folderless session must drop whatever tree was there.
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      vm.setRoot(makeSourceFoldersRoot(@[makeEntry("main.nr", path = "src/main.nr")]))
+      check findOverlay(panel, "filesystem-tree").children.len > 0
+
+      vm.showNoProjectFolder()
+
+      check vm.isEmpty.val
+      check findOverlay(panel, "filesystem-tree").children.len == 0
+      check isShown(findOverlay(panel, "filesystem-empty-overlay"))
+
+      dispose()
+
+  test "opening a folder, a failure or a session reset leaves the folderless state":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+      vm.showNoProjectFolder()
+      vm.setRoot(emptySourceFoldersRoot())
+      check not vm.noProjectFolder.val
+      # An opened folder that holds nothing keeps the generic empty state.
+      check findOverlay(panel, "filesystem-empty-overlay").textContent ==
+        FilesystemEmptyStateText
+
+      vm.showNoProjectFolder()
+      vm.failLoad("cannot read /proj: EACCES")
+      check not vm.noProjectFolder.val
+      check not isShown(findOverlay(panel, "filesystem-empty-overlay"))
+
+      vm.showNoProjectFolder()
+      vm.clearRoot()
+      check not vm.noProjectFolder.val
+      check vm.loadingState.val == lsLoading
+
+      vm.showNoProjectFolder()
+      vm.resetToInitial()
+      check not vm.noProjectFolder.val
+      check vm.loadingState.val == lsLoading
+
+      dispose()
+
 # ---------------------------------------------------------------------------
 # The roots of an imported trace's file tree (#785)
 # ---------------------------------------------------------------------------

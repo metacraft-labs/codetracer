@@ -7,7 +7,7 @@
 ## reports the rows it shows (``TraceLogVM.setViewport``), which reads their
 ## locals by window. The rows are the latest tracepoint run's stops: this
 ## module turns the trace service's sessions into ``TraceLogEntry`` rows
-## whenever its results change (``trace.traceResultsChanged``), mounted or
+## whenever its results change (``trace.onTraceResultsChanged``), mounted or
 ## not. The ``TraceLogComponent`` keeps its identity for the layout.
 ## ---------------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ from ../viewmodel/store/types as vmtypes import TraceLogEntry
 from ../viewmodel/viewmodels/trace_log_vm import TraceLogVM, setEntries
 from ../viewmodel/session_vm import SessionViewModel
 import ./panel_host
-from ./trace import traceResultsChanged
+from ./trace import onTraceResultsChanged
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers.
@@ -115,7 +115,7 @@ proc initTraceLogVMFromSession*(vm: TraceLogVM) =
   ## The session's ``TraceLogVM`` is installed: show the runs already made.
   syncTraceLogFromService()
 
-traceResultsChanged = syncTraceLogFromService
+onTraceResultsChanged(syncTraceLogFromService)
 
 method register*(self: TraceLogComponent, api: MediatorWithSubscribers) =
   ## The pane subscribes to nothing: its rows are the session's

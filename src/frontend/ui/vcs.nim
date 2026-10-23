@@ -373,8 +373,63 @@ proc loadChangedFilesForIndex*(self: VCSComponent; cwd: cstring;
 proc getWorkingDirectory(self: VCSComponent): cstring =
   gitWorkingDirectory(self.data)
 
+proc owningSession(self: VCSComponent): ReplaySession =
+  ## The window tab this panel belongs to, or nil when it is in none yet.
+  ##
+  ## Every tab builds its own `VCSComponent` (`session.ui.componentMapping`),
+  ## but `self.data.startOptions` always reads the ACTIVE tab's — and this
+  ## panel's refresh timer keeps running while another tab is shown. A replay
+  ## tab's panel must not decide it has no project folder because a New File
+  ## tab happens to be in front.
+  if self.isNil or self.data.isNil:
+    return nil
+  for session in self.data.sessions:
+    if session.isNil or session.ui.isNil:
+      continue
+    let mapping = session.ui.componentMapping[Content.VCS]
+    if mapping.isNil:
+      continue
+    for _, component in mapping:
+      if component == Component(self):
+        return session
+  nil
+
+proc hasNoProjectFolder(self: VCSComponent): bool =
+  ## Does this panel's OWN session have no project folder (New File)?
+  let session = self.owningSession()
+  if session.isNil:
+    sessionHasNoProjectFolder(self.data)
+  else:
+    startOptionsHaveNoProjectFolder(session.startOptions)
+
+proc showNoProjectFolder(self: VCSComponent) =
+  ## The session has no project folder (Welcome screen → New File): drop
+  ## every repository-derived value, so `syncLegacyVCSIntoVM` hands the
+  ## ViewModel the "No project folder is open." absence and nothing else.
+  ## The ViewModel side of the same state is `VCSVM.setNoProjectFolder`.
+  self.isGitRepo = false
+  self.errorMessage = cstring(NoProjectFolderText)
+  self.currentBranch = cstring""
+  self.branches = @[]
+  self.commits = @[]
+  self.changedFiles = @[]
+  self.workingTreeChanges = @[]
+  self.selectedCommitIndices = @[]
+  self.lastClickedCommitIndex = -1
+  self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+  self.branchDropdownOpen = false
+
 proc refreshVCSData*(self: VCSComponent) =
   ## Reload all VCS data from git.
+  # NO PROJECT FOLDER, NO GIT. A New File session's folder is empty, and an
+  # empty working directory reaches git as "the platform's default" — the
+  # process's own directory — so the panel drew the history of whatever
+  # repository CodeTracer was launched from (codetracer-pm issue 2026-10-21).
+  # `Welcome-Screen.md` §"New file, and what it creates" settles what this
+  # session shows instead: the same absence as Test Results and Constraints.
+  if self.hasNoProjectFolder():
+    self.showNoProjectFolder()
+    return
   let cwd = self.getWorkingDirectory()
   if not isGitRepository(cwd):
     self.isGitRepo = false
@@ -447,6 +502,17 @@ proc debouncedRefreshGitData(self: VCSComponent) =
   ## refresh, start a 1-second debounce window during which further refresh
   ## requests are ignored.
   if self.debounceActive:
+    return
+
+  # A session with no project folder has no repository to watch: running the
+  # snapshot below would read the launch directory's. If this panel still
+  # shows a repository (it watched one before the session became folderless),
+  # replace it with the absence once.
+  if self.hasNoProjectFolder():
+    if self.isGitRepo:
+      self.lastStatusSnapshot = cstring""
+      self.refreshVCSData()
+      data.redraw()
     return
 
   let cwd = self.getWorkingDirectory()
@@ -665,6 +731,22 @@ proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   # leave a stale diff behind.
   vm.setUnifiedDiff(false, @[])
   vm.setHunkState(@[], false, false)
+
+proc syncSessionVCSIntoVM*(session: ReplaySession) =
+  ## Hand the shared `VCSVM` (one per component id, so one for every tab)
+  ## what `session`'s OWN VCS panels hold. Called when a tab is entered again
+  ## (`session_switch.syncSessionVCSHook`), so a tab shows its own
+  ## repository, or its own "No project folder is open.", rather than
+  ## whatever the tab shown before it last wrote.
+  if session.isNil or session.ui.isNil:
+    return
+  let mapping = session.ui.componentMapping[Content.VCS]
+  if mapping.isNil:
+    return
+  for _, component in mapping:
+    if component.isNil:
+      continue
+    VCSComponent(component).syncLegacyVCSIntoVM()
 
 proc openUnifiedDiffTab*(self: VCSComponent; target: string) =
   ## Open (or focus) a dedicated editor-area tab showing the unified diff for

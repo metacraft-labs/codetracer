@@ -437,6 +437,16 @@ proc move*(s: var ContextMenuState; delta: int) =
       s.selected = i
       return
 
+proc moveToEnd*(s: var ContextMenuState; last: bool) =
+  ## Home / End: to the first (or, with `last`, the final) ENABLED entry.
+  ## Not `move(±n)`: a step of more than the entry count wraps to an
+  ## arbitrary row, and Nim's `mod` keeps the sign of a negative operand.
+  let n = s.menu.entries.len
+  if not s.open or n == 0:
+    return
+  s.selected = -1
+  move(s, if last: -1 else: 1)
+
 proc hover*(s: var ContextMenuState; index: int) =
   ## The pointer is on entry `index` (any entry: a disabled one is still
   ## where the pointer is, but it is never chosen).

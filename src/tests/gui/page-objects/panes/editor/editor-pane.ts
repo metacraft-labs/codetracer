@@ -679,6 +679,41 @@ export class EditorPane {
   }
 
   /**
+   * Returns, per loop, the iterations whose values are currently rendered in
+   * this editor's flow, read from the loop step containers
+   * (`flow-loop-step-container-<loop>-<iteration>`) and from the `iteration`
+   * attribute of every value box inside them. Loop `0` is the pseudo-loop of
+   * the code outside any loop and is left out.
+   *
+   * The flow shows one iteration of a loop at a time, so after an iteration is
+   * selected each loop maps to exactly that iteration. A second entry means a
+   * previously shown iteration's values were left on screen.
+   */
+  async renderedLoopIterations(): Promise<Record<string, number[]>> {
+    return await this.root.evaluate((root: Element) => {
+      const result: Record<string, number[]> = {};
+      const add = (loop: string, iteration: number): void => {
+        const seen = (result[loop] ??= []);
+        if (!seen.includes(iteration)) {
+          seen.push(iteration);
+          seen.sort((a, b) => a - b);
+        }
+      };
+      for (const container of Array.from(
+        root.querySelectorAll('[id^="flow-loop-step-container-"]'),
+      )) {
+        const match = /^flow-loop-step-container-(\d+)-(\d+)$/.exec(container.id);
+        if (!match || match[1] === "0") continue;
+        add(match[1], Number(match[2]));
+        for (const box of Array.from(container.querySelectorAll("[iteration]"))) {
+          add(match[1], Number(box.getAttribute("iteration")));
+        }
+      }
+      return result;
+    });
+  }
+
+  /**
    * Gathers all flow values currently rendered in the editor.
    */
   async flowValues(): Promise<FlowValue[]> {

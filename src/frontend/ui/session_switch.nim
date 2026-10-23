@@ -147,6 +147,27 @@ proc callInitLayoutSafe(config: GoldenLayoutResolvedConfig,
 # tab's own `EditorService` — the source of truth for its tree — and because
 # the sync also points `filesystem.filesystemComponentRef` back at it, so a
 # later `filesystem-loaded` refresh lands in the right tab.
+#
+# VCS IS SHARED TOO, BY COMPONENT ID: `vcs.vcsVMInstances` holds one `VCSVM`
+# per id, and every tab's panel is id 0, so all tabs draw the same ViewModel.
+# It is re-synced the same way, from the entered tab's own `VCSComponent`,
+# which keeps that tab's branch, history and working tree. Measured on the
+# desktop (2026-10-22, `new_file_with_open_replay.spec.ts`): replay open, "+",
+# New File; the edit tab's "No project folder is open." stayed in the replay
+# tab's VCS pane after switching back. Before New File stopped running git in
+# the launch directory, both tabs happened to show the same repository, which
+# hid this.
+#
+# Through a hook rather than an import: `ui/vcs.nim` imports
+# `agent_activity`, whose own imports reach back here, so importing it from
+# this module breaks the compile on an import cycle. `ui_js.nim` imports both
+# and installs `vcs.syncSessionVCSIntoVM` at startup.
+
+var syncSessionVCSHook*: proc(session: ReplaySession) = nil
+  ## Re-syncs `session`'s own VCS panels into the shared `VCSVM` (installed
+  ## by `ui_js.nim`: `vcs.syncSessionVCSIntoVM`). Nil until installed, in
+  ## which case the VCS pane keeps what it showed — the behaviour before the
+  ## hook existed.
 
 proc saveSharedPanes(session: ReplaySession) =
   ## Keep what `session` shows in the shared panes, as it is left.
@@ -175,6 +196,8 @@ proc restoreSharedPanes(session: ReplaySession) =
           continue
         filesystem.syncLegacyFilesystemIntoVM(FilesystemComponent(component))
         break
+    if not syncSessionVCSHook.isNil:
+      syncSessionVCSHook(session)
   # After the re-sync, which MERGES the tree's opened folders into the
   # expansion set: the copy then replaces that set with the tab's own.
   shared_pane_state.restoreSharedPanes(

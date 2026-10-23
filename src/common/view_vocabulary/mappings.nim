@@ -293,10 +293,13 @@ func webMapping*(k: ViewKind): Mapping =
     "the row complete is that the medium answers the same contract")
   of pkSelect: m(msPartial, "<select> / <option>",
     "MEASURED: a closed, focused <select> COMMITS on Up / Down, Home / End " &
-    "and type-ahead, with no highlight step. The entry's highlight/commit " &
-    "split exists natively only inside the opened popup, which a page can " &
-    "neither style nor read, so `open` and `highlight` are the binding's, " &
-    "and it prevents those defaults. This row used to say the native element " &
+    "and type-ahead, with no highlight step, on Linux and Windows; on macOS " &
+    "Up / Down OPEN the popup instead, Home / End do nothing, and " &
+    "type-ahead still commits. Neither is the entry's split, and the " &
+    "binding prevents the union of both platforms' keys. The entry's " &
+    "highlight/commit split exists natively only inside the opened popup, " &
+    "which a page can neither style nor read, so `open` and `highlight` " &
+    "are the binding's, and it prevents those defaults. This row used to say the native element " &
     "\"commits on change and dismisses on Escape, which is the entry's " &
     "highlight/commit split\" — true of the popup, false of the closed " &
     "control; the browser suite found the difference as a real defect (Down " &

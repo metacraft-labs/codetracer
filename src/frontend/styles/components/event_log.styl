@@ -660,6 +660,58 @@ label
     .eventLog-cell.direct-location-rr-ticks
       overflow: visible !important
 
+// The list (HSF-D6): the IsoNim view's own scroller, which replaced
+// DataTables' Scroller. The scroll area is as tall as the whole (filtered)
+// list (`listHeight`) and the held window sits `loadedStart` rows down in it
+// (`windowOffset`), so the scrollbar spans the log.
+.eventLog
+  .eventLog-dense-table
+    display: flex
+    flex-direction: column
+    position: relative
+
+  // `flex-basis: 0`: the body takes the table's height whatever it holds.
+  // Sized by its content (`auto`), an empty log measured 0px tall, so the
+  // pane reported no rows, asked for none, and stayed empty.
+  .eventLog-scroll-body
+    flex: 1 1 0
+    min-height: 0
+    overflow-y: auto
+    overflow-x: hidden
+
+  // The empty log's text sits over the list rather than taking its height.
+  > .eventLog-dense-table > .dt-empty
+    position: absolute
+    top: 2em
+    left: 0
+    right: 0
+    pointer-events: none
+
+  .eventLog-scroll-space
+    position: relative
+    min-height: 100%
+
+  .eventLog-rows
+    position: absolute
+    top: 0
+    left: 0
+    right: 0
+    border-collapse: collapse
+
+  .eventLog-row
+    cursor: pointer
+
+    &.event-selected, &.selected
+      background-color: colors-ui-surface-primary-secondary-hover
+
+    &.eventLog-expanded .eventLog-text
+      max-height: 20ch
+      overflow: auto
+      white-space: pre-wrap
+
+  .row-expander-none
+    display: none
+
 .paging-content
   display: flex
   flex-direction: column
