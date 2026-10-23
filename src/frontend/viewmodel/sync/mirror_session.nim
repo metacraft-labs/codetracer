@@ -52,6 +52,14 @@ type
       ## The last viewport this mirror reported for each pane, by pane name
       ## (the `args` of a `viewport` / `set` action): sent again to every
       ## primary the mirror starts to follow (`switchTo`).
+    unsentViewOps: seq[ViewOpEnvelope]
+      ## View operations made in this mirror's panes before it followed any
+      ## session — a `ct host` page is usable before the server's session
+      ## exists, which is made at the replay's first stop. Sent to the first
+      ## session it follows (`switchTo`), after its subscription: the snapshot
+      ## answering that subscription replaces this mirror's document, and these
+      ## are what the session's next batch brings back (codetracer-pm
+      ## issues/2026-10-22-a-watch-typed-in-the-browser-never-produces-a-row.md).
     disposeRoot: proc()
 
 proc inertBackend*(): BackendService =
@@ -88,6 +96,9 @@ proc switchTo*(m: MirrorSession; sessionId: string) =
   if not m.viewports.isNil:
     for _, args in m.viewports.pairs:
       m.channel.send(serializeAction("viewport", "set", args, sessionId))
+  for op in m.unsentViewOps:
+    m.channel.send(serializeAction("collab", "viewop", op.toJson, sessionId))
+  m.unsentViewOps = @[]
 
 proc onHostMessage(m: MirrorSession; msg: JsonNode) =
   if msg.isNil or msg.kind != JObject:
@@ -181,7 +192,9 @@ proc createMirrorSession*(
     core.collaborationEnabled = true
     core.publishLocalViewOp = proc(op: ViewOpEnvelope): bool =
       if m.following.len == 0:
-        return false
+        # Held for the first session followed (`unsentViewOps`), not dropped.
+        m.unsentViewOps.add op
+        return true
       m.channel.send(serializeAction("collab", "viewop", op.toJson,
                                      m.following))
       true

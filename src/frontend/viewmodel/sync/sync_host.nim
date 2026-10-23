@@ -48,6 +48,10 @@ type
     pinned: string
       ## The one session this mirror may follow; "" when it follows the
       ## host's active session.
+    actorTag: string
+      ## This attachment's own name for the view operations it relays
+      ## (`namespacedViewOp`), unique among every attachment this host has
+      ## served.
 
   SyncHost* = ref object
     sessions: OrderedTable[string, HostedSession]
@@ -57,6 +61,8 @@ type
     schedule: Scheduler
     actionsApplied*: int
       ## Actions that ran on a primary, for tests and diagnostics.
+    attachments: int
+      ## How many mirrors have attached, ever: the source of `actorTag`.
 
 proc newSyncHost*(schedule: Scheduler = nil): SyncHost =
   ## A host with no sessions. `schedule` decides when each session's batches
@@ -70,6 +76,32 @@ proc primary*(host: SyncHost; id: string): SessionViewModel =
 
 proc publisher*(host: SyncHost; id: string): SyncPublisher =
   if host.sessions.hasKey(id): host.sessions[id].publisher else: nil
+
+proc namespacedViewOp(a: Attached; msg: JsonNode): JsonNode =
+  ## A mirror's `collab` / `viewop` action, its operation renamed into this
+  ## attachment's namespace: `<tag>/<actor>` and `<tag>/<actor>:<seq>`.
+  ##
+  ## A COLLABORATION CORE'S NAMES ARE ONLY UNIQUE IN ITS OWN PROCESS. An
+  ## operation is `<actor>:<sequence>`, and a session's actor is
+  ## `local-actor-<storeId>`, a counter of the process: a `ct host` page's
+  ## first session and the server's are both `local-actor-1`, both counting
+  ## from 1, and so are a reloaded page and the page before it, and two
+  ## webviews of one extension host. The primary's document refuses an
+  ## operation whose name it has applied (`reducer.applyViewOp`, "duplicate"),
+  ## so the page's click on the Watches tab, the same `local-actor-1:1` as the
+  ## server's own call-trace selection, was dropped without a trace
+  ## (codetracer-pm issues/2026-10-22-a-watch-typed-in-the-browser-never-
+  ## produces-a-row.md). The host knows which attachment sent an operation, so
+  ## it is the host that makes the name unique. A mirror's resent operation
+  ## keeps its name in its namespace, so it is still recognised as applied.
+  result = msg.copy
+  let args = result{"args"}
+  if args.isNil or args.kind != JObject:
+    return
+  for field in ["actorId", "opId"]:
+    let node = args{field}
+    if not node.isNil and node.kind == JString and node.getStr.len > 0:
+      args[field] = %(a.actorTag & "/" & node.getStr)
 
 proc mayFollow(a: Attached; id: string): bool =
   a.pinned.len == 0 or a.pinned == id
@@ -111,8 +143,10 @@ proc onMirrorMessage(host: SyncHost; a: Attached; msg: JsonNode) =
     var id = msg{"session"}.getStr("")
     if id.len == 0:
       id = a.following
+    let relayed =
+      if msg{"vm"}.getStr("") == "collab": a.namespacedViewOp(msg) else: msg
     if a.mayFollow(id) and host.sessions.hasKey(id) and
-       host.sessions[id].session.applyAction(msg):
+       host.sessions[id].session.applyAction(relayed):
       inc host.actionsApplied
   else:
     discard
@@ -121,7 +155,9 @@ proc attach*(host: SyncHost; channel: SyncChannel; follow = "") =
   ## Serve the mirror at the other end of `channel`. With `follow` it follows
   ## that session only (PINNED); without, the host's active one. It is told
   ## which, when that session is hosted.
-  let a = Attached(channel: channel, pinned: follow)
+  inc host.attachments
+  let a = Attached(channel: channel, pinned: follow,
+                   actorTag: "mirror-" & $host.attachments)
   host.attached.add a
   channel.setHandler(proc(msg: JsonNode) = host.onMirrorMessage(a, msg))
   let id = host.sessionFor(a)

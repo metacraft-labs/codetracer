@@ -83,6 +83,23 @@ proc applyEntries(sub: SyncSubscriber; entries: JsonNode) =
     if s.read() != value:
       s.write(value)
 
+proc loadViewDocument(sub: SyncSubscriber; msg: JsonNode) =
+  ## Replace the mirror's shared view document with the primary's, when
+  ## `msg` carries one.
+  ##
+  ## THE MIRROR'S DOCUMENT FOLLOWS THE PRIMARY'S, not only its view signals.
+  ## The mirror projects its own document into its panes on its next view
+  ## operation, and reads it to remove or reorder a watch; one that only a
+  ## snapshot updated put the panes back to the snapshot's view (codetracer-pm
+  ## issues/2026-10-22-a-watch-typed-in-the-browser-never-produces-a-row.md).
+  let collab = msg{"collab"}
+  if collab.isNil or collab.kind != JObject or sub.collabCore.isNil:
+    return
+  try:
+    sub.collabCore.loadJoinSnapshot(parseSharedSessionSnapshot(collab))
+  except CatchableError:
+    discard
+
 proc onMessage*(sub: SyncSubscriber; msg: JsonNode): bool =
   ## Apply `msg` if it is the next thing this mirror needs. `true` when it
   ## was applied. Message types it does not know are ignored, so an older
@@ -104,13 +121,7 @@ proc onMessage*(sub: SyncSubscriber; msg: JsonNode): bool =
     # The view state first: loading it projects the chosen tab, the expanded
     # rows and the watches into the panes, and the signal entries written
     # after it are then the primary's, whatever the projection set.
-    let collab = msg{"collab"}
-    if not collab.isNil and collab.kind == JObject and
-       not sub.collabCore.isNil:
-      try:
-        sub.collabCore.loadJoinSnapshot(parseSharedSessionSnapshot(collab))
-      except CatchableError:
-        discard
+    sub.loadViewDocument(msg)
     sub.applyEntries(entries)
     sub.revision = revision
     sub.inStep = true
@@ -124,6 +135,9 @@ proc onMessage*(sub: SyncSubscriber; msg: JsonNode): bool =
     sub.inStep = false
     inc sub.refused
     return false
+  # A batch carries the view document when it changed (`sync_publisher`
+  # `collabPending`), loaded first for the same reason as a snapshot's.
+  sub.loadViewDocument(msg)
   sub.applyEntries(entries)
   sub.revision = revision
   inc sub.applied

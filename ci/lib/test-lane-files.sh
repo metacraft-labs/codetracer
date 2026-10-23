@@ -1071,6 +1071,10 @@ test_lane_files() {
 		# off a real layout before and after a zoom (#849). Geometry needs a
 		# browser that lays out; jsdom answers 0 for every rect.
 		echo src/frontend/tests/calltrace_guides_chromium_test.nim
+		# A programmatic editor focus (`ui/editor_focus`, `utils.focusLine`)
+		# leaves the keyboard in a text field being typed in. Where the
+		# keyboard goes is decided only by a browser.
+		echo src/frontend/tests/editor_focus_chromium_test.nim
 		;;
 
 	main-process)

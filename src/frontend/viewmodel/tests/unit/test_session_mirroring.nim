@@ -337,6 +337,204 @@ suite "a primary and its mirror":
       host.dispose()
       done()
 
+  test "a tab and a watch chosen before the mirror's snapshot survive its next view operation":
+    # codetracer-pm issues/2026-10-22-a-watch-typed-in-the-browser-never-
+    # produces-a-row.md, measured under `ct host`: the page chose the Watches
+    # tab and typed a watch while its first snapshot was on the wire. The
+    # snapshot carried the primary's view document from BEFORE those
+    # operations, and replaced the page's; the batches after it carried the
+    # primary's answer as signals, so the pane looked right — but the page's
+    # document stayed the old one, and the next view operation on the page
+    # projected it: the pane went back to Locals with no watches, and the
+    # primary, whose own tab never changed, never sent it again. The second
+    # watch then landed in a tab nobody was looking at.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      # The host's messages to the mirror are HELD, so the test decides
+      # when each arrives; the mirror's reach the host at once.
+      var held: seq[JsonNode]
+      var mirrorEnd: SyncChannel
+      let toMirror = newSyncChannel(proc(msg: JsonNode) = held.add msg.copy)
+      mirrorEnd = newSyncChannel(proc(msg: JsonNode) =
+        toMirror.deliver(msg.copy))
+      proc deliverHeld() =
+        while held.len > 0 or queued.len > 0:
+          let run = queued
+          queued = @[]
+          for callback in run: callback()
+          let msgs = held
+          held = @[]
+          for msg in msgs: mirrorEnd.deliver(msg)
+      let mirror = createMirrorSession(mirrorEnd)
+      host.attach(toMirror)
+      # `activate` reaches the mirror, which subscribes; its snapshot is
+      # held, as it was on the wire.
+      while held.len > 0 and held[0]{"type"}.getStr != "signal-snapshot":
+        mirrorEnd.deliver(held[0])
+        held.delete(0)
+      check held.len == 1   # the snapshot, not yet delivered
+      let svm = mirror.session.stateVM
+      svm.selectTab(stWatches)
+      svm.addWatch("initial_shield")
+      deliverHeld()
+      ck primary.stateVM.activeTab.val == stWatches
+      ck primary.stateVM.watchExpressions.val == @["initial_shield"]
+      ck svm.activeTab.val == stWatches
+      ck svm.watchExpressions.val == @["initial_shield"]
+      # Any later view operation on the mirror — here a row expanded.
+      svm.toggleExpand("asteroid_masses_positive")
+      deliverHeld()
+      ck primary.stateVM.expandedPaths.val.contains("asteroid_masses_positive")
+      ck svm.activeTab.val == stWatches
+      ck svm.watchExpressions.val == @["initial_shield"]
+      # And the next watch joins the first, in the tab being looked at.
+      svm.addWatch("asteroid_masses_positive[1]")
+      deliverHeld()
+      ck primary.stateVM.watchExpressions.val ==
+         @["initial_shield", "asteroid_masses_positive[1]"]
+      ck svm.watchExpressions.val ==
+         @["initial_shield", "asteroid_masses_positive[1]"]
+      ck svm.activeTab.val == stWatches
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a tab and a watch chosen before the mirror follows a session reach it":
+    # The same report, the other order measured under `ct host`: the page
+    # is on screen, and its tab strip and watch input usable, BEFORE the
+    # server's session exists (it is made at the replay's first stop) and so
+    # before the page follows it. The operations were applied to the page's
+    # own document and sent nowhere (`publishLocalViewOp` had no session to
+    # name); the snapshot that followed replaced that document, and the
+    # Watches tab and the watch were gone — from the page AND from the
+    # session, which had never heard of them.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      let mirror = createMirrorSession(link.b)
+      link.settle()
+      check mirror.following.len == 0   # no session is hosted yet
+      let svm = mirror.session.stateVM
+      svm.selectTab(stWatches)
+      svm.addWatch("initial_shield")
+      ck svm.activeTab.val == stWatches   # shown at once, as typed
+      host.addPrimary("s1", primary)
+      link.settle()
+      ck mirror.following == "s1"
+      ck primary.stateVM.activeTab.val == stWatches
+      ck primary.stateVM.watchExpressions.val == @["initial_shield"]
+      ck svm.activeTab.val == stWatches
+      ck svm.watchExpressions.val == @["initial_shield"]
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a mirror's view operation is not taken for one the primary already applied":
+    # The same report, a third time under `ct host`: the page's click on the
+    # Watches tab reached the server's session and was DROPPED as a
+    # duplicate. A collaboration core names its operations
+    # `<actor>:<sequence>`, and the actor is `local-actor-<storeId>` — a
+    # counter of the PROCESS, so the page's first session and the server's
+    # first session are both `local-actor-1`, and both number their
+    # operations from 1. The server had made a view operation of its own
+    # first (the call trace following the stop), and the page's tab, the
+    # same `local-actor-1:1`, was refused as already applied. The two cores
+    # are given that same actor here, as two processes give it to them.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      let mirror = createMirrorSession(link.b)
+      mirror.session.collabCore.localActorId =
+        primary.collabCore.localActorId
+      link.settle()
+      # The primary's own view operation, first.
+      primary.stateVM.toggleExpand("asteroid_masses_positive")
+      link.settle()
+      mirror.session.stateVM.selectTab(stWatches)
+      mirror.session.stateVM.addWatch("initial_shield")
+      link.settle()
+      ck primary.stateVM.activeTab.val == stWatches
+      ck primary.stateVM.watchExpressions.val == @["initial_shield"]
+      ck mirror.session.stateVM.activeTab.val == stWatches
+      ck mirror.session.stateVM.watchExpressions.val == @["initial_shield"]
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a reloaded page's view operations reach the session it left":
+    # `hosted_primary`: THE SESSION OUTLIVES CONNECTIONS, and a reloaded page
+    # is a new mirror whose collaboration core starts its sequence again —
+    # in a new page, with the same `local-actor-1` as the page before it.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let first = newInMemoryLink()
+      host.attach(first.a)
+      let before = createMirrorSession(first.b)
+      first.settle()
+      before.session.stateVM.addWatch("initial_shield")
+      first.settle()
+      let actor = before.session.collabCore.localActorId
+      host.detach(first.a)
+      before.dispose()
+      let second = newInMemoryLink()
+      host.attach(second.a)
+      let after = createMirrorSession(second.b)
+      after.session.collabCore.localActorId = actor
+      second.settle()
+      ck after.session.stateVM.watchExpressions.val == @["initial_shield"]
+      after.session.stateVM.addWatch("asteroid_masses_positive[1]")
+      second.settle()
+      ck primary.stateVM.watchExpressions.val ==
+         @["initial_shield", "asteroid_masses_positive[1]"]
+      ck after.session.stateVM.watchExpressions.val ==
+         @["initial_shield", "asteroid_masses_positive[1]"]
+      after.dispose()
+      host.dispose()
+      done()
+
+  test "a watch another mirror added can be removed on this one":
+    # Variable-State-Pane.md: watch expressions "add, edit, remove", in every
+    # front-end. A removal names the watch's live add tags, which the mirror
+    # reads from ITS view document (`liveWatchForExpression`); a document that
+    # only a snapshot ever updated had no such watch, and the removal was a
+    # silent no-op.
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let linkA = newInMemoryLink()
+      host.attach(linkA.a)
+      let mirrorA = createMirrorSession(linkA.b)
+      linkA.settle()
+      let linkB = newInMemoryLink()
+      host.attach(linkB.a)
+      let mirrorB = createMirrorSession(linkB.b)
+      linkB.settle()
+      mirrorB.session.stateVM.addWatch("initial_shield")
+      linkB.settle()
+      linkA.settle()
+      ck primary.stateVM.watchExpressions.val == @["initial_shield"]
+      ck mirrorA.session.stateVM.watchExpressions.val == @["initial_shield"]
+      mirrorA.session.stateVM.removeWatch("initial_shield")
+      linkA.settle()
+      linkB.settle()
+      ck primary.stateVM.watchExpressions.val.len == 0
+      ck mirrorA.session.stateVM.watchExpressions.val.len == 0
+      ck mirrorB.session.stateVM.watchExpressions.val.len == 0
+      mirrorA.dispose()
+      mirrorB.dispose()
+      host.dispose()
+      done()
+
   test "a viewport set on the mirror reaches the primary":
     createRoot proc(done: proc()) =
       let (primary, _) = newPrimary()

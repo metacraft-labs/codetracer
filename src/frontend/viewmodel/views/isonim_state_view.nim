@@ -773,10 +773,21 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
             # ``ui/origin_badge.nim::renderBadgeDom`` would emit. We
             # build it via the DSL so both Mock + Web renderers stay
             # in lock-step and the headless tests can walk the tree.
+            #
+            # THE BADGE DOES NOT REPEAT THE ROW'S `data-variable-name`.
+            # That attribute names a ROW (the State pane's semantic
+            # selector, Live-HCR-GUI-E2E-Test-Design.md "Semantic Test
+            # Selectors"), and a badge carrying it too made every row
+            # two elements by that name: a reader that collected the
+            # rows by it read the badge's empty text for the row's, and
+            # a watch that had been answered and drawn was reported as
+            # "never produced a row" (codetracer-pm issues/2026-10-22-a-
+            # watch-typed-in-the-browser-never-produces-a-row.md). The
+            # badge is found inside its row: `[data-variable-name=x]
+            # button.ct-origin-badge`.
             button(class = badgeClassForRow(vm, item()),
                    `aria-label` = badgeAriaForRow(vm, item()),
                    `data-token` = badgeTokenForRow(vm, item()),
-                   `data-variable-name` = item().name,
                    display = badgeDisplay(vm, item()),
                    onclick = onBadgeClick):
               span(class = "ct-origin-badge-icon"):

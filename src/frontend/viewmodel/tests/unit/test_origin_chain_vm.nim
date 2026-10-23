@@ -668,13 +668,27 @@ proc findAllByClass(node: MockNode; cls: string): seq[MockNode] =
   for child in node.children:
     result.add(findAllByClass(child, cls))
 
+proc findRowNamed(node: MockNode; rowName: string): MockNode =
+  ## The row whose ``data-variable-name`` is ``rowName`` — the attribute
+  ## names the ROW and nothing inside it.
+  if node.kind == mnkElement and
+      node.attributes.getOrDefault("data-variable-name", "") == rowName:
+    return node
+  for child in node.children:
+    let found = findRowNamed(child, rowName)
+    if found != nil:
+      return found
+  nil
+
 proc findBadgeForRow(panel: MockNode; rowName: string): MockNode =
   ## Return the badge button attached to the row identified by
-  ## ``rowName``. Returns nil when no badge is found.
-  for badge in findAllByClass(panel, "ct-origin-badge"):
-    if badge.attributes.getOrDefault("data-variable-name", "") == rowName:
-      return badge
-  nil
+  ## ``rowName`` — the row's own badge, found inside the row, which is how
+  ## the Playwright page object finds it (`originChainPane.badge`). Returns
+  ## nil when no badge is found.
+  let row = findRowNamed(panel, rowName)
+  if row.isNil:
+    return nil
+  findByClass(row, "ct-origin-badge")
 
 proc visibleBadgeCount(panel: MockNode): int =
   ## Count badge buttons whose ``display`` style is not ``none`` —

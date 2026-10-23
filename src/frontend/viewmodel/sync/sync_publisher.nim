@@ -21,6 +21,10 @@
 ##   {"type": "signal-batch",    "session": id, "revision": n, "batch": [{"key", "value"}, …]}
 ##   {"type": "signal-snapshot", "session": id, "revision": n, "batch": [{"key", "value"}, …]}
 ##
+## Both carry `"collab"`, the session's shared VIEW DOCUMENT (the chosen tabs,
+## the expanded rows, the watches), when there is one: a snapshot always, a
+## batch when the document changed since the last batch. See `collabPending`.
+##
 ## Works on both the C and JS backends.
 
 import std/[json, tables]
@@ -28,7 +32,7 @@ import std/[json, tables]
 import isonim/core/[computation, owner]
 
 import ../session_vm
-import ../collab/[codec, session_core]
+import ../collab/[codec, session_core, types]
 import synced_signals
 
 type
@@ -42,6 +46,19 @@ type
       ## The session's shared view state (chosen tabs, expanded rows,
       ## watches), sent whole with every snapshot: it is a document, not a
       ## set of signals, and the panes' view signals are projections of it.
+    collabPending: bool
+      ## The document changed since the last batch, which therefore carries it.
+      ##
+      ## A MIRROR'S DOCUMENT HAS TO FOLLOW THE PRIMARY'S, not only its view
+      ## signals. The mirror projects its own document into its panes on every
+      ## view operation it makes (`dispatchLocalViewOp`), and reads it to
+      ## remove or reorder a watch (`liveWatchForExpression`). When only a
+      ## snapshot carried the document, a mirror whose snapshot left the
+      ## primary before the mirror's own operations were applied there kept
+      ## that older document for good: the batches set its panes right, and
+      ## its next view operation set them back (codetracer-pm issues/
+      ## 2026-10-22-a-watch-typed-in-the-browser-never-produces-a-row.md —
+      ## under `ct host` the State pane fell back to Locals with no watches).
     revision*: int
       ## The revision of the last batch published (0: none yet).
     publishProc: proc(msg: JsonNode)
@@ -67,15 +84,19 @@ proc flush*(pub: SyncPublisher) =
   ## Publish what changed since the last batch, as one batch. Nothing is sent
   ## when nothing changed.
   pub.scheduled = false
-  if pub.disposed or pub.pending.len == 0:
+  if pub.disposed or (pub.pending.len == 0 and not pub.collabPending):
     return
   var batch = newJArray()
   for key, value in pub.pending:
     batch.add %*{"key": key, "value": value}
   pub.pending.clear()
   inc pub.revision
-  pub.publishProc(%*{"type": "signal-batch", "session": pub.sessionId,
-                     "revision": pub.revision, "batch": batch})
+  var msg = %*{"type": "signal-batch", "session": pub.sessionId,
+               "revision": pub.revision, "batch": batch}
+  if pub.collabPending and not pub.collabCore.isNil:
+    msg["collab"] = pub.collabCore.joinSnapshot.toJson
+  pub.collabPending = false
+  pub.publishProc(msg)
 
 proc snapshot*(pub: SyncPublisher): JsonNode =
   ## Every mirrored signal at the current revision. Pending changes are
@@ -87,6 +108,12 @@ proc snapshot*(pub: SyncPublisher): JsonNode =
   if not pub.collabCore.isNil:
     result["collab"] = pub.collabCore.joinSnapshot.toJson
 
+proc scheduleFlush(pub: SyncPublisher) =
+  ## Cut a batch at the end of this turn, once however many changes ask.
+  if not pub.scheduled:
+    pub.scheduled = true
+    pub.schedule(proc() = pub.flush())
+
 proc observe(pub: SyncPublisher; signal: SyncedSignal) =
   ## One effect per signal. A proc of its own, not a closure built in the
   ## caller's loop: Nim closures created in a loop share the loop's
@@ -94,9 +121,7 @@ proc observe(pub: SyncPublisher; signal: SyncedSignal) =
   createEffect proc() =
     let value = signal.read()
     pub.pending[signal.key] = value
-    if not pub.scheduled:
-      pub.scheduled = true
-      pub.schedule(proc() = pub.flush())
+    pub.scheduleFlush()
 
 proc createSyncPublisher*(session: SessionViewModel; sessionId: string;
                           publish: proc(msg: JsonNode);
@@ -120,9 +145,20 @@ proc createSyncPublisher*(session: SessionViewModel; sessionId: string;
     pub.disposeRoot = dispose
     for signal in pub.registry.signals:
       pub.observe(signal)
+  # Every change to the view document — an operation of this process, or a
+  # mirror's applied here — is sent with the next batch. The callback runs
+  # once at installation, which, like the effects' first readings, is the
+  # snapshot's business and is cleared below.
+  if not pub.collabCore.isNil:
+    pub.collabCore.addProjectionCallback(proc(state: SharedSessionViewState) =
+      if pub.disposed:
+        return
+      pub.collabPending = true
+      pub.scheduleFlush())
   # The effects' first runs recorded every signal's initial value. That is
   # the snapshot's job, not a batch's: a mirror attaches with `snapshot`.
   pub.pending.clear()
+  pub.collabPending = false
   pub.scheduled = false
   pub
 

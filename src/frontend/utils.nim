@@ -3,7 +3,7 @@ import
   kdom, dom,
   types, lang,
   lib / [ logging, monaco_lib, jslib ],
-  ui / auto_hide
+  ui / [auto_hide, editor_focus]
 
 import viewmodel / viewmodels / editor_gutter_lanes
 from viewmodel / viewmodels / menu_vm import newMenuVM
@@ -1618,7 +1618,10 @@ const NO_COLUMN* = 0
 
 proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
   ## Move the caret to ``line`` (and ``col`` when given), scroll it into view
-  ## and focus the editor.
+  ## and focus the editor — unless the user is typing in a text field outside
+  ## it, which keeps the keyboard (`ui/editor_focus`). This runs on its own
+  ## schedule (the first stop's editor tab calls it from a timer once Monaco
+  ## exists), so it must not take keystrokes meant for, say, the watch box.
   ##
   ## The column is threaded through for build-error navigation: a diagnostic
   ## carries a column and landing on the start of the line instead of on the
@@ -1626,9 +1629,7 @@ proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
   ## line the error is on". Monaco columns are 1-based, which is also how the
   ## compilers this feature reads report them, so the value passes straight
   ## through.
-  editor.monacoEditor.revealLineInCenter(line)
-  editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: col))
-  editor.monacoEditor.focus()
+  revealLineAndFocus(editor.monacoEditor.toJs, line, col)
 
 proc sleepMs*(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
 
