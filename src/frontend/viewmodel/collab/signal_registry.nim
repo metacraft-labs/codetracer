@@ -384,7 +384,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # intent, so a peer must receive them from the backend owner as a set and
   # never merge them.
   entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks", "styledLines",
-                             "layoutWindow", "windowReturns", "windowPath",
+                             "layoutWindow", "layoutWindows", "windowReturns", "windowPath",
                              "windowFunction"],
     vscBackendAuthoritative,
     "The loaded flow window: backend loop array, the loop picked from it, the tick it was loaded for, and its per-line facts.")

@@ -175,6 +175,11 @@ type
       ## Decoded here once, so a consumer that draws its own overlay (a web
       ## page, BlockTracer) does not keep a second decoder of the wire
       ## (Shared-DOM-Front-Ends D8).
+    layoutWindows*: Signal[seq[FlowLayoutWindow]]
+      ## The same, for every view of the window, index-aligned with the
+      ## wire's `viewUpdates` (`EditorView`'s ordinals: the source, the
+      ## target source, the instructions …). `layoutWindow` is entry 0. An
+      ## editor showing another view of the code reads its own entry.
     windowReturns*: Signal[seq[FlowWindowReturn]]
     windowPath*: Signal[string]
       ## The file the window is on, as the engine names it.
@@ -384,25 +389,6 @@ proc pickFocusedLoop(loops: seq[FlowLoopInfo]): int =
       return index
   -1
 
-type
-  # A typed view of ONE flow window, holding exactly the fields
-  # `flowStyledLines` reads. The wire's own type (`FlowViewUpdate`) is built on
-  # `TableLike`, which is a JS object on the web backend; this view is what the
-  # shared predicate is instantiated over on the native one. It is a second
-  # SHAPE for the one rule's input, not a second rule.
-  FlowLineExtent = object
-    firstLine, lastLine: int
-  FlowLineBranches = object
-    table: Table[int, int]
-    extents: Table[int, FlowLineExtent]
-  FlowLineSpan = object
-    functionFirst, functionLast: int
-  FlowLineWindow = object
-    location: FlowLineSpan
-    branchesTaken: seq[seq[FlowLineBranches]]
-    commentLines: seq[int]
-    relevantStepCount: seq[int]
-
 const NotTaken = 2
   ## `BranchState.NotTaken`'s ordinal on the wire (`Unknown, Taken, NotTaken`
   ## in `common_types/codetracer_features/flow.nim`). `insideUntakenBranch`
@@ -448,29 +434,27 @@ proc intList(node: JsonNode): seq[int] =
   for n in node:
     if n.kind == JInt: result.add n.getInt
 
-proc flowLineWindow(view: JsonNode): FlowLineWindow =
-  ## Parse the fields `flowStyledLines` needs out of one wire view update.
-  let loc = view{"location"}
-  if not loc.isNil and loc.kind == JObject:
-    result.location = FlowLineSpan(
-      functionFirst: loc{"functionFirst"}.getInt(0),
-      functionLast: loc{"functionLast"}.getInt(0))
-  result.commentLines = intList(view{"commentLines"})
-  result.relevantStepCount = intList(view{"relevantStepCount"})
-  let bt = view{"branchesTaken"}
-  if not bt.isNil and bt.kind == JArray:
-    for group in bt:
-      var row: seq[FlowLineBranches] = @[]
-      if group.kind == JArray:
-        for entry in group:
-          row.add FlowLineBranches(
-            table: intKeyedTable[int](entry{"table"},
-              proc (n: JsonNode): int = n.getInt(0)),
-            extents: intKeyedTable[FlowLineExtent](entry{"extents"},
-              proc (n: JsonNode): FlowLineExtent =
-                FlowLineExtent(firstLine: n{"firstLine"}.getInt(0),
-                               lastLine: n{"lastLine"}.getInt(0))))
-      result.branchesTaken.add row
+proc flowLayoutWindowOf*(view: JsonNode; envelope: JsonNode = nil):
+    FlowLayoutWindow
+
+proc flowStyledLinesOf*(window: FlowLayoutWindow; finished: bool):
+    seq[FlowStyledLine] =
+  ## The shared dimming rule (`common/flow_line_rule.flowStyledLines`) over a
+  ## decoded window — the rule the desktop editor styles its lines with.
+  ## Instantiated HERE, where `NotTaken` / `Taken` are the wire's ordinals;
+  ## a consumer that also sees the `BranchState` enum (the desktop renderer)
+  ## calls this rather than instantiating the rule over ints itself.
+  flowStyledLines(window, finished)
+
+proc flowLineFactsOf*(window: FlowLayoutWindow): seq[FlowStyledLine] =
+  ## The per-line facts of one decoded window. See `flowLineFacts`.
+  result = flowStyledLines(window, finished = false)
+  if window.branchesTaken.len > 0 and window.branchesTaken[0].len > 0:
+    for header, state in window.branchesTaken[0][0].table:
+      if state != 0 and header > window.location.functionFirst and
+         header <= window.location.functionLast:
+        result.add FlowStyledLine(position: header, kind: flskHit)
+  result.sort(proc (a, b: FlowStyledLine): int = cmp(a.position, b.position))
 
 proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
   ## The per-line facts of one wire view update, decided by the shared rule.
@@ -490,14 +474,7 @@ proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
   ## Sorted by line, one entry per line.
   if view.isNil or view.kind != JObject:
     return @[]
-  let window = flowLineWindow(view)
-  result = flowStyledLines(window, finished = false)
-  if window.branchesTaken.len > 0 and window.branchesTaken[0].len > 0:
-    for header, state in window.branchesTaken[0][0].table:
-      if state != 0 and header > window.location.functionFirst and
-         header <= window.location.functionLast:
-        result.add FlowStyledLine(position: header, kind: flskHit)
-  result.sort(proc (a, b: FlowStyledLine): int = cmp(a.position, b.position))
+  flowLineFactsOf(flowLayoutWindowOf(view))
 
 proc flowValueText(value: JsonNode): string =
   ## One recorded value as the flow pane prints it: PLAT-2's pipeline at the
@@ -545,11 +522,22 @@ proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
 const FlowReturnExpression = "return"
   ## The pseudo-expression a step records its return value under.
 
+proc flowValueOf(name: string; value: JsonNode): FlowValueText =
+  ## One recorded value: PLAT-2's text at the flow budget, whether it was cut,
+  ## and the tree itself.
+  result = FlowValueText(expression: name)
+  if value.isNil or value.kind == JNull:
+    return
+  let presented = present(json_adapter.toPValue(value), FlowBudget)
+  result.text = presented.root.text
+  result.truncated = presented.truncated
+  result.value = value
+
 proc flowValueList(node: JsonNode): seq[FlowValueText] =
   if node.isNil or node.kind != JObject: return
   for name, value in node:
     if name == FlowReturnExpression: continue
-    result.add FlowValueText(expression: name, text: flowValueText(value))
+    result.add flowValueOf(name, value)
 
 proc flowLayoutLoopOf(node, passes: JsonNode): FlowLayoutLoop =
   result = FlowLayoutLoop(first: -1, last: -1, registeredLine: -1)
@@ -565,6 +553,7 @@ proc flowLayoutLoopOf(node, passes: JsonNode): FlowLayoutLoop =
   result.internal = ints(node{"internal"})
   result.stepCounts = ints(node{"stepCounts"})
   result.rrTicksForIterations = ints(node{"rrTicksForIterations"})
+  result.iteration = jsonInt(node{"iteration"}, 0)
   if passes.isNil or passes.kind != JArray: return
   for pass in passes:
     var entries: seq[tuple[line: int, stepCount: int]] = @[]
@@ -578,13 +567,69 @@ proc flowLayoutLoopOf(node, passes: JsonNode): FlowLayoutLoop =
                      stepCount: jsonInt(stepCount, 0))
     result.iterationSteps.add entries
 
-proc flowLayoutWindowOf*(view: JsonNode): FlowLayoutWindow =
-  ## One `FlowViewUpdate` view (`viewUpdates[i]`) as the inline-value layout
-  ## reads it. `position` is the step's source line; `loops` and
-  ## `loopIterationSteps` are index-aligned (entry `i` is loop `i`'s passes).
-  ## Moved here from BlockTracer's `live_flow.parseFlowWindow`.
+proc flowEventsOf(node: JsonNode): seq[FlowLayoutEvent] =
+  if node.isNil or node.kind != JArray: return
+  for ev in node:
+    if ev.kind != JObject: continue
+    result.add FlowLayoutEvent(kind: jsonInt(ev{"kind"}, -1),
+                               text: ev{"text"}.getStr(""),
+                               metadata: ev{"metadata"}.getStr(""))
+
+proc flowBranchTableOf(node: JsonNode): FlowBranchTable =
+  result.table = intKeyedTable[int](node{"table"},
+    proc (n: JsonNode): int = jsonInt(n, 0))
+  result.extents = intKeyedTable[FlowBranchExtent](node{"extents"},
+    proc (n: JsonNode): FlowBranchExtent =
+      FlowBranchExtent(firstLine: n{"firstLine"}.getInt(0),
+                       lastLine: n{"lastLine"}.getInt(0)))
+
+proc flowLayoutWindowOf*(view: JsonNode; envelope: JsonNode = nil):
+    FlowLayoutWindow =
+  ## One `FlowViewUpdate` view (`viewUpdates[i]`) decoded: the whole window
+  ## every surface draws from — the steps with their recorded values and
+  ## events, the loops with their passes, the per-line facts the line styling
+  ## reads, and which call and tick the window is of. `position` is the
+  ## step's source line; `loops` and `loopIterationSteps` are index-aligned
+  ## (entry `i` is loop `i`'s passes). `envelope` is the `FlowUpdate` the view
+  ## came in (its `location` and `finished`); without it the view's own
+  ## location is used.
+  ##
+  ## The one decoder of the wire's window (Shared-DOM-Front-Ends D7.4 (b)):
+  ## the desktop's inline flow, the terminal's and GPUI's overlays and the
+  ## VS Code host all read what this returns.
   result = FlowLayoutWindow(tabSize: 4)
   if view.isNil or view.kind != JObject: return
+  var location = view{"location"}
+  if not envelope.isNil and envelope.kind == JObject and
+     not envelope{"location"}.isNil and envelope{"location"}.kind == JObject:
+    location = envelope{"location"}
+  if not location.isNil and location.kind == JObject:
+    result.key = location{"key"}.getStr("")
+    result.path = location{"path"}.getStr("")
+    result.highLevelPath = location{"highLevelPath"}.getStr("")
+    result.functionName = location{"functionName"}.getStr("")
+    result.rrTicks = jsonInt(location{"rrTicks"}, 0)
+  # The function extent is the VIEW's: a view of another file (the target
+  # source, the instructions) has its own.
+  let viewLocation = view{"location"}
+  if not viewLocation.isNil and viewLocation.kind == JObject:
+    result.location = FlowWindowSpan(
+      functionFirst: jsonInt(viewLocation{"functionFirst"}, 0),
+      functionLast: jsonInt(viewLocation{"functionLast"}, 0))
+  if not envelope.isNil and envelope.kind == JObject:
+    result.finished = envelope{"finished"}.getBool(false)
+  result.commentLines = intList(view{"commentLines"})
+  result.relevantStepCount = intList(view{"relevantStepCount"})
+  let branches = view{"branchesTaken"}
+  if not branches.isNil and branches.kind == JArray:
+    for group in branches:
+      var row: seq[FlowBranchTable] = @[]
+      if group.kind == JArray:
+        for entry in group:
+          row.add flowBranchTableOf(entry)
+      result.branchesTaken.add row
+  result.positionStepCounts = intKeyedTable[seq[int]](
+    view{"positionStepCounts"}, proc (n: JsonNode): seq[int] = intList(n))
   let passesByLoop = view{"loopIterationSteps"}
   let loopNodes = view{"loops"}
   if not loopNodes.isNil and loopNodes.kind == JArray:
@@ -605,6 +650,8 @@ proc flowLayoutWindowOf*(view: JsonNode): FlowLayoutWindow =
     if not orderNode.isNil and orderNode.kind == JArray:
       for e in orderNode:
         if e.kind == JString: order.add e.getStr
+    let before = st{"beforeValues"}
+    let after = st{"afterValues"}
     result.steps.add FlowLayoutStep(
       stepCount: jsonInt(st{"stepCount"}, 0),
       line: jsonInt(st{"position"}, 0),
@@ -612,8 +659,15 @@ proc flowLayoutWindowOf*(view: JsonNode): FlowLayoutWindow =
       iteration: jsonInt(st{"iteration"}, 0),
       rrTicks: jsonInt(st{"rrTicks"}, 0),
       exprOrder: order,
-      beforeValues: flowValueList(st{"beforeValues"}),
-      afterValues: flowValueList(st{"afterValues"}))
+      beforeValues: flowValueList(before),
+      afterValues: flowValueList(after),
+      beforeReturn: flowValueOf(FlowReturnExpression,
+        if before.isNil or before.kind != JObject: nil
+        else: before{FlowReturnExpression}),
+      afterReturn: flowValueOf(FlowReturnExpression,
+        if after.isNil or after.kind != JObject: nil
+        else: after{FlowReturnExpression}),
+      events: flowEventsOf(st{"events"}))
 
 proc flowWindowReturnsOf*(view: JsonNode): seq[FlowWindowReturn] =
   ## The values the window's steps returned. A `None` return (no value) is not
@@ -739,14 +793,18 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
 
   vm.loops.val = loops
   vm.focusedLoop.val = focused
-  vm.styledLines.val = flowLineFacts(view)
+  var windows: seq[FlowLayoutWindow] = @[]
+  for viewNode in viewUpdates:
+    windows.add flowLayoutWindowOf(viewNode, response)
+  vm.styledLines.val = flowLineFactsOf(windows[0])
   # PLAT-41: THE STEPS ARE KEPT. The flow pane's rows are the window's own
   # steps, and until 2026-09-23 this function adopted the loops and the line
   # facts and dropped the steps on the floor, so the pane said "no flow steps
   # have been loaded" beside an editor drawing the same window's overlay.
   vm.steps.val = flowStepEntriesOf(view)
   vm.events.val = flowStepEventsOf(view)
-  vm.layoutWindow.val = flowLayoutWindowOf(view)
+  vm.layoutWindows.val = windows
+  vm.layoutWindow.val = windows[0]
   vm.windowReturns.val = flowWindowReturnsOf(view)
   # The window's file and function are the same on the envelope's location
   # and the view's own; whichever is populated is taken.
@@ -825,6 +883,7 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       focusedLoop: focusedLoop,
       windowRRTicks: windowRRTicks,
       layoutWindow: createSignal(FlowLayoutWindow(tabSize: 4)),
+      layoutWindows: createSignal(newSeq[FlowLayoutWindow]()),
       windowReturns: createSignal(newSeq[FlowWindowReturn]()),
       windowPath: createSignal(""),
       windowFunction: createSignal(""),

@@ -136,7 +136,10 @@ ARMS = [
      "    discard", [LAWS], "GPUI does not dim a not-taken line"),
     ("F3", PANE, "      if line in model.notTakenLines and shown > 0:",
      "      if false:", [FLOW_TERM], "the terminal does not dim a not-taken line"),
-    ("F4", FLOWVM, "  vm.styledLines.val = flowLineFacts(view)",
+    # F4 RE-AIMED 2026-10-23 (HSF-D5): the facts are read off the decoded
+    # window (`flowLineFactsOf(windows[0])`, the same rule over the same
+    # view) instead of a second private parse of the wire.
+    ("F4", FLOWVM, "  vm.styledLines.val = flowLineFactsOf(windows[0])",
      "  vm.styledLines.val = @[]", [FACTS, FLOW_TERM],
      "the flow window's per-line facts are discarded again (PLAT22-PG2)"),
     ("S1", STDIO, "    deliver()", "    discard", [FLOW_TERM],
