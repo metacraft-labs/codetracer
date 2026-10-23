@@ -270,15 +270,29 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
     tui = openTuiSession(folder, viewportHeight = 1,
                          bound = DapReadBound(timeoutMs: handshakeBudgetMs(),
                                               interruptFd: -1))
+  except EngineStalledAfterOpenError as e:
+    fail(ErrRequestFailed, "cannot open " & folder & ": " &
+         StalledAfterOpenPhrase & " (" & e.msg & ")")
   except CatchableError as e:
     fail(ErrRequestFailed, "cannot open " & folder & ": " & e.msg)
   tui.disarmHandshakeInterrupt()
+  # An editor's user is watching: a sweep or a `continue` that is silent for
+  # longer than the clock is a slow engine, not a stopped one (§8b).
+  tui.allowSlowOperations()
   # Every pane is hosted from here on: a pane the editor does not show has
   # no viewport, and the source window is the editor's.
   rt.hostedRows[paneEditor] = 0
   tui.header(rt)
-  tui.learnExtent()
-  tui.refresh(rt)
+  # The first pane loads: an engine that answers none of them is reported
+  # after ONE budget, in §8b's after-open wording, and its child is closed
+  # rather than left behind a session the editor never received.
+  try:
+    tui.learnExtent()
+    tui.refresh(rt)
+  except DapStalledError as e:
+    tui.close()
+    fail(ErrRequestFailed, "cannot open " & folder & ": " &
+         StalledAfterOpenPhrase & " (" & e.msg & ")")
   result = ServerSession(id: srv.nextId, folder: folder, app: app, rt: rt,
                          tui: tui, product: app.modes.product,
                          pngCache: (frame: -1, png: "", width: 0, height: 0))

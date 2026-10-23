@@ -730,6 +730,15 @@ proc interactive(command: TuiCommand): int =
     driver.stop()
     stderr.writeLine(TuiProgramName & ": cannot open " & folder & ": " & e.msg)
     return ExitUnreadableRecording
+  except EngineStalledAfterOpenError as e:
+    # THE ENGINE READ THE RECORDING, then went quiet on the session's first
+    # request. The same exit code as a stalled open, because it is the same
+    # fact for a script, but NOT the open's remedy: re-recording a recording
+    # the engine has read cannot help (§8b).
+    driver.stop()
+    for line in stalledAfterOpenReport(TuiProgramName, folder, e.msg):
+      stderr.writeLine(line)
+    return ExitEngineStalled
   except DapStalledError as e:
     # A DISTINCT EXIT CODE, because this is a distinct fact. `ExitUsage` would
     # send a user to look at their command line for a folder that named itself
@@ -759,14 +768,27 @@ proc interactive(command: TuiCommand): int =
   # abandoned mid-message cannot be resynchronised, which is the right trade
   # while the session is still being built and the wrong one afterwards.
   session.disarmHandshakeInterrupt()
+  # Somebody is watching from here on: a sweep or a `continue` that is silent
+  # for longer than the clock is a slow engine, not a stopped one (§8b).
+  session.allowSlowOperations()
   session.header(rt)
   app.dividers = command.dividers
-  if command.noFlowOverlay:
-    session.setFlowOverlay(false)
-  session.setViewportHeight(rt.sourcePaneRows())
-  session.learnExtent()
-  session.wireFindInFiles()
-  session.refresh(rt)
+  # THE FIRST PANE LOADS, and the stall they can end on. `learnExtent` raises
+  # an engine that answers none of them for a whole budget
+  # (`EngineStalledAfterOpenError`) instead of costing one budget per request;
+  # it is reported here as the open's stall is, in the after-open wording.
+  try:
+    if command.noFlowOverlay:
+      session.setFlowOverlay(false)
+    session.setViewportHeight(rt.sourcePaneRows())
+    session.learnExtent()
+    session.wireFindInFiles()
+    session.refresh(rt)
+  except DapStalledError as e:
+    driver.stop()
+    for line in stalledAfterOpenReport(TuiProgramName, folder, e.msg):
+      stderr.writeLine(line)
+    return ExitEngineStalled
 
   # PLAT-49 part B (finding 7): THE SESSION IS A TAB OF THE STRIP. It is put
   # into `HeadlessApp` (adopted, as GPUI's is: the engine is this host's), so
@@ -825,11 +847,23 @@ proc interactive(command: TuiCommand): int =
       opened = openTuiSession(path, viewportHeight = max(1, size.rows - 6),
                               bound = DapReadBound(timeoutMs: handshakeBudgetMs(),
                                                    interruptFd: -1))
+    except EngineStalledAfterOpenError as e:
+      return "could not open " & path & ": " & StalledAfterOpenPhrase & " (" &
+        e.msg.splitLines()[0] & ")"
     except CatchableError as e:
       return "could not open " & path & ": " & e.msg.splitLines()[0]
-    if command.noFlowOverlay:
-      opened.setFlowOverlay(false)
-    opened.learnExtent()
+    # Interactive, as the first session is (§8b).
+    opened.allowSlowOperations()
+    try:
+      if command.noFlowOverlay:
+        opened.setFlowOverlay(false)
+      opened.learnExtent()
+    except DapStalledError as e:
+      # Its first pane loads went unanswered: refused like an open that
+      # failed, and its engine closed rather than left in a tab nobody can use.
+      opened.close()
+      return "could not open " & path & ": " & StalledAfterOpenPhrase & " (" &
+        e.msg.splitLines()[0] & ")"
     let slot = app.shell.openSession(
       opened.session.backend.toBackendService(),
       title = extractFilename(opened.session.tracePath.strip(chars = {'/'})),

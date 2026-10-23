@@ -219,6 +219,10 @@ suite "ReplayDataStore requests":
     check request["withLocals"].getBool == false
     check tracepointSweepRequest(specs, withLocals = true)["withLocals"].getBool
     check request["session"]["id"].getInt == 0
+    # Each sweep's own id rides as `session.id`, which the engine echoes as
+    # the answer's `sessionId`: how `runTracepoints` tells its answer from an
+    # earlier sweep's late one.
+    check tracepointSweepRequest(specs, sweepId = 7)["session"]["id"].getInt == 7
     let tracepoints = request["session"]["tracepoints"]
     check tracepoints.len == 2
     for i, spec in specs:

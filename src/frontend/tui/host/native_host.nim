@@ -411,6 +411,26 @@ proc handshakeBudgetMs*(envVar = HandshakeEnvVar): int =
   except ValueError:
     DefaultHandshakeMs
 
+# §8b's stall after the open, raised by `newHeadlessDebugSession` and by
+# `tui_session`; re-exported for the terminal's call sites that report it.
+export headless_session.EngineStalledAfterOpenError
+
+const StalledAfterOpenPhrase* =
+  "the replay engine stopped answering after the recording opened"
+  ## §8b's wording for `EngineStalledAfterOpenError`, shared by every
+  ## terminal call site that reports one.
+
+proc stalledAfterOpenReport*(program, folder, detail: string;
+                             envVar = HandshakeEnvVar): seq[string] =
+  ## The two stderr lines a run that ends on `EngineStalledAfterOpenError`
+  ## prints: what happened, naming the folder and the budget (`detail` is the
+  ## stall's own message), then a remedy that does NOT suggest re-recording.
+  @[program & ": " & folder & ": " & StalledAfterOpenPhrase & " (" & detail &
+      ")",
+    "  the engine read the recording and then went quiet on a request; run" &
+      " again, or raise " & envVar & " if the host is slow, and report it" &
+      " with the engine's log if it recurs."]
+
 const
   MaxListedRecordings* = 64
     ## How many recordings `recordingsBeside` lists: a folder of thousands
@@ -725,12 +745,12 @@ proc loadRecordingPanes*(s: HeadlessDebugSession;
   ## budget (`DapStalledError`) is raised instead, because swallowing it makes
   ## the next request wait out the budget again — one budget per request
   ## before a run that will never get an answer says so — and reports a
-  ## silent engine as a recording with empty panes. The GPUI front-end passes
-  ## it, and reports the stall by name (`gpui/main.nim`). The terminal's call
-  ## sites (`tui_session.learnExtent`) keep the default, because they run
-  ## after and outside the `try` that reports a stall at their open: raised
-  ## there, a stall would escape as an unhandled exception. On those paths a
-  ## silent engine still costs one budget per request here.
+  ## silent engine as a recording with empty panes. Both native front-ends
+  ## pass it and report the stall by name: GPUI in `gpui/main.nim`, the
+  ## terminal through `tui_session.learnExtent`, which raises it as
+  ## `EngineStalledAfterOpenError` for its four call sites to report (§8b:
+  ## one budget, then `ExitEngineStalled` worded as a stall after the open).
+  ## The default is kept for suites that read what loaded on a real engine.
   let store = s.session.store
   try:
     discard s.requestAndLoadEventLog(start = 0, count = 1)

@@ -51,6 +51,20 @@ import viewmodels/[state_vm, calltrace_vm, scratchpad_vm, event_log_vm,
                   origin_chain_types]
 
 type
+  EngineStalledAfterOpenError* = object of DapStalledError
+    ## The engine went quiet AFTER it opened the recording: it reached its
+    ## first stop, then sent nothing for a whole budget on a later request
+    ## (the requests the session sends as it is built, the first pane loads).
+    ##
+    ## A SUBTYPE, so every `except DapStalledError` still catches it, and
+    ## distinct, because it calls for a different remedy than a stall before
+    ## the first stop: the engine READ this recording, so re-recording it
+    ## cannot help (codetracer-pm `spec/CLI/ct/ui-selection.md` §8b).
+    ## `newHeadlessDebugSession` raises it for a stall after the first
+    ## `stopped`; the terminal's `tui_session` for one in the requests it
+    ## sends after that.
+
+type
   HeadlessDebugSession* = ref object
     ## Owns a replay-server process and the full ViewModel layer.
     ## Provides synchronous action methods for integration testing.
@@ -77,6 +91,11 @@ type
       ## Path to the replay-server binary.
     lastCompleteMoveEvent*: JsonNode
       ## Latest raw ``ct/complete-move`` event observed by the session.
+    lastSweepId: int
+      ## The id the last ``runTracepoints`` sweep was sent with (its
+      ## request's ``session.id``, which the engine echoes back as the
+      ## answer's ``sessionId``). Each sweep takes the next one, so a late
+      ## answer to an earlier sweep can be told from this one's.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -180,6 +199,7 @@ proc newHeadlessDebugSession*(
 
   # 1. Spawn
   let backend = startReplayServer(replayServerBin, bound = handshake)
+  var reachedFirstStop = false
 
   # THE CHILD IS REAPED ON EVERY FAILING PATH, not only on the two the code
   # below already named. CTUI-14 made that matter: with a `DapReadBound`
@@ -235,6 +255,11 @@ proc newHeadlessDebugSession*(
     # version it found, the version it requires and the re-record remedy, and
     # the front-end threw it away. See `DapLaunchRefusedError`.
     discard backend.waitForEventOrRefusal("stopped")
+    # THE ENGINE HAS READ THE RECORDING. A stall from here on is a stall after
+    # the open (`EngineStalledAfterOpenError`): the session's first requests
+    # (the flow window for this stop, sent as the first position is applied)
+    # are answered by an engine that opened the recording.
+    reachedFirstStop = true
 
     # 6. Create the ViewModel layer through the Embed SDK session, with the
     #    stdio backend injected as the BackendService (spec §3.1 — the
@@ -275,13 +300,16 @@ proc newHeadlessDebugSession*(
     # Push initial position into the store from the ct/complete-move event.
     let completeMoveEvent = backend.waitForEvent("ct/complete-move")
     result.updatePositionFromCompleteMove(completeMoveEvent)
-  except CatchableError:
+  except CatchableError as e:
     try:
       backend.close()
     except CatchableError:
       # A child that cannot be closed is not a reason to lose the diagnosis of
       # why the handshake failed, which is what re-raising from here would do.
       discard
+    if reachedFirstStop and e of DapStalledError and
+       not (e of EngineStalledAfterOpenError):
+      raise newException(EngineStalledAfterOpenError, e.msg, e)
     raise
 
 # ---------------------------------------------------------------------------
@@ -1288,14 +1316,38 @@ proc runTracepoints*(s: HeadlessDebugSession;
   ## arrive within the message budget, rather than returning an empty sequence:
   ## "the sweep found nothing" and "the sweep never answered" are different
   ## facts and only one of them is a result.
+  ##
+  ## ## THE SWEEP IS SILENT UNTIL IT IS DONE, AND ITS ANSWER IS ITS OWN
+  ##
+  ## Nothing at all arrives while the engine sweeps, so the wait is an
+  ## OPERATION wait (``waitForEvent(operation = true)``): untimed on a channel
+  ## whose bound says so (``DapReadBound.untimedOperations``, an attended
+  ## front-end), timed — and, when the clock runs out, the channel declared
+  ## dead — on one nobody watches. Either way a slow sweep is never reported
+  ## as a stall in front of a user, and its late answer is never read as the
+  ## answer to a later request (codetracer-pm `spec/CLI/ct/ui-selection.md`
+  ## §8b).
+  ##
+  ## Each sweep is also sent with its own id, ``lastSweepId``, as the
+  ## request's ``session.id``; the engine echoes it as the answer's
+  ## ``sessionId`` (``TracepointResultsAggregate``, ``task.rs``). An answer
+  ## carrying another id is an earlier sweep's — left in the stream when that
+  ## sweep's wait ran out of its message budget — and is discarded rather than
+  ## returned as this one's.
   # The request body is `store/replay_data_store.tracepointSweepRequest`, the
   # one place this side spells a `Tracepoint`'s keys (and, since LRS-1, does
   # NOT spell a `lang`: the ordinal that used to ride here was dead on both
   # sides and is gone from both).
+  inc s.lastSweepId
+  let sweepId = s.lastSweepId
   s.backend.sendDapRequestNoResponse("ct/run-tracepoints",
-                                     tracepointSweepRequest(specs))
+                                     tracepointSweepRequest(specs,
+                                                            sweepId = sweepId))
   let event = s.backend.waitForEvent("ct/tracepoint-results",
-                                     maxMessages = maxMessages)
+                                     maxMessages = maxMessages,
+                                     operation = true,
+                                     accept = proc(e: JsonNode): bool =
+    e{"body", "sessionId"}.getInt(-1) == sweepId)
   let body = event.getOrDefault("body")
   if body.isNil or body.kind != JObject:
     return

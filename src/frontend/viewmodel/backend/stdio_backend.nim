@@ -62,6 +62,16 @@
 ## is the caller that asks for a bound, because it is the caller that has
 ## something to lose.
 ##
+## The clock tells a STOPPED peer from a working one, and some operations are
+## silent BY DESIGN for as long as they work: a step or ``continue`` is
+## answered only once the move lands, and a tracepoint sweep sends nothing
+## until the whole recording is swept. ``DapReadBound.untimedOperations`` lets
+## an attended front-end exempt exactly those reads (``SilentOperationCommands``
+## and ``waitForEvent(operation = true)``) while keeping the clock on every
+## ordinary request; where such a read is timed and runs out, the channel is
+## declared dead, so the operation's late answer is never read as a later
+## request's (codetracer-pm ``spec/CLI/ct/ui-selection.md`` §8b).
+##
 ## ## WHY THIS MODULE READS THE FILE DESCRIPTOR AND NOT ``outputStream``
 ##
 ## **``osproc.outputStream`` is BUFFERED on POSIX**, and that fact is what makes
@@ -138,6 +148,28 @@ type
       ## know what an input token is, and a front-end that had its keystroke
       ## eaten by its debug adapter would be a worse defect than the one this
       ## exists to fix.
+    untimedOperations*: bool
+      ## Whether a read that waits for an engine OPERATION is exempt from
+      ## ``timeoutMs``.  ``false`` (the default, and every caller before the
+      ## sweep-stall issue) times every read alike.
+      ##
+      ## AN OPERATION IS SILENT BY DESIGN until it has finished traversing the
+      ## recording: a step or ``continue`` (``SilentOperationCommands``) is
+      ## answered only once the move has landed, and ``ct/run-tracepoints``
+      ## sends nothing at all until the whole recording is swept.  Over a large
+      ## recording either can be silent for longer than any budget short enough
+      ## to be useful, and a peer that is working is a SLOW peer, not a stopped
+      ## one — the distinction ``timeoutMs`` exists to draw.  So a front-end
+      ## somebody is watching sets this, and keeps the clock on every ordinary
+      ## request; an engine that exits still ends the wait (end of stream).
+      ## The interrupt half, if armed, still applies to these reads.
+      ##
+      ## A run nobody watches leaves it ``false``: there, a silent operation is
+      ## a stall like any other, and ``readDapMessage`` then declares the
+      ## channel dead (``abandonedOperation``), because the operation's answer
+      ## will still arrive at a point nobody can know.
+      ##
+      ## Contract: codetracer-pm ``spec/CLI/ct/ui-selection.md`` §8b.
 
   DapStalledError* = object of CatchableError
     ## The peer stopped answering and the clock ran out.
@@ -221,6 +253,22 @@ type
       ## becomes a wrong answer. `main.nim` installs the interrupt half of the
       ## bound only for the handshake for this reason: there, the next thing
       ## that happens is that the session is thrown away.
+    abandonedOperation: bool
+      ## Set when an OPERATION read (``readDapMessage(operation = true)``) was
+      ## given up: it ran out of ``bound.timeoutMs``, or the interrupt half
+      ## abandoned it.
+      ##
+      ## Unlike a response, which ``sendDapRequest`` matches by
+      ## ``request_seq`` and so can never mistake for another's, an
+      ## operation's answer is a set of EVENTS — ``stopped`` and
+      ## ``ct/complete-move``, or a sweep's ``ct/tracepoint-results`` — that
+      ## the engine still sends once it finishes, at a point nobody can know.
+      ## Read later, they would be taken as the answer to whatever was asked
+      ## next: the previous sweep's hits returned for a new one, or a
+      ## ``continue``'s landing reported as the next step's.  So the channel
+      ## is declared dead instead, and every later read fails at once.  Only a
+      ## run with the clock on these reads (``untimedOperations`` false: one
+      ## nobody watches) can reach it, and such a run ends on the stall.
     readBuf: string
     readPos: int
       ## THE ONLY PLACE A BYTE FROM THE CHILD CAN BE HIDING.  See this module's
@@ -255,7 +303,28 @@ proc isBounded*(b: DapReadBound): bool =
   ## Whether this bound does anything at all. ``DapReadBound()`` does not.
   b.timeoutMs > 0 or b.watchesInterrupt
 
-proc awaitReadable(backend: DapStdioBackend; deadline: MonoTime) =
+type
+  ReadDeadline = object
+    ## The clock ONE message's read runs on: ``budgetMs`` (``0`` = none) and
+    ## the instant ``at`` it runs out. Carried down to ``awaitReadable`` rather
+    ## than read off ``bound`` there, because an operation read
+    ## (``untimedOperations``) and an ordinary one share a bound and not a
+    ## clock.
+    budgetMs: int
+    at: MonoTime
+
+proc readDeadline(backend: DapStdioBackend; operation: bool): ReadDeadline =
+  ## The clock for the message about to be read, starting now.
+  let budget =
+    if operation and backend.bound.untimedOperations: 0
+    else: backend.bound.timeoutMs
+  if budget > 0:
+    ReadDeadline(budgetMs: budget,
+                 at: getMonoTime() + initDuration(milliseconds = budget))
+  else:
+    ReadDeadline()
+
+proc awaitReadable(backend: DapStdioBackend; deadline: ReadDeadline) =
   ## Block until the child's stdout has something on it, the deadline passes,
   ## or the interrupt fd says the user gave up.
   ##
@@ -265,8 +334,10 @@ proc awaitReadable(backend: DapStdioBackend; deadline: MonoTime) =
   ##
   ## A NO-OP WHEN THE BOUND IS THE ZERO VALUE, and that is the whole
   ## compatibility story: the caller then goes straight to the same blocking
-  ## stream read it always did.
-  if not backend.bound.isBounded:
+  ## stream read it always did. The same holds for an untimed operation read
+  ## with no interrupt fd: there is nothing for `select` to wait on but the
+  ## pipe itself.
+  if deadline.budgetMs <= 0 and not backend.bound.watchesInterrupt:
     return
   when not defined(posix):
     # No `select` here. The bound is accepted and not honoured rather than
@@ -286,12 +357,12 @@ proc awaitReadable(backend: DapStdioBackend; deadline: MonoTime) =
         if backend.bound.interruptFd > maxFd:
           maxFd = backend.bound.interruptFd
       var sliceMs = InterruptPollMs
-      if backend.bound.timeoutMs > 0:
-        let left = (deadline - getMonoTime()).inMilliseconds
+      if deadline.budgetMs > 0:
+        let left = (deadline.at - getMonoTime()).inMilliseconds
         if left <= 0:
           raise newException(DapStalledError,
             "DapStdioBackend: the debug adapter sent nothing for " &
-            $backend.bound.timeoutMs & " ms")
+            $deadline.budgetMs & " ms")
         if left < sliceMs:
           sliceMs = int(left)
       var tv: Timeval
@@ -326,7 +397,7 @@ const
     ## capacity, so a chatty answer costs a handful of syscalls rather than one
     ## per byte — which is what the old `Stream.readLine` header parse did.
 
-proc fillBuffer(backend: DapStdioBackend; deadline: MonoTime): bool =
+proc fillBuffer(backend: DapStdioBackend; deadline: ReadDeadline): bool =
   ## Take whatever the pipe has into `readBuf`. `false` means end of stream.
   ##
   ## THE ONE PLACE THIS PROCESS READS THE CHILD. `osproc.outputStream` is
@@ -352,7 +423,7 @@ proc fillBuffer(backend: DapStdioBackend; deadline: MonoTime): bool =
   backend.readBuf.add chunk
   true
 
-proc nextByte(backend: DapStdioBackend; deadline: MonoTime): (bool, char) =
+proc nextByte(backend: DapStdioBackend; deadline: ReadDeadline): (bool, char) =
   ## One byte, from the buffer or from the pipe. `(false, _)` at end of stream.
   while backend.readPos >= backend.readBuf.len:
     if not backend.fillBuffer(deadline):
@@ -361,7 +432,7 @@ proc nextByte(backend: DapStdioBackend; deadline: MonoTime): (bool, char) =
   inc backend.readPos
   (true, c)
 
-proc readHeaderLine(backend: DapStdioBackend; deadline: MonoTime;
+proc readHeaderLine(backend: DapStdioBackend; deadline: ReadDeadline;
                     consumed: var bool): string =
   ## One ``\n``-terminated header line, with the ``\r`` stripped.
   ##
@@ -386,7 +457,7 @@ proc readHeaderLine(backend: DapStdioBackend; deadline: MonoTime;
     result.setLen(result.len - 1)
 
 proc readBody(backend: DapStdioBackend; length: int;
-              deadline: MonoTime; consumed: var bool): string =
+              deadline: ReadDeadline; consumed: var bool): string =
   ## Exactly `length` bytes of message body.
   ##
   ## LOOPED, which is a fix in its own right: a pipe hands over at most one
@@ -408,7 +479,7 @@ proc readBody(backend: DapStdioBackend; length: int;
     inc have, take
     consumed = true
 
-proc readOneMessage(backend: DapStdioBackend; deadline: MonoTime;
+proc readOneMessage(backend: DapStdioBackend; deadline: ReadDeadline;
                     consumed: var bool): JsonNode =
   ## The body of `readDapMessage`, with `consumed` saying whether any byte of
   ## this message has been taken off the stream yet.
@@ -438,7 +509,8 @@ proc readOneMessage(backend: DapStdioBackend; deadline: MonoTime;
 
   parseJson(backend.readBody(contentLength, deadline, consumed))
 
-proc readDapMessage*(backend: DapStdioBackend): JsonNode =
+proc readDapMessage*(backend: DapStdioBackend;
+                     operation = false): JsonNode =
   ## Read one complete DAP message from the child's stdout (blocking).
   ##
   ## Parses the ``Content-Length`` header, skips the blank separator line,
@@ -450,18 +522,31 @@ proc readDapMessage*(backend: DapStdioBackend): JsonNode =
   ##
   ## THE DEADLINE IS PER MESSAGE and starts here, so a session that is making
   ## progress never accumulates one.
+  ##
+  ## ``operation``: this read waits for an engine operation that is silent by
+  ## design until it finishes (see ``DapReadBound.untimedOperations``). It is
+  ## untimed when the bound says so; when it is timed and runs out, the channel
+  ## is declared dead (``abandonedOperation``).
   if backend.broken:
     raise newException(DapStalledError,
       "DapStdioBackend: this channel was abandoned part way through a" &
       " message and cannot be resynchronised")
-  let deadline =
-    if backend.bound.timeoutMs > 0:
-      getMonoTime() + initDuration(milliseconds = backend.bound.timeoutMs)
-    else:
-      MonoTime()
+  if backend.abandonedOperation:
+    raise newException(DapStalledError,
+      "DapStdioBackend: an earlier engine operation was abandoned before it" &
+      " answered; its late answer cannot be told from a later request's")
+  let deadline = backend.readDeadline(operation)
   var consumed = false
   try:
     result = readOneMessage(backend, deadline, consumed)
+  except DapStalledError, DapInterruptedError:
+    # AN ABANDONED OPERATION LEAVES ITS ANSWER BEHIND, whether the clock or
+    # the user gave up on it. See `abandonedOperation`.
+    if operation:
+      backend.abandonedOperation = true
+    if consumed:
+      backend.broken = true
+    raise
   except CatchableError:
     # ABANDONED PART WAY THROUGH: the stream is no longer at a message
     # boundary, so nothing after this can be parsed. Say so once, here, rather
@@ -491,6 +576,29 @@ proc writeDapMessage*(backend: DapStdioBackend; msg: JsonNode) =
 # Request / response
 # ---------------------------------------------------------------------------
 
+const SilentOperationCommands* = [
+    "next", "stepIn", "stepOut", "continue", "stepBack", "reverseContinue",
+    "ct/reverseStepIn", "ct/reverseStepOut"]
+  ## The requests the engine answers only once the move has LANDED, so the
+  ## wait for their response is an operation read (see
+  ## ``DapReadBound.untimedOperations``).
+  ##
+  ## Exactly the step actions of ``dap_command_to_step_action``
+  ## (``src/db-backend/src/dap_server.rs``). Each reaches ``Handler::step``,
+  ## or, for ``next`` / ``stepBack`` / ``stepIn`` / ``stepOut``, the
+  ## column-aware ``next_or_step_back_dap`` / ``step_in_or_out_dap``
+  ## (``src/db-backend/src/dap_handler.rs``), and all of them have one shape:
+  ## move — silently, for as long as the recording takes — then
+  ## ``complete_move`` sends ``stopped`` and ``ct/complete-move``, and only
+  ## then ``respond_dap``. So by the time the response is read, the move's events
+  ## are already queued, and the caller's ``waitForEvent("stopped")`` finds
+  ## them there without another silent wait.
+  ##
+  ## NOT the jumps (``ct/source-line-jump``, ``ct/source-call-jump``, …):
+  ## their error paths do not respond at all, so ``awaitJump`` deliberately
+  ## takes silence there for "no step reaches that line", under its own
+  ## ``LineJumpQuietMs``.
+
 proc sendDapRequest*(backend: DapStdioBackend; command: string;
                      args: JsonNode = newJObject()): JsonNode =
   ## Send a DAP request and block until the matching response arrives.
@@ -500,6 +608,10 @@ proc sendDapRequest*(backend: DapStdioBackend; command: string;
   ##
   ## Returns the full DAP response JSON object.  The caller should check
   ## ``result["success"]`` to detect errors.
+  ##
+  ## The wait for a ``SilentOperationCommands`` request's response is an
+  ## operation read: untimed when ``bound.untimedOperations`` says so.
+  let operation = command in SilentOperationCommands
   inc backend.seqCounter
   let seqId = backend.seqCounter
 
@@ -513,7 +625,7 @@ proc sendDapRequest*(backend: DapStdioBackend; command: string;
 
   # Read messages until we find the response matching our sequence number.
   while true:
-    let msg = backend.readDapMessage()
+    let msg = backend.readDapMessage(operation)
     let msgType = msg.getOrDefault("type").getStr("")
     if msgType == "response" and
        msg.getOrDefault("request_seq").getInt(-1) == seqId:
@@ -553,7 +665,8 @@ proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
   backend.writeDapMessage(request)
 
 proc waitForEvent*(backend: DapStdioBackend; eventName: string;
-                   maxMessages: int = 50): JsonNode =
+                   maxMessages: int = 50; operation = false;
+                   accept: proc(event: JsonNode): bool = nil): JsonNode =
   ## Wait for a specific DAP event by name.
   ##
   ## First checks the buffered ``eventQueue``; if not found, reads new
@@ -569,22 +682,40 @@ proc waitForEvent*(backend: DapStdioBackend; eventName: string;
   ## ``readDapMessage``.  Both are needed and neither implies the other: the
   ## wedge this module's header records had a budget of 50 and used none of it,
   ## because it never completed a single message.
+  ##
+  ## ``operation``: the event is the answer to an engine operation that is
+  ## silent by design until it finishes (a sweep's ``ct/tracepoint-results``),
+  ## so each read is an operation read (``readDapMessage``).
+  ##
+  ## ``accept``: when given, an ``eventName`` event it rejects is NOT the
+  ## answer being waited for — an earlier request's late answer — and is
+  ## DISCARDED: dropped from ``eventQueue``, or, read off the stream, delivered
+  ## to the subscribers like every event (``undelivered``) and neither queued
+  ## nor returned. A queued one would otherwise be returned to the next
+  ## caller that waits for the same name.
+  proc wanted(event: JsonNode): bool =
+    accept.isNil or accept(event)
 
   # Check the buffer first.
-  for i in 0 ..< backend.eventQueue.len:
+  var i = 0
+  while i < backend.eventQueue.len:
     if backend.eventQueue[i].getOrDefault("event").getStr("") == eventName:
-      result = backend.eventQueue[i]
+      let event = backend.eventQueue[i]
       backend.eventQueue.delete(i)
-      return
+      if wanted(event):
+        return event
+      continue
+    inc i
 
   # Read new messages.
   for _ in 0 ..< maxMessages:
-    let msg = backend.readDapMessage()
+    let msg = backend.readDapMessage(operation)
     let msgType = msg.getOrDefault("type").getStr("")
     if msgType == "event":
       backend.undelivered.add(msg)
       if msg.getOrDefault("event").getStr("") == eventName:
-        return msg
+        if wanted(msg):
+          return msg
       else:
         backend.eventQueue.add(msg)
     # Responses without a pending request are ignored (shouldn't happen

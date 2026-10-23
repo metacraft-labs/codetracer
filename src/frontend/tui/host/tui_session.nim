@@ -187,43 +187,56 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
   ## `host/native_host.openLocalTrace`. It is carried rather than built here
   ## because the fd it watches is the DRIVER's input fd, and this module owns
   ## no terminal.
+  ##
+  ## Raises `EngineStalledAfterOpenError` (a `DapStalledError`) when the engine
+  ## completes the handshake and then goes quiet on the session's first
+  ## request; a stall in the handshake itself is a plain `DapStalledError`.
   let sess = openLocalTrace(traceFolder, bound)
-  let store = sess.session.store
-  let src = createSourceVM(store, sess.session.editorVM)
-  if not sess.session.editorVM.isNil:
-    sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
-  src.setOverscan(SourceOverscan)
-  src.setViewport(src.viewport.withRows(max(1, viewportHeight)))
-  var nav = new(OriginNavigator)
-  nav[] = initOriginNavigator()
-  # THE PANES READ THE SESSION'S VIEWMODELS — the ones
-  # `initializePanelViewModels` built when the session attached — not a
-  # second set over the same store (Shared-DOM-Front-Ends D1). A second
-  # `StateVM` was what the inline values were drawn from while the stop
-  # loader wrote the origin summaries into the session's. The origin chain is
-  # not a panel VM; the session holds the one the host attaches.
-  let panels = sess.session
-  if panels.originChainVM.isNil:
-    panels.attachOriginChainVM(createOriginChainVM(store))
-  TuiSession(
-    session: sess,
-    source: src,
-    calltrace: panels.calltraceVM,
-    state: panels.stateVM,
-    timeline: panels.timelineVM,
-    events: panels.eventLogVM,
-    controls: panels.debugControlsVM,
-    origin: panels.originChainVM,
-    provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
-    lexerContexts: newLexerContextCache(),
-    valueTimeline: initValueTimeline(),
-    entryFile: sess.getCurrentFile(),
-    bounds: TimelineBounds(),
-    callBoundaries: @[],
-    mutations: @[],
-    maxRRTicks: 0'u64,
-    originNav: nav,
-    valueGate: InlineValueGate())
+  # A STALL FROM HERE ON IS A STALL AFTER THE OPEN. `openLocalTrace` reached
+  # the first stop (and raises `EngineStalledAfterOpenError` itself for the
+  # requests it sends after it), so the engine read the recording; an engine
+  # that goes quiet on what this builds — the flow overlay switched on below
+  # — is reported in the same after-open terms, with its child closed here.
+  try:
+    let store = sess.session.store
+    let src = createSourceVM(store, sess.session.editorVM)
+    if not sess.session.editorVM.isNil:
+      sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
+    src.setOverscan(SourceOverscan)
+    src.setViewport(src.viewport.withRows(max(1, viewportHeight)))
+    var nav = new(OriginNavigator)
+    nav[] = initOriginNavigator()
+    # THE PANES READ THE SESSION'S VIEWMODELS — the ones
+    # `initializePanelViewModels` built when the session attached — not a
+    # second set over the same store (Shared-DOM-Front-Ends D1). A second
+    # `StateVM` was what the inline values were drawn from while the stop
+    # loader wrote the origin summaries into the session's. The origin chain is
+    # not a panel VM; the session holds the one the host attaches.
+    let panels = sess.session
+    if panels.originChainVM.isNil:
+      panels.attachOriginChainVM(createOriginChainVM(store))
+    result = TuiSession(
+      session: sess,
+      source: src,
+      calltrace: panels.calltraceVM,
+      state: panels.stateVM,
+      timeline: panels.timelineVM,
+      events: panels.eventLogVM,
+      controls: panels.debugControlsVM,
+      origin: panels.originChainVM,
+      provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
+      lexerContexts: newLexerContextCache(),
+      valueTimeline: initValueTimeline(),
+      entryFile: sess.getCurrentFile(),
+      bounds: TimelineBounds(),
+      callBoundaries: @[],
+      mutations: @[],
+      maxRRTicks: 0'u64,
+      originNav: nav,
+      valueGate: InlineValueGate())
+  except DapStalledError as e:
+    sess.close()
+    raise newException(EngineStalledAfterOpenError, e.msg, e)
 
 proc close*(s: TuiSession) =
   ## Tear the session down. The source window is this host's; the panel
@@ -467,6 +480,13 @@ proc learnExtent*(s: TuiSession) =
   ## change: `ct/event-load`'s `maxRRTicks` is a property of the recording, and
   ## re-asking for it after every step would put a whole-log request inside the
   ## step latency CTUI-14 measures.
+  ##
+  ## Raises `EngineStalledAfterOpenError` when the engine answers none of
+  ## these requests for a whole budget: ONE budget, then the caller reports
+  ## the stall in §8b's after-open terms. Until this raised, each request
+  ## swallowed its own stall as a pane that did not load, so a silent engine
+  ## cost one budget per request and was then reported, if at all, as a
+  ## recording with empty panes.
   if s.ended:
     return
   # THE SHARED PRODUCERS (`native_host.loadRecordingPanes`) — the event log's
@@ -479,7 +499,11 @@ proc learnExtent*(s: TuiSession) =
   # `getCalltraceLines()` was empty on every real run, and `callBoundaries` was
   # silently `@[]` — "empty because nothing asked" and "empty because the
   # request failed" produced the same value. `PaneLoad` now says which.
-  let loaded = s.session.loadRecordingPanes()
+  let loaded =
+    try:
+      s.session.loadRecordingPanes(raiseOnStall = true)
+    except DapStalledError as e:
+      raise newException(EngineStalledAfterOpenError, e.msg, e)
   # PLAT-52: the recorded program's terminal output — the Terminal Output
   # pane's lines and screen model (`terminal_output_source`, which GPUI asks
   # through too). A refusal leaves the pane in its loading state.
@@ -1447,11 +1471,38 @@ proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## The clock stays because a mid-session stall would otherwise hang the loop
   ## with no input running at all — the very shape CTUI-14 exists to remove.
   ## When it fires the channel is declared dead, every later read fails fast,
-  ## and the user keeps a terminal that answers `q`.
+  ## and the user keeps a terminal that answers `q`. It stays on ORDINARY
+  ## requests: the operations that are silent by design until they finish (a
+  ## tracepoint sweep, a step or `continue`) are a slow engine, not a stopped
+  ## one, and `allowSlowOperations` exempts them.
   if s.isNil or s.session.isNil or s.session.backend.isNil:
     return
   s.session.backend.bound.interruptFd = -1
   s.session.backend.bound.onInterrupt = nil
+
+proc allowSlowOperations*(s: TuiSession) =
+  ## Let the engine operations that are silent BY DESIGN take as long as they
+  ## take, now that somebody is watching this session.
+  ##
+  ## The clock stays on every ordinary request (`disarmHandshakeInterrupt`
+  ## says why), so a mid-session stall on one still fails by name and the
+  ## terminal still answers `q`. But some operations send nothing until they
+  ## are finished: a tracepoint sweep sends nothing until the whole recording
+  ## is swept, and a step or `continue` is answered only once the move lands.
+  ## Over a large recording either can be silent for longer than any budget,
+  ## and that engine is SLOW, not stopped. Under the clock such a sweep was
+  ## reported as a failure, and its answer — which still arrived — was then
+  ## read as the answer to the next sweep. So those reads are untimed here
+  ## (`DapReadBound.untimedOperations`); an engine that exits still ends them.
+  ##
+  ## Called on the INTERACTIVE paths only — the tty session, each session a
+  ## "+" opens, the editor's pane server — and not by `--headless`, which
+  ## nobody watches: there a silent operation stays a stall, and the channel
+  ## is then declared dead so its late answer is never misread
+  ## (codetracer-pm `spec/CLI/ct/ui-selection.md` §8b).
+  if s.isNil or s.session.isNil or s.session.backend.isNil:
+    return
+  s.session.backend.bound.untimedOperations = true
 
 proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
   ## §6.2's `--goto=<tick>`, applied ONCE before the first debugger frame.
