@@ -209,22 +209,56 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   // then lies far right of the visible text, the press scrolls the editor
   // sideways, and lands on nothing.
   menus.editorText = await rightClickMenu(line31, { x: 60, y: 8 });
-  // AND A PRESS THAT LANDS ON NO TEXT POSITION, kept on purpose: the
-  // editor's own vertical scrollbar, which Monaco's mouse target resolves to
-  // no position. The editor's mouse handler once read `lineNumber` off that
-  // null position and threw (`ui/editor.nim`, "A press Monaco resolves to no
-  // text position"); `pageErrors` below is what notices it. No menu is
-  // expected there, so none is waited for. This press used to happen by
-  // accident — the right-click on the line's text above landed at the centre
-  // of a `.view-line` as wide as the widest line — and the line's own press
-  // now lands on its text, so the null-position press is made explicitly.
-  // The scrollbar track is drawn only while hovered, so the press is made at
-  // its place — the editor's right edge — rather than on its element.
+  // A right press on the editor's own vertical scrollbar, kept: it once
+  // landed on no text position and made the editor's mouse handler throw
+  // (`ui/editor.nim`, "A press Monaco resolves to no text position");
+  // `pageErrors` below is what notices a throw. No menu is expected there,
+  // so none is waited for. The scrollbar track is drawn only while hovered,
+  // so the press is made at its place — the editor's right edge — rather
+  // than on its element.
   const editorBox = await line31.locator("xpath=ancestor::div[contains(@class,'monaco-editor')][1]").boundingBox();
   expect(editorBox).not.toBeNull();
   await ctPage.mouse.click(editorBox!.x + editorBox!.width - 4, editorBox!.y + editorBox!.height / 2,
     { button: "right" });
   await ctPage.keyboard.press("Escape");
+  // Monaco now resolves the scrollbar press above to a position too (target
+  // type 11), so it no longer reaches the guard. A press that DOES reach it:
+  // one on an OVERLAY WIDGET, which Monaco resolves to no position (target
+  // type 12) — its own find widget, opened with Ctrl+F in the editor. The
+  // editor's `onMouseDown` sees the press (overlay widgets are inside the
+  // editor's view), and a listener of this spec reads the target it got, so
+  // the case proves the null-position branch was entered rather than
+  // assuming it. Escape closes the widget again.
+  await line31.click({ position: { x: 60, y: 8 } });
+  await ctPage.keyboard.press("Control+F");
+  const findWidget = ctPage.locator(".monaco-editor .find-widget.visible").first();
+  await findWidget.waitFor({ state: "visible", timeout: 10_000 });
+  // The widget slides in from above the editor (a CSS transition): measured
+  // at once, its box is still off its resting place and the press misses it.
+  await ctPage.waitForTimeout(1_000);
+  await ctPage.evaluate(() => {
+    const g = globalThis as any;
+    g.__plat50PressTargets = [];
+    for (const ed of g.monaco.editor.getEditors()) {
+      ed.onMouseDown((e: any) => g.__plat50PressTargets?.push({
+        type: e.target.type, hasPosition: e.target.position != null }));
+    }
+  });
+  const findBox = await findWidget.boundingBox();
+  expect(findBox).not.toBeNull();
+  await ctPage.mouse.click(findBox!.x + 4, findBox!.y + findBox!.height / 2, { button: "right" });
+  await ctPage.waitForTimeout(500);
+  out.nullPositionPress = await ctPage.evaluate(() => {
+    const g = globalThis as any;
+    const seen = g.__plat50PressTargets ?? [];
+    g.__plat50PressTargets = undefined;
+    return seen;
+  });
+  await ctPage.keyboard.press("Escape");
+  await ctPage.mouse.click(5, 300);
+  await findWidget.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+  // The press reached the editor's handler with no position: the guard ran.
+  expect(out.nullPositionPress).toContainEqual({ type: 12, hasPosition: false });
   // A call's ARGUMENT, and a docked pane's label in the footer.
   menus.callArgument = await rightClickMenu(ctPage.locator(".calltrace-view .call-arg", { hasText: "left" }).first());
   menus.dockLabelBottom = await rightClickMenu(ctPage.locator(".auto-hide-strip-tab", { hasText: /^BUILD$/i }).first());
@@ -333,11 +367,13 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   // click on the `output` column (and after a second click).
   const firstOutput = async () =>
     ctPage.evaluate(() => {
-      const cell = document.querySelector("table[id*=\"-dense-table-\"] tbody tr .eventLog-text") as HTMLElement | null;
+      // The Event Log is one view over its ViewModel: its rows are the held
+      // window's, under the scroll body (`views/isonim_event_log_view`).
+      const cell = document.querySelector(".eventLog-scroll-body tbody tr .eventLog-text") as HTMLElement | null;
       return cell ? cell.innerText.trim() : "";
     });
-  // The header the desktop shows is its own strip (`ui/event_log.
-  // renderColumnHeader`; DataTables' header row is hidden).
+  // The header the desktop shows is the view's own strip
+  // (`views/isonim_event_log_view`, `.eventLog-column-header`).
   const header = ctPage.locator(".eventLog-column-header .eventLog-cell", { hasText: /^output( [▲▼])?$/ }).first();
   if ((await header.count()) > 0) {
     const before = await firstOutput();
