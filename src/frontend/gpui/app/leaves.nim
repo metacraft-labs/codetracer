@@ -2343,30 +2343,67 @@ const
     ## font size — the `min-height` is dead weight, not a rival that takes
     ## over once the text grows.
 
-  CallRowPitch* = CallRowToggleEmRatio * float(CodeFontPx)
-    ## The desktop's row pitch: the row box above, at the root font size the
-    ## desktop sets on `documentElement` (`ui_js.nim`'s
-    ## `style.fontSize = "{data.ui.fontSize}px"`, and `data.ui.fontSize` is
-    ## `CodeFontPx`). 1.5625 x 16 = 25 px.
+  CallRowAdvanceEmRatio* = 1.580037
+    ## The desktop's row ADVANCE — one row's top to the next — as a multiple
+    ## of the root font size. **This, and not the row box above, is what
+    ## positions rows**, and the two differ: the box is 1.5625em (25 px) and
+    ## the advance is ~1.58em (~25.28 px), so a layout built on the box falls
+    ## behind by ~0.28 px every row.
     ##
-    ## It was `25.78` until 2026-10-18: "722 px over 28 rows", a fitted
-    ## AVERAGE with no rule behind it. Measured on the parity captures at
-    ## `codetracer 052ca76ce`, 2x: the desktop paints the selected row's box
-    ## — `.event-selected` covers the whole row — exactly **50 device px**,
-    ## sharp-edged, with no partially covered scanline at either edge, in
-    ## each of the three views that show the pane. 50 device px is 25
-    ## logical px, which is this rule; 25.78 is not any row's height.
+    ## The desktop does not hardcode it — `isonim_calltrace_view`'s
+    ## `measureCallRowPitch` reads it off the live layout for exactly this
+    ## reason, and says so. GPUI has no layout to measure before it draws, so
+    ## it needs the constant, and this is it.
     ##
-    ## **One thing here is measured and NOT explained, so do not read this
-    ## constant as the whole story.** The row BOX is 25, but the mean row
-    ## ADVANCE down the desktop's pane measures 50.596 device px (25.298
-    ## logical) — four independent estimators agree, and the one that
-    ## recovers this front-end's own former 25.78 to 0.03% is the control
-    ## that says they can be trusted. So the desktop advances ~0.3 px per row
-    ## more than its own row box, and nothing in `calltrace.styl` accounts
-    ## for it. This constant deliberately does NOT absorb that 0.3: absorbing
-    ## it is how 25.78 was arrived at, and a fitted pitch re-drifts at a
-    ## different font size. Derive the box; leave the remainder visible.
+    ## MEASURED, 2026-10-23, on the `PLAT50-FUSE` parity capture
+    ## (`flip-after/calltrace.{electron,gpui}.rgba`, 2880x1800, CROP_PX 56) at
+    ## codetracer `356ac4b793`: the ink-per-row profile's autocorrelation,
+    ## refined parabolically at k = 4, 6, 8, 10 and 12 periods so the period
+    ## is recovered at k times the single-period precision. Electron
+    ## **50.5612 device px = 25.28059 logical = 1.580037em**.
+    ##
+    ## **Its positive control is in the same measurement.** Run unchanged on
+    ## the GPUI arm — whose pitch is known, because this file sets it — it
+    ## returns 1.562765 against the 1.5625 actually drawn, an error of
+    ## 0.0003. An estimator that recovers a known value to 0.02% is reporting
+    ## the other arm's value, not its own bias.
+    ##
+    ## **Why this is a rule and not a fit.** The earlier `25.78` was a fitted
+    ## average ("722 px over 28 rows") and was rightly removed; the objection
+    ## recorded against re-absorbing the remainder was that a fitted pitch
+    ## re-drifts at a different font size. It cannot, here: every length in
+    ## the chain that produces the advance is `em`-relative — the toggle's
+    ## 1.5625em, the row's 1.55em `min-height` and `line-height`, its
+    ## 0.3125em `padding-left`, and SpaceMono's own 1.481em `normal` line
+    ## box — and the only two `px` literals in `calltrace.styl` (`2px`,
+    ## `13px`) belong to other components. A ratio of em-relative lengths is
+    ## scale-invariant, so this one holds at every font size by construction.
+    ##
+    ## **Where the extra ~0.018em comes from**, as far as it is established:
+    ## `.calltrace-row` is `display: inline-flex`, i.e. an ATOMIC INLINE, and
+    ## it sits on a line box in the block `.calltrace-call-line`, which sets
+    ## no `line-height` — so that block's strut is `normal`, which for
+    ## SpaceMono (unitsPerEm 1000, ascent 1120, descent 361, lineGap 0, and
+    ## `USE_TYPO_METRICS`) is 1.481em with 0.361em below the baseline. A line
+    ## box can only exceed the 25 px atomic inline on it if the strut reaches
+    ## further below the baseline than the inline does, and the strut's
+    ## 0.361em is the only candidate in the chain. That identifies the
+    ## mechanism and predicts the scale-invariance above; it is NOT a closed
+    ## derivation of 1.580037, and should not be quoted as one.
+
+  CallRowPitch* = CallRowAdvanceEmRatio * float(CodeFontPx)
+    ## The desktop's row pitch at the root font size the desktop sets on
+    ## `documentElement` (`ui_js.nim`'s `style.fontSize = "{data.ui.fontSize}px"`,
+    ## and `data.ui.fontSize` is `CodeFontPx`): 1.580037 x 16 = 25.2806 px.
+    ##
+    ## It was `CallRowToggleEmRatio * CodeFontPx` (25 px, the BOX) until
+    ## 2026-10-23, and that is what made `pane:calltrace` the largest
+    ## residual in ALL SIX parity views (share of frame error 0.35 to 0.61,
+    ## fracOver0_10 0.29): rows started level and had drifted 5 device px by
+    ## the foot of the pane. Positions accumulate in float and round once
+    ## (`callRowTopPx`), so a fractional pitch tiles rows 25/25/26/25... the
+    ## way the desktop's own fractional advance does, rather than rounding
+    ## the error in at every row.
 
   CallRowPx* = int(round(CallRowPitch))
     ## A row's height, as an integer, so a press is mapped to the row it is on
