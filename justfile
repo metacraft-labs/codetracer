@@ -144,6 +144,17 @@ test-sibling-backend-path:
 test-build-siblings-native-backend:
   bash ci/test/build-siblings-native-backend-runs-test.sh
 
+# Assert that `build-siblings` builds `nargo` from a noir checkout that has
+# never been prepared (no `.codetracer-deps/`), as a fresh or CI clone is. Its
+# entry once ran a bare `cargo build` without noir's own `just
+# trace-format-nim`, so the trace writer's build script panicked with "Nim FFI
+# entry point not found" and every GUI spec needing the sibling `nargo` ran
+# without it. Runs the real build and noir's own fetch of the pinned Nim
+# sources (network; minutes cold); fails, rather than skips, without the
+# sibling.
+test-build-siblings-noir:
+  bash ci/test/build-siblings-noir-fresh-checkout-test.sh
+
 # Assert that the built output tree carries the assets `ct` reads on startup
 # (`<prefix>/config/default_config.yaml` and `default_layout.json`). A tup
 # build exits 0 when a runtime asset is simply never published -- there is no
