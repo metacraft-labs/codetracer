@@ -106,37 +106,18 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 	fail "could not build the windowed codetracer-gpui"
 
 # ---- 3. the recordings -------------------------------------------------------
-fixtures=(calc)
-for w in "${which[@]}"; do
-	[ "${w}" = "plat47" ] && fixtures+=(call_pages)
-	[ "${w}" = "plat70a" ] && fixtures+=(wide_lines)
-	[ "${w}" = "m71" ] && fixtures+=(multi_root)
-done
-work="$(mktemp -d "${root}/build/gpui-window-captures.XXXXXX")"
-trap 'rm -rf "${work}"' EXIT
-for fx in "${fixtures[@]}"; do
-	ls -d "test-logs/tui-fixtures/${fx}-"* >/dev/null 2>&1 && continue
-	echo "=== recording the ${fx} fixture"
-	# `multi_root` is not one of the provider's declared fixtures: every suite
-	# that opens it spells its spec, as `test_m71_gpui_plan.nim` does.
-	spec="\"${fx}\""
-	[ "${fx}" = "multi_root" ] && spec='FixtureSpec(name: "multi_root",
-  program: "test-programs/multi_root/app/main.py",
-  recorder: "codetracer-python-recorder",
-  probe: FixtureProbe(kind: pkPythonRecorder),
-  buildHint: "Install codetracer_python_recorder into the interpreter ct will use.",
-  blockedOn: "")'
-	cat >"${work}/record_${fx}.nim" <<NIM
-import fixtures/fixture_provider
-let r = resolveFixture(${spec})
-if r.outcome != foRecorded:
-  quit("could not record the ${fx} fixture: " & r.detail, 1)
-echo r.tracePath
-NIM
-	nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
-		--nimcache:"${work}/nc-${fx}" -o:"${work}/record_${fx}" \
-		"${work}/record_${fx}.nim" || fail "could not record the ${fx} fixture"
-done
+#
+# Which recordings each capture opens, and their specs, are
+# `window_capture_fixtures.nim`'s: most are not in the provider's declared
+# corpus, so a name alone cannot be resolved (`test_window_capture_fixtures.nim`
+# asserts every capture's recordings resolve). The provider reuses a recording
+# whose program is unchanged, so this is cheap when they already exist.
+echo "=== recording the fixtures ${which[*]} open"
+nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
+	--nimcache:build/nimcache/window-capture-fixtures \
+	-o:build/window-capture-fixtures \
+	src/frontend/tui/tests/fixtures/window_capture_fixtures.nim "${which[@]}" ||
+	fail "could not record the fixtures ${which[*]} open"
 
 # ---- 3b. the no-display refusal, with the binary that CAN open a window -----
 #
