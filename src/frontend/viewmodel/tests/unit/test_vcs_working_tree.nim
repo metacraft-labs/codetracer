@@ -22,13 +22,19 @@
 ##      adds a file or commits;
 ##   5. a repository whose history is larger than a pipe holds is read
 ##      completely, not deadlocked on (the facade drains git's output before
-##      waiting for it).
+##      waiting for it);
+##   6. the reads a refresh makes — status, and the working tree's diff,
+##      through the facade and through `native_vcs_details` — never write the
+##      repository's index, so they never create `.git/index.lock`: a pane
+##      killed in the middle of a refresh cannot leave the user's checkout
+##      locked (VCS-Panel.md, "Reading the repository never takes the index
+##      lock").
 ##
 ## No mocks of git or the filesystem. IsoNim's `MockRenderer` is the one
 ## stand-in, and it is not a mock: it is the renderer IsoNim ships for running
 ## a view without a browser, executing the desktop view's own code.
 
-import std/[os, osproc, strutils, tables, tempfiles, unittest]
+import std/[os, osproc, strutils, tables, tempfiles, times, unittest]
 
 import isonim/core/[owner, signals]
 import isonim/testing/mock_dom
@@ -37,6 +43,8 @@ import ../../viewmodels/vcs_vm
 import ../../views/isonim_vcs_view
 import ../../platform/vcs
 import ../../host/desktop_native
+import ../../host/native_vcs
+import ../../host/native_vcs_details
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -172,6 +180,68 @@ suite "PLAT-47 deliverable 4: one working tree for every VCS pane":
       ck vm.commits.val[0].message == "big 49"
       dispose()
     removeDir(repo.parentDir)
+
+  # Claim 6. A repository whose index has a STALE STAT CACHE: `tracked.txt`
+  # is committed, then its mtime is moved without its content changing. That
+  # is the state a checkout is in after a build tool, a checkout of the same
+  # content or an editor's unchanged save touched a file, and it is the state
+  # in which a plain `git status` or `git diff` refreshes the cache and
+  # writes the index back — creating `.git/index.lock` and renaming it over
+  # `.git/index`, so the index's inode changes. A read that leaves the inode
+  # alone did not write the index, and so did not take its lock.
+  #
+  # Each read gets a repository of its own, so one read refreshing the cache
+  # cannot hide another's write. Each repository ends with the CONTROL — a
+  # plain `git status`, which must rewrite the index — proving it really was
+  # stale, so a pass cannot come from a fixture in which git had nothing to
+  # refresh.
+  proc staleStatRepo(): string =
+    result = createTempDir("vcs-index-lock-", "") / "repo"
+    createDir(result)
+    let (output, code) = execCmdEx("cd " & quoteShell(result) &
+      " && git -c init.defaultBranch=main init -q ." &
+      " && printf 'one\\n' > tracked.txt && git add tracked.txt" &
+      " && git -c user.name=x -c user.email=x@invalid -c commit.gpgsign=false" &
+      " commit -q -m one")
+    if code != 0: checkpoint(output)
+    doAssert code == 0
+    # 2001-09-09: years older than the index, so the entry's recorded mtime
+    # no longer matches and git must re-read the file to learn it is
+    # unchanged.
+    setLastModificationTime(result / "tracked.txt", fromUnix(1_000_000_000))
+
+  proc indexInode(repo: string): int64 =
+    int64(getFileInfo(repo / ".git" / "index").id.file)
+
+  proc leavesTheIndexAlone(label: string; read: proc(repo: string)) =
+    let repo = staleStatRepo()
+    let before = indexInode(repo)
+    read(repo)
+    checkpoint(label)
+    ck indexInode(repo) == before
+    ck not fileExists(repo / ".git" / "index.lock")
+    # The control: the same repository, read by a git without the option,
+    # does write its index.
+    let (output, code) = execCmdEx("git -C " & quoteShell(repo) &
+                                   " status --porcelain")
+    ck code == 0 and output.len == 0
+    ck indexInode(repo) != before
+    removeDir(repo.parentDir)
+
+  test "a refresh's reads never write the index, so they never take its lock":
+    let facade = nativeVcs(NativeVcsProfile)
+    leavesTheIndexAlone("the facade's status") do (repo: string):
+      let status = awaitSync(facade.status(repo))
+      ck status.ok and status.value.branch == "main" and
+         status.value.changes.len == 0
+    leavesTheIndexAlone("the facade's working-tree diff") do (repo: string):
+      let diff = awaitSync(facade.diff(repo, @[], false, 3))
+      ck diff.ok and diff.value.len == 0
+    leavesTheIndexAlone("the facade's working-tree diff of one path") do (repo: string):
+      let diff = awaitSync(facade.diff(repo, @["tracked.txt"], false, 3))
+      ck diff.ok and diff.value.len == 0
+    leavesTheIndexAlone("the native front-ends' file-click diff") do (repo: string):
+      ck workingTreeFileDiff(repo, "tracked.txt", "M") == ""
 
   test "a directory that is not a repository says so and lists nothing":
     let dir = createTempDir("plat47-novcs-", "")

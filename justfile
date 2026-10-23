@@ -1757,7 +1757,8 @@ test-acp-notifications:
   ct_export_scratch_codetracer_home acp-notifications
   notification_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-notifications.XXXXXX.js")"
   sessions_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-sessions.XXXXXX.js")"
-  trap 'rm -f "$notification_test" "$sessions_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  git_changes_test="$(mktemp "${TMPDIR:-/tmp}/codetracer-acp-git-changes.XXXXXX.js")"
+  trap 'rm -f "$notification_test" "$sessions_test" "$git_changes_test"; rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
   nim js -d:nodejs -d:server -d:chronicles_enabled=off \
     --out:"$notification_test" src/frontend/tests/acp_notification_test.nim
   node "$notification_test"
@@ -1766,6 +1767,11 @@ test-acp-notifications:
   nim js -d:nodejs -d:server -d:chronicles_enabled=off \
     --out:"$sessions_test" src/frontend/tests/acp_sessions_per_client_test.nim
   node "$sessions_test"
+  # The agent pane's git change detection: exactly the files whose content
+  # changed, read without writing the user's index. Needs `git` on PATH.
+  nim js -d:nodejs -d:server -d:chronicles_enabled=off \
+    --out:"$git_changes_test" src/frontend/tests/acp_git_visible_changes_test.nim
+  node "$git_changes_test"
 
 test-frontend-js:
   #!/usr/bin/env bash

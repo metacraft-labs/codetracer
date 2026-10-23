@@ -328,7 +328,14 @@ proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
 # Process
 # ---------------------------------------------------------------------------
 
-proc electronProcess(profile: PlatformProfile): ProcessFacade =
+proc electronProcess*(profile: PlatformProfile): ProcessFacade =
+  ## The Electron renderer's process facade.
+  ##
+  ## Exported for one reader, for the reason `electronVcs` below is:
+  ## `tests/git_cli_index_lock_test.nim` in the `renderer-dom` lane runs
+  ## `ui/git_cli.nim` under node, where `newDesktopElectronPlatform` finds no
+  ## `require('electron')` and falls back to the web profile, so the process
+  ## facade the shipped window runs git through is reachable only by name.
   result = unavailableProcess(profile)
 
   result.run = proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
@@ -396,8 +403,11 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
   result = unavailableVcs(profile)
 
   proc git(repository: string; args: seq[string]): PlatformOutcome[string] =
+    ## Every git call this facade makes is built by `noIndexLockGitArgs`, so
+    ## the pane's refresh never writes the index nor takes its lock
+    ## (`platform/vcs.NoIndexLockGitOptions`).
     var jsArgs: seq[cstring] = @[]
-    for a in args: jsArgs.add a.cstring
+    for a in noIndexLockGitArgs(args): jsArgs.add a.cstring
     jsGuard:
       succeeded($nodeExecFileSync(cstring"git", jsArgs, repository.cstring, cstring""))
     do:
@@ -415,7 +425,8 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
     const shown = "git rev-parse --show-toplevel"
     jsGuard:
       settledLater(proc(settle: proc(value: PlatformOutcome[string])) =
-        rootGit(GitCall(argv: @["git", "rev-parse", "--show-toplevel"],
+        rootGit(GitCall(argv: @["git"] & noIndexLockGitArgs(
+                          ["rev-parse", "--show-toplevel"]),
                         cwd: path),
           proc(reply: GitReply) {.closure, gcsafe.} =
             {.cast(gcsafe).}:
@@ -554,9 +565,10 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
 
   result.applyPatch = proc(repository, patch: string;
                            reverse: bool): PlatformFuture[PlatformOutcome[Nothing]] =
-    var jsArgs: seq[cstring] = @[cstring"apply"]
-    if reverse: jsArgs.add cstring"--reverse"
-    jsArgs.add cstring"-"
+    var jsArgs: seq[cstring] = @[]
+    for a in noIndexLockGitArgs(if reverse: @["apply", "--reverse", "-"]
+                                else: @["apply", "-"]):
+      jsArgs.add a.cstring
     jsGuard:
       discard nodeExecFileSync(cstring"git", jsArgs, repository.cstring, patch.cstring)
       resolvedOk()

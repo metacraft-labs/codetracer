@@ -654,7 +654,12 @@ type
     message: string
 
 proc git(repository: string; args: seq[string]; stdinText = ""): GitOutcome =
-  var spec = processSpec("git", args, workingDir = repository)
+  ## `args` run by the container's git, with the shared
+  ## `NoIndexLockGitOptions` prefix (`platform/vcs`): the client's pane
+  ## refreshes through these verbs every few seconds, and a refresh must never
+  ## write the user's index nor take its lock.
+  var spec = processSpec("git", noIndexLockGitArgs(args),
+                         workingDir = repository)
   spec.stdinText = stdinText
   let outcome = runSpec(spec)
   if not outcome.ran:
