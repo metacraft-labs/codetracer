@@ -4794,9 +4794,11 @@
     "nim-termctl": {
       "flake": false,
       "locked": {
+        "lastModified": 1792755460,
+        "narHash": "sha256-hGBjDYbIgLoe3lQ9tAEGhJq5VsfnYaqmBte62UBcLgo=",
         "owner": "metacraft-labs",
         "repo": "nim-termctl",
-        "rev": "64c3cee722b050df11bb1f7384c03922751e15a8",
+        "rev": "9c0e9899d2ff50a8b55a4df6140710a7a5e53fde",
         "type": "github"
       },
       "original": {
