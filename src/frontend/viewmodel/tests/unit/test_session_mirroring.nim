@@ -36,6 +36,7 @@ import ../../store/types
 import ../../sync/[action_relay, mirror_session, sync_host, sync_publisher,
                    sync_subscriber, synced_signals, transport]
 import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
+                         flow_layout, flow_vm,
                          filesystem_vm, terminal_output_model,
                          terminal_output_vm,
                          state_vm]
@@ -556,6 +557,50 @@ suite "a primary and its mirror":
       # then shows.
       ck mirror.session.calltraceVM.viewportHeight.val == 37
       ck mirror.session.eventLogVM.pageSize.val == 24
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a value holding a nil JSON node is mirrored, in the snapshot and in a batch":
+    # The flow window's recorded values are `JsonNode`s, nil for a step that
+    # recorded none (`FlowValueText.value`). Encoded as the same reference,
+    # the nil reached `std/json`'s `$` / `copy` / `==`, which dereference it:
+    # the snapshot and every later batch raised, and the mirror kept the last
+    # message it had received (under `ct host`, a page with no stop and no
+    # watches). The link copies each message as a real transport does, so it
+    # meets the nil as the socket did.
+    proc windowWith(text: string): FlowLayoutWindow =
+      FlowLayoutWindow(tabSize: 4, steps: @[FlowLayoutStep(
+        stepCount: 0, line: 3,
+        beforeValues: @[FlowValueText(expression: "x", text: text)])])
+    createRoot proc(done: proc()) =
+      let (primary, _) = newPrimary()
+      primary.flowVM.layoutWindows.val = @[windowWith("1")]
+      check primary.flowVM.layoutWindows.val[0].steps[0].beforeValues[0].value.isNil
+      let host = newSyncHost(manual)
+      host.addPrimary("s1", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a)
+      let mirror = createMirrorSession(link.b)
+      link.settle()
+      # The snapshot.
+      let windows = mirror.session.flowVM.layoutWindows.val
+      ck windows.len == 1
+      if windows.len == 1:
+        ck windows[0].steps[0].beforeValues[0].text == "1"
+        let v = windows[0].steps[0].beforeValues[0].value
+        ck v.isNil or v.kind == JNull
+      # A batch carrying the nil, and a move after it: the session keeps
+      # being mirrored.
+      primary.flowVM.layoutWindows.val = @[windowWith("2")]
+      primary.moveTo(7, "/src/main.nr", 12)
+      link.settle()
+      ck mirror.session.flowVM.layoutWindows.val.len == 1
+      if mirror.session.flowVM.layoutWindows.val.len == 1:
+        ck mirror.session.flowVM.layoutWindows.val[0].steps[0].beforeValues[0].text == "2"
+      ck mirror.session.store.debugger.val.location.line == 12
+      # Encoding did not write `null` into the primary's own value.
+      ck primary.flowVM.layoutWindows.val[0].steps[0].beforeValues[0].value.isNil
       mirror.dispose()
       host.dispose()
       done()

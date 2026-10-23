@@ -57,12 +57,63 @@ const
   EncodeOptions = ToJsonOptions(enumMode: joptEnumString)
   DecodeOptions = Joptions(allowMissingKeys: true, allowExtraKeys: true)
 
+proc holdsNil(node: JsonNode): bool =
+  ## Whether `node` is nil or holds a nil node at any depth.
+  if node.isNil:
+    return true
+  case node.kind
+  of JObject:
+    for _, child in node.pairs:
+      if child.holdsNil:
+        return true
+  of JArray:
+    for child in node.elems:
+      if child.holdsNil:
+        return true
+  else:
+    discard
+  false
+
+proc copyNilAsNull(node: JsonNode): JsonNode =
+  ## A copy of `node` in which every nil node is a JSON `null`.
+  if node.isNil:
+    return newJNull()
+  case node.kind
+  of JObject:
+    result = newJObject()
+    for key, child in node.pairs:
+      result[key] = copyNilAsNull(child)
+  of JArray:
+    result = newJArray()
+    for child in node.elems:
+      result.add copyNilAsNull(child)
+  else:
+    result = node.copy
+
+proc encode[T](value: T): JsonNode =
+  ## `value` as the wire carries it.
+  ##
+  ## A NIL `JsonNode` INSIDE A VALUE IS WRITTEN AS `null`. A signal may hold
+  ## one: `FlowValueText.value` is nil for a step that recorded no value.
+  ## `jsonutils.toJson` passes a `JsonNode` through as the same reference
+  ## (`joptJsonNodeAsRef`), so the encoded tree had a nil child, and
+  ## `std/json`'s `$`, `copy` and `==` all dereference it. The publisher's
+  ## snapshot and batches then raised, and every mirror of the session
+  ## stayed at the last message it had received: under `ct host` the page's
+  ## panes showed no stop and no watches. The tree is copied only when it
+  ## holds a nil, and never changed in place, because its nodes are the
+  ## signal's own value. A mirror decodes the `null` as a `JNull` node, which
+  ## the readers of such a field treat as "no value" as they treat nil.
+  result = toJson(value, EncodeOptions)
+  if result.holdsNil:
+    result = copyNilAsNull(result)
+
 proc add[T](reg: var SyncRegistry; key: string; sig: Signal[T]) =
   let s = sig
   reg.index[key] = reg.signals.len
   reg.signals.add SyncedSignal(
     key: key,
-    read: proc(): JsonNode = toJson(s.val, EncodeOptions),
+    read: proc(): JsonNode = encode(s.val),
     write: proc(value: JsonNode) =
       var decoded: T
       try:
