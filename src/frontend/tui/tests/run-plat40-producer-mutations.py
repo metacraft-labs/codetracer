@@ -21,8 +21,8 @@ derived from a run; rc 124 is a hang (§1); per-arm restore verification.
 The suite runs in-process against the real `calc` recording and a real
 `replay-server`. Its DIFF-9 half reads the committed pixel record of the
 native window and the desktop, which a source mutation cannot move; the
-native-window table rows (`gpui_binding`) and the desktop's row copy
-(`ui/event_log_cells.dataTableRowOf`) are therefore graded by their capture lanes
+native-window table rows (`gpui_binding`) and the desktop's Event Log view
+(`views/isonim_event_log_view`) are therefore graded by their capture lanes
 re-measuring, not here.
 
 Usage:
@@ -69,12 +69,13 @@ ARMS = [
      "    if false:", [PRODUCERS],
      "the call trace is requested and its answer dropped"),
     ("E1", HOST,
-     "    discard s.requestAndLoadEventLog(start = 0, count = RecordingEventWindow)",
+     "    discard s.requestAndLoadEventLog(start = 0, count = 1)",
      "    discard", [PRODUCERS],
      "the recording's event log is never asked for"),
     ("P1", SESSION,
-     "  s.session.store.applyVerifiedBreakpoints(path, verified, disabled)",
-     "  discard verified", [PRODUCERS],
+     "  s.session.store.applyVerifiedBreakpoints(path,\n"
+     "    answeredBreakpoints(plan, resp.getOrDefault(\"body\")))",
+     "  discard plan", [PRODUCERS],
      "the engine's breakpoint verdict never reaches the store"),
     # --- the one decoder ---------------------------------------------------
     ("D1", STORE,

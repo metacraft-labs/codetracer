@@ -2,7 +2,7 @@
   "C1": "loaded.calltrace",
   "D1": "l.name == \"hl\"",
   "D2": "store.applyCalltraceResponse(body) == 2",
-  "E1": "rows.len > event_log_vm.DEFAULT_PAGE_SIZE",
+  "E1": "loaded.events",
   "P1": "pv.report.len == 0",
   "T1": "termPoints.isRead",
   "T2": "termPoints.isRead",
