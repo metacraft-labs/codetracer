@@ -69,7 +69,7 @@ test("PLAT-48: the desktop's menu is drawn from the shared Menu ViewModel", asyn
       "(`just plat48-capture-electron`).",
     ],
   };
-  await ctPage.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", {
+  await ctPage.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", undefined, {
     timeout: 120_000,
   });
   const state = async (): Promise<MenuState> =>

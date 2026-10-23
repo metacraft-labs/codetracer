@@ -6,6 +6,8 @@ import
   ../../../frontend/index/electron_vars,
   ../served_client
 
+from ../../viewmodel/platform/vcs import noIndexLockGitArgs
+
 proc getEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.split(' ').filter(Boolean) : [])(#)".}
 proc normalizePath(p: cstring): cstring {.importjs: "require('path').resolve(#)".}
@@ -36,19 +38,69 @@ proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
 proc writeFileUtf8(path: cstring, content: cstring): Future[void] {.importjs: "require('fs').promises.writeFile(#, #, 'utf8')".}
 
-# Returns the content of a file at git HEAD (empty string if the file is new/untracked).
-proc gitFileAtHead(absPath: cstring): cstring {.importjs: """
-(() => {
+# Git, for the agent pane's change detection. Every call goes through
+# `gitRead`, which starts its argv with the shared `NoIndexLockGitOptions`
+# (`platform/vcs`): these reads run at the start and end of every prompt, and
+# a read must never write the user's index nor take its lock — a CodeTracer
+# killed while git held `.git/index.lock` left the checkout unusable (VCS-Panel
+# .md, "Reading the repository never takes the index lock").
+proc gitStdoutSync(args: seq[cstring]): JsObject {.importjs: """
+(function(a) {
   try {
-    const cp = require('child_process');
-    const path = require('path');
-    const rel = path.relative(process.cwd(), #);
-    const r = cp.spawnSync('git', ['show', 'HEAD:' + rel],
+    const r = require('child_process').spawnSync('git', a,
       { encoding: 'utf8', timeout: 10000, cwd: process.cwd() });
-    return (!r.error && r.status === 0) ? (r.stdout || '') : '';
-  } catch(e) { return ''; }
-})()
-""".}
+    return (!r.error && r.status === 0) ? (r.stdout || '') : null;
+  } catch (e) { return null; }
+})(#)""".}
+proc resolveFromCwd(p: cstring): cstring {.importjs: "require('path').resolve(process.cwd(), #)".}
+proc relativeToCwd(p: cstring): cstring {.importjs: "require('path').relative(process.cwd(), #)".}
+
+proc gitRead(args: openArray[string]): tuple[ok: bool, output: string] =
+  ## git's stdout for `args`, run in this process's working directory; not
+  ## ok when git could not be run, timed out (10 s) or exited non-zero.
+  var argv: seq[cstring] = @[]
+  for a in noIndexLockGitArgs(args): argv.add cstring(a)
+  let raw = gitStdoutSync(argv)
+  if raw.isNull or raw.isUndefined: (false, "")
+  else: (true, $raw.to(cstring))
+
+proc gitFileAtHead(absPath: cstring): cstring =
+  ## The content of a file at git HEAD (empty if the file is new/untracked).
+  let (ok, output) = gitRead(["show", "HEAD:" & $relativeToCwd(absPath)])
+  if ok: cstring(output) else: cstring""
+
+proc gitVisibleChanges(): seq[cstring] =
+  ## Every file whose content differs from HEAD, plus every untracked file
+  ## that is not ignored, as absolute paths.
+  ##
+  ## `--numstat`, not `--name-only`: with `diff.autoRefreshIndex` off (part of
+  ## the shared options) `--name-only` also lists a file whose mtime alone
+  ## changed, while `--numstat` compares its content and leaves it out, as
+  ## `--name-only` used to when git refreshed the index. `-z` keeps names
+  ## verbatim (no C-style quoting) and spells a rename as an empty name
+  ## followed by the old and the new path; the new one is listed, as
+  ## `--name-only` lists it. https://git-scm.com/docs/git-diff#_other_diff_formats
+  let (diffOk, numstat) = gitRead(["diff", "--numstat", "-z", "HEAD"])
+  if diffOk:
+    let fields = numstat.split('\0')
+    var i = 0
+    while i < fields.len:
+      let parts = fields[i].split('\t', maxsplit = 2)
+      if parts.len == 3 and parts[2].len > 0:
+        result.add resolveFromCwd(cstring(parts[2]))
+        inc i
+      elif parts.len == 3 and i + 2 < fields.len:
+        result.add resolveFromCwd(cstring(fields[i + 2]))
+        i += 3
+      else:
+        inc i
+  let (untrackedOk, untracked) =
+    gitRead(["ls-files", "-z", "--others", "--exclude-standard"])
+  if untrackedOk:
+    for p in untracked.split('\0'):
+      if p.len > 0:
+        result.add resolveFromCwd(cstring(p))
+
 
 
 proc makeClient(onRequestPermission: js, onSessionUpdate: js, onWriteTextFile: js, onReadTextFile: js, onCreateTerminal: js): JsObject {.importjs: "(() => ({ requestPermission: async (params) => await #(params), sessionUpdate: async (params) => await #(params), writeTextFile: async (params) => await #(params), readTextFile: async (params) => await #(params), createTerminal: async (params) => await #(params), extMethod: async () => ({}), extNotification: async () => {} }))()".}
@@ -727,24 +779,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   # end-of-prompt comparison can detect bash modifications to ANY of them, not just
   # previously-tracked files.  The baseline set is also used by git detection to
   # identify truly brand-new files (created from scratch during the prompt).
-  promptGitBaseline = @[]
-  {.emit: """
-  (() => {
-    try {
-      const cp = require('child_process');
-      const path = require('path');
-      const cwd = process.cwd();
-      function gitLines(args) {
-        const r = cp.spawnSync('git', args, { encoding: 'utf8', timeout: 10000, cwd });
-        return (!r.error && r.status === 0 && r.stdout)
-          ? r.stdout.trim().split('\n').filter(Boolean) : [];
-      }
-      const paths = [...gitLines(['diff', '--name-only', 'HEAD']),
-                     ...gitLines(['ls-files', '--others', '--exclude-standard'])];
-      for (const p of paths) { `promptGitBaseline`.push(path.resolve(cwd, p)); }
-    } catch(e) {}
-  })();
-  """.}
+  promptGitBaseline = gitVisibleChanges()
   # Read content of git-visible files not yet in lastKnownContent so we have a
   # pre-prompt baseline for every file the agent might touch via bash.
   for gitPath in promptGitBaseline:
@@ -813,24 +848,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   # Git-based detection: files modified or created during this prompt that
   # weren't caught by primary tracking or lastKnownContent (e.g. brand-new
   # files written for the first time via bash this prompt).
-  var gitCurrentPaths: seq[cstring] = @[]
-  {.emit: """
-  (() => {
-    try {
-      const cp = require('child_process');
-      const path = require('path');
-      const cwd = process.cwd();
-      function gitLines2(args) {
-        const r = cp.spawnSync('git', args, { encoding: 'utf8', timeout: 10000, cwd });
-        return (!r.error && r.status === 0 && r.stdout)
-          ? r.stdout.trim().split('\n').filter(Boolean) : [];
-      }
-      const paths = [...gitLines2(['diff', '--name-only', 'HEAD']),
-                     ...gitLines2(['ls-files', '--others', '--exclude-standard'])];
-      for (const p of paths) { `gitCurrentPaths`.push(path.resolve(cwd, p)); }
-    } catch(e) {}
-  })();
-  """.}
+  let gitCurrentPaths = gitVisibleChanges()
   for gitPath in gitCurrentPaths:
     # Skip files that were already changed before this prompt started.
     var wasInBaseline = false

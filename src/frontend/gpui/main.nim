@@ -1808,6 +1808,30 @@ let geometryOut = getEnv("CODETRACER_GPUI_GEOMETRY_OUT", "")
   ## (which tab to press, where a divider is). What a gesture did is read
   ## back from the window's pixels, never from this file.
 
+proc editorVBarRectAsDrawn(): tuple[rect: PxRect; v: EditorVScroll]
+  ## M73: defined with the editor's bars, below.
+
+proc editorVScrollbarGeometry(rect: proc (p: PxRect): JsonNode): JsonNode =
+  ## The editor's vertical scrubber as the window placed it (M73), for a lane
+  ## to AIM at: its track, its thumb and its current-position mark in window
+  ## pixels, the thumb's corner radius, and whether it is SHOWN (the pointer
+  ## over the editor; hidden, every part is drawn at opacity 0). Null while
+  ## the file fits. PLAT-47 B1 reads the execution band's two halves against
+  ## it — the band colour up to the track's left edge, the thumb over the band
+  ## across its width (Scrollbar-Scrubbers.md §4.1) — so the edge the record
+  ## expects is the window's stated one, not one measured off the same pixels.
+  let (bar, v) = editorVBarRectAsDrawn()
+  if bar.h <= 0:
+    return newJNull()
+  %*{"rect": rect(bar),
+     "thumb": rect(PxRect(x: bar.x, y: bar.y + v.thumbTopPx, w: bar.w,
+                          h: v.thumbPx)),
+     "thumbRadius": EditorScrollbarThumbRadiusPx,
+     "mark": (if v.markTopPx < 0: newJNull()
+              else: rect(PxRect(x: bar.x, y: bar.y + v.markTopPx, w: bar.w,
+                                h: EditorScrollbarMarkPx))),
+     "shown": editorScrollbarShown}
+
 proc writeGeometry() =
   if geometryOut.len == 0:
     return
@@ -1857,7 +1881,9 @@ proc writeGeometry() =
                                 "dividers": dividers, "strips": strips,
                                 "revealed": revealed, "topBar": top,
                                 "footer": rect(gGeom.footer),
-                                "openDock": openDock}))
+                                "openDock": openDock,
+                                "editorVScrollbar":
+                                  editorVScrollbarGeometry(rect)}))
   except IOError:
     discard
 
@@ -2149,6 +2175,10 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
                        gLayoutSettings.overflowMarkers, sticky)
+  # The editor is redrawn on its own (the hover that shows its scrollbars, a
+  # scroll), without the arrangement's redraw that writes the geometry: write
+  # it here too, so the scrubber it reports is the one just drawn.
+  writeGeometry()
 
 proc redrawEditorRows(r: GpuiRenderer) =
   ## `PLAT35-F3`. Draw the editor pane's body again from the surface it was
@@ -2275,15 +2305,13 @@ proc editorBarRect(): PxRect =
          w: gEditorViewportPx - (if v.present: EditorVScrollbarPx else: 0),
          h: EditorScrollbarPx)
 
-proc editorVBarRect(): tuple[rect: PxRect; v: EditorVScroll] =
-  ## M73 (#840): where `leaves.renderEditorVScrollbar` draws the editor's
-  ## vertical scrubber, in window pixels, and the decision it was drawn from
-  ## (`leaves.editorVScrollOf`, over the surface the editor was drawn from);
-  ## a zero rectangle while the file fits.
+proc editorVBarRectAsDrawn(): tuple[rect: PxRect; v: EditorVScroll] =
+  ## `editorVBarRect` over the horizontal view AS IT STANDS — no
+  ## `followEditorView` — so the geometry dump (`writeGeometry`) reports the
+  ## scrubber the last draw placed without moving the view under it.
   let i = gGeom.tabsNodeOfPane($paneEditor)
   if i < 0:
     return
-  followEditorView()
   let body = gGeom.nodes[i].body
   let v = editorVScrollOf(gEditorSurface, body.h, gEditorView.overflows)
   if not v.present or gEditorViewportPx <= EditorVScrollbarPx:
@@ -2293,6 +2321,14 @@ proc editorVBarRect(): tuple[rect: PxRect; v: EditorVScroll] =
                 y: body.y + v.trackTopPx, w: EditorVScrollbarPx,
                 h: v.trackPx),
    v: v)
+
+proc editorVBarRect(): tuple[rect: PxRect; v: EditorVScroll] =
+  ## M73 (#840): where `leaves.renderEditorVScrollbar` draws the editor's
+  ## vertical scrubber, in window pixels, and the decision it was drawn from
+  ## (`leaves.editorVScrollOf`, over the surface the editor was drawn from);
+  ## a zero rectangle while the file fits.
+  followEditorView()
+  editorVBarRectAsDrawn()
 
 proc scrubEditorBar(r: GpuiRenderer; x: int; click: bool) =
   ## PLAT-70 (Horizontal-Overflow.md §4.2): a press on the editor's bar

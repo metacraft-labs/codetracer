@@ -33,8 +33,12 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
     ## Synchronous internally, which is honest: the desktop's git IS a
     ## synchronous subprocess. The facade's async signature is preserved by the
     ## callers below, which is where the contract lives.
+    ##
+    ## Every argv starts with `NoIndexLockGitOptions`: a refresh must never
+    ## write the index, nor take its lock (see that constant).
     try:
-      let child = startProcess("git", workingDir = repository, args = args,
+      let child = startProcess("git", workingDir = repository,
+                               args = noIndexLockGitArgs(args),
                                options = {poUsePath})
       # READ BEFORE WAITING. A child that writes more than a pipe holds (64 KiB
       # on Linux) blocks until someone reads, so `waitForExit` first never
@@ -154,7 +158,11 @@ proc nativeVcs*(profile: PlatformProfile): VcsFacade =
       var args = @["apply"]
       if reverse: args.add "--reverse"
       args.add "-"
-      let child = startProcess("git", workingDir = repository, args = args,
+      # The shared prefix here too: `git apply` takes the index lock it needs
+      # whatever the options say, and one way of building argv is one place
+      # the options cannot be forgotten.
+      let child = startProcess("git", workingDir = repository,
+                               args = noIndexLockGitArgs(args),
                                options = {poUsePath})
       child.inputStream.write(patch)
       child.inputStream.close()

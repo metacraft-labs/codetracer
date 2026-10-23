@@ -949,6 +949,15 @@ test_lane_files() {
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
+		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
+		# `diff`, through the Electron process facade, over real repositories
+		# with a stale stat cache, never rewrite the index or leave
+		# `.git/index.lock` (VCS-Panel.md, "Reading the repository never takes
+		# the index lock"). Here because `git_cli` is a renderer module, and
+		# `jsdom-run.mjs` loads the suite with node's `require`, so git can
+		# be spawned. Needs `git` on PATH; writes only under one `mkdtemp`
+		# directory, which it removes.
+		echo src/frontend/tests/git_cli_index_lock_test.nim
 		echo src/frontend/tests/loop_built_handlers_test.nim
 		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;
@@ -1011,6 +1020,15 @@ test_lane_files() {
 		# compile for a browser and cannot spawn git. Needs `git` and `sh` on
 		# PATH; writes only under one `mkdtemp` directory, which it removes.
 		echo src/frontend/tests/electron_vcs_content_id_async_test.nim
+		#
+		# `electron_vcs_index_lock_test.nim` drives the same facade's `status`
+		# and `diff` over real repositories whose index has a stale stat cache,
+		# and asserts the index is never rewritten and no `.git/index.lock` is
+		# left (VCS-Panel.md, "Reading the repository never takes the index
+		# lock"), with a plain `git status` as the control that does rewrite
+		# it. Here for the same reason as the suite above. Needs `git` on
+		# PATH; writes only under one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/electron_vcs_index_lock_test.nim
 		#
 		# `settle_once_test.nim` drives `index/settle_once.nim` — the rule that
 		# `traces.onRunTest` and `onRunTestSuite` answer a test run EXACTLY ONCE —
@@ -1159,10 +1177,13 @@ test_lane_files() {
 		# the Electron window can be supplied without a display;
 		# `acp_sessions_per_client_test.nim` does the same to hold `ct host`'s
 		# clients to one ACP session each (`index/served_client` contexts).
+		# `acp_git_visible_changes_test.nim` holds the same module's git change
+		# detection to the files whose content changed, with no index write.
 		# `component_ids_across_sessions_test.nim` (#835) imports `utils.nim`,
 		# whose `generateId` reads every tab's `componentMapping` through the same
 		# JS-only `Data`; it holds editor and diff ids unique across the window.
 		printf '%s\n' \
+			src/frontend/tests/acp_git_visible_changes_test.nim \
 			src/frontend/tests/acp_notification_test.nim \
 			src/frontend/tests/acp_sessions_per_client_test.nim \
 			src/frontend/tests/component_ids_across_sessions_test.nim \

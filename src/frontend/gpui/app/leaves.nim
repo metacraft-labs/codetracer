@@ -976,6 +976,12 @@ const
     ## default is the only published value, and §3.1's "never a hex" rule is
     ## about the `data-ct-token` attribute, which this element deliberately
     ## does not claim to carry.
+  EditorScrollbarThumbRadiusPx* = 3
+    ## Both bars' thumbs are drawn with corners this round. Named (rather
+    ## than a `"3px"` literal at each thumb) because the window's geometry
+    ## reports it (`main.writeGeometry`): the rows a thumb's rounded ends
+    ## leave partly uncovered are where a capture must not read the
+    ## thumb-over-band colour (Scrollbar-Scrubbers.md §4.1, PLAT-47 B1).
   EditorScrollbarAttribute* = "data-ct-editor-scrollbar"
     ## **THE SCROLLBAR'S TRACK.** Present on exactly one node, and only on
     ## frames whose content is wider than the pane. Its value is the axis
@@ -1310,7 +1316,7 @@ proc renderEditorScrollbar(r: GpuiRenderer; scroll: EditorHScroll;
   r.setStyle(thumb, "height", $EditorScrollbarPx & "px")
   r.setStyle(thumb, "flex-shrink", "0")
   r.setStyle(thumb, "background-color", EditorScrollbarThumbColour)
-  r.setStyle(thumb, "rounded", "3px")
+  r.setStyle(thumb, "rounded", $EditorScrollbarThumbRadiusPx & "px")
   if not editorScrollbarShown:
     r.setStyle(thumb, "opacity", "0")
   r.appendChild(result, thumb)
@@ -1360,7 +1366,7 @@ proc renderEditorVScrollbar(r: GpuiRenderer; v: EditorVScroll;
   r.setStyle(thumb, "width", $EditorVScrollbarPx & "px")
   r.setStyle(thumb, "height", $v.thumbPx & "px")
   r.setStyle(thumb, "background-color", EditorScrollbarThumbColour)
-  r.setStyle(thumb, "rounded", "3px")
+  r.setStyle(thumb, "rounded", $EditorScrollbarThumbRadiusPx & "px")
   if not editorScrollbarShown:
     r.setStyle(thumb, "opacity", "0")
   r.appendChild(result, thumb)

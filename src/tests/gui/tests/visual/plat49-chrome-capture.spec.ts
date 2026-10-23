@@ -64,7 +64,7 @@ test("PLAT-49: the desktop's root menu, control tooltips and omnibar placeholder
       "(`bash scripts/plat49-capture-electron.sh`).",
     ],
   };
-  await ctPage.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", {
+  await ctPage.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", undefined, {
     timeout: 120_000,
   });
   const box = async (selector: string): Promise<Box> => {

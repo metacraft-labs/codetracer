@@ -21,7 +21,7 @@ from ../platform_host import
   ctPlatform, ctAwaitSync, can, canAll, capFilesystemRead, capProcessSpawn,
   capProcessArbitraryPrograms, capVcsWrite, ProcessSpec, Platform,
   PlatformOutcome, PlatformFutureT, ProcessRunResult, Nothing, process, fs, vcs,
-  succeededExit, onComplete, pkTimeout, `$`
+  succeededExit, onComplete, pkTimeout, noIndexLockGitArgs, `$`
 
 import std/tables
 
@@ -134,9 +134,15 @@ proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
   ## anything" are the two separate questions this call needs answered yes.
   if not ctPlatform().canAll({capProcessSpawn, capProcessArbitraryPrograms}):
     return ("", false)
-  var argv: seq[string] = @[]
+  # Every call starts with the shared `NoIndexLockGitOptions`: the VCS
+  # panel re-reads the repository through here every few seconds, and a
+  # refresh must never write the user's index nor take its lock
+  # (`platform/vcs`, VCS-Panel.md "Reading the repository never takes the
+  # index lock").
+  var plain: seq[string] = @[]
   for arg in args:
-    argv.add $arg
+    plain.add $arg
+  let argv = noIndexLockGitArgs(plain)
   let key = memoKey("run", args, cwd)
   if gitInFlight.hasKey(key):
     # A call for this exact question is already out. Issuing a second one here

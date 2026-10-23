@@ -67,7 +67,7 @@ import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
 
-const ExpectedAssertions = 1002
+const ExpectedAssertions = 1012
 var counted = 0
 var failedChecks = 0
 
@@ -777,6 +777,53 @@ suite "vcs is served by running git, and reads back what git wrote":
     let nowhere = answer("vcs.status", %*{"repository": workspace & "/absent"})
     ck not nowhere.ok
     ck nowhere.errorKind == pkNotFound
+
+  # VCS-Panel.md, "Reading the repository never takes the index lock". A
+  # repository whose index has a STALE STAT CACHE — `tracked.txt` committed,
+  # then its mtime moved with its content unchanged — is the state in which a
+  # plain `git status` or `git diff` refreshes the cache and writes the index
+  # back: `.git/index.lock` is created and renamed over `.git/index`, so the
+  # index's inode changes. A read that leaves the inode alone took no lock.
+  # Each verb gets its own repository, so one read's refresh cannot hide
+  # another's write, and each ends with the CONTROL: a plain `git status` in
+  # the same repository DOES rewrite the index, so the repository really was
+  # stale and the verb really had something to refresh.
+  proc staleStatRepository(name: string): string =
+    result = workspace & "/" & name
+    ck runScript(workspace,
+      "git -c init.defaultBranch=main init -q " & name & " && cd " & name &
+      " && printf 'one\\n' > tracked.txt && git add tracked.txt" &
+      " && git -c user.name=x -c user.email=x@example.invalid" &
+      " -c commit.gpgsign=false commit -q -m one" &
+      # 2001-09-09, POSIX `touch -t` ([[CC]YY]MMDDhhmm): years older than
+      # the index, so the recorded stat no longer matches.
+      " && touch -t 200109090146 tracked.txt").exit.exitCode == 0
+
+  proc indexInode(repo: string): int =
+    nodeFs.statSync(cstring(repo & "/.git/index")).ino.to(int)
+
+  proc controlRewritesIndex(repo: string; before: int): bool =
+    runScript(repo, "git status --porcelain").exit.exitCode == 0 and
+      indexInode(repo) != before
+
+  test "vcs.status and vcs.diff never write the index, so never take its lock":
+    let statusRepo = staleStatRepository("stale-status")
+    let statusBefore = indexInode(statusRepo)
+    let status = decodeVcsStatus(
+      payloadOf("vcs.status", %*{"repository": statusRepo}))
+    ck status.branch == "main" and status.changes.len == 0
+    ck indexInode(statusRepo) == statusBefore
+    ck not nodeFs.existsSync(cstring(statusRepo & "/.git/index.lock")).to(bool)
+    ck controlRewritesIndex(statusRepo, statusBefore)
+
+    let diffRepo = staleStatRepository("stale-diff")
+    let diffBefore = indexInode(diffRepo)
+    ck decodeText(payloadOf("vcs.diff", %*{
+      "repository": diffRepo, "paths": [], "staged": false,
+      "contextLines": 3})) == ""
+    ck indexInode(diffRepo) == diffBefore
+    ck not nodeFs.existsSync(cstring(diffRepo & "/.git/index.lock")).to(bool)
+    ck controlRewritesIndex(diffRepo, diffBefore)
 
 # ---------------------------------------------------------------------------
 # 5b. vcs.contentId — SB-2a: the content facts W, H and S, and the store roots
