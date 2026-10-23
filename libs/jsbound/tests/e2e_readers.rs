@@ -184,6 +184,16 @@ impl ReadDeadline for std::net::TcpStream {
     }
 }
 
+/// A client of the daemon that asks for the session the `ct trace` commands
+/// open: every request it sends carries `hostSourceReads: true`, the setting
+/// `ct trace info` sends. The daemon keeps one session per trace and
+/// setting, and routes a request without the field (recording sources only)
+/// to a session of its own (codetracer-pm
+/// `spec/Planned-Features/CodeTracer-MCP-Server.md` §2, "A session's identity
+/// is the trace path and whether its replay backend may read the recording's
+/// listed sources from the host"), so without it these requests would open,
+/// and question, a second replay-server rather than the one `ct trace info`
+/// started.
 struct DapClient<S: Read + Write + ReadDeadline> {
     stream: S,
     seq: i64,
@@ -209,9 +219,14 @@ impl<S: Read + Write + ReadDeadline> DapClient<S> {
         reply
     }
 
-    /// Send `command` and return its response, skipping the events the
+    /// Send `command` (its `arguments` marked `hostSourceReads: true`, see
+    /// [`DapClient`]) and return its response, skipping the events the
     /// daemon forwards in between.
-    fn request(&mut self, command: &str, arguments: Value) -> Value {
+    fn request(&mut self, command: &str, mut arguments: Value) -> Value {
+        arguments
+            .as_object_mut()
+            .expect("request arguments are an object")
+            .insert("hostSourceReads".to_string(), Value::Bool(true));
         self.seq += 1;
         self.pending = command.to_string();
         let body = serde_json::to_vec(&json!({
@@ -363,6 +378,10 @@ fn e2e_jsbound_ct_opens_in_existing_readers() {
         open["body"]["cached"], true,
         "the session `ct trace info` opened is still loaded: {open}"
     );
+    assert_eq!(
+        open["body"]["hostSourceReads"], true,
+        "the session is the one the `ct trace` commands open: {open}"
+    );
     // Step 0 exists in every trace with at least one step: the replay-server
     // looks it up in its step table (db-backend `Db::jump_to`) and refuses
     // an index that is not there.
@@ -434,6 +453,8 @@ fn e2e_jsbound_ct_answers_every_query_with_no_steps() {
     let mut client = daemon.connect();
     let open = client.request("ct/open-trace", json!({ "tracePath": tp }));
     assert_eq!(open["success"], true, "ct/open-trace: {open}");
+    // The queries below reach the replay-server `ct trace info` started.
+    assert_eq!(open["body"]["cached"], true, "ct/open-trace: {open}");
 
     let mut ask = |command: &str, arguments: Value| -> Value {
         let reply = client.request_within(command, arguments, QUERY_DEADLINE);
