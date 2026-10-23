@@ -29,7 +29,8 @@
 ##     stdin closing as a busy engine does, is killed rather than left behind;
 ##   * with no override the shipped default budget applies (it is a clock, not
 ##     an opt-in);
-##   * the engine is reaped: the stalled child does not outlive the front-end;
+##   * the engine is reaped: the stalled child does not outlive the front-end,
+##     and neither does the engine of a window run that ended normally;
 ##   * an engine that says WHY (`ct/launch-failed`) is still reported as that
 ##     refusal, verbatim, with `ExitUnreadableRecording` (5) — the bound must
 ##     not swallow the stated reason into a stall;
@@ -437,6 +438,42 @@ suite "codetracer-gpui bounds the replay engine's handshake":
     ck r.rc == 0
     ck "stopped answering" notin r.stderr
     ck r.stdout.strip().startsWith("{")
+
+  test "a window run that ends normally closes its engine too":
+    # The run's own engine ends with the run on EVERY path out of `runOpen`
+    # (§8b), not only a stall's. A window run is asked for (no plan flag) and
+    # ends however this host lets it: the window opens and `--quit-after-ms`
+    # stops its loop (0), or the shim cannot show one and the run is refused
+    # (`ExitNoWindow`, 3). Either way `launchWindow` returns through `runOpen`.
+    # The real engine on `calc`, run by a wrapper that records its own pid,
+    # serves the session through the real engine, and then — once the engine
+    # has seen its input close and exited — stays alive as that same pid
+    # (`exec sleep`). The real engine alone exits on that EOF, so a run that
+    # never closed it would still look clean; the wrapper outlives the EOF
+    # the way a busy engine does, so only the run closing (killing) it ends
+    # it.
+    let pidFile = scratch / "window-engine.pid"
+    let wrapper = scratch / "pid-replay-server"
+    writeFile(wrapper, "#!/bin/sh\necho $$ > " & quoteShell(pidFile) &
+                       "\n" & quoteShell(getEnv("REPLAY_SERVER_BIN")) &
+                       " \"$@\"\nexec sleep 600\n")
+    setFilePermissions(wrapper, {fpUserRead, fpUserWrite, fpUserExec})
+    var env = baseEnv()
+    env["REPLAY_SERVER_BIN"] = wrapper
+    env[HandshakeEnv] = $BudgetMs
+    let r = runBinary(@["--quit-after-ms=1500", calc], env)
+    checkpoint("rc " & $r.rc & " in " & $r.seconds & " s; killed: " &
+               $r.killed & "; stderr: " & r.stderr)
+    ck not r.killed
+    ck r.rc in [0, 3]
+    ck "stopped answering" notin r.stderr
+    let pid = if fileExists(pidFile): parseInt(readFile(pidFile).strip())
+              else: -1
+    ck pid > 0
+    let gone = waitGone(pid)
+    ck gone
+    if not gone:
+      discard execCmd("kill -9 " & $pid & " 2>/dev/null")
 
   test "the open is bounded and the window's session is not":
     # The same entry points the binary uses, in-process, on the real engine
