@@ -44,11 +44,6 @@ when defined(js):
   import ../store/replay_data_store
   from ./context_menu_bridge import showContextMenu
   from ../../context_menu_item import ContextMenuItem
-  when defined(ctRenderer):
-    from ../../types import RAW_TYPE, TypeKind, Value, ValueWithExpression
-    from ../../../common/ct_event import InternalAddToScratchpad
-    from ../../communication import emit
-    from ../../types import data
   import kdom except Location
   import std/jsffi
   import ./list_scrubber_dom
@@ -346,32 +341,18 @@ when defined(js):
     isonim_dom.setAttribute(line, cstring"stroke-width", cstring"0.5")
     isonim_dom.appendChild(isonim_dom.Node(svg), isonim_dom.Node(line))
 
-  when defined(ctRenderer):
-    proc rawScratchpadValue(text: string): Value =
-      Value(
-        kind: TypeKind.Raw,
-        typ: RAW_TYPE,
-        r: cstring(text),
-        isLiteral: false)
-
   var addToScratchpadHook*: proc(name, text: string)
-    ## Where "Add value to scratchpad" goes when the page has no desktop
-    ## renderer: a VS Code webview sets it to its mirror's
-    ## `ScratchpadVM.addValue` (`entries/vscode_panel`). Unset, the desktop's
-    ## event bus is used.
+    ## Where "Add value to scratchpad" on a call argument goes. The host that
+    ## mounts the view installs it: the desktop sends the value over its event
+    ## bus (`ui/panel_host`), a VS Code webview to its mirror's
+    ## `ScratchpadVM.addValue` (`entries/vscode_panel`). A page with no
+    ## scratchpad leaves it unset and the entry does nothing. The view itself
+    ## knows no host, so it can be rendered outside the desktop
+    ## (`codetracer_ui_components`).
 
   proc addCallArgToScratchpad(name, text: string) =
     if not addToScratchpadHook.isNil:
       addToScratchpadHook(name, text)
-      return
-    when defined(ctRenderer):
-      if data.sessions.len == 0:
-        return
-      let api =
-        data.sessions[data.activeSessionIndex].viewsApi
-      api.emit(InternalAddToScratchpad, ValueWithExpression(
-        expression: cstring(name),
-        value: rawScratchpadValue(text)))
 
   proc showMenu(ev: isonim_dom.Event; items: seq[ContextMenuItem]) =
     ev.preventDefault()

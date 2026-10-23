@@ -202,6 +202,15 @@ FACADE_MODULE="codetracer_embed"
 # is the SDK's public surface; a missing plugin surface is
 # plugin-reactive-boundary.sh's `surface-present`, and duplicating it would put
 # the same finding in two gates with two names.
+# The UI Components package (CodeTracer-UI-Components.md; Shared-DOM-Front-Ends
+# Q6, decided 2026-10-19; HSF-B2): the
+# shared generic pane views, for an embedder that renders them. A SEPARATE
+# surface from ${FACADE_REL}, which stays rendering-free, and held to its own
+# rule set below (VIEWS_FORBIDDEN_PATTERNS): rendering is what it is for, the
+# desktop is not.
+VIEWS_FACADE_REL="${SDK_SUBTREE}/codetracer_ui_components.nim"
+VIEWS_FACADE_MODULE="codetracer_ui_components"
+
 PLUGIN_SURFACE_REL="${SDK_SUBTREE}/codetracer_plugin.nim"
 PLUGIN_SURFACE_MODULE="codetracer_plugin"
 
@@ -395,6 +404,25 @@ FORBIDDEN_PATTERNS=(
 #
 # What is left is unambiguous: nothing in a debugger over a trace has a
 # reason to say `blockNumber`.
+# What the views facade must not reach. Rendering modules (IsoNim's DSL and web
+# renderer, the DOM, `kdom` for the context menus) are its purpose and are not
+# listed; the desktop around them is. `lib/electron_presence.nim` is admitted
+# by name below: it is a runtime probe that imports nothing, written so a web
+# page can ask "am I in Electron?" without the Electron binding.
+VIEWS_FORBIDDEN_PATTERNS=(
+	"[Mm]onaco;Monaco (the desktop editor; an embedder brings its own)"
+	"[Gg]olden[Ll]?ayout|golden_layout;GoldenLayout (the desktop's panel manager)"
+	"^src/frontend/(renderer|index)/;the legacy Electron renderer"
+	"${UI_PATH_PATTERN};the desktop UI tree — a shared view must not depend on a desktop component"
+	"^src/frontend/types\.nim$;the desktop types module (Data, the Karax components)"
+	"(^|/)electron|ipc_renderer|ipcRenderer;Electron IPC"
+	"(^|/)osproc(\.nim)?$;spawns processes — an embeddable library cannot (spec §8)"
+)
+
+VIEWS_ALLOWLIST=(
+	"src/frontend/lib/electron_presence.nim"
+)
+
 CHAIN_TOKENS=(
 	"chainid"
 	"chain_id"
@@ -814,6 +842,60 @@ if [ "${facade_ok}" -eq 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Check 3b: the views facade reaches the shared views and not the desktop
+# ---------------------------------------------------------------------------
+
+if [ -f "${VIEWS_FACADE_REL}" ]; then
+	if ! grep -q "CodeTracerUiComponentsModule\* = \"${VIEWS_FACADE_MODULE}\"" "${VIEWS_FACADE_REL}"; then
+		check_failed "views-facade-present"
+		violation_detail "${VIEWS_FACADE_REL} does not declare CodeTracerUiComponentsModule* = \"${VIEWS_FACADE_MODULE}\""
+	else
+		check_ok "views-facade-present"
+		mapfile -t views_closure < <(closure_of "${VIEWS_FACADE_REL}" | sort -u)
+		mapfile -t views_externals < <(external_specs_of "${views_closure[@]}")
+		echo "  (views facade graph: ${#views_closure[@]} modules, ${#views_externals[@]} external specs)"
+		views_violations=0
+		for entry in "${VIEWS_FORBIDDEN_PATTERNS[@]}"; do
+			pattern="${entry%%;*}"
+			reason="${entry#*;}"
+			for item in "${views_closure[@]}" "${views_externals[@]}"; do
+				if grep -qE "${pattern}" <<<"${item}"; then
+					allowed=0
+					for ok in "${VIEWS_ALLOWLIST[@]}"; do
+						[ "${item}" = "${ok}" ] && allowed=1
+					done
+					[ "${allowed}" -eq 1 ] && continue
+					ui_path_exempt "${pattern}" "${item}" && continue
+					views_violations=$((views_violations + 1))
+					violation_detail "${item} — ${reason}"
+				fi
+			done
+		done
+		if [ "${views_violations}" -eq 0 ]; then
+			check_ok "views-facade-graph-no-desktop (Shared-DOM-Front-Ends Q6)"
+		else
+			check_failed "views-facade-graph-no-desktop: ${views_violations} desktop module(s) reachable from the views facade"
+		fi
+		views_chain=0
+		for token in "${CHAIN_TOKENS[@]}"; do
+			while read -r hit; do
+				[ -n "${hit}" ] || continue
+				views_chain=$((views_chain + 1))
+				violation_detail "${hit}"
+				violation_detail "  '${token}' is a chain concept; the shared views must not carry one."
+			done < <(grep -rinE "(^|[^a-zA-Z0-9_])${token}([^a-zA-Z0-9_]|$)" "${views_closure[@]}" 2>/dev/null |
+				awk -F: '{ rest = $0; sub(/^[^:]*:[0-9]+:/, "", rest); if (rest !~ /^[ \t]*#/) print }' |
+				head -20)
+		done
+		if [ "${views_chain}" -eq 0 ]; then
+			check_ok "views-facade-graph-no-chain-concept"
+		else
+			check_failed "views-facade-graph-no-chain-concept: ${views_chain} chain reference(s) in the views graph"
+		fi
+	fi
+fi
+
+# ---------------------------------------------------------------------------
 # Check 4: declared consumers reach the SDK only through the facade
 # ---------------------------------------------------------------------------
 
@@ -831,6 +913,8 @@ for c in "${consumers[@]}"; do
 		*) continue ;;
 		esac
 		[ "${resolved}" = "${FACADE_REL}" ] && continue
+		# The views facade is the second public surface (Q6); see VIEWS_FACADE_REL.
+		[ "${resolved}" = "${VIEWS_FACADE_REL}" ] && continue
 		# The narrowed surface a plugin consumes. See PLUGIN_SURFACE_REL above
 		# for why admitting it changes nothing else about this guard.
 		[ "${resolved}" = "${PLUGIN_SURFACE_REL}" ] && continue
@@ -843,7 +927,8 @@ for c in "${consumers[@]}"; do
 		fi
 		consumer_violations=$((consumer_violations + 1))
 		violation_detail "${c} imports '${spec}' -> ${resolved}"
-		violation_detail "  That is an SDK internal. A consumer may import '${FACADE_MODULE}', or"
+		violation_detail "  That is an SDK internal. A consumer may import '${FACADE_MODULE}' (and"
+		violation_detail "  '${VIEWS_FACADE_MODULE}' to render the shared panes), or"
 		violation_detail "  '${PLUGIN_SURFACE_MODULE}' if it is a plugin, and nothing else here."
 		violation_detail "  Spec §7: anything not exported from the facade is private, and an"
 		violation_detail "  internal refactor that does not change the facade is not a breaking change."

@@ -1068,5 +1068,54 @@ else
 	fi
 fi
 
+# ---------------------------------------------------------------------------
+# views-facade (Shared-DOM-Front-Ends Q6): rendering yes, the desktop no
+# ---------------------------------------------------------------------------
+
+views_tree() {
+	local t
+	t="$(make_tree "$1")"
+	mkdir -p "${t}/src/frontend/viewmodel/views" "${t}/src/frontend/ui" "${t}/src/frontend/lib"
+	printf '%s\n' 'import views/a_view' 'export a_view' \
+		'const CodeTracerUiComponentsModule* = "codetracer_ui_components"' \
+		>"${t}/src/frontend/viewmodel/codetracer_ui_components.nim"
+	printf '%s' "${t}"
+}
+
+t="$(views_tree views-clean)"
+printf '%s\n' 'import kdom' 'from ../../lib/electron_presence import inElectron' \
+	'const ViewVersion* = 1' >"${t}/src/frontend/viewmodel/views/a_view.nim"
+echo 'proc inElectron*(): bool = false' >"${t}/src/frontend/lib/electron_presence.nim"
+mkdir -p "${t}/consumer"
+printf '%s\n' '## SDK-CONSUMER: a host that renders the shared panes.' \
+	'import ../src/frontend/viewmodel/[codetracer_embed, codetracer_ui_components]' \
+	'echo StoreVersion, ViewVersion' >"${t}/consumer/pane.nim"
+git -C "${t}" add -A >/dev/null
+assert_clean "${t}" "a views facade that renders (kdom) and asks electron_presence passes, and a consumer may import it"
+
+t="$(views_tree views-reach-ui)"
+echo 'import ../../ui/some_component' >"${t}/src/frontend/viewmodel/views/a_view.nim"
+echo 'const X* = 1' >"${t}/src/frontend/ui/some_component.nim"
+git -C "${t}" add -A >/dev/null
+assert_fires "${t}" "views-facade-graph-no-desktop" \
+	"a shared view that reaches a desktop ui/ component is reported" \
+	"src/frontend/ui/some_component.nim"
+
+t="$(views_tree views-reach-types)"
+printf '%s\n' 'when defined(ctRenderer):' '  from ../../types import data' \
+	>"${t}/src/frontend/viewmodel/views/a_view.nim"
+echo 'var data* = 0' >"${t}/src/frontend/types.nim"
+git -C "${t}" add -A >/dev/null
+assert_fires "${t}" "views-facade-graph-no-desktop" \
+	"a desktop types.nim import is reported even under a when-branch" \
+	"src/frontend/types.nim"
+
+t="$(views_tree views-renamed)"
+sed -i 's/CodeTracerUiComponentsModule/SomethingElse/' "${t}/src/frontend/viewmodel/codetracer_ui_components.nim"
+echo 'const ViewVersion* = 1' >"${t}/src/frontend/viewmodel/views/a_view.nim"
+git -C "${t}" add -A >/dev/null
+assert_fires "${t}" "views-facade-present" \
+	"a views facade that does not declare its module name is reported"
+
 echo "--- ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]

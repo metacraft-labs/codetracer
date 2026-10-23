@@ -34,6 +34,8 @@ from isonim/web/dom_api import nil
 from ./pane_host_lookup import findPaneHost
 
 import ../types
+from ../communication import emit
+from ../../common/ct_event import InternalAddToScratchpad
 import ../viewmodel/session_vm
 import ../viewmodel/pane_viewport
 from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall,
@@ -486,6 +488,21 @@ proc setPanelSessionResolver*(
   ## every host shows the session `setPanelSession` installed.
   resolveSession = resolve
   refreshPanelSessions()
+
+# "Add value to scratchpad" on a call-trace argument: the desktop's scratchpad
+# takes values over the tab's event bus (`ui/scratchpad`'s
+# `InternalAddToScratchpad` subscription). The view only calls the hook, so it
+# can be rendered outside the desktop (`codetracer_ui_components`).
+proc rawScratchpadValue(text: string): Value =
+  Value(kind: TypeKind.Raw, typ: RAW_TYPE, r: cstring(text), isLiteral: false)
+
+addToScratchpadHook = proc(name, text: string) =
+  if data.sessions.len == 0:
+    return
+  data.sessions[data.activeSessionIndex].viewsApi.emit(
+    InternalAddToScratchpad,
+    ValueWithExpression(expression: cstring(name),
+                        value: rawScratchpadValue(text)))
 
 proc setPanelSession*(session: SessionViewModel) =
   ## Install the session of the tab on screen, and mount or re-render every
