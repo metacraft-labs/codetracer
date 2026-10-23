@@ -1009,8 +1009,11 @@
           name = "backend-manager";
           pname = "backend-manager";
 
-          # Include the crate and both of its local path dependencies:
-          # ``../../libs/ct-home`` and ``../../../codetracer-trace-format``.
+          # Include the crate and its local path dependencies:
+          # ``../../libs/ct-home``, ``../../libs/ct-data-breakpoints``,
+          # ``../../libs/ct-open-beneath`` and ``../../../codetracer-trace-format``
+          # (``ci/test/backend-manager-package-inputs.nix`` checks that every
+          # path dependency in the manifests is present).
           # Preserve their relative layout so Cargo can resolve them.
           # The script executor security tests also copy the real Python API
           # from ``../../python-api``. Include that fixture without pulling in
@@ -1020,6 +1023,8 @@
             mkdir -p $out/codetracer/src $out/codetracer/libs
             cp -r ${../../src/backend-manager} $out/codetracer/src/backend-manager
             cp -r ${../../libs/ct-home} $out/codetracer/libs/ct-home
+            cp -r ${../../libs/ct-data-breakpoints} $out/codetracer/libs/ct-data-breakpoints
+            cp -r ${../../libs/ct-open-beneath} $out/codetracer/libs/ct-open-beneath
             cp -r ${../../python-api} $out/codetracer/python-api
             cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
           '';

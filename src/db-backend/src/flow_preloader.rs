@@ -134,6 +134,12 @@ impl FlowPreloader {
         }
     }
 
+    /// Puts this preloader, and every walk it starts, under a session's
+    /// source-reading rule (see [`crate::source_access`]).
+    pub fn set_source_access(&mut self, source_access: crate::source_access::SourceAccessHandle) {
+        self.expr_loader.set_source_access(source_access);
+    }
+
     pub fn load(
         &mut self,
         location: Location,
@@ -373,7 +379,12 @@ impl<'a> CallFlowPreloader<'a> {
             trace_kind,
             lang: lang_from_context(Path::new(&location.path)),
             pending_branches: vec![],
-            walk_expr_loader: ExprLoader::new(CoreTrace::default()),
+            // Under the session's source-reading rule, as the preloader's
+            // own loader is.
+            walk_expr_loader: ExprLoader::with_source_access(
+                CoreTrace::default(),
+                flow_preloader.expr_loader.source_access().clone(),
+            ),
         }
     }
 

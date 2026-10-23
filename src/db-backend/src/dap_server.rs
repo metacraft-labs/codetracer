@@ -27,6 +27,7 @@ use crate::recreator_session::{RecreatorArgs, ReplayWorkerStartError};
 // `Handler` so requests can route per-thread to the owning trace.
 use crate::session_handler::{SessionHandler, TraceSlot, compose_thread_id, decompose_thread_id};
 use crate::session_manifest::SessionManifest;
+use crate::source_access::{HostSourceReads, SourceAccess};
 use crate::task;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
@@ -437,8 +438,16 @@ fn setup(
     for_launch: bool,
     thread_name: &str,
     rename_list_path: Option<&Path>,
+    host_reads: HostSourceReads,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
+    // The session's source-reading rule, in force from the handler's
+    // construction on (see `crate::source_access`). The copy roots are
+    // filled in as the trace folder and the bundle become known.
+    let source_access = SourceAccess {
+        host_reads,
+        ..SourceAccess::default()
+    };
     let trace_path = trace_folder.join(trace_file);
 
     // A JS boundary recording (codetracer-pm CTFS-Binary-Format.md §4.8) is a
@@ -459,7 +468,7 @@ fn setup(
             );
             let workdir = candidate.parent().map(Path::to_path_buf).unwrap_or_default();
             let reader: Arc<dyn TraceReader> = Arc::new(CTFSTraceReader::from_events(Vec::new(), &workdir)?);
-            let mut handler = Handler::construct_with_reader(
+            let mut handler = Handler::construct_with_reader_and_source_access(
                 TraceKind::Materialized,
                 RecreatorArgs {
                     name: thread_name.to_string(),
@@ -467,6 +476,7 @@ fn setup(
                 },
                 reader,
                 false,
+                source_access.clone(),
             );
             handler.raw_diff_index = raw_diff_index;
             handler.set_trace_folder(trace_folder);
@@ -518,7 +528,7 @@ fn setup(
                     ctfs_reader.event_count(),
                 );
                 let reader: Arc<dyn TraceReader> = Arc::new(ctfs_reader);
-                let mut handler = Handler::construct_with_reader(
+                let mut handler = Handler::construct_with_reader_and_source_access(
                     TraceKind::Materialized,
                     RecreatorArgs {
                         name: thread_name.to_string(),
@@ -526,6 +536,7 @@ fn setup(
                     },
                     reader,
                     false,
+                    source_access.clone(),
                 );
                 if let Some(decoder) = load_materialized_origin_metadata_decoder_from_path(&ctfs_path) {
                     handler.install_materialized_origin_metadata_decoder(decoder);
@@ -650,7 +661,7 @@ fn setup(
             reader.event_count(),
         );
         let reader: Arc<dyn TraceReader> = Arc::new(reader);
-        let mut handler = Handler::construct_with_reader(
+        let mut handler = Handler::construct_with_reader_and_source_access(
             TraceKind::Materialized,
             RecreatorArgs {
                 name: thread_name.to_string(),
@@ -658,6 +669,7 @@ fn setup(
             },
             reader,
             false,
+            source_access.clone(),
         );
         handler.raw_diff_index = raw_diff_index;
         // RS-M2 — remember the recording directory so
@@ -710,7 +722,13 @@ fn setup(
             ..RecreatorArgs::default()
         };
         info!("ct_rr_args {:?}", ct_rr_args);
-        let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
+        let mut handler = Handler::construct_with_reader_and_source_access(
+            TraceKind::Recreator,
+            ct_rr_args,
+            Arc::new(crate::in_memory_trace_reader::InMemoryTraceReader::new(db)),
+            false,
+            source_access,
+        );
         handler.raw_diff_index = raw_diff_index;
         // Load macro sourcemaps for Nim macro expansion support (S6).
         // RS-M2 — remember the recording directory so
@@ -830,6 +848,7 @@ fn setup_session(
     for_launch: bool,
     thread_name: &str,
     rename_list_path: Option<&Path>,
+    host_reads: HostSourceReads,
 ) -> Result<SessionHandler, Box<dyn Error>> {
     info!("setup_session: loading manifest from {}", manifest_path.display());
     let manifest = SessionManifest::load(manifest_path)
@@ -864,6 +883,7 @@ fn setup_session(
             trace_for_launch,
             &per_trace_thread_name,
             rename_list_path,
+            host_reads,
         )
         .map_err(|e| -> Box<dyn Error> {
             format!(
@@ -2423,6 +2443,9 @@ pub struct Ctx {
     /// CLI default (`cli_default_rename_list`) or the sibling lookup
     /// `<recording-dir>/renames.toml`.
     pub launch_rename_list: Option<PathBuf>,
+    /// The `launch` argument `hostSourceReads`: the session's source-reading
+    /// rule (see `crate::source_access`).
+    pub launch_host_source_reads: HostSourceReads,
     /// CLI-supplied default rename list path
     /// (`replay-server dap-server --rename-list <p>`).  Applies to
     /// every trace the server opens unless overridden by a per-launch
@@ -2454,6 +2477,7 @@ impl Default for Ctx {
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
             launch_rename_list: None,
+            launch_host_source_reads: HostSourceReads::default(),
             cli_default_rename_list: None,
             launch_program: None,
             launch_program_args: Vec::new(),
@@ -2576,7 +2600,37 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
         }
         DapMessage::Request(req) if req.command == "launch" => {
             // ctx.received_launch = true;
-            let args = req.load_args::<dap::LaunchRequestArguments>()?;
+            //
+            // Launch arguments this build cannot parse (an unknown field from
+            // a newer client, a wrong type) are refused with a launch
+            // response naming the reason, for the same reason as the
+            // `traceSource` refusal below: the native loop only logs an
+            // `Err`, so returning one leaves the client waiting for a
+            // response that never comes.
+            let args = match req.load_args::<dap::LaunchRequestArguments>() {
+                Ok(args) => args,
+                Err(e) => {
+                    let reason = format!(
+                        "launch arguments not understood by this replay server: {e}; \
+                         a field it does not know usually means the client is newer than the server"
+                    );
+                    warn!("refusing launch: {reason}");
+                    let resp = DapMessage::Response(Response {
+                        base: ProtocolMessage {
+                            seq: ctx.seq,
+                            type_: "response".to_string(),
+                        },
+                        request_seq: req.base.seq,
+                        success: false,
+                        command: "launch".to_string(),
+                        message: Some(reason),
+                        body: json!({}),
+                    });
+                    ctx.seq += 1;
+                    sender.send(resp)?;
+                    return Ok(());
+                }
+            };
 
             // A `traceSource` the engine cannot open must be refused by name,
             // with a launch response — not swallowed. Both halves of that
@@ -2624,6 +2678,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 // §P5.4: per-launch arg wins; fall back to CLI default
                 // when the DAP `launch.renameList` field is unset.
                 ctx.launch_rename_list = args.rename_list.clone().or_else(|| ctx.cli_default_rename_list.clone());
+                ctx.launch_host_source_reads = HostSourceReads::from_launch_argument(args.host_source_reads);
 
                 // Only resolve the replay-worker executable for non-DB traces.
                 // DB-based traces (JavaScript, Python, Ruby, etc.) never use
@@ -2659,6 +2714,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.launch_trace_file = PathBuf::new();
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
                 ctx.launch_rename_list = args.rename_list.clone().or_else(|| ctx.cli_default_rename_list.clone());
+                ctx.launch_host_source_reads = HostSourceReads::from_launch_argument(args.host_source_reads);
                 ctx.recreator_exe = resolve_recreator_exe(args.recreator_exe);
                 ctx.restore_location = args.restore_location.clone();
 
@@ -3237,6 +3293,9 @@ fn task_thread(
     let mut loaded_trace_folder: Option<PathBuf> = None;
     let mut loaded_trace_file: Option<PathBuf> = None;
     let mut loaded_raw_diff_index: Option<String> = None;
+    // The source-reading rule the loaded trace was set up with: a launch
+    // that asks for a different one reloads rather than reusing it.
+    let mut loaded_host_reads = HostSourceReads::default();
 
     // M24 — every dispatch path routes through a [`SessionHandler`].
     // The single-trace flow synthesises a one-entry session via
@@ -3267,6 +3326,7 @@ fn task_thread(
                 for_launch,
                 name,
                 ctx_with_cached_launch.launch_rename_list.as_deref(),
+                ctx_with_cached_launch.launch_host_source_reads,
             )
             .map_err(|e| {
                 error!("launch error (session): {e:?}");
@@ -3298,6 +3358,7 @@ fn task_thread(
                     for_launch,
                     name,
                     ctx_with_cached_launch.launch_rename_list.as_deref(),
+                    ctx_with_cached_launch.launch_host_source_reads,
                 )
             }
             .map_err(|e| {
@@ -3314,6 +3375,7 @@ fn task_thread(
             loaded_trace_folder = Some(ctx_with_cached_launch.launch_trace_folder.clone());
             loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
             loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
+            loaded_host_reads = ctx_with_cached_launch.launch_host_source_reads;
         }
         // M29 §5.2 — emit `ct/listProcesses` on session-load. The
         // cached-launch path has just built a productive
@@ -3368,6 +3430,7 @@ fn task_thread(
                     info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
                     let launch_raw_diff_index = args.raw_diff_index.clone();
+                    let launch_host_reads = HostSourceReads::from_launch_argument(args.host_source_reads);
                     let session_manifest_path = resolve_session_manifest_path(&launch_trace_folder, &launch_trace_file);
                     // Only resolve the replay-worker executable for non-DB traces
                     // (see the parallel comment in the initial launch handler).
@@ -3396,6 +3459,7 @@ fn task_thread(
                     let same_trace = loaded_trace_folder.as_ref() == Some(&launch_trace_folder)
                         && loaded_trace_file.as_ref() == Some(&launch_trace_file)
                         && loaded_raw_diff_index == launch_raw_diff_index
+                        && loaded_host_reads == launch_host_reads
                         && session_initialized
                         && restore_location.is_none();
 
@@ -3424,6 +3488,7 @@ fn task_thread(
                             for_launch,
                             name,
                             effective_rename_list.as_deref(),
+                            launch_host_reads,
                         )
                         // #689: `inspect_err`, not `map_err` to a `String` — the
                         // formatting would destroy the concrete
@@ -3438,6 +3503,7 @@ fn task_thread(
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
+                        loaded_host_reads = launch_host_reads;
                     } else {
                         let for_launch = run_to_entry;
                         // §P5.4 — per-launch arg wins; CLI default fills in.
@@ -3455,6 +3521,7 @@ fn task_thread(
                             for_launch,
                             name,
                             effective_rename_list.as_deref(),
+                            launch_host_reads,
                         )
                         // #689: see the `inspect_err` note above — the concrete
                         // error type must survive to `launch_failure_text`.
@@ -3469,6 +3536,7 @@ fn task_thread(
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
+                        loaded_host_reads = launch_host_reads;
                     }
                 }
                 if let Some(program) = &args.program
@@ -4201,6 +4269,7 @@ mod tests {
             false,
             "oracle-test",
             None,
+            HostSourceReads::Allowed,
         ) {
             Ok(_) => panic!("{} was opened as a recording", trace_folder.join(trace_file).display()),
             Err(e) => e.to_string(),

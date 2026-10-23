@@ -226,6 +226,10 @@ pub mod replay;
 // owning trace's handler. See spec §14.1 and the M24 milestone.
 pub mod session_handler;
 pub mod session_manifest;
+// Where a replay session may read a recording's source text from: the
+// recording's own copies, and the recorded path on this host only when the
+// session allows it (the `launch` argument `hostSourceReads`).
+pub mod source_access;
 // M-DWARF-4: DWARF CFI walker for multi-frame stack unwinding.
 // Owns the parsed `.eh_frame` / `.debug_frame` sections and offers an
 // `unwind` entry point that the `EmulatorReplaySession::load_callstack`

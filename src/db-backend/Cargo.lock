@@ -508,6 +508,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-open-beneath"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1628,6 +1635,7 @@ dependencies = [
  "ct-data-breakpoints",
  "ct-home",
  "ct-lang",
+ "ct-open-beneath",
  "env_logger",
  "filetime",
  "futures",

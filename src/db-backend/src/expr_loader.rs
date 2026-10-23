@@ -1,5 +1,6 @@
 use crate::{
     lang::Lang,
+    source_access::{HOST_READS_REFUSED, SourceAccessHandle},
     task::{
         Branch, BranchExtent, BranchId, BranchState, CoreTrace, Location, LoopShape, LoopShapeId, NO_BRANCH_ID,
         NO_POSITION, Position,
@@ -642,6 +643,11 @@ pub struct ExprLoader {
     processed_files: HashMap<PathBuf, FileInfo>,
     loop_index: i64,
     pub trace: CoreTrace,
+    /// Where source text may be read from: the session's rule, shared with
+    /// every other loader of the session (see [`crate::source_access`]).
+    /// A loader made with [`Self::new`] has its own, which reads the host
+    /// as this loader always did.
+    source_access: SourceAccessHandle,
     /// FALSIFIER ARM ONLY — see the arm's note in `get_source_line_v2`. Keyed
     /// by path STRING, which is the whole point: it is design §7.2's named
     /// implementation error made real so the reverse-navigation gate can be
@@ -693,7 +699,7 @@ pub struct ExprLoader {
 /// into the container is *not* sufficient on its own — nothing read the VFS
 /// for source before this — and once it is read, position resolution and
 /// origin classification are served by the same read.
-fn vfs_source_text(path: &Path) -> Option<String> {
+pub(crate) fn vfs_source_text(path: &Path) -> Option<String> {
     crate::vfs::vfs_read(path.to_string_lossy().as_ref()).and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
@@ -735,12 +741,95 @@ pub fn source_text(path: &Path) -> Option<String> {
 #[allow(clippy::unwrap_used)]
 impl ExprLoader {
     pub fn new(trace: CoreTrace) -> Self {
+        Self::with_source_access(trace, SourceAccessHandle::default())
+    }
+
+    /// A loader that reads source text under a session's rule.
+    pub fn with_source_access(trace: CoreTrace, source_access: SourceAccessHandle) -> Self {
         ExprLoader {
             processed_files: HashMap::new(),
             loop_index: 1,
             trace,
+            source_access,
             #[cfg(feature = "gdh7-falsify-string-keyed-cache")]
             gdh7_string_keyed_cache: HashMap::new(),
+        }
+    }
+
+    /// The rule this loader reads source text under.
+    pub fn source_access(&self) -> &SourceAccessHandle {
+        &self.source_access
+    }
+
+    /// Puts this loader under a session's rule. Every file read so far is
+    /// dropped, so nothing read under the previous rule is served under
+    /// the new one.
+    pub fn set_source_access(&mut self, source_access: SourceAccessHandle) {
+        self.source_access = source_access;
+        self.processed_files.clear();
+    }
+
+    /// The spelling of a recorded path the origin code probes: under the
+    /// recorded working directory when that file is reachable, else the
+    /// recorded path as given ([`crate::db::source_probe_path`]). With host
+    /// reads off nothing on this host is consulted to choose (the
+    /// working-directory spelling is used; the recording's copies are found
+    /// from it by suffix), so a recorded path is never stat'ed there.
+    pub fn source_probe_path(&self, workdir: &Path, path_str: &str) -> PathBuf {
+        if self.source_access.get().host_reads_allowed() {
+            crate::db::source_probe_path(workdir, path_str)
+        } else {
+            workdir.join(path_str)
+        }
+    }
+
+    /// The current bytes of `path` for checking a continuation token's
+    /// `filesystem` digest (spec §5.3.1 step 3). The token is client data, so
+    /// `path` is whatever the client wrote: with host reads allowed it is
+    /// read on this host, as the digest was issued from it; with host reads
+    /// off only the recording's own copy is consulted (the one
+    /// [`Self::source_digest_bytes`] hashed at issue), and `None` means
+    /// there is nothing to compare, never a host read.
+    pub fn token_digest_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        let access = self.source_access.get();
+        if access.host_reads_allowed() {
+            return fs::read(path).ok();
+        }
+        if let Some(info) = self.processed_files.get(path) {
+            return Some(info.source_code.clone().into_bytes());
+        }
+        access.read_recording_copy(path).map(String::into_bytes)
+    }
+
+    /// The bytes a continuation token's source digest covers for a line read
+    /// from `probe_path` with `origin` (spec §5.3.1): the bundled copy for
+    /// [`SourceOrigin::BundledMetaData`]; for [`SourceOrigin::Filesystem`]
+    /// the file on this host when host reads are allowed, and otherwise the
+    /// recording's copy this loader actually served. With host reads off the
+    /// host file is never read, not even to hash it.
+    pub fn source_digest_bytes(
+        &self,
+        probe_path: &Path,
+        origin: SourceOrigin,
+        meta_dat_sources_root: Option<&Path>,
+    ) -> Option<Vec<u8>> {
+        let host_reads = self.source_access.get().host_reads_allowed();
+        match origin {
+            SourceOrigin::BundledMetaData => match meta_dat_sources_root {
+                Some(root) => {
+                    let candidate = root.join(probe_path.strip_prefix("/").unwrap_or(probe_path));
+                    crate::source_access::read_contained(root, &candidate).map(String::into_bytes)
+                }
+                None if host_reads => fs::read(probe_path).ok(),
+                None => None,
+            },
+            SourceOrigin::Filesystem if host_reads => fs::read(probe_path).ok(),
+            SourceOrigin::Filesystem => self
+                .processed_files
+                .get(probe_path)
+                .map(|info| info.source_code.clone().into_bytes()),
+            SourceOrigin::Unavailable if host_reads => fs::read(probe_path).ok(),
+            SourceOrigin::Unavailable => None,
         }
     }
 
@@ -958,8 +1047,12 @@ impl ExprLoader {
             // half of why `srcviews.dat` never surfaced there. `source_text`
             // keeps the filesystem first and adds the VFS behind it, so the
             // native answer is unchanged.
+            // Opened beneath the root without following a symlink below it
+            // (`source_access::read_contained`): the branch labels what it
+            // reads as the recording's own copy, so it must not be led out
+            // of the bundle by a link planted inside it.
             if let Some(candidate) = candidate
-                && let Some(text) = source_text(&candidate)
+                && let Some(text) = crate::source_access::read_contained(root, &candidate)
             {
                 // Match `get_source_line`'s 1-indexed convention: the
                 // bundled-source branch is invoked with the same `row`
@@ -2401,6 +2494,16 @@ impl ExprLoader {
 
     pub fn file_source_code(&self, path: &PathBuf) -> Result<String, Box<dyn Error>> {
         if !self.processed_files.contains_key(path) {
+            // With host reads off, only the recording's own copies are read
+            // (see `crate::source_access`); `path` is recorded data and is
+            // never opened where it points.
+            let access = self.source_access.get();
+            if !access.host_reads_allowed() {
+                return match access.read_recording_copy(path) {
+                    Some(text) => Ok(text),
+                    None => Err(format!("{}: {}", path.display(), HOST_READS_REFUSED).into()),
+                };
+            }
             let read_path = self.find_real_path(path);
             info!("try to read {read_path:?}");
             let source_result = fs::read_to_string(&read_path);
@@ -2718,8 +2821,15 @@ impl ExprLoader {
                 }
             }
         }
-        let real_path = self.find_real_path(path_buf);
-        updated_location.missing_path = !source_is_reachable(&real_path);
+        let access = self.source_access.get();
+        updated_location.missing_path = if access.host_reads_allowed() {
+            let real_path = self.find_real_path(path_buf);
+            !source_is_reachable(&real_path)
+        } else {
+            // Whether the RECORDING carries the file: the host is not asked,
+            // so a location does not report whether a listed host file exists.
+            !access.has_recording_copy(path_buf)
+        };
         updated_location
     }
 

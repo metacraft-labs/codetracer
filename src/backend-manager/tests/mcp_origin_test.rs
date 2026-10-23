@@ -149,6 +149,13 @@ impl McpClient {
             .stderr(Stdio::null());
         if let Some(socket) = socket {
             command.env("CODETRACER_DAEMON_SOCK", socket);
+            // These tests read the test's own recordings, whose sources are
+            // the fixture files on this host with no copy in the recording,
+            // and assert on the source lines the chain carries: the setting
+            // a developer reading their own recordings uses.  Without it the
+            // backend reads no listed host file and every hop's source text
+            // is empty (mcp_host_source_reads_test.rs).
+            command.arg("--allow-host-source-reads");
         }
         let mut child = command
             .spawn()
@@ -346,6 +353,16 @@ fn test_mcp_resolve_variable_step_tool_registered() {
 /// Locate a built `replay-server`, mirroring the probe in
 /// `real_recording_integration.rs`.
 fn find_replay_server() -> Option<PathBuf> {
+    // An explicit choice wins: an in-tree build can be older than the daemon
+    // under test, and a replay server older than a launch argument the
+    // daemon sends refuses that launch.
+    if let Ok(from_env) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
+        let path = PathBuf::from(from_env);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
     let mut target_dir = std::env::current_exe().ok()?;
     target_dir.pop();
     if target_dir.ends_with("deps") {
@@ -368,13 +385,6 @@ fn find_replay_server() -> Option<PathBuf> {
         let path = manifest_dir.join(&relative);
         if path.exists() {
             return Some(path.canonicalize().unwrap_or(path));
-        }
-    }
-
-    if let Ok(from_env) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
-        let path = PathBuf::from(from_env);
-        if path.exists() {
-            return Some(path);
         }
     }
 

@@ -1644,6 +1644,10 @@ pub struct MaterializedReplaySession {
     /// is the regression test for this specific trap; it reddens the
     /// moment anyone collapses this field back down to a `bool`.
     breakpoint_suppression: Option<i64>,
+    /// The session's source-reading rule, for the loaders this session
+    /// makes for itself (`load_callstack`, `location_jump`, `jump_to_call`).
+    /// See [`crate::source_access`].
+    source_access: crate::source_access::SourceAccessHandle,
 }
 
 impl MaterializedReplaySession {
@@ -1668,6 +1672,7 @@ impl MaterializedReplaySession {
             watchpoint_list: Vec::new(),
             pending_tracepoint_hits: Vec::new(),
             breakpoint_suppression: None,
+            source_access: crate::source_access::SourceAccessHandle::default(),
         }
     }
 
@@ -2429,7 +2434,8 @@ impl MaterializedReplaySession {
     /// meant "one of the versions, chosen by the map's insertion order". The
     /// callers below each state which they want.
     fn load_path_ids(&self, path: &str) -> Vec<PathId> {
-        self.reader.fuzzy_path_ids_for(path)
+        self.reader
+            .fuzzy_path_ids_for_under(path, self.source_access.get().host_reads)
     }
 
     /// The NEWEST version `path` resolves to — the file's current content.
@@ -2933,7 +2939,7 @@ impl ReplaySession for MaterializedReplaySession {
                 .step(step_id)
                 .ok_or_else(|| format!("load_callstack: invalid step_id {:?}", step_id))?;
             let mut call_key = current_step.call_key;
-            let mut expr_loader = ExprLoader::new(CoreTrace::default());
+            let mut expr_loader = ExprLoader::with_source_access(CoreTrace::default(), self.source_access.clone());
 
             while call_key != NO_KEY {
                 let call_record = self
@@ -3051,7 +3057,7 @@ impl ReplaySession for MaterializedReplaySession {
 
     fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
         self.jump_to(StepId(location.rr_ticks.0))?;
-        let mut expr_loader = ExprLoader::new(CoreTrace::default());
+        let mut expr_loader = ExprLoader::with_source_access(CoreTrace::default(), self.source_access.clone());
         let location = self.load_location(&mut expr_loader)?;
         self.step_id = StepId(location.rr_ticks.0);
         Ok(())
@@ -3286,7 +3292,7 @@ impl ReplaySession for MaterializedReplaySession {
             .ok_or_else(|| format!("jump_to_call: invalid call_key {:?}", call_key))?
             .step_id;
         self.jump_to(first_call_step_id)?;
-        let mut expr_loader = ExprLoader::new(CoreTrace::default());
+        let mut expr_loader = ExprLoader::with_source_access(CoreTrace::default(), self.source_access.clone());
         self.load_location(&mut expr_loader)
     }
 
@@ -3318,6 +3324,10 @@ impl ReplaySession for MaterializedReplaySession {
         _lang: Lang,
     ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         Err("tracepoint call expressions are not supported for db traces".into())
+    }
+
+    fn set_source_access(&mut self, source_access: crate::source_access::SourceAccessHandle) {
+        self.source_access = source_access;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
@@ -3519,12 +3529,15 @@ impl MaterializedReplaySession {
                 }
                 // Spec §5.3.1 step 3: verify per-path source digest. We
                 // only check digests for paths whose origin was the
-                // filesystem (bundled paths are immune per spec).
+                // filesystem (bundled paths are immune per spec). The
+                // token is client data, so its paths are read under the
+                // session's source rule: with host reads off, only the
+                // recording's own copy, never the named host file.
                 for digest in &token.source_digests {
                     if digest.origin == SourceOriginKind::Filesystem {
-                        let current = match std::fs::read(&digest.path) {
-                            Ok(bytes) => sha256_hex(&bytes),
-                            Err(_) => continue,
+                        let current = match expr_loader.token_digest_bytes(Path::new(&digest.path)) {
+                            Some(bytes) => sha256_hex(&bytes),
+                            None => continue,
                         };
                         if current != digest.sha256_hex {
                             return Err(OriginError::new(
@@ -3764,7 +3777,7 @@ impl MaterializedReplaySession {
                 }
             };
             let path_str = self.reader.path(step_record.path_id).unwrap_or("").to_string();
-            let probe_path = source_probe_path(self.reader.workdir(), &path_str);
+            let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
             // Spec §6.1.0 monotonicity: `last_change_step` is the step at
             // which the post-write value first becomes observable in
             // `Db.variables`. For recorders that snapshot variables
@@ -3874,7 +3887,13 @@ impl MaterializedReplaySession {
             // token. Bundled paths get the bundled digest; filesystem
             // paths get the on-disk digest.
             if !path_str.is_empty() && source_origin != SourceOrigin::Unavailable {
-                track_source_digest(&mut source_digests, &probe_path, source_origin, meta_dat_sources_root);
+                track_source_digest(
+                    &mut source_digests,
+                    &probe_path,
+                    source_origin,
+                    meta_dat_sources_root,
+                    expr_loader,
+                );
             }
 
             if let Some(record) =
@@ -4489,7 +4508,7 @@ impl MaterializedReplaySession {
             return None;
         }
         let path_str = self.reader.path(step.path_id)?.to_string();
-        let probe_path = source_probe_path(self.reader.workdir(), &path_str);
+        let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
         let row = step.line.0.max(0) as usize;
         let (line_text, origin) = expr_loader.get_source_line_v2(
             &probe_path,
@@ -4523,7 +4542,7 @@ impl MaterializedReplaySession {
             };
             if step.call_key == caller_frame {
                 let path_str = self.reader.path(step.path_id)?.to_string();
-                let probe_path = source_probe_path(self.reader.workdir(), &path_str);
+                let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
                 let row = step.line.0.max(0) as usize;
                 let (line_text, origin) = expr_loader.get_source_line_v2(
                     &probe_path,
@@ -4693,7 +4712,7 @@ impl MaterializedReplaySession {
             if classifier_lang_for_path(path_str) != Some(ClassifierLang::Ruby) {
                 return None;
             }
-            let probe_path = source_probe_path(self.reader.workdir(), path_str);
+            let probe_path = expr_loader.source_probe_path(self.reader.workdir(), path_str);
             let row = step.line.0.max(0) as usize;
             let (line_text, origin) = expr_loader.get_source_line_v2(
                 &probe_path,
@@ -4967,23 +4986,20 @@ fn track_source_digest(
     probe_path: &Path,
     origin: SourceOrigin,
     meta_dat_sources_root: Option<&Path>,
+    expr_loader: &ExprLoader,
 ) {
     let path_str = probe_path.to_string_lossy().to_string();
     if digests.iter().any(|d| d.path == path_str) {
         return;
     }
-    let (origin_kind, digest_path) = match origin {
-        SourceOrigin::BundledMetaData => match meta_dat_sources_root {
-            Some(root) => (
-                SourceOriginKind::BundledMetaData,
-                root.join(probe_path.strip_prefix("/").unwrap_or(probe_path)),
-            ),
-            None => (SourceOriginKind::BundledMetaData, probe_path.to_path_buf()),
-        },
-        SourceOrigin::Filesystem => (SourceOriginKind::Filesystem, probe_path.to_path_buf()),
-        SourceOrigin::Unavailable => (SourceOriginKind::Unavailable, probe_path.to_path_buf()),
+    let origin_kind = match origin {
+        SourceOrigin::BundledMetaData => SourceOriginKind::BundledMetaData,
+        SourceOrigin::Filesystem => SourceOriginKind::Filesystem,
+        SourceOrigin::Unavailable => SourceOriginKind::Unavailable,
     };
-    if let Ok(bytes) = std::fs::read(&digest_path) {
+    // The loader decides which bytes stand for the line: with host reads
+    // off it never reads the recorded path on this host, not even to hash it.
+    if let Some(bytes) = expr_loader.source_digest_bytes(probe_path, origin, meta_dat_sources_root) {
         digests.push(SourceDigest {
             path: path_str,
             origin: origin_kind,

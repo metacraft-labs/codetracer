@@ -54,9 +54,14 @@ If `backend-manager` is not on your PATH, use the full path to the binary.
 `read_source_file` serves the source copies a recording embeds. To also read
 the files a recording's source list names from this machine, which most
 recordings need because most recorders embed no copies, add
-`"--allow-host-source-reads"` to `args`. Leave it out for an agent that reads
-recordings of other people's programs or traffic: a recording's source list
-can name any file on the machine that replays it.
+`"--allow-host-source-reads"` to `args`. The option also governs every other
+tool: without it, the replay backend the daemon starts reads source text only
+from the recording's own copies, so origin answers (`sourceText`,
+`assignment`), flow expressions and `exec_script`'s `read_source` carry no line
+of a host file, and say so. Leave it out for an agent that reads recordings of
+other people's programs or traffic: a recording's source list can name any file
+on the machine that replays it. The `ct trace` commands read host sources, as
+the desktop GUI does.
 
 ### Other MCP Clients
 

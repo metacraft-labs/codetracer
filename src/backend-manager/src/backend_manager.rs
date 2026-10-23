@@ -40,7 +40,7 @@ use crate::{
         self, PendingPyNavState, PendingPyRequest, PendingPyRequestKind, PyBridgeState,
     },
     script_executor,
-    session::SessionManager,
+    session::{HostSourceReads, SessionKey, SessionManager},
     trace_metadata,
 };
 
@@ -1584,7 +1584,7 @@ impl BackendManager {
                 // NOT `removed: true`, which is what this path used to
                 // answer before the backend saw anything.
                 if let PendingPyRequestKind::RemoveWatchpoint {
-                    trace_path,
+                    session: trace_path,
                     wp_id,
                     expression,
                 } = &pending.kind
@@ -1630,7 +1630,7 @@ impl BackendManager {
                 // has to be rolled back out of the daemon's own table.
                 let point_verdict = match &pending.kind {
                     PendingPyRequestKind::AddBreakpoint {
-                        trace_path,
+                        session: trace_path,
                         bp_id,
                         index,
                     } => Some((
@@ -1640,7 +1640,7 @@ impl BackendManager {
                         false,
                     )),
                     PendingPyRequestKind::AddWatchpoint {
-                        trace_path,
+                        session: trace_path,
                         wp_id,
                         index,
                     } => Some((
@@ -1842,7 +1842,10 @@ impl BackendManager {
     ///
     /// When the last session is removed (and at least one session existed),
     /// triggers automatic daemon shutdown.
-    async fn ttl_expiry_loop(mgr: Arc<Mutex<Self>>, mut ttl_expiry_rx: UnboundedReceiver<PathBuf>) {
+    async fn ttl_expiry_loop(
+        mgr: Arc<Mutex<Self>>,
+        mut ttl_expiry_rx: UnboundedReceiver<SessionKey>,
+    ) {
         while let Some(trace_path) = ttl_expiry_rx.recv().await {
             let mut locked = mgr.lock().await;
 
@@ -1854,16 +1857,12 @@ impl BackendManager {
             // Remove the session (this also aborts its timer, though the
             // timer already fired in this case).
             if let Some(backend_id) = ds.session_manager.remove_session(&trace_path) {
-                info!(
-                    "TTL expired for session {} (backend_id={backend_id})",
-                    trace_path.display()
-                );
+                info!("TTL expired for session {trace_path} (backend_id={backend_id})");
 
                 // Stop the child replay process.
                 if let Err(e) = locked.stop_replay(backend_id).await {
                     warn!(
-                        "Failed to stop replay {backend_id} for expired session {}: {e}",
-                        trace_path.display()
+                        "Failed to stop replay {backend_id} for expired session {trace_path}: {e}"
                     );
                 }
 
@@ -1904,7 +1903,7 @@ impl BackendManager {
             let mut locked = mgr.lock().await;
 
             // First pass: collect (path, backend_id) pairs for all sessions.
-            let sessions: Vec<(PathBuf, usize)> = {
+            let sessions: Vec<(SessionKey, usize)> = {
                 let ds = match locked.daemon_state.as_ref() {
                     Some(ds) => ds,
                     None => continue,
@@ -1912,13 +1911,13 @@ impl BackendManager {
                 ds.session_manager
                     .list_sessions()
                     .iter()
-                    .map(|s| (s.trace_path.clone(), s.backend_id))
+                    .map(|s| (s.key.clone(), s.backend_id))
                     .collect()
             };
 
             // Second pass: check which backends are dead (only borrows
             // locked.children, not daemon_state).
-            let mut dead_sessions: Vec<(PathBuf, usize)> = Vec::new();
+            let mut dead_sessions: Vec<(SessionKey, usize)> = Vec::new();
             for (path, backend_id) in &sessions {
                 if let Some(true) = locked.is_child_dead(*backend_id) {
                     dead_sessions.push((path.clone(), *backend_id));
@@ -1927,10 +1926,7 @@ impl BackendManager {
 
             // Third pass: clean up dead sessions.
             for (path, backend_id) in dead_sessions {
-                warn!(
-                    "Crash detected for backend {backend_id} (trace: {})",
-                    path.display()
-                );
+                warn!("Crash detected for backend {backend_id} (session: {path})");
 
                 if let Some(ds) = locked.daemon_state.as_mut() {
                     ds.session_manager.remove_session(&path);
@@ -1940,7 +1936,8 @@ impl BackendManager {
                         "type": "event",
                         "event": "ct/session-crashed",
                         "body": {
-                            "tracePath": path.to_string_lossy(),
+                            "tracePath": path.trace_path.to_string_lossy(),
+                            "hostSourceReads": path.host_source_reads.is_allowed(),
                             "backendId": backend_id,
                             "message": "backend process exited unexpectedly",
                         }
@@ -2405,7 +2402,18 @@ impl BackendManager {
                             // replay tool and subsequent arguments identify the trace.
                             // We join all arguments into a single key so that
                             // different sessions are distinguished.
-                            let trace_path = Self::trace_path_from_args(command, &cmd_args);
+                            //
+                            // The replay this starts is launched by its
+                            // client, with whatever launch arguments that
+                            // client sends, so the daemon does not restrict
+                            // its source reads: it is a host-reads session,
+                            // and a client asking for recording sources only
+                            // (`ct/open-trace` without `hostSourceReads`) is
+                            // never routed to it.
+                            let trace_path = SessionKey::new(
+                                Self::trace_path_from_args(command, &cmd_args),
+                                HostSourceReads::Allowed,
+                            );
 
                             // In daemon mode, check session limits before starting.
                             if let Some(ds) = self.daemon_state.as_mut() {
@@ -2464,10 +2472,7 @@ impl BackendManager {
                                     .session_manager
                                     .add_session(trace_path.clone(), replay_id)
                             {
-                                warn!(
-                                    "Failed to register session for {}: {e}",
-                                    trace_path.display()
-                                );
+                                warn!("Failed to register session for {trace_path}: {e}");
                             }
 
                             let response = json!({
@@ -2588,7 +2593,9 @@ impl BackendManager {
                             let count = infos.len();
                             let paths: Vec<Value> = infos
                                 .iter()
-                                .map(|s| Value::String(s.trace_path.to_string_lossy().to_string()))
+                                .map(|s| {
+                                    Value::String(s.key.trace_path.to_string_lossy().to_string())
+                                })
                                 .collect();
                             (count, paths)
                         } else {
@@ -2785,13 +2792,13 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Look up the backend for this trace.
         let backend_id = match self
             .daemon_state
             .as_ref()
-            .and_then(|ds| ds.session_manager.get_session_backend_id(&trace_path))
+            .and_then(|ds| ds.session_manager.get_session_backend_id(&session))
         {
             Some(id) => id,
             None => {
@@ -2914,10 +2921,10 @@ impl BackendManager {
     /// Looks up the backend ID for a given trace path from the session
     /// manager.  Returns `None` if not in daemon mode or the trace has
     /// no active session.
-    fn backend_id_for_trace(&self, trace_path: &PathBuf) -> Option<usize> {
+    fn backend_id_for_trace(&self, session: &SessionKey) -> Option<usize> {
         self.daemon_state
             .as_ref()
-            .and_then(|ds| ds.session_manager.get_session_backend_id(trace_path))
+            .and_then(|ds| ds.session_manager.get_session_backend_id(session))
     }
 
     /// Builds an actionable error message for "no session loaded" errors.
@@ -2989,9 +2996,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3171,9 +3178,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3296,9 +3303,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3424,9 +3431,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3649,9 +3656,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3670,7 +3677,7 @@ impl BackendManager {
         // backend's per-line `setBreakpoints` response.
         let (bp_id, all_lines, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.add_breakpoint(&source_path, line)
             }
             None => return Ok(()),
@@ -3711,7 +3718,7 @@ impl BackendManager {
             // breakpoint the backend has never heard of.
             if let Some(ds) = self.daemon_state.as_mut() {
                 ds.py_bridge
-                    .breakpoint_state_mut(&trace_path)
+                    .breakpoint_state_mut(&session)
                     .forget_breakpoint(bp_id);
             }
             self.send_py_command_error(
@@ -3726,7 +3733,7 @@ impl BackendManager {
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
                 kind: PendingPyRequestKind::AddBreakpoint {
-                    trace_path,
+                    session,
                     bp_id,
                     index,
                 },
@@ -3807,9 +3814,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3826,7 +3833,7 @@ impl BackendManager {
         // Remove the breakpoint and get remaining lines for the affected file.
         let removal_result = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.remove_breakpoint(bp_id)
             }
             None => return Ok(()),
@@ -3952,9 +3959,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3973,7 +3980,7 @@ impl BackendManager {
         // `setDataBreakpoints` response.
         let (wp_id, all_expressions, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.add_watchpoint(&expression)
             }
             None => return Ok(()),
@@ -4023,7 +4030,7 @@ impl BackendManager {
             // watchpoint the backend has never heard of.
             if let Some(ds) = self.daemon_state.as_mut() {
                 ds.py_bridge
-                    .breakpoint_state_mut(&trace_path)
+                    .breakpoint_state_mut(&session)
                     .forget_watchpoint(wp_id);
             }
             self.send_py_command_error(
@@ -4038,7 +4045,7 @@ impl BackendManager {
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
                 kind: PendingPyRequestKind::AddWatchpoint {
-                    trace_path,
+                    session,
                     wp_id,
                     index,
                 },
@@ -4118,9 +4125,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4139,7 +4146,7 @@ impl BackendManager {
         // daemon's table and the replay engine still agree.
         let (removed_expression, removal_result) = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 let expression = bp_state.watchpoint_expression(wp_id);
                 (expression, bp_state.remove_watchpoint(wp_id))
             }
@@ -4185,7 +4192,7 @@ impl BackendManager {
                         (self.daemon_state.as_mut(), removed_expression.as_ref())
                     {
                         ds.py_bridge
-                            .breakpoint_state_mut(&trace_path)
+                            .breakpoint_state_mut(&session)
                             .restore_watchpoint(wp_id, expression);
                     }
                     self.send_py_command_error(
@@ -4199,7 +4206,7 @@ impl BackendManager {
                 if let Some(ds) = self.daemon_state.as_mut() {
                     ds.py_bridge.pending_requests.push(PendingPyRequest {
                         kind: PendingPyRequestKind::RemoveWatchpoint {
-                            trace_path: trace_path.clone(),
+                            session: session.clone(),
                             wp_id,
                             expression: removed_expression.unwrap_or_default(),
                         },
@@ -4320,12 +4327,12 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Validate that a session exists for this trace (but no DAP
         // command is sent — tracepoints are stored daemon-side until
         // ct/py-run-tracepoints).
-        if self.backend_id_for_trace(&trace_path).is_none() {
+        if self.backend_id_for_trace(&session).is_none() {
             self.send_py_command_error(
                 seq,
                 "ct/py-add-tracepoint",
@@ -4336,7 +4343,7 @@ impl BackendManager {
 
         let tp_id = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 let (tp_id, _entry) = bp_state.add_tracepoint(&source_path, line, &expression);
                 tp_id
             }
@@ -4418,11 +4425,11 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         let removed = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.remove_tracepoint(tp_id)
             }
             None => return Ok(()),
@@ -4520,9 +4527,9 @@ impl BackendManager {
             .map(|v| v.as_i64().unwrap_or(-1))
             .unwrap_or(-1);
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4542,7 +4549,7 @@ impl BackendManager {
                 let bp_state = ds
                     .py_bridge
                     .breakpoint_states
-                    .get(&trace_path)
+                    .get(&session)
                     .map(|s| s.all_tracepoints())
                     .unwrap_or_default();
                 bp_state
@@ -4696,9 +4703,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4873,9 +4880,9 @@ impl BackendManager {
             .and_then(Value::as_i64)
             .unwrap_or(100);
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4989,9 +4996,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5123,9 +5130,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5193,8 +5200,13 @@ impl BackendManager {
 
     /// Handles `ct/py-read-source` requests from Python clients.
     ///
-    /// Translates the request into a `ct/read-source` DAP command,
-    /// sends it to the backend, and registers a pending request.
+    /// Translates the request into a DAP `source` request
+    /// (<https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Source>),
+    /// sends it to the session's backend, and registers a pending request.
+    /// The request carries `allowWorkingTree` from the session's host-read
+    /// setting, so a session with host reads off asks the backend for the
+    /// recording's own copy only; the backend applies the same rule from
+    /// its own launch setting as well.
     ///
     /// # Wire protocol
     ///
@@ -5251,9 +5263,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5274,13 +5286,16 @@ impl BackendManager {
             None => return Ok(()),
         };
 
-        // Build and send the ct/read-source command to the backend.
+        // Build and send the DAP `source` request to the backend.
         let dap_request = serde_json::json!({
             "type": "request",
-            "command": "ct/read-source",
+            "command": "source",
             "seq": dap_seq,
             "arguments": {
-                "path": source_path,
+                "source": {"path": source_path},
+                // Required by the DAP schema; 0 means "read by path".
+                "sourceReference": 0,
+                "allowWorkingTree": session.host_source_reads.is_allowed(),
             },
         });
 
@@ -5379,9 +5394,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5532,9 +5547,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5654,9 +5669,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5813,8 +5828,8 @@ impl BackendManager {
         // Reset TTL for the session (if any) backing this trace; the
         // memory-diff query doesn't actually drive the backend, but if
         // a session is loaded we don't want it to expire mid-bisect.
-        let trace_path = PathBuf::from(&trace_path_str);
-        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+        let session = SessionKey::for_request(&trace_path_str, args);
+        if let Some(backend_id) = self.backend_id_for_trace(&session) {
             self.reset_ttl_for_backend_id(backend_id);
         }
 
@@ -6033,8 +6048,8 @@ impl BackendManager {
 
         // Refresh the session TTL if one is loaded for this trace —
         // bisect agents call back-to-back and shouldn't lose state.
-        let trace_path = PathBuf::from(&record_trace);
-        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+        let session = SessionKey::for_request(&record_trace, args);
+        if let Some(backend_id) = self.backend_id_for_trace(&session) {
             self.reset_ttl_for_backend_id(backend_id);
         }
 
@@ -6249,6 +6264,10 @@ impl BackendManager {
         };
 
         let trace_path = PathBuf::from(&trace_path_str);
+        // The session is the trace AND the host-read setting the request
+        // carries: a backend started for one setting is never reused for a
+        // request with the other (see `crate::session::SessionKey`).
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Check if already loaded — return existing session and reset TTL.
         //
@@ -6259,15 +6278,15 @@ impl BackendManager {
         // the `setBreakpoints` DAP command sends ALL accumulated
         // breakpoints, causing `continue` to hit unexpected locations.
         if let Some(ds) = self.daemon_state.as_mut()
-            && ds.session_manager.has_session(&trace_path)
+            && ds.session_manager.has_session(&session)
         {
-            ds.session_manager.reset_ttl(&trace_path);
+            ds.session_manager.reset_ttl(&session);
 
             // Clear accumulated breakpoint/watchpoint state from previous
             // script runs so the new script starts with a clean slate.
-            ds.py_bridge.breakpoint_state_mut(&trace_path).clear_all();
+            ds.py_bridge.breakpoint_state_mut(&session).clear_all();
 
-            if let Some(info) = ds.session_manager.get_session(&trace_path) {
+            if let Some(info) = ds.session_manager.get_session(&session) {
                 let backend_id = info.backend_id;
 
                 // Send an empty setBreakpoints to the backend so its
@@ -6331,6 +6350,7 @@ impl BackendManager {
                         "sourceFiles": info.source_files,
                         "program": info.program,
                         "workdir": info.workdir,
+                        "hostSourceReads": session.host_source_reads.is_allowed(),
                         "cached": true,
                     }
                 });
@@ -6418,7 +6438,10 @@ impl BackendManager {
         //
         // Reference: replay-server/src/dap.rs — `LaunchRequestArguments.ctRRWorkerExe`
         let dap_launch_opts = {
-            let mut opts = dap_init::DapLaunchOptions::default();
+            let mut opts = dap_init::DapLaunchOptions {
+                host_source_reads: Some(session.host_source_reads),
+                ..dap_init::DapLaunchOptions::default()
+            };
             let needs_rr_support = trace_path.join("rr").is_dir()
                 || trace_path.join("ttd-trace-manifest.json").is_file()
                 || trace_path.extension().is_some_and(|ext| ext == "ct")
@@ -6574,16 +6597,11 @@ impl BackendManager {
 
         // Register session with metadata.
         if let Some(ds) = self.daemon_state.as_mut()
-            && let Err(e) = ds.session_manager.add_session_with_metadata(
-                trace_path.clone(),
-                backend_id,
-                &metadata,
-            )
+            && let Err(e) =
+                ds.session_manager
+                    .add_session_with_metadata(session.clone(), backend_id, &metadata)
         {
-            warn!(
-                "Failed to register session for {}: {e}",
-                trace_path.display()
-            );
+            warn!("Failed to register session for {session}: {e}");
         }
 
         let response = json!({
@@ -6605,6 +6623,7 @@ impl BackendManager {
                 "sourceFiles": metadata.source_files,
                 "program": metadata.program,
                 "workdir": metadata.workdir,
+                "hostSourceReads": session.host_source_reads.is_allowed(),
                 "cached": false,
                 "initialLocation": initial_location,
             }
@@ -6635,12 +6654,12 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         let session_info = self
             .daemon_state
             .as_ref()
-            .and_then(|ds| ds.session_manager.get_session(&trace_path));
+            .and_then(|ds| ds.session_manager.get_session(&session));
 
         match session_info {
             Some(info) => {
@@ -6656,6 +6675,7 @@ impl BackendManager {
                         "sourceFiles": info.source_files,
                         "program": info.program,
                         "workdir": info.workdir,
+                        "hostSourceReads": session.host_source_reads.is_allowed(),
                     }
                 });
                 self.send_response_for_seq(seq, response);
@@ -6740,6 +6760,14 @@ impl BackendManager {
             .and_then(|a| a.get("timeout"))
             .and_then(Value::as_u64)
             .unwrap_or(script_executor::DEFAULT_TIMEOUT_SECS);
+
+        // --- The host-read setting the script's trace session uses ---
+        //
+        // The script's Python process opens the trace through this daemon
+        // like any other client, so it must ask for the session this
+        // request's client asked for; otherwise a script started by a
+        // client with host reads off would reach a backend that reads them.
+        let host_source_reads = HostSourceReads::from_request(args);
 
         // --- Extract optional session ID ---
         let session_id = args
@@ -6852,6 +6880,7 @@ impl BackendManager {
                 &python_api,
                 timeout_secs,
                 session_id.as_deref(),
+                host_source_reads,
             )
             .await
             {
@@ -6913,13 +6942,13 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Look up the session and remove it.
         let backend_id = self
             .daemon_state
             .as_mut()
-            .and_then(|ds| ds.session_manager.remove_session(&trace_path));
+            .and_then(|ds| ds.session_manager.remove_session(&session));
 
         match backend_id {
             Some(bid) => {
