@@ -7242,15 +7242,31 @@ when not defined(ctWeb):
     # THIS TAB'S CLIENT ID, kept for the tab's life.
     #
     # `ct host` gives every client its own replay and its own session
-    # (`index/host_clients.nim`; `CLI/ct/host.md`, "Sessions are isolated"),
-    # and knows a client by the id its page presents as `?ct_client=` in the
-    # socket handshake. `sessionStorage` is per tab and survives a reload, so
-    # a reload resumes this tab's session and another tab gets its own. A
-    # storage that refuses (a privacy mode) gives an id for this page load
-    # only: the session is then not resumed on reload, but it is still not
-    # anyone else's.
-    proc hostClientId(): cstring {.importjs: """(function () {
+    # (`index/host_clients.nim`; `CLI/ct/host.md`, "Clients and Their
+    # Sessions"), and knows a client by the id its page presents as
+    # `?ct_client=` in the socket handshake. `sessionStorage` is per tab and
+    # survives a reload, so a reload resumes this tab's session. A storage
+    # that refuses (a privacy mode) gives an id for this page load only: the
+    # session is then not resumed on reload, but it is still not anyone
+    # else's.
+    #
+    # A DUPLICATED TAB IS ANOTHER CLIENT (owner decision, 2026-10-23). The
+    # browser's "Duplicate" copies `sessionStorage`, so the copy finds the
+    # original's id — and the server lets a second socket with a known id take
+    # that client over, because a reload's new socket can reach it before the
+    # old one's disconnect. The page tells the two apart before it connects:
+    # a stored id is first claimed on a `BroadcastChannel`, and any live tab
+    # holding it answers. After a reload the previous document of this tab is
+    # gone and nothing answers, so the id is kept; a duplicate's original is
+    # still open and answers, so the duplicate mints an id of its own. Every
+    # tab then answers for the id it settled on. A browser without
+    # `BroadcastChannel` keeps the stored id (the behaviour before this).
+    var resolvedHostClientId = cstring""
+
+    proc resolveHostClientIdThen(done: proc(id: cstring)) {.importjs: """(function (done) {
   var key = 'codetracer.hostClientId';
+  var channelName = 'codetracer.hostClient';
+  var claimWindowMs = 250;
   var fresh = function () {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
       return window.crypto.randomUUID();
@@ -7261,17 +7277,53 @@ when not defined(ctWeb):
       return ('0' + b.toString(16)).slice(-2);
     }).join('');
   };
-  try {
-    var id = window.sessionStorage.getItem(key);
-    if (!id || id.length > 64 || id.replace(/[A-Za-z0-9_-]/g, '') !== '') {
-      id = fresh();
-      window.sessionStorage.setItem(key, id);
-    }
-    return id;
-  } catch (e) {
-    return fresh();
+  var store = function (id) {
+    try { window.sessionStorage.setItem(key, id); } catch (e) { /* refused */ }
+  };
+  var answerFor = function (channel, id) {
+    // From now on, this tab answers for `id`.
+    channel.onmessage = function (event) {
+      var m = event.data;
+      if (m && m.kind === 'who-has' && m.id === id) {
+        channel.postMessage({kind: 'i-have', id: id, to: m.from});
+      }
+    };
+  };
+  var stored = null;
+  try { stored = window.sessionStorage.getItem(key); } catch (e) { stored = null; }
+  if (stored && (stored.length > 64 || stored.replace(/[A-Za-z0-9_-]/g, '') !== '')) {
+    stored = null;
   }
-})()""".}
+  if (typeof BroadcastChannel !== 'function') {
+    var plain = stored || fresh();
+    store(plain);
+    done(plain);
+    return;
+  }
+  var channel = new BroadcastChannel(channelName);
+  if (!stored) {
+    var minted = fresh();
+    store(minted);
+    answerFor(channel, minted);
+    done(minted);
+    return;
+  }
+  var me = fresh();
+  var taken = false;
+  channel.onmessage = function (event) {
+    var m = event.data;
+    if (m && m.kind === 'i-have' && m.id === stored && m.to === me) taken = true;
+  };
+  channel.postMessage({kind: 'who-has', id: stored, from: me});
+  setTimeout(function () {
+    var id = taken ? fresh() : stored;
+    if (taken) store(id);
+    answerFor(channel, id);
+    done(id);
+  }, claimWindowMs);
+})(#)""".}
+
+    proc hostClientId(): cstring = resolvedHostClientId
 
     proc startIPC =
       let host = domwindow.location.hostname.to(cstring)
@@ -7430,7 +7482,10 @@ when not defined(ctWeb):
   } catch (e) { done(); }
 })(#)""".}
 
-    fetchDescriptorThen(proc() = startIPC())
+    fetchDescriptorThen(proc() =
+      resolveHostClientIdThen(proc(id: cstring) =
+        resolvedHostClientId = id
+        startIPC()))
 
 
 if inElectron:

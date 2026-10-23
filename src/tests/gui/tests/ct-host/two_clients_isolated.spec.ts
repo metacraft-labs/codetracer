@@ -21,7 +21,9 @@ import { LayoutPage } from "../../page-objects/layout-page";
 import { retry } from "../../lib/retry-helpers";
 
 test.use({ sourcePath: "noir_space_ship/", launchMode: "trace", deploymentMode: "web" });
-test.setTimeout(240_000);
+// Each case starts its own ct host and replays; on a loaded host that alone
+// takes minutes, so the limit is generous rather than tight.
+test.setTimeout(360_000);
 
 const CLIENT_ID_KEY = "codetracer.hostClientId";
 
@@ -118,5 +120,84 @@ test("two clients of one ct host step independently; a reload resumes its own", 
     expect(await activeLine(layoutA)).toBe(movedA);
   } finally {
     await contextB.close();
+  }
+});
+
+// A DUPLICATED TAB (owner decision 2026-10-23, CLI/ct/host.md "Clients and
+// Their Sessions"): the browser's "Duplicate" copies the tab's
+// sessionStorage, so the copy starts out holding the original's client id
+// while the original is still open. It must get a session of its own, and
+// its own reload must resume that one.
+//
+// Playwright has no "duplicate tab", so this builds exactly what one is: a
+// second page in the SAME browser context (so the two tabs share an origin's
+// BroadcastChannel, as two tabs of one browser do) whose sessionStorage
+// starts with the original's id. The seed is written once, so the
+// duplicate's own reload does not plant the original's id again.
+test("a duplicated tab gets its own session; its reload resumes its own", async ({ ctPage }) => {
+  const layoutA = new LayoutPage(ctPage);
+  await layoutA.waitForAllComponentsLoaded();
+  const idA = await clientIdOf(ctPage);
+  const startA = await activeLine(layoutA);
+  expect(startA).toBeGreaterThan(0);
+
+  // The original moves first, so a duplicate that took it over would open
+  // at the original's position.
+  await stepNext(layoutA, 3);
+  const movedA = await activeLine(layoutA);
+  expect(movedA).not.toBe(startA);
+
+  const dup = await ctPage.context().newPage();
+  try {
+    await dup.addInitScript(
+      ({ key, id }) => {
+        if (window.sessionStorage.getItem("__ct_test_dup_seeded") === null) {
+          window.sessionStorage.setItem("__ct_test_dup_seeded", "1");
+          window.sessionStorage.setItem(key, id);
+        }
+      },
+      { key: CLIENT_ID_KEY, id: idA },
+    );
+    await dup.goto(ctPage.url());
+    const layoutDup = new LayoutPage(dup);
+    await layoutDup.waitForAllComponentsLoaded();
+
+    // Its own id, and its own replay at the start — not the original's.
+    const idDup = await clientIdOf(dup);
+    expect(idDup).not.toBe(idA);
+    expect(await activeLine(layoutDup)).toBe(startA);
+    // And the original was not taken over: still connected, still where it
+    // was.
+    expect(await activeLine(layoutA)).toBe(movedA);
+
+    // The duplicate steps on its own replay; the original stays.
+    await stepNext(layoutDup, 1);
+    const movedDup = await activeLine(layoutDup);
+    expect(movedDup).not.toBe(startA);
+    await ctPage.waitForTimeout(2_000);
+    expect(await activeLine(layoutA)).toBe(movedA);
+
+    // The original steps; the duplicate stays.
+    await stepNext(layoutA, 1);
+    const movedA2 = await activeLine(layoutA);
+    await dup.waitForTimeout(2_000);
+    expect(await activeLine(layoutDup)).toBe(movedDup);
+
+    // The duplicate's reload resumes the duplicate's session.
+    await dup.reload();
+    const reloadedDup = new LayoutPage(dup);
+    await reloadedDup.waitForAllComponentsLoaded();
+    expect(await clientIdOf(dup)).toBe(idDup);
+    expect(await activeLine(reloadedDup)).toBe(movedDup);
+    expect(await activeLine(layoutA)).toBe(movedA2);
+
+    // And the original's reload resumes the original's.
+    await ctPage.reload();
+    const reloadedA = new LayoutPage(ctPage);
+    await reloadedA.waitForAllComponentsLoaded();
+    expect(await clientIdOf(ctPage)).toBe(idA);
+    expect(await activeLine(reloadedA)).toBe(movedA2);
+  } finally {
+    await dup.close();
   }
 });
