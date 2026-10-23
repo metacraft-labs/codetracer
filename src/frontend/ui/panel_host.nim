@@ -31,7 +31,7 @@ import std/sequtils
 import isonim/core/[owner, signals, computation]
 import isonim/web/web_renderer
 from isonim/web/dom_api import nil
-from ./isonim_panel_mount import findIsoNimPaneHost
+from ./pane_host_lookup import findPaneHost
 
 import ../types
 import ../viewmodel/session_vm
@@ -524,7 +524,7 @@ proc ensurePanelMountedById*(containerId: cstring; kind: Content;
   ## `ensurePanelMounted` on tab `activeTab`'s host with id `containerId`, if
   ## that tab has one. Every tab of a window carries the same pane ids, so a
   ## document-wide lookup would find the first tab's host
-  ## (`isonim_panel_mount.findIsoNimPaneHost`).
-  let host = findIsoNimPaneHost(containerId, activeTab)
+  ## (`pane_host_lookup.findPaneHost`).
+  let host = findPaneHost(containerId, activeTab)
   if not dom_api.isNodeNil(dom_api.Node(host)):
     ensurePanelMounted(host, kind)

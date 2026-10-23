@@ -20,7 +20,7 @@ import std/[options, os, sequtils, strutils, tables, times]
 
 import isonim/core/[signals, computation]
 # `untrack` keeps the Start Debugger form's typing from rebuilding the whole
-# screen — see the `setChecked` call in `renderNewRecordModeWeb`.
+# screen — see the `setChecked` call in `renderNewRecordMode`.
 from isonim/core/batch import untrack
 import isonim/dsl/ui
 import isonim/dsl/components
@@ -258,50 +258,24 @@ proc parseArgsInput*(value: string): seq[string] =
     value.split(" ").filterIt(it.len > 0)
 
 # ---------------------------------------------------------------------------
-# Form wiring, per renderer
+# Form wiring
 # ---------------------------------------------------------------------------
 #
 # A field's current text is read where the renderer keeps it: the DOM
 # input's `value` property in the browser, the node's `value` attribute in
 # `MockRenderer` (what a headless test sets before firing `input`).
 
-proc wireWelcomeInput(r: MockRenderer; node: MockNode;
-                      onValue: proc(v: string)) =
+proc wireWelcomeInput[R, N](r: R; node: N; onValue: proc(v: string)) =
+  ## Report the control's value after every keystroke.
   let captured = node
   r.addEventListener(node, "input", proc() =
-    onValue(captured.attributes.getOrDefault("value", "")))
+    onValue(r.inputValue(captured)))
 
-proc wireWelcomeChange(r: MockRenderer; node: MockNode;
-                       onValue: proc(v: string)) =
+proc wireWelcomeChange[R, N](r: R; node: N; onValue: proc(v: string)) =
+  ## Report the control's value when it is committed (a select, a checkbox).
   let captured = node
   r.addEventListener(node, "change", proc() =
-    onValue(captured.attributes.getOrDefault("value", "")))
-
-proc initWelcomeChecked(r: MockRenderer; node: MockNode; checked: bool) =
-  r.setAttribute(node, "checked", if checked: "true" else: "false")
-
-when defined(js):
-  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
-  proc setChecked(node: isonim_dom.Node; checked: bool) {.importjs: "#.checked = #".}
-
-  proc readInputValue(node: isonim_dom.Node): string =
-    $node.inputValue()
-
-  proc wireWelcomeInput(r: WebRenderer; node: isonim_dom.Element;
-                        onValue: proc(v: string)) =
-    let asNode = isonim_dom.Node(node)
-    isonim_dom.addEventListener(asNode, cstring"input",
-      proc(ev: isonim_dom.Event) = onValue(readInputValue(asNode)))
-
-  proc wireWelcomeChange(r: WebRenderer; node: isonim_dom.Element;
-                         onValue: proc(v: string)) =
-    let asNode = isonim_dom.Node(node)
-    isonim_dom.addEventListener(asNode, cstring"change",
-      proc(ev: isonim_dom.Event) = onValue(readInputValue(asNode)))
-
-  proc initWelcomeChecked(r: WebRenderer; node: isonim_dom.Element;
-                          checked: bool) =
-    isonim_dom.Node(node).setChecked(checked)
+    onValue(r.inputValue(captured)))
 
 # ---------------------------------------------------------------------------
 # The screen, for every renderer
@@ -432,7 +406,6 @@ proc renderWelcomeMode[R, N](r: R; vm: WelcomeScreenVM;
 
 proc renderNewRecordMode[R, N](r: R; vm: WelcomeScreenVM;
                                callbacks: WelcomeScreenCallbacks): N =
-  mixin wireWelcomeInput, wireWelcomeChange, initWelcomeChecked
   var execInput, argsInput, workDirInput, outputInput, checkbox: N
   var backendSelect: N
   # The backend choice is read here, in the body: its rows are a plain list
@@ -557,7 +530,7 @@ proc renderNewRecordMode[R, N](r: R; vm: WelcomeScreenVM;
   # replaced instead of changing state.  The checkbox only needs the value it
   # has when the form opens; toggling it goes through its own handler below.
   untrack proc() =
-    initWelcomeChecked(r, checkbox, vm.newRecord.val.defaultOutputFolder)
+    r.setChecked(checkbox, vm.newRecord.val.defaultOutputFolder)
   wireWelcomeInput(r, execInput, proc(v: string) =
     vm.setRecordExecutable(v)
     if callbacks.onRecordExecutableChange != nil:
@@ -589,7 +562,6 @@ proc renderNewRecordMode[R, N](r: R; vm: WelcomeScreenVM;
 
 proc renderOnlineTraceMode[R, N](r: R; vm: WelcomeScreenVM;
                                  callbacks: WelcomeScreenCallbacks): N =
-  mixin wireWelcomeInput
   var inputNode: N
   let panel = ui(r):
     tdiv(class = WelcomeScreenWrapperClass):

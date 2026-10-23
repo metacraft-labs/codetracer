@@ -76,7 +76,7 @@
  * `CODETRACER::load-recent-trace`). Which host a pane mounts into is a
  * property of the real GoldenLayout DOM of two live tabs, which no headless
  * ViewModel owns; the lookup rule itself is unit-tested headless in
- * `src/tests/gui/tests/layout/isonim_panel_mount_test.nim`, and which
+ * `src/tests/gui/tests/layout/pane_host_lookup_test.nim`, and which
  * session's ViewModels a tab's pane host renders, and which session a tagged
  * event updates, in `src/frontend/tests/session_viewmodels_test.nim`.
  */

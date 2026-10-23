@@ -41,7 +41,6 @@ import
   ui_imports,
   session_viewmodels,
   # A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
-  isonim_panel_mount,
   ../[ types, communication, event_helpers ],
   tables,
   sets,

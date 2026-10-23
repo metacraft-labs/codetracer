@@ -21,11 +21,6 @@ import
 
 import kdom except Location
 
-# Every `tryMountIsoNim*Panel` finds its host and decides whether to mount
-# through this module (`findIsoNimPaneHost`, `isoNimPanelNeedsMountInHost`):
-# one rule for the whole window, not a copy per pane.
-import isonim_panel_mount
-
 from dom import Element, getAttribute, Node, preventDefault, document, getElementById, querySelectorAll, querySelector, focus
 
 proc jqFind*(a: cstring): js {.importcpp: "jQuery(#)".}
@@ -35,4 +30,4 @@ export
   types, renderer, config, utils, focus, lang,
   jslib, logging, monaco_lib, misc_lib,
   event_log_service, debugger_service, editor_service, flow_service, shell_service,
-  search_service, isonim_panel_mount
+  search_service

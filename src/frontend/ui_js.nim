@@ -267,7 +267,7 @@ proc hideWelcomeScreenSurface() =
 import viewmodel/session_vm
 import ui/session_viewmodels
 import ui/panel_host   # the panes it mounts render their tab's ViewModels
-from ui/isonim_panel_mount import tabOfIsoNimPaneHost
+from ui/pane_host_lookup import tabOfPaneHost
 from isonim/web/dom_api as isonim_dom import nil
 import viewmodel/sdk/[debugger_session, trace_source]
 from viewmodel/viewport import timeoutScheduler
@@ -2363,7 +2363,7 @@ proc configureWindowMiddleware() =
   initPanelVM("setPanelSessionResolver"):
     panel_host.setPanelSessionResolver(
       proc(host: isonim_dom.Element): SessionViewModel =
-        data.sessionVMOfTab(tabOfIsoNimPaneHost(host)))
+        data.sessionVMOfTab(tabOfPaneHost(host)))
 
   # EVERY `ct/originChain` IS NAMED BY THE TRANSPORT as it is sent —
   # the VM's own (`OriginChainVM.onShowOrigin`) and the legacy menus'
@@ -2428,8 +2428,6 @@ proc bindWindowToSession(session: ReplaySession) =
     panel_host.setPanelSession(vm)
   initPanelVM("initEventLogVMFromSession"):
     event_log.initEventLogVMFromSession(vm.eventLogVM)
-  initPanelVM("initFlowVMFromSession"):
-    flow.initFlowVMFromSession(vm.flowVM)
   initPanelVM("initEditorVMFromSession"):
     editor.initEditorVMFromSession(vm.editorVM)
     # The editor's surface reads the session's values and flow, as the
@@ -6536,7 +6534,7 @@ when defined(ctWeb):
       # welcome surface, the second mounts panes and owns the project store).
       #
       # BEFORE the mount, unlike the build commands, because the callbacks
-      # record is built once per mount and `tryMountIsoNimWelcomeScreen` returns
+      # record is built once per mount and `mountWelcomeScreen` returns
       # early for an already-mounted screen — a handler installed afterwards
       # would not reach the view.
       #

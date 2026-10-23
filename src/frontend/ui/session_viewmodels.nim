@@ -52,7 +52,7 @@ from ../viewmodel/viewmodels/constraints_vm import ConstraintsVM,
   createConstraintsVM
 import isonim/viewmodel as isovm
 from isonim/web/dom_api import nil
-from ./isonim_panel_mount import tabOfIsoNimPaneHost
+from ./pane_host_lookup import tabOfPaneHost
 
 
 type
@@ -221,10 +221,10 @@ proc tabScopedId*(data: Data; component: Component): int =
 
 proc hostTab*(data: Data; host: dom_api.Element): ReplaySession =
   ## The tab whose container holds the pane host `host`, or the tab on screen
-  ## for a host outside every tab (`tabOfIsoNimPaneHost`).
+  ## for a host outside every tab (`tabOfPaneHost`).
   if data.isNil or data.sessions.len == 0:
     return nil
-  let tab = tabOfIsoNimPaneHost(host)
+  let tab = tabOfPaneHost(host)
   if tab >= 0 and tab < data.sessions.len: data.sessions[tab]
   else: data.activeSession
 

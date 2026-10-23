@@ -7,15 +7,14 @@
 ## loading state), the DOM updates automatically via IsoNim's
 ## `createRenderEffect`.
 ##
-## Both renderer overloads (Mock and Web) produce the same structure;
-## the markup lives in a single `renderFlowPanelImpl` template that is
-## materialised into one concrete proc per renderer so the `ui()`
-## macro can resolve element types at compile time.
+## One generic view (`renderFlowPanel[R, N]`) for every renderer: the
+## headless tests render it under `MockRenderer`, the VS Code panel bundle,
+## the storybook and the standalone app shell under `WebRenderer`.
 
 import std/options
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -23,6 +22,10 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/flow_vm
+
+# The generic procs expand the DSL (`val=`, `createRenderEffect`, `indexEach`)
+# at their instantiation site, in the caller's module.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Static labels and class names
@@ -79,9 +82,13 @@ proc flowStepTransition(step: FlowStepEntry): string =
   else:
     step.beforeValue
 
-proc onStepClick(vm: FlowVM; index: int): proc() =
-  let captured = index
-  result = proc() = vm.clickStep(captured)
+proc onStepClick(vm: FlowVM; step: proc(): FlowStepEntry): proc() =
+  ## Reads the row's step when clicked, so a reused row clicks the step it
+  ## shows.
+  result = proc() = vm.clickStep(step().step)
+
+proc emptyStepsDisplay(vm: FlowVM): string =
+  if vm.steps.val.len == 0: "block" else: "none"
 
 # ---------------------------------------------------------------------------
 # Click handlers
@@ -92,11 +99,11 @@ proc onSetMode(vm: FlowVM; mode: FlowMode): proc() =
   result = proc() = vm.setMode(m)
 
 # ---------------------------------------------------------------------------
-# Panel template — shared between Mock and Web renderers
+# The panel
 # ---------------------------------------------------------------------------
 #
 # Structure:
-#   div.flow-component
+#   div.flow-component.isonim-flow
 #     div.flow-mode-selector
 #       button.mode-call[.active]
 #       button.mode-line[.active]
@@ -105,7 +112,9 @@ proc onSetMode(vm: FlowVM; mode: FlowMode): proc() =
 #     div.flow-iteration-slider
 #       span.iteration-label                            text reactive
 #       input.iteration-range[type=range, min=0, max reactive, value reactive]
-#     div.flow-steps                                    placeholder
+#     div.flow-steps
+#       div.flow-steps-rows                             indexEach over vm.steps
+#       div.flow-steps-empty[display reactive]          "No flow values loaded."
 #     div.flow-value-display
 #       span.flow-value-text
 #       button.raw-value-toggle                         class + text reactive
@@ -113,9 +122,27 @@ proc onSetMode(vm: FlowVM; mode: FlowMode): proc() =
 # All dynamic attributes / text become per-attribute
 # `createRenderEffect`s emitted by the DSL macro.
 
-template renderFlowPanelImpl(r, vm, rootClass: untyped): untyped =
+proc renderFlowStepRow[R, N](r: R; vm: FlowVM; step: proc(): FlowStepEntry;
+                            index: int): N =
+  ## One step of the flow: its index, location, expression and value.
   ui(r):
-    tdiv(class = rootClass):
+    tdiv(class = flowStepRowClass(vm, index),
+         onclick = onStepClick(vm, step)):
+      span(class = "flow-step-index"):
+        text $step().step
+      span(class = "flow-step-location"):
+        text step().location
+      span(class = "flow-step-expression"):
+        text step().expression
+      span(class = "flow-step-value"):
+        text flowStepTransition(step())
+
+proc renderFlowPanel*[R, N](r: R; vm: FlowVM): N =
+  ## The Flow panel. The step rows are an `indexEach` over `vm.steps`, so they
+  ## follow the ViewModel after the panel is built.
+  var stepsHost: N
+  let panel = ui(r):
+    tdiv(class = "flow-component isonim-flow"):
       tdiv(class = "flow-mode-selector"):
         button(class = modeButtonClass(vm, fmCall),
                onclick = onSetMode(vm, fmCall)):
@@ -150,44 +177,27 @@ template renderFlowPanelImpl(r, vm, rootClass: untyped): untyped =
             text "Expression"
           span:
             text "Value"
-        for i, step in vm.steps.val:
-          tdiv(class = flowStepRowClass(vm, i),
-               onclick = onStepClick(vm, step.step)):
-            span(class = "flow-step-index"):
-              text $step.step
-            span(class = "flow-step-location"):
-              text step.location
-            span(class = "flow-step-expression"):
-              text step.expression
-            span(class = "flow-step-value"):
-              text flowStepTransition(step)
-        if vm.steps.val.len == 0:
-          tdiv(class = "flow-steps-empty"):
-            text "No flow values loaded."
+        tdiv(ref = stepsHost, class = "flow-steps-rows"):
+          discard
+        tdiv(class = "flow-steps-empty",
+             display = emptyStepsDisplay(vm)):
+          text "No flow values loaded."
       tdiv(class = "flow-value-display"):
         span(class = "flow-value-text"):
           discard
         button(class = rawValueToggleClass(vm),
                onclick = proc() = vm.toggleRawValues()):
           text rawValueToggleText(vm)
-
-# ---------------------------------------------------------------------------
-# Renderer overloads
-# ---------------------------------------------------------------------------
-
-proc renderFlowPanel*(r: MockRenderer; vm: FlowVM): MockNode =
-  ## Render the full Flow panel for headless tests.
-  renderFlowPanelImpl(r, vm, "flow-component")
+  indexEach[FlowStepEntry, R, N](r, stepsHost,
+    proc(): seq[FlowStepEntry] = vm.steps.val,
+    proc(step: proc(): FlowStepEntry; index: int): N =
+      renderFlowStepRow[R, N](r, vm, step, index))
+  panel
 
 when defined(js):
-  proc renderFlowPanel*(r: WebRenderer; vm: FlowVM): isonim_dom.Element =
-    ## Render the Flow panel into real DOM elements.
-    renderFlowPanelImpl(r, vm, "flow-component isonim-flow")
-
   proc mountIsoNimFlow*(container: isonim_dom.Element; vm: FlowVM) =
-    ## Mount the IsoNim Flow panel as a child of `container`. Reactive
-    ## effects handle every subsequent update — no manual redraw is
-    ## needed.
-    let r = WebRenderer()
-    let panel = renderFlowPanel(r, vm)
+    ## Append the Flow panel to `container` (the storybook and the
+    ## standalone app shell). Reactive effects handle every later update.
+    let panel = renderFlowPanel[WebRenderer, isonim_dom.Element](
+      WebRenderer(), vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

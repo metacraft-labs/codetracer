@@ -34,14 +34,6 @@ proc intValue*(i: int): Value {.exportc.} =
     typ: Type(kind: TypeKind.Int, langType: "Int"),
   )
 
-proc deleteWatch*(self: StateComponent, expression: cstring) =
-  var i = self.watchExpressions.find(expression)
-
-  if i != -1:
-    delete(self.watchExpressions, i..i)
-    self.locals = self.locals.filterIt(it.expression != expression)
-    self.redraw()
-
 proc updateWatches*(self: StateComponent, handler: proc(locals: seq[Variable])) {.async.} =
   # TODO: Fix up with new communication
   # data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
@@ -124,28 +116,6 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
   else:
     self.customRedraw(self)
 
-  if uiExpanded and self.stateID != -1: # expanded and in state
-
-    let nonExpandedItems = findNonExpanded(value)
-    let nonExpandedItemExpressions = nonExpandedItems.mapIt(it.expression)
-    let state = self.data.stateComponent(self.stateID)
-    let originalStateIndex = state.completeMoveIndex
-    let expandedItems = await self.expandValues(nonExpandedItemExpressions, 1, originalStateIndex)
-
-    if state.completeMoveIndex != originalStateIndex:
-      return
-
-    for i, item in nonExpandedItems:
-      if i < expandedItems.len:
-        let expandedItem = expandedItems[i]
-        objectAssign(item.toJs, expandedItem.toJs)
-      else:
-        cerror &"no expanded item {i}"
-
-    if self.customRedraw.isNil:
-      self.redraw()
-    else:
-      self.customRedraw(self)
 
 proc expandValue(self: ValueComponent, path: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
   # We need to emit expand value event and sub to the expand value response
@@ -1215,11 +1185,6 @@ proc renderValueRowDom(
 
   if expression == self.baseExpression and self.inlineHistoryVisible(expression):
     result.appendChild(self.renderInlineHistoryDom(expression))
-
-method delete*(self: ValueComponent) {.async.} =
-  if self.selected:
-    var state = self.data.stateComponent(self.stateID)
-    state.deleteWatch(self.baseExpression)
 
 proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem] =
   var showHistory:  ContextMenuItem

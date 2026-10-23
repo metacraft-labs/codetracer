@@ -276,34 +276,7 @@ const StatusPickerOptions*: array[5, (string, string)] = [
 ]
   ## (filterValue, displayLabel) pairs for the Status filter picker.
 
-# ---------------------------------------------------------------------------
-# Picker host helpers — generic across Mock and Web renderers
-# ---------------------------------------------------------------------------
-
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
-  ## Attach a rendered picker item to its container.  Mirrors the VCS view's
-  ## helper of the same name so ``renderFilterPicker`` can stay generic.
-  r.appendChild(host, child)
-
-proc setPickerChevron(r: MockRenderer; node: MockNode; html: string) =
-  ## Set the inner HTML of a mock node.  ``renderFilterPicker`` uses this to
-  ## inject the chevron SVG.  In the mock renderer this is a no-op: tests do
-  ## not inspect the chevron SVG content.
-  discard
-
-# Web-renderer picker helpers forward-declared here (before renderFilterPicker)
-# so that generic instantiation for WebRenderer finds setPickerChevron /
-# appendRenderedChild. Mirrors the VCS view's pattern exactly.
 when defined(js):
-  proc setPickerChevron(r: WebRenderer; node: isonim_dom.Element; html: string) =
-    ## Inject raw HTML into a DOM element.  Used by ``renderFilterPicker`` to
-    ## insert the chevron SVG into ``.ct-picker-chevron`` spans.
-    node.innerHTML = cstring(html)
-
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    ## Attach a rendered picker item to its container.
-    r.appendChild(host, child)
-
   # ---------------------------------------------------------------------------
   # Drag-resize FFI — used by the detail panel resize handle
   # ---------------------------------------------------------------------------
@@ -381,7 +354,7 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
           text displayLabel
       if isOpen:
         tdiv(ref = dropdown, class = "ct-picker-dropdown")
-  r.setPickerChevron(chevronHost, chevronSvg)
+  r.setInnerHtml(chevronHost, chevronSvg)
   if isOpen:
     for (optValue, optLabel) in options:
       let v = optValue
@@ -392,7 +365,7 @@ proc renderFilterPicker[R](r: R; label: string; isOpen: bool;
         tdiv(class = itemClass, onclick = pickerSelectHandler(onSelect, v)):
           span(class = "ct-menu-item-label"):
             text ol
-      r.appendRenderedChild(dropdown, item)
+      r.appendChild(dropdown, item)
   panel
 
 # ---------------------------------------------------------------------------
@@ -428,7 +401,6 @@ proc renderDetail[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   ## The detail panel of the selected request: header bar (method badge, URL,
   ## status, Handler button), tab bar, and the active tab's content. `handle`
   ## is the resize handle, for the browser to wire the drag to.
-  mixin appendRenderedChild
   let badgeCls = methodBadgeClass(req.httpMethod)
   let statusCls = statusCellClass(req)
   let statusDisplayText = if req.isOpen: InFlightPlaceholder
@@ -458,9 +430,9 @@ proc renderDetail[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
     let tabEl = ui(r):
       span(class = tabCls, onclick = makeTabClickHandler(vm, tabId)):
         text tl
-    r.appendRenderedChild(tabBarHost, tabEl)
+    r.appendChild(tabBarHost, tabEl)
   let content: N = renderDetailContent[R, N](r, req, tab)
-  r.appendRenderedChild(contentHost, content)
+  r.appendChild(contentHost, content)
   handle = handleEl
   panel
 
@@ -527,7 +499,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
   ## and the detail panel are rebuilt by effects when their signals change.
   ## The Method and Status pickers use the shared ``renderFilterPicker``
   ## (``ct-picker ct-picker--chevron-right``), matching the VCS branch picker.
-  mixin clearChildren, appendChild, appendRenderedChild, addEventListener
+  mixin clearChildren, appendChild, addEventListener
   let methodPickerOpen = createSignal(false)
   let statusPickerOpen = createSignal(false)
   # Percentage of the panel height claimed by the detail pane, updated by the
@@ -586,7 +558,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
       onSelect = proc(v: string) =
         vm.setFilterMethod(v)
         methodPickerOpen.val = false)
-    r.appendRenderedChild(methodPickerHost, picker)
+    r.appendChild(methodPickerHost, picker)
 
   # Status picker — rebuilt whenever its open flag or the filter changes.
   createRenderEffect proc() =
@@ -599,7 +571,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
       onSelect = proc(v: string) =
         vm.setFilterStatus(v)
         statusPickerOpen.val = false)
-    r.appendRenderedChild(statusPickerHost, picker)
+    r.appendChild(statusPickerHost, picker)
 
   # Table body — rebuilt whenever the filtered list or the selection changes.
   createRenderEffect proc() =
@@ -632,7 +604,7 @@ proc renderRequestPanel*[R, N](r: R; vm: RequestPanelVM): N =
     if idx >= 0 and idx < filtered.len:
       var handle: N
       let detail: N = renderDetail[R, N](r, vm, filtered[idx], tab, handle)
-      r.appendRenderedChild(detailContainer, detail)
+      r.appendChild(detailContainer, detail)
       when defined(js):
         when N is isonim_dom.Element:
           let capturePanel = panelRef

@@ -160,11 +160,9 @@ const WindowUniqueIdContents* = {Content.EditorView, Content.UnifiedDiff}
   ## tabs share one document: a hidden tab keeps its `session-container-<n>`
   ## mounted so switching back is instant (`ui/session_switch.nim`). These two
   ## panes are found by a document-global id derived from the component id —
-  ## `editorComponent-<id>` (`ui/layout.nim`'s editor registration, then
-  ## `ui/editor.renderTopLevelEditorDirect`'s `getElementById` and the
-  ## `jq("#editorComponent-<id>")` Monaco is created on) and
-  ## `unifiedDiffComponent-<id>` (`ui/unified_diff.nim`) — and the editor's
-  ## id also keys module-global state (`ui/editor.isoNimEditorMountedIds`).
+  ## `editorComponent-<id>` (`ui/layout.nim`'s editor registration, and
+  ## selectors elsewhere that reach an editor's DOM) and
+  ## `unifiedDiffComponent-<id>` (`ui/unified_diff.nim`).
   ## `getElementById` returns the FIRST match in document order, which is the
   ## earlier tab's. So a second tab's editor 0 mounted into the replay tab's
   ## `editorComponent-0`: Monaco refused a second editor on that host
@@ -783,7 +781,6 @@ proc makeFlowComponent*(data: Data, position: int): FlowComponent =
     loopLineSteps: JsAssoc[int, int]{},
     inlineDecorations: JsAssoc[int, InlineDecorations]{},
     # editorUI: self,
-    # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
     # editor: self.service,
     # service: self.data.services.flow,
     # data: self.data,
@@ -1543,6 +1540,11 @@ proc openNoSourceView*(data: Data, name: cstring, noInfoMessage: cstring) =
   data.services.editor.active = name
 
 
+var editorSourceInstalled*: proc(editor: EditorViewComponent)
+  ## Set by `ui/editor`: finish the mount of an editor whose pane was built
+  ## before its source arrived (`resumeEditorMount`). A hook, because this
+  ## module sits below `ui/editor` and cannot import it.
+
 proc makeEditorView*(
     data: Data,
     name: cstring,
@@ -1737,9 +1739,9 @@ proc openNewEditorView*(
     # config carries one `editorComponent` node per tab the visitor had open, so
     # the walk registers an `EditorViewComponent` in `data.ui.editors` for each
     # — with a `layoutItem`, and with NO `tabInfo`, because nothing on that path
-    # asks for the file's source. `renderTopLevelEditorDirect`'s mount poll
-    # waits on `not self.tabInfo.isNil`, never gets it, and gives up: the tab is
-    # in the strip, the container is on screen, and it never fills.
+    # asks for the file's source. Its mount (`renderTopLevelEditorDirect`)
+    # waits for the source, and the pane fills only when it is installed
+    # below (`editorSourceInstalled`).
     #
     # Reaching here for such a pane used to raise out of `makeEditorViewComponent`
     # ("editor <name> exists"), which is an unhandled rejection inside this async
@@ -1758,6 +1760,9 @@ proc openNewEditorView*(
       data.services.editor.open[editorName] = tabInfo
       restored.tabInfo = tabInfo
       data.services.editor.active = editorName
+      # The pane was mounted before its source arrived; finish the mount.
+      if not editorSourceInstalled.isNil:
+        editorSourceInstalled(restored)
       data.redraw()
     else:
       data.makeEditorViewDetailed(

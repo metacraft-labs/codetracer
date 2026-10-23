@@ -3395,11 +3395,11 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "flow-component"
+      check "flow-component" in panel.attributes["class"].split(' ')
 
       dispose()
 
@@ -3409,7 +3409,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let modeBar = findByClass(panel, "flow-mode-selector")
       check modeBar != nil
@@ -3443,7 +3443,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let slider = findByClass(panel, "flow-iteration-slider")
       check slider != nil
@@ -3462,7 +3462,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let display = findByClass(panel, "flow-value-display")
       check display != nil
@@ -3479,7 +3479,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let steps = findByClass(panel, "flow-steps")
       check steps != nil
@@ -3492,7 +3492,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "flow-loading")
       check indicator != nil
@@ -3512,7 +3512,7 @@ suite "IsoNim Flow Panel — mode switching":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let lineBtn = findByClass(panel, "mode-line")
       check lineBtn != nil
@@ -3533,7 +3533,7 @@ suite "IsoNim Flow Panel — mode switching":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let funcBtn = findByClass(panel, "mode-function")
       funcBtn.fireEvent("click")
@@ -3555,7 +3555,7 @@ suite "IsoNim Flow Panel — raw values":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let toggleBtn = findByClass(panel, "raw-value-toggle")
       check toggleBtn.textContent == "Raw"
@@ -3582,7 +3582,7 @@ suite "IsoNim Flow Panel — iteration slider":
 
       vm.iterationCount.val = 10
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let label = findByClass(panel, "iteration-label")
       check label != nil
@@ -3607,7 +3607,7 @@ suite "IsoNim Flow Panel — loading":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "flow-loading")
 
       check indicator.styles["display"] == "none"

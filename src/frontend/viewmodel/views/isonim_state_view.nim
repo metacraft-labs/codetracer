@@ -686,15 +686,15 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ##   div.value-expanded.value-expanded-name.border-value-{depth}
   ##     div.value-expanded-{atom|compound}-parent
   ##       div.value-name-container
-  ##         if hasChildren:
+  ##         [shown while hasChildren]
   ##           span.value-expand-button > div.{caret-expand|caret-collapse}
   ##         span.value-name : "{name}: "
-  ##         if compoundTypeVisible:
+  ##         [shown while compoundTypeVisible]
   ##           span.value-type : "{typeName}"
   ##       div
   ##         span.value-view
   ##           span.value-expanded-text : "{value}"
-  ##           if atomTypeVisible:
+  ##           [shown while atomTypeVisible]
   ##             span.value-type : "{typeName}"
   ##           button#value-history
   ##           button.value-load-more[display: when moreElements and expanded]
@@ -721,6 +721,7 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
   ## the underlying VariableViewState signal updates.
   mixin BadgeEvent
   var chainContainer, historyContainer: N
+  var expandSlot, nameTypeSlot, valueTypeSlot: N
   let onToggle = onToggleExpand(vm, item)
   let onBadgeClick = onToggleOriginBadge(vm, item, BadgeEvent(r))
   let onRowContextMenu = onShowVariableRowContextMenu(vm, item)
@@ -731,22 +732,22 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
          oncontextmenu = onRowContextMenu):
       tdiv(class = atomOrCompoundClass(item)):
         tdiv(class = "value-name-container"):
-          if item().hasChildren:
-            span(class = "value-expand-button", onclick = onToggle):
-              tdiv(class = caretClass(item)):
-                discard
+          # Slots for the parts a row shows only sometimes: `show` below puts
+          # each in or takes it out as the row's item changes (a reused row
+          # becomes a compound, a compound is expanded). `display: contents`
+          # keeps a slot out of the layout.
+          span(ref = expandSlot, display = "contents"):
+            discard
           span(class = "value-name"):
             text item().name & ": "
-          if compoundTypeVisible(item):
-            span(class = "value-type"):
-              text item().typeName
+          span(ref = nameTypeSlot, display = "contents"):
+            discard
         tdiv:
           span(class = "value-view"):
             span(class = valueTextClass(vm, item)):
               text item().value
-            if atomTypeVisible(item):
-              span(class = "value-type"):
-                text item().typeName
+            span(ref = valueTypeSlot, display = "contents"):
+              discard
             button(class = "value-history-button ct-button-image-xs-secondary ct-ml-2",
                    id = "value-history",
                    onclick = proc() = vm.toggleHistory(item().path)):
@@ -794,6 +795,25 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
            display = (if item().isHistoryExpanded: "block" else: "none"),
            ref = historyContainer):
         discard
+  show(r, expandSlot,
+    proc(): bool = item().hasChildren,
+    proc(): N =
+      ui(r):
+        span(class = "value-expand-button", onclick = onToggle):
+          tdiv(class = caretClass(item)):
+            discard)
+  show(r, nameTypeSlot,
+    proc(): bool = compoundTypeVisible(item),
+    proc(): N =
+      ui(r):
+        span(class = "value-type"):
+          text item().typeName)
+  show(r, valueTypeSlot,
+    proc(): bool = atomTypeVisible(item),
+    proc(): N =
+      ui(r):
+        span(class = "value-type"):
+          text item().typeName)
   # Attach the reactive sub-lists AFTER the row exists — a plain `for`
   # inside the `ui()` block would only ever run once (see #558).
   renderOriginChainLines[R, N](r, chainContainer, item, vm)

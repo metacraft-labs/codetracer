@@ -454,117 +454,57 @@ proc renderMenuShell*[R, N](
 # nothing the render would have set on it.  If it ever gains one, this swap is
 # the place that has to start reconciling it.
 #
-# The helpers below exist so that ONE implementation serves both backends: the
-# mock renderer is what lets the identity property be asserted headlessly
+# The helpers below are generic over the renderer, so ONE implementation
+# serves both backends: the mock renderer is what lets the identity property
+# be asserted headlessly
 # (`src/tests/gui/tests/session-chrome/menu_redraw_storm_test.nim`), and a
-# JS-only fix would have been a fix nothing could test.
+# JS-only fix would have been a fix nothing could test. They walk ELEMENT
+# children only (`firstElementChild` / `nextElementSibling`): the shell root's
+# children are all elements, and the container holds nothing but what the
+# previous render moved into it.
 
-proc menuShellFindChild(r: MockRenderer; parent: MockNode; id: string): MockNode =
+proc menuShellFindChild[R, N](r: R; parent: N; id: string): N =
   ## The host is a DIRECT child of the shell root, so this deliberately does
   ## not recurse: a nested element that happened to share the id must not be
-  ## mistaken for it.
-  for child in parent.children:
-    if child.kind == mnkElement and
-        child.attributes.getOrDefault("id", "") == id:
-      return child
-  nil
+  ## mistaken for it. Nil when there is none.
+  result = r.firstElementChild(parent)
+  while not r.isNilNode(result) and r.getAttribute(result, "id") != id:
+    result = r.nextElementSibling(result)
 
-proc menuShellIsNilNode(node: MockNode): bool = node.isNil
-
-proc menuShellClearExcept(r: MockRenderer; container, keep: MockNode) =
-  let existing = container.children
-  for child in existing:
+proc menuShellClearExcept[R, N](r: R; container, keep: N) =
+  var child = r.firstElementChild(container)
+  while not r.isNilNode(child):
+    let next = r.nextElementSibling(child)
     if child != keep:
       r.removeChild(container, child)
+    child = next
 
-proc menuShellMoveChildren(r: MockRenderer; destination, source: MockNode) =
-  ## Over a COPY of the child list: `appendChild` detaches first, so iterating
-  ## `source.children` directly would skip every other node.
-  let moving = source.children
-  for child in moving:
+proc menuShellMoveChildren[R, N](r: R; destination, source: N) =
+  ## The next sibling is read before the move: `appendChild` detaches the
+  ## node from `source` first.
+  var child = r.firstElementChild(source)
+  while not r.isNilNode(child):
+    let next = r.nextElementSibling(child)
     r.appendChild(destination, child)
+    child = next
 
-proc menuShellMoveChildrenAround(
-    r: MockRenderer; destination, source, anchor: MockNode) =
+proc menuShellMoveChildrenAround[R, N](r: R; destination, source, anchor: N) =
+  ## Move `source`'s children into `destination` around `anchor`: those
+  ## before the new render's own (empty) host placeholder go before `anchor`,
+  ## those after it after, and the placeholder itself is dropped.
   var seenPlaceholder = false
-  let moving = source.children
-  for child in moving:
-    if child.kind == mnkElement and
-        child.attributes.getOrDefault("id", "") == DebugControlsHostId:
+  var child = r.firstElementChild(source)
+  while not r.isNilNode(child):
+    let next = r.nextElementSibling(child)
+    if r.getAttribute(child, "id") == DebugControlsHostId:
       seenPlaceholder = true
       r.removeChild(source, child)
-      continue
-    if seenPlaceholder:
+    elif seenPlaceholder:
       r.appendChild(destination, child)
     else:
       r.insertBefore(destination, child, anchor)
+    child = next
 
-when defined(js):
-  proc menuShellFindChild(r: WebRenderer; parent: isonim_dom.Element;
-                          id: string): isonim_dom.Element =
-    var child = isonim_dom.Node(parent).firstChild
-    while not isonim_dom.isNodeNil(child):
-      # `nodeType == 1` is ELEMENT_NODE; `getAttribute` does not exist on the
-      # text nodes a shell render can leave between elements.
-      if child.nodeType == 1:
-        let element = cast[isonim_dom.Element](child)
-        let raw = isonim_dom.getAttribute(element, cstring"id")
-        if not raw.isNil and $raw == id:
-          return element
-      child = child.nextSibling
-    nil
-
-  proc menuShellIsNilNode(node: isonim_dom.Element): bool =
-    isonim_dom.isNodeNil(isonim_dom.Node(node))
-
-  proc menuShellSameNode(a, b: isonim_dom.Node): bool {.importjs: "(# === #)".}
-
-  proc menuShellIsHostPlaceholder(node: isonim_dom.Node): bool =
-    if node.nodeType != 1:
-      return false
-    let raw = isonim_dom.getAttribute(
-      cast[isonim_dom.Element](node), cstring"id")
-    not raw.isNil and $raw == DebugControlsHostId
-
-  proc menuShellClearExcept(r: WebRenderer;
-                            container, keep: isonim_dom.Element) =
-    let containerNode = isonim_dom.Node(container)
-    let keepNode = isonim_dom.Node(keep)
-    var child = containerNode.firstChild
-    while not isonim_dom.isNodeNil(child):
-      let next = child.nextSibling
-      if not menuShellSameNode(child, keepNode):
-        discard isonim_dom.removeChild(containerNode, child)
-      child = next
-
-  proc menuShellMoveChildren(r: WebRenderer;
-                             destination, source: isonim_dom.Element) =
-    let destinationNode = isonim_dom.Node(destination)
-    let sourceNode = isonim_dom.Node(source)
-    while not isonim_dom.isNodeNil(sourceNode.firstChild):
-      discard isonim_dom.appendChild(destinationNode, sourceNode.firstChild)
-
-  proc menuShellMoveChildrenAround(
-      r: WebRenderer; destination, source, anchor: isonim_dom.Element) =
-    let destinationNode = isonim_dom.Node(destination)
-    let sourceNode = isonim_dom.Node(source)
-    let anchorNode = isonim_dom.Node(anchor)
-    var seenPlaceholder = false
-    while not isonim_dom.isNodeNil(sourceNode.firstChild):
-      let child = sourceNode.firstChild
-      if menuShellIsHostPlaceholder(child):
-        seenPlaceholder = true
-        discard isonim_dom.removeChild(sourceNode, child)
-        continue
-      if seenPlaceholder:
-        discard isonim_dom.appendChild(destinationNode, child)
-      else:
-        discard isonim_dom.insertBefore(destinationNode, child, anchorNode)
-
-# BELOW THE BACKEND HELPERS ON PURPOSE. A template binds the overloads it can
-# already see at its definition site, so a template declared above the
-# `when defined(js)` block would resolve `menuShellFindChild` and friends to
-# the mock ones and fail to compile for the web.
 proc renderMenuShellInto*[R, N](
     r: R;
     container: N;
@@ -572,12 +512,8 @@ proc renderMenuShellInto*[R, N](
     callbacks: MenuShellCallbacks = MenuShellCallbacks()) =
   ## Render the menu shell into `container`, keeping the debugger toolbar's
   ## host (`DebugControlsHostId`) in the document if it is already there.
-  ## The helpers it uses are per renderer: they walk and move the host's
-  ## children, which a renderer exposes in its own way.
-  mixin menuShellFindChild, menuShellIsNilNode, menuShellClearExcept,
-        menuShellMoveChildren, menuShellMoveChildrenAround
   let preservedHost = menuShellFindChild(r, container, DebugControlsHostId)
-  let hasPreserved = not menuShellIsNilNode(preservedHost)
+  let hasPreserved = not r.isNilNode(preservedHost)
   if hasPreserved:
     # THE HOST NEVER LEAVES THE DOCUMENT. Everything around it is removed and
     # the new siblings are inserted before and after it, rather than the host

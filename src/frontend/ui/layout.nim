@@ -37,6 +37,7 @@ import kdom except Location
 # converted panes into the container it creates, and disposes them with it.
 import ./panel_host
 from ./session_viewmodels import tabScopedKey
+from ./pane_host_lookup import findPaneHost
 from isonim/web/dom_api import nil
 from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
 from ../headless_app/desktop_panes import PaneContent, paneOfContent
@@ -1747,13 +1748,14 @@ proc bindLayoutItemForTab(state: GoldenItemState; container: GoldenContainer) =
     return
   component.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-proc mountPaneForState(state: GoldenItemState) =
-    ## Mount the pane `state` names into the `.component-container` div that
-    ## carries `state.label` as its id, creating the pane's `Component` first
-    ## if nothing has.
+proc mountPaneForState(state: GoldenItemState; host: Element = nil) =
+    ## Mount the pane `state` names into `host` — the `.component-container`
+    ## div the caller built — or, without one, into the container carrying
+    ## `state.label` as its id in the active tab; creating the pane's
+    ## `Component` first if nothing has.
     ##
-    ## EXTRACTED FROM `genericUiComponent`'s registration below, which is
-    ## still its first caller — the deferred body there is now one call.  It
+    ## EXTRACTED FROM `genericUiComponent`'s registration below, which is its
+    ## first caller and passes the container it has just built.  It
     ## has a second caller since issue #691: an auto-hide panel restored from
     ## `auto_hide_state.json` never passes through GoldenLayout at all, so the
     ## factory never ran for it and its pane came back blank.  That path
@@ -1770,12 +1772,11 @@ proc mountPaneForState(state: GoldenItemState) =
     ## `pinPanel` builds that object out of a live item's state and
     ## persistence round-trips it as JSON.
     ##
-    ## THE CONTAINER MUST ALREADY BE IN THE DOCUMENT when this runs; every arm
-    ## below finds its mount point with `getElementById`.  The registration
-    ## guarantees that by building the container first and deferring this by
-    ## 200 ms; the auto-hide path guarantees it by revealing the panel — which
+    ## The registration mounts synchronously into the container it built
+    ## (Shared-DOM-Front-Ends D4); the auto-hide path reveals the panel — which
     ## reparents the rebuilt host into the docked sidebar or the overlay —
-    ## before `onPanelShown` calls this.
+    ## before `onPanelShown` calls this, so the container is found per tab
+    ## (`pane_host_lookup.findPaneHost`).
     # Components that still enter the generic GoldenLayout route mount
     # directly into the GoldenLayout container. Editor tabs are built by the
     # separate `editorComponent` registration and never reach here.
@@ -1821,6 +1822,9 @@ proc mountPaneForState(state: GoldenItemState) =
 
     var containerId: cstring
     containerId = state.label
+    let paneHost =
+      if not host.isNil: host
+      else: cast[Element](findPaneHost(containerId, data.activeSessionIndex))
 
     if not data.ui.componentMapping[state.content].hasKey(state.id):
       discard data.makeComponent(state.content, state.id)
@@ -1843,14 +1847,13 @@ proc mountPaneForState(state: GoldenItemState) =
       # The panel host's panes: reached here only for a container rebuilt
       # outside GoldenLayout (an auto-hide panel restored from its saved
       # state), which the factory never saw.
-      if state.content in PanelHostKinds:
-        ensurePanelMountedById(containerId, state.content,
-                               data.activeSessionIndex)
+      if state.content in PanelHostKinds and not paneHost.isNil:
+        ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)
 
-      if state.content == Content.Shell:
+      if state.content == Content.Shell and not paneHost.isNil:
         let shellComponent = ShellComponent(component)
         if shellComponent.shell.isNil:
-          discard shellComponent.createShell()
+          discard shellComponent.createShell(paneHost)
 
 
       # ``Content.AgentActivityDeepReview`` has no renderer of its own since
@@ -1868,9 +1871,9 @@ proc mountPaneForState(state: GoldenItemState) =
       # CaptionBarProgress: render via IsoNim WebRenderer directly
       # into the GL container. Progress and hover mutation paths refresh
       # this direct mount explicitly.
-      if state.content == Content.CaptionBarProgress:
-        tryMountCaptionBarProgress(
-          containerId,
+      if state.content == Content.CaptionBarProgress and not paneHost.isNil:
+        mountCaptionBarProgress(
+          cast[dom_api.Element](paneHost),
           CaptionBarProgressComponent(component))
 
       discard component.afterInit()
@@ -1924,7 +1927,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     clog "initLayout: mounting IsoNim welcome screen"
     if not data.ui.welcomeScreen.isNil:
       data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-    welcome_screen.tryMountIsoNimWelcomeScreen()
+    welcome_screen.mountWelcomeScreen()
     return
 
   # Determine the GL container element.
@@ -2169,43 +2172,31 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let isReparentingObj = isReparenting
 
     if not isReparentingObj:
-      var containerId: cstring
-      containerId = cstring(fmt"editorComponent-{state.id}")
-
+      # THE EDITOR IS MOUNTED HERE, NOW, into the container just built
+      # (Shared-DOM-Front-Ends D4) — not after a timer, and not by looking the
+      # container up by id later.
+      #
+      # THE EDITOR THAT ALREADY OWNS THIS PATH, IF THERE IS ONE. `state.label`
+      # is the tab's full path, and `data.ui.editors` is keyed by exactly that.
+      # When a mode transition destroys the editor pane and a later one rebuilds
+      # it, the component holding the loaded source, the tab info and the live
+      # Monaco instance is STILL in `data.ui.editors` — only its GoldenLayout
+      # container went. Building a second, empty `EditorViewComponent` on a
+      # `componentMapping` miss left an editor pane with no editor in it after
+      # Stop (`ci/test/noir-mode-roundtrip.sh`); reusing the live one carries its
+      # Monaco instance into the new container (`reattachMonacoIfDetached`).
       let editorPathForMount = state.label
+      var component: Component
+      if data.ui.editors.hasKey(editorPathForMount):
+        component = data.ui.editors[editorPathForMount]
+      else:
+        if not data.ui.componentMapping[state.content].hasKey(state.id):
+          discard data.makeComponent(state.content, state.id)
+        component = data.ui.componentMapping[state.content][state.id]
 
-      discard windowSetTimeout((proc =
-        # THE EDITOR THAT ALREADY OWNS THIS PATH, IF THERE IS ONE.
-        #
-        # `state.label` is the tab's full path, and `data.ui.editors` is keyed
-        # by exactly that. When a mode transition destroys the editor pane and
-        # a later one rebuilds it, the component holding the loaded source, the
-        # tab info and the live Monaco instance is STILL in `data.ui.editors`
-        # — it is only its GoldenLayout container that went. Reaching for
-        # `componentMapping` first and calling `makeComponent` on a miss builds
-        # a SECOND, empty `EditorViewComponent` with no path and no tab info,
-        # whose `renderTopLevelEditorDirect` then retries 1200 times waiting for
-        # a source that will never arrive, and gives up.
-        #
-        # Measured on the assembled bundle: after Stop the edit layout came
-        # back with its `src/main.nr` tab and an 880x902 `editorComponent-0`
-        # host, and `document.querySelectorAll(".view-line").length` was 0 —
-        # an editor pane with no editor in it. The real instance was still
-        # alive and detached, reporting the replay's `readOnly: true`.
-        # `ci/test/noir-mode-roundtrip.sh` reads that as "the editors are
-        # writable again" failing on every trip.
-        var component: Component
-        if data.ui.editors.hasKey(editorPathForMount):
-          component = data.ui.editors[editorPathForMount]
-        else:
-          if not data.ui.componentMapping[state.content].hasKey(state.id):
-            discard data.makeComponent(state.content, state.id)
-          component = data.ui.componentMapping[state.content][state.id]
-
-        if not component.isNil:
-          EditorViewComponent(component).renderTopLevelEditorDirect(containerId)
-
-        ), 200)
+      if not component.isNil:
+        EditorViewComponent(component).renderTopLevelEditorDirect(
+          cast[dom_api.Element](element.firstChild))
 
   layout.registerComponent(cstring"genericUiComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:
@@ -2249,6 +2240,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           discard data.makeComponent(state.content, state.id)
         discard mountPanel(cast[dom_api.Element](element.firstChild),
                            state.content)
+      else:
+        # The panes the panel host does not render (the shell's terminal, the
+        # caption bar progress), mounted now into the same container.
+        mountPaneForState(state, cast[Element](element.firstChild))
 
     # Whatever pane is still inside this container when GoldenLayout destroys
     # it is disposed with it (a reparented pane has already moved out).
@@ -2309,15 +2304,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           activeDraggedItem = genericContentItem
         )
 
-    let isReparentingObj = isReparenting
-
-    discard windowSetTimeout((proc =
-      # The panel host mounted its panes synchronously above; the deferred
-      # dispatch is for the panes whose views are not converted yet.
-      if isReparentingObj or state.content in PanelHostKinds:
-        return
-      mountPaneForState(state)
-      ), 200)
 
   # Widen the splitter grab zone so it is easier to grab with the mouse.
   # The per-stack minimum width is enforced dynamically by enforceMinStackWidth

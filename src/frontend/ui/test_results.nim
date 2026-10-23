@@ -29,6 +29,7 @@ import
   ../[ types, communication ]
 
 from isonim/web/dom_api import nil
+from ./pane_host_lookup import tabOfPaneHost
 import isonim/web/web_renderer
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
@@ -103,7 +104,7 @@ proc testResultsVMForHost(host: dom_api.Element): TestResultsVM =
   ## The ViewModel of the tab whose container holds `host` — so tab 1's pane
   ## shows tab 1's catalog and run whichever tab is on screen. A host outside
   ## every tab shows the shown tab's.
-  let tab = tabOfIsoNimPaneHost(host)
+  let tab = tabOfPaneHost(host)
   if tab >= 0 and tab < data.sessions.len:
     result = testResultsVMOf(data.sessions[tab])
     applyHostInstallers(result)

@@ -63,9 +63,11 @@ when defined(js):
 var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
 
-# Track which editor instances have been IsoNim-mounted by their id.
-# Once an editor's container is created by IsoNim, its legacy renderer entry is removed.
-var isoNimEditorMountedIds = JsAssoc[int, bool]{}
+when defined(js):
+  var pendingEditorHosts = JsAssoc[int, dom_api.Element]{}
+    ## Editors whose host GoldenLayout's factory handed over before their
+    ## source was installed (a restored layout's tab): `resumeEditorMount`
+    ## finishes each mount when `utils.openTab` installs the source.
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
@@ -211,11 +213,10 @@ proc styleLines(
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
-proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
+proc initMonacoForEditor(self: EditorViewComponent, host: JsObject)
 proc editorAfterRedraw(self: EditorViewComponent)
 proc scheduleInitialFlowLoad(self: EditorViewComponent)
-proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
-proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring)
+proc takeOverEditorRendering(self: EditorViewComponent)
 proc renderExpandedEditorDirect(self: EditorViewComponent)
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
@@ -347,9 +348,9 @@ proc closeEditorTab*(data: Data, id: cstring) =
   # remove editor renderer instance (may already be absent if IsoNim-mounted)
   renderer.removeLegacyRendererInstanceByKey(id)
 
-  # Clean up the IsoNim mount tracking for this editor.
-  if isoNimEditorMountedIds.hasKey(editorId):
-    discard jsDelete(isoNimEditorMountedIds[editorId])
+  when defined(js):
+    if pendingEditorHosts.hasKey(editorId):
+      discard jsDelete(pendingEditorHosts[editorId])
 
   # add editor to closed tabs registry
   let header = EditorViewTabArgs(name: id, editorView: editor.editorView)
@@ -2269,7 +2270,6 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     loopLineSteps: JsAssoc[int, int]{},
     inlineDecorations: JsAssoc[int, InlineDecorations]{},
     editorUI: self,
-    scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
     editor: self.service,
     service: self.data.services.flow,
     data: self.data,
@@ -2309,6 +2309,11 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
 
 proc createMonacoEditor*(selector: cstring, options: MonacoEditorOptions): MonacoEditor =
   result = monaco.editor.create(jq(selector), options)
+
+proc createMonacoEditorIn(host: JsObject; options: MonacoEditorOptions): MonacoEditor
+  {.importjs: "monaco.editor.create(#, #)".}
+  ## Monaco on `host` itself: the element need not be in the document yet —
+  ## with `automaticLayout` the editor sizes itself once it is laid out.
 
 proc updateMonacoGutterWidth(editor: MonacoEditor, fontSize: int) =
   let options = cast[MonacoEditorOptions](editor.getOptions())
@@ -3323,8 +3328,8 @@ proc scheduleInitialFlowLoad(self: EditorViewComponent) =
 # IsoNim primary rendering — Monaco init and after-redraw extracted procs
 # ---------------------------------------------------------------------------
 
-proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
-  ## Initialise Monaco Editor inside the container identified by `selector`.
+proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
+  ## Initialise Monaco Editor inside `host`.
   ## Shared by the top-level and expanded direct IsoNim editor mount paths.
   ## Runs only once — guarded by `tabInfo.monacoEditor.isNil`.
   var tabInfo = self.tabInfo
@@ -3364,8 +3369,8 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
 
     cdebug lang
 
-    tabInfo.monacoEditor = createMonacoEditor(
-      selector,
+    tabInfo.monacoEditor = createMonacoEditorIn(
+      host,
       MonacoEditorOptions(
         value: tabInfo.source,
         language: cstring(editorLanguageForPath($path, lang.toCLang())),
@@ -3825,7 +3830,7 @@ proc monacoEditorSetEditable*(editor: MonacoEditor;
   ## leaving debug mode calls `setEditorsEditable` again — with the same
   ## zero-valued fields — which is why it "never recovers".
 
-proc reattachMonacoIfDetached*(self: EditorViewComponent; selector: cstring) =
+proc reattachMonacoIfDetached*(self: EditorViewComponent; host: JsObject) =
   ## Carry a live Monaco instance into the container a layout rebuild just
   ## made for it.
   ##
@@ -3855,17 +3860,16 @@ proc reattachMonacoIfDetached*(self: EditorViewComponent; selector: cstring) =
     return
   if monacoEditorIsAttached(self.tabInfo.monacoEditor):
     return
-  let host = jq(selector)
   if host.isNil:
     return
-  monacoEditorAdoptInto(self.tabInfo.monacoEditor, host.toJs)
+  monacoEditorAdoptInto(self.tabInfo.monacoEditor, host)
   self.monacoEditor = self.tabInfo.monacoEditor
   # The transition that destroyed the pane may also have changed the mode, and
   # this instance was constructed for the previous one.
   monacoEditorSetReadOnly(
     self.monacoEditor,
     self.data.ui.readOnly or self.data.isReviewDatasetSession())
-  cdebug "editor: re-attached monaco for " & $self.name & " into " & $selector
+  cdebug "editor: re-attached monaco for " & $self.name
 
 proc editorAfterRedraw(self: EditorViewComponent) =
   ## Per-redraw work for the editor: flow rendering, line styles, test
@@ -3980,42 +3984,23 @@ proc refreshFlowAfterActivation*(self: EditorViewComponent) =
   self.applyEventualStylesLines()
   self.applyColumnBreakpointDecorations()
 
-proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
-  ## Mark the IsoNim editor view as the primary renderer once Monaco
-  ## has initialized inside the direct editor host.
-  ##
-  ## Called after Monaco has been initialised by the direct IsoNim editor
-  ## mount path.
-  ##
-  ## Safe to call multiple times per editor — mounts only once per id.
-  let editorId = self.id
-  if isoNimEditorMountedIds.hasKey(editorId):
+proc takeOverEditorRendering(self: EditorViewComponent) =
+  ## Make the IsoNim editor view this editor's renderer, once Monaco runs in
+  ## the host GoldenLayout's factory handed over: the legacy renderer entry is
+  ## removed, so `redrawAll()` neither diffs over the Monaco-managed DOM nor
+  ## runs this editor's after-redraw work (`onCompleteMove` runs it directly
+  ## for an editor `renderedByIsoNim`).
+  if self.renderedByIsoNim:
     return
-
-  # Ensure the EditorVM is available before taking ownership.
   initEditorVM()
-  if editorVMInstance.isNil:
+  if editorVMInstance.isNil or self.tabInfo.isNil or
+     self.tabInfo.monacoEditor.isNil:
     return
-
-  let tabInfo = self.tabInfo
-  if tabInfo.isNil:
-    return
-
-  # Only mount after Monaco has been created — we need the container
-  # to already be in the DOM with Monaco attached.
-  if tabInfo.monacoEditor.isNil:
-    return
-
-  # Remove the legacy renderer instance so redrawAll() skips this component.
   # Editor tabs use the file path (self.name) as the renderer key.
-  # This prevents legacy VDOM diffing from corrupting the IsoNim/Monaco
-  # managed DOM on subsequent redraw cycles.
   if not self.name.isNil:
     renderer.removeLegacyRendererInstanceByKey(self.name)
-
-  isoNimEditorMountedIds[editorId] = true
-
-  clog "IsoNim editor: mounted as primary renderer for editorComponent-" & cstring($editorId)
+  self.renderedByIsoNim = true
+  clog "IsoNim editor: rendering editorComponent-" & cstring($self.id)
 
 proc editorSourceReady(self: EditorViewComponent): bool =
   not self.service.open.hasKey(self.name) or self.service.open[self.name].received
@@ -4064,95 +4049,66 @@ when defined(js):
     dom_api.setAttribute(panel, cstring"data-isonim-editor-host", cstring"true")
     panel
 
-  proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring) =
-    ## Mount the top-level editor GoldenLayout surface directly through IsoNim.
+  proc finishEditorMount(self: EditorViewComponent; panel: dom_api.Element) =
+    ## Create (or carry across) the editor's Monaco instance in `panel`, now
+    ## that its source is installed.
+    if self.tabInfo.monacoEditor.isNil:
+      self.initMonacoForEditor(panel.toJs)
+    else:
+      # The instance exists but the container is new: a layout rebuild
+      # replaced the pane under it. `initMonacoForEditor` would decline, so
+      # the editor is carried across instead of being left detached.
+      self.reattachMonacoIfDetached(panel.toJs)
+    if not self.tabInfo.monacoEditor.isNil:
+      self.takeOverEditorRendering()
+      self.editorAfterRedraw()
+
+  proc renderTopLevelEditorDirect*(self: EditorViewComponent;
+                                   host: dom_api.Element) =
+    ## Mount the editor into `host`, the container GoldenLayout's
+    ## `editorComponent` factory has just built (Shared-DOM-Front-Ends D4:
+    ## whoever creates a pane's container mounts the pane, synchronously).
     ##
-    ## GoldenLayout creates a temporary ``component-container`` with the stable
-    ## ``editorComponent-{id}`` id.  This proc replaces that placeholder with
-    ## the IsoNim editor host using the same id, then initializes Monaco once
-    ## source data is available.  Loading tabs keep the shell mounted and retry
-    ## until the legacy editor service marks the source as received.
+    ## The IsoNim editor view replaces the placeholder under the same
+    ## `editorComponent-{id}` id. Monaco is created in it at once when the
+    ## file's source is installed — the usual case, since a tab is opened
+    ## after its source is. A restored layout's tab can be built before its
+    ## source arrives; that mount is finished by `resumeEditorMount`, which
+    ## `utils.openTab` calls when it installs the source.
     self.ensureEditorLspStarted()
+    if pendingEditorHosts.hasKey(self.id):
+      discard jsDelete(pendingEditorHosts[self.id])
 
-    let componentId = self.id
-    var retryCount = 0
-    var afterInitScheduled = false
-    var layoutListenerInstalled = false
-    var layoutListener: proc(ev: Event)
+    if self.editorView == ViewNoSource and not self.noInfo.isNil:
+      self.noInfo.renderNoSourceShellDirect(host)
+      discard self.afterInit()
+      return
 
-    if isoNimEditorMountedIds.hasKey(componentId):
-      discard jsDelete(isoNimEditorMountedIds[componentId])
+    let panel = self.replaceWithIsoNimEditorPanel(host)
+    if dom_api.isNodeNil(dom_api.Node(panel)):
+      cerror "editor: no host to mount editorComponent-" & cstring($self.id) &
+        " into"
+      return
+    discard self.afterInit()
 
-    proc doMount() =
-      retryCount += 1
+    if self.tabInfo.isNil or not self.editorSourceReady():
+      pendingEditorHosts[self.id] = panel
+      return
+    self.finishEditorMount(panel)
 
-      # Query the container ID dynamically from layoutItem/contentItem metadata if available
-      var targetContainerId = containerId
-      if not self.layoutItem.isNil and not self.layoutItem.componentState.isNil:
-        let stateId = self.layoutItem.componentState.id
-        if stateId > 0:
-          targetContainerId = cstring("editorComponent-" & $stateId)
+  proc resumeEditorMount*(self: EditorViewComponent) =
+    ## Finish a mount `renderTopLevelEditorDirect` left waiting for the
+    ## editor's source, now that it is installed. Nothing when none waits.
+    if self.isNil or not pendingEditorHosts.hasKey(self.id):
+      return
+    if self.tabInfo.isNil or not self.editorSourceReady():
+      return
+    let panel = pendingEditorHosts[self.id]
+    discard jsDelete(pendingEditorHosts[self.id])
+    self.finishEditorMount(panel)
 
-      var host = dom_api.getElementById(dom_api.document, targetContainerId)
-      if dom_api.isNodeNil(dom_api.Node(host)):
-        if not layoutListenerInstalled:
-          layoutListenerInstalled = true
-          domwindow.addEventListener(cstring"ct:layoutUpdated", layoutListener)
-        if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 20)
-        return
-
-      if self.editorView == ViewNoSource and not self.noInfo.isNil:
-        self.noInfo.renderNoSourceShellDirect(host)
-        if not afterInitScheduled:
-          afterInitScheduled = true
-          discard self.afterInit()
-        if layoutListenerInstalled:
-          domwindow.removeEventListener(cstring"ct:layoutUpdated", layoutListener)
-        return
-
-      let panel = self.replaceWithIsoNimEditorPanel(host)
-      if dom_api.isNodeNil(dom_api.Node(panel)):
-        if not layoutListenerInstalled:
-          layoutListenerInstalled = true
-          domwindow.addEventListener(cstring"ct:layoutUpdated", layoutListener)
-        if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 20)
-        return
-
-      # Successfully replaced the host with the panel, we can remove the layout listener now.
-      if layoutListenerInstalled:
-        domwindow.removeEventListener(cstring"ct:layoutUpdated", layoutListener)
-
-      if not afterInitScheduled:
-        afterInitScheduled = true
-        discard self.afterInit()
-
-      let sourceReady = self.editorSourceReady()
-      if self.tabInfo.isNil or not sourceReady:
-        if retryCount <= 1200:
-          discard setTimeout(proc() = doMount(), 25)
-        return
-
-      let selector = cstring("#editorComponent-" & $componentId)
-      if self.tabInfo.monacoEditor.isNil:
-        self.initMonacoForEditor(selector)
-      else:
-        # The instance exists but the container is new: a layout rebuild
-        # replaced the pane under it. `initMonacoForEditor` would decline, so
-        # the editor is carried across instead of being left detached.
-        self.reattachMonacoIfDetached(selector)
-
-      if not self.tabInfo.monacoEditor.isNil:
-        self.tryMountIsoNimEditorPanel()
-        self.editorAfterRedraw()
-
-    # Define the layout updated listener callback
-    layoutListener = proc(ev: Event) =
-      if not isoNimEditorMountedIds.hasKey(componentId):
-        doMount()
-
-    doMount()
+  editorSourceInstalled = proc(editor: EditorViewComponent) =
+    editor.resumeEditorMount()
 
 proc renderExpandedEditorDirect(self: EditorViewComponent) =
   ## Refresh a Monaco macro-expansion editor without registering a Karax
@@ -4192,7 +4148,7 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
     host = panel
 
   if self.tabInfo.monacoEditor.isNil:
-    self.initMonacoForEditor(hostId)
+    self.initMonacoForEditor(host.toJs)
 
   self.editorAfterRedraw()
 
@@ -4527,7 +4483,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
   # For IsoNim-mounted editors, run the after-redraw work directly
   # since the legacy renderer entry has been removed and redrawAll() will not
   # reach this component's afterRedraws callbacks.
-  if isoNimEditorMountedIds.hasKey(self.id):
+  if self.renderedByIsoNim:
     self.editorAfterRedraw()
 
   self.data.redraw()

@@ -1130,7 +1130,8 @@ type
     ## user workspace and agent workspace views.
     progress*: AgentProgress
     viewState*: WorkspaceViewState
-    containerId*: cstring
+    host*: JsObject
+      ## The container the progress is rendered into (`mountCaptionBarProgress`).
     animationFrame*: int
     expanded*: bool
     lastUpdateMs*: int
@@ -1190,6 +1191,9 @@ type
     ## component holds nothing.
 
   EditorViewComponent* = ref object of Component
+    renderedByIsoNim*: bool
+      ## The IsoNim editor view renders this editor (`ui/editor
+      ## .takeOverEditorRendering`); it dies with the component.
     editorView*:     EditorView
     path*:           cstring
     line*:           int
@@ -1508,7 +1512,6 @@ type
     mutationObserver*: MutationObserver
     pixelsPerSymbol*: int
     recalculate*: bool
-    scratchpadUI*: ScratchpadComponent
     selected*: bool
     selectedLine*: int
     selectedLineInGroup*: int
@@ -3028,37 +3031,15 @@ method redrawForSinglePage*(self: Component) {.base.} =
 method redraw*(self: Component) {.base.} =
   self.redrawForSinglePage()
 
-# templates for singletons
-template welcomeScreen*(data: Data): WelcomeScreenComponent =
-  WelcomeScreenComponent(data.ui.componentMapping[Content.WelcomeScreen][0])
-
 # templates for getting a component from the common mapping
-template stateComponent*(data: Data, id: int): StateComponent =
-  StateComponent(data.ui.componentMapping[Content.State][id])
-
 template buildComponent*(data: Data, id: int): BuildComponent =
   BuildComponent(data.ui.componentMapping[Content.Build][id])
 
 template errorsComponent*(data: Data, id: int): ErrorsComponent =
   ErrorsComponent(data.ui.componentMapping[Content.BuildErrors][id])
 
-template scratchpadComponent*(data: Data, id: int): ScratchpadComponent =
-  ScratchpadComponent(data.ui.componentMapping[Content.Scratchpad][id])
-
 template shellComponent*(data: Data, id: int): ShellComponent =
   ShellComponent(data.ui.componentMapping[Content.Shell][id])
-
-template traceLogComponent*(data: Data, id: int): TraceLogComponent =
-  TraceLogComponent(data.ui.componentMapping[Content.TraceLog][id])
-
-template testResultsComponent*(data: Data, id: int): TestResultsComponent =
-  TestResultsComponent(data.ui.componentMapping[Content.TestResults][id])
-
-template pointListComponent*(data: Data, id: int): PointListComponent =
-  PointListComponent(data.ui.componentMapping[Content.PointList][id])
-
-template constraintsComponent*(data: Data, id: int): ConstraintsComponent =
-  ConstraintsComponent(data.ui.componentMapping[Content.Constraints][id])
 
 
 # macro delegate*(namespace: static[string], messages: untyped): untyped =

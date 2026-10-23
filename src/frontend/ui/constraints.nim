@@ -26,6 +26,7 @@ import
 from ../viewmodel/viewmodels/constraints_vm import
   ConstraintsVM, createConstraintsVM, setReport, setAbsence, noteSourceEdited
 from isonim/web/dom_api import nil
+from ./pane_host_lookup import tabOfPaneHost
 import isonim/web/web_renderer
 import ./panel_host
 from ../viewmodel/session_vm import SessionViewModel
@@ -62,7 +63,7 @@ proc initConstraintsVM*() =
 proc constraintsVMForHost(host: dom_api.Element): ConstraintsVM =
   ## The ViewModel of the tab whose container holds `host`; a host outside
   ## every tab shows the shown tab's.
-  let tab = tabOfIsoNimPaneHost(host)
+  let tab = tabOfPaneHost(host)
   if tab >= 0 and tab < data.sessions.len:
     constraintsVMOf(data.sessions[tab])
   else:

@@ -17,7 +17,7 @@
 
 import
   strutils, os,
-  ui_imports, session_viewmodels,
+  ui_imports,
   value, scratchpad,
   ../[ renderer, communication, dap, event_helpers],
   ../lib/isonim_styles,
@@ -56,17 +56,11 @@ from ../viewmodel/views/isonim_flow_inline_view import
 from trace import getConfiguration
 
 # ---------------------------------------------------------------------------
-# The Flow PANEL (`isonim_flow_view`, mounted into `.flow-component-container`)
-# renders from a FlowVM of its own. Inline flow in the editor does not read it:
-# it is laid out from the `CtUpdatedFlow` window this component receives, whose
-# typed values the tooltips and the scratchpad need.
+# Inline flow in the editor is laid out from the `CtUpdatedFlow` window this
+# component receives, whose typed values the tooltips and the scratchpad need.
 # ---------------------------------------------------------------------------
 import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ./presented_value
-import ../viewmodel/store/replay_data_store
-from ../viewmodel/viewmodels/flow_vm import
-  FlowVM, createFlowVM
 # The renderer-neutral half of Omniscience's layout — expression columns,
 # legend columns, indentation, per-line grouping, loop iteration windowing and
 # the before/after value modes. It was extracted OUT of this file so that a
@@ -84,8 +78,6 @@ from ../viewmodel/viewmodels/flow_layout import
   stepIndexForTicks, orderIterationSteps, firstBodyStepIn,
   closestIterationStepCount, FlowLayoutLoop
 from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_flow_view import
-  mountIsoNimFlow
 
 type
   WR = WebRenderer
@@ -121,17 +113,8 @@ proc layoutMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
 
 proc appendToDocumentBody(node: dom_api.Node) {.importjs: "document.body.appendChild(#)".}
 
-# Module-level FlowVM instance. Created once and fed data whenever
-# the legacy event-bus handlers fire. Rendering still reads from legacy
-# data so behaviour is unchanged.
-var flowVMInstance: FlowVM
-var flowVMStore: ReplayDataStore
-var isoNimFlowMounted*: bool = false
-
 when defined(js):
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
-
-proc tryMountIsoNimFlowPanel()
 
 proc flowIsLive*(self: FlowComponent): bool =
   ## Whether this component is still the editor's current flow.
@@ -157,127 +140,6 @@ proc validFlowStepCount*(self: FlowComponent, stepCount: int): bool =
   ## earlier (in `flowLines[..].loopStepCounts`, in a `FlowLoop.loopStep`, in a
   ## DOM closure) has to be revalidated before it is used as an index.
   not self.flow.isNil and stepCount >= 0 and stepCount < self.flow.steps.len
-
-# ---------------------------------------------------------------------------
-# ViewModel bridge procs — sync legacy event data into the parallel store.
-# ---------------------------------------------------------------------------
-
-proc initFlowVMFromSession*(vm: FlowVM) =
-  ## Hand the pane the session's `FlowVM` — the one
-  ## `initializePanelViewModels` built on the session's store, so every
-  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
-  ##
-  ## If a stub-backed instance already exists (created before the session
-  ## was available), it is replaced so the panel uses the real backend.
-  let store = vm.store
-  if flowVMInstance != nil:
-    clog "FlowVM: replacing existing instance with shared-store version"
-    isoNimFlowMounted = false
-  flowVMStore = store
-  flowVMInstance = vm
-  clog "FlowVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimFlowPanel()
-
-proc initFlowVM() =
-  ## Lazily create the parallel FlowVM backed by a stub
-  ## BackendService.  Fallback when no shared store has been provided
-  ## via `initFlowVMFromSession`.
-  if flowVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  flowVMStore = createReplayDataStore(stubBackend)
-  flowVMInstance = createFlowVM(flowVMStore)
-  clog "FlowVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimFlowPanel()
-
-proc ownPaneStore(self: FlowComponent): ReplayDataStore =
-  ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
-  let vm = ownPaneVM(self, flowVMInstance, flowVM)
-  if vm.isNil: nil else: vm.store
-
-proc syncFlowDebuggerPosition(store: ReplayDataStore;
-                              rrTicks: int, path: cstring, line: int;
-                              sourceGeneration: int = 0;
-                              sourceDigest: cstring = cstring"") =
-  ## Mirror the legacy debugger position into the ViewModel store so
-  ## the FlowVM's auto-load effect fires with the updated rrTicks.
-  ##
-  ## `store` is the store of the tab whose component received the move —
-  ## that tab's, shown or not (`ownPaneStore`), never the shown tab's for
-  ## another tab's move.
-  if store.isNil:
-    return
-  let ticks = cast[uint64](rrTicks)
-  store.updateDebuggerPosition(
-    ticks, $path, line,
-    sourceGeneration = sourceGeneration,
-    sourceDigest = $sourceDigest)
-  clog fmt"FlowVM: synced debugger rrTicks={ticks}"
-
-proc jsQuerySelector(selector: cstring): dom_api.Element
-  {.importcpp: "document.querySelector(#)".}
-  ## Thin wrapper around `document.querySelector` for cases where
-  ## the isonim dom_api does not expose this method.
-
-type
-  FlowMountData = ref object
-    retryCount: int
-
-proc doMountFlowPanel(data: FlowMountData) {.cdecl.} =
-  if isoNimFlowMounted:
-    return
-  data.retryCount += 1
-  let container = jsQuerySelector(cstring".flow-component-container")
-  if dom_api.isNodeNil(dom_api.Node(container)):
-    if data.retryCount > 100:
-      clog "IsoNim flow panel: container not found after 100 retries, giving up"
-      return
-    setTimeoutWithArg(doMountFlowPanel, 0, data)
-    return
-
-  let containerNode = dom_api.Node(container)
-  while not dom_api.isNodeNil(containerNode.firstChild):
-    discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-  isoNimFlowMounted = true
-  mountIsoNimFlow(dom_api.Element(containerNode), flowVMInstance)
-  clog "IsoNim flow panel: mounted as primary renderer in .flow-component-container"
-
-proc tryMountIsoNimFlowPanel() =
-  ## Mount the IsoNim flow panel view into the first
-  ## `.flow-component-container` element in the DOM. The IsoNim view
-  ## replaces existing Karax content and becomes the primary renderer,
-  ## creating the container structure that the Monaco view zone
-  ## integration code and noUiSlider attach to.
-  ##
-  ## After mounting:
-  ## - `isoNimFlowMounted` is set to true
-  ## - The Karax render() returns a minimal stub
-  ## - The existing DOM manipulation code (createFlowViewZone,
-  ##   makeSlider, addStepValues, etc.) continues to work on
-  ##   the IsoNim-created containers
-  ##
-  ## Safe to call multiple times — mounts only once.
-  if isoNimFlowMounted or flowVMInstance.isNil:
-    return
-
-  let mountData = FlowMountData(retryCount: 0)
-  doMountFlowPanel(mountData)
 
 # thank, God!
 proc resizeLineSlider(self: FlowComponent, position: int)
@@ -349,21 +211,10 @@ proc getFlowValueMode(self: FlowComponent, beforeValue: Value, afterValue: Value
 method register*(self: FlowComponent, api: MediatorWithSubscribers) =
   self.api = api
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    # Feed the same position into the parallel ViewModel store.
-    initFlowVM()
-    syncFlowDebuggerPosition(self.ownPaneStore(),
-      response.location.rrTicks,
-      response.location.path,
-      response.location.line,
-      response.location.sourceGeneration,
-      response.location.sourceDigest)
-
+    # The session's store is moved by `ui_js`; the session's FlowVM asks for
+    # the flow at the new position, and the answer arrives here as
+    # `CtUpdatedFlow`.
     self.location = response.location
-    # The legacy CtLoadFlow emit has been removed.  The
-    # syncFlowDebuggerPosition call above updates the store's debugger
-    # signal which triggers the FlowVM's auto-load effect.  That effect
-    # sends the ct/load-flow command through the real backend, and the
-    # response arrives via the existing CtUpdatedFlow subscription.
     self.redraw()
   )
   api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
@@ -372,9 +223,6 @@ method register*(self: FlowComponent, api: MediatorWithSubscribers) =
     discard self.onUpdatedFlow(response)
   )
 
-# FlowComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths. All
-# real rendering is handled by tryMountIsoNimFlowPanel().
 
 
 
@@ -744,42 +592,23 @@ proc removeExpandedFlow(self: FlowComponent, line: int) =
   if self.multilineZones.hasKey(line):
     removeMonacoViewZone(self.editorUI.monacoEditor, self.multilineZones[line].zoneID)
 
-proc registerScratchpadValue(self: ScratchpadComponent, expression: cstring, value: Value) =
-  self.programValues.add((expression, value))
-  self.values.add(ValueComponent(
-    expanded: JsAssoc[cstring, bool]{},
-    charts: JsAssoc[cstring, ChartComponent]{},
-    showInline: JsAssoc[cstring, bool]{},
-    baseExpression: expression,
-    baseValue: value,
-    nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-    valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-    stateID: -1,
-    data: self.data))
-
 proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool) =
-  if not self.flow.isNil and stepCount in self.flow.steps.low .. self.flow.steps.high:
-    let step = self.flow.steps[stepCount]
-    if not self.scratchpadUI.isNil:
-      if before:
-        if name == cstring"":
-          for valueName, value in step.beforeValues:
-            self.scratchpadUI.registerScratchpadValue(valueName, value)
-        else:
-          if step.beforeValues.hasKey(name):
-            self.scratchpadUI.registerScratchpadValue(name, step.beforeValues[name])
-
-        self.redraw()
-
-      else:
-        if name == cstring"":
-          for valueName, value in step.afterValues:
-            self.scratchpadUI.registerScratchpadValue(valueName, value)
-        else:
-          if step.afterValues.hasKey(name):
-            self.scratchpadUI.registerScratchpadValue(name, step.afterValues[name])
-
-        self.redraw()
+  ## Pin the step's values (all of them when `name` is empty) to the
+  ## scratchpad, through the same route every other "add to scratchpad" of the
+  ## flow and the editor takes (`openValueInScratchpad`, which the session's
+  ## Scratchpad ViewModel answers).
+  if self.flow.isNil or stepCount notin self.flow.steps.low .. self.flow.steps.high:
+    return
+  let step = self.flow.steps[stepCount]
+  let values = if before: step.beforeValues else: step.afterValues
+  if name == cstring"":
+    for valueName, value in values:
+      self.api.openValueInScratchpad(
+        ValueWithExpression(expression: valueName, value: value))
+  elif values.hasKey(name):
+    self.api.openValueInScratchpad(
+      ValueWithExpression(expression: name, value: values[name]))
+  self.redraw()
 
 proc displayTooltip(
     self: FlowComponent,

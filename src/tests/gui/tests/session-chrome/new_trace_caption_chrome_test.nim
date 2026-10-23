@@ -599,7 +599,7 @@ else:
       let welcomeIndex =
         indexOfRequired(body, "if data.startOptions.welcomeScreen and data.trace.isNil:")
       let mountIndex =
-        indexOfRequired(body, "welcome_screen.tryMountIsoNimWelcomeScreen()")
+        indexOfRequired(body, "welcome_screen.mountWelcomeScreen()")
 
       check sharedIndex < welcomeIndex
       check welcomeIndex < mountIndex

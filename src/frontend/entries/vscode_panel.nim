@@ -66,7 +66,7 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
     renderScratchpadPanel[WebRenderer, dom_api.Element](r, s.scratchpadVM)
   of "traceLog":
     renderTraceLogPanel[WebRenderer, dom_api.Element](r, s.traceLogVM)
-  of "flow": renderFlowPanel(r, s.flowVM)
+  of "flow": renderFlowPanel[WebRenderer, dom_api.Element](r, s.flowVM)
   of "pointList":
     renderPointListPanel[WebRenderer, dom_api.Element](r, s.pointListVM)
   of "fileTree":

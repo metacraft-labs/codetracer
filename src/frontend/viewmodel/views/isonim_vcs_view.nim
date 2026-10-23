@@ -913,7 +913,10 @@ proc renderCommitGraph[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
   # targets calls onLoadMoreCommits when this div scrolls into view.
   let bottomArea = ui(r):
     tdiv(ref = sentinel, class = "vcs-load-more-sentinel"):
-      if vm.loadingMore.val:
+      # Shown while the next page is being fetched; an attribute, so it
+      # follows `loadingMore` without rebuilding the list.
+      span(class = "vcs-load-more-label",
+           display = (if vm.loadingMore.val: "inline" else: "none")):
         text "Loading\xe2\x80\xa6"  # "Loading…" — ellipsis U+2026
 
   r.appendRenderedChild(list, bottomArea)

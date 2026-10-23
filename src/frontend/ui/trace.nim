@@ -1,5 +1,5 @@
 import
-  ui_imports, value, datatable, isonim_panel_mount, session_viewmodels,
+  ui_imports, value, datatable, session_viewmodels,
   ../[ types, lang, utils, renderer, communication, dap, event_helpers ],
   ../lib/isonim_styles,
   ../../common/ct_event

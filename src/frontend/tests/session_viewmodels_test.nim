@@ -83,7 +83,7 @@ from ../ui/tab_answer_routing import deliverTabAnswer, deliverPendingTabAnswers
 from ../index/tab_answers import askingTab, answerFor, withTab
 import ../ui/state
 import ../ui/test_results
-from ../ui/isonim_panel_mount import tabOfIsoNimPaneHost
+from ../ui/pane_host_lookup import tabOfPaneHost
 import ../viewmodel/session_vm
 import ../viewmodel/sdk/debugger_session
 from ../viewmodel/viewmodels/test_results_vm import TestResultsVM, setRunAbsence
@@ -179,7 +179,7 @@ let overlayHost = block:
 
 # The resolver `ui_js.configureWindowMiddleware` installs.
 setPanelSessionResolver(proc(host: isonim_dom.Element): SessionViewModel =
-  data.sessionVMOfTab(tabOfIsoNimPaneHost(host)))
+  data.sessionVMOfTab(tabOfPaneHost(host)))
 
 scenario "each tab owns a distinct ViewModel set over its own DAP API":
   ck not vm0.isNil and not vm1.isNil
