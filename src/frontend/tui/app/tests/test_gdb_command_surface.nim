@@ -160,7 +160,12 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 107
+  ExpectedAppModules = 109
+    ## 2026-10-23: 107 → 109, re-counting `6ef051354` (HSF-E1, --pane-server),
+    ## which added two files here without re-counting: `pane_protocol.nim`
+    ## (the pane server's protocol as values; its transport is
+    ## `host/pane_server.nim`, outside this walk) and its pure suite
+    ## `tests/test_pane_protocol.nim`.
     ## 2026-10-15 (PLAT-57): 106 → 107. `views/search_results_pane.nim`, the
     ## Find in Files pane's painter and hit-test.
     ## 2026-10-12 (PLAT-68 Phase B review): 105 → 106. `tests/editor_ownership.nim`
@@ -274,7 +279,13 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 267
+  ExpectedStyleLiterals = 270
+    ## 2026-10-23: 267 → 270, measured, re-counting `6ef051354` (HSF-E1). The
+    ## three are FIXTURES, not paint: `tests/test_pane_protocol.nim` builds
+    ## one row of three spans (`srChromeMuted`, `srValueModified` and the
+    ## default style) to assert that span offsets are UTF-8 bytes and that a
+    ## span carries its semantic role. They are roles already, so there is no
+    ## colour for the theme registry to supply.
     ## 2026-10-16 (PLAT-70 Part A): 266 → 267, measured. The `‹` / `›`
     ## overflow markers' style (`views/scrubber_track.OverflowMarkerStyle`,
     ## the muted chrome role).
@@ -379,7 +390,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 35
+  ExpectedStyledFiles = 36
+    ## 2026-10-23: +1, `tests/test_pane_protocol.nim` (see above).
     ## 2026-10-15 (PLAT-57): +1, `views/search_results_pane.nim`.
     ## 2026-10-08 (PLAT-51 part B): +1, `views/welcome_view.nim`.
     ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
