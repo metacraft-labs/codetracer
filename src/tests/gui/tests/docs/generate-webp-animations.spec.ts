@@ -195,7 +195,7 @@ test.describe("generate faithful webp animations", () => {
       await eventLogTab.click();
       await ctPage.waitForTimeout(1000);
 
-      const scrollBody = ctPage.locator(".dt-scroll-body");
+      const scrollBody = ctPage.locator(".eventLog-scroll-body");
       await scrollBody.evaluate(el => el.scrollTo({ top: 1000, behavior: 'smooth' }));
       await ctPage.waitForTimeout(2000);
       await scrollBody.evaluate(el => el.scrollTo({ top: 0, behavior: 'smooth' }));

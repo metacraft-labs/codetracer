@@ -401,6 +401,12 @@ when defined(js):
 
   const FallbackLineHeightPx = 18.0
     ## A line's height before one is drawn to measure.
+  const
+    LinesAboveProperty = cstring"--ct-terminal-lines-above"
+      ## The height of the lines above the held window (`terminal.styl`
+      ## draws it as the line view's `::before`).
+    LinesBelowProperty = cstring"--ct-terminal-lines-below"
+      ## The height of the lines below it (the `::after`).
 
   proc decorateTerminalOutput*(panel: isonim_dom.Element;
                                vm: TerminalOutputVM) =
@@ -427,21 +433,28 @@ when defined(js):
       current = proc(): int = vm.currentLine(),
       rowHeight = lineHeight,
       paneId = "terminalOutput")
-    # The held window sits at its own place in the output: the `pre` is
-    # padded by the lines above and below it, so its scroll range is every
-    # line's.
+    # The held window sits at its own place in the output: the `pre` holds
+    # SPACERS as tall as the lines above and below it, so its scroll range
+    # is every line's. They are its `::before` / `::after` (`terminal.styl`),
+    # sized by two custom properties — not padding: a box is never shorter
+    # than its padding, so a padded `pre` grew past the panel whenever the
+    # lines it did not hold were taller than the pane, the panel's flex
+    # could not shrink it, and the press at the scrubber's end landed below
+    # the window (measured: the `pre` alternating between 613 and 1992 px in
+    # a 629 px panel as the window refilled). Content is what a scroll range
+    # is made of; a spacer is content, and the flex shrinks the box around it.
     createEffect proc() =
       let held = vm.lines.val.len
       let start = vm.linesStart.val
       let total = vm.lineCount()
       let h = lineHeight()
       if vm.windowed:
-        setStyles(pre, "padding-top", cstring($(float(start) * h) & "px"))
-        setStyles(pre, "padding-bottom",
+        setStyles(pre, LinesAboveProperty, cstring($(float(start) * h) & "px"))
+        setStyles(pre, LinesBelowProperty,
                   cstring($(float(max(0, total - start - held)) * h) & "px"))
       else:
-        setStyles(pre, "padding-top", "")
-        setStyles(pre, "padding-bottom", "")
+        setStyles(pre, LinesAboveProperty, "0px")
+        setStyles(pre, LinesBelowProperty, "0px")
     # PLAT-70 (Horizontal-Overflow.md §4): the line view's overflow-only
     # horizontal bar, under the lines, the corner left to neither track.
     discard attachHorizontalScrubber(pre, p, paneId = "terminalOutput",

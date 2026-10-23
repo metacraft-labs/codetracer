@@ -181,7 +181,18 @@ when defined(js):
     ## scroll handling turns into a window fetch.
     countJump()
     if s.jumpTo.isNil:
-      s.container.setScrollTop(float(firstRow) * max(1.0, s.rowHeight()))
+      # THE END IS THE END of the scroll range, not `firstRow` rows down. A
+      # view that is not a whole number of rows tall counts as the ROUNDED
+      # number of rows (see `model`), so `maxFirstVisible * rowH` can stop a
+      # fraction of a row short of the range's end, the last row cut off
+      # (measured on the Terminal Output: 613 px over 24 px rows counted as
+      # 26, a press at the track's end stopped 11 px short, the output's
+      # last line under the pane's bottom edge). Asked for the range's end,
+      # the container clamps to exactly the offset that shows the last row.
+      if firstRow > 0 and firstRow >= s.model().maxFirstVisible:
+        s.container.setScrollTop(s.container.scrollHeightOf())
+      else:
+        s.container.setScrollTop(float(firstRow) * max(1.0, s.rowHeight()))
     else:
       s.jumpTo(firstRow)
     s.refresh()

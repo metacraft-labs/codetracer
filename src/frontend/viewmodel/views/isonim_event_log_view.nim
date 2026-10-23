@@ -24,7 +24,7 @@
 ## field, the expander of a multi-line event and the scrollbar scrubber — is
 ## decoration added under `when N is isonim_dom.Element`.
 
-import std/[options, strutils]
+import std/[math, options, strutils]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -405,7 +405,14 @@ when defined(js):
       current = proc(): int = vm.store.eventLog.currentIndex.val,
       rowHeight = rowPx,
       paneId = "eventLog",
-      firstVisible = proc(): int = int(scrollTopOf(scrollBody) / rowPx()),
+      # ROUNDED, as the shared scrubber's own default is: a jump to row `k`
+      # asks for the offset `k * rowPx()`, which the scroll body can clamp a
+      # few pixels short when the list's height is not a whole number of
+      # rows (measured on a 70-event log: a press at the track's end asked
+      # for row 50, the body stopped at 1337 px over 26.8 px rows, 49.9 rows,
+      # with the last event in view; the floor read row 49 and reported the
+      # last event as out of view).
+      firstVisible = proc(): int = int(round(scrollTopOf(scrollBody) / rowPx())),
       visibleRows = visible,
       jumpTo = proc(row: int) =
         scrollBody.setScrollTop(float(max(0, row)) * rowPx()))

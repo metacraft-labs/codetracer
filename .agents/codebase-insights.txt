@@ -7416,3 +7416,22 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   (the renderer runs old CSS/JS around new `ui.js`). Run `just build-once`
   first; under CI load set `CODETRACER_PERF_LIMIT_SCALE` for capture runs
   only (never for a lane that gates performance).
+- Windowed desktop list views (Terminal Output's line view): never size the
+  rows a window does not hold with PADDING on the scroll container. A box
+  cannot be shorter than its padding, so a flex item padded taller than its
+  panel overflows the panel and its scroll range breaks (the `pre` grew to
+  2000 px in a 629 px panel). Spacers must be content: the line view uses
+  `pre::before` / `::after` sized by `--ct-terminal-lines-above/-below`
+  (`terminal.styl`). A blank `.terminal-line` (a flex row with no fragments)
+  collapsed to 0 px until it got `min-height: 1lh`; any row model that
+  assumes uniform row heights breaks on a zero-height row.
+- The shared desktop list scrubber (`views/list_scrubber_dom.nim`) counts a
+  view as ROUND(clientHeight / rowH) rows, so `maxFirstVisible * rowH` can
+  stop short of the scroll range's end; `moveViewTo` scrolls to the range's
+  end instead when asked for the last page. Views that pass their own
+  `firstVisible` must round too (the Event Log's floor read row 49 at the end).
+- Monaco resolves a press on its scrollbars to a POSITION now (target type
+  11); a press with no position is one on an overlay widget (type 12), e.g.
+  its find widget (Ctrl+F in the editor). Content widgets are type 9, but the
+  desktop editor has none on screen in the calc capture (the flow's value
+  boxes are outside Monaco's mouse handling).
