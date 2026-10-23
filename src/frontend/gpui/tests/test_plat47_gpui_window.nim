@@ -34,6 +34,10 @@ from gpui/window_geometry import TabStripPx, FooterPx, GpuiEditorRowPx,
   # row pitch and its horizontal scrollbar's band
 from headless_app/golden_layout_hit import GlSideAreaPx
   # GoldenLayout's ground band, where a drop splits the whole layout
+from gpui/app/leaves import EditorScrollbarThumbColour, EditorVScrollbarPx
+  # the editor's scrollbar thumb (Monaco's `scrollbarSlider.background`, a
+  # quoted reference value, not a constant of this window's choosing) and
+  # its vertical scrubber's width (Monaco's `verticalScrollbarSize`)
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -45,7 +49,7 @@ const
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
   Desktop50 = "src/tests/visual/answers/plat50-desktop.electron.json"
     ## The desktop's tab strip colours (PLAT-50's capture).
-  ExpectedAssertions = 125
+  ExpectedAssertions = 130
     ## 104 -> 125 (the Electron-parity redesign, 2026-10-17, re-captured and
     ## measured): three more frames settled (counted per frame); the outline
     ## absent before the first press and drawn on the editor's own box; the
@@ -56,6 +60,11 @@ const
     ## commit read from the dropped pane's own outline; the dock by the pin,
     ## to the footer, its label in the reveal's reach.
     ## PLAT-50: +1, the docked reveal is read by the span of its change.
+    ## 125 -> 130 (2026-10-23, Scrollbar-Scrubbers.md §4.1): B1's band end
+    ## reads both halves against the vertical scrubber — the measured row is
+    ## a band row, the scrubber lies along the editor's right edge, the end,
+    ## the run past it, its colour, and that colour told from the thumb over
+    ## the ground (one end check became six).
   GhostBoxPx = 160 * 32
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
@@ -166,8 +175,64 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     ck b["startX"].getInt > b["activeNumberMaxX"].getInt
     ck b["gutterAtBandRow"].getStr == desk["editor"]["background"].getStr
     # …and runs to the code column's right edge: the editor's, which fills
-    # its pane to the edge (`EditorPadSidePx`).
-    ck b["endX"].getInt == b["bodyRight"].getInt - EditorPadSidePx
+    # its pane to the edge (`EditorPadSidePx`) — UNDER the vertical scrubber
+    # (M73), which is an overlay there as Monaco's is and takes no width
+    # from the code column (Scrollbar-Scrubbers.md §4.1). Where the scrubber
+    # is shown and its thumb covers the measured row, the thumb is
+    # composited over the band: the band's own colour ends at the scrubber's
+    # left edge and every pixel from there to the right edge is the thumb
+    # over the BAND. A band that stopped at the scrubber would read the
+    # thumb over the editor's GROUND there instead; one that stopped short
+    # of it, the ground. Everywhere else the band shows to the edge.
+    let y = b["row"].getInt
+    ck y >= rows[0] and y <= rows[1]
+    let vbar = b["vscrollbar"]
+    let thumbOver =
+      vbar.kind == JObject and vbar["shown"].getBool and
+      arr(vbar["thumb"])[1] <= y and
+      y < arr(vbar["thumb"])[1] + arr(vbar["thumb"])[3]
+    checkpoint("thumb over the measured row: " & $thumbOver)
+    # The scrubber's left edge is the WINDOW's stated geometry, and that
+    # geometry is held to the spec rather than trusted: a scrubber
+    # `EditorVScrollbarPx` wide whose right edge is the editor's own (the
+    # box its focus outline closes), not one inset from it.
+    let ring = arr(rec["focusRing"]["bbox"])
+    let barRect = if thumbOver: arr(vbar["rect"]) else: @[0, 0, 0, 0]
+    ck (not thumbOver) or
+       (barRect[2] == EditorVScrollbarPx and
+        barRect[0] + barRect[2] == ring[0] + ring[2])
+    let scrubLeft = barRect[0]
+    ck b["endX"].getInt ==
+         (if thumbOver: scrubLeft - 1
+          else: b["bodyRight"].getInt - EditorPadSidePx)
+    let run = b["afterBandRun"].getElems.mapIt(it.getStr)
+    ck run.len == (if thumbOver: b["bodyRight"].getInt - scrubLeft + 1 else: 0)
+    # The thumb's colour composited over a ground, channel by channel, as
+    # the renderer blends a `#rrggbbaa` fill (source-over): the band's, and
+    # for contrast the editor ground's. Both grounds are the DESKTOP's
+    # measured colours.
+    proc rgb(h: string): array[3, int] =
+      [parseHexInt(h[1 .. 2]), parseHexInt(h[3 .. 4]), parseHexInt(h[5 .. 6])]
+    proc over(ground: string): array[3, float] =
+      let t = rgb(EditorScrollbarThumbColour)
+      let a = float(parseHexInt(EditorScrollbarThumbColour[7 .. 8])) / 255.0
+      let g = rgb(ground)
+      for k in 0 .. 2: result[k] = float(g[k]) + (float(t[k]) - float(g[k])) * a
+    let overBand = over(desk["editor"]["executionLine"].getStr)
+    let overGround = over(desk["editor"]["background"].getStr)
+    checkpoint("thumb over band " & $overBand & ", over ground " & $overGround)
+    var offColour: seq[string]
+    for h in run:
+      let c = rgb(h)
+      for k in 0 .. 2:
+        if abs(float(c[k]) - overBand[k]) > 1.0:
+          offColour.add h
+          break
+    checkpoint("pixels past the band not the thumb over the band: " & $offColour)
+    ck offColour.len == 0
+    # And the two composites are told apart at that tolerance, so the run's
+    # colour does say which of the two the thumb lies over.
+    ck (0 .. 2).toSeq.anyIt(abs(overBand[it] - overGround[it]) > 2.0)
 
   test "deliverable 5: a divider dragged 80 px moves the pane edge 80 px, live and committed":
     let r = rec["resize"]

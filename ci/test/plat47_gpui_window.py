@@ -719,8 +719,34 @@ def record():
         if n > body[2] // 3:
             rows.append(y)
     out["band"] = {"rows": [rows[0], rows[-1]] if rows else None}
+    # The editor's vertical scrubber (M73), as the WINDOW says it placed it
+    # (`main.editorVScrollbarGeometry`) — an aim, like every geometry read
+    # here: what is under it is read from the pixels below. Since
+    # Scrollbar-Scrubbers.md §4.1 the scrubber is an overlay: the band runs
+    # under it to the editor's right edge, and a shown thumb is composited
+    # over the band, so the band's own colour ends at the scrubber's left
+    # edge on a row the thumb covers.
+    vbar = ga0.get("editorVScrollbar")
     if rows:
-        y = (rows[0] + rows[-1]) // 2
+        # The row the band's extent is read on: the band's middle, unless the
+        # window says the scrubber's current-position mark (§3.5) or a
+        # rounded end of its thumb lies on that row — those pixels are
+        # neither the band nor the thumb over it — then the band row nearest
+        # the middle that is clear of both. Chosen from the geometry alone,
+        # never from what the pixels there are.
+        def clear(yy):
+            if not vbar:
+                return True
+            mark = vbar["mark"]
+            if mark and mark[1] <= yy < mark[1] + mark[3]:
+                return False
+            t, r = vbar["thumb"], vbar["thumbRadius"]
+            on_thumb = t[1] <= yy < t[1] + t[3]
+            straight = t[1] + r <= yy < t[1] + t[3] - r
+            return straight or not on_thumb
+        mid = (rows[0] + rows[-1]) // 2
+        y = min((yy for yy in range(rows[0], rows[-1] + 1) if clear(yy)),
+                key=lambda yy: abs(yy - mid), default=mid)
         xs = [x for x in range(body[0], body[0] + body[2]) if px(base, x, y) == band]
         # The active line's number, in the editor's gutter (`leaves
         # .EditorGutterPx`, 110 px — Monaco's line-number lanes): the code on
@@ -739,6 +765,16 @@ def record():
                 px(base, x, y) for x in range(body[0], xs[0])).most_common(1)[0][0],
             "afterBandAtRow": "#%02x%02x%02x" % px(base, xs[-1] + 1, y),
             "bodyLeft": body[0], "bodyRight": body[0] + body[2] - 1,
+            "row": y,
+            # The scrubber as the window placed it, for the test to derive
+            # where the band's own colour must end (null: the file fits).
+            "vscrollbar": vbar,
+            # Every pixel of the measured row from the band's last pixel on
+            # to the body's right edge: a band that runs under the scrubber
+            # reads the thumb over the band there, one that stopped at it
+            # reads the thumb over the editor's ground.
+            "afterBandRun": ["#%02x%02x%02x" % px(base, x, y)
+                             for x in range(xs[-1] + 1, body[0] + body[2])],
         })
 
     # Tabs: the SAME label drawn active and inactive — the Files stack's
