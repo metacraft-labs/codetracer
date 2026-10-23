@@ -17,7 +17,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use jsbound::record::hex;
-use jsbound::{decode_log, encode_log, DecodeErrorKind, Record, Termination, RECORD_KINDS};
+use jsbound::{
+    decode_log, encode_batch, encode_log, parse_batch, DecodeErrorKind, Record, Termination,
+    RECORD_KINDS,
+};
 
 fn vectors_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vectors")
@@ -407,4 +410,77 @@ fn frames_are_encoded_exactly_as_the_spec_lays_them_out() {
             0, 0, 0, 4, 3, 0, 0, 0, 0, 0, 0, 1
         ]
     );
+}
+
+/// The shared batch vectors (`batches.json`), as committed: every valid
+/// batch parses to its expected envelope and records and, when canonical,
+/// `encode_batch` gives its bytes back; every refusal is refused with the
+/// named error. codetracer-js-recorder's `parseBatch` and `encodeBatch` are
+/// held to the same files.
+///
+/// Vacuity guard: at least four valid vectors, one of them non-canonical,
+/// and every `BatchError` name is reached by some refusal.
+#[test]
+fn test_jsbound_batch_vectors() {
+    let dir = vectors_dir();
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(dir.join("batches.json")).expect("vectors/batches.json"))
+            .unwrap();
+    let entries = manifest["vectors"].as_array().expect("batches.vectors");
+    let (mut valid, mut non_canonical) = (0, 0);
+    let mut errors = BTreeSet::new();
+    for e in entries {
+        let name = e["name"].as_str().unwrap();
+        let bytes = fs::read(dir.join(e["bytes"].as_str().unwrap())).unwrap();
+        let want: Value =
+            serde_json::from_slice(&fs::read(dir.join(e["expected"].as_str().unwrap())).unwrap())
+                .unwrap();
+        match (e["class"].as_str().unwrap(), parse_batch(&bytes)) {
+            ("valid", Ok(got)) => {
+                valid += 1;
+                assert_eq!(
+                    serde_json::to_value(&got.envelope).unwrap(),
+                    want["envelope"],
+                    "{name}: envelope"
+                );
+                let records: Vec<Record> = got.records.into_iter().map(|(_, r)| r).collect();
+                assert_eq!(
+                    Value::from(records.iter().map(Record::to_json).collect::<Vec<_>>()),
+                    want["records"],
+                    "{name}: records"
+                );
+                let canonical = want["canonical"].as_bool().expect("canonical");
+                assert_eq!(
+                    encode_batch(&got.envelope, &records) == bytes,
+                    canonical,
+                    "{name}: encode_batch gives the bytes back iff canonical"
+                );
+                if !canonical {
+                    non_canonical += 1;
+                }
+            }
+            ("valid", Err(err)) => panic!("{name}: refused: {err}"),
+            ("refusal", Ok(_)) => panic!("{name}: parses, expected {}", want["error"]),
+            ("refusal", Err(err)) => {
+                assert_eq!(err.name(), want["error"].as_str().unwrap(), "{name}: {err}");
+                errors.insert(err.name());
+            }
+            (class, _) => panic!("{name}: unknown class {class}"),
+        }
+    }
+    assert!(valid >= 4, "only {valid} valid batch vector(s)");
+    assert!(non_canonical >= 1, "no non-canonical batch vector");
+    for name in [
+        "BadMagic",
+        "UnsupportedVersion",
+        "EnvelopeTooLarge",
+        "Truncated",
+        "BadEnvelope",
+        "Frame",
+    ] {
+        assert!(
+            errors.contains(name),
+            "no batch vector is refused with {name}"
+        );
+    }
 }

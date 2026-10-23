@@ -22,6 +22,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for v in jsbound::vectors::catalogue() {
         jsbound::vectors::check(&v, &v.bytes).map_err(|e| format!("vector {}: {e}", v.name))?;
     }
+    for v in jsbound::vectors::batch_catalogue() {
+        jsbound::vectors::check_batch(&v, &v.bytes)
+            .map_err(|e| format!("batch vector {}: {e}", v.name))?;
+    }
     let files = jsbound::vectors::render();
     fs::create_dir_all(&dir)?;
     for entry in fs::read_dir(&dir)? {
