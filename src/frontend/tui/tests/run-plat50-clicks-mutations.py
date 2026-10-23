@@ -135,7 +135,7 @@ WINCLICKS = "src/frontend/gpui/window_clicks.nim"
 GPUIMAIN = "src/frontend/gpui/main.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
 DESKEDITOR = "src/frontend/ui/editor.nim"
-DESKEVENTLOG = "src/frontend/ui/event_log.nim"
+DESKEVLOGVIEW = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
 EVENTLOGVM = "src/frontend/viewmodel/viewmodels/event_log_vm.nim"
 CALLTRACEVM = "src/frontend/viewmodel/viewmodels/calltrace_vm.nim"
 VCSDETAILS = "src/frontend/viewmodel/host/native_vcs_details.nim"
@@ -187,7 +187,7 @@ SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
             MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
             FILETREE, POINTLIST, BORDERS, CLI, TUIAPP, TUIMAIN, CHROME,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
-            DESKEVENTLOG, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
+            DESKEVLOGVIEW, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
             EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP,
             SDKBP, SESSDRIVER]
 SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, IGT, ENGT, SHIMT,
@@ -664,9 +664,13 @@ ARMS = [
         "    result.add CallSegment(kind: csArgValue, text: a.value, arg: i + 1)\n",
         "    result.add CallSegment(kind: csArgValue, text: a.value, arg: i)\n",
         K_SCRATCH, "an argument's value belongs to the argument before it"),
-    Arm("DL1", DESKEVENTLOG,
-        '        let direction = if again and ascending: cstring"desc" else: cstring"asc"\n',
-        '        let direction = cstring"asc"\n',
+    # RE-AIMED 2026-10-23: the desktop Event Log is one view over its
+    # ViewModel (`1c18341dd`); the DataTables header handler DL1 mutated is
+    # gone, and the desktop's header click is the view's `onHeaderClick`.
+    # The shared reversal rule itself is EV1's.
+    Arm("DL1", DESKEVLOGVIEW,
+        "  result = proc() = vm.sortBy(vm.order().clickedHeader(col))\n",
+        "  result = proc() = vm.sortBy(EventLogOrder(column: col, ascending: true))\n",
         D_DESKTOP, "the desktop's second header click does not reverse the order"),
     Arm("HS5", SDKBP,
         "  result.add BreakpointSpec(line: line, column: max(0, column),\n",
