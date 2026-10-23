@@ -46,7 +46,7 @@
 ## Lane: `main-process` — `nim js -d:nodejs -d:ctIndex -d:server`, run under
 ## node.
 
-import std/[jsffi, strutils]
+import std/[asyncjs, jsffi, strutils]
 
 import ../viewmodel/platform/outcome
 import ../viewmodel/platform/vcs
@@ -113,11 +113,25 @@ proc lockLeft(repo: string): bool =
 
 let facade = electronVcs(electronDesktopProfile(false))
 
+proc settled[T](future: PlatformFuture[PlatformOutcome[T]]): Future[PlatformOutcome[T]] =
+  ## `future`'s outcome, whenever it arrives. `status` settles on a later
+  ## turn of the event loop — it runs git through `child_process.spawn`, so
+  ## the pane's auto-refresh never stalls the window (VCS-Panel.md, "An
+  ## auto-refresh never stalls the window") — and `awaitSync` would read it
+  ## as a timeout; `diff` still settles at once. This waits for either,
+  ## draining nim-everywhere's queue for the one that is already settled.
+  result = newPromise(proc(resolve: proc(value: PlatformOutcome[T])) =
+    future.onComplete(
+      proc(value: PlatformOutcome[T]) = resolve(value),
+      proc(message: string) =
+        resolve(failed[T](pkTransport, "the future rejected", message)))
+    drainPlatformCallbacks())
+
 proc leavesTheIndexAlone(label: string;
-                         read: proc(repo: string): bool) =
+                         read: proc(repo: string): Future[bool]): Future[void] {.async.} =
   let repo = staleStatRepository(label.replace(' ', '-'))
   let before = indexInode(repo)
-  ck read(repo), label & ": the read answers"
+  ck await read(repo), label & ": the read answers"
   ck indexInode(repo) == before, label & ": the index was not rewritten"
   ck not lockLeft(repo), label & ": no index.lock is left"
   # The control: a plain git in the same repository does rewrite it.
@@ -125,33 +139,37 @@ proc leavesTheIndexAlone(label: string;
   ck indexInode(repo) != before,
      label & ": control — a plain `git status` does rewrite this index"
 
-proc runCases() =
+proc runCases() {.async.} =
   echo "[Suite] the Electron instantiation's VCS reads take no index lock"
 
-  leavesTheIndexAlone("status") do (repo: string) -> bool:
-    let res = awaitSync(facade.status(repo))
-    res.ok and res.value.branch == "main" and res.value.changes.len == 0
+  await leavesTheIndexAlone("status", proc(repo: string): Future[bool] {.async.} =
+    let res = await settled(facade.status(repo))
+    return res.ok and res.value.branch == "main" and res.value.changes.len == 0)
 
-  leavesTheIndexAlone("working tree diff") do (repo: string) -> bool:
-    let res = awaitSync(facade.diff(repo, @[], false, 3))
-    res.ok and res.value.len == 0
+  await leavesTheIndexAlone("working tree diff", proc(repo: string): Future[bool] {.async.} =
+    let res = await settled(facade.diff(repo, @[], false, 3))
+    return res.ok and res.value.len == 0)
 
-  leavesTheIndexAlone("working tree diff of one path") do (repo: string) -> bool:
-    let res = awaitSync(facade.diff(repo, @["tracked.txt"], false, 3))
-    res.ok and res.value.len == 0
+  await leavesTheIndexAlone("working tree diff of one path",
+    proc(repo: string): Future[bool] {.async.} =
+      let res = await settled(facade.diff(repo, @["tracked.txt"], false, 3))
+      return res.ok and res.value.len == 0)
 
 const ExpectedChecks = 12
 
-try:
-  runCases()
-except:
-  inc failedChecks
-  echo "  [FAILED] the suite itself raised: ", getCurrentExceptionMsg()
-try:
-  discard nodeFs.rmSync(cstring(workspace), js{recursive: true, force: true})
-except:
-  discard
-echo "CHECKS: ", checks, " FAILED: ", failedChecks
-if checks != ExpectedChecks:
-  echo "  [FAILED] expected ", ExpectedChecks, " checks, ran ", checks
-exitProcess(if failedChecks == 0 and checks == ExpectedChecks: 0 else: 1)
+proc main() {.async.} =
+  try:
+    await runCases()
+  except:
+    inc failedChecks
+    echo "  [FAILED] the suite itself raised: ", getCurrentExceptionMsg()
+  try:
+    discard nodeFs.rmSync(cstring(workspace), js{recursive: true, force: true})
+  except:
+    discard
+  echo "CHECKS: ", checks, " FAILED: ", failedChecks
+  if checks != ExpectedChecks:
+    echo "  [FAILED] expected ", ExpectedChecks, " checks, ran ", checks
+  exitProcess(if failedChecks == 0 and checks == ExpectedChecks: 0 else: 1)
+
+discard main()

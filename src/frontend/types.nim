@@ -688,6 +688,20 @@ type
     author*: cstring       ## author name shown in the expanded accordion row
     parents*: seq[cstring] ## full hashes of parent commits (1 normal, 2+ merge)
 
+  VcsRefreshCheck* = ref object
+    ## The VCS panel's change check in flight, if any — the state
+    ## `ui/git_cli.requestRefreshCheck` keeps so that overlapping triggers
+    ## (the 5 s tick, window focus, the first baseline) coalesce instead of
+    ## stacking up git processes or being lost. VCS-Panel.md, "An
+    ## auto-refresh never stalls the window": "A trigger that arrives while a
+    ## check is in flight is not dropped: one more check follows the one in
+    ## flight."
+    inFlight*: bool
+      ## A status + log read has been issued and has not answered yet.
+    followUp*: bool
+      ## At least one trigger arrived while `inFlight`: exactly one more
+      ## check starts when the current one answers, however many arrived.
+
   VCSChangedFile* = object
     status*: cstring       ## "M", "A", "D", etc.
     filename*: cstring
@@ -727,9 +741,16 @@ type
       ## ID of the periodic ``windowSetTimeout`` timer. -1 when no timer
       ## is active. Stored so it can be cancelled.
     lastStatusSnapshot*: cstring
-      ## Concatenation of ``git status --porcelain`` and ``git log``
-      ## output from the most recent refresh.  Used to detect whether
-      ## anything actually changed before triggering a redraw.
+      ## The most recent ``git_cli.readRefreshSnapshot`` answer — the
+      ## working tree's status and the last 30 commit ids, in one string.
+      ## Used to detect whether anything actually changed before reloading
+      ## and redrawing. Nil until ``startFileWatching``'s baseline (or the
+      ## first check after it) has answered: the first answer is recorded,
+      ## not compared, so it cannot cause a spurious reload.
+    refreshCheck*: VcsRefreshCheck
+      ## The change check in flight, if any (``VcsRefreshCheck``). Created
+      ## by the first ``ui/vcs.requestSnapshotCheck`` — the baseline
+      ## ``startFileWatching`` requests.
     debounceTimerId*: int
       ## ID of the debounce ``windowSetTimeout``. -1 when idle.
     debounceActive*: bool

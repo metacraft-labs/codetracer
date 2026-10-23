@@ -497,10 +497,60 @@ proc resetAndRefreshVCS*(self: VCSComponent) =
 
 proc scheduleRefresh(self: VCSComponent)
 
+proc openDebounceWindow(self: VCSComponent) =
+  ## Start (or restart) the 1-second window during which further refresh
+  ## triggers are ignored.
+  if self.debounceTimerId != -1:
+    # A window still open from an earlier check would otherwise close this
+    # one early when its own timer fires.
+    windowClearTimeout(self.debounceTimerId)
+  self.debounceActive = true
+  self.debounceTimerId = windowSetTimeout(
+    proc() =
+      self.debounceActive = false
+      self.debounceTimerId = -1,
+    debounceMs)
+
+proc requestSnapshotCheck(self: VCSComponent) =
+  ## Compare the repository with the last snapshot WITHOUT waiting for git
+  ## (VCS-Panel.md, "An auto-refresh never stalls the window"; codetracer-pm
+  ## issue
+  ## `2026-10-21-vcs-auto-refresh-runs-git-synchronously-on-the-renderer-main-thread`).
+  ##
+  ## `git_cli.requestRefreshCheck` issues the status and log reads together
+  ## and answers when both have; until then the panel keeps showing what it
+  ## showed. A trigger during the check queues exactly one more. The answer
+  ## is dropped when the panel's working directory changed while it was
+  ## read, or the session became folderless — it describes a repository the
+  ## panel no longer shows; the next tick reads the right one.
+  ##
+  ## The first answer after `startFileWatching` is the baseline: recorded,
+  ## not compared, because the panel was just loaded from the same state.
+  if self.refreshCheck.isNil:
+    self.refreshCheck = VcsRefreshCheck()
+  requestRefreshCheck(self.refreshCheck,
+    proc(): cstring = self.getWorkingDirectory(),
+    proc(): bool = self.hasNoProjectFolder(),
+    proc(snapshot: string; current: bool) =
+      if current:
+        if self.lastStatusSnapshot.isNil:
+          self.lastStatusSnapshot = cstring(snapshot)
+        elif cstring(snapshot) != self.lastStatusSnapshot:
+          self.lastStatusSnapshot = cstring(snapshot)
+          self.refreshVCSData()
+          data.redraw()
+      # THE DEBOUNCE WINDOW OPENS WHEN A CHECK ANSWERS, as it did when the
+      # reads were synchronous and "after the read" was the same moment as
+      # "after the trigger". Opening it at the trigger instead would make it
+      # swallow a focus event that arrives while the check is in flight —
+      # the one trigger the spec says must not be dropped. A trigger during
+      # the window is still ignored: the check that just answered is at most
+      # a second old.
+      self.openDebounceWindow())
+
 proc debouncedRefreshGitData(self: VCSComponent) =
-  ## Perform a git refresh if the debounce window is not active. After the
-  ## refresh, start a 1-second debounce window during which further refresh
-  ## requests are ignored.
+  ## Check the repository for changes unless the debounce window is open;
+  ## the window opens when the check answers (`requestSnapshotCheck`).
   if self.debounceActive:
     return
 
@@ -515,25 +565,7 @@ proc debouncedRefreshGitData(self: VCSComponent) =
       data.redraw()
     return
 
-  let cwd = self.getWorkingDirectory()
-  # Build a lightweight snapshot of volatile git state to detect changes.
-  let statusRaw = gitExec(@[cstring"status", cstring"--porcelain"], cwd)
-  let logRaw = gitExec(
-    @[cstring"log", cstring"--pretty=format:%H", cstring"-30"], cwd)
-  let snapshot = cstring($statusRaw & "\n---\n" & $logRaw)
-
-  if snapshot != self.lastStatusSnapshot:
-    self.lastStatusSnapshot = snapshot
-    self.refreshVCSData()
-    data.redraw()
-
-  # Activate debounce window.
-  self.debounceActive = true
-  self.debounceTimerId = windowSetTimeout(
-    proc() =
-      self.debounceActive = false
-      self.debounceTimerId = -1,
-    debounceMs)
+  self.requestSnapshotCheck()
 
 proc scheduleRefresh(self: VCSComponent) =
   ## Schedule the next periodic auto-refresh tick. Cancels any existing
@@ -551,16 +583,17 @@ proc startFileWatching(self: VCSComponent) =
   ## Begin periodic auto-refresh and subscribe to window focus events.
   ## Called once after the initial git data load.
 
-  # Store initial snapshot so the first tick can detect changes.
-  let cwd = self.getWorkingDirectory()
-  let statusRaw = gitExec(@[cstring"status", cstring"--porcelain"], cwd)
-  let logRaw = gitExec(@[cstring"log", cstring"--pretty=format:%H", cstring"-30"], cwd)
-  self.lastStatusSnapshot = cstring($statusRaw & "\n---\n" & $logRaw)
-
   # Initialize timer IDs.
   self.refreshTimerId = -1
   self.debounceTimerId = -1
   self.debounceActive = false
+
+  # The baseline the first tick compares with, read the way every tick
+  # reads (`requestSnapshotCheck`), so the two are the same format and an
+  # unchanged repository does not reload on the first tick. Nil until it
+  # answers: whichever check answers first records the baseline.
+  self.lastStatusSnapshot = nil
+  self.requestSnapshotCheck()
 
   # Start the periodic refresh cycle.
   self.scheduleRefresh()
