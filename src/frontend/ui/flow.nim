@@ -159,10 +159,14 @@ iterator afters*(step: FlowLayoutStep): (cstring, FlowValueText) =
     yield (cstring(FlowReturnName), step.afterReturn)
 
 proc beforeCount*(step: FlowLayoutStep): int =
-  step.beforeCount + (if step.beforeReturn.isNil: 0 else: 1)
+  ## The step's recorded "before" values, its `return` included — what
+  ## `befores` yields. (`FlowLayoutStep` has no count field: a bare
+  ## `step.beforeCount` here is this proc again.)
+  step.beforeValues.len + (if step.beforeReturn.isNil: 0 else: 1)
 
 proc afterCount*(step: FlowLayoutStep): int =
-  step.afterCount + (if step.afterReturn.isNil: 0 else: 1)
+  ## The "after" values, its `return` included — what `afters` yields.
+  step.afterValues.len + (if step.afterReturn.isNil: 0 else: 1)
 
 proc passTable*(window: FlowWindowRef; loopIndex, iteration: int):
     OrderedTable[int, int] =
