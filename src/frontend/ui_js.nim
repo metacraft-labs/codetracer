@@ -1757,13 +1757,15 @@ proc configure(data: Data) =
   # is what every `ct test` provider reports as `TraceMetadata.path`.
   #
   # Installed here rather than beside the other panel-VM wiring in
-  # `configureMiddleware`: that routine runs only from `onTraceLoaded` and
-  # `onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
+  # `configureMiddleware`: that routine used to run only from `onTraceLoaded`
+  # and `onNoTrace` — the handlers for `CODETRACER::trace-loaded` and
   # `CODETRACER::no-trace` — and a `ct review` dataset launch reaches neither
   # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns),
   # so a review —
   # the one mode this feature exists for — got a panel with no trace-opening
-  # service at all.  `configure` runs once per renderer in every launch mode.
+  # service at all.  `onStartDeepReview` runs it too now, but `configure`
+  # runs once per renderer in every launch mode, which no handler-specific
+  # routine can promise.
   agent_activity.installAgentActivityTraceOpenService(
     TraceOpenService(openProc: proc(request: TraceOpenRequest) =
       if request.policy == topNewTab:
@@ -1786,12 +1788,12 @@ proc configure(data: Data) =
   # second way to open a review.
   #
   # Installed beside AA-2's service, in `configure`, and for the same
-  # measured reason: `configureMiddleware` runs only from `onTraceLoaded` and
-  # `onNoTrace`, and a `ct review` dataset launch reaches neither
-  # (`index/startup.nim` sends `CODETRACER::start-deepreview` and returns).
-  # A review is the one mode this feature exists for, so wiring placed there
-  # would be a silent no-op exactly where it is needed.  `configure` runs
-  # once per renderer in every launch mode.
+  # reason: `configureMiddleware` runs only from the launch handlers
+  # (`onTraceLoaded`, `onNoTrace`, `onStartDeepReview`), and a review is the
+  # one mode this feature exists for, so a launch path that skipped the
+  # routine — as the dataset review's did until 2026-10-23 — would make
+  # wiring placed there a silent no-op exactly where it is needed.
+  # `configure` runs once per renderer in every launch mode.
   agent_activity.installAgentActivityReviewOpenService(
     ReviewOpenService(requestProc: proc(request: ReviewDatasetRequest) =
       data.ipc.send cstring"CODETRACER::open-review-dataset",
@@ -2285,7 +2287,27 @@ const middlewareLoggingEnabled = true # TODO: maybe overridable dynamically
 
 # === end of LocalToViewsTransport
 
-proc configureMiddleware =
+proc configureMiddleware(withDebugger = true) =
+  ## Create the renderer's session and wire every pane to it, once per
+  ## renderer (callers guard it with `middlewareConfigured`).
+  ##
+  ## `withDebugger` is false for a window that opens with no replay engine to
+  ## talk to and no debugging surface to show: a dataset review
+  ## (`onStartDeepReview`; DeepReview-GUI.md §1.1, "not a replay session").
+  ## It then skips the two steps that address the engine:
+  ##
+  ## - The DAP `initialize` request. With no replay selected the Backend
+  ##   Manager has no peer to forward it to and never answers, so 30 s later
+  ##   the request's timeout put "initialize got no answer from the debugger"
+  ##   in the status bar of a review that never asked for a debugger
+  ##   (measured on a `ct review` launch). A replay opened later sends its own
+  ##   `initialize` (`handleDapReplaySelected`).
+  ## - Binding the debugger toolbar. Its stepping buttons would step a replay
+  ##   that does not exist, each press ending in the same timeout. A review
+  ##   that later opens a recording binds it then (`onTraceLoaded`).
+  ##
+  ## Everything else — the session, its panel ViewModels and the panel host's
+  ## session — is what the review's panes render, and is built either way.
   setupMiddlewareApis(data.dapApi, data.viewsApi)
 
   data.dapApi.ipc = data.ipc
@@ -2304,9 +2326,10 @@ proc configureMiddleware =
       activeSessionVM.store.setSupportsStepBack(supportsStepBack)
   )
 
-  data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
-    clientName: "codetracer"
-  )))
+  if withDebugger:
+    data.dapApi.sendCtRequest(DapInitialize, toJs(DapInitializeRequestArgs(
+      clientName: "codetracer"
+    )))
 
   # -----------------------------------------------------------------------
   # ViewModel layer: create a SessionViewModel backed by the real DapApi.
@@ -2532,8 +2555,9 @@ proc configureMiddleware =
     initPanelVM("mountProcessTree"):
       mountProcessTree(activeSessionVM)
 
-    initPanelVM("bindDebugToolbar"):
-      debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
+    if withDebugger:
+      initPanelVM("bindDebugToolbar"):
+        debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
     initPanelVM("setPanelSession"):
       # The panes the panel host mounts render this session's ViewModels;
       # a pane whose container was built before now is mounted here.
@@ -2663,8 +2687,8 @@ proc configureMiddleware =
           # Stays at ERROR.  The "it just arrived early"
           # reading of this branch does not survive checking: the only
           # thing that registers this subscription is
-          # `configureMiddleware`, and both of its call sites
-          # (`onTraceLoaded`, `onNoTrace`) run strictly after
+          # `configureMiddleware`, and all of its call sites
+          # (`onTraceLoaded`, `onNoTrace`, `onStartDeepReview`) run strictly after
           # `createUIComponents`, which constructs `data.ui.status`
           # unconditionally.  So a `CtCompleteMove` cannot reach this
           # handler before the status bar exists on the ordinary path,
@@ -3106,6 +3130,12 @@ proc onTraceLoaded(
   if not middlewareConfigured:
     configureMiddleware()
     middlewareConfigured = true
+  # A dataset review configured the session without the debugger toolbar
+  # (`configureMiddleware(withDebugger = false)`); a recording opened into it
+  # now has a replay to step, so the toolbar is bound here. A no-op when it is
+  # already bound to this session's controls.
+  if not activeSessionVM.isNil:
+    debug_toolbar.bindDebugToolbar(activeSessionVM.debugControlsVM)
   attachLoadedTrace($data.trace.outputFolder)
   # A session started with a diff (`ct run --diff`): its diff flow is the
   # session's to load, once (the stop loader's `spDiffFlow`), not the
@@ -3190,6 +3220,12 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   ## layout (DeepReview-GUI.md §1.1).  The other two launch methods have a
   ## recording, do not pass through this handler, and keep the debugging
   ## layout with those panels populated.
+  ##
+  ## The renderer's session is created here, as for a trace or an edit launch
+  ## (``configureMiddleware``), because the panes the panel host mounts — VCS,
+  ## Agent Activity, Files among them — render that session's ViewModels and
+  ## wait for it.  Having no recording, the review creates it without the
+  ## debugger: no DAP ``initialize`` and no stepping toolbar.
   data.startOptions.loading = false
   data.startOptions.withDeepReview = true
   data.config = response.config
@@ -3277,6 +3313,24 @@ proc onStartDeepReview*(sender: js, response: jsobject(config=Config, startOptio
   # config tree and instantiates each component.  The VCS panel detects
   # deepReviewActive and shows changed files; editor tabs get diff decorations.
   data.createUIComponents()
+
+  # THE SESSION THE PANES RENDER, created here as `onNoTrace` creates it, and
+  # in the same place: after `createUIComponents` (whose components the
+  # routine subscribes) and before `tryInitLayout` (whose GoldenLayout factory
+  # mounts the panel-host panes into the containers it makes).
+  # `configureMiddleware` is what calls `panel_host.setPanelSession`; until it
+  # runs, `mountPanel` holds every container it is given. A dataset review
+  # loads no recording and so never reaches `onTraceLoaded`, and this handler
+  # used to skip the routine altogether — harmless while the review's panes
+  # mounted themselves, but once Agent Activity, VCS and Files moved onto the
+  # panel host they waited forever behind tabs with empty containers
+  # (codetracer-pm issue 2026-10-22, "enter_submits_prompt.spec.ts never finds
+  # the Agent Activity tab or its prompt box").  It runs without the two steps
+  # that address a replay engine, since a dataset review has none; see
+  # `configureMiddleware`.
+  if not middlewareConfigured:
+    configureMiddleware(withDebugger = false)
+    middlewareConfigured = true
 
   data.ui.initEventReceived = true
   data.tryInitLayout()

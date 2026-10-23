@@ -212,7 +212,8 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
         # Stays at ERROR, for the same reason as the twin
         # branch in `ui_js.configureMiddleware`.  This handler is installed
         # by `setupMiddlewareApis`, whose sole caller is
-        # `configureMiddleware`, whose own two call sites both run after
+        # `configureMiddleware`, whose call sites (the trace, edit and dataset-review
+        # launch handlers) all run after
         # `createUIComponents` has unconditionally built the status
         # component — so "the event beat the status bar into existence" is
         # not a state the ordinary startup path can be in, and a clean
