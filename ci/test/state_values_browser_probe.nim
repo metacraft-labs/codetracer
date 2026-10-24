@@ -85,7 +85,7 @@ import isonim/web/dom_api as dom
 # that file directly does not compile on its own (`langstring` comes from
 # the including module's prelude).
 from ../../src/frontend/types import
-  Value, TypeKind, CtLoadLocalsResponseBody, `$`, textRepr
+  Value, TypeKind, CtLoadLocalsResponseBody, `$`
 import ../../src/frontend/ui/state as ui_state
 import ../../src/frontend/viewmodel/store/replay_data_store
 import ../../src/frontend/viewmodel/store/types as store_types
