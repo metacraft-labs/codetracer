@@ -293,39 +293,60 @@ suite "PLAT-68 GPUI: the focused strip's selected tab is told apart":
 
 suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":
 
-  test "Alt pressed and released alone opens the menu, its mnemonics underlined":
-    var t: string
-    let plan = windowPlan("modifiers:alt,modifiers:", trace = t)
-    ck t.lines("alt tapped").len == 1
-    ck t.lines("operation ") == @["operation menu.toggle"]
-    ck plan.values("data-ct-menu-item").len > 0
-    # Every shown folder's access key, as the span that underlines it — the
-    # letter, and the underline itself.
-    ck plan.values("data-ct-menu-mnemonic") ==
-       @["F", "i", "w", "B", "R", "D", "H"]
-    var underlined = 0
-    for span in plan.nodesWith("data-ct-menu-mnemonic"):
-      if span{"styles"}{"text_decoration"}.getStr == "underline":
-        inc underlined
-    ck underlined == 7
+  # CUA-Keymap.md §3.8 binds `Alt` alone and `Alt+<mnemonic>` on Linux and
+  # Windows only: "On macOS, as in VS Code, there is neither — Option+<letter>
+  # types a character — and the menu is the system's." So on macOS the two
+  # gestures are asserted to reach NO `menu.*` operation, which keeps the
+  # platform rule a checked statement rather than a skipped case.
+  when defined(macosx):
+    test "on macOS Alt pressed and released alone reaches no menu operation":
+      var t: string
+      let plan = windowPlan("modifiers:alt,modifiers:", trace = t)
+      ck t.lines("operation ") == newSeq[string]()
+      ck plan.values("data-ct-menu-item").len == 0
 
-  test "a second Alt tap closes it":
-    var t: string
-    let plan = windowPlan("modifiers:alt,modifiers:,modifiers:alt,modifiers:",
-                          trace = t)
-    ck t.lines("alt tapped").len == 2
-    ck plan.values("data-ct-menu-item").len == 0
+    test "on macOS Alt+D opens no folder (Option+D is a character)":
+      var t: string
+      let plan = windowPlan("modifiers:alt,key:d:alt,modifiers:", trace = t)
+      var menuOps = 0
+      for line in t.lines("operation "):
+        if line.startsWith("operation menu."): inc menuOps
+      ck menuOps == 0
+      ck plan.values("data-ct-menu-item").len == 0
+  else:
+    test "Alt pressed and released alone opens the menu, its mnemonics underlined":
+      var t: string
+      let plan = windowPlan("modifiers:alt,modifiers:", trace = t)
+      ck t.lines("alt tapped").len == 1
+      ck t.lines("operation ") == @["operation menu.toggle"]
+      ck plan.values("data-ct-menu-item").len > 0
+      # Every shown folder's access key, as the span that underlines it — the
+      # letter, and the underline itself.
+      ck plan.values("data-ct-menu-mnemonic") ==
+         @["F", "i", "w", "B", "R", "D", "H"]
+      var underlined = 0
+      for span in plan.nodesWith("data-ct-menu-mnemonic"):
+        if span{"styles"}{"text_decoration"}.getStr == "underline":
+          inc underlined
+      ck underlined == 7
 
-  test "Alt+D opens Debug; the release that follows is not a tap":
-    var t: string
-    let plan = windowPlan("modifiers:alt,key:d:alt,modifiers:", trace = t)
-    ck t.lines("alt tapped").len == 0
-    ck t.lines("operation ") == @["operation menu.open-folder(debug)"]
-    var active: seq[string] = @[]
-    for n in plan.nodesWith("data-ct-menu-active"):
-      if n.attr("data-ct-menu-active") == "true":
-        active.add n.attr("data-ct-menu-item")
-    ck "Debug" in active
+    test "a second Alt tap closes it":
+      var t: string
+      let plan = windowPlan("modifiers:alt,modifiers:,modifiers:alt,modifiers:",
+                            trace = t)
+      ck t.lines("alt tapped").len == 2
+      ck plan.values("data-ct-menu-item").len == 0
+
+    test "Alt+D opens Debug; the release that follows is not a tap":
+      var t: string
+      let plan = windowPlan("modifiers:alt,key:d:alt,modifiers:", trace = t)
+      ck t.lines("alt tapped").len == 0
+      ck t.lines("operation ") == @["operation menu.open-folder(debug)"]
+      var active: seq[string] = @[]
+      for n in plan.nodesWith("data-ct-menu-active"):
+        if n.attr("data-ct-menu-active") == "true":
+          active.add n.attr("data-ct-menu-item")
+      ck "Debug" in active
 
   test "Alt+` opens it too — the chord a terminal can send":
     var t: string
@@ -335,4 +356,8 @@ suite "PLAT-68 GPUI: the program menu from the keyboard (CUA-Keymap.md §3.8)":
 
 suite "PLAT-68 GPUI: assertion count":
   test "the declared count was reached":
-    check countedAssertions == ExpectedAssertions
+    # macOS runs the two §3.8 macOS cases (4 checks) in place of the Linux /
+    # Windows Alt-tap, second-tap and Alt+D cases (5 + 2 + 3 checks).
+    const Expected = when defined(macosx): ExpectedAssertions - 10 + 4
+                     else: ExpectedAssertions
+    check countedAssertions == Expected

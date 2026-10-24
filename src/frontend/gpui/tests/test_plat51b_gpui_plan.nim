@@ -41,7 +41,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 63
+  ExpectedAssertions = 65
     ## 32 -> 33 (2026-10-17): the focus case asserts that NOTHING is outlined
     ## before the first press (the desktop's behaviour since the redesign),
     ## then that a press outlines the pressed pane — one check more.
@@ -62,6 +62,25 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = repo / CalcFixture
+
+const
+  OpenFile = when defined(macosx): "key:`:alt,key:enter" else: "key:f:alt"
+    ## How the M74 cases open File. CUA-Keymap.md §3.8 binds `Alt+F` on Linux
+    ## and Windows only ("On macOS … Option+<letter> types a character"), so on
+    ## macOS File is reached by `` Alt+` `` (`menu.open`, every platform) and
+    ## `Enter` on its first folder. The cases' subject is File's ITEMS, not the
+    ## mnemonic; "the two routes reach the same File menu" below holds the
+    ## macOS route to the Linux one on every platform.
+
+proc ctUnderTest(): string =
+  ## The ONE `ct` a "Record new trace" case may run: `CT_BIN` when the
+  ## environment names one, else this checkout's debug build. It is resolved
+  ## here once and pinned into the window's `CT_BIN`, so the binary the case
+  ## checks is the binary the window runs — never another `ct` that
+  ## `native_host.findCtBinary` would fall through to (`PATH`, or one beside
+  ## the engine) when this one is missing.
+  let named = getEnv("CT_BIN", "")
+  if named.len > 0: named else: repo / "src/build-debug/bin/ct"
 
 proc windowPlan(ops: string; geometry: var JsonNode; state = "";
                 pre: seq[string] = @[]; width = W): JsonNode =
@@ -84,9 +103,11 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   env["XDG_STATE_HOME"] = root / "xdg"
   # Every other per-user location of the spawned binary (common/ct_home).
   env["CODETRACER_HOME"] = root / "ct-home"
-  let ct = repo / "src/build-debug/bin/ct"
+  let ct = ctUnderTest()
   if fileExists(ct):
     env["CT_BIN"] = ct
+  else:
+    env.del("CT_BIN")
   let geomFile = root / "geometry.json"
   env["CODETRACER_GPUI_GEOMETRY_OUT"] = geomFile
   var args = pre & @["--report-window-plan", "--width=" & $width,
@@ -315,32 +336,51 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
       ck panel.getStr in text
 
   test "Record new trace runs a real ct record and the recording opens in the tab":
-    let ct = repo / "src/build-debug/bin/ct"
+    let ct = ctUnderTest()
+    checkpoint("ct under test: " & ct)
     if not fileExists(ct):
-      checkpoint("prerequisite missing: " & ct & " (just build-once)")
+      checkpoint("prerequisite missing: " & ct &
+                 " (just build-once, or CT_BIN); the window is not run " &
+                 "against any other ct")
     ck fileExists(ct)
-    let state = createTempDir("plat51b-gpui-record-", "")
-    defer: removeDir(state)
-    let program = state / "greeter.py"
-    writeFile(program, "def greet(name):\n    return 'hello ' + name\n\n" &
-                       "print(greet('plat51'))\n")
-    # The focus starts on "Open folder"; "Record new trace" is the next row.
-    let plan = windowPlan("tab-add,key:down,key:enter,type:" & program &
-                          ",key:enter,wait:240000", state)
-    var titles: seq[string] = @[]
-    for t in plan.nodesWith("data-ct-session-tab"):
-      titles.add t.attr("data-ct-session-tab")
-    checkpoint("tabs " & $titles)
-    var recorded = false
-    for t in titles:
-      if t.startsWith("greeter-"): recorded = true
-    ck recorded
-    ck plan.nodesWith("data-ct-welcome").len == 0
-    var found = 0
-    for kind, path in walkDir(state / "recordings"):
-      if kind == pcDir and path.extractFilename.startsWith("greeter-"):
-        inc found
-    ck found == 1
+    if fileExists(ct):
+      let state = createTempDir("plat51b-gpui-record-", "")
+      defer: removeDir(state)
+      let program = state / "greeter.py"
+      writeFile(program, "def greet(name):\n    return 'hello ' + name\n\n" &
+                         "print(greet('plat51'))\n")
+      # The focus starts on "Open folder"; "Record new trace" is the next row.
+      let plan = windowPlan("tab-add,key:down,key:enter,type:" & program &
+                            ",key:enter,wait:240000", state)
+      var titles: seq[string] = @[]
+      for t in plan.nodesWith("data-ct-session-tab"):
+        titles.add t.attr("data-ct-session-tab")
+      checkpoint("tabs " & $titles)
+      var recorded = false
+      for t in titles:
+        if t.startsWith("greeter-"): recorded = true
+      ck recorded
+      ck plan.nodesWith("data-ct-welcome").len == 0
+      var found = 0
+      for kind, path in walkDir(state / "recordings"):
+        if kind == pcDir and path.extractFilename.startsWith("greeter-"):
+          inc found
+      ck found == 1
+
+suite "M74 (#841) GPUI: File opens the same way on every platform":
+
+  test "the two routes reach the same File menu (Alt+F, and Alt+` then Enter)":
+    var g: JsonNode
+    let byMnemonic = windowPlan("key:f:alt", g)
+    let byMenuKey = windowPlan("key:`:alt,key:enter", g)
+    var a, b: seq[string]
+    for n in byMnemonic.nodesWith("data-ct-menu-active"):
+      if n.attr("data-ct-menu-active") == "true": a.add n.attr("data-ct-menu-item")
+    for n in byMenuKey.nodesWith("data-ct-menu-active"):
+      if n.attr("data-ct-menu-active") == "true": b.add n.attr("data-ct-menu-item")
+    checkpoint("Alt+F " & $a & " / Alt+` Enter " & $b)
+    ck a == @["File", "Open Trace..."]
+    ck b == a
 
 suite "M74 (#841) GPUI: the File menu reaches the welcome flow":
   # codetracer#841: the window's menu enabled a static list without a single
@@ -356,13 +396,13 @@ suite "M74 (#841) GPUI: the File menu reaches the welcome flow":
   test "New Trace Tab opens the Welcome Screen; Open Trace… and Record New Trace… open its forms":
     # File's items in order: Open Trace…, Open Trace in New Tab…, Record New
     # Trace…, New Trace Tab. The folder opens on the first.
-    let tab = windowPlan("key:f:alt,key:down,key:down,key:down,key:enter")
+    let tab = windowPlan(OpenFile & ",key:down,key:down,key:down,key:enter")
     ck tab.nodesWith("data-ct-welcome").len == 1
     ck tab.welcomeForm == ""
-    let open = windowPlan("key:f:alt,key:enter")
+    let open = windowPlan(OpenFile & ",key:enter")
     ck open.nodesWith("data-ct-welcome").len == 1
     ck open.welcomeForm == "open-local-trace"
-    let record = windowPlan("key:f:alt,key:down,key:down,key:enter")
+    let record = windowPlan(OpenFile & ",key:down,key:down,key:enter")
     ck record.nodesWith("data-ct-welcome").len == 1
     ck record.welcomeForm == "record-new-trace"
 
@@ -379,7 +419,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     CloseFileReason =
       "the window's editor holds one file per tab; there is no list of " &
       "open files to step through"
-    ToCloseFile = "key:f:alt,key:down,key:down,key:down,key:down"
+    ToCloseFile = OpenFile & ",key:down,key:down,key:down,key:down"
       ## File opens on Open Trace…; Close Current File is the fifth item.
 
   proc pxRect(a: JsonNode): PxRect =
@@ -420,7 +460,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
 
   test "highlighted by keyboard or pointer, the reason is drawn beside the row; an enabled item has none":
     var g: JsonNode
-    let opened = windowPlan("key:f:alt", g)
+    let opened = windowPlan(OpenFile, g)
     # Open Trace…, highlighted on opening, is performed here: no label.
     ck opened.hoverLabels.len == 0
     let (pop, close) = g.fileRow("Close Current File")
@@ -442,18 +482,18 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     # Up again, onto New Trace Tab (enabled): the label goes.
     ck windowPlan(ToCloseFile & ",key:up").hoverLabels.len == 0
     # THE POINTER: the same row hovered, then an enabled one.
-    let hovered = windowPlan("key:f:alt,move:" & close.mid)
+    let hovered = windowPlan(OpenFile & ",move:" & close.mid)
     let hl = hovered.hoverLabels
     ck hl.len == 1
     if hl.len == 1:
       ck hl[0].textOf == CloseFileReason
       ck hl[0].besideRow(pop, close)
-    ck windowPlan("key:f:alt,move:" & close.mid & ",move:" &
+    ck windowPlan(OpenFile & ",move:" & close.mid & ",move:" &
                   newTab.mid).hoverLabels.len == 0
 
   test "choosing it, by Enter or by a click, keeps the menu open and shows the reason":
     var g0: JsonNode
-    discard windowPlan("key:f:alt", g0)
+    discard windowPlan(OpenFile, g0)
     let (pop, close) = g0.fileRow("Close Current File")
     var ge: JsonNode
     let entered = windowPlan(ToCloseFile & ",key:enter", ge)
@@ -463,7 +503,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     # A press with no motion before it (a touch, a tablet): the press alone
     # must bring the refused row's reason up.
     var gc: JsonNode
-    let clicked = windowPlan("key:f:alt,press:" & close.mid & ",release:" &
+    let clicked = windowPlan(OpenFile & ",press:" & close.mid & ",release:" &
                              close.mid, gc)
     ck gc["topBar"]["menuOpen"].getBool
     let cl = clicked.hoverLabels
@@ -480,7 +520,7 @@ suite "M74 (#841) GPUI: a disabled File item says why, beside it":
     for (width, beside) in [(1280, true), (640, false)]:
       checkpoint("window width " & $width)
       var g: JsonNode
-      discard windowPlan("key:f:alt", g, width = width)
+      discard windowPlan(OpenFile, g, width = width)
       let (pop, close) = g.fileRow("Close Current File")
       let ls = windowPlan(ToCloseFile, width = width).hoverLabels
       ck ls.len == 1
