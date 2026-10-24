@@ -38,6 +38,10 @@ const
 var
   watching = ""
   importNotes: seq[string] = @[]
+  onKeybindingsText*: proc(text: string) = nil
+    ## Called with the file's text (or "") whenever it is sent to the
+    ## renderer: the macOS native menu (`index/menu`) re-reads its
+    ## accelerators from the router over the same text.
 
 proc readIfExists(path: string): tuple[ok: bool, text: string] =
   if not fs.existsSync(cstring(path)):
@@ -89,6 +93,8 @@ proc sendKeybindings*() =
     return
   let path = keybindingsPath()
   let read = readIfExists(path)
+  if not onKeybindingsText.isNil:
+    onKeybindingsText(read.text)
   mainWindow.webContents.send(cstring(KeybindingsMessage), js{
     path: cstring(path),
     exists: read.ok,
