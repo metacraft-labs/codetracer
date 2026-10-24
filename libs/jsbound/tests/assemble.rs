@@ -419,3 +419,194 @@ fn assemble_writes_a_gap_before_the_end() {
     let err = assemble(&bodies(&batches), &options(Finalisation::Ended)).unwrap_err();
     assert_eq!(err.name(), "UnexplainedGap", "{err}");
 }
+
+/// `--summary` writes what the ingest stores about the session, read from
+/// the assembled log, so the ingest never decodes a frame itself: the `seq`
+/// range, every `Gap` with its reason, the refusals, `replayable`, an
+/// `Error`, the `traceparent`'s trace id and the experiment arms. Through the
+/// binary, as the ingest runs it; a refused assembly writes no summary.
+///
+/// Negative controls: the complete fixture session is replayable with no
+/// gap, no error, no trace id and empty arms, so each field below is read
+/// from the records, not defaulted.
+#[test]
+fn assemble_writes_a_summary_for_the_ingest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let read_summary = |dir: &str, batches: &[StagedBatch], extra: &[&str]| {
+        let staged = stage(&tmp.path().join(dir), batches);
+        let summary = tmp.path().join(format!("{dir}.json"));
+        let out = tmp.path().join(format!("{dir}.ct"));
+        let mut args = vec!["--summary", summary.to_str().unwrap()];
+        args.extend_from_slice(extra);
+        let ct = assemble_files(&out, &staged, &args);
+        let json: serde_json::Value = serde_json::from_slice(&fs::read(&summary).unwrap()).unwrap();
+        (json, ct)
+    };
+
+    let (plain, ct) = read_summary("plain", &session_batches(), &[]);
+    assert_eq!(plain["session_id"], SESSION_ID);
+    assert_eq!(plain["build_hash"], BUILD_HASH);
+    assert_eq!(plain["batches"], 4);
+    assert_eq!(plain["first_seq"], 1);
+    assert_eq!(plain["last_seq"], 12);
+    assert_eq!(plain["end_reason"], end_reason::PAGEHIDE);
+    assert_eq!(plain["gaps"], serde_json::json!([]));
+    assert_eq!(plain["refusals"], 0);
+    assert_eq!(plain["replayable"], true);
+    assert_eq!(plain["has_error"], false);
+    assert_eq!(plain["trace_id"], serde_json::Value::Null);
+    assert_eq!(plain["arms"], serde_json::json!({}));
+    assert_eq!(plain["program"], "https://shop.example/cart");
+    assert_eq!(plain["container_bytes"], ct.len());
+    // Header, Env, 12 seq-bearing records, End.
+    assert_eq!(plain["records"], 15);
+
+    // A session with a refusal, an error, a traceparent and arms, whose
+    // batch 1 the ingest refused and whose stream never ended.
+    let mut batches = session_batches();
+    batches.retain(|b| b.batch_seq != 1);
+    batches[0].records[1] = match env() {
+        Record::Env {
+            ua,
+            ua_major,
+            viewport_w,
+            viewport_h,
+            dpr,
+            locale,
+            tz,
+            fonts_digest,
+            color_scheme,
+            reduced_motion,
+            url,
+            referrer_origin,
+            ..
+        } => Record::Env {
+            ua,
+            ua_major,
+            viewport_w,
+            viewport_h,
+            dpr,
+            locale,
+            tz,
+            fonts_digest,
+            color_scheme,
+            reduced_motion,
+            url,
+            referrer_origin,
+            arms: r#"{"checkout":"b"}"#.into(),
+            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into(),
+        },
+        _ => unreachable!(),
+    };
+    let last = batches.last_mut().unwrap();
+    last.records.retain(|r| !matches!(r, Record::End { .. }));
+    last.records[0] = Record::Refusal {
+        seq: 10,
+        feature: "SharedWorker".into(),
+        detail: String::new(),
+    };
+    last.records[1] = Record::Error {
+        seq: 11,
+        kind: 1,
+        message: "boom".into(),
+        frames: "[]".into(),
+    };
+    let (rich, _) = read_summary("rich", &batches, &["--idle", "--refused-batch", "1"]);
+    assert_eq!(
+        rich["gaps"],
+        serde_json::json!([{"first_seq": 4, "last_seq": 6, "reason": gap_reason::BATCH_REFUSED}])
+    );
+    assert_eq!(rich["refusals"], 1);
+    assert_eq!(rich["replayable"], false);
+    assert_eq!(rich["has_error"], true);
+    assert_eq!(rich["trace_id"], "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(rich["arms"], serde_json::json!({"checkout": "b"}));
+    assert_eq!(rich["last_seq"], 12);
+    assert_eq!(rich["end_reason"], end_reason::IDLE_FINALISATION);
+
+    // A Refusal alone, with no Gap, makes a session not replayable.
+    let mut refusing = session_batches();
+    refusing[1].records[0] = Record::Refusal {
+        seq: 4,
+        feature: "SharedWorker".into(),
+        detail: String::new(),
+    };
+    let (refusal_only, _) = read_summary("refusal", &refusing, &[]);
+    assert_eq!(refusal_only["gaps"], serde_json::json!([]));
+    assert_eq!(refusal_only["refusals"], 1);
+    assert_eq!(refusal_only["replayable"], false);
+
+    // A refused assembly leaves neither a .ct nor a summary.
+    let refused = stage(&tmp.path().join("refused"), &batches);
+    let summary = tmp.path().join("refused.json");
+    let out = tmp.path().join("refused.ct");
+    let mut args = vec![
+        "assemble",
+        "--recording-id",
+        RECORDING_ID,
+        "--out",
+        out.to_str().unwrap(),
+        "--summary",
+        summary.to_str().unwrap(),
+    ];
+    args.extend(refused.iter().map(|p| p.to_str().unwrap()));
+    let (status, _, stderr) = ct_jsbound(&args);
+    assert_eq!(status, 1, "{stderr}");
+    assert!(!out.exists() && !summary.exists());
+
+    // A summary named like the `.ct` would replace the recording with JSON
+    // after it was written: a usage error, and nothing is written.
+    let staged = stage(&tmp.path().join("same"), &session_batches());
+    let out = tmp.path().join("same.ct");
+    let mut args = vec![
+        "assemble",
+        "--recording-id",
+        RECORDING_ID,
+        "--out",
+        out.to_str().unwrap(),
+        "--summary",
+        out.to_str().unwrap(),
+    ];
+    args.extend(staged.iter().map(|p| p.to_str().unwrap()));
+    let (status, _, stderr) = ct_jsbound(&args);
+    assert_eq!(status, 2, "{stderr}");
+    assert!(
+        stderr.contains("--summary must name a different file"),
+        "{stderr}"
+    );
+    assert!(!out.exists());
+}
+
+/// `ct-jsbound summarize` reads an assembled `.ct` back, verifies it, and
+/// reports the same summary the assembler wrote (with `batches` 0), its
+/// recording id and its four members; a file that is not a boundary
+/// recording exits 1.
+#[test]
+fn summarize_reports_what_assemble_wrote() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staged = stage(&tmp.path().join("staging"), &session_batches());
+    let out = tmp.path().join("r.ct");
+    let summary = tmp.path().join("s.json");
+    assemble_files(&out, &staged, &["--summary", summary.to_str().unwrap()]);
+    let written: serde_json::Value = serde_json::from_slice(&fs::read(&summary).unwrap()).unwrap();
+
+    let (status, stdout, stderr) = ct_jsbound(&["summarize", out.to_str().unwrap()]);
+    assert_eq!(status, 0, "{stderr}");
+    let mut read: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(read["recording_id"], RECORDING_ID);
+    assert_eq!(
+        read["members"],
+        serde_json::json!(["meta.dat", "jsbound.log", "jsbound.blb", "jsbound.chk"])
+    );
+    assert_eq!(read["batches"], 0);
+    let obj = read.as_object_mut().unwrap();
+    obj.remove("recording_id");
+    obj.remove("members");
+    obj.insert("batches".into(), written["batches"].clone());
+    assert_eq!(read, written);
+
+    let bogus = tmp.path().join("bogus.ct");
+    fs::write(&bogus, b"not a container").unwrap();
+    let (status, _, _) = ct_jsbound(&["summarize", bogus.to_str().unwrap()]);
+    assert_eq!(status, 1);
+}

@@ -145,6 +145,166 @@ pub struct Assembled {
     pub members: Members,
     /// The `.ct` bytes.
     pub container: Vec<u8>,
+    /// What the ingest records about the session, read from the assembled
+    /// log (JS-Boundary-Recording.md §5.6, "Summary").
+    pub summary: Summary,
+}
+
+/// One `Gap` of the assembled log.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GapSummary {
+    pub first_seq: u64,
+    pub last_seq: u64,
+    pub reason: u8,
+}
+
+/// The facts about an assembled session that the ingest stores in its
+/// session row and passes on registration. The ingest never decodes frames
+/// itself: it reads these from the assembler's `--summary` file, as plain
+/// JSON, so everything it learns about the records comes from this process,
+/// which the ingest runs sandboxed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Summary {
+    /// The `Header`'s session id (the envelopes' `session_id`).
+    pub session_id: String,
+    /// The `Header`'s build hash (the envelopes' `build_hash`).
+    pub build_hash: String,
+    /// The number of batches assembled.
+    pub batches: u64,
+    /// Every record of the assembled log, `Gap` and an appended `End` included.
+    pub records: u64,
+    /// The first `seq` the log accounts for (a record's or a `Gap`'s), 0 when none.
+    pub first_seq: u64,
+    /// `End.last_seq`.
+    pub last_seq: u64,
+    /// `End.reason`.
+    pub end_reason: u8,
+    /// Every `Gap`, in `seq` order.
+    pub gaps: Vec<GapSummary>,
+    /// The number of `Refusal` records.
+    pub refusals: u64,
+    /// Whether the log can be replayed to its end: no `Gap` and no `Refusal`.
+    pub replayable: bool,
+    /// Whether the log holds an `Error` record.
+    pub has_error: bool,
+    /// The trace id of `Env.traceparent` (32 lowercase hex digits) when it is
+    /// a well-formed W3C `traceparent`
+    /// (<https://www.w3.org/TR/trace-context/#traceparent-header>) with a
+    /// non-zero trace id and parent id; `None` otherwise.
+    pub trace_id: Option<String>,
+    /// `Env.arms` when it is a JSON object whose values are all strings
+    /// (experiment key to arm); `None` otherwise.
+    pub arms: Option<serde_json::Map<String, serde_json::Value>>,
+    /// `meta.dat`'s `program`: `Env.url` without query or fragment.
+    pub program: String,
+    /// The size of the `.ct` in bytes.
+    pub container_bytes: u64,
+}
+
+/// The trace id of a W3C `traceparent`, or `None` when it is not one.
+/// Version `00` has exactly four fields; a later version (not `ff`) is read
+/// by the version-00 rules with any further fields ignored, as the
+/// specification asks of a version-00 parser.
+fn trace_id_of(traceparent: &str) -> Option<String> {
+    let parts: Vec<&str> = traceparent.split('-').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+    let is_hex = |s: &str, n: usize| {
+        s.len() == n && s.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+    };
+    let (version, trace_id, parent_id, flags) = (parts[0], parts[1], parts[2], parts[3]);
+    if !is_hex(version, 2) || version == "ff" || (version == "00" && parts.len() != 4) {
+        return None;
+    }
+    if !is_hex(trace_id, 32) || !is_hex(parent_id, 16) || !is_hex(flags, 2) {
+        return None;
+    }
+    if trace_id.bytes().all(|c| c == b'0') || parent_id.bytes().all(|c| c == b'0') {
+        return None;
+    }
+    Some(trace_id.to_string())
+}
+
+/// `Env.arms` as a map of experiment key to arm, when it is one.
+fn arms_of(arms: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+    match serde_json::from_str::<serde_json::Value>(arms) {
+        Ok(serde_json::Value::Object(map)) if map.values().all(serde_json::Value::is_string) => {
+            Some(map)
+        }
+        _ => None,
+    }
+}
+
+/// Summarise a strictly decoded, complete log.
+pub(crate) fn summarise(
+    decoded: &crate::decode::DecodedLog,
+    batches: usize,
+    container_bytes: usize,
+) -> Summary {
+    let mut summary = Summary {
+        session_id: String::new(),
+        build_hash: String::new(),
+        batches: batches as u64,
+        records: decoded.records.len() as u64,
+        first_seq: 0,
+        last_seq: 0,
+        end_reason: 0,
+        gaps: Vec::new(),
+        refusals: 0,
+        replayable: true,
+        has_error: false,
+        trace_id: None,
+        arms: None,
+        program: String::new(),
+        container_bytes: container_bytes as u64,
+    };
+    for record in &decoded.records {
+        if summary.first_seq == 0 {
+            summary.first_seq = match record {
+                Record::Gap { first_seq, .. } => *first_seq,
+                other => other.seq().unwrap_or(0),
+            };
+        }
+        match record {
+            Record::Header {
+                session_id,
+                build_hash,
+                ..
+            } => {
+                summary.session_id = session_id.clone();
+                summary.build_hash = build_hash.clone();
+            }
+            Record::Env {
+                url,
+                arms,
+                traceparent,
+                ..
+            } => {
+                summary.program = program_of(url).to_string();
+                summary.trace_id = trace_id_of(traceparent);
+                summary.arms = arms_of(arms);
+            }
+            Record::Gap {
+                first_seq,
+                last_seq,
+                reason,
+            } => summary.gaps.push(GapSummary {
+                first_seq: *first_seq,
+                last_seq: *last_seq,
+                reason: *reason,
+            }),
+            Record::Refusal { .. } => summary.refusals += 1,
+            Record::Error { .. } => summary.has_error = true,
+            Record::End { last_seq, reason } => {
+                summary.last_seq = *last_seq;
+                summary.end_reason = *reason;
+            }
+            _ => {}
+        }
+    }
+    summary.replayable = summary.gaps.is_empty() && summary.refusals == 0;
+    summary
 }
 
 /// Whether `id` is a canonical lowercase UUID whose version nibble is 7.
@@ -257,7 +417,12 @@ pub fn assemble(bodies: &[Vec<u8>], options: &AssembleOptions) -> Result<Assembl
         log,
     };
     let container = write_container(&members).map_err(AssembleError::Container)?;
-    Ok(Assembled { members, container })
+    let summary = summarise(&decoded, bodies.len(), container.len());
+    Ok(Assembled {
+        members,
+        container,
+        summary,
+    })
 }
 
 /// Every batch names the same session and build, the `Header` agrees with
