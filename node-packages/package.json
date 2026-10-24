@@ -33,7 +33,6 @@
     "jstree": "3.3.17",
     "monaco-editor": "0.54.0",
     "monaco-languageclient": "10.2.0",
-    "mousetrap": "^1.6.5",
     "node-abi": "^4.24.0",
     "node-gyp": "^12.1.0",
     "node-ipc": "^12.0.0",
