@@ -326,7 +326,7 @@ G_ORDER = "an event-log header orders the log; again reverses it"
 G_COLUMN = ("Alt+click anchors a column breakpoint; Ctrl+Alt+click goes into "
             "a call")
 G_FLOW = "an inline value's menu; Ctrl+click pins it"
-G_SWEEP = "the Variables tabs, a point, the footer's location, a dock label"
+G_SWEEP = "the Variables list, a point, the footer's location, a dock label"
 G_VCS = "the VCS pane: a file's diff, a commit's files"
 E_ORDER = "a_column_orders_the_log_and_ties_keep_the_recorded_order"
 E_NAMES = "column_names_select_their_keys"

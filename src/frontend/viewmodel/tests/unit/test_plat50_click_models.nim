@@ -80,9 +80,9 @@ suite "PLAT-50: the click inventory":
                "K45", "K53"]:
       ck id in terminal
       ck id in gpui
-    # The one row only GPUI draws a target for: the Locals / Globals /
-    # Watches tabs.
-    ck "K29" in gpui and "K29" notin terminal
+    # K29 (the Variables pane's hide-other-process-watches toggle, since
+    # the one list of variables and watches) is drawn by both front-ends.
+    ck "K29" in gpui and "K29" in terminal
     ck behaviour("K20").terminal == nsExisting
     # An argument's left press is the row's: the desktop opens no tooltip.
     ck behaviour("K38").terminal == nsExisting
