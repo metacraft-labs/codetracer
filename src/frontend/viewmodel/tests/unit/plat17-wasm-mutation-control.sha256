@@ -13,17 +13,17 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES
 # (§16): re-recording from a tree whose arms have stopped matching
 # certifies the arms along with the bytes.
-ba2695508f6456f9a154474d8f7c44cddecf9289568cdb1884503be12501dee5  ../nim-everywhere/src/nim_everywhere/async_compat.nim
+3a92942a0534f26352d54c2316ee78de303006fb36d93d88baa099e296bc2bb4  ../nim-everywhere/src/nim_everywhere/async_compat.nim
 7df743fd7a5add06f72fecfef994322f98ac1f2e7694cab386ed7ddfc7e14823  src/common/paths.nim
 e04991e5e13399c9da1b379ad5268e96592b4198ac2ffabe1e92b10b00c4d687  ci/lib/run-nim-test-lane.sh
-45366f0f01c410f5db22ddfcc2744c12fb31acb0ccaff4ab52829dbd4570c0ee  ci/lib/test-lane-files.sh
-770eef7a71e8744b165b3a15a478db0608579513bdaa2f9fedd52db1edb108bc  justfile
+56d555829f2cd2841579d9ef616c806bb2d09c09f2ede1a3492f4fbd73d6ee0f  ci/lib/test-lane-files.sh
+a109a846e7c2403f2ca295e0c69bc1390b672516f2d76595f8744564024fbce2  justfile
 f82d5d9bb1d134cba0df3de54c3d44c78ba0f978c8d884a5bd2dabe9c4ed5a98  src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim
 94a3f0aca01cbb9251c9ac993a8aa31500a8d38f03147d843e00f2a750771cb5  src/frontend/viewmodel/tests/manual/wasm_footprint_probe.nim
 938b658f452638cffee02b706c077ae915b97ac18050fb13eb2eb5c458be929e  src/frontend/viewmodel/tests/unit/test_async_compat_wasm_arm.nim
-117effeacc8dc9571f026a6a1553f3fd1529c0522da8329d8888150540212366  src/frontend/viewmodel/tests/unit/test_sdk_facade.nim
+4a7d661f652f5b6335e330d9b1e7d80ac9778d98b269f4f127ca989c5333e650  src/frontend/viewmodel/tests/unit/test_sdk_facade.nim
 707b5650849ae2372752b5aac59b620abadad722fb37292a79d943d4e79f3e3f  src/frontend/viewmodel/tests/unit/test_verification_panel_registration.nim
-4588190125db636368c32a9594e62636cbff1f2506972843df4e9a238f802da1  ci/test/vm-unit-wasm-parity.sh
+99874c234e9c42c05ca4e1a3f94b545e56131ec6bfc1affdcc80fd797d151259  ci/test/vm-unit-wasm-parity.sh
 25e02f5edd71b89864b5f771a585bff1f1c6f26e8053d728c5722d1dda5442ee  ci/test/vm-unit-wasm-lane-test.sh
 50e2c425fe2491f043cea25c6bf3a8491d3c6b203babd77f888325870338a41e  ci/test/wasm-footprint.sh
 aa7bbdc7239d570a6f225bbe78553f6130b6d460984009e15d2083be16cfecbc  ci/test/wasm-fake-timer-speed.sh

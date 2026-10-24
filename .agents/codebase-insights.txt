@@ -7605,3 +7605,26 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   sibling of the scrolling body, so `table_fit_dom.attachEventLogFit`
   translates it by the body's `scrollLeft` (its own scrollLeft cannot move:
   it is as wide as the table).
+
+## Terminal Output loading paths and mutation re-grades (2026-10-24)
+- The Terminal Output pane's LINES are loaded by window on every front-end
+  (Viewport-Driven-Loading Q3). Native hosts: `terminal_output_source.
+  showTerminalLines` -> `vm.setViewport`. Desktop: `ui/panel_host.nim`'s
+  `PaneMeasure.report` for `Content.TerminalOutput` -> `setViewport`.
+  `ui/terminal_output.nim`'s `onLoadedTerminal` / `syncTerminalOutputVM`
+  (`setEvents`) has NO dispatcher left, and `loadTerminalOutput` feeds only
+  whole-output consumers (reference tests). A mutation on either `setEvents`
+  survives; aim loading arms at the viewport reports.
+- The Electron capture scripts (`scripts/plat4[57]-capture-electron.sh`,
+  plat52's) start Xvfb at 2560x1440x24 -dpi 96 when DISPLAY is unset. A
+  scratch display at another size changes the committed geometry answers and
+  turns the parity controls red; start your own display with the same
+  geometry.
+- Every Electron gate runs `just test-e2e`, which type-checks ALL specs under
+  `src/tests/gui` first: one spec using a removed fixture option (e.g.
+  `noUserLayout`, retired by the first-run-layout default) fails every gate
+  with rc=2 and no result lines.
+- `test_capability_resolution.nim` reads the TUI CLI options from
+  `CT_SPECS_DIR`'s CodeTracer-TUI.md §6.2; a pm checkout whose spec publishes
+  options the code has not landed yet (Part H's `--scrollbar-*`) reddens it.
+  Grade with a spec checkout that matches the code under test.

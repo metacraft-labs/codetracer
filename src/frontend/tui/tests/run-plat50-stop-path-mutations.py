@@ -232,7 +232,7 @@ ARMS += [
         PTY, P_MISSING,
         "the terminal answers a missing file with the old banner, naming none"),
     Arm("AB3", PANE,
-        "    if model.provenance == gpAbsent and model.heldLines.len == 0: 0",
+        "    if absent: 0",
         "    if false: 0",
         ABSENT, A_WRAP,
         "the terminal draws an absent file's rows as `⋯ loading` that never "
