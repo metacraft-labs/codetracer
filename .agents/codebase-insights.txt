@@ -7509,11 +7509,14 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   listener in a factory proc (`columnGrip`).
 - Desktop event-log cells are HTML strings: escape the output and location
   text (`escapeCellHtml`) — `<<LEFT-EDGE>>` was eaten as a tag.
-- The desktop's Call Trace is NOT a table pane: it keeps scrolling sideways
-  (`list_scrubber.styl`, requested 2026-10-16) and its rows carry no
-  `data-ct-cell`; the terminal and GPUI cut theirs. Which one wins is an open
-  user decision (Horizontal-Overflow.md, Part B notes) — do not "fix" either
-  side without it.
+- PLAT-70 Part I (Horizontal-Overflow.md §5.5): the desktop's Call Trace IS a
+  table pane now — its call boxes carry `data-ct-cell` and are cut at the
+  row column's edge (`views/table_fit_dom.fitCallTrace` sets their
+  `max-width`; the `…` is a `::after` overlay because the box is a flex row
+  `text-overflow` cannot cut); the list scrolls sideways only when a row's
+  indent + callee name do not fit. This is OQ-H5, PROPOSED and awaiting the
+  user's confirmation — it replaces Part B's "the desktop scrolls, the others
+  cut" split; if the user rules otherwise, `callFitRow`'s floor is the knob.
 - The table panes' names (`VariablesTablePane`, `EventLogTablePane`,
   `CallTraceTablePane`), the remembered document's merge
   (`mergeColumnWidths`) and `table.resize-column`'s target
@@ -7568,3 +7571,37 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The desktop Event Log's whole-log size reaches the store as the engine's
   `unfilteredTotal` (`applyEventLogResponse`); `total` is the searched /
   kind-filtered count. A defect in `total` alone shows only in a searched view.
+||||||| parent of 254d82aa77 (feat(tui,gpui,desktop): table panes fit their columns, or scroll sideways)
+
+## PLAT-70 Part I — table panes fit or scroll (Horizontal-Overflow.md §5.5)
+- ONE solver, `viewmodel/viewmodels/table_fit.nim` (`fitTable`): CSS's
+  automatic table layout over `FitColumn`s (min / preferred / flex /
+  neverCut / userUnits / fixed) → FIT (slack to flex), SHRINK (between floor
+  and preferred, pane filled) or SCROLL (floors, wider than the pane, the
+  §4 bar over `HorizontalView`). UNITS ARE THE CALLER'S: the terminal passes
+  cells, GPUI pixels (`gpuiCellUnits()` = one code-face cell, `unit=`), the
+  desktop characters (`EventLogVM.tableMetrics`). The declaration helpers
+  take `unit` for the cell-stated minimums.
+- The slack and the shrink are shared by Jefferson's divisor rule, one unit
+  at a time: a largest-remainder share is NOT monotone in the pane width
+  (Alabama paradox) and the sweep test caught it.
+- `HorizontalView.settle(fit)`: content = `contentUnits` only in SCROLL, so
+  the view returns to 0 when the bar goes. The TUI keeps each table pane's
+  view in its model (`EventLogModel.hview`, `CallTraceModel.hview`,
+  `VariablesModel.hview`); `runtime.syncTableViews` stores the settled view
+  every frame (painting is pure over a copy of the model), and
+  `tableViewOf` is the one geometry the wheel / bar / palette `view.*` read.
+- The TUI table painters lay the table out at its own width into a scratch
+  `StyledGrid` and `table_hscroll.copySlice` the `[leftCol, +width)` window —
+  header and rows through the same slice; cut cells are moved with
+  `shiftCuts` (a `…` off screen is not pressable).
+- Preferred widths are measured over the rows ON SCREEN (a windowed pane
+  cannot measure its population), so a vertical scroll can change the fit;
+  the Call Trace's composite floor is the deepest shown row's.
+- GPUI's call trace holds only its loaded section (15 rows in a plan): a
+  plan test that needs deep rows scrolls first (`wheel:calltrace:40`).
+- The desktop Event Log in SCROLL: explicit widths come from the view's
+  `columnWidthStyle` (reactive on `tableMetrics`); the header strip is a
+  sibling of the scrolling body, so `table_fit_dom.attachEventLogFit`
+  translates it by the body's `scrollLeft` (its own scrollLeft cannot move:
+  it is as wide as the table).

@@ -36,10 +36,14 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
   from std/jsffi import JsObject
   from ./list_scrubber_dom import attachListScrubber
+  from ./table_fit_dom import attachEventLogFit
 
 import ../store/types
 import ../viewmodels/event_log_vm
-from ../viewmodels/table_overflow import pxOfCells, EventLogTablePane
+from ../viewmodels/table_overflow import pxOfCells, EventLogTablePane, oneLine
+from std/unicode import runeLen
+# PLAT-70 Part I: fit or scroll (Horizontal-Overflow.md §5.5).
+import ../viewmodels/table_fit
 
 export signals, computation, components
 
@@ -93,10 +97,80 @@ proc columnClass*(col: EventLogColumn): string =
   of elcKind: "eventLog-event eventLog-cell"
   of elcOutput: "eventLog-text eventLog-cell"
 
+# ---------------------------------------------------------------------------
+# PLAT-70 Part I: the columns fit or scroll (Horizontal-Overflow.md §5.5)
+# ---------------------------------------------------------------------------
+
+const DesktopColumnGapCells* = 1
+  ## The space between two columns, in characters (the cells' padding): the
+  ## terminal's `GapCells`, so both lay out the same table.
+
+var fitCache: tuple[key: string; fit: TableFit]
+
+proc rowLocation*(row: EventLogRow): string
+
+proc desktopFit*(vm: EventLogVM): TableFit =
+  ## The Event Log's columns in CHARACTERS of the table's font, laid out by
+  ## the shared solver over the viewport the panel measured
+  ## (`EventLogVM.tableMetrics`) and each column's widest cell over the rows
+  ## held — the terminal's declaration (`eventLogFitColumns`,
+  ## `eventLogDefaultCells`) in the terminal's units, so the desktop and the
+  ## terminal make the same decision for the same rows and width (HO-13).
+  let m = vm.tableMetrics.val
+  let columns = vm.columns.val
+  let rows = vm.eventRows.val
+  var key = $m.cells & "|" & $columns.visibleColumns & "|" & $rows.len
+  for col in EventLogColumn: key.add "," & $columns.widths[col]
+  if rows.len > 0:
+    key.add "|" & $rows[0].eventId & "|" & $rows[^1].eventId
+  if fitCache.key == key:
+    return fitCache.fit
+  var widest: array[EventLogColumn, int]
+  for row in rows:
+    widest[elcTick] = max(widest[elcTick], ($row.rrTicks).len)
+    widest[elcIndex] = max(widest[elcIndex], ($row.eventId).len)
+    widest[elcLocation] = max(widest[elcLocation], rowLocation(row).runeLen)
+    widest[elcOutput] = max(widest[elcOutput],
+                            oneLine(eventLogText(row)).runeLen)
+  result = fitTable(columns.eventLogFitColumns(widest, eventLogDefaultCells()),
+                    m.cells, DesktopColumnGapCells)
+  fitCache = (key, result)
+
+proc desktopScrolls*(vm: EventLogVM): bool =
+  ## SCROLL: the columns' floors do not fit the measured viewport — the
+  ## table is laid out at them and its body scrolls sideways (HO-11).
+  vm.tableMetrics.val.cells > 0 and vm.desktopFit.overflows
+
+proc fitPx(vm: EventLogVM; cells: int): int =
+  int(round(float(cells) * vm.tableMetrics.val.charPx))
+
+proc tableMinWidthStyle*(vm: EventLogVM): string =
+  ## The header's and the rows' width in SCROLL: the laid-out table's.
+  if vm.desktopScrolls: "min-width: " & $vm.fitPx(vm.desktopFit.contentUnits) & "px"
+  else: ""
+
+proc scrollBodyStyle*(vm: EventLogVM): string =
+  ## The body scrolls sideways only in SCROLL (the bar is overflow-only).
+  if vm.desktopScrolls: "overflow-x: auto" else: ""
+
+proc fitModeOf*(vm: EventLogVM): string =
+  ## `data-ct-fit` on the table: the solver's mode, `fit` until measured.
+  if vm.tableMetrics.val.cells <= 0: $fmFit else: $vm.desktopFit.mode
+
 proc columnWidthStyle*(vm: EventLogVM; col: EventLogColumn): string =
-  ## A column's width as its cells' style — header and body alike — when the
-  ## user set one (`EventLogColumns.widths`, `ColumnCellPx` pixels a cell),
-  ## else nothing: the stylesheet's own width (Horizontal-Overflow.md §5.2).
+  ## A column's width as its cells' style — header and body alike. In SCROLL
+  ## (PLAT-70 Part I) every column is the solver's width; otherwise a column
+  ## the user set (`EventLogColumns.widths`, `ColumnCellPx` pixels a cell) is
+  ## that width and the others the stylesheet's own (Horizontal-Overflow.md
+  ## §5.2), whose flex layout is the solver's FIT and SHRINK rule (fixed
+  ## columns, the output the flex column).
+  if vm.desktopScrolls:
+    let fit = vm.desktopFit
+    let k = vm.columns.val.visibleColumns.find(col)
+    if k >= 0 and k < fit.widths.len:
+      let px = $vm.fitPx(fit.widths[k] + DesktopColumnGapCells) & "px"
+      return "flex: 0 0 " & px & "; width: " & px & "; max-width: " & px &
+             "; min-width: " & px & "; box-sizing: border-box"
   let cells = vm.columns.val.widths[col]
   if cells <= 0: ""
   else:
@@ -397,6 +471,11 @@ when defined(js):
     ##   (Scrollbar-Scrubbers.md): its track jumps there, its thumb drags,
     ##   and a mark shows the current event (`currentIndex`).
     let rowPx = proc(): float = max(1.0, vm.rowHeightPx.val)
+    # PLAT-70 Part I (§5.5): the columns' viewport, measured on every resize
+    # and reported to the ViewModel; in SCROLL the header follows the body.
+    attachEventLogFit(cast[JsObject](scrollBody), cast[JsObject](dataTable),
+                      proc(cells: int; charPx: float) =
+                        vm.setTableMetrics(cells, charPx))
     onDomEvent(searchInput, cstring"input", proc(ev: JsObject) =
       vm.setSearchQuery($inputValueOf(searchInput)), false)
 
@@ -499,12 +578,17 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
         text markerEmptyStateText(vm)
       tdiv(ref = markerContainer, class = "event-log-marker-rows"):
         discard
-      tdiv(ref = dataTable, class = "eventLog-dense-table data-table"):
-        tdiv(ref = headerStrip, class = "eventLog-column-header"):
+      tdiv(ref = dataTable, class = "eventLog-dense-table data-table",
+           `data-ct-fit` = fitModeOf(vm)):
+        tdiv(ref = headerStrip, class = "eventLog-column-header",
+             style = tableMinWidthStyle(vm)):
           discard
-        tdiv(ref = scrollBody, class = EventLogScrollBodyClass):
-          tdiv(class = "eventLog-scroll-space", height = listHeight(vm)):
-            table(class = "eventLog-rows", transform = windowOffset(vm)):
+        tdiv(ref = scrollBody, class = EventLogScrollBodyClass,
+             style = scrollBodyStyle(vm)):
+          tdiv(class = "eventLog-scroll-space", height = listHeight(vm),
+               style = tableMinWidthStyle(vm)):
+            table(class = "eventLog-rows", transform = windowOffset(vm),
+                  style = tableMinWidthStyle(vm)):
               tbody(ref = tbodyEl):
                 discard
         tdiv(class = "dt-empty", display = emptyDisplay(vm)):

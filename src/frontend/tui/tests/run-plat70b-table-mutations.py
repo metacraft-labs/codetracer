@@ -152,10 +152,12 @@ ARMS = [
              "    if col == at + 1:\n      return (true, c)")],
      [(TBL, None)],
      "§5.2: the Event Log's separators hit-tested off their drawn column"),
-    ("T3", [(TUI_EVENTS, "    let w = model.columns.columnWidthOr(\n      col, columnCells(col, k == shown.high, startCol + width - at))",
-             "    let w = columnCells(col, k == shown.high, startCol + width - at)")],
+    ("T3", [(EVENT_VM, "      f.userUnits = c.widths[col] * userUnit",
+             "      discard")],
      [(TBL, None)],
-     "HO-9: the terminal draws its defaults, not the model's widths"),
+     "HO-9: the terminal draws its defaults, not the model's widths "
+     "(re-aimed by PLAT-70 Part I: the widths reach the painters through the "
+     "shared fit's declaration, `eventLogFitColumns`)"),
     ("T4", [(TUI_CALLS, "    let fitted = fitCell(full, stop - textAt, terminalMeasure)",
              "    let fitted = fitCell(full, stop - textAt + 2, terminalMeasure)")],
      [(TBL, None)],

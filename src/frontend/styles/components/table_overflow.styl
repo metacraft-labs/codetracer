@@ -11,10 +11,35 @@
   white-space: nowrap
   min-width: 0
 
-// THE DESKTOP'S CALL TRACE IS NOT HERE: it keeps scrolling sideways
-// (`list_scrubber.styl`, requested 2026-10-16), so its rows are not cut and
-// carry no `data-ct-cell`. Whether it should truncate like the terminal's and
-// GPUI's is open (Horizontal-Overflow.md, Part B's notes).
+// PLAT-70 Part I (Horizontal-Overflow.md §5.5.5 — OQ-H5, proposed, awaiting
+// the user's confirmation): THE CALL TRACE FITS OR SCROLLS. Each row's call
+// box is a table cell ending at the row column's edge (`views/
+// table_fit_dom.fitCallTrace` sets its `max-width`); the list scrolls
+// sideways only when a row's indent and callee name do not fit. The box is a
+// flex row of the call's parts, which `text-overflow` cannot cut, so a cut
+// box draws its `…` over its last character: a last flex item stuck to the
+// box's right edge (`sticky`, so the box is not made a positioned ancestor —
+// the call guides measure their anchors against the row's offset parent).
+// The box clips its parts; none of them gives up width to fit it (a shrunk
+// toggle would move the call guides' anchor off its centre).
+.isonim-calltrace .call-child-box[data-ct-cell] > *
+  flex-shrink: 0
+
+.isonim-calltrace .call-child-box[data-ct-cut]::after
+  content: "…"
+  position: sticky
+  right: 0
+  flex-shrink: 0
+  margin-left: auto
+  align-self: stretch
+  display: flex
+  align-items: center
+  padding-left: 0.125em
+  background-color: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
+
+.isonim-calltrace .event-selected .call-child-box[data-ct-cut]::after
+  background-color: colors-editor-surface-select
 
 // The Variables pane's value takes what the row has left, and is cut there:
 // every box from the row down to the value gives up its content width
@@ -47,6 +72,12 @@
 // (Pointer-Affordances: a truncated cell's `…` is `pointer`).
 [data-ct-cut]
   cursor: pointer
+
+// PLAT-70 Part I (§5.5): in SCROLL the Event Log's body scrolls sideways and
+// its header strip follows it by a translation (`views/table_fit_dom`); the
+// table clips the header's part left of the pane.
+.eventLog-dense-table[data-ct-fit="scroll"]
+  overflow-x: hidden
 
 // The Event Log's column separators: a grip at each header cell's right edge.
 .eventLog-column-header > span

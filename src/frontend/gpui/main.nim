@@ -2108,6 +2108,7 @@ proc syncLeafContext() =
   let ct = gGeom.tabsNodeOfPane($paneCalltrace)
   if ct >= 0:
     callTracePaneWidthPx = gGeom.nodes[ct].body.w
+    callTracePaneHeightPx = gGeom.nodes[ct].body.h
 
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
@@ -3260,6 +3261,22 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       discard scrollTerminalColumns(r,
         wheelColumnsOf(-dx, GpuiWheelLinePx))
       return
+    # PLAT-70 Part I (§5.5): over a table pane whose columns SCROLL, the
+    # horizontal wheel moves its view — in pixels, a notch of
+    # `WheelColumns` columns of the code face.
+    if dx != 0.0 and onPane in [$paneCalltrace, $paneEventLog]:
+      let kind = if onPane == $paneCalltrace: paneCalltrace else: paneEventLog
+      let cols = wheelColumnsOf(-dx, GpuiWheelLinePx)
+      let moved =
+        if kind == paneCalltrace: callTraceHView.scrollBy(cols * gpuiCellUnits())
+        else: eventLogHView.scrollBy(cols * gpuiCellUnits())
+      if moved:
+        traceGesture($kind & "-hscroll left=" &
+                     $(if kind == paneCalltrace: callTraceHView.leftCol
+                       else: eventLogHView.leftCol))
+        redrawPaneOf(r, kind)
+      if dy == 0.0:
+        return
     if onPane == $paneCalltrace:
       # GPUI's wheel delta is the CONTENT's motion: a turn toward the user
       # (scroll down) moves the content up, a negative `dy`.
@@ -9590,7 +9607,9 @@ proc runOpen(cmd: GpuiCommand): int =
     if st >= 0: statePaneSizePx = (g.nodes[st].body.w, g.nodes[st].body.h)
     syncInHandRows(g)
     let ct = g.tabsNodeOfPane($paneCalltrace)
-    if ct >= 0: callTracePaneWidthPx = g.nodes[ct].body.w
+    if ct >= 0:
+      callTracePaneWidthPx = g.nodes[ct].body.w
+      callTracePaneHeightPx = g.nodes[ct].body.h
     let e = g.tabsNodeOfPane($paneEditor)
     if e >= 0: editorPaneHeightPx = g.nodes[e].body.h
     # The call trace and the event log read the windows their panes show

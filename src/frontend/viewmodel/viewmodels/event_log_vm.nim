@@ -67,6 +67,7 @@ import ../store/[replay_data_store, types]
 import ../viewport
 export viewport
 import ./table_overflow
+import ./table_fit
 from ../keymap/operation_catalogue import parseColumnResize
 
 const
@@ -357,6 +358,60 @@ func columnResizeTarget*(c: EventLogColumns; arg: string):
     col = named
   (true, col, parsed.delta, "")
 
+const
+  EventLogTickCells* = 8
+    ## PLAT-70 Part I (Horizontal-Overflow.md §5.5.3): the tick column's
+    ## default width — its preferred width is at least this.
+  EventLogIndexCells* = 4
+  EventLogKindCells* = 4
+  EventLogLocationMinCells* = 10
+  EventLogOutputMinCells* = 12
+
+func eventLogDefaultCells*(): array[EventLogColumn, int] =
+  ## The terminal's default field widths, in cells: what a column's
+  ## preferred width is at least (a number column) or exactly (the kind).
+  result[elcTick] = EventLogTickCells
+  result[elcIndex] = EventLogIndexCells
+  result[elcKind] = EventLogKindCells
+  result[elcLocation] = 0
+  result[elcOutput] = 0
+
+func eventLogFitColumns*(c: EventLogColumns;
+                         widest, defaults: array[EventLogColumn, int];
+                         unit = 1; userUnit = unit): seq[FitColumn] =
+  ## §5.5.3: the Event Log's visible columns, in display order, declared for
+  ## `table_fit.fitTable` in the caller's units — `widest` is each column's
+  ## widest cell over the rows shown and `defaults` its default field width
+  ## (both in the caller's units), `unit` the caller's units per cell (the
+  ## minimums are in cells) and `userUnit` its units per cell of a width the
+  ## user set (`EventLogColumns.widths`, §5.2).
+  ##
+  ##   tick, `#` — never cut; preferred: the widest number, at least the
+  ##               default;
+  ##   kind      — never cut; the default;
+  ##   location  — at least 10 cells; preferred: the widest location;
+  ##   output    — at least 12 cells; preferred: the widest output; the one
+  ##               flex column (the slack).
+  for col in c.visibleColumns:
+    var f = FitColumn(name: $col)
+    case col
+    of elcTick, elcIndex:
+      f.neverCut = true
+      f.preferredUnits = max(defaults[col], widest[col])
+    of elcKind:
+      f.neverCut = true
+      f.preferredUnits = defaults[col]
+    of elcLocation:
+      f.minUnits = EventLogLocationMinCells * unit
+      f.preferredUnits = max(widest[col], 1)
+    of elcOutput:
+      f.minUnits = EventLogOutputMinCells * unit
+      f.preferredUnits = max(widest[col], 1)
+      f.flex = 1
+    if c.widths[col] > 0:
+      f.userUnits = c.widths[col] * userUnit
+    result.add f
+
 func parseEventLogColumn*(name: string): (bool, EventLogColumn) =
   ## A column by its title or its enum name, case-insensitively — what a
   ## typed command names (`:column-hide location`).
@@ -426,6 +481,12 @@ type
       ## "[+ Columns]" control, a checkbox per column (show / hide) with its
       ## move left / right. The desktop draws it from here; the terminal's
       ## `:columns` lists the same rows.
+    tableMetrics*: Signal[tuple[cells: int; charPx: float]]
+      ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the columns' viewport
+      ## a pixel front-end measured — its width in characters of the table's
+      ## font, and that character's width — so the desktop lays its columns
+      ## out by the shared solver in the same cells as the terminal. (0, 0)
+      ## until measured; the terminal and GPUI lay out without it.
 
     # -- Event log data — THE STORE'S OWN SIGNALS --
     #
@@ -715,6 +776,12 @@ proc setColumnWidth*(vm: EventLogVM; col: EventLogColumn;
   var c = vm.columns.val
   result = c.setColumnWidth(col, cells)
   vm.columns.val = c
+
+proc setTableMetrics*(vm: EventLogVM; cells: int; charPx: float) =
+  ## PLAT-70 Part I: the columns' viewport a pixel front-end measured.
+  let m = (cells: max(0, cells), charPx: max(0.0, charPx))
+  if vm.tableMetrics.val != m:
+    vm.tableMetrics.val = m
 
 proc resizeColumn*(vm: EventLogVM; col: EventLogColumn;
                    delta, current: int): bool =
@@ -1304,6 +1371,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let sortAscending = createSignal(true)
     let columns = createSignal(defaultEventLogColumns())
     let columnsMenuOpen = createSignal(false)
+    let tableMetrics = createSignal((cells: 0, charPx: 0.0))
 
     # Event-log state, READ OFF THE STORE rather than created here. See the
     # field declarations above for why these are aliases and not copies.
@@ -1388,6 +1456,7 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       sortAscending: sortAscending,
       columns: columns,
       columnsMenuOpen: columnsMenuOpen,
+      tableMetrics: tableMetrics,
       eventRows: eventRows,
       totalEventCount: totalEventCount,
       loadingState: loadingState,

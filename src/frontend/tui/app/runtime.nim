@@ -1893,6 +1893,52 @@ proc syncOutputViews(rt: TuiRuntime) =
     let geo = terminalPaneGeometry(rt.app.terminalOutput, t)
     rt.app.terminalOutput.hview.setViewport(geo.textWidth)
 
+const TableViewPanes = {paneEventLog, paneCalltrace, paneState}
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the table panes, whose
+  ## columns scroll sideways when their floors do not fit.
+
+proc tableViewOf(rt: TuiRuntime; pane: PaneKind):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## A table pane's horizontal view this frame, settled over its fit, and
+  ## where its bar is — the painters' own geometry functions, so the wheel,
+  ## the bar and the drawing read one decision.
+  let area = rt.paintedAreaOf(pane)
+  if area.width <= 0 or area.height <= 0:
+    return
+  case pane
+  of paneEventLog:
+    if not rt.app.eventLog.hasContent: return
+    let geo = rt.app.eventLog.eventLogGeometry(area)
+    (geo.barRow >= 0, geo.barRow, area.col, geo.width, geo.view)
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty: return
+    let geo = rt.app.callTrace.callTraceGeometry(area)
+    (geo.barRow >= 0, geo.barRow, area.col, geo.rowWidth, geo.view)
+  of paneState:
+    if rt.app.variables.isEmpty: return
+    let geo = rt.app.variables.variablesGeometry(area)
+    (geo.barRow >= 0, geo.barRow, area.col, geo.width, geo.view)
+  else: (false, -1, 0, 0, HorizontalView())
+
+proc storeTableView(rt: TuiRuntime; pane: PaneKind; v: HorizontalView) =
+  case pane
+  of paneEventLog: rt.app.eventLog.hview = v
+  of paneCalltrace: rt.app.callTrace.hview = v
+  of paneState: rt.app.variables.hview = v
+  else: discard
+
+proc syncTableViews(rt: TuiRuntime) =
+  ## PLAT-70 Part I: each table pane's view settled over this frame's fit
+  ## before the frame is painted — so a pane widened until its columns fit
+  ## comes back at column 0, and is there when its bar next appears (§4.1).
+  for pane in TableViewPanes:
+    let area = rt.paintedAreaOf(pane)
+    if area.width <= 0:
+      continue
+    let t = rt.tableViewOf(pane)
+    if t.cols > 0:
+      rt.storeTableView(pane, t.view)
+
 proc horizontalViewPane(rt: TuiRuntime; pane: PaneKind): bool =
   ## Whether `pane` is a text pane with a horizontal view now (§4.1): the
   ## editor with a document, the Terminal Output's LINE view (the screen
@@ -1902,6 +1948,7 @@ proc horizontalViewPane(rt: TuiRuntime; pane: PaneKind): bool =
   of paneTerminalOutput: rt.app.terminalOutput.loaded and
                          not rt.app.terminalOutput.screenShown
   of paneBuildOutput: true
+  of paneEventLog, paneCalltrace, paneState: rt.tableViewOf(pane).view.overflows
   else: false
 
 proc scrollPaneView(rt: TuiRuntime; pane: PaneKind;
@@ -1916,6 +1963,12 @@ proc scrollPaneView(rt: TuiRuntime; pane: PaneKind;
     step(buf.hview)
   of paneTerminalOutput: step(rt.app.terminalOutput.hview)
   of paneBuildOutput: step(rt.app.buildView.hview)
+  of paneEventLog, paneCalltrace, paneState:
+    # PLAT-70 Part I: the view as this frame settled it, stepped, kept.
+    var v = rt.tableViewOf(pane).view
+    let moved = step(v)
+    rt.storeTableView(pane, v)
+    moved
   else: false
 
 proc routeHorizontalWheel(rt: TuiRuntime; event: MouseEvent;
@@ -1929,7 +1982,8 @@ proc routeHorizontalWheel(rt: TuiRuntime; event: MouseEvent;
   let at = rt.layoutGeometry().paneAt(event.row, event.col)
   var pane = if at.found: at.region.pane else: paneEditor
   if rt.maximize.active:
-    for kind in [paneEditor, paneTerminalOutput, paneBuildOutput]:
+    for kind in [paneEditor, paneTerminalOutput, paneBuildOutput,
+                 paneEventLog, paneCalltrace, paneState]:
       if rt.paintedAreaOf(kind).contains(event.row, event.col):
         pane = kind
   elif not at.found:
@@ -1963,6 +2017,8 @@ proc hbarOf(rt: TuiRuntime; pane: PaneKind):
     let content = CellArea(col: area.col, row: area.row + 1,
                            width: area.width, height: max(0, area.height - 1))
     return buildBarOf(model, content)
+  of paneEventLog, paneCalltrace, paneState:
+    return rt.tableViewOf(pane)
   else:
     discard
 
@@ -1975,7 +2031,8 @@ proc pressHorizontalBar(rt: TuiRuntime; event: MouseEvent;
   ## `routeTerminalOutputClick`.)
   if event.kind != mekPress or event.button != mbLeft:
     return false
-  for pane in [paneEditor, paneBuildOutput]:
+  for pane in [paneEditor, paneBuildOutput, paneEventLog, paneCalltrace,
+               paneState]:
     if not rt.horizontalViewPane(pane):
       continue
     let bar = rt.hbarOf(pane)
@@ -2032,10 +2089,11 @@ proc runViewOperation(rt: TuiRuntime; operation: string;
   ## (`view.scroll-left` / `-right`), by half the view, back to column 0.
   let (had, focused) = rt.focus.focusedPane()
   let pane = if had: focused else: paneEditor
-  if pane notin {paneTerminalOutput, paneBuildOutput} or
+  if pane notin {paneTerminalOutput, paneBuildOutput} + TableViewPanes or
      not rt.horizontalViewPane(pane):
-    rt.note("`" & operation & "` scrolls the Terminal Output or Build " &
-            "Output pane")
+    rt.note("`" & operation & "` scrolls a pane wider than its content " &
+            "area: Terminal Output, Build Output, or a table pane whose " &
+            "columns do not fit")
     outcome.repaint = true
     return true
   discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
@@ -2080,7 +2138,7 @@ proc scrubCallTrace(rt: TuiRuntime; area: CellArea; row: int;
   ## then shows (`pagesCallTrace`), as a scroll does.
   if area.width <= 0 or not area.tracked:
     return false
-  let body = area.height - 1
+  let body = rt.app.callTrace.callTraceBodyRows(area)
   let sm = rt.app.callTrace.scrubberOf(body)
   let at = clamp(row, area.row + 1, area.row + body)
   let hit = sm.verticalScrubberHit(area.row + 1, body, at)
@@ -2320,7 +2378,7 @@ proc tableCellAt(rt: TuiRuntime; row, col: int): TableCellHit =
   of paneCalltrace:
     if rt.app.callTrace.isEmpty: return
     cuts = paintCallTraceScreen(g, under, rt.app.callTrace).cuts
-    body = under.height - 1
+    body = rt.app.callTrace.callTraceBodyRows(under)
   else: return
   let i = cuts.cutCellAt(row, col)
   if i < 0:
@@ -2439,9 +2497,11 @@ proc resizeEventLogColumn(rt: TuiRuntime; arg: string;
   if not target.ok:
     rt.note(target.message)
     return
-  let area = rt.eventLogArea()
+  let area = rt.paintedAreaOf(paneEventLog)
   var current = 0
-  for (c, _, w) in rt.app.eventLog.columnCellsOf(area.col, max(1, area.width)):
+  # PLAT-70 Part I: the width the column is DRAWN at (the fit's).
+  var g = newStyledGrid(area.col + max(1, area.width), area.row + max(1, area.height))
+  for (c, _, w) in paintEventLog(g, area, rt.app.eventLog).columnCells:
     if c == target.col: current = w
   discard rt.app.eventLog.columns.resizeColumn(target.col, target.delta, current)
   rt.note(rt.describeWidth(target.col))
@@ -5925,6 +5985,8 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   rt.scheduleHighlights()
   # PLAT-70: the output panes' widths before the model is taken from them.
   rt.syncOutputViews()
+  # PLAT-70 Part I: the table panes' views over this frame's fit.
+  rt.syncTableViews()
   var model = rt.app.shellModel(rt.width, rt.height)
   model.status.mode = statusMode(rt.modal.mode)
   # PLAT-68: the indicator's text is the router's (a pending prefix, a

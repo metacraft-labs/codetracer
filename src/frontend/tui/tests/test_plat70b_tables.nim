@@ -96,11 +96,24 @@ suite "PLAT-70 Part B: the terminal's table panes, in process":
           if room <= 0 or col == elcKind: continue
           inc cells
           let full = eventCellText(r.event, col)
-          let fitted = fitCell(full, room, terminalMeasure)
+          # PLAT-70 Part I (§5.5): a cell is fitted to its COLUMN's width (the
+          # solver's); in SCROLL a column at the pane's edge shows the part of
+          # it on screen.
+          let fitted = fitCell(full, w, terminalMeasure)
           let drawn = g.rowCells(y, at, room)
           let shown = if col in {elcTick, elcIndex}: drawn.strip(trailing = false)
                       else: drawn.strip(leading = false)
-          if shown != fitted.text and not (fitted.text.len == 0 and shown.strip.len == 0):
+          let whole = room == w
+          let expected =
+            if whole: fitted.text
+            else: truncateToCells(
+                    (if col in {elcTick, elcIndex}: padLeft(fitted.text, w)
+                     else: padRight(fitted.text, w)), room).strip(leading = false)
+          let mismatch =
+            if whole: shown != expected and
+                      not (fitted.text.len == 0 and shown.strip.len == 0)
+            else: shown.strip != expected.strip
+          if mismatch:
             inc wrong
             if wrong <= 5:
               checkpoint("width " & $width & " " & $col & ": drawn '" & shown &
@@ -113,7 +126,7 @@ suite "PLAT-70 Part B: the terminal's table panes, in process":
             if reportWrong <= 5:
               checkpoint("report width " & $width & " " & $col & " '" & full &
                          "' reported " & $reported)
-          if fitted.truncated:
+          if fitted.truncated and whole:
             inc cut
             # The `…` is the cut cell's last drawn character.
             let k = screen.cuts.ellipsisAt(y, at + (if col in {elcTick, elcIndex}:

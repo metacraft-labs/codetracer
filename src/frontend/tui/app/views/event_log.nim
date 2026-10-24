@@ -75,12 +75,18 @@ from codetracer_embed import ScrubberModel, scrubberModel
 # PLAT-70 Part B: the cut cells, the open detail and the column widths
 # (Horizontal-Overflow.md §5).
 from codetracer_embed import FittedCell, fitCell, CutCell, DetailToggle,
-  detailView, isOpen, isOpenIn, columnWidthOr, EventLogTableName
+  detailView, isOpen, isOpenIn, columnWidthOr, EventLogTableName, oneLine
+# PLAT-70 Part I: the columns' widths and the horizontal view
+# (Horizontal-Overflow.md §5.5).
+from codetracer_embed import TableFit, fitTable, settle, overflows, barModel,
+  HorizontalView, eventLogFitColumns, eventLogDefaultCells, EventLogTickCells,
+  EventLogIndexCells, EventLogKindCells
 from ../formatters/type_formatters import terminalMeasure
 
 import ../layout/profile
 import ./styled_row
 import ./scrubber_track
+import ./table_hscroll
 
 export styled_row, profile
 export EventLogColumn, EventLogColumns, defaultEventLogColumns,
@@ -190,6 +196,10 @@ type
       ## (`list.show-detail`, a click on a `…`); its key is the event's number.
     copyChord*: string
       ## The resolved `list.copy` chord the detail's hint names (KL-8).
+    hview*: HorizontalView
+      ## PLAT-70 Part I: the table's horizontal view (Horizontal-Overflow.md
+      ## §5.5) — `leftCol` is what the runtime's wheel and bar move; the
+      ## painter settles it over each frame's fit.
 
   EventLogScreen* = object
     ## One painted pane, plus the counts and coordinates a test asserts on.
@@ -230,6 +240,12 @@ type
     trackTop*: int
     trackRows*: int
       ## The track's first screen row and its height (the body's).
+    fit*: TableFit
+      ## PLAT-70 Part I: the columns' fit this frame (FIT, SHRINK, SCROLL).
+    hview*: HorizontalView
+      ## The horizontal view the pane was drawn from, settled over `fit`.
+    barRow*: int
+      ## The SCREEN row of the horizontal bar, -1 when none is drawn.
 
 const
   MinTrackedWidth* = 8
@@ -252,15 +268,14 @@ const
     ## the last one is short, so both "it pages" and "it finds the end" are
     ## observable on real data.
 
-  TickFieldCells* = 8
+  TickFieldCells* = EventLogTickCells
   GapCells* = 1
-  IndexFieldCells* = 4
+  IndexFieldCells* = EventLogIndexCells
     ## The `#` column: the event's number in the log.
-  CategoryFieldCells* = 4
-  LocationFieldCells* = 18
-  OutputFieldCells* = 24
-    ## The output column's width when it is NOT the last column; last, it
-    ## takes the rest of the row.
+  CategoryFieldCells* = EventLogKindCells
+    ## PLAT-70 Part I: the default widths are the shared declaration's
+    ## (`event_log_vm.eventLogFitColumns`); the location and output columns
+    ## take their widths from what they show (Horizontal-Overflow.md §5.5).
   HeaderStyle* = CellStyle(role: srChromeMuted, bold: true)
     ## The column header's titles (the desktop's `.eventLog-column-header`).
 
@@ -622,10 +637,6 @@ proc locationTextFor*(event: EventRow): string =
   if event.file.len == 0: ""
   else: pathBaseName(event.file) & ":" & $event.line
 
-proc columnCellsOf*(model: EventLogModel; startCol, width: int):
-    seq[(EventLogColumn, int, int)]
-  ## Defined with the header, below.
-
 func eventCellText*(event: EventRow; col: EventLogColumn): string =
   ## What `col` says about `event`, whole — the cell before it is fitted.
   case col
@@ -639,16 +650,51 @@ func eventCellText*(event: EventRow; col: EventLogColumn): string =
   of elcKind: categoryLabel(event.category).strip
   of elcOutput: event.content.strip(leading = false, trailing = true)
 
-proc eventRowLayout*(model: EventLogModel; row: EventLogRow; startCol,
-                     width, screenRow: int):
+proc eventLogFit*(model: EventLogModel; rows: openArray[EventLogRow];
+                  width: int): TableFit =
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the columns' widths in a
+  ## pane `width` cells wide (the scrubber's column excluded), from each
+  ## column's widest cell over the rows shown — FIT, SHRINK or SCROLL, the
+  ## shared solver's decision (`table_fit.fitTable`, the declaration
+  ## `event_log_vm.eventLogFitColumns`).
+  var widest: array[EventLogColumn, int]
+  for row in rows:
+    if row.kind != elrEvent:
+      continue
+    for col in EventLogColumn:
+      widest[col] = max(widest[col],
+                        cellWidthOf(oneLine(eventCellText(row.event, col))))
+  fitTable(model.columns.eventLogFitColumns(widest, eventLogDefaultCells()),
+           width, GapCells)
+
+proc columnCellsOf*(model: EventLogModel; startCol: int;
+                    fit: TableFit): seq[(EventLogColumn, int, int)] =
+  ## Every visible column with its first column (from `startCol`) and width
+  ## — the ONE table both the header and the rows are laid out by.
+  let shown = model.columns.visibleColumns
+  for k, col in shown:
+    if k < fit.widths.len:
+      result.add (col, startCol + fit.starts[k], fit.widths[k])
+
+proc columnCellsOf*(model: EventLogModel; startCol, width: int):
+    seq[(EventLogColumn, int, int)] =
+  ## The columns of a pane `width` cells wide over the rows from the view's
+  ## top — for a caller with no painted screen at hand.
+  let rows = model.paneRows(model.scrollTop, max(1, model.pageSize))
+  model.columnCellsOf(startCol, model.eventLogFit(rows, width))
+
+proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
+                     cells: openArray[(EventLogColumn, int, int)];
+                     startCol, width, screenRow: int):
     tuple[spans: StyledRow; cuts: seq[CutCell]] =
   ## One body row, `     38 out  main.py:111  2 + 3 = 5`, and the cells it
-  ## drew cut.
+  ## drew cut, laid out over `cells` (columns from 0) in a row `width` cells
+  ## wide.
   ##
   ## PLAT-70 Part B (Horizontal-Overflow.md §5.1): EVERY CELL IS FITTED TO ITS
   ## COLUMN BY `fitCell` — cut with `…` when it does not fit, untouched when
   ## it does — so the `…` on screen is exactly the shared decision's
-  ## `truncated` (HO-8). The columns are `columnCellsOf`'s, the header's.
+  ## `truncated` (HO-8). The columns are the header's.
   if width <= 0:
     return
   case row.kind
@@ -664,7 +710,7 @@ proc eventRowLayout*(model: EventLogModel; row: EventLogRow; startCol,
   let selected = row.index == model.selected
   var spans: seq[StyledSpan] = @[]
   var used = 0
-  for (col, at, w) in model.columnCellsOf(0, width):
+  for (col, at, w) in cells:
     if at > used:
       spans.add StyledSpan(text: repeat(' ', at - used), style: DefaultCellStyle)
       used = at
@@ -715,37 +761,14 @@ func detailColumnOf*(model: EventLogModel; column: string): EventLogColumn =
   elif shown.len > 0: shown[^1]
   else: elcOutput
 
-func columnCells*(col: EventLogColumn; last: bool; rest: int): int =
-  ## One column's DEFAULT width in cells: fixed for every column but a LAST
-  ## output column, which takes `rest`.
-  case col
-  of elcTick: TickFieldCells
-  of elcIndex: IndexFieldCells
-  of elcLocation: LocationFieldCells
-  of elcKind: CategoryFieldCells
-  of elcOutput: (if last: max(0, rest) else: OutputFieldCells)
-
-proc columnCellsOf*(model: EventLogModel; startCol, width: int):
-    seq[(EventLogColumn, int, int)] =
-  ## Every visible column with its first screen column and width — the ONE
-  ## table both the header and the rows are laid out by. A width the user set
-  ## (PLAT-70 Part B, `EventLogColumns.widths`) replaces the default.
-  let shown = model.columns.visibleColumns
-  var at = startCol
-  for k, col in shown:
-    if k > 0:
-      at += GapCells
-    let w = model.columns.columnWidthOr(
-      col, columnCells(col, k == shown.high, startCol + width - at))
-    result.add (col, at, w)
-    at += w
-
-proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
+proc headerRowSpans*(model: EventLogModel;
+                     cells: openArray[(EventLogColumn, int, int)];
+                     width: int): StyledRow =
   ## The column header: each visible column's title over its cells, in the
   ## model's order (the desktop's `.eventLog-column-header`). A title is
   ## clipped to its column (chrome: a header is not a table cell).
   var line = ""
-  for (col, at, w) in model.columnCellsOf(0, width):
+  for (col, at, w) in cells:
     while cellWidthOf(line) < at:
       line.add ' '
     # PLAT-50: the column the log is ordered by carries the desktop's sort
@@ -760,21 +783,71 @@ proc headerRowSpans*(model: EventLogModel; width: int): StyledRow =
               else: truncateToCells(title, w))
   @[StyledSpan(text: truncateToCells(line, width), style: HeaderStyle)]
 
+type
+  EventLogGeometry* = object
+    ## PLAT-70 Part I: where the pane's parts go this frame — read by the
+    ## painter and by the runtime's wheel, bar and resize routes, so a
+    ## gesture and the drawing cannot disagree.
+    tracked*: bool
+    width*: int
+      ## The cells the columns are shown in (the scrubber's column excluded).
+    header*: bool
+    firstBody*: int
+    bodyHeight*: int
+      ## The body's rows, less the bar's row while it is shown.
+    fit*: TableFit
+    view*: HorizontalView
+      ## The pane's horizontal view, settled over `fit`.
+    barRow*: int
+      ## The SCREEN row of the horizontal bar, -1 when it is not drawn.
+
+proc eventLogGeometry*(model: EventLogModel; area: CellArea): EventLogGeometry =
+  ## The pane's geometry in `area`: the columns' fit over the rows the body
+  ## shows (§5.5), the horizontal view settled over it, and — in SCROLL, when
+  ## the body has a row to spare — §4.7's bar on the body's last row.
+  result.barRow = -1
+  result.tracked = area.width >= MinTrackedWidth and area.height > 2
+  result.width = if result.tracked: area.width - ScrubberTrackCells
+                 else: area.width
+  result.header = area.height > 2
+  result.firstBody = area.row + (if result.header: 2 else: 1)
+  result.bodyHeight = max(0, area.row + area.height - result.firstBody)
+  let rows = model.paneRows(model.scrollTop, result.bodyHeight)
+  result.fit = model.eventLogFit(rows, max(0, result.width))
+  result.view = model.hview
+  result.view.settle(result.fit)
+  if result.fit.overflows and result.bodyHeight > 1:
+    dec result.bodyHeight
+    result.barRow = result.firstBody + result.bodyHeight
+
 proc paintEventLog*(g: var StyledGrid; area: CellArea;
                     model: EventLogModel): EventLogScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
   ##
   ## PURE over what is held: this never calls the seam. See the module header.
+  ##
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the header and the rows are
+  ## laid out once at the TABLE's width (the solver's), into a scratch grid,
+  ## and the window `[leftCol, leftCol + width)` of each is copied to the
+  ## pane — the header over its cells at every scroll.
   result = EventLogScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, eventRows: 0,
     pendingRows: 0, selectedRow: -1, currentRow: -1,
-    tickColumn: -1, contentColumn: -1, headerRow: -1, trackCol: -1)
+    tickColumn: -1, contentColumn: -1, headerRow: -1, trackCol: -1,
+    barRow: -1)
   # PLAT-51: THE RIGHTMOST COLUMN IS THE SCROLLBAR SCRUBBER, inside the pane's
   # own rectangle (Scrollbar-Scrubbers.md §4), when the pane has a body and
   # room for it; the columns lay out in the cells left of it.
-  let tracked = area.width >= MinTrackedWidth and area.height > 2
-  let width = if tracked: area.width - ScrubberTrackCells else: area.width
-  result.columnCells = model.columnCellsOf(area.col, width)
+  let geo = model.eventLogGeometry(area)
+  let width = geo.width
+  let left = geo.view.leftCol
+  let shift = area.col - left
+  result.fit = geo.fit
+  result.hview = geo.view
+  let tableCells = model.columnCellsOf(0, geo.fit)
+  let tableW = max(width, geo.fit.contentUnits)
+  for (col, at, w) in tableCells:
+    result.columnCells.add (col, at + shift, w)
   for (col, at, _) in result.columnCells:
     if col == elcTick: result.tickColumn = at
     if col == elcOutput: result.contentColumn = at
@@ -791,27 +864,34 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
+  # The table at its own width; row `area.row + k` of the pane is row `k`.
+  var table = newStyledGrid(tableW, area.height)
   # PLAT-49 part B: THE COLUMN HEADER, under the title row (which the shell's
   # tab strip replaces) — the desktop's table names its columns, and with
   # columns that can be hidden and reordered the reader has to see which are
   # which.
-  let header = area.height > 2
-  if header:
+  if geo.header:
     result.headerRow = area.row + 1
-    var at = area.col
-    for span in headerRowSpans(model, width):
-      g.paint(area.row + 1, at, span.text, span.style)
+    var at = 0
+    for span in headerRowSpans(model, tableCells, tableW):
+      table.paint(1, at, span.text, span.style)
       at += cellWidthOf(span.text)
-  let firstBody = area.row + (if header: 2 else: 1)
-  let bodyHeight = area.row + area.height - firstBody
+    g.copySlice(area.row + 1, area.col, table, 1, left, width)
+  let firstBody = geo.firstBody
+  let bodyHeight = geo.bodyHeight
   result.bodyHeight = bodyHeight
   let rows = model.paneRows(model.scrollTop, bodyHeight)
-  if tracked and bodyHeight > 0:
+  if geo.tracked and bodyHeight > 0:
     result.trackCol = area.col + width
     result.trackTop = firstBody
     result.trackRows = bodyHeight
     paintVerticalScrubber(g, result.trackCol, firstBody, bodyHeight,
                           model.scrubberOf(bodyHeight))
+  if geo.barRow >= 0:
+    # §4.7: the bar on the body's last row; the corner cell (the scrubber's
+    # column on that row) belongs to neither track (HO-7).
+    result.barRow = geo.barRow
+    paintHorizontalBar(g, geo.barRow, area.col, width, geo.view.barModel)
 
   if rows.len == 0:
     g.paint(firstBody, area.col,
@@ -821,11 +901,12 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
     return
 
   # PLAT-70 Part B: the separators a drag on the header resizes — the gap
-  # cell right of each column but the last.
-  if header:
+  # cell right of each column but the last (those on screen).
+  if geo.header:
     for k in 0 ..< result.columnCells.len - 1:
       let (col, at, w) = result.columnCells[k]
-      result.separators.add (col, at + w)
+      if at + w >= area.col and at + w < area.col + width:
+        result.separators.add (col, at + w)
 
   # The body: each event's row, and under the one whose detail is open its
   # full text (Horizontal-Overflow.md §5.3), until the body is full.
@@ -834,12 +915,14 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
     if line >= bodyHeight:
       break
     let screenRow = firstBody + line
-    let laid = eventRowLayout(model, row, area.col, width, screenRow)
-    var at = area.col
+    let tableRow = screenRow - area.row
+    let laid = eventRowLayout(model, row, tableCells, 0, tableW, screenRow)
+    var at = 0
     for span in laid.spans:
-      g.paint(screenRow, at, span.text, span.style)
+      table.paint(tableRow, at, span.text, span.style)
       at += cellWidthOf(span.text)
-    result.cuts.add laid.cuts
+    g.copySlice(screenRow, area.col, table, tableRow, left, width)
+    result.cuts.add shiftCuts(laid.cuts, shift, area.col, area.col + width)
     result.visible.add row
     result.lineRows.add result.visible.high
     inc line
@@ -856,8 +939,9 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
         var colAt, colW = 0
         for (c, cAt, cW) in result.columnCells:
           if c == col:
-            colAt = cAt
-            colW = min(cW, area.col + width - cAt)
+            # The detail wraps inside the column's part on screen.
+            colAt = max(area.col, cAt)
+            colW = max(1, min(cAt + cW, area.col + width) - colAt)
         let view = detailView(eventCellText(row.event, col), colW,
                               bodyHeight, model.copyChord, terminalMeasure)
         for text in view.lines:

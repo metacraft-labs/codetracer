@@ -9,10 +9,11 @@
  *     EXACTLY the cells the browser draws cut (its `text-overflow: ellipsis`
  *     shows when the text is wider than the cell), both directions, and a
  *     cut is present in each pane;
- *   * the desktop's Call Trace still scrolls sideways (requested 2026-10-16;
- *     whether it should cut its rows like the terminal and GPUI is open):
- *     its rows are not table cells, and the long argument list overflows a
- *     list that scrolls;
+ *   * the desktop's Call Trace fits or scrolls (PLAT-70 Part I, §5.5.5 —
+ *     OQ-H5, proposed, awaiting the user's confirmation): here every row's
+ *     indent and callee name fit, so its rows are table cells cut at the
+ *     pane — the long argument list is cut, not scrolled to
+ *     (`plat70i-fit-or-scroll.spec.ts` covers the scroll);
  *   * §5.3 hover — the pointer resting on a cut cell shows its whole text in
  *     a tooltip after 500 ms (not before), wrapped at min(80 columns, the
  *     window); on a cell that fits, none;
@@ -135,15 +136,16 @@ test.describe("PLAT-70 Part B: the desktop's table panes truncate, resize and re
       expect(mine.some((c: any) => c.cut), `a cut cell in ${p}`).toBe(true);
     }
 
-    // ---- The desktop's Call Trace scrolls sideways, uncut ------------------
-    expect(all.filter((c: any) => c.cell.startsWith("call-trace|")).length).toBe(0);
+    // ---- PLAT-70 Part I: the desktop's Call Trace fits — its rows cut ------
+    const callCells = all.filter((c: any) => c.cell.startsWith("call-trace|"));
+    expect(callCells.length).toBeGreaterThan(0);
+    expect(callCells.some((c: any) => c.cut), "the wide call is cut").toBe(true);
     const callScroll = await page.evaluate(() => {
       const box = document.querySelector(".local-calltrace-view") as HTMLElement;
       return box ? { sw: box.scrollWidth, cw: box.clientWidth, ox: getComputedStyle(box).overflowX } : null;
     });
     expect(callScroll).not.toBeNull();
-    expect(["auto", "scroll"]).toContain(callScroll!.ox);
-    expect(callScroll!.sw, "the wide call overflows its list").toBeGreaterThan(callScroll!.cw);
+    expect(callScroll!.ox, "no sideways scroll while the floors fit").toBe("hidden");
 
     // ---- Decision 3: the state pane does not scroll sideways ---------------
     const stateScroll = await page.evaluate(() => {

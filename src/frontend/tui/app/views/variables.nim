@@ -84,6 +84,10 @@ import ../layout/profile
 import ./styled_row
 import ./tree_node
 import ./scrubber_track
+import ./table_hscroll
+# PLAT-70 Part I: fit or scroll (Horizontal-Overflow.md §5.5).
+from codetracer_embed import TableFit, FitColumn, fitTable, settle, overflows,
+  barModel, HorizontalView, fmScroll
 from codetracer_embed import DetailToggle, CutCell, detailView, isOpen,
   VariablesTablePane,
   fullValueText
@@ -236,6 +240,10 @@ type
       ## (Horizontal-Overflow.md §5.3); its key is the variable's path.
     copyChord*: string
       ## The resolved `list.copy` chord the detail's hint names (KL-8).
+    hview*: HorizontalView
+      ## PLAT-70 Part I: the rows' horizontal view (Horizontal-Overflow.md
+      ## §5.5) — what the wheel and the bar move; settled over each frame's
+      ## fit.
     populations*: int
       ## How many times `children` has been called. Asserted by the expansion
       ## suite: a re-expansion that did no work — the CTUI-4 shape, where the
@@ -273,6 +281,17 @@ type
       ## PLAT-70 Part B: every cell drawn cut, with its `…` (HO-8).
     detailRows*: seq[int]
       ## The SCREEN rows the open detail's lines are on.
+    fit*: TableFit
+      ## PLAT-70 Part I: the name and value fields' fit this frame.
+    hview*: HorizontalView
+      ## The horizontal view the rows were drawn from.
+    tableWidth*: int
+      ## The width the rows were laid out at: `contentWidth` in FIT and
+      ## SHRINK, wider in SCROLL.
+    nameCells*: int
+      ## The name field's width the rows were laid out with (the fit's).
+    barRow*: int
+      ## The SCREEN row of the horizontal bar, -1 when none is drawn.
 
 const
   ProvenanceBudgetCells* = 40
@@ -809,15 +828,85 @@ proc scrubberOf*(screen: VariablesScreen): ScrubberModel =
   ## timeline.
   scrubberModel(screen.totalRows, screen.top, screen.bodyHeight)
 
+const VariablesFixedCells* = NameFieldCol + ReservedTrailingCells +
+                             ControlCells + 1
+  ## PLAT-70 Part I (§5.5.3): a variable row's fixed parts — the tag, the
+  ## expander, the value controls and the trailing cell — outside the name
+  ## and value fields.
+
+proc variablesFit*(model: VariablesModel; rows: openArray[VariablesRow];
+                   width: int): TableFit =
+  ## §5.5.3, the terminal's Variables pane: the name field (at least
+  ## `MinimumNameCells`, and at least the deepest shown row's indent and the
+  ## first `MinimumNameCells` of its name; preferred the field's share, or the
+  ## dragged separator) and the value field (at least `MinimumValueCells`,
+  ## the flex column) in what a row `width` cells wide leaves after its fixed
+  ## parts. The type field is the one a narrow row drops (`fieldWidths`).
+  let fields = width - VariablesFixedCells
+  var nameFloor = MinimumNameCells
+  for row in rows:
+    if row.kind == vrkVariable:
+      nameFloor = max(nameFloor,
+                      max(0, row.depth - 1) * IndentCells +
+                      min(cellWidthOf(row.node.name), MinimumNameCells))
+  let share = min(max(fields div 3, MinimumNameCells), MaximumNameCells)
+  var name = FitColumn(name: "name", minUnits: nameFloor,
+                       preferredUnits: max(share, nameFloor))
+  if model.nameCells > 0:
+    # The dragged separator, kept inside the row as PLAT-51 keeps it (a
+    # value field of at least `MinimumValueCells` survives).
+    name.userUnits = max(nameFloor,
+                         min(model.nameCells, fields - MinimumValueCells - 1))
+  let value = FitColumn(name: "value", minUnits: MinimumValueCells,
+                        preferredUnits: MinimumValueCells, flex: 1)
+  fitTable([name, value], max(0, fields), gap = 1)
+
+type
+  VariablesGeometry* = object
+    ## PLAT-70 Part I: the pane's horizontal geometry this frame — what the
+    ## runtime's wheel and bar read, without painting the rows.
+    width*: int
+      ## The cells the rows are shown in (the scrollbar's column excluded).
+    fit*: TableFit
+    view*: HorizontalView
+    barRow*: int
+      ## The SCREEN row of the horizontal bar, -1 when none.
+
+proc variablesGeometry*(model: VariablesModel; area: CellArea): VariablesGeometry =
+  ## The same decisions `paintVariables` makes, in the same order.
+  result.barRow = -1
+  result.width = area.width
+  if area.width <= 0 or area.height <= 1:
+    return
+  let bodyHeight = area.height - 1
+  let rows = model.paneRows()
+  if rows.len == 0:
+    return
+  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells
+  result.width = if overflow: area.width - ScrubberTrackCells else: area.width
+  let top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  result.fit = model.variablesFit(rows[top ..< min(rows.len, top + bodyHeight)],
+                                  result.width)
+  result.view = model.hview
+  result.view.settle(result.fit)
+  if result.fit.overflows and bodyHeight > 1:
+    result.barRow = area.row + bodyHeight
+
 proc paintVariables*(g: var StyledGrid; area: CellArea;
                      model: VariablesModel): VariablesScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
+  ##
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the rows are laid out at
+  ## the table's width — the pane's while the name and value fields' floors
+  ## fit, wider in SCROLL — into a scratch grid, and the window `[leftCol,
+  ## leftCol + width)` of each is copied to the pane.
   result = VariablesScreen(
     rows: @[], area: area, visible: @[], bodyHeight: 0, totalRows: 0,
     scopeRows: 0, variableRows: 0, moreRows: 0, noteRows: 0, modifiedRows: 0,
     valueColumn: area.col + valueFieldColumn(area.width, model.nameCells),
     nameColumn: area.col + nameFieldColumn(), top: 0,
-    contentWidth: area.width, trackCol: -1)
+    contentWidth: area.width, trackCol: -1, tableWidth: area.width,
+    nameCells: model.nameCells, barRow: -1)
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -831,20 +920,18 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
-  let bodyHeight = area.height - 1
-  result.bodyHeight = bodyHeight
+  var bodyHeight = area.height - 1
   let rows = model.paneRows()
   result.totalRows = rows.len
 
   if rows.len == 0:
+    result.bodyHeight = bodyHeight
     g.paint(area.row + 1, area.col,
             truncateToCells(EmptyPaneText, area.width), EmptyPaneStyle)
     for r in area.row ..< area.row + area.height:
       result.rows.add g.rowSpansIn(r, area.col, area.width)
     return
 
-  let top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
-  result.top = top
   # M71 (#838): WHILE THE ROWS OVERFLOW, THE RIGHTMOST COLUMN IS THE PANE'S
   # SCROLLBAR (Scrollbar-Scrubbers.md §2: a pane whose whole content is in
   # hand keeps an ordinary scrollbar; §4: the terminal's track is the pane's
@@ -855,25 +942,60 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
   let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells
   let width = if overflow: area.width - ScrubberTrackCells else: area.width
   result.contentWidth = width
-  result.valueColumn = area.col + valueFieldColumn(width, model.nameCells)
+  # PLAT-70 Part I: the fields' fit over the rows the body shows.
+  var top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  let fit = model.variablesFit(rows[top ..< min(rows.len, top + bodyHeight)],
+                               width)
+  var view = model.hview
+  view.settle(fit)
+  if fit.overflows and bodyHeight > 1:
+    dec bodyHeight
+    result.barRow = area.row + 1 + bodyHeight
+    top = clampScrollTop(model.scrollTop, rows.len, bodyHeight)
+  result.bodyHeight = bodyHeight
+  result.top = top
+  result.fit = fit
+  result.hview = view
+  let tableW = width + max(0, fit.contentUnits - fit.viewportUnits)
+  result.tableWidth = tableW
+  let nameCells = fit.widths[0]
+  result.nameCells = nameCells
+  var laidModel = model
+  laidModel.nameCells = nameCells
+  let left = view.leftCol
+  let shift = area.col - left
+  result.valueColumn = shift + valueFieldColumn(tableW, nameCells)
+  result.nameColumn = shift + nameFieldColumn()
+  let direct = left == 0 and tableW == width
+  var table: StyledGrid
   var line = 0
   var rowIndex = top
   while line < bodyHeight and rowIndex < rows.len:
     let screenRow = area.row + 1 + line
     let modelRow = rows[rowIndex]
     inc rowIndex
-    let spec = rowSpecFor(model, modelRow, width)
+    let spec = rowSpecFor(laidModel, modelRow, tableW)
     let laid = treeRowLayout(spec)
-    var at = area.col
-    for span in laid.spans:
-      g.paint(screenRow, at, span.text, span.style)
-      at += cellWidthOf(span.text)
+    if direct:
+      # The table is the pane (FIT / SHRINK, the view at 0): painted in place,
+      # with no scratch row — the common case keeps its old cost.
+      var at = area.col
+      for span in laid.spans:
+        g.paint(screenRow, at, span.text, span.style)
+        at += cellWidthOf(span.text)
+    else:
+      table = newStyledGrid(tableW, 1)
+      var at = 0
+      for span in laid.spans:
+        table.paint(0, at, span.text, span.style)
+        at += cellWidthOf(span.text)
+      g.copySlice(screenRow, area.col, table, 0, left, width)
+    var placedCuts: seq[CutCell]
     for c in laid.cuts:
       var placed = c
       placed.row = screenRow
-      placed.col += area.col
-      placed.ellipsisCol += area.col
-      result.cuts.add placed
+      placedCuts.add placed
+    result.cuts.add shiftCuts(placedCuts, shift, area.col, area.col + width)
     result.visible.add modelRow
     inc line
     case modelRow.kind
@@ -889,15 +1011,16 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     # with the copy hint — rows that are painted, not pane rows.
     if modelRow.kind == vrkVariable and
        model.detail.isOpen(DetailPaneName, modelRow.node.path):
-      let valueAt = valueFieldColumn(width, model.nameCells)
-      let cells = max(1, fieldWidths(width, model.nameCells).value)
+      let valueAt = max(area.col, shift + valueFieldColumn(tableW, nameCells))
+      let cells = max(1, min(fieldWidths(tableW, nameCells).value,
+                             area.col + width - valueAt))
       let view = detailView(model.fullValueOf(modelRow.node), cells,
                             bodyHeight, model.copyChord, terminalMeasure)
       for text in view.lines:
         if line >= bodyHeight:
           break
         let detailRow = area.row + 1 + line
-        g.paint(detailRow, area.col + valueAt, padRight(text, cells),
+        g.paint(detailRow, valueAt, padRight(text, cells),
                 DetailValueStyle)
         result.visible.add VariablesRow(kind: vrkDetail, scope: modelRow.scope,
                                         depth: modelRow.depth,
@@ -909,6 +1032,9 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     result.trackCol = area.col + width
     g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,
                             result.scrubberOf)
+  if result.barRow >= 0:
+    # §4.7: the bar on the body's last row; the corner is neither track's.
+    paintHorizontalBar(g, result.barRow, area.col, width, view.barModel)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -974,13 +1100,15 @@ proc controlAt*(screen: VariablesScreen; model: VariablesModel;
   let (ok, row) = screen.rowAtScreenRow(screenRow)
   if not ok or row.kind != vrkVariable:
     return vcNone
-  let at = screen.area.col + controlColumn(screen.contentWidth)
+  # PLAT-70 Part I: the rows were laid out at `tableWidth` and drawn from
+  # the view's `leftCol`.
+  let origin = screen.area.col - screen.hview.leftCol
+  let at = origin + controlColumn(screen.tableWidth)
   if col == at: return vcHistory
   if col == at + 1: return vcOrigin
   if col == at + 2 and row.scope == skWatches and row.depth == 1:
     return vcRemoveWatch
-  if col == screen.area.col + nameSeparatorColumn(screen.contentWidth,
-                                                  model.nameCells):
+  if col == origin + nameSeparatorColumn(screen.tableWidth, screen.nameCells):
     return vcNameSeparator
   vcNone
 

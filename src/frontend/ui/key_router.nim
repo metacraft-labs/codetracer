@@ -431,10 +431,11 @@ proc registerHostOperation*(operation: string; run: proc()) =
 
 func selectedRowSelectorOf(pane: string): cstring =
   ## The selector of a table pane's selected row ("" for the Variables pane,
-  ## which marks none: its row is the one last pressed). The desktop's Call
-  ## Trace is not a table pane: it scrolls sideways instead of cutting its
-  ## rows (`table_overflow.styl`).
+  ## which marks none: its row is the one last pressed). PLAT-70 Part I: the
+  ## Call Trace is a table pane on the desktop too (its rows are cut at the
+  ## pane, Horizontal-Overflow.md §5.5.5).
   if pane == EventLogDetailPane: cstring"tr.event-selected"
+  elif pane == CallTraceTablePane: cstring".calltrace-call-line.event-selected"
   else: cstring""
 
 proc focusedTablePane(): tuple[pane: string; selected: cstring] =
@@ -445,6 +446,7 @@ proc focusedTablePane(): tuple[pane: string; selected: cstring] =
     let pane = case e.paneKind
                of "state": StateDetailPane
                of "eventLog": EventLogDetailPane
+               of "calltrace": CallTraceTablePane
                else: ""
     if pane.len > 0:
       return (pane, selectedRowSelectorOf(pane))
@@ -459,8 +461,8 @@ proc runTableOperation(res: EditingResolution): bool =
   case res.operation
   of "list.show-detail":
     if pane.len == 0 or not showDetailOf(pane, selected):
-      cwarn "keys: Show Detail works in the Variables and Event Log panes, " &
-            "on a row"
+      cwarn "keys: Show Detail works in the Variables, Event Log and Call " &
+            "Trace panes, on a row"
     true
   of "list.copy":
     pane.len > 0 and copyRowOf(pane, selected)

@@ -47,6 +47,11 @@ when defined(js):
   import kdom except Location
   import std/jsffi
   import ./list_scrubber_dom
+  # PLAT-70 Part I (Horizontal-Overflow.md §5.5.5): the rows fit or scroll,
+  # and fitted rows are table cells (Part B's cut, hover, detail and copy).
+  from ./table_fit_dom import attachCallTraceFit, CalleeAttribute
+  from ./table_overflow_dom import attachTableOverflow
+  from ../viewmodels/table_overflow import CallTraceTablePane
 
 import ../store/types
 import ../backend/backend_service
@@ -476,6 +481,14 @@ when defined(js):
       setCalltraceTabBusy(vm.isLoading.val)
 
     wireSearchForm(formEl, inputEl, vm)
+    # PLAT-70 Part I (Horizontal-Overflow.md §5.5.5 — OQ-H5, proposed,
+    # awaiting the user's confirmation): the rows are cut at the pane while
+    # every row's indent and callee name fit, and scroll sideways only when
+    # they do not; a cut row's whole text is on hover, under it, and copied.
+    attachCallTraceFit(cast[JsObject](scrollContainer),
+                       cast[JsObject](linesContainer))
+    discard attachTableOverflow(cast[JsObject](panel), CallTraceTablePane,
+                                cstring".calltrace-call-line")
     # What the pane shows — its rows, the row it is scrolled to, the depth
     # levels across it — is reported by the panel host that mounted it
     # (`ui/panel_host`, HSF-V2), not measured here.
@@ -548,6 +561,18 @@ proc rowClass(vm: CalltraceVM; item: proc(): CallLine): string =
   else:
     "calltrace-call-line calltrace-row"
 
+proc callCellKey(item: proc(): CallLine): string =
+  ## PLAT-70 Part I: the row's call box is a TABLE CELL of the Call Trace —
+  ## `<pane>|<key>|<column>`, the terminal's and GPUI's key (the call's
+  ## trace index).
+  "call-trace|" & $item().index & "|call"
+
+proc callFullText(vm: CalltraceVM; item: proc(): CallLine): string =
+  ## The row's whole text — the shared `callRowText` over the ViewModel's
+  ## row (name, `#index`, arguments, return), the text the terminal and GPUI
+  ## fit and show in full.
+  callRowText(callRowOf(item(), argsForRow(vm, item)))
+
 proc childBoxClass(vm: CalltraceVM; item: proc(): CallLine): string =
   let sel = vm.selectedEntry.val
   if sel.isSome and sel.get == item().index: "call-current call-child-box"
@@ -598,7 +623,10 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
         discard
       tdiv(class = "calltrace-child call-depth"):
         tdiv(id = "local-call-" & $item().index,
-             class = childBoxClass(vm, item)):
+             class = childBoxClass(vm, item),
+             `data-ct-cell` = callCellKey(item),
+             `data-ct-full` = callFullText(vm, item),
+             `data-ct-callee` = callDisplayName(item())):
           span(class = "toggle-call", onclick = h.onToggle):
             tdiv(class = toggleClass(vm, item)):
               discard

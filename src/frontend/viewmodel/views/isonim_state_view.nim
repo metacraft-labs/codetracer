@@ -968,6 +968,11 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
   panel
 
 when defined(js):
+  from ./table_fit_dom import attachStateFit
+  proc querySelectorJs(el: JsObject; sel: cstring): JsObject
+    {.importjs: "#.querySelector(#)".}
+  proc isNullJs(el: JsObject): bool {.importjs: "(# == null)".}
+
   proc attachStateTableOverflow*(panel: JsObject; vm: StateVM) =
     ## The values are table cells — fitted, hovered and their `…` pressed
     ## through the shared model (`table_overflow_dom`, Horizontal-Overflow.md
@@ -977,6 +982,14 @@ when defined(js):
     discard attachTableOverflow(panel, StateDetailPane,
                                 cstring".value-expanded",
                                 proc(path: string): string = vm.fullValueOf(path))
+    # PLAT-70 Part I (Horizontal-Overflow.md §5.5.3): the rows fit the pane
+    # while every row's floor (all but its value, and the value's first
+    # cells) does, and scroll sideways only when one does not.
+    let container = panel.querySelectorJs(cstring".value-components-container")
+    if not container.isNullJs:
+      let rows = container.querySelectorJs(cstring":scope > div:last-child")
+      if not rows.isNullJs:
+        attachStateFit(container, rows)
 
   proc mountIsoNimStatePanel*(container: isonim_dom.Element;
                               vm: StateVM) =

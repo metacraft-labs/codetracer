@@ -277,6 +277,13 @@ export horizontal_scroll
 import viewmodels/table_overflow
 export table_overflow
 
+# PLAT-70 Part I: the table panes' column widths and whether a table pane
+# scrolls sideways — CSS's automatic table layout over each column's minimum
+# and preferred widths (Horizontal-Overflow.md §5.5). Pure; imports only
+# `horizontal_scroll`.
+import viewmodels/table_fit
+export table_fit
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #
