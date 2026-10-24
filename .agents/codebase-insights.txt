@@ -7571,7 +7571,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The desktop Event Log's whole-log size reaches the store as the engine's
   `unfilteredTotal` (`applyEventLogResponse`); `total` is the searched /
   kind-filtered count. A defect in `total` alone shows only in a searched view.
-||||||| parent of 254d82aa77 (feat(tui,gpui,desktop): table panes fit their columns, or scroll sideways)
 
 ## PLAT-70 Part I — table panes fit or scroll (Horizontal-Overflow.md §5.5)
 - ONE solver, `viewmodel/viewmodels/table_fit.nim` (`fitTable`): CSS's
@@ -7660,7 +7659,6 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   re-stamp. Never copy `src/build-debug` between trees (tup rejects the variant).
 - layout_settings now carries VALUED settings (`settingValues`, `parseValue`,
   `assignValue`, `valueText`); `savePreference` hooks take (name, value: string).
-||||||| parent of c20db0191a (feat(tui,gpui): open the Files pane's context menu on a Files row)
 - Files pane menu (K19) in the native front-ends: the entries are
   `FilesystemVM.fileTreeMenu`'s, converted by `headless_app/file_tree_menu`
   (`fileTreeContextMenuOf`, `runFileTreeAction`); a `ContextMenuModel` holds
@@ -7680,3 +7678,13 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   ever opens on a replay's tree.
 - Running `source /tmp/.../devenv.sh` from the zsh Bash tool half-works: the
   TUI build then fails on `tree_sitter/api.h`. Source captured envs under bash.
+- `ci/test/sdk-facade-boundary.sh` walks Nim imports WITHOUT evaluating `when`
+  branches, so a JS-only import inside `isonim/core` (once
+  `core/nondet.nim -> web/dom_api`) puts a renderer in the facade graph. IsoNim
+  now keeps the listener boundary generic over the event type and its
+  `tests/test_core_layering.py` holds core to core/std/nim_everywhere imports.
+- The same guard enumerates sources with `git ls-files` (+ `--others
+  --exclude-standard`): in a plain scratch copy of the tree it sees no files and
+  reports consumer-declared / plugin-io-edge-is-real / tui-layers violations.
+  `git init` the copy, exclude the submodule paths in `.git/info/exclude`, and
+  `git add -f` the few tracked-but-ignored .nim files so the listing matches.

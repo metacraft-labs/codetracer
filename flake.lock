@@ -4104,11 +4104,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1792772624,
-        "narHash": "sha256-qNVe5if+zuOK0w1QguqOhSQNpnj2j4lIm9iVBFcEJ30=",
+        "lastModified": 1792838836,
+        "narHash": "sha256-+CJVl7nCGWdr0B3fWkGgbWg4ot8KwmW/g1XFJRTyabw=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "3b3d356c17d65ae385350fe70e7235e5527c70c0",
+        "rev": "e3c232fee9555c40f4b6140162072ca9b3f5c75f",
         "type": "github"
       },
       "original": {
