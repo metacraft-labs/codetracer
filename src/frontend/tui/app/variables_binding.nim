@@ -20,13 +20,12 @@
 ## Established by reading and grepping `src/frontend/viewmodel/` on 2026-09-06,
 ## and recorded here because a later reader would otherwise re-derive it:
 ##
-## 1. **`currentVariables` is a memo over exactly three store signals** —
-##    `store.locals.locals`, `store.locals.globals`, `store.locals.watches` —
-##    selected by `activeTab`. It is not a fourth source, so a pane that wants
-##    two of the three at once reads the store's signals for the ones the tab is
-##    not on. `rootsFor` does that, and it deliberately goes through
-##    `currentVariables` for the tab that IS active, so the memo is on the path
-##    the product uses rather than bypassed.
+## 1. **`currentVariables` is the one list the pane shows** — the locals, the
+##    globals, then one row per watch expression (amended 2026-10-24: the State
+##    pane became the Variables pane and lost its tabs). `rootsFor` splits it
+##    into the terminal's scope roots — a watch row by `isWatch`, a global by
+##    its presence in `store.locals.globals` — so the memo stays on the path
+##    the product uses rather than being bypassed.
 ##
 ## 2. **Nothing writes `store.locals.globals` from a backend response.** A grep
 ##    over the whole ViewModel layer finds one read (`state_vm`), one test
@@ -89,16 +88,15 @@ const
     "registers are projected only by the MCR emulator backend " &
     "(dap_handler.rs, TraceKind::Emulator); every fixture here is a CTFS trace"
 
-proc scopeForTab*(tab: StateTab): ScopeKind =
-  ## Which §3.3.4 root `StateVM.activeTab` is on.
-  ##
-  ## The tab is a real signal with a real writer (`selectTab`), and this is what
-  ## makes it visible in a pane that has no tab strip: the root it names is the
-  ## one the pane opens and puts its cursor in.
-  case tab
-  of stLocals: skLocals
-  of stGlobals: skGlobals
-  of stWatches: skWatches
+proc scopeForPath*(vm: StateVM; path: string): ScopeKind =
+  ## Which §3.3.4 root a `StateVM` path (`selectedPath`) is under: a watched
+  ## expression's row is under `Watches`, everything else under `Locals`.
+  ## The pane is ONE list (Variable-State-Pane.md § Decisions, 2026-10-24); the
+  ## terminal draws it as its roots one after another.
+  if vm.isNil or path.len == 0:
+    return skLocals
+  let head = path.split('.')[0]
+  if head in vm.watchExpressions.val: skWatches else: skLocals
 
 proc declaredScopes*(vm: StateVM = nil): seq[Scope] =
   ## §3.3.4's five roots plus `Watches`, each with its availability.
@@ -134,20 +132,24 @@ proc declaredScopes*(vm: StateVM = nil): seq[Scope] =
 proc rootsFor*(vm: StateVM; scope: ScopeKind): seq[Variable] =
   ## The top-level variables of one root, read from `StateVM`.
   ##
-  ## THROUGH `currentVariables` FOR THE ACTIVE TAB. That memo is what the
-  ## product renders, so a pane that always read the store's signals directly
-  ## would be testing a path the desktop does not take — and would keep working
-  ## if the memo broke.
+  ## THROUGH `currentVariables`, the pane's one list (locals, globals, then
+  ## the watches) that every front-end renders, split back into the roots the
+  ## terminal draws one after another. Reading the store's signals directly
+  ## would be testing a path the desktop does not take — and would miss what
+  ## the memo adds: the watches the answer has no row for, shown as not valid,
+  ## and the "Hide watches from other processes" filter.
   if vm.isNil:
     return @[]
-  let active = scopeForTab(vm.activeTab.val)
-  if scope == active:
-    return vm.currentVariables.val
-  case scope
-  of skLocals: vm.store.locals.locals.val
-  of skGlobals: vm.store.locals.globals.val
-  of skWatches: vm.store.locals.watches.val
-  else: @[]
+  let globals = vm.store.locals.globals.val
+  for v in vm.currentVariables.val:
+    case scope
+    of skWatches:
+      if v.isWatch: result.add v
+    of skGlobals:
+      if not v.isWatch and v in globals: result.add v
+    of skLocals:
+      if not v.isWatch and v notin globals: result.add v
+    else: discard
 
 # ---------------------------------------------------------------------------
 # Variables -> VarNode
@@ -260,7 +262,7 @@ proc variablesModelFor*(vm: StateVM;
   ## so two stops are two values and the difference between them is exactly the
   ## difference on screen.
   ##
-  ## The root `activeTab` names is OPENED and its first page materialised, which
+  ## The root holding the selected row (the locals when nothing is selected) is OPENED and its first page materialised, which
   ## is the one expansion the pane does without being asked: a variables pane
   ## that opened to five closed roots would show a debugger's locals to nobody.
   result = initVariablesModel(
@@ -272,7 +274,8 @@ proc variablesModelFor*(vm: StateVM;
     scrollTop = scrollTop)
   if vm.isNil:
     return
-  let openScope = scopePath(scopeForTab(vm.activeTab.val))
+  let selected = vm.selectedPath.val
+  let openScope = scopePath(vm.scopeForPath(selected))
   result.expandNode(openScope)
   # PLAT-49: the pane lists every group one after another with no separator
   # row to open a closed one from, so every root that CAN be filled is
@@ -280,7 +283,6 @@ proc variablesModelFor*(vm: StateVM;
   for scope in result.scopes:
     if scope.availability == savaAvailable:
       result.expandNode(scopePath(scope.kind))
-  let selected = vm.selectedPath.val
   if selected.len > 0:
     result.selected = childPath(openScope, selected)
     result.focused = result.selected

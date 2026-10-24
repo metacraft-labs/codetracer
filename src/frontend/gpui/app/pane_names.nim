@@ -18,7 +18,7 @@ func gpuiPaneName*(kind: PaneKind): string =
   case kind
   of paneEditor: "Editor"
   of paneCalltrace: "Call Trace"
-  of paneState: "State"
+  of paneState: "Variables"
   of paneEventLog: "Event Log"
   of paneDebugControls: "Debug Controls"
   of paneFlow: "Flow"

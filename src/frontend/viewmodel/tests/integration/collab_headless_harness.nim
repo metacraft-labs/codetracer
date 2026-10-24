@@ -57,7 +57,6 @@ type
   ProjectedSignalsSnapshot* = object
     calltraceSelection*: Option[int64]
     calltraceExpanded*: seq[int64]
-    stateTab*: StateTab
     stateSelectedPath*: string
     stateExpanded*: seq[string]
     watches*: seq[string]
@@ -102,7 +101,6 @@ proc projectedSignals*(peer: HeadlessPeer): ProjectedSignalsSnapshot =
   ProjectedSignalsSnapshot(
     calltraceSelection: peer.session.calltraceVM.selectedEntry.val,
     calltraceExpanded: peer.session.calltraceVM.expandedNodes.val.sortedSeq,
-    stateTab: peer.session.stateVM.activeTab.val,
     stateSelectedPath: peer.session.stateVM.selectedPath.val,
     stateExpanded: peer.session.stateVM.expandedPaths.val.sortedSeq,
     watches: peer.session.stateVM.watchExpressions.val,
@@ -503,11 +501,11 @@ proc toggleCalltrace*(harness: CollabHeadlessHarness;
   peer.session.calltraceVM.toggleExpand(lineIndex)
   harness.publishLocalOps(peer)
 
-proc selectStateTab*(harness: CollabHeadlessHarness;
-                     peerId: string;
-                     tab: StateTab) =
+proc selectStatePath*(harness: CollabHeadlessHarness;
+                      peerId: string;
+                      path: string) =
   let peer = harness.findPeer(peerId)
-  peer.session.stateVM.selectTab(tab)
+  peer.session.stateVM.selectPath(path)
   harness.publishLocalOps(peer)
 
 proc toggleStatePath*(harness: CollabHeadlessHarness;

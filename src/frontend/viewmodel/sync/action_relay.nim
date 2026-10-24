@@ -194,7 +194,6 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     let v = session.stateVM
     if v.isNil: return false
     case action
-    of "selectTab": v.selectTab(a.arg("tab", stLocals))
     of "toggleExpand": v.toggleExpand(a.arg("path", ""))
     of "selectPath": v.selectPath(a.arg("path", ""))
     of "addWatch": v.addWatch(a.arg("expression", ""))

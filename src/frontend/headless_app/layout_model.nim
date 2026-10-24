@@ -915,7 +915,7 @@ proc defaultReplayLayout*(): LayoutNode =
       pane(paneEditor, "Editor", weight = 3.0),
       column([
         pane(paneCalltrace, "Call Trace", weight = 1.0),
-        stack([pane(paneState, "State"), pane(paneEventLog, "Event Log")],
+        stack([pane(paneState, "Variables"), pane(paneEventLog, "Event Log")],
               activeIndex = 0, weight = 1.0)],
         weight = 2.0)],
       weight = 9.0)])

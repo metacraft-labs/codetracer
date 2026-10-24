@@ -147,12 +147,12 @@ proc main() {.async.} =
     "a step relayed by the page reaches the server's backend"
 
   # ---- a view operation in the page's pane is the server's view state
-  mirror.session.stateVM.selectTab(stGlobals)
+  mirror.session.stateVM.selectPath("g")
   ck await eventually(proc(): bool =
-    primary.stateVM.activeTab.val == stGlobals),
-    "a tab chosen in the page is chosen on the server"
+    primary.stateVM.selectedPath.val == "g"),
+    "a row selected in the page is selected on the server"
   ck await eventually(proc(): bool =
-    mirror.session.stateVM.activeTab.val == stGlobals),
+    mirror.session.stateVM.selectedPath.val == "g"),
     "and stays chosen in the page after the server's next batch"
 
   # ---- a reloaded page resumes the session where it was
@@ -165,7 +165,7 @@ proc main() {.async.} =
   let again = createMirrorSession(newSocketSyncChannel(reloaded))
   ck await eventually(proc(): bool =
     again.session.store.debugger.val.rrTicks == 25 and
-    again.session.stateVM.activeTab.val == stGlobals),
+    again.session.stateVM.selectedPath.val == "g"),
     "a reloaded page receives the session's position and view state"
   ck await eventually(proc(): bool =
     disagreement(primary, again.session).len == 0),

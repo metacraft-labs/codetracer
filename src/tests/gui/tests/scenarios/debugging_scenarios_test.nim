@@ -991,9 +991,9 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
       let localsCount1 = mock.countCommands("ct/load-locals")
       check localsCount1 == 1
 
-      # Simulate some other non-move event (e.g. tab switch).
-      session.stateVM.selectTab(stGlobals)
-      session.stateVM.selectTab(stLocals)
+      # Simulate some other non-move event (e.g. expanding a row).
+      session.stateVM.toggleExpand("x")
+      session.stateVM.toggleExpand("x")
       drain()
 
       # No new locals request should have been sent because the

@@ -171,9 +171,10 @@ type
       ## explicitly (tests).
     stateVMs*: Table[string, StateVM]
       ## Per-recording StateVM table — each entry owns independent
-      ## `activeTab` / `expandedPaths` / `watchExpressions` /
-      ## `selectedPath` signals so switching the active process does
-      ## not corrupt the inactive recording's per-step view.
+      ## `expandedPaths` / `selectedPath` / history signals so switching the
+      ## active process does not corrupt the inactive recording's per-step
+      ## view. The watch list is NOT per recording: every entry shares the
+      ## session's (Variable-State-Pane.md § Decisions, 2026-10-24).
     crossProcessSpans*: Memo[seq[CrossProcessSpan]]
       ## Derived view of
       ## `originChainVM.activeChain.crossProcessSpans` (§5.3). Empty
@@ -322,8 +323,14 @@ proc ensureStateVM*(session: SessionViewModel;
   ## switching the active process does not corrupt the inactive
   ## recording's per-step view.
   ##
+  ## THE WATCH LIST IS THE SESSION'S (Variable-State-Pane.md § Decisions,
+  ## 2026-10-24): every per-recording VM shares the session's primary StateVM's
+  ## `watchExpressions` / `watchOrigins` signals and edits them through it
+  ## (`watchOwner`), so a watch survives a process switch and remembers the
+  ## recording it was added in.
+  ##
   ## Note: per-recording StateVMs are built WITHOUT a CollaborativeSessionCore
-  ## reference — `selectTab` / `toggleExpand` / `addWatch` go through
+  ## reference — `toggleExpand` / `addWatch` go through
   ## `collabCore.dispatchLocalViewOp` (a single shared CRDT document
   ## state) which would otherwise mirror every mutation across every
   ## recording's VM via the same `statePane.*` slot. Local signal
@@ -337,7 +344,19 @@ proc ensureStateVM*(session: SessionViewModel;
   ## because that is the VM the host already shows (see `setProcessTree`).
   if session.stateVMs.hasKey(recordingId):
     return session.stateVMs[recordingId]
-  let vm = createStateVM(session.store, nil, session.runtimeRole)
+  # The owner is the session's StateVM; before it has one (a process tree
+  # seeded without `initializePanelViewModels`), the first per-recording VM.
+  var anchor = session.stateVM
+  if anchor.isNil:
+    for existing in session.stateVMs.values:
+      anchor = existing
+      break
+  let owner =
+    if anchor.isNil: nil
+    elif anchor.watchOwner.isNil: anchor
+    else: anchor.watchOwner
+  let vm = createStateVM(session.store, nil, session.runtimeRole,
+                         watchOwner = owner, recordingId = recordingId)
   session.stateVMs[recordingId] = vm
   vm
 
@@ -370,6 +389,7 @@ proc setProcessTree*(session: SessionViewModel;
         break
     if not registered:
       session.stateVMs[entries[0].recordingId] = session.stateVM
+      session.stateVM.recordingId = entries[0].recordingId
   var seqEntries = newSeq[ProcessTreeEntry](entries.len)
   for i, e in entries:
     seqEntries[i] = e

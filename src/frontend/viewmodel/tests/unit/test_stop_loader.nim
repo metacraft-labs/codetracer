@@ -233,8 +233,9 @@ suite "HSF-S1: an answer is applied to the stop it was asked at":
     check session.store.locals.locals.val.len == 0
 
 proc watchRows(store: ReplayDataStore): seq[string] =
-  ## What the Watches tab shows (`StateVM.currentVariables`' `stWatches` arm
-  ## reads exactly this signal): each watch row as `name=value`.
+  ## The watch answers the Variables pane lists after the variables
+  ## (`StateVM.currentVariables` reads them from this signal by name): each
+  ## watch row as `name=value`.
   for row in store.locals.watches.val:
     result.add row.name & "=" & row.value
 

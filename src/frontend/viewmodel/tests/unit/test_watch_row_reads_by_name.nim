@@ -103,9 +103,9 @@ proc firstWithClass(node: MockNode; cls: string): MockNode =
       return found
   nil
 
-suite "a watch typed into the State pane is one row, readable by its name":
+suite "a watch typed into the Variables pane is one row, readable by its name":
 
-  test "the Watches tab holds one element named after the watch, and it shows the answer":
+  test "the list holds one element named after the watch, and it shows the answer":
     createRoot proc(done: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let s = newDebuggerSession(mock.answeringWatchesFromTheRequest())
@@ -115,10 +115,6 @@ suite "a watch typed into the State pane is one row, readable by its name":
 
       let vm = s.session.stateVM
       let panel = renderStatePanel[MockRenderer, MockNode](MockRenderer(), vm)
-      # The tab strip, by gesture.
-      firstWithClass(panel, "tab-watches").fireEvent("click")
-      check vm.activeTab.val == stWatches
-
       # What the watch input's submit handler calls.
       vm.addWatch("initial_shield")
       drainPlatformCallbacks()
@@ -132,12 +128,16 @@ suite "a watch typed into the State pane is one row, readable by its name":
       check asked
       check s.store.locals.watches.val.len == 1
 
-      # THE ASSERTION THE DEFECT FAILS: one element by that name, the row.
+      # THE ASSERTION THE DEFECT FAILS: one element per row by that name.
+      # The pane is one list (Variable-State-Pane.md, 2026-10-24), so the
+      # local `initial_shield` and the watch `initial_shield` are two rows,
+      # the watch last — and no element inside a row repeats the name.
       let named = panel.elementsNamed("initial_shield")
-      check named.len == 1
+      check named.len == 2
       if named.len >= 1:
         let row = named[^1]   # the one a "last write wins" reader keeps
         check "value-expanded" in row.attributes.getOrDefault("class", "")
+        check "value-watch" in row.attributes.getOrDefault("class", "")
         let valueCell = firstWithClass(row, "value-expanded-text")
         check not valueCell.isNil
         if not valueCell.isNil:

@@ -7672,13 +7672,6 @@ proc onPaneClick(c: GPaneClick) =
       session.stateVM.selectPath(c.key)
       session.stateVM.toggleExpand(c.key)
       redrawPaneOf(r, paneState)
-  of gcpStateTab:
-    # K29: Locals / Globals / Watches.
-    if c.button != gbLeft or c.index < 0 or c.index > ord(StateTab.high):
-      return
-    session.stateVM.selectTab(StateTab(c.index))
-    traceGesture("state tab " & $StateTab(c.index))
-    redrawPaneOf(r, paneState)
   of gcpGutter:
     # K10 / K11.
     let path = editorPath()
@@ -7798,6 +7791,10 @@ proc onPaneClick(c: GPaneClick) =
     of "history": showValueHistory(r, arg)
     of "origin": showValueOrigin(r, arg)
     of "unwatch": discard runWatchCommand(r, ":unwatch " & arg)
+    of "hide-other-process-watches":
+      # Variable-State-Pane.md § Decisions, 2026-10-24.
+      gSession.stateVM.setHideOtherProcessWatches(arg == "on")
+      redrawPaneOf(r, paneState)
     else: discard
   of gcpHistoryEntry:
     # PLAT-51: a value-history row is a NAVIGATION ROW — a click goes to the

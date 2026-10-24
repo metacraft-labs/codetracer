@@ -3067,6 +3067,8 @@ type
     hasChildren*: bool
     expanded*: bool
     selected*: bool
+    isWatch*: bool     ## a watched expression's row (top level only)
+    watchInvalid*: bool ## the stop cannot answer this watch; `value` says why
 
 proc appendStateRows(v: Variable; path: string; depth: int;
                      budget: Budget; expanded: HashSet[string];
@@ -3089,7 +3091,9 @@ proc appendStateRows(v: Variable; path: string; depth: int;
                    whole: v.value, depth: depth,
                    hasChildren: v.hasChildren or v.children.len > 0,
                    expanded: path in expanded,
-                   selected: path == selected)
+                   selected: path == selected,
+                   isWatch: depth == 0 and v.isWatch,
+                   watchInvalid: depth == 0 and v.isInvalidWatch)
   if path in expanded:
     for c in v.children:
       appendStateRows(c, path & "." & c.name, depth + 1, budget, expanded,
@@ -3115,11 +3119,6 @@ const
   StateInsetPx* = 8
     ## The state pane's content inset (`.state-component` at 8 px in from the
     ## panel, measured on the Electron front-end 2026-10-17).
-  StateTabsPx* = 200
-    ## The Locals / Globals / Watches control (`.state-tabs`): 200 x 26, its
-    ## buttons 20 high, 2 px apart, on #161616 inside a 1 px border.
-  StateTabsGround = "#161616"
-  StateTabActiveGround = "#262626"
   StateWatchFieldPx* = 300
     ## The watch field beside it (`.ct-input-panel`), 6 px after it.
   StateCodeLineGround = "#3a3a3ab3"
@@ -3332,7 +3331,7 @@ proc stateScrollbars(r: GpuiRenderer; parent: GpuiElement;
 proc stateFixedPx(vm: StateVM; row: StateRow): int =
   ## A state row's width less its value — the indent, the caret, `name:`,
   ## the type, the controls and the gaps — as `renderState` lays it out.
-  let watchControl = vm.activeTab.val == stWatches and row.depth == 0
+  let watchControl = row.isWatch
   let controlsPx = 20 + 20 + (if watchControl: pxOfText(1) else: 0)
   let gaps = 8 * (2 + (if row.typeName.len > 0: 1 else: 0) +
                   (if watchControl: 1 else: 0))
@@ -3377,48 +3376,23 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.setStyle(head, "height", "26px")
   r.setStyle(head, "padding-left", $StateInsetPx & "px")
   r.setStyle(head, "gap", "6px")
-  let tabs = r.createElement("div")
-  r.setAttribute(tabs, ViewIdAttribute, "state.tabs")
-  r.setAttribute(tabs, ViewKindAttribute, vocabularyName(pkTabs))
-  r.setStyle(tabs, "display", "flex")
-  r.setStyle(tabs, "items", "center")
-  r.setStyle(tabs, "flex-shrink", "0")
-  r.setStyle(tabs, "width", $StateTabsPx & "px")
-  r.setStyle(tabs, "height", "26px")
-  r.setStyle(tabs, "padding-left", "2px")
-  r.setStyle(tabs, "gap", "2px")
-  r.setStyle(tabs, "rounded", "6px")
-  r.setStyle(tabs, "border-width", "1px")
-  r.setStyle(tabs, "border-color", StateControlBorder)
-  r.setStyle(tabs, "background-color", StateTabsGround)
-  for t in StateTab:
-    let active = vm.activeTab.val == t
-    let label = case t
-                of stLocals: "Locals"
-                of stGlobals: "Globals"
-                of stWatches: "Watches"
-    let b = r.createElement("div")
-    r.setAttribute(b, "data-option-index", $ord(t))
-    r.setAttribute(b, "data-option-id", ($t)[2 .. ^1].toLowerAscii)
-    r.setAttribute(b, "data-ct-tab-active", $active)
-    r.setStyle(b, "display", "flex")
-    r.setStyle(b, "items", "center")
-    r.setStyle(b, "justify", "center")
-    r.setStyle(b, "flex-shrink", "0")
-    r.setStyle(b, "height", "20px")
-    r.setStyle(b, "padding-left", "10px")
-    r.setStyle(b, "padding-right", "10px")
-    r.setStyle(b, "rounded", "5px")
-    r.setStyle(b, "font-family", WindowFontFamily)
-    r.setStyle(b, "font-size", "12px")
-    r.setStyle(b, "line-height", "16px")
-    r.setStyle(b, "color", if active: DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
-                           else: DesignTokenHex[dtColorsUiTextPrimaryBodySubtle][dmDark])
-    if active:
-      r.setStyle(b, "background-color", StateTabActiveGround)
-    r.appendChild(b, r.createTextNode(label))
-    r.appendChild(tabs, b)
-  r.appendChild(head, tabs)
+  # ONE LIST, NO TABS (Variable-State-Pane.md § Decisions, 2026-10-24). The
+  # head offers "Hide watches from other processes" only when some watch was
+  # added in another process (or while it is on).
+  var otherProcess = vm.hideOtherProcessWatches.val
+  if not otherProcess and vm.recordingId.len > 0:
+    for _, origin in vm.watchOrigins.val:
+      if origin.len > 0 and origin != vm.recordingId:
+        otherProcess = true
+        break
+  if otherProcess:
+    let hide = vm.hideOtherProcessWatches.val
+    let t = stateText(r, (if hide: "◉ " else: "○ ") &
+                         "Hide watches from other processes",
+                      StateEmptyColour, 12, mono = false)
+    r.setAttribute(t, StateControlAttribute, "hide-other-process-watches:" &
+                                             (if hide: "off" else: "on"))
+    r.appendChild(head, t)
   # The watch field: a press opens the omnibox on `:watch ` (the window's
   # one text field), as this pane's watch row did.
   let field = r.createElement("div")
@@ -3513,9 +3487,9 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     r.setStyle(table, "flex-grow", "1")
     r.setStyle(table, "items", "center")
     r.setStyle(table, "justify", "center")
-    let msg = stateText(r, stateEmptyText(vm.activeTab.val), StateEmptyColour,
+    let msg = stateText(r, stateEmptyText(), StateEmptyColour,
                         14, mono = false)
-    r.setAttribute(msg, "data-ct-state-empty", $vm.activeTab.val)
+    r.setAttribute(msg, "data-ct-state-empty", "variables")
     r.appendChild(table, msg)
   # PLAT-70 Part B (Horizontal-Overflow.md §5): EACH ROW FITS THE PANE. The
   # value takes what the row has left after the name, the type and the
@@ -3603,7 +3577,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     r.setAttribute(el, StateChangedAttribute, (if changed: "true" else: "false"))
     # The value's cells: the pane less the row's indent, the caret, the
     # `name:`, the type, the controls and the gaps between them.
-    let watchControl = vm.activeTab.val == stWatches and row.depth == 0
+    let watchControl = row.isWatch
     let controlsPx = 20 + 20 + (if watchControl: pxOfText(1) else: 0)
     let gaps = 8 * (2 + (if row.typeName.len > 0: 1 else: 0) +
                     (if watchControl: 1 else: 0))
@@ -3654,7 +3628,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
                else: "question"
     r.appendChild(el, stateIconButton(r, "origin:" & row.path, icon,
                                       originIconSvg(icon), originOpen))
-    if vm.activeTab.val == stWatches and row.depth == 0:
+    if row.isWatch:
       let c = stateText(r, "×", StateEmptyColour, mono = false)
       r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
       r.appendChild(el, c)

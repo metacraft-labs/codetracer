@@ -199,12 +199,6 @@ func entriesOf*(root: ViewNode): set[ViewKind] =
 # State
 # ---------------------------------------------------------------------------
 
-func stateTabOptions*(): seq[ViewOption] =
-  ## §3.3.4's three roots, derived from `StateTab` rather than written out, so
-  ## a fourth tab cannot arrive without appearing here.
-  for t in StateTab:
-    result.add ViewOption(id: $t, label: ($t)[2 .. ^1])
-
 const VariableLabelSeparator* = ": "
   ## **The vocabulary's spelling of "this name has this value"**, named once so
   ## every medium draws the same row. It was ` = ` until PLAT-40, while the
@@ -237,7 +231,9 @@ proc variableRow(v: store_types.Variable; path: string;
                expanded = path in expanded)
 
 proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
-  ## The state panel: a `Tabs` over the three roots and a `Tree` of variables.
+  ## The Variables pane: ONE `Tree` of the locals, the globals when present
+  ## and the watched expressions — no tabs (Variable-State-Pane.md
+  ## § Decisions, 2026-10-24).
   result.pane = paneState
   if vm.isNil:
     result.report = "the state panel has no ViewModel; the session has not " &
@@ -245,7 +241,6 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
     result.root = viewText("state.report", result.report)
     result.entries = entriesOf(result.root)
     return
-  let tab = vm.activeTab.val
   let expanded = vm.expandedPaths.val
   let vars = vm.currentVariables.val
   var rows: seq[ViewNode] = @[]
@@ -255,10 +250,7 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
   if rows.len == 0:
     result.report = "no variables at this position"
   let tree = viewTreeNode("state.root",
-    (case tab
-     of stLocals: "locals"
-     of stGlobals: "globals"
-     of stWatches: "watches") &
+    "variables" &
     (if result.report.len > 0: " — " & result.report else: ""),
     rows, expanded = true)
   # THE CURSOR IS DERIVED FROM `StateVM.selectedPath`, which is the signal the
@@ -273,12 +265,10 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
       cursor = i
       break
   tree.cursor = cursor
-  let tabs = viewTabs("state.tabs", stateTabOptions(), selected = ord(tab))
   # NO TITLE OF ITS OWN (PLAT-49, the user, 2026-10-01: no title row inside a
-  # pane). The pane's tab strip says "State", as the desktop's GoldenLayout
-  # header does; a label here drew a second "State" as the pane's first row.
-  result.root = viewCollapsible("state", "", @[tabs, tree],
-                                expanded = true)
+  # pane). The pane's tab strip says "Variables", as the desktop's
+  # GoldenLayout header does.
+  result.root = viewCollapsible("state", "", @[tree], expanded = true)
   result.entries = entriesOf(result.root)
 
 # ---------------------------------------------------------------------------

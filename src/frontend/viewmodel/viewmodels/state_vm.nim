@@ -24,9 +24,8 @@
 ##
 ## Usage:
 ##   let vm = createStateVM(store)
-##   echo vm.activeTab.val        # stLocals
-##   vm.selectTab(stGlobals)
-##   echo vm.currentVariables.val # globals from the store
+##   vm.addWatch("total")
+##   echo vm.currentVariables.val # locals, globals, then the watches
 
 import std/[json, options, sets, tables, strutils]
 import ./action_sink
@@ -50,17 +49,20 @@ import value_changes
 # cross into this VM as `ValueHistoryRow` (see below), decoded from the wire
 # JSON by `historyRowsOf` (or, in the VS Code extension, by `ui/state.nim`).
 
-type
-  StateTab* = enum
-    ## The three tabs available in the state panel.
-    stLocals   ## Local variables at the current execution point
-    stGlobals  ## Global / module-level variables
-    stWatches  ## User-defined watch expressions
+const
+  WatchErrorType* = "watch error"
+    ## The type name of a watch row the stop cannot answer: the engine's own
+    ## refusal (`db-backend/src/watch_expression.rs` `refusal_type`) and the
+    ## placeholder this VM draws for a watch the answer has no row for.
+  WatchPendingType* = "watch pending"
+    ## The type name of a watch row whose value has not arrived yet.
 
+type
   VariableCategory* = enum
     ## PLAT-49 finding 12. WHICH GROUP A VARIABLE ROW BELONGS TO, as a value
-    ## every front-end reads: the desktop and GPUI show one group at a time
-    ## (`StateTab`), the terminal lists the groups one after another and marks
+    ## every front-end reads: every front-end lists the groups one after
+    ## another in one list (Variable-State-Pane.md § Decisions, 2026-10-24), the
+    ## terminal marks
     ## each ROW with its category (a one-letter tag, colour-coded) instead of
     ## spending a row on a separator per group. Declaration order is the order
     ## the groups are listed in.
@@ -95,16 +97,18 @@ type
       ## Rendered form of ``HistoryResult.value`` (``textRepr``).
 
   StateVM* = ref object of ViewModel
-    ## Reactive state for the State panel.
+    ## Reactive state for the Variables pane (formerly the State pane).
+    ##
+    ## ONE LIST (Variable-State-Pane.md § Decisions, 2026-10-24): the locals,
+    ## the globals when present, then the watched expressions — no tabs.
     ##
     ## Mutable signals:
-    ##   activeTab       — which tab is shown
     ##   expandedPaths   — set of variable paths whose children are visible
     ##   selectedPath    — path under the cursor (empty string = none)
     ##   watchExpressions — list of user-entered watch expressions
     ##
     ## Derived memos:
-    ##   currentVariables — the variable seq for the active tab
+    ##   currentVariables — the pane's one list: locals, globals, watches
     ##   isLoading        — whether a locals request is in flight
     ##
     ## The store reference is kept for the auto-load effect.
@@ -116,11 +120,29 @@ type
     runtimeRole*: ViewModelRuntimeRole
 
     # -- Mutable state --
-    activeTab*: Signal[StateTab]
     expandedPaths*: Signal[HashSet[string]]
     selectedPath*: Signal[string]
       ## Empty string means "no selection".
     watchExpressions*: Signal[seq[string]]
+      ## THE SESSION'S watch list: every recording's StateVM of a session holds
+      ## this same signal (`session_vm.ensureStateVM`), so a watch survives a
+      ## process switch (Variable-State-Pane.md § Decisions, 2026-10-24).
+    watchOrigins*: Signal[Table[string, string]]
+      ## The recording each watch was added in, by expression (shared like
+      ## `watchExpressions`). Empty for a watch added before any recording was
+      ## known — such a watch belongs to every process.
+    hideOtherProcessWatches*: Signal[bool]
+      ## "Hide watches from other processes": when on, a watch added in another
+      ## recording is left out of `currentVariables` while this one is shown.
+      ## The reader's own setting; off by default.
+    recordingId*: string
+      ## The recording this StateVM shows (`ensureStateVM`); empty in a
+      ## single-recording session.
+    watchOwner*: StateVM
+      ## The VM that edits the session's watch list for this one — the
+      ## session's primary StateVM, set for every other recording's VM, so a
+      ## watch added in any process goes through the one collaboration-backed
+      ## owner. Nil on the owner itself.
     expandedHistories*: Signal[HashSet[string]]
     viewport*: Signal[Viewport]
     loadingMore*: Signal[HashSet[string]]
@@ -307,38 +329,54 @@ func categoryTag*(c: VariableCategory): string =
   VariableCategoryTags[c]
 
 
-func stateEmptyText*(tab: StateTab): string =
-  ## What an empty pane says, per tab — the desktop's overlay, drawn by every
-  ## front-end.
-  ##
-  ## Every tab used to say "No local variables are present in the current
-  ## point of execution." — including the Watches tab, where it is simply
-  ## untrue: an empty Watches tab means the user has not added a watch
-  ## yet, and telling them about locals gives no hint that the input above
-  ## is the thing to use. An empty state that cannot say WHICH emptiness
-  ## it is describing is the failure this pane keeps producing.
-  case tab
-  of stLocals:
-    "No local variables are present in the current point of execution."
-  of stGlobals:
-    "No global variables are present in the current point of execution."
-  of stWatches:
-    "No watch expressions yet — type one above to evaluate it at this step."
+func stateEmptyText*(): string =
+  ## What an empty Variables pane says, drawn by every front-end: nothing is
+  ## in scope and nothing is watched yet — and where to type a watch.
+  "No variables at this point of execution. Type an expression above to watch it."
 
-proc selectTab*(vm: StateVM; tab: StateTab) =
-  ## Switch to a different tab. The `currentVariables` memo updates
-  ## automatically because it depends on `activeTab`.
-  if vm.actionSink.forwards("state", "selectTab",
-      %*{"tab": sinkArg(tab)}):
+func isInvalidWatch*(row: store_types.Variable): bool =
+  ## A watch row the current stop cannot answer: the engine refused it, or
+  ## the answer had no row for it. Shown as not valid here, never dropped.
+  row.isWatch and row.typeName == WatchErrorType
+
+func isPendingWatch*(row: store_types.Variable): bool =
+  ## A watch row whose value has not arrived yet.
+  row.isWatch and row.typeName == WatchPendingType
+
+proc setHideOtherProcessWatches*(vm: StateVM; hide: bool) =
+  ## Turn "Hide watches from other processes" on or off.
+  if vm.isNil:
     return
-  if not vm.collabCore.isNil:
-    discard vm.collabCore.dispatchLocalViewOp(
-      vokSetStateTab,
-      "statePane.activeTab",
-      %*{"tab": $tab},
-    )
+  vm.hideOtherProcessWatches.val = hide
+
+proc watchOrigin*(vm: StateVM; expression: string): string =
+  ## The recording `expression` was added in, or "" when not recorded.
+  if vm.isNil:
+    return ""
+  vm.watchOrigins.val.getOrDefault(expression, "")
+
+proc noteWatchOrigin(vm: StateVM; expression, recordingId: string) =
+  ## Record where a watch was added, unless it already has an origin.
+  if recordingId.len == 0 or expression.len == 0:
     return
-  vm.activeTab.val = tab
+  let t = vm.watchOrigins.val
+  if t.hasKey(expression):
+    return
+  var fresh = initTable[string, string]()
+  for k, v in t:
+    fresh[k] = v
+  fresh[expression] = recordingId
+  vm.watchOrigins.val = fresh
+
+proc forgetWatchOrigin(vm: StateVM; expression: string) =
+  let t = vm.watchOrigins.val
+  if not t.hasKey(expression):
+    return
+  var fresh = initTable[string, string]()
+  for k, v in t:
+    if k != expression:
+      fresh[k] = v
+  vm.watchOrigins.val = fresh
 
 proc toggleExpand*(vm: StateVM; path: string) =
   ## Toggle whether a variable path is expanded or collapsed.
@@ -415,6 +453,13 @@ proc addWatch*(vm: StateVM; expression: string) =
     return
   if expression.len == 0:
     return
+  # The session's watch list is edited by its owner; the watch remembers the
+  # recording it was added in (Variable-State-Pane.md § Decisions).
+  if not vm.watchOwner.isNil and vm.watchOwner != vm:
+    vm.watchOwner.noteWatchOrigin(expression, vm.recordingId)
+    vm.watchOwner.addWatch(expression)
+    return
+  vm.noteWatchOrigin(expression, vm.recordingId)
   if isOriginWatch(expression) and not vm.onShowOriginProc.isNil and
      not vm.store.isNil:
     let inner = unwrapOriginWatch(expression)
@@ -448,6 +493,10 @@ proc removeWatch*(vm: StateVM; expression: string) =
   if vm.actionSink.forwards("state", "removeWatch",
       %*{"expression": expression}):
     return
+  if not vm.watchOwner.isNil and vm.watchOwner != vm:
+    vm.watchOwner.removeWatch(expression)
+    return
+  vm.forgetWatchOrigin(expression)
   if not vm.collabCore.isNil:
     let watch = vm.collabCore.liveWatchForExpression(expression)
     if watch.isNone:
@@ -481,6 +530,13 @@ proc editWatch*(vm: StateVM; old, expression: string) =
     return
   if expression.len == 0 or old == expression:
     return
+  if not vm.watchOwner.isNil and vm.watchOwner != vm:
+    vm.watchOwner.editWatch(old, expression)
+    return
+  # An edited watch keeps the process it was added in.
+  let origin = vm.watchOrigin(old)
+  vm.forgetWatchOrigin(old)
+  vm.noteWatchOrigin(expression, origin)
   if not vm.collabCore.isNil:
     vm.removeWatch(old)
     vm.addWatch(expression)
@@ -796,7 +852,9 @@ proc isOriginExpanded*(vm: StateVM; row: VariableId): bool =
 
 proc createStateVM*(store: ReplayDataStore;
                     collabCore: CollaborativeSessionCore = nil;
-                    runtimeRole = vrrStandalone): StateVM =
+                    runtimeRole = vrrStandalone;
+                    watchOwner: StateVM = nil;
+                    recordingId = ""): StateVM =
   ## Create a StateVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
   ##
@@ -805,10 +863,19 @@ proc createStateVM*(store: ReplayDataStore;
   ## 2. Derived memos for `currentVariables` and `isLoading`
   ## 3. Optional bridge callbacks supplied by the legacy component
   withViewModel proc(dispose: proc()): StateVM =
-    let activeTab = createSignal(stLocals)
     let expandedPaths = createSignal(initHashSet[string]())
     let selectedPath = createSignal("")
-    let watchExpressions = createSignal(newSeq[string]())
+    # Another recording's VM of the same session shares the owner's watch
+    # list and origins (Variable-State-Pane.md § Decisions, 2026-10-24).
+    let watchExpressions =
+      if watchOwner.isNil: createSignal(newSeq[string]())
+      else: watchOwner.watchExpressions
+    let watchOrigins =
+      if watchOwner.isNil: createSignal(initTable[string, string]())
+      else: watchOwner.watchOrigins
+    let hideOtherProcessWatches =
+      if watchOwner.isNil: createSignal(false)
+      else: watchOwner.hideOtherProcessWatches
     let expandedHistories = createSignal(initHashSet[string]())
     let valueHistory = createSignal(initTable[string, seq[ValueHistoryRow]]())
     let viewport = createSignal(Viewport())
@@ -822,24 +889,45 @@ proc createStateVM*(store: ReplayDataStore;
     let valueChanges = createSignal(VariableDiff())
     let originLines = createSignal(initTable[string, seq[string]]())
 
-    # Derived: pick the right variable list based on the active tab.
+    # Derived: THE PANE'S ONE LIST (Variable-State-Pane.md § Decisions,
+    # 2026-10-24): the locals, the globals when the backend reports any, then
+    # one row per watched expression, in the session's watch order.
+    #
+    # A watch's row is the engine's answer for it (watch answers ride the
+    # locals response, split into `store.locals.watches` by `value.isWatch`).
+    # A watch the answer has no row for is still listed — "evaluating…" while
+    # the request is in flight, "not available at this stop" once it settled —
+    # because a watch is never dropped for not evaluating. With "Hide watches
+    # from other processes" on, a watch added in another recording is left out.
     let currentVariables = createMemo[seq[store_types.Variable]] proc(): seq[store_types.Variable] =
-      case activeTab.val
-      of stLocals:
-        store.locals.locals.val
-      of stGlobals:
-        store.locals.globals.val
-      of stWatches:
-        # Watches are evaluated server-side and returned as part of the
-        # locals response, split out of it by `value.isWatch` into
-        # `store.locals.watches`.
-        #
-        # This arm used to be `newSeq[store_types.Variable]()` — a literal
-        # empty list — with a comment promising it would be filled in
-        # "when the backend supports them". It has therefore been unable
-        # to show anything at all, whatever the backend answered, for as
-        # long as the tab has existed.
-        store.locals.watches.val
+      result = store.locals.locals.val
+      for g in store.locals.globals.val:
+        result.add g
+      let answered = store.locals.watches.val
+      let hide = hideOtherProcessWatches.val
+      let origins = watchOrigins.val
+      let loading = store.locals.loadingState.val == lsLoading
+      for expression in watchExpressions.val:
+        let origin = origins.getOrDefault(expression, "")
+        if hide and recordingId.len > 0 and origin.len > 0 and
+           origin != recordingId:
+          continue
+        var found = false
+        for row in answered:
+          if row.name == expression:
+            # A row is a watch because the user typed it, whatever flag the
+            # answer carried.
+            var watchRow = row
+            watchRow.isWatch = true
+            result.add watchRow
+            found = true
+            break
+        if not found:
+          result.add store_types.Variable(
+            name: expression,
+            value: (if loading: "evaluating…" else: "not available at this stop"),
+            typeName: (if loading: WatchPendingType else: WatchErrorType),
+            isWatch: true)
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -864,7 +952,6 @@ proc createStateVM*(store: ReplayDataStore;
       store: store,
       collabCore: collabCore,
       runtimeRole: runtimeRole,
-      activeTab: activeTab,
       expandedPaths: expandedPaths,
       expandedHistories: expandedHistories,
       valueHistory: valueHistory,
@@ -872,6 +959,10 @@ proc createStateVM*(store: ReplayDataStore;
       loadingMore: loadingMore,
       selectedPath: selectedPath,
       watchExpressions: watchExpressions,
+      watchOrigins: watchOrigins,
+      hideOtherProcessWatches: hideOtherProcessWatches,
+      recordingId: recordingId,
+      watchOwner: watchOwner,
       currentVariables: currentVariables,
       isLoading: isLoading,
       codeStateLine: codeStateLine,

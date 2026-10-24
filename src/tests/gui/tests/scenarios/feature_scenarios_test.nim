@@ -1606,7 +1606,10 @@ suite "Full workflow: record -> replay -> debug":
       ])
       # Back at step 2 -- a is 0 again (time-travel).
       check session.stateVM.currentVariables.val[1].value == "0"
-      check session.stateVM.currentVariables.val.len == 3
+      # The three locals, then the "a + b" watch added in step 6: the pane
+      # is one list of variables and watches.
+      check session.stateVM.currentVariables.val.len == 4
+      check session.stateVM.currentVariables.val[3].name == "a + b"
 
       # ---- Step 9: Movement preserves the already-loaded event list ----
       check mock.findCommand("ct/event-load").isNone
@@ -1664,9 +1667,9 @@ suite "Full workflow: record -> replay -> debug":
 
       dispose()
 
-  test "tab switching mid-session shows correct variable source":
-    ## During a debugging session, switching between locals, globals,
-    ## and watches should show the right data source for each.
+  test "the variables pane shows locals and globals in one list":
+    ## During a debugging session the variables pane shows the locals and
+    ## the globals in one list (Variable-State-Pane.md, 2026-10-24).
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
@@ -1688,25 +1691,13 @@ suite "Full workflow: record -> replay -> debug":
                  hasChildren: false, children: @[]),
       ]
 
-      # Locals tab: 2 variables.
-      check session.stateVM.activeTab.val == stLocals
-      check session.stateVM.currentVariables.val.len == 2
-      check session.stateVM.currentVariables.val[0].name == "request"
-
-      # Globals tab: 3 variables.
-      session.stateVM.selectTab(stGlobals)
-      check session.stateVM.currentVariables.val.len == 3
-      check session.stateVM.currentVariables.val[2].name == "VERSION"
-      check session.stateVM.currentVariables.val[2].value == "2.1.0"
-
-      # Watches tab: empty (not wired to backend results yet).
-      session.stateVM.selectTab(stWatches)
-      check session.stateVM.currentVariables.val.len == 0
-
-      # Back to locals.
-      session.stateVM.selectTab(stLocals)
-      check session.stateVM.currentVariables.val.len == 2
-      check session.stateVM.currentVariables.val[1].name == "user_id"
+      # One list: the 2 locals, then the 3 globals.
+      let rows = session.stateVM.currentVariables.val
+      check rows.len == 5
+      check rows[0].name == "request"
+      check rows[1].name == "user_id"
+      check rows[4].name == "VERSION"
+      check rows[4].value == "2.1.0"
 
       dispose()
 

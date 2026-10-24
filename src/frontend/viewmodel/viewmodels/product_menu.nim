@@ -95,7 +95,7 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
     folder("View", mnemonic = 'w', children = @[
       item("Filesystem", "aFilesystem"),
       item("Calltrace", "aFullCalltrace"),
-      item("State", "aState"),
+      item("Variables", "aState"),
       item("Event Log", "aEventLog"),
       item("Terminal Output", "aTerminal"),
       item("Scratchpad", "aScratchpad"),

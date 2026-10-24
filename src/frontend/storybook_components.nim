@@ -1438,17 +1438,17 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
   of "auto-hide-collapsed-icons":
     appendRendered(container, renderAutoHideCollapsedIconsPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideCollapsedIconRecord(title: "Calltrace", icon: "C"),
-      AutoHideCollapsedIconRecord(title: "State", icon: "S"),
+      AutoHideCollapsedIconRecord(title: "Variables", icon: "V"),
     ]))
   of "auto-hide-overlay-tabs":
     appendRendered(container, renderAutoHideOverlayTabsPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideOverlayTabRecord(title: "Calltrace", active: true),
-      AutoHideOverlayTabRecord(title: "State", active: false),
+      AutoHideOverlayTabRecord(title: "Variables", active: false),
     ], true, " side-tabs-left"))
   of "auto-hide-side-strip":
     appendRendered(container, renderAutoHideSideStripPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideSideStripRecord(title: "Calltrace"),
-      AutoHideSideStripRecord(title: "State"),
+      AutoHideSideStripRecord(title: "Variables"),
     ], fixture == "collapsed"))
   else:
     let node = r.createElement("div")

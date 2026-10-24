@@ -41,7 +41,6 @@ type
     focusedPanelId*: string
     calltraceSelectionId*: string
     stateSelectedPath*: string
-    stateActiveTab*: string
     activeDocumentId*: string
     driverControls*: AdapterDriverControls
     followMode*: AdapterFollowMode
@@ -152,7 +151,6 @@ proc projectSharedState*(adapter: FrontEndAdapter; state: SharedSessionViewState
     focusedPanelId: state.focusedPanelId.value,
     calltraceSelectionId: state.calltrace.selectedEntry.value,
     stateSelectedPath: state.statePane.selectedPath.value,
-    stateActiveTab: state.statePane.activeTab.value,
     activeDocumentId: state.editor.activeDocumentId.value,
     driverControls: AdapterDriverControls(
       activePrincipalId: state.activeDriver.principalId,
@@ -283,7 +281,6 @@ proc projectionJson*(adapter: FrontEndAdapter): JsonNode =
     "focusedPanelId": adapter.projection.focusedPanelId,
     "calltraceSelectionId": adapter.projection.calltraceSelectionId,
     "stateSelectedPath": adapter.projection.stateSelectedPath,
-    "stateActiveTab": adapter.projection.stateActiveTab,
     "activeDocumentId": adapter.projection.activeDocumentId,
     "driverControls": {
       "activePrincipalId": adapter.projection.driverControls.activePrincipalId,

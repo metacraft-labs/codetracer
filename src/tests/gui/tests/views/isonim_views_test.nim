@@ -1188,7 +1188,7 @@ suite "IsoNim State Panel — structure":
 
       dispose()
 
-  test "renders three tab buttons":
+  test "renders no tab strip: one list of variables and watches":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
@@ -1196,26 +1196,10 @@ suite "IsoNim State Panel — structure":
 
       let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
-      let tabBar = findByClass(panel, "state-tabs")
-      check tabBar != nil
-      check tabBar.tag == "div"
-
-      let localsBtn = findByClass(panel, "tab-locals")
-      let globalsBtn = findByClass(panel, "tab-globals")
-      let watchesBtn = findByClass(panel, "tab-watches")
-
-      check localsBtn != nil
-      check globalsBtn != nil
-      check watchesBtn != nil
-
-      check localsBtn.tag == "button"
-      check globalsBtn.tag == "button"
-      check watchesBtn.tag == "button"
-
-      # Locals tab should have the "active" class by default
-      check "active" in localsBtn.attributes["class"]
-      check "active" notin globalsBtn.attributes["class"]
-      check "active" notin watchesBtn.attributes["class"]
+      check findByClassOrNil(panel, "state-tabs") == nil
+      check findByClassOrNil(panel, "tab-locals") == nil
+      check findByClassOrNil(panel, "tab-watches") == nil
+      check findByClass(panel, "variables-toolbar") != nil
 
       dispose()
 
@@ -1248,7 +1232,7 @@ suite "IsoNim State Panel — structure":
 
       dispose()
 
-  test "the watch input is shown on every tab":
+  test "the watch input is in the pane":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
@@ -1280,56 +1264,79 @@ suite "IsoNim State Panel — structure":
       dispose()
 
 # ---------------------------------------------------------------------------
-# Tab switching tests
+# Watches in the one list
 # ---------------------------------------------------------------------------
 
-suite "IsoNim State Panel — tab switching":
+suite "IsoNim State Panel — watches in the list":
 
-  test "clicking globals tab updates active class":
+  test "a watch typed in the input appears after the variables":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
+      drain()
+      store.updateLocals(@[makeVariable("x", "1", "int")])
 
       let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+      vm.addWatch("x + 1")
+      store.locals.watches.val = @[
+        Variable(name: "x + 1", value: "2", typeName: "int", isWatch: true)]
 
-      let globalsBtn = findByClass(panel, "tab-globals")
-      check globalsBtn != nil
-      globalsBtn.fireEvent("click")
-
-      check vm.activeTab.val == stGlobals
-
-      # Active class should have moved
-      check "active" in globalsBtn.attributes["class"]
-
-      let localsBtn = findByClass(panel, "tab-locals")
-      check "active" notin localsBtn.attributes["class"]
+      let container = findByClass(panel, "value-components-container")
+      let rows = findAllByClass(container, "value-expanded")
+      check rows.len == 2
+      check "x + 1" in rows[1].textContent
+      check "value-watch" in rows[1].attributes["class"]
+      check "watch-invalid" notin rows[1].attributes["class"]
 
       dispose()
 
-  test "clicking watches tab selects it, the watch input stays":
+  test "a watch the stop cannot answer stays, marked not valid":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
+      drain()
 
       let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+      vm.addWatch("gone")
+      drain()
 
-      let watchesBtn = findByClass(panel, "tab-watches")
-      check watchesBtn != nil
-      watchesBtn.fireEvent("click")
+      let container = findByClass(panel, "value-components-container")
+      let rows = findAllByClass(container, "value-expanded")
+      check rows.len == 1
+      check "watch-invalid" in rows[0].attributes["class"]
+      check "not available at this stop" in rows[0].textContent
 
-      check vm.activeTab.val == stWatches
-      check "active" in watchesBtn.attributes["class"]
+      dispose()
 
-      let watchContainer = findByClass(panel, "watch-input-container")
-      check watchContainer != nil
-      check watchContainer.styles.getOrDefault("display", "") != "none"
+  test "the hide toggle is offered only when a watch came from another process":
+    createRoot proc(dispose: proc()) =
+      let (storeA, _) = makeStoreWithMock()
+      let (storeB, _) = makeStoreWithMock()
+      let a = createStateVM(storeA, recordingId = "rec-a")
+      let b = createStateVM(storeB, watchOwner = a, recordingId = "rec-b")
+      let r = MockRenderer()
+      drain()
 
-      # Back to Locals: the input is still there to add a watch from.
-      findByClass(panel, "tab-locals").fireEvent("click")
-      check vm.activeTab.val == stLocals
-      check watchContainer.styles.getOrDefault("display", "") != "none"
+      let panel = renderStatePanel[MockRenderer, MockNode](r, b)
+      let toggle = findByClass(panel, "hide-other-process-watches")
+      check toggle != nil
+      check toggle.styles.getOrDefault("display", "") == "none"
+
+      b.addWatch("mine")
+      check toggle.styles.getOrDefault("display", "") == "none"
+      a.addWatch("theirs")
+      check toggle.styles.getOrDefault("display", "") != "none"
+
+      let container = findByClass(panel, "value-components-container")
+      check findAllByClass(container, "value-expanded").len == 2
+      toggle.fireEvent("click")
+      check b.hideOtherProcessWatches.val
+      check "active" in toggle.attributes["class"]
+      let shown = findAllByClass(container, "value-expanded")
+      check shown.len == 1
+      check "mine" in shown[0].textContent
 
       dispose()
 
@@ -1439,7 +1446,7 @@ suite "IsoNim State Panel — tab switching":
 
       dispose()
 
-  test "switching to globals shows global variables":
+  test "globals follow the locals in the one list":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
@@ -1455,18 +1462,11 @@ suite "IsoNim State Panel — tab switching":
 
       let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
-      # Initially shows locals
       let container = findByClass(panel, "value-components-container")
-      let localRows = findAllByClass(container, "value-expanded")
-      check localRows.len == 1
-      check "localVar" in localRows[0].textContent
-
-      # Switch to globals
-      vm.selectTab(stGlobals)
-
-      let globalRows = findAllByClass(container, "value-expanded")
-      check globalRows.len == 1
-      check "globalVar" in globalRows[0].textContent
+      let rows = findAllByClass(container, "value-expanded")
+      check rows.len == 2
+      check "localVar" in rows[0].textContent
+      check "globalVar" in rows[1].textContent
 
       dispose()
 
@@ -1642,21 +1642,16 @@ suite "IsoNim State Panel — loading":
 
 suite "IsoNim State Panel — text content":
 
-  test "tab buttons have correct text":
+  test "the empty list invites a watch":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
+      drain()
 
       let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
-
-      let localsBtn = findByClass(panel, "tab-locals")
-      let globalsBtn = findByClass(panel, "tab-globals")
-      let watchesBtn = findByClass(panel, "tab-watches")
-
-      check localsBtn.textContent == "Locals"
-      check globalsBtn.textContent == "Globals"
-      check watchesBtn.textContent == "Watches"
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay.textContent == stateEmptyText()
 
       dispose()
 

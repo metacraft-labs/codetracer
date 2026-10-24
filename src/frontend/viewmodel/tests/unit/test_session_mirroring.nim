@@ -132,7 +132,7 @@ suite "the publisher":
         proc(msg: JsonNode) = sent.add(msg), manual)
       ck queued.len == 0           # construction publishes nothing
       session.moveTo(10, "main.nim", 3)
-      session.stateVM.selectTab(stGlobals)
+      session.stateVM.selectPath("g")
       for callback in queued: callback()
       queued = @[]
       ck sent.len == 1
@@ -142,7 +142,7 @@ suite "the publisher":
       var keys: seq[string]
       for e in sent[0]["batch"]: keys.add e["key"].getStr
       ck "store.debugger" in keys
-      ck "state.activeTab" in keys
+      ck "state.selectedPath" in keys
       # Nothing changed: nothing sent.
       pub.flush()
       ck sent.len == 1
@@ -237,7 +237,7 @@ suite "a primary and its mirror":
       primary.moveTo(200, "src/helper.nim", 4)
       primary.store.locals.locals.val = @[Variable(name: "y", value: "2",
                                                    typeName: "int")]
-      primary.stateVM.selectTab(stWatches)
+      primary.stateVM.selectPath("w")
       link.settle()
 
       let differing = agree(primary, mirror.session)
@@ -246,7 +246,7 @@ suite "a primary and its mirror":
       ck mirror.session.store.debugger.val.rrTicks == 200
       ck mirror.session.store.locals.locals.val[0].name == "y"
       ck mirror.session.calltraceVM.selectedEntry.val == some(1'i64)
-      ck mirror.session.stateVM.activeTab.val == stWatches
+      ck mirror.session.stateVM.selectedPath.val == "w"
       mirror.dispose()
       host.dispose()
       done()
@@ -266,11 +266,11 @@ suite "a primary and its mirror":
       ck primary.stateVM.watchExpressions.val == @["a + b"]
       ck mirror.session.stateVM.watchExpressions.val == @["a + b"]
 
-      mirror.relay("state", "selectTab", %*{"tab": actionArg(stGlobals)})
+      mirror.relay("state", "selectPath", %*{"path": actionArg("g")})
       mirror.relay("calltrace", "selectEntry",
                    %*{"lineIndex": actionArg(some(3'i64))})
       link.settle()
-      ck primary.stateVM.activeTab.val == stGlobals
+      ck primary.stateVM.selectedPath.val == "g"
       ck primary.calltraceVM.selectedEntry.val == some(3'i64)
 
       # A step reaches the PRIMARY's backend; the mirror's sends nothing
@@ -338,7 +338,7 @@ suite "a primary and its mirror":
       host.dispose()
       done()
 
-  test "a tab and a watch chosen before the mirror's snapshot survive its next view operation":
+  test "a selection and a watch made before the mirror's snapshot survive its next view operation":
     # codetracer-pm issues/2026-10-22-a-watch-typed-in-the-browser-never-
     # produces-a-row.md, measured under `ct host`: the page chose the Watches
     # tab and typed a watch while its first snapshot was on the wire. The
@@ -377,18 +377,18 @@ suite "a primary and its mirror":
         held.delete(0)
       check held.len == 1   # the snapshot, not yet delivered
       let svm = mirror.session.stateVM
-      svm.selectTab(stWatches)
+      svm.selectPath("w")
       svm.addWatch("initial_shield")
       deliverHeld()
-      ck primary.stateVM.activeTab.val == stWatches
+      ck primary.stateVM.selectedPath.val == "w"
       ck primary.stateVM.watchExpressions.val == @["initial_shield"]
-      ck svm.activeTab.val == stWatches
+      ck svm.selectedPath.val == "w"
       ck svm.watchExpressions.val == @["initial_shield"]
       # Any later view operation on the mirror — here a row expanded.
       svm.toggleExpand("asteroid_masses_positive")
       deliverHeld()
       ck primary.stateVM.expandedPaths.val.contains("asteroid_masses_positive")
-      ck svm.activeTab.val == stWatches
+      ck svm.selectedPath.val == "w"
       ck svm.watchExpressions.val == @["initial_shield"]
       # And the next watch joins the first, in the tab being looked at.
       svm.addWatch("asteroid_masses_positive[1]")
@@ -397,12 +397,12 @@ suite "a primary and its mirror":
          @["initial_shield", "asteroid_masses_positive[1]"]
       ck svm.watchExpressions.val ==
          @["initial_shield", "asteroid_masses_positive[1]"]
-      ck svm.activeTab.val == stWatches
+      ck svm.selectedPath.val == "w"
       mirror.dispose()
       host.dispose()
       done()
 
-  test "a tab and a watch chosen before the mirror follows a session reach it":
+  test "a selection and a watch made before the mirror follows a session reach it":
     # The same report, the other order measured under `ct host`: the page
     # is on screen, and its tab strip and watch input usable, BEFORE the
     # server's session exists (it is made at the replay's first stop) and so
@@ -420,15 +420,15 @@ suite "a primary and its mirror":
       link.settle()
       check mirror.following.len == 0   # no session is hosted yet
       let svm = mirror.session.stateVM
-      svm.selectTab(stWatches)
+      svm.selectPath("w")
       svm.addWatch("initial_shield")
-      ck svm.activeTab.val == stWatches   # shown at once, as typed
+      ck svm.selectedPath.val == "w"   # shown at once, as typed
       host.addPrimary("s1", primary)
       link.settle()
       ck mirror.following == "s1"
-      ck primary.stateVM.activeTab.val == stWatches
+      ck primary.stateVM.selectedPath.val == "w"
       ck primary.stateVM.watchExpressions.val == @["initial_shield"]
-      ck svm.activeTab.val == stWatches
+      ck svm.selectedPath.val == "w"
       ck svm.watchExpressions.val == @["initial_shield"]
       mirror.dispose()
       host.dispose()
@@ -458,12 +458,12 @@ suite "a primary and its mirror":
       # The primary's own view operation, first.
       primary.stateVM.toggleExpand("asteroid_masses_positive")
       link.settle()
-      mirror.session.stateVM.selectTab(stWatches)
+      mirror.session.stateVM.selectPath("w")
       mirror.session.stateVM.addWatch("initial_shield")
       link.settle()
-      ck primary.stateVM.activeTab.val == stWatches
+      ck primary.stateVM.selectedPath.val == "w"
       ck primary.stateVM.watchExpressions.val == @["initial_shield"]
-      ck mirror.session.stateVM.activeTab.val == stWatches
+      ck mirror.session.stateVM.selectedPath.val == "w"
       ck mirror.session.stateVM.watchExpressions.val == @["initial_shield"]
       mirror.dispose()
       host.dispose()
@@ -656,7 +656,7 @@ suite "several primaries, one set of mirrors":
       ck mirror.following == "first"
 
       first.moveTo(111, "first.nim", 11)
-      first.stateVM.selectTab(stGlobals)
+      first.stateVM.selectPath("g")
       second.moveTo(222, "second.nim", 22)
       link.settle()
       ck mirror.session.store.debugger.val.rrTicks == 111
@@ -665,12 +665,12 @@ suite "several primaries, one set of mirrors":
       link.settle()
       ck mirror.following == "second"
       ck mirror.session.store.debugger.val.rrTicks == 222
-      ck mirror.session.stateVM.activeTab.val == stLocals
+      ck mirror.session.stateVM.selectedPath.val == ""
       checkpoint $agree(second, mirror.session)
       ck agree(second, mirror.session).len == 0
       # The first session, unwatched, kept its position and its pane state.
       ck first.store.debugger.val.rrTicks == 111
-      ck first.stateVM.activeTab.val == stGlobals
+      ck first.stateVM.selectedPath.val == "g"
 
       # It moves while hidden; the mirror does not show it.
       first.moveTo(333, "first.nim", 33)
@@ -686,7 +686,7 @@ suite "several primaries, one set of mirrors":
       host.activate("first")
       link.settle()
       ck mirror.session.store.debugger.val.rrTicks == 333
-      ck mirror.session.stateVM.activeTab.val == stGlobals
+      ck mirror.session.stateVM.selectedPath.val == "g"
       checkpoint $agree(first, mirror.session)
       ck agree(first, mirror.session).len == 0
       mirror.dispose()
@@ -828,12 +828,12 @@ suite "a mirror whose panels act on the primary (a VS Code webview)":
       # An `Option` argument.
       mirror.session.calltraceVM.selectEntry(some(1'i64))
       # An enum argument.
-      mirror.session.stateVM.selectTab(stGlobals)
+      mirror.session.stateVM.selectPath("g")
       link.settle()
       ck primary.calltraceVM.selectedEntry.val == some(1'i64)
       ck mirror.session.calltraceVM.selectedEntry.val == some(1'i64)
-      ck primary.stateVM.activeTab.val == stGlobals
-      ck mirror.session.stateVM.activeTab.val == stGlobals
+      ck primary.stateVM.selectedPath.val == "g"
+      ck mirror.session.stateVM.selectedPath.val == "g"
 
       # An action that asks the backend: the PRIMARY's backend is asked.
       mock.clearReceivedCommands()

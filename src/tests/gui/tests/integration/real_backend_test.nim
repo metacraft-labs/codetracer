@@ -319,7 +319,7 @@ suite "Real backend: locals inspection":
     check session.session.store.locals.locals.val.len > 0
 
     # The StateVM's currentVariables memo should reflect the same data
-    # (since the default tab is stLocals).
+    # (the locals lead the one list).
     check session.session.stateVM.currentVariables.val.len > 0
 
 # ---------------------------------------------------------------------------

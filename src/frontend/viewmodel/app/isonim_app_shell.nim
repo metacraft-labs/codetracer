@@ -36,7 +36,7 @@ const
   IsoNimAppHeaderText* = "IsoNim Rendering (experimental)"
 
   IsoNimAppSectionSpecs*: array[8, IsoNimAppSectionSpec] = [
-    IsoNimAppSectionSpec(panelId: "state", title: "State"),
+    IsoNimAppSectionSpec(panelId: "state", title: "Variables"),
     IsoNimAppSectionSpec(panelId: "calltrace", title: "Calltrace"),
     IsoNimAppSectionSpec(panelId: "event-log", title: "Event Log"),
     IsoNimAppSectionSpec(panelId: "flow", title: "Flow"),
@@ -59,7 +59,7 @@ template renderIsoNimAppShellImpl(
         text IsoNimAppHeaderText
       tdiv(class = IsoNimPanelSectionClass, id = sectionId("state")):
         h3(class = IsoNimSectionHeaderClass):
-          text "State"
+          text "Variables"
         tdiv(ref = stateContent, class = IsoNimSectionContentClass):
           discard
       tdiv(class = IsoNimPanelSectionClass, id = sectionId("calltrace")):
@@ -104,7 +104,7 @@ proc sectionHosts[N](
     shellContent: N): seq[IsoNimAppSectionHost[N]] =
   @[
     IsoNimAppSectionHost[N](
-      panelId: "state", title: "State", content: stateContent),
+      panelId: "state", title: "Variables", content: stateContent),
     IsoNimAppSectionHost[N](
       panelId: "calltrace", title: "Calltrace", content: calltraceContent),
     IsoNimAppSectionHost[N](

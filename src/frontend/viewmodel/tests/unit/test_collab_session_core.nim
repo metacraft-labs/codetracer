@@ -93,12 +93,12 @@ suite "collaborative ViewModel M2 session core":
 
     calltrace.selectEntry(some(7'i64))
     state.addWatch("legacyValue")
-    state.selectTab(stWatches)
+    state.selectPath("legacyValue")
     drain()
 
     check calltrace.selectedEntry.val == some(7'i64)
     check state.watchExpressions.val == @["legacyValue"]
-    check state.activeTab.val == stWatches
+    check state.selectedPath.val == "legacyValue"
     check mock.findCommand("ct/load-locals").isSome
     calltrace.dispose()
     state.dispose()
@@ -108,7 +108,7 @@ suite "collaborative ViewModel M2 session core":
     let (session, _) = makeSession()
 
     session.calltraceVM.selectEntry(some(9'i64))
-    session.stateVM.selectTab(stWatches)
+    session.stateVM.selectPath("root.child")
     session.stateVM.toggleExpand("root.child")
     session.stateVM.addWatch("root.child")
 
@@ -116,7 +116,7 @@ suite "collaborative ViewModel M2 session core":
     check snap.documentRevision == 4'u64
     check snap.appliedOpIds.len == 4
     check snap.state.calltrace.selectedEntry.value == "9"
-    check snap.state.statePane.activeTab.value == "stWatches"
+    check snap.state.statePane.selectedPath.value == "root.child"
     check "root.child" in visibleExpansionIds(snap.state.statePane.expandedPaths)
     check snap.state.statePane.visibleWatches.len == 1
     check snap.state.statePane.visibleWatches[0].expression == "root.child"

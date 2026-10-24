@@ -64,12 +64,6 @@ proc parseInt64Option(value: string): Option[int64] =
   else:
     none(int64)
 
-proc parseStateTab(value: string): StateTab =
-  case value
-  of "stGlobals": stGlobals
-  of "stWatches": stWatches
-  else: stLocals
-
 proc projectCalltraceViewState*(state: SharedSessionViewState;
                                 vm: CalltraceVM) =
   if vm.isNil:
@@ -98,7 +92,6 @@ proc projectCalltraceViewState*(state: SharedSessionViewState;
 proc projectStateViewState*(state: SharedSessionViewState; vm: StateVM) =
   if vm.isNil:
     return
-  vm.activeTab.val = parseStateTab(state.statePane.activeTab.value)
   vm.selectedPath.val = state.statePane.selectedPath.value
 
   var paths = initHashSet[string]()

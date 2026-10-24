@@ -22,7 +22,7 @@
 ## expressed via the DSL inside the `indexEach` body so the structure is
 ## visible at a glance.
 
-import std/[options, sets]
+import std/[options, sets, tables]
 from std/strutils import find
 
 import isonim/core/[signals, computation]
@@ -84,24 +84,31 @@ when defined(ctPlat18Slice):
 # Static label / class helpers
 # ---------------------------------------------------------------------------
 
-proc tabCssClass(tab: StateTab): string =
-  ## CSS class name for a tab button — used both for the static class
-  ## and for the dynamic active-modifier expression.
-  case tab
-  of stLocals:  "tab-locals"
-  of stGlobals: "tab-globals"
-  of stWatches: "tab-watches"
+proc emptyOverlayText(): string =
+  ## What an empty pane says — `state_vm.stateEmptyText`, the one spelling
+  ## every front-end draws.
+  stateEmptyText()
 
-proc tabLabel(tab: StateTab): string =
-  case tab
-  of stLocals:  "Locals"
-  of stGlobals: "Globals"
-  of stWatches: "Watches"
+proc hasOtherProcessWatches(vm: StateVM): bool =
+  ## Whether some watch was added in another process than the one shown —
+  ## the only case the "Hide watches from other processes" toggle can change
+  ## anything, so the only case it is offered (or while it is on).
+  if vm.hideOtherProcessWatches.val:
+    return true
+  if vm.recordingId.len == 0:
+    return false
+  for _, origin in vm.watchOrigins.val:
+    if origin.len > 0 and origin != vm.recordingId:
+      return true
+  false
 
-proc emptyOverlayText(tab: StateTab): string =
-  ## What an empty pane says, per tab — `state_vm.stateEmptyText`, the one
-  ## spelling every front-end draws.
-  stateEmptyText(tab)
+proc hideToggleClass(vm: StateVM): string =
+  if vm.hideOtherProcessWatches.val: "hide-other-process-watches active"
+  else: "hide-other-process-watches"
+
+proc onToggleHideOtherProcessWatches(vm: StateVM): proc() =
+  result = proc() =
+    vm.setHideOtherProcessWatches(not vm.hideOtherProcessWatches.val)
 
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
@@ -183,11 +190,6 @@ proc codeStateLineSource(vm: StateVM): string =
 # wraps the call in a `createRenderEffect` and tracks its signal reads
 # automatically.
 
-proc tabClass(vm: StateVM; tab: StateTab): string =
-  ## Tab button class with the optional `active` modifier.
-  let cls = tabCssClass(tab)
-  if vm.activeTab.val == tab: cls & " active" else: cls
-
 proc atomOrCompoundClass(item: proc(): VariableViewState): string =
   ## "value-expanded-compound-parent" when the variable is an expanded
   ## compound; otherwise "value-expanded-atom-parent". Mirrors the
@@ -199,8 +201,16 @@ proc atomOrCompoundClass(item: proc(): VariableViewState): string =
     "value-expanded-atom-parent"
 
 proc rowClass(item: proc(): VariableViewState): string =
-  ## Outer row class with depth-borders class.
-  "value-expanded value-expanded-name border-value-" & $item().depth
+  ## Outer row class with depth-borders class; a watched expression's row is
+  ## marked `value-watch`, and `watch-invalid` / `watch-pending` when the stop
+  ## cannot answer it or its value has not arrived (Variable-State-Pane.md
+  ## § Decisions, 2026-10-24).
+  let v = item()
+  result = "value-expanded value-expanded-name border-value-" & $v.depth
+  if v.isWatch:
+    result.add " value-watch"
+    if v.watchInvalid: result.add " watch-invalid"
+    elif v.watchPending: result.add " watch-pending"
 
 proc valueTextClass(vm: StateVM; item: proc(): VariableViewState): string =
   ## PLAT-51: the value's class, with `value-changed` when the step that
@@ -572,10 +582,6 @@ proc chainLineIconClass(line: proc(): OriginChainLineView): string =
 # Click handler factories
 # ---------------------------------------------------------------------------
 
-proc onSelectTab(vm: StateVM; tab: StateTab): proc() =
-  let t = tab
-  result = proc() = vm.selectTab(t)
-
 proc loadMoreDisplay(vm: StateVM; item: proc(): VariableViewState): string =
   ## The row's "Load more" shows while the locals budget left part of its
   ## collection unloaded and the row is open.
@@ -894,14 +900,15 @@ when defined(js):
           inputNode.setInputValue(cstring""))
 
 proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
-  ## The State panel.
+  ## The Variables pane (formerly the State pane): ONE list of the locals,
+  ## the globals when present and the watched expressions — no tabs
+  ## (Variable-State-Pane.md § Decisions, 2026-10-24).
   ##
   ## Structure:
   ##   div.state-component.isonim-state
-  ##     div.state-tabs
-  ##       button.tab-locals[.active]   onclick = selectTab(stLocals)   "Locals"
-  ##       button.tab-globals[.active]  onclick = selectTab(stGlobals)  "Globals"
-  ##       button.tab-watches[.active]  onclick = selectTab(stWatches)  "Watches"
+  ##     div.variables-toolbar
+  ##       button.hide-other-process-watches[.active]  (offered only when some
+  ##                                                   watch came from another process)
   ##     div#code-state-line-0.code-state-line[.no-code]
   ##     div#gdb-evaluate.watch-input-container
   ##       form > input#watch-0.watch-input
@@ -914,16 +921,11 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
 
   let panel = ui(r):
     tdiv(class = "component-container active-state state-component isonim-state"):
-      tdiv(class = "state-tabs"):
-        button(class = tabClass(vm, stLocals),
-               onclick = onSelectTab(vm, stLocals)):
-          text tabLabel(stLocals)
-        button(class = tabClass(vm, stGlobals),
-               onclick = onSelectTab(vm, stGlobals)):
-          text tabLabel(stGlobals)
-        button(class = tabClass(vm, stWatches),
-               onclick = onSelectTab(vm, stWatches)):
-          text tabLabel(stWatches)
+      tdiv(class = "variables-toolbar"):
+        button(class = hideToggleClass(vm),
+               display = (if hasOtherProcessWatches(vm): "inline-flex" else: "none"),
+               onclick = onToggleHideOtherProcessWatches(vm)):
+          text "Hide watches from other processes"
       # Code-state-line: always present so `#code-state-line-0` is found
       # whatever the trace kind, and before the watch input so the lookup
       # finds the populated element ("<line> | <source>", the legacy
@@ -952,7 +954,7 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
       tdiv(class = "value-components-container"):
         tdiv(class = "empty-overlay",
              display = displayFlexIf(getStateViewState(vm).variables.len == 0)):
-          text emptyOverlayText(vm.activeTab.val)
+          text emptyOverlayText()
         tdiv(ref = rowContainer):
           discard
 

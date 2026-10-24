@@ -114,6 +114,12 @@ proc convertTabTitle(content: cstring): cstring =
   # caption can differ from it. `Filesystem` -> `FILES` above is the same move.
   if content == cstring"TestResults":
     return cstring"TESTS"
+  # VARIABLES, NOT "STATE" (Variable-State-Pane.md § Decisions, 2026-10-24:
+  # the pane lists the variables and the watched expressions together, "the
+  # Variables (formerly State panel)"). An override for the same reason as
+  # `FILES` and `TESTS`: `Content.State` is the persisted wire identity.
+  if content == cstring"State":
+    return cstring"VARIABLES"
 
   var title: cstring = ""
   var label = content

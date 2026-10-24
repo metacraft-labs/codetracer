@@ -233,9 +233,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["visibleLines", "hasMoreAbove", "hasMoreBelow", "highlightedMatches",
      "isLoading", "degradedState"])
 
-  entries.addMany("StateVM", ["activeTab", "watchExpressions"],
-    vscSharedSessionViewState,
-    "State pane tab and watch list are shared session view state.")
+  entries.addEntry("StateVM", "watchExpressions", vscSharedSessionViewState,
+    "The watch list is shared session view state, one per session across " &
+    "process switches (Variable-State-Pane.md § Decisions, 2026-10-24).")
+  entries.addEntry("StateVM", "watchOrigins", vscSharedSessionViewState,
+    "The recording each watch was added in travels with the session's watch " &
+    "list (Variable-State-Pane.md § Decisions, 2026-10-24).")
+  entries.addEntry("StateVM", "hideOtherProcessWatches", vscRendererLocal,
+    "\"Hide watches from other processes\" is the reader's own setting.")
   entries.addEntry("StateVM", "expandedPaths", vscSharedSessionViewState,
     "State variable expansion set is shared session view state.",
     requiresStableId = true,

@@ -110,10 +110,10 @@ proc main() {.async.} =
   ck await eventually(proc(): bool =
     requested("s1Requests", "ct/search-calltrace")),
     "a search typed in the panel is asked by the host's session"
-  mirror.session.stateVM.selectTab(stWatches)
+  mirror.session.stateVM.selectPath("w")
   ck await eventually(proc(): bool =
-    mirror.session.stateVM.activeTab.val == stWatches),
-    "a tab chosen in the panel is the session's, and comes back to it"
+    mirror.session.stateVM.selectedPath.val == "w"),
+    "a row selected in the panel is the session's, and comes back to it"
 
   # ---- the file tree: the recording's sources; "open" opens VS Code's editor
   host.setSourceFiles("s1", @["/src/main.rs", "/src/util/math.rs"])
