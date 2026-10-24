@@ -35,7 +35,9 @@ import viewmodels/event_log_vm
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 248
+# 248 -> 246: K30 and K45 left the done sweep (-4 checks) for the two
+# retired-rows checks (+2) when the Timeline rows were retired.
+const ExpectedAssertions = 246
 
 var countedAssertions = 0
 
@@ -65,7 +67,7 @@ suite "PLAT-50: the click inventory":
       # A row the front-ends do not do says why; one an earlier milestone
       # did names it.
       for state in [b.terminal, b.gpui]:
-        if state in {nsNotApplicable, nsExisting} and b.note.len == 0:
+        if state in {nsNotApplicable, nsExisting, nsRetired} and b.note.len == 0:
           checkpoint("row " & b.id & " is " & $state & " without a note")
           ck false
 
@@ -76,10 +78,15 @@ suite "PLAT-50: the click inventory":
     # target either front-end draws is left undone.
     for id in ["K7", "K10", "K11", "K12", "K13", "K14", "K15", "K17", "K18",
                "K19", "K22", "K23", "K24", "K25", "K26", "K27", "K28",
-               "K30", "K31", "K33", "K34", "K36", "K37", "K42",
-               "K45", "K53"]:
+               "K31", "K33", "K34", "K36", "K37", "K42",
+               "K53"]:
       ck id in terminal
       ck id in gpui
+    # The Timeline's track and zoom (K30, K44, K45) went with the Timeline
+    # panel, on the desktop too: retired on both front-ends, and nothing
+    # else is.
+    ck rowsWith(nsRetired) == @["K30", "K44", "K45"]
+    ck rowsWith(nsRetired, gpui = true) == @["K30", "K44", "K45"]
     # K29 (the Variables pane's hide-other-process-watches toggle, since
     # the one list of variables and watches) is drawn by both front-ends.
     ck "K29" in gpui and "K29" in terminal

@@ -395,7 +395,7 @@ r = json.load(open(sys.argv[1]))
 legs = {l["leg"]: l for l in r["legs"]}
 d = set(legs["debug"]["allTabTitles"])
 e = set(legs["edit"]["allTabTitles"])
-want = ["VARIABLES", "EVENT LOG", "TIMELINE"]
+want = ["VARIABLES", "EVENT LOG"]  # the Timeline panel was removed (Layout-System.md)
 missing = [w for w in want if w not in d]
 leaked = [w for w in want if w in e]
 if missing:
@@ -403,7 +403,7 @@ if missing:
 elif leaked:
     print("no"); print("edit mode is showing debug-only panes: " + ", ".join(leaked))
 else:
-    print("ok"); print("STATE, EVENT LOG and TIMELINE are in debug and in neither edit leg")
+    print("ok"); print("VARIABLES and EVENT LOG are in debug and in neither edit leg")
 ')"
 check "$(printf '%s' "${out}" | head -1)" "the debugging panes arrive with debug mode and do not linger in edit"
 note "$(printf '%s' "${out}" | tail -n +2)"

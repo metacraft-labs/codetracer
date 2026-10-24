@@ -74,7 +74,7 @@ const
   LauncherRecipe = "cd ../codetracer-launcher && just build"
 
   PaneTitles: array[4, string] = ["Call Trace", "Variables", "Event Log",
-                                  "Timeline"]
+                                  "Terminal Output"]
     ## §3.1's screen, as the pane names a real headless frame carries. Since
     ## PLAT-49 a pane has no title row: its TAB STRIP names it, in the
     ## desktop's spelling (`Call Trace`, not `CALL STACK`), and these are four
@@ -91,6 +91,11 @@ const
     ## this suite failed on `TIMELINE` alone. `HeadlessColumns`/`HeadlessRows`
     ## below pin the STANDARD profile for every child, so the sweep asserts the
     ## same four panes whether or not the runner has a terminal.
+    ##
+    ## The fourth was `Timeline` until the Timeline panel was removed
+    ## (Layout-System.md, "The Timeline panel is removed"); the shared default's
+    ## event stack is now Event Log | Terminal Output, so the strip that names
+    ## the fourth pane is `Terminal Output`. The count stays four.
 
   HeadlessColumns = "120"
   HeadlessRows = "40"
