@@ -1519,6 +1519,16 @@ proc onCommandSearch*(query: cstring) {.async.} =
 # `download.openFileDialog` already exists for a caller that actually wants
 # one.
 
+proc paletteModePrefix(mode: SearchMode): cstring =
+  ## The text a search mode starts the palette's input with: the command
+  ## prefix, `:grep ` or `:sym ` (VS Code's `>` / `#` for its show-commands
+  ## and show-all-symbols); nothing for the file search.
+  case mode
+  of SearchCommandRealTime: cstring(commandPrefix)
+  of SearchFindInFiles: cstring":grep "
+  of SearchFindSymbol: cstring":sym "
+  else: cstring""
+
 proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
   cdebug fmt"search: {query}"
   if not data.ui.commandPalette.active:
@@ -1527,10 +1537,22 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
     # TODO command component
     # data.activeFocus = Content.EditorView
     data.ui.commandPalette.active = true
-    discard windowSetTimeout(proc =
+    # The input takes the keyboard once it is mounted — IF THE PALETTE IS
+    # STILL OPEN. A choice made within the delay closed the palette and handed
+    # the keyboard to its destination (`command.runChosen`); focusing the
+    # hidden input afterwards took it back from the editor the choice opened.
+    proc focusPaletteInput() =
       let input = cstring"#command-query-text"
       data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
-      cast[kdom.Node](data.ui.commandPalette.inputField).focus(), 200)
+      if data.ui.commandPalette.active:
+        cast[kdom.Node](data.ui.commandPalette.inputField).focus()
+        # The mode's prefix, as the branch below writes it for a palette
+        # that is already open: `Find Symbol` chosen IN the palette closes it
+        # first (`command.runChosen`) and lands here.
+        let prefix = paletteModePrefix(mode)
+        if query.len == 0 and prefix.len > 0:
+          data.ui.commandPalette.inputField.toJs.value = prefix
+    discard windowSetTimeout(focusPaletteInput, 200)
 
   else:
     data.ui.commandPalette.selected = 0
@@ -1539,16 +1561,12 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
       discard windowSetTimeout(
         proc =
           data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
+          if not data.ui.commandPalette.active:
+            return  # closed within the delay: see the branch above
           cast[kdom.Node](data.ui.commandPalette.inputField).focus()
-          case mode
-          of SearchCommandRealTime:
-            data.ui.commandPalette.inputField.toJs.value = cstring(commandPrefix)
-          of SearchFindInFiles:
-            data.ui.commandPalette.inputField.toJs.value = cstring(":grep ")
-          of SearchFindSymbol:
-            data.ui.commandPalette.inputField.toJs.value = cstring(":sym ")
-          else:
-            discard
+          let prefix = paletteModePrefix(mode)
+          if prefix.len > 0:
+            data.ui.commandPalette.inputField.toJs.value = prefix
         ,
         100
       )

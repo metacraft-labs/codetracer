@@ -258,6 +258,16 @@ proc actOnProgramSearchResult*(self: CommandInterpreter, res: CommandPanelResult
   echo "# TODO most cases"
   discard
 
+proc sourcePathOf(self: CommandInterpreter; file: cstring): cstring =
+  ## The path to open for a result that names a source file (a symbol, a
+  ## search hit). The file index (`files`, filled by
+  ## `ui_js.refreshCommandPaletteFileIndex`) maps each path the trace lists to
+  ## itself; a symbol carries the path its recorder wrote (`symbols.json`),
+  ## which that index need not hold. Indexing the table with such a path
+  ## answered `undefined`, and `openTab` died on it, so choosing a symbol in
+  ## the palette did nothing at all. The result's own path is opened instead.
+  if self.files.hasKey(file): self.files[file] else: file
+
 proc runCommandPanelResult*(self: CommandInterpreter, commandResult: CommandPanelResult) =
   case commandResult.kind:
   of CommandQuery:
@@ -270,10 +280,12 @@ proc runCommandPanelResult*(self: CommandInterpreter, commandResult: CommandPane
     self.actOnProgramSearchResult(commandResult)
 
   of TextSearchQuery:
-    self.data.openTab(self.files[commandResult.file], ViewSource, line=commandResult.line)
+    self.data.openTab(self.sourcePathOf(commandResult.file), ViewSource,
+                      line=commandResult.line)
 
   of SymbolQuery:
-    self.data.openTab(self.files[commandResult.file], ViewSource, line=commandResult.line)
+    self.data.openTab(self.sourcePathOf(commandResult.file), ViewSource,
+                      line=commandResult.line)
 
   of AgentQuery:
     self.data.ui.commandPalette.inAgentMode = true

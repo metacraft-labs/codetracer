@@ -71,7 +71,26 @@ proc clear(self: CommandPaletteComponent) =
   self.results = @[]
   self.mode = CommandPaletteNormal
 
+proc releasePaletteKeyboard(input: JsObject) {.importjs: """
+  ((input) => {
+    const a = document.activeElement;
+    if (!input || !a) return;
+    const view = document.getElementById('command-view');
+    const root = (view && view.contains(input)) ? view : input;
+    if (root.contains(a) && typeof a.blur === 'function') a.blur();
+  })(#)""".}
+  ## Blur the element holding the keyboard when it is the palette's input or
+  ## anything else inside the palette.
+
 proc close(self: CommandPaletteComponent) =
+  ## Hide the palette AND RELEASE THE KEYBOARD. The palette's input is a text
+  ## field outside the editor, and a programmatic editor focus does not take
+  ## the keyboard from one (`ui/editor_focus`). A palette that stayed focused
+  ## while it disappeared left the keyboard in a hidden field — or, when a
+  ## result's navigation ran first, nowhere at all instead of in the editor
+  ## it opened.
+  if not self.inputField.isNil:
+    releasePaletteKeyboard(self.inputField.toJs)
   self.active = false
   self.requestCommandPalettePanelRefresh()
   self.clear()
@@ -80,6 +99,18 @@ proc resetCommandPalette*(self: CommandPaletteComponent) =
   self.inputField.toJs.value = "".cstring
   self.close()
   data.redraw()
+
+proc runChosen(self: CommandPaletteComponent; run: proc()) =
+  ## Run the user's choice AFTER the palette has closed and let go of the
+  ## keyboard, so a choice that navigates (a symbol, a search hit, a file, a
+  ## command that focuses a pane or a field) hands the keyboard to its
+  ## destination. Run first, the destination's focus call found the palette's
+  ## input still focused and, by the rule that a programmatic focus leaves a
+  ## text field alone, the keyboard was left nowhere when the palette closed.
+  ## `run` must not read the palette's state: `resetCommandPalette` clears it,
+  ## so callers capture the chosen result first.
+  self.resetCommandPalette()
+  run()
 
 proc commandIsParent(self: CommandPaletteComponent, commandName: cstring): bool =
   if self.interpreter.commands.hasKey(commandName):
@@ -186,18 +217,23 @@ proc runQuery(self: CommandPaletteComponent) =
       let inputValue = cstring(&"{commandPrefix}{selectedResult.value}: ")
       self.inputField.toJs.value = inputValue
       self.onInput(inputValue)
+      self.resetCommandPalette()
     of ActionCommand:
-      self.interpreter.runCommandPanelResult(selectedResult)
-      self.close()
-    self.resetCommandPalette()
+      # NOT reset again after the action: `runChosen` already closed the
+      # palette, and an action may open it anew — `Find Symbol` and `Find in
+      # Files` put the palette back up with `:sym ` / `:grep ` and the
+      # keyboard in its input (`renderer.search`). Closing it after them
+      # left the user with no palette and no keyboard.
+      let interpreter = self.interpreter
+      self.runChosen(proc() = interpreter.runCommandPanelResult(selectedResult))
 
   of FileQuery:
     if self.results.len == 0:
       return
 
-    self.interpreter.openFileQuery(self.results[self.selected])
-    self.close()
-    self.resetCommandPalette()
+    let chosen = self.results[self.selected]
+    let interpreter = self.interpreter
+    self.runChosen(proc() = interpreter.openFileQuery(chosen))
 
   of ProgramQuery:
     # `:grep <text>` (Find-And-Incremental-Search.md §5.1): the Find in Files
@@ -213,9 +249,8 @@ proc runQuery(self: CommandPaletteComponent) =
 
   of SymbolQuery:
     let selectedResult = self.results[self.selected]
-    self.interpreter.runCommandPanelResult(selectedResult)
-    self.close()
-    self.resetCommandPalette()
+    let interpreter = self.interpreter
+    self.runChosen(proc() = interpreter.runCommandPanelResult(selectedResult))
 
   of AgentQuery:
     data.lastAgentPrompt = self.inputValue
@@ -378,9 +413,9 @@ proc wireCommandPaletteResultRunner(self: CommandPaletteComponent) =
   vm.onResultRun = proc(index: int) =
     if index >= 0 and index < self.results.len:
       self.selected = index
-      self.interpreter.runCommandPanelResult(self.results[index])
-      self.close()
-      self.resetCommandPalette()
+      let chosen = self.results[index]
+      let interpreter = self.interpreter
+      self.runChosen(proc() = interpreter.runCommandPanelResult(chosen))
 
 # ---------------------------------------------------------------------------
 # VM bootstrap

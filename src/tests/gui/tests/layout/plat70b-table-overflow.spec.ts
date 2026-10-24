@@ -105,7 +105,6 @@ test.describe("PLAT-70 Part B: the desktop's table panes truncate, resize and re
   test.use({
     sourcePath: recording("wide_lines"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     ...(prefix ? { codetracerPrefixOverride: prefix } : {}),
   });
 

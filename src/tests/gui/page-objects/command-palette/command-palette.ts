@@ -22,7 +22,12 @@ export class CommandPalette {
   }
 
   private get resultsContainer(): Locator {
-    return this.page.locator("#command-results");
+    // The results list is `div.command-results` inside the palette
+    // (`CommandPaletteResultsClass`, `views/isonim_command_palette_view.nim`).
+    // It has had no `command-results` id since the palette moved to that
+    // view, so the old `#command-results` matched nothing and every wait
+    // for results timed out.
+    return this.root.locator(".command-results");
   }
 
   private get resultItems(): Locator {
@@ -33,18 +38,35 @@ export class CommandPalette {
     return this.resultsContainer.locator(".command-result:not(.empty)");
   }
 
+  /**
+   * Whether the palette is open. `#command-view` is the omnibox in the
+   * window's header and is always on screen; the palette is OPEN when its
+   * `.command-container` lacks the `hidden` modifier
+   * (`CommandPaletteHiddenModifier`, `views/isonim_command_palette_view.nim`).
+   */
+  private openState(): Promise<boolean> {
+    return this.page.evaluate(() => {
+      const c = document.getElementById("command-view")?.closest(".command-container");
+      return !!c && !c.classList.contains("hidden");
+    });
+  }
+
+  private async waitOpen(open: boolean): Promise<void> {
+    await retry(async () => (await this.openState()) === open);
+  }
+
   async open(): Promise<void> {
     await this.page.keyboard.press("Control+KeyP");
-    await this.root.waitFor({ state: "visible" });
+    await this.waitOpen(true);
   }
 
   async close(): Promise<void> {
     await this.page.keyboard.press("Escape");
-    await this.root.waitFor({ state: "hidden" });
+    await this.waitOpen(false);
   }
 
   async isVisible(): Promise<boolean> {
-    return this.root.isVisible();
+    return this.openState();
   }
 
   async resultTexts(): Promise<string[]> {
@@ -69,7 +91,7 @@ export class CommandPalette {
     await this.queryInput.fill(`:${commandText}`);
     await this.waitForMatchingResults();
     await this.queryInput.press("Enter");
-    await this.root.waitFor({ state: "hidden" });
+    await this.waitOpen(false);
   }
 
   async executeSymbolSearch(symbolQuery: string, resultIndex = 0): Promise<void> {
@@ -77,7 +99,7 @@ export class CommandPalette {
     await this.queryInput.fill(`:sym ${symbolQuery}`);
     await this.waitForResults();
     await this.resultItems.nth(resultIndex).click();
-    await this.root.waitFor({ state: "hidden" });
+    await this.waitOpen(false);
   }
 
   private async ensureVisible(): Promise<void> {
