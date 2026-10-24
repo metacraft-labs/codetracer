@@ -704,14 +704,18 @@ fi
 # compiling, with no gate in this file noticing: the `=dev` entries were
 # counted against a ceiling, which says nothing about WHICH commit `dev` is.
 #
-# So the agreement is asserted, per entry and counted. Scoped to the two
-# trace-format halves deliberately: elsewhere a SHA that deliberately differs
-# from the flake input is documented as such (`reprobuild-packages` in
-# deploy-web-codetracer.yml pins a catalog revision the flake input does not
-# track yet), and turning those into failures here would be a different
-# change with a different argument behind it.
+# So the agreement is asserted, per entry and counted, for every sibling that
+# is a root flake input and is named by SHA in a `siblings:` block. It was
+# first scoped to the two trace-format halves, and the other inputs drifted
+# with nothing noticing: on 2026-10-24 six workflow lines named
+# codetracer-native-backend at a859cfb9 while flake.lock locked 742cc6d0,
+# and io-mon's entries trailed its flake.lock rev the same way.
+# `reprobuild-packages` stays out: deploy-web-codetracer.yml pins a catalog
+# revision its flake input does not track yet, deliberately and documented.
+# nim-stackable-hooks stays out until its two flake.lock nodes agree (see the
+# ceiling note above); its entries are `=dev` anyway.
 # ---------------------------------------------------------------------------
-readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim'
+readonly FLAKE_PINNED_SIBLINGS='codetracer-trace-format codetracer-trace-format-nim codetracer-native-recorder codetracer-native-backend codetracer-visual-replay io-mon'
 
 # jq, not python3: jq is on every runner this suite is meant to run on -- the
 # stock ubuntu-latest of `ci-contract-suites` and the self-hosted NixOS and
@@ -767,7 +771,7 @@ if [ "$flake_pin_checked" -eq 0 ]; then
 		"blocks went back to a branch ref, the branch-tip ceiling is the only thing" \
 		"still looking at them, and it does not check WHICH commit the branch is."
 elif [ "${#flake_pin_mismatches[@]}" -eq 0 ]; then
-	ok "all $flake_pin_checked SHA-pinned trace-format entries equal their flake.lock locked.rev"
+	ok "all $flake_pin_checked SHA-pinned flake-input sibling entries equal their flake.lock locked.rev"
 else
 	fail "every SHA-pinned flake-input sibling equals its flake.lock locked.rev" \
 		"the sibling checkout and the Nix lane would compile different revisions;" \
