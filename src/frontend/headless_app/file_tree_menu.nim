@@ -67,3 +67,97 @@ proc fileTreeEntryReason*(vm: FilesystemVM; path: string;
     if e.action == wanted:
       return (if e.disabled: e.disabledReason else: "")
   "not a Files menu entry"
+
+# ---------------------------------------------------------------------------
+# The inline name field and Delete's question, typed into
+# ---------------------------------------------------------------------------
+#
+# GPUI draws the model's name field in the tree, where the desktop draws its
+# own (Filesystem-Pane.md § "Create and Rename"), and Delete's question under
+# the entry's row (§ "In the terminal and GPUI"). While either is open the
+# window's keys are the field's. This is the one reading of a key there, so
+# what a key does to the field is decided beside the model, not in a window.
+
+type
+  FilesFieldStep* = enum
+    ## What one key did to an open name field or Delete question.
+    ffsNotOpen     ## Nothing is open: the key is not the field's.
+    ffsAbsorbed    ## The field took the key and nothing else changed (a
+                   ## key with no meaning there, or a character while
+                   ## Delete's question is open).
+    ffsTyped       ## The name being typed changed.
+    ffsCommitted   ## Enter: the name was accepted and sent (a Rename to the
+                   ## unchanged name closes and sends nothing), or Delete
+                   ## was answered yes and sent.
+    ffsRefused     ## Enter: the name was refused; the field stays open with
+                   ## its reason (`nameEdit.val.error`).
+    ffsCancelled   ## Escape: closed, nothing sent.
+
+proc filesFieldOpen*(vm: FilesystemVM): bool =
+  ## Whether the model has a name field or Delete's question open.
+  not vm.isNil and (vm.nameEdit.val.kind != fneNone or
+                    vm.pendingDelete.len > 0)
+
+proc cancelFilesField*(vm: FilesystemVM): bool =
+  ## Close an open name field or Delete question without acting — Escape,
+  ## or leaving the field. False when nothing was open.
+  if vm.isNil:
+    return false
+  if vm.pendingDelete.len > 0:
+    vm.cancelDelete()
+    return true
+  if vm.nameEdit.val.kind != fneNone:
+    vm.cancelNameEdit()
+    return true
+  false
+
+proc dropLastRune(s: var string) =
+  ## Remove the last UTF-8 character of `s` (a name may hold any).
+  var i = s.high
+  while i > 0 and (ord(s[i]) and 0xC0) == 0x80:
+    dec i
+  if i >= 0:
+    s.setLen(i)
+
+proc applyFilesFieldKey*(vm: FilesystemVM; key: string): FilesFieldStep =
+  ## One key, in this product's canonical names (`Enter`, `Esc`,
+  ## `Backspace`, `Space`, or one printable character), to the open name
+  ## field or Delete question. The name typed so far is the model's
+  ## `nameEditDraft`; Rename's field opens holding the current name.
+  if not vm.filesFieldOpen():
+    return ffsNotOpen
+  if vm.pendingDelete.len > 0:
+    case key
+    of "Enter":
+      discard vm.confirmDelete()
+      return ffsCommitted
+    of "Esc":
+      vm.cancelDelete()
+      return ffsCancelled
+    else:
+      return ffsAbsorbed
+  case key
+  of "Enter":
+    # A COPY, not the draft itself: `commitNameEdit` clears the draft before
+    # it sends the name, and a parameter aliasing the field would then send
+    # whatever the freed buffer holds (measured: a Create of "new.py" asked
+    # for "tmp/g").
+    var name = vm.nameEditDraft
+    if vm.commitNameEdit(name): ffsCommitted else: ffsRefused
+  of "Esc":
+    vm.cancelNameEdit()
+    ffsCancelled
+  of "Backspace":
+    if vm.nameEditDraft.len == 0:
+      return ffsAbsorbed
+    vm.nameEditDraft.dropLastRune()
+    ffsTyped
+  of "Space":
+    vm.nameEditDraft.add ' '
+    ffsTyped
+  else:
+    if key.len == 1 and key[0] >= ' ' and key[0] <= '~':
+      vm.nameEditDraft.add key
+      ffsTyped
+    else:
+      ffsAbsorbed

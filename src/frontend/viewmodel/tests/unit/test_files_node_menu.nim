@@ -23,6 +23,10 @@
 ##     `cancelDelete`; the desktop's (`confirmsDelete` false) is sent at once;
 ##   * the prompts a front-end without an inline field shows, and the
 ##     project-relative spelling of a tree path;
+##   * the inline name field and Delete's question typed into
+##     (`applyFilesFieldKey`, GPUI's): characters and Backspace edit the
+##     name, Enter sends it or keeps the field open with its reason, Escape
+##     closes it; the question takes only Enter and Escape;
 ##   * a tree with no replay behind it (`createFilesystemVM(nil)`) works.
 ##
 ## The requests a menu entry sends are caught by closures assigned to the
@@ -44,7 +48,7 @@ import headless_app/layout_model
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 85
+const ExpectedAssertions = 129
 
 var countedAssertions = 0
 
@@ -223,6 +227,70 @@ suite "Files node menu: Delete asks first":
       ck vm.runFileTreeAction("/proj/README.md", caFileDelete) == ""
       ck calls.deleted == @["/proj/README.md"]
       ck vm.pendingDelete == ""
+      dispose()
+
+suite "Files node menu: the name field and the question, typed into":
+
+  test "Create: characters, Backspace, a refused name kept open, Enter sends":
+    createRoot proc(dispose: proc()) =
+      let (vm, calls) = editVM()
+      ck not vm.filesFieldOpen()
+      ck vm.applyFilesFieldKey("a") == ffsNotOpen
+      ck vm.runFileTreeAction("/proj/src/main.py", caFileCreate) == ""
+      ck vm.filesFieldOpen() and vm.nameEditDraft == ""
+      for k in ["m", "a", "i", "n", ".", "p", "y"]:
+        ck vm.applyFilesFieldKey(k) == ffsTyped
+      ck vm.nameEditDraft == "main.py"
+      # Taken: the field stays open with its reason and the name typed.
+      ck vm.applyFilesFieldKey("Enter") == ffsRefused
+      ck vm.filesFieldOpen()
+      ck vm.nameEdit.val.error == alreadyExistsRefusal("main.py")
+      ck vm.nameEditDraft == "main.py" and calls.created.len == 0
+      # A key with no meaning in the field is taken and changes nothing.
+      ck vm.applyFilesFieldKey("Ctrl+S") == ffsAbsorbed
+      for _ in 0 ..< 3:
+        ck vm.applyFilesFieldKey("Backspace") == ffsTyped
+      ck vm.applyFilesFieldKey("Space") == ffsTyped
+      ck vm.applyFilesFieldKey("B") == ffsTyped
+      ck vm.nameEditDraft == "main B"
+      ck vm.applyFilesFieldKey("Enter") == ffsCommitted
+      ck calls.created == @[("/proj/src", "main B")]
+      ck not vm.filesFieldOpen()
+      dispose()
+
+  test "Rename opens on the current name; Escape sends nothing":
+    createRoot proc(dispose: proc()) =
+      let (vm, calls) = editVM()
+      ck vm.runFileTreeAction("/proj/README.md", caFileRename) == ""
+      ck vm.nameEditDraft == "README.md"
+      ck vm.applyFilesFieldKey("Esc") == ffsCancelled
+      ck not vm.filesFieldOpen() and calls.renamed.len == 0
+      discard vm.runFileTreeAction("/proj/README.md", caFileRename)
+      for _ in 0 ..< 3:
+        discard vm.applyFilesFieldKey("Backspace")
+      ck vm.nameEditDraft == "README"
+      ck vm.applyFilesFieldKey("Enter") == ffsCommitted
+      ck calls.renamed == @[("/proj/README.md", "README")]
+      # An empty field does not shrink further.
+      discard vm.runFileTreeAction("/proj/src/main.py", caFileCreate)
+      ck vm.applyFilesFieldKey("Backspace") == ffsAbsorbed
+      ck vm.cancelFilesField()
+      ck not vm.cancelFilesField()
+      dispose()
+
+  test "Delete's question: characters do not answer it; Enter and Escape do":
+    createRoot proc(dispose: proc()) =
+      let (vm, calls) = editVM(confirms = true)
+      discard vm.runFileTreeAction("/proj/README.md", caFileDelete)
+      ck vm.filesFieldOpen()
+      ck vm.applyFilesFieldKey("y") == ffsAbsorbed
+      ck calls.deleted.len == 0
+      ck vm.applyFilesFieldKey("Esc") == ffsCancelled
+      ck calls.deleted.len == 0 and not vm.filesFieldOpen()
+      discard vm.runFileTreeAction("/proj/README.md", caFileDelete)
+      ck vm.applyFilesFieldKey("Enter") == ffsCommitted
+      ck calls.deleted == @["/proj/README.md"]
+      ck not vm.filesFieldOpen()
       dispose()
 
 suite "Files node menu: the click inventory":

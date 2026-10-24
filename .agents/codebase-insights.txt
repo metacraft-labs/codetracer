@@ -7674,8 +7674,28 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - The command line hides the status notification while open: show a
   question with `CommandLineModel.message` (drawn after the buffer; the next
   edit clears it).
-- GPUI's Edit mode draws no Files tree (leaf vm nil): its Files menu only
-  ever opens on a replay's tree.
+- GPUI's Edit mode (an Edit window and a folder tab) draws the opened
+  folder's Files tree: `main.editFilesVMOf` (one `FilesystemVM` per folder,
+  `projectTreeOf` over `listProjectFiles`, wired by `wireNativeFileOperations`)
+  attached to the Files leaf by `attachEditFiles`; `windowFilesVM()` is the
+  tree the window's clicks and menu act on. The name field is drawn INLINE by
+  `leaves.renderFileTree` (`fileTreeLines`: field / reason / question lines),
+  its keys read by `file_tree_menu.applyFilesFieldKey` via `editOverlayKey`
+  at the top of `editKey`. Each file opened from the tree gets its own edit
+  arm (`gEditArms`, by absolute path).
+- An Edit window has no `gMenu`/`gOmnibar`: `drawTopBar` used to return at
+  once there, so no right-click menu was drawn and NO ROW WAS EVER WIRED for
+  clicks (`wireClicks` runs at its end). It now draws the popovers and wires.
+  `runContextAction` returns early without a session except for Files
+  entries; `onPaneClick` likewise lets only Files presses through.
+- `FilesystemVM.commitNameEdit(vm.nameEditDraft)` is an aliasing bug: the
+  proc clears the draft before sending `name`, and the parameter aliases the
+  freed buffer (measured: a Create of "new.py" asked for "tmp/g"). Pass a
+  `var` copy.
+- `adoptNewLeaves` re-derives leaves from `gShell.leavesFor` (vm nil for the
+  host-supplied panes); it now takes the ViewModel a host attached to the
+  same pane in `gLeafSet` (a folder tab's Files tree and VCS), which was
+  otherwise drawn only from the leaf's next redraw.
 - Running `source /tmp/.../devenv.sh` from the zsh Bash tool half-works: the
   TUI build then fails on `tree_sitter/api.h`. Source captured envs under bash.
 - `ci/test/sdk-facade-boundary.sh` walks Nim imports WITHOUT evaluating `when`

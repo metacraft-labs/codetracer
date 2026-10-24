@@ -139,6 +139,7 @@ import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
 import headless_app/auto_hide_hover
 import headless_app/footer_info
 import headless_app/file_tree_menu   # K19: the Files pane's menu
+from ../viewmodel/host/native_file_tree import wireNativeFileOperations
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
 import headless_session   # `calltraceJumpByLine`, `requestAndLoadCalltrace`
 import pane_viewport     # HSF-V2: a pane's size as the Viewport it reports
@@ -858,6 +859,15 @@ var
     ## window. Module-level for the root builder's reason above.
   editPane: GpuiElement = nil
     ## The editor leaf's element — the one the arm redraws and the keys reach.
+  gEditArms = initTable[string, GpuiEditArm]()
+    ## K19 in Edit mode: every file the Files pane opened, by its absolute
+    ## path, so switching back to one finds its buffer as it was left (an
+    ## Edit buffer is never dropped by opening another file).
+  gEditFiles = initTable[string, FilesystemVM]()
+    ## K19 in Edit mode: each opened folder's Files model (`projectTreeOf`
+    ## over the project walk, acting on the disk through
+    ## `native_file_tree`), by the folder's absolute path — what the Files
+    ## leaf of an Edit window or a folder tab draws.
   editViewportRows = 0
   gEditorSurface: EditorSurface
     ## **The surface the editor pane was last drawn from** (`PLAT35-F3`).
@@ -991,6 +1001,8 @@ var handlerMs: seq[float] = @[]
 let editTrace = getEnv("CODETRACER_GPUI_EDIT_TRACE", "") == "1"
 
 var editArmed = false
+var armedEditPane: GpuiElement = nil
+  ## The element `armEditorPane` gave the Edit window's key listener.
   ## Whether the editor pane already has its listener — the headless
   ## `--edit-keys` path arms it before the window builder would.
 
@@ -1076,11 +1088,20 @@ proc redrawEditor() =
 proc cancelWindowGesture(): bool
   ## PLAT-47: `Esc` during a layout gesture (defined with the gestures below).
 
+proc editOverlayKey(key: string; mods: seq[string]): bool
+  ## K19: forward-declared; defined with Edit mode's Files tree.
+proc leaveFilesField(r: GpuiRenderer)
+  ## K19: likewise.
+
 proc editKey(key: string; mods: seq[string]) =
   ## One key of an EDIT window's editor pane: its `keydown` listener's body,
   ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
   ## holds the focus there).
   if openArm.isNil: return
+  # K19: the Files pane's name field or Delete question takes the keys
+  # while it is open; an open right-click menu closes on `Esc`.
+  if editOverlayKey(key, mods):
+    return
   # PLAT-47: `Esc` cancels a layout gesture in flight, and is not typed.
   if key.toLowerAscii in ["escape", "esc"] and cancelWindowGesture():
     return
@@ -1113,9 +1134,18 @@ proc armEditorPane(r: GpuiRenderer) =
   ## Focus the editor pane and give it the key listener. Once.
   if openArm.isNil or editPane.isNil or editArmed: return
   editArmed = true
+  armedEditPane = editPane
   setFocusable(editPane)
   discard focusElement(editPane)
   r.addEventListener(editPane, "keydown", editKeyHandler(editPane))
+
+proc focusEditKeys() =
+  ## K19: the Edit window's keys back to its editor's listener — the one
+  ## place they are read (`editKey`, which gives the Files pane's open name
+  ## field or question its keys first). A press on the Files pane gave that
+  ## pane the focus, and it has no listener in an Edit window.
+  if not editPane.isNil and editPane == armedEditPane:
+    discard focusElement(editPane)
 
 
 # ---------------------------------------------------------------------------
@@ -1966,9 +1996,18 @@ proc adoptNewLeaves(r: GpuiRenderer) =
   if gShell.isNil:
     return
   let fresh = gShell.leavesFor(gWindow)
-  for leaf in fresh.leaves:
-    if leaf.paneId.len == 0 or gPanes.hasKey(leaf.paneId):
+  for adopted in fresh.leaves:
+    if adopted.paneId.len == 0 or gPanes.hasKey(adopted.paneId):
       continue
+    # K19: a ViewModel the host handed the leaf (a folder tab's Files tree,
+    # `attachEditFiles`; its VCS, `attachVcs`) is drawn from the first
+    # frame, not only from the leaf's next redraw.
+    var leaf = adopted
+    if leaf.vm.isNil:
+      for known in gLeafSet.leaves:
+        if known.paneId == leaf.paneId and not known.vm.isNil:
+          leaf.vm = known.vm
+          break
     let (node, _) = renderLeaf(r, leaf, gEditorSurface, gEditorViewportPx)
     stripHeading(r, node)
     applyTextFaces(r, node)
@@ -3128,6 +3167,10 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and
      handlePopoverPress(r, kind, x, y):
     return
+  # K19: a press anywhere leaves the Files pane's name field, which cancels
+  # it (a press on a Files row has left it already, `onPaneClick`).
+  if kind in {gekPointerDown, gekContextMenu, gekAuxDown}:
+    leaveFilesField(r)
   case kind
   of gekContextMenu:
     # PLAT-50 (K42): a right-click on a docked pane's label opens the
@@ -3158,6 +3201,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       focusWindowPane(r, pressedPane)
       traceGesture("focus " & pressedPane)
       discard drawArrangement(r)
+    # K19: an Edit window's Files pane hears no keys of its own; they stay
+    # with the editor's listener, which hands the Files pane's name field
+    # its keys first.
+    if not openArm.isNil and pressedPane == $paneFileTree:
+      focusEditKeys()
     # PLAT-51: a list pane's scrollbar scrubber BEFORE the pane's rows: the
     # track is drawn over the rows' right edge, and a press on it moves the
     # view — never the debugger, which a press on the call row under it
@@ -4002,13 +4050,93 @@ proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
                          pendingViewportHeight - h))
       return (text, lines, PxRect(x: x, y: y, w: w, h: h))
 
+proc drawPopovers(r: GpuiRenderer) =
+  ## The right-click menu and an event's content, over the window.
+  # PLAT-50: THE RIGHT-CLICK MENU, on the desktop's dropdown surface, and an
+  # event's CONTENT.
+  if gCtxMenu.open:
+    let rect = contextMenuRect(gCtxMenu, pendingViewportWidth,
+                               pendingViewportHeight)
+    let box = absBox(r, rect, chromeOf(crMenuBackground))
+    r.setAttribute(box, "data-ct-context-menu", $gCtxMenu.menu.kind)
+    r.setStyle(box, "rounded", "6px")
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
+    gTopEls.add box
+    for (rr, i) in contextMenuRows(gCtxMenu, rect):
+      let e = gCtxMenu.menu.entries[i]
+      let selected = i == gCtxMenu.selected and e.enabled
+      let rb = absBox(r, rr,
+                      if selected: chromeOf(crTabActiveBackground) else: "")
+      r.setAttribute(rb, "data-ct-context-entry", e.label)
+      r.setAttribute(rb, "data-ct-context-enabled", $e.enabled)
+      r.setStyle(rb, "padding-left", $TabPadPx & "px")
+      r.setStyle(rb, "white-space", "nowrap")
+      r.setStyle(rb, "color", chromeOf(
+        if not e.enabled: crTabInactiveForeground
+        elif selected: crTabActiveForeground
+        else: crWindowForeground))
+      r.appendChild(rb, r.createTextNode(
+        e.label & (if e.hint.len > 0: "   " & e.hint else: "")))
+      gTopEls.add rb
+  if gContent.open:
+    let w = min(pendingViewportWidth - 80, 960)
+    let h = min(pendingViewportHeight - 120, 640)
+    let rect = PxRect(x: (pendingViewportWidth - w) div 2,
+                      y: (pendingViewportHeight - h) div 2, w: w, h: h)
+    let box = absBox(r, rect, chromeOf(crMenuBackground))
+    r.setAttribute(box, "data-ct-event-content", gContent.title)
+    r.setStyle(box, "rounded", "6px")
+    r.setStyle(box, "border-width", "1px")
+    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
+    r.setStyle(box, "flex-direction", "column")
+    r.setStyle(box, "padding", $ChromePaddingPx & "px")
+    let title = r.createElement("div")
+    r.setStyle(title, "color", chromeOf(crPaneTitleForeground))
+    r.appendChild(title, r.createTextNode(gContent.title))
+    r.appendChild(box, title)
+    if not gContent.refill.isNil:
+      gContent.text = gContent.refill(gContent.top)
+    let lines = gContent.text.replace("\\n", "\n").splitLines()
+    let room = max(1, (h - 2 * ChromePaddingPx) div MenuItemPx - 1)
+    for i in min(gContent.top, max(0, lines.high)) ..< lines.len:
+      if i - gContent.top >= room:
+        break
+      let l = lines[i]
+      let row = r.createElement("div")
+      r.setAttribute(row, "data-ct-content-line", $i)
+      r.setStyle(row, "white-space", "nowrap")
+      r.setStyle(row, "color",
+        if not gContent.diff: chromeOf(crWindowForeground)
+        elif l.startsWith("+++") or l.startsWith("---"):
+          chromeOf(crPaneTitleForeground)
+        elif l.startsWith("+"): DiffAddedColour
+        elif l.startsWith("-"): DiffRemovedColour
+        elif l.startsWith("@@"): chromeOf(crTabInactiveForeground)
+        else: chromeOf(crWindowForeground))
+      r.appendChild(row, r.createTextNode(l))
+      r.appendChild(box, row)
+    gTopEls.add box
+
 proc drawTopBar(r: GpuiRenderer) =
   ## The band and everything over it, from the shared ViewModels.
-  if gRoot.isNil or gMenu.isNil:
+  if gRoot.isNil:
     return
   for e in gTopEls:
     r.removeChild(gRoot, e)
   gTopEls = @[]
+  if gMenu.isNil:
+    # K19: an Edit window draws no top bar, and its right-click menu — the
+    # Files pane's — is still drawn over the window, and the Files rows a
+    # redraw made take their presses.
+    drawPopovers(r)
+    for e in gTopEls:
+      if gChrome.clientDecorated and
+         getAttribute(e, WindowRegionAttribute).len == 0:
+        r.setAttribute(e, WindowRegionAttribute, $wrNoDrag)
+      r.appendChild(gRoot, e)
+    wireClicks(r)
+    return
   let tabs = if gShell.isNil: @[]
              else: mainShell().app.stripTabsOf(gWelcomeTabs)
   gTopLayout = gpuiTopBarLayout(gMenu, gOmnibar, tabs, pendingViewportWidth,
@@ -4314,71 +4442,7 @@ proc drawTopBar(r: GpuiRenderer) =
                  if row.item < 0: EditorLineNumberColour else: EditorTextColour)
       r.appendChild(rb, r.createTextNode(text))
       gTopEls.add rb
-  # PLAT-50: THE RIGHT-CLICK MENU, on the desktop's dropdown surface, and an
-  # event's CONTENT.
-  if gCtxMenu.open:
-    let rect = contextMenuRect(gCtxMenu, pendingViewportWidth,
-                               pendingViewportHeight)
-    let box = absBox(r, rect, chromeOf(crMenuBackground))
-    r.setAttribute(box, "data-ct-context-menu", $gCtxMenu.menu.kind)
-    r.setStyle(box, "rounded", "6px")
-    r.setStyle(box, "border-width", "1px")
-    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
-    gTopEls.add box
-    for (rr, i) in contextMenuRows(gCtxMenu, rect):
-      let e = gCtxMenu.menu.entries[i]
-      let selected = i == gCtxMenu.selected and e.enabled
-      let rb = absBox(r, rr,
-                      if selected: chromeOf(crTabActiveBackground) else: "")
-      r.setAttribute(rb, "data-ct-context-entry", e.label)
-      r.setAttribute(rb, "data-ct-context-enabled", $e.enabled)
-      r.setStyle(rb, "padding-left", $TabPadPx & "px")
-      r.setStyle(rb, "white-space", "nowrap")
-      r.setStyle(rb, "color", chromeOf(
-        if not e.enabled: crTabInactiveForeground
-        elif selected: crTabActiveForeground
-        else: crWindowForeground))
-      r.appendChild(rb, r.createTextNode(
-        e.label & (if e.hint.len > 0: "   " & e.hint else: "")))
-      gTopEls.add rb
-  if gContent.open:
-    let w = min(pendingViewportWidth - 80, 960)
-    let h = min(pendingViewportHeight - 120, 640)
-    let rect = PxRect(x: (pendingViewportWidth - w) div 2,
-                      y: (pendingViewportHeight - h) div 2, w: w, h: h)
-    let box = absBox(r, rect, chromeOf(crMenuBackground))
-    r.setAttribute(box, "data-ct-event-content", gContent.title)
-    r.setStyle(box, "rounded", "6px")
-    r.setStyle(box, "border-width", "1px")
-    r.setStyle(box, "border-color", chromeOf(crMenuBorder))
-    r.setStyle(box, "flex-direction", "column")
-    r.setStyle(box, "padding", $ChromePaddingPx & "px")
-    let title = r.createElement("div")
-    r.setStyle(title, "color", chromeOf(crPaneTitleForeground))
-    r.appendChild(title, r.createTextNode(gContent.title))
-    r.appendChild(box, title)
-    if not gContent.refill.isNil:
-      gContent.text = gContent.refill(gContent.top)
-    let lines = gContent.text.replace("\\n", "\n").splitLines()
-    let room = max(1, (h - 2 * ChromePaddingPx) div MenuItemPx - 1)
-    for i in min(gContent.top, max(0, lines.high)) ..< lines.len:
-      if i - gContent.top >= room:
-        break
-      let l = lines[i]
-      let row = r.createElement("div")
-      r.setAttribute(row, "data-ct-content-line", $i)
-      r.setStyle(row, "white-space", "nowrap")
-      r.setStyle(row, "color",
-        if not gContent.diff: chromeOf(crWindowForeground)
-        elif l.startsWith("+++") or l.startsWith("---"):
-          chromeOf(crPaneTitleForeground)
-        elif l.startsWith("+"): DiffAddedColour
-        elif l.startsWith("-"): DiffRemovedColour
-        elif l.startsWith("@@"): chromeOf(crTabInactiveForeground)
-        else: chromeOf(crWindowForeground))
-      r.appendChild(row, r.createTextNode(l))
-      r.appendChild(box, row)
-    gTopEls.add box
+  drawPopovers(r)
   # UNPIN on a revealed pane (the PIN buttons are drawn before the
   # popovers, below).
   if gGestures.revealing:
@@ -4960,6 +5024,155 @@ proc armRecordTick()
 
 proc runWelcomeIntent(r: GpuiRenderer; index: int)
 
+# ---------------------------------------------------------------------------
+# K19 in Edit mode: the opened folder's Files tree, acting on the disk
+# (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "In the terminal
+# and GPUI") — the terminal's model (`projectTreeOf` over the project walk)
+# and its disk half (`native_file_tree`), drawn by `renderFileTree`.
+# ---------------------------------------------------------------------------
+
+proc editFileOperationDone(root: string; res: FileTreeOperationResult)
+
+proc editFolderRoot(folder: string): string =
+  ## The opened folder, absolute and without a trailing separator — the
+  ## spelling of the tree's own row (`projectTreeOf`).
+  result = absolutePath(folder).normalizedPath
+  while result.len > 1 and result[^1] in {'/', '\\'}:
+    result.setLen(result.len - 1)
+
+proc relistEditFiles(vm: FilesystemVM; root: string) =
+  ## The opened folder walked again, so the pane follows the disk; the
+  ## folders the reader opened stay open, and the folder's own row is.
+  vm.setRoot(projectTreeOf(root, listProjectFiles(root).files))
+  vm.expandPath(root)
+
+proc editFilesVMOf(folder: string): FilesystemVM =
+  ## The opened folder's Files model, made once per folder: Create, Rename
+  ## and Delete carried out here by the index process's rules, Delete asking
+  ## first.
+  let root = editFolderRoot(folder)
+  result = gEditFiles.getOrDefault(root)
+  if not result.isNil:
+    return
+  result = createFilesystemVM(nil)
+  wireNativeFileOperations(result, proc(): string = root,
+    proc(res: FileTreeOperationResult) = editFileOperationDone(root, res))
+  relistEditFiles(result, root)
+  gEditFiles[root] = result
+
+proc attachEditFiles(leafSet: var GpuiLeafSet; folder: string) =
+  ## Hand the Files leaf, when the arrangement places one, the opened
+  ## folder's model — as `attachVcs` hands the VCS leaf its own.
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneFileTree:
+      leaf.vm = ViewModel(editFilesVMOf(folder))
+
+proc windowFilesVM(): FilesystemVM =
+  ## The Files model the window's tree is drawn from: the opened folder's in
+  ## Edit mode (an Edit window, a folder tab), else the replay's.
+  if not openArm.isNil: editFilesVMOf(openArm.root)
+  elif not gSession.isNil: gSession.session.fileTreeVM
+  else: nil
+
+proc filesSay(what: string) =
+  ## What the Files pane has to say — an operation's outcome, a disabled
+  ## entry's reason: in Edit mode the editor's notice (the window has no
+  ## status line there), and the gesture trace.
+  traceGesture("files: " & what)
+  if not openArm.isNil:
+    openArm.status = what
+    redrawEditor()
+
+proc openEditFile(path: string): bool =
+  ## Edit mode's K17 (and the Files menu's Edit, and a new file): the file
+  ## at `path` in the editor, through an edit arm of its own — the buffer
+  ## of the file shown before is kept, unchanged, for when it is opened
+  ## again. False, with the reason as the notice, when it cannot be read.
+  if openArm.isNil:
+    return false
+  let root = editFolderRoot(openArm.root)
+  let shown = joinTreePath(root, openArm.path)
+  if not gEditArms.hasKey(shown):
+    gEditArms[shown] = openArm
+  if path == shown:
+    return true
+  var arm = gEditArms.getOrDefault(path)
+  if arm.isNil:
+    let rel = relativeToRoot(root, path)
+    if rel.len == 0:
+      filesSay(path & ": is outside the project folder")
+      return false
+    var text = ""
+    try:
+      text = readProjectFile(root, rel)
+    except CatchableError as e:
+      filesSay(e.msg)
+      return false
+    arm = newGpuiEditArm(root, rel, text, openArm.doc.model)
+    gEditArms[path] = arm
+  openArm = arm
+  if folderShown():
+    gFolderArms[gWelcomeTabs.shownTab.serial] = arm
+  traceGesture("editing " & arm.path)
+  redrawEditor()
+  focusEditKeys()
+  true
+
+proc editFileOperationDone(root: string; res: FileTreeOperationResult) =
+  ## The disk's answer to a Create, Rename or Delete: the folder listed
+  ## again, a new file opened in the editor (Filesystem-Pane.md, "Create
+  ## makes an empty file and opens it in the editor"), what changed or why
+  ## not said. Open buffers are left alone.
+  var r: GpuiRenderer
+  let vm = gEditFiles.getOrDefault(root)
+  if res.error.len == 0 and not vm.isNil:
+    relistEditFiles(vm, root)
+  if res.error.len == 0 and res.operation == ftaCreate:
+    discard openEditFile(res.path)
+  filesSay(describeFileTreeOperation(res, root))
+  redrawPaneOf(r, paneFileTree)
+
+proc filesFieldKey(key: string; mods: seq[string]): bool =
+  ## A key while the Files model has its name field or Delete's question
+  ## open: the field's (`file_tree_menu.applyFilesFieldKey`), the pane drawn
+  ## again. False when nothing is open.
+  let vm = windowFilesVM()
+  if not vm.filesFieldOpen():
+    return false
+  var r: GpuiRenderer
+  case vm.applyFilesFieldKey(canonicalKeyOfGpui(key, mods))
+  of ffsNotOpen:
+    return false
+  of ffsRefused:
+    traceGesture("files: " & vm.nameEdit.val.error)
+  of ffsCancelled:
+    traceGesture("files: cancelled")
+  of ffsAbsorbed, ffsTyped, ffsCommitted:
+    discard
+  redrawPaneOf(r, paneFileTree)
+  true
+
+proc editOverlayKey(key: string; mods: seq[string]): bool =
+  ## An Edit window's key before its editor: the Files pane's open name field
+  ## or question, then `Esc` on an open right-click menu (which the window
+  ## draws over the editor, with no top bar of its own to route it).
+  if filesFieldKey(key, mods):
+    return true
+  if gCtxMenu.open and key.toLowerAscii in ["escape", "esc"]:
+    var r: GpuiRenderer
+    gCtxMenu.close()
+    drawTopBar(r)
+    return true
+  false
+
+proc leaveFilesField(r: GpuiRenderer) =
+  ## A press elsewhere while the name field or the question is open:
+  ## leaving the field cancels it (Filesystem-Pane.md § "Create and Rename").
+  let vm = if openArm.isNil: nil else: windowFilesVM()
+  if vm.cancelFilesField():
+    traceGesture("files: cancelled")
+    redrawPaneOf(r, paneFileTree)
+
 proc showFolderTab(r: GpuiRenderer; index: int): string =
   ## A FOLDER tab shown: the window's Edit default (a shell window of its
   ## own with no session), its editor writing the folder's first file
@@ -4994,6 +5207,7 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   gWindow = WindowId(0)
   var leafSet = gShell.leavesFor(gWindow)
   attachVcs(leafSet, tab.folder)
+  attachEditFiles(leafSet, tab.folder)   # K19: the folder's Files tree
   gLeafSet = leafSet
   openArm = arm
   if editViewportRows <= 0:
@@ -5372,6 +5586,9 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
       openArm.doc.switchModel(base.model)
     for arm in gFolderArms.values:
       arm.doc.switchModel(base.model)
+    for arm in gEditArms.values:
+      if arm != openArm:
+        arm.doc.switchModel(base.model)
     for d in gDebugDocs.mvalues:
       d.switchModel(base.model)
     gRouter.switchBase(base.model, ksCommand)
@@ -6909,7 +7126,9 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   ## A right-click menu's chosen entry, routed to the operation the
   ## desktop's entry runs.
   traceGesture("context action " & $action)
-  if gSession.isNil:
+  # K19: an Edit window has no session; its Files menu acts on the disk.
+  if gSession.isNil and
+     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit}:
     return
   case action
   of caNone: discard
@@ -7000,17 +7219,27 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
                  " is the value at this step")
   of caFileCreate, caFileRename, caFileDelete, caFileEdit:
     # K19: the Files pane's entries, as the shared Files model decides them
-    # now. Opening a file is this window's editor.
-    let vm = gSession.session.fileTreeVM
+    # now — the replay's tree, or Edit mode's opened folder. Opening a file
+    # is this window's editor.
+    let vm = windowFilesVM()
     if action == caFileEdit:
       let why = vm.fileTreeEntryReason(target.path, action)
       if why.len > 0:
-        traceGesture("files: " & why)
+        filesSay(why)
+      elif not openArm.isNil:
+        discard openEditFile(target.path)
       else:
         openTreeFile(r, target.path)
       return
     let why = vm.runFileTreeAction(target.path, action)
-    traceGesture("files: " & (if why.len > 0: why else: $action))
+    if why.len > 0:
+      filesSay(why)
+    else:
+      # A name field or Delete's question is open in the tree now; the keys
+      # reach it through the editor's listener.
+      traceGesture("files: " & $action)
+      redrawPaneOf(r, paneFileTree)
+      focusEditKeys()
 
 # ---------------------------------------------------------------------------
 # PLAT-68 — the window's keys through the ONE router
@@ -7657,9 +7886,12 @@ proc onPaneClick(c: GPaneClick) =
   ## click there. An open popover (a menu, the omnibar's results, a
   ## right-click menu, a text over the window) owns the press instead.
   var r: GpuiRenderer
-  if gSession.isNil or gCtxMenu.open or gContent.open or
+  if gCtxMenu.open or gContent.open or
      (not gMenu.isNil and gMenu.isOpen) or
      (not gOmnibar.isNil and gOmnibar.isOpen):
+    return
+  # K19: an Edit window has no session, and its Files tree is its own.
+  if gSession.isNil and c.part != gcpFileNode:
     return
   # PLAT-70 Part B: a press on a `…` or a column separator is the table's
   # gesture; GPUI hands the row under it the press first, and the row must
@@ -7670,13 +7902,12 @@ proc onPaneClick(c: GPaneClick) =
   traceGesture("pane click " & $c.part & " " & c.key & " #" & $c.index &
                " line " & $c.line & " " & $c.button &
                (if c.ctrl: "+ctrl" else: "") & (if c.alt: "+alt" else: ""))
-  let session = gSession.session
-  case c.part
-  of gcpNone: discard
-  of gcpFileNode:
+  if c.part == gcpFileNode:
     # K17 / K18, and K19: a right-click opens the Files pane's menu, the
-    # entries and reasons the shared Files model decides.
-    let vm = session.fileTreeVM
+    # entries and reasons the shared Files model decides — on the replay's
+    # tree, or on Edit mode's opened folder.
+    leaveFilesField(r)
+    let vm = windowFilesVM()
     let e = fileEntryOf(vm, c.key)
     if e.text.len == 0:
       return
@@ -7688,8 +7919,14 @@ proc onPaneClick(c: GPaneClick) =
     if e.isFolder:
       vm.toggleExpanded(e.path)
       redrawPaneOf(r, paneFileTree)
+    elif not openArm.isNil:
+      discard openEditFile(e.path)
     else:
       openTreeFile(r, e.path)
+    return
+  let session = gSession.session
+  case c.part
+  of gcpNone, gcpFileNode: discard
   of gcpEventRow:
     # K24 / K25.
     let rows = session.eventLogVM.eventRows.val
@@ -9278,6 +9515,9 @@ proc runEdit(cmd: GpuiCommand): int =
   # PLAT-47 deliverable 4: in Edit mode the VCS pane shows the project.
   if editProjectProblem(cmd.traceFolder).len == 0:
     attachVcs(leafSet, cmd.traceFolder)
+    # K19: and the Files pane lists the opened folder, its menu acting on
+    # the disk.
+    attachEditFiles(leafSet, cmd.traceFolder)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface

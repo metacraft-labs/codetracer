@@ -334,6 +334,87 @@ else
 		"rc=$rc" "$out"
 fi
 
+# --- Case 10: a build two repo scripts down is followed; talk is not ---------
+# `cross-process-linux` clones the JS recorder and runs `just
+# test-cross-process`, a recipe that execs scripts/test-cross-process.sh, which
+# builds the recorder through scripts/provision-cross-process-recording.sh ->
+# `build-siblings.sh --only codetracer-js-recorder`. Read only as far as the
+# recipe, that job is a false positive. A planted tree (the checker copied
+# beside its own justfile and scripts, because it resolves both from its own
+# location) pins both directions: the chain is followed, and a script that
+# mentions the build only in a COMMENT does not count.
+chain="$tmp_root/chain"
+mkdir -p "$chain/ci/verdict" "$chain/scripts"
+cp "$GUARD" "$chain/ci/verdict/"
+printf 'gate:\n  exec ./scripts/gate.sh\n' >"$chain/justfile"
+# shellcheck disable=SC2016 # the planted script expands it, not this one
+printf '#!/usr/bin/env bash\nbash "$REPO_ROOT/scripts/provision.sh"\n' >"$chain/scripts/gate.sh"
+cat >"$tmp_root/chain.yml" <<'EOF'
+name: fixture
+on: push
+jobs:
+  a-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone js-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+      - name: Run the gate
+        run: just gate
+EOF
+# shellcheck disable=SC2016 # the planted script expands it, not this one
+printf '#!/usr/bin/env bash\nfor r in codetracer-js-recorder; do bash scripts/build-siblings.sh --only "$r"; done\n' \
+	>"$chain/scripts/provision.sh"
+chain_out="$(cd "$chain" && python3 ci/verdict/recorder-clone-implies-build.py "$tmp_root/chain.yml" 2>&1)"
+chain_rc=$?
+if [ "$chain_rc" -eq 0 ]; then
+	ok "a build reached through a recipe and two repo scripts is followed"
+else
+	fail "a build reached through a recipe and two repo scripts is followed" \
+		"rc=$chain_rc" "$chain_out"
+fi
+printf '#!/usr/bin/env bash\n# codetracer-js-recorder is built by build-siblings.sh elsewhere\ntrue\n' \
+	>"$chain/scripts/provision.sh"
+chain_out="$(cd "$chain" && python3 ci/verdict/recorder-clone-implies-build.py "$tmp_root/chain.yml" 2>&1)"
+chain_rc=$?
+if [ "$chain_rc" -eq 1 ] && grep -qF "clones codetracer-js-recorder but never builds it" <<<"$chain_out"; then
+	ok "a followed script that only mentions the build in a comment does not count"
+else
+	fail "a followed script that only mentions the build in a comment does not count" \
+		"rc=$chain_rc" "$chain_out"
+fi
+# The other direction of the same hole: a script that DOES build the recorder,
+# named only on a comment line of the recipe, is not run, so it must not be
+# followed. (Before this case the checker followed every `scripts/*.sh` the
+# recipe text contained, comments included.)
+# shellcheck disable=SC2016 # the planted script expands it, not this one
+printf '#!/usr/bin/env bash\nfor r in codetracer-js-recorder; do bash scripts/build-siblings.sh --only "$r"; done\n' \
+	>"$chain/scripts/provision.sh"
+printf 'gate:\n  # the build lives in ./scripts/provision.sh\n  true\n' >"$chain/justfile"
+chain_out="$(cd "$chain" && python3 ci/verdict/recorder-clone-implies-build.py "$tmp_root/chain.yml" 2>&1)"
+chain_rc=$?
+if [ "$chain_rc" -eq 1 ] && grep -qF "clones codetracer-js-recorder but never builds it" <<<"$chain_out"; then
+	ok "a script named only in a recipe comment is not followed"
+else
+	fail "a script named only in a recipe comment is not followed" \
+		"rc=$chain_rc" "$chain_out"
+fi
+# And a path that climbs out of scripts/ is not followed either: only the
+# repo's own entry points count.
+mkdir -p "$chain/elsewhere"
+cp "$chain/scripts/provision.sh" "$chain/elsewhere/provision.sh"
+printf 'gate:\n  bash scripts/../elsewhere/provision.sh\n' >"$chain/justfile"
+chain_out="$(cd "$chain" && python3 ci/verdict/recorder-clone-implies-build.py "$tmp_root/chain.yml" 2>&1)"
+chain_rc=$?
+if [ "$chain_rc" -eq 1 ] && grep -qF "clones codetracer-js-recorder but never builds it" <<<"$chain_out"; then
+	ok "a script path that resolves outside scripts/ is not followed"
+else
+	fail "a script path that resolves outside scripts/ is not followed" \
+		"rc=$chain_rc" "$chain_out"
+fi
+
 printf '\n'
 if [ "$failures" -ne 0 ]; then
 	printf '%d of %d assertions failed\n' "$failures" "$assertions"

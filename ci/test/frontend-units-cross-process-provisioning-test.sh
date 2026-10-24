@@ -266,6 +266,46 @@ if grep -qE '^[[:space:]]*set -euo pipefail' <<<"$recipe"; then
 else
 	t_fail "the recipe lost set -euo pipefail; a provisioning failure would not stop it"
 fi
+# idle_timeout_integration_test needs $CODETRACER_PREFIX/server_index.js.  A
+# `${CODETRACER_PREFIX:-…}` default never applies under `repro exec`: the dev
+# env sets src/build-<type>-repro, which tup (build-once on Linux) never
+# writes, so the suite reported DID NOT RUN after a successful build.  The
+# recipe has to build with build-once and take the output root it publishes.
+# shellcheck disable=SC2016 # literal recipe text, not an expansion
+build_line="$(grep -nF 'CODETRACER_BUILD_ENV_FILE="$ct_build_env_file" bash scripts/build-once.sh' <<<"$recipe" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016 # literal recipe text, not an expansion
+prefix_line="$(grep -nF 'export CODETRACER_PREFIX="$PWD/$CT_BUILD_OUT_ROOT"' <<<"$recipe" | head -1 | cut -d: -f1)"
+if [[ -n $build_line && -n $prefix_line && -n $lane_line ]] &&
+	((build_line < prefix_line && prefix_line < lane_line)) &&
+	! grep -qF 'CODETRACER_PREFIX:-' <<<"$(grep -v '^[[:space:]]*#' <<<"$recipe")"; then
+	t_pass "the recipe points CODETRACER_PREFIX at the tree build-once built, not at an ambient default"
+else
+	t_fail "the recipe does not take CODETRACER_PREFIX from build-once's published output root before the lane (build=${build_line:-none} prefix=${prefix_line:-none} lane=${lane_line:-none})"
+fi
+
+echo "(C2) the demo recipe provisions through the same script"
+# `just demo-cross-tracer` records the same demo and built nothing, so it could
+# only fail in the materialiser on a host without the tools. It must call the
+# one provisioning script (no second copy of its logic) before it records.
+# (`just test-cross-process` provisions inside scripts/test-cross-process.sh,
+# pinned by ci/test/cross-process-gate.sh; the db-backend suites provision
+# through the test harness, src/db-backend/tests/test_harness/mod.rs.)
+recipe_body() {
+	awk -v want="$1:" '$1 == want {on = 1; next} on && /^[^[:space:]]/ {exit} on' "$JUSTFILE"
+}
+rname=demo-cross-tracer
+# shellcheck disable=SC2016 # literal recipe text, not an expansion
+provision='CODETRACER_RECORD_WEB_BIN="$(bash scripts/provision-cross-process-recording.sh)"'
+consumer='./scripts/materialize-recording.sh cross-process-three-trace'
+body="$(recipe_body "$rname")"
+p_line="$(grep -nF "$provision" <<<"$body" | head -1 | cut -d: -f1)"
+e_line="$(grep -n '^[[:space:]]*export CODETRACER_RECORD_WEB_BIN[[:space:]]*$' <<<"$body" | head -1 | cut -d: -f1)"
+c_line="$(grep -nF "$consumer" <<<"$body" | head -1 | cut -d: -f1)"
+if [[ -n $p_line && -n $e_line && -n $c_line ]] && ((p_line < e_line && e_line < c_line)); then
+	t_pass "$rname provisions and exports CODETRACER_RECORD_WEB_BIN before it records"
+else
+	t_fail "$rname does not provision through scripts/provision-cross-process-recording.sh before recording (provision=${p_line:-none} export=${e_line:-none} consumer=${c_line:-none})"
+fi
 
 echo "(D) the lane-deferral note names the real prerequisites"
 note="$(awk '/^#   test-frontend-units / {on = 1} on && /^#   [(a-z]/ && !/test-frontend-units/ {exit} on' "$JUSTFILE")"
