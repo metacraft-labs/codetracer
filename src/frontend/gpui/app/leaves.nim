@@ -3873,6 +3873,14 @@ const
     ## high (`pinVcsRowPitch`), so its rows and its scrollbar agree.
   FileTreeFirstAttribute* = "data-ct-file-tree-first"
     ## On the file tree's view: the index of its first row drawn.
+  FilesFieldAttribute* = "data-ct-files-field"
+    ## On the Files pane's open name field: `create` or `rename`.
+  FilesFieldTextAttribute* = "data-ct-files-field-text"
+    ## On it, too: the name typed so far.
+  FilesFieldErrorAttribute* = "data-ct-files-field-error"
+    ## On the line under the field: why the name typed was refused.
+  FilesQuestionAttribute* = "data-ct-files-question"
+    ## On Delete's question: the path it asks about.
   VcsScrollAttribute* = "data-ct-vcs-scroll"
     ## On the VCS pane's scroll box: the index of the first row shown.
 
@@ -3889,9 +3897,43 @@ func inHandTop*(top, total, rows: int): int =
   ## `top` kept inside a list of `total` rows of which `rows` show.
   if rows <= 0: 0 else: max(0, min(top, total - rows))
 
+type
+  FileTreeLineKind* = enum
+    ## What one drawn line of the Files pane is.
+    ftlEntry      ## A row of the tree.
+    ftlField      ## Create's name field: the first child of its folder.
+    ftlReason     ## Why the name typed was refused, under the field.
+    ftlQuestion   ## Delete's question, under the entry it asks about.
+
+  FileTreeLine = tuple[kind: FileTreeLineKind; row: int; depth: int]
+    ## `row`: the tree row the line belongs to (`fileTreeRows`' index).
+
+proc fileTreeLines(vm: FilesystemVM;
+                   rows: seq[tuple[node: FilesystemEntryNode; path: string;
+                                   depth: int; open: bool]]):
+    seq[FileTreeLine] =
+  ## The pane's lines: the tree's rows, with the model's open name field
+  ## (Filesystem-Pane.md § "Create and Rename": Create's as the first child
+  ## of its folder, Rename's in place of the row's label), the reason a name
+  ## was refused under it, and Delete's question under its entry.
+  let edit = vm.nameEdit.val
+  for i, row in rows:
+    result.add (ftlEntry, i, row.depth)
+    let p = row.node.path
+    if p.len == 0:
+      continue
+    if edit.kind == fneCreate and p == edit.folder:
+      result.add (ftlField, i, row.depth + 1)
+      if edit.error.len > 0:
+        result.add (ftlReason, i, row.depth + 1)
+    elif edit.kind == fneRename and p == edit.path and edit.error.len > 0:
+      result.add (ftlReason, i, row.depth)
+    if vm.pendingDelete.len > 0 and p == vm.pendingDelete:
+      result.add (ftlQuestion, i, row.depth)
+
 proc fileTreeRowCount*(vm: FilesystemVM): int =
-  ## Every row the Files pane lists at its expansion (what `renderFileTree`
-  ## draws a window of).
+  ## Every line the Files pane lists at its expansion (what `renderFileTree`
+  ## draws a window of): the rows, and an open name field or question.
   if vm.isNil:
     return 0
   let root = vm.rootEntry.val
@@ -3900,7 +3942,7 @@ proc fileTreeRowCount*(vm: FilesystemVM): int =
   var rows: seq[tuple[node: FilesystemEntryNode; path: string; depth: int;
                       open: bool]] = @[]
   fileTreeRows(vm, root, "fileTree", 0, rows)
-  rows.len
+  fileTreeLines(vm, rows).len
 
 proc vocabularyRows*(v: ViewNode): int =
   ## The lines a vocabulary subtree draws at one line each (the VCS pane's
@@ -4031,11 +4073,58 @@ proc renderFileTree*(r: GpuiRenderer; parent: GpuiElement;
   # scrolls (the wheel, its scrollbar: `main.drawListScrubbers`) instead of
   # clipping every row past the pane's foot. Unmeasured (no window: the leaf
   # plan), every row.
-  let shown = if fileTreeScroll.rows > 0: fileTreeScroll.rows else: rows.len
-  let top = inHandTop(fileTreeScroll.top, rows.len, shown)
+  let lines = fileTreeLines(vm, rows)
+  let shown = if fileTreeScroll.rows > 0: fileTreeScroll.rows else: lines.len
+  let top = inHandTop(fileTreeScroll.top, lines.len, shown)
   r.setAttribute(tree, FileTreeFirstAttribute, $top)
-  for k in top ..< min(rows.len, top + shown):
-    let row = rows[k]
+  let edit = vm.nameEdit.val
+  proc fieldText(): string =
+    vm.nameEditDraft & "▏"
+  for k in top ..< min(lines.len, top + shown):
+    let line = lines[k]
+    let row = rows[line.row]
+    if line.kind != ftlEntry:
+      # The model's name field, its refusal, or Delete's question: a line of
+      # the tree's height, at its depth, NOT a `Tree` row (no click is wired
+      # to it, and no row id names it).
+      let el = r.createElement("div")
+      r.setStyle(el, "display", "flex")
+      r.setStyle(el, "items", "center")
+      r.setStyle(el, "flex-shrink", "0")
+      r.setStyle(el, "height", $FileTreeRowPx & "px")
+      r.setStyle(el, "white-space", "nowrap")
+      r.setStyle(el, "padding-left",
+                 $(line.depth * FileTreeIndentPx + FileTreeIconLeft) & "px")
+      r.setStyle(el, "font-family", WindowFontFamily)
+      case line.kind
+      of ftlField:
+        let box = r.createElement("div")
+        r.setAttribute(box, FilesFieldAttribute, "create")
+        r.setAttribute(box, FilesFieldTextAttribute, vm.nameEditDraft)
+        r.setStyle(box, "border-width", "1px")
+        r.setStyle(box, "border-color",
+                   DesignTokenHex[dtColorsUiBorderAction][dmDark])
+        r.setStyle(box, "padding-left", "4px")
+        r.setStyle(box, "padding-right", "4px")
+        r.setStyle(box, "line-height", "20px")
+        r.setStyle(box, "color",
+                   DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+        r.appendChild(box, r.createTextNode(fieldText()))
+        r.appendChild(el, box)
+      of ftlReason:
+        r.setAttribute(el, FilesFieldErrorAttribute, edit.error)
+        r.setStyle(el, "color",
+                   DesignTokenHex[dtColorsUiTextErrorPrimary][dmDark])
+        r.appendChild(el, r.createTextNode(edit.error))
+      of ftlQuestion:
+        r.setAttribute(el, FilesQuestionAttribute, vm.pendingDelete)
+        r.setStyle(el, "color",
+                   DesignTokenHex[dtColorsUiTextWarningPrimary][dmDark])
+        r.appendChild(el, r.createTextNode(deletePrompt(vm.pendingDelete) &
+          "  Enter moves it to the trash, Escape keeps it"))
+      of ftlEntry: discard
+      r.appendChild(rootMark, el)
+      continue
     let el = r.createElement("div")
     r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
     r.setAttribute(el, ViewIdAttribute, row.path)
@@ -4092,7 +4181,20 @@ proc renderFileTree*(r: GpuiRenderer; parent: GpuiElement;
     r.setStyle(label, "top", "0px")
     r.setStyle(label, "line-height", "24px")
     r.setStyle(label, "white-space", "nowrap")
-    r.appendChild(label, r.createTextNode(row.node.text))
+    if edit.kind == fneRename and row.node.path.len > 0 and
+       row.node.path == edit.path:
+      # Rename's field in place of the label, holding the name typed so far.
+      r.setAttribute(label, FilesFieldAttribute, "rename")
+      r.setAttribute(label, FilesFieldTextAttribute, vm.nameEditDraft)
+      r.setStyle(label, "border-width", "1px")
+      r.setStyle(label, "border-color",
+                 DesignTokenHex[dtColorsUiBorderAction][dmDark])
+      r.setStyle(label, "line-height", "22px")
+      r.setStyle(label, "padding-left", "4px")
+      r.setStyle(label, "padding-right", "4px")
+      r.appendChild(label, r.createTextNode(fieldText()))
+    else:
+      r.appendChild(label, r.createTextNode(row.node.text))
     r.appendChild(el, label)
     r.appendChild(rootMark, el)
   r.appendChild(tree, rootMark)
