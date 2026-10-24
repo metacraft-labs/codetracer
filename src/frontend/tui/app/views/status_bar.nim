@@ -66,7 +66,7 @@ type
       ## colour; `label` is its text.
     label*: string
       ## PLAT-68: THE INDICATOR'S TEXT — the router's `statusLabel`: a
-      ## pending prefix (`Ctrl+k…`), the newest pushed mode (`FIND`,
+      ## pending prefix (`Ctrl+K…`), the newest pushed mode (`FIND`,
       ## `PALETTE`, `COMMAND`), the modal machine's mode under the Vim and
       ## Kakoune bases, and under CUA and Emacs — which have no NORMAL mode
       ## (CodeTracer-TUI.md §4 as amended) — the base's own name. Empty is

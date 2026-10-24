@@ -7754,3 +7754,27 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - Re-syncing a /tmp mirror (`sync.sh`) while `build-once.sh` runs in it
   reverts the patched `src/Tuprules.tup`, and cargo then builds into the
   SHARED `/tmp/codetracer/db_backend_target`. Never sync a mirror mid-build.
+- Keymap router pending prefixes expire LAZILY in `resolveLayers` (at the next
+  key). The terminal now also expires them on the idle clock
+  (`keymap_router.expirePending` / `runtime.tickPendingPrefix`, woken by
+  `idleWaitMs`), so Vim's `g…` leaves the status line at 1000 ms.
+  `pendingLabel` spells the prefix with `key_names.displaySequence`
+  (`Ctrl+K…`), not the router's canonical `Ctrl+k`.
+- Under CUA a writable editor already has `textInputFocus` true
+  (`context_keys`), and the resolver's text-entry shadow types a printable key
+  before any non-focused layer is asked: the letter rows' `editorReadOnly` and
+  `!textInputFocus` are defence in depth, not the only guard.
+- The terminal's find field (`rt.prompt`, kind != pkCommand) is on the scope
+  path only while the focus is on its owner (`rt.app.findOwner`: the editor's
+  element id or the pane `/` was typed in); elsewhere `Escape` is that pane's.
+- GPUI's EDIT window (`--edit`, `openArm`) delivers keys to the document's
+  own resolution (`edit_arm.applyGpuiKey` -> `doc.applyKey`), NOT through
+  `gRouter.route`; only `editKeyInert` asks the router (for the inert-key
+  status-bar note). A replay window's keys go through `routeWindowKey`.
+- GPUI's status bar is `drawFooter` (`data-ct-footer="status-bar"`); its
+  transient note is `gStatusNote` (`data-ct-footer-note`).
+- The shortcut reference's text is `keymap_router.referenceLines` of
+  `shortcutReference`: `[user:<table>]` / `[base:<table>]` headings in
+  resolution order, rows `  <key>  <operation> — <label>  (shadowed by your
+  row N)`. Terminal: `:keys reference` and `help.keyboard-shortcuts`
+  (`Ctrl+K Ctrl+S`) open it in the content overlay; GPUI the same op.

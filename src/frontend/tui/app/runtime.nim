@@ -574,6 +574,9 @@ proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
 proc scopePath*(rt: TuiRuntime): ScopePath
 proc navMode(rt: TuiRuntime): NavigationMode
 proc unmountGoneOwners(rt: TuiRuntime)
+proc showShortcutReference(rt: TuiRuntime; outcome: var RuntimeOutcome)
+  ## FORWARD-DECLARED (PLAT-68) for `:keys reference`; defined beside
+  ## `syncOverlayLayers`, whose stack it reads.
   ## FORWARD-DECLARED (PLAT-68) for the chord displays and the focus ring;
   ## defined with the router's section beside `handleToken`.
   ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
@@ -1523,8 +1526,11 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
           rt.keyCheck = startCheck()
           rt.note("keys check: press keys to see how they arrive; " &
                   "Esc ends the check")
+        of "reference":
+          rt.showShortcutReference(outcome)
         else:
-          rt.note("keys: '" & arg & "' is not a keys verb (reload, check)")
+          rt.note("keys: '" & arg & "' is not a keys verb " &
+                  "(reload, check, reference)")
         rt.refreshMenuForKeymap()
       outcome.detail = rt.app.notification
       return
@@ -5611,10 +5617,22 @@ proc scopePath*(rt: TuiRuntime): ScopePath =
                                  element(ekInput, "prompt")],
                                 atWindow = true)
   var inner: seq[ScopeElement] = @[]
+  var focusOwner = "window"
   if rt.editorFocused:
     let id = rt.editorElementId()
-    if id.len > 0: inner.add element(ekEditor, id)
-  if rt.prompt.open:
+    if id.len > 0:
+      inner.add element(ekEditor, id)
+      focusOwner = id
+  else:
+    let (had, focused) = rt.focus.focusedPane()
+    if had: focusOwner = $focused
+  # §5.3 / §5.4: the find field is ITS OWNER'S — on the path while the focus
+  # is on the element that opened it (the editor, or the pane `/` was typed
+  # in), not on whatever pane the focus moved to while it stayed open. So
+  # `Escape` in another pane is that pane's, and find stays open.
+  let owner = rt.app.findOwner
+  if rt.prompt.open and (owner.len == 0 or owner == "window" or
+                         owner == focusOwner):
     inner.add element(ekOverlay, "find")
     inner.add element(ekInput, "find-query")
   rt.focus.scopePathOf(inner)
@@ -5657,6 +5675,34 @@ proc syncOverlayLayers(rt: TuiRuntime) =
   rt.want(CommandLineTable, "window", "COMMAND", promptCommand)
   rt.want(PaletteTable, "window", "PALETTE", rt.app.omnibar.isOpen)
   rt.want(ContextMenuTable, "window", "MENU", rt.app.contextMenu.open)
+
+proc pendingPrefixDueMs*(rt: TuiRuntime): int64 =
+  ## When the pending chord prefix times out under this base (Vim and
+  ## Kakoune: 1000 ms, §3.7), or -1 — so the loop wakes for it.
+  rt.router.pendingDueMs
+
+proc tickPendingPrefix*(rt: TuiRuntime; nowMs: int64): bool =
+  ## PLAT-68 (§3.7): a prefix whose timeout passed ENDS THEN, on the clock —
+  ## its `g…` leaves the status line at the timeout, not at the next key.
+  ## Answers whether the frame changed.
+  if rt.router.expirePending(nowMs):
+    rt.note("")
+    return true
+  false
+
+proc showShortcutReference(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## PLAT-68 (Base-Keymaps-And-Layer-Stack.md §5.4, §5.6): THE SHORTCUT
+  ## REFERENCE for where the focus is — every live binding, layer by layer in
+  ## the order a key is asked of them (an open pushed layer first), each base
+  ## row marked with the user row that shadows it — over the body, scrolled
+  ## like any text there. The lines are `keymap_router.referenceLines` of
+  ## `shortcutReference`, the one function every front-end shows.
+  rt.syncOverlayLayers()
+  let path = rt.scopePath
+  let lines = referenceLines(rt.router.shortcutReference(
+    rt.sessionFacts, path, rt.navMode))
+  rt.showContent("Keyboard shortcuts — " & ($rt.router.base).toUpperAscii &
+                 " at " & $path, lines.join("\n"), outcome = outcome)
 
 proc unmountGoneOwners(rt: TuiRuntime) =
   ## §5.4: a layer's lifetime is bounded by its owner. After the panes are
@@ -6092,6 +6138,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
      "view.scroll-right-half", "view.scroll-to-line-start":
     # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view.
     discard rt.runViewOperation(res.operation, outcome)
+    return
+  of "help.keyboard-shortcuts":
+    rt.showShortcutReference(outcome)
     return
   of "help.check-key-delivery":
     rt.keyCheck = startCheck()

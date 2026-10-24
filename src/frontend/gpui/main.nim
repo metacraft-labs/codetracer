@@ -821,6 +821,9 @@ const
   CallsCommand = ":calls "
     ## The call trace's search field's omnibox prefix (`runWatchCommand`).
 
+const StatusNoteSeconds = 6.0
+  ## How long a status-bar note (`gStatusNote`) stays when no key replaces it.
+
 type
   GContent = object
     ## PLAT-50: a text over the window — an event's full content, a value's
@@ -1093,6 +1096,10 @@ proc editOverlayKey(key: string; mods: seq[string]): bool
 proc leaveFilesField(r: GpuiRenderer)
   ## K19: likewise.
 
+proc editKeyInert(name: string): bool
+  ## PLAT-68 (Mode-Transitions §8.1): FORWARD-DECLARED; defined with the
+  ## router's section beside `routeWindowKey`.
+
 proc editKey(key: string; mods: seq[string]) =
   ## One key of an EDIT window's editor pane: its `keydown` listener's body,
   ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
@@ -1101,6 +1108,11 @@ proc editKey(key: string; mods: seq[string]) =
   # K19: the Files pane's name field or Delete question takes the keys
   # while it is open; an open right-click menu closes on `Esc`.
   if editOverlayKey(key, mods):
+    return
+  # A key that runs an operation only in a replay (`F12`, step out) is inert
+  # here AND SAYS SO on the status bar — the router's answer for this window's
+  # scope path in Edit mode — instead of reaching the document as nothing.
+  if editKeyInert(canonicalKeyOfGpui(key, mods)):
     return
   # PLAT-47: `Esc` cancels a layout gesture in flight, and is not typed.
   if key.toLowerAscii in ["escape", "esc"] and cancelWindowGesture():
@@ -1187,6 +1199,11 @@ var
     ## PLAT-50: the open right-click menu (`headless_app/pane_clicks`).
   gContent: GContent
     ## PLAT-50: a text over the window (`GContent`).
+  gStatusNote: tuple[text: string, untilS: float]
+    ## PLAT-68 (Mode-Transitions §8.1): a short note on the status bar — a
+    ## key inert in this product mode says so there, as the terminal says it
+    ## on its status line — shown until `untilS` (`epochTime`) or until the
+    ## next key the router answers.
   gMaximised = none(PaneKind)
     ## PLAT-50 (K7): the pane whose container "Maximise container" shows
     ## alone, until "Minimise container".
@@ -1342,6 +1359,9 @@ proc windowSessionFacts(): SessionFacts
 proc windowScopePath(): ScopePath
   ## PLAT-70 Part B: forward-declared; defined with the table panes' hover
   ## (and the router's facts, below).
+proc syncOverlayLayers()
+  ## PLAT-68: forward-declared for the shortcut reference; defined with the
+  ## router's facts below.
 proc handleTopHover(r: GpuiRenderer; x, y: int)
 proc handleTopKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
 proc topBarGeometry(): JsonNode
@@ -3939,6 +3959,7 @@ proc drawFooter(r: GpuiRenderer) =
       text(r, b, sl.label)
       r.appendChild(strip, b)
     gTopEls.add strip
+  var noteRight = gGeom.footer.x + gGeom.footer.w - 16
   if not gSession.isNil:
     # From the right: the copy button, the location before it, the
     # certificate label before that.
@@ -3964,6 +3985,7 @@ proc drawFooter(r: GpuiRenderer) =
     text(r, p, location)
     gTopEls.add p
     let cert = certificateLabel()
+    var leftEdge = lx
     if cert.len > 0:
       let cw = groteskTextPx(cert, 14.0)
       let c = absBox(r, PxRect(x: lx - 8 - cw, y: rowY, w: cw, h: TabHeightPx))
@@ -3971,6 +3993,23 @@ proc drawFooter(r: GpuiRenderer) =
       r.setStyle(c, "color", ink)
       text(r, c, cert)
       gTopEls.add c
+      leftEdge = lx - 8 - cw
+    noteRight = leftEdge - 16
+  # PLAT-68 (Mode-Transitions §8.1): the status bar's note — a key inert in
+  # this product mode says what it does and in which mode — right-aligned
+  # before the location, in the status bar's ink, for a few seconds.
+  if gStatusNote.text.len > 0 and epochTime() > gStatusNote.untilS:
+    gStatusNote = ("", 0.0)
+  if gStatusNote.text.len > 0:
+    let nw = groteskTextPx(gStatusNote.text, 14.0)
+    let nx = max(gGeom.footer.x, noteRight - nw)
+    let n = absBox(r, PxRect(x: nx, y: rowY, w: max(1, noteRight - nx),
+                             h: TabHeightPx))
+    r.setAttribute(n, "data-ct-footer-note", gStatusNote.text)
+    r.setStyle(n, "color", ink)
+    r.setStyle(n, "overflow", "hidden")
+    text(r, n, gStatusNote.text)
+    gTopEls.add n
 
 proc wrapWords(text: string; maxChars: int): seq[string] =
   ## `text` broken at spaces into lines of at most `maxChars` characters, the
@@ -5758,9 +5797,29 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.
 
+proc showShortcutReference(r: GpuiRenderer) =
+  ## PLAT-68 (Base-Keymaps §5.4, §5.6): THE SHORTCUT REFERENCE for where the
+  ## focus is — `keymap_router.referenceLines` of `shortcutReference`, the
+  ## lines the terminal shows — as a text over the window: every live
+  ## binding, layer by layer in resolution order, each base row marked with
+  ## the user row that shadows it.
+  syncOverlayLayers()
+  let path = windowScopePath()
+  let lines = referenceLines(gRouter.shortcutReference(
+    windowSessionFacts(), path, nmNormal))
+  showContent(r, "Keyboard shortcuts — " & ($gRouter.base).toUpperAscii &
+              " at " & $path, lines.join("\n"))
+
 proc acceptOmnibar(r: GpuiRenderer) =
   # PLAT-51: a watch verb.
   if runWatchCommand(r, gOmnibar.query):
+    return
+  # PLAT-68: `:keys reference` — the shortcut reference, for where the focus
+  # was when the omnibox opened (the terminal's command of the same name).
+  if classifyOmnibarQuery(gOmnibar.query) == (omCommand, "keys reference"):
+    gOmnibar.close()
+    drawTopBar(r)
+    showShortcutReference(r)
     return
   # PLAT-57: `:grep <text>` is Find in Files (§5.1) — the omnibox closes and
   # the search runs into the pane; `:grep` alone keeps the field open.
@@ -7437,10 +7496,13 @@ proc windowSessionFacts(): SessionFacts =
   ## the terminal's `runtime.sessionFacts`, from this window's models.
   let path = editorPath()
   let editor =
-    if editorFocused() and gDebugDocs.hasKey(path):
+    if not openArm.isNil: editorFactsOf(openArm.doc.state, false)
+    elif editorFocused() and gDebugDocs.hasKey(path):
       editorFactsOf(gDebugDocs[path].state, false)
     else: sourceViewFacts()
-  SessionFacts(product: pmDebug,
+  # An Edit window (`--edit`, `openArm`) is in Edit mode; a replay window is
+  # in Debug mode.
+  SessionFacts(product: (if openArm.isNil: pmDebug else: pmEdit),
                replayLoaded: not gSession.isNil,
                editor: editor,
                paletteVisible: not gOmnibar.isNil and gOmnibar.isOpen,
@@ -7777,6 +7839,9 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
                  $v.maxLeftCol)
     drawTerminalPane(r)
     return
+  of "help.keyboard-shortcuts":
+    showShortcutReference(r)
+    return
   of "find.open", "find.open-backward":
     # GPUI's find is the omnibar's (`:grep` over the files).
     openOmnibar(r, CommandPrefix & "grep ")
@@ -7817,6 +7882,31 @@ func decodePercent(text: string): string =
       result.add text[i]
       inc i
 
+proc editKeyInert(name: string): bool =
+  ## An EDIT window's key, asked of the shared router without effect (its
+  ## editing goes on through the document, `editKey`): when it resolves to an
+  ## operation that only a replay runs (`nrDisabled`), its note goes on the
+  ## status bar, as the terminal puts it on its status line, and the key is
+  ## taken. Any other key clears a note the previous one left.
+  if name.len == 0 or openArm.isNil:
+    return false
+  let facts = windowSessionFacts()
+  let path = windowScopePath()
+  var probe = gRouter
+  let res = probe.route(facts, path, nmNormal, name, int64(epochTime() * 1000))
+  traceGesture("edit key " & name & " at " & $path & " -> " &
+               describeResolution(res))
+  var r: GpuiRenderer
+  if res.kind == erNothing and res.reason == nrDisabled:
+    let note = gRouter.inertNote(res, facts, path, nmNormal)
+    traceGesture("inert " & note)
+    # The Edit window has no status bar: its editor's notice is where it
+    # says what a key did (`wrote main.py`), so the note goes there.
+    openArm.status = note
+    redrawEditor()
+    return true
+  false
+
 proc probeWindowResolution(key: string; mods: seq[string]): EditingResolution =
   ## What the keystroke WOULD resolve to here, with no effect — the router
   ## copied, nothing run.
@@ -7851,6 +7941,10 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   let path = windowScopePath()
   traceGesture("key " & name & " at " & $path)
   let res = gRouter.route(windowSessionFacts(), path, nmNormal, name, nowMs)
+  # A note says what the LAST key did; the next one the router answers
+  # takes it away.
+  let hadNote = gStatusNote.text.len > 0
+  gStatusNote = ("", 0.0)
   case res.kind
   of erPending:
     traceGesture("pending " & gRouter.pendingLabel)
@@ -7858,10 +7952,14 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
     if res.reason in {nrPrefixAbandoned, nrPrefixTimedOut}:
       traceGesture("pending cleared")
     elif res.reason == nrDisabled:
-      # Mode-Transitions §8.1: inert in this product mode — the window has no
-      # status line to say it on, so the trace carries it.
-      traceGesture("inert " & gRouter.inertNote(res, windowSessionFacts(),
-                                                path, nmNormal))
+      # Mode-Transitions §8.1: inert in this product mode, and SAID — on the
+      # status bar, as the terminal says it on its status line.
+      let note = gRouter.inertNote(res, windowSessionFacts(), path, nmNormal)
+      traceGesture("inert " & note)
+      gStatusNote = (note, epochTime() + StatusNoteSeconds)
+      drawTopBar(r)
+      return
+    if hadNote: drawTopBar(r)
   of erCharacter:
     if gOmnibar.isOpen:
       gOmnibar.typeText(res.character)
@@ -9549,6 +9647,17 @@ proc runEdit(cmd: GpuiCommand): int =
   gWindow = windowId
   gRemember = false
   gLeafSet = leafSet
+  # PLAT-68: the shared router, under the session's base and the user's
+  # `keybindings.json` (read, never written: the one-time import of older
+  # configurations is the replay window's), so the edit window can ask it
+  # whether a key is inert in Edit mode (`editKeyInert`).
+  let preference = sessionKeymap(cmd.keymap)
+  gRouter = initKeymapRouter(preference.model, GpuiDelivery,
+                             case preference.reason
+                             of "flag": ksFlag
+                             of "stored": ksStored
+                             else: ksDefault)
+  applyKeybindings(readKeybindings())
   if cmd.editKeys.len > 0:
     # PLAT-44, HEADLESS. The keys go through the SHIM'S OWN focus dispatch to
     # the editor pane's listener — the path a window's keys take — and not

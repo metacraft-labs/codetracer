@@ -148,6 +148,10 @@ proc idleWaitMs(rt: TuiRuntime): int =
   let bars = rt.scrollbarDueMs()
   if bars >= 0 and (due < 0 or bars < due):
     due = bars
+  # PLAT-68 (§3.7): a pending chord prefix ends at its base's timeout.
+  let prefix = rt.pendingPrefixDueMs()
+  if prefix >= 0 and (due < 0 or prefix + 1 < due):
+    due = prefix + 1
   if due < 0:
     return IdlePollMs
   clamp(int(due - nowMs()), 1, IdlePollMs)
@@ -1285,7 +1289,8 @@ proc interactive(command: TuiCommand): int =
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
       # the pointer rested on a label, a dismissal due after it left.
       let hoverChanged = rt.tickAutoHide(nowMs()) or
-                         rt.tickCellHover(nowMs())
+                         rt.tickCellHover(nowMs()) or
+                         rt.tickPendingPrefix(nowMs())
       # PLAT-70 Part H: the scrollbars' fades and a held paging press (a
       # page of the editor is a source scroll the session makes).
       let bars = rt.tickScrollbars(nowMs())
@@ -1631,7 +1636,8 @@ proc editInteractive(command: TuiCommand): int =
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
-                         rt.tickCellHover(nowMs())
+                         rt.tickCellHover(nowMs()) or
+                         rt.tickPendingPrefix(nowMs())
       let barsChanged = rt.tickScrollbars(nowMs()).repaint
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or

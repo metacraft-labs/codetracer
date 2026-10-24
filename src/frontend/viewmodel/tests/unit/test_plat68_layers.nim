@@ -377,7 +377,7 @@ suite "the pending prefix and the status line":
   test "CUA waits on Ctrl+K forever; Vim times out at 1000 ms":
     var r = initKeymapRouter(bkCua, Linux)
     ck r.pressAt(editFacts(), CallTracePath, nmNormal, 0, "Ctrl+k").kind == erPending
-    ck r.statusLabel(CallTracePath, nmNormal) == "Ctrl+k…"
+    ck r.statusLabel(CallTracePath, nmNormal) == "Ctrl+K…"
     ck r.pressAt(editFacts(), CallTracePath, nmNormal, 60_000, "Ctrl+s").op ==
       "help.keyboard-shortcuts"
     var v = initKeymapRouter(bkVim, Linux)
