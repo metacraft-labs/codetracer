@@ -199,23 +199,19 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
   });
 
   // ---- 14. THE EVENT LOG'S COLUMNS -----------------------------------------
+  // The desktop's Event Log is ONE generic view over its ViewModel (no
+  // DataTables): the columns and their visibility are the ViewModel's, as
+  // its column menu lists them; the header and the rows are what is DRAWN.
   out.eventLog = await page.evaluate(() => {
-    const $ = (globalThis as any).jQuery;
-    const tables = Array.from(document.querySelectorAll("table.dataTable"))
-      .filter((t) => (t as HTMLElement).id.length > 0 && !(t as HTMLElement).id.includes("detailed"));
-    for (const t of tables) {
-      if (!$ || !$.fn || !$.fn.dataTable || !$.fn.dataTable.isDataTable(t)) continue;
-      const dt = $(t).DataTable();
-      const cols: { title: string; visible: boolean }[] = [];
-      dt.columns().every(function (this: any) {
-        cols.push({ title: (this.header()?.textContent ?? "").trim(), visible: this.visible() });
-      });
-      const header = Array.from(document.querySelectorAll(".eventLog-column-header > *"))
-        .map((e) => ({ title: (e.textContent ?? "").trim(), cls: (e as HTMLElement).className,
-                       shown: (e as HTMLElement).offsetParent !== null && (e as HTMLElement).offsetWidth > 0 }));
-      return { id: (t as HTMLElement).id, columns: cols, header };
-    }
-    return { id: "", columns: [], header: [] };
+    const columns = Array.from(document.querySelectorAll(".eventLog-columns-menu .eventLog-column-option"))
+      .map((o) => ({ title: (o.querySelector(".eventLog-column-title")?.textContent ?? "").trim(),
+                     visible: o.querySelector(".eventLog-column-check")?.classList.contains("checked") ?? false }));
+    const header = Array.from(document.querySelectorAll(".eventLog-column-header > *"))
+      .map((e) => ({ title: (e.textContent ?? "").trim(), cls: (e as HTMLElement).className,
+                     shown: (e as HTMLElement).offsetParent !== null && (e as HTMLElement).offsetWidth > 0 }));
+    const rows = document.querySelectorAll(".eventLog-dense-table tbody tr").length;
+    const locationCells = document.querySelectorAll(".eventLog-dense-table tbody .eventLog-fullpath").length;
+    return { columns, header, rows, locationCells };
   });
 
   // ---- 14 (review). THE COLUMN MENU -----------------------------------------
@@ -564,7 +560,14 @@ test("PLAT-49 part B: the desktop's panes and session tabs", async ({ ctPage }) 
   expect(drop.rootIsRow).toBe(true);
   expect(drop.lastTabs).toEqual(["EVENT LOG"]);
   expect(drop.lastFullHeight).toBe(true);
-  // Finding 14: the location column, when the table has one, is hidden.
-  const loc = ((out.eventLog as any).columns as any[]).find((c) => c.title === "location");
-  if (loc) expect(loc.visible).toBe(false);
+  // Finding 14: the location column is hidden by default — in the
+  // ViewModel's columns, in the header and in every row drawn. Each reading
+  // must have happened: an empty one fails rather than passing.
+  const el = out.eventLog as { columns: { title: string; visible: boolean }[];
+                               header: { title: string }[]; rows: number; locationCells: number };
+  expect(el.header.length, "the Event Log's header was read").toBeGreaterThan(0);
+  expect(el.rows, "the Event Log's rows were read").toBeGreaterThan(0);
+  expect(el.columns.find((c) => c.title === "location")?.visible).toBe(false);
+  expect(el.header.map((h) => h.title)).not.toContain("location");
+  expect(el.locationCells).toBe(0);
 });

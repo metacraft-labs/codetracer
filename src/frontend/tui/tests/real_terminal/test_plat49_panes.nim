@@ -44,6 +44,8 @@ import ../fixtures/fixture_provider
 import ./lifecycle_support
 import ../../app/theme/colour_math
 from ../../app/views/shell import DividerGlyph
+from ../../../headless_app/auto_hide_hover import HoverPreviewDelayMs,
+  LeaveDismissDelayMs
 import ../../../styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
@@ -329,7 +331,13 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     sess.hover(StatusRow, buildCol + 1)
     sleep(100)
     let early = sess.snap()
-    ck early.findRow(" BUILD ", below = StatusRow)[0] < 0
+    # "Nothing yet" can only be read off a screen taken BEFORE the delay ran
+    # out: on a loaded host the snapshot itself can arrive after it, and the
+    # overlay is then due. (The delay is still held below: `waited`.)
+    let earlyAt = (getMonoTime() - t0).inMilliseconds
+    checkpoint("early screen read by " & $earlyAt & " ms")
+    ck earlyAt >= HoverPreviewDelayMs or
+       early.findRow(" BUILD ", below = StatusRow)[0] < 0
     # …the overlay after the preview delay: the build pane, over the body.
     let (br, bc) = sess.waitFor(" BUILD ", timeoutMs = 3000, below = StatusRow)
     let waited = (getMonoTime() - t0).inMilliseconds
@@ -338,9 +346,14 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     ck br > StatusRow div 2 and bc == 0
     ck sess.snap().findRow("no build has been run", below = StatusRow)[0] > br
     # Off the label and the overlay: still shown a moment later, then gone.
+    let left = getMonoTime()
     sess.hover(10, 100)
     sleep(60)
-    ck sess.snap().findRow(" BUILD ", below = StatusRow)[0] == br
+    let graceScreen = sess.snap()
+    let graceAt = (getMonoTime() - left).inMilliseconds
+    checkpoint("grace screen read by " & $graceAt & " ms")
+    ck graceAt >= LeaveDismissDelayMs or
+       graceScreen.findRow(" BUILD ", below = StatusRow)[0] == br
     discard sess.waitFor(" BUILD ", present = false, timeoutMs = 3000,
                          below = StatusRow)
     sess.quit()

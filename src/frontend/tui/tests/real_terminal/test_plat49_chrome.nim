@@ -121,6 +121,20 @@ proc snap(sess: var TuiTestSession; cols = Cols; rows = Rows): Snapshot =
       row.add sess.cellAt(r, c)
     result.add row
 
+proc settle(sess: var TuiTestSession; timeoutMs: int;
+            ready: proc(s: Snapshot): bool): Snapshot =
+  ## The screen once `ready` holds of it, else the last one read after
+  ## `timeoutMs` (the checks on it then fail on what was drawn). A gesture's
+  ## redraw can take longer than any fixed sleep on a loaded host; a check
+  ## that something DID change polls for it rather than reading the screen
+  ## once after a guess.
+  let t0 = getMonoTime()
+  result = sess.snap()
+  while not ready(result) and
+        (getMonoTime() - t0).inMilliseconds < timeoutMs:
+    sleep(50)
+    result = sess.snap()
+
 proc text(s: Snapshot; r: int): string =
   for c in s[r]:
     result.add(if int(c.rune) == 0: " " else: $c.rune)
@@ -258,7 +272,8 @@ suite "PLAT-49 on a real terminal: a click is a click":
     sess.click(1, vcsAt + 1)
     discard sess.waitRow(1, " VCS ")
     sleep(300)
-    let s2 = sess.snap()
+    let s2 = sess.settle(5000, proc(s: Snapshot): bool =
+      caBold in s[1][vcsAt + 1].attrs)
     ck caBold in s2[1][vcsAt + 1].attrs
     ck sess.status().saysNothingOfDrags()
     # A press on the Files tab moved ONE column (under the threshold), then
@@ -268,7 +283,8 @@ suite "PLAT-49 on a real terminal: a click is a click":
     sess.mouse(32, 1, filesAt + 2)            # motion, button held
     sess.mouse(0, 1, filesAt + 2, release = true)
     sleep(400)
-    let s3 = sess.snap()
+    let s3 = sess.settle(5000, proc(s: Snapshot): bool =
+      caBold in s[1][filesAt + 1].attrs)
     ck caBold in s3[1][filesAt + 1].attrs
     ck s3.text(1).cellFind(" Files ") == filesAt - 1
     ck sess.status().saysNothingOfDrags()
@@ -282,20 +298,17 @@ suite "PLAT-49 on a real terminal: a click is a click":
     for c in [filesAt + 5, filesAt + 20, editorAt + 2]:
       sess.mouse(32, 20, c)
     sleep(400)
-    let s4 = sess.snap()
-    var changed = 0
-    for r in 2 ..< Rows - 2:
-      for c in 30 ..< 110:
-        if hexOfColor(s4[r][c].bg) != hexOfColor(s3[r][c].bg):
-          inc changed
+    proc tinted(s: Snapshot): int =
+      for r in 2 ..< Rows - 2:
+        for c in 30 ..< 110:
+          if hexOfColor(s[r][c].bg) != hexOfColor(s3[r][c].bg):
+            inc result
+    let s4 = sess.settle(5000, proc(s: Snapshot): bool = tinted(s) > 100)
+    let changed = tinted(s4)
     ck changed > 100
     sess.esc()
-    let s5 = sess.snap()
-    var restored = true
-    for r in 2 ..< Rows - 2:
-      for c in 30 ..< 110:
-        if hexOfColor(s5[r][c].bg) != hexOfColor(s3[r][c].bg):
-          restored = false
+    let s5 = sess.settle(5000, proc(s: Snapshot): bool = tinted(s) == 0)
+    let restored = tinted(s5) == 0
     ck restored
     sess.quit()
 

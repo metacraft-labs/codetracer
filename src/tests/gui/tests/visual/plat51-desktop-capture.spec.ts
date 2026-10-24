@@ -310,8 +310,16 @@ test.describe("PLAT-51: a saved desktop layout that held the Timeline", () => {
         .filter((e) => (e.textContent ?? "").trim().length === 0).length);
     out.pageErrors = pageErrors;
     expect(out.timelineTabs).toBe(0);
+    expect(out.emptyTabs).toBe(0);
     expect((out.tabs as string[])).toContain("EVENT LOG");
     expect((out.tabs as string[])).toContain("TERMINAL OUTPUT");
+    // THE USER'S LAYOUT IS THE ONE THAT OPENED, not the mode's default in
+    // its place: only the saved tree keeps TEST RESULTS and CONSTRAINTS in a
+    // column of their own (the Debug default puts the tests beside VCS and
+    // shows no CONSTRAINTS on `calc`). A layout the desktop could not load
+    // because the Timeline was left in it also opens without a Timeline tab
+    // — on the default — and only this tells the two apart.
+    expect((out.tabs as string[])).toContain("CONSTRAINTS");
     writeAnswers("savedLayout", out);
   });
 });
