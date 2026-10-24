@@ -856,8 +856,13 @@ proc requestWindow*(vm: FlowVM;
     if not onDone.isNil: onDone(false)
     return
   let position = store.debugger.val.location
+  # The engine's vocabulary, never this panel's: `$vm.flowMode.val` would put
+  # the view granularity (`fmLine`, `fmFunction`) on the wire, which the
+  # engine refuses (`FlowMode::from_wire_name`). The stop loader's dedup keys
+  # on the VIEW mode instead, so switching granularity still asks again.
+  let wireMode = engineFlowModeWireName(vm.flowMode.val)
   let args = %*{
-    "flowMode": engineFlowModeWireName(vm.flowMode.val),
+    "flowMode": wireMode,
     "location": {
       "path": position.file,
       "line": position.line,

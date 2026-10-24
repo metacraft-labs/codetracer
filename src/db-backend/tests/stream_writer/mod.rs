@@ -55,7 +55,12 @@ const BASE40_CHARS: &[u8; 40] = b"\x000123456789abcdefghijklmnopqrstuvwxyz./-";
 /// reader can open the container before any chunk of any stream exists, exactly
 /// as a live recorder creates the directory up front. A stream the test never
 /// flushes simply stays at size 0 (its FileEntry advertises an empty file).
-const FILES: [&str; 9] = [
+///
+/// The four interning tables (`paths`, `funcs`, `types`, `varnames`) are all
+/// declared: codetracer-trace-format-spec `internal-files.md` "Interning
+/// Tables" makes them one unit that a container carries all four or none of,
+/// and every reader refuses a partial set by name.
+const FILES: [&str; 15] = [
     "steps.dat",
     "steps.idx",
     "values.dat",
@@ -64,8 +69,19 @@ const FILES: [&str; 9] = [
     "calls.idx",
     "paths.dat",
     "paths.off",
+    "funcs.dat",
+    "funcs.off",
+    "types.dat",
+    "types.off",
+    "varnames.dat",
+    "varnames.off",
     "meta.dat",
 ];
+
+/// The interning tables this writer carries with no records. Per
+/// `internal-files.md` "Interning Tables", a table with no records is still
+/// carried: its data file is empty and its offset file is the single entry `0`.
+const EMPTY_INTERNING_TABLES: [&str; 3] = ["funcs", "types", "varnames"];
 
 /// How many source paths this writer's containers register.
 ///
@@ -170,8 +186,24 @@ impl IncrementalCtfsStreamWriter {
         // Grow the backing file to cover block 0, zero-filled.
         writer.ensure_len(writer.next_block * BLOCK_SIZE as u64)?;
         writer.flush_block_zero()?;
-        writer.write_path_table()?;
+        writer.write_interning_tables()?;
         Ok(writer)
+    }
+
+    /// Write the container's four interning tables: the synthetic path table,
+    /// and the function, type and variable-name tables with no records.
+    ///
+    /// The paths alone are not enough: a container carrying `paths.*` without
+    /// the other three is refused at open by every reader (the trace-format
+    /// library, the db-backend and the session manager), so a writer standing
+    /// in for a recorder must emit the whole unit.
+    fn write_interning_tables(&mut self) -> std::io::Result<()> {
+        self.write_path_table()?;
+        for table in EMPTY_INTERNING_TABLES {
+            self.append_to_file(&format!("{table}.off"), &0u64.to_le_bytes())?;
+        }
+        self.flush_block_zero()?;
+        self.file.flush()
     }
 
     /// Write the container's path interning table: `paths.dat` is the

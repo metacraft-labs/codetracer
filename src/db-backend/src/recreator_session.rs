@@ -912,12 +912,20 @@ impl ReplayWorker {
 /// describe how it ended: `the process ended with signal: 11 (SIGSEGV) (core
 /// dumped)` (std's `ExitStatus` display). A worker still running after `grace`
 /// is stopped, since nothing can be paired with its answers any more.
+///
+/// The grace is measured through [`crate::wall_clock`], not `Instant`: this
+/// function is not inside a `#[cfg(unix)]` / `#[cfg(windows)]` item, so it is
+/// compiled into the wasm build, where a raw `std::time` read traps
+/// (`tests/wall_clock_sweep_test.rs`).
 fn reap_worker(child: &mut Child, grace: Duration) -> String {
-    let deadline = Instant::now() + grace;
+    let started_ms = crate::wall_clock::monotonic_ms();
+    let grace_ms = u64::try_from(grace.as_millis()).unwrap_or(u64::MAX);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return format!("the process ended with {status}"),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(None) if crate::wall_clock::monotonic_ms().saturating_sub(started_ms) < grace_ms => {
+                thread::sleep(Duration::from_millis(20))
+            }
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();

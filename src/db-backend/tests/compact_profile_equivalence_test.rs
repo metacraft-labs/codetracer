@@ -36,6 +36,7 @@ use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::ctfs_trace_reader::ctfs_container::{CtfsProfile, CtfsReader, write_compact_ctfs, write_minimal_ctfs};
 use db_backend::db::CellChange;
 use db_backend::expr_loader::ExprLoader;
+use db_backend::source_access::HostSourceReads;
 use db_backend::task::CoreTrace;
 use db_backend::trace_reader::TraceReader;
 
@@ -598,6 +599,31 @@ fn probes() -> Vec<Probe> {
             ["program.rs", SRC, "ccp5/program.rs", "nope.rs", ""]
                 .into_iter()
                 .map(|p| format!("{:?}", r.fuzzy_path_ids_for(p)))
+                .collect::<Vec<_>>()
+                .join("|")
+        }),
+        // Both source-reading rules, because they take different routes through
+        // the resolver: `Refused` skips the two host-canonicalize stages, so a
+        // loader difference visible only to the string stages (or only behind
+        // them) shows up in one mode and not the other. The `..` query is the
+        // one that gets past the exact, workdir and suffix stages, so it is the
+        // one that reaches the canonicalize stages only `Allowed` runs (and
+        // then the filename stage both run).
+        ("fuzzy_path_ids_for_under", |r| {
+            [HostSourceReads::Allowed, HostSourceReads::Refused]
+                .into_iter()
+                .flat_map(|reads| {
+                    [
+                        "program.rs",
+                        SRC,
+                        "ccp5/program.rs",
+                        "/tmp/ccp5/../ccp5/program.rs",
+                        "nope.rs",
+                        "",
+                    ]
+                    .into_iter()
+                    .map(move |p| format!("{reads:?}:{:?}", r.fuzzy_path_ids_for_under(p, reads)))
+                })
                 .collect::<Vec<_>>()
                 .join("|")
         }),
