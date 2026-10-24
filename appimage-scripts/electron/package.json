@@ -4,6 +4,6 @@
   "private": true,
   "description": "Pins the Electron runtime bundled into the CodeTracer AppImage. See ../install_electron.sh.",
   "dependencies": {
-    "electron": "44.1.1"
+    "electron": "44.9.1"
   }
 }
