@@ -116,6 +116,7 @@ OPERATIONS = "src/frontend/viewmodel/editor/operations.nim"
 NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 EMACS = "src/frontend/viewmodel/keymap/emacs_keymap.nim"
 CAPS = "src/frontend/tui/app/theme/capabilities.nim"
+USER_KEYMAP = "src/frontend/viewmodel/keymap/user_keymap.nim"
 
 # Phase B suites.
 LAYERS = "src/frontend/viewmodel/tests/unit/test_plat68_layers.nim"
@@ -132,7 +133,8 @@ MENU = "src/frontend/viewmodel/tests/unit/test_plat68_menu_access.nim"
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
             ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
             MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
-            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS]
+            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS,
+            USER_KEYMAP]
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
           LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
           PROPAGATION, MENU]
@@ -340,6 +342,46 @@ ARMS = [
              "  if not rt.clipboardRead.asks or")],
      [(PTYB, "*::kitty's TERM: a paste does not ask*")],
      "the paste ignores the terminal's clipboard-read capability"),
+
+    # --- k4: precedence, the stack, the shadow and the loader ---------------
+    # The milestone's own list of arms that Phase B did not carry: each is
+    # aimed at the one case that holds it, so its `because` is that case's.
+    ("G1", [(ROUTER, "  for i in countdown(path.len - 1, 0):",
+             "  for i in 0 .. path.len - 1:")],
+     [(LAYERS, "*::inside a base the inner scope goes first")],
+     "§5.1: within the base, the outer scope answers before the inner"),
+    ("G2", [(ROUTER, "  for source in [lsUser, lsBase]:\n"
+                     "    for (table, atFocus) in router.tablesInOrder(path):",
+             "  for (table, atFocus) in router.tablesInOrder(path):\n"
+                     "    for source in [lsUser, lsBase]:")],
+     [(LAYERS, None)],
+     "the withdrawn draft: scope compared before source (B1's case, its "
+     "cross-scope line rather than B1's same-table line)"),
+    ("G3", [(ROUTER, "      let trie = trieFor(km, scope, table, laterFirst = source == lsUser)",
+             "      let trie = trieFor(km, scope, table, laterFirst = false)")],
+     [(LAYERS, "*::two user rows for one chord in one scope*")],
+     "KL-11: of two user rows for one chord, the EARLIER fires"),
+    ("G4", [(ROUTER, "        router.shadows.add Shadow(\n"
+                     "          keyText: userRows[i].keyText, userIndex: userRows[i].index,\n"
+                     "          shadowedSource: lsBase, shadowedOperation: b.operation,",
+             "        discard Shadow(\n"
+             "          keyText: userRows[i].keyText, userIndex: userRows[i].index,\n"
+             "          shadowedSource: lsBase, shadowedOperation: b.operation,")],
+     [(LAYERS, None)],
+     "§5.6: a user row's shadow of a base row resolves but is not in the "
+     "load report"),
+    ("G5", [(STACK, "    else: next.layers.add l", "    next.layers.add l")],
+     [(LAYERS, "*::closing the owner pops its layer")],
+     "KL-5: an owner's unmount leaves its layer on the stack"),
+    ("G6", [(KEYMAP, "      if node >= 0 and shadowDefeatedAt(layer, node):",
+             "      if false:")],
+     [(LAYERS, "*::a focused field's own row with a true `when` takes its character")],
+     "§5.6: the text-entry shadow answers before the focused layer's true "
+     "`when` (a find field's bound letter types itself)"),
+    ("G7", [(USER_KEYMAP, "    fail(ueMalformedKey, \"'\" & keyNode.getStr & \"' names no key\")",
+             "    return")],
+     [(LAYERS, "*::one planted row per kind*")],
+     "KL-7: the loader skips a malformed key instead of reporting it"),
 ]
 DECLARED_SURVIVORS = {"N1"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,

@@ -2,6 +2,12 @@
 ## bindings over PLAT-30's 224 named operations, **plus a report naming exactly
 ## what could not be translated**.
 ##
+## Owns: the translation of a `.vimrc` / `init.vim` text into bindings over
+## the named operations, and the report of every line it could not translate.
+##
+## Refuses to own: the Vim base's own table (`vim_keymap`), resolution
+## (`editing_keymap`), and reading the file from disk (the host does that).
+##
 ## `codetracer-specs/GUI/Editing-Operations-And-Keymaps.md` §6 owns the
 ## behaviour. Three sentences of it decide the shape of this module:
 ##

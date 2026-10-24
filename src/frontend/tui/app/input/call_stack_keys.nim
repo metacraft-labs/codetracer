@@ -48,6 +48,8 @@
 
 import std/strutils
 
+import ../../../../common/key_names
+
 import ../views/call_stack
 import ./mouse
 
@@ -81,10 +83,15 @@ const
   KeyBottom* = "G"
     ## The outermost frame: the entry point.
   KeyToggleGroup* = "x"
-  KeyArrowDown* = "\x1b[B"
-  KeyArrowUp* = "\x1b[A"
-  KeyPageDown* = "\x1b[6~"
-  KeyPageUp* = "\x1b[5~"
+  KeyArrowDown* = "Down"
+  KeyArrowUp* = "Up"
+  KeyPageDown* = "PageDown"
+  KeyPageUp* = "PageUp"
+    ## The four named keys, as `key_names.keyName` names them — not as the
+    ## bytes a terminal sends: `key_names` is the only place those bytes
+    ## become names (Base-Keymaps-And-Layer-Stack.md §8 item 2,
+    ## `ci/test/keymap-clean-code.sh`). `applyKey` takes either the token or
+    ## the name, through that one decoder.
 
   WheelScrollRows* = 3
     ## Rows one wheel notch scrolls. Three is the convention every terminal
@@ -98,8 +105,9 @@ proc selectFrame*(model: var CallStackModel; frame: int;
   ## THE ONLY WRITER OF `selected` IN THIS MODULE, so "selecting a frame never
   ## touches the debugger" is a property of one function rather than of five
   ## call sites that each have to remember it. There is no session here to
-  ## touch: this module imports `app/views/call_stack` and `std/strutils` and
-  ## nothing else.
+  ## touch: this module imports `app/views/call_stack`, `app/input/mouse`,
+  ## `common/key_names` (the terminal's one key decoder) and `std/strutils`,
+  ## and nothing else.
   if frame < 0 or frame >= model.frames.len:
     return csaSelectionUnchanged
   if frame == model.selected:
@@ -216,7 +224,11 @@ proc applyKey*(model: var CallStackModel; token: string;
   if isMouse:
     return model.applyMouse(screen, event)
   let body = max(1, screen.bodyHeight)
-  case token
+  # A terminal's token (`CSI B`) or an already-decoded name (`Down`): the one
+  # decoder names the first, and a name is not a token it reads.
+  let decoded = keyName(token)
+  let key = if decoded.len > 0: decoded else: token
+  case key
   of KeyDown, KeyArrowDown: model.moveByRows(1, body)
   of KeyUp, KeyArrowUp: model.moveByRows(-1, body)
   of KeyPageDown: model.moveByRows(body, body)

@@ -393,10 +393,13 @@ proc applyKey*(model: var CommandLineModel; token: string;
                candidates: openArray[string] = []): CommandLineAction =
   ## One input token against the prompt.
   ##
-  ## Takes the token the runtime framed OR the canonical name
-  ## `keymap.keyName` produces, because both spellings reach a prompt in this
-  ## tree — the snapshot runtime hands `applyToken` raw bytes, and CTUI-9's
-  ## resolver hands a caller `Left` / `Up` / `Backspace`.
+  ## Takes the canonical name `key_names.keyName` produces (`Left`, `Up`,
+  ## `Backspace`, …) — what the router hands the prompt — and, for the
+  ## single-byte keys only (`\r`, `\x1b`, `\x7f`, `\t`), the byte itself,
+  ## which some callers still pass. A multi-byte key sequence (`CSI A`) is
+  ## never read here: `key_names` is the only place the terminal's bytes
+  ## become key names (Base-Keymaps-And-Layer-Stack.md §8 item 2,
+  ## `ci/test/keymap-clean-code.sh`).
   if not model.open:
     return claUnhandled
   case token
@@ -409,13 +412,13 @@ proc applyKey*(model: var CommandLineModel; token: string;
     model.backspace()
   of KeyTab, "Tab":
     model.complete(candidates)
-  of KeyUp, "\x1b[A":
+  of KeyUp:
     model.historyPrev()
-  of KeyDown, "\x1b[B":
+  of KeyDown:
     model.historyNext()
-  of KeyRight, "\x1b[C":
+  of KeyRight:
     model.moveCursor(KeyRight)
-  of KeyLeft, "\x1b[D":
+  of KeyLeft:
     model.moveCursor(KeyLeft)
   of KeyHome, KeyEnd:
     model.moveCursor(token)
