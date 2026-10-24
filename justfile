@@ -2369,6 +2369,12 @@ demo-cross-tracer:
   # afterwards, and re-runs it whenever the demo's sources or any of the
   # recorder binaries change — so what the GUI opens is always a recording
   # of the tree you are standing in.
+  # The materialiser refuses without ct-instrument, session-manager and a
+  # built codetracer-js-recorder; build them first (the same provisioning
+  # `just test-cross-process` uses), failing by name when a sibling is absent.
+  echo "[demo] Building the recording tools (ct-instrument, session-manager, codetracer-js-recorder)"
+  CODETRACER_RECORD_WEB_BIN="$(bash scripts/provision-cross-process-recording.sh)"
+  export CODETRACER_RECORD_WEB_BIN
   echo "[demo] Recording the three-tier demo from this tree (cached after the first run)"
   recordings="$(./scripts/materialize-recording.sh cross-process-three-trace)"
   session="$recordings/session.toml"

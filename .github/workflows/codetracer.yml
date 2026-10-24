@@ -2915,6 +2915,32 @@ jobs:
         # action reaches `repro` through this repo's own dev shell.
         uses: ./.github/actions/provision-repro-lock-siblings
 
+      # The envelope records the three-tier demo from this tree, and
+      # scripts/materialize-recording.sh refuses without `ct-instrument` and a
+      # built codetracer-js-recorder. `just test-cross-process` builds both
+      # (with session-manager) through
+      # scripts/provision-cross-process-recording.sh, which fails by name when
+      # a sibling is not checked out -- so both are cloned here, unbuilt: the
+      # provisioning step builds them in their own dev shells, the same way on
+      # every host. Asserted by ci/test/cross-process-gate.sh.
+      - name: Clone codetracer-wasm-instrumenter sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-wasm-instrumenter
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-wasm-instrumenter
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-js-recorder sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          submodules: "false"
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
       - name: Clone runquota sibling
         # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
         # ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
