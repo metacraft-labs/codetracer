@@ -2605,6 +2605,9 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true) =
         desktopDebugCommands(data, s.store))
     sessionVM = vms.mirror.session
     sessionVM.store.claimLocalsLoading()
+    # The panes that run on the page jump through the page's connection,
+    # as its toolbar does (`ReplayDataStore.navigationBackend`).
+    sessionVM.store.navigationBackend = realBackend
   else:
     vms.debuggerSession = newDebuggerSession(realBackend)
     sessionVM = vms.debuggerSession.session

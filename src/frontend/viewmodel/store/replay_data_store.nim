@@ -368,6 +368,15 @@ type
     requestSpans*: RequestSpansStore
     degraded*: DegradedStateStore
     backend*: BackendService
+    navigationBackend*: BackendService
+      ## Where `requestHistoricalNavigation` sends a move to a recorded
+      ## moment, when it is not `backend`. A `ct host` page's store is its
+      ## mirror's, over an inert backend (`sync/mirror_session`), while the
+      ## page drives the replay it launched — its toolbar steps through the
+      ## page's own connection and the server's session follows the moves
+      ## it makes. A jump from a pane that runs on the page (a Pixel History
+      ## entry, a frame, an event) has to take that same connection, or it
+      ## is sent to a backend that never answers. nil: `backend`.
     requestTracker*: RequestTracker
     stops*: StopTimeline
       ## PLAT-29. The stops the debugger has been at, as versions — so a
@@ -623,7 +632,10 @@ proc requestHistoricalNavigation*(store: ReplayDataStore; command: string;
   ## from a live session, the UI enters historical mode immediately; the
   ## backend's complete-move event will refresh the exact debugger position.
   store.enterHistoricalModeForNavigation()
-  discard store.backend.send(command, args)
+  let backend =
+    if store.navigationBackend.isNil: store.backend
+    else: store.navigationBackend
+  discard backend.send(command, args)
 
 proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
   ## Mirror a backend recording-head update into session and timeline state.

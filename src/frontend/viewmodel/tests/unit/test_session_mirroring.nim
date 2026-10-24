@@ -37,8 +37,8 @@ import ../../sync/[action_relay, mirror_session, sync_host, sync_publisher,
                    sync_subscriber, synced_signals, transport]
 import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          flow_layout, flow_vm,
-                         filesystem_vm, terminal_output_model,
-                         terminal_output_vm,
+                         filesystem_vm, pixel_history_vm, terminal_output_model,
+                         terminal_output_vm, visual_replay_client,
                          state_vm]
 import ../../viewport
 
@@ -962,6 +962,48 @@ suite "a ct host page's mirror (Shared-DOM-Front-Ends D2)":
       ck chosen == 1
       ck host.actionsApplied == before
       ck "/src" notin primary.fileTreeVM.expandedPaths.val
+      mirror.dispose()
+      host.dispose()
+      done()
+
+  test "a jump from a pane on the page goes through the page's connection":
+    # A `ct host` page drives the replay it launched: its toolbar steps over
+    # the page's own connection and the server's session follows. A pane
+    # whose actions stay on the page (Pixel History, the frame strip, the
+    # event log) jumps through its store, and the mirror's store is over an
+    # inert backend — so the jump has to take the page's connection
+    # (`navigationBackend`, set by `ui_js`), or it is never sent: a Pixel
+    # History entry click sent no `ct/seek-to-geid` (codetracer-pm
+    # issues/2026-10-22-pixel-history-entry-click-sends-no-seek-to-geid.md).
+    createRoot proc(done: proc()) =
+      let (primary, mock) = newPrimary()
+      let host = newSyncHost(manual)
+      host.addPrimary("ct-host/replay-0", primary)
+      let link = newInMemoryLink()
+      host.attach(link.a, follow = "ct-host/replay-0")
+      let mirror = createHostedPageMirror(link.b)
+      link.settle()
+      let page = newMockBackendService(autoRespond = true)
+      let history = createPixelHistoryVM(nil, mirror.session.store)
+      history.entries.val = @[VisualReplayPixelHistoryEntry(geid: 210),
+                              VisualReplayPixelHistoryEntry(geid: 220)]
+
+      # CONTROL: without the page's connection the jump goes nowhere — what
+      # the page did before, and what makes the check below about the field.
+      mock.clearReceivedCommands()
+      history.selectEntry(1)
+      link.settle()
+      ck page.findCommand("ct/seek-to-geid").isNone
+      ck mock.findCommand("ct/seek-to-geid").isNone
+
+      mirror.session.store.navigationBackend = page.toBackendService()
+      history.selectEntry(1)
+      link.settle()
+      let sent = page.findCommand("ct/seek-to-geid")
+      ck sent.isSome
+      if sent.isSome:
+        ck sent.get.args["geid"].getInt == 220
+      ck mock.findCommand("ct/seek-to-geid").isNone
       mirror.dispose()
       host.dispose()
       done()
