@@ -15,7 +15,7 @@ use crate::calltrace::{Calltrace, CalltraceShape};
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{Db, DbCall, DbRecordEvent, MaterializedReplaySession};
+use crate::db::{Db, DbCall, MaterializedReplaySession, program_event_of_record};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
@@ -52,7 +52,7 @@ use crate::task::{
     CalltraceLoadArgs, CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DapTracepoint,
     DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction,
     Instructions, JumpBehaviour, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location,
-    MoveState, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent,
+    MoveState, NO_ADDRESS, NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent,
     RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
     Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate, UpdateTableArgs,
     Variable,
@@ -226,11 +226,14 @@ pub struct Handler {
     /// does not contain the recorded event log. Materialized sessions can scan
     /// `reader.events()` directly without loading other event types.
     /// When `cached_events` is already populated, Write events are extracted
-    /// from it instead.
+    /// from it instead. Both routes build the rows with
+    /// `program_event_of_record`, so they agree. Every (re)load of
+    /// `cached_events` drops this cache.
     cached_terminal_events: Option<Vec<ProgramEvent>>,
 
     /// The terminal output split into lines (`ct/load-terminal-lines`), with
-    /// each write's text and tick; built once from `cached_terminal_events`.
+    /// each write's text and tick; built from `cached_terminal_events` and
+    /// dropped with it.
     cached_terminal_lines: Option<CachedTerminalLines>,
 
     /// Macro sourcemaps loaded from the trace directory.
@@ -2846,6 +2849,11 @@ impl Handler {
             // The marker projection is OF these events; a reloaded list
             // (a live session's growing log) needs it rebuilt.
             self.cached_marker_rows = None;
+            // So is the terminal: its writes are this list's writes, and a
+            // live session's terminal must show the output the reloaded log
+            // gained since the terminal was last built.
+            self.cached_terminal_events = None;
+            self.cached_terminal_lines = None;
         }
         Ok(())
     }
@@ -3263,6 +3271,8 @@ impl Handler {
         self.cached_events = Some(events);
         self.event_tick_index = None;
         self.cached_marker_rows = None;
+        self.cached_terminal_events = None;
+        self.cached_terminal_lines = None;
         self.marker_decode_calls.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -6965,8 +6975,9 @@ impl Handler {
         let start = arg_usize("start");
         let count = arg_usize("count");
         let at_ticks = req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64);
+        // Always ask: a live session's reload drops the cached lines.
+        self.ensure_terminal_events_loaded()?;
         if self.cached_terminal_lines.is_none() {
-            self.ensure_terminal_events_loaded()?;
             let events = self.cached_terminal_events.as_deref().unwrap_or(&[]);
             self.cached_terminal_lines = Some(CachedTerminalLines::of(events));
         }
@@ -6985,16 +6996,22 @@ impl Handler {
     /// extracted from it. Recreator sessions must ask their worker for the
     /// recorded events: their reader is an empty projection, not the producer.
     /// Other sessions retain the direct reader scan for stdout and stderr.
+    ///
+    /// A live recreator session's event log grows, so `ensure_events_loaded`
+    /// reloads it on every call and drops the terminal caches built from the
+    /// previous list; the terminal is then rebuilt from the reloaded one.
     fn ensure_terminal_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.cached_terminal_events.is_some() {
-            return Ok(());
-        }
-
         if self.trace_kind == TraceKind::Recreator {
             // Use the same events and recorded positions as ct/event-load,
             // including registration in event_db for subsequent event jumps.
             // Do not cache an empty terminal when the worker failed to load.
+            // A replayed (not live) recording loads once; later calls are
+            // no-ops that keep the cached terminal.
             self.ensure_events_loaded()?;
+        }
+
+        if self.cached_terminal_events.is_some() {
+            return Ok(());
         }
 
         let write_events: Vec<ProgramEvent> = if let Some(ref all_events) = self.cached_events {
@@ -7012,7 +7029,7 @@ impl Handler {
                 .iter()
                 .enumerate()
                 .filter(|(_, record)| terminal_output_category(record.kind).is_some())
-                .map(|(i, record)| self.to_program_event(record, i))
+                .map(|(i, record)| program_event_of_record(self.reader.as_ref(), record, i))
                 .collect()
         };
 
@@ -7032,45 +7049,6 @@ impl Handler {
         info!("send notification {:?}", raw_event);
         sender.send(raw_event)?;
         Ok(())
-    }
-
-    fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
-        let step_id_int = event_record.step_id.0;
-        // I/O can be recorded at a reload annotation. Keep the event at its
-        // execution tick without inventing a source location for that tick.
-        let (path, line) = if let Some(step_record) = self.reader.step(event_record.step_id) {
-            (
-                self.reader
-                    .workdir()
-                    .join(self.reader.path(step_record.path_id).unwrap_or(""))
-                    .display()
-                    .to_string(),
-                step_record.line.0,
-            )
-        } else {
-            (NO_PATH.to_string(), NO_POSITION)
-        };
-
-        ProgramEvent {
-            kind: event_record.kind,
-            semantic_kind: String::new(),
-            content: event_record.content.clone(),
-            bytes: event_record.content.len(),
-            rr_event_id: index,
-            direct_location_rr_ticks: step_id_int,
-            metadata: event_record.metadata.to_string(),
-            // A write to standard error is terminal output, but not standard
-            // output (`terminal_output_category` files it under "stderr").
-            stdout: event_record.kind != EventLogKind::WriteStderr,
-            event_index: index,
-            tracepoint_result_index: NO_INDEX,
-            high_level_path: path,
-            high_level_line: line,
-            base64_encoded: false,
-            max_rr_ticks: self.reader.last_step_id().map_or(0, |id| id.0),
-            source_generation: 0,
-            source_digest: String::new(),
-        }
     }
 
     fn serialize<T: Serialize>(&self, value: &T) -> Result<String, Box<dyn Error>> {

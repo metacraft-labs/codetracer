@@ -1650,6 +1650,54 @@ pub struct MaterializedReplaySession {
     source_access: crate::source_access::SourceAccessHandle,
 }
 
+/// The event-log row of a recorded event: its position (`rrEventId`), its tick
+/// and source location, and whether a write is to standard output.
+///
+/// `ct/event-load` (through `MaterializedReplaySession::load_events`) and
+/// `ct/load-terminal` (through the handler's direct scan of the trace's
+/// events) both build their rows here, so the terminal's writes are the event
+/// log's writes whichever request came first
+/// (codetracer-specs `spec/Architecture/CodeTracer-DAP-Extensions.md`,
+/// `ct/load-terminal`).
+pub fn program_event_of_record(reader: &dyn TraceReader, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
+    // I/O can be recorded at a reload annotation. Keep the event at its
+    // execution tick without inventing a source location for that tick.
+    let (path, line) = if let Some(step_record) = reader.step(event_record.step_id) {
+        (
+            reader
+                .workdir()
+                .join(reader.path(step_record.path_id).unwrap_or(""))
+                .display()
+                .to_string(),
+            step_record.line.0,
+        )
+    } else {
+        (NO_PATH.to_string(), NO_POSITION)
+    };
+
+    ProgramEvent {
+        kind: event_record.kind,
+        semantic_kind: String::new(),
+        content: event_record.content.clone(),
+        bytes: event_record.content.len(),
+        rr_event_id: index,
+        direct_location_rr_ticks: event_record.step_id.0,
+        metadata: event_record.metadata.to_string(),
+        // `Write` is standard output and `WriteStderr` standard error
+        // (`spec/Trace-Files/MCR-Event-Log-Stream.md` §2.3). A write to
+        // standard error is terminal output, but not standard output.
+        stdout: event_record.kind != EventLogKind::WriteStderr,
+        event_index: index,
+        tracepoint_result_index: NO_INDEX,
+        high_level_path: path,
+        high_level_line: line,
+        base64_encoded: false,
+        max_rr_ticks: reader.last_step_id().map_or(0, |id| id.0),
+        source_generation: 0,
+        source_digest: String::new(),
+    }
+}
+
 impl MaterializedReplaySession {
     pub fn new(reader: Arc<dyn TraceReader>) -> MaterializedReplaySession {
         let mut breakpoint_list: Vec<HashMap<(usize, Option<i64>), Breakpoint>> = Default::default();
@@ -1907,54 +1955,6 @@ impl MaterializedReplaySession {
     pub fn step_id_jump(&mut self, step_id: StepId) {
         if step_id.0 != NO_INDEX {
             self.step_id = step_id;
-        }
-    }
-
-    #[allow(clippy::expect_used)] // step_id != NO_INDEX guard ensures the id is valid
-    fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
-        let step_id_int = event_record.step_id.0;
-        // I/O can be recorded at a reload annotation. Keep the event at its
-        // execution tick without inventing a source location for that tick.
-        let (path, line) = if let Some(step_record) = self.reader.step(event_record.step_id) {
-            (
-                self.reader
-                    .workdir()
-                    .join(self.reader.path(step_record.path_id).unwrap_or(""))
-                    .display()
-                    .to_string(),
-                step_record.line.0,
-            )
-        } else {
-            (NO_PATH.to_string(), NO_POSITION)
-        };
-
-        let default_step = DbStep {
-            step_id: StepId(0),
-            path_id: PathId(0),
-            line: Line(0),
-            column: None,
-            call_key: CallKey(0),
-            global_call_key: CallKey(0),
-        };
-        let last_step_id = self.reader.last_step_id().unwrap_or(default_step.step_id);
-
-        ProgramEvent {
-            kind: event_record.kind,
-            semantic_kind: String::new(),
-            content: event_record.content.clone(),
-            bytes: event_record.content.len(),
-            rr_event_id: index,
-            direct_location_rr_ticks: step_id_int,
-            metadata: event_record.metadata.to_string(),
-            stdout: true,
-            event_index: index,
-            tracepoint_result_index: NO_INDEX,
-            high_level_path: path,
-            high_level_line: line,
-            base64_encoded: false,
-            max_rr_ticks: last_step_id.0,
-            source_generation: 0,
-            source_digest: String::new(),
         }
     }
 
@@ -2723,7 +2723,7 @@ impl ReplaySession for MaterializedReplaySession {
         let mut contents: String = "".to_string();
 
         for (i, event_record) in self.reader.events().iter().enumerate() {
-            let mut event = self.to_program_event(event_record, i);
+            let mut event = program_event_of_record(self.reader.as_ref(), event_record, i);
             event.content = event_record.content.to_string();
             events.push(event.clone());
             if i < 20 {
