@@ -41,6 +41,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | 1 terminal host | TS1 (collapsed folders still list their files), TS2 (an opened file never shown), TS3 (the status line does not say where), TS4 (the gutter right-click always enables), TS6 (Delete ALL deletes nothing) |
   | 1 shared ops | HS1 (a disabled breakpoint still sent), HS2 (Run to Cursor sent as backward), HS3 (clearing a file sends nothing), HS4 (a jump with no step that way hangs), SD1 (a disabled row stored enabled), NH1 (the tree opens collapsed), PV1 (the vocabulary tree ignores the VM's expansion) |
   | 1 terminal input | MO1 (Ctrl read from the Alt bit), FT1 (a collapsed folder's twisty), PL1 (the selected point not drawn), CM1 (menu rows off by the frame), CM2 (disabled entries not italic), CM3 (the menu far from the press), CM4 (the overlay shows the title for the text) |
+  | 1 GPUI's Edit mode Files | GE1 (the Files leaf gets no model), GE2 (a file press opens nothing), GE3 (opening a file drops the first one's buffer), GE4 (nothing carries the operations out), GE5 (the folder not listed again), GE6 (a new file not opened), GE7 (the name field takes no keys), GE8 (the Edit window draws no menu), GE9 (a Files press does not leave the field), GE10 (a folder tab's Files leaf gets no model), GE11 (an Edit window runs no Files entry), GE12 (Esc keeps the menu), GL3 / GL4 / GL5 (the Create field, Delete's question, the Rename field not drawn), FM1 (Enter on the question keeps the entry), FM2 (any key answers the question), FM3 (Backspace removes nothing), FM4 (Escape keeps the field open) |
   | 1 GPUI | GW1 (right button read as left), GW2 (RETIRED 2026-10-17, below), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GF1 / GF2 (a Files node opens no menu; its Edit opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
   | 2 colours | RO1 (inactive tabs black), RO2 (the field the raised slab), RO3 (the menu on the card), RO4 (the strip divider in the border colour), RO6 (the strip on raised), RO7 (the top bar on the card), RO8 (the menu frame in the subtle border), SH4 (row 0 on the card), TB3 (controls filled), TB5 (no dropdown frame), GC1 (GPUI's window ground the old raised), GC2 (GPUI's menu on the card), GM11 (GPUI's band on the pane ground), GM12 (GPUI's omnibox border the menu's) |
   | 3 the omnibox | TB1 (not centred), TB2 (a third, not the desktop's share), TB4 (no field edge), GT1 (GPUI not centred), GT2 (GPUI a third wide) |
@@ -150,6 +151,9 @@ DAPHANDLER = "src/db-backend/src/dap_handler.rs"
 # (`session_driver`).
 SDKBP = "src/frontend/viewmodel/sdk/breakpoints.nim"
 SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
+# ADDED 2026-10-24: GPUI's Edit mode draws the opened folder's Files tree and
+# its menu acts on the disk; the name field's keys are read beside the model.
+FILETREEMENU = "src/frontend/headless_app/file_tree_menu.nim"
 ISONIM_GPUI_DIR = Path(os.environ.get(
     "ISONIM_GPUI_DIR", str(ROOT.parent / "isonim-gpui")))
 if os.environ.get("ISONIM_GPUI_SRC"):
@@ -175,6 +179,10 @@ GPLAN = "src/frontend/gpui/tests/test_plat50_gpui_plan.nim"
 # the share exceeds the controls (1920 px, not this plan's 1440), and the case
 # that measures the centring is PLAT-69's — a layout case, no binary.
 G69 = "src/frontend/gpui/tests/test_plat69_gpui_chrome.nim"
+# ADDED 2026-10-24: GPUI's Edit mode over a real temporary folder (the shipped
+# binary's window plan), and the name field's keys in the shared model.
+GEDIT = "src/frontend/gpui/tests/test_files_edit_gpui_plan.nim"
+VFILES = "src/frontend/viewmodel/tests/unit/test_files_node_menu.nim"
 COLVM = "src/frontend/viewmodel/tests/unit/test_plat50_column_ops_vm.nim"
 ENGT = EVENTDB + "#event_order_tests"
 SHIMT = str(SHIM_CRATE / "tests" / "gpui_rendering.rs")
@@ -189,9 +197,9 @@ SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
             DESKEVLOGVIEW, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
             EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP,
-            SDKBP, SESSDRIVER]
-SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, IGT, ENGT, SHIMT,
-          CLIPT, DESKTOP_GATE]
+            SDKBP, SESSDRIVER, FILETREEMENU]
+SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, GEDIT, VFILES, IGT,
+          ENGT, SHIMT, CLIPT, DESKTOP_GATE]
 
 
 def suite_file(path: str) -> str:
@@ -217,6 +225,8 @@ SUITE_KIND = {
     PTYC: ("c", "tui-real-terminal"),
     GPLAN: ("c", "gpui-shell"),
     G69: ("c", "gpui-shell"),
+    GEDIT: ("c", "gpui-shell"),
+    VFILES: ("c", "vm-unit"),
     # isonim-gpui's own suite, compiled in ITS checkout with its `nim.cfg`.
     IGT: ("isonim-gpui", ""),
     # The real desktop, filtered to its one case (a regex without spaces).
@@ -227,7 +237,7 @@ ENGINE_SUBJECTS = {EVENTDB, DAPHANDLER}
   # an arm on these graded by a binary suite rebuilds the replay-server
   # `REPLAY_SERVER_BIN` names, from `ENGINE_DIR`
   # graded against a REBUILT codetracer-tui
-GPUI_BINARY_SUITES = {GPLAN}
+GPUI_BINARY_SUITES = {GPLAN, GEDIT}
   # read the WINDOW's render plan of a REBUILT codetracer-gpui
 UNISOLATED_SUITES: set = set()
   # none: every suite here runs with the harness's own state isolation
@@ -319,6 +329,21 @@ G_CHROME = "the desktop's grounds, a bordered omnibox after the controls"
 G69_CENTRED = "the omnibar is centred in what the buttons leave of the band"
 G_DIVIDERS = ("--dividers=subtle draws a line in each gap between side-by-side "
               "panes")
+E_TREE = "the leaf plan and the window list the folder, its folder and files"
+E_OPEN = "a click opens a file; the first file's unsaved buffer is kept"
+E_MENU = ("a file's menu: four entries, all enabled; the folder's row is not "
+          "renamed")
+E_CREATE = "Create: a taken name is refused, a free one is created and opened"
+E_RENAME = "Rename: the field holds the name; the file is renamed on disk"
+E_DELETE = ("Delete asks first: Escape keeps the file, Enter moves it to the "
+            "trash")
+E_LEAVE = "a press elsewhere cancels an open name field"
+E_TAB = "a folder tab lists the folder, and its menu acts on the disk"
+U_CREATE = ("Create: characters, Backspace, a refused name kept open, Enter "
+            "sends")
+U_RENAME = "Rename opens on the current name; Escape sends nothing"
+U_DELETE = ("Delete's question: characters do not answer it; Enter and Escape "
+            "do")
 I_POINTER = ("a pointer event decodes its window position, and a wheel its "
              "delta")
 G_SCRATCH = "an argument pinned to the scratchpad; its close button removes it"
@@ -353,6 +378,9 @@ CASE_SUITE = {
     G_FILES: GPLAN, G_CHROME: GPLAN, G_DIVIDERS: GPLAN, G69_CENTRED: G69,
     G_SCRATCH: GPLAN, G_ORDER: GPLAN, G_COLUMN: GPLAN, G_FLOW: GPLAN,
     G_SWEEP: GPLAN, G_VCS: GPLAN,
+    E_TREE: GEDIT, E_OPEN: GEDIT, E_MENU: GEDIT, E_CREATE: GEDIT,
+    E_RENAME: GEDIT, E_DELETE: GEDIT, E_LEAVE: GEDIT, E_TAB: GEDIT,
+    U_CREATE: VFILES, U_RENAME: VFILES, U_DELETE: VFILES,
     I_POINTER: IGT,
     E_ORDER: ENGT, E_NAMES: ENGT, I_BUTTONS: SHIMT, I_CLIP: CLIPT,
     D_DESKTOP: DESKTOP_GATE,
@@ -649,6 +677,87 @@ ARMS = [
         "  of GpuiEventPointerContext: gekContextMenu\n",
         "  of GpuiEventPointerContext: gekOther\n",
         I_POINTER, "isonim-gpui: the right button decodes to an unknown kind"),
+    # --- 1. GPUI's Edit mode: the opened folder's Files tree (K19) ---------
+    # ADDED 2026-10-24 (codetracer-pm issue
+    # `2026-10-24-gpui-edit-mode-files-pane-lists-no-tree`): the tree is the
+    # shared Files model over the project walk, its menu acts on the disk
+    # (`native_file_tree`), the name is typed into an inline field.
+    Arm("GE1", GPUIMAIN,
+        "      leaf.vm = ViewModel(editFilesVMOf(folder))\n",
+        "      discard folder\n",
+        E_TREE, "GPUI's Edit mode Files leaf gets no model (the issue's state)"),
+    Arm("GE2", GPUIMAIN,
+        "    elif not openArm.isNil:\n      discard openEditFile(e.path)\n",
+        "    elif not openArm.isNil:\n      discard e.path\n",
+        E_OPEN, "a file press in an Edit window opens nothing"),
+    Arm("GE3", GPUIMAIN,
+        "  if not gEditArms.hasKey(shown):\n    gEditArms[shown] = openArm\n",
+        "  if false:\n    gEditArms[shown] = openArm\n",
+        E_OPEN, "opening a file drops the shown file's unsaved buffer"),
+    Arm("GE4", GPUIMAIN,
+        "  wireNativeFileOperations(result, proc(): string = root,\n    proc(res: FileTreeOperationResult) = editFileOperationDone(root, res))\n",
+        "  discard root\n",
+        E_MENU, "nothing carries Edit mode's operations out (a replay's menu)"),
+    Arm("GE5", GPUIMAIN,
+        "  if res.error.len == 0 and not vm.isNil:\n    relistEditFiles(vm, root)\n",
+        "  if res.error.len == 0 and not vm.isNil:\n    discard vm\n",
+        E_CREATE, "the pane does not follow the disk after an operation"),
+    Arm("GE6", GPUIMAIN,
+        "    discard openEditFile(res.path)\n",
+        "    discard res.path\n",
+        E_CREATE, "a created file is not opened in the editor"),
+    Arm("GE7", GPUIMAIN,
+        "  if filesFieldKey(key, mods):\n    return true\n",
+        "  if false:\n    return true\n",
+        E_CREATE, "the name field takes no keys (they type into the editor)"),
+    Arm("GE8", GPUIMAIN,
+        "    drawPopovers(r)\n    for e in gTopEls:\n",
+        "    for e in gTopEls:\n",
+        E_MENU, "an Edit window draws no right-click menu"),
+    Arm("GE9", GPUIMAIN,
+        "    leaveFilesField(r)\n    let vm = windowFilesVM()\n",
+        "    let vm = windowFilesVM()\n",
+        E_LEAVE, "a press on a Files row does not leave the open field"),
+    Arm("GE10", GPUIMAIN,
+        "  attachEditFiles(leafSet, tab.folder)   # K19: the folder's Files tree\n",
+        "  discard tab.folder\n",
+        E_TAB, "a folder tab's Files leaf gets no model"),
+    Arm("GE11", GPUIMAIN,
+        "     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit}:\n",
+        "     true:\n",
+        E_CREATE, "an Edit window runs no Files entry (no session)"),
+    Arm("GE12", GPUIMAIN,
+        "  if gCtxMenu.open and key.toLowerAscii in [\"escape\", \"esc\"]:\n",
+        "  if false:\n",
+        E_MENU, "Esc does not close an Edit window's menu"),
+    Arm("GL3", GPUILEAVES,
+        "      result.add (ftlField, i, row.depth + 1)\n",
+        "      discard i\n",
+        E_CREATE, "Create's name field is not drawn"),
+    Arm("GL4", GPUILEAVES,
+        "      result.add (ftlQuestion, i, row.depth)\n",
+        "      discard i\n",
+        E_DELETE, "Delete's question is not drawn"),
+    Arm("GL5", GPUILEAVES,
+        "    if edit.kind == fneRename and row.node.path.len > 0 and\n",
+        "    if false and edit.kind == fneRename and row.node.path.len > 0 and\n",
+        E_RENAME, "Rename's field is not drawn in place of the label"),
+    Arm("FM1", FILETREEMENU,
+        "    of \"Enter\":\n      discard vm.confirmDelete()\n",
+        "    of \"Enter\":\n      vm.cancelDelete()\n",
+        U_DELETE, "Enter on Delete's question keeps the entry"),
+    Arm("FM2", FILETREEMENU,
+        "    else:\n      return ffsAbsorbed\n",
+        "    else:\n      discard vm.confirmDelete()\n      return ffsAbsorbed\n",
+        U_DELETE, "any key answers Delete's question yes"),
+    Arm("FM3", FILETREEMENU,
+        "    vm.nameEditDraft.dropLastRune()\n",
+        "    discard\n",
+        U_CREATE, "Backspace removes nothing from the name"),
+    Arm("FM4", FILETREEMENU,
+        "  of \"Esc\":\n    vm.cancelNameEdit()\n    ffsCancelled\n",
+        "  of \"Esc\":\n    ffsCancelled\n",
+        U_RENAME, "Escape leaves the name field open"),
     # --- 1. the sweep's other rows: the shared models ------------------------
     Arm("PC8", PANECLICKS,
         "  result.entries.add entry(UnpinLabel, caUnpin)\n",
