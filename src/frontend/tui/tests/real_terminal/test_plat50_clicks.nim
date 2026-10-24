@@ -35,7 +35,10 @@ from viewmodels/product_mode import editorTabLabel
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 108
+const ExpectedAssertions = 116
+  ## K19: 108 -> 116 — a Files node opens the Files pane's menu (its four
+  ## rows, the reason on three, a disabled entry inert, Edit opening the
+  ## file) where the case asserted no menu (6).
   ## 107 -> 108: the Files click case pins the derived tab label
   ## (`editorTabLabel`, folder/name since 2026-10-17) before using it.
   ## PLAT-51: 112 -> 107 — the two Timeline-track cases (K30, K45) went with
@@ -278,18 +281,37 @@ suite "PLAT-50 on a real terminal: Files (K17, K18, K19)":
     ck sess.snap().findRow("extra.py")[0] > rs
     sess.quit()
 
-  test "a right-click on a node opens no menu (the desktop has none)":
-    var sess = open()
-    let (rm, cm) = sess.waitFor("    main.py", below = Rows - 1)
-    ck cm < 20
-    sess.press(rm, cm + 5, RightButton)
-    # Give a menu the time it would take to appear, then look for its frame
-    # and the four entries the desktop used to offer.
-    sleep(600)
+  test "a right-click on a node opens the Files pane's menu; Edit opens the file":
+    # K19 (Filesystem-Pane.md § "Context menu"): the desktop's four entries,
+    # in its order. A recording's sources are read-only, so Create, Rename
+    # and Delete are disabled with that reason, drawn beside them; Edit
+    # opens the file.
+    var sess = open("multi_root")
+    let (rh, ch) = sess.waitFor("helpers.py", below = Rows - 1)
+    ck ch < 40
+    sess.press(rh, ch + 2, RightButton)
+    let (rc, cc) = sess.waitFor("Create", fromCol = ch)
     let s = sess.snap()
-    for label in ["Create", "Rename", "Delete", "Edit"]:
-      ck s.findRow(label)[0] < 0
-    ck s.findRow("┌")[0] < 0
+    ck rc > rh - 1
+    ck s.text(rc + 1).contains("Rename")
+    ck s.text(rc + 2).contains("Delete")
+    ck s.text(rc + 3).contains("Edit")
+    for r in rc .. rc + 2:
+      ck s.text(r).contains("A recording's sources are read-only")
+    ck not s.text(rc + 3).contains("read-only")
+    # A disabled entry does nothing: the menu stays and the status line
+    # says why.
+    sess.press(rc, cc + 1)
+    sleep(300)
+    ck sess.snap().text(rc + 3).contains("Edit")
+    ck sess.rowText(StatusRow).contains("A recording's sources are read-only")
+    # Edit opens the file, as a click on its row does.
+    let ce = sess.snap().text(rc + 3).cellFind("Edit")
+    ck ce >= 0
+    sess.press(rc + 3, ce + 1)
+    discard sess.waitFor("def add(left, right):")
+    ck sess.snap().text(1).contains(" shared/helpers.py ")
+    ck sess.rowText(StatusRow).contains("opened ")
     sess.quit()
 
 suite "PLAT-50 on a real terminal: the editor (K10-K13)":

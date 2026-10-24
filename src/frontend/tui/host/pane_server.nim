@@ -839,12 +839,8 @@ proc handleRequest(srv: PaneServer; meth: string; params: JsonNode;
     # source set does not change.
     let s = srv.sessionById(params)
     if s.app.modes.product == pmEdit and not s.rt.editServices.listFiles.isNil:
-      let open = s.app.fileTree.openPath
-      let listing = s.rt.editServices.listFiles()
-      s.app.fileTree = initFileTreeModel(files = listing.files,
-        selected = (if listing.files.len > 0: 0 else: -1),
-        truncated = listing.truncated)
-      s.app.fileTree.openPath = open
+      # The rows and the Files model the menu decides on (K19), together.
+      s.rt.installProjectListing(s.rt.editServices.listFiles())
       extra.add srv.publish(s)
     result = newJNull()
   of "files/selected":

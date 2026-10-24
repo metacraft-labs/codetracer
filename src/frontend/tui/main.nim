@@ -82,6 +82,8 @@ import ./host/layout_store
 import ./host/native_host
 import ./host/pane_server
 from ../viewmodel/host/find_in_files import running   # PLAT-57
+from ../viewmodel/host/native_file_tree import wireNativeFileOperations,
+  FilesystemVM, FileTreeOperationResult # K19
 import ./host/terminal_driver
 import ./host/terminal_probe
 import ./host/tui_session
@@ -201,6 +203,12 @@ proc wireEditServices(rt: TuiRuntime; root: string; keymapFlag: string;
     except TuiHostError as e:
       EditReadResult(ok: false, message: e.msg)
   rt.editServices.listFiles = listFiles
+  # K19: Edit mode's Files menu acts on the disk here, in-process, by the
+  # index process's rules (`native_file_tree`).
+  rt.editServices.wireFileTree = proc(vm: FilesystemVM;
+                                      openedFolder: proc(): string;
+                                      done: proc(r: FileTreeOperationResult)) =
+    wireNativeFileOperations(vm, openedFolder, done)
   # PLAT-43. The keymap model this session starts under is the one the user
   # last chose, read through the same `selectKeymap` a typed `:keymap` goes
   # through. A stored value that is not a model is REFUSED BY NAME on the
@@ -1398,9 +1406,19 @@ proc editInteractive(command: TuiCommand): int =
   # again, which is how the "before the terminal is claimed" ordering above
   # survives being routed through a function the replay loop also uses. The
   # walk happened on the ordinary screen; this hands back its answer.
+  #
+  # K19: ONLY THE FIRST ANSWER IS THAT LISTING. A Create, Rename or Delete in
+  # the Files pane changes the project, and the pane must follow the disk, so
+  # every later call walks again (the terminal is long claimed by then, and a
+  # walk after an operation is the user's own action).
+  var served = false
   let edit = wireEditServices(rt, root, command.keymap,
                               proc(): EditListResult =
-    EditListResult(files: listing.files, truncated: listing.truncated))
+    if not served:
+      served = true
+      return EditListResult(files: listing.files, truncated: listing.truncated)
+    let fresh = listProjectFiles(rt.app.projectRoot)
+    EditListResult(files: fresh.files, truncated: fresh.truncated))
   wireTopBar(rt)
   let keybindings = wireKeybindings(rt)
   # THE LAYOUT IS THE USER'S IN EDIT MODE TOO — AND IT IS NOT REMEMBERED.

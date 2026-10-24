@@ -33,7 +33,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | request | arms |
   |---|---|
   | 1 the shared menus | PC1 (the tab menu's order), PC2 (Run to Cursor without its key), PC3 (a disabled breakpoint offers "Disable"), PC4 (a leaf may expand), PC5 (a variable's entry disabled), PC6 (Up/Down land on disabled entries), PC7 (a disabled entry is chosen), PC8 (no Unpin on a dock label), PC9 (no word just past its end), PC10 (an ambiguous Rust path taken), PC11 ("Add all values" pins one), PC13 (a row dropped from the table), EV1 (a second header click keeps the direction) |
-  | 1 the sweep's other rows, terminal | RT21 (Alt+click at column 1), RT22 (Ctrl+Alt read as Alt), RT23 (Copy copies nothing), RT24 (a tracepoint on the stop's line), RT25 (the close button inverted), RT26 (header clicks ignored), RT27 (the status line copies nothing), RT28 (a dock label opens the tab menu), RT29 (Unpin does nothing), RT31 (the View menu cannot add a pane), RT32 (the commit below opens), RT33 (`:origin` waits for a move: the freeze), RT34 (Ctrl+click pins nothing), RT35 (an argument opens the call's menu), RF1 (a Files menu again), TS7-TS11 (the host drops the column / the order / the removal / the origin answer / the tracepoint's line), VS1 (a commit only closes), VD1 (a commit's files named by their letter), EL1 (the header arrow reversed), SP1 (the close button a cell off) |
+  | 1 the sweep's other rows, terminal | RT21 (Alt+click at column 1), RT22 (Ctrl+Alt read as Alt), RT23 (Copy copies nothing), RT24 (a tracepoint on the stop's line), RT25 (the close button inverted), RT26 (header clicks ignored), RT27 (the status line copies nothing), RT28 (a dock label opens the tab menu), RT29 (Unpin does nothing), RT31 (the View menu cannot add a pane), RT32 (the commit below opens), RT33 (`:origin` waits for a move: the freeze), RT34 (Ctrl+click pins nothing), RT35 (an argument opens the call's menu), RF1 / RF2 (a Files node opens no menu; its Edit opens nothing), PC14 (a disabled Files entry's reason not drawn), TS7-TS11 (the host drops the column / the order / the removal / the origin answer / the tracepoint's line), VS1 (a commit only closes), VD1 (a commit's files named by their letter), EL1 (the header arrow reversed), SP1 (the close button a cell off) |
   | 1 the sweep's other rows, shared ops | HS5 / HS6 (a column breakpoint sent, or kept, without its column), HS7 (a call jump without its name), HS8 (the order always ascending), HS9 (history rows without values), HS10 (the origin chain dropped), HS11 (the scratchpad never written), HS12 (a disabled column breakpoint still sent) |
   | 1 the sweep's other rows, GPUI | GM14-GM25 (column, call jump, header order, close button, value pin, footer copy, dock label menu, View menu, adopted leaves, commit files, argument menu, the clipboard never written), GL2 (arguments unmarked) |
   | 1 the engine and the shim | EN1-EN3 (`event_db`: output sorted backwards, ties reversed, the column name's key), EN4 (`dap_handler` ignores the order — the shipped defect, graded on the real terminal against a rebuilt replay-server), IG2 / IG3 (the shim never listens for the right / middle button), IG4 (every frame writes the clipboard) |
@@ -41,7 +41,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | 1 terminal host | TS1 (collapsed folders still list their files), TS2 (an opened file never shown), TS3 (the status line does not say where), TS4 (the gutter right-click always enables), TS6 (Delete ALL deletes nothing) |
   | 1 shared ops | HS1 (a disabled breakpoint still sent), HS2 (Run to Cursor sent as backward), HS3 (clearing a file sends nothing), HS4 (a jump with no step that way hangs), SD1 (a disabled row stored enabled), NH1 (the tree opens collapsed), PV1 (the vocabulary tree ignores the VM's expansion) |
   | 1 terminal input | MO1 (Ctrl read from the Alt bit), FT1 (a collapsed folder's twisty), PL1 (the selected point not drawn), CM1 (menu rows off by the frame), CM2 (disabled entries not italic), CM3 (the menu far from the press), CM4 (the overlay shows the title for the text) |
-  | 1 GPUI | GW1 (right button read as left), GW2 (RETIRED 2026-10-17, below), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
+  | 1 GPUI | GW1 (right button read as left), GW2 (RETIRED 2026-10-17, below), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GF1 / GF2 (a Files node opens no menu; its Edit opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
   | 2 colours | RO1 (inactive tabs black), RO2 (the field the raised slab), RO3 (the menu on the card), RO4 (the strip divider in the border colour), RO6 (the strip on raised), RO7 (the top bar on the card), RO8 (the menu frame in the subtle border), SH4 (row 0 on the card), TB3 (controls filled), TB5 (no dropdown frame), GC1 (GPUI's window ground the old raised), GC2 (GPUI's menu on the card), GM11 (GPUI's band on the pane ground), GM12 (GPUI's omnibox border the menu's) |
   | 3 the omnibox | TB1 (not centred), TB2 (a third, not the desktop's share), TB4 (no field edge), GT1 (GPUI not centred), GT2 (GPUI a third wide) |
   | 4 dividers | BD1 (the strip is no divider), BD2 (a lone pane's whole strip is its label), SH1 (a strip-row divider on the panel), SH2 (body dividers in the subtle colour by default), SH3 (body dividers on the canvas), SH5 (a box-drawing line), RO5 (subtle is the strip colour), BO1 (the field edge degrades to `!`), CL1 (`--dividers` inverted), TM1 (the terminal never reads `--dividers`), TA1 (the shell never gets the choice), GM10 (GPUI never draws subtle lines) |
@@ -269,7 +269,8 @@ S_POINT = "a click on a point-list row selects it, on the selection ground"
 S_ASCII = "the ASCII tier draws the edge lines as |"
 S_FLAG = "--dividers=strip|subtle, strip by default, anything else refused"
 K_FILES = "a file click opens it in the editor; a folder click collapses it"
-K_FILEMENU = "a right-click on a node opens no menu (the desktop has none)"
+K_FILEMENU = ("a right-click on a node opens the Files pane's menu; Edit opens "
+              "the file")
 K_GUTTER = ("a gutter click sets a breakpoint the replay stops at; a right "
             "click disables it")
 K_CTRL = ("Ctrl+click and a middle click on a line go to it; the status line "
@@ -408,9 +409,10 @@ ARMS = [
         "    if event.button != mbRight:\n      return false\n    let pane = rt.app.layoutBinding.stripPaneAt(",
         "    if event.button != mbMiddle:\n      return false\n    let pane = rt.app.layoutBinding.stripPaneAt(",
         S_TABMENU, "the tab menu opens on the middle button, not the right"),
+    # RE-AIMED 2026-10-24 (K19): the Files press is `activateFilesRow`'s.
     Arm("RT2", RUNTIME,
-        "      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path))",
-        "      kind: pcOpenFile, path: e.path))",
+        "      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path)\n",
+        "      kind: pcOpenFile, path: e.path)\n",
         K_FILES, "a folder click is sent as opening a file"),
     Arm("RT3", FILETREE,
         "  let i = screen.top + (row - screen.area.row - 1)\n",
@@ -623,10 +625,22 @@ ARMS = [
         "      session.stateVM.toggleExpand(c.key)\n",
         "      discard c.key\n",
         G_VALUE, "GPUI's value press expands nothing"),
+    # RE-AIMED 2026-10-24 (K19): a file press, and the menu's Edit, open
+    # through `openTreeFile`.
     Arm("GM9", GPUIMAIN,
-        "      gViewedFile = e.path\n      if gViewedFile == gSession.getCurrentFile():\n",
-        "      gViewedFile = \"\"\n      if gViewedFile == gSession.getCurrentFile():\n",
+        "  gViewedFile = path\n  if gViewedFile == gSession.getCurrentFile():\n",
+        "  gViewedFile = \"\"\n  if gViewedFile == gSession.getCurrentFile():\n",
         G_FILES, "GPUI's file press opens nothing"),
+    # K19, 2026-10-24: a Files node opens the Files pane's menu (Filesystem-
+    # Pane.md § "Context menu"), from the shared Files model.
+    Arm("GF1", GPUIMAIN,
+        "    if c.button == gbRight:\n      openContextMenuAt(r, vm.fileTreeContextMenuOf(e.path), c.x, c.y)\n      return\n",
+        "    if c.button == gbRight:\n      return\n",
+        G_FILES, "GPUI's Files node opens no menu again"),
+    Arm("GF2", GPUIMAIN,
+        "      else:\n        openTreeFile(r, target.path)\n      return\n",
+        "      else:\n        discard\n      return\n",
+        G_FILES, "GPUI's menu Edit opens nothing"),
     Arm("GM13", GPUIMAIN,
         "  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and\n     handlePopoverPress(r, kind, x, y):\n",
         "  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and false and\n     handlePopoverPress(r, kind, x, y):\n",
@@ -775,10 +789,20 @@ ARMS = [
         "    if hit.arg >= 0 and hit.arg < call.args.len:\n",
         "    if false:\n",
         K_SCRATCH, "an argument's right-click opens the call's menu"),
+    # RE-AIMED 2026-10-24: K19 is the Files pane's menu (Filesystem-Pane.md),
+    # where it was no menu.
     Arm("RF1", RUNTIME,
-        "    # K17 / K18 (K19: the desktop has no Files menu).\n    if event.button != mbLeft:\n",
-        "    # K17 / K18 (K19: the desktop has no Files menu).\n    if event.button == mbRight:\n      rt.openContextMenu(tabContextMenu(paneFileTree, false), event.row,\n                         event.col, outcome)\n      return true\n    if event.button != mbLeft:\n",
-        K_FILEMENU, "a Files node opens a menu again"),
+        "    if event.button == mbRight:\n      rt.openFilesMenu(i, event.row, event.col, outcome)\n      return true\n",
+        "    if event.button == mbRight:\n      return false\n",
+        K_FILEMENU, "a Files node opens no menu again"),
+    Arm("RF2", RUNTIME,
+        "      outcome.paneClick = PaneClickRequest(kind: pcOpenFile, path: target.path)\n",
+        "      discard target\n",
+        K_FILEMENU, "the menu's Edit opens nothing in a replay"),
+    Arm("PC14", PANECLICKS,
+        "                             hint = (if d.enabled: \"\" else: d.reason),\n",
+        "                             hint = \"\",\n",
+        K_FILEMENU, "a disabled Files entry's reason is not drawn"),
     Arm("TS7", TUISESSION,
         "    if session.setColumnBreakpoint(c.path, c.line, c.column):\n",
         "    if session.setColumnBreakpoint(c.path, c.line, 1):\n",

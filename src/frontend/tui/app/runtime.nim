@@ -40,6 +40,7 @@ import std/[options, os, strutils, tables]
 
 import codetracer_embed   # PLAT-43: `BaseKeymap`, `selectKeymap`
 import headless_app/auto_hide_hover
+import headless_app/file_tree_menu   # K19: the Files pane's menu
 
 import ./commands/interpreter
 import ./edit_binding
@@ -154,6 +155,13 @@ type
       ## PLAT-68: re-read the user's `keybindings.json` and lay it over the
       ## base (`:keys reload`); answers the load summary. Nil in a host that
       ## keeps no configuration.
+    wireFileTree*: proc(vm: FilesystemVM; openedFolder: proc(): string;
+                        done: proc(r: FileTreeOperationResult)) {.closure.}
+      ## K19: make Edit mode's Files model (`TuiApp.editFilesVM`) act on the
+      ## disk — the host's `native_file_tree.wireNativeFileOperations`, which
+      ## `app/` may not import. Nil in a session with no host filesystem: the
+      ## menu then disables Create, Rename and Delete ("This front end cannot
+      ## change files").
 
   PaneClickKind* = enum
     ## PLAT-50: what a click in a pane asks the HOST to do — the operations
@@ -436,6 +444,10 @@ type
       ## `editing … — N file(s)`, which would otherwise overwrite it within the
       ## same frame (measured by the pty suite's first run). Shown once.
     editServices*: EditServices
+    filesReprompt*: string
+      ## K19: the command line to open again after the one just submitted —
+      ## a Files name the model refused (`commitNameEdit`), whose field stays
+      ## open with its reason.
       ## PLAT-16. The HOST's three filesystem/process capabilities, injected.
       ##
       ## THE SAME CATEGORY AS CTUI-8's `EventPages` SEAM AND CTUI-10's
@@ -1073,6 +1085,261 @@ proc chooseKeymap*(rt: TuiRuntime; name: string) =
   rt.note("keymap " & $selection.model &
           (if saved.len == 0: "" else: " (" & saved & ")"))
 
+# ---------------------------------------------------------------------------
+# K19: THE FILES PANE'S MENU — Create, Rename, Delete, Edit
+# (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Context menu")
+# ---------------------------------------------------------------------------
+#
+# The entries, their order and their disabled reasons are the shared Files
+# model's (`FilesystemVM.fileTreeMenu`, read as a native menu by
+# `headless_app/file_tree_menu`): the replay's tree is the session's model,
+# Edit mode's is `TuiApp.editFilesVM` over the opened folder. This terminal
+# has no inline name field, so Create and Rename open the command line with
+# `create ` / `rename <name>` typed, and Delete — which asks first here — with
+# `trash <path>`; Enter answers, Escape cancels. Those three words are read
+# ONLY while the model has that field or question open: they are not
+# commands (§4.3's table is unchanged), and with nothing open they fall
+# through to the interpreter as before.
+
+const
+  CreateVerb = "create"
+  RenameVerb = "rename"
+  TrashVerb = "trash"
+
+proc openContextMenu(rt: TuiRuntime; menu: ContextMenuModel; row, col: int;
+                     outcome: var RuntimeOutcome)
+  ## Forward-declared: defined with the other click routes below.
+
+proc editTreeRoot*(rt: TuiRuntime): string =
+  ## The opened folder Edit mode's Files tree is rooted at, absolute and
+  ## without a trailing separator (`projectTreeOf`'s spelling of its row).
+  let root = if rt.app.projectRoot.len > 0: rt.app.projectRoot
+             else: getCurrentDir()
+  result = absolutePath(root).normalizedPath
+  while result.len > 1 and result[^1] in {'/', '\\'}:
+    result.setLen(result.len - 1)
+
+proc filesMenuVM(rt: TuiRuntime): FilesystemVM =
+  ## The Files model the pane's rows belong to: a replay's tree (the
+  ## session's), or Edit mode's opened folder.
+  if rt.app.fileTree.entries.len > 0: rt.app.filesVM
+  else: rt.app.editFilesVM
+
+proc filesRowPath(rt: TuiRuntime; i: int): string =
+  ## The Files model's path of row `i` of the pane.
+  let t = rt.app.fileTree
+  if t.entries.len > 0:
+    if i >= 0 and i < t.entries.len: t.entries[i].path else: ""
+  elif i >= 0 and i < t.files.len:
+    joinTreePath(rt.editTreeRoot(), t.files[i])
+  else: ""
+
+proc fileTreeOperationDone*(rt: TuiRuntime; r: FileTreeOperationResult)
+
+proc installProjectListing*(rt: TuiRuntime; listing: EditListResult) =
+  ## Edit mode's Files pane over `listing` (the project walk): the rows, and
+  ## the Files model the menu decides on. The open file, the selection and
+  ## the reader's place are kept where the rows still hold them.
+  let old = rt.app.fileTree
+  var tree = initFileTreeModel(files = listing.files,
+                               selected = (if listing.files.len > 0: 0
+                                           else: -1),
+                               truncated = listing.truncated)
+  tree.openPath = old.openPath
+  tree.scrollTop = old.scrollTop
+  if old.selected >= 0 and old.selected < old.files.len:
+    let at = listing.files.find(old.files[old.selected])
+    if at >= 0: tree.selected = at
+  rt.app.fileTree = tree
+  if rt.app.editFilesVM.isNil:
+    let vm = createFilesystemVM(nil)
+    # With no host to act on the disk, the opened folder is still the tree,
+    # and the menu says nothing carries the operations out.
+    let root = proc(): string = rt.editTreeRoot()
+    vm.hostFacts = proc(): FileTreeHostFacts =
+      FileTreeHostFacts(layout: ToolbarMode.EditMode, openedFolder: root(),
+                        hasIndexProcess: false, canTrash: false)
+    if not rt.editServices.wireFileTree.isNil:
+      rt.editServices.wireFileTree(vm, root,
+        proc(r: FileTreeOperationResult) = rt.fileTreeOperationDone(r))
+    rt.app.editFilesVM = vm
+  rt.app.editFilesVM.setRoot(projectTreeOf(rt.editTreeRoot(), listing.files))
+
+proc openProjectFile(rt: TuiRuntime; relative: string): bool =
+  ## Edit mode's K17 (and the Files menu's Edit): the project file in the
+  ## editor, as `:e <relative>` opens it.
+  if rt.editServices.readFile.isNil:
+    rt.note("this session has no reader for " & relative)
+    return false
+  let opened = rt.editServices.readFile(relative)
+  if not opened.ok:
+    rt.note(opened.message)
+    return false
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
+  discard rt.app.editSession.openFile(relative, opened.text,
+                                      max(1, rt.sourcePaneRows()))
+  rt.app.fileTree.openPath = relative
+  rt.note("editing " & relative)
+  true
+
+proc fileTreeOperationDone*(rt: TuiRuntime; r: FileTreeOperationResult) =
+  ## The host's answer to a Create, Rename or Delete: the folder is listed
+  ## again (the pane follows the disk), the status line says what changed or
+  ## why not, and a new file opens in the editor (Filesystem-Pane.md, "Create
+  ## makes an empty file and opens it in the editor"). Open editor tabs are
+  ## left alone.
+  let root = rt.editTreeRoot()
+  if r.error.len == 0 and not rt.editServices.listFiles.isNil:
+    rt.installProjectListing(rt.editServices.listFiles())
+    let rel = relativeToRoot(root, r.path)
+    let at = rt.app.fileTree.files.find(rel)
+    if at >= 0 and r.operation != ftaDelete:
+      rt.app.fileTree.selected = at
+    if r.operation == ftaCreate and rel.len > 0:
+      discard rt.openProjectFile(rel)
+  rt.note(describeFileTreeOperation(r, root))
+
+proc filesFieldOpen(rt: TuiRuntime): bool =
+  ## Whether the Files model has a name field or a Delete question open.
+  let vm = rt.filesMenuVM()
+  not vm.isNil and (vm.nameEdit.val.kind != fneNone or
+                    vm.pendingDelete.len > 0)
+
+proc cancelFilesField(rt: TuiRuntime): string =
+  ## Close an open name field or Delete question without acting; what to say.
+  let vm = rt.filesMenuVM()
+  if vm.isNil:
+    return ""
+  if vm.pendingDelete.len > 0:
+    let kept = entryNameOf(vm.pendingDelete)
+    vm.cancelDelete()
+    return "kept " & kept
+  if vm.nameEdit.val.kind != fneNone:
+    let what = nameEditPrompt(vm.nameEdit.val)
+    vm.cancelNameEdit()
+    return what & ": cancelled"
+  ""
+
+proc askOnPrompt(rt: TuiRuntime; question: string) =
+  ## Say `question` where it is read while the command line is open: after
+  ## the line (`CommandLineModel.message`, which the next edit clears), and
+  ## on the status line once it closes.
+  rt.prompt.message = question
+  rt.note(question)
+
+proc promptForFilesField(rt: TuiRuntime) =
+  ## The model opened a name field or asked about Delete: the command line,
+  ## with the answer's word typed, and what Enter and Escape do.
+  let vm = rt.filesMenuVM()
+  if vm.isNil:
+    return
+  let root = rt.editTreeRoot()
+  if vm.pendingDelete.len > 0:
+    let rel = relativeToRoot(root, vm.pendingDelete)
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert(TrashVerb & " " &
+                             (if rel.len > 0: rel else: vm.pendingDelete))
+    rt.askOnPrompt(deletePrompt(vm.pendingDelete) &
+                   " Enter moves it to the trash, Escape keeps it")
+    return
+  let edit = vm.nameEdit.val
+  case edit.kind
+  of fneCreate:
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert(CreateVerb & " ")
+    rt.askOnPrompt(nameEditPrompt(edit) &
+                   " — type its name; Enter creates it, Escape cancels")
+  of fneRename:
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert(RenameVerb & " " & edit.name)
+    rt.askOnPrompt(nameEditPrompt(edit) &
+                   " — edit the name; Enter renames it, Escape cancels")
+  of fneNone:
+    discard
+
+proc runFilesFieldLine(rt: TuiRuntime; text: string): bool =
+  ## A submitted command line while the Files model has a field or a
+  ## question open: its answer, when the line is one (`create <name>`,
+  ## `rename <name>`, `trash …`). Any other line closes the field first and
+  ## is run as itself (false).
+  if not rt.filesFieldOpen():
+    return false
+  let vm = rt.filesMenuVM()
+  let words = text.splitWhitespace()
+  let verb = if words.len > 0: words[0] else: ""
+  let rest = if words.len > 0: text.strip()[verb.len .. ^1].strip() else: ""
+  if vm.pendingDelete.len > 0 and verb == TrashVerb:
+    let asked = vm.pendingDelete
+    if vm.confirmDelete():
+      if rt.app.notification.len == 0:
+        rt.note("moved " & entryNameOf(asked) & " to the trash")
+    return true
+  let edit = vm.nameEdit.val
+  if (edit.kind == fneCreate and verb == CreateVerb) or
+     (edit.kind == fneRename and verb == RenameVerb):
+    rt.app.notification = ""
+    if vm.commitNameEdit(rest):
+      if edit.kind == fneRename and rest == edit.name:
+        rt.note("the name is unchanged")
+    else:
+      # The field stays open with its reason (the spec's refused name).
+      rt.filesReprompt = verb & " " & rest
+      rt.note(vm.nameEdit.val.error)
+    return true
+  discard rt.cancelFilesField()
+  false
+
+proc openFilesMenu(rt: TuiRuntime; i, row, col: int;
+                   outcome: var RuntimeOutcome) =
+  ## K19: row `i`'s menu, at the cell (`row`, `col`), the row selected.
+  let vm = rt.filesMenuVM()
+  let path = rt.filesRowPath(i)
+  if vm.isNil or (path.len == 0 and rt.app.fileTree.entries.len == 0):
+    rt.note("the Files pane has no menu here")
+    outcome.repaint = true
+    return
+  rt.app.fileTree.selected = i
+  rt.openContextMenu(vm.fileTreeContextMenuOf(path), row, col, outcome)
+
+proc activateFilesRow(rt: TuiRuntime; i: int; outcome: var RuntimeOutcome) =
+  ## K17 / K18 from the keyboard or a press: a file opens, a folder opens or
+  ## closes.
+  let t = rt.app.fileTree
+  rt.app.fileTree.selected = i
+  outcome.repaint = true
+  if t.entries.len > 0:
+    if i < 0 or i >= t.entries.len:
+      return
+    let e = t.entries[i]
+    outcome.paneClick = PaneClickRequest(
+      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path)
+  elif i >= 0 and i < t.files.len:
+    discard rt.openProjectFile(t.files[i])
+
+proc runFilesMenuAction(rt: TuiRuntime; action: ContextAction;
+                        target: ContextTarget; outcome: var RuntimeOutcome) =
+  ## A chosen Files entry, as the model decides it now.
+  let vm = rt.filesMenuVM()
+  outcome.repaint = true
+  if action == caFileEdit:
+    # Opening a file is this front-end's editor: the model is asked only
+    # whether the entry acts here.
+    let why = vm.fileTreeEntryReason(target.path, action)
+    if why.len > 0:
+      rt.note(why)
+    elif rt.app.fileTree.entries.len > 0:
+      outcome.paneClick = PaneClickRequest(kind: pcOpenFile, path: target.path)
+    else:
+      discard rt.openProjectFile(relativeToRoot(rt.editTreeRoot(),
+                                                target.path))
+    return
+  let why = vm.runFileTreeAction(target.path, action)
+  if why.len > 0:
+    rt.note(why)
+    return
+  rt.promptForFilesField()
+
 proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
                     unknownFallsThrough = false): bool =
   ## One command line, through CTUI-10's interpreter and the verbs beside it —
@@ -1083,8 +1350,19 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
   ## takes its chosen palette entry instead).
   result = true
   if line.strip().len == 0:
+    discard rt.cancelFilesField()
     rt.note("")
     return
+
+  # K19: the answer to an open Files name field or Delete question.
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    if rt.runFilesFieldLine(text):
+      outcome.repaint = true
+      outcome.detail = rt.app.notification
+      return
 
   # PLAT-51: `:set focus-highlight on|off`, `:set live-resize on|off` — the
   # two layout preferences (`layout_settings.parseSetLine`), remembered. A
@@ -3020,21 +3298,22 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     return false   # the divider
   case region.pane
   of paneFileTree:
-    # K17 / K18 (K19: the desktop has no Files menu).
-    if event.button != mbLeft:
+    # K17 / K18, and K19: a right-click opens the Files pane's menu.
+    if event.button notin {mbLeft, mbRight}:
       return false
     let tree = rt.app.fileTree
-    if tree.entries.len == 0:
+    if tree.isEmpty:
       return false
     # The row under the press, by the top the painter drew from (M71: the
     # pane scrolls, and `scrollTop` is clamped there).
     var g = newStyledGrid(under.col + under.width, under.row + under.height)
     let i = paintFileTree(g, under, tree).entryIndexAt(event.row)
-    if i < 0 or i >= tree.entries.len:
+    if i < 0 or i >= tree.rowCount:
       return false
-    let e = tree.entries[i]
-    outcome.requestClick(PaneClickRequest(
-      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path))
+    if event.button == mbRight:
+      rt.openFilesMenu(i, event.row, event.col, outcome)
+      return true
+    rt.activateFilesRow(i, outcome)
     return true
   of paneEditor:
     return rt.routeEditorClick(under, event, outcome)
@@ -3300,6 +3579,9 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caJumpToValue:
     rt.note(target.expression & " = " & target.text &
             " is the value at this step")
+  of caFileCreate, caFileRename, caFileDelete, caFileEdit:
+    # K19: the Files pane's entries, as the shared Files model decides them.
+    rt.runFilesMenuAction(action, target, outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -3614,10 +3896,8 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
     return ""
   rt.app.editSession.furnished = true
   let listing = rt.editServices.listFiles()
-  rt.app.fileTree = initFileTreeModel(
-    files = listing.files,
-    selected = (if listing.files.len > 0: 0 else: -1),
-    truncated = listing.truncated)
+  rt.app.fileTree = FileTreeModel()
+  rt.installProjectListing(listing)
   let where = if rt.app.projectRoot.len > 0: rt.app.projectRoot else: "."
   result = "editing " & where & " — " & $listing.files.len & " file(s)" &
     (if listing.truncated: " (truncated)" else: "")
@@ -5447,6 +5727,74 @@ proc runPromptKey(rt: TuiRuntime; key: string;
   ## The command line's own editing step, for the `input.*` operations the
   ## router resolved on it; defined beside `handleToken`.
 
+proc filesPaneArea(rt: TuiRuntime): CellArea =
+  ## The rectangle the Files pane is painted into (its strip row first), or
+  ## an empty one when it is not on the screen.
+  let geometry = rt.layoutGeometry()
+  for i, region in geometry.projection.regions:
+    if region.pane == paneFileTree:
+      return paneUnderStrip(geometry, i)
+  CellArea()
+
+proc runFilesKeyOperation(rt: TuiRuntime; operation: string;
+                          outcome: var RuntimeOutcome): bool =
+  ## K17 / K18 / K19 FROM THE KEYBOARD, while the Files pane has the focus:
+  ## Up / Down (and the modal bases' `j` / `k`) move the selected row, Home /
+  ## End go to the ends, Enter opens the file or opens or closes the folder,
+  ## and `context-menu.open` (CUA's `Shift+F10` in Edit mode; the palette's
+  ## "Show Context Menu" everywhere) opens the selected row's menu beside it.
+  ## Answers whether `operation` was the pane's.
+  let n = rt.app.fileTree.rowCount
+  let sel = rt.app.fileTree.selected
+  proc select(rt: TuiRuntime; i: int) =
+    rt.app.fileTree.selected = i
+    # Keep the selected row in view (the pane scrolls, M71).
+    let body = max(1, rt.paneBodyRows(paneFileTree))
+    var top = rt.app.fileTree.clampScrollTop(rt.app.fileTree.scrollTop, body)
+    if i < top: top = i
+    elif i >= top + body: top = i - body + 1
+    rt.app.fileTree.scrollTop = top
+  case operation
+  of "list.focus-next", "list.focus-previous", "editor.scroll-line-down",
+     "editor.scroll-line-up", "list.focus-first", "list.focus-last",
+     "list.focus-page-down", "list.focus-page-up":
+    outcome.repaint = true
+    if n == 0:
+      rt.note("the Files pane lists nothing")
+      return true
+    let page = max(1, rt.paneBodyRows(paneFileTree) - 1)
+    let next =
+      case operation
+      of "list.focus-first": 0
+      of "list.focus-last": n - 1
+      of "list.focus-page-down": (if sel < 0: 0 else: sel + page)
+      of "list.focus-page-up": (if sel < 0: 0 else: sel - page)
+      of "list.focus-next", "editor.scroll-line-down":
+        (if sel < 0: 0 else: sel + 1)
+      else: (if sel < 0: n - 1 else: sel - 1)
+    rt.select(clamp(next, 0, n - 1))
+    true
+  of "list.activate", "list.expand", "list.toggle-expand":
+    if sel < 0 or sel >= n:
+      rt.note("no row of the Files pane is selected")
+      outcome.repaint = true
+      return true
+    rt.activateFilesRow(sel, outcome)
+    true
+  of "context-menu.open":
+    if sel < 0 or sel >= n:
+      rt.note("no row of the Files pane is selected")
+      outcome.repaint = true
+      return true
+    let area = rt.filesPaneArea()
+    let top = rt.app.fileTree.clampScrollTop(rt.app.fileTree.scrollTop,
+                                             max(1, area.height - 1))
+    let row = if area.width > 0: area.row + 1 + (sel - top) else: 1
+    let col = if area.width > 0: area.col + 2 else: 0
+    rt.openFilesMenu(sel, row, col, outcome)
+    true
+  else: false
+
 proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
                   outcome: var RuntimeOutcome) =
   ## **THE TERMINAL'S DISPATCH** of a resolved operation onto its ViewModels:
@@ -5512,6 +5860,12 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     of "context-menu.close": rt.app.contextMenu.close()
     else: discard
     return
+  # K17 / K18 / K19 from the keyboard, on the focused Files pane.
+  if not rt.prompt.open:
+    let (had, focused) = rt.focus.focusedPane()
+    if had and focused == paneFileTree and
+       rt.runFilesKeyOperation(res.operation, outcome):
+      return
   if res.operation.startsWith("input.") and rt.prompt.open:
     case res.operation
     of "input.copy", "input.cut":
@@ -5702,9 +6056,16 @@ proc runPromptKey(rt: TuiRuntime; key: string;
     if outcome.action != kaNone:
       discard rt.applyLocalAction(outcome.action, outcome)
     discard rt.modal.applyModalEvent(meCommit)
+    # K19: a refused Files name keeps its field open, with the name typed.
+    if rt.filesReprompt.len > 0:
+      discard rt.openPrompt(pkCommand)
+      discard rt.prompt.insert(rt.filesReprompt)
+      rt.prompt.message = rt.app.notification
+      rt.filesReprompt = ""
   of claCancelled:
     discard rt.modal.applyModalEvent(meCancel)
-    rt.note("")
+    # K19: Escape on a Files name field or Delete question cancels it.
+    rt.note(rt.cancelFilesField())
   else:
     discard before
 

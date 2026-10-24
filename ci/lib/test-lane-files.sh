@@ -1441,7 +1441,15 @@ test_lane_files() {
 				'/test_every_status_surface_has_an_entry_point\.nim$' \
 				'/test_view_census\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
-				'/test_vcs_content_id\.nim$'
+				'/test_vcs_content_id\.nim$' \
+				'/test_native_file_tree_operations\.nim$'
+		# `test_native_file_tree_operations` (K19) creates, renames and moves
+		# to a trash REAL files in a temporary directory: its subject,
+		# `host/native_file_tree.nim`, is the native front-ends' disk half and
+		# refuses to compile on this backend (the desktop's is the index
+		# process, `main-process`'s `file_tree_operations_test.nim`). Rejected
+		# rather than guarded for the vacuous-pass reason below; its
+		# backend-independent half, `test_files_node_menu`, runs here.
 		# `test_view_census` (HSF-D6) is a source scan of the same shape as the
 		# two below: it walks `src/frontend` with `std/os`, which the JS target
 		# lacks, and with the walk elided it would pass having read nothing.
@@ -1702,7 +1710,12 @@ test_lane_files() {
 				'/test_vcs_working_tree\.nim$' \
 				'/test_vcs_content_id\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
-				'/test_project_action_runner\.nim$'
+				'/test_project_action_runner\.nim$' \
+				'/test_native_file_tree_operations\.nim$'
+		# TEN entries since K19: `test_native_file_tree_operations` creates,
+		# renames and trashes REAL files in a temporary directory through
+		# `std/posix` (`host/native_file_tree`, a native front-end's disk
+		# half), the same reason it is rejected from `vm-unit-js` above.
 		# NINE entries since SB-2a: `test_vcs_content_id` runs the system git
 		# through `std/osproc` exactly as `test_vcs_working_tree` below does,
 		# so it dies on the same `posix_spawnp` link line.

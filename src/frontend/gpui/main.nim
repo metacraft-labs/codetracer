@@ -138,6 +138,7 @@ import ./host/gpui_host
 import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
 import headless_app/auto_hide_hover
 import headless_app/footer_info
+import headless_app/file_tree_menu   # K19: the Files pane's menu
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents
 import headless_session   # `calltraceJumpByLine`, `requestAndLoadCalltrace`
 import pane_viewport     # HSF-V2: a pane's size as the Viewport it reports
@@ -6893,6 +6894,16 @@ proc runWatchCommand(r: GpuiRenderer; query: string): bool =
 
 # ---- the actions -----------------------------------------------------------
 
+proc openTreeFile(r: GpuiRenderer; path: string) =
+  ## K17 (and the Files menu's Edit): the file in the editor, as the
+  ## desktop's `FilesystemVM.openFile` opens it.
+  gViewedFile = path
+  if gViewedFile == gSession.getCurrentFile():
+    gViewedFile = ""
+    refreshReplayWindow(r)
+  else:
+    showViewedFile(r)
+
 proc runContextAction(r: GpuiRenderer; action: ContextAction;
                       target: ContextTarget) =
   ## A right-click menu's chosen entry, routed to the operation the
@@ -6987,6 +6998,19 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   of caJumpToValue:
     traceGesture(target.expression & " = " & target.text &
                  " is the value at this step")
+  of caFileCreate, caFileRename, caFileDelete, caFileEdit:
+    # K19: the Files pane's entries, as the shared Files model decides them
+    # now. Opening a file is this window's editor.
+    let vm = gSession.session.fileTreeVM
+    if action == caFileEdit:
+      let why = vm.fileTreeEntryReason(target.path, action)
+      if why.len > 0:
+        traceGesture("files: " & why)
+      else:
+        openTreeFile(r, target.path)
+      return
+    let why = vm.runFileTreeAction(target.path, action)
+    traceGesture("files: " & (if why.len > 0: why else: $action))
 
 # ---------------------------------------------------------------------------
 # PLAT-68 — the window's keys through the ONE router
@@ -7650,21 +7674,22 @@ proc onPaneClick(c: GPaneClick) =
   case c.part
   of gcpNone: discard
   of gcpFileNode:
-    # K17 / K18 (K19: no Files menu, as on the desktop).
+    # K17 / K18, and K19: a right-click opens the Files pane's menu, the
+    # entries and reasons the shared Files model decides.
     let vm = session.fileTreeVM
     let e = fileEntryOf(vm, c.key)
-    if e.text.len == 0 or c.button != gbLeft:
+    if e.text.len == 0:
+      return
+    if c.button == gbRight:
+      openContextMenuAt(r, vm.fileTreeContextMenuOf(e.path), c.x, c.y)
+      return
+    if c.button != gbLeft:
       return
     if e.isFolder:
       vm.toggleExpanded(e.path)
       redrawPaneOf(r, paneFileTree)
     else:
-      gViewedFile = e.path
-      if gViewedFile == gSession.getCurrentFile():
-        gViewedFile = ""
-        refreshReplayWindow(r)
-      else:
-        showViewedFile(r)
+      openTreeFile(r, e.path)
   of gcpEventRow:
     # K24 / K25.
     let rows = session.eventLogVM.eventRows.val

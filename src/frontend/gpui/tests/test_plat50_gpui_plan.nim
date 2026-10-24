@@ -26,8 +26,9 @@
 ##   * K27 / K28 — a value expands; a variable's menu;
 ##   * (K30, the timeline's track, went with the Timeline panel — PLAT-51;)
 ##   * K17 / K18 / K19 — Files (on `multi_root`): a file opens in the editor
-##     (its tab names it), a folder collapses, a node opens no menu (the
-##     desktop has none);
+##     (its tab names it), a folder collapses, a node opens the Files pane's
+##     menu — Create, Rename, Delete read-only in a replay with their reason,
+##     Edit opening the file;
 ##   * K23 / K33 — an argument pinned to the scratchpad, its close button;
 ##   * K26 — an event-log header orders the log, again reverses it;
 ##   * K14 / K15 — Alt+click anchors a column breakpoint, Ctrl+Alt+click and
@@ -65,7 +66,10 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 108
+  ExpectedAssertions = 115
+    ## K19: 108 -> 115 — a Files node opens the Files pane's menu (its
+    ## entries, kind, the reason drawn on each, a disabled entry, Edit) where
+    ## the case asserted no menu (2).
     ## PLAT-51: 112 -> 108 — the Timeline's K30 case (3) removed with the
     ## pane, and the history / origin read in the pane, not over it (-1).
   CalcFixture = "test-logs/tui-fixtures/calc-2f0db4f45192"
@@ -406,10 +410,28 @@ suite "PLAT-50 GPUI: Files":
       for n in collapsed.nodesWith("data-ct-clicks"):
         if n.attr("data-view-id") == helpers: still = true
       ck not still
-      # No Files menu, as on the desktop.
+      # K19: the Files pane's menu (Filesystem-Pane.md § "Context menu"):
+      # the four entries in the desktop's order, from the shared Files model;
+      # a recording's sources are read-only, the reason drawn beside each
+      # disabled entry; Edit opens the file.
       let menu = windowPlan("click:file:" & helpers & ":right", mr)
-      ck menu.menuEntries.len == 0
-      ck menu.nodesWith("data-ct-context-menu").len == 0
+      ck menu.menuEntries == @[("Create", "false"), ("Rename", "false"),
+                               ("Delete", "false"), ("Edit", "true")]
+      let boxes = menu.nodesWith("data-ct-context-menu")
+      ck boxes.len == 1 and
+        boxes[0].attr("data-ct-context-menu") == "file-tree-node"
+      for n in menu.nodesWith("data-ct-context-entry"):
+        ck n.textOf.contains("A recording's sources are read-only") ==
+          (n.attr("data-ct-context-entry") != "Edit")
+      # A disabled entry runs nothing: the menu stays open.
+      let inert = windowPlan("click:file:" & helpers & ":right,ctx:Delete",
+                             mr)
+      ck inert.menuEntries.len == 4
+      # Edit opens the file in the editor, as a click on its row does.
+      let edited = windowPlan("click:file:" & helpers & ":right,ctx:Edit",
+                              mr, trace = trace)
+      ck edited.menuEntries.len == 0
+      ck edited.textOf.contains("def add(left, right):")
 
 suite "PLAT-50 GPUI: the sweep's other rows":
 

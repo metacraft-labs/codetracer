@@ -7660,3 +7660,23 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   re-stamp. Never copy `src/build-debug` between trees (tup rejects the variant).
 - layout_settings now carries VALUED settings (`settingValues`, `parseValue`,
   `assignValue`, `valueText`); `savePreference` hooks take (name, value: string).
+||||||| parent of c20db0191a (feat(tui,gpui): open the Files pane's context menu on a Files row)
+- Files pane menu (K19) in the native front-ends: the entries are
+  `FilesystemVM.fileTreeMenu`'s, converted by `headless_app/file_tree_menu`
+  (`fileTreeContextMenuOf`, `runFileTreeAction`); a `ContextMenuModel` holds
+  no closures, so a chosen entry re-asks the VM. The TUI's Edit-mode tree is
+  a FLAT list (`FileTreeModel.files`), backed for the menu by
+  `TuiApp.editFilesVM` (`projectTreeOf` over the walk, absolute paths) and
+  refreshed by `runtime.installProjectListing`. The disk half is
+  `viewmodel/host/native_file_tree.nim` (C only; freedesktop trash under
+  `$XDG_DATA_HOME/Trash` — tests MUST point XDG_DATA_HOME at a temp dir).
+  Name entry is the `:` command line with `create `/`rename `/`trash `
+  typed; those words are read only while the VM has a field/question open.
+  `editInteractive`'s listFiles serves the pre-claim listing once, then walks.
+- The command line hides the status notification while open: show a
+  question with `CommandLineModel.message` (drawn after the buffer; the next
+  edit clears it).
+- GPUI's Edit mode draws no Files tree (leaf vm nil): its Files menu only
+  ever opens on a replay's tree.
+- Running `source /tmp/.../devenv.sh` from the zsh Bash tool half-works: the
+  TUI build then fails on `tree_sitter/api.h`. Source captured envs under bash.

@@ -211,6 +211,15 @@ type
       ## every input and reads it whenever it rebuilds the field (a lazy
       ## load re-renders the tree while the field is open), so a rebuild
       ## keeps the typed text.
+    confirmsDelete*: bool
+      ## Whether Delete asks first (Filesystem-Pane.md § "Delete asks
+      ## first"): the terminal and GPUI set it, and the menu's Delete then
+      ## only names the entry in ``pendingDelete``; ``confirmDelete`` sends
+      ## it. False on the desktop, whose Delete is sent at once.
+    pendingDelete*: string
+      ## The entry Delete is asking about, ``""`` when it asks about none. A
+      ## plain field for ``lastContextMenu``'s reason: nothing reacts to it,
+      ## the front-end that asks reads it.
 
     # -- Derived state --
     isEmpty*: Memo[bool]
@@ -547,6 +556,7 @@ proc menuEntry(action: FileTreeAction; reason: string;
 
 proc startCreate*(vm: FilesystemVM; folder: string)
 proc startRename*(vm: FilesystemVM; path: string)
+proc requestDelete*(vm: FilesystemVM; path: string)
   ## Forward declarations: the menu's entries run them.
 
 proc fileTreeMenu*(vm: FilesystemVM; path: string): seq[FileTreeMenuEntry] =
@@ -593,9 +603,7 @@ proc fileTreeMenu*(vm: FilesystemVM; path: string): seq[FileTreeMenuEntry] =
     menuEntry(ftaRename, renameReason,
       proc() = vm.startRename(target)),
     menuEntry(ftaDelete, deleteReason,
-      proc() =
-        if not vm.onDeletePath.isNil:
-          vm.onDeletePath(target)),
+      proc() = vm.requestDelete(target)),
     menuEntry(ftaEdit, editReason,
       proc() = vm.openFile(target)),
   ]
@@ -610,6 +618,51 @@ proc cancelNameEdit*(vm: FilesystemVM) =
   ## Close the name field without acting: Escape, or leaving the field.
   vm.nameEditDraft = ""
   vm.nameEdit.val = FileTreeNameEdit()
+
+proc requestDelete*(vm: FilesystemVM; path: string) =
+  ## The menu's Delete on the row at ``path``. Where Delete asks first
+  ## (``confirmsDelete``) it only records the question, and the front-end
+  ## asks it; otherwise the request is sent.
+  if path.len == 0:
+    return
+  if vm.confirmsDelete:
+    vm.pendingDelete = path
+  elif not vm.onDeletePath.isNil:
+    vm.onDeletePath(path)
+
+proc confirmDelete*(vm: FilesystemVM): bool =
+  ## The user answered yes: send the Delete that was asked about. False when
+  ## nothing was being asked.
+  let path = vm.pendingDelete
+  vm.pendingDelete = ""
+  if path.len == 0:
+    return false
+  if not vm.onDeletePath.isNil:
+    vm.onDeletePath(path)
+  true
+
+proc cancelDelete*(vm: FilesystemVM) =
+  ## The user answered no: nothing is sent.
+  vm.pendingDelete = ""
+
+proc entryNameOf*(path: string): string =
+  ## The last component of ``path`` (either separator), as a row shows it.
+  for i in countdown(path.high, 0):
+    if path[i] == '/' or path[i] == '\\':
+      return path[i + 1 .. ^1]
+  path
+
+proc nameEditPrompt*(edit: FileTreeNameEdit): string =
+  ## What a front-end without an inline field says while the name field is
+  ## open: which folder the new file goes in, or which entry is renamed.
+  case edit.kind
+  of fneCreate: "New file in " & entryNameOf(edit.folder)
+  of fneRename: "Rename " & entryNameOf(edit.path)
+  of fneNone: ""
+
+proc deletePrompt*(path: string): string =
+  ## The question Delete asks (``confirmsDelete``).
+  "Move \"" & entryNameOf(path) & "\" to the trash?"
 
 proc startCreate*(vm: FilesystemVM; folder: string) =
   ## Open an empty name field as the first child of ``folder`` and expand
@@ -679,6 +732,104 @@ proc commitNameEdit*(vm: FilesystemVM; name: string): bool =
   of fneNone:
     discard
   true
+
+# ---------------------------------------------------------------------------
+# A native front-end's opened folder
+# ---------------------------------------------------------------------------
+
+type
+  FileTreeOperationResult* = object
+    ## What one Create, Rename or Delete did, as the host that carried it out
+    ## answers it — the counterpart of the index process's answer
+    ## (`index/file_tree_operations.FileTreeAnswer`) for a front-end that
+    ## acts on the disk itself (`host/native_file_tree`).
+    operation*: FileTreeAction
+    source*: string
+      ## What the request named: the target folder (Create), the entry
+      ## (Rename, Delete).
+    path*: string
+      ## The path the operation changed; ``""`` when it failed.
+    folder*: string
+      ## The folder whose listing changed.
+    error*: string
+      ## Why it failed; ``""`` when it succeeded.
+
+proc joinTreePath*(folder, name: string): string =
+  ## ``name`` inside ``folder``, in the separator ``folder`` is spelled with.
+  if folder.len == 0:
+    return name
+  let sep = if '/' notin folder and '\\' in folder: '\\' else: '/'
+  if folder[^1] == '/' or folder[^1] == '\\': folder & name
+  else: folder & sep & name
+
+proc projectTreeOf*(root: string; files: openArray[string]): FilesystemEntryNode =
+  ## The tree of the opened folder ``root`` from its project-relative file
+  ## paths (a native front-end's project walk, `edit_host.listProjectFiles`):
+  ## the folder's own row, its folders and files below it, every path
+  ## absolute. A native front-end in Edit mode hands it to a
+  ## ``FilesystemVM`` so the Files menu decides on the opened folder exactly
+  ## as it does on the desktop.
+  var rootPath = root
+  while rootPath.len > 1 and (rootPath[^1] == '/' or rootPath[^1] == '\\'):
+    rootPath.setLen(rootPath.len - 1)
+  result = FilesystemEntryNode(text: entryNameOf(rootPath), path: rootPath,
+                               isFolder: true, isExpanded: true)
+  proc childIndex(node: FilesystemEntryNode; name: string): int =
+    for i, c in node.children:
+      if c.isFolder and c.text == name:
+        return i
+    -1
+  proc insert(node: var FilesystemEntryNode; parts: openArray[string];
+              at: int) =
+    let path = joinTreePath(node.path, parts[at])
+    if at == parts.high:
+      node.children.add FilesystemEntryNode(text: parts[at], path: path)
+      return
+    var i = node.childIndex(parts[at])
+    if i < 0:
+      node.children.add FilesystemEntryNode(text: parts[at], path: path,
+                                            isFolder: true)
+      i = node.children.high
+    insert(node.children[i], parts, at + 1)
+  for rel in files:
+    var parts: seq[string] = @[]
+    var current = ""
+    for c in rel:
+      if c == '/' or c == '\\':
+        if current.len > 0: parts.add current
+        current = ""
+      else:
+        current.add c
+    if current.len > 0: parts.add current
+    if parts.len > 0:
+      insert(result, parts, 0)
+
+proc relativeToRoot*(root, path: string): string =
+  ## ``path`` relative to ``root`` (``projectTreeOf``'s paths back to the
+  ## project-relative spelling a native editor opens), or ``""`` when it is
+  ## not below it.
+  var r = root
+  while r.len > 1 and (r[^1] == '/' or r[^1] == '\\'):
+    r.setLen(r.len - 1)
+  if path.len <= r.len + 1 or path[0 ..< r.len] != r or
+     path[r.len] notin {'/', '\\'}:
+    return ""
+  path[r.len + 1 .. ^1]
+
+proc describeFileTreeOperation*(r: FileTreeOperationResult;
+                                root = ""): string =
+  ## The status line's account of an answer — what changed, or why not —
+  ## naming paths relative to the opened folder `root`.
+  proc shown(p: string): string =
+    let rel = relativeToRoot(root, p)
+    if rel.len > 0: rel else: p
+  if r.error.len > 0:
+    return r.error
+  case r.operation
+  of ftaCreate: "created " & shown(r.path)
+  of ftaRename: "renamed " & shown(r.source) & " to " & entryNameOf(r.path)
+  of ftaDelete: "moved " & shown(r.source) & " to the trash"
+  of ftaEdit: "opened " & shown(r.path)
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -759,6 +910,10 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     var lastActiveFile = ""
     var lastDebugger: DebuggerState
     createEffect proc() =
+      # A tree with no replay behind it (a native front-end's Edit mode,
+      # `projectTreeOf`) has no file the debugger is stopped in.
+      if store.isNil:
+        return
       let debuggerState = store.debugger.val
       # Read the tree so it is tracked as a dependency; a lazily filled
       # subtree must re-run this effect.

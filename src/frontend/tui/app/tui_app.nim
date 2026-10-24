@@ -372,6 +372,11 @@ type
     controls*: DebugControlsVM
       ## The session's transport ViewModel, for which controls are available.
     filesVM*: FilesystemVM
+    editFilesVM*: FilesystemVM
+      ## K19: Edit mode's Files model — the opened folder (`projectTreeOf`
+      ## over the project walk), so the Files menu decides on it as the
+      ## desktop's does; `nil` until Edit mode lists the project
+      ## (`runtime.installProjectListing`).
     store*: ReplayDataStore
       ## What the omnibar's index is gathered from (`omnibar_sources`).
       ## §3.1's header fields for a session a HOST opened.

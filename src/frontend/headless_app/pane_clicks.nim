@@ -102,6 +102,12 @@ type
     caAddValueToScratchpad = "add-value-to-scratchpad"
     caAddAllValuesToScratchpad = "add-all-values-to-scratchpad"
     caJumpToValue = "jump-to-value"
+    caFileCreate = "file-create"
+      ## The Files pane's menu (Filesystem-Pane.md § "Context menu"): the
+      ## four entries `FilesystemVM.fileTreeMenu` decides, in its order.
+    caFileRename = "file-rename"
+    caFileDelete = "file-delete"
+    caFileEdit = "file-edit"
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -114,6 +120,8 @@ type
       ## PLAT-51: a row of a variable's value history (the desktop's history
       ## popover row, `ui/value.createHistoryContextMenu`).
     cmkDockLabel = "dock-label"
+    cmkFileTreeNode = "file-tree-node"
+      ## A row of the Files pane's tree (K19).
 
   ContextMenuEntry* = object
     label*: string
@@ -360,6 +368,34 @@ func callArgumentContextMenu*(index: int64; name,
                           expression: name, text: value),
     entries: @[entry(AddValueToScratchpadLabel, caAddValueToScratchpad)])
 
+const FileTreeMenuLabels* = ["Create", "Rename", "Delete", "Edit"]
+  ## The Files pane's menu, always all four and in this order
+  ## (Filesystem-Pane.md § "Context menu"; `FilesystemVM.FileTreeAction`).
+
+func fileTreeNodeContextMenu*(path: string;
+                              decided: openArray[tuple[label: string;
+                                                       enabled: bool;
+                                                       reason: string]]):
+    ContextMenuModel =
+  ## A Files row's right-click menu, from the entries the shared Files model
+  ## decided (`headless_app/file_tree_menu.fileTreeContextMenuOf` reads them
+  ## off `FilesystemVM.fileTreeMenu`). A disabled entry keeps its reason, and
+  ## the reason is also its HINT — the column a native menu draws beside the
+  ## label — because the spec shows it as the entry's sublabel.
+  result = ContextMenuModel(kind: cmkFileTreeNode,
+                            target: ContextTarget(pane: paneFileTree,
+                                                  path: path))
+  for d in decided:
+    let action =
+      if d.label == FileTreeMenuLabels[0]: caFileCreate
+      elif d.label == FileTreeMenuLabels[1]: caFileRename
+      elif d.label == FileTreeMenuLabels[2]: caFileDelete
+      elif d.label == FileTreeMenuLabels[3]: caFileEdit
+      else: caNone
+    result.entries.add entry(d.label, action,
+                             hint = (if d.enabled: "" else: d.reason),
+                             enabled = d.enabled, reason = d.reason)
+
 func variablesContextMenu*(path: string): ContextMenuModel =
   ## A Variables row's right-click menu — the State pane's
   ## `buildVariableRowContextMenu`: value history and value origin.
@@ -535,8 +571,9 @@ const ClickInventory*: array[57, ClickBehaviour] = [
   k("K18", "Files: folder", {cgClick}, "expand / collapse",
     "FilesystemVM.toggleExpanded", nsDone, nsDone),
   k("K19", "Files: node", {cgRightClick},
-    "no menu: the four no-op entries the desktop showed were removed",
-    "-", nsDone, nsDone, "no front-end opens a Files menu"),
+    "the Files pane's menu: Create, Rename, Delete, Edit " &
+      "(Filesystem-Pane.md)",
+    "FilesystemVM.fileTreeMenu", nsDone, nsDone),
   k("K20", "Call trace: row", {cgClick, cgDoubleClick}, "go to that call",
     "calltraceJumpByLine", nsExisting, nsExisting, "PLAT-49 part B"),
   k("K21", "Call trace: toggle", {cgClick}, "expand / collapse children",

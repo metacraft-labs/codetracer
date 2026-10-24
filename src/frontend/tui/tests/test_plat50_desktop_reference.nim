@@ -7,7 +7,8 @@
 ##     children, a leaf, a call argument, the editor's text on a plain line
 ##     and on a breakpoint's, a Variables row, an inline value — are the
 ##     shared models' (`headless_app/pane_clicks`), label for label, in the
-##     desktop's order, and a Files node has none;
+##     desktop's order, and a Files node's is the Files pane's four entries,
+##     as the native menu the shared Files model builds lists them;
 ##   * the COLOURS the terminal paints its chrome with are the tokens the
 ##     desktop's chrome resolves to (its caption bar, transport buttons,
 ##     omnibox ground and border, the ground behind its tabs, its splitters,
@@ -35,7 +36,7 @@ import ../app/views/top_bar
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 51
+const ExpectedAssertions = 53
 
 var countedAssertions = 0
 
@@ -73,6 +74,13 @@ suite "PLAT-50: the desktop's right-click menus are the shared models'":
     # The desktop's Files node opens the Files pane's own menu, all four
     # entries in their order (Filesystem-Pane.md, "Context menu").
     ck labelsOf("filesNode") == @["Create", "Rename", "Delete", "Edit"]
+    # …and so does the terminal's and GPUI's: the native menu the shared
+    # Files model builds for a row (`headless_app/file_tree_menu`).
+    ck labelsOf("filesNode") == @FileTreeMenuLabels
+    ck labelsOf("filesNode") ==
+       fileTreeNodeContextMenu("/rec/main.py", @[
+         ("Create", false, "r"), ("Rename", false, "r"),
+         ("Delete", false, "r"), ("Edit", true, "")]).labels
 
   test "the editor's text, on a plain line and on a breakpoint's":
     ck labelsOf("editorText") == editorTextContextMenu("main.py", 31).labels
