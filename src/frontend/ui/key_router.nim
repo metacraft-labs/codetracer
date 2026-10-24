@@ -38,7 +38,7 @@
 
 import ui_imports
 
-import std/[tables, options]
+import std/[json, tables, options]
 import isonim/core/signals
 
 import ../viewmodel/keymap/[keymap_router, user_keymap, client_actions,
@@ -53,6 +53,7 @@ import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
 import ./menu_keys
 import ../viewmodel/keymap/alt_tap
+from ../viewmodel/keymap/keymap_selection import selectKeymap
 from ../viewmodel/viewmodels/omnibar_vm import paletteFieldOf
 import ../../common/key_names
 import ../viewmodel/viewmodels/video_player_vm
@@ -647,6 +648,14 @@ proc routeKey(name: string; ev: JsObject) =
   if handled:
     stop(ev)
 
+proc canonicalKeyOfEvent(ev: JsObject): string =
+  ## A `keydown`'s canonical name — the desktop's ONE decoder
+  ## (`key_event_names.canonicalKeyOfDom`) over the event's own fields. The
+  ## listener and `probeKeys` both read an event through it.
+  canonicalKeyOfDom($ev.key.to(cstring), $ev.code.to(cstring),
+                    ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
+                    ev.altKey.to(bool), ev.metaKey.to(bool))
+
 proc onKeyDown(ev: JsObject) =
   ## The ONE key listener (capture phase, on the window).
   if ev[cstring"isComposing"].to(bool):
@@ -657,9 +666,7 @@ proc onKeyDown(ev: JsObject) =
     return
   # Any other key while Alt is held makes it a chord, not a tap.
   deskAltTap.interrupted()
-  let name = canonicalKeyOfDom(key, $ev.code.to(cstring),
-                               ev.ctrlKey.to(bool), ev.shiftKey.to(bool),
-                               ev.altKey.to(bool), ev.metaKey.to(bool))
+  let name = canonicalKeyOfEvent(ev)
   if name.len == 0:
     return
   if videoPlayerKey(name):
@@ -741,12 +748,50 @@ proc importStoredPreset() =
                   js{preset: cstring(stored.get)})
   markPresetImported()
 
+proc newKeyDownEvent(init: JsObject): JsObject {.importjs:
+  "(new KeyboardEvent('keydown', #))".}
+
+proc probeKeys(request: cstring): cstring =
+  ## **WHAT KEYS WOULD RESOLVE TO HERE, WITH NO EFFECT** — the desktop's
+  ## counterpart of GPUI's `--window-ops=probe:` and the terminal's
+  ## `probeKey`, read by the cross-front-end differential (DIFF-13, KL-6).
+  ## `request` is JSON: `{base, keybindings, events: [KeyboardEventInit]}`.
+  ## Each event is a real `KeyboardEvent` (never dispatched), named by the
+  ## listener's own decoder (`canonicalKeyOfEvent`); the scope path and the
+  ## facts are this renderer's (`desktopScopePath`, `desktopFacts`); the
+  ## router is a COPY of the live one with `base` selected and `keybindings`
+  ## laid over it. Answers JSON: `{path, answers: ["<key> -> <resolution>"]}`.
+  let req = parseJson($request)
+  syncPaletteLayer()
+  syncContextMenuLayer()
+  let path = desktopScopePath()
+  let facts = desktopFacts()
+  var router = deskRouter
+  let selection = selectKeymap(req["base"].getStr)
+  if selection.ok:
+    router.switchBase(selection.model, ksCommand)
+  router.applyUserKeymap(parseUserKeymap(req{"keybindings"}.getStr))
+  var answers = newJArray()
+  for e in req["events"]:
+    let init = JsObject{}
+    init[cstring"key"] = cstring(e["key"].getStr)
+    init[cstring"code"] = cstring(e["code"].getStr)
+    for flag in ["ctrlKey", "shiftKey", "altKey", "metaKey"]:
+      init[cstring(flag)] = e{flag}.getBool.toJs
+    let name = canonicalKeyOfEvent(newKeyDownEvent(init))
+    var probe = router
+    answers.add %(name & " -> " &
+                  describeResolution(probe.route(facts, path, nmNormal, name,
+                                                 0)))
+  cstring($(%*{"path": $path, "answers": answers}))
+
 proc installKeyRouter*() =
   ## Install the listener and wait for the user's keymap. Idempotent: the
   ## renderer's start-up paths may all call it.
   if installed:
     return
   installed = true
+  {.emit: ["window.__ctKeymapProbe = ", probeKeys, ";"].}
   {.emit: ["window.addEventListener('keydown', ", onKeyDown, ", true);",
            "window.addEventListener('keyup', ", onKeyUp, ", true);",
            "window.addEventListener('mousedown', ", onPointerDown, ", true);",

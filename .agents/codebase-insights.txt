@@ -7720,3 +7720,17 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - In the PLAT-68 harness, `B1` (base before user) and `G2` (scope before
   source) are told apart by the first lines of test_plat68_layers' KL-11 case:
   a SAME-table user/base pair (only B1 fails it) precedes the cross-scope pair.
+- DIFF-13 (KL-6) is `src/frontend/tui/tests/test_plat68_diff13.nim` over a population DERIVED from the four bases'
+  tables (`tui/tests/support/diff13_population.nim`, ~4.6k row tuples, ~4.5k probes); the key synthesiser for all three
+  devices is `tui/tests/support/key_devices.nim`. The desktop half is `src/tests/gui/tests/keymaps/plat68-diff13-desktop.spec.ts`
+  reading the committed `diff13/answers-<base>.json` (split per base: the repo refuses added files > 500 KB); regenerate
+  them with `CT_DIFF13_WRITE=1` and the suite filtered to "PLAT-68 DIFF-13: the population*::*". The desktop answers through
+  `window.__ctKeymapProbe(json)` (ui/key_router.probeKeys), GPUI through `--window-ops=probe:<key>[:mods]` (the key field is
+  percent-decoded: `%2C` `,`, `%3A` `:`, `%25` `%`), the terminal through `runtime.probeKey`.
+- A situation that opens something (palette, writable editor) must be reached with THAT base's own chord
+  (`openingChords` via `chordFor`): Ctrl+P / Ctrl+E are other operations under Emacs. GPUI cannot switch its base after
+  start and Vim/Kakoune bind no key to `editor.toggle-read-only`, so the writable editor under a modal base is unreachable
+  on GPUI (counted). The desktop's `desktopFacts` reports a writable editor as insert mode under every base (no modal
+  editing in Monaco) — counted as inexpressible on the desktop.
+- The desktop's session-container-<n> carries `data-scope-kind=tab` / `data-scope-id=tab:<n+1>` so its scope path has the
+  session tab like the terminal's and GPUI's (window / tab:tab:1 / pane:… ).

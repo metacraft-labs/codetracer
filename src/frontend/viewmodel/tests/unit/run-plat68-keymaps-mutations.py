@@ -118,6 +118,10 @@ EMACS = "src/frontend/viewmodel/keymap/emacs_keymap.nim"
 CAPS = "src/frontend/tui/app/theme/capabilities.nim"
 USER_KEYMAP = "src/frontend/viewmodel/keymap/user_keymap.nim"
 
+# DIFF-13's subjects: GPUI's and the desktop's decoders.
+GPUI_KEYS = "src/frontend/gpui/app/gpui_keys.nim"
+DOM_KEYS = "src/common/key_event_names.nim"
+
 # Phase B suites.
 LAYERS = "src/frontend/viewmodel/tests/unit/test_plat68_layers.nim"
 PTYB = "src/frontend/tui/tests/real_terminal/test_plat68b_pty.nim"
@@ -129,15 +133,19 @@ NOCONF = "src/frontend/tui/app/tests/test_keymap_no_conflicts.nim"
 MONACO_T = "src/frontend/tests/monaco_operations_test.nim"
 PROPAGATION = "isonim-tui:../tests/test_event_propagation.nim"
 MENU = "src/frontend/viewmodel/tests/unit/test_plat68_menu_access.nim"
+DIFF13_POP = "src/frontend/tui/tests/support/diff13_population.nim"
+DIFF13_DEV = "src/frontend/tui/tests/support/key_devices.nim"
+
+DIFF13_DECODE = "PLAT-68 DIFF-13: the population*::every key's device form*"
+DIFF13_GPUI_CUA = "PLAT-68 DIFF-13: GPUI*::cua:*"
 
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
             ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
             MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
-            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS,
-            USER_KEYMAP]
+            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS, USER_KEYMAP, GPUI_KEYS, DOM_KEYS]
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
           LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
-          PROPAGATION, MENU]
+          PROPAGATION, MENU, DIFF13_POP, DIFF13_DEV]
 
 SEQUENCE = "*::the milestone's sequence, Ctrl+S, and the file on disk"
 RESTORED = "*::the pop or the reset is written on SIGTERM, SIGHUP and a crash"
@@ -248,7 +256,7 @@ ARMS = [
      "a user's `-command` row removes nothing"),
     ("B14", [(GPUI_MAIN, "    result.add element(ekEditor, \"editor:\" & path)",
               "    discard path")],
-     [(DIFF13, None)],
+     [(DIFF13, DIFF13_GPUI_CUA)],
      "GPUI's scope path loses the editor element (DIFF-13)"),
     ("B15", [(MOTIONS, "  pf.heldPane = if atWindow: pf.focusedIndex() else: -1",
               "  pf.heldPane = -1")],
@@ -382,6 +390,29 @@ ARMS = [
              "    return")],
      [(LAYERS, "*::one planted row per kind*")],
      "KL-7: the loader skips a malformed key instead of reporting it"),
+    # --- k3: DIFF-13, the cross-front-end differential over the tables ---
+    ("F1", [(GPUI_MAIN, "      editorFactsOf(gDebugDocs[path].state, false)",
+             "      EditorFacts(readOnly: false, mode: gDebugDocs[path].state.mode)")],
+     [(DIFF13, DIFF13_GPUI_CUA)],
+     "GPUI decides `editorReadOnly` itself instead of from the document "
+     "(`contextKeysOf`'s fact): a read-only document is writable there"),
+    ("F2", [(GPUI_KEYS, "  if \"shift\" in modifiers: result.incl kmodShift",
+             "  discard")],
+     [(DIFF13, DIFF13_DECODE)],
+     "GPUI's decoder drops Shift"),
+    ("F3", [(DOM_KEYS, "  if (mods * {kmodCtrl, kmodAlt, kmodMeta}) != {}:\n"
+                       "    return chordName(mods, fromCode)",
+             "  if (mods * {kmodCtrl, kmodAlt, kmodMeta}) != {}:\n"
+             "    return (if {kmodCtrl, kmodShift} <= mods: \"Shift+\" & "
+             "chordName(mods - {kmodShift}, fromCode) "
+             "else: chordName(mods, fromCode))")],
+     [(DIFF13, DIFF13_DECODE)],
+     "the desktop's decoder spells Shift before Ctrl"),
+    ("F4", [(GPUI_MAIN, "    let kind = getAttribute(node, ScopeKindAttribute)",
+             "    let kind = (let k = getAttribute(node, ScopeKindAttribute); "
+             "(if k == \"pane\": \"\" else: k))")],
+     [(DIFF13, DIFF13_GPUI_CUA)],
+     "GPUI's scope path omits the pane level"),
 ]
 DECLARED_SURVIVORS = {"N1"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
@@ -389,7 +420,7 @@ IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
              TOP_BAR, OPERATIONS, CAPS}
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE, CHROME,
-           GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS}
+           GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS, GPUI_KEYS}
   # Subjects compiled into `codetracer-gpui`.
 GPUI_SUITES = {GPUIK, DIFF13}
   # Suites that run the GPUI binary.

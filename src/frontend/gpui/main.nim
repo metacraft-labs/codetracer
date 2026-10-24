@@ -7804,6 +7804,19 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
   traceGesture("`" & op & "` (" & operationLabelOf(res.operation) &
                ") is not available in this window")
 
+func decodePercent(text: string): string =
+  ## `%XX` (two hex digits) → that byte; anything else as it is. Only the
+  ## `probe` op's key field is read through it.
+  var i = 0
+  while i < text.len:
+    if text[i] == '%' and i + 2 <= text.high and
+       text[i + 1] in HexDigits and text[i + 2] in HexDigits:
+      result.add chr(parseHexInt(text[i + 1 .. i + 2]))
+      i += 3
+    else:
+      result.add text[i]
+      inc i
+
 proc probeWindowResolution(key: string; mods: seq[string]): EditingResolution =
   ## What the keystroke WOULD resolve to here, with no effect — the router
   ## copied, nothing run.
@@ -9038,9 +9051,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       windowModifiers(held)
     of "probe":
       # PLAT-68: `probe:<key>[:<mod>+<mod>]` — what the key would resolve to
-      # where the focus is, traced, with no effect.
+      # where the focus is, traced, with no effect. The key is
+      # percent-decoded (`%2C` is `,`, `%3A` is `:`, `%25` is `%`), so the
+      # three characters the op list's own grammar takes can be probed too
+      # (the cross-front-end differential asks every key a table binds).
       let mods = if parts.len > 2: parts[2].split('+') else: @[]
-      traceGesture("probe " & probeWindowKey(parts[1], mods))
+      traceGesture("probe " & probeWindowKey(decodePercent(parts[1]), mods))
     of "select":
       # PLAT-68: `select:<line>@<column>:<line>@<column>` — a left press on
       # the editor's text at the first cell, the pointer moved, with the

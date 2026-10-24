@@ -4116,6 +4116,18 @@ jobs:
         # starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
+      - name: The desktop answers every key as the shared rule does (DIFF-13)
+        if: ${{ !cancelled() }}
+        # The cross-front-end differential's desktop column: every key of the
+        # four base keymaps in six situations, built as a real KeyboardEvent
+        # and named by the desktop's own decoder, resolved for the scope path
+        # the desktop reads off its DOM focus chain, against the committed
+        # answers the terminal and GPUI are held to in the tui lane
+        # (src/tests/gui/tests/keymaps/diff13/).
+        env:
+          PLAT68_SPEC: tests/keymaps/plat68-diff13-desktop.spec.ts
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
