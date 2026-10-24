@@ -395,7 +395,7 @@ r = json.load(open(sys.argv[1]))
 legs = {l["leg"]: l for l in r["legs"]}
 d = set(legs["debug"]["allTabTitles"])
 e = set(legs["edit"]["allTabTitles"])
-want = ["STATE", "EVENT LOG", "TIMELINE"]
+want = ["VARIABLES", "EVENT LOG", "TIMELINE"]
 missing = [w for w in want if w not in d]
 leaked = [w for w in want if w in e]
 if missing:

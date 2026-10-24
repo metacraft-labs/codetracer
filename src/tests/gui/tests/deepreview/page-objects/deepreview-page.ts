@@ -229,7 +229,7 @@ export class DeepReviewPage {
    * since RV-2 that is no longer "all of them". A dataset review
    * (`ct review <PATH>`) opens the EDITOR layout, which deliberately omits
    * the panels a dataset cannot populate — "CALLTRACE", "EVENT LOG",
-   * "TIMELINE", "TERMINAL OUTPUT", "STATE" and "SCRATCHPAD" are *required to
+   * "TIMELINE", "TERMINAL OUTPUT", "VARIABLES" and "SCRATCHPAD" are *required to
    * be absent* there (DeepReview-GUI.md §1.1), and asserting their presence
    * is asserting the defect RV-2 fixed. What every review must show is the
    * three pillars: "FILES"/"VCS" and "AGENT ACTIVITY". Launch methods 2 and 3
@@ -238,7 +238,7 @@ export class DeepReviewPage {
    *
    * Titles come from ``convertTabTitle`` (``src/frontend/ui/layout.nim``),
    * which upper-cases and splits the ``Content`` enum name. The special cases
-   * are the ones whose enum name is not the caption: ``Filesystem`` ->
+   * are the ones whose enum name is not the caption: ``State`` -> "VARIABLES", ``Filesystem`` ->
    * "FILES", ``BuildErrors`` -> "PROBLEMS", ``TestResults`` -> "TESTS", and
    * "VCS" (which the splitter would otherwise turn into "V C S"). Read the
    * proc rather than this list before relying on it — a caption that differs

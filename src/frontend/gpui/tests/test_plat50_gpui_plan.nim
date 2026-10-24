@@ -56,7 +56,7 @@ import gpui/chrome
 import gpui/window_geometry
 import gpui/window_top_bar
 import styles/generated/design_tokens
-from viewmodels/state_vm import StateTab, stateEmptyText
+from viewmodels/state_vm import stateEmptyText
 from ../../../common/view_vocabulary/layout_questions import trGutterLineNumber
 
 var CHECKS = 0
@@ -471,11 +471,11 @@ suite "PLAT-50 GPUI: the sweep's other rows":
                             ":left:ctrl,click:tab:scratchpad:left")
     ck pinned.viewText("scratchpad").len > 0
 
-  test "the Variables tabs, a point, the footer's location, a dock label":
-    let globals = windowPlan("click:statetab:1:left")
-    # The Globals tab: `calc` has none at the entry, so the pane says so in
-    # the Globals tab's own words (`stateEmptyText`), not the Locals tab's.
-    ck globals.viewText("state.root") == stateEmptyText(stGlobals)
+  test "the Variables list, a point, the footer's location, a dock label":
+    let entry = windowPlan("")
+    # One list of variables and watches: `calc` has none at the entry, so
+    # the pane says so in its own words (`stateEmptyText`).
+    ck entry.viewText("state.root") == stateEmptyText()
     var trace = ""
     let points = windowPlan("click:gutter:31:left,click:gutter:36:left," &
       "key:p:control,key:colon" & typed("Breakp") & ",key:enter," &

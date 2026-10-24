@@ -429,7 +429,7 @@ export class LayoutPage extends BasePage {
     if (forceReload || this.programStateTabsCache.length === 0) {
       const roots = await this.page.locator("div[id^='stateComponent']").all();
       this.programStateTabsCache = roots.map(
-        (r) => new VariableStatePane(this.page, r, "STATE"),
+        (r) => new VariableStatePane(this.page, r, "VARIABLES"),
       );
     }
     return this.programStateTabsCache;

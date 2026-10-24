@@ -114,32 +114,20 @@ report.panelAMounted = await page.evaluate(
 report.panelBMounted = await page.evaluate(
   () => !!document.querySelector('#ct-ordering-pane .state-component'));
 
-// ---- A. the LOCALS tab, holding the recorded locals ----------------------
+// ---- A. the list, holding the recorded locals and the watches ------------
 {
   const r = await readRows('#ct-state-pane');
   report.localsRows = r.rows;
   report.localsRejected = r.rejected;
 }
 
-// ---- A. the WATCHES tab, holding the refused watch ----------------------
+// ---- A. the watches, in the same list -----------------------------------
 //
-// Reached by a click on the product's own tab button. Absence is a result,
-// not a crash: the click is attempted and everything after it runs either
-// way, so an arm that removes the button reports a product reading rather
-// than an instrument failure.
-report.watchesTabClicked = false;
-try {
-  await page.click('#ct-state-pane .tab-watches', { timeout: 4000 });
-  report.watchesTabClicked = true;
-} catch (e) {
-  report.watchesTabError = String((e && e.message) || e).split('\n')[0];
-}
-await page.waitForTimeout(400);
-{
-  const r = await readRows('#ct-state-pane');
-  report.watchRows = r.rows;
-  report.watchRejected = r.rejected;
-}
+// The pane is one list of variables and watches (Variable-State-Pane.md,
+// "Decisions (2026-10-24)"), so the refused watch is read from the same
+// rows; there is no tab to open.
+report.watchRows = report.localsRows;
+report.watchRejected = report.localsRejected;
 report.loadingVisibleA = await loadingVisible('#ct-state-pane');
 
 // ---- B. the pane at the end of the ordering sequence --------------------

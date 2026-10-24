@@ -939,7 +939,7 @@ function appendDefaultDebugLayout(shellRoot, variant) {
       layoutBox: "rightTopLeft",
       fixture: "empty",
       tabs: [
-        { title: "STATE", name: "state" },
+        { title: "VARIABLES", name: "state" },
         { title: "SCRATCHPAD", name: "scratchpad" },
       ],
     },
@@ -1044,7 +1044,7 @@ function appendOpenViewMenu(navigation) {
   nested.id = "menu-nested-elements-1";
   nested.style.left = "202px";
   nested.style.top = "60px";
-  ["Filesystem", "Calltrace", "State", "Event Log", "Terminal Output", "Scratchpad", "Agent Activity"]
+  ["Filesystem", "Calltrace", "Variables", "Event Log", "Terminal Output", "Scratchpad", "Agent Activity"]
     .forEach((label, index) => appendMenuNode(nested, label, "menu-element", {
       index,
       nameWidth: 16,

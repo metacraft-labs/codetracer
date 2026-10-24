@@ -92,7 +92,7 @@ import ../views/command_line
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 493
+const ExpectedAssertions = 507
 
 var countedAssertions = 0
 
@@ -112,15 +112,17 @@ const
   SpecSectionHeading = "### 4.3 GDB-Compatible Command Surface"
   SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
-  ExpectedSpecCommands = 16
-    ## §4.3's command count, counted from the document on 2026-09-06. Asserted
+  ExpectedSpecCommands = 17
+    ## §4.3's command count, counted from the document on 2026-09-06 (16) and
+    ## again on 2026-10-24, when `:watches <hide|show>` was added (17). Asserted
     ## so that a parser which stopped early — or a block that lost a line — is
     ## red here rather than quietly checking less.
 
   ExpectedAliases = 11
-    ## How many of the sixteen §4.3 publishes an `(alias: …)` for. Counted
-    ## from the document on 2026-09-06: the five without one are `tracepoint`,
-    ## `goto`, `info threads`, `info registers` and `theme`.
+    ## How many of the seventeen §4.3 publishes an `(alias: …)` for. Counted
+    ## from the document on 2026-09-06: the six without one are `tracepoint`,
+    ## `goto`, `info threads`, `info registers`, `theme` and (2026-10-24)
+    ## `watches`.
 
   # The ViewModel action procs that MOVE A DEBUGGER, and every file each may be
   # called from — `|`-joined, in the sorted order the walk reports. This is
@@ -765,7 +767,7 @@ suite "CTUI-10: §4.3's command surface is the published one":
     declared.sort(proc(a, b: CommandKind): int = cmp($a, $b))
     checkpoint("commands §4.2 binds no key to: " & $unbound)
     ck unbound == declared
-    ck unbound.len == 6
+    ck unbound.len == 7
     for kind in CommandOnlyKinds:
       let (isBound, action) = keyActionFor(kind)
       ck not isBound
@@ -972,7 +974,7 @@ suite "CTUI-10: §4.3's command surface is the published one":
       ck out2.dispatch.status == drRejected
       ck out2.message == bare.message
     checkpoint("commands with a required argument: " & $required)
-    ck required == 7
+    ck required == 8   # `:watches <hide|show>` (2026-10-24) is the eighth
     # THE POSITIVE TWIN: the ten with no placeholder accept a bare line.
     var bareOk = 0
     for row in published:

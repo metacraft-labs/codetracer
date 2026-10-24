@@ -212,9 +212,10 @@ OPTIONS:
                     the row as the window delivers a real press:
                       click:<part>:<key>[:left|right|middle[:ctrl|alt|
                       shift|ctrl+alt]] (part: file, event, header, var,
-                      statetab, gutter, code, value, call, arg, tab, point,
+                      gutter, code, value, call, arg, tab, point,
                       scratch, position, vcsfile, commit, and PLAT-51's
-                      statecontrol (key `history|origin|unwatch:<path>`),
+                      statecontrol (key `history|origin|unwatch:<path>|
+                      hide-other-process-watches:on|off`),
                       history (key `<ticks>`), addwatch, separator — a code
                       or value key `<line>@<column>`, an arg's
                       `<call>/<arg>`) and

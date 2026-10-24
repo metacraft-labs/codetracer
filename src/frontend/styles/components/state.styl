@@ -3,13 +3,13 @@
 
 .isonim-state
   // The panel inset (PANEL_INSET, 8px — button.styl) on both sides of every
-  // row: the sub-tabs, the source line, the watch field and the values start
+  // row: the toolbar, the source line, the watch field and the values start
   // on the same line as the tab title above them and end 8px from the right.
   // The .value-components-container drops its right padding so its scrollbar
   // remains flush with the right edge of the panel.
   .code-state-line,
   #gdb-evaluate,
-  .state-tabs,
+  .variables-toolbar,
   .loading-indicator,
   .value-components-container
     padding-left: PANEL_INSET
@@ -27,35 +27,31 @@
   .value-view
     flex-wrap: nowrap
 
-  // The watch field sits on the tabs' row, to their right, 6px from them —
-  // one control bar instead of two stacked rows.
-  //
-  // The panel is otherwise a single column, and the code line renders between
-  // the tabs and the field, so this is a grid rather than a markup change:
-  // row 1 is the tabs (as wide as they need) and the field (the rest), and
-  // everything else spans the full width below.  A `display: none` child
-  // (the loading line, or a hidden code line) simply leaves its row empty.
+  // One column (Variable-State-Pane.md, "Decisions (2026-10-24)": the pane
+  // is one list of variables and watches, with no tab strip): the watch
+  // field, the toolbar under it, the source line, then the list.  The
+  // toolbar holds only the "Hide watches from other processes" toggle, which
+  // is `display: none` unless some watch came from another process; the
+  // toolbar then has no height, so its row is empty.  A `display: none` child
+  // (the loading line, or a hidden code line) likewise leaves its row empty.
   //
   // `&`: `isonim-state` and `state-component` are classes of the SAME element.
   &.state-component
     display: grid
-    grid-template-columns: max-content minmax(0, 1fr)
-    grid-template-rows: auto auto auto minmax(0, 1fr)
-    grid-template-areas: "tabs field" "code code" "loading loading" "values values"
-    column-gap: 0.375rem
+    grid-template-columns: minmax(0, 1fr)
+    grid-template-rows: auto auto auto auto minmax(0, 1fr)
+    grid-template-areas: "field" "toolbar" "code" "loading" "values"
     align-items: center
 
-    > .state-tabs
-      grid-area: tabs
-
-    // No left inset of its own here: the 6px gap is the only space between
-    // it and the tabs.  Its right inset matches the rows below.
     > #gdb-evaluate
       grid-area: field
-      padding-left: 0
 
-    // The source line of the stopped position, 8px below the tabs/field bar
-    // (it sat flush against it).
+    > .variables-toolbar
+      grid-area: toolbar
+      display: flex
+      justify-content: flex-end
+
+    // The source line of the stopped position, 8px below the field.
     > .code-state-line
       grid-area: code
       margin-top: PANEL_INSET
@@ -75,8 +71,8 @@
       // Anchors the empty message below.
       position: relative
 
-      // The empty message ("No local variables…", "No watch expressions
-      // yet…") centred in the values area, the way every other panel centres
+      // The empty message ("No variables at this point of execution…")
+      // centred in the values area, the way every other panel centres
       // its message (components/empty_states.styl) — the same fill Scratchpad
       // uses (scratchpad.styl).
       //
@@ -94,23 +90,34 @@
         right: 0
         bottom: 0
 
-  // Locals / Globals / Watches — the design system's mode-switcher
-  // (CodeTracer Design System, "I2 · Mode switcher", node 4342:744): one
-  // outlined track with the selected view raised inside it.  These are three
-  // ways to look at the same stopped state, which is what that component is
-  // for; the filter chips on the same page are for narrowing one list.
-  //
-  // Until now the buttons carried no styles at all, so they drew as the
-  // browser's default light-grey buttons, and the active one was identical to
-  // the other two — nothing said which view was showing.
-  //
-  // The shared segmented tabs (`segmented-tabs()`, shared_widgets.styl): a
-  // 26px track, the same height as the watch field beside it, with 20px tabs.
-  .state-tabs
-    segmented-tabs()
-    // Keeps the 8px inset from the rule at the top of this block, as a margin:
-    // the track's own padding is the 2px around the tabs.
-    margin-left: PANEL_INSET
+  // "Hide watches from other processes": a small toggle, raised while on.
+  .hide-other-process-watches
+    margin-top: 0.25rem
+    height: 1.25rem
+    padding: 0 0.625rem
+    border: 0.0625rem solid #3a3a3a
+    border-radius: 0.3125rem
+    background-color: transparent
+    font-family: "SpaceGrotesk"
+    font-size: 0.75rem
+    line-height: 1rem
+    white-space: nowrap
+    color: #b4b4b4
+    cursor: pointer
+
+    &.active
+      background-color: #262626
+      color: #f3f3f3
+
+  // A watch the stop cannot answer stays in the list, its value cell
+  // carrying the reason, muted and italic so it does not read as a value; a
+  // watch still waiting for its answer is muted only.
+  .value-watch.watch-invalid .value-expanded-text
+    color: #b4b4b4
+    font-style: italic
+
+  .value-watch.watch-pending .value-expanded-text
+    color: #b4b4b4
 
   // The line execution is stopped on, drawn the way the editor draws it —
   // the yellow arrow, the line number in the gutter's type, the code in the
@@ -120,7 +127,7 @@
   //
   // The band runs the full width of the panel (it covers the 8px side
   // insets), as the editor's band runs the full width of the code area; the
-  // arrow then starts on the panel inset, under the tabs.
+  // arrow then starts on the panel inset, under the watch field.
   .code-state-line
     display: flex
     // Number and code share a baseline although their sizes differ, as in

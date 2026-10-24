@@ -59,28 +59,19 @@ export class VariableStatePane {
     return this.root.locator("#watch-0");
   }
 
-  /** The Locals / Globals / Watches tab strip inside the pane. */
-  stateTabButton(which: "locals" | "globals" | "watches"): Locator {
-    return this.root.locator(`.state-tabs .tab-${which}`).first();
+  /**
+   * The "Hide watches from other processes" toggle. The pane is one list of
+   * variables and watches (Variable-State-Pane.md, "Decisions (2026-10-24)"),
+   * so there is no tab strip; this toggle is shown only while some watch was
+   * added in another process.
+   */
+  hideOtherProcessWatchesToggle(): Locator {
+    return this.root.locator(".variables-toolbar .hide-other-process-watches").first();
   }
 
-  /**
-   * Switch the pane to one of its three tabs.
-   *
-   * This is a click on the product's own button, deliberately, and not a
-   * `vm.selectTab` call: until the tab strip was added to the WebRenderer
-   * panel the Watches tab could ONLY be reached from a ViewModel call, so
-   * a test that reached it that way would have passed against a product
-   * in which no user could get there.
-   */
-  async selectStateTab(which: "locals" | "globals" | "watches"): Promise<void> {
-    const btn = this.stateTabButton(which);
-    await btn.waitFor({ state: "visible", timeout: 15_000 });
-    try {
-      await btn.click({ timeout: 5_000 });
-    } catch {
-      await btn.dispatchEvent("click");
-    }
+  /** The watch rows of the list, in the order the user added them. */
+  watchRows(): Locator {
+    return this.root.locator(".value-expanded.value-watch");
   }
 
   /**

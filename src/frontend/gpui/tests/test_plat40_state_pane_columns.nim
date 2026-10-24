@@ -333,7 +333,7 @@ const
   TabActiveAttr = "data-ct-tab-active"    # `renderState`'s tab buttons
   ScrollAttr = "data-ct-state-scroll"     # the rows' scroll box
   ScrollbarAttr = "data-ct-state-scrollbar" # its thumbs
-  EmptyAttr = "data-ct-state-empty"       # the tab's empty-state sentence
+  EmptyAttr = "data-ct-state-empty"       # the pane's empty-state sentence
   ColumnIndexAttr = "data-column-index"   # the event log's column cells
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
@@ -936,7 +936,7 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
 
     test "at " & vp & " an UNSTEPPED session draws the desktop's empty state":
       # The population control: at entry there are no variables, and the
-      # pane draws the tab's empty-state sentence (`.empty-overlay`) — not a
+      # pane draws its empty-state sentence (`.empty-overlay`) — not a
       # table with no rows, and not a row with no data.
       let plan = windowPlan(w, h, UnsteppedOps)
       let pane = plan.paneOf("state")
@@ -948,9 +948,11 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
       let empty = pane.nodesWith(EmptyAttr)
       ck empty.len == 1
       if empty.len == 1:
-        ck empty[0].attr(EmptyAttr) == $stLocals
-        ck empty[0].textOf == stateEmptyText(stLocals)
-      ck "Locals" in pane.textOf
+        ck empty[0].attr(EmptyAttr) == "variables"
+        ck empty[0].textOf == stateEmptyText()
+      # One list of variables and watches: no Locals / Globals / Watches tabs
+      # (Variable-State-Pane.md, "Decisions (2026-10-24)").
+      ck "Globals" notin pane.textOf
 
 suite "PLAT-40 / PLAT35-F4: every case in this file ran":
 

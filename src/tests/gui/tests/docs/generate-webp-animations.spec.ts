@@ -171,7 +171,7 @@ test.describe("generate faithful webp animations", () => {
       }
 
       // Toggle tabs
-      await ctPage.locator(".lm_tab", { hasText: "STATE" }).click();
+      await ctPage.locator(".lm_tab", { hasText: "VARIABLES" }).click();
       await ctPage.waitForTimeout(1000);
       await ctPage.locator(".lm_tab", { hasText: "SCRATCHPAD" }).click();
       await ctPage.waitForTimeout(1000);

@@ -6,7 +6,7 @@
 # WHAT THIS ASSERTS THAT NOTHING ELSE DOES
 # ----------------------------------------
 # `watch_expressions_dap_test.rs` proves the backend answers `ct/load-locals`
-# correctly. `watch-expressions-in-browser.sh` proves the State pane's tabs
+# correctly. `watch-expressions-in-browser.sh` proves the Variables pane's list
 # and inputs are reachable by gesture. Between the two there is a gap the
 # size of this gate, and two defects lived in it.
 #
@@ -241,8 +241,6 @@ ck "$([ "$(q "${control}" 'rowval(d["localsRows"], "initial_shield") == "10000"'
 
 # THE REFUSAL. An `Error` value whose `msg` IS the explanation. `text()` has
 # no `of Error` branch and painted the bare word "Error".
-ck "$([ "$(q "${control}" 'd["watchesTabClicked"]')" = True ] && echo ok || echo no)" \
-	"the Watches tab opens by gesture"
 refusal="$(q "${control}" 'rowval(d["watchRows"], "initial_shield + 1")')"
 note "initial_shield + 1 value cell: ${refusal}"
 ck "$([ "$(q "${control}" 'rowval(d["watchRows"], "initial_shield + 1") != "Error"')" = True ] && echo ok || echo no)" \

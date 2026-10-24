@@ -20,8 +20,13 @@
  *      a field written only by a proc with no call sites.
  *
  * Any test that drove the ViewModel directly would have passed against
- * all four. So everything below is a GESTURE: a click on the product's
- * own tab button, and keystrokes into the product's own input.
+ * all four. So everything below is a GESTURE: keystrokes into the
+ * product's own input.
+ *
+ * ONE LIST (Variable-State-Pane.md, "Decisions (2026-10-24)"). The pane no
+ * longer has Locals / Globals / Watches tabs: the watches are listed after
+ * the variables, each row marked `value-watch`, and a watch the stop cannot
+ * answer stays in the list marked `watch-invalid` with its reason.
  *
  * WHAT IT ASSERTS, and why each assertion can fail for its own reason
  * -------------------------------------------------------------------
@@ -63,7 +68,7 @@
  * own assertion: it must produce a row, and that row must carry a stated
  * reason. `initial_shield + 1` is refused because the sum was never
  * recorded — a replay cannot compute it — and the pane has to say so
- * rather than showing an empty Watches tab.
+ * rather than dropping the row.
  */
 
 import { test, expect } from "../../lib/fixtures";
@@ -75,7 +80,7 @@ const INITIAL_SHIELD = 10000n;
 const ASTEROID_MASS_AT_1 = 2000n;
 
 function statePane(page: Page): VariableStatePane {
-  return new VariableStatePane(page, page.locator("#stateComponent-0"), "STATE");
+  return new VariableStatePane(page, page.locator("#stateComponent-0"), "VARIABLES");
 }
 
 /** One row of the pane, as painted. */
@@ -89,38 +94,38 @@ interface PaintedRow {
 }
 
 /**
- * Everything the Watches tab is showing, as `name` -> painted row.
+ * Every watch row the pane is showing, as `name` -> painted row.
  *
  * Read from the rows the product painted rather than from a ViewModel,
  * and returned WHOLE so a failure can print what the pane actually held.
  * "The expected row is missing" and "the pane has no rows at all" need
  * different fixes and a bare `toBe` cannot tell them apart.
  *
- * ONLY WHILE THE WATCHES TAB IS THE ONE SHOWN. `initial_shield` is also a
- * LOCAL of `main`, so the Locals tab holds a row by that name with the same
- * value: a reader that did not check the tab passed on the Locals row while
- * the pane had fallen back to Locals and the watch was nowhere on screen
- * (measured under `ct host`, codetracer-pm issue 2026-10-22). When the
- * Watches tab is not the active one this returns no rows.
+ * ONLY THE WATCH ROWS (`.value-watch`). `initial_shield` is also a LOCAL of
+ * `main`, so the list holds a variable row by that name with the same
+ * value: a reader that did not tell them apart would pass on the local while
+ * the watch was nowhere on screen (measured under `ct host`, codetracer-pm
+ * issue 2026-10-22).
  */
 async function watchRows(page: Page): Promise<Record<string, PaintedRow>> {
   return page.evaluate(() => {
     const out: Record<string, { text: string; value: string; elementsNamed: number }> = {};
     const pane = document.getElementById("stateComponent-0");
     if (!pane) return out;
-    if (!pane.querySelector(".state-tabs .tab-watches.active")) return out;
-    for (const row of pane.querySelectorAll("[data-variable-name]")) {
+    for (const row of pane.querySelectorAll("[data-variable-name].value-watch")) {
       const name = row.getAttribute("data-variable-name") || "";
       const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
       const text = (row as HTMLElement).innerText || row.textContent || "";
       const cell = row.querySelector(".value-expanded-text");
       const seen = out[name];
+      // The row, plus any element inside it that repeats the row's name.
+      const inside = Array.from(row.querySelectorAll("[data-variable-name]")).filter(
+        (e) => e.getAttribute("data-variable-name") === name,
+      ).length;
       out[name] = {
-        // The FIRST element by the name is the row (document order puts a
-        // row before anything inside it); a later one only counts.
         text: seen ? seen.text : collapse(text),
         value: seen ? seen.value : collapse(cell ? cell.textContent || "" : ""),
-        elementsNamed: (seen ? seen.elementsNamed : 0) + 1,
+        elementsNamed: (seen ? seen.elementsNamed : 0) + 1 + inside,
       };
     }
     return out;
@@ -155,10 +160,6 @@ function shownNumber(cell: string): bigint | null {
 
 /** `shownNumber` of the named row's value cell, as text for `expect.poll`. */
 async function watchNumber(page: Page, name: string): Promise<string> {
-  const watchesShown = await page
-    .locator("#stateComponent-0 .state-tabs .tab-watches.active")
-    .count();
-  if (watchesShown === 0) return "<the Watches tab is not the one shown>";
   const row = (await watchRows(page))[name];
   if (!row) return "<no row>";
   if (row.elementsNamed !== 1) return `<${row.elementsNamed} elements named ${name}>`;
@@ -186,35 +187,25 @@ test.describe("watch expressions — typed into the product, in a browser", () =
     // the keyboard with it, so `asteroid_masses_positive[1]` was submitted
     // as `ast` (`ui/editor_focus`, codetracer-pm issue 2026-10-22).
 
-    // ---- THE TAB STRIP EXISTS AND THE WATCHES TAB IS REACHABLE -------
+    // ---- ONE LIST: NO TAB STRIP, AND THE EMPTY TEXT INVITES A WATCH --
     //
-    // Asserted separately and FIRST, because it was absent from the web
-    // renderer entirely. Without it every assertion below would fail for
-    // the same single reason and the report would not say which layer
-    // was broken.
+    // Asserted separately and FIRST, so a pane that still had tabs fails
+    // for that reason and not for every assertion below.
     await expect(
-      pane.stateTabButton("watches"),
-      "the Watches tab button must exist in the browser renderer, not only in the Mock one",
+      ctPage.locator("#stateComponent-0 .state-tabs"),
+      "the Variables pane is one list of variables and watches; it has no tab strip",
+    ).toHaveCount(0);
+    await expect(
+      pane.watchExpressionTextBox(),
+      "the watch input is in the pane",
     ).toBeVisible({ timeout: 30_000 });
-
-    await pane.selectStateTab("watches");
-
-    // ---- AN EMPTY WATCHES TAB SAYS IT IS EMPTY OF WATCHES ------------
-    //
-    // Not "No local variables are present…", which is what every tab used
-    // to say. An empty state that names the wrong thing is how a user
-    // concludes the feature is broken when it is merely unused.
-    await expect(
-      ctPage.locator("#stateComponent-0 .empty-overlay"),
-      "the empty Watches tab must describe ITS emptiness, not the Locals tab's",
-    ).toContainText("No watch expressions yet", { timeout: 15_000 });
 
     // ---- A BARE NAME ------------------------------------------------
     await pane.addWatchExpression("initial_shield");
     await expect
       .poll(async () => watchNumber(ctPage, "initial_shield"), {
         timeout: 45_000,
-        message: "the watch `initial_shield` never produced a row showing its value in the Watches tab",
+        message: "the watch `initial_shield` never produced a watch row showing its value",
       })
       .toBe(INITIAL_SHIELD.toString());
 
@@ -257,7 +248,7 @@ test.describe("watch expressions — typed into the product, in a browser", () =
       .poll(async () => (await watchRows(ctPage))["initial_shield + 1"]?.text ?? "", {
         timeout: 45_000,
         message:
-          "an unanswerable watch produced NO ROW — the pane's two states are " +
+          "an unanswerable watch produced NO WATCH ROW — the pane's two states are " +
           "'a value' and 'nothing', which is the defect this spec exists for",
       })
       .toContain("cannot evaluate");
@@ -267,6 +258,12 @@ test.describe("watch expressions — typed into the product, in a browser", () =
       rowsAfterRefusal["initial_shield + 1"]?.text ?? "",
       "the refusal must say WHY a recording cannot answer it, not merely that it failed",
     ).toContain("only holds the values that were actually recorded");
+
+    // The refused row is marked not valid, in the list, rather than dropped.
+    await expect(
+      ctPage.locator('#stateComponent-0 .value-watch.watch-invalid[data-variable-name="initial_shield + 1"]'),
+      "a refused watch is listed and marked not valid",
+    ).toHaveCount(1);
 
     // A refusal must not have cost the working watches their rows.
     expect(

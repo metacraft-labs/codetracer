@@ -177,13 +177,19 @@ proc mountValuePane(): int =
 
   # `applyLocalsResponse` is the product's own locals/watch split — the
   # one entry point every host uses.
-  store.applyLocalsResponse(rows)
+  discard store.applyLocalsResponse(rows, store.stopStamp())
   store.updateCodeStateLine(2, "let shield = 10000;")
 
-  # The Watches tab holds the refusal row, so open it after the locals
-  # have been read. Driven through the VM here because pane A's subject is
-  # the RENDERING; the gesture that reaches this tab is already gated by
-  # `ci/test/watch-expressions-in-browser.sh`.
+  # The watches the request asked for are the session's watch list: the pane
+  # lists the session's watches after the variables (Variable-State-Pane.md,
+  # "Decisions (2026-10-24)"), so the refusal row is listed only for a watch
+  # the session has. Set through the VM because pane A's subject is the
+  # RENDERING; typing a watch is gated by `ci/test/watch-expressions-in-browser.sh`.
+  var asked: seq[string]
+  for row in rows:
+    if row.isWatch:
+      asked.add row.name
+  vm.watchExpressions.val = asked
   let container = dom.getElementById(dom.document, cstring"ct-state-pane")
   mountIsoNimStatePanel(container, vm)
   settle(store)
@@ -257,7 +263,7 @@ proc runOrderingTimeline(): JsonNode =
   let body = cast[CtLoadLocalsResponseBody](jsJsonParse(cstring(BackendResponse)))
   let rows = rowsFromBody(body)
   if sentAfterMove > 0:
-    store.applyLocalsResponse(rows)
+    discard store.applyLocalsResponse(rows, store.stopStamp())
     store.locals.loadingState.val = lsIdle
     note("T2 the answer arrives and is applied: " & $rows.len & " row(s)")
   else:
