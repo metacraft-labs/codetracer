@@ -284,6 +284,17 @@ when defined(server):
     server.use(cstring"/styles/", cached("/styles/", codetracerExeDir & cstring"/frontend/styles/"))
     server.use(cstring"/frontend/styles/", cached("/frontend/styles/", codetracerExeDir & cstring"/frontend/styles/"))
     server.use(cstring"/node_modules", cached("/node_modules", codetracerInstallDir & cstring"/node_modules"))
+    # The design system's typefaces. `styles/generated/fonts.styl` names them
+    # relative to the stylesheet (`../../../../libs/codetracer-design-system/…`),
+    # which the desktop resolves on the filesystem and a served page resolves
+    # to `/libs/codetracer-design-system/…` — so that is the mount.
+    # An empty install dir (a suite run from the checkout root) means the
+    # checkout itself, so the root is then relative rather than `/libs/…`.
+    let designSystemRoot =
+      if codetracerInstallDir.len == 0: cstring"libs/codetracer-design-system"
+      else: codetracerInstallDir & cstring"/libs/codetracer-design-system"
+    server.use(cstring"/libs/codetracer-design-system",
+               cached("/libs/codetracer-design-system", designSystemRoot))
     server.use(cstring"/ui.js", cached("/ui.js", userInterfacePath))
     # BIND THE ADDRESS, AND REPORT THE ONE ACTUALLY BOUND.
     #

@@ -1164,6 +1164,12 @@ test_lane_files() {
 		# passes while they do.
 		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
 		#
+		# `index_serves_design_system_fonts_test.nim` requests every face
+		# `styles/generated/fonts.styl` names, at the URL a served page resolves it
+		# to, from the running server: they must all be 200, and a name under the
+		# same mount that is no file a 404.
+		echo src/frontend/tests/index_serves_design_system_fonts_test.nim
+		#
 		# `index_reports_the_port_it_bound_test.nim` starts the real server on
 		# `--port 0` and then CONNECTS to the port the `CODETRACER_HOST_URL=`
 		# line named. The number cannot be compared against the input, because
