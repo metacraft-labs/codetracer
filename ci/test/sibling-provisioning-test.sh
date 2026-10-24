@@ -248,7 +248,16 @@ echo "siblings: entries pin a reproducible revision"
 # The agreement between those spellings is now asserted below rather than
 # merely intended, so a flake.lock bump that leaves a workflow behind is a
 # failure here instead of a compile error two jobs later.
-readonly BRANCH_TIP_CEILING=30
+#
+# 30 -> 15: the nine `codetracer-native-recorder=dev` entries (seven blocks in
+# codetracer.yml, cross-repo-tests.yml, setup-db-backend-siblings) and the
+# `|| 'dev'` fallback in mcr-dap-flow.yml now name the commit flake.lock locks,
+# for the trace-format reason: flake.lock locks a recorder commit that is not
+# on its `dev` (a18db9bd5, 2026-10-09), and the codetracer-native-backend these
+# lanes build passes `ct-mcr replay-worker --parent-pid`, which only that
+# commit's ct-mcr accepts. The count had already fallen to 24 unnoticed, since
+# a ceiling reports only an increase.
+readonly BRANCH_TIP_CEILING=15
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops

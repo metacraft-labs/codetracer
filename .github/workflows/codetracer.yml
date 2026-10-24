@@ -1367,7 +1367,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
             codetracer-trace-format-nim=ffd0554d6d779b94403bfa0fc1bf3056e06a5946
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
             codetracer-native-backend
 
       - name: Upload env.ps1 component decomposition
@@ -1650,7 +1650,7 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -2126,7 +2126,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
             codetracer-trace-format-nim=ffd0554d6d779b94403bfa0fc1bf3056e06a5946
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -5008,7 +5008,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
             codetracer-trace-format-nim=ffd0554d6d779b94403bfa0fc1bf3056e06a5946
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
 
       - name: Remove WSL bash stub from System32
         # As in the other eph-win-x64 jobs: let CreateProcessW fall through to
@@ -6600,14 +6600,14 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
             codetracer-trace-format-nim=ffd0554d6d779b94403bfa0fc1bf3056e06a5946
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
             nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=6388a4df49b3805b5b77df14516c6c15975aa4e3
-            codetracer-native-backend=742cc6d0d943be648d3e80da8ef8d809d209066a
+            codetracer-native-backend=e3e4a2a63b20fbf3084cf832a1c2f93f18e5e493
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -7240,7 +7240,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
-          RR_BACKEND_REF: 742cc6d0d943be648d3e80da8ef8d809d209066a
+          RR_BACKEND_REF: e3e4a2a63b20fbf3084cf832a1c2f93f18e5e493
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -7546,8 +7546,8 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=6388a4df49b3805b5b77df14516c6c15975aa4e3
-            codetracer-native-backend=742cc6d0d943be648d3e80da8ef8d809d209066a
-            codetracer-native-recorder=dev
+            codetracer-native-backend=e3e4a2a63b20fbf3084cf832a1c2f93f18e5e493
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -7850,14 +7850,14 @@ jobs:
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
             nim-stackable-hooks=dev
-            codetracer-native-recorder=dev
+            codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=742cc6d0d943be648d3e80da8ef8d809d209066a
+            codetracer-native-backend=e3e4a2a63b20fbf3084cf832a1c2f93f18e5e493
             codetracer-visual-replay=6388a4df49b3805b5b77df14516c6c15975aa4e3
 
       - name: Allow direnv in the cloned recorder siblings

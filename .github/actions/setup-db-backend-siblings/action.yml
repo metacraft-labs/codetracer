@@ -95,8 +95,8 @@ runs:
       # below. The refs are explicit because a bare entry resolves through a
       # per-commit workspace lock in the shared manifests repo, which has
       # published nothing since 2026-08-02 -- see the note at the top of
-      # .github/workflows/codetracer.yml. Two of the three are named by
-      # commit rather than by branch, for the reason set out below. This
+      # .github/workflows/codetracer.yml. All three are named by commit
+      # rather than by branch, for the reason set out below. This
       # composite is used by six jobs, and every one of them died in this
       # step until the refs were pinned.
       # codetracer-native-recorder /
@@ -135,6 +135,15 @@ runs:
       # agrees with, so the sibling checkout and the Nix lane compile the
       # same revision by construction. `ci/test/sibling-provisioning-test.sh`
       # fails when a spelling here drifts from `flake.lock`.
+      #
+      # CODETRACER-NATIVE-RECORDER IS NAMED BY COMMIT FOR THE SAME REASON.
+      # `flake.lock` and `repro.lock` lock the commit the workspace builds,
+      # which is not on the recorder's `dev`: `dev` (a18db9bd5, 2026-10-09)
+      # predates `ct-mcr replay-worker --parent-pid`
+      # (codetracer-native-recorder 9c793cacd), which the
+      # codetracer-native-backend these lanes build passes when it starts an
+      # MCR replay worker, so a recorder cloned at `dev` refuses the option
+      # and no MCR replay starts. Refresh it with the lock, as above.
       uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
       with:
         env-flavor: ${{ inputs.env-flavor }}
@@ -147,10 +156,11 @@ runs:
         # `#` comments, so an empty `extra-siblings` contributes nothing and a
         # multi-line one needs no particular indentation.
         #
-        # The two trace-format halves are named by COMMIT, not by `dev`; the
-        # reason, and the refresh rule, are above the `uses:` line.
+        # The two trace-format halves and the native recorder are named by
+        # COMMIT, not by `dev`; the reasons, and the refresh rule, are above
+        # the `uses:` line.
         siblings: |
           codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
           codetracer-trace-format-nim=ffd0554d6d779b94403bfa0fc1bf3056e06a5946
-          codetracer-native-recorder=dev
+          codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
           ${{ inputs.extra-siblings }}

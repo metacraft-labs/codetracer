@@ -47,7 +47,7 @@ on:
   workflow_dispatch:
     inputs:
       native_recorder_ref:
-        description: 'codetracer-native-recorder ref (default: dev)'
+        description: 'codetracer-native-recorder ref (default: the commit flake.lock locks)'
         required: false
         default: ''
       native_backend_ref:
@@ -161,9 +161,12 @@ jobs:
           # codetracer-native-backend: an `/agents` input in flake.nix, so the
           #   fallback is the commit flake.lock and repro.lock lock, not `dev`
           #   (a branch the Nix lane does not build); refresh it with the lock.
+          # codetracer-native-recorder: likewise the commit the locks name, so
+          #   ct-mcr accepts the `replay-worker --parent-pid` that this
+          #   native-backend passes (see setup-db-backend-siblings/action.yml).
           siblings: |
-            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || 'dev' }}
-            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || '742cc6d0d943be648d3e80da8ef8d809d209066a' }}
+            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '9c793cacd828bb5ac0a1794536064e0e88b326cd' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'e3e4a2a63b20fbf3084cf832a1c2f93f18e5e493' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that

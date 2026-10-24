@@ -108,7 +108,8 @@ name: Deploy ide.codetracer.com
 #   the PRIVATE sibling codetracer-native-recorder/ct_emulator/build_wasm_api.sh
 #   exists: the MCR emulator's Nim sources are cross-compiled to wasm32 C and
 #   linked into db-backend by its build.rs. This mirrors cross-repo-tests.yml,
-#   which already clones codetracer-native-recorder=dev, `direnv allow`s it and
+#   which already clones codetracer-native-recorder (at the commit flake.lock
+#   locks), `direnv allow`s it and
 #   resolves its ct_emulator nimble deps before building db-backend. The wasm
 #   toolchain (rust wasm32-unknown-unknown, wasm-pack, clang/llvm, nim/nimble)
 #   all lives in the flake `.#ci` shell (nix/shells/ci-base.nix) — no emscripten
