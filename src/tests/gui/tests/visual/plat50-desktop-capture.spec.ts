@@ -195,7 +195,8 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   menus.tab = await rightClickMenu(ctPage.locator(".lm_tab", { hasText: "VCS" }).first());
   menus.callTraceWithChildren = await rightClickMenu(ctPage.locator(".calltrace-view .call-text", { hasText: "apply_op" }).first());
   menus.callTraceLeaf = await rightClickMenu(ctPage.locator(".calltrace-view .call-text", { hasText: "add" }).first());
-  // A Files node: NO menu (its four entries did nothing and were removed).
+  // A Files node: the Files pane's own menu (Filesystem-Pane.md, "Context
+  // menu"): Create, Rename, Delete, Edit, always all four, in that order.
   await ctPage.locator(".jstree-anchor", { hasText: "main.py" }).first().click({ button: "right" });
   await ctPage.waitForTimeout(800);
   menus.filesNode = (await ctPage.locator("#context-menu-container").isVisible())
@@ -448,7 +449,7 @@ test("PLAT-50: the desktop's caption bar, strips, menu surface and click behavio
   expect(clicks.gutterDisabled).toBe(true);
   expect(clicks.eventLogRow).toMatchObject({ moved: true });
   expect(menus.tab.slice(0, 4)).toEqual(["Pin to Left", "Pin to Bottom", "Pin to Right", "Close"]);
-  expect(menus.filesNode).toEqual([]);
+  expect(menus.filesNode).toEqual(["Create", "Rename", "Delete", "Edit"]);
   const sort = clicks.eventLogSort as { ascending: unknown; descending: unknown };
   expect(sort.ascending).not.toEqual(sort.descending);
   expect(menus.callTraceWithChildren).toEqual(["Collapse Call Children"]);

@@ -60,7 +60,7 @@ proc dark(token: DesignToken): string = tokenHex(token, dmDark)
 
 suite "PLAT-50: the desktop's right-click menus are the shared models'":
 
-  test "a tab, a dock label, a call, a leaf, an argument; no Files menu":
+  test "a tab, a dock label, a call, a leaf, an argument; the Files menu":
     ck labelsOf("tab") == tabContextMenu(paneVcs, maximised = false).labels
     ck labelsOf("dockLabelBottom") ==
        dockLabelContextMenu(paneBuildOutput, leBottom).labels
@@ -70,8 +70,9 @@ suite "PLAT-50: the desktop's right-click menus are the shared models'":
        callTraceContextMenu(4, hasChildren = false, expanded = false).labels
     ck labelsOf("callArgument") ==
        callArgumentContextMenu(4, "left", "2").labels
-    # The desktop's Files node has no menu (its entries ran nothing).
-    ck labelsOf("filesNode").len == 0
+    # The desktop's Files node opens the Files pane's own menu, all four
+    # entries in their order (Filesystem-Pane.md, "Context menu").
+    ck labelsOf("filesNode") == @["Create", "Rename", "Delete", "Edit"]
 
   test "the editor's text, on a plain line and on a breakpoint's":
     ck labelsOf("editorText") == editorTextContextMenu("main.py", 31).labels

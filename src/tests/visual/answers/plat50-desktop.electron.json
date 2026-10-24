@@ -3,7 +3,7 @@
   "PLAT-50 — the desktop's chrome and click behaviours, read from the real Electron app on calc.",
   "Produced by src/tests/gui/tests/visual/plat50-desktop-capture.spec.ts",
   "(`bash scripts/plat50-capture-electron.sh`).",
-  "NOT ONE CAPTURE. menus.editorTextOnBreakpointFirst, clicks.gutterRightClickMenu and clicks.statusCopyControlVisible are from a 2026-10-21 capture; every other field is from the capture before it.",
+  "NOT ONE CAPTURE. menus.editorTextOnBreakpointFirst, clicks.gutterRightClickMenu and clicks.statusCopyControlVisible are from a 2026-10-21 capture; menus.filesNode is from a 2026-10-23 capture (the Files pane's context menu); every other field is from the capture before it.",
   "That capture also differed elsewhere (the event log's header reads `OUTPUT ▼` since the panel-header restyle, caption geometry moved, flowValue appeared), and its header fails test_plat50_desktop_reference.nim, so those fields wait for a full recapture."
  ],
  "chrome": {
@@ -92,7 +92,12 @@
   "callTraceLeaf": [
    "Expand Call Children"
   ],
-  "filesNode": [],
+  "filesNode": [
+   "Create",
+   "Rename",
+   "Delete",
+   "Edit"
+  ],
   "editorText": [
    "Copy",
    "Find",
