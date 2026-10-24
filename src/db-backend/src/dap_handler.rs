@@ -4198,7 +4198,7 @@ impl Handler {
                 warn!("bundled-sources: cannot create {}: {e}", parent.display());
                 continue;
             }
-            if let Err(e) = std::fs::write(&dest, &sv.content) {
+            if let Err(e) = publish_bundled_source(&dest, &sv.content) {
                 warn!("bundled-sources: cannot write {}: {e}", dest.display());
                 continue;
             }
@@ -7741,6 +7741,48 @@ fn terminal_output_category(kind: EventLogKind) -> Option<&'static str> {
     }
 }
 
+/// Distinguishes the staging files of concurrent [`publish_bundled_source`]
+/// calls within one process; the process id distinguishes processes.
+static BUNDLED_SOURCE_STAGING_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Put `content` at `dest` so that a concurrent reader of `dest` sees either
+/// the previous complete file or the new complete file, never a truncated one.
+///
+/// The bundled-sources directory is SHARED: its path is a hash of the
+/// container path under `std::env::temp_dir()`, so every session that opens
+/// the same `.ct` — two handlers in one process, a GUI and an MCP session,
+/// parallel tests over one committed fixture — extracts to the same files.
+/// `std::fs::write` truncates before it writes, so a session reading the
+/// source while another re-extracts it read an empty file, and the
+/// value-origin classifier reported the source unavailable
+/// (`origin_gdscript_dap_test` failed about 1 run in 30 with parallel tests).
+///
+/// A file that already holds exactly `content` is left alone, so the common
+/// re-open writes nothing. Otherwise the bytes are staged in a sibling file
+/// and moved into place with `rename`, which replaces the destination in one
+/// step (POSIX `rename(2)`; `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` on
+/// Windows, per <https://doc.rust-lang.org/std/fs/fn.rename.html>).
+fn publish_bundled_source(dest: &Path, content: &[u8]) -> std::io::Result<()> {
+    if std::fs::read(dest).is_ok_and(|existing| existing == content) {
+        return Ok(());
+    }
+    let file_name = dest
+        .file_name()
+        .ok_or_else(|| std::io::Error::other(format!("{} names no file", dest.display())))?;
+    let seq = BUNDLED_SOURCE_STAGING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut staging_name = std::ffi::OsString::from(".");
+    staging_name.push(file_name);
+    staging_name.push(format!(".{}.{seq}.staging", std::process::id()));
+    let staging = dest.with_file_name(staging_name);
+    let published = std::fs::write(&staging, content).and_then(|()| std::fs::rename(&staging, dest));
+    if published.is_err() {
+        // Best effort: a staging file left behind is never read (it is not a
+        // name the read side derives), but it should not accumulate either.
+        let _ = std::fs::remove_file(&staging);
+    }
+    published
+}
+
 fn find_ct_container(trace_dir: &Path) -> Option<std::path::PathBuf> {
     // Direct `.ct` file → use as-is.
     if trace_dir.is_file() {
@@ -8009,6 +8051,56 @@ mod tests {
             .expect("a recreator handler's replay is a RecreatorReplaySession");
         let (name, index) = session.worker_identity();
         (name.to_string(), index)
+    }
+
+    /// Re-extracting a bundled source while another session reads it must
+    /// never expose a partial file: the bundled-sources directory is shared by
+    /// every session over one container. Writers alternate two different
+    /// contents so every publish really replaces the file (an identical
+    /// content is skipped), and a reader checks each read is one of the two in
+    /// full. With `std::fs::write` in place of `publish_bundled_source` the
+    /// readers see the truncated, empty file.
+    #[test]
+    fn publishing_a_bundled_source_never_exposes_a_partial_file() {
+        let dir = env::temp_dir().join(format!("ct-publish-bundled-source-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("gf_values.gd");
+        let a = vec![b'a'; 64 * 1024];
+        let b = vec![b'b'; 48 * 1024];
+        publish_bundled_source(&dest, &a).unwrap();
+
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writers: Vec<_> = (0..2)
+            .map(|w| {
+                let (dest, a, b, stop) = (dest.clone(), a.clone(), b.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    let mut i = w;
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        publish_bundled_source(&dest, if i % 2 == 0 { &b } else { &a }).unwrap();
+                        i += 1;
+                    }
+                })
+            })
+            .collect();
+        let mut partial = 0usize;
+        for _ in 0..2000 {
+            let seen = std::fs::read(&dest).unwrap();
+            if seen != a && seen != b {
+                partial += 1;
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for w in writers {
+            w.join().unwrap();
+        }
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "gf_values.gd")
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(partial, 0, "a reader saw a partially written bundled source");
+        assert!(leftovers.is_empty(), "staging files were left behind: {leftovers:?}");
     }
 
     /// The `flow` task thread's handler names its own replay `flow`, the name
