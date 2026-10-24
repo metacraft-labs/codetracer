@@ -1628,6 +1628,216 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+// ===========================================================================
+// Provisioning workspace siblings
+// ===========================================================================
+//
+// Many suites here drive a recorder or tool that lives in a SIBLING checkout
+// of the workspace (codetracer-beam-recorder, codetracer-js-recorder,
+// codetracer-native-backend, …). A plain `cargo test` used to look for the
+// sibling's build output and, when nobody had built it, fail with "binary not
+// found": 30-odd failures on a fresh workspace, every one of them a missing
+// build step rather than a defect (codetracer-pm issues/2026-10-22-db-backend-
+// cargo-test-has-33-baseline-failures-on-agents.md). The rule is that the test
+// stays loud and the prerequisite is SUPPLIED, never skipped (codetracer-pm
+// spec/Testing/Silent-Self-Pass-Audit-2026-08-23.md). So the finders below
+// supply it: when no explicit override names a tool, they build the workspace
+// sibling with `scripts/build-siblings.sh --only <key>`, the one script that
+// knows how to build each sibling in its own pinned dev shell, and return the
+// artifact it produced.
+//
+// build-siblings.sh reuses an artifact only when its build stamp matches the
+// sibling's current inputs, so asking it every time is how a STALE build gets
+// rebuilt as well as a missing one; for a current one it is a stamp check.
+//
+// An explicit override (each finder's environment variable, or a tool on PATH
+// that is not the sibling's own output) is used as given and never built:
+// whoever set it chose that tool.
+
+/// The codetracer checkout this test binary was built from.
+pub fn codetracer_root() -> PathBuf {
+    safe_canonicalize(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+}
+
+/// The workspace directory the sibling repositories are checked out in, side
+/// by side with codetracer.
+pub fn workspace_root() -> PathBuf {
+    let root = codetracer_root();
+    root.parent()
+        .unwrap_or_else(|| panic!("the codetracer checkout {} has no parent directory", root.display()))
+        .to_path_buf()
+}
+
+/// Whether `path` lies inside the workspace sibling checkout `repo`.
+///
+/// A finder treats such a hit (typically on the `PATH` the dev shell assembled
+/// from the sibling's build output) as the sibling itself and provisions it,
+/// instead of using it as found: the hit says only that the sibling was built
+/// at some point, not that the build is current. For the Ruby recorder it says
+/// even less, because the wrapper on PATH is checked in and the extension it
+/// loads may never have been built (measured 2026-10-24: the dev shell's PATH
+/// carried the wrapper while the extension was absent).
+fn is_in_workspace_sibling(path: &Path, repo: &str) -> bool {
+    safe_canonicalize(path).starts_with(workspace_root().join(repo))
+}
+
+/// Run `produce` at most once per test process for `key`, and return what it
+/// produced; panic with its diagnostic when it failed.
+///
+/// Two locks serialise the work:
+///
+/// - an in-process mutex, held across `produce`, so the tests of one binary
+///   (which libtest runs on parallel threads) start one build and wait for it,
+///   instead of starting N identical ones; and an outcome cached per key, so
+///   the rest of the binary neither repeats a build nor retries a failed one;
+/// - an exclusive file lock (`flock(2)` on Unix, `LockFileEx` on Windows, via
+///   `File::lock`) on `.tools/test-harness-provisioning.lock` in the codetracer
+///   checkout, held for the same span, so test binaries that run concurrently
+///   (cargo runs them one after another, nextest in parallel) never build the
+///   same sibling at once. One lock for every key rather than one per key:
+///   the cross-process recording tools include the JS recorder, which also has
+///   a key of its own, and serialising all provisioning is simpler than
+///   proving which keys share builds. Every build is CPU-bound, so running two
+///   at once would not finish sooner anyway.
+///
+/// There is no timeout on either lock: a build that takes long is waited for,
+/// and one that hangs is a defect to see, not to paper over.
+fn provision_once(key: &str, produce: impl FnOnce() -> Result<PathBuf, String>) -> PathBuf {
+    use std::sync::{Mutex, OnceLock};
+
+    static OUTCOMES: OnceLock<Mutex<HashMap<String, Result<PathBuf, String>>>> = OnceLock::new();
+    let outcomes = OUTCOMES.get_or_init(|| Mutex::new(HashMap::new()));
+    // A test that panicked while holding the guard poisons the mutex; the map
+    // it guards is still consistent (an entry is inserted whole or not at
+    // all), so carry on with it.
+    let mut guard = outcomes.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let outcome = match guard.get(key) {
+        Some(outcome) => outcome.clone(),
+        None => {
+            let outcome = with_provisioning_file_lock(produce);
+            guard.insert(key.to_string(), outcome.clone());
+            outcome
+        }
+    };
+    drop(guard);
+    outcome.unwrap_or_else(|diagnostic| panic!("{diagnostic}"))
+}
+
+/// Hold the cross-process provisioning lock (see [`provision_once`]) while
+/// `produce` runs. The lock is released when the file is closed, which also
+/// happens if this process dies, so a killed test cannot leave it held.
+fn with_provisioning_file_lock(produce: impl FnOnce() -> Result<PathBuf, String>) -> Result<PathBuf, String> {
+    let lock_dir = codetracer_root().join(".tools");
+    fs::create_dir_all(&lock_dir).map_err(|e| {
+        format!(
+            "cannot create the provisioning lock directory {}: {e}",
+            lock_dir.display()
+        )
+    })?;
+    let lock_path = lock_dir.join("test-harness-provisioning.lock");
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|e| format!("cannot open the provisioning lock {}: {e}", lock_path.display()))?;
+    lock_file
+        .lock()
+        .map_err(|e| format!("cannot take the provisioning lock {}: {e}", lock_path.display()))?;
+    produce()
+}
+
+/// Build the workspace sibling artifact `artifact` (relative to the sibling
+/// checkout `repo`) with `scripts/build-siblings.sh --only <key>`, and return
+/// its absolute path.
+///
+/// `key` is that script's logical key for the artifact, and `artifact` the
+/// path its entry names, so the script and the harness agree on what "built"
+/// means. `--only` matches keys by SUBSTRING, so a key must be one that no
+/// other entry's key contains; every key the finders pass is. A key the script
+/// does not know builds nothing, and is caught by the artifact check below.
+///
+/// Panics, naming the sibling and the remedy, when the sibling is not checked
+/// out, when the build fails (build-siblings.sh prints the tail of the failing
+/// build's log, and its output is inherited, so it is right above the panic),
+/// or when the build reports success without producing the artifact. The
+/// script itself treats a missing checkout as MISSING and exits 0, which is
+/// why the checkout and the artifact are checked here.
+pub fn provision_sibling(key: &str, repo: &str, artifact: &str) -> PathBuf {
+    provision_once(&format!("build-siblings:{key}"), || {
+        let repo_dir = workspace_root().join(repo);
+        if !repo_dir.is_dir() {
+            return Err(format!(
+                "MISSING PREREQUISITE: the `{repo}` sibling repository is not checked out at {}, so \
+                 `{artifact}` cannot be built for this test. Check it out (`repro ws enable codetracer` \
+                 checks out every repository the codetracer project includes), or point this test at a \
+                 build through the override its finder documents.",
+                repo_dir.display()
+            ));
+        }
+        let script = codetracer_root().join("scripts/build-siblings.sh");
+        eprintln!(
+            "[test_harness] provisioning `{key}`: bash {} --only {key}",
+            script.display()
+        );
+        // Both streams inherited: a first build takes minutes, and the
+        // script's progress and summary are the only sign the test has not
+        // hung, and the only place a failure's cause is printed.
+        let status = Command::new("bash")
+            .arg(&script)
+            .arg("--only")
+            .arg(key)
+            .current_dir(codetracer_root())
+            .stdin(Stdio::null())
+            .status()
+            .map_err(|e| format!("could not run {}: {e}", script.display()))?;
+        if !status.success() {
+            return Err(format!(
+                "could not build `{key}` ({artifact} in {}): `bash {} --only {key}` exited with {status}. \
+                 Its summary above names the failing build and the tail of its log.",
+                repo_dir.display(),
+                script.display()
+            ));
+        }
+        let artifact_path = repo_dir.join(artifact);
+        if !artifact_path.exists() {
+            return Err(format!(
+                "`bash {} --only {key}` succeeded but {} does not exist; the script's entry for `{key}` \
+                 and this harness disagree about the artifact (or `{key}` is not one of its keys).",
+                script.display(),
+                artifact_path.display()
+            ));
+        }
+        Ok(safe_canonicalize(&artifact_path))
+    })
+}
+
+/// The `ct-print` CTFS decoder (codetracer-trace-format-nim), which several
+/// suites use as an INDEPENDENT reader of a container: one that is not the
+/// db-backend reader under test.
+///
+/// `CODETRACER_CT_PRINT` (the variable `ci/test/launcher-recorder-e2e.sh`
+/// honours) overrides it. Otherwise it is the workspace sibling's
+/// `ct-print`, at the fixed path that repository builds it to, provisioned
+/// by [`provision_sibling`]; a missing checkout or a failed build panics.
+pub fn find_ct_print() -> PathBuf {
+    if let Ok(path) = env::var("CODETRACER_CT_PRINT") {
+        let p = PathBuf::from(&path);
+        assert!(
+            p.is_file(),
+            "CODETRACER_CT_PRINT='{path}' does not name a file. Unset it to build the workspace's \
+             codetracer-trace-format-nim/ct-print, or point it at a ct-print binary."
+        );
+        return p;
+    }
+    provision_sibling(
+        "codetracer-trace-format-nim/ct-print",
+        "codetracer-trace-format-nim",
+        // The name the script's entry uses on every platform.
+        "ct-print",
+    )
+}
+
 /// The 1-based line number of the unique line in `path` containing `needle`.
 ///
 /// Panics — loudly, naming both the file and the needle — when the line is
@@ -1670,9 +1880,16 @@ pub fn find_line_containing(path: &Path, needle: &str) -> usize {
 ///    `CT_RR_SUPPORT_PATH` — the spelling `codetracer-native-backend`'s
 ///    `scripts/run-cross-repo-tests.sh` still exports when it drives this
 ///    suite, so it stays until that repo switches over.
-/// 2. System PATH lookup (via `which`/`where`) for `ct-native-replay`
-/// 3. Common development locations relative to CARGO_MANIFEST_DIR
-/// 4. Home directory locations
+/// 2. System PATH lookup (via `which`/`where`) for `ct-native-replay`, unless
+///    the hit is the workspace sibling's own build (see step 3)
+/// 3. The workspace's `codetracer-native-backend` sibling, PROVISIONED: built
+///    or refreshed by `scripts/build-siblings.sh --only codetracer-native-backend`
+///    (see [`provision_sibling`]), which panics when the build fails
+/// 4. Only when that sibling is not checked out: the legacy in-tree location
+///    and home directory locations; and when none of those exists either,
+///    [`provision_sibling`] panics naming the missing checkout
+///
+/// So this returns `Some` or panics; the `Option` stays for the callers.
 pub fn find_ct_native_replay() -> Option<PathBuf> {
     // Tests calling `find_ct_native_replay` are about to spawn ct-native-replay
     // (directly or via db-backend) and would otherwise deadlock when the
@@ -1694,41 +1911,48 @@ pub fn find_ct_native_replay() -> Option<PathBuf> {
 
     // Check PATH.
     let exe_name = format!("ct-native-replay{}", std::env::consts::EXE_SUFFIX);
-    if let Some(path) = find_on_path(&exe_name) {
+    const SIBLING: &str = "codetracer-native-backend";
+    if let Some(path) = find_on_path(&exe_name)
+        && !is_in_workspace_sibling(&path, SIBLING)
+    {
         return Some(path);
     }
 
-    // Check common development locations (try both repo names)
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev_locations = [
-        format!("../../codetracer-native-backend/target/debug/{}", exe_name),
-        format!("../../codetracer-native-backend/target/release/{}", exe_name),
-        format!("../../../codetracer-native-backend/target/debug/{}", exe_name),
-    ];
-
-    for loc in &dev_locations {
-        let path = manifest_dir.join(loc);
-        if path.exists() {
-            return Some(safe_canonicalize(&path));
-        }
-    }
-
-    // Check from home directory
-    if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
-        let home_path = PathBuf::from(home);
-        let home_locations = [
-            format!("metacraft/codetracer-native-backend/target/debug/{}", exe_name),
-            format!("codetracer-native-backend/target/debug/{}", exe_name),
+    // No sibling checkout: the legacy in-tree location (both profiles), then
+    // home directory locations.
+    if !workspace_root().join(SIBLING).is_dir() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let dev_locations = [
+            format!("../../codetracer-native-backend/target/debug/{}", exe_name),
+            format!("../../codetracer-native-backend/target/release/{}", exe_name),
         ];
-        for loc in &home_locations {
-            let path = home_path.join(loc);
+        for loc in &dev_locations {
+            let path = manifest_dir.join(loc);
             if path.exists() {
-                return Some(path);
+                return Some(safe_canonicalize(&path));
+            }
+        }
+
+        if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
+            let home_path = PathBuf::from(home);
+            let home_locations = [
+                format!("metacraft/codetracer-native-backend/target/debug/{}", exe_name),
+                format!("codetracer-native-backend/target/debug/{}", exe_name),
+            ];
+            for loc in &home_locations {
+                let path = home_path.join(loc);
+                if path.exists() {
+                    return Some(path);
+                }
             }
         }
     }
 
-    None
+    // The workspace sibling, built or refreshed now; with no checkout,
+    // `provision_sibling` fails naming it. The artifact is the one
+    // build-siblings.sh's entry names (`just ensure-ct-native-replay` builds
+    // the debug profile).
+    Some(provision_sibling(SIBLING, SIBLING, &format!("target/debug/{exe_name}")))
 }
 
 /// Check if rr is available (Unix only)
@@ -2290,9 +2514,16 @@ pub fn find_elixir_recorder_repo() -> Option<PathBuf> {
 /// Find the codetracer-beam-recorder binary.
 ///
 /// `CODETRACER_BEAM_RECORDER_BIN` (or the legacy alias
-/// `CODETRACER_ELIXIR_RECORDER_BIN`) overrides the binary. Otherwise the
-/// binary is resolved under the detected recorder repo, preferring debug
-/// builds for local test speed and release builds for CI/prebuilt checkouts.
+/// `CODETRACER_ELIXIR_RECORDER_BIN`) overrides the binary, and a recorder on
+/// PATH that is not the workspace sibling's own build is used as found.
+/// Otherwise, when the detected recorder repo is the workspace's
+/// `codetracer-beam-recorder` sibling (or no repo is detected at all), the
+/// binary is PROVISIONED by [`provision_sibling`]: built or refreshed with
+/// `scripts/build-siblings.sh --only codetracer-beam-recorder`, panicking when
+/// the sibling is not checked out or does not build. A repo named by
+/// `CODETRACER_BEAM_RECORDER_PATH` elsewhere is not built; its binary is
+/// resolved under it, preferring debug builds for local test speed and
+/// release builds for CI/prebuilt checkouts.
 pub fn find_beam_recorder() -> Option<PathBuf> {
     for env_var in ["CODETRACER_BEAM_RECORDER_BIN", "CODETRACER_ELIXIR_RECORDER_BIN"] {
         if let Ok(path) = env::var(env_var) {
@@ -2311,12 +2542,27 @@ pub fn find_beam_recorder() -> Option<PathBuf> {
         // Append the platform executable suffix (`.exe` on Windows) so the
         // PATH lookup finds the real binary.
         let exe_name = format!("{}{}", binary_name, std::env::consts::EXE_SUFFIX);
-        if let Some(path) = find_on_path(&exe_name) {
+        if let Some(path) = find_on_path(&exe_name)
+            && !is_in_workspace_sibling(&path, "codetracer-beam-recorder")
+        {
             return Some(path);
         }
     }
 
-    let repo = find_beam_recorder_repo()?;
+    let repo = match find_beam_recorder_repo() {
+        Some(repo) if !is_in_workspace_sibling(&repo, "codetracer-beam-recorder") => repo,
+        // The workspace sibling, or nothing detected: provision the sibling,
+        // which fails naming it when it is not checked out. The artifact is
+        // the one build-siblings.sh's entry names (`just build-native` builds
+        // the debug profile).
+        _ => {
+            return Some(provision_sibling(
+                "codetracer-beam-recorder",
+                "codetracer-beam-recorder",
+                &format!("target/debug/codetracer-beam-recorder{}", std::env::consts::EXE_SUFFIX),
+            ));
+        }
+    };
     for binary_name in ["codetracer-beam-recorder", "codetracer-elixir-recorder"] {
         for profile in ["debug", "release"] {
             // `target/<profile>/<name>` carries the `.exe` suffix on Windows.
@@ -2341,21 +2587,6 @@ pub fn find_elixir_recorder() -> Option<PathBuf> {
     find_beam_recorder()
 }
 
-/// Find the pure-Ruby recorder script.
-///
-/// Search order:
-/// 1. `CODETRACER_RUBY_RECORDER_PATH` env var (explicit override)
-/// 2. System PATH lookup for `codetracer-pure-ruby-recorder` (for gem-installed recorder)
-/// 3. Sibling repo (native): `../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`
-/// 4. Legacy submodule (native): `../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`
-///
-/// The native Ruby recorder writes the `.ct` CTFS container — the only
-/// supported materialized-trace format.  The legacy pure-Ruby recorder
-/// (`codetracer-pure-ruby-recorder`) only emits the legacy 3-file JSON
-/// shape, so it is no longer auto-detected here; an explicit override via
-/// `CODETRACER_RUBY_RECORDER_PATH` still works for out-of-tree experiments.
-///
-/// Returns `None` if a CTFS-capable recorder is not found.
 /// Find the PHP recorder C extension (`codetracer.so`).
 ///
 /// Search order:
@@ -2395,6 +2626,35 @@ pub fn find_php_recorder() -> Option<PathBuf> {
     None
 }
 
+/// Find the native Ruby recorder's launcher script.
+///
+/// Search order:
+/// 1. `CODETRACER_RUBY_RECORDER_PATH` env var (explicit override)
+/// 2. System PATH lookup for `codetracer-ruby-recorder` (a gem-installed
+///    recorder), unless the hit is the workspace sibling's own wrapper
+/// 3. The workspace's `codetracer-ruby-recorder` sibling, PROVISIONED: its
+///    native extension is built or refreshed by
+///    `scripts/build-siblings.sh --only codetracer-ruby-recorder` (see
+///    [`provision_sibling`]), which panics when the build fails
+/// 4. Only when that sibling is not checked out: the legacy submodule
+///    `../../libs/codetracer-ruby-recorder/…`; and when that is absent too,
+///    [`provision_sibling`] panics naming the missing checkout
+///
+/// The sibling's wrapper (`gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder`)
+/// is CHECKED IN, so its presence says nothing about whether the recorder
+/// works: what it loads is the compiled extension
+/// `ext/native_tracer/target/release/codetracer_ruby_recorder.<DLEXT>`, absent
+/// from a fresh clone. Returning the wrapper unbuilt is how every Ruby
+/// recording failed with "native tracer unavailable: cannot load such file",
+/// so the extension is what gets provisioned, and the wrapper what is returned.
+///
+/// The native Ruby recorder writes the `.ct` CTFS container — the only
+/// supported materialized-trace format.  The legacy pure-Ruby recorder
+/// (`codetracer-pure-ruby-recorder`) only emits the legacy 3-file JSON
+/// shape, so it is no longer auto-detected here; an explicit override via
+/// `CODETRACER_RUBY_RECORDER_PATH` still works for out-of-tree experiments.
+///
+/// So this returns `Some` or panics; the `Option` stays for the callers.
 pub fn find_ruby_recorder() -> Option<PathBuf> {
     if let Ok(path) = env::var("CODETRACER_RUBY_RECORDER_PATH") {
         let p = PathBuf::from(&path);
@@ -2407,27 +2667,36 @@ pub fn find_ruby_recorder() -> Option<PathBuf> {
         );
     }
 
+    const SIBLING: &str = "codetracer-ruby-recorder";
+    const WRAPPER: &str = "gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder";
+
     // Check PATH (for gem-installed native recorder)
-    if let Some(path) = find_on_path("codetracer-ruby-recorder") {
+    if let Some(path) = find_on_path("codetracer-ruby-recorder")
+        && !is_in_workspace_sibling(&path, SIBLING)
+    {
         return Some(path);
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let locations = [
-        // Sibling repo (workspace layout) — native recorder
-        "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
-        // Legacy submodule — native recorder
-        "../../libs/codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
-    ];
+    // `just build-extension` names the extension with RbConfig's DLEXT, which
+    // build-siblings.sh asks Ruby for: `bundle` on macOS, `so` elsewhere.
+    let extension = format!(
+        "gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.{}",
+        if cfg!(target_os = "macos") { "bundle" } else { "so" }
+    );
+    let sibling = workspace_root().join(SIBLING);
 
-    for loc in locations {
-        let path = manifest_dir.join(loc);
-        if path.exists() {
-            return Some(safe_canonicalize(&path));
-        }
+    // No sibling checkout: the legacy submodule — native recorder
+    let legacy = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../libs/codetracer-ruby-recorder")
+        .join(WRAPPER);
+    if !sibling.is_dir() && legacy.exists() {
+        return Some(safe_canonicalize(&legacy));
     }
 
-    None
+    // The workspace sibling, its extension built or refreshed now; with no
+    // checkout, `provision_sibling` fails naming it.
+    provision_sibling(SIBLING, SIBLING, &extension);
+    Some(safe_canonicalize(&sibling.join(WRAPPER)))
 }
 
 /// Find the wazero binary for WASM recording.
@@ -2955,10 +3224,16 @@ pub fn record_skip(context: &str, reason: &str) {
 ///
 /// Search order:
 /// 1. `CODETRACER_JS_RECORDER_PATH` env var (explicit override)
-/// 2. System PATH lookup for `codetracer-js-recorder` (for npm-installed recorder)
-/// 3. Sibling repo: `../../../codetracer-js-recorder/packages/cli/dist/index.js`
+/// 2. System PATH lookup for `codetracer-js-recorder` (for npm-installed
+///    recorder), unless the hit is the workspace sibling's own build (its
+///    `node_modules/.bin` shim)
+/// 3. The workspace's `codetracer-js-recorder` sibling, PROVISIONED: its
+///    `packages/cli/dist/index.js` is built or refreshed by
+///    `scripts/build-siblings.sh --only codetracer-js-recorder` (see
+///    [`provision_sibling`]), which panics when the sibling is not checked
+///    out or does not build
 ///
-/// Returns `None` if the recorder is not found.
+/// So this returns `Some` or panics; the `Option` stays for the callers.
 pub fn find_js_recorder() -> Option<PathBuf> {
     // Check explicit environment variable first
     if let Ok(path) = env::var("CODETRACER_JS_RECORDER_PATH") {
@@ -2973,17 +3248,20 @@ pub fn find_js_recorder() -> Option<PathBuf> {
     }
 
     // Check PATH (for npm-installed recorder)
-    if let Some(path) = find_on_path("codetracer-js-recorder") {
+    if let Some(path) = find_on_path("codetracer-js-recorder")
+        && !is_in_workspace_sibling(&path, "codetracer-js-recorder")
+    {
         return Some(path);
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let recorder = manifest_dir.join("../../../codetracer-js-recorder/packages/cli/dist/index.js");
-    if recorder.exists() {
-        Some(safe_canonicalize(&recorder))
-    } else {
-        None
-    }
+    // The workspace sibling, built or refreshed now. The artifact is the one
+    // build-siblings.sh's entry names, and the one
+    // scripts/materialize-recording.sh uses (scripts/js-recorder-path.sh).
+    Some(provision_sibling(
+        "codetracer-js-recorder",
+        "codetracer-js-recorder",
+        "packages/cli/dist/index.js",
+    ))
 }
 
 /// Record a JavaScript trace by running the JS recorder CLI.
@@ -5552,6 +5830,13 @@ fn verify_flow_results(config: &FlowTestConfig, flow: &FlowData) -> Result<(), S
 /// `session-manager` moves the key and it runs again, which is the
 /// whole point.
 ///
+/// # Prerequisites
+///
+/// The tools the recording is made with are provisioned first, by
+/// [`provision_cross_process_recording_tools`], which keeps each tool the
+/// caller supplies through its override variable, unless the caller hands
+/// over the recording itself in `CT_RECORDINGS_DIR`.
+///
 /// # Failure
 ///
 /// Panics with the materialiser's diagnostic if the recording cannot be
@@ -5581,9 +5866,25 @@ pub fn materialized_recording(fixture: &str) -> PathBuf {
         .expect("resolve the repository root from the db-backend manifest directory");
     let script = repo_root.join("scripts/materialize-recording.sh");
 
-    let output = Command::new(&script)
-        .arg(fixture)
-        .current_dir(&repo_root)
+    let mut command = Command::new(&script);
+    command.arg(fixture).current_dir(&repo_root);
+    // The tools the recording is made with. The materialiser refuses to
+    // record without `ct-instrument`, `session-manager` and (for the
+    // three-trace fixture) a built codetracer-js-recorder, and nothing on a
+    // plain `cargo test` path used to build them, so every test replaying the
+    // recording failed on a fresh workspace (codetracer-pm issues/2026-10-22-
+    // db-backend-cargo-test-has-33-baseline-failures-on-agents.md). So they
+    // are provisioned here, except when an earlier stage handed down the
+    // recording itself (CT_RECORDINGS_DIR), which the materialiser then uses
+    // without recording anything. A tool the caller supplies through its
+    // override variable (`just test-rust` exports CODETRACER_RECORD_WEB_BIN)
+    // is kept: the provisioning script honours each of them and builds only
+    // the rest, and the variables reach the materialiser unchanged.
+    if env::var_os("CT_RECORDINGS_DIR").is_none() {
+        command.env("CODETRACER_RECORD_WEB_BIN", provision_cross_process_recording_tools());
+    }
+
+    let output = command
         // Inherit stderr: production takes tens of seconds and the
         // progress it prints is the only sign the suite has not hung.
         .stderr(Stdio::inherit())
@@ -5609,6 +5910,56 @@ pub fn materialized_recording(fixture: &str) -> PathBuf {
 
     guard.insert(fixture.to_string(), path.clone());
     path
+}
+
+/// Build the tools `scripts/materialize-recording.sh` records with, and
+/// return the `session-manager` executable to hand it as
+/// `CODETRACER_RECORD_WEB_BIN`.
+///
+/// This runs `scripts/provision-cross-process-recording.sh`, the script
+/// `just test-frontend-units` provisions the same recording with: it builds
+/// `ct-instrument` and codetracer-js-recorder through build-siblings.sh (each
+/// skipped when its override variable is set), builds `session-manager`
+/// (or, when `CODETRACER_RECORD_WEB_BIN` is set, takes that one), fails
+/// naming whatever is not checked out or does not build, and prints the
+/// session-manager path, which cargo may have put under a CARGO_TARGET_DIR
+/// rather than where the materialiser looks. Once per process, under the same
+/// locks as every other provisioning (see [`provision_once`]).
+fn provision_cross_process_recording_tools() -> PathBuf {
+    provision_once("provision-cross-process-recording", || {
+        let script = codetracer_root().join("scripts/provision-cross-process-recording.sh");
+        eprintln!(
+            "[test_harness] provisioning the recording tools: bash {}",
+            script.display()
+        );
+        // stdout is the one-line result; stderr, the progress of builds that
+        // can take minutes and the diagnostic when one fails, is inherited.
+        let output = Command::new("bash")
+            .arg(&script)
+            .current_dir(codetracer_root())
+            .stdin(Stdio::null())
+            .stderr(Stdio::inherit())
+            .output()
+            .map_err(|e| format!("could not run {}: {e}", script.display()))?;
+        if !output.status.success() {
+            return Err(format!(
+                "MISSING PREREQUISITE: could not provision the tools the materialised recordings are made \
+                 with: `bash {}` exited with {}. The list above names each tool that is not checked out or \
+                 did not build.",
+                script.display(),
+                output.status
+            ));
+        }
+        let session_manager = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if !session_manager.is_file() {
+            return Err(format!(
+                "`bash {}` reported `{}` as the session-manager, which is not a file",
+                script.display(),
+                session_manager.display()
+            ));
+        }
+        Ok(session_manager)
+    })
 }
 
 /// The three-recording cross-process demo: `frontend.ct`,

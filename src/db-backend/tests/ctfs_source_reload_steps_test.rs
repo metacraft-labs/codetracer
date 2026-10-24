@@ -4,6 +4,8 @@
 #![cfg(feature = "nim-reader")]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+mod test_harness;
+
 use codetracer_trace_types::{EventLogKind, Line, StepId, TypeKind, ValueRecord};
 use codetracer_trace_writer::{
     ctfs_writer::CtfsTraceWriter, step_stream::SourceReloadChange, trace_writer::TraceWriter,
@@ -83,9 +85,18 @@ fn fixture(dir: &Path, column_aware: bool) -> PathBuf {
     path.with_extension("ct")
 }
 
+/// Every source step and every reload marker, as `ct-print` reads them: the
+/// independent reader (not the db-backend's) the assertions are checked
+/// against. `test_harness::find_ct_print` builds or refreshes the workspace's
+/// codetracer-trace-format-nim/ct-print, or takes `CODETRACER_CT_PRINT`, and
+/// panics naming the sibling when it can do neither.
 fn independent_indices(path: &Path) -> (BTreeSet<StepId>, BTreeSet<StepId>) {
-    let binary = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../codetracer-trace-format-nim/ct-print");
-    let output = Command::new(binary).arg("--events").arg(path).output().unwrap();
+    let binary = test_harness::find_ct_print();
+    let output = Command::new(&binary)
+        .arg("--events")
+        .arg(path)
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {}: {e}", binary.display()));
     assert!(
         output.status.success(),
         "ct-print: {}",

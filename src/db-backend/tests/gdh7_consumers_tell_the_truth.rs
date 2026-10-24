@@ -66,6 +66,8 @@
 //! everywhere has not been shown to discriminate — this campaign has now found
 //! seven falsifiers that could not.
 
+mod test_harness;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -191,26 +193,20 @@ fn container(dir: &Path) -> PathBuf {
     ct
 }
 
-/// `ct-print`, the campaign's container inspector, resolved at the sibling path
-/// every GDH driver already uses.
+/// `ct-print`, the campaign's container inspector: the workspace's
+/// codetracer-trace-format-nim sibling builds it at the fixed path every GDH
+/// driver already uses (`../codetracer-trace-format-nim/ct-print`), and the
+/// harness builds or refreshes it there (`test_harness::find_ct_print`;
+/// `CODETRACER_CT_PRINT` overrides it).
 ///
 /// It is a SECOND, INDEPENDENT reader, deliberately not the one under test: the
 /// reload markers this harness ties its navigation to must be read from the
 /// container rather than assumed from the fixture, and reading them with the
-/// very reader whose correctness is the subject would be circular.
+/// very reader whose correctness is the subject would be circular. Its absence
+/// is an instrument failure, never a reason to skip: `find_ct_print` panics,
+/// naming the sibling, when it cannot be built.
 fn ct_print() -> PathBuf {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../codetracer-trace-format-nim/ct-print")
-        .canonicalize()
-        .unwrap_or_else(|e| {
-            panic!(
-                "GDH7-CHECK-FAIL: ct-print not resolvable next to the workspace \
-                 (../../../codetracer-trace-format-nim/ct-print): {e}. Build it with \
-                 `scripts/build-siblings.sh --only codetracer-trace-format-nim/ct-print` (or \
-                 `just build-ct-print` in that checkout). It is this harness's independent \
-                 container reader and its absence is an instrument failure, not a reason to skip."
-            )
-        });
+    let p = test_harness::find_ct_print();
     assert!(
         p.is_file(),
         "GDH7-CHECK-FAIL: ct-print at {} is not a file",

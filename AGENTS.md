@@ -178,6 +178,27 @@ cargo build
 CODETRACER_HOME="$(mktemp -d)" cargo test
 ```
 
+### Sibling recorders and tools are built by the tests that need them
+
+Suites that drive a recorder or tool from a sibling checkout (BEAM, JS and
+Ruby recorders, `ct-native-replay`, `ct-print`, and the `ct-instrument` +
+JS recorder + `session-manager` set the materialised cross-process
+recordings are made with) provision it themselves: when no override names a
+tool, the finder in `tests/test_harness/mod.rs` runs
+`scripts/build-siblings.sh --only <key>` (or
+`scripts/provision-cross-process-recording.sh`) once per test binary, under
+a file lock shared by concurrent test binaries, and uses what it built. A
+current build costs a stamp check; the first run of a fresh workspace spends
+minutes building, with the progress on stderr.
+
+- A sibling that is not checked out, or does not build, FAILS the test with
+  the remedy. It never skips: the prerequisite is supplied, not waived.
+- An override is used as given and never built: the finder's environment
+  variable (`CT_NATIVE_REPLAY_PATH`, `CODETRACER_JS_RECORDER_PATH`,
+  `CODETRACER_BEAM_RECORDER_BIN`, `CODETRACER_RUBY_RECORDER_PATH`,
+  `CODETRACER_CT_PRINT`, `CODETRACER_RECORD_WEB_BIN`, …), or a tool on
+  `PATH` that is not the sibling's own build output.
+
 ### Tests never touch your real CodeTracer state: `CODETRACER_HOME`
 
 `CODETRACER_HOME` relocates EVERY per-user location CodeTracer has — the trace

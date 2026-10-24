@@ -113,14 +113,32 @@ print_log_tail() {
 	tail -n "$fail_tail_lines" "$log" | sed 's/^/  | /' >&2
 	echo "---- end of $label log ----" >&2
 }
-
 # Resolve the pinned compiler and zstd flags in one environment entry. Keep
 # errors per invocation: suppressing them hides activation failures, and four
 # independent entries repeat expensive provisioning before any build starts.
+#
+# Resolved LAZILY, by the first build that actually runs, not up front. The
+# lookup enters codetracer's dev shell, which costs 45-95 s even when that
+# shell is current (measured 2026-10-24 on nixos-ci-bare-003), while a run
+# whose artifacts all match their build stamps builds nothing and needs no
+# toolchain. The db-backend test harness asks this script for each sibling
+# once per test binary precisely so that a stale artifact is rebuilt; paying
+# the lookup up front made every such no-op answer cost a minute and a half
+# instead of a stamp check. Nothing a stamp records depends on the lookup:
+# the build commands reference $ZSTD_CFLAGS / $ZSTD_LIBS / $EXTRA_NIM_PATH
+# unexpanded, which is also why `--check` (which never looks up) agrees with
+# a building run about what is stale.
 EXTRA_NIM_PATH=""
 ZSTD_CFLAGS=""
 ZSTD_LIBS=""
-if [ "$CHECK_ONLY" -eq 0 ]; then
+export EXTRA_NIM_PATH ZSTD_CFLAGS ZSTD_LIBS
+TOOLCHAIN_RESOLVED=0
+# resolve_toolchain: run the lookup once per invocation and export the
+# results. A failure exits the script (no summary: no build has run, and the
+# lookup's own log is the only place its cause exists).
+resolve_toolchain() {
+	[ "$TOOLCHAIN_RESOLVED" -eq 0 ] || return 0
+	local toolchain_output toolchain_log
 	toolchain_output="$(mktemp "$LOG_DIR/toolchain.XXXXXX")" || exit 1
 	toolchain_log="${toolchain_output}.log"
 	# NUL-separated values preserve spaces and shell metacharacters as data.
@@ -140,9 +158,10 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
 		rm -f "$toolchain_output"
 		exit 1
 	fi
+	local nim_toolchain_bin nimble_toolchain_bin
 	if ! {
-		IFS= read -r -d '' NIM_TOOLCHAIN_BIN &&
-			IFS= read -r -d '' NIMBLE_TOOLCHAIN_BIN &&
+		IFS= read -r -d '' nim_toolchain_bin &&
+			IFS= read -r -d '' nimble_toolchain_bin &&
 			IFS= read -r -d '' ZSTD_CFLAGS &&
 			IFS= read -r -d '' ZSTD_LIBS
 	} <"$toolchain_output"; then
@@ -152,12 +171,12 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
 		exit 1
 	fi
 	rm -f "$toolchain_output"
-	EXTRA_NIM_PATH="$NIM_TOOLCHAIN_BIN"
-	if [ "$NIMBLE_TOOLCHAIN_BIN" != "$NIM_TOOLCHAIN_BIN" ]; then
-		EXTRA_NIM_PATH="$EXTRA_NIM_PATH:$NIMBLE_TOOLCHAIN_BIN"
+	EXTRA_NIM_PATH="$nim_toolchain_bin"
+	if [ "$nimble_toolchain_bin" != "$nim_toolchain_bin" ]; then
+		EXTRA_NIM_PATH="$EXTRA_NIM_PATH:$nimble_toolchain_bin"
 	fi
-fi
-export EXTRA_NIM_PATH ZSTD_CFLAGS ZSTD_LIBS
+	TOOLCHAIN_RESOLVED=1
+}
 
 # Per-repo results.
 declare -A RESULT_STATE  # repo -> PASS|SKIP|FAIL|MISSING
@@ -593,6 +612,10 @@ build_sibling() {
 	# undone would make it match again over whatever the failed build left in
 	# place.  No stamp means the next run rebuilds — the safe answer.
 	rm -f "$stamp"
+
+	# The first build of this run resolves the toolchain (see
+	# resolve_toolchain); one whose stamp matched returned above without it.
+	resolve_toolchain
 
 	# Sanitize key for log filename (no slashes).
 	local log_name="${key//\//__}"
