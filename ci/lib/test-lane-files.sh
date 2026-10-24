@@ -1054,6 +1054,21 @@ test_lane_files() {
 		# the suite above. Needs `git` and `sh` on PATH; writes only under one
 		# `mkdtemp` directory, which it removes.
 		echo src/frontend/tests/git_cli_refresh_snapshot_test.nim
+		# `vcs_panel_reload_test.nim`: the VCS panel's reload
+		# (`ui/vcs_reload.readPanelReload`, `panelStateOf`, `applyPanelState`,
+		# `requestPanelReload`) through the Electron process facade's
+		# `runLater`, over real repositories: the reads answer on a later turn
+		# while the event loop runs, the gathered state equals the synchronous
+		# reload's (clean, modified, staged, untracked, conflicted, detached,
+		# branches, commits, an expanded commit, no commits, not a repository,
+		# git missing), the panel changes in one step when every read has
+		# answered, a superseded reload is applied before the one that follows
+		# it (so a stream of requests cannot starve the panel), stale reloads
+		# are discarded, and a folderless session runs no git (VCS-Panel.md, "An
+		# auto-refresh never stalls the window"). Here for the same reason as
+		# the suite above. Needs `git` and `sh` on PATH; writes only under one
+		# `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/vcs_panel_reload_test.nim
 		echo src/frontend/tests/loop_built_handlers_test.nim
 		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;

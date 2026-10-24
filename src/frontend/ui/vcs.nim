@@ -13,7 +13,8 @@
 ##
 ## Git data is fetched with structured `git` argv calls via Node.js
 ## `child_process` (available in Electron's renderer process with
-## nodeIntegration enabled) — see ``ui/git_cli.nim``.
+## nodeIntegration enabled) — see ``ui/git_cli.nim``.  A reload of the panel
+## reads without waiting for git — see ``ui/vcs_reload.nim``.
 ##
 ## The panel is never itself a diff.  Clicking a changed file resolves through
 ## ``VCSVM.openActionFor`` to either a source tab or a unified-diff editor tab
@@ -28,7 +29,7 @@ import agent_activity
 from unified_diff import requestDocumentScroll
 from ../viewmodel/viewmodels/diff_target import isWholeCommitTarget
 import ../viewmodel/viewmodels/vcs_vm
-from ../viewmodel/platform/vcs import parsePorcelainV2
+import vcs_reload
 import ../viewmodel/viewmodels/review_entry
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
@@ -56,41 +57,9 @@ const
     ## Minimum interval between successive refreshes.
 
 # ---------------------------------------------------------------------------
-# Data loading helpers
-# ---------------------------------------------------------------------------
-
-proc loadCurrentBranch(self: VCSComponent, cwd: cstring) =
-  self.currentBranch = gitExec(@[cstring"branch", cstring"--show-current"], cwd)
-  if self.currentBranch.len == 0:
-    # Detached HEAD -- show abbreviated hash instead.
-    self.currentBranch = gitExec(@[cstring"rev-parse", cstring"--short", cstring"HEAD"], cwd)
-
-proc loadWorkingTree(self: VCSComponent, cwd: cstring) =
-  ## The working tree's changed files, read by the SAME `parsePorcelainV2`
-  ## the native front-ends' VCS facade reads with, so the three VCS panes
-  ## cannot disagree about a file's state (PLAT-47 deliverable 4).
-  let raw = gitExec(@[cstring"status", cstring"--porcelain=v2",
-                      cstring"--branch"], cwd)
-  self.workingTreeChanges = @[]
-  for row in workingTreeRowsOf(parsePorcelainV2($raw)):
-    self.workingTreeChanges.add VCSChangedFile(
-      status: cstring(row.status), filename: cstring(row.path))
-
-proc loadBranches(self: VCSComponent, cwd: cstring) =
-  let raw = gitExec(@[cstring"branch", cstring"--format=%(refname:short)"], cwd)
-  self.branches = @[]
-  if raw.len > 0:
-    for line in ($raw).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len > 0:
-        self.branches.add(cstring(trimmed))
-
-# ---------------------------------------------------------------------------
 # Commit graph lane-tracking algorithm
 # ---------------------------------------------------------------------------
 
-const commitPageSize = 50
-  ## Number of commits fetched per page for the infinite-scroll commit graph.
 
 const branchPalette = [
   "#818CF8", "#FB923C", "#4ADE80",
@@ -245,131 +214,23 @@ proc computeGraphRows(commits: seq[VCSCommit]): seq[GraphRow] =
       lanes.setLen(lanes.len - 1)
 
 proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
-  ## Fetch ``commitPageSize`` commits starting at ``skip``, parsing parent
-  ## hashes so the commit-graph algorithm can assign branch lanes.
-  ##
-  ## Format: ``<fullHash> <parent1> [<parent2> …>]\x1e<shortHash>\x1e<subject>\x1e<relDate>\x1e<absDate>\x1e<author>``
-  ## The ``%P`` token is a space-separated list of full parent hashes;
-  ## it is empty for root commits.  ``%cs`` produces the committer date in
-  ## short YYYY-MM-DD format (requires git ≥ 2.29).
-  const sep = "\x1e"
-  let prettyFmt = "%H %P" & sep & "%h" & sep & "%s" & sep & "%cr" & sep & "%cs" & sep & "%an"
-  let skipStr = "--skip=" & $skip
-  let countStr = "-" & $commitPageSize
-  let raw = gitExec(
-    @[cstring"log",
-      cstring("--pretty=format:" & prettyFmt),
-      cstring(skipStr),
-      cstring(countStr)],
-    cwd)
-
-  if skip == 0:
-    self.commits = @[]
-
-  # Rows appended by THIS call, so the caller can tell a full page from the
-  # last, short one. `commitOffset` used to advance by a flat `commitPageSize`
-  # whether or not any commit came back, which left the infinite-scroll
-  # sentinel with no way to know it had reached the end — see
-  # `allCommitsLoaded` in `VCSComponent`.
-  var appended = 0
-
-  if raw.len > 0:
-    for line in ($raw).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len == 0:
-        continue
-      let parts = trimmed.split(sep)
-      if parts.len < 1:
-        continue
-      # First field: "<fullHash> [<parent1> <parent2> …]"
-      let hashAndParents = parts[0].strip().split(" ")
-      let fullH = if hashAndParents.len > 0: hashAndParents[0] else: ""
-      var parents: seq[cstring] = @[]
-      for pIdx in 1 ..< hashAndParents.len:
-        let p = hashAndParents[pIdx].strip()
-        if p.len > 0:
-          parents.add(cstring(p))
-      let shortH    = if parts.len > 1: parts[1].strip() else: fullH[0..min(6, fullH.high)]
-      let subject   = if parts.len > 2: parts[2] else: ""
-      let relDate   = if parts.len > 3: parts[3] else: ""
-      let absDate   = if parts.len > 4: parts[4] else: ""
-      let authorStr = if parts.len > 5: parts[5] else: ""
-      self.commits.add(VCSCommit(
-        hash: cstring(shortH),
-        message: cstring(subject),
-        relativeTime: cstring(relDate),
-        date: cstring(absDate),
-        fullHash: cstring(fullH),
-        author: cstring(authorStr),
-        parents: parents,
-      ))
-      appended += 1
-
-  self.commitOffset = skip + appended
-  self.allCommitsLoaded = appended < commitPageSize
-
-proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
-  ## Load the files changed in a specific commit with diff --stat style info.
-  ## Uses `git diff-tree` which works for any commit without needing a parent
-  ## check (root commits are handled with --root).
-  let raw = gitExec(
-    @[cstring"diff-tree", cstring"--no-commit-id", cstring"-r", cstring"--numstat", commitHash], cwd)
-  self.changedFiles = @[]
-  if raw.len > 0:
-    for line in ($raw).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len == 0:
-        continue
-      # Format: <added>\t<deleted>\t<filename>
-      let parts = trimmed.split("\t")
-      if parts.len >= 3:
-        var added = 0
-        var deleted = 0
-        try:
-          added = parseInt(parts[0].strip())
-        except ValueError:
-          discard
-        try:
-          deleted = parseInt(parts[1].strip())
-        except ValueError:
-          discard
-        # Determine status from the change pattern.
-        let status = if added > 0 and deleted == 0: cstring"A"
-                     elif added == 0 and deleted > 0: cstring"D"
-                     else: cstring"M"
-        self.changedFiles.add(VCSChangedFile(
-          status: status,
-          filename: cstring(parts[2]),
-          additions: added,
-          deletions: deleted))
-
-  # If no numstat output, fall back to --name-status.
-  if self.changedFiles.len == 0:
-    let raw2 = gitExec(
-      @[cstring"diff-tree", cstring"--no-commit-id", cstring"-r", cstring"--name-status", commitHash], cwd)
-    if raw2.len > 0:
-      for line in ($raw2).splitLines():
-        let trimmed = line.strip()
-        if trimmed.len == 0:
-          continue
-        let parts = trimmed.split("\t")
-        if parts.len >= 2:
-          self.changedFiles.add(VCSChangedFile(
-            status: cstring(parts[0]),
-            filename: cstring(parts[1]),
-            additions: 0,
-            deletions: 0))
+  ## Fetch the page of commits starting at ``skip`` synchronously and put it
+  ## in the panel — `loadMoreCommits`' read, which answers the user's scroll.
+  ## A reload reads the first page without waiting (`ui/vcs_reload`).
+  self.applyCommitPage(commitPageNow(cwd, skip), skip)
 
 proc loadChangedFilesForIndex*(self: VCSComponent; cwd: cstring;
                                commitIndex: int) =
   ## Load changed files for the commit at ``commitIndex`` and store the result
   ## in ``commitFilesCache``.  A no-op if the index is out of range.
+  ##
+  ## Synchronous: it answers the user expanding a commit. A reload reads the
+  ## expanded commits' files without waiting (`vcs_reload.readPanelReload`).
   if commitIndex < 0 or commitIndex >= self.commits.len:
     return
   if self.commitFilesCache.isNil:
     self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-  let hash = self.commits[commitIndex].hash
-  self.loadChangedFiles(cwd, hash)
+  self.changedFiles = commitFilesNow(cwd, self.commits[commitIndex].hash)
   self.commitFilesCache[commitIndex] = self.changedFiles
 
 proc getWorkingDirectory(self: VCSComponent): cstring =
@@ -412,35 +273,55 @@ proc showNoProjectFolder(self: VCSComponent) =
   self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
   self.branchDropdownOpen = false
 
+proc startFileWatching(self: VCSComponent)
+
 proc refreshVCSData*(self: VCSComponent) =
-  ## Reload all VCS data from git.
+  ## Reload all VCS data from git, WITHOUT WAITING FOR IT (VCS-Panel.md, "An
+  ## auto-refresh never stalls the window"; codetracer-pm issue
+  ## `2026-10-23-vcs-reload-after-a-detected-change-runs-git-synchronously`).
+  ##
+  ## The reads are issued and this returns; the panel keeps showing what it
+  ## showed until all of them have answered, and then takes the new state in
+  ## one step (`vcs_reload.applyPanelState`) and redraws. A reload requested
+  ## while one is reading follows it: the one in flight is applied, then read
+  ## again. An answer read for a working directory or a set of expanded
+  ## commits the panel no longer shows is discarded and read again
+  ## (`vcs_reload.requestPanelReload`).
+  ##
+  ## Every reload goes this way: the auto-refresh's after a check found a
+  ## change, the first load, the refresh control and the one after a branch
+  ## checkout. None of their callers reads the panel's git state between the
+  ## call and the next render — each only pushes the panel into its
+  ## ViewModel, which the reload does again when it applies.
   # NO PROJECT FOLDER, NO GIT. A New File session's folder is empty, and an
   # empty working directory reaches git as "the platform's default" — the
   # process's own directory — so the panel drew the history of whatever
   # repository CodeTracer was launched from (codetracer-pm issue 2026-10-21).
   # `Welcome-Screen.md` §"New file, and what it creates" settles what this
   # session shows instead: the same absence as Test Results and Constraints.
+  # Shown at once: it needs no git.
   if self.hasNoProjectFolder():
+    self.watchAfterReload = false
     self.showNoProjectFolder()
     return
-  let cwd = self.getWorkingDirectory()
-  if not isGitRepository(cwd):
-    self.isGitRepo = false
-    self.errorMessage = cstring"Not a git repository"
-    return
-
-  self.isGitRepo = true
-  self.errorMessage = cstring""
-  self.loadCurrentBranch(cwd)
-  self.loadWorkingTree(cwd)
-  self.loadBranches(cwd)
-  self.loadCommits(cwd)
-
-  # Reload files for all currently expanded commits after a refresh.
-  # Indices that are now out-of-range are silently skipped.
-  self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-  for idx in self.selectedCommitIndices:
-    self.loadChangedFilesForIndex(cwd, idx)
+  if self.reload.isNil:
+    self.reload = VcsPanelReload()
+  requestPanelReload(self.reload,
+    proc(): VcsReloadTarget =
+      let cwd = self.getWorkingDirectory()
+      VcsReloadTarget(workingDirectory: (if cwd.isNil: "" else: $cwd),
+                      expanded: self.selectedCommitIndices),
+    proc(): bool = self.hasNoProjectFolder(),
+    proc(reads: VcsReloadReads) =
+      self.applyPanelState(panelStateOf(reads))
+      if self.watchAfterReload:
+        # The first load has landed: watch the repository it found, as the
+        # synchronous first load did right after it returned.
+        self.watchAfterReload = false
+        if self.isGitRepo:
+          self.startFileWatching()
+      self.syncLegacyVCSIntoVM()
+      data.redraw())
 
 proc commitRows(self: VCSComponent): seq[VCSCommitRow]
 
@@ -530,8 +411,9 @@ proc requestSnapshotCheck(self: VCSComponent) =
           self.lastStatusSnapshot = cstring(snapshot)
         elif cstring(snapshot) != self.lastStatusSnapshot:
           self.lastStatusSnapshot = cstring(snapshot)
+          # Does not wait either: the reload applies and redraws when its
+          # reads have answered (`refreshVCSData`).
           self.refreshVCSData()
-          data.redraw()
       # THE DEBOUNCE WINDOW OPENS WHEN A CHECK ANSWERS, as it did when the
       # reads were synchronous and "after the read" was the same moment as
       # "after the trigger". Opening it at the trigger instead would make it
@@ -632,9 +514,11 @@ proc safeStr(s: cstring): string =
 proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
+    # The load answers later; auto-refresh starts when it is applied, if it
+    # found a repository (`refreshVCSData`). Set before the call: a
+    # folderless session clears it again, and watches nothing.
+    self.watchAfterReload = true
     self.refreshVCSData()
-    if self.isGitRepo:
-      self.startFileWatching()
 
 proc reviewDataset(self: VCSComponent): ReviewDataset =
   ## The review this panel is showing, as the ViewModel layer's dataset.

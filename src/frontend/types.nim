@@ -706,6 +706,19 @@ type
       ## At least one trigger arrived while `inFlight`: exactly one more
       ## check starts when the current one answers, however many arrived.
 
+  VcsPanelReload* = ref object
+    ## The VCS panel's reload in flight, if any — the state
+    ## `ui/vcs_reload.requestPanelReload` keeps so that a reload requested
+    ## while one is reading is neither stacked nor lost. VCS-Panel.md, "An
+    ## auto-refresh never stalls the window": "A reload superseded by a newer
+    ## check or reload is still applied, and the newer one then reads again".
+    inFlight*: bool
+      ## The reload's reads have been issued and have not all answered.
+    followUp*: bool
+      ## Another reload was requested while `inFlight` (or the answer turned
+      ## out stale): exactly one more reload starts when the reads in flight
+      ## answer — after they are applied, or discarded if stale.
+
   VCSChangedFile* = object
     status*: cstring       ## "M", "A", "D", etc.
     filename*: cstring
@@ -755,6 +768,14 @@ type
       ## The change check in flight, if any (``VcsRefreshCheck``). Created
       ## by the first ``ui/vcs.requestSnapshotCheck`` — the baseline
       ## ``startFileWatching`` requests.
+    reload*: VcsPanelReload
+      ## The reload in flight, if any (``VcsPanelReload``). Created by the
+      ## first ``ui/vcs.refreshVCSData``.
+    watchAfterReload*: bool
+      ## The first load is in flight: when it is applied, auto-refresh starts
+      ## if it found a repository (``ui/vcs.ensureVCSDataLoaded``). The load
+      ## used to finish before ``refreshVCSData`` returned, so this was a
+      ## plain ``if`` after the call.
     debounceTimerId*: int
       ## ID of the debounce ``windowSetTimeout``. -1 when idle.
     debounceActive*: bool

@@ -331,11 +331,12 @@ proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
 proc electronProcess*(profile: PlatformProfile): ProcessFacade =
   ## The Electron renderer's process facade.
   ##
-  ## Exported for one reader, for the reason `electronVcs` below is:
-  ## `tests/git_cli_index_lock_test.nim` in the `renderer-dom` lane runs
-  ## `ui/git_cli.nim` under node, where `newDesktopElectronPlatform` finds no
-  ## `require('electron')` and falls back to the web profile, so the process
-  ## facade the shipped window runs git through is reachable only by name.
+  ## Exported for the readers that run `ui/git_cli.nim` under node in the
+  ## `renderer-dom` lane — `tests/git_cli_index_lock_test.nim` and
+  ## `tests/vcs_panel_reload_test.nim` — for the reason `electronVcs` below
+  ## is: there `newDesktopElectronPlatform` finds no `require('electron')` and
+  ## falls back to the web profile, so the process facade the shipped window
+  ## runs git through is reachable only by name.
   result = unavailableProcess(profile)
 
   result.run = proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
@@ -356,6 +357,50 @@ proc electronProcess*(profile: PlatformProfile): ProcessFacade =
       resolvedOk(ProcessRunResult(
         exit: ProcessExit(exitCode: 1, signalled: false),
         stdout: "", stderr: errorText()))
+
+  # `run` without the wait: `child_process.spawn` through the runner the VCS
+  # facade's asynchronous reads use (`node_certificate_host.nodeAsyncGitRunner`
+  # — named for git, but it runs whatever argv it is given), the future
+  # settled when the child closes. `run` above stays `execFileSync`: see
+  # `ProcessFacade.runLater` for who relies on that.
+  #
+  # What it reports is what the child did — its exit status, stdout and
+  # stderr — where `run` folds every failure into exit 1 with empty output.
+  # A child that could not be launched (ENOENT, a missing working
+  # directory), was killed, or wrote more than the runner captures, is a
+  # `pkFailed` carrying node's account of why: there is no exit status to
+  # report for it.
+  #
+  # `stdinText` and `clearEnv` are refused rather than dropped: the runner
+  # gives the child `/dev/null` and the inherited environment, so a caller
+  # that asked for either would otherwise get a different run from the one
+  # it described. `timeoutMs` is not enforced, as it is not by `run`.
+  let laterRunner = nodeAsyncGitRunner()
+  result.runLater = proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
+    if spec.stdinText.len > 0 or spec.clearEnv:
+      return resolvedErr[ProcessRunResult](pkNotSupported,
+        "runLater cannot feed stdin or clear the environment on this platform")
+    let shown = spec.command
+    var env: seq[(string, string)] = @[]
+    for (key, value) in spec.env:
+      env.add (key, value)
+    jsGuard:
+      settledLater(proc(settle: proc(value: PlatformOutcome[ProcessRunResult])) =
+        laterRunner(GitCall(argv: @[spec.command] & spec.args,
+                            cwd: spec.workingDir, env: env),
+          proc(reply: GitReply) {.closure, gcsafe.} =
+            {.cast(gcsafe).}:
+              if reply.exitCode < 0 or not reply.complete:
+                settle(failed[ProcessRunResult](pkFailed, "running " & shown & " failed",
+                  if reply.stderr.strip().len > 0: reply.stderr.strip()
+                  elif not reply.complete: "the output was more than could be captured"
+                  else: "exit " & $reply.exitCode))
+              else:
+                settle(succeeded(ProcessRunResult(
+                  exit: ProcessExit(exitCode: reply.exitCode, signalled: false),
+                  stdout: reply.stdout, stderr: reply.stderr)))))
+    do:
+      resolvedErr[ProcessRunResult](pkFailed, "running " & shown & " failed", errorText())
 
   # `start`, `signal`, `writeStdin`, `closeStdin` and `isRunning` are left
   # refusing, and the profile below drops `capProcessSpawn`'s watchable half
@@ -465,9 +510,9 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
   ## answering later changes no caller's answer.
   ##
   ## The other operations still use `execFileSync`. They run when the user
-  ## acts (stage, a diff, a blob) rather than on a timer, and the pane's own
-  ## reload after a refresh found a change still runs git through
-  ## `ui/git_cli.gitExec` and the process facade.
+  ## acts (stage, a diff, a blob) rather than on a timer. The pane's own
+  ## reload runs git through `ui/git_cli.gitReadLater` and the process
+  ## facade's `runLater`, which does not block either.
   result = unavailableVcs(profile)
 
   proc git(repository: string; args: seq[string]): PlatformOutcome[string] =

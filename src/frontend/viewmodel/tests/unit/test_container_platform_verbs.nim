@@ -38,7 +38,7 @@ import ../../platform/platform
 import ../../platform/endpoint_codec
 import ../../host/container_platform
 
-const ExpectedAssertions = 422
+const ExpectedAssertions = 428
 var counted = 0
 template ck(cond: untyped) =
   inc counted
@@ -337,6 +337,23 @@ suite "process verbs":
       ck outcome.value.exit.signalName == "SIGKILL"
       ck outcome.value.stdout == "compiled"
       ck outcome.value.stderr == Awkward
+
+  test "process.runLater is process.run on the wire, not a verb of its own":
+    # The container's answer already comes back over the socket, so its
+    # `runLater` is `run` (`ProcessFacade.runLater`): a second verb would be
+    # one the endpoint does not serve.
+    withEndpoint:
+      nextPayload = encodeProcessRunResult(ProcessRunResult(
+        exit: ProcessExit(exitCode: 0), stdout: "main", stderr: ""))
+      let outcome = awaitOutcome(remote.process.runLater(
+        processSpec("git", @["branch", "--show-current"], workingDir = "/w")))
+      ck seenVerb == "process.run"
+      let sent = decodeProcessSpec(jrequire(seenArgs, "spec"))
+      ck sent.command == "git"
+      ck sent.args == @["branch", "--show-current"]
+      ck sent.workingDir == "/w"
+      ck outcome.ok
+      ck outcome.value.stdout == "main"
 
   test "process.start returns an opaque handle and sends neither callback":
     withEndpoint:

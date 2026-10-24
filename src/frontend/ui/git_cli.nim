@@ -187,6 +187,91 @@ proc gitExec*(args: seq[cstring], cwd: cstring): cstring =
   output.strip().cstring
 
 # ---------------------------------------------------------------------------
+# GIT WITHOUT THE WAIT: `gitExec`'s answer, delivered later.
+#
+# `gitExec` stays synchronous for the callers that read the repository
+# straight after a user acted on it. The VCS panel's reload does not need its
+# answers inline, and on the desktop waiting for them froze the window once
+# for every git process (codetracer-pm issue
+# `2026-10-23-vcs-reload-after-a-detected-change-runs-git-synchronously`), so
+# it reads through these two instead. The same argv, the same
+# `noIndexLockGitArgs`, the same capability guard and the same answer —
+# trimmed stdout, or "" for any failure — as `gitExec`; only the delivery
+# differs. They go through `ProcessFacade.runLater`, which on the desktop
+# launches git with `child_process.spawn`, rather than `run`, which there is
+# `execFileSync`.
+# ---------------------------------------------------------------------------
+
+proc gitReadLater*(args: seq[cstring]; cwd: cstring; done: proc(output: cstring)) =
+  ## Run one git command in `cwd` and call `done` exactly once with what
+  ## `gitExec` would have returned for it.
+  ##
+  ## `done` runs on a later turn of the event loop, and the caller's thread is
+  ## not held meanwhile. It runs before this returns only when the platform
+  ## answered at once — it cannot run programs, or refused — so a caller must
+  ## not depend on either order.
+  var answered = false
+  proc answer(output: cstring) =
+    if not answered:
+      answered = true
+      done(output)
+  # `runGit`'s guard, for `runGit`'s reasons.
+  if not ctPlatform().canAll({capProcessSpawn, capProcessArbitraryPrograms}):
+    answer(cstring"")
+    return
+  var plain: seq[string] = @[]
+  for arg in args:
+    plain.add $arg
+  let future =
+    try:
+      ctPlatform().process.runLater(ProcessSpec(
+        command: "git",
+        args: noIndexLockGitArgs(plain),
+        workingDir: (if cwd.isNil: "" else: $cwd),
+        timeoutMs: gitTimeoutMs))
+    except:
+      resolvedErr[ProcessRunResult](pkFailed, "process.runLater raised",
+                                    getCurrentExceptionMsg())
+  future.onComplete(
+    proc(settled: PlatformOutcome[ProcessRunResult]) =
+      if settled.ok and settled.value.exit.succeededExit:
+        answer(settled.value.stdout.strip().cstring)
+      else:
+        answer(cstring""),
+    proc(message: string) = answer(cstring""))
+  # An answer the platform already had is delivered through nim-everywhere's
+  # queue; see the same call in `readRefreshSnapshot`.
+  drainPlatformCallbacks()
+
+proc gitReadAllLater*(calls: seq[seq[cstring]]; cwd: cstring;
+                      done: proc(outputs: seq[cstring])) =
+  ## Run every command of `calls` in `cwd` through `gitReadLater`, all of
+  ## them issued before any is waited on, and call `done` once — when the
+  ## LAST has answered — with their outputs in the order of `calls`. Never
+  ## with some of them: a caller that applies the answers together cannot
+  ## see half of them. No calls answers `@[]` at once.
+  if calls.len == 0:
+    done(@[])
+    return
+  var outputs = newSeq[cstring](calls.len)
+  # Counted down from the full number BEFORE the first is issued, so an
+  # answer delivered while the rest are still being issued cannot finish the
+  # join early.
+  var waiting = calls.len
+  # One proc per call, not a closure built in the loop body: Nim makes one
+  # closure environment per routine, not per iteration, so every answer
+  # would land in the LAST slot (.agents/codebase-insights.txt, "Every
+  # closure built in a `for` body shares ONE binding").
+  proc issue(slot: int) =
+    gitReadLater(calls[slot], cwd, proc(output: cstring) =
+      outputs[slot] = output
+      dec waiting
+      if waiting == 0:
+        done(outputs))
+  for slot in 0 ..< calls.len:
+    issue(slot)
+
+# ---------------------------------------------------------------------------
 # THE PANEL'S CHANGE CHECK, which never waits for git.
 #
 # The VCS panel decides whether anything changed — every 5 s and on window

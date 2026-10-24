@@ -447,15 +447,20 @@ proc buildProcess(web: WebPlatform; profile: PlatformProfile): ProcessFacade =
   proc resolvedModule(spec: ProcessSpec): WasmResolution =
     host.registry.resolve(spec.command, spec.args)
 
+  let runModule = proc(spec: ProcessSpec
+                      ): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
+    let resolution = resolvedModule(spec)
+    if resolution.kind != wrResolved:
+      return resolved(refuse[ProcessRunResult](spec.command, spec.args))
+    host.run(resolution.module.moduleId, spec)
+
   ProcessFacade(
     profile: profile,
 
-    run: proc(spec: ProcessSpec
-             ): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
-      let resolution = resolvedModule(spec)
-      if resolution.kind != wrResolved:
-        return resolved(refuse[ProcessRunResult](spec.command, spec.args))
-      host.run(resolution.module.moduleId, spec),
+    run: runModule,
+    # The module runs in a worker and answers by message, so `run` already
+    # never holds the tab's thread: `runLater` is the same operation.
+    runLater: runModule,
 
     start: proc(spec: ProcessSpec;
                 onOutput: proc(chunk: ProcessOutputChunk);

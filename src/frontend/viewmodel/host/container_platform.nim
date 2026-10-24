@@ -265,6 +265,9 @@ proc newContainerPlatform*(transport: RemoteTransport;
     callRemote[ProcessRunResult](transport, "process.run",
                                  %*{"spec": encodeProcessSpec(spec)},
                                  decodeProcessRunResult)
+  # The answer comes back over the socket, so `run` never holds the caller's
+  # thread: `runLater` is the same verb on the wire, not a second one.
+  result.process.runLater = result.process.run
   result.process.start = proc(spec: ProcessSpec;
                               onOutput: proc(chunk: ProcessOutputChunk);
                               onExit: proc(exit: ProcessExit)): auto =
