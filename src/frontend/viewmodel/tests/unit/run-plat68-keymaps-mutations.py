@@ -145,6 +145,9 @@ INDEX_MENU = "src/frontend/index/menu.nim"
 DIALOG = "src/frontend/ui/shortcut_dialog.nim"
 MENU_ACCEL_T = "src/frontend/viewmodel/tests/unit/test_plat68_menu_accelerators.nim"
 DIALOG_T = "src/frontend/tests/shortcut_dialog_test.nim"
+# The real-stack boxes' suites (k1: the terminal and GPUI halves).
+PTYC = "src/frontend/tui/tests/real_terminal/test_plat68c_pty.nim"
+GPUIC = "src/frontend/gpui/tests/test_plat68c_gpui_plan.nim"
 
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
             ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
@@ -153,6 +156,7 @@ SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
           LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
           PROPAGATION, MENU, DIFF13_POP, DIFF13_DEV, MENU_ACCEL_T, DIALOG_T]
+          PROPAGATION, MENU, PTYC, GPUIC]
 
 SEQUENCE = "*::the milestone's sequence, Ctrl+S, and the file on disk"
 RESTORED = "*::the pop or the reset is written on SIGTERM, SIGHUP and a crash"
@@ -437,6 +441,47 @@ ARMS = [
              "    if false:")],
      [(DIALOG_T, "*::the shortcut reference*")],
      "the shortcut reference drops the shadow mark"),
+
+    # --- k1: the real-stack boxes on the terminal and GPUI ---
+    ("C1", [(CUA, "  Ro = \"productMode == debug && editorFocus && editorReadOnly && !textInputFocus\"",
+             "  Ro = \"productMode == debug && editorFocus && !textInputFocus\"")],
+     [(PTYC, "*::writable, n is typed*"),
+      (GPUIC, "*::writable, n is typed*")],
+     "the letters' `when` loses `editorReadOnly`"),
+    ("C2", [(CUA, "  Ro = \"productMode == debug && editorFocus && editorReadOnly && !textInputFocus\"",
+             "  Ro = \"productMode == debug && editorFocus && editorReadOnly\"")],
+     [(PTYC, "*::the find field takes n*"),
+      (GPUIC, "*::the find field: n is typed*")],
+     "the letters' `when` loses `!textInputFocus`"),
+    ("C3", [(ROUTER, "            by = \"your row \" & $(s.userIndex + 1)",
+             "            discard")],
+     [(PTYC, "*::a user row with no `when` takes Enter*"),
+      (GPUIC, "*::a user row with no `when` takes Enter*")],
+     "the shortcut reference does not mark a shadowed base row"),
+    ("C4", [(GPUI_MAIN, "    openArm.status = note\n    redrawEditor()",
+             "    discard note\n    redrawEditor()")],
+     [(GPUIC, "*::F12 in Edit mode*")],
+     "GPUI: a key inert in this product mode is not said on the status bar"),
+    ("C8", [(GPUI_MAIN, "      gStatusNote = (note, epochTime() + StatusNoteSeconds)",
+             "      discard note")],
+     [(GPUIC, "*::Ctrl+S in a replay saves nothing*")],
+     "GPUI: a key inert in a replay is not said on the status bar"),
+    ("C9", [(RUNTIME, "  if rt.prompt.open and (owner.len == 0 or owner == \"window\" or",
+             "  if rt.prompt.open and (true or owner == \"window\" or")],
+     [(PTYC, "*::find is its owner's*")],
+     "the terminal's find field is on the path wherever the focus is"),
+    ("C5", [(RUNTIME, "  if rt.router.expirePending(nowMs):",
+             "  if false:")],
+     [(PTYC, "*::Vim's g ends at 1000 ms*")],
+     "a timed-out prefix stays on the status line until the next key"),
+    ("C6", [(RUNTIME, "  of \"help.keyboard-shortcuts\":\n    rt.showShortcutReference(outcome)",
+             "  of \"help.keyboard-shortcuts\":\n    discard")],
+     [(PTYC, "*::a user row with no `when` takes Enter*")],
+     "the terminal's Ctrl+K Ctrl+S shows no reference"),
+    ("C7", [(ROUTER, "  for l in activeLayers(router.stack, path):\n    result.add (l.table, true)",
+             "  for l in activeLayers(router.stack, path):\n    discard l")],
+     [(PTYC, "*::find is its owner's*")],
+     "an open find widget's pushed layer is never asked"),
 ]
 DECLARED_SURVIVORS = {"N1"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
@@ -446,7 +491,7 @@ IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
 IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE, CHROME,
            GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS, GPUI_KEYS}
   # Subjects compiled into `codetracer-gpui`.
-GPUI_SUITES = {GPUIK, DIFF13}
+GPUI_SUITES = {GPUIK, DIFF13, GPUIC}
   # Suites that run the GPUI binary.
 
 
@@ -473,7 +518,7 @@ def lane_flags(lane):
 
 
 def suite_flags(suite):
-    if suite in (PTY, PTYB):
+    if suite in (PTY, PTYB, PTYC):
         return lane_flags("tui-real-terminal")
     if suite.startswith("src/frontend/tui/"):
         return lane_flags("tui")
@@ -723,7 +768,7 @@ def main():
         return 3
     only = set(filter(None, a.only.split(",")))
     selected = [arm for arm in ARMS if not only or arm[0] in only]
-    needs_binary = any(s in (PTY, PTYB) for arm in selected for s, _ in arm[2])
+    needs_binary = any(s in (PTY, PTYB, PTYC) for arm in selected for s, _ in arm[2])
     needs_gpui = any(s in GPUI_SUITES for arm in selected for s, _ in arm[2])
     binary_digest = None
     gpui_digest = None
@@ -758,7 +803,7 @@ def main():
             for rel, find, replace in edits:
                 path = path_of(rel)
                 path.write_text(path.read_text().replace(find, replace, 1))
-            through_pty = any(s in (PTY, PTYB) for s, _ in suites)
+            through_pty = any(s in (PTY, PTYB, PTYC) for s, _ in suites)
             through_gpui = any(s in GPUI_SUITES for s, _ in suites)
             built, refusal = True, ""
             if through_pty and any(r in IN_BINARY for r in files):
