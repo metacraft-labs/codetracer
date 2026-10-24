@@ -938,6 +938,14 @@ const
     # `ct record prog -- a b`: the program may stand before `--` (CLI/ct/record.md,
     # "Program arguments"); the resolver and both forms through the real ct.
     "src/tests/cli/record_child_argv_test.nim",
+    # `ct record main.nim` must produce a recording the replay engine can
+    # OPEN, not merely a container: the `.nim` compile step built `-d:release`
+    # with no DWARF, every recording succeeded, and every replay failed at
+    # launch ("MCR run-to-entry stopped without source location").  The
+    # dispatch e2e above stops at "a CTFS container came out" and stayed green
+    # throughout, so this is the only check of that property; registered so it
+    # cannot quietly stop running.
+    "src/tests/cli/record_nim_debuginfo_e2e_test.nim",
   ]
 
   CliReviewGateTests* = [

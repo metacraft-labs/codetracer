@@ -87,6 +87,36 @@ proc recordWithCtRrSupport(
   result = importTrace(traceFolder, recordingId, NO_PID, LangUnknown, DB_SELF_CONTAINED_DEFAULT, traceKind=traceKind)
 
 
+proc copyMacroSourcemaps(nimcacheDir, traceFolder: string) =
+  ## Copy the compiler's ``macro_sourcemap*.json`` from ``nimcacheDir`` to the
+  ## trace folder root.
+  ##
+  ## The codetracer Nim fork writes the macro-expansion map into the nimcache
+  ## (codetracer-nim ``compiler/cgen.nim`` ``cgenWriteModules``: "a build side
+  ## output … written into the nimcache"), but every reader looks for it in
+  ## the trace folder ROOT: replay-server's ``load_macro_sourcemaps``
+  ## (``src/db-backend/src/macro_sourcemap.rs``, called with the launch's
+  ## trace folder), the native backend's twin of it, and the GUI's
+  ## ``findMacroSourcemapPath`` (``src/frontend/index/traces.nim``), whose
+  ## answer decides ``hasMacroSourcemap``.  All three document it as "placed
+  ## in the trace directory during recording"; this is that placement.
+  ##
+  ## Best effort, like the native backend's ``copy_sourcemap_files``: the
+  ## recording is complete without it (only macro-expansion views lose their
+  ## data), so a failure is reported and the recording goes on.
+  if not dirExists(nimcacheDir):
+    return
+  for kind, path in walkDir(nimcacheDir):
+    if kind notin {pcFile, pcLinkToFile}:
+      continue
+    let name = path.extractFilename
+    if name.startsWith("macro_sourcemap") and name.endsWith(".json"):
+      try:
+        copyFile(path, traceFolder / name)
+      except OSError:
+        echo fmt"warning: could not copy {path} to {traceFolder}: " &
+          getCurrentExceptionMsg()
+
 proc recordNim(
     program: string, args: seq[string],
     traceFolder: string,
@@ -101,10 +131,18 @@ proc recordNim(
   ##   ``feature/M-nim-column-aware``) emits a CTFS-format ``.ct`` container
   ##   straight into the trace folder, which importTrace then ingests.
   ##
-  ## * ``.nim`` (default) — first compiled to a native binary with
-  ##   ``nim c -o:<binary> <program>`` into the trace folder, then recorded
-  ##   with the MCR ``ct-mcr record`` tool.  MCR writes a ``trace.ct``
-  ##   container next to the binary, again consumable by importTrace.
+  ## * ``.nim`` (default) — first compiled to a native binary in the trace
+  ##   folder with debug info, no optimisation and the generated C kept in
+  ##   ``<traceFolder>/nimcache`` (``nimNativeCompileArgs`` in
+  ##   ``trace/recorder_dispatch.nim``, the counterpart of the native backend's
+  ##   ``compile_nim``), then recorded with the MCR ``ct-mcr record`` tool.
+  ##   MCR writes a ``trace.ct`` container next to the binary, again
+  ##   consumable by importTrace.  The replay needs that DWARF to place even
+  ##   its entry stop: a ``-d:release`` build without it recorded fine and
+  ##   then failed every launch with "MCR run-to-entry stopped without source
+  ##   location".  The compiler's ``macro_sourcemap_*.json`` is copied from
+  ##   the nimcache to the trace folder root, where its readers look
+  ##   (``copyMacroSourcemaps``).
   ##
   ## The temp compile step is the simplest plausible bridge — it intentionally
   ## does not handle multi-file Nim projects with ``.nimble`` manifests or
@@ -150,21 +188,16 @@ proc recordNim(
 
   let compiledName = program.splitFile.name
   let binaryPath = traceFolder / compiledName
-  let compileArgs = @[
-    "c",
-    "--hints:off",
-    "-d:release",
-    "-o:" & binaryPath,
-    program
-  ]
+  let nimcacheDir = traceFolder / "nimcache"
   let compileProcess = startProcess(
     nimCompilerExe(),
-    args = compileArgs,
+    args = nimNativeCompileArgs(program, binaryPath, nimcacheDir),
     options = {poEchoCmd, poParentStreams})
   let compileExit = waitForExit(compileProcess)
   if compileExit != 0:
     echo fmt"error: nim c exited with {compileExit} for {program}"
     quit(1)
+  copyMacroSourcemaps(nimcacheDir, traceFolder)
 
   # MCR ``record -o <out.ct>`` produces a single CTFS container.  We point it
   # at ``<traceFolder>/trace.ct`` so importTrace's findCtFileInFolder picks
