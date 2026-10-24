@@ -134,11 +134,16 @@ SESSTABS = "src/frontend/headless_app/session_tabs.nim"
 CALLVIEW = "src/frontend/tui/app/views/call_trace.nim"
 EVLOGVIEW = "src/frontend/tui/app/views/event_log.nim"
 TUISESSION = "src/frontend/tui/host/tui_session.nim"
+# The native hosts' shared driver (`ad7805dbd`): what follows a call-trace
+# click or toggle, for the terminal and GPUI alike.
+SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
 NATIVEHOST = "src/frontend/tui/host/native_host.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
 GESTURES = "src/frontend/gpui/window_gestures.nim"
-DESKEVLOG = "src/frontend/ui/event_log.nim"
-DESKCALL = "src/frontend/ui/calltrace.nim"
+# `ui/event_log.nim` and `ui/calltrace.nim` are no longer subjects: the
+# desktop draws both panes through the ONE generic view each
+# (`1c18341dd`, `730399e0e`) and decodes the call trace with the shared
+# store, so EL8, EM1 and CT14 aim there (re-aimed 2026-10-23).
 OMNISRC = "src/frontend/viewmodel/viewmodels/omnibar_sources.nim"
 # The review's subjects (2026-10-03): the footer's file info, the session
 # strip's "+" and the hosts that open a second session, the desktop's column
@@ -180,7 +185,7 @@ SUBJECTS = [TOPBAR, SHELL, BINDING, RUNTIME, ROLES, STATUS, VARS, TUIMAIN,
             GPUIMAIN, PRODMODE, CARET,
             CALLVM, EVLOGVM, STORE, INTERACT, LAYMODEL, HOVER, SESSTABS,
             CALLVIEW, EVLOGVIEW, TUISESSION, NATIVEHOST, GPUILEAVES,
-            GESTURES, DESKEVLOG, DESKCALL, OMNISRC,
+            GESTURES, SESSDRIVER, OMNISRC,
             FOOTERINFO, TUIAPP, DESKEVLOGVIEW, GPUISHELL, GLHIT]
 SUITES = [VMU, T1, REF, PROF, PTY, GPLAN, DESKTOP_GATE,
           VMU2, T2, REF2, PTY2, GPLAN2, DESKTOP_GATE_B]
@@ -618,14 +623,14 @@ ARMS = [
         '  NoShapeTerms* = ["dumb", ',
         P_DRAWN,
         "isonim-tui tells the Linux console it shapes its cursor"),
+    # DT1 RE-AIMED 2026-10-23: `277ebc777` made the palette ONE view for
+    # every renderer, so the DOM variant's copy of the placeholder is gone;
+    # the one left is the desktop's input.
     Arm("DT1", DESKPALETTE,
-        "variant above draws it.\n                  placeholder = OmnibarPlaceholder,\n",
-        'variant above draws it.\n                  placeholder = "Search...",\n',
+        "draw the same words.\n                placeholder = OmnibarPlaceholder,\n",
+        'draw the same words.\n                placeholder = "Search...",\n',
         D_DESKTOP,
-        "the desktop's palette (the DOM renderer's input) keeps words of its own",
-        also=((DESKPALETTE,
-               "draw the same words.\n                placeholder = OmnibarPlaceholder,\n",
-               'draw the same words.\n                placeholder = "Search...",\n'),)),
+        "the desktop's palette (the DOM renderer's input) keeps words of its own"),
 
     # --- 10. key hints ---------------------------------------------------------
     Arm("KH1", STATUS,
@@ -710,9 +715,11 @@ ARMS = [
         "      of cthRow:\n        outcome.jumpsToCall = false\n",
         P2_JUMP,
         "a click on a call-trace row goes nowhere"),
-    Arm("CT9", TUISESSION,
-        "  let command = if line.isExpanded: \"ct/collapse-calls\" else: \"ct/expand-calls\"\n",
-        "  let command = if line.isExpanded: \"ct/expand-calls\" else: \"ct/collapse-calls\"\n",
+    # CT9 RE-AIMED 2026-10-23: `ad7805dbd` moved the terminal's toggle into
+    # the hosts' shared driver (`session_driver.toggleCallChildren`).
+    Arm("CT9", SESSDRIVER,
+        "  let command = if collapse: \"ct/collapse-calls\" else: \"ct/expand-calls\"\n",
+        "  let command = if collapse: \"ct/expand-calls\" else: \"ct/collapse-calls\"\n",
         P2_JUMP,
         "the terminal's toggle expands an expanded call instead of collapsing it"),
     Arm("CT10", GPUILEAVES,
@@ -720,9 +727,11 @@ ARMS = [
         "        of csPunct, csArgName, csArgValue: CallTextColour\n",
         G2_ROWS,
         "GPUI draws the arguments in the body text, not their colour"),
+    # CT11 RE-AIMED 2026-10-23: `ad7805dbd`: GPUI's row press goes to the
+    # call through the shared driver (`session_driver.jumpToCall`).
     Arm("CT11", GPUIMAIN,
-        "    gSession.calltraceJumpByLine(line)\n",
-        "    discard line\n",
+        "  let why = gSession.jumpToCall(row.index)\n",
+        "  let why = \"\"\n",
         G2_JUMP,
         "a press on a GPUI call-trace row goes nowhere"),
     Arm("CT12", NATIVEHOST,
@@ -735,9 +744,12 @@ ARMS = [
         "       l.depth == stack.len:\n",
         S2_ROLES,
         "the current call is looked for one level too deep"),
-    Arm("CT14", DESKCALL,
-        "    if text.len > 0:\n      result.add makeCallArg(\"__return\", text)\n",
-        "    if false:\n      result.add makeCallArg(\"__return\", text)\n",
+    # CT14 RE-AIMED 2026-10-23: `730399e0e` made the desktop decode its call
+    # trace sections with the shared store (`applyCalltraceResponse`), so its
+    # return values come from `callArgsOf`, the line the native decoder uses.
+    Arm("CT14", STORE,
+        "  if r.len > 0:\n    result.add CallArg(name: \"__return\", text: r)\n",
+        "  if false:\n    result.add CallArg(name: \"__return\", text: r)\n",
         D_DESKTOP_B,
         "the desktop's decoder drops the return values again"),
 
@@ -782,11 +794,17 @@ ARMS = [
         "  let shown = vm.columns.val.order\n",
         G2_LOG,
         "GPUI's table draws every column, hidden ones included"),
-    Arm("EL8", DESKEVLOG,
-        "        let shown = columnState.isVisible(column)\n",
-        "        let shown = true\n",
+    # EL8 RE-AIMED 2026-10-23: `1c18341dd` made the desktop Event Log ONE
+    # view over its ViewModel; its header and its rows take the shown columns
+    # from `visibleColumns`, and the arm draws every column in both.
+    Arm("EL8", DESKEVLOGVIEW,
+        "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
+        "    proc(): seq[EventLogColumn] = vm.columns.val.order,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
         D_DESKTOP_B,
-        "the desktop shows the location column again"),
+        "the desktop shows the location column again",
+        also=((DESKEVLOGVIEW,
+               "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`",
+               "    proc(): seq[EventLogColumn] = vm.columns.val.order,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`"),)),
 
     Arm("EL9", TUISESSION,
         "  if keptColumns.order.len > 0:\n    rt.app.eventLog.columns = keptColumns\n",
@@ -1139,16 +1157,27 @@ ARMS = [
         "GPUI's window keeps the first session's ViewModels in every leaf"),
 
     # --- review: the desktop's column menu --------------------------------------
-    # EM1 RE-AIMED 2026-10-21 (PLAT-70 Part B): a width alone no longer
-    # rebuilds the table, so the rebuild is gated on order and hidden set.
-    Arm("EM1", DESKEVLOG,
-        "        if comp.init and (wanted.order != appliedEventLogColumns.order or\n",
-        "        if false and (wanted.order != appliedEventLogColumns.order or\n",
+    # EM1 RE-AIMED 2026-10-23: the desktop's table is no longer rebuilt by
+    # its host when the columns change (`1c18341dd`): the generic view's
+    # header and rows read `vm.columns` in the closures that key them, so a
+    # menu change redraws them. The arm reads the columns UNTRACKED in both,
+    # so the menu changes the ViewModel and the table stays as it was.
+    Arm("EM1", DESKEVLOGVIEW,
+        "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
+        "    proc(): seq[EventLogColumn] = untrack(proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns),\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
         D_DESKTOP_B,
-        "the desktop's column menu changes the ViewModel and not the table"),
+        "the desktop's column menu changes the ViewModel and not the table",
+        also=((DESKEVLOGVIEW,
+               "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`",
+               "    proc(): seq[EventLogColumn] = untrack(proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns),\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`"),
+              (DESKEVLOGVIEW,
+               "import isonim/core/[signals, computation]\n",
+               "import isonim/core/[signals, computation, batch]\n"))),
+    # EM2 RE-AIMED 2026-10-23: the menu's buttons take their handlers from
+    # `onMoveColumn` (`1c18341dd`).
     Arm("EM2", DESKEVLOGVIEW,
-        "                   onclick = proc() = discard vm.moveColumn(item(), -1)):\n",
-        "                   onclick = proc() = discard vm.moveColumn(item(), 1)):\n",
+        "                 onclick = onMoveColumn(vm, item(), -1)):\n",
+        "                 onclick = onMoveColumn(vm, item(), 1)):\n",
         D_DESKTOP_B,
         "the desktop menu's move-left moves right"),
 ]

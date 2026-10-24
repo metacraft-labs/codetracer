@@ -565,9 +565,17 @@ ARMS = [
         "  if false: \"value-expanded-text value-changed\"\n",
         D_CHANGED, "the desktop draws no changed value"),
     # --- the engine ------------------------------------------------------------
+    # E1 RE-AIMED 2026-10-23: the engine reports the log's size twice — the
+    # list the pane pages through (`total`, the search and the kind selection
+    # applied) and the whole log (`unfilteredTotal`) — in the window's answer
+    # and in an `indexOnly` one, and the store takes the LOG'S size from
+    # `unfilteredTotal` whenever the engine says it
+    # (`replay_data_store.applyEventLogResponse`). So the page response's
+    # `total` no longer reaches a suite (E1 SURVIVED there). The arm now makes
+    # the one `unfiltered_total` both answers report the page's size.
     Arm("E1", ENGINE,
-        "                \"markers\": marker_rows,\n                \"total\": total,\n",
-        "                \"markers\": marker_rows,\n                \"total\": page_events.len(),\n",
+        "        let unfiltered_total = all_events.len();\n",
+        "        let unfiltered_total = positions.len().saturating_sub(skip).min(take);\n",
         S_EVENTS, "the engine reports the page it sent as the log's size"),
 ]
 
@@ -1408,8 +1416,18 @@ def main() -> int:
             # rebuilds it with its own defect anyway.
             if suite in BINARY_SUITES or suite in GPUI_BINARY_SUITES:
                 _DIRTY.add(suite in BINARY_SUITES and "tui" or "gpui")
+            # THE ENGINE IS THE EXCEPTION: no later arm rebuilds it, and every
+            # suite that opens a recording refuses a replay-server built from
+            # other sources (`replay_prerequisite`'s provenance check), so a
+            # mutant engine left in place turned each later arm on a real
+            # recording into a HARNESS-FAILURE. Rebuild it from the restored
+            # tree at once.
             if any(path in ENGINE_SUBJECTS for path, _f, _r in arm.edits()):
-                _DIRTY.add("engine")
+                _DIRTY.discard("engine")
+                if not build_engine():
+                    print("the restored tree's engine does not build")
+                    rebuild_restored()
+                    return 2
         if res.hung:
             verdict, note = "HUNG", f"no result in {SUITE_TIMEOUT}s"
             problems += 1

@@ -7529,3 +7529,42 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   status bar hides `.location-path` (the "HIDDEN FOR NOW" rule of
   2026-10-15, issue 2026-10-20-ready-on-entry-...): to compare two trees,
   apply the same local removal of that rule to both scratch copies.
+- `src/Tuprules.tup` hard-codes `CARGO_TARGET_BASE = /tmp/codetracer`, so
+  every `just build-once` on the host shares one replay-server target. Two
+  concurrent builds there (or two scratch copies sharing one
+  `codetracer-native-recorder`) interleave the emulator's generated C and the
+  link fails with `undefined reference to eqdestroy___…` / `hidden symbol …
+  isn't defined` in `libmcr_emulator.so`. In a scratch copy, point
+  `CARGO_TARGET_BASE` at a target of its own, give it its own native-recorder
+  copy, and delete that copy's `ct_emulator/build/` after such a failure.
+- `scripts/build-tui-grammars.sh` proves generation did not dirty a grammar
+  submodule with `git -C libs/<grammar> diff`. In a scratch copy whose
+  submodules carry no `.git`, that reads the PARENT checkout's diff, which
+  moves while a harness records its controls, and the build refuses. Copy a
+  finished `build/grammars/` (with `cp -a`, keeping mtimes) into the copy.
+- Recordings under `test-logs/tui-fixtures/` hold ABSOLUTE source paths
+  (`files/<abs path>`). Never rsync one checkout's fixtures over another's:
+  the two `files/` trees merge, the Files pane shows both roots, and
+  `test_plat50_clicks`' folder case fails. Record each checkout's own
+  (`test_fixture_corpus.nim`, `fixtures/window_capture_fixtures.nim`, and
+  `test_plat52_terminal_output.nim` for the terminal recordings; the GPUI
+  plan suites never record, they only look).
+- Mutation harnesses that edit SIBLING sources (plat49 CR1 `isonim-tui`,
+  plat50 IG1 and the shim arms `isonim-gpui`, plat68 `nim-termctl`,
+  `isonim-tui` and the specs checkout) must not share those siblings with a
+  concurrent build or harness: give each run its own copies.
+- A proc named like a field the type does not have calls ITSELF
+  (`proc beforeCount*(step: FlowLayoutStep): int = step.beforeCount + …`
+  in `ui/flow.nim` recursed until the JS stack overflowed). The Electron
+  capture gates catch it only as a page error (`expect(pageErrors)`).
+- GPUI's list-scrubber press order: a track press at the track's END lands
+  below the last drawn call row, so it cannot tell "the scrubber answers
+  first" from "the row answers first"; `test_plat51_gpui_plan`'s Call Trace
+  case also presses the track's middle, where a row lies under it.
+- tup compiles every Nim binary of `just build-once` into `/tmp/ct-nim-cache`
+  (fixed in `src/Tuprules.tup`), whatever `CT_NIM_CACHE_ROOT` says: two
+  scratch copies building at once interleave their objects and `ct` /
+  `db-backend-record` fail to link. Run their `build-once`s one at a time.
+- The desktop Event Log's whole-log size reaches the store as the engine's
+  `unfilteredTotal` (`applyEventLogResponse`); `total` is the searched /
+  kind-filtered count. A defect in `total` alone shows only in a searched view.

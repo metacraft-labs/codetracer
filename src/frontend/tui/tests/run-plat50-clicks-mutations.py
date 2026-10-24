@@ -688,9 +688,15 @@ ARMS = [
         '              %*{"path": path, "line": line, "token": token,',
         '              %*{"path": path, "line": line, "token": "",',
         K_CALLJUMP, "a call jump sent without the function's name"),
-    Arm("HS8", HSESSION,
-        '    args["sortAscending"] = %order.ascending\n',
-        '    args["sortAscending"] = %true\n',
+    # RE-AIMED 2026-10-23: `683918518` made the terminal page its event log
+    # through the ViewModel, so a header click's order reaches the engine in
+    # the ViewModel's window request, not `headless_session`'s
+    # `requestAndLoadEventLog` (only GPUI's header click still calls that,
+    # and GM16 is its arm). The needle there still matched, so the scan was
+    # clean while K_ORDER could no longer reach it, and HS8 SURVIVED.
+    Arm("HS8", EVENTLOGVM,
+        '        "sortAscending": asc,\n',
+        '        "sortAscending": true,\n',
         K_ORDER, "the log's order always sent ascending"),
     Arm("HS9", HSESSION,
         '      valueText: presentedValueText(r{"value"}, budget))\n',
@@ -1662,7 +1668,16 @@ def main() -> int:
                     return 2
             # The restored tree's binary is rebuilt before the harness exits
             # (`rebuild_restored`), not after every arm: the next binary arm
-            # rebuilds it with its own defect anyway.
+            # rebuilds it with its own defect anyway. THE ENGINE IS THE
+            # EXCEPTION: no later arm rebuilds it, and every suite that opens
+            # a recording refuses a replay-server built from other sources
+            # (`replay_prerequisite`'s provenance check), so a mutant engine
+            # left in place turns each later arm into a HARNESS-FAILURE.
+            if "engine" in _DIRTY:
+                _DIRTY.discard("engine")
+                if not build_engine():
+                    print("the restored tree's engine does not build")
+                    return 2
             if suite in BINARY_SUITES or suite in GPUI_BINARY_SUITES:
                 _DIRTY.add(suite in BINARY_SUITES and "tui" or "gpui")
         if res.hung:
