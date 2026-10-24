@@ -7794,8 +7794,9 @@ proc onPaneClick(c: GPaneClick) =
     of "unwatch": discard runWatchCommand(r, ":unwatch " & arg)
     of "hide-other-process-watches":
       # Variable-State-Pane.md § Decisions, 2026-10-24.
-      gSession.stateVM.setHideOtherProcessWatches(arg == "on")
-      redrawPaneOf(r, paneState)
+      if not gSession.isNil and not gSession.session.stateVM.isNil:
+        gSession.session.stateVM.setHideOtherProcessWatches(arg == "on")
+        redrawPaneOf(r, paneState)
     else: discard
   of gcpHistoryEntry:
     # PLAT-51: a value-history row is a NAVIGATION ROW — a click goes to the
