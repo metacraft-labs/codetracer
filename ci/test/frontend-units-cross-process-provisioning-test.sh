@@ -266,6 +266,22 @@ if grep -qE '^[[:space:]]*set -euo pipefail' <<<"$recipe"; then
 else
 	t_fail "the recipe lost set -euo pipefail; a provisioning failure would not stop it"
 fi
+# idle_timeout_integration_test needs $CODETRACER_PREFIX/server_index.js.  A
+# `${CODETRACER_PREFIX:-…}` default never applies under `repro exec`: the dev
+# env sets src/build-<type>-repro, which tup (build-once on Linux) never
+# writes, so the suite reported DID NOT RUN after a successful build.  The
+# recipe has to build with build-once and take the output root it publishes.
+# shellcheck disable=SC2016 # literal recipe text, not an expansion
+build_line="$(grep -nF 'CODETRACER_BUILD_ENV_FILE="$ct_build_env_file" bash scripts/build-once.sh' <<<"$recipe" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2016 # literal recipe text, not an expansion
+prefix_line="$(grep -nF 'export CODETRACER_PREFIX="$PWD/$CT_BUILD_OUT_ROOT"' <<<"$recipe" | head -1 | cut -d: -f1)"
+if [[ -n $build_line && -n $prefix_line && -n $lane_line ]] &&
+	((build_line < prefix_line && prefix_line < lane_line)) &&
+	! grep -v '^[[:space:]]*#' <<<"$recipe" | grep -qF 'CODETRACER_PREFIX:-'; then
+	t_pass "the recipe points CODETRACER_PREFIX at the tree build-once built, not at an ambient default"
+else
+	t_fail "the recipe does not take CODETRACER_PREFIX from build-once's published output root before the lane (build=${build_line:-none} prefix=${prefix_line:-none} lane=${lane_line:-none})"
+fi
 
 echo "(D) the lane-deferral note names the real prerequisites"
 note="$(awk '/^#   test-frontend-units / {on = 1} on && /^#   [(a-z]/ && !/test-frontend-units/ {exit} on' "$JUSTFILE")"

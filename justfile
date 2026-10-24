@@ -3385,25 +3385,22 @@ test-vm: test-vm-native test-vm-js
 #                                and the suite passes 8/8 with them; it fails,
 #                                naming the sibling, when one is not checked
 #                                out, so a CI lane must check out both
-#                                siblings first.  What still keeps the lane
-#                                red is idle_timeout_integration_test, which
-#                                needs a built host ($CODETRACER_PREFIX/
-#                                server_index.js).  The repro dev env sets
-#                                CODETRACER_PREFIX to
-#                                src/build-<type>-repro, so the
-#                                src/build-debug default below never applies,
-#                                and `just build-once` (tup) does not write
-#                                that tree.  Measured 2026-10-23 on
-#                                nixos-ci-bare-002 at e22ce1215, after
-#                                `just build-once`: under `repro exec` the
-#                                suite reports DID NOT RUN and the lane exits
-#                                1.  With
-#                                CODETRACER_PREFIX=$PWD/src/build-debug, all
-#                                8 files pass (84 cases) and it exits 0.
-#                                Recorded as codetracer-pm issues/2026-10-23-
-#                                test-frontend-units-under-repro-exec-points-
-#                                codetracer-prefix-at-a-tree-build-once-does-
-#                                not-produce.md.
+#                                siblings first.  idle_timeout_integration_test
+#                                needs the built host
+#                                ($CODETRACER_PREFIX/server_index.js), so the
+#                                recipe also runs scripts/build-once.sh and
+#                                points CODETRACER_PREFIX at the tree build-once
+#                                reports building.  Before that, the dev env's
+#                                src/build-<type>-repro prefix overrode the
+#                                recipe's default, tup never writes that tree,
+#                                and the suite reported DID NOT RUN.  With
+#                                both fixes, and the suite waiting for the
+#                                host to bind instead of sleeping, the lane
+#                                was measured green under `repro exec` on one
+#                                Linux host (2026-10-23); macOS and Windows
+#                                are unmeasured.  A CI job for it must check
+#                                out and build those siblings and pay for a
+#                                full build-once.
 #   (test-vm-collab-units)       FIXED, PLAT-33.  The drift was real and the
 #                                FIGURE was not: 32 unclassified and 0 stale,
 #                                not "30 unclassified, 1 stale".  Eighteen of
@@ -3578,7 +3575,29 @@ test-frontend-units:
   # than the skip it intends -- `std/unittest`'s `skip()` MARKS a case but does
   # not leave its body, so each guarded test ran on anyway.  Pointing at the
   # build tree makes all seven cases run for real.
-  export CODETRACER_PREFIX="${CODETRACER_PREFIX:-$PWD/src/build-debug}"
+  #
+  # WHICH build tree is the one scripts/build-once.sh builds, and the recipe
+  # asks it rather than guessing.  It used to export
+  # `${CODETRACER_PREFIX:-$PWD/src/build-debug}`, but the repro dev env already
+  # sets CODETRACER_PREFIX to src/build-<type>-repro (repro.nim `devEnv:`), so
+  # the default never applied under `repro exec`.  On Linux build-once builds
+  # with tup into src/build-<config>, so after a successful build the suite
+  # still found no server_index.js, reported DID NOT RUN, and the lane exited 1.
+  # build-once publishes the output root it resolved (tup or reprobuild, per
+  # host) through CODETRACER_BUILD_ENV_FILE, the contract scripts/build.sh
+  # reads, so the prefix follows the build on every host.  It is not free on a
+  # built tree: tup skips its commands, but build-once invalidates and rebuilds
+  # the webpack renderer bundle every time (208 s on a loaded Linux CI host,
+  # 2026-10-23).
+  ct_build_env_file="$(mktemp "${TMPDIR:-/tmp}/codetracer-build-env.XXXXXX")"
+  # Removed on every exit, including a failed build that stops the recipe.
+  trap 'rm -f "$ct_build_env_file"' EXIT
+  CODETRACER_BUILD_ENV_FILE="$ct_build_env_file" bash scripts/build-once.sh
+  # shellcheck source=/dev/null
+  . "$ct_build_env_file"
+  : "${CT_BUILD_OUT_ROOT:?scripts/build-once.sh published no CT_BUILD_OUT_ROOT}"
+  export CODETRACER_PREFIX="$PWD/$CT_BUILD_OUT_ROOT"
+  echo "test-frontend-units: CODETRACER_PREFIX=$CODETRACER_PREFIX (the tree build-once built)"
   # `cross_process_origin_vm_test.nim` replays the `cross-process-three-trace`
   # recording, which is not committed: scripts/materialize-recording.sh
   # produces it from this tree on first use and refuses without
