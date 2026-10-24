@@ -35,7 +35,9 @@ pub mod encode;
 pub mod record;
 pub mod vectors;
 
-pub use assemble::{assemble, AssembleError, AssembleOptions, Assembled, Finalisation};
+pub use assemble::{
+    assemble, AssembleError, AssembleOptions, Assembled, Finalisation, GapSummary, Summary,
+};
 pub use batch::{encode_batch, parse_batch, Batch, BatchError, Envelope};
 pub use container::{BoundaryRecording, CheckpointRow, ContainerError, Members};
 pub use decode::{decode_log, DecodeError, DecodeErrorKind, DecodedLog, Termination};
