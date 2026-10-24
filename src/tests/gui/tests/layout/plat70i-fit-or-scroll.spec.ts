@@ -96,7 +96,6 @@ test.describe("PLAT-70 Part I: wide_lines — the columns fit", () => {
   test.use({
     sourcePath: recording("wide_lines"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     ...(prefix ? { codetracerPrefixOverride: prefix } : {}),
   });
 
@@ -137,7 +136,6 @@ test.describe("PLAT-70 Part I: wide_lines — a remembered wide column scrolls",
   test.use({
     sourcePath: recording("wide_lines"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     ...(prefix ? { codetracerPrefixOverride: prefix } : {}),
   });
 
@@ -186,7 +184,6 @@ test.describe("PLAT-70 Part I: deep_calls — a deep call scrolls the Call Trace
   test.use({
     sourcePath: recording("deep_calls"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     ...(prefix ? { codetracerPrefixOverride: prefix } : {}),
   });
 
