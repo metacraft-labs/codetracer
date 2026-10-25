@@ -66,6 +66,7 @@ import ./top_bar
 import ./tracepoint_manager
 import ./vcs_pane
 import ./search_results_pane
+import ./test_results_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -185,6 +186,9 @@ type
       ## PLAT-57. FIND IN FILES, as a value: the session's `SearchResultsVM`
       ## the desktop's panel draws too, read by `tui_session.searchModelOf`.
       ## Not loaded by default.
+    tests*: TestResultsPaneModel
+      ## PLAT-53. TEST RESULTS, as a value: the window's `TestResultsVM`,
+      ## read by `test_results_source.paneModelOf`. Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -884,6 +888,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneSearch and model.search.loaded:
     belowStrip:
       discard paintSearchResults(g, content, model.search)
+  # PLAT-53. TEST RESULTS — its headline is content, so below the strip.
+  elif region.pane == paneTestResults and model.tests.loaded:
+    belowStrip:
+      discard paintTestResults(g, content, model.tests)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

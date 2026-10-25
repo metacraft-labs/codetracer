@@ -60,3 +60,4 @@ onFileTreeDelete      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim b
 onFileTreeOperationDone  # renderer IPC handler: `uiIpcHandlers` in ui_js.nim's `configureIPC` builds it from the string "file-tree-operation-done" (CODETRACER::file-tree-operation-done, the index process's answer to a Files-pane Create, Rename or Delete)
 onTableColumnsRequest  # IPC handler resolved by string: ipc_utils registers "table-columns-request" and dispatches to on<CamelCase>
 onTableColumnsSave  # IPC handler resolved by string: ipc_utils registers "table-columns-save" and dispatches to on<CamelCase>
+testResultsFit  # reached by the Test Results panes of the terminal (tui/app/views/test_results_pane.nim columnsFor) and GPUI (gpui/test_results_leaf.nim testsLayout): product modules whose test_* basename the name scan classifies as tests

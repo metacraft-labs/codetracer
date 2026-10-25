@@ -182,8 +182,15 @@ impl SeekableStepStream {
         // dropping has_source_reload rejects tag 8 and silently sends a native
         // reader back to the cursor-projection FFI path. Preserve the actual
         // declaration while retaining the presence-header compatibility bridge.
+        //
+        // An absent or still-empty (not yet committed) `meta.dat` declares no
+        // extended capability. A committed member that cannot be read is an
+        // error: treating it as absent would silently drop its declarations.
         let mut meta = super::structural_presence_meta();
-        if let Ok(recorded_meta) = ctfs.read_file("meta.dat") {
+        if ctfs.file_size("meta.dat").is_some_and(|size| size > 0) {
+            let recorded_meta = ctfs
+                .read_file("meta.dat")
+                .map_err(|e| format!("meta.dat is committed but cannot be read: {e}"))?;
             let flags = codetracer_trace_writer::meta_dat::read_meta_dat_ext_flags(&recorded_meta)?;
             meta[8..12].copy_from_slice(&flags.to_le_bytes());
         }

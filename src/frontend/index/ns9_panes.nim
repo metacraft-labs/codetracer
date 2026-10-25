@@ -45,6 +45,9 @@ import ../../ct_test/contracts
 # half is exactly what this file needs, and it is the same half the browser
 # calls, so using it is not a workaround: it is the reason the split exists.
 import ../../ct_test/frameworks/noir_test_syntax
+# The folder → catalog / absence rule, shared with the native hosts
+# (`GUI/Core-Panes/Test-Results-Pane.md` §8.2).
+import ../viewmodel/viewmodels/test_catalog_answer
 # The one sentence every pane shows for a session with no project folder
 # (Files and VCS say it too; `viewmodels/no_project_folder`).
 from ../viewmodel/viewmodels/no_project_folder import NoProjectFolderText
@@ -174,22 +177,16 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   ## answer they must show instead of staying blank.
   let folder = $response.folder
 
+  # THE ANSWER IS THE SHARED RULE's (`test_catalog_answer`), which the
+  # terminal and the GPUI window answer their own pane with; this host only
+  # says whether the marker exists and reads the sources, with node's `fs`.
+  let answer = testCatalogAnswer(folder,
+    folder.len > 0 and fileExistsIn(folder, NoirProjectMarker),
+    proc(): seq[NoirSourceFile] = noirSourcesUnder(folder))
   var catalogJson = ""
-  var catalogAbsence = ""
-  if folder.len == 0:
-    catalogAbsence = NoProjectFolderText
-  elif not fileExistsIn(folder, NoirProjectMarker):
-    catalogAbsence =
-      "This project has no " & NoirProjectMarker & ", so CodeTracer has no " &
-      "test provider for it yet. Noir is the first language wired into this " &
-      "pane; the `ct test` framework already has providers for many more."
-  else:
-    try:
-      let catalogNode = noirCatalogFromSources(noirSourcesUnder(folder)).toJson()
-      catalogJson = pretty(catalogNode)
-    except CatchableError:
-      catalogAbsence = "Test discovery failed for this project: " &
-        getCurrentExceptionMsg()
+  let catalogAbsence = answer.absence
+  if answer.hasCatalog:
+    catalogJson = pretty(answer.catalog.toJson())
 
   # `tab` is the asking renderer tab, echoed on both answers so each reaches
   # that tab's panes (`ui_js.ns9PanesTarget`); undefined from a sender that

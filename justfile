@@ -5489,6 +5489,15 @@ plat50-capture-electron *args:
 plat52-capture-electron *args:
   bash scripts/plat52-capture-electron.sh "$@"
 
+# PLAT-53: the desktop's Test Results pane is the reference the terminal's and
+# the GPUI window's are measured against: its rows before and after a real
+# `ct test run` on a Noir crate with a passing and a failing test, and what a
+# right-click on a row opens — written to
+# `src/tests/visual/answers/plat53-test-results.electron.json`.
+[positional-arguments]
+plat53-capture-electron *args:
+  bash scripts/plat53-capture-electron.sh "$@"
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh

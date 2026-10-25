@@ -139,58 +139,21 @@ export signals, computation, components
 
 const TestResultsContainerClass* = "component-container test-results"
 
-const EmptyStateText* = "No tests found in this project."
-
 proc stateClass*(state: TestResultsRowState): string =
   "test-results-row " & $state
 
-proc stateMark*(state: TestResultsRowState): string =
-  ## The glyph §1a's mock-up uses, extended to the states a real run has.
-  ## `·` for not-run rather than a blank, so every row has a mark column and
-  ## the list does not look ragged.
-  case state
-  of trsNotRun: "·"
-  of trsRunning: "…"
-  of trsPassed: "✓"
-  of trsFailed: "✗"
-  of trsSkipped: "–"
-  of trsErrored: "!"
-  of trsCancelled: "×"
-
-proc rowWhere*(row: TestResultsRow): string =
-  if row.file.len == 0: ""
-  elif row.line > 0: row.file & ":" & $row.line
-  else: row.file
+# `stateMark`, `rowWhere`, `rowDuration`, `runButtonTitle` and
+# `EmptyStateText` are the ViewModel's since PLAT-53 — the terminal's pane and
+# the GPUI window draw the same words (`Test-Results-Pane.md` §8.4) — and are
+# re-exported here, so this view's readers see them where they always did.
+export stateMark, rowWhere, rowDuration, runButtonTitle, EmptyStateText,
+       RunTestsTitle, RunButtonLabel
 
 proc runButtonClass*(vm: TestResultsVM): string =
   ## `disabled` follows `canRun`, so the class a gate reads and the guard the
   ## click takes are one decision rather than two that can drift.
   if vm.canRun(): "test-results-run-btn"
   else: "test-results-run-btn disabled"
-
-proc runButtonTitle*(vm: TestResultsVM): string =
-  ## WHY it is disabled, in the tooltip — the three cases are different
-  ## problems with different remedies and a single greyed control that said
-  ## nothing would make all three look like the same dead affordance.
-  ##
-  ## The two fixed sentences are the view-model's constants and not literals
-  ## here: `RunInProgressText` is also what the per-row controls say in the
-  ## same state, and `NoRunHostText` is what `desktop_test_host` returns when
-  ## it is built without a dispatch. One string each, one place each.
-  if vm.inFlight.val:
-    RunInProgressText
-  elif vm.runAbsence.val.len > 0:
-    vm.runAbsence.val
-  elif vm.runTests.val.isNil:
-    NoRunHostText
-  else:
-    "Run the tests (nargo test)"
-
-proc rowDuration*(row: TestResultsRow): string =
-  ## Empty until the test has actually run. "0 ms" against a test nobody
-  ## started is a measurement the pane did not make.
-  if row.state == trsNotRun: ""
-  else: formatDurationMs(row.durationMs)
 
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
@@ -340,9 +303,9 @@ proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
         tdiv(ref = headlineNode, class = "test-results-headline"):
           discard
         tdiv(ref = runButton, class = "test-results-run-btn",
-             title = "Run the tests (nargo test)",
+             title = RunTestsTitle,
              onclick = proc() = vm.startRun()):
-          text "\u25b6"
+          text RunButtonLabel
       tdiv(ref = bodyContainer, class = "test-results-body"):
         discard
       tdiv(ref = failureNode, class = "test-results-failure hidden"):

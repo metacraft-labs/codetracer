@@ -93,7 +93,7 @@
       ]
     },
     "stepped-editor": {
-      "_why": "Six step-ins. Measured 2026-09-21, FIVE identical runs (the trajectory, the tick count, the operations moved, the settle attempts and the tier-1 verdict are byte-identical in all five): ticks 1..6 visit lines 1, 2, 29, 34, 39, 44, so the stop is line 44 — `calc`'s `def div` — and every one of those six is a module-level `def` statement.",
+      "_why": "Five step-ins. Ticks 1..6 visit lines 1, 2, 29, 34, 39, 44, so the stop is line 44 — `calc`'s `def div` — and every one of those six lines is a module-level `def` statement. Measured 2026-09-21, FIVE identical runs (the trajectory, the tick count, the operations moved, the settle attempts and the tier-1 verdict are byte-identical in all five), when the scenario stepped in six times: the engine then opened a recording on the `<toplevel>` root's synthetic entry at tick 0. Since codetracer `5ba7e8408` (2026-10-05, `first_user_call` opens at the program's entry call) the session opens at tick 1 on line 1, so five step-ins reach the same tick 6. Re-measured 2026-10-12 from a codetracer checkout at `8f284d063`, with a `replay-server` carrying `5ba7e8408` and a re-recorded fixture, on both front-ends — the GPUI window via the PLAT-39 oracle, and Electron via `window.data.services.debugger.location` — as 44 / 56 / 44 for `stepped-editor` / `advanced-state` / `breakpoint-editor`.",
       "electronStoppedLine": 44,
       "gpuiStoppedLine": 44,
       "_whyElectronPanes": "Re-pinned 2026-10-17. The capture opens on the product's own first-run layout since 9268c8ab3 (`noUserLayout`), not the bundled tree the launch fixture used to copy in: the TEST RESULTS / CONSTRAINTS column that no mode opens with is gone, the files stack is FILES | VCS | TESTS (3), and the event-log stack is EVENT LOG | TERMINAL OUTPUT (2, the Timeline tab removed 2026-10-08) — exactly the shared default `Layout-System.md` publishes. It was `...filesystem@0/2,...eventLog@0/3,testResults@0/1,constraints@0/1` against the bundled tree.",
@@ -109,7 +109,7 @@
       ]
     },
     "advanced-state": {
-      "_why": "Six step-ins and three nexts: 44 -> 54 -> 55 -> 56, the entries of the OPERATIONS dispatch table.",
+      "_why": "Five step-ins and three nexts: 44 -> 54 -> 55 -> 56, the entries of the OPERATIONS dispatch table.",
       "electronStoppedLine": 56,
       "gpuiStoppedLine": 56,
       "_whyElectronPanes": "Re-pinned 2026-10-17. The capture opens on the product's own first-run layout since 9268c8ab3 (`noUserLayout`), not the bundled tree the launch fixture used to copy in: the TEST RESULTS / CONSTRAINTS column that no mode opens with is gone, the files stack is FILES | VCS | TESTS (3), and the event-log stack is EVENT LOG | TERMINAL OUTPUT (2, the Timeline tab removed 2026-10-08) — exactly the shared default `Layout-System.md` publishes. It was `...filesystem@0/2,...eventLog@0/3,testResults@0/1,constraints@0/1` against the bundled tree.",
@@ -164,7 +164,7 @@
       "_whyEditorRowsIsASet": "THE EDITOR IS BOTTOM-ANCHORED HERE TOO, and this is the scenario `PLAT35-PD4` was measured on: ONE operation, so a settle between operations has nothing to work with. At the 978px editor height the three bounds are 1596 (= 2574 - 978), 1608 (= 2586 - 978, the horizontal scrollbar counted) and 1629 (= 2607 - 978, the 21px view zone counted too), which put the first rendered line at 73, 74 and 75. ALL THREE WERE OBSERVED, in ten captures. They are not a list somebody collected: each is the arithmetic consequence of one content-height stage, so a corpus that moves — a different line, a different file, a different viewport — leaves the set entirely."
     },
     "breakpoint-editor": {
-      "_why": "Six step-ins, then a gutter mark. The mark does NOT move the program, which the capture asserts: the stop stays at line 44, tick 6, exactly `stepped-editor`'s, and the two scenarios are told apart by the breakpoint and by the viewport.",
+      "_why": "Five step-ins, then a gutter mark. The mark does NOT move the program, which the capture asserts: the stop stays at line 44, tick 6, exactly `stepped-editor`'s, and the two scenarios are told apart by the breakpoint and by the viewport.",
       "electronStoppedLine": 44,
       "gpuiStoppedLine": 44,
       "_whyElectronPanes": "Re-pinned 2026-10-17. The capture opens on the product's own first-run layout since 9268c8ab3 (`noUserLayout`), not the bundled tree the launch fixture used to copy in: the TEST RESULTS / CONSTRAINTS column that no mode opens with is gone, the files stack is FILES | VCS | TESTS (3), and the event-log stack is EVENT LOG | TERMINAL OUTPUT (2, the Timeline tab removed 2026-10-08) — exactly the shared default `Layout-System.md` publishes. It was `...filesystem@0/2,...eventLog@0/3,testResults@0/1,constraints@0/1` against the bundled tree.",

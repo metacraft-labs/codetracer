@@ -57,7 +57,7 @@ fn create_go_flow_config() -> FlowTestConfig {
         ],
         // fmt.Println is a function call and should NOT appear as a variable
         excluded_identifiers: vec!["Println".to_string(), "fmt".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

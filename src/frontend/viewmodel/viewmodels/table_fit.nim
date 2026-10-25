@@ -252,3 +252,33 @@ func compositeWidth*(f: TableFit): int =
   ## The width a composite pane's rows are fitted to: the pane in FIT and
   ## SHRINK, the floor in SCROLL.
   if f.widths.len == 0: f.viewportUnits else: f.widths[0]
+
+# ---------------------------------------------------------------------------
+# The Test Results pane's row (PLAT-53, Test-Results-Pane.md §8.4)
+# ---------------------------------------------------------------------------
+
+const
+  TestNameFlex* = 18
+  TestWhereFlex* = 10
+    ## The desktop's `grid-template-columns: 14px minmax(0, 1.8fr)
+    ## minmax(0, 1fr) auto auto`: the name and the location share the room
+    ## 1.8 : 1, whatever they hold — the name outranks the location
+    ## (`styles/components/ns9_panes.styl`'s grid comment).
+  TestColumnNames* = ["mark", "name", "where", "duration", "actions"]
+
+proc testResultsFit*(markUnits, durationUnits, actionsUnits, viewport: int;
+                     gap = 1): TableFit =
+  ## The five columns' widths for a pane `viewport` units wide: the mark,
+  ## the duration (never cut) and the actions at their widths, and the name
+  ## and the location sharing what is left as the desktop's `fr` tracks do
+  ## (`table_fit` with zero preferred widths: every unit of slack is shared
+  ## by the flex weights).
+  fitTable([
+    FitColumn(name: TestColumnNames[0], preferredUnits: markUnits,
+              fixed: true),
+    FitColumn(name: TestColumnNames[1], flex: TestNameFlex),
+    FitColumn(name: TestColumnNames[2], flex: TestWhereFlex),
+    FitColumn(name: TestColumnNames[3], preferredUnits: durationUnits,
+              neverCut: true),
+    FitColumn(name: TestColumnNames[4], preferredUnits: actionsUnits,
+              fixed: true)], viewport, gap)

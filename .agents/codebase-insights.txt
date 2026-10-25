@@ -7778,3 +7778,22 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   resolution order, rows `  <key>  <operation> — <label>  (shadowed by your
   row N)`. Terminal: `:keys reference` and `help.keyboard-shortcuts`
   (`Ctrl+K Ctrl+S`) open it in the content overlay; GPUI the same op.
+- Test Results natively (PLAT-53): the native hosts install the DESKTOP's
+  `desktop_test_host` unchanged over `viewmodel/host/native_test_host.nim`'s
+  producers (`ct test run --events`, `ct record-test`, run via `/bin/sh -c
+  'exec "$0" "$@" >out 2>err'` with `poDaemon` = its own process group, so
+  `kill(-pid)` ends ct, ct-test and nargo together; polled, never awaited).
+  ONE `TestResultsVM` PER WINDOW (TUI `test_results_source.TestsSource` beside
+  the VCS source in both loops; GPUI `gTestsVM`, attached to the leaf like
+  `attachVcs`) — `headless_app.paneViewModel` stays nil for testResults. The
+  catalog rule is `viewmodels/test_catalog_answer` (desktop ns9_panes calls it).
+  A `⏵` record run calls `beginRun`, which CLEARS the last verdicts (desktop
+  behaviour): after record-and-open the headline is "N tests, not run yet".
+- `native_host` re-exports `headless_session`, whose `findCtBinary` collides
+  with native_host's own: callers that see both use `nativeCtBinary()`.
+- TUI: a MAXIMIZED pane gets no pane clicks — `routePaneClick` hit-tests the
+  binding's un-maximized geometry (`paintedAreaOf` knows the maximized one).
+  Widen a pane in a pty test by dragging its divider, and wait for the
+  status line's `setDivider(...) applied` before reading positions.
+- Desktop row messages repeat the nargo failure text twice (the fold appends
+  both `output` and `failure.output`); every front-end shows the same.

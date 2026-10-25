@@ -62,6 +62,7 @@ import ./views/vcs_pane
 import ./views/search_results_pane
 import ./views/terminal_info
 import ./theme/terminal_report
+import ./views/test_results_pane
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -227,6 +228,16 @@ type
       ## PLAT-57: Find in Files' toggle whose operation is `text`
       ## (`search.toggle-case` / `-whole-word` / `-regex`) flipped, and the
       ## search run again.
+    pcTestsRun
+      ## PLAT-53: the Test Results pane's ▶ — the project's suite run
+      ## (`TestResultsVM.startRun`).
+    pcTestsRefresh
+      ## PLAT-53: a Test Results row's `⟳` on the test `text` names (its
+      ## id): record it again and stay (`TestResultsVM.triggerRefresh`).
+    pcTestsOpen
+      ## PLAT-53: a Test Results row's `⏵` on the test `text` names: open its
+      ## recording in a new tab, recording it first when it has none
+      ## (`TestResultsVM.triggerOpen`).
     pcFrameSeek
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
@@ -2469,6 +2480,46 @@ proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
     rt.app.search.scrollTop + delta, screen.listRows)
   outcome.repaint = true
 
+proc testsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                            screen: TestsPaneScreen] =
+  ## PLAT-53: Test Results' rows below its strip, and where the painter put
+  ## its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneTestResults)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintTestResults(g, result.area, rt.app.tests)
+
+proc scrollTests(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-53: the wheel over Test Results scrolls its list.
+  let (_, screen) = rt.testsPaneScreen()
+  rt.app.tests.scrollTop = clampTestsTop(screen.wrapped.len,
+    rt.app.tests.scrollTop + delta, screen.listRows)
+  outcome.repaint = true
+
+proc selectTestRow(rt: TuiRuntime; row: int) =
+  ## PLAT-53: select Test Results row `row`, kept in view.
+  if row < 0 or row >= rt.app.tests.rows.len:
+    return
+  rt.app.tests.selected = row
+  let (_, screen) = rt.testsPaneScreen()
+  rt.app.tests.scrollTop = rt.app.tests.revealRow(screen, row)
+
+proc pressTestsControl(rt: TuiRuntime; control: TestsPaneControl;
+                       request: PaneClickRequest;
+                       outcome: var RuntimeOutcome) =
+  ## PLAT-53: the ▶, a `⟳` or a `⏵`, pressed. An enabled control is the
+  ## host's (`test_results_source.applyClick`); a disabled one says why on
+  ## the status line — its title, the ViewModel's (§8.4) — and does nothing.
+  outcome.repaint = true
+  if control.enabled:
+    outcome.requestClick(request)
+  else:
+    rt.note(control.title)
+
 # ---------------------------------------------------------------------------
 # M71 (#838): the panes whose whole content is in hand — State, Files, VCS —
 # keep an ORDINARY scrollbar (Scrollbar-Scrubbers.md §2), drawn by their
@@ -2974,6 +3025,8 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       outcome.pagesCallTrace = true
     of paneSearch:
       rt.app.search.scrollTop = top
+    of paneTestResults:
+      rt.app.tests.scrollTop = top
     of paneEditor:
       rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top + 1), outcome)
     of InHandPanes:
@@ -3603,6 +3656,38 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of stFile, stNone:
       return false
+  of paneTestResults:
+    # PLAT-53: the ▶ runs the suite; a row's `⟳` records it again and `⏵`
+    # opens its recording in a new tab; a press elsewhere on a row (or its
+    # message) selects it; the scrollbar is the scrollbars' (`routeScrollbars`).
+    # The desktop opens no menu on a row, so a right press does nothing here.
+    if event.button != mbLeft or not rt.app.tests.loaded:
+      return false
+    let (area, screen) = rt.testsPaneScreen()
+    let t = rt.app.tests.testsTargetAt(screen, area, event.row, event.col)
+    case t.kind
+    of tpRun:
+      rt.pressTestsControl(rt.app.tests.run,
+                           PaneClickRequest(kind: pcTestsRun), outcome)
+      return true
+    of tpRefresh, tpOpen:
+      let r = rt.app.tests.rows[t.row]
+      rt.app.tests.selected = t.row
+      if t.kind == tpRefresh:
+        rt.pressTestsControl(r.refresh, PaneClickRequest(kind: pcTestsRefresh,
+                             text: r.testId), outcome)
+      else:
+        rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
+                             text: r.testId), outcome)
+      return true
+    of tpRow:
+      rt.selectTestRow(t.row)
+      outcome.repaint = true
+      return true
+    of tpTrack:
+      return true
+    of tpText, tpNone:
+      return false
   of paneVcs:
     # K34 / K53: a changed file opens its diff; a commit opens (lists the
     # files it changed) or closes; a commit's file opens that change.
@@ -3913,6 +3998,12 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     let at = geometry.paneAt(event.row, event.col)
     if at.found and at.region.pane == paneSearch and rt.app.search.loaded:
       rt.scrollSearch(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-53: the wheel scrolls Test Results' list.
+    if at.found and at.region.pane == paneTestResults and rt.app.tests.loaded:
+      rt.scrollTests(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -5980,6 +6071,45 @@ proc runFilesKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
+                          outcome: var RuntimeOutcome): bool =
+  ## PLAT-53 FROM THE KEYBOARD, while Test Results has the focus (§8.4): Up /
+  ## Down (and the modal bases' `j` / `k`), Home / End and the pages move the
+  ## selected row; Enter is its `⏵`. Answers whether `operation` was the
+  ## pane's.
+  let n = rt.app.tests.rows.len
+  let sel = rt.app.tests.selected
+  case operation
+  of "list.focus-next", "list.focus-previous", "editor.scroll-line-down",
+     "editor.scroll-line-up", "list.focus-first", "list.focus-last",
+     "list.focus-page-down", "list.focus-page-up":
+    outcome.repaint = true
+    if n == 0:
+      rt.note("the Test Results pane lists no test")
+      return true
+    let page = max(1, rt.paneBodyRows(paneTestResults) - 2)
+    let next =
+      case operation
+      of "list.focus-first": 0
+      of "list.focus-last": n - 1
+      of "list.focus-page-down": (if sel < 0: 0 else: sel + page)
+      of "list.focus-page-up": (if sel < 0: 0 else: sel - page)
+      of "list.focus-next", "editor.scroll-line-down":
+        (if sel < 0: 0 else: sel + 1)
+      else: (if sel < 0: n - 1 else: sel - 1)
+    rt.selectTestRow(clamp(next, 0, n - 1))
+    true
+  of "list.activate":
+    if sel < 0 or sel >= n:
+      rt.note("no test of the Test Results pane is selected")
+      outcome.repaint = true
+      return true
+    let r = rt.app.tests.rows[sel]
+    rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
+                         text: r.testId), outcome)
+    true
+  else: false
+
 proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
                   outcome: var RuntimeOutcome) =
   ## **THE TERMINAL'S DISPATCH** of a resolved operation onto its ViewModels:
@@ -6050,6 +6180,9 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     let (had, focused) = rt.focus.focusedPane()
     if had and focused == paneFileTree and
        rt.runFilesKeyOperation(res.operation, outcome):
+      return
+    if had and focused == paneTestResults and rt.app.tests.loaded and
+       rt.runTestsKeyOperation(res.operation, outcome):
       return
   if res.operation.startsWith("input.") and rt.prompt.open:
     case res.operation

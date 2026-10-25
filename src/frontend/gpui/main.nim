@@ -82,6 +82,8 @@ when defined(js):
 import ./design_fonts
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
             times]
+when defined(posix):
+  import std/posix   # PLAT-53: `tests:kill`
 
 import isonim_gpui/renderer
 # `isonim_gpui/bindings` AND NOT `isonim_gpui/window`, since PLAT-37. The
@@ -152,6 +154,8 @@ import ../viewmodel/viewmodels/[point_list_vm, scratchpad_vm, state_vm,
 # PLAT-52: the Terminal Output pane, drawn natively, and its producer.
 import ./terminal_output_leaf
 import ./search_results_leaf   # PLAT-57: Find in Files, drawn natively
+import ./test_results_leaf     # PLAT-53: Test Results, drawn natively
+import ../viewmodel/host/native_test_host   # PLAT-53: the desktop's host, native producers
 import ../viewmodel/viewmodels/search_results_vm
 from ../viewmodel/host/find_in_files import FindInFilesScope, running, pump
 import ../viewmodel/host/terminal_output_source
@@ -243,6 +247,12 @@ OPTIONS:
                       search:option:<case|word|regex>
                       search:field  search:wheel:<rows>
                       search:track:<permille>
+                    and (PLAT-53) Test Results (`tests:wait` lets a run
+                    settle):
+                      tests:show  tests:run  tests:wait[:<ms>]
+                      tests:row:<test>  tests:refresh:<test>
+                      tests:open:<test>[:shift]  tests:key:<operation>
+                      tests:kill  tests:wheel:<rows>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -609,6 +619,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "select", "probe", "modifiers",
                        # PLAT-57: Find in Files' rows, toggles and field.
                        "search",
+                       # PLAT-53: Test Results' ▶, rows and controls.
+                       "tests",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome"]:
           return GpuiCommand(kind: gckUsageError,
@@ -1059,6 +1071,8 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.}
 
 proc drawTerminalPane(r: GpuiRenderer)
 proc drawSearchPane(r: GpuiRenderer)
+proc drawTestsPane(r: GpuiRenderer)
+  ## PLAT-53: forward-declared; defined beside Find in Files' drawing.
   ## PLAT-57: forward-declared; defined beside the Terminal Output pane's.
   ## PLAT-52: the Terminal Output pane, drawn natively (defined with its
   ## clicks, before `windowPointer`).
@@ -1188,6 +1202,20 @@ var
   gGestures = idle()
   gSession: HeadlessDebugSession = nil
   gSearch = initGSearchPane()
+  gTests = initGTestsPane()
+    ## PLAT-53: the Test Results pane's reading position and selection.
+  gTestsVM: TestResultsVM = nil
+    ## PLAT-53: the WINDOW's Test Results ViewModel — its project's tests
+    ## (`Test-Results-Pane.md` §8.2), shared by every tab of the window.
+  gTestsHost: NativeTestHost = nil
+    ## PLAT-53: the desktop's host over the native producers
+    ## (`viewmodel/host/native_test_host`), installed on `gTestsVM`.
+  gPointerShift = false
+    ## PLAT-53: whether Shift was held with the pointer event being handled
+    ## (`pointerHandler`), so a press on `⏵` arms it as the desktop's does.
+  gTestsRoot = ""
+    ## PLAT-53: the window's project (§8.2) — its working directory for a
+    ## replay, the project of the Edit window, a folder tab's folder.
     ## PLAT-57: Find in Files' reading position and a held scrubber thumb.
   gSessionsOpened = initTable[int, HeadlessDebugSession]()
     ## PLAT-49 part B: every session this window holds, by its tab's id —
@@ -2093,6 +2121,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawTerminalPane(r)
   # PLAT-57: and Find in Files from its own (a docked one's included).
   drawSearchPane(r)
+  # PLAT-53: and Test Results from its own.
+  drawTestsPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
   drawListScrubbers(r)
   # V6: the VCS history follows the body it was laid out with — once the
@@ -2805,6 +2835,31 @@ proc searchBody(): PxRect =
     return PxRect()
   n.body
 
+proc testsBody(): PxRect =
+  ## PLAT-53: Test Results' body in window pixels — revealed, docked open, or
+  ## the visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneTestResults:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneTestResults:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneTestResults)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneTestResults:
+    return PxRect()
+  n.body
+
+proc drawTestsPane(r: GpuiRenderer) =
+  ## PLAT-53: draw Test Results from the window's ViewModel, natively,
+  ## replacing whatever the leaf held.
+  let pane = gPanes.getOrDefault($paneTestResults)
+  if pane.isNil or gTestsVM.isNil:
+    return
+  if drawTestResults(r, pane, gTestsVM, gTests, testsBody()):
+    applyTextFaces(r, pane)
+
 proc drawSearchPane(r: GpuiRenderer) =
   ## Draw Find in Files from its ViewModel, natively, replacing whatever the
   ## leaf held (the vocabulary tree `renderLeaf` built is the leaf plan's).
@@ -2816,6 +2871,8 @@ proc drawSearchPane(r: GpuiRenderer) =
     applyTextFaces(r, pane)
 
 proc pressSearch(r: GpuiRenderer; x, y: int): bool
+proc pressTests(r: GpuiRenderer; x, y: int): bool
+  ## PLAT-53: forward-declared; defined beside the Test Results host.
 proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string)
 proc openFindInFiles(r: GpuiRenderer)
 proc stepSearchResult(r: GpuiRenderer; delta: int)
@@ -3211,6 +3268,13 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # pane under a revealed one must not take the press.
     if pressSearch(r, x, y):
       return
+    # PLAT-53: Test Results' presses (its ▶, a row's `⟳` / `⏵`, a row).
+    if pressTests(r, x, y):
+      gFocusShown = true
+      if gFocusPane != $paneTestResults:
+        focusWindowPane(r, $paneTestResults)
+        discard drawArrangement(r)
+      return
     # PLAT-51: A PRESS FOCUSES THE PANE UNDER IT (the desktop's selected
     # panel follows its clicks) — whatever the pane then does with the press
     # (a call row, a scrubber, the terminal output): its strip and outline
@@ -3277,6 +3341,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         gSearch.scrubSearch(vm, searchBody(), y, dragging = true)
         drawSearchPane(r)
       return
+    if gTests.dragging:
+      if not gTestsVM.isNil:
+        gTests.scrubTests(gTestsVM, testsBody(), y, dragging = true)
+        drawTestsPane(r)
+      return
     if gListDrag.active:
       moveListScrubber(r, y)
       return
@@ -3341,6 +3410,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         gSearch.scrollBy(vm, search, (if rows == 0: (if dy < 0: 1 else: -1)
                                       else: rows))
         drawSearchPane(r)
+      return
+    # PLAT-53: and Test Results' list.
+    let tests = testsBody()
+    if tests.w > 0 and tests.contains(x, y) and dy != 0.0 and
+       not gTestsVM.isNil:
+      let rows = int(round(-dy / float(TestsRowPx)))
+      gTests.scrollBy(gTestsVM, tests, (if rows == 0: (if dy < 0: 1 else: -1)
+                                        else: rows))
+      drawTestsPane(r)
       return
     let onPane = gGeom.activePaneAt(x, y)
     # PLAT-70 (Horizontal-Overflow.md §4.3): a horizontal wheel — the
@@ -3443,6 +3521,7 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
     if not p.valid:
       return
     let (dy, dx) = wheelDeltas(p.dy, p.dx, gmShift in ev.modifiers)
+    gPointerShift = gmShift in ev.modifiers
     windowPointer(r0, ev.kind, int(p.x), int(p.y), dy, dx)
 
 proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
@@ -4855,6 +4934,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
         redrawWindowLeaf(r, pane, leaf)
   drawTerminalPane(r)
   drawSearchPane(r)
+  drawTestsPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu,
@@ -4864,6 +4944,8 @@ proc refreshReplayWindow(r: GpuiRenderer) =
 
 proc attachVcs(leafSet: var GpuiLeafSet; directory: string)
   ## Forward-declared for `showSession`; defined beside the ticks.
+proc attachTests(leafSet: var GpuiLeafSet)
+  ## PLAT-53: forward-declared for `showSession`; defined beside the ticks.
 
 proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   ## PLAT-49 part B: the window shows the session behind tab `id` — its
@@ -4880,6 +4962,7 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   gSourceService = newGpuiSourceService(gSession, gSession.tracePath, rows)
   var leafSet = gShell.leavesFor(gWindow)
   attachVcs(leafSet, getCurrentDir())
+  attachTests(leafSet)
   gLeafSet = leafSet
   traceGesture("session shown " & $id & " " & gSession.tracePath)
   # PLAT-69: the window is called after the recording it shows.
@@ -5248,6 +5331,9 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   var leafSet = gShell.leavesFor(gWindow)
   attachVcs(leafSet, tab.folder)
   attachEditFiles(leafSet, tab.folder)   # K19: the folder's Files tree
+  # PLAT-53: the window's project is the folder now (§8.2).
+  gTestsRoot = tab.folder
+  attachTests(leafSet)
   gLeafSet = leafSet
   openArm = arm
   if editViewportRows <= 0:
@@ -6173,7 +6259,9 @@ proc armHoverTick() =
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
   if due < 0 and ((not gRecordJob.isNil and not gRecordJob.done) or
-                  (not gTestJob.isNil and not gTestJob.done)):
+                  (not gTestJob.isNil and not gTestJob.done) or
+                  # PLAT-53: a Test Results run, polled on the same tick.
+                  gTestsHost.running):
     gArmedTick = (due: -3'i64, vcs: false)
     gpui_set_tick(uint32(RecordPollMs), recordTick)
     return
@@ -6528,6 +6616,155 @@ proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
 proc armRecordTick() =
   armHoverTick()
 
+# ---------------------------------------------------------------------------
+# PLAT-53: the Test Results pane's host (`Test-Results-Pane.md` §8)
+# ---------------------------------------------------------------------------
+
+const NoSessionTabsInEditText* =
+  "this window has no session tabs (it is the Edit window), so the " &
+  "recording is not opened here; it is at "
+  ## The `⏵` refusal of the GPUI Edit window, followed by the recording's
+  ## folder (§8.3): stated on the pane, never a silent no-op.
+
+proc installTestsHost(root: string; openFolder: NativeOpenFolder) =
+  ## The window's Test Results ViewModel and the desktop's host over the
+  ## native producers, for the project at `root` (§8.2), its catalog read.
+  if not gTestsVM.isNil:
+    return
+  gTestsRoot = root
+  gTestsVM = createTestResultsVM()
+  gTestsHost = newNativeTestHost(gTestsVM,
+    projectRoot = proc(): string = gTestsRoot,
+    ctBinary = proc(): string = nativeCtBinary(),
+    resolveFolder = proc(id: string): string = recordingFolderOf(id),
+    openFolder = openFolder)
+  discard gTestsHost.refreshCatalog(force = true)
+
+proc attachTests(leafSet: var GpuiLeafSet) =
+  ## Hand the Test Results leaf, when the arrangement places one, the
+  ## window's ViewModel — the headless replay session owns none
+  ## (`headless_app.paneViewModel`), as it owns no VCS ViewModel.
+  if gTestsVM.isNil:
+    return
+  discard gTestsHost.refreshCatalog()   # a re-rooted window's project
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneTestResults:
+      leaf.vm = ViewModel(gTestsVM)
+
+proc pollTestsHost(r: GpuiRenderer): bool =
+  ## PLAT-53: a run that ended, settled into the pane (and, for
+  ## record-and-open, its recording opened in a new tab).
+  if gTestsHost.isNil or not gTestsHost.poll():
+    return false
+  let note = gTestsHost.takeNote()
+  if note.len > 0:
+    traceGesture("tests: " & note)
+  traceGesture("tests settled: " & gTestsVM.headline.val)
+  drawTestsPane(r)
+  true
+
+proc stopTestsHost() =
+  ## The window ends: a run still going ends with it (its process group).
+  if not gTestsHost.isNil:
+    gTestsHost.stop()
+
+proc killTestsRun() =
+  ## `tests:kill` — the run in flight's whole process group, SIGKILLed from
+  ## outside, as a user's `kill -9` would (§5: it must still settle).
+  when defined(posix):
+    if gTestsHost.running:
+      discard posix.kill(Pid(-gTestsHost.job.pid), SIGKILL)
+
+proc testsRowNamed(name: string): int =
+  ## The row of the test `name` (its short name or selector), -1 for none.
+  if gTestsVM.isNil:
+    return -1
+  for i, row in gTestsVM.rows.val:
+    if row.name == name or row.selector == name or row.testId == name:
+      return i
+  -1
+
+proc pressTests(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on Test Results: the ▶ runs the suite, a row's `⟳`
+  ## records it again, `⏵` opens its recording in a new tab (recording it
+  ## first when it has none; Shift held arms the re-record, as on the
+  ## desktop), a row is selected, the scrubber moves the view. A disabled
+  ## control says why (the trace) and runs nothing.
+  let body = testsBody()
+  if gTestsVM.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let vm = gTestsVM
+  let hit = testsHitAt(vm, gTests, body, x, y)
+  case hit.kind
+  of gtNone, gtText: discard
+  of gtRun:
+    if vm.canRun(): vm.startRun()
+    else: traceGesture("tests: " & vm.runButtonTitle())
+  of gtRow:
+    gTests.selected = hit.row
+  of gtRefresh, gtOpen:
+    gTests.selected = hit.row
+    vm.setShiftHeld(gPointerShift)
+    let row = vm.rows.val[hit.row]
+    if hit.kind == gtRefresh:
+      if vm.refreshAbsence().len > 0:
+        traceGesture("tests: " & vm.refreshButtonTitle(row))
+      else:
+        vm.triggerRefresh(row)
+    else:
+      if vm.openAbsence(row).len > 0:
+        traceGesture("tests: " & vm.openButtonTitle(row))
+      else:
+        traceGesture("tests: open " & row.name & " (" &
+                     $vm.openButtonMode(row) & ")")
+        vm.triggerOpen(row)
+    vm.setShiftHeld(false)
+  of gtTrack, gtThumb:
+    gTests.dragging = hit.kind == gtThumb
+    if gTests.dragging:
+      let lay = testsLayout(vm, body)
+      gTests.scrubberOf(lay.lines.len, lay.rows).beginBarGrab(hit.fraction)
+    gTests.scrubTests(vm, body, y, dragging = gTests.dragging)
+  let note = if gTestsHost.isNil: "" else: gTestsHost.takeNote()
+  if note.len > 0:
+    traceGesture("tests: " & note)
+  drawTestsPane(r)
+  armRecordTick()
+  true
+
+proc testsKey(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-53 from the keyboard, the pane focused (§8.4): the list's moves
+  ## select a row, `list.activate` is its `⏵`. Whether it was the pane's.
+  if gTestsVM.isNil or gFocusPane != $paneTestResults:
+    return false
+  let n = gTestsVM.rows.val.len
+  let sel = gTests.selected
+  case operation
+  of "list.focus-next": gTests.selected = clamp(sel + 1, 0, max(0, n - 1))
+  of "list.focus-previous": gTests.selected = clamp(sel - 1, 0, max(0, n - 1))
+  of "list.focus-first": gTests.selected = 0
+  of "list.focus-last": gTests.selected = n - 1
+  of "list.focus-page-down": gTests.selected = clamp(sel + 10, 0, max(0, n - 1))
+  of "list.focus-page-up": gTests.selected = clamp(sel - 10, 0, max(0, n - 1))
+  of "list.activate":
+    if sel < 0 or sel >= n:
+      traceGesture("tests: no test is selected")
+      return true
+    let row = gTestsVM.rows.val[sel]
+    if gTestsVM.openAbsence(row).len > 0:
+      traceGesture("tests: " & gTestsVM.openButtonTitle(row))
+    else:
+      gTestsVM.triggerOpen(row)
+      armRecordTick()
+  else:
+    return false
+  if n == 0:
+    gTests.selected = -1
+  else:
+    gTests.revealRow(gTestsVM, testsBody(), gTests.selected)
+  drawTestsPane(r)
+  true
+
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
@@ -6535,6 +6772,7 @@ proc recordTick() {.cdecl.} =
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
   discard pollTestRun(r)
+  discard pollTestsHost(r)
   armHoverTick()
 
 proc searchTick() {.cdecl.} =
@@ -6664,6 +6902,9 @@ proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind) =
     return
   if pane == paneSearch:
     drawSearchPane(r)
+    return
+  if pane == paneTestResults:
+    drawTestsPane(r)
     return
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == pane:
@@ -7786,6 +8027,13 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
         traceGesture("session tab " & $gShell.app.activeTabIndex())
     drawTopBar(r)
     return
+  of "list.focus-next", "list.focus-previous", "list.focus-first",
+     "list.focus-last", "list.focus-page-down", "list.focus-page-up",
+     "list.activate":
+    # PLAT-53: the focused Test Results pane's list (other panes say below
+    # that the operation is not theirs here, as before).
+    if testsKey(r, res.operation):
+      return
   of "list.copy":
     let (text, what) = focusedRowText()
     if text.len == 0: traceGesture("nothing is selected here to copy")
@@ -8788,6 +9036,71 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
       else:
         return "unknown terminal event '" & parts[1] & "'"
+    of "tests":
+      # PLAT-53: Test Results, aimed from the geometry it was drawn with
+      # (`test_results_leaf.testsLayout`):
+      #   tests:show                  activate its tab
+      #   tests:run                   press the ▶
+      #   tests:wait[:<ms>]           let the run in flight settle (polled
+      #                               as the window's tick polls it)
+      #   tests:row:<name>            press a test's row (selects it)
+      #   tests:refresh:<name>        press its `⟳`
+      #   tests:open:<name>[:shift]   press its `⏵` (Shift held)
+      #   tests:key:<operation>       a list operation, the pane focused
+      #   tests:kill                  SIGKILL the run in flight's group
+      #   tests:wheel:<rows>          the wheel over the pane
+      case parts[1]
+      of "show":
+        applyGestureCommand(r, cmdActivateTab(paneTestResults))
+        discard drawArrangement(r)
+      of "wait":
+        let budget = if parts.len > 2: at(2) else: 300_000
+        let deadline = epochTime() + float(budget) / 1000.0
+        while gTestsHost.running and epochTime() < deadline:
+          sleep(50)
+          discard pollTestsHost(r)
+        discard pollTestsHost(r)
+        if gTestsHost.running:
+          return "the test run did not settle within " & $budget & " ms"
+      of "kill":
+        if not gTestsHost.running:
+          return "no test run is in flight"
+        killTestsRun()
+      of "key":
+        gFocusPane = $paneTestResults
+        if not testsKey(r, parts[2]):
+          return "the Test Results pane does not take '" & parts[2] & "'"
+      else:
+        let body = testsBody()
+        if gTestsVM.isNil or body.w <= 0:
+          return "the Test Results pane is not drawn"
+        case parts[1]
+        of "run":
+          let (x, y) = centreOf(testsLayout(gTestsVM, body).run)
+          pressAt(x, y)
+        of "row", "refresh", "open":
+          let i = testsRowNamed(parts[2])
+          if i < 0:
+            return "no test " & parts[2]
+          gTests.revealRow(gTestsVM, body, i)
+          drawTestsPane(r)
+          let lay = testsLayout(gTestsVM, body)
+          let top = gTests.visibleTop(lay.lines.len, lay.rows)
+          let y = lay.list.y + (lay.lineOfRow(i) - top) * TestsRowPx +
+                  TestsRowPx div 2
+          let a = lay.list.x + lay.fit.starts[4]
+          let x = case parts[1]
+                  of "row": lay.list.x + TestsActionPx
+                  of "refresh": a + TestsActionPx div 2
+                  else: a + TestsActionPx + TestsActionPx div 2
+          gPointerShift = parts.len > 3 and parts[3] == "shift"
+          pressAt(x, y)
+          gPointerShift = false
+        of "wheel":
+          let (cx, cy) = centreOf(body)
+          windowPointer(r, gekWheel, cx, cy, -float(at(2) * TestsRowPx))
+        else:
+          return "unknown tests event '" & parts[1] & "'"
     of "search":
       # PLAT-57: Find in Files, aimed from the geometry it was drawn with
       # (`search_results_leaf.searchLayout`):
@@ -9607,6 +9920,8 @@ proc editSurfaceFor(cmd: GpuiCommand; rows: int): EditorSurface =
 
 proc runEdit(cmd: GpuiCommand): int =
   ## `ct edit --ui=gpui <project>`, end to end, with NO recording open.
+  # PLAT-53: a Test Results run still going ends with the window.
+  defer: stopTestsHost()
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
   let surface = editSurfaceFor(cmd,
@@ -9634,6 +9949,11 @@ proc runEdit(cmd: GpuiCommand): int =
     # K19: and the Files pane lists the opened folder, its menu acting on
     # the disk.
     attachEditFiles(leafSet, cmd.traceFolder)
+  # PLAT-53: Test Results over the project. This window has no session tabs,
+  # so a test's recording is not opened here: the pane says where it is.
+  installTestsHost(cmd.traceFolder, proc(folder: string): string =
+    NoSessionTabsInEditText & folder)
+  attachTests(leafSet)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
@@ -9715,6 +10035,8 @@ proc runOpen(cmd: GpuiCommand): int =
   # `DapStdioBackend.close` is idempotent and kills a child that does not
   # exit on its own.
   defer: session.backend.close()
+  # PLAT-53: and a Test Results run still going ends with it (its group).
+  defer: stopTestsHost()
   # The shipped product default for the flow overlay — the same constant the
   # terminal host applies, pinned against `default_config.yaml` by a test.
   if not session.session.editorVM.isNil:
@@ -9996,6 +10318,18 @@ proc runOpen(cmd: GpuiCommand): int =
   # from the repository the desktop would show for a replay — the process's
   # working directory.
   attachVcs(leafSet, getCurrentDir())
+  # PLAT-53: Test Results over the same directory, the window's project; a
+  # test's recording opens in a NEW SESSION TAB (Test-Results-Pane.md §8.3).
+  installTestsHost(getCurrentDir(), proc(folder: string): string =
+    let problem = traceFolderProblem(folder)
+    if problem.len > 0:
+      return "could not open " & folder & ": " & problem
+    let before = gSessionsOpened.len
+    var rr: GpuiRenderer
+    openRecordingInTab(rr, folder)
+    if gSessionsOpened.len > before: ""
+    else: "could not open " & folder & " in a new tab")
+  attachTests(leafSet)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at — the same reading `editorRowsFor`
   # takes for the row count, over the same layout.
