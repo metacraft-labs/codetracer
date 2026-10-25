@@ -551,13 +551,15 @@ suite "PLAT-48: the GPUI window's top bar and auto-hide panels, as drawn":
       slots.add s.attr("data-ct-dock-slot")
     ck $paneState notin slots
     # Back in its own stack, AT ITS OWN PLACE: the shared default's
-    # "State | Scratchpad", not "Scratchpad | State" (State is the first
-    # tab, so it goes back in front of the tab that followed it).
+    # "Variables | Scratchpad", not "Scratchpad | Variables" (the state
+    # pane is the first tab, so it goes back in front of the tab that
+    # followed it). Its tab reads "Variables" since the one-list Variables
+    # pane (`9ae2786b7`, `pane_names.nim`).
     var tabs: seq[string] = @[]
     for t in back.nodesWith("data-ct-tabs"):
       let labels = t.attr("data-ct-tabs").split(',')
       if "Scratchpad" in labels: tabs = labels
-    ck tabs == @["State", "Scratchpad"]
+    ck tabs == @["Variables", "Scratchpad"]
 
   test "PLAT35-F3: the horizontal wheel reaches the editor, and the clipped text arrives":
     # **WHY THIS CASE IS IN THIS FILE AND NOT IN

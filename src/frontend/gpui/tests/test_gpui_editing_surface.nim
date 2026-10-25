@@ -972,8 +972,11 @@ suite "PLAT-22: the GPUI editing surface":
     # The execution pointer reached the plan: PLAT-51 draws the desktop's
     # mark (`highlight_line_arrow.svg`), named on its lane, not a glyph.
     ck "highlight_line_arrow.svg" in output
-    # The state pane rendered its vocabulary tree rather than its name.
-    ck "Locals" in output
+    # The state pane rendered its own content rather than its name. Since the
+    # one-list Variables pane (`9ae2786b7`) that content opens with the watch
+    # input `leaves.nim` draws, at every stop and with or without variables;
+    # the Locals tab this used to look for no longer exists.
+    ck "Enter a watch expression" in output
     expectCount(7)
 
 # ---------------------------------------------------------------------------
