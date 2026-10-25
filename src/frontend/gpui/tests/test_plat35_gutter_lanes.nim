@@ -392,8 +392,8 @@ suite "PLAT-35 tier 3 — the gutter's lanes":
 
   test "the CORPUS declares an unstepped breakpoint case":
     # **THE HALF THAT IS ABOUT THE CORPUS AND NOT ABOUT THE WINDOW.**
-    # `breakpoint-editor` is `stepIn=6, setBreakpoint@1`, and `setBreakpoint@n`
-    # is an offset into the editor's FIRST DRAWN ROW, which after six stepIns
+    # `breakpoint-editor` is `stepIn=5, setBreakpoint@1`, and `setBreakpoint@n`
+    # is an offset into the editor's FIRST DRAWN ROW, which after five stepIns
     # is 31 — so its mark lands on a two-digit row and that scenario CANNOT
     # fail the cases above. Reproducing `PLAT35-F14` took an ad-hoc probe, and
     # an assertion that cannot fail is the defect this campaign is about.
