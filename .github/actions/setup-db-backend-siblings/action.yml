@@ -162,5 +162,5 @@ runs:
         siblings: |
           codetracer-trace-format=6c53d0af8908e6d3abe65fd1c7508893025e5571
           codetracer-trace-format-nim=ffd0554d6d779b94403bfa0fc1bf3056e06a5946
-          codetracer-native-recorder=9c793cacd828bb5ac0a1794536064e0e88b326cd
+          codetracer-native-recorder=fc70f957a9ed4e3bdcee4135905313a1e36ef89d
           ${{ inputs.extra-siblings }}
