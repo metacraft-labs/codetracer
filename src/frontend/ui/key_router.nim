@@ -48,6 +48,8 @@ import ../../common/[key_event_names, ct_event]
 import ../dap
 import ./shortcut_preference
 import ./chord_display
+from ./shortcut_dialog import ReferenceLine
+from ./status import onNotification
 import ./monaco_operations
 import ./editor_scope
 import ./video_player   # `videoPlayerHasFocus`, `currentVideoPlayerVM`
@@ -424,6 +426,18 @@ proc focusedOutputScroller(): JsObject {.importjs: """
   ## Terminal Output's LINE view (its screen view has no bar and keeps its
   ## step-by-write arrows) or Build Output's lines — or nil.
 
+proc showInertNote(note: string) =
+  ## The inert key's reason on the status bar, and on `window.__ctInertNotes`
+  ## (what the Electron specs read beside the bar's text).
+  let entry = cstring(note)
+  {.emit: ["(window.__ctInertNotes = window.__ctInertNotes || []).push(",
+           entry, ");"].}
+  if not data.isNil and not data.ui.isNil and not data.ui.status.isNil:
+    data.ui.status.onNotification(newNotification(
+      NotificationKind.NotificationInfo, note))
+  else:
+    cwarn "keys: " & note
+
 proc registerHostOperation*(operation: string; run: proc()) =
   ## How THIS build performs `operation` — a catalogued operation whose rows
   ## hold only where a build supplies it (the web studio's
@@ -643,7 +657,16 @@ proc routeKey(name: string; ev: JsObject) =
     handled = true
   of erOperation:
     handled = runDesktopOperation(res) == nkHandled
-  of erCharacter, erNothing:
+  of erNothing:
+    # Mode-Transitions.md §8.1: a key whose operation has no meaning in this
+    # product mode is inert AND SAYS SO, on the surface the user is looking
+    # at — the status bar, briefly (an info notice, dismissed by its timer),
+    # as the terminal says it on its status line.
+    let note = deskRouter.inertNote(res, facts, path, nmNormal)
+    if note.len > 0:
+      showInertNote(note)
+      handled = true
+  of erCharacter:
     discard
   if handled:
     stop(ev)
@@ -729,6 +752,21 @@ proc chordForAction*(action: ClientAction): cstring =
   cstring(chordMemo.chords[op])
 
 chord_display.chordOfAction = chordForAction
+
+proc shortcutReferenceHere*(): tuple[lines: seq[ReferenceLine], scope: string] =
+  ## The shortcut reference for where the focus is NOW (the shortcuts dialog
+  ## asks as it opens, before it is in the document): the router's
+  ## `shortcutReference` — the same layers `route` resolves through — each
+  ## line with its operation's reading name.
+  syncPaletteLayer()
+  syncContextMenuLayer()
+  let path = desktopScopePath()
+  for e in deskRouter.shortcutReference(desktopFacts(), path, nmNormal):
+    result.lines.add ReferenceLine(layer: e.layer, keyText: e.keyText,
+                                   operation: e.operation,
+                                   label: operationLabelOf(e.operation),
+                                   shadowedBy: e.shadowedBy)
+  result.scope = $path
 
 # PLAT-70 Part B: the copy hint under a table row names the chord that
 # copies it where the focus is (KL-8).
