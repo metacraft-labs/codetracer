@@ -89,6 +89,16 @@ export default defineConfig({
         jsRecorder,
         "packages/runtime-browser/src/index.ts",
       ),
+      // The runtime's own dependency, at its source for the same reason.
+      // Its `dist/` is CommonJS, and Vite converts CommonJS only under a
+      // `node_modules` path: the recorder's workspace links the package
+      // from `packages/`, whose real path is outside one, so a named import
+      // of the CommonJS build (`encodeBatch`, by the batch transport) fails
+      // the build with "is not exported".
+      "@codetracer/boundary-format": path.join(
+        jsRecorder,
+        "packages/boundary-format/src/index.ts",
+      ),
       "codetracer-wasm-instrumenter/recorder-runtime": path.join(
         wasmInstrumenter,
         "recorder-runtime",
