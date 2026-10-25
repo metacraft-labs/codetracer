@@ -32,13 +32,16 @@
  *
  * ONE FILE, TWO MODES. The same editor and the same line are right-clicked in
  * both modes, so "the menus differ" cannot be satisfied by having clicked
- * somewhere else. `#run-image` and `#stop-image` are the product's own
- * transitions, the same two the toolbar offers.
+ * somewhere else. The way in is `Ctrl+F5` and the way out is a click on
+ * `#stop-image`, the product's own transitions (`lib/mode-switch.ts`). Run is
+ * not used because this is an Electron edit session, where Run does not leave
+ * Edit mode.
  */
 
 import * as path from "node:path";
 
 import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { enterDebugMode, stopToEditMode } from "../../lib/mode-switch";
 import { ContextMenu } from "../../page-objects/components/context-menu";
 
 const testFolder = path.join(codetracerInstallDir, "test-programs");
@@ -138,7 +141,8 @@ test.describe("The editor context menu follows the mode", () => {
   test.use({
     launchMode: "edit",
     editFolderPath: testFolder,
-    deploymentMode: "web",
+    // The `edit` launch is always Electron (`ct edit`); `lib/mode-switch.ts`.
+    deploymentMode: "electron",
   });
 
   test("edit mode offers editing commands and no replay commands", async ({
@@ -208,9 +212,11 @@ test.describe("The editor context menu follows the mode", () => {
     await ctPage.keyboard.press("Escape");
 
     // ---- DEBUG -------------------------------------------------------------
-    await ctPage.locator("#run-image").click({ timeout: 30_000 });
-    await ctPage.waitForSelector(".isonim-debug-controls", { timeout: 180_000 });
-    await ctPage.waitForSelector(".view-line", { timeout: 60_000 });
+    // Red here until the Debug layout an edit session toggles into carries the
+    // open source tab (Mode-Transitions.md §5). Today it carries none, so
+    // `openEditorMenu` finds no rendered code to right-click. That is a
+    // product defect, recorded on its own, and not a reason to soften this leg.
+    await enterDebugMode(ctPage);
 
     await openEditorMenu(ctPage);
     const debugRows: Row[] = await readRows(ctPage);
@@ -268,9 +274,7 @@ test.describe("The editor context menu follows the mode", () => {
     // The round trip, because a menu built from a mode read once would be right
     // on the first switch and wrong afterwards — the failure shape the per-mode
     // layout register exists to stop having.
-    await ctPage.locator("#stop-image").click({ timeout: 30_000 });
-    await ctPage.waitForSelector(".edit-mode-toolbar", { timeout: 180_000 });
-    await ctPage.waitForSelector(".view-line", { timeout: 60_000 });
+    await stopToEditMode(ctPage);
 
     await openEditorMenu(ctPage);
     const editAgain = names(await readRows(ctPage));
