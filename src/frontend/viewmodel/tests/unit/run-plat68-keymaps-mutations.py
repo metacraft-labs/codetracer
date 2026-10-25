@@ -480,10 +480,21 @@ ARMS = [
      "the terminal's Ctrl+K Ctrl+S shows no reference"),
     ("C7", [(ROUTER, "  for l in activeLayers(router.stack, path):\n    result.add (l.table, true)",
              "  for l in activeLayers(router.stack, path):\n    discard l")],
-     [(PTYC, "*::find is its owner's*")],
+     [(PTYC, "*::with find open the reference lists its layer first*")],
      "an open find widget's pushed layer is never asked"),
+    # C1 and C2 are DECLARED SURVIVORS, measured: a writable CUA editor
+    # already has `textInputFocus` (`context_keys`), and the resolver's
+    # text-entry shadow types a printable key before any layer that is not
+    # the focused element's is asked — so neither guard in the letters'
+    # `when` is the one that holds. C10 removes the shadow itself, and the
+    # letters test's writable and find-field halves kill it.
+    ("C10", [(KEYMAP, "  if textEntry and pending.chords.len == 0 and isTextKey(key):",
+              "  if false and textEntry and pending.chords.len == 0 and isTextKey(key):")],
+     [(PTYC, "*::writable, n is typed*"),
+      (PTYC, "*::the find field takes n*")],
+     "a printable key in a text field is not typed (no text-entry shadow)"),
 ]
-DECLARED_SURVIVORS = {"N1"}
+DECLARED_SURVIVORS = {"N1", "C1", "C2"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
              CORE, ROLES, TUI_MAIN, DRIVER, MOTIONS, RUNTIME, PRODUCT_MENU,
              TOP_BAR, OPERATIONS, CAPS}

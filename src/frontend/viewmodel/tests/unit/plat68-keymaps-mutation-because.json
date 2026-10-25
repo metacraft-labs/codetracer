@@ -31,6 +31,8 @@
   "B7": "Unhandled exception: never: Home to 3 [AssertionFailedError]",
   "B8": "plan.values(\"data-ct-selection\") == @[\"1:1-24\", \"2:1-84\"]",
   "B9": "Unhandled exception: never: a two-line selection [AssertionFailedError]",
+  "C10": "Unhandled exception: never: an n typed on line 11 [AssertionFailedError]",
+  "C7": "first == \"[base:find]\"",
   "D1": "onDisk == expected",
   "D2": "keyName(bytes) == want",
   "D3": "keyName(\"\\b\", '\\b') == \"Backspace\"",
