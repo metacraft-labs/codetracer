@@ -17,7 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
 
-import { test as base, expect, chromium, type Page } from "@playwright/test";
+import { test as base, expect, chromium, type BrowserContext, type Page } from "@playwright/test";
 
 import {
   codetracerInstallDir,
@@ -783,6 +783,26 @@ function forceSelectedSegmentPrimaryReplicaMiss(
     missingObjectKeys,
     secondaryObjectKeys,
   };
+}
+
+/**
+ * The tab a clicked dive-in link opens, or null when it opened none (the
+ * caller then follows the click in its own tab).
+ *
+ * Wait for it as long as for the page itself, not a few seconds.  Playwright
+ * emits a popup's `page` event only once the popup has navigated to its first
+ * URL (https://playwright.dev/docs/api/class-browsercontext#browser-context-event-page),
+ * and the debug-session endpoint answers only after it has resolved the span
+ * and launched the replay.  On a storage failure that answer comes after the
+ * replica reads have failed, which on a loaded host took longer than the 5 s
+ * this used to wait: the popup then showed the expected `storage_failure`
+ * while the test waited for the Grafana tab to navigate, and timed out.
+ */
+function waitForDiveInPopup(
+  context: BrowserContext,
+  timeoutMs: number,
+): Promise<Page | null> {
+  return context.waitForEvent("page", { timeout: timeoutMs }).catch(() => null);
 }
 
 async function waitForOutput(
@@ -4672,7 +4692,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
       ).toBe(true);
 
-      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(context, 120_000);
       await link.click();
       const problemPage = (await popupPromise) ?? page;
       await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -4921,7 +4941,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           ),
         ).toBe(true);
 
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 120_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5287,7 +5307,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           );
         }
 
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5366,7 +5386,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const link = page.locator('a[title="Debug in CodeTracer"]').first();
       await expect(link).toBeVisible({ timeout: 60_000 });
       expect(await link.getAttribute("href")).toBe(mcrDebugUrl);
-      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(page.context(), 60_000);
       await link.click();
       const problemPage = (await popupPromise) ?? page;
       await problemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
@@ -5675,7 +5695,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         const link = page.locator('a[title="Debug in CodeTracer"]').first();
         await expect(link).toBeVisible({ timeout: 60_000 });
         expect(await link.getAttribute("href")).toBe(debugUrl);
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(new RegExp(escapeRegExp(debugUrl)), {
@@ -5705,7 +5725,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const jaegerMcrLink = page.locator('a[title="Debug in CodeTracer"]').first();
       await expect(jaegerMcrLink).toBeVisible({ timeout: 60_000 });
       expect(await jaegerMcrLink.getAttribute("href")).toBe(mcrDebugUrl);
-      const jaegerMcrPopupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const jaegerMcrPopupPromise = waitForDiveInPopup(page.context(), 60_000);
       await jaegerMcrLink.click();
       const jaegerMcrProblemPage = (await jaegerMcrPopupPromise) ?? page;
       await jaegerMcrProblemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
@@ -5760,7 +5780,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         } else {
           assertM36DebugUrl(grafanaHref ?? "", retentionCaseAsPlatformReady(policyHarness.ready, testcase));
         }
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5932,7 +5952,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await expect(link).toBeVisible({ timeout: 60_000 });
       expect(await link.getAttribute("href")).toBe(debugUrl);
 
-      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(page.context(), 120_000);
       await link.click();
       const popup = await popupPromise;
       const replayPage = popup ?? page;
@@ -6322,7 +6342,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           timeout: 60_000,
         });
         expect(await link.getAttribute("href")).toBe(debugUrl);
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 120_000);
         await link.click();
         const replayPage = (await popupPromise) ?? page;
         await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
@@ -6547,7 +6567,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
       ).toBe(true);
 
-      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(context, 120_000);
       await link.click();
       const replayPage = (await popupPromise) ?? page;
       await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
@@ -6787,7 +6807,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ).toBe(true);
 
         const previousLaunches = launches.length;
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 120_000);
         await link.click();
         const replayPage = (await popupPromise) ?? page;
         await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
