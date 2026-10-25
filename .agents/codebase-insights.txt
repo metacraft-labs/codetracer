@@ -7734,3 +7734,23 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   editing in Monaco) — counted as inexpressible on the desktop.
 - The desktop's session-container-<n> carries `data-scope-kind=tab` / `data-scope-id=tab:<n+1>` so its scope path has the
   session tab like the terminal's and GPUI's (window / tab:tab:1 / pane:… ).
+- The macOS native menu (`index/menu.nim`, `when defined(ctmacos)`) is
+  compiled by NO Linux lane; `nim check -b:js <Tuprules NIM_COMMON_FLAGS>
+  -d:ctIndex -d:nodejs -d:ctmacos src/frontend/index.nim` type-checks it on
+  Linux. Its accelerators come from `viewmodel/keymap/menu_accelerators`
+  (a main-process router over the same keybindings.json), and
+  `test_plat68_menu_accelerators` source-checks the arm.
+- `index/keybindings.onKeybindingsText` is called with the file's text every
+  time it is sent to the renderer — the hook the macOS menu re-keys on.
+- The desktop shortcuts dialog has NO stylesheet (no `kb-*` rules anywhere);
+  its shortcut-reference section carries an inline max-height/overflow.
+- `shortcut_dialog_test`'s no-markup walk counts 3 checks per node per dialog
+  (text, tag, each attribute): a new dialog section moves ExpectedAssertions
+  by (nodes × checks × 4 presets), not only by the new case's checks.
+- Changing node-packages/yarn.lock: set the platform's hash in
+  `yarn-project.nix` to `sentinelHash`, `nix build .#packages.x86_64-linux.
+  node-modules-derivation`, paste the `got:` (it is the yarn-cache FOD), build
+  again. The yarn-cache build takes ~15 s here (680 MiB of packages).
+- Re-syncing a /tmp mirror (`sync.sh`) while `build-once.sh` runs in it
+  reverts the patched `src/Tuprules.tup`, and cargo then builds into the
+  SHARED `/tmp/codetracer/db_backend_target`. Never sync a mirror mid-build.

@@ -4128,6 +4128,15 @@ jobs:
           PLAT68_SPEC: tests/keymaps/plat68-diff13-desktop.spec.ts
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
+      - name: One keybindings.json, three front-ends, one behaviour
+        if: ${{ !cancelled() }}
+        # The same user file read by the terminal (a real pty), the GPUI
+        # window and the Electron app in one run: a rebound call-trace
+        # operation and a removed base row give the same execution lines on
+        # all three. Needs the terminal and GPUI binaries beside the desktop
+        # build; the recipe's desktop half starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat68-one-keymap'
+
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4

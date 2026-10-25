@@ -6783,3 +6783,9 @@ plat51-capture-electron *args:
 # Ctrl+Shift+B, the user's keybindings.json and its reload).
 plat68-desktop-keys *args:
   bash scripts/plat68-desktop-keys.sh {{args}}
+
+# One keybindings.json read by the terminal (a real pty), GPUI (the window
+# plan) and the desktop (the real Electron app) in one run: a rebound pane
+# operation and a `-command` removal behave identically on all three.
+plat68-one-keymap:
+  bash ci/test/plat68-one-keymap-three-front-ends.sh

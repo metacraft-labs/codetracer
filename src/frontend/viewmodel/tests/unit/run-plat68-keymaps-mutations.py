@@ -139,13 +139,20 @@ DIFF13_DEV = "src/frontend/tui/tests/support/key_devices.nim"
 DIFF13_DECODE = "PLAT-68 DIFF-13: the population*::every key's device form*"
 DIFF13_GPUI_CUA = "PLAT-68 DIFF-13: GPUI*::cua:*"
 
+# k2: the desktop's macOS menu accelerators and the shortcut reference.
+MENU_ACCEL = "src/frontend/viewmodel/keymap/menu_accelerators.nim"
+INDEX_MENU = "src/frontend/index/menu.nim"
+DIALOG = "src/frontend/ui/shortcut_dialog.nim"
+MENU_ACCEL_T = "src/frontend/viewmodel/tests/unit/test_plat68_menu_accelerators.nim"
+DIALOG_T = "src/frontend/tests/shortcut_dialog_test.nim"
+
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
             ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
             MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
-            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS, USER_KEYMAP, GPUI_KEYS, DOM_KEYS]
+            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS, USER_KEYMAP, GPUI_KEYS, DOM_KEYS, MENU_ACCEL, INDEX_MENU, DIALOG]
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
           LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
-          PROPAGATION, MENU, DIFF13_POP, DIFF13_DEV]
+          PROPAGATION, MENU, DIFF13_POP, DIFF13_DEV, MENU_ACCEL_T, DIALOG_T]
 
 SEQUENCE = "*::the milestone's sequence, Ctrl+S, and the file on disk"
 RESTORED = "*::the pop or the reset is written on SIGTERM, SIGHUP and a crash"
@@ -413,6 +420,23 @@ ARMS = [
              "(if k == \"pane\": \"\" else: k))")],
      [(DIFF13, DIFF13_GPUI_CUA)],
      "GPUI's scope path omits the pane level"),
+    # --- k2: the desktop's macOS menu accelerators and shortcut reference ---
+    ("E1", [(INDEX_MENU, "      let accelerator = menuRouter.menuAccelerator($node.action)",
+             "      let accelerator = (let b = data.config.shortcutMap.actionShortcuts[node.action]; if b.len == 0: \"\" else: $b[0].renderer)")],
+     [(MENU_ACCEL_T, "*::index/menu.nim's macOS arm")],
+     "the macOS menu's accelerators come from the YAML table again"),
+    ("E2", [(MENU_ACCEL, "  if code.len == 1 and not command:",
+             "  if false:")],
+     [(MENU_ACCEL_T, "*::what has no accelerator")],
+     "a bare letter (CUA's read-only `n`) becomes a registered accelerator"),
+    ("E3", [(MENU_ACCEL, "  router.chordFor(name, menuFacts(), menuScopePath(), nmNormal, arg)",
+             "  initKeymapRouter(router.base, router.delivery).chordFor(name, menuFacts(), menuScopePath(), nmNormal, arg)")],
+     [(MENU_ACCEL_T, "*::a row rebinding Step Over, and F10 removed")],
+     "the menu shows the base's chord over the user's rebinding"),
+    ("E4", [(DIALOG, "    if line.shadowedBy.len > 0:",
+             "    if false:")],
+     [(DIALOG_T, "*::the shortcut reference*")],
+     "the shortcut reference drops the shadow mark"),
 ]
 DECLARED_SURVIVORS = {"N1"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
@@ -557,7 +581,23 @@ def run_suite(suite, test_filter):
     stem = Path(suite).stem
     env = dict(os.environ, CODETRACER_REPO_ROOT=str(REPO))
     try:
-        if suite == MONACO_T:
+        if suite == DIALOG_T:
+            # `frontend-js`: compiled to JavaScript with the lane's flags, run
+            # under node (the lane's own recipe, `run-nim-test-lane.sh`).
+            out = f"{NIMCACHE}/{stem}.js"
+            c = subprocess.run(
+                ["nim", "js", "-d:nodejs", "--hints:off", "--warnings:off"] +
+                lane_flags("frontend-js") +
+                [f"--nimcache:{NIMCACHE}/{stem}", f"-o:{out}", suite],
+                cwd=REPO, capture_output=True, text=True, timeout=TIMEOUT,
+                env=env)
+            if c.returncode != 0:
+                return "DID-NOT-COMPILE", []
+            argv = ["node", out] + ([test_filter] if test_filter and
+                                    test_filter != "GREEN" else [])
+            p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
+                               timeout=TIMEOUT, env=env)
+        elif suite == MONACO_T:
             # `frontend-js`: compiled to JavaScript, run under node.
             out = f"{NIMCACHE}/{stem}.js"
             c = subprocess.run(
