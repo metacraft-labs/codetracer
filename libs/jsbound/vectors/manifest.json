@@ -226,6 +226,13 @@
       "name": "resource_events"
     },
     {
+      "bytes": "platform_state.bin",
+      "class": "valid",
+      "description": "values the platform holds that a page reads: the referrer and a socket's bufferedAmount (PlatformValue src 8), and navigator.storage.estimate() settling in a platform task with the estimate it resolved with (TaskReg and Task kind 13, then PlatformValue src 9)",
+      "expected": "platform_state.json",
+      "name": "platform_state"
+    },
+    {
       "bytes": "storage_shape_reads.bin",
       "class": "valid",
       "description": "StorageRead present 2: the key list, length and key(n) of an area",
@@ -757,17 +764,17 @@
     },
     {
       "base": "enum_greatest",
-      "bytes": "enum_platform_value_src_8.bin",
+      "bytes": "enum_platform_value_src_10.bin",
       "class": "refusal",
-      "description": "PlatformValue.src is 8, one past its greatest value (1 to 7)",
-      "expected": "enum_platform_value_src_8.json",
-      "name": "enum_platform_value_src_8"
+      "description": "PlatformValue.src is 10, one past its greatest value (1 to 9)",
+      "expected": "enum_platform_value_src_10.json",
+      "name": "enum_platform_value_src_10"
     },
     {
       "base": "enum_greatest",
       "bytes": "enum_platform_value_src_0.bin",
       "class": "refusal",
-      "description": "PlatformValue.src is 0, one before its least value (1 to 7)",
+      "description": "PlatformValue.src is 0, one before its least value (1 to 9)",
       "expected": "enum_platform_value_src_0.json",
       "name": "enum_platform_value_src_0"
     }

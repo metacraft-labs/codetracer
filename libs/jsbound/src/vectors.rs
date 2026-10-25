@@ -546,6 +546,51 @@ fn resource_events_records() -> Vec<Record> {
     ]
 }
 
+/// Values the platform holds that a page reads (spec §5.2 `PlatformValue`
+/// src 8 and 9, §10.4): `document.referrer` and an open socket's
+/// `bufferedAmount`, each read where the page made it, then
+/// `navigator.storage.estimate()`, a platform promise registered when it is
+/// called and settled in a task of its own, followed by what it resolved
+/// with.
+fn platform_state_records() -> Vec<Record> {
+    let state = |seq, query: &str, value: &str| Record::PlatformValue {
+        seq,
+        src: 8,
+        task_id: 0,
+        query: query.into(),
+        value: value.into(),
+    };
+    vec![
+        header(),
+        env(),
+        state(
+            1,
+            "document.referrer",
+            r#""https://search.example/?q=shoes""#,
+        ),
+        state(2, "WebSocket.bufferedAmount[1]", "4096"),
+        Record::TaskReg {
+            seq: 3,
+            task_id: 1,
+            kind: 13,
+            delay_ms: 0.0,
+        },
+        Record::Task {
+            seq: 4,
+            task_id: 1,
+            kind: 13,
+        },
+        Record::PlatformValue {
+            seq: 5,
+            src: 9,
+            task_id: 1,
+            query: "navigator.storage.estimate".into(),
+            value: r#"{"resolved":{"quota":1073741824,"usage":5120}}"#.into(),
+        },
+        end(5),
+    ]
+}
+
 /// An XMLHttpRequest that uploads a body and downloads a response, with the
 /// `XhrEvent` of every `ProgressEvent` it dispatches (spec §5.2, §6, §10.4):
 /// `loadstart` inside `send()` (no `Task`), the upload object's `progress`,
@@ -952,6 +997,15 @@ fn decoding_vectors() -> Vec<Vector> {
          outcome, and a dynamic import whose module reads the clock before \
          the import settles (TaskReg and Task kind 13)",
         resource_events_records(),
+    ));
+    out.push(complete(
+        "platform_state",
+        "values the platform holds that a page reads: the referrer and a \
+         socket's bufferedAmount (PlatformValue src 8), and \
+         navigator.storage.estimate() settling in a platform task with the \
+         estimate it resolved with (TaskReg and Task kind 13, then \
+         PlatformValue src 9)",
+        platform_state_records(),
     ));
     out.push(complete(
         "storage_shape_reads",

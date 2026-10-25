@@ -242,8 +242,12 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     // 1 IntersectionObserver entries, 2 ResizeObserver entries, 3
     // MutationObserver records, 4 PerformanceObserver entries, 5 a read of
     // the performance timeline, 6 `IdleDeadline.didTimeout`, 7 a media
-    // element's state or the outcome of its `play()`.
-    ("PlatformValue", "src", 1, 7),
+    // element's state or the outcome of its `play()`, 8 a read of the
+    // platform's own state (`document.referrer`, the navigator's and the
+    // screen's, `WebSocket.bufferedAmount`, …), 9 the outcome of a platform
+    // promise that settles in a platform task (`navigator.storage.estimate()`,
+    // `document.fonts.ready`, `HTMLImageElement.decode()`, …).
+    ("PlatformValue", "src", 1, 9),
 ];
 
 /// The value set of `record`.`field`, if it is an enumerated field.
