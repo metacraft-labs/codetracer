@@ -298,3 +298,9 @@ src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	f1d4342a6b4811eae0d9b68c710a3b1da181a285c91f114c6fbfdeddc315b0e3	3a77204b316679c7479d1925630d128c2e244fd01cdafb4f00d4515191bd1b39
 src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/tui/app/runtime.nim	5daa473da801319db4e4da95f1e116f705e4eb2cbee385c1357f9a60518465a4	b82bbbcefe5491172c4b6aa320bbe689cd63c4402b65645eea29ddb63272be9c
 src/frontend/tui/tests/plat71c-report-mutation-control.sha256	src/frontend/tui/app/runtime.nim	5daa473da801319db4e4da95f1e116f705e4eb2cbee385c1357f9a60518465a4	b82bbbcefe5491172c4b6aa320bbe689cd63c4402b65645eea29ddb63272be9c
+# 2026-10-25: session_driver.nim takes OriginEventName from the ViewModel rather
+# than from the terminal's origin_binding, so the GPUI binary links no isonim_tui
+# (codetracer-pm issue 2026-10-22, "just build-gpui fails to link without the
+# TUI grammar archive"). Both harnesses were already owed a re-grade above.
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/tui/host/session_driver.nim	44423125ab2216c4ac557cee6db34f06870c1a5f87f23afbecbc7d129c066f38	dcbbb72c9838f4c9ef5359dc7b5284326577b7abce50cb15d2db3b7672829532
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/host/session_driver.nim	44423125ab2216c4ac557cee6db34f06870c1a5f87f23afbecbc7d129c066f38	dcbbb72c9838f4c9ef5359dc7b5284326577b7abce50cb15d2db3b7672829532

@@ -578,6 +578,21 @@ proc parseOriginSummary*(j: JsonNode): OriginSummary =
   result.isPlaceholder = j{"isPlaceholder"}.getBool(false)
   result.placeholderToken = getOptStr(j{"placeholderToken"})
 
+const
+  OriginEventName* = "ct/updated-origin-chain"
+    ## The DAP event `Handler::respond_origin_chain` emits beside every
+    ## `ct/originChain` response (`dap.rs`'s `updated_origin_chain_event`).
+    ##
+    ## It lives in this renderer-free module rather than in the terminal's
+    ## `tui/app/origin_binding.nim`, where it was first written, because the
+    ## native hosts' shared `tui/host/session_driver.nim` waits for it too.
+    ## Importing it from `origin_binding` pulled that module's re-export of
+    ## `views/styled_row`, and through it all of `isonim_tui` including the
+    ## tree-sitter grammar archive, into every binary that links the session
+    ## driver. The GPUI front-end is one of those binaries, and it must link
+    ## no terminal renderer (codetracer `justfile`, the block above
+    ## `build-gpui:`).
+
 # ---------------------------------------------------------------------------
 # Outbound payload builders. Centralised here so every surface that
 # fires a `ct/originChain` / `ct/originSummary` request emits the same
