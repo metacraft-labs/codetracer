@@ -410,7 +410,9 @@ proc requestPanelReload*(reload: VcsPanelReload;
   ##     now; without it, the change check that triggered this one would
   ##     compare equal next time and the panel would never catch up;
   ##   * ``folderless()`` became true — the session has no repository; the
-  ##     panel's own folderless path shows the absence.
+  ##     panel's own folderless path shows the absence;
+  ##   * ``releaseInFlight`` was called while it read — the caller wrote the
+  ##     panel's state itself, and no follow-up queued before then runs.
   ##
   ## (VCS-Panel.md, "An auto-refresh never stalls the window".)
   ##
@@ -428,8 +430,16 @@ proc requestPanelReload*(reload: VcsPanelReload;
   let issuedFor = target()
   readPanelReload(issuedFor, proc(reads: VcsReloadReads) =
     reload.inFlight = false
+    let released = reload.released
+    reload.released = false
     try:
-      if folderless():
+      if released:
+        # `releaseInFlight` was called while these reads ran: the panel's
+        # state now belongs to whoever wrote it, so this answer is dropped. A
+        # follow-up queued before the release was cleared by it; one queued
+        # after it is a new request and still runs below.
+        discard
+      elif folderless():
         discard
       elif target() != issuedFor:
         reload.followUp = true
@@ -440,3 +450,19 @@ proc requestPanelReload*(reload: VcsPanelReload;
       if reload.followUp:
         reload.followUp = false
         requestPanelReload(reload, target, folderless, apply))
+
+proc releaseInFlight*(reload: VcsPanelReload) =
+  ## Give up the reload in flight, if any, because the caller has just written
+  ## the panel's state itself: its answers are discarded when they arrive, and
+  ## a follow-up queued before this call does not start. A reload requested
+  ## after this call reads as usual, following the released one.
+  ##
+  ## The agentic launcher is that caller (`agentic_session_launcher.syncVcs`):
+  ## it shows the agent's worktree in the panel without git. While the first
+  ## load answered before it returned, the launcher's write always came last;
+  ## now that the load answers later, an answer still in flight would replace
+  ## the launcher's state with the repository git read.
+  if reload.isNil or not reload.inFlight:
+    return
+  reload.released = true
+  reload.followUp = false

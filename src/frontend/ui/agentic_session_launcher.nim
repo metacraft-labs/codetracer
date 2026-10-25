@@ -420,6 +420,9 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   let comp = VCSComponent(data.ui.componentMapping[Content.VCS][VcsId])
   if comp.isNil:
     return
+  # The panel's first load answers later; one still in flight must not
+  # replace the agent's worktree state written below.
+  comp.adoptExternalState()
   comp.currentBranch = cstring"agent-worktree"
   comp.branches = @[cstring"agent-worktree"]
   comp.commits = @[]

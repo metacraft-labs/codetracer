@@ -41,7 +41,10 @@
 ##      applied, so requests that keep arriving faster than a reload answers
 ##      still let the panel move; an answer read for a working directory or an
 ##      expanded set the panel no longer shows is discarded and read again; one that arrives after the session became
-##      folderless is discarded and not read again.
+##      folderless is discarded and not read again; one the caller released
+##      (`releaseInFlight`, because it wrote the panel's state itself) is
+##      discarded with the follow-up queued before the release, while a
+##      request made after it still runs.
 ##   4. **A folderless session runs no git**, including the follow-up queued
 ##      during a reload (VCS-Panel.md, "A session with no project folder"). A
 ##      `git` wrapper that logs each invocation counts what ran.
@@ -632,6 +635,46 @@ proc runCases() {.async.} =
     ck applied.len == 0 and invoked() == 6,
        "an answer after the session became folderless is discarded, not read again (" &
        $invoked() & " git runs)"
+    folderless = false
+
+  block:
+    # RELEASED: the caller wrote the panel's state itself while a reload read
+    # (`agentic_session_launcher.syncVcs`, through
+    # `VCSComponent.adoptExternalState`). Neither that reload's answer nor a
+    # follow-up queued before the release replaces it.
+    resetInvocations()
+    applied = @[]
+    requestPanelReload(reload, tgt, fl, apply)
+    requestPanelReload(reload, tgt, fl, apply)
+    reload.releaseInFlight()
+    await settle()
+    ck applied.len == 0 and invoked() == 6 and not reload.inFlight and
+       not reload.followUp and not reload.released,
+       "a released reload is not applied and its queued follow-up does not run (" &
+       $invoked() & " git runs)"
+
+    # A request made after the release is a new one: it follows the released
+    # reload and is applied.
+    resetInvocations()
+    applied = @[]
+    requestPanelReload(reload, tgt, fl, apply)
+    reload.releaseInFlight()
+    requestPanelReload(reload, tgt, fl, apply)
+    await settle()
+    ck applied.len == 1 and invoked() == 12,
+       "a request after the release reads again and is applied (" &
+       $applied.len & " applies, " & $invoked() & " git runs)"
+
+    # With nothing in flight the release changes nothing, and the next
+    # reload is applied as usual; a panel that never loaded has no reload.
+    resetInvocations()
+    applied = @[]
+    reload.releaseInFlight()
+    VcsPanelReload(nil).releaseInFlight()
+    requestPanelReload(reload, tgt, fl, apply)
+    await settle()
+    ck applied.len == 1 and invoked() == 6 and not reload.released,
+       "a release with nothing in flight is a no-op"
 
   # -- claim 4 ----------------------------------------------------------
   block:
@@ -670,7 +713,21 @@ proc runCases() {.async.} =
        "loadCommits(" notin body,
        "ui/vcs.refreshVCSData reloads through requestPanelReload and runs no git itself"
 
-const ExpectedChecks = 67
+  block:
+    # The agentic launcher writes the panel's state itself; it gives up the
+    # load in flight before it does, so no answer read from git replaces it.
+    let source = $(nodeFs.readFileSync(
+      cstring"src/frontend/ui/agentic_session_launcher.nim", cstring"utf8").to(cstring))
+    let start = source.find("proc syncVcs(")
+    let rest = if start >= 0: source[start .. ^1] else: ""
+    let stop = rest.find("\nproc ", 1)
+    let body = if stop >= 0: rest[0 ..< stop] else: rest
+    let adopt = body.find("comp.adoptExternalState()")
+    let firstWrite = body.find("comp.currentBranch =")
+    ck start >= 0 and adopt >= 0 and firstWrite > adopt,
+       "agentic_session_launcher.syncVcs releases the panel's load before writing it"
+
+const ExpectedChecks = 71
 
 proc main() {.async.} =
   try:

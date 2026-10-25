@@ -718,6 +718,10 @@ type
       ## Another reload was requested while `inFlight` (or the answer turned
       ## out stale): exactly one more reload starts when the reads in flight
       ## answer — after they are applied, or discarded if stale.
+    released*: bool
+      ## The reads in flight were given up by ``vcs_reload.releaseInFlight``:
+      ## the panel's state was written by someone else while they read, so
+      ## their answers are discarded and no follow-up starts from them.
 
   VCSChangedFile* = object
     status*: cstring       ## "M", "A", "D", etc.

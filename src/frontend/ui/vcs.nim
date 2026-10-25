@@ -323,6 +323,16 @@ proc refreshVCSData*(self: VCSComponent) =
       self.syncLegacyVCSIntoVM()
       data.redraw())
 
+proc adoptExternalState*(self: VCSComponent) =
+  ## For a caller that writes the panel's state itself instead of reading it
+  ## from git (`agentic_session_launcher.syncVcs`): the reload in flight, if
+  ## any, is given up (`vcs_reload.releaseInFlight`), and the auto-refresh
+  ## the first load would have started does not start, so nothing read from
+  ## git replaces the state the caller writes. A panel the caller initialised
+  ## before its first load never loads or watches either.
+  self.reload.releaseInFlight()
+  self.watchAfterReload = false
+
 proc commitRows(self: VCSComponent): seq[VCSCommitRow]
 
 proc loadMoreCommits*(self: VCSComponent) =
