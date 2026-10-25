@@ -1,0 +1,10 @@
+{
+  "A1": "offenders.len == 0",
+  "A2": "screen.contains(\"\u2014\")",
+  "A3": "text.contains(\"*\")",
+  "A4": "leaks.len == 0",
+  "A5": "leaks.len == 0",
+  "A6": "cellWidthOf(\"e\u0301\") == 1",
+  "A7": "g.runeAt(0, 0) == \"\u2026\" and g.runeAt(0, 1) == \"\" and g.runeAt(0, 2) == \"x\"",
+  "A8": "o.glyphTierOf(GlyphProfile(ambiguousWide: true)) == gtAmbiguousModern"
+}
