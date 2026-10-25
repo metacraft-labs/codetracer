@@ -55,7 +55,7 @@ from ../../view_vocabulary/pane_views import testResultsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 90
+const ExpectedAssertions = 94
 
 var countedAssertions = 0
 
@@ -378,6 +378,32 @@ suite "PLAT-53: the terminal's Test Results pane over the real host":
         said = true
     ck said
     ck rt.app.tests.run.enabled
+    # THE WINDOW CLOSES DURING A RUN (`stop`): the run's whole process group
+    # ends AT ONCE — not when the suite would have finished — and the run
+    # settles, ended by the signal the window sent.
+    let (_, s6) = rt.testsPaneScreen()
+    let third = rt.press(area.row, s6.runCol)
+    ck src.applyClick(rt, third.paneClick)
+    let group = src.host.job.pid
+    let t0 = getMonoTime()
+    src.host.stop()
+    let stopMs = (getMonoTime() - t0).inMilliseconds
+    checkpoint("stop took " & $stopMs & " ms")
+    ck stopMs < 1000
+    # No process of the group is left (allowing an orphan's reaping).
+    var left = true
+    for _ in 0 ..< 25:
+      if posix.kill(Pid(-group), 0) != 0:
+        left = false
+        break
+      sleep(20)
+    ck not left
+    src.publish(rt)
+    var ended = false
+    for line in rt.app.tests.lines:
+      if line.kind == tlFailure and line.text.contains("ended by signal 15"):
+        ended = true
+    ck ended
     # A HOST WITH NO `ct` refuses with a sentence and settles at once.
     let bare = newTestsSource(
       projectRoot = proc(): string = project,

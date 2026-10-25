@@ -1,0 +1,23 @@
+# Control digests for run-plat53-test-results-mutations.py —
+# the subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+6b04198289c0bbaa429aa7582c37306869b40265328aac58f6994cf96b4fb60d  src/frontend/viewmodel/viewmodels/test_results_vm.nim
+354d363a9dbdfdaa5ca5d2520face0d7a75f5191642df5f36babb5426cf664db  src/frontend/viewmodel/viewmodels/table_fit.nim
+48282dd5905a93a5896d206329f7eb5dac3c38963c82a20d2b65abb395f981a9  src/frontend/viewmodel/viewmodels/test_catalog_answer.nim
+de3c3af319dfd75ea145ee72ffd5f0639af75786b004a6158f2b359c2a2f3c0a  src/frontend/viewmodel/host/native_test_host.nim
+1f3f3624b89b4c96cd2946684a6f6811253bf13cb41759faf5f21caaa2f8a529  src/frontend/tui/app/views/test_results_pane.nim
+b82bbbcefe5491172c4b6aa320bbe689cd63c4402b65645eea29ddb63272be9c  src/frontend/tui/app/runtime.nim
+49538dc8cc8abe038c6c8b1fb236ed0b58079a5e6cd6dcb2bfbde3b7229383df  src/frontend/tui/app/views/shell.nim
+9056ed813636140407992c05b18f7f1b57fb2c2ce44916120a85a5237571f25c  src/frontend/tui/app/layout/profile.nim
+be5f07f47a34cd3cfccffda28e82d744f6ff8cf3daa22bd8811b4f30d485e173  src/frontend/tui/host/test_results_source.nim
+2909f58043a4b17375a98a556aa4ebcd5f59759b78fca727a98bfd5f26535d01  src/frontend/tui/main.nim
+7bc650629918031ac7610e3dc1f2bdf14afde6ca71939b0454f38624a195210b  src/frontend/gpui/test_results_leaf.nim
+fbb5e8764aafe4716b21dda8289561e57680bf2a3bb70f42ec8b829b0d7a771f  src/frontend/gpui/main.nim
+3a77204b316679c7479d1925630d128c2e244fd01cdafb4f00d4515191bd1b39  src/frontend/view_vocabulary/pane_views.nim
+7a41dc5bd50cf6614f3d57a8b93c027d01820b0a18fbd6e9ebd8ecfcf350c334  src/frontend/index/ns9_panes.nim
+2d5fb3f2a0ad9dc7154cc47c5f8d1babe13452972407f5eff0543303e292ecbc  src/frontend/viewmodel/tests/unit/test_plat53_test_results.nim
+912470cb3d14f21ffd49e8a4456d20442072dbce0b004ad150b71bd152785256  src/frontend/tui/tests/test_plat53_test_results.nim
+1d354155495542faa3e1e550fb00d6a0d495588f997c3a4bf17b4fb2760266b7  src/frontend/tui/tests/real_terminal/test_plat53_test_results_pty.nim
+ee7898f09f2bcb078c2290cbd356b1280dd4c53ab46b972e628d524fa53e567f  src/frontend/gpui/tests/test_plat53_gpui_plan.nim
+78ae916db5004dc20dd649befb47058b8bffac2ee2949415e46a885827d57497  src/tests/gui/tests/test-results-pane/plat53-test-results-capture.spec.ts
