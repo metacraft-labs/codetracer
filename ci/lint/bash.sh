@@ -602,6 +602,12 @@ lint_step "contract suite: recorder probes track the built artefact" \
 lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling build" \
 	bash ci/test/detect-siblings-nargo-test.sh
 
+# Likewise for `nim`: a codetracer-nim sibling's bin/nim is whatever that
+# checkout last built, and with it first on PATH a stale build compiled the
+# db-backend tests' Nim fixtures instead of the pinned fork. Pure bash fixtures.
+lint_step "contract suite: the dev shell's nim is not shadowed by a sibling build" \
+	bash ci/test/detect-siblings-nim-test.sh
+
 # A lane that runs with graceful skipping off excludes, by name, the tests it
 # does not provide the tools for. A misspelled or stale entry excludes nothing
 # and says nothing, so every entry must name a test binary that exists, and

@@ -563,9 +563,19 @@ fi
 # libpcre.so(.3|.1|)" when invoked from a shell that lacks it (e.g. the
 # codetracer dev shell rather than codetracer-nim's own).  Mirror the lldb
 # nix-build resolution used for ct-native-replay above.
+#
+# The sibling's bin/ is deliberately NOT put on PATH. The `nim` on PATH is the
+# pinned fork (reprobuild's `packages.nim-fork`, built from the same
+# codetracer-nim history at the revision reprobuild's flake.lock names), and it
+# compiles every Nim program this shell builds, the db-backend tests' Nim
+# fixtures included. bin/nim is whatever someone last built in the sibling,
+# and nothing rebuilds it when the checkout moves, so putting it first let a
+# stale local build shadow the pin: the Nim MCR flow test compiled its fixture
+# with a compiler that predated the source-map fix the pin carries. Only the
+# consumers that ask for the sibling by name get it, through
+# CODETRACER_NIM_BIN.
 if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim" ]; then
 	export CODETRACER_NIM_BIN="$_CT_WORKSPACE_ROOT/codetracer-nim/bin/nim"
-	export PATH="$_CT_WORKSPACE_ROOT/codetracer-nim/bin:$PATH"
 	_ct_pcre_dir=""
 	if command -v nix >/dev/null 2>&1; then
 		_ct_pcre_dir="$(nix build --no-link --print-out-paths "nixpkgs#pcre.out" 2>/dev/null)/lib"
