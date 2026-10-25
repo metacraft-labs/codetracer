@@ -441,9 +441,13 @@ suite "PLAT-68 DIFF-13: GPUI (its element focus chain, its decoder, the shipped 
           for p in probes: keys.add p.chord
           let lines = gpuiRun(calc.tracePath, base, user, si, keys)
           ck lines.len == probes.len
-          var gpuiWrongPath, gpuiWrong = 0
+          var gpuiWrongPath, gpuiWrong, gpuiPathWithoutPane = 0
           for i in 0 ..< min(lines.len, probes.len):
             let (name, path, answer) = splitProbeLine(lines[i])
+            # The pane level on its own, so a producer that drops it is told
+            # apart from one that drops another level.
+            if ($s.path).contains(" / pane:") and not path.contains(" / pane:"):
+              inc gpuiPathWithoutPane
             if normalisedPathText(path) != $s.path:
               inc gpuiWrongPath
               if gpuiWrongPath <= 1:
@@ -458,6 +462,7 @@ suite "PLAT-68 DIFF-13: GPUI (its element focus chain, its decoder, the shipped 
                            probes[i].expected[fGpui])
           checkpoint(s.name & ": " & $probes.len & " keys, " & $gpuiWrong &
                      " differ, " & $gpuiWrongPath & " paths differ")
+          ck gpuiPathWithoutPane == 0
           ck gpuiWrongPath == 0
           ck gpuiWrong == 0
 
