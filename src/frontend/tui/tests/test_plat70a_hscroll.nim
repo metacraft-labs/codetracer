@@ -226,10 +226,19 @@ suite "PLAT-70 Part A: the terminal's horizontal scroll, in process":
     for c in cells:
       row.add StyledSpan(text: c.glyph, style: styleOf(c.kind))
     ck cells[0].glyph == "▏" and cells[2].glyph == "▏"
-    let degraded = degradeRow(row, ascii)
+    # PLAT-71 (Terminal-Adaptation §6.4): on the ASCII profile the slider is
+    # DRAWN from the table's ASCII column — whole cells, a cell is thumb when
+    # the thumb covers its centre — rather than rewritten after it was drawn
+    # in eighths. The thumb covers the centres of the first two cells.
+    let asciiCells = thumbCells(ThumbSpan(start: 1, length: 16), 4,
+                                vertical = false, glyphs = glyphProfileOf(ascii))
+    var asciiRow: StyledRow = @[]
+    for c in asciiCells:
+      asciiRow.add StyledSpan(text: c.glyph, style: styleOf(c.kind))
+    let degraded = degradeRow(asciiRow, ascii)
     var text = ""
     for span in degraded: text.add span.text
-    ck text == "###-"
+    ck text == "##--"
     ck asciiFor("▏") == "|"            # what the glyph table alone would draw
     let sl = parseSetLine(":set overflow-markers off")
     ck sl.isSet and sl.ok

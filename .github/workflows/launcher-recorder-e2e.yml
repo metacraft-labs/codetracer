@@ -706,7 +706,7 @@ jobs:
             # recorder repos' lock records these edges also resolve do not
             # carry it, so it keeps the SHA shape.
             isonim=3b3d356c17d65ae385350fe70e7235e5527c70c0
-            isonim-tui=594398d5962a911f89f18d77cc1794404858283d
+            isonim-tui=029cc0cf21ec32a1628e7870a41359956cf29f32
             runquota=f9f1118cd33a27051c6fea683348f343df91e96f
 
       - name: Check the workspace has the shape the driver expects

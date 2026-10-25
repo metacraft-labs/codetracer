@@ -118,6 +118,11 @@ type
       ## PLAT-70 Part H: how this frame's scrollbars are drawn — the
       ## options, the bar the pointer is on, each pane's fade (handed to the
       ## pane painters on the grid, `StyledGrid.scrollbars`).
+    glyphs*: GlyphProfile
+      ## PLAT-71: the glyph table column this frame's chrome is drawn from
+      ## (Terminal-Adaptation §6), handed to the painters on the grid.
+    ambiguous*: AmbiguousWidth
+      ## PLAT-71: the width policy for East Asian Width `A` (§6.6).
     fileInfo*: string
       ## The status bar's file info — the current file's language and
       ## encoding (`headless_app/footer_info`), drawn first on the status row
@@ -623,7 +628,7 @@ proc tracepointOverlayArea*(body: CellArea): CellArea =
            width: w, height: h)
 
 const
-  DividerGlyph* = "▏"
+  DividerGlyph* = canonical(grDividerV)
     ## PLAT-50: a pane divider is U+258F LEFT ONE EIGHTH BLOCK — a line at
     ## the divider cell's left edge, its foreground the divider's colour and
     ## its background the fill beside it (the user's direction, 2026-10-02),
@@ -782,19 +787,19 @@ proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
     # (The user, 2026-10-09: the focus ground leaked one cell into the next
     # pane, and the line was drawn in its own ground.)
     if cell in ring and row == focused.row and col < focused.col:
-      g.paint(row, col, DividerGlyph,
+      g.paint(row, col, g.glyphText(grDividerV),
               CellStyle(role: srDividerStrip, surface: srTabBarFocused))
       continue
     let focusSide = cell in ring and row != focused.row
     let stripBeside = (row, col - 1) in strips or (row, col + 1) in strips
     if stripBeside and not focusSide:
-      g.paint(row, col, DividerGlyph,
+      g.paint(row, col, g.glyphText(grDividerV),
               CellStyle(role: srDividerStrip, surface: srTabBar))
       continue
     let role = if focusSide: srBorderFocused else: line
     let ground = if (row, col + 1) in strips: srTabBar
                  else: groundOf(regions, row, col + 1)
-    g.paint(row, col, DividerGlyph, CellStyle(role: role, surface: ground))
+    g.paint(row, col, g.glyphText(grDividerV), CellStyle(role: role, surface: ground))
 
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea; focusedStrip = false;
@@ -1133,6 +1138,8 @@ proc shellScreen*(model: ShellModel; width, height: int;
 
   var g = newStyledGrid(width, height)
   g.scrollbars = model.scrollbars
+  g.glyphs = model.glyphs
+  g.ambiguous = model.ambiguous
   # PLAT-46 deliverable 8: EVERY CELL HAS A SURFACE. The canvas under all of
   # it, the header on a card; each pane fills its own rectangle in `paintPane`
   # and the status line its row below.
@@ -1267,7 +1274,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
       g.paint(height - 1, 1, fitCells(model.fileInfo, max(0, min(width - 1,
               lead - 3))))
     if sw > 0:
-      g.paint(height - 1, sc, statusBarText(status, sw))
+      g.paint(height - 1, sc, statusBarText(status, sw, g.glyphs))
       # The two indicators in their own roles: the input mode, then the
       # product mode, exactly where `statusBarText` put them (it never drops
       # them).

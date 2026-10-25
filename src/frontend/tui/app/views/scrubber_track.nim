@@ -39,13 +39,37 @@ const
 
 type
   ThumbCellKind* = enum
-    tcTrack, tcThumb, tcThumbReversed
+    tcTrack, tcThumb, tcThumbReversed,
+    tcThumbSpace
+      ## PLAT-71: a reverse-video space in the thumb's colour — the thumb on
+      ## the ambiguous-wide column, where every block glyph is two cells.
   ThumbCell* = object
     kind*: ThumbCellKind
     glyph*: string
 
+proc wholeCellThumbs(span: ThumbSpan; cells: int; vertical: bool;
+                     glyphs: GlyphProfile): seq[ThumbCell] =
+  ## PLAT-71 (Terminal-Adaptation §6.4): a slider on the `basic`, ASCII or
+  ## ambiguous-wide column — whole cells only, the eighths need `extended`
+  ## and narrow widths. A cell is thumb when the thumb covers its centre.
+  let track =
+    if glyphs.tier == tierAscii or glyphs.ambiguousWide:
+      (if vertical: "|" else: "-")
+    else: (if vertical: TrackVerticalGlyph else: TrackHorizontalGlyph)
+  for c in 0 ..< cells:
+    let centre = c * 8 + 4
+    if centre >= span.start and centre < span.start + max(1, span.length):
+      if glyphs.tier == tierAscii:
+        result.add ThumbCell(kind: tcThumb, glyph: "#")
+      elif glyphs.ambiguousWide:
+        result.add ThumbCell(kind: tcThumbSpace, glyph: " ")
+      else:
+        result.add ThumbCell(kind: tcThumb, glyph: ThumbFullGlyph)
+    else:
+      result.add ThumbCell(kind: tcTrack, glyph: track)
+
 proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool;
-                 modern = false): seq[ThumbCell] =
+                 modern = false; glyphs = DefaultGlyphs): seq[ThumbCell] =
   ## A track of `cells` cells with a thumb covering `span` (in EIGHTHS of a
   ## cell), cell by cell. A cell the thumb covers fully is a full block; the
   ## cell where the thumb starts part-way is the eighth block of its FAR part
@@ -56,6 +80,8 @@ proc thumbCells*(span: ThumbSpan; cells: int; vertical: bool;
   ## `modern` (the `modern-unicode` setting, Scrollbar-Scrubbers.md §7.1):
   ## the upper and right eighths are Symbols for Legacy Computing's, drawn
   ## in the thumb's own colour — no reversed cell.
+  if glyphs.tier != tierExtended or glyphs.ambiguousWide:
+    return wholeCellThumbs(span, cells, vertical, glyphs)
   let first = span.start
   let last = span.start + span.length          # exclusive, in eighths
   for c in 0 ..< cells:
@@ -103,6 +129,10 @@ proc styleOf*(k: ThumbCellKind): CellStyle =
   of tcTrack: TrackStyle
   of tcThumb: ThumbStyle
   of tcThumbReversed: ThumbReversedStyle
+  of tcThumbSpace:
+    var s = ThumbStyle
+    s.reverse = true
+    s
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +239,10 @@ proc barScrollTo*(v: var HorizontalView; hit: ScrubberHit;
   else: v.clickTrack(hit.fraction)
 
 const
-  PrecedesGlyph* = "‹"
+  PrecedesGlyph* = canonical(grOverflowLeft)
     ## §4.6: U+2039, in the first text column of a row whose text continues
     ## left of the view (Vim's `listchars` `precedes:`); `<` on the ASCII tier.
-  ExtendsGlyph* = "›"
+  ExtendsGlyph* = canonical(grOverflowRight)
     ## U+203A, in the last text column of a row that continues right of it
     ## (`extends:`); `>` on the ASCII tier.
   OverflowMarkerStyle* = CellStyle(role: srChromeMuted)
@@ -227,6 +257,7 @@ proc paintOverflowMarkers*(g: var StyledGrid; row, left: int;
     return
   let marks = overflowMarkers(rowWidth, v)
   if marks.precedes:
-    g.paint(row, left, PrecedesGlyph, OverflowMarkerStyle)
+    g.paint(row, left, g.glyphText(grOverflowLeft), OverflowMarkerStyle)
   if marks.extends:
-    g.paint(row, left + v.viewportCols - 1, ExtendsGlyph, OverflowMarkerStyle)
+    g.paint(row, left + v.viewportCols - 1, g.glyphText(grOverflowRight),
+            OverflowMarkerStyle)

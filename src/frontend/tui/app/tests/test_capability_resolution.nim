@@ -1133,10 +1133,11 @@ suite "CTUI-11 Tier 1: capability resolution":
     # OUTSIDE tmux, nothing is ever "withheld".
     ck not resolveCapabilities(xterm, initCapabilityFlags(),
       TerminalProbe(attempted: true, tmuxQueried: true)).tmuxRgbWithheld
-    # NOTHING TO ASK when the depth and the mode are both flags and the
-    # mouse is off; with the mouse on (PLAT-51) the pixel-mouse question
-    # (DECRQM 1016, the cell size) is still asked.
-    ck not probeWanted(xterm, initCapabilityFlags(
+    # Terminal-Adaptation §4.2: the identity questions and the width probe
+    # are asked on EVERY start, so even with the depth and the mode both
+    # flags and the mouse off the round still runs (only a dumb terminal, or
+    # the round turned off, asks nothing — `test_plat71_terminal_profile`).
+    ck probeWanted(xterm, initCapabilityFlags(
       forceTrueColor = true, theme = utDark, themePinned = true,
       noMouse = true))
     ck probeWanted(xterm, initCapabilityFlags(

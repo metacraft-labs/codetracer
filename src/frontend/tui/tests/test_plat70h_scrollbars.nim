@@ -62,12 +62,14 @@ const
   BarCells = 12
 
 proc paintOne(o: ScrollbarOptions; axis: BarAxis; state: BarState;
-              m: ScrubberModel; faded = 0'f32): StyledGrid =
+              m: ScrubberModel; faded = 0'f32;
+              glyphs = DefaultGlyphs): StyledGrid =
   ## One bar of `BarCells` cells in a pane of the editor's ground, painted as
   ## the shell would (the options and the pointer on the grid).
   result = newStyledGrid(20, 20)
   result.fillSurface(0, 0, 20, 20, srSurfaceEditor)
   result.painting = paneEditor
+  result.glyphs = glyphs
   result.scrollbars = ScrollbarFrame(
     options: o,
     pointer: BarPointer(active: state != bsIdle, pane: paneEditor,
@@ -212,7 +214,10 @@ suite "PLAT-70 Part H: the tiers":
     for t in BarThickness:
       o.thickness = t
       for axis in BarAxis:
-        let g = paintOne(o, axis, bsIdle, scrubberModel(100, 33, 20))
+        # PLAT-71: the ASCII bar is the glyph table's ASCII column, drawn by
+        # the painter on an ASCII profile (no longer rewritten afterwards).
+        let g = paintOne(o, axis, bsIdle, scrubberModel(100, 33, 20),
+                         glyphs = glyphProfileOf(ascii))
         var text = ""
         if axis == axVertical:
           for r in 2 ..< 2 + BarCells:

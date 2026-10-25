@@ -32,6 +32,7 @@
 
 import codetracer_embed
 
+import ./glyph_table
 import ./styled_row
 
 type
@@ -61,12 +62,25 @@ type
       ## Under the pointer and while held: one step wider from the edge.
 
   GlyphTier* = enum
-    ## Which glyph set the table's column is drawn from.
+    ## Which column of the table a bar is drawn from. PLAT-71
+    ## (Terminal-Adaptation §6.4) adds the `basic` tier, the ambiguous-wide
+    ## columns and the ASCII tier to Part H's two.
     gtClassic = "classic"
-      ## Block Elements and Box Drawing (Unicode 1.1).
+      ## Block Elements and Box Drawing (Unicode 1.1): the `extended` tier.
     gtModern = "modern-unicode"
       ## ... and Symbols for Legacy Computing (Unicode 13), where they draw a
       ## step the classic blocks cannot.
+    gtBasic = "basic"
+      ## A font without the eighths and the heavy or half lines: whole-cell
+      ## thumbs from the WGL4 set (`│ ▐ ▄ █`).
+    gtAmbiguous = "ambiguous-wide"
+      ## Where East Asian Width `A` glyphs are two cells: only `▐`, ASCII and
+      ## a reverse-video space (`RvSpace`), whole cells.
+    gtAmbiguousModern = "ambiguous-wide modern-unicode"
+      ## ... with `modern-unicode`: `🮇` / `🮈` are not `A`, so the vertical
+      ## thin thumb keeps them; the horizontal `▂` / `▃` fall to `RvSpace`.
+    gtAscii = "ascii"
+      ## Scrollbar-Scrubbers §4: `#` on `|` / `-`.
 
 const
   LowerEighths* = ["", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
@@ -166,17 +180,119 @@ let
       btThick: ThicknessLooks(rest: look(QuarterV, QuarterH),
                               widened: look(FullModernV, QuarterH)),
       btFull: ThicknessLooks(rest: look(FullModernV, QuarterH),
-                             widened: look(FullModernV, QuarterH))]]
+                             widened: look(FullModernV, QuarterH))],
+    # PLAT-71 (Terminal-Adaptation §6.4). Whole-cell ends throughout: the
+    # partial ends of the extended rows need the eighths and narrow widths.
+    # The widened step is the next row's glyph.
+    gtBasic: [
+      btHairline: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("│"), track: "│"),
+                   AxisLook(thumb: whole("_"), track: "─")),
+        widened: look(AxisLook(thumb: whole("▐"), track: "│"),
+                      AxisLook(thumb: whole("▄"), track: "─"))),
+      btThin: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("▐"), track: "│"),
+                   AxisLook(thumb: whole("▄"), track: "─")),
+        widened: look(AxisLook(thumb: whole("▐"), track: "│"),
+                      AxisLook(thumb: whole("▄"), track: "─"))),
+      btThick: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("▐"), track: "│"),
+                   AxisLook(thumb: whole("▄"), track: "─")),
+        widened: look(AxisLook(thumb: whole("█"), track: "│"),
+                      AxisLook(thumb: whole("▄"), track: "─"))),
+      btFull: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("█"), track: "│"),
+                   AxisLook(thumb: whole("▄"), track: "─")),
+        widened: look(AxisLook(thumb: whole("█"), track: "│"),
+                      AxisLook(thumb: whole("▄"), track: "─")))],
+    gtAmbiguous: [
+      btHairline: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("|"), track: "|"),
+                   AxisLook(thumb: whole("_"), track: "-")),
+        widened: look(AxisLook(thumb: whole("▐"), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-"))),
+      btThin: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("▐"), track: "|"),
+                   AxisLook(thumb: whole(RvSpace), track: "-")),
+        widened: look(AxisLook(thumb: whole("▐"), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-"))),
+      btThick: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("▐"), track: "|"),
+                   AxisLook(thumb: whole(RvSpace), track: "-")),
+        widened: look(AxisLook(thumb: whole(RvSpace), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-"))),
+      btFull: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole(RvSpace), track: "|"),
+                   AxisLook(thumb: whole(RvSpace), track: "-")),
+        widened: look(AxisLook(thumb: whole(RvSpace), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-")))],
+    gtAmbiguousModern: [
+      btHairline: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("|"), track: "|"),
+                   AxisLook(thumb: whole("_"), track: "-")),
+        widened: look(AxisLook(thumb: whole("🮈"), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-"))),
+      btThin: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("🮇"), track: "|"),
+                   AxisLook(thumb: whole(RvSpace), track: "-")),
+        widened: look(AxisLook(thumb: whole("▐"), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-"))),
+      btThick: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("▐"), track: "|"),
+                   AxisLook(thumb: whole(RvSpace), track: "-")),
+        widened: look(AxisLook(thumb: whole(RvSpace), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-"))),
+      btFull: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole(RvSpace), track: "|"),
+                   AxisLook(thumb: whole(RvSpace), track: "-")),
+        widened: look(AxisLook(thumb: whole(RvSpace), track: "|"),
+                      AxisLook(thumb: whole(RvSpace), track: "-")))],
+    gtAscii: [
+      btHairline: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("#"), track: "|"),
+                   AxisLook(thumb: whole("#"), track: "-")),
+        widened: look(AxisLook(thumb: whole("#"), track: "|"),
+                      AxisLook(thumb: whole("#"), track: "-"))),
+      btThin: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("#"), track: "|"),
+                   AxisLook(thumb: whole("#"), track: "-")),
+        widened: look(AxisLook(thumb: whole("#"), track: "|"),
+                      AxisLook(thumb: whole("#"), track: "-"))),
+      btThick: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("#"), track: "|"),
+                   AxisLook(thumb: whole("#"), track: "-")),
+        widened: look(AxisLook(thumb: whole("#"), track: "|"),
+                      AxisLook(thumb: whole("#"), track: "-"))),
+      btFull: ThicknessLooks(
+        rest: look(AxisLook(thumb: whole("#"), track: "|"),
+                   AxisLook(thumb: whole("#"), track: "-")),
+        widened: look(AxisLook(thumb: whole("#"), track: "|"),
+                      AxisLook(thumb: whole("#"), track: "-")))]]
 
 func glyphTierOf*(o: ScrollbarOptions): GlyphTier =
-  ## The column the options choose. (A capability profile will choose it
-  ## from the terminal as well as from `modern-unicode`.)
+  ## The column the options choose on an extended, narrow terminal.
   if o.modernUnicode: gtModern else: gtClassic
 
-proc lookOf*(o: ScrollbarOptions; axis: BarAxis; state: BarState): AxisLook =
-  ## The glyphs a bar draws in `state`.
-  let t = ScrollbarGlyphs[o.glyphTierOf][o.thickness]
+func glyphTierOf*(o: ScrollbarOptions; p: GlyphProfile): GlyphTier =
+  ## The column a terminal's glyph profile and the options choose
+  ## (Terminal-Adaptation §6.4): ASCII, then the ambiguous-wide columns, then
+  ## `basic`, then Part H's two.
+  if p.tier == tierAscii: gtAscii
+  elif p.ambiguousWide:
+    (if o.modernUnicode and p.tier == tierExtended: gtAmbiguousModern
+     else: gtAmbiguous)
+  elif p.tier == tierBasic: gtBasic
+  else: o.glyphTierOf
+
+proc lookOf*(o: ScrollbarOptions; axis: BarAxis; state: BarState;
+             tier: GlyphTier): AxisLook =
+  ## The glyphs a bar draws in `state`, from column `tier`.
+  let t = ScrollbarGlyphs[tier][o.thickness]
   if state.widened: t.widened[axis] else: t.rest[axis]
+
+proc lookOf*(o: ScrollbarOptions; axis: BarAxis; state: BarState): AxisLook =
+  ## The glyphs a bar draws in `state` on an extended, narrow terminal.
+  o.lookOf(axis, state, o.glyphTierOf)
 
 # ---------------------------------------------------------------------------
 # Roles
@@ -225,11 +341,11 @@ func segmentMask*(span: ThumbSpan; cell, segments: int): int =
       result = result or (1 shl s)
 
 proc thumbCellRange*(o: ScrollbarOptions; axis: BarAxis; span: ThumbSpan;
-                     cells: int): (int, int) =
+                     cells: int; tier = o.glyphTierOf): (int, int) =
   ## The first and last cell the thumb is drawn in AT REST — what a pointer
   ## must be over to hover or grab it. Widening under the pointer never
   ## moves this boundary. `(-1, -1)` for an empty bar.
-  let segs = o.lookOf(axis, bsIdle).thumb.segments
+  let segs = o.lookOf(axis, bsIdle, tier).thumb.segments
   var first, last = -1
   for c in 0 ..< cells:
     if segmentMask(span, c, segs) != 0:
@@ -237,9 +353,10 @@ proc thumbCellRange*(o: ScrollbarOptions; axis: BarAxis; span: ThumbSpan;
       last = c
   (first, last)
 
-proc onThumb*(o: ScrollbarOptions; bar: BarSpot; cell: int): bool =
+proc onThumb*(o: ScrollbarOptions; bar: BarSpot; cell: int;
+              tier = o.glyphTierOf): bool =
   let (first, last) = o.thumbCellRange(bar.axis, bar.model.spanOf(bar.cells),
-                                       bar.cells)
+                                       bar.cells, tier)
   cell >= first and cell <= last
 
 # ---------------------------------------------------------------------------
@@ -250,9 +367,15 @@ proc paintCell(g: var StyledGrid; axis: BarAxis; origin, at: int;
                glyph: string; style: CellStyle) =
   if glyph.len == 0:
     return
+  var text = glyph
+  var s = style
+  if glyph == RvSpace:
+    # §6.2: a reverse-video space, in the thumb's colour.
+    text = " "
+    s.reverse = true
   case axis
-  of axVertical: g.paint(at, origin, glyph, style)
-  of axHorizontal: g.paint(origin, at, glyph, style)
+  of axVertical: g.paint(at, origin, text, s)
+  of axHorizontal: g.paint(origin, at, text, s)
 
 proc paintBar*(g: var StyledGrid; axis: BarAxis; origin, at, cells: int;
                model: ScrubberModel; markCell = -1) =
@@ -272,7 +395,8 @@ proc paintBar*(g: var StyledGrid; axis: BarAxis; origin, at, cells: int;
     return
   let o = frame.options
   let state = frame.stateOf(pane, axis)
-  let look = o.lookOf(axis, state)
+  let tier = o.glyphTierOf(g.glyphs)
+  let look = o.lookOf(axis, state, tier)
   let span = model.spanOf(cells)
   let showTrack = o.trackShown(state)
   let glyphs = look.thumb
@@ -289,7 +413,7 @@ proc paintBar*(g: var StyledGrid; axis: BarAxis; origin, at, cells: int;
       g.paintCell(axis, origin, at + c, glyph, thumbStyle)
   if markCell in 0 ..< cells:
     g.paintCell(axis, origin, at + markCell,
-                o.lookOf(axis, bsIdle).thumb.byMask[^1],
+                o.lookOf(axis, bsIdle, tier).thumb.byMask[^1],
                 CellStyle(role: srScrubberMark, faded: faded))
 
 # ---------------------------------------------------------------------------

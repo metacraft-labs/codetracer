@@ -186,7 +186,8 @@ proc noteMinCells*(note: string): int =
   if not found or path.rfind('/') <= 0:
     return textCells(note)
   min(textCells(note),
-      textCells(before) + textCells("…/") + textCells(name) + textCells(after))
+      textCells(before) + textCells(canonical(grTruncation) & "/") +
+        textCells(name) + textCells(after))
 
 const ModeNoteGap* = 4
   ## The blank cells `statusBarText` always keeps after the mode indicators,
@@ -203,7 +204,7 @@ proc noteRowCells*(note: string): int =
   if note.len == 0: 0
   else: ModeNoteGap + 2 + noteMinCells(note)
 
-proc fitNoteCells*(note: string; width: int): string =
+proc fitNoteCells*(note: string; width: int; glyphs = DefaultGlyphs): string =
   ## The notification in `width` cells: whole when it fits. When it does not
   ## and it carries an ABSOLUTE PATH (`tui_session.describe`'s `<file>:<line>
   ## tick <n>  extent <a>..<b>`, the Edit toggle's `editing <root> — N
@@ -235,14 +236,15 @@ proc fitNoteCells*(note: string; width: int): string =
       tail.insert($runesOf[k], 0)
       used += w
     dir = tail.join("")
-  fitCells(before & "…" & (if dir.len > 0: dir & "/" else: "/") & name & after,
-           width)
+  fitCells(before & glyphs.glyph(grTruncation) &
+           (if dir.len > 0: dir & "/" else: "/") & name & after, width)
 
 func modeText*(m: StatusBarModel): string =
   ## The mode indicator as drawn: the router's label, else the input mode.
   if m.label.len > 0: m.label else: $m.mode
 
-proc statusBarText*(m: StatusBarModel; width: int): string =
+proc statusBarText*(m: StatusBarModel; width: int;
+                    glyphs = DefaultGlyphs): string =
   ## The bottom row, exactly `width` cells wide.
   ##
   ## The mode indicator is never dropped, and the notification is
@@ -270,7 +272,11 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
     return fitCells(mode, width)
 
   var line = mode
-  let note = m.notification
+  # The status line's notes are CodeTracer's own sentences (chrome), and on
+  # the ASCII tier their punctuation is drawn as ASCII (`asciiProse`); a path
+  # inside one keeps every character that is not that punctuation.
+  let note = if glyphs.tier == tierAscii: asciiProse(m.notification)
+             else: m.notification
   # `noteRoom` is the two separating spaces PLUS the message, so anything below
   # three cells cannot carry a message at all and must be zero rather than one
   # or two. At `noteRoom == 1` the tail below would be `(width - 1) + 2` cells
@@ -287,5 +293,5 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
     line.add " | " & fitCells(middle, min(middleRoom, textCells(middle)))
   if noteRoom > 0:
     return fitCells(line, width - noteRoom) & "  " &
-           fitNoteCells(note, noteRoom - 2)
+           fitNoteCells(note, noteRoom - 2, glyphs)
   fitCells(line, width)

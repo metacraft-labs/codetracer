@@ -506,9 +506,11 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     var sess = open(term = "linux")
     sess.send(CtrlP)
     sess.send("ab")
-    discard sess.waitRow(0, "⌕ ab")
+    # PLAT-71 (Terminal-Adaptation §6.1): the Linux console's glyph tier is
+    # `basic`, whose omnibar mark is `/` (`⌕` is outside the WGL4 set).
+    discard sess.waitRow(0, "/ ab")
     let s = sess.snap()
-    let lead = s.text(0).cellFind("⌕ ")
+    let lead = s.text(0).cellFind("/ ab")
     ck not sess.cursorVisible()
     # The insert caret: the cell after the query, underlined.
     ck s[0][lead + 4].underline != usNone

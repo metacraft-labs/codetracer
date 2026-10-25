@@ -58,6 +58,7 @@ import std/strutils
 
 import ./theme/capabilities
 import ./theme/roles
+import ./theme/terminal_settings
 import codetracer_embed   # `layout_settings` (PLAT-51)
 
 export layout_settings
@@ -157,6 +158,12 @@ type
         ## PLAT-42 built the overlay on both native front-ends and shows it by
         ## default (`FlowOverlayShownByDefault`); this is the GPUI binary's
         ## flag of the same name, so the two can be asked for the same screen.
+      capabilitiesJson*: bool
+        ## PLAT-71: `--capabilities=json` — the report as JSON, every axis
+        ## with its `from` (Terminal-Adaptation §10.1, TA-13).
+      capabilitiesCard*: bool
+        ## PLAT-71: `--card` (with `--capabilities`; what `ct doctor
+        ## terminal` passes) — the glyph test card after the report (§10.3).
       layoutBinding*: bool
         ## `--layout-binding` — accepted, and since PLAT-45 it asks for what
         ## is already the default.
@@ -366,8 +373,17 @@ options:
   --scrollbar-fade=on|off     fade out when left alone (default on)
   --scrollbar-track=on|off    a faint track under each thumb (default off)
   --scrollbar-click=NAME      a track press: jump (default) or page
-  --modern-unicode=on|off     finer Legacy Computing glyphs (default off)
+  --modern-unicode=off|on|auto  Legacy Computing glyphs in all chrome
+                     (default off; auto: only where the terminal draws them)
                      each of these five is remembered by :set <name> <value>
+  --glyphs=NAME      auto (default), ascii, basic or extended chrome glyphs;
+                     --ascii-borders is --glyphs=ascii
+  --ambiguous-width=NAME  auto (measured, default), narrow or wide
+  --colors=NAME      auto (default), truecolor, 256, 16 or mono
+  --no-probe         ask the terminal nothing at start-up (--terminal-probe=off)
+  --reduce-motion=NAME  auto (default: on over a slow link), on or off
+  --capabilities=json   the --capabilities report as JSON
+  --card             with --capabilities: the glyph test card after it
   --headless         render one screen as plain text and exit — for CI
   --pane-server      serve CodeTracer's panes to an editor over stdio
                      (JSON-RPC with LSP framing); started by the Neovim and
@@ -494,6 +510,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var editRequested = false
   var keymap = ""
   var capabilitiesRequested = false
+  var capabilitiesJson = false
+  var capabilitiesCard = false
   var i = first
   while i <= high(args):
     let arg = args[i]
@@ -513,6 +531,17 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.noMouse = true
     of "--capabilities":
       capabilitiesRequested = true
+    of "--capabilities=json":
+      capabilitiesRequested = true
+      capabilitiesJson = true
+    of "--capabilities=text":
+      capabilitiesRequested = true
+    of "--card":
+      capabilitiesCard = true
+    of "--no-probe":
+      # PLAT-71 (§4.8 rule 4): the escape hatch for a terminal that
+      # misbehaves on a query — the same as `--terminal-probe=off`.
+      layoutFlags[lsTerminalProbe] = "off"
     of "--edit":
       # PLAT-16 / ui-selection.md §6. `ct edit --ui=tui <project>` reaches this
       # binary as `codetracer-tui --edit <project>`.
@@ -724,6 +753,45 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       message: "--record-keys and --replay-keys contradict each other;" &
                " a replay would only record its own input back")
 
+  # PLAT-71: THE TERMINAL SETTINGS' FLAGS ARE RANK 2 OF THE PRECEDENCE
+  # (Terminal-Adaptation §5.2), so they go to the capability resolver as well
+  # as to the session's settings: `--glyphs=ascii`, `--modern-unicode=on`,
+  # `--ambiguous-width=wide`, `--colors=16`, `--terminal-probe=off`,
+  # `--reduce-motion=on`.
+  for which in LayoutSetting:
+    if which.isTerminalSetting and layoutFlags[which].len > 0:
+      discard choicesOf(which, layoutFlags[which], flags.choices)
+  # …and their contradictions are refused, not ordered (§5.2).
+  if flags.choices.modernUnicode.isSome and
+     flags.choices.modernUnicode.get == mcOn:
+    if flags.asciiBorders or (flags.choices.glyphs.isSome and
+                              flags.choices.glyphs.get != gcExtended):
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "--modern-unicode=on needs the extended glyphs; it " &
+                 "contradicts " & (if flags.asciiBorders: "--ascii-borders"
+                                   else: "--glyphs=" &
+                                         $flags.choices.glyphs.get))
+  if flags.asciiBorders and flags.choices.glyphs.isSome and
+     flags.choices.glyphs.get != gcAscii:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "--ascii-borders and --glyphs=" & $flags.choices.glyphs.get &
+               " contradict each other; pass one")
+  if flags.choices.colors.isSome:
+    let c = flags.choices.colors.get
+    if (flags.noColor and c != ccMono) or
+       (flags.forceTrueColor and c != ccTrueColor):
+      return TuiCommand(
+        kind: tckUsageError,
+        message: (if flags.noColor: "--no-color" else: "--truecolor") &
+                 " and --colors=" & $c & " contradict each other; pass one")
+  if capabilitiesCard and not capabilitiesRequested:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "'--card' is the glyph test card of '--capabilities'; " &
+               "pass them together (or run `ct doctor terminal`)")
+
   # PLAT-68: `--capabilities` reports the terminal and opens nothing.
   if capabilitiesRequested:
     if editRequested or tracePath.len > 0 or mode == tckHeadless:
@@ -731,7 +799,10 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
         kind: tckUsageError,
         message: "'--capabilities' reports what this terminal negotiates and" &
                  " opens nothing; pass it without a trace, --edit or --headless")
-    return TuiCommand(kind: tckCapabilities, flags: flags, keymap: keymap)
+    return TuiCommand(kind: tckCapabilities, flags: flags, keymap: keymap,
+                      capabilitiesJson: capabilitiesJson,
+                      capabilitiesCard: capabilitiesCard,
+                      layoutFlags: layoutFlags)
 
   # PLAT-16's OWN CONTRADICTIONS, refused rather than ordered, on exactly the
   # rule the three blocks above follow.

@@ -13,7 +13,17 @@
 ##   * the scrollbar options (PLAT-70 Part H, Scrollbar-Scrubbers.md §7.1):
 ##     `scrollbar-thickness` (hairline | thin | thick | full),
 ##     `scrollbar-fade`, `scrollbar-track`, `scrollbar-click` (jump | page)
-##     and `modern-unicode`.
+##     and `modern-unicode`;
+##   * the TERMINAL settings (PLAT-71, CodeTracer-TUI-Terminal-Adaptation.md
+##     §5.3): `glyphs` (auto | ascii | basic | extended), `modern-unicode`
+##     (off | on | auto — it governs ALL chrome, not only the scrollbars,
+##     OQ-T9), `ambiguous-width` (auto | narrow | wide), `colors` (auto |
+##     truecolor | 256 | 16 | mono), `terminal-probe` (on | off),
+##     `reduce-motion` (auto | on | off) and `terminal-hints` (on | off).
+##     They are the TERMINAL's (`isTerminalSetting`): the window front-end
+##     draws with real fonts and offers none of them. Any of them may be
+##     scoped to one terminal by a `[terminal "<glob>"]` section of the
+##     remembered file (`ScopedSettings`, OQ-T6).
 ##
 ## A setting is on / off, or takes one of a list of VALUES
 ## (`settingValues`); every text form — the flag, the `:set` line, the
@@ -46,12 +56,39 @@ type
     lsScrollbarTrack = "scrollbar-track"
     lsScrollbarClick = "scrollbar-click"
     lsModernUnicode = "modern-unicode"
+    lsGlyphs = "glyphs"
+    lsAmbiguousWidth = "ambiguous-width"
+    lsColors = "colors"
+    lsTerminalProbe = "terminal-probe"
+    lsReduceMotion = "reduce-motion"
+    lsTerminalHints = "terminal-hints"
+
+  TerminalSettingWords* = object
+    ## The terminal settings' value words (PLAT-71). `modern-unicode` lives
+    ## here as a WORD (`off`, `on`, `auto`): what it resolves to on a given
+    ## terminal is the capability profile's decision, which then sets
+    ## `ScrollbarOptions.modernUnicode`.
+    glyphs*: string
+    modernUnicode*: string
+    ambiguousWidth*: string
+    colors*: string
+    terminalProbe*: string
+    reduceMotion*: string
+    terminalHints*: string
+
+  ScopedSettings* = object
+    ## A `[terminal "<glob>"]` section: the settings it scopes to the
+    ## terminals whose identity matches `glob`.
+    glob*: string
+    values*: seq[(LayoutSetting, string)]
 
   LayoutSettings* = object
     focusHighlight*: bool
     liveResize*: bool
     overflowMarkers*: bool
     scrollbars*: ScrollbarOptions
+    terminal*: TerminalSettingWords
+    scoped*: seq[ScopedSettings]
 
   SettingOverride* = enum
     ## A CLI flag's answer for one setting. The zero value is "not given".
@@ -81,16 +118,30 @@ const
   ToggleOverflowMarkersLabel* = "View: Toggle Overflow Markers"
     ## Horizontal-Overflow.md §4.6's palette entry.
 
+const
+  DefaultTerminalSettingWords* = TerminalSettingWords(
+    glyphs: "auto", modernUnicode: "off", ambiguousWidth: "auto",
+    colors: "auto", terminalProbe: "on", reduceMotion: "auto",
+    terminalHints: "on")
+    ## §5.3's defaults. `modern-unicode` is `off` (the user's decision).
+
 func defaultLayoutSettings*(overflowMarkers = true): LayoutSettings =
   ## The highlight shows, the divider reflows live; the overflow markers are
   ## the front-end's default (on in the terminal, off in GPUI — OQ-H1).
   LayoutSettings(focusHighlight: true, liveResize: true,
                  overflowMarkers: overflowMarkers,
-                 scrollbars: DefaultScrollbarOptions)
+                 scrollbars: DefaultScrollbarOptions,
+                 terminal: DefaultTerminalSettingWords)
+
+func isTerminalSetting*(which: LayoutSetting): bool =
+  ## PLAT-71: a setting only the terminal front-end has (§5.3).
+  which in {lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
+            lsTerminalProbe, lsReduceMotion, lsTerminalHints}
 
 func isOnOff*(which: LayoutSetting): bool =
   ## Whether the setting is on / off (else it takes `settingValues`).
-  which notin {lsScrollbarThickness, lsScrollbarClick}
+  which notin {lsScrollbarThickness, lsScrollbarClick, lsModernUnicode,
+               lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion}
 
 func settingValues*(which: LayoutSetting): seq[string] =
   ## The words the setting takes, in the order the omnibox lists them.
@@ -99,6 +150,11 @@ func settingValues*(which: LayoutSetting): seq[string] =
     for t in BarThickness: result.add $t
   of lsScrollbarClick:
     for r in TrackClickRule: result.add $r
+  of lsModernUnicode: result = @["off", "on", "auto"]
+  of lsGlyphs: result = @["auto", "ascii", "basic", "extended"]
+  of lsAmbiguousWidth: result = @["auto", "narrow", "wide"]
+  of lsColors: result = @["auto", "truecolor", "256", "16", "mono"]
+  of lsReduceMotion: result = @["auto", "on", "off"]
   else: result = @["on", "off"]
 
 func valuesText(which: LayoutSetting): string =
@@ -148,7 +204,13 @@ func valueText*(s: LayoutSettings; which: LayoutSetting): string =
   of lsScrollbarFade: onOffWord(s.scrollbars.fade)
   of lsScrollbarTrack: onOffWord(s.scrollbars.track)
   of lsScrollbarClick: $s.scrollbars.click
-  of lsModernUnicode: onOffWord(s.scrollbars.modernUnicode)
+  of lsModernUnicode: s.terminal.modernUnicode
+  of lsGlyphs: s.terminal.glyphs
+  of lsAmbiguousWidth: s.terminal.ambiguousWidth
+  of lsColors: s.terminal.colors
+  of lsTerminalProbe: s.terminal.terminalProbe
+  of lsReduceMotion: s.terminal.reduceMotion
+  of lsTerminalHints: s.terminal.terminalHints
 
 proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
                   value: string): bool =
@@ -164,7 +226,17 @@ proc assignValue*(s: var LayoutSettings; which: LayoutSetting;
   of lsOverflowMarkers: s.overflowMarkers = on
   of lsScrollbarFade: s.scrollbars.fade = on
   of lsScrollbarTrack: s.scrollbars.track = on
-  of lsModernUnicode: s.scrollbars.modernUnicode = on
+  of lsModernUnicode:
+    s.terminal.modernUnicode = v
+    # On an extended, narrow terminal `on` is what it resolves to; the
+    # terminal front-end re-decides it from its profile (`auto` too).
+    s.scrollbars.modernUnicode = v == "on"
+  of lsGlyphs: s.terminal.glyphs = v
+  of lsAmbiguousWidth: s.terminal.ambiguousWidth = v
+  of lsColors: s.terminal.colors = v
+  of lsTerminalProbe: s.terminal.terminalProbe = v
+  of lsReduceMotion: s.terminal.reduceMotion = v
+  of lsTerminalHints: s.terminal.terminalHints = v
   of lsScrollbarThickness:
     for t in BarThickness:
       if $t == v: s.scrollbars.thickness = t
@@ -259,9 +331,45 @@ proc applyOverride*(s: var LayoutSettings; which: LayoutSetting;
     discard s.assignValue(which, word)
 
 func encodeLayoutSettings*(s: LayoutSettings): string =
-  ## The remembered preference's text: one `name=value` line per setting.
+  ## The remembered preference's text: one `name=value` line per setting,
+  ## then each `[terminal "<glob>"]` section with the settings it scopes.
   for which in LayoutSetting:
     result.add $which & "=" & s.valueText(which) & "\n"
+  for scope in s.scoped:
+    if scope.values.len == 0:
+      continue
+    result.add "[terminal \"" & scope.glob & "\"]\n"
+    for (which, value) in scope.values:
+      result.add $which & "=" & value & "\n"
+
+func parseSectionHeader*(line: string): tuple[ok: bool; glob: string] =
+  ## `[terminal "kitty*"]` -> `(true, "kitty*")`.
+  let l = line.strip
+  const prefix = "[terminal \""
+  if l.startsWith(prefix) and l.endsWith("\"]") and
+     l.len > prefix.len + 2:
+    return (true, l[prefix.len ..< l.len - 2])
+  (false, "")
+
+proc setScoped*(s: var LayoutSettings; glob: string; which: LayoutSetting;
+                value: string): bool =
+  ## Remember `which = value` for the terminals `glob` matches (a
+  ## `[terminal "<glob>"]` section). Only a terminal setting can be scoped.
+  if not which.isTerminalSetting:
+    return false
+  let (ok, v) = parseValue(which, value)
+  if not ok:
+    return false
+  for scope in s.scoped.mitems:
+    if scope.glob == glob:
+      for entry in scope.values.mitems:
+        if entry[0] == which:
+          entry[1] = v
+          return true
+      scope.values.add (which, v)
+      return true
+  s.scoped.add ScopedSettings(glob: glob, values: @[(which, v)])
+  true
 
 func decodeLayoutSettings*(text: string; defaults = defaultLayoutSettings()):
     tuple[ok: bool; settings: LayoutSettings; message: string] =
@@ -269,14 +377,27 @@ func decodeLayoutSettings*(text: string; defaults = defaultLayoutSettings()):
   ## refused by name (never silently dropped); a setting it does not mention
   ## keeps the default.
   result = (true, defaults, "")
+  var section = ""
   for raw in text.splitLines():
     let line = raw.strip
     if line.len == 0 or line.startsWith("#"):
+      continue
+    if line.startsWith("["):
+      let (isHeader, glob) = parseSectionHeader(line)
+      if not isHeader:
+        return (false, defaults, "not a section header: '" & line & "'")
+      section = glob
       continue
     let at = line.find('=')
     if at < 0:
       return (false, defaults, "not a setting line: '" & line & "'")
     let (known, which) = parseSettingName(line[0 ..< at])
+    if section.len > 0:
+      if not known or not result.settings.setScoped(section, which,
+                                                    line[at + 1 .. ^1]):
+        return (false, defaults, "not a terminal setting in [terminal \"" &
+                section & "\"]: '" & line & "'")
+      continue
     if not known or not result.settings.assignValue(which, line[at + 1 .. ^1]):
       return (false, defaults,
               "unknown stored setting '" & line & "'")
@@ -317,6 +438,12 @@ func settingCommandLabel*(which: LayoutSetting; value: string): string =
     of lsScrollbarTrack: "Scrollbar track"
     of lsScrollbarClick: "Scrollbar click"
     of lsModernUnicode: "Modern Unicode glyphs"
+    of lsGlyphs: "Terminal glyphs"
+    of lsAmbiguousWidth: "Ambiguous-width characters"
+    of lsColors: "Terminal colours"
+    of lsTerminalProbe: "Terminal probe"
+    of lsReduceMotion: "Reduce motion"
+    of lsTerminalHints: "Terminal hints"
   name & ": " & value
 
 func settingCommandLabel*(which: LayoutSetting; on: bool): string =

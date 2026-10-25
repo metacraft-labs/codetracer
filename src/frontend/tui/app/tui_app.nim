@@ -51,6 +51,7 @@ import headless_app/layout_interaction
 import isonim_tui
 
 import ./edit_binding
+import ./views/terminal_info
 import ./views/shell
 # PLAT-48: the top bar's shared models come through `codetracer_embed`.
 import headless_app/welcome_tabs   # exports `session_tabs`
@@ -427,7 +428,12 @@ proc refreshOmnibarIndex*(app: TuiApp) =
   if app.isNil or app.omnibar.isNil:
     return
   app.omnibar.setIndex(omnibarIndexOf(app.filesVM, app.store, app.menu) &
-                       app.recordings)
+                       app.recordings &
+                       # PLAT-71: the terminal's own report (§10.1).
+                       @[OmnibarEntry(kind: OmnibarMode.omCommand,
+                                      label: TerminalInfoLabel,
+                                      detail: ":terminal-info",
+                                      target: TerminalInfoCommandTarget)])
 
 proc openSession*(app: TuiApp; backend: BackendService;
                   title: string = ""): HeadlessSessionSlot =

@@ -82,3 +82,21 @@ proc saveLayoutPreference*(product: LayoutProduct; which: LayoutSetting;
                            on: bool): string =
   ## An on / off setting remembered.
   saveLayoutPreference(product, which, if on: "on" else: "off")
+
+proc saveScopedPreference*(product: LayoutProduct; glob: string;
+                           which: LayoutSetting; value: string): string =
+  ## PLAT-71 (Terminal-Adaptation §5.3, OQ-T6): remember `which = value` for
+  ## the terminals `glob` matches — a `[terminal "<glob>"]` section of the
+  ## same file. "" on success, else why not.
+  var current = loadLayoutPreferences(product)
+  if current.status == lpsRefused:
+    return current.message
+  var s = if current.status == lpsLoaded: current.settings
+          else: productDefaults(product)
+  if not s.setScoped(glob, which, value):
+    return "'" & value & "' is not a value of " & $which &
+           " for one terminal"
+  let failure = writeStaged(layoutPreferencesPath(product),
+                            encodeLayoutSettings(s))
+  if failure.len == 0: ""
+  else: "the " & $which & " setting could not be saved: " & failure

@@ -57,7 +57,9 @@ const
     ## Colours no token of the system resolves to, so a rung that still shows
     ## the old keyword pink could not have come from the new hex by accident.
   ThemeModules = ["roles.nim", "cell_style.nim", "colour_math.nim",
-                  "palette.nim", "capabilities.nim", "editor_theme.nim"]
+                  "palette.nim", "capabilities.nim", "editor_theme.nim",
+                  "terminal_profile.nim"]
+    ## (PLAT-71: `capabilities.nim` imports `terminal_profile.nim`.)
   ProbeSource = """
 import ./palette
 import ./capabilities

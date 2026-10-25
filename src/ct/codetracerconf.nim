@@ -1541,7 +1541,8 @@ type
         argument,
         defaultValue: "",
         desc: "Recorder to probe " &
-          "(python, ruby, javascript, ...). " &
+          "(python, ruby, javascript, ...), or `terminal` for this " &
+          "terminal's capability report and glyph test card. " &
           "Omit to probe every known recorder."
       .}: string
 

@@ -28,6 +28,7 @@ import std/[options, strutils]
 from codetracer_embed import CallLine, currentCallInSectionOf,
   CallRow, CallRowToggle, CallSegmentKind,
   CallSegment, callRowSegments, crtLeaf, crtExpanded, crtCollapsed,
+  CallToggleGlyphs, csToggle,
   CallRowIndentCells,
   csIndent, csToggle, csCallee, csIndex, csPunct, csArgName, csArgValue,
   csReturnArrow, csReturnValue
@@ -42,7 +43,7 @@ from codetracer_embed import callRowText, fitCell, CutCell, DetailToggle, Ellips
 # shown row's indent and callee name (Horizontal-Overflow.md §5.5).
 from codetracer_embed import TableFit, CompositeRow, callFitRow, compositeFit,
   compositeWidth, settle, overflows, barModel, HorizontalView
-from ../formatters/type_formatters import terminalMeasure
+from ../formatters/type_formatters import terminalMeasure, measureOf
 
 import ../layout/profile
 import ./styled_row
@@ -134,7 +135,7 @@ const
   CallTraceTitle* = "CALL TRACE"
   StackFallbackTitle* = "Call stack: this recording has no call trace"
     ## The fallback's note, painted over the call stack's own heading row.
-  CallTraceLoadingText* = "  …"
+  CallTraceLoadingText* = "  " & canonical(grTruncation)
     ## A row of the trace whose section has not arrived: drawn, not left
     ## blank, because a blank row reads as the end of the trace.
   CallTraceTitleStyle = CellStyle(role: srChromeTitle)
@@ -142,7 +143,7 @@ const
   CallTraceRuleStyle = CellStyle(role: srBorderPane)
   CallTraceLoadingStyle = CellStyle(role: srChromeMuted)
   CallTraceDetailStyle = CellStyle(role: srChromeText)
-  CallTraceRuleGlyph = "─"
+  CallTraceRuleGlyph = canonical(grDividerH)
 
 proc initCallTraceModel*(rows: seq[CallTraceRow] = @[];
                          tick: uint64 = 0;
@@ -279,12 +280,13 @@ proc rowAt*(m: CallTraceModel; index: int): (bool, CallTraceRow) =
   if local >= 0 and local < m.rows.len: (true, m.rows[local])
   else: (false, CallTraceRow())
 
-proc titleText*(m: CallTraceModel; width: int): string =
+proc titleText*(m: CallTraceModel; width: int;
+                glyphs = DefaultGlyphs): string =
   ## `CALL TRACE 29 call(s) ────`: the whole trace's count, not the section's.
   var line = CallTraceTitle & " " & $m.total & " call(s)"
   if cellWidthOf(line) + 1 <= width:
     line.add " "
-    line.add repeatGlyph(CallTraceRuleGlyph, width - cellWidthOf(line))
+    line.add repeatGlyph(glyphs.glyph(grDividerH), width - cellWidthOf(line))
   truncateToCells(line, width)
 
 proc rowStartCol(r: CallTraceRow): int =
@@ -370,7 +372,7 @@ proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
   result.barRow = -1
   if area.width <= 0 or area.height <= 0:
     return
-  let title = titleText(m, area.width)
+  let title = titleText(m, area.width, g.glyphs)
   g.paint(area.row, area.col, title, CallTraceRuleStyle)
   let label = CallTraceTitle
   let count = " " & $m.total & " call(s)"
@@ -398,7 +400,7 @@ proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
     # §4.7: the bar on the body's last row; the corner is neither track's.
     result.barRow = geo.barRow
     paintHorizontalBar(g, geo.barRow, area.col, rowWidth, geo.view.barModel)
-  var table = newStyledGrid(tableW, 1)
+  var table = newStyledGridLike(g, tableW, 1)
   for i, line in m.bodyLines(area):
     let index = line.index
     let y = area.row + 1 + i
@@ -409,7 +411,8 @@ proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
       result.detailRows.add y
       continue
     if not loaded:
-      g.paint(y, area.col, truncateToCells(CallTraceLoadingText, rowWidth),
+      g.paint(y, area.col, truncateToCells("  " & g.glyphText(grTruncation),
+                                           rowWidth),
               CallTraceLoadingStyle)
       continue
     # PLAT-49 part B: EACH PART IN ITS OWN STYLE (`segmentStyle`), and the
@@ -417,7 +420,7 @@ proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
     # (`onCompleteMove` -> `selectEntry`: `.event-selected`, its own ground,
     # and `.call-current`, bold) — the whole row on the active-row ground.
     let isCurrent = index == current
-    table = newStyledGrid(tableW, 1)
+    table = newStyledGridLike(g, tableW, 1)
     var x = 0
     let stop = tableW
     if isCurrent:
@@ -428,14 +431,27 @@ proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
     # styles up to the `…`.
     let textAt = min(tableW, r.rowStartCol)
     let full = callRowText(r.callOf)
-    let fitted = fitCell(full, stop - textAt, terminalMeasure)
-    let keep = if fitted.truncated: textAt + cellWidthOf(fitted.text) - 1
+    let fitted = fitCell(full, stop - textAt, measureOf(g))
+    let keep = if fitted.truncated:
+                 textAt + cellWidthOf(fitted.text, g.ambiguous) -
+                   g.glyphs.markerCells
                else: stop
     var lastStyle = segmentStyle(csCallee, isCurrent)
     for seg in callRowSegments(r.callOf):
       if x >= keep:
         break
-      let piece = truncateToCells(seg.text, keep - x)
+      # PLAT-71: the shared row's toggle is the desktop's icon; the terminal
+      # draws it from the glyph table's column (`·` / `▾` / `▸`, one cell on
+      # every tier).
+      let segText =
+        if seg.kind == csToggle:
+          (if seg.text == CallToggleGlyphs[crtExpanded]:
+             g.glyphText(grCallExpanded)
+           elif seg.text == CallToggleGlyphs[crtCollapsed]:
+             g.glyphText(grCallCollapsed)
+           else: g.glyphText(grCallLeaf))
+        else: seg.text
+      let piece = truncateToCells(segText, keep - x)
       if piece.len == 0:
         continue
       lastStyle = segmentStyle(seg.kind, isCurrent)
@@ -443,8 +459,7 @@ proc paintCallTraceScreen*(g: var StyledGrid; area: CellArea;
       x += cellWidthOf(piece)
     var cuts: seq[CutCell]
     if fitted.truncated and stop > textAt:
-      table.paint(0, keep, fitted.text.substr(fitted.text.len - Ellipsis.len),
-                  lastStyle)
+      table.paint(0, keep, g.glyphText(grTruncation), lastStyle)
       cuts.add CutCell(row: y, col: textAt, width: stop - textAt,
                        ellipsisCol: keep, key: $index,
                        column: "call", full: full)

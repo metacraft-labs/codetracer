@@ -86,6 +86,10 @@ from ../viewmodel/host/native_file_tree import wireNativeFileOperations,
   FilesystemVM, FileTreeOperationResult # K19
 import ./host/terminal_driver
 import ./host/terminal_probe
+import ./app/theme/terminal_report
+import ./app/theme/terminal_settings
+import ./app/theme/degradation
+import ./app/theme/colour_math
 import ./host/tui_session
 import ./host/vcs_source
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
@@ -321,6 +325,12 @@ proc wireLayoutPreferences(rt: TuiRuntime;
   for which in LayoutSetting:
     settings.applyOverride(which, flags[which])
   for which in LayoutSetting:
+    # PLAT-71: the terminal settings are NOT applied here — they are ranks
+    # of the capability profile, read by the negotiation (the remembered
+    # ones as ranks 4–5, the flags as rank 2) — so a remembered value is
+    # never mistaken for this session's `:set`.
+    if which.isTerminalSetting:
+      continue
     discard rt.applyLayoutSetting(which, settings.valueText(which),
                                   remember = false)
   rt.savePreference = proc(name, value: string): string =
@@ -539,25 +549,132 @@ proc themeSwitch(negotiation: StartupNegotiation; driver: TerminalDriver;
     rt.adoptCaps(negotiation.caps)
     true
 
-proc reportCapabilities(flags: CapabilityFlags): int =
+proc storedTerminalPrefs(): (LayoutPreferencesLoad, TerminalPrefs) =
+  ## PLAT-71: the remembered terminal settings — global and per terminal —
+  ## as ranks 4 and 5 of Terminal-Adaptation §5.2.
+  let stored = loadLayoutPreferences(lpTerminal)
+  (stored, prefsOf(stored.settings))
+
+proc printCard(caps: TerminalCapabilities) =
+  ## The glyph test card (§10.3) on stdout, in the terminal's own colours.
+  for row in glyphTestCard(caps):
+    var line = ""
+    for span in row:
+      let s = degradeStyle(span.style, caps)
+      var sgr: seq[string] = @[]
+      if s.bold: sgr.add "1"
+      if s.italic: sgr.add "3"
+      if s.underline: sgr.add "4"
+      if s.reverse: sgr.add "7"
+      proc colour(c: string; base: int): string =
+        if c.len == 7 and c[0] == '#':
+          try:
+            return $(base + 8) & ";2;" & $fromHex[int](c[1 .. 2]) & ";" &
+                   $fromHex[int](c[3 .. 4]) & ";" & $fromHex[int](c[5 .. 6])
+          except ValueError: return ""
+        if c.startsWith("indexed:"):
+          return $(base + 8) & ";5;" & c["indexed:".len .. ^1]
+        let i = AnsiNames.find(c)
+        if i >= 0:
+          return (if i < 8: $(base + i) else: $(base + 60 + i - 8))
+        ""
+      let fg = colour(s.fg, 30)
+      let bg = colour(s.bg, 40)
+      if fg.len > 0: sgr.add fg
+      if bg.len > 0: sgr.add bg
+      if sgr.len > 0:
+        line.add "\e[" & sgr.join(";") & "m" & span.text & "\e[m"
+      else:
+        line.add span.text
+    echo line
+
+proc reportCapabilities(command: TuiCommand): int =
   ## PLAT-68: `--capabilities`. The negotiation a session runs — the
   ## environment, then the start-up query round on the claimed terminal — and
-  ## its result printed after the terminal is given back: one line per
-  ## `describe`, then the status line's notes (the tmux remedies among them).
-  let caps = negotiateCapabilities(flags)
-  if not stdoutIsTerminal():
-    echo describe(caps)
-    return ExitOk
-  let driver = newTerminalDriver(caps)
+  ## its result printed after the terminal is given back.
+  ##
+  ## PLAT-71 (Terminal-Adaptation §10.1): the REPORT — every axis with the
+  ## source that decided it (`terminal_report.profileReport`), or the same as
+  ## JSON (`--capabilities=json`), and with `--card` (what `ct doctor
+  ## terminal` passes) the glyph test card after it.
+  let flags = command.flags
+  let (_, prefs) = storedTerminalPrefs()
+  let caps = resolveCapabilities(readTerminalEnv(), flags, prefs = prefs)
   var negotiated = caps
-  driver.start()
-  try:
-    negotiated = driver.negotiateOnTerminal(flags).caps
-  finally:
-    driver.stop()
-  echo describe(negotiated)
-  echo capabilityNote(negotiated)
+  if stdoutIsTerminal():
+    let driver = newTerminalDriver(caps)
+    driver.start()
+    try:
+      negotiated = driver.negotiateOnTerminal(flags, prefs).caps
+    finally:
+      driver.stop()
+  if command.capabilitiesJson:
+    echo pretty(profileJson(negotiated))
+    return ExitOk
+  for line in profileReport(negotiated):
+    echo line
+  echo "summary      " & describe(negotiated)
+  if command.capabilitiesCard:
+    echo ""
+    printCard(negotiated)
   ExitOk
+
+proc wireTerminalService(rt: TuiRuntime; n: StartupNegotiation;
+                         driver: TerminalDriver) =
+  ## PLAT-71: the host's half of the terminal settings (`TerminalService`):
+  ## a `:set` of one re-resolves the profile at rank 1 and the screen is
+  ## repainted from it; the test card's `y` / `n` remembers `modern-unicode`
+  ## for THIS terminal; `r` asks again; `dismiss` turns the hint off for good.
+  rt.terminalService = TerminalService(
+    setChoice: proc(which: LayoutSetting; value: string): string =
+      if which == lsTerminalHints:
+        return describe(which, value)
+      var c = TerminalChoices()
+      if not choicesOf(which, value, c):
+        return "'" & value & "' is not a value of " & $which
+      if which in {lsGlyphs, lsAmbiguousWidth, lsColors, lsReduceMotion} and
+         value == "auto":
+        # `auto` at rank 1 SAYS NOTHING: drop an earlier `:set` of this axis.
+        case which
+        of lsGlyphs: n.session.glyphs = none(GlyphsChoice)
+        of lsAmbiguousWidth: n.session.ambiguousWidth = none(AmbiguousChoice)
+        of lsColors: n.session.colors = none(ColorsChoice)
+        else: n.session.reduceMotion = none(bool)
+      discard n.setSessionChoice(driver, c)
+      rt.adoptCaps(n.caps)
+      let caps = n.caps
+      result = describe(which, value) & " -> " &
+        (case which
+         of lsModernUnicode: "modern-unicode " &
+           (if caps.modernUnicode: "on" else: "off") & " (" & caps.modernNote &
+           ")"
+         of lsGlyphs: "glyphs " & $caps.tier
+         of lsAmbiguousWidth: "ambiguous " &
+           (if caps.ambiguousWide: "wide" else: "narrow")
+         of lsColors: "colours " & $caps.colors
+         of lsReduceMotion: "motion " &
+           (if caps.reduceMotion: "reduced" else: "animated")
+         else: "applied"),
+    setForThisTerminal: proc(which: LayoutSetting; value: string): string =
+      let name = n.caps.identity.name
+      if name.len == 0:
+        return "this terminal did not identify itself; use :set " & $which &
+               " " & value & " for every terminal"
+      let failure = saveScopedPreference(lpTerminal, name, which, value)
+      if failure.len > 0:
+        return failure
+      let (_, prefs) = storedTerminalPrefs()
+      discard n.setPrefs(driver, prefs)
+      rt.adoptCaps(n.caps)
+      $which & " " & value & " for " & name & " (remembered in [terminal \"" &
+        name & "\"])",
+    rerun: proc(): string =
+      n.restartProbe(driver)
+      "asking the terminal again",
+    dismissHints: proc(): string =
+      let failure = saveLayoutPreference(lpTerminal, lsTerminalHints, "off")
+      if failure.len > 0: failure
+      else: "terminal hints dismissed (terminal-hints off)")
 
 proc interactive(command: TuiCommand): int =
   ## Open a trace and run the loop until the user quits or the terminal goes
@@ -616,8 +733,10 @@ proc interactive(command: TuiCommand): int =
   # (OSC 11) and whether it keeps 24-bit colour (DECRQSS / XTGETTCAP, tmux's
   # `RGB`) — in raw mode, before frame 0, bounded by one short wait. Late
   # replies are taken by the loop below.
-  let negotiation = driver.negotiateOnTerminal(command.flags)
+  let (storedPrefs, terminalPrefs) = storedTerminalPrefs()
+  let negotiation = driver.negotiateOnTerminal(command.flags, terminalPrefs)
   adoptMouseMetrics(driver, negotiation)
+  let hintsOn = storedPrefs.settings.terminal.terminalHints != "off"
 
   var size = driver.size()
   let app = newTuiApp()
@@ -629,8 +748,8 @@ proc interactive(command: TuiCommand): int =
   app.caretDrawn = gCaretSupport == caretDrawn
   # The negotiation's note FIRST: the status line clips a long notification
   # from the right, and a trace folder's path is long.
-  app.notification = capabilityNote(negotiation.caps) & " | opening " &
-                     folder & " …"
+  app.notification = capabilityNote(negotiation.caps, hintsOn) &
+                     " | opening " & folder & " …"
   # PLAT-16: THE PROJECT A REPLAY SESSION EDITS IS THE WORKING DIRECTORY, and
   # that is a decision rather than a fallback, so it is written down here.
   #
@@ -662,6 +781,7 @@ proc interactive(command: TuiCommand): int =
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
   rt.eraseByte = driver.eraseByte()
   rt.themeService = themeSwitch(negotiation, driver, rt)
+  wireTerminalService(rt, negotiation, driver)
   let edit = wireEditServices(rt, projectRoot, command.keymap,
                               proc(): EditListResult =
     let listing = listProjectFiles(rt.app.projectRoot)
@@ -1077,11 +1197,12 @@ proc interactive(command: TuiCommand): int =
     elif at < app.welcomes.len:
       app.welcomes[at].message = recordJob.message
     true
-  if negotiation.caps.tmuxRgbWithheld:
-    # THE ONE CAPABILITY FINDING THAT OUTLIVES FRAME 0: a user whose tmux is
-    # painting their 24-bit terminal at 256 colours needs the remedy, and it
-    # is one line of tmux configuration.
-    app.notification.add " | " & tmuxRgbRemedy(negotiation.caps)
+  if hintsOn and negotiation.caps.remedies.len > 0:
+    # THE ONE CAPABILITY FINDING THAT OUTLIVES FRAME 0 (Terminal-Adaptation
+    # §10.2): at most one hint per session — the most useful remedy, e.g. a
+    # tmux painting a 24-bit terminal at 256 colours — dismissed for good
+    # with `:terminal-info dismiss`.
+    app.notification.add " | " & negotiation.caps.remedies[0]
 
   # §6.2's `--goto=<tick>`: BEFORE THE FIRST DEBUGGER FRAME, which is the whole
   # of what the flag adds over typing `:goto` — `session.seekToStartupTick`
@@ -1110,6 +1231,10 @@ proc interactive(command: TuiCommand): int =
 
   var running = true
   var frameOwed = false
+  var lastPaintMs = 0'i64
+    ## PLAT-71 (Terminal-Adaptation §4.6): when the last token-driven frame
+    ## was painted — on a link-conservative session a pointer merely passing
+    ## repaints at most once per `HoverCoalesceMs`.
   var commitsSeen = rt.layoutCommits
   var viewRows = rt.sourcePaneRows()
   # PLAT-70: the editor's horizontal bar takes a row from the source window
@@ -1218,7 +1343,7 @@ proc interactive(command: TuiCommand): int =
         adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.adoptCaps(negotiation.caps)
-          app.notification = capabilityNote(negotiation.caps)
+          app.notification = capabilityNote(negotiation.caps, hintsOn)
           paint(driver, rt)
         continue
       # RECORDED BEFORE IT IS HANDLED, so the journal of a session that quit on
@@ -1277,11 +1402,17 @@ proc interactive(command: TuiCommand): int =
         if bars.repaint:
           session.applyOutcome(rt, bars)
         let barsMoved = bars.repaint
+        # PLAT-71 (§4.6): over a slow link, hover-driven repaints are
+        # coalesced; the owed frame is painted by the next token or idle tick.
+        let hoverOnly = negotiation.caps.linkConservative and
+                        isPointerPassing(ev.token)
         if outcome.repaint or frameOwed or vcsFollowed or barsMoved:
-          if driver.holdFrame(journal.pendingReplay > 0):
+          if driver.holdFrame(journal.pendingReplay > 0) or
+             (hoverOnly and nowMs() - lastPaintMs < HoverCoalesceMs):
             frameOwed = true
           else:
             paint(driver, rt)
+            lastPaintMs = nowMs()
             frameOwed = false
         # PLAT-70: the editor's horizontal bar came or went (a wider file, an
         # edit, a narrower pane): the source window follows the rows it left.
@@ -1381,8 +1512,10 @@ proc editInteractive(command: TuiCommand): int =
   let driver = newTerminalDriver(caps)
   driver.start()
   defer: driver.stop()
-  let negotiation = driver.negotiateOnTerminal(command.editFlags)
+  let (storedPrefs, terminalPrefs) = storedTerminalPrefs()
+  let negotiation = driver.negotiateOnTerminal(command.editFlags, terminalPrefs)
   adoptMouseMetrics(driver, negotiation)
+  let hintsOn = storedPrefs.settings.terminal.terminalHints != "off"
 
   var size = driver.size()
   let app = newTuiApp()
@@ -1397,6 +1530,7 @@ proc editInteractive(command: TuiCommand): int =
   let rt = newTuiRuntime(app, negotiation.caps, size.cols, size.rows)
   rt.eraseByte = driver.eraseByte()
   rt.themeService = themeSwitch(negotiation, driver, rt)
+  wireTerminalService(rt, negotiation, driver)
   rt.dispatcher.services.setTheme = rt.themeService
 
   # THE HOST'S FOUR CAPABILITIES, INJECTED — one function, shared with
@@ -1521,7 +1655,7 @@ proc editInteractive(command: TuiCommand): int =
         adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.adoptCaps(negotiation.caps)
-          app.notification = capabilityNote(negotiation.caps)
+          app.notification = capabilityNote(negotiation.caps, hintsOn)
           paint(driver, rt)
         continue
       let outcome = rt.handleToken(ev.token, nowMs())
@@ -1591,7 +1725,7 @@ proc run(args: seq[string]): int =
       stderr.writeLine(TuiProgramName & ": " & e.msg)
       ExitUsage
   of tckCapabilities:
-    reportCapabilities(command.flags)
+    reportCapabilities(command)
   of tckPaneServer:
     # HSF-E1: an editor's pane server. Its stdio is the protocol, so a
     # refusal is written to stderr like every other diagnostic here.

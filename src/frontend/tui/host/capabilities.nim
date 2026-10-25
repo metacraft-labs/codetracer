@@ -9,7 +9,7 @@
 ##
 ## ## What this file is, and what it deliberately is not
 ##
-## It is seven `getEnv` calls and one `isatty`, in one function, feeding
+## It is a list of `getEnv` calls and one `isatty`, in one function, feeding
 ## `app/theme/capabilities.resolveCapabilities`. That is the whole of it, and
 ## the smallness is the design:
 ##
@@ -66,7 +66,27 @@ proc readTerminalEnv*(fd: cint = STDOUT_FILENO): TerminalEnv =
     noColor: getEnv("NO_COLOR", ""),
     isTty: isatty(fd) == 1,
     colorFgBg: getEnv("COLORFGBG", ""),
-    tmux: getEnv("TMUX", ""))
+    tmux: getEnv("TMUX", ""),
+    # PLAT-71 (Terminal-Adaptation §4.1): the terminals' own markers, the
+    # multiplexers, a remote session, and CodeTracer's own overrides.
+    termProgramVersion: getEnv("TERM_PROGRAM_VERSION", ""),
+    vteVersion: getEnv("VTE_VERSION", ""),
+    konsoleVersion: getEnv("KONSOLE_VERSION", ""),
+    kittyWindowId: getEnv("KITTY_WINDOW_ID", ""),
+    weztermExecutable: getEnv("WEZTERM_EXECUTABLE", ""),
+    alacrittyWindowId: getEnv("ALACRITTY_WINDOW_ID", ""),
+    ghosttyResourcesDir: getEnv("GHOSTTY_RESOURCES_DIR", ""),
+    wtSession: getEnv("WT_SESSION", ""),
+    terminalEmulator: getEnv("TERMINAL_EMULATOR", ""),
+    sty: getEnv("STY", ""),
+    zellij: getEnv("ZELLIJ", ""),
+    sshConnection: getEnv("SSH_CONNECTION", ""),
+    sshTty: getEnv("SSH_TTY", ""),
+    ctGlyphs: getEnv("CODETRACER_TUI_GLYPHS", ""),
+    ctModernUnicode: getEnv("CODETRACER_TUI_MODERN_UNICODE", ""),
+    ctAmbiguousWidth: getEnv("CODETRACER_TUI_AMBIGUOUS_WIDTH", ""),
+    ctColors: getEnv("CODETRACER_TUI_COLORS", ""),
+    ctProbe: getEnv("CODETRACER_TUI_PROBE", ""))
 
 proc negotiateCapabilities*(flags: CapabilityFlags;
                             fd: cint = STDOUT_FILENO): TerminalCapabilities =

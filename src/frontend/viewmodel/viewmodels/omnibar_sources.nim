@@ -163,12 +163,13 @@ proc parseColumnWidthLine*(words: openArray[string]):
     return (false, col, 0, "`" & words[2] & "` is not a number of cells")
   (true, col, cells, "")
 
-proc layoutSettingCommands*(): seq[OmnibarEntry]
+proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry]
 proc baseKeymapCommands*(): seq[OmnibarEntry]
   ## Forward-declared; defined at the end of this module.
 
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
-                     menu: MenuVM): seq[OmnibarEntry] =
+                     menu: MenuVM;
+                     terminalSettings = true): seq[OmnibarEntry] =
   ## The whole index, in a fixed order (files, symbols, commands — the
   ## menu's, then the event log's column commands).
   result = filesOf(fs)
@@ -176,7 +177,7 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add commandsOf(menu)
   result.add eventLogColumnCommands()
   result.add tableCommands()
-  result.add layoutSettingCommands()
+  result.add layoutSettingCommands(terminalSettings)
   result.add baseKeymapCommands()
 
 proc baseKeymapCommands*(): seq[OmnibarEntry] =
@@ -188,13 +189,17 @@ proc baseKeymapCommands*(): seq[OmnibarEntry] =
                             detail: ":keymap " & $m,
                             target: baseKeymapCommandTarget(m))
 
-proc layoutSettingCommands*(): seq[OmnibarEntry] =
+proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry] =
   ## PLAT-51: the layout preferences as omnibox commands, on and off —
   ## `:set focus-highlight …` and `:set live-resize …` without the prompt, on
   ## both native front-ends (`layout_settings`).
   ## PLAT-70 Part H: a setting that takes a value (`scrollbar-thickness`)
   ## has one entry per value, as the base keymaps have.
+  ## PLAT-71: the terminal's own settings (`isTerminalSetting`) only where
+  ## `terminalSettings` — the window front-end draws with real fonts.
   for which in LayoutSetting:
+    if which.isTerminalSetting and not terminalSettings:
+      continue
     for value in settingValues(which):
       result.add OmnibarEntry(kind: OmnibarMode.omCommand,
                               label: settingCommandLabel(which, value),

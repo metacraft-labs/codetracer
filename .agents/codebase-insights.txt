@@ -7708,3 +7708,49 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   reports consumer-declared / plugin-io-edge-is-real / tui-layers violations.
   `git init` the copy, exclude the submodule paths in `.git/info/exclude`, and
   `git add -f` the few tracked-but-ignored .nim files so the listing matches.
+||||||| parent of c0f009c5e8 (wip: terminal adaptation)
+
+## Terminal capability profile and the one glyph table (PLAT-71)
+- `app/theme/capabilities.resolveCapabilities(env, flags, probe, prefs,
+  session, cache)` is the WHOLE profile, pure, with §5.2's ranks: `session` is
+  rank 1 (`:set`), `flags.choices` rank 2, `env.ct*` (`CODETRACER_TUI_*`) rank
+  3, `prefs.scoped` (`[terminal "<glob>"]`) rank 4, `prefs.global` rank 5.
+  `auto` SAYS NOTHING at a rank (falls through) except for `modern-unicode`,
+  whose `auto` is a value. The cache beats only conservative env guesses.
+- `ChromeTier` is ordered RICHEST first (`tierExtended` is the zero value) so
+  a ShellModel/StyledGrid built without a profile paints the old Unicode screen.
+- Views ask `views/glyph_table` for a ROLE: `g.glyphText(grX)` (or
+  `g.paintGlyph`) on a grid; helpers that build rows without a grid take a
+  `glyphs = DefaultGlyphs` parameter and the painter passes `g.glyphs`. The
+  published `*Glyph` constants are `canonical(role)` (the extended column) for
+  tests. `tests/test_plat71_glyph_table.nim`'s TA-6 gate fails on any table
+  code point in `app/views/*.nim` code outside glyph_table / scrollbar_styles /
+  borders.
+- `degradation.degradeRow` no longer rewrites TEXT on the ASCII tier — content
+  (a docstring's em dash) is drawn verbatim. Status-line notes, which are
+  CodeTracer's own prose, go through `glyph_table.asciiProse` on ASCII.
+- The shared call-trace row carries its toggle as the desktop's glyphs
+  (`calltrace_vm.CallToggleGlyphs`); the TUI painter maps `csToggle` segments
+  to `grCallExpanded/Collapsed/Leaf`.
+- `StyledGrid.ambiguous` and `isonim_tui.newCompositor(…, ambiguous)` must
+  agree, or rows shift under an ambiguous-wide profile. `cellWidthOf` and
+  friends count zero-width runes as 0 (the compositor draws no cell for them).
+  `cellWidthOf` has a 1-arg overload because `measureLines` takes it as a value.
+- The start-up round (`host/terminal_probe.queriesFor`) now always asks
+  XTVERSION, DA2, DECRQM 2026/2027 and the six-glyph CPR width probe before the
+  DA1 fence; `probeWanted` is false only for a dumb terminal or the probe off.
+  CPR tokens are replies only while `probe.cprOpen` (the F3 rule); use
+  `isReplyTokenFor(probe, token)`, not `isReplyToken`, for late replies.
+- tmux facts come from ONE `tmux display -p` with every format (`TmuxFormats`),
+  spawned before the round's write and collected after the wait. tmux prints
+  boolean options as 0/1 (`#{mouse}` = "0"), not on/off.
+- TermAssert (pinned) blocks `TMUX` by default; a case that SETS it must not
+  also `envRemove` it. A real-tmux pty case is best done as plat46 does: the
+  tmux CLIENT is the TermAssert child; `tmux pipe-pane -o 'cat > f'` inside the
+  pane records the bytes the inner program writes.
+- `nim-termctl.setExtraRestore(bytes)` registers the app's own mode resets
+  (2027, 2026, 1016, 1003) with the async-signal-safe restore; the driver's
+  `restoreUnion` is that buffer and `stop` writes the same bytes.
+- Per-terminal cache: `<state root>/terminal-profiles.json` (state root =
+  `CODETRACER_TUI_LAYOUT_DIR` if set). Pty suites must give each case its own
+  state dir or one case's cache answers the next.

@@ -312,7 +312,7 @@ const
     ## (`shell.paneTitle(paneState)` uppercased), so every CTUI-3 assertion that
     ## reads `VARIABLES` off a shell row still reads it once this pane fills
     ## that rectangle.
-  PaneRule* = "─"
+  PaneRule* = canonical(grDividerH)
   DefaultPageSize* = 100
     ## Members materialised per expansion step.
     ##
@@ -758,7 +758,8 @@ proc degradationOf*(model: VariablesModel): string =
   # sentence has one implementation and two callers (§14).
   describeDegradation(spec.presentation(ProvenanceBudgetCells))
 
-proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
+proc titleRowSpans*(model: VariablesModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## `VARIABLES 22 name(s) 1 changed  builtin.record tier=builtin … ────`.
   ##
   ## The two numbers are the facts the suites assert against data they derived
@@ -807,7 +808,7 @@ proc titleRowSpans*(model: VariablesModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc titleRowText*(model: VariablesModel; width: int): string =
@@ -911,7 +912,7 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     return
 
   var spanAt = area.col
-  for span in titleRowSpans(model, area.width):
+  for span in titleRowSpans(model, area.width, g.glyphs):
     g.paint(area.row, spanAt, span.text, span.style)
     spanAt += cellWidthOf(span.text)
 
@@ -975,20 +976,20 @@ proc paintVariables*(g: var StyledGrid; area: CellArea;
     let modelRow = rows[rowIndex]
     inc rowIndex
     let spec = rowSpecFor(laidModel, modelRow, tableW)
-    let laid = treeRowLayout(spec)
+    let laid = treeRowLayout(spec, g.glyphs, g.ambiguous)
     if direct:
       # The table is the pane (FIT / SHRINK, the view at 0): painted in place,
       # with no scratch row — the common case keeps its old cost.
       var at = area.col
       for span in laid.spans:
         g.paint(screenRow, at, span.text, span.style)
-        at += cellWidthOf(span.text)
+        at += cellWidthOf(span.text, g.ambiguous)
     else:
-      table = newStyledGrid(tableW, 1)
+      table = newStyledGridLike(g, tableW, 1)
       var at = 0
       for span in laid.spans:
         table.paint(0, at, span.text, span.style)
-        at += cellWidthOf(span.text)
+        at += cellWidthOf(span.text, g.ambiguous)
       g.copySlice(screenRow, area.col, table, 0, left, width)
     var placedCuts: seq[CutCell]
     for c in laid.cuts:

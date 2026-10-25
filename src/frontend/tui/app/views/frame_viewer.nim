@@ -477,7 +477,7 @@ proc gridRowSpans*(grid: CellGrid; row: int; width: int;
     inc col
 
 const
-  SceneMarkGlyph* = "┼"
+  SceneMarkGlyph* = canonical(grBoxCross)
     ## A scene boundary on the frame scrubber's track (ASCII `+`).
 
 func hasFrameScrubber*(model: FrameViewerModel; area: CellArea): bool =
@@ -518,7 +518,8 @@ proc paintFrameScrubber(g: var StyledGrid; area: CellArea;
   let at = frameColumn(model.frameCount, model.frameIndex, w)
   let cells = thumbCells(ThumbSpan(start: at * 8, length: 8), w,
                          vertical = false,
-                         modern = g.scrollbars.options.modernUnicode)
+                         modern = g.scrollbars.options.modernUnicode,
+                         glyphs = g.glyphs)
   for i, cell in cells:
     g.paint(row, area.col + i, cell.glyph, styleOf(cell.kind))
   for f in model.sceneMarks:
@@ -527,7 +528,7 @@ proc paintFrameScrubber(g: var StyledGrid; area: CellArea;
     let x = frameColumn(model.frameCount, f, w)
     if x == at:
       continue   # the thumb is on top
-    g.paint(row, area.col + x, SceneMarkGlyph, MarkStyle)
+    g.paint(row, area.col + x, g.glyphText(grBoxCross), MarkStyle)
     if x notin screen.sceneMarkCols:
       screen.sceneMarkCols.add x
   screen.scrubberRow = row

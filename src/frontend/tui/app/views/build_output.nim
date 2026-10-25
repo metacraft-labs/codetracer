@@ -55,7 +55,7 @@ type
 const
   BuildOutputStyle* = CellStyle(role: srChromeText)
   BuildTruncatedStyle* = CellStyle(role: srChromeNotification, italic: true)
-  TruncatedNote* = "… earlier output dropped"
+  TruncatedNote* = canonical(grTruncation) & " earlier output dropped"
 
 proc verdictStyle*(verdict: BuildVerdict): CellStyle =
   ## ONE COLOUR PER VERDICT, NO TWO THE SAME, on exactly the rule
@@ -126,9 +126,10 @@ proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
   var row = area.row + 1
   let lastRow = area.row + area.height - 1 - (if bar.shown: 1 else: 0)
   if model.truncated and row <= lastRow:
-    g.paint(row, area.col, truncateToCells(TruncatedNote, area.width),
+    let note = g.glyphText(grTruncation) & " earlier output dropped"
+    g.paint(row, area.col, truncateToCells(note, area.width),
             BuildTruncatedStyle)
-    result.rows.add @[StyledSpan(text: TruncatedNote,
+    result.rows.add @[StyledSpan(text: note,
                                  style: BuildTruncatedStyle)]
     inc row
   var i = model.scrollTop

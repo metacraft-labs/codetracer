@@ -60,6 +60,8 @@ import headless_app/welcome_tabs
 import ./views/event_log
 import ./views/vcs_pane
 import ./views/search_results_pane
+import ./views/terminal_info
+import ./theme/terminal_report
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -381,12 +383,29 @@ type
     clockMs*: int64
       ## The latest time the runtime was told (a token, a tick).
 
+  TerminalService* = ref object
+    ## PLAT-71 (Terminal-Adaptation §5, §10): what only the host can do
+    ## about the terminal — it holds the start-up negotiation.
+    setChoice*: proc(which: LayoutSetting; value: string): string {.closure.}
+      ## `:set <terminal setting> <value>` (rank 1): re-resolve the profile
+      ## with it, adopt it, remember it. Answers the status line's text.
+    setForThisTerminal*: proc(which: LayoutSetting;
+                              value: string): string {.closure.}
+      ## The glyph test card's `y` / `n`: the setting for THIS terminal only
+      ## (a `[terminal "<name>"]` section, OQ-T6).
+    rerun*: proc(): string {.closure.}
+      ## Ask the terminal again (`:terminal-info`'s `r`).
+    dismissHints*: proc(): string {.closure.}
+      ## `:terminal-info dismiss`: no start-up hint ever again (§10.2).
+
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
     scrollbars*: ScrollbarRuntime
       ## PLAT-70 Part H: the scrollbars' options, pointer, grab, paging and
       ## fades (§7).
+    terminalInfo*: TerminalInfoView
+      ## PLAT-71: `:terminal-info` — the live report and the glyph test card.
     caps*: TerminalCapabilities
       ## Handed in by `host/capabilities.negotiateCapabilities` before this
       ## object exists, for CTUI-11's "resolved before first paint".
@@ -483,6 +502,11 @@ type
       ## PLAT-51: the HOST's write of a layout preference (`:set
       ## focus-highlight off`, `:set scrollbar-thickness thin`), "" on
       ## success, else why not. Nil in a host that keeps no state.
+    terminalService*: TerminalService
+      ## PLAT-71: the HOST's half of the terminal settings and the report —
+      ## re-resolving the capability profile when `:set` changes one (rank 1
+      ## of Terminal-Adaptation §5.2), the scoped `y` / `n` of the glyph test
+      ## card, and `:terminal-info`'s report. Nil in a host with no terminal.
     saveIcons*: proc(mode: IconsMode): string {.closure.}
       ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
       ## success. Nil in a host that keeps no state.
@@ -574,7 +598,7 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
   ## reason, and a Compact profile has fewer panes than an Ultra-wide one.
   let model = app.shellModel(width, height)
   let projection = projectLayout(model.layout, bodyArea(width, height))
-  TuiRuntime(
+  result = TuiRuntime(
     app: app, caps: caps,
     # The base an edit session was opened under, else the product default
     # until the host's `selectBase` (the flag, the stored preference).
@@ -593,6 +617,9 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
     autoHide: initAutoHideHover(),
     scrollbars: initScrollbarRuntime(),
     eraseByte: '\x7f')
+  # PLAT-71: the options the profile owns (`adoptProfileOptions`).
+  result.scrollbars.options.modernUnicode = caps.modernUnicode
+  result.scrollbars.options.reduceMotion = caps.reduceMotion
 
 proc keyOf*(rt: TuiRuntime; token: string): string =
   ## The canonical name of an input token on THIS terminal — `keyName` with the
@@ -606,10 +633,22 @@ proc keyDelivery*(rt: TuiRuntime): KeyDelivery =
   KeyDelivery(frontEnd: feTerminal, platform: hostPlatform(),
               keyProtocol: rt.caps.keyProtocol)
 
+proc openTerminalInfo*(rt: TuiRuntime) =
+  ## PLAT-71: `:terminal-info` / **Terminal: Show Capabilities**.
+  rt.terminalInfo = TerminalInfoView(open: true)
+
+proc adoptProfileOptions(rt: TuiRuntime) =
+  ## PLAT-71: the scrollbar options the terminal's profile owns —
+  ## `modern-unicode` for all chrome (OQ-T9) and `reduce-motion` (or a
+  ## conservative link, §4.6), which makes the fade jump to its end state.
+  rt.scrollbars.options.modernUnicode = rt.caps.modernUnicode
+  rt.scrollbars.options.reduceMotion = rt.caps.reduceMotion
+
 proc adoptCaps*(rt: TuiRuntime; caps: TerminalCapabilities) =
   ## The host re-negotiated (a late reply, `:theme`): take the new
   ## capabilities, and hand an open edit session the key protocol they carry.
   rt.caps = caps
+  rt.adoptProfileOptions()
   if not rt.app.editSession.isNil:
     rt.app.editSession.adoptDelivery(rt.keyDelivery)
   # The user's rows are judged again: a chord a legacy terminal could not
@@ -1027,6 +1066,22 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
   if not current.assignValue(which, value):
     return "'" & value & "' is not a value of " & $which
   let on = value == "on"
+  if which.isTerminalSetting:
+    # PLAT-71: a TERMINAL setting is a rank of the capability profile
+    # (Terminal-Adaptation §5.2): the host re-resolves, and the screen is
+    # repainted from the new profile. `modern-unicode` among them (OQ-T9).
+    if rt.terminalService.isNil or rt.terminalService.setChoice.isNil:
+      return describe(which, value) & " (no terminal to apply it to)"
+    result = rt.terminalService.setChoice(which, value)
+    for pane in PaneKind:
+      rt.scrollbars.fades[pane].wake(rt.scrollbars.clockMs)
+    if remember:
+      let saved =
+        if rt.savePreference.isNil: "not remembered: this session keeps no state"
+        else: rt.savePreference($which, value)
+      if saved.len > 0:
+        result.add " (" & saved & ")"
+    return
   case which
   of lsFocusHighlight:
     rt.app.focusHighlightOff = not on
@@ -1035,8 +1090,11 @@ proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
       rt.app.layoutBinding.liveResize = on
   of lsOverflowMarkers:
     rt.app.overflowMarkersOff = not on
+  of lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
+     lsTerminalProbe, lsReduceMotion, lsTerminalHints:
+    discard
   of lsScrollbarThickness, lsScrollbarFade, lsScrollbarTrack,
-     lsScrollbarClick, lsModernUnicode:
+     lsScrollbarClick:
     rt.scrollbars.options = current.scrollbars
     # A changed option shows on every bar at once.
     for pane in PaneKind:
@@ -1375,6 +1433,28 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.note(sl.message)
       else:
         rt.note(rt.applyLayoutSetting(sl.setting, sl.value))
+      outcome.detail = rt.app.notification
+      return
+
+  # PLAT-71: `:terminal-info` (Terminal-Adaptation §10.1) — the live report
+  # and the glyph test card — and `:terminal-info dismiss`, which turns the
+  # start-up hint off for good (§10.2).
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and words[0] == "terminal-info":
+      outcome.repaint = true
+      if words.len > 1 and words[1] == "dismiss":
+        rt.note(if rt.terminalService.isNil or
+                   rt.terminalService.dismissHints.isNil:
+                  "no terminal hints to dismiss in this session"
+                else: rt.terminalService.dismissHints())
+      elif words.len > 1:
+        rt.note(":terminal-info takes nothing or `dismiss`")
+      else:
+        rt.openTerminalInfo()
       outcome.detail = rt.app.notification
       return
 
@@ -2057,6 +2137,56 @@ proc copyToClipboard(rt: TuiRuntime; text, what: string) =
   rt.app.clipboard = text
   rt.app.pasteBuffer = text
   rt.note("copied " & what)
+
+proc terminalInfoBody*(rt: TuiRuntime): seq[StyledRow] =
+  ## What `:terminal-info` shows under its live lines: the report
+  ## (`terminal_report.profileReport`, the one renderer `--capabilities`
+  ## and `ct doctor terminal` share) and the glyph test card.
+  for line in profileReport(rt.caps):
+    result.add @[StyledSpan(text: line)]
+  result.add @[StyledSpan(text: "")]
+  result.add glyphTestCard(rt.caps)
+
+proc handleTerminalInfoToken(rt: TuiRuntime; token: string;
+                             outcome: var RuntimeOutcome) =
+  ## Every token while `:terminal-info` is open is its own: a key is shown
+  ## decoded (the interactive half of the report), a pointer report is shown
+  ## as the cell it is over, and the view's few keys act.
+  outcome.repaint = true
+  let (isMouse, event) = decodeMouse(token)
+  if isMouse:
+    rt.terminalInfo.pointer = "cell " & $event.col & "," & $event.row &
+      (if event.kind == mekPress: " pressed " & $event.button else: "")
+    return
+  let name = rt.keyOf(token)
+  rt.terminalInfo.lastKey = name
+  let service = rt.terminalService
+  case name
+  of "Esc", "q":
+    rt.terminalInfo.open = false
+  of "Up":
+    rt.terminalInfo.scroll = max(0, rt.terminalInfo.scroll - 1)
+  of "Down":
+    rt.terminalInfo.scroll = min(max(0, rt.terminalInfoBody().len - 1),
+                                 rt.terminalInfo.scroll + 1)
+  of "r":
+    rt.terminalInfo.note =
+      if service.isNil or service.rerun.isNil: "no terminal to ask"
+      else: service.rerun()
+  of "y", "n":
+    # §10.3: the answer to "do the Legacy Computing glyphs look right?"
+    # sets modern-unicode for THIS terminal only (OQ-T6).
+    let value = if name == "y": "on" else: "off"
+    rt.terminalInfo.note =
+      if service.isNil or service.setForThisTerminal.isNil:
+        "this session keeps no state"
+      else: service.setForThisTerminal(lsModernUnicode, value)
+  of "c":
+    rt.copyToClipboard(TerminalInfoCopyText, "an OSC 52 test string")
+    rt.terminalInfo.note = "copied '" & TerminalInfoCopyText &
+      "' (" & rt.caps.clipboard & "): paste it to check"
+  else:
+    discard
 
 proc eventRowAt(model: EventLogModel; area: CellArea;
                 row: int): (bool, event_log.EventLogRow, EventLogScreen) =
@@ -2811,6 +2941,9 @@ proc barScreen(rt: TuiRuntime): ShellScreen =
   model.hasFocus = hasFocus
   model.focused = focused
   model.scrollbars = rt.scrollbarFrame()
+  model.glyphs = glyphProfileOf(rt.caps)
+  model.ambiguous = ambiguousPolicyOf(rt.caps)
+  model.topBar.glyphs = model.glyphs
   shellScreen(model, rt.width, rt.height)
 
 proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
@@ -4847,6 +4980,11 @@ proc runPointMenuItem(rt: TuiRuntime; op: PointMenuOp; action: string;
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
+  # PLAT-71: **Terminal: Show Capabilities** (`:terminal-info`).
+  if action == TerminalInfoCommandTarget:
+    rt.openTerminalInfo()
+    outcome.repaint = true
+    return
   # PLAT-51: the omnibox's layout-setting commands (`:set …` without the
   # prompt, `omnibar_sources.layoutSettingCommands`).
   let setting = parseSettingCommandTarget(action)
@@ -6106,8 +6244,13 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   # what the framer delivered before it framed Alt.
   if token.len == 2 and token[0] == '\x1b' and token[1] != '\x1b' and
      not rt.app.menu.isOpen and not rt.app.content.open and
+     not rt.terminalInfo.open and
      rt.probeKey(rt.lastKey).kind == erNothing:
     return rt.handleToken(token[1 .. 1], nowMs)
+  # PLAT-71: `:terminal-info` takes every token while it is open.
+  if rt.terminalInfo.open:
+    rt.handleTerminalInfoToken(token, result)
+    return
 
   # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
   # decoder is not even CALLED without one, so with the flag off this is one
@@ -6403,8 +6546,21 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   model.hasFocus = hasFocus
   model.focused = focused
   model.scrollbars = rt.scrollbarFrame()
+  model.glyphs = glyphProfileOf(rt.caps)
+  model.ambiguous = ambiguousPolicyOf(rt.caps)
+  model.topBar.glyphs = model.glyphs
   result = shellScreen(model, rt.width, rt.height)
   rt.noteBarsPainted(result.bars)
+  if rt.terminalInfo.open and result.styledRows.len == rt.height:
+    # PLAT-71: `:terminal-info` over the body, top bar and status kept.
+    var g = newStyledGrid(rt.width, rt.height)
+    g.glyphs = model.glyphs
+    g.ambiguous = model.ambiguous
+    let area = terminalInfoArea(rt.width, rt.height)
+    paintTerminalInfo(g, area, rt.terminalInfo, rt.terminalInfoBody())
+    for r in area.row ..< area.row + area.height:
+      result.styledRows[r] = g.rowSpans(r)
+      result.rows[r] = g.rowText(r)
   if rt.prompt.open and result.rows.len > 0:
     # §3.3.6's prompt replaces the status row while it is open. Painted over the
     # finished screen rather than folded into `ShellModel`, because

@@ -189,7 +189,7 @@ const
   EditDirtyStyle* = CellStyle(role: srChromeNotification, bold: true)
   EditStatementStyle* = CellStyle(role: srChromeMuted, italic: true)
   EditRuleStyle* = CellStyle(role: srBorderPane)
-  EditPaneRule* = "─"
+  EditPaneRule* = canonical(grDividerH)
 
 proc initEditPaneModel*(path = ""; sourceStatement = "";
                         lines: seq[string] = @[]; viewportTop = 1;
@@ -235,7 +235,8 @@ proc paneGutterWidth*(model: EditPaneModel): int =
 # re-exported by `shell.nim`, so a consumer would have had to qualify a call
 # that has exactly one right answer.
 
-proc titleRowSpans*(model: EditPaneModel; width: int): StyledRow =
+proc titleRowSpans*(model: EditPaneModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## The title row as styled spans, exactly `width` cells wide.
   ##
   ## FOUR FIELDS AND THE THIRD IS THE REQUIREMENT: `EDIT`, the basename, the
@@ -270,7 +271,7 @@ proc titleRowSpans*(model: EditPaneModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(EditPaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: EditRuleStyle)
 
 proc titleRowText*(model: EditPaneModel; width: int): string =
@@ -305,7 +306,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
   # Row 0 is the title; the body starts at row 1. Same split as the Debug pane,
   # so the two modes' first code row is the same screen row.
   var at = area.row
-  var titleSpans = titleRowSpans(model, area.width)
+  var titleSpans = titleRowSpans(model, area.width, g.glyphs)
   var x = area.col
   for span in titleSpans:
     g.paint(at, x, span.text, span.style)
@@ -370,7 +371,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     # and the three cells stay reserved. §3: "the gutter reused from Debug mode
     # minus the execution pointer (there is no execution)."
     spec.isInspectionLine = false
-    let gutterSpans = gutterRow(spec)
+    let gutterSpans = gutterRow(spec, g.glyphs)
     var gx = area.col
     for span in gutterSpans:
       if gx >= area.col + gw:

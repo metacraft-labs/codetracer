@@ -4818,7 +4818,8 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawSearchPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
-                                   gSession.session.store, gMenu) &
+                                   gSession.session.store, gMenu,
+      terminalSettings = false) &
                     gRecordings)
   drawTopBar(r)
 
@@ -5567,7 +5568,8 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
   refreshGpuiMenuAvailability()
   if not gSession.isNil:
     gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
-                                     gSession.session.store, gMenu) &
+                                     gSession.session.store, gMenu,
+      terminalSettings = false) &
                       gRecordings)
   gOmnibar.open(query)
   drawTopBar(r)
@@ -9951,7 +9953,8 @@ proc runOpen(cmd: GpuiCommand): int =
                   else: ksDefault)
   gOmnibar = newOmnibarVM()
   gOmnibar.setIndex(omnibarIndexOf(session.session.fileTreeVM,
-                                   session.session.store, gMenu) &
+                                   session.session.store, gMenu,
+      terminalSettings = false) &
                     gRecordings)
   gLeafSet = leafSet
   gCalltraceLoads =

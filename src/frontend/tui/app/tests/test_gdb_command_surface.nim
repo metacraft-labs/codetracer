@@ -162,7 +162,13 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 112
+  ExpectedAppModules = 118
+    ## 2026-10-24 (PLAT-71): 112 → 118. `theme/terminal_profile.nim` (the
+    ## profile's vocabulary and parsers), `theme/terminal_settings.nim` (the
+    ## settings as ranks), `theme/terminal_report.nim` (the report and the
+    ## glyph test card), `views/glyph_table.nim` (the one glyph table),
+    ## `views/terminal_info.nim` (`:terminal-info`) and
+    ## `tests/test_plat71_terminal_profile.nim`.
     ## 2026-10-24: 111 → 112, re-counting PLAT-70 Part I, which added
     ## `views/table_hscroll.nim` (a table pane's sideways view and bar)
     ## without re-counting.
@@ -288,7 +294,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 277
+  ExpectedStyleLiterals = 285
+    ## 2026-10-24 (PLAT-71): +8 — `views/terminal_info.nim`'s three (title,
+    ## keys, live line) and `theme/terminal_report.nim`'s five (the card's
+    ## colour swatch and its four attribute samples).
     ## 2026-10-23 (PLAT-70 Part H): 270 → 277, measured — the bar painter's
     ## three styles in `views/scrollbar_styles.nim` (the track, the thumb and
     ## the mark, each a ROLE carrying the fade), so the theme registry has no
@@ -404,7 +413,9 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 37
+  ExpectedStyledFiles = 39
+    ## 2026-10-24 (PLAT-71): +2, `views/terminal_info.nim` and
+    ## `theme/terminal_report.nim`.
     ## 2026-10-23 (PLAT-70 Part H): +1, `views/scrollbar_styles.nim`.
     ## 2026-10-23: +1, `tests/test_pane_protocol.nim` (see above).
     ## 2026-10-15 (PLAT-57): +1, `views/search_results_pane.nim`.

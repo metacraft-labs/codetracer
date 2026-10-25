@@ -91,6 +91,9 @@ type
     menu*: MenuVM
     omnibar*: OmnibarVM
     icons*: IconsMode
+    glyphs*: GlyphProfile
+      ## PLAT-71: the terminal's glyph profile (set with the shell's), which
+      ## decides whether the `unicode` icons can be drawn (`effectiveIconsOf`).
     graphicsDrawn*: bool
       ## The terminal was measured to draw pictures (kitty graphics). In
       ## `graphics` mode without it the controls fall back to `unicode`
@@ -154,9 +157,9 @@ type
     index*: int
 
 const
-  MenuButtonGlyph* = "≡"
-  OmnibarGlyph* = "⌕"
-  FolderMarker* = "›"
+  MenuButtonGlyph* = canonical(grMenuButton)
+  OmnibarGlyph* = canonical(grOmnibar)
+  FolderMarker* = canonical(grOverflowRight)
   OmnibarOpenMinCells* = 16
   OmnibarFieldMinCells* = 14
   OmnibarResultRows* = 10
@@ -184,12 +187,12 @@ const
     ## surface, not text on the bar. Since PLAT-50 the padding cell on each
     ## side carries the field's border as an edge line (`FieldEdgeLeft` /
     ## `FieldEdgeRight`).
-  FieldEdgeLeft* = "▕"
+  FieldEdgeLeft* = canonical(grFieldEdgeLeft)
     ## PLAT-50: the field's (and the menu button's) left border — U+2595
     ## RIGHT ONE EIGHTH BLOCK, a line at the cell's right edge, against the
     ## field — in ui/border/secondary on the bar's ground, the desktop's
     ## `.command-input-row` 1px border in a cell.
-  FieldEdgeRight* = "▏"
+  FieldEdgeRight* = canonical(grFieldEdgeRight)
     ## PLAT-50: the field's right border — U+258F LEFT ONE EIGHTH BLOCK.
   DesktopEmPx = 16.0
     ## PLAT-50: the desktop caption bar's em (its 16px root font), which its
@@ -217,30 +220,45 @@ const
     ## tabs, so each is a separate item on its own ground (the desktop's
     ## `.session-tab` `margin-right 0.25em`).
 
-func agentGlyph*(a: SessionTabAgent): string =
+func agentGlyph*(a: SessionTabAgent; glyphs = DefaultGlyphs): string =
   ## The agent indicator a tab draws before its label (DeepReview
   ## Agentic-Coding-Integration.md §3.3's icon per state): working ⟳,
   ## completed ✓, failed ✗, cancelled ■; nothing without an agent.
   if not a.present: ""
   else:
     case a.lifecycle
-    of aslConnecting, aslRunning: "⟳"
-    of aslCompleted: "✓"
-    of aslError: "✗"
-    of aslCancelled, aslDisconnected: "■"
+    of aslConnecting, aslRunning: glyphs.glyph(grStatusRunning)
+    of aslCompleted: glyphs.glyph(grStatusOk)
+    of aslError: glyphs.glyph(grStatusError)
+    of aslCancelled, aslDisconnected: glyphs.glyph(grStatusStopped)
 
-func tabText*(t: SessionTabView): string =
-  ## A session tab's cells: ` [agent ]label [× ]`.
-  let glyph = agentGlyph(t.agent)
+func tabText*(t: SessionTabView; glyphs = DefaultGlyphs): string =
+  ## A session tab's cells: ` [agent ]label [× ]`. Every glyph in it is one
+  ## cell in every column of the glyph table, so its width is the same on
+  ## every profile.
+  let glyph = agentGlyph(t.agent, glyphs)
   result = " " & (if glyph.len > 0: glyph & " " else: "") &
            (if t.label.len > 0: t.label else: t.title) & " "
   if t.closable:
-    result.add SessionTabCloseGlyph & " "
+    result.add glyphs.glyph(grTabClose) & " "
 
 proc tabCells*(t: SessionTabView): int = textCells(tabText(t))
 
 proc effectiveIconsOf*(m: TopBarModel): IconsMode =
-  if m.icons == imGraphics and not m.graphicsDrawn: imUnicode else: m.icons
+  ## The icons the bar actually draws. PLAT-71 (Terminal-Adaptation §6.1):
+  ## the `unicode` icons (`⏮ ⏵ ↷ …`) are outside the `basic` tier and some
+  ## are East Asian Width `A`, so a `basic`, ambiguous-wide or ASCII profile
+  ## draws the `text` icons instead — as the ASCII tier does for any glyph
+  ## icon. Pictures (`graphics`) are not glyphs and are kept.
+  result = if m.icons == imGraphics and not m.graphicsDrawn: imUnicode
+           else: m.icons
+  if result == imGraphics:
+    return
+  if m.glyphs.tier == tierAscii:
+    return imText
+  if result == imUnicode and (m.glyphs.tier == tierBasic or
+                              m.glyphs.ambiguousWide):
+    return imText
 
 proc controlCells*(mode: IconsMode; i: int): int =
   ## One control's cells, its padding included.
@@ -498,17 +516,18 @@ proc segmentOf*(lay: TopBarLayout; part: TopBarPart; index = 0): TopBarSegment =
 # The omnibar's field and its caret (PLAT-49)
 # ---------------------------------------------------------------------------
 
-proc omnibarFieldText*(m: TopBarModel; width: int): tuple[text: string,
-                                                          caretCell: int] =
+proc omnibarFieldText*(m: TopBarModel; width: int;
+                       glyphs = DefaultGlyphs): tuple[text: string,
+                                                      caretCell: int] =
   ## What the field shows inside its padding, and the caret's cell within
   ## that text: `⌕ ` and the query — scrolled so the caret stays in view — or
   ## the placeholder when there is no query.
   let room = max(0, width - 2 * OmnibarPad)
   let ob = m.omnibar
   if ob.isNil or not ob.isOpen or ob.query.len == 0:
-    return (fitCells(OmnibarGlyph & " " & TopBarPlaceholder, room),
-            textCells(OmnibarGlyph & " "))
-  let lead = OmnibarGlyph & " "
+    return (fitCells(glyphs.glyph(grOmnibar) & " " & TopBarPlaceholder, room),
+            textCells(glyphs.glyph(grOmnibar) & " "))
+  let lead = glyphs.glyph(grOmnibar) & " "
   let runes = ob.query.toRunes
   let caret = min(ob.cursorChars, runes.len)
   # The caret needs a cell of its own after the last character.
@@ -551,15 +570,15 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       # PLAT-50); open, it takes the active tab's surface.
       if open:
         g.fillSurface(0, s.col, s.width, 1, srTabActive)
-        g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
+        g.paint(0, s.col, fitCells(" " & g.glyphText(grMenuButton) & " ", s.width),
                 CellStyle(role: srTabActive, bold: true))
       else:
-        g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
+        g.paint(0, s.col, fitCells(" " & g.glyphText(grMenuButton) & " ", s.width),
                 CellStyle(role: srChromeText, surface: srSurfaceTopBar))
         if s.width >= 3:
-          g.paint(0, s.col, FieldEdgeLeft,
+          g.paint(0, s.col, g.glyphText(grFieldEdgeLeft),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
-          g.paint(0, s.col + s.width - 1, FieldEdgeRight,
+          g.paint(0, s.col + s.width - 1, g.glyphText(grFieldEdgeRight),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
     of tpControl, tpStop:
       # M76: Stop (`tpStop`) is drawn exactly as a transport is — the same
@@ -613,17 +632,17 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         # user still read as "white".
         g.fillSurface(0, s.col, s.width, 1, OmnibarGround)
         g.paint(0, s.col, spaces(s.width), OmnibarTextStyle)
-        let (text, _) = omnibarFieldText(m, s.width)
+        let (text, _) = omnibarFieldText(m, s.width, g.glyphs)
         let showsPlaceholder = m.omnibar.isNil or m.omnibar.query.len == 0
         g.paint(0, s.col + OmnibarPad, text,
                 if showsPlaceholder: OmnibarPlaceholderStyle
                 else: OmnibarTextStyle)
         if s.width > 2 * OmnibarPad:
           g.fillSurface(0, s.col, 1, 1, srSurfaceTopBar)
-          g.paint(0, s.col, FieldEdgeLeft,
+          g.paint(0, s.col, g.glyphText(grFieldEdgeLeft),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
           g.fillSurface(0, s.col + s.width - 1, 1, 1, srSurfaceTopBar)
-          g.paint(0, s.col + s.width - 1, FieldEdgeRight,
+          g.paint(0, s.col + s.width - 1, g.glyphText(grFieldEdgeRight),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
         let caret = omnibarCaret(m, lay)
         if caret.shown and m.caretDrawn:
@@ -634,7 +653,7 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
                       else: r.underline = true
                       r)
       else:
-        g.paint(0, s.col, fitCells(" " & OmnibarGlyph & " ", s.width),
+        g.paint(0, s.col, fitCells(" " & g.glyphText(grOmnibar) & " ", s.width),
                 CellStyle(role: srChromeText, surface: srSurfaceTopBar))
     of tpTab:
       # PLAT-49 part B (finding 7): EACH SESSION TAB ON ITS OWN GROUND, a
@@ -646,10 +665,10 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       let t = m.tabs[s.index]
       let role = if t.active: srTabActive else: srSessionTab
       g.fillSurface(0, s.col, s.width, 1, role)
-      g.paint(0, s.col, fitCells(tabText(t), s.width),
+      g.paint(0, s.col, fitCells(tabText(t, g.glyphs), s.width),
               CellStyle(role: role, bold: t.active))
       if t.agent.present:
-        let glyph = agentGlyph(t.agent)
+        let glyph = agentGlyph(t.agent, g.glyphs)
         g.paint(0, s.col + 1, glyph,
                 CellStyle(role: (case t.agent.lifecycle
                                  of aslError: srChromeError
@@ -657,10 +676,11 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
                                  else: srChromeInfo),
                           surface: role, bold: t.agent.running))
       if t.closable and s.width >= 3:
-        g.paint(0, s.col + s.width - 2, SessionTabCloseGlyph,
+        g.paint(0, s.col + s.width - 2, g.glyphText(grTabClose),
                 CellStyle(role: srChromeMuted, surface: role))
     of tpTabMore:
-      g.paint(0, s.col, (if s.index < 0: "‹" else: "›"),
+      g.paint(0, s.col, (if s.index < 0: g.glyphText(grOverflowLeft)
+                         else: g.glyphText(grOverflowRight)),
               CellStyle(role: srChromeMuted, surface: srSurfaceTopBar))
     of tpTabAdd:
       # The desktop's `.session-tab-add`: a borderless button on the bar,
@@ -749,13 +769,16 @@ proc paintDropdownFrame*(g: var StyledGrid; a: CellArea) =
   g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
   let st = CellStyle(role: srBorderMenu, surface: srSurfaceMenu)
   let inner = a.width - 2
-  g.paint(a.row, a.col, "┌" & repeat("─", inner) & "┐", st)
-  g.paint(a.row + a.height - 1, a.col, "└" & repeat("─", inner) & "┘", st)
+  let h = g.glyphText(grBoxHorizontal)
+  g.paint(a.row, a.col, g.glyphText(grBoxTopLeft) & repeat(h, inner) &
+          g.glyphText(grBoxTopRight), st)
+  g.paint(a.row + a.height - 1, a.col, g.glyphText(grBoxBottomLeft) &
+          repeat(h, inner) & g.glyphText(grBoxBottomRight), st)
   for r in a.row + 1 ..< a.row + a.height - 1:
-    g.paint(r, a.col, "│", st)
+    g.paint(r, a.col, g.glyphText(grBoxVertical), st)
     g.paint(r, a.col + 1, spaces(inner),
             CellStyle(role: srChromeText, surface: srSurfaceMenu))
-    g.paint(r, a.col + a.width - 1, "│", st)
+    g.paint(r, a.col + a.width - 1, g.glyphText(grBoxVertical), st)
 
 proc menuDropdowns*(m: TopBarModel; lay: TopBarLayout;
                     width, height: int): seq[MenuDropdown] =
@@ -837,7 +860,8 @@ proc paintMenuDropdowns*(g: var StyledGrid; dropdowns: seq[MenuDropdown]) =
                 CellStyle(role: role, bold: it.active, underline: true))
       var tail = ""
       if it.shortcut.len > 0: tail.add it.shortcut
-      tail.add (if it.folder: " " & FolderMarker & " " else: "   ")
+      tail.add (if it.folder: " " & g.glyphText(grOverflowRight) & " "
+                else: "   ")
       let tw = textCells(tail)
       if tw < iw:
         g.paint(dr.row, ic + iw - tw, tail,

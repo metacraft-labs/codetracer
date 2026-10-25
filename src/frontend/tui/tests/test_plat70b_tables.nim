@@ -147,6 +147,9 @@ suite "PLAT-70 Part B: the terminal's table panes, in process":
                                      palette: pkDesign, theme: utDark)
     let model = eventModel(@[repeat("y", 200)])
     var g = newStyledGrid(60, 6)
+    # PLAT-71: the cut is DRAWN from the glyph table's ASCII column (the
+    # terminal's profile on the grid), not rewritten by the colour pass.
+    g.glyphs = glyphProfileOf(ascii)
     discard paintEventLog(g, CellArea(col: 0, row: 0, width: 60, height: 6),
                           model)
     let row = degradeRow(g.rowSpans(2), ascii)

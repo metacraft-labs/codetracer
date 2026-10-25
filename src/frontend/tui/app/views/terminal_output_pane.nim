@@ -299,7 +299,7 @@ proc fragmentStyle*(f: TerminalEventFragment;
     result.dim = true
 
 proc clipNote*(m: TerminalOutputPaneModel; geo: TerminalPaneGeometry;
-               area: CellArea): string =
+               area: CellArea; sep = canonical(grSeparator)): string =
   ## What the header says when the recorded screen does not fit the pane:
   ## the part shown, of the whole (the screen is never re-wrapped).
   if not m.screenShown:
@@ -308,7 +308,8 @@ proc clipNote*(m: TerminalOutputPaneModel; geo: TerminalPaneGeometry;
   let rows = m.screen.rows
   if rows <= geo.contentRows and cols <= area.width:
     return ""
-  " · clipped " & $min(cols, area.width) & "x" & $min(rows, geo.contentRows) &
+  " " & sep & " clipped " & $min(cols, area.width) & "x" &
+    $min(rows, geo.contentRows) &
     " of " & $cols & "x" & $rows
 
 proc paintToggle(g: var StyledGrid; geo: TerminalPaneGeometry;
@@ -326,9 +327,11 @@ proc paintToggle(g: var StyledGrid; geo: TerminalPaneGeometry;
     if screen and not m.screen.isNil:
       let n = m.screen.writeCount
       (if m.shownWrite < 0: "before the first write"
-       else: "write " & $(m.shownWrite + 1) & " / " & $n & " · tick " &
+       else: "write " & $(m.shownWrite + 1) & " / " & $n & " " &
+             g.glyphText(grSeparator) & " tick " &
              $m.screen.writes[m.shownWrite].rrTicks) &
-      (if m.previewing: " · scrubbing" else: "") & clipNote(m, geo, area)
+      (if m.previewing: " " & g.glyphText(grSeparator) & " scrubbing"
+       else: "") & clipNote(m, geo, area, g.glyphText(grSeparator))
     else:
       $m.lineCount & " line" & (if m.lineCount == 1: "" else: "s")
   let used = geo.linesToggle.width + geo.screenToggle.width + 1
@@ -394,7 +397,8 @@ proc paintScreenScrubber(g: var StyledGrid; geo: TerminalPaneGeometry;
     else: int(round(fractionOfWrite(n, m.shownWrite) * float(units - 8)))
   let cells = thumbCells(ThumbSpan(start: pos, length: 8), w,
                          vertical = false,
-                         modern = g.scrollbars.options.modernUnicode)
+                         modern = g.scrollbars.options.modernUnicode,
+                         glyphs = g.glyphs)
   for i, cell in cells:
     g.paint(geo.screenTrackRow, geo.screenTrackCol + i, cell.glyph,
             styleOf(cell.kind))

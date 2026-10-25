@@ -39,7 +39,7 @@
 ## 0-15 and 39/49" are properties of one function rather than claims about
 ## eighteen view modules.
 
-import std/[strutils, unicode]
+import std/strutils
 
 import ../views/borders
 import ../views/gutter
@@ -167,32 +167,38 @@ proc monochromeStyle*(role: SemanticRole): CellStyle =
   ## THE BOTTOM RUNG: weight, underline, reverse. No `fg`, no `bg`, ever.
   roleStyle(role, cdMonochrome)
 
-proc roleGlyph*(role: SemanticRole; mode: BorderMode): string =
-  ## The mark this role paints, in the border set the terminal can show.
+proc roleGlyph*(role: SemanticRole; p: GlyphProfile): string =
+  ## The mark this role paints, in the glyph table's column for profile `p`.
   ##
-  ## Read out of `app/views/borders.nim`'s two sets rather than spelled here,
-  ## so the ASCII fallback of a mark and the ASCII fallback of the same rune
-  ## arriving through `degradeRows` cannot disagree.
-  let bs = borderSet(mode)
+  ## Read out of `app/views/glyph_table.nim` rather than spelled here, so the
+  ## mark a view draws and the mark this table says it draws cannot disagree.
+  func g(r: GlyphRole): string =
+    let s = p.glyph(r)
+    if s == RvSpace: " " else: s
   case role
-  of srGutterBreakpoint: bs.breakpoint
-  of srGutterBreakpointDisabled: bs.breakpointDisabled
-  of srGutterTracepoint: bs.tracepoint
-  of srGutterExecutionPointer: ExecutionPointerGlyph
-  of srGutterInspectionPointer: InspectionPointerGlyph
+  of srGutterBreakpoint: g(grBreakpoint)
+  of srGutterBreakpointDisabled: g(grBreakpointDisabled)
+  of srGutterTracepoint: g(grTracepoint)
+  of srGutterExecutionPointer: p.pointerField(grExecPointer)
+  of srGutterInspectionPointer: p.pointerField(grInspectPointer)
   of srGutterNoMark: NoPointerGlyph
-  of srTimelineTrack: bs.horizontal
-  of srTimelineSpan: bs.span
-  of srTimelineMark: bs.tracepoint
-  of srTimelineNeedle: bs.needle
+  of srTimelineTrack: g(grBoxHorizontal)
+  of srTimelineSpan: g(grSpan)
+  of srTimelineMark: g(grTracepoint)
+  of srTimelineNeedle: g(grNeedle)
   of srTimelineBounds: "["
   else: ""
+
+proc roleGlyph*(role: SemanticRole; mode: BorderMode): string =
+  ## The mark this role paints, in the border set the terminal can show.
+  roleGlyph(role, GlyphProfile(tier: (if mode == bmAscii: tierAscii
+                                      else: tierExtended)))
 
 proc appearance*(role: SemanticRole;
                  caps: TerminalCapabilities): RoleAppearance =
   ## What this role looks like on THIS terminal, in the theme it was asked for.
   RoleAppearance(style: roleStyle(role, caps.colors, caps.mode, caps.palette),
-                 glyph: roleGlyph(role, caps.borders))
+                 glyph: roleGlyph(role, glyphProfileOf(caps)))
 
 proc distinctionKey*(a: RoleAppearance): string =
   ## The observable identity of an appearance: everything a terminal shows and
@@ -316,33 +322,8 @@ proc degradeStyle*(style: CellStyle; caps: TerminalCapabilities): CellStyle =
     else: caps.colors
   projectStyle(resolved, depth)
 
-proc degradeText*(text: string; caps: TerminalCapabilities): string =
-  ## One span's text with its chrome glyphs put onto the border set.
-  ##
-  ## Walks by RUNE rather than by byte, because the substitution table is keyed
-  ## by rune and a byte walk would never match a three-byte `─`.
-  if caps.borders == bmUnicode:
-    return text
-  result = newStringOfCap(text.len)
-  for r in text.utf8:
-    result.add asciiFor(r)
-
-func isScrubberThumb(style: CellStyle): bool =
-  ## A cell of a scrubber's thumb: the thumb's own role, or an end cell the
-  ## thumb covers in part, drawn in the track's colour on the thumb's ground
-  ## (`scrubber_track.ThumbReversedStyle`).
-  style.role in {srScrubberThumb, srScrollbarThumb, srScrollbarThumbSolid,
-                 srScrollbarThumbHover, srScrollbarThumbHeld} or
-    style.surface == srScrubberThumbGround
-
-func asciiTrack(text: string): string =
-  ## PLAT-70 Part H: a scrollbar track's cells on the ASCII tier — `|` down a
-  ## vertical bar (`▕`, `│`), `-` along a horizontal one (`▁`, `─`).
-  for r in text.runes:
-    result.add(if $r in ["▁", "─"]: "-" else: "|")
-
 proc degradeRow*(row: StyledRow; caps: TerminalCapabilities): StyledRow =
-  ## One composited screen row at the resolved tier.
+  ## One composited screen row at the resolved COLOUR tier.
   ##
   ## Spans are NOT re-fused afterwards, and that is deliberate: two adjacent
   ## spans that degrade to one style stay two spans, which costs one extra
@@ -350,20 +331,16 @@ proc degradeRow*(row: StyledRow; caps: TerminalCapabilities): StyledRow =
   ## compositor's `allText` branch emits them at adjacent columns either way, so
   ## the screen is identical; only the entry count differs.
   ##
-  ## A SCROLLBAR THUMB'S CELLS ARE THE THUMB'S GLYPH on the ASCII tier
-  ## (Scrollbar-Scrubbers.md §4), whatever eighth block drew them: the glyph
-  ## table alone maps `▏` to a divider's `|`, which put a track-looking cell
-  ## inside a horizontal thumb that starts or ends one eighth into a cell.
+  ## THE TEXT IS NEVER TOUCHED (PLAT-71, Terminal-Adaptation principle 5).
+  ## Until the glyph table this pass also rewrote every chrome-looking rune
+  ## of the frame onto ASCII — including a `●` or a `─` inside a recorded
+  ## string literal. Every view now draws its chrome from the glyph table's
+  ## column for the terminal's tier (`views/glyph_table`, the scrollbar part
+  ## in `views/scrollbar_styles`), so the program's text reaches the
+  ## terminal exactly as recorded (TA-7).
   result = @[]
   for span in row:
-    let text =
-      if caps.borders == bmAscii and span.style.isScrubberThumb:
-        repeat(asciiFor("█"), span.text.runeLen)
-      elif caps.borders == bmAscii and
-           span.style.role in {srScrollbarTrack, srScrollbarTrackRevealed}:
-        asciiTrack(span.text)
-      else: degradeText(span.text, caps)
-    result.add StyledSpan(text: text, style: degradeStyle(span.style, caps))
+    result.add StyledSpan(text: span.text, style: degradeStyle(span.style, caps))
 
 proc degradeRows*(rows: seq[StyledRow];
                   caps: TerminalCapabilities): seq[StyledRow] =

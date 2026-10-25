@@ -225,8 +225,8 @@ type
 
 const
   SourcePaneTitle* = "SOURCE"
-  PaneRule* = "─"
-  SourceLoadingText* = "⋯ loading"
+  PaneRule* = canonical(grDividerH)
+  SourceLoadingText* = canonical(grLoading) & " loading"
     ## What a visible-but-unheld line shows. See this module's header: never a
     ## blank, because a blank is how a source pane lies about a working
     ## debugger.
@@ -393,7 +393,8 @@ proc paneGutterWidth*(model: SourcePaneModel): int =
 # Painting
 # ---------------------------------------------------------------------------
 
-proc titleRowSpans*(model: SourcePaneModel; width: int): StyledRow =
+proc titleRowSpans*(model: SourcePaneModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## The title row as styled spans, exactly `width` cells wide.
   ##
   ## Built as a list of (text, style) pairs and then fitted, rather than
@@ -424,7 +425,7 @@ proc titleRowSpans*(model: SourcePaneModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc titleRowText*(model: SourcePaneModel; width: int): string =
@@ -438,7 +439,7 @@ proc paintTitleRow(g: var StyledGrid; row, col, width: int;
   if width <= 0:
     return
   var at = col
-  for span in titleRowSpans(model, width):
+  for span in titleRowSpans(model, width, g.glyphs):
     g.paint(row, at, span.text, span.style)
     at += cellWidthOf(span.text)
 
@@ -594,11 +595,11 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       provenance = model.provenance,
       isInspectionLine = line == model.inspectionLine and line > 0)
     if model.gutterMode == gutExecutionCounts:
-      spec.numberText = model.heat.heatCountText(line)
+      spec.numberText = model.heat.heatCountText(line, g.glyphs)
       spec.numberStyle = model.heat.heatStyle(line)
 
     var at = area.col
-    for span in gutterRow(spec):
+    for span in gutterRow(spec, g.glyphs):
       if at >= area.col + gutW:
         break
       let room = area.col + gutW - at
@@ -612,7 +613,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
     let codeCol = area.col + gutW
     if not model.holdsLine(line):
       inc result.loadingLines
-      let loading = truncateToCells(SourceLoadingText, codeW)
+      let loading = truncateToCells(g.glyphText(grLoading) & " loading", codeW)
       g.paint(row, codeCol, loading, SourceLoadingStyle)
     else:
       inc result.materializedLines
@@ -658,7 +659,7 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       # the execution line where the flow has none (`annotationsAt`).
       let annotations = model.annotationsAt(line, raw)
       if annotations.len > 0:
-        let span = shownAnnotationSpan(annotations, codeW, shown)
+        let span = shownAnnotationSpan(annotations, codeW, shown, g.glyphs)
         if span.text.len > 0:
           inc result.annotatedLines
           g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)

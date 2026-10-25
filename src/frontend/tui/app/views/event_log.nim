@@ -81,7 +81,8 @@ from codetracer_embed import FittedCell, fitCell, CutCell, DetailToggle,
 from codetracer_embed import TableFit, fitTable, settle, overflows, barModel,
   HorizontalView, eventLogFitColumns, eventLogDefaultCells, EventLogTickCells,
   EventLogIndexCells, EventLogKindCells
-from ../formatters/type_formatters import terminalMeasure
+from ../formatters/type_formatters import terminalMeasure, measureFor,
+  markCut
 
 import ../layout/profile
 import ./styled_row
@@ -254,7 +255,7 @@ const
     ## Contains the string CTUI-3's own pane title produced for `paneEventLog`
     ## in the Compact profile (`shell.paneTitle` calls that pane `Tracepoints`),
     ## so every CTUI-3 assertion that reads it off a shell row still reads it.
-  PaneRule* = "─"
+  PaneRule* = canonical(grDividerH)
 
   DefaultEventPageSize* = 16
     ## Events fetched per window by a model built without a pane — the
@@ -279,7 +280,7 @@ const
   HeaderStyle* = CellStyle(role: srChromeMuted, bold: true)
     ## The column header's titles (the desktop's `.eventLog-column-header`).
 
-  PendingText* = "…"
+  PendingText* = canonical(grTruncation)
 
   TitleStyle* = CellStyle(role: srChromeTitle)
   TitleDetailStyle* = CellStyle(role: srChromeMuted)
@@ -603,7 +604,8 @@ proc scrollToSelection*(model: var EventLogModel; bodyHeight: int) =
 # Painting
 # ---------------------------------------------------------------------------
 
-proc titleRowSpans*(model: EventLogModel; width: int): StyledRow =
+proc titleRowSpans*(model: EventLogModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## `TRACEPOINTS 70 event(s) ────`, or `70+` while the end is undiscovered.
   result = @[]
   if width <= 0:
@@ -630,7 +632,7 @@ proc titleRowSpans*(model: EventLogModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc locationTextFor*(event: EventRow): string =
@@ -685,7 +687,8 @@ proc columnCellsOf*(model: EventLogModel; startCol, width: int):
 
 proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
                      cells: openArray[(EventLogColumn, int, int)];
-                     startCol, width, screenRow: int):
+                     startCol, width, screenRow: int;
+                     glyphs = DefaultGlyphs; ambiguous = awNarrow):
     tuple[spans: StyledRow; cuts: seq[CutCell]] =
   ## One body row, `     38 out  main.py:111  2 + 3 = 5`, and the cells it
   ## drew cut, laid out over `cells` (columns from 0) in a row `width` cells
@@ -699,8 +702,8 @@ proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
     return
   case row.kind
   of elrPending:
-    result.spans.add StyledSpan(text: fitCell(PendingText, width,
-                                              terminalMeasure).text,
+    result.spans.add StyledSpan(text: fitCell(glyphs.glyph(grTruncation), width,
+                                              measureFor(ambiguous)).text,
                                 style: PendingStyle)
     return
   of elrEvent:
@@ -717,11 +720,14 @@ proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
     if w <= 0 or used >= width:
       continue
     let room = min(w, width - used)
-    let cell = fitCell(eventCellText(event, col), room, terminalMeasure)
-    let drawn = cellWidthOf(cell.text)
+    let fittedCell = fitCell(eventCellText(event, col), room,
+                             measureFor(ambiguous))
+    var cell = fittedCell
+    cell.text = markCut(fittedCell, glyphs)
+    let drawn = cellWidthOf(cell.text, ambiguous)
     # Numbers are right-aligned in their column; text is left-aligned.
-    let text = if col in {elcTick, elcIndex}: padLeft(cell.text, room)
-               else: padRight(cell.text, room)
+    let text = if col in {elcTick, elcIndex}: padLeft(cell.text, room, ambiguous)
+               else: padRight(cell.text, room, ambiguous)
     let style = case col
                 of elcTick: (if atCurrent: CurrentTickStyle else: TickStyle)
                 of elcIndex: TickStyle
@@ -733,7 +739,8 @@ proc eventRowLayout*(model: EventLogModel; row: EventLogRow;
       let first = startCol + used +
                   (if col in {elcTick, elcIndex}: room - drawn else: 0)
       result.cuts.add CutCell(row: screenRow, col: startCol + used,
-                              width: room, ellipsisCol: first + drawn - 1,
+                              width: room,
+                              ellipsisCol: first + drawn - glyphs.markerCells,
                               key: $event.index, column: $col,
                               full: eventCellText(event, col))
     used += room
@@ -763,7 +770,7 @@ func detailColumnOf*(model: EventLogModel; column: string): EventLogColumn =
 
 proc headerRowSpans*(model: EventLogModel;
                      cells: openArray[(EventLogColumn, int, int)];
-                     width: int): StyledRow =
+                     width: int; glyphs = DefaultGlyphs): StyledRow =
   ## The column header: each visible column's title over its cells, in the
   ## model's order (the desktop's `.eventLog-column-header`). A title is
   ## clipped to its column (chrome: a header is not a table cell).
@@ -776,7 +783,8 @@ proc headerRowSpans*(model: EventLogModel;
     # left the recorded order.
     let title = eventLogColumnTitle(col) &
       (if model.order != RecordedEventOrder and model.order.column == col:
-         (if model.order.ascending: " ▲" else: " ▼")
+         (if model.order.ascending: " " & glyphs.glyph(grSortAscending)
+          else: " " & glyphs.glyph(grSortDescending))
        else: "")
     # Numbers are right-aligned under a right-aligned title.
     line.add (if col in {elcTick, elcIndex}: padLeft(title, w)
@@ -855,7 +863,7 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
     return
 
   var spanAt = area.col
-  for span in titleRowSpans(model, area.width):
+  for span in titleRowSpans(model, area.width, g.glyphs):
     g.paint(area.row, spanAt, span.text, span.style)
     spanAt += cellWidthOf(span.text)
 
@@ -865,7 +873,7 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
     return
 
   # The table at its own width; row `area.row + k` of the pane is row `k`.
-  var table = newStyledGrid(tableW, area.height)
+  var table = newStyledGridLike(g, tableW, area.height)
   # PLAT-49 part B: THE COLUMN HEADER, under the title row (which the shell's
   # tab strip replaces) — the desktop's table names its columns, and with
   # columns that can be hidden and reordered the reader has to see which are
@@ -873,7 +881,7 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
   if geo.header:
     result.headerRow = area.row + 1
     var at = 0
-    for span in headerRowSpans(model, tableCells, tableW):
+    for span in headerRowSpans(model, tableCells, tableW, g.glyphs):
       table.paint(1, at, span.text, span.style)
       at += cellWidthOf(span.text)
     g.copySlice(area.row + 1, area.col, table, 1, left, width)
@@ -916,7 +924,8 @@ proc paintEventLog*(g: var StyledGrid; area: CellArea;
       break
     let screenRow = firstBody + line
     let tableRow = screenRow - area.row
-    let laid = eventRowLayout(model, row, tableCells, 0, tableW, screenRow)
+    let laid = eventRowLayout(model, row, tableCells, 0, tableW, screenRow,
+                              g.glyphs, g.ambiguous)
     var at = 0
     for span in laid.spans:
       table.paint(tableRow, at, span.text, span.style)

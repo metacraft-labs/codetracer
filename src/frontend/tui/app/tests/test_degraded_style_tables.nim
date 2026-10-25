@@ -65,7 +65,7 @@ import ../views/styled_row
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 3642
+const ExpectedAssertions = 3701
   ## PLAT-51: 3387 -> 3389, measured: the ASCII fallback table grew by the
   ## current-line and inspection triangles, the role table traded the `[MOD]`
   ## tag for the editor-text role, and one permitted merge was added.
@@ -168,7 +168,8 @@ proc differsOnSomeColourRung(a, b: SemanticRole): bool =
           return true
   false
 
-proc sampleScreen(width, height: int): seq[StyledRow] =
+proc sampleScreen(width, height: int;
+                  glyphs = DefaultGlyphs): seq[StyledRow] =
   ## A REAL painted screen, not a hand-made row.
   ##
   ## `newShellModel` + `shellScreen(...).styledRows` is the same path `app/tui_app.nim`
@@ -194,6 +195,10 @@ proc sampleScreen(width, height: int): seq[StyledRow] =
     frames = @[StackFrame(name: "main", path: "/tmp/main.py", line: 12),
                StackFrame(name: "evaluate", path: "/tmp/main.py", line: 40)],
     userRoots = @["/tmp"], executionFrame = 0, selected = 0)
+  # PLAT-71: the glyph table's column for this screen (the terminal's
+  # profile), set as the runtime sets it.
+  model.glyphs = glyphs
+  model.topBar.glyphs = glyphs
   shellScreen(model, width, height).styledRows
 
 suite "CTUI-11 Tier 1: degraded style tables":
@@ -557,7 +562,22 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # thumb's half lines and joins, the quadrants, the upper blocks and the
     # Legacy Computing widths (65); and the right eighths a position
     # slider's thumb starts with under `modern-unicode` (68).
-    ck mapped == 68
+    # PLAT-71: the table is DERIVED from the glyph table (every role's
+    # extended, basic and ambiguous-wide glyph that is not already ASCII, plus
+    # the scrollbar table's), so its size is the derivation's, recounted here
+    # independently of `buildAsciiTable`.
+    var expected: seq[string] = @[]
+    for role in GlyphRole:
+      for col in [gcolExtended, gcolBasic, gcolAmbiguous]:
+        let g = ChromeGlyphs[role][col]
+        if g != ChromeGlyphs[role][gcolAscii] and g != RvSpace and
+           g notin expected:
+          expected.add g
+    for tee in ["├", "┤", "┬", "┴"]:
+      if tee notin expected: expected.add tee
+    checkpoint("chrome glyphs from the role table: " & $expected.len)
+    ck expected.len <= mapped
+    ck mapped == 82
     # A rune that is NOT chrome passes through unchanged, in both modes — the
     # rule that keeps a Python identifier or a recorded path out of the
     # substitution table.
@@ -610,11 +630,20 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # above and would be precisely the collapse the contract forbids.
     ck attributed > 0
 
-    # THE GLYPHS. Every Unicode chrome rune is gone and its ASCII stand-in is
-    # there, read off the rows themselves.
+    # THE GLYPHS. PLAT-71: the ASCII tier's chrome is DRAWN from the glyph
+    # table's ASCII column (the profile on the grid), not rewritten by the
+    # colour pass, which now leaves text alone. The same screen painted on the
+    # ASCII profile: every Unicode chrome rune is gone and its ASCII stand-in
+    # is there, read off the rows themselves.
+    let asciiRows = degradeRows(sampleScreen(Width, Height,
+                                             GlyphProfile(tier: tierAscii)),
+                                caps)
     var text = ""
-    for row in degraded:
+    for row in asciiRows:
       text.add rowText(row)
+    # …and the colour pass changes no text at all.
+    for i in 0 ..< rows.len:
+      ck rowText(degraded[i]) == rowText(rows[i])
     var originalText = ""
     for row in rows:
       originalText.add rowText(row)
@@ -637,11 +666,11 @@ suite "CTUI-11 Tier 1: degraded style tables":
     # rows.
     var widthsHeld = 0
     for i in 0 ..< rows.len:
-      if cellsOf(rowText(degraded[i])) != cellsOf(rowText(rows[i])):
+      if cellsOf(rowText(asciiRows[i])) != cellsOf(rowText(rows[i])):
         checkpoint("row " & $i & " changed width: " &
                    $cellsOf(rowText(rows[i])) & " -> " &
-                   $cellsOf(rowText(degraded[i])))
-      ck cellsOf(rowText(degraded[i])) == cellsOf(rowText(rows[i]))
+                   $cellsOf(rowText(asciiRows[i])))
+      ck cellsOf(rowText(asciiRows[i])) == cellsOf(rowText(rows[i]))
       inc widthsHeld
     ck widthsHeld == Height
 

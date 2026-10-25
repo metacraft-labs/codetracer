@@ -15,6 +15,7 @@ import
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
   ../doctor,
+  ui_dispatch,
   ../gfx_replay,
   backends,
   electron,
@@ -674,6 +675,19 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
         conf.gfxReplayBackend))
     of StartupCommand.doctor:
       # P7.1: recorder readiness probe.  See ``doctor.nim``.
+      #
+      # ``ct doctor terminal`` (CodeTracer-TUI-Terminal-Adaptation.md §10.1):
+      # the TERMINAL's report and glyph test card, which only the terminal
+      # front-end can produce — it negotiates with the terminal it runs in.
+      # ``terminal`` is reserved beside the language names, and the TUI
+      # binary is EXEC'd (not spawned) because it needs this process's tty.
+      if conf.doctorLanguage.toLowerAscii == "terminal":
+        let tui = resolveTuiBinary("codetracer-tui")
+        if tui.len == 0:
+          echo "ct doctor terminal: codetracer-tui was not found; set " &
+               "CODETRACER_TUI_BIN or build it with `just build-tui`"
+          quit(1)
+        execHandoff(tui, @["--capabilities", "--card"])
       quit(doctorCommand(conf.doctorLanguage))
     of StartupCommand.`ct-describe-commands`:
       # M7: emit the line-oriented description used by the launcher's

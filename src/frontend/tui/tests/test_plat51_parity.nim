@@ -198,12 +198,14 @@ suite "PLAT-51 terminal: the current line, the caret, the values":
     ck not line.contains("-->")
     ck not line.contains("▶")
     ck runeLen(ExecutionPointerGlyph.strip()) == 1
-    # The ASCII tier's substitution: the same three cells, `>` in the middle.
-    let ascii = resolveCapabilities(
+    # The ASCII tier's glyphs: the same three cells, `>` in the middle — the
+    # glyph table's ASCII column for the profile a `LANG=C` terminal resolves
+    # to (PLAT-71: drawn from the table, no longer rewritten afterwards).
+    let ascii = glyphProfileOf(resolveCapabilities(
       initTerminalEnv(term = "xterm-256color", lang = "C"),
-      initCapabilityFlags())
-    ck degradeText(ExecutionPointerGlyph, ascii) == " > "
-    ck degradeText(InspectionPointerGlyph, ascii) == " ) "
+      initCapabilityFlags()))
+    ck ascii.pointerField(grExecPointer) == " > "
+    ck ascii.pointerField(grInspectPointer) == " ) "
 
   test "a click on the text places the caret; keys move it; Alt+t opens the tracepoint editor there":
     require rec.outcome == foRecorded

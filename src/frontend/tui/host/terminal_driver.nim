@@ -392,7 +392,8 @@ template frameNodeIds(body: untyped) =
   finally:
     nextTerminalNodeId = kept
 
-proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
+proc composite*(rows: seq[StyledRow]; cols, height: int;
+                ambiguous = awNarrow): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
   ##
   ## The three production types — `TerminalRenderer`, `newHeadlessDriver`,
@@ -409,7 +410,9 @@ proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   frameNodeIds:
     let renderer = TerminalRenderer()
     let driver = newHeadlessDriver(cols, height)
-    let comp = newCompositor(cols, height)
+    # PLAT-71: the compositor lays the frame out under the SAME width policy
+    # the panes were painted under (Terminal-Adaptation §6.6).
+    let comp = newCompositor(cols, height, ambiguous)
     comp.paint(styledRowsTree(renderer, rows), driver)
     result = driver.buffer
 
@@ -420,12 +423,13 @@ proc composite*(rows: seq[StyledRow]; cols, height: int;
   ## (PLAT-47): a drop tint re-colours cells without replacing a glyph, and
   ## the ghost label is drawn above the tint. With no overlays this is the
   ## same call, byte for byte.
+  let ambiguous = if caps.ambiguousWide: awWide else: awNarrow
   if overlays.len == 0:
-    return composite(rows, cols, height)
+    return composite(rows, cols, height, ambiguous)
   frameNodeIds:
     let renderer = TerminalRenderer()
     let driver = newHeadlessDriver(cols, height)
-    let comp = newCompositor(cols, height)
+    let comp = newCompositor(cols, height, ambiguous)
     let tree = styledRowsTree(renderer, rows)
     for node in overlayNodes(renderer, overlays, caps):
       renderer.appendChild(tree, node)
@@ -556,6 +560,9 @@ type
     mouseOwned: bool
     pixelMouseOwned: bool
       ## PLAT-51: `?1016h` was sent (`enablePixelMouse`).
+    graphemeOwned: bool
+      ## PLAT-71: `?2027h` was sent — the terminal recognised grapheme
+      ## clustering and had it off (Terminal-Adaptation §4.3).
     altOwned: bool
     rawOwned: bool
     keyReporting: KeyReporting
@@ -613,6 +620,25 @@ proc applyKeyProtocol(d: TerminalDriver) =
   of 2: d.keyReporting = enableKeyReporting(krmModifyOtherKeys, d.outFd)
   else: discard
 
+proc restoreUnion*(d: TerminalDriver): string =
+  ## PLAT-71 (Terminal-Adaptation §4.8 rule 3): the resets of every mode this
+  ## driver set beyond `nim-termctl`'s own — grapheme clustering, synchronized
+  ## output, pixel and any-motion mouse — in the order the spec gives. ONE
+  ## buffer, registered with `nim-termctl`'s async-signal-safe restore
+  ## (`setExtraRestore`) and written by `stop`, so no exit path can miss one.
+  result = ""
+  if d.graphemeOwned:
+    result.add "\x1b[?2027l"
+  if d.started:
+    result.add "\x1b[?2026l"
+  if d.pixelMouseOwned:
+    result.add "\x1b[?1016l"
+  if d.mouseOwned:
+    result.add "\x1b[?1003l"
+
+proc registerRestore(d: TerminalDriver) =
+  discard setExtraRestore(d.restoreUnion())
+
 proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   ## PLAT-46. Replace the negotiated capabilities after the start-up query
   ## round answered — a 24-bit terminal behind a conservative `TERM`, or a
@@ -624,6 +650,14 @@ proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   d.emitter.caps = caps
   d.emitter.reset()
   d.applyKeyProtocol()
+  # PLAT-71: grapheme clustering on, when the terminal recognised DEC 2027
+  # and had it off — matching this front-end's own UAX #29 clustering — and
+  # its reset registered before anything else is drawn.
+  if d.started and caps.graphemeSet and not d.graphemeOwned:
+    writeAll(d.outFd, "\x1b[?2027h")
+    d.graphemeOwned = true
+  if d.started:
+    d.registerRestore()
 
 proc expectReplies*(d: TerminalDriver; on: bool) =
   ## Whether `ESC ]` / `ESC P` / `ESC _` begin a terminal's reply string. On
@@ -684,6 +718,7 @@ proc start*(d: TerminalDriver) =
   # not switch it off.
   d.focusReporting = enableFocusReporting(d.outFd)
   d.started = true
+  d.registerRestore()
   # PLAT-68: EXTENDED KEY REPORTING IS NOT ASKED FOR HERE. Until the start-up
   # round has run, `caps.keyProtocol` is the environment's guess; the round
   # (`terminal_probe.negotiateOnTerminal`) asks the terminal, and its
@@ -704,6 +739,7 @@ proc enablePixelMouse*(d: TerminalDriver) =
   if d.mouseOwned and not d.pixelMouseOwned:
     writeAll(d.outFd, PixelMouseOnBytes)
     d.pixelMouseOwned = true
+    d.registerRestore()
 
 proc stop*(d: TerminalDriver) =
   ## Give the terminal back. Idempotent, and safe to call after a failed
@@ -717,11 +753,14 @@ proc stop*(d: TerminalDriver) =
     # Before the alternate screen is left: the Kitty pop must reach the
     # screen its push was made on.
     disableKeyReporting(d.keyReporting)
-  if d.pixelMouseOwned:
-    writeAll(d.outFd, PixelMouseOffBytes)
-    d.pixelMouseOwned = false
+  # PLAT-71: THE ONE RESTORE BUFFER (`restoreUnion`) — 2027, 2026, 1016,
+  # 1003 — the same bytes a SIGTERM or a crash writes, then forgotten.
+  if d.started:
+    writeAll(d.outFd, d.restoreUnion())
+    discard setExtraRestore("")
+  d.graphemeOwned = false
+  d.pixelMouseOwned = false
   if d.mouseOwned:
-    writeAll(d.outFd, MotionTrackingOffBytes)
     disableMouseCapture(d.mouseCapture)
     d.mouseOwned = false
   # DECSET 1004 is not per-screen, so its place relative to leaving the

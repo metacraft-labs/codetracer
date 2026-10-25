@@ -220,7 +220,8 @@ proc paintSearchResults*(g: var StyledGrid; area: CellArea;
     of spFile:
       result.painted.add g.paintSpans(y, area.col, width, [
         StyledSpan(text: r.caption, style: SearchFileStyle),
-        StyledSpan(text: " · " & r.count, style: SearchCountStyle)])
+        StyledSpan(text: " " & g.glyphText(grSeparator) & " " & r.count,
+                   style: SearchCountStyle)])
     of spMatch:
       let selected = r.index == model.selected
       if selected:

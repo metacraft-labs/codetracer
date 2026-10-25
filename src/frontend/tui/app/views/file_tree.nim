@@ -77,14 +77,14 @@ type
 
 const
   FileTreeTitle* = "FILES"
-  FileTreeRule* = "─"
+  FileTreeRule* = canonical(grDividerH)
   FileTreeTitleStyle* = CellStyle(role: srModeEdit, bold: true)
   FileTreeRuleStyle* = CellStyle(role: srBorderPane)
   FileTreeOpenStyle* = CellStyle(role: srChromeText, bold: true)
   FileTreePlainStyle* = CellStyle(role: srChromeMuted)
   FileTreeSelectedBackground* = srSurfaceSelection
   FileTreeTruncatedStyle* = CellStyle(role: srChromeNotification)
-  OpenMarker* = "•"
+  OpenMarker* = canonical(grOpenMarker)
     ## Beside the file the editor holds. One cell, so the paths stay aligned.
 
 proc initFileTreeModel*(files: seq[string] = @[]; selected = -1;
@@ -96,18 +96,18 @@ proc initFileTreeModel*(files: seq[string] = @[]; selected = -1;
 proc isEmpty*(model: FileTreeModel): bool =
   model.files.len == 0 and model.entries.len == 0
 
-const FolderGlyph* = "▼"
+const FolderGlyph* = canonical(grTreeExpanded)
   ## Beside an expanded folder, as the desktop's twisty. One cell;
   ## `borders.asciiFor` degrades it to `v`.
-const CollapsedFolderGlyph* = "▶"
+const CollapsedFolderGlyph* = canonical(grTreeCollapsed)
   ## PLAT-50: beside a COLLAPSED folder (a click opens it). `asciiFor`: `>`.
 
-proc entryText*(e: FileTreeEntry): string =
+proc entryText*(e: FileTreeEntry; glyphs = DefaultGlyphs): string =
   ## What one tree row says: indented by depth, a folder marked.
   repeat("  ", max(0, e.depth)) &
     (if not e.isFolder: "  "
-     elif e.expanded: FolderGlyph & " "
-     else: CollapsedFolderGlyph & " ") & e.text
+     elif e.expanded: glyphs.glyph(grTreeExpanded) & " "
+     else: glyphs.glyph(grTreeCollapsed) & " ") & e.text
 
 proc initFileTreeModel*(entries: seq[FileTreeEntry]): FileTreeModel =
   ## A replay session's file tree.
@@ -147,7 +147,8 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
     used += cellWidthOf(fitted)
   if used < area.width:
     g.paint(area.row, area.col + used,
-            repeatGlyph(FileTreeRule, area.width - used), FileTreeRuleStyle)
+            repeatGlyph(g.glyphText(grDividerH), area.width - used),
+            FileTreeRuleStyle)
   result.rows.add title
 
   let bodyRows = area.height - 1
@@ -176,7 +177,7 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
       let isOpen = not e.isFolder and model.openPath.len > 0 and
                    e.path.endsWith(model.openPath)
       let style = if isOpen: FileTreeOpenStyle else: FileTreePlainStyle
-      let text = truncateToCells(entryText(e), width)
+      let text = truncateToCells(entryText(e, g.glyphs), width)
       g.paint(area.row + 1 + i, area.col, text, style)
       # The selected entry on the selection surface, as the flat list draws
       # its own: a selection made elsewhere (an editor's tree reporting
@@ -197,7 +198,7 @@ proc paintFileTree*(g: var StyledGrid; area: CellArea;
     let row = area.row + 1 + i
     let path = model.files[idx]
     let isOpen = path == model.openPath and path.len > 0
-    let marker = if isOpen: OpenMarker else: " "
+    let marker = if isOpen: g.glyphText(grOpenMarker) else: " "
     let style = if isOpen: FileTreeOpenStyle else: FileTreePlainStyle
     let text = truncateToCells(marker & path, width)
     g.paint(row, area.col, text, style)

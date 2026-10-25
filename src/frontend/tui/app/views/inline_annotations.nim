@@ -78,7 +78,7 @@ const
     ## program — and a marker that changed per language would make the
     ## annotation look like code in the language that uses that marker.
   AnnotationSeparator* = ", "
-  AnnotationEllipsis* = "…"
+  AnnotationEllipsis* = canonical(grTruncation)
   AnnotationGap* = 2
     ## Cells between the end of the code and the start of the annotation.
 
@@ -170,7 +170,8 @@ func cellWidth(s: string): int =
   for r in runes(s):
     result += max(1, displayWidth($r, TerminalAmbiguousWidth))
 
-proc fitAnnotation*(text: string; room: int): string =
+proc fitAnnotation*(text: string; room: int;
+                    glyphs = DefaultGlyphs): string =
   ## `text` truncated to `room` cells, with `…` marking the loss.
   ##
   ## Returns "" when there is not room for a legible annotation at all
@@ -209,14 +210,15 @@ proc fitAnnotation*(text: string; room: int): string =
     return text
   var kept = ""
   var cells = 0
-  let budget = room - cellWidth(AnnotationEllipsis)
+  let marker = glyphs.glyph(grTruncation)
+  let budget = room - cellWidth(marker)
   for r in runes(text):
     let w = max(1, displayWidth($r, TerminalAmbiguousWidth))
     if cells + w > budget:
       break
     kept.add $r
     cells += w
-  kept & AnnotationEllipsis
+  kept & marker
 
 proc annotationRoom*(codeWidth, renderedCells: int): int =
   ## Cells left for an annotation after the code has been drawn.
@@ -230,7 +232,8 @@ proc annotationRoom*(codeWidth, renderedCells: int): int =
   codeWidth - max(0, renderedCells) - AnnotationGap
 
 proc shownAnnotationSpan*(selected: openArray[Annotation];
-                          codeWidth, renderedCells: int): StyledSpan =
+                          codeWidth, renderedCells: int;
+                          glyphs = DefaultGlyphs): StyledSpan =
   ## `selected` — already the line's values — as one styled span fitted to
   ## the room the code left, or an empty span. The flow's per-line values
   ## (`editor_surface.flowValuesByLine`) are drawn through this directly: the
@@ -239,7 +242,8 @@ proc shownAnnotationSpan*(selected: openArray[Annotation];
   let text = annotationText(selected)
   if text.len == 0:
     return StyledSpan(text: "", style: AnnotationStyle)
-  let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells))
+  let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells),
+                             glyphs)
   StyledSpan(text: fitted, style: AnnotationStyle)
 
 proc annotationSpan*(lineText: string; values: openArray[Annotation];
