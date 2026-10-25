@@ -52,7 +52,7 @@ fn create_wasm_flow_config() -> FlowTestConfig {
         // println! is a macro — the Rust grammar should filter it out.
         // calculate_sum is a function call in main(), should not appear as a variable.
         excluded_identifiers: vec!["println".to_string(), "calculate_sum".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

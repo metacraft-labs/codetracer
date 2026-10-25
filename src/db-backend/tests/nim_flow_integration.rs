@@ -52,7 +52,7 @@ fn create_nim_flow_config() -> FlowTestConfig {
             "final".to_string(),
         ],
         excluded_identifiers: vec!["echo".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 

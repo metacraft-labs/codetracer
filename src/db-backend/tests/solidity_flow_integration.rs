@@ -55,7 +55,7 @@ fn create_solidity_flow_config() -> FlowTestConfig {
         // The emitted event, the contract and the function are names, not
         // variables.
         excluded_identifiers: vec!["Computed".to_string(), "FlowTest".to_string(), "run".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 
