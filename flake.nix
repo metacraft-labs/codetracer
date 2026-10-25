@@ -383,6 +383,25 @@
       flake = false;
     };
 
+    # The sandboxed backend-manager test recorder (nix/packages/default.nix)
+    # compiles codetracer-native-recorder's ct_cli, whose record parser needs
+    # the metacraft-labs confutils fork at the exact commit its ct_cli.nimble
+    # pins (the `valueName` / `implicitValue` / `alsoSets` pragmas). The main
+    # source input carries no Git submodules, so these cannot come from
+    # libs/; serialization and faststreams match this repository's gitlinks.
+    nim-confutils = {
+      url = "github:metacraft-labs/nim-confutils/331c5fa2f741a6657c16404bfc9401b18d295f92";
+      flake = false;
+    };
+    nim-serialization = {
+      url = "github:status-im/nim-serialization/9eb88077063bf7e16357e1ed6aaa7c1391b4d7c4";
+      flake = false;
+    };
+    nim-faststreams = {
+      url = "github:status-im/nim-faststreams/37a183153c071539ab870f427c09a1376ba311b9";
+      flake = false;
+    };
+
     # The standalone `results` package. codetracer-trace-format-nim declares
     # `requires "results"`. The `stew/results.nim` copy in the nim-stew pin
     # above is an older fork of it: its `unsafeError` constrains the value
