@@ -91,7 +91,9 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 452
+const ExpectedAssertions = 454
+  ## 452 -> 454: the twenty-second scanned keymap module
+  ## (`menu_accelerators`).
   ## 450 -> 452: the twenty-first scanned keymap module (`alt_tap`).
   ## (+20 on 2026-10-12, PLAT-68 Phase B: ten more keymap modules scanned,
   ## two assertions each.)
@@ -258,9 +260,11 @@ const ScannedKeymapModules = [
   "base_keymaps.nim", "binding_sets.nim", "client_actions.nim",
   "keymap_importers.nim", "keymap_router.nim", "layer_stack.nim",
   "navigation_keymap.nim", "operation_catalogue.nim", "scope_path.nim",
-  "user_keymap.nim", "alt_tap.nim"]
+  "user_keymap.nim", "alt_tap.nim", "menu_accelerators.nim"]
 
-const ScannedKeymapModuleCount = 21
+const ScannedKeymapModuleCount = 22
+  ## **TWENTY-TWO SINCE 2026-10-25** (the twenty-second is
+  ## `menu_accelerators`, the macOS menu's chords from the router).
   ## **TWENTY-ONE SINCE 2026-10-12** (the twenty-first is `alt_tap`, the
   ## menu's `Alt`-alone gesture): PLAT-68 Phase B added the shared router and
   ## everything it reads — the one resolver's front door (`keymap_router`),
