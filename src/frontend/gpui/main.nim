@@ -1295,6 +1295,18 @@ var
   gCalltraceLoads = 0
     ## How many call-trace sections the window has read (the first, at open,
     ## included) — reported for the paging test.
+  gFind: FindVM
+    ## PLAT-70 Part C (Find-And-Incremental-Search.md §3): the editor's
+    ## in-document find session — the shared ViewModel the terminal drives
+    ## too — over the shown file's Debug-mode document (`gDebugDocs`). Its
+    ## widget is drawn over the editor's top right (`drawFindWidget`), its
+    ## highlights in the editor's rows.
+  gFindBrowsing = false
+    ## PLAT-70 Part C: a search committed under Vim or Kakoune is
+    ## CodeTracer-TUI.md §4.2's SEARCH mode, browsing — `n` / `N` walk the
+    ## matches (the navigation table's SEARCH rows) until `Escape` returns to
+    ## NORMAL, as the terminal's modal machine does. The window has no modal
+    ## machine, so this flag is the one state it needs for it.
   gDebugDocs = initTable[string, EditingDocument]()
     ## PLAT-68: THE DEBUG-MODE EDITOR'S DOCUMENTS, by path — each file the
     ## editor showed, opened from the recording as an `EditingDocument` with
@@ -2347,6 +2359,66 @@ proc editorCaretMark(): int =
     gDebugDocs[gEditorSurface.path].caretViewColumn
   else: -1
 
+proc drawFindWidget(r: GpuiRenderer; pane: GpuiElement; d: EditingDocument) =
+  ## PLAT-70 Part C: GPUI's IN-DOCUMENT FIND WIDGET (Find-And-Incremental-
+  ## Search.md §3.3 step 5), over the editor's top right as VS Code's: the
+  ## field (its caret drawn), the count — `3 of 17`, `no matches` — and the
+  ## Match Case / Match Whole Word toggles, each carrying its state. Drawn
+  ## from the session on every draw of the editor's body.
+  const WidgetPx = 380
+  r.setStyle(pane, "position", "relative")
+  let w = r.createElement("div")
+  r.setAttribute(w, FindWidgetAttribute, "open")
+  r.setAttribute(w, "data-ct-find-field", gFind.field)
+  r.setAttribute(w, "data-ct-find-count", gFind.countText(d))
+  r.setAttribute(w, "data-ct-find-case",
+                 (if d.state.search.options.caseSensitive: "on" else: "off"))
+  r.setAttribute(w, "data-ct-find-word",
+                 (if d.state.search.options.wholeWord: "on" else: "off"))
+  r.setStyle(w, "position", "absolute")
+  r.setStyle(w, "left", $max(0, gEditorViewportPx - WidgetPx) & "px")
+  r.setStyle(w, "top", $EditorTopPadPx & "px")
+  r.setStyle(w, "width", $WidgetPx & "px")
+  r.setStyle(w, "height", "28px")
+  r.setStyle(w, "display", "flex")
+  r.setStyle(w, "align-items", "center")
+  r.setStyle(w, "padding-left", "8px")
+  r.setStyle(w, "background-color",
+             DesignTokenHex[dtColorsUiSurfaceInputDefault][dmDark])
+  r.setStyle(w, "border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark])
+  r.setStyle(w, "border-width", "1px")
+  let field = r.createElement("div")
+  r.setStyle(field, "flex-grow", "1")
+  r.setStyle(field, "white-space", "nowrap")
+  r.setStyle(field, "overflow", "hidden")
+  r.setStyle(field, "color", EditorTextColour)
+  let shown = gFind.field[0 ..< gFind.cursor] & "\u2502" &
+              gFind.field[gFind.cursor .. ^1]
+  r.appendChild(field, r.createTextNode(shown))
+  r.appendChild(w, field)
+  let count = r.createElement("div")
+  r.setStyle(count, "padding-left", "8px")
+  r.setStyle(count, "padding-right", "8px")
+  r.setStyle(count, "color",
+             DesignTokenHex[dtColorsUiTextPrimaryCaptionSubtle][dmDark])
+  let text = gFind.countText(d)
+  r.appendChild(count, r.createTextNode(if text.len > 0: text
+                                        else: NoMatchesText))
+  r.appendChild(w, count)
+  for (label, on) in [("Aa", d.state.search.options.caseSensitive),
+                      ("ab", d.state.search.options.wholeWord)]:
+    let t = r.createElement("div")
+    r.setAttribute(t, "data-ct-find-toggle", label)
+    r.setStyle(t, "padding-left", "4px")
+    r.setStyle(t, "padding-right", "4px")
+    r.setStyle(t, "color", EditorTextColour)
+    if on:
+      r.setStyle(t, "background-color",
+                 DesignTokenHex[dtColorsUiSurfaceActionPrimary][dmDark])
+    r.appendChild(t, r.createTextNode(label))
+    r.appendChild(w, t)
+  r.appendChild(pane, w)
+
 proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
                     sticky: seq[tuple[line: int; text: string; top: int]] = @[]) =
   ## The editor's rows and bar from `gEditorSurface`, at the window's width
@@ -2356,6 +2428,9 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
                        gLayoutSettings.overflowMarkers, sticky)
+  if gFind.open and gFind.owner == "editor:" & gEditorSurface.path and
+     gDebugDocs.hasKey(gEditorSurface.path):
+    drawFindWidget(r, pane, gDebugDocs[gEditorSurface.path])
   # The editor is redrawn on its own (the hover that shows its scrollbars, a
   # scroll), without the arrangement's redraw that writes the geometry: write
   # it here too, so the scrubber it reports is the one just drawn.
@@ -2436,6 +2511,12 @@ proc withDebugDocument(surface: EditorSurface): EditorSurface =
     result.caretLine = d.caretLine
     result.caretColumn = d.caretColumn + 1
   result.selection = d.selectionCells
+  # PLAT-70 Part C: the find session's highlights on the drawn rows.
+  result.findMarks = @[]
+  if result.rows.len > 0:
+    let first = result.rows[0].line
+    for m in gFind.marksInWindow(d, first, result.rows.len):
+      result.findMarks.add (m.line, m.fromColumn, m.toColumn, m.current)
 
 proc syncEditorViewport(r: GpuiRenderer) =
   ## `PLAT35-F3`. Take the editor pane's inner width from the geometry the
@@ -5938,6 +6019,9 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
 
 proc editorPath(): string
 proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp)
+proc runFindOperation(r: GpuiRenderer; operation: string; nowMs: int64)
+  ## PLAT-70 Part C: forward-declared for the palette's **Find: Cancel and
+  ## Return**; defined with the in-document find.
 
 proc runGpuiViewOperation(r: GpuiRenderer; operation: string) =
   ## PLAT-70 (Horizontal-Overflow.md §4.4) / Part I (§5.5): `view.scroll-*`
@@ -6053,6 +6137,9 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
     of "view.scroll-left", "view.scroll-right":
       # PLAT-70 Part I: the focused output or table pane's view.
       runGpuiViewOperation(r, name)
+    of "find.cancel":
+      # PLAT-70 Part C: **Find: Cancel and Return**.
+      runFindOperation(r, "find.cancel", 0)
     else: traceGesture(operation.operation & " is not available here")
     drawTopBar(r)
     return
@@ -8395,6 +8482,7 @@ proc windowSessionFacts(): SessionFacts =
   SessionFacts(product: pmDebug,
                replayLoaded: not gSession.isNil,
                editor: editor,
+               findWidgetVisible: gFind.open,
                paletteVisible: not gOmnibar.isNil and gOmnibar.isOpen,
                contextMenuVisible: gCtxMenu.open,
                dragActive: gGestures.active or gGestures.revealing)
@@ -8430,6 +8518,11 @@ proc windowScopePath(): ScopePath =
   if result[^1].kind == ekPane and result[^1].paneKind == $paneEditor and
      gDebugDocs.hasKey(path):
     result.add element(ekEditor, "editor:" & path)
+    # PLAT-70 Part C: an open find widget's field holds the focus inside the
+    # editor it searches (Base-Keymaps §5.3).
+    if gFind.open:
+      result.add element(ekOverlay, "find")
+      result.add element(ekInput, "find-query")
 
 proc syncOverlayLayers() =
   ## THE PUSHED LAYERS MIRROR THE OVERLAYS (§5.3): the palette's and the
@@ -8442,6 +8535,16 @@ proc syncOverlayLayers() =
     elif not open and at >= 0:
       discard gRouter.popLayer(gRouter.stack.layers[at].token)
   let palette = not gOmnibar.isNil and gOmnibar.isOpen
+  # PLAT-70 Part C: the find widget's layer, owned by the editor it searches.
+  let findAt = block:
+    var at = -1
+    for i, l in gRouter.stack.layers:
+      if l.table == FindTable: at = i
+    at
+  if not gFind.open and findAt >= 0:
+    discard gRouter.popLayer(gRouter.stack.layers[findAt].token)
+  elif gFind.open and findAt < 0:
+    discard gRouter.pushLayer(FindTable, gFind.owner, "FIND")
   if not gCtxMenu.open: want(ContextMenuTable, "MENU", false)
   if not palette: want(PaletteTable, "PALETTE", false)
   want(PaletteTable, "PALETTE", palette)
@@ -8569,6 +8672,136 @@ proc focusedRowText(): tuple[text, what: string] =
   else: discard
   ("", "")
 
+# ---------------------------------------------------------------------------
+# PLAT-70 Part C: THE IN-DOCUMENT FIND (Find-And-Incremental-Search.md §3,
+# §4) — the shared `find_vm.FindVM` over the shown file's Debug-mode
+# document. This window draws its widget (`drawFindWidget`, over the editor's
+# top right, as VS Code's) and the highlights (`withDebugDocument`), and
+# moves the editor's view where the session asks; the session decides the
+# rest.
+# ---------------------------------------------------------------------------
+
+proc editorTopLine(): int =
+  ## The first line the editor shows now.
+  if gViewedFile.len > 0 or gSourceService.isNil:
+    max(1, gEditorSurface.viewportTop)
+  else:
+    max(1, gSourceService.vm.visibleFirstLine.val)
+
+proc findTrace(d: EditingDocument) =
+  let m = d.state.selection.mainRange
+  traceGesture("find open=" & $gFind.open & " field=" & gFind.field &
+               " count=" & gFind.countText(d) & " wrapped=" & $gFind.wrapped &
+               " selection=" & $m.rangeFrom & "-" & $m.rangeTo &
+               " pattern=" & d.state.search.pattern)
+
+proc findRevealed(r: GpuiRenderer; path: string; reveal: FindReveal) =
+  ## §3.3 step 3: the current match revealed — vertically centred when it
+  ## was off-screen — and the editor drawn with the highlights and the
+  ## widget; the horizontal view follows the caret on the draw (§4.5).
+  if reveal.line > 0:
+    let rows = max(1, editorRowsOf(gGeom))
+    let top = editorTopLine()
+    let want = revealTop(top, rows, reveal.line)
+    if want != top:
+      scrollEditorTo(r, want)
+  drawDebugDocument(r)
+  findTrace(gDebugDocs[path])
+
+proc findTyped(r: GpuiRenderer; text: string) =
+  ## Characters typed into the widget's field (§3.3).
+  let path = editorPath()
+  if not gDebugDocs.hasKey(path): return
+  findRevealed(r, path, gFind.typeText(gDebugDocs[path], text))
+
+proc findFieldOperation(r: GpuiRenderer; operation: string) =
+  ## The field's own editing operations (`input.*`), and its `Enter` /
+  ## `Escape` where a base resolves them as the field's.
+  let path = editorPath()
+  if not gDebugDocs.hasKey(path): return
+  var reveal = FindReveal()
+  case operation
+  of "input.delete-backward": reveal = gFind.deleteBackward(gDebugDocs[path])
+  of "input.delete-forward": reveal = gFind.deleteForward(gDebugDocs[path])
+  of "input.move-left": gFind.moveFieldCursor(-1)
+  of "input.move-right": gFind.moveFieldCursor(1)
+  of "input.move-start": gFind.fieldHome()
+  of "input.move-end": gFind.fieldEnd()
+  of "input.paste":
+    let pasted = clipboardText().splitLines()
+    if pasted.len > 0 and pasted[0].len > 0:
+      reveal = gFind.typeText(gDebugDocs[path], pasted[0])
+  of "input.commit":
+    reveal = gFind.accept(gDebugDocs[path])
+    gFindBrowsing = isModal(gRouter.base)
+  of "input.cancel":
+    if gRouter.base == bkCua:
+      reveal = gFind.accept(gDebugDocs[path])
+    else:
+      discard gFind.cancel(gDebugDocs[path])
+      gFindBrowsing = false
+  else:
+    traceGesture("`" & operation & "` is not available in the find field")
+  findRevealed(r, path, reveal)
+
+proc runFindOperation(r: GpuiRenderer; operation: string; nowMs: int64) =
+  ## The find session's operations, onto the shared session.
+  let path = editorPath()
+  if not debugDocumentFor(path, gEditorSurface.executionLine):
+    traceGesture("find: there is no document in the editor to search")
+    return
+  template d: untyped = gDebugDocs[path]
+  var reveal = FindReveal()
+  case operation
+  of "find.open", "find.open-backward":
+    # §4.1: CUA seeds from the selection or the word at the caret; the
+    # other bases' prompts open empty.
+    gFindBrowsing = false
+    reveal = gFind.openFind(d, gRouter.base, "editor:" & path,
+                            operation == "find.open-backward",
+                            (if gRouter.base == bkCua: fsSelectionOrWord
+                             else: fsNone),
+                            editorTopLine(), gEditorView.leftCol)
+  of "find.open-symbol-at-caret":
+    reveal = gFind.openSymbolAtCaret(d, gRouter.base, "editor:" & path,
+                                     editorTopLine(), gEditorView.leftCol)
+  of "find.next", "find.previous":
+    if gFind.open:
+      reveal = gFind.step(d, operation == "find.next")
+    else:
+      let walked = walkClosed(d, gRouter.base, operation == "find.next")
+      reveal = walked.reveal
+      if walked.message.len > 0: traceGesture("find: " & walked.message)
+  of "find.close", "find.accept":
+    if gFind.open:
+      reveal = gFind.accept(d)
+      gFindBrowsing = isModal(gRouter.base)
+  of "find.cancel":
+    gFindBrowsing = false
+    if gFind.open:
+      let (top, leftCol) = gFind.cancel(d)
+      scrollEditorTo(r, top)
+      followEditorView()
+      discard gEditorView.scrollBy(leftCol - gEditorView.leftCol)
+      gEditorFollow = d.caretFollowOf
+  of "find.toggle-case":
+    if gFind.open: reveal = gFind.toggleCase(d)
+  of "find.toggle-whole-word":
+    if gFind.open: reveal = gFind.toggleWholeWord(d)
+  of "find.yank-word":
+    if gFind.open: reveal = gFind.yankWord(d)
+  of "find.next-selection-match", "find.previous-selection-match":
+    let ran = nextSelectionMatch(d, operation == "find.previous-selection-match",
+                                 nowMs)
+    reveal = ran.reveal
+    if ran.message.len > 0: traceGesture("find: " & ran.message)
+  else: discard
+  # The editor holds the focus while the widget is open: its field is the
+  # focused element's (the scope path's `find-query`).
+  if gFind.open and not editorFocused():
+    focusWindowPane(r, $paneEditor)
+  findRevealed(r, path, reveal)
+
 proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
                         nowMs: int64) =
   ## **GPUI'S DISPATCH** of a resolved operation onto its ViewModels — the
@@ -8612,6 +8845,10 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     of "input.cancel": gOmnibar.close()
     else: traceGesture("`" & op & "` is not available in the palette")
     drawTopBar(r)
+    return
+  if res.operation.startsWith("input.") and gFind.open and editorFocused():
+    # PLAT-70 Part C: the find widget's field.
+    findFieldOperation(r, res.operation)
     return
   if res.operation.startsWith("context-menu.") and gCtxMenu.open:
     case res.operation
@@ -8723,9 +8960,18 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
      "view.scroll-right-half", "view.scroll-to-line-start":
     runGpuiViewOperation(r, res.operation)
     return
-  of "find.open", "find.open-backward":
-    # GPUI's find is the omnibar's (`:grep` over the files).
-    openOmnibar(r, CommandPrefix & "grep ")
+  of "modal.return-to-normal":
+    # PLAT-70 Part C: `Escape` ends a committed search's browsing.
+    gFindBrowsing = false
+    traceGesture("find browsing ended")
+    return
+  of "find.open", "find.open-backward", "find.open-symbol-at-caret",
+     "find.next", "find.previous", "find.close", "find.accept", "find.cancel",
+     "find.toggle-case", "find.toggle-whole-word", "find.yank-word",
+     "find.next-selection-match", "find.previous-selection-match":
+    # PLAT-70 Part C: the in-document find session (`find_vm`) — no longer
+    # the omnibar's `:grep`, which is Find in Files (§5).
+    runFindOperation(r, res.operation, nowMs)
     return
   of "search.find-in-files":
     # PLAT-57: with a pattern, the search; without, the pane and its field.
@@ -8789,7 +9035,8 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   syncOverlayLayers()
   let path = windowScopePath()
   traceGesture("key " & name & " at " & $path)
-  let res = gRouter.route(windowSessionFacts(), path, nmNormal, name, nowMs)
+  let mode = if gFindBrowsing and not gFind.open: nmSearch else: nmNormal
+  let res = gRouter.route(windowSessionFacts(), path, mode, name, nowMs)
   case res.kind
   of erPending:
     traceGesture("pending " & gRouter.pendingLabel)
@@ -8800,11 +9047,13 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
       # Mode-Transitions §8.1: inert in this product mode — the window has no
       # status line to say it on, so the trace carries it.
       traceGesture("inert " & gRouter.inertNote(res, windowSessionFacts(),
-                                                path, nmNormal))
+                                                path, mode))
   of erCharacter:
     if gOmnibar.isOpen:
       gOmnibar.typeText(res.character)
       drawTopBar(r)
+    elif gFind.open and editorFocused():
+      findTyped(r, res.character)
     elif editorFocused():
       runDebugEditorOperation(r, res, nowMs)
   of erOperation:

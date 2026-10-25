@@ -216,6 +216,13 @@ const
     ## The editor's default foreground (PLAT-51: the omnibox's text in every
     ## state — Commands-And-Omnibox.md, "Omnibox colours on every front-end").
   EditorSelectionColour* = DesignTokenHex[dtEditorThemeSelection][dmDark]
+  FindMatchColour* = DesignTokenHex[dtColorsUiSurfaceAlertWarning][dmDark]
+    ## PLAT-70 Part C: every find match — the terminal's
+    ## `srSurfaceFindMatch` token (`theme/roles.nim` records why: the design
+    ## system has no find-match token).
+  FindMatchCurrentColour* =
+    DesignTokenHex[dtColorsUiSurfaceAlertInformation][dmDark]
+    ## The current match — the terminal's `srSurfaceFindMatchCurrent`.
     ## The editor's selection ground (the omnibox's selected result).
   EditorActiveLineNumberColour* =
     DesignTokenHex[dtEditorThemeActiveLineNumber][dmDark]
@@ -307,6 +314,13 @@ const
   EditorCaretAttribute* = "data-ct-caret"
     ## PLAT-51: on the read-only editor's caret, `<line>:<column>`.
   EditorSelectionAttribute* = "data-ct-selection"
+  FindMatchAttribute* = "data-ct-find-match"
+    ## PLAT-70 Part C: a find highlight's band, `line:from-to` (1-based cell
+    ## columns, `find_vm.FindMark`'s).
+  FindCurrentAttribute* = "data-ct-find-current"
+    ## On the current match's band.
+  FindWidgetAttribute* = "data-ct-find-widget"
+    ## The in-document find widget (its field, count and toggles).
     ## PLAT-68: on a selected span of an editor row,
     ## `<line>:<fromColumn>-<toColumn>` (1-based display columns, `to`
     ## exclusive).
@@ -1182,7 +1196,7 @@ func editorHScrollOf*(rows: openArray[EditorRow]; numberWidth: int;
   result.thumbLeftPx = span.start
   result.view = view
 
-const EditorTopPadPx = 4
+const EditorTopPadPx* = 4
   ## The editor's top inset at rest (`window_geometry.EditorPadTopPx`).
   ## Declared here (M73) because the vertical scrubber's track starts at it.
 
@@ -1466,6 +1480,8 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
                      caretColumn = 0;
                      selected: openArray[tuple[fromColumn, toColumn: int]] = [];
+                     findMarks: openArray[tuple[fromColumn, toColumn: int;
+                                                current: bool]] = [];
                      foldable = false; bracketDepth = 0;
                      guides = 0; stickyHeader = false;
                      markersView = HorizontalView()):
@@ -1666,6 +1682,28 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                                           EditorColumnPx, ffDecimal, 1) & "px")
     r.setStyle(band, "height", "100%")
     r.setStyle(band, "background", EditorSelectionColour)
+    r.appendChild(column, band)
+  for m in findMarks:
+    # PLAT-70 Part C: THE FIND HIGHLIGHTS (Find-And-Incremental-Search.md
+    # §3.3 step 4), Monaco's `editor.findMatchHighlightBackground` for every
+    # match and `editor.findMatchBackground` for the current one — over the
+    # selection (the current match is the selection), under the caret.
+    let fromCol = max(m.fromColumn, skipCols + 1)
+    if m.toColumn <= fromCol: continue
+    r.setStyle(column, "position", "relative")
+    let band = r.createElement("div")
+    r.setAttribute(band, FindMatchAttribute,
+                   $row.line & ":" & $m.fromColumn & "-" & $m.toColumn)
+    if m.current: r.setAttribute(band, FindCurrentAttribute, "true")
+    r.setStyle(band, "position", "absolute")
+    r.setStyle(band, "left", formatFloat(float(fromCol - 1 - skipCols) *
+                                         EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(band, "top", "0px")
+    r.setStyle(band, "width", formatFloat(float(m.toColumn - fromCol) *
+                                          EditorColumnPx, ffDecimal, 1) & "px")
+    r.setStyle(band, "height", "100%")
+    r.setStyle(band, "background", (if m.current: FindMatchCurrentColour
+                                    else: FindMatchColour))
     r.appendChild(column, band)
   if caretColumn > 0 and caretColumn > skipCols:
     # PLAT-51: THE CARET of the read-only debugging editor — a thin bar
@@ -2202,11 +2240,14 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     var selected: seq[tuple[fromColumn, toColumn: int]] = @[]
     for cell in surface.selection:
       if cell.line == row.line: selected.add (cell.fromColumn, cell.toColumn)
+    var found: seq[tuple[fromColumn, toColumn: int; current: bool]] = @[]
+    for m in surface.findMarks:
+      if m.line == row.line: found.add (m.fromColumn, m.toColumn, m.current)
     r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,
                                           scroll.leftCols,
                                           (if row.line == surface.caretLine:
                                              surface.caretColumn else: 0),
-                                          selected, folds[i], depths[i],
+                                          selected, found, folds[i], depths[i],
                                           guideCounts[i],
                                           markersView =
                                             (if overflowMarkers and

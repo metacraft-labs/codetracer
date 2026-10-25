@@ -101,7 +101,8 @@ import
 from viewmodel/viewmodels/search_results_vm import SearchOptionOperations
 # PLAT-70 Part B: the table panes' palette entries.
 from viewmodel/viewmodels/omnibar_sources import ShowDetailLabel,
-  WidenColumnLabel, NarrowColumnLabel, ScrollLeftLabel, ScrollRightLabel
+  WidenColumnLabel, NarrowColumnLabel, ScrollLeftLabel, ScrollRightLabel,
+  FindCancelLabel
 from viewmodel/viewmodels/table_overflow import ColumnStepCells
 
 
@@ -1876,7 +1877,8 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                           (WidenColumnLabel, aWidenColumn),
                           (NarrowColumnLabel, aNarrowColumn),
                           (ScrollLeftLabel, aScrollViewLeft),
-                          (ScrollRightLabel, aScrollViewRight)]:
+                          (ScrollRightLabel, aScrollViewRight),
+                          (FindCancelLabel, aFindCancel)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -6120,6 +6122,9 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     runPaletteOperation("view.scroll-left", ""),
   aScrollViewRight: proc(actionData: JsObject) = # aScrollViewRight
     runPaletteOperation("view.scroll-right", ""),
+  aFindCancel: proc(actionData: JsObject) = # aFindCancel
+    ## PLAT-70 Part C: **Find: Cancel and Return** (`find.cancel`).
+    discard cancelEditorFind(),
 ]
 
 data.actions = actions

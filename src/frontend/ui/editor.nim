@@ -4248,8 +4248,42 @@ method afterInit*(self: EditorViewComponent) {.async.} =
 func supportsFlow*(self: EditorViewComponent): bool =
   self.data.config.flow.enabled
 
+type DesktopFindOrigin = object
+  ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): where the find
+  ## started in Monaco — every selection and both scroll offsets — taken when
+  ## `find.open` opened the widget, for the palette's **Find: Cancel and
+  ## Return** (`find.cancel`). CUA's `Escape` is Monaco's own, which keeps
+  ## the match (the user's OQ-F1); this is the other exit, reached by input.
+  editor: EditorViewComponent
+  selections: JsObject
+  scrollTop, scrollLeft: float
+
+var desktopFindOrigin: DesktopFindOrigin
+
 method onFindOrFilter*(self: EditorViewComponent) {.async.} =
+  if not self.monacoEditor.isNil:
+    let ed = self.monacoEditor.toJs
+    desktopFindOrigin = DesktopFindOrigin(
+      editor: self, selections: ed.getSelections(),
+      scrollTop: ed.getScrollTop().to(float),
+      scrollLeft: ed.getScrollLeft().to(float))
   self.monacoEditor.trigger("keyboard".cstring, "actions.find".cstring)
+
+proc cancelEditorFind*(): bool =
+  ## `find.cancel` on the desktop: Monaco's find widget closed and the
+  ## selections and both scroll offsets put back exactly as they were when
+  ## `find.open` ran. Answers whether there was a find to cancel.
+  let o = desktopFindOrigin
+  desktopFindOrigin = DesktopFindOrigin()
+  if o.editor.isNil or o.editor.monacoEditor.isNil:
+    return false
+  let ed = o.editor.monacoEditor.toJs
+  o.editor.monacoEditor.trigger("keyboard".cstring, "closeFindWidget".cstring)
+  discard ed.setSelections(o.selections)
+  discard ed.setScrollTop(o.scrollTop)
+  discard ed.setScrollLeft(o.scrollLeft)
+  discard ed.focus()
+  true
 
 proc applySourceRevisionForLocation(self: EditorViewComponent;
                                     location: types.Location) {.async.} =

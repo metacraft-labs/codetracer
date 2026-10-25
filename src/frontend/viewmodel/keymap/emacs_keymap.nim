@@ -128,6 +128,9 @@ const
     # --- §3.6 Search, the palette and the editor pane --------------------------
     BaseRow(chords: "Ctrl+S", operation: "find.open", whenText: "editorFocus"),
     BaseRow(chords: "Ctrl+R", operation: "find.open-backward", whenText: "editorFocus"),
+    # PLAT-70 Part C (§4.5): `M-s .`, `isearch-forward-symbol-at-point`.
+    BaseRow(chords: "Alt+S .", operation: "find.open-symbol-at-caret",
+            whenText: "editorFocus"),
     BaseRow(chords: "Alt+%", operation: "find.open-replace",
             whenText: "editorFocus && !editorReadOnly"),
     BaseRow(chords: "Alt+G G", operation: "palette.go-to-line", whenText: "editorFocus"),
@@ -207,9 +210,16 @@ const
             table: FindTable),
     BaseRow(chords: "Alt+R", operation: "find.toggle-regex", whenText: "findWidgetVisible",
             table: FindTable),
-    BaseRow(chords: "Enter", operation: "find.close", whenText: "findInputFocus",
+    # PLAT-70 Part C (Find-And-Incremental-Search.md §3.5, §4.5): `RET`
+    # accepts (`isearch-exit`), `C-g` restores the starting point
+    # (`isearch-abort`, which `find.close` did not), `C-w` pulls the next
+    # word of the buffer into the query (`isearch-yank-word-or-char`) — in
+    # this layer only, so `kill-region` is unaffected outside it.
+    BaseRow(chords: "Enter", operation: "find.accept", whenText: "findInputFocus",
             table: FindTable),
-    BaseRow(chords: "Ctrl+G", operation: "find.close", whenText: "findWidgetVisible",
+    BaseRow(chords: "Ctrl+G", operation: "find.cancel", whenText: "findWidgetVisible",
+            table: FindTable),
+    BaseRow(chords: "Ctrl+W", operation: "find.yank-word", whenText: "findWidgetVisible",
             table: FindTable),
 
     # --- §3.10 The minibuffer: single-line inputs --------------------------------

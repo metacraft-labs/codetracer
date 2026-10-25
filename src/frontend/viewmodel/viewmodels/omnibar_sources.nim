@@ -155,6 +155,19 @@ proc viewScrollCommands*(): seq[OmnibarEntry] =
   result.add OmnibarEntry(kind: omCommand, label: ScrollRightLabel,
                           target: OperationCommandPrefix & "view.scroll-right")
 
+const
+  FindCancelLabel* = "Find: Cancel and Return"
+    ## PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): CUA has no
+    ## restoring exit — `Escape` keeps the match (the user's OQ-F1) — so
+    ## `find.cancel` is reached under CUA from the palette (IR-2).
+
+proc findCommands*(): seq[OmnibarEntry] =
+  ## THE FIND SESSION'S PALETTE ENTRY: **Find: Cancel and Return**
+  ## (`find.cancel`) — the selection and both scroll offsets as they were
+  ## when the find opened.
+  result.add OmnibarEntry(kind: omCommand, label: FindCancelLabel,
+                          target: OperationCommandPrefix & "find.cancel")
+
 proc parseOperationCommand*(target: string): tuple[ok: bool; operation: string] =
   ## `operation:<name>[(<arg>)]` -> the operation text; `ok` false otherwise.
   if not target.startsWith(OperationCommandPrefix):
@@ -192,6 +205,7 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add eventLogColumnCommands()
   result.add tableCommands()
   result.add viewScrollCommands()
+  result.add findCommands()
   result.add layoutSettingCommands(terminalSettings)
   result.add baseKeymapCommands()
 

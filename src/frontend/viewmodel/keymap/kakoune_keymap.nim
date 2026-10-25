@@ -239,9 +239,22 @@ proc buildKakouneKeymap(): EditingKeymap =
   r.add eb(@["Ctrl+g"], "add-cursor-at-each-line-of-selection", KakouneLiveModes)
   r.add eb(@["Ctrl+w"], "remove-primary-cursor", KakouneLiveModes)
   r.add eb(@["Ctrl+b"], "rotate-primary-cursor", KakouneLiveModes)
-  r.add eb(@["/"], "search-forward", {emNormal})
-  r.add eb(@["?"], "search-backward", {emNormal})
-  r.add eb(@["s"], "search-selection", KakouneLiveModes)
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §3, §4.4). `/` and `?`
+  # open the find session — the global rows the modal bases share
+  # (`navigation_keymap`), no longer shadowed here by the bare direction
+  # setters. `*` sets the search register to the main selection, with word
+  # boundaries when the selection is a word, and does not move; `Alt+*`
+  # (`Shift+Alt+8` canonically: `ESC *` on the wire, which `key_names`
+  # decodes) does the same literally. `n` then searches. The idiom for the
+  # word at the caret is `[ w *` here (`<a-i> w *` upstream; `[` is this
+  # table's object prefix, see `objectRows`).
+  #
+  # **`s` IS NO LONGER `search-selection`.** Kakoune's `s` SELECTS THE REGEX
+  # MATCHES INSIDE THE SELECTION, an operation the vocabulary does not have;
+  # the row was wrong (§4.4). `s` is unbound and recorded in
+  # `KakouneUncoveredKeys` with that reason.
+  r.add eb(@["*"], "search-selection-whole-word", KakouneLiveModes)
+  r.add eb(@["Shift+Alt+8"], "search-selection", KakouneLiveModes)
   r.add eb(@["Ctrl+l"], "search-clear", {emNormal})
   r.add eb(@["Ctrl+s"], "save", {emNormal, emInsert})
   r.add eb(@["z", "c"], "fold", {emNormal})
@@ -263,6 +276,16 @@ proc buildKakouneKeymap(): EditingKeymap =
   EditingKeymap(bindings: r)
 
 const
+  KakouneUncoveredKeys*: seq[tuple[key, reason: string]] = @[
+    ## Kakoune keys this table leaves unbound because the vocabulary has no
+    ## operation for them (KL-2's filed set, for keys rather than
+    ## declarations).
+    ("s", "Kakoune's `s` selects the regex matches inside the selection " &
+          "(`select-matches`), which the vocabulary does not publish; it was " &
+          "bound to `search-selection` until PLAT-70 Part C, which is " &
+          "Kakoune's `Alt+*` (Find-And-Incremental-Search.md §4.4)"),
+  ]
+
   NoCollapsingForm* = [
     ## The nine motions whose `move-` form Kakoune does not have. Named as data
     ## so the nine filed rows below are generated from one list, and so the
@@ -286,6 +309,11 @@ proc buildKakouneFiled(): seq[FiledDeclaration] =
       "because inventing a chord for a variant the model does not have would " &
       "be this preset diverging from the editor it is named after (§6.4)")
   result.add @[
+    FiledDeclaration(decl: "search-forward", forms: {}, reason:
+      "PLAT-70 Part C: `/` opens the find session, which sets the direction " &
+      "(Find-And-Incremental-Search.md §3.2), so the bare setter has no key"),
+    FiledDeclaration(decl: "search-backward", forms: {}, reason:
+      "as `search-forward`: `?` opens the session backward"),
     FiledDeclaration(decl: "group-backward", forms: {}, reason:
       "`<a-b>` upstream. `keyName` spells `Alt+` only for the function keys " &
       "and the arrows — a bare `Alt+b` is two tokens on the wire — so there " &

@@ -222,6 +222,14 @@ const
     BaseRow(chords: "Down", operation: "context-menu.focus-next", table: ContextMenuTable),
     BaseRow(chords: "Enter", operation: "context-menu.accept", table: ContextMenuTable),
     BaseRow(chords: "Escape", operation: "context-menu.close", table: ContextMenuTable),
+    # PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): the find
+    # session's exits under the modal bases — Vim's and Kakoune's search
+    # prompt: `Enter` keeps the match, `Escape` abandons the search and the
+    # cursor returns (Vim's `incsearch`, Kakoune's prompt restores the
+    # selections). In the pushed find layer, so they win over SEARCH mode's
+    # `input.commit` / `modal.return-to-normal` while the field is open.
+    BaseRow(chords: "Enter", operation: "find.accept", table: FindTable),
+    BaseRow(chords: "Escape", operation: "find.cancel", table: FindTable),
     BaseRow(chords: "Enter", operation: "editor.toggle-tracepoint", table: G,
             navModes: N,
             whenText: "editorTextFocus && editorReadOnly && productMode == debug"),

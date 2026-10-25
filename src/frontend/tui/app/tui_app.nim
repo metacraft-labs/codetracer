@@ -231,9 +231,11 @@ type
       ## editor or list it searches — named when `find.open` ran, so its
       ## pushed layer is active only while that element is on the scope
       ## path (Base-Keymaps §5.3).
-    findQuery*: string
-      ## PLAT-68: the last query the find widget searched, for `F3` with the
-      ## widget closed.
+    find*: FindVM
+      ## PLAT-70 Part C (Find-And-Incremental-Search.md §3): the editor's
+      ## find session — the shared ViewModel GPUI drives too. Its query is
+      ## the editor document's `EditorState.search.pattern` (the one pattern
+      ## store), so `F3` / `n` after it closes continue that pattern.
     caret*: tuple[path: string, line, column: int]
       ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
       ## caret in a read-only editor") — placed by a click on the text, moved

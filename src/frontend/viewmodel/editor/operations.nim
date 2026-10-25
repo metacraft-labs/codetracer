@@ -313,7 +313,9 @@ func catOf(r: Rune): CharCat =
   ## §2.2 A's *"by character category — word / space / other"*, over RUNES
   ## rather than bytes. `isAlpha` is Unicode's, so a Cyrillic identifier is one
   ## group and not three.
-  if r == Rune('_') or r.isAlpha() or (int(r) < 128 and char(int(r)) in {'0'..'9'}):
+  if r.isWordRune():
+    # `find_match.isWordRune`: the one word class, shared with a whole-word
+    # match (Find-And-Incremental-Search.md §4).
     ccWord
   elif r.isWhiteSpace():
     ccSpace
@@ -543,21 +545,13 @@ proc indentBlock(env: OpEnv; pos: int): (int, int) =
     inc b
   (a, b)
 
-proc findFrom(doc, pattern: string; start: int; forward: bool): int =
-  ## Literal search, wrapping at the document's ends the way `n` / `N` do.
-  if pattern.len == 0: return -1
-  if forward:
-    let i = doc.find(pattern, start)
-    if i >= 0: return i
-    return doc.find(pattern, 0)
-  else:
-    var best = -1
-    var i = doc.find(pattern, 0)
-    while i >= 0 and i < start:
-      best = i
-      i = doc.find(pattern, i + 1)
-    if best >= 0: return best
-    return doc.rfind(pattern)
+proc findFrom(doc, pattern: string; start: int; forward: bool;
+              options = MatchOptions(caseSensitive: true)): int =
+  ## The walk of `find_match.nextMatchOf` — the one matcher (FS-1) — as an
+  ## offset: wrapping at the document's ends the way `n` / `N` do, -1 when
+  ## nothing matches.
+  let w = nextMatchOf(doc, pattern, options, start, forward)
+  if w.found: w.span.a else: -1
 
 # ===========================================================================
 # THE ENVIRONMENT
@@ -896,7 +890,8 @@ proc searchLanding(env: OpEnv; st: EditorState; r: SelectionRange;
                    forward: bool): MotionLanding =
   if st.search.pattern.len == 0: return refusedLanding(r, rrNoPattern)
   let start = if forward: min(r.head + 1, env.ctx.doc.len) else: r.head
-  let i = findFrom(env.ctx.doc, st.search.pattern, start, forward)
+  let i = findFrom(env.ctx.doc, st.search.pattern, start, forward,
+                   st.search.options)
   if i < 0: refusedLanding(r, rrNoMatch)
   else: landing(env.ctx.boundaryAtOrBefore(i))
 
@@ -1986,10 +1981,28 @@ proc cSearchBackward(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   settle(st, after)
 
 proc cSearchSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## The selection, LITERALLY, becomes the pattern: whole word off (Vim's
+  ## `g*`, Kakoune's `Alt+*`, CUA `Ctrl+F3` over a selection).
   let t = selectedText(st)
   if t.len == 0: return refused(st, rrNoMatch)
   var after = st
   after.search.pattern = t
+  after.search.options.wholeWord = false
+  settle(st, after)
+
+proc cSearchSelectionWholeWord(env: OpEnv; st: EditorState;
+                               args: OpArgs): OpResult =
+  ## PLAT-70 Part C (Find-And-Incremental-Search.md §4): `search-selection`
+  ## with word boundaries — Vim's `\<…\>` for `*` / `#`, Kakoune's `*`. The
+  ## boundaries are added WHEN THE SELECTION IS A WORD (`isWholeWordText`),
+  ## which is both editors' own rule: Kakoune's `*` *"adds word boundaries
+  ## when the selection is a word"*, and Vim's `*` on punctuation searches it
+  ## without `\<` (`:help star`: *"only whole keywords are searched for"*).
+  let t = selectedText(st)
+  if t.len == 0: return refused(st, rrNoMatch)
+  var after = st
+  after.search.pattern = t
+  after.search.options.wholeWord = isWholeWordText(t)
   settle(st, after)
 
 proc cSearchClear(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
@@ -2224,11 +2237,12 @@ proc cSelectAllMatches(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   if needle.len == 0: return refused(st, rrNoPattern)
   var ranges: seq[SelectionRange] = @[]
   var primary = 0
-  var i = st.doc.find(needle, 0)
-  while i >= 0:
-    if i <= st.selection.mainRange.rangeFrom: primary = ranges.len
-    ranges.add spanRange(i, i + needle.len)
-    i = st.doc.find(needle, i + max(1, needle.len))
+  # The one matcher (FS-1), literal and case-sensitive as VS Code's
+  # `Ctrl+Shift+L` over a selection.
+  for m in matchesOf(st.doc, needle, MatchOptions(caseSensitive: true),
+                     limit = high(int)):
+    if m.a <= st.selection.mainRange.rangeFrom: primary = ranges.len
+    ranges.add spanRange(m.a, m.b)
   if ranges.len == 0: return refused(st, rrNoMatch)
   var after = st
   after.pushSelectionHistory(env.nowMs)
@@ -2618,6 +2632,7 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("search-forward", cSearchForward),
     commandDecl("search-backward", cSearchBackward),
     commandDecl("search-selection", cSearchSelection),
+    commandDecl("search-selection-whole-word", cSearchSelectionWholeWord),
     commandDecl("search-clear", cSearchClear),
 
     commandDecl("save", intentOnly(hiSave)),
