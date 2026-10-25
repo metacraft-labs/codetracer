@@ -356,6 +356,7 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 phase: 1,
                 elements: 14,
                 scripts: 2,
+                text: 318,
             },
         ),
         (
@@ -384,17 +385,19 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
 
 /// A document that loads while the visitor moves the pointer (spec §5.2, §6
 /// "The document's own tasks"): a hover while the parser waits for a slow
-/// script (`Loading` phase 1, before the input's `Task`), the script's
+/// script (`Loading` phase 1, with the text the parser had inserted, before
+/// the input's `Task`), the script's
 /// execution (`DocTask` 1, written at its first read), a hover after parsing
 /// (phase 2), a module that ran without a record of its own (`DocTask` 4, written
 /// when it settled), `DOMContentLoaded` (`DocTask` 2) and `load` (`DocTask` 3), then
 /// a task after `load`, which carries no `Loading`.
 fn document_loading_records() -> Vec<Record> {
-    let loading = |seq, phase, elements, scripts| Record::Loading {
+    let loading = |seq, phase, elements, scripts, text| Record::Loading {
         seq,
         phase,
         elements,
         scripts,
+        text,
     };
     let hover = |seq, task_id| Record::Input {
         seq,
@@ -407,14 +410,14 @@ fn document_loading_records() -> Vec<Record> {
     vec![
         header(),
         env(),
-        loading(1, 1, 3, 0),
+        loading(1, 1, 3, 0, 9),
         Record::Task {
             seq: 2,
             task_id: 1,
             kind: 5,
         },
         hover(3, 1),
-        loading(4, 1, 3, 0),
+        loading(4, 1, 3, 0, 9),
         Record::DocTask {
             seq: 5,
             kind: 1,
@@ -427,19 +430,20 @@ fn document_loading_records() -> Vec<Record> {
             src: 1,
             bits: 0x4279_0000_0000_0000,
         },
-        loading(7, 2, 9, 1),
+        loading(7, 2, 9, 1, 0),
         Record::Task {
             seq: 8,
             task_id: 2,
             kind: 5,
         },
         hover(9, 2),
-        loading(10, 2, 9, 1),
+        loading(10, 2, 9, 1, 0),
         Record::Loading {
             seq: 11,
             phase: 2,
             elements: 9,
             scripts: 1,
+            text: 0,
         },
         Record::DocTask {
             seq: 12,
@@ -448,7 +452,7 @@ fn document_loading_records() -> Vec<Record> {
             target: String::new(),
             event: String::new(),
         },
-        loading(13, 2, 9, 2),
+        loading(13, 2, 9, 2, 0),
         Record::DocTask {
             seq: 14,
             kind: 2,
@@ -456,7 +460,7 @@ fn document_loading_records() -> Vec<Record> {
             target: String::new(),
             event: String::new(),
         },
-        loading(15, 3, 9, 2),
+        loading(15, 3, 9, 2, 0),
         Record::DocTask {
             seq: 16,
             kind: 3,
@@ -504,6 +508,7 @@ fn resource_events_records() -> Vec<Record> {
             phase: 1,
             elements: 12,
             scripts: 1,
+            text: 140,
         },
         resource(2, "https://shop.example/hero.png", "path:#hero", "load"),
         Record::Loading {
@@ -511,6 +516,7 @@ fn resource_events_records() -> Vec<Record> {
             phase: 3,
             elements: 20,
             scripts: 2,
+            text: 0,
         },
         resource(4, "", "path:#intro", "loadedmetadata"),
         media(5, 0, r#"duration["path:#intro"]"#, "12.5"),
@@ -982,7 +988,8 @@ fn decoding_vectors() -> Vec<Vector> {
     out.push(complete(
         "document_loading",
         "a document that loads while the pointer moves: Loading before each \
-         task recorded before load (phase 1 while parsing, 2 once parsed), \
+         task recorded before load (phase 1 while parsing, with the character \
+         data the parser had inserted, 2 once parsed, with none), \
          DocTask for a script that runs (1) and one that ran with no record of \
          its own (4), DOMContentLoaded and load, and a task after load with no \
          Loading",
