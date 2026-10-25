@@ -7113,7 +7113,8 @@ mod replay_id_tag_tests {
 
     #[test]
     fn a_replays_message_names_the_replay_and_keeps_its_fields() {
-        let event = json!({"type": "event", "event": "ct/complete-move", "seq": 7, "body": {"x": 1}});
+        let event =
+            json!({"type": "event", "event": "ct/complete-move", "seq": 7, "body": {"x": 1}});
         let tagged = tag_with_replay_id(event, 3);
         assert_eq!(tagged[REPLAY_ID_TAG], json!(3));
         assert_eq!(tagged["event"], json!("ct/complete-move"));
