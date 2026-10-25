@@ -58,10 +58,12 @@
       "seq": "4"
     },
     {
+      "event": "",
       "kind": 1,
       "record": "DocTask",
       "seq": "5",
-      "src": "https://shop.example/slow.js"
+      "src": "https://shop.example/slow.js",
+      "target": ""
     },
     {
       "bits": "4789859678685233152",
@@ -106,10 +108,12 @@
       "seq": "11"
     },
     {
+      "event": "",
       "kind": 4,
       "record": "DocTask",
       "seq": "12",
-      "src": "https://shop.example/module.js"
+      "src": "https://shop.example/module.js",
+      "target": ""
     },
     {
       "elements": 9,
@@ -119,10 +123,12 @@
       "seq": "13"
     },
     {
+      "event": "",
       "kind": 2,
       "record": "DocTask",
       "seq": "14",
-      "src": ""
+      "src": "",
+      "target": ""
     },
     {
       "elements": 9,
@@ -132,10 +138,12 @@
       "seq": "15"
     },
     {
+      "event": "",
       "kind": 3,
       "record": "DocTask",
       "seq": "16",
-      "src": ""
+      "src": "",
+      "target": ""
     },
     {
       "kind": 1,

@@ -219,6 +219,13 @@
       "name": "document_loading"
     },
     {
+      "bytes": "resource_events.bin",
+      "class": "valid",
+      "description": "a page that loads resources and media: an image's load while the parser waits (DocTask 5 with its URL), a media element's loadedmetadata (DocTask 5 without one) and the duration it reads (PlatformValue src 7), play() settling in a platform task with its outcome, and a dynamic import whose module reads the clock before the import settles (TaskReg and Task kind 13)",
+      "expected": "resource_events.json",
+      "name": "resource_events"
+    },
+    {
       "bytes": "storage_shape_reads.bin",
       "class": "valid",
       "description": "StorageRead present 2: the key list, length and key(n) of an area",
@@ -734,33 +741,33 @@
     },
     {
       "base": "enum_greatest",
-      "bytes": "enum_doc_task_kind_5.bin",
+      "bytes": "enum_doc_task_kind_6.bin",
       "class": "refusal",
-      "description": "DocTask.kind is 5, one past its greatest value (1 to 4)",
-      "expected": "enum_doc_task_kind_5.json",
-      "name": "enum_doc_task_kind_5"
+      "description": "DocTask.kind is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_doc_task_kind_6.json",
+      "name": "enum_doc_task_kind_6"
     },
     {
       "base": "enum_greatest",
       "bytes": "enum_doc_task_kind_0.bin",
       "class": "refusal",
-      "description": "DocTask.kind is 0, one before its least value (1 to 4)",
+      "description": "DocTask.kind is 0, one before its least value (1 to 5)",
       "expected": "enum_doc_task_kind_0.json",
       "name": "enum_doc_task_kind_0"
     },
     {
       "base": "enum_greatest",
-      "bytes": "enum_platform_value_src_7.bin",
+      "bytes": "enum_platform_value_src_8.bin",
       "class": "refusal",
-      "description": "PlatformValue.src is 7, one past its greatest value (1 to 6)",
-      "expected": "enum_platform_value_src_7.json",
-      "name": "enum_platform_value_src_7"
+      "description": "PlatformValue.src is 8, one past its greatest value (1 to 7)",
+      "expected": "enum_platform_value_src_8.json",
+      "name": "enum_platform_value_src_8"
     },
     {
       "base": "enum_greatest",
       "bytes": "enum_platform_value_src_0.bin",
       "class": "refusal",
-      "description": "PlatformValue.src is 0, one before its least value (1 to 6)",
+      "description": "PlatformValue.src is 0, one before its least value (1 to 7)",
       "expected": "enum_platform_value_src_0.json",
       "name": "enum_platform_value_src_0"
     }

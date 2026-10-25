@@ -364,6 +364,8 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 seq,
                 kind: 1,
                 src: "https://shop.example/assets/app.js".into(),
+                target: String::new(),
+                event: String::new(),
             },
         ),
         (
@@ -417,6 +419,8 @@ fn document_loading_records() -> Vec<Record> {
             seq: 5,
             kind: 1,
             src: "https://shop.example/slow.js".into(),
+            target: String::new(),
+            event: String::new(),
         },
         Record::Clock {
             seq: 6,
@@ -441,18 +445,24 @@ fn document_loading_records() -> Vec<Record> {
             seq: 12,
             kind: 4,
             src: "https://shop.example/module.js".into(),
+            target: String::new(),
+            event: String::new(),
         },
         loading(13, 2, 9, 2),
         Record::DocTask {
             seq: 14,
             kind: 2,
             src: String::new(),
+            target: String::new(),
+            event: String::new(),
         },
         loading(15, 3, 9, 2),
         Record::DocTask {
             seq: 16,
             kind: 3,
             src: String::new(),
+            target: String::new(),
+            event: String::new(),
         },
         Record::Task {
             seq: 17,
@@ -460,6 +470,79 @@ fn document_loading_records() -> Vec<Record> {
             kind: 1,
         },
         end(17),
+    ]
+}
+
+/// A page that loads resources and media (spec §5.2, §6 "The document's own
+/// tasks", §10.4): an image's `load` while the parser waits (`Loading`, then
+/// `DocTask` 5 naming the image, its URL and the event), a media element's
+/// `loadedmetadata` (`DocTask` 5 with no URL, since replay dispatches media
+/// events from the log) and the duration its listener reads (`PlatformValue`
+/// src 7), a `play()` that settles in a platform task with its outcome, and a
+/// dynamic `import()` whose module makes a clock read while it evaluates,
+/// before the import settles (`TaskReg` and `Task` kind 13).
+fn resource_events_records() -> Vec<Record> {
+    let resource = |seq, src: &str, target: &str, event: &str| Record::DocTask {
+        seq,
+        kind: 5,
+        src: src.into(),
+        target: target.into(),
+        event: event.into(),
+    };
+    let media = |seq, task_id, query: &str, value: &str| Record::PlatformValue {
+        seq,
+        src: 7,
+        task_id,
+        query: query.into(),
+        value: value.into(),
+    };
+    vec![
+        header(),
+        env(),
+        Record::Loading {
+            seq: 1,
+            phase: 1,
+            elements: 12,
+            scripts: 1,
+        },
+        resource(2, "https://shop.example/hero.png", "path:#hero", "load"),
+        Record::Loading {
+            seq: 3,
+            phase: 3,
+            elements: 20,
+            scripts: 2,
+        },
+        resource(4, "", "path:#intro", "loadedmetadata"),
+        media(5, 0, r#"duration["path:#intro"]"#, "12.5"),
+        Record::TaskReg {
+            seq: 6,
+            task_id: 4,
+            kind: 13,
+            delay_ms: 0.0,
+        },
+        Record::Task {
+            seq: 7,
+            task_id: 4,
+            kind: 13,
+        },
+        media(8, 4, r#"play["path:#intro"]"#, r#"{"resolved":true}"#),
+        Record::TaskReg {
+            seq: 9,
+            task_id: 5,
+            kind: 13,
+            delay_ms: 0.0,
+        },
+        Record::Clock {
+            seq: 10,
+            src: 1,
+            bits: NOW_BITS,
+        },
+        Record::Task {
+            seq: 11,
+            task_id: 5,
+            kind: 13,
+        },
+        end(11),
     ]
 }
 
@@ -859,6 +942,16 @@ fn decoding_vectors() -> Vec<Vector> {
          its own (4), DOMContentLoaded and load, and a task after load with no \
          Loading",
         document_loading_records(),
+    ));
+    out.push(complete(
+        "resource_events",
+        "a page that loads resources and media: an image's load while the \
+         parser waits (DocTask 5 with its URL), a media element's \
+         loadedmetadata (DocTask 5 without one) and the duration it reads \
+         (PlatformValue src 7), play() settling in a platform task with its \
+         outcome, and a dynamic import whose module reads the clock before \
+         the import settles (TaskReg and Task kind 13)",
+        resource_events_records(),
     ));
     out.push(complete(
         "storage_shape_reads",

@@ -29,10 +29,12 @@
       "viewport_w": 1280
     },
     {
+      "event": "",
       "kind": 1,
       "record": "DocTask",
       "seq": "1",
-      "src": "https://shop.example/assets/app.js"
+      "src": "https://shop.example/assets/app.js",
+      "target": ""
     },
     {
       "last_seq": "1",

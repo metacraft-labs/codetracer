@@ -236,12 +236,14 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     ("Loading", "phase", 1, 3),
     // 1 a script runs (written before its first record), 2 DOMContentLoaded,
     // 3 load, 4 a script ran that wrote no record while it ran (written when
-    // it settled).
-    ("DocTask", "kind", 1, 4),
+    // it settled), 5 an event of a resource element (`load`, `error`, or a
+    // media element's event).
+    ("DocTask", "kind", 1, 5),
     // 1 IntersectionObserver entries, 2 ResizeObserver entries, 3
     // MutationObserver records, 4 PerformanceObserver entries, 5 a read of
-    // the performance timeline, 6 `IdleDeadline.didTimeout`.
-    ("PlatformValue", "src", 1, 6),
+    // the performance timeline, 6 `IdleDeadline.didTimeout`, 7 a media
+    // element's state or the outcome of its `play()`.
+    ("PlatformValue", "src", 1, 7),
 ];
 
 /// The value set of `record`.`field`, if it is an enumerated field.
@@ -501,7 +503,7 @@ define_records! {
         length_computable: u8,
     },
     0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32 },
-    0x58 => DocTask { seq: u64, kind: u8, src: String },
+    0x58 => DocTask { seq: u64, kind: u8, src: String, target: String, event: String },
     0x59 => PlatformValue { seq: u64, src: u8, task_id: u64, query: String, value: String },
     0x5F => End { last_seq: u64, reason: u8 },
 }
@@ -561,6 +563,12 @@ pub mod doc_task {
     /// script whose first boundary read was in a microtask); written when it
     /// settled, after the records of its microtasks.
     pub const SCRIPT_SETTLED: u8 = 4;
+    /// An event of a resource element: an element's `load` or `error` (an
+    /// image, a style sheet, a frame, an object, a track), or a media
+    /// element's event; `target` names the element and `event` the event's
+    /// type, and `src` the resource replay holds until then (empty for a
+    /// media element, whose events replay dispatches from the log).
+    pub const RESOURCE_EVENT: u8 = 5;
 }
 
 /// `End.reason` values (spec §5.2).

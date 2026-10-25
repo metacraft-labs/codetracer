@@ -216,16 +216,18 @@
       "seq": "24"
     },
     {
-      "kind": 4,
+      "event": "",
+      "kind": 5,
       "record": "DocTask",
       "seq": "25",
-      "src": "https://shop.example/assets/app.js"
+      "src": "https://shop.example/assets/app.js",
+      "target": ""
     },
     {
       "query": "callback",
       "record": "PlatformValue",
       "seq": "26",
-      "src": 6,
+      "src": 7,
       "task_id": "11",
       "value": "[{\"target\":\"path:#hero\",\"isIntersecting\":true,\"intersectionRatio\":0.5}]"
     },

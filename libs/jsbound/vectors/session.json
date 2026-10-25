@@ -216,10 +216,12 @@
       "seq": "24"
     },
     {
+      "event": "",
       "kind": 1,
       "record": "DocTask",
       "seq": "25",
-      "src": "https://shop.example/assets/app.js"
+      "src": "https://shop.example/assets/app.js",
+      "target": ""
     },
     {
       "query": "callback",
