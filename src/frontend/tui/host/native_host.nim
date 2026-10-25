@@ -131,6 +131,13 @@ proc findCtBinary*(): string =
     return candidate
   findExe("ct")
 
+proc nativeCtBinary*(): string =
+  ## `findCtBinary` under a name of its own: this module re-exports
+  ## `headless_session`, whose narrower `findCtBinary` (no `PATH`, raises) a
+  ## caller importing both would otherwise be ambiguous with. PLAT-53's Test
+  ## Results host (`test_results_source`) runs `ct test run` with it.
+  findCtBinary()
+
 type
   NativeRecordJob* = ref object
     ## PLAT-51 deliverable 8: a welcome tab's `ct record`, running. The host

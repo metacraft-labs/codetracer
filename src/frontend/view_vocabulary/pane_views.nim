@@ -90,6 +90,7 @@ import viewmodels/filesystem_vm
 import viewmodels/vcs_vm
 # PLAT-52 — the Terminal Output pane's ViewModel.
 import viewmodels/terminal_output_vm
+import viewmodels/test_results_vm
 
 import headless_app/layout_model
 
@@ -132,7 +133,11 @@ const
                                          # PLAT-52: the recorded program's
                                          # terminal output (its lines, or its
                                          # screen), from `TerminalOutputVM`.
-                                         paneTerminalOutput}
+                                         paneTerminalOutput,
+                                         # PLAT-53: the project's tests and
+                                         # the last run, from the window's
+                                         # `TestResultsVM`.
+                                         paneTestResults}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -148,9 +153,10 @@ const
   PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
                                             # PLAT-45 — the desktop's panes
                                             # (PLAT-47 drew `paneVcs`,
-                                            # PLAT-52 `paneTerminalOutput`).
+                                            # PLAT-52 `paneTerminalOutput`,
+                                            # PLAT-53 `paneTestResults`).
                                             paneAgentActivity,
-                                            paneTestResults, paneConstraints,
+                                            paneConstraints,
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks.
                                             paneProblems, paneRequests}
@@ -685,6 +691,41 @@ proc terminalOutputPaneView*(vm: TerminalOutputVM): PaneView =
                                                        current))))
   result.entries = entriesOf(result.root)
 
+const TestResultsColumns* = @["", "test", "where", "duration"]
+  ## PLAT-53: the Test Results table's columns — the desktop row's mark,
+  ## name, location and duration (its controls are each medium's).
+
+proc testResultsPaneView*(vm: TestResultsVM): PaneView =
+  ## PLAT-53. THE TEST RESULTS PANE (`Test-Results-Pane.md` §8): the
+  ## headline, then a `Table` of the tests — mark, name, location, duration,
+  ## every cell the ViewModel's words — then the failure block's lines, the
+  ## absence and the empty state as `Text`. The headless replay session owns
+  ## no `TestResultsVM` (the window does: its tests are its project's, §8.2),
+  ## so a front-end attaches the window's, as it attaches its VCS pane's.
+  result.pane = paneTestResults
+  if vm.isNil:
+    result.report = "test results have no ViewModel; no host attached one"
+    result.root = viewText("tests.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children = @[viewText("tests.headline", vm.headline.val)]
+  let rows = vm.rows.val
+  var cells: seq[seq[string]] = @[]
+  for row in rows:
+    cells.add @[stateMark(row.state), row.name, rowWhere(row), rowDuration(row)]
+  if rows.len > 0:
+    children.add viewTable("tests.rows", TestResultsColumns, cells)
+  for i, line in vm.runFailure.val:
+    children.add viewText("tests.failure." & $i, line)
+  if vm.runAbsence.val.len > 0:
+    children.add viewText("tests.absence", vm.runAbsence.val)
+  if rows.len == 0:
+    children.add viewText("tests.empty", EmptyStateText)
+    result.report = "no tests found"
+  result.root = viewTreeNode("tests", "Test Results", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc shellPaneView*(vm: ShellVM): PaneView =
   ## The shell: a `Tree` of the input `Input` and a `List` of history.
   ##
@@ -877,7 +918,9 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneVcs: vcsPaneView(VCSVM(vm))
   # PLAT-52.
   of paneTerminalOutput: terminalOutputPaneView(TerminalOutputVM(vm))
-  of paneAgentActivity, paneTestResults,
+  # PLAT-53.
+  of paneTestResults: testResultsPaneView(TestResultsVM(vm))
+  of paneAgentActivity,
      paneConstraints, paneProblems, paneRequests:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which

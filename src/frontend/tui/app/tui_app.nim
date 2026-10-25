@@ -63,6 +63,7 @@ import ./layout/binding     # `slotExtent`, `footerLeadCells`
 import ./layout/cells       # `terminalPaneName`
 import ./views/vcs_pane
 import ./views/search_results_pane
+import ./views/test_results_pane
 import ./views/point_list
 
 export headless_app
@@ -284,6 +285,12 @@ type
       ## (`host/tui_session.searchModelOf`) from the session's
       ## `SearchResultsVM`; its
       ## `scrollTop` is the pane's own reading position.
+    tests*: TestResultsPaneModel
+      ## PLAT-53. The TEST RESULTS pane's model, as a value, filled by the
+      ## host (`host/test_results_source.nim`) from the window's
+      ## `TestResultsVM`; its `selected` and `scrollTop` are the pane's own.
+      ## The window's, not a session's: every tab shares the project
+      ## (`Test-Results-Pane.md` §8.2).
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -631,6 +638,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     fileTree: app.fileTree,
     vcs: app.vcs,
     search: app.search,
+    tests: app.tests,
     build: build,
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()

@@ -117,13 +117,14 @@ proc terminalCapability*(): PaneCapability =
      # (`views/terminal_output_pane.nim`).
      paneTerminalOutput,
      # PLAT-57: Find in Files (`views/search_results_pane.nim`).
-     paneSearch},
+     paneSearch,
+     # PLAT-53: Test Results (`views/test_results_pane.nim`).
+     paneTestResults},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
      (paneShell, "the terminal has no embedded shell view yet"),
      (paneAgentActivity, "the terminal has no agent-activity view yet"),
-     (paneTestResults, "the terminal has no test-results view yet"),
      (paneConstraints, "the terminal has no constraints view yet"),
      (paneProblems, "the terminal has no problems view yet; a build's " &
                     "errors are in the Build pane"),

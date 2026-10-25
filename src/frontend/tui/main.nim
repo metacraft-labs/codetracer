@@ -92,6 +92,7 @@ import ./app/theme/degradation
 import ./app/theme/colour_math
 import ./host/tui_session
 import ./host/vcs_source
+import ./host/test_results_source   # PLAT-53
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -1081,6 +1082,21 @@ proc interactive(command: TuiCommand): int =
   var vcs = newVcsSource(projectRoot)
   defer: vcs.close()
   vcs.refresh(rt)
+  # PLAT-53: the Test Results pane — the window's project (`app.projectRoot`,
+  # which a welcome tab's folder re-roots) and the desktop's host over the
+  # native producers; a test's recording opens in a NEW session tab
+  # (`recordingOpener`, Test-Results-Pane.md §8.3).
+  let tests = newTestsSource(
+    projectRoot = proc(): string = app.projectRoot,
+    ctBinary = proc(): string = nativeCtBinary(),
+    resolveFolder = proc(id: string): string = recordingFolderOf(id),
+    openFolder = proc(folder: string): string =
+      let problem = traceFolderProblem(folder)
+      if problem.len > 0:
+        return "could not open " & folder & ": " & problem
+      app.recordingOpener(folder))
+  defer: tests.close()
+  tests.refresh(rt)
   app.notification = describe(session)
 
   # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN, performed. The "+"
@@ -1278,6 +1294,8 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
+      # PLAT-53: a test run that ended, and a re-rooted project.
+      let testsChanged = tests.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
       # PLAT-51: a welcome tab's recording, when it finishes.
@@ -1295,7 +1313,7 @@ proc interactive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
-         barsChanged:
+         barsChanged or testsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1359,8 +1377,10 @@ proc interactive(command: TuiCommand): int =
         # session: the panes follow it before the outcome is applied.
         if app.shell.activeSessionId() != shownId:
           showSession(app.shell.activeSessionId())
-        # PLAT-50: a click in the VCS pane is the VCS source's.
-        if not vcs.applyClick(rt, outcome.paneClick):
+        # PLAT-50: a click in the VCS pane is the VCS source's; PLAT-53: one
+        # on Test Results' controls is the Test Results source's.
+        if not vcs.applyClick(rt, outcome.paneClick) and
+           not tests.applyClick(rt, outcome.paneClick):
           session.applyOutcome(rt, outcome)
         # V6: THE VCS HISTORY FOLLOWS ITS LIST. The token may have scrolled the
         # pane, revealed its tab or committed an arrangement that resized it;
@@ -1611,6 +1631,17 @@ proc editInteractive(command: TuiCommand): int =
   let vcs = newVcsSource(root)
   defer: vcs.close()
   vcs.refresh(rt)
+  # PLAT-53: the Test Results pane over the project. This loop has no session
+  # tabs, so a test's recording is not opened here: the pane says where it is
+  # instead (Test-Results-Pane.md §8.3).
+  let tests = newTestsSource(
+    projectRoot = proc(): string = app.projectRoot,
+    ctBinary = proc(): string = nativeCtBinary(),
+    resolveFolder = proc(id: string): string = recordingFolderOf(id),
+    openFolder = proc(folder: string): string =
+      NoSessionTabsText & folder)
+  defer: tests.close()
+  tests.refresh(rt)
 
   paint(driver, rt)
 
@@ -1630,12 +1661,13 @@ proc editInteractive(command: TuiCommand): int =
       # session is checked on every tick. See `host/build_runner.pollBuild`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
+      let testsChanged = tests.tick(rt)
       let hoverChanged = rt.tickAutoHide(nowMs()) or
                          rt.tickCellHover(nowMs())
       let barsChanged = rt.tickScrollbars(nowMs()).repaint
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
-         hoverChanged or keysChanged or barsChanged:
+         hoverChanged or keysChanged or barsChanged or testsChanged:
         paint(driver, rt)
     of dekResize:
       size = ev.size
@@ -1663,8 +1695,9 @@ proc editInteractive(command: TuiCommand): int =
         loop = false
       else:
         # PLAT-50: a click in the VCS pane is the VCS source's, in Edit mode
-        # too.
+        # too; PLAT-53: Test Results' controls are the Test Results source's.
         discard vcs.applyClick(rt, outcome.paneClick)
+        discard tests.applyClick(rt, outcome.paneClick)
         # V6: the history follows its list, as in the replay loop above.
         let vcsFollowed = vcs.followViewport(rt)
         # A CANCEL REQUEST IS ACTED ON BEFORE THE NEXT IDLE TICK, so `:cancel`
