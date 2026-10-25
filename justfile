@@ -58,6 +58,21 @@ test-build-once-failed-bundle:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert every package name `repro.nim`'s `uses:` list declares (every `when`
+# branch; also `buildDeps:` / `nativeBuildDeps:` / `runtimeDeps:`) resolves
+# against the `reprobuild-packages` catalog this flake pins, by reprobuild's
+# own rule: a catalog interface, else a bundled stdlib
+# selector reprobuild has not moved out, else a repro.lock workspace producer.
+# The dev shell exports that catalog as REPROBUILD_PACKAGES_ROOT, which makes
+# it the ONLY catalog reprobuild consults, so a name it lacks means the recipe
+# does not compile in `nix develop` (it did not, from 2026-09-30, for
+# `shellcheck`). Also asserts flake.lock and repro.lock pin the catalog at the
+# same revision. Locates the two pinned trees with `nix eval`; skips LOUDLY
+# without nix, CT_CATALOG_COVERAGE_STRICT=1 makes that a failure.
+# See the header of scripts/test-reprobuild-catalog-coverage.sh.
+test-reprobuild-catalog-coverage:
+  bash scripts/test-reprobuild-catalog-coverage.sh
+
 # Run inside the dev-env to exercise its provisioned Nix, including 2.28.
 test-dev-env-flake-metadata:
   bash ci/test/dev-env-flake-metadata-test.sh
@@ -1106,6 +1121,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-flake-pin-alignment \
+    test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \
     test-flake-lock-node-dates \
     test-npm-install-yarn-lock \
