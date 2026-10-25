@@ -5705,7 +5705,8 @@ proc holdPaste(rt: TuiRuntime; target: PasteTarget;
   ## Hold a paste while the terminal is asked for its clipboard (OSC 52,
   ## written with the next frame), unless it is known not to answer or a
   ## paste is already held. Answers whether it was held.
-  if not rt.clipboardRead.asks or rt.clipboardRead.pending.active:
+  if not rt.caps.clipboardRead or not rt.clipboardRead.asks or
+     rt.clipboardRead.pending.active:
     return false
   rt.clipboardRead.pending = PendingPaste(active: true, target: target,
                                           resolution: res)

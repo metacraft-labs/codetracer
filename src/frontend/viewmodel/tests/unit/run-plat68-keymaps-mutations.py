@@ -115,6 +115,7 @@ TOP_BAR = "src/frontend/tui/app/views/top_bar.nim"
 OPERATIONS = "src/frontend/viewmodel/editor/operations.nim"
 NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 EMACS = "src/frontend/viewmodel/keymap/emacs_keymap.nim"
+CAPS = "src/frontend/tui/app/theme/capabilities.nim"
 
 # Phase B suites.
 LAYERS = "src/frontend/viewmodel/tests/unit/test_plat68_layers.nim"
@@ -131,7 +132,7 @@ MENU = "src/frontend/viewmodel/tests/unit/test_plat68_menu_access.nim"
 SUBJECTS = [NAMES, KEYMAP, SELECTION, WHEN, CUA, CUA_SPEC, RESTORE,
             ROUTER, STACK, IMPORTERS, CORE, ROLES, CHROME, TUI_MAIN, DRIVER,
             MOTIONS, GPUI_MAIN, MONACO, DISPATCH, RUNTIME, ALT_TAP,
-            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS]
+            PRODUCT_MENU, TOP_BAR, OPERATIONS, NAVIGATION, EMACS, CAPS]
 SUITES = [DECODING, BASES, ORACLE, PTY, EXTRACTOR, "tools/cua-keymap-extractor.py",
           LAYERS, PTYB, GPUIK, DIFF13, PARITY, PLAT28, NOCONF, MONACO_T,
           PROPAGATION, MENU]
@@ -326,11 +327,24 @@ ARMS = [
               "    BaseRow(chords: \"Ctrl+Alt+Enter\", operation: \"editor.toggle-tracepoint\",")],
      [(LAYERS, "*::Enter opens the tracepoint editor under every base*")],
      "Emacs: Enter in the read-only editor does nothing"),
+    # --- parent: the OSC 52 read on real terminals (measured 2026-10-24) ---
+    ("H1", [(DRIVER, "  d.framer.altChordsAsCsiU = want == 1",
+             "  d.framer.altChordsAsCsiU = false")],
+     [(PTYB, "*::a LATE clipboard answer is not typed into the document*")],
+     "a late OSC 52 answer is typed into the document as text"),
+    ("H2", [(CAPS, "  if env.term in ClipboardReadPromptTerms or",
+             "  if false and env.term in ClipboardReadPromptTerms or")],
+     [(PTYB, "*::kitty's TERM: a paste does not ask*")],
+     "kitty and Ghostty are asked, and their permission prompt takes the keys"),
+    ("H3", [(RUNTIME, "  if not rt.caps.clipboardRead or not rt.clipboardRead.asks or",
+             "  if not rt.clipboardRead.asks or")],
+     [(PTYB, "*::kitty's TERM: a paste does not ask*")],
+     "the paste ignores the terminal's clipboard-read capability"),
 ]
 DECLARED_SURVIVORS = {"N1"}
 IN_BINARY = {NAMES, KEYMAP, SELECTION, WHEN, CUA, RESTORE, ROUTER, STACK,
              CORE, ROLES, TUI_MAIN, DRIVER, MOTIONS, RUNTIME, PRODUCT_MENU,
-             TOP_BAR, OPERATIONS}
+             TOP_BAR, OPERATIONS, CAPS}
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {NAMES, KEYMAP, SELECTION, WHEN, CUA, ROUTER, STACK, CORE, CHROME,
            GPUI_MAIN, ALT_TAP, PRODUCT_MENU, OPERATIONS}

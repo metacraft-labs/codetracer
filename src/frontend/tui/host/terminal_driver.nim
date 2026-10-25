@@ -130,6 +130,16 @@ type
       ## pure function of the bytes.
     expectStrings*: bool
       ## See above. Set by `TerminalDriver.expectReplies`.
+    altChordsAsCsiU*: bool
+      ## Set while the Kitty keyboard protocol is on (`applyKeyProtocol`). Its
+      ## flag 1 makes the terminal send Alt+<key> — and the Esc key itself —
+      ## as `CSI … u`, so `ESC ]`, `ESC P` and `ESC _` can then only begin a
+      ## terminal's REPLY, and are framed as one whether or not a query is
+      ## outstanding. That is what keeps a LATE answer out of the document: a
+      ## terminal that asks the user before it lets a program read the
+      ## clipboard (kitty's and Ghostty's defaults) answers the OSC 52 read
+      ## after the paste's wait has run out, and before this, outside the
+      ## reply window, its bytes were typed as text.
 
 const
   EscDelayMs* = 50'i64
@@ -148,7 +158,8 @@ const
     ## which the framing turns into one `Esc` and which no keyboard sends.
 
 proc initInputFramer*(): InputFramer =
-  InputFramer(pending: "", escSinceMs: 0, expectStrings: false)
+  InputFramer(pending: "", escSinceMs: 0, expectStrings: false,
+              altChordsAsCsiU: false)
 
 proc reset*(f: var InputFramer) =
   ## Forget the sequence being assembled. `expectStrings` is the DRIVER's
@@ -186,7 +197,8 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
 
   f.pending.add b
   if f.pending.len > 2 and f.pending[1] in {']', 'P', '_'}:
-    # A STRING (only reachable while `expectStrings`): BEL or ST ends it.
+    # A STRING (only reachable while `expectStrings` or `altChordsAsCsiU`):
+    # BEL or ST ends it.
     if b == '\x07' or (b == '\\' and f.pending[^2] == Esc):
       let token = f.pending
       f.reset()
@@ -202,7 +214,7 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       # A CSI or an SS3 is starting; keep accumulating.
       return (false, "")
     of ']', 'P', '_':
-      if f.expectStrings:
+      if f.expectStrings or f.altChordsAsCsiU:
         return (false, "")
       let broke = $b
       f.reset()
@@ -611,6 +623,7 @@ proc applyKeyProtocol(d: TerminalDriver) =
   let have = if not d.keyReporting.active: 0
              elif d.keyReporting.mode == krmKitty: 1
              else: 2
+  d.framer.altChordsAsCsiU = want == 1
   if want == have:
     return
   if d.keyReporting.active:
@@ -753,6 +766,7 @@ proc stop*(d: TerminalDriver) =
     # Before the alternate screen is left: the Kitty pop must reach the
     # screen its push was made on.
     disableKeyReporting(d.keyReporting)
+  d.framer.altChordsAsCsiU = false
   # PLAT-71: THE ONE RESTORE BUFFER (`restoreUnion`) — 2027, 2026, 1016,
   # 1003 — the same bytes a SIGTERM or a crash writes, then forgotten.
   if d.started:
