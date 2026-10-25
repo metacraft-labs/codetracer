@@ -307,10 +307,10 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       discard settledFrame(sess, 1)
       checkField(sess, keysApp.KeyRow, keysApp.KeyLabel, "Ctrl+w")
       checkField(sess, keysApp.KindRow, keysApp.KindLabel, "pending")
-      checkField(sess, keysApp.PendingRow, keysApp.PendingLabel, "Ctrl+w…")
+      checkField(sess, keysApp.PendingRow, keysApp.PendingLabel, "Ctrl+W…")
       let bar = paneRow(sess, Rows - 1)
       checkpoint("status bar while pending: '" & bar & "'")
-      ck bar.endsWith("Ctrl+w…")
+      ck bar.endsWith("Ctrl+W…")
       # The mode did NOT change: a prefix is not a mode.
       checkMode(sess, mmNormal, ansiIndexOf(srModeNormal))
 
@@ -323,7 +323,7 @@ suite "CTUI-9 Tier 2: the keymap on a real terminal":
       checkField(sess, keysApp.FocusRow, keysApp.FocusLabel, "editor")
       let cleared = paneRow(sess, Rows - 1)
       checkpoint("status bar after completion: '" & cleared & "'")
-      ck not cleared.endsWith("Ctrl+w…")
+      ck not cleared.endsWith("Ctrl+W…")
 
       # …and `l` ON ITS OWN is a different action entirely — §4.2's "Expand
       # Node" — which is the positive twin that makes the line above a
