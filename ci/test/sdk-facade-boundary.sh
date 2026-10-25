@@ -262,8 +262,11 @@ SIBLING_PACKAGES=(
 	"nim-everywhere|nim_everywhere/async_compat.nim|NIM_EVERYWHERE_SRC|../nim-everywhere/src"
 )
 
-# Filled by resolve_sibling_roots.
+# Filled by resolve_sibling_roots. SIBLING_ROOT_NAMES runs parallel to
+# SIBLING_ROOTS — entry i names the package whose root is SIBLING_ROOTS[i] — so
+# that --list-graph can say which root belongs to which package.
 SIBLING_ROOTS=()
+SIBLING_ROOT_NAMES=()
 SIBLING_MISSING=()
 
 # How far into a file the `## SDK-CONSUMER:` header marker may appear.
@@ -468,6 +471,14 @@ while [ $# -gt 0 ]; do
 		# Print the facade's transitive import graph and exit. For working out
 		# WHICH edge dragged a forbidden module in, and for checking this
 		# script's lexical resolution against `nim c --genDeps`.
+		#
+		# Three kinds of line: a bare path is a module in the graph; an
+		# `external: <spec>` line is a spec that resolved nowhere; and a
+		# `sibling-root: <name> <abs-path>` line is the root this run used for
+		# a sibling package. The last is there so that a caller — the contract
+		# suite in particular — can tell which graph paths are that package's
+		# own files without re-deriving ISONIM_SRC / the `../isonim/src`
+		# fallback itself, and without assuming what the checkout is called.
 		list_graph=1
 		;;
 	*)
@@ -602,10 +613,14 @@ resolve_module() {
 	return 0
 }
 
-# resolve_sibling_roots — populate SIBLING_ROOTS / SIBLING_MISSING from
-# SIBLING_PACKAGES. Absolute paths, because these are outside the repo.
+# resolve_sibling_roots — populate SIBLING_ROOTS / SIBLING_ROOT_NAMES /
+# SIBLING_MISSING from SIBLING_PACKAGES. Absolute paths, because these are
+# outside the repo — and that includes an env override, which is normalised the
+# same way as the fallback so that a relative ISONIM_SRC does not put relative
+# paths into a graph whose sibling modules are recognised by a leading `/`.
 resolve_sibling_roots() {
 	SIBLING_ROOTS=()
+	SIBLING_ROOT_NAMES=()
 	SIBLING_MISSING=()
 	local entry name probe envvar fallback base override
 	for entry in "${SIBLING_PACKAGES[@]}"; do
@@ -613,12 +628,13 @@ resolve_sibling_roots() {
 		base=""
 		override="${!envvar:-}"
 		if [ -n "${override}" ] && [ -f "${override}/${probe}" ]; then
-			base="${override}"
+			base="$(cd "${override}" && pwd)"
 		elif [ -f "${fallback}/${probe}" ]; then
 			base="$(cd "${fallback}" && pwd)"
 		fi
 		if [ -n "${base}" ]; then
 			SIBLING_ROOTS+=("${base}")
+			SIBLING_ROOT_NAMES+=("${name}")
 		else
 			SIBLING_MISSING+=("${name} (set ${envvar}, or check out beside this repo)")
 		fi
@@ -730,6 +746,9 @@ if [ "${list_graph}" -eq 1 ]; then
 	mapfile -t graph < <(closure_of "${FACADE_REL}" | sort -u)
 	printf '%s\n' "${graph[@]}"
 	external_specs_of "${graph[@]}" | sed 's/^/external: /'
+	for i in "${!SIBLING_ROOTS[@]}"; do
+		printf 'sibling-root: %s %s\n' "${SIBLING_ROOT_NAMES[${i}]}" "${SIBLING_ROOTS[${i}]}"
+	done
 	exit 0
 fi
 

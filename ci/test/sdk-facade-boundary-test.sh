@@ -1010,14 +1010,67 @@ else
 		"exit ${repo_status}" "${repo_output}"
 fi
 
+# graph_isonim_root GRAPH_OUTPUT — the IsoNim root the guard itself used, from
+# its `sibling-root: isonim <path>` line. Taken from the guard rather than
+# re-derived here, so the assertion below cannot drift from the resolution it
+# is checking, and so nothing depends on what the checkout directory is called:
+# a pinned worktree named `isonim-dd` is as much IsoNim as one named `isonim`.
+graph_isonim_root() {
+	sed -n 's/^sibling-root: isonim //p' <<<"$1" | head -n 1
+}
+
+# assert_graph_has_isonim_sources LABEL GRAPH_OUTPUT — the graph contains
+# `<isonim-root>/isonim/core/signals.nim` as a whole line, i.e. the walk
+# resolved an IsoNim spec to IsoNim's own file under the root it reports.
+assert_graph_has_isonim_sources() {
+	local label="$1" output="$2" isonim_root
+	isonim_root="$(graph_isonim_root "${output}")"
+	if [ -z "${isonim_root}" ]; then
+		bad "${label}" \
+			"--list-graph printed no 'sibling-root: isonim <path>' line, so the" \
+			"guard did not resolve an IsoNim root and cannot have walked it." \
+			"${output}"
+	elif grep -qxF "${isonim_root}/isonim/core/signals.nim" <<<"${output}"; then
+		ok "${label}"
+	else
+		bad "${label}" \
+			"No ${isonim_root}/isonim/core/signals.nim in --list-graph output." \
+			"If the resolver stops at the repo edge the walk is decorative: every" \
+			"forbidden-module rule below would have nothing from IsoNim to match."
+	fi
+}
+
 graph_output="$(cd "${repo_root}" && bash "${guard}" --list-graph 2>&1)"
-if grep -qE '^/.*/isonim/(src/)?isonim/core/signals\.nim$' <<<"${graph_output}"; then
-	ok "the printed graph contains IsoNim's own source files, not just its module specs"
+assert_graph_has_isonim_sources \
+	"the printed graph contains IsoNim's own source files, not just its module specs" \
+	"${graph_output}"
+
+# The same property when ISONIM_SRC reaches IsoNim through a directory that is
+# NOT called `isonim` — a pinned worktree such as `isonim-dd`. This case used to
+# fail with the walk intact, because the assertion above was a regex anchored
+# on a parent directory named `isonim`. A symlink stands in for the worktree so
+# the IsoNim tree is not copied. The real root is the one the run above used:
+# `<checkout>/src`, by the `../isonim/src` fallback or an ISONIM_SRC override.
+real_isonim_root="$(graph_isonim_root "${graph_output}")"
+if [ -n "${real_isonim_root}" ]; then
+	ln -s "$(dirname "${real_isonim_root}")" "${work}/isonim-renamed"
+	renamed_root="${work}/isonim-renamed/$(basename "${real_isonim_root}")"
+	renamed_output="$(cd "${repo_root}" && ISONIM_SRC="${renamed_root}" \
+		bash "${guard}" --list-graph 2>&1)"
+	assert_graph_has_isonim_sources \
+		"an IsoNim checkout whose directory is not named isonim is still walked" \
+		"${renamed_output}"
+	renamed_reported="$(graph_isonim_root "${renamed_output}")"
+	if [ "${renamed_reported}" = "${renamed_root}" ]; then
+		ok "--list-graph reports the ISONIM_SRC override as the IsoNim root"
+	else
+		bad "--list-graph reports the ISONIM_SRC override as the IsoNim root" \
+			"expected: ${renamed_root}" \
+			"reported: ${renamed_reported}"
+	fi
 else
-	bad "the printed graph contains IsoNim's own source files" \
-		"No absolute isonim/core/signals.nim in --list-graph output." \
-		"If the resolver stops at the repo edge the walk is decorative: every" \
-		"forbidden-module rule below would have nothing from IsoNim to match."
+	bad "an IsoNim checkout whose directory is not named isonim is still walked" \
+		"No IsoNim root to rename: the default --list-graph run reported none."
 fi
 
 # The mutation. Point ISONIM_SRC at a stand-in whose `isonim/core/signals`
