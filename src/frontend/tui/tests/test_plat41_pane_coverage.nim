@@ -92,15 +92,17 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # PLAT-52 moved `paneTerminalOutput` into the vocabulary: it draws the
     # session's `TerminalOutputVM`.
     # PLAT-51 removed `paneTimeline` (native): 19 panes, one native.
+    # PLAT-53 moved `paneTestResults` into the vocabulary: it draws the
+    # window's `TestResultsVM`.
     ck card(allPanes()) == 19
-    ck card(PaneVocabularyPanes) == 12
+    ck card(PaneVocabularyPanes) == 13
     ck card(PaneNativePanes) == 1
-    ck card(PaneAcceptedExceptions) == 6
+    ck card(PaneAcceptedExceptions) == 5
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
     ck paneTerminalOutput in PaneVocabularyPanes
+    ck paneTestResults in PaneVocabularyPanes
     ck PaneAcceptedExceptions == {paneBuildOutput, paneAgentActivity,
-                                  paneTestResults,
                                   paneConstraints, paneProblems,
                                   paneRequests}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +

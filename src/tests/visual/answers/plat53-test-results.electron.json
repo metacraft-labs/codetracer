@@ -1,0 +1,123 @@
+{
+ "_comment": [
+  "PLAT-53 — the desktop's Test Results pane, read from the real Electron app.",
+  "Produced by src/tests/gui/tests/test-results-pane/plat53-test-results-capture.spec.ts",
+  "(`just plat53-capture-electron`). Durations vary per run; the suites compare their presence."
+ ],
+ "project": "plat53_suite",
+ "before": {
+  "headline": "2 tests, not run yet",
+  "run": {
+   "label": "▶",
+   "title": "Run the tests (nargo test)",
+   "disabled": false
+  },
+  "rows": [
+   {
+    "testId": "noir-nargo/noir/nargo-test/src/main.nr::test_passes",
+    "state": "not-run",
+    "mark": "·",
+    "markColor": "rgb(200, 200, 200)",
+    "name": "test_passes",
+    "where": "src/main.nr:5",
+    "duration": "",
+    "refresh": {
+     "label": "⟳",
+     "title": "Record test_passes (this test has no recording yet). Stays in this pane.",
+     "disabled": false
+    },
+    "open": {
+     "label": "⏺⏵",
+     "title": "Record test_passes and open the recording (this test has no recording yet).",
+     "mode": "record-and-open",
+     "disabled": false
+    },
+    "message": "",
+    "messageColor": ""
+   },
+   {
+    "testId": "noir-nargo/noir/nargo-test/src/main.nr::test_fails",
+    "state": "not-run",
+    "mark": "·",
+    "markColor": "rgb(200, 200, 200)",
+    "name": "test_fails",
+    "where": "src/main.nr:10",
+    "duration": "",
+    "refresh": {
+     "label": "⟳",
+     "title": "Record test_fails (this test has no recording yet). Stays in this pane.",
+     "disabled": false
+    },
+    "open": {
+     "label": "⏺⏵",
+     "title": "Record test_fails and open the recording (this test has no recording yet).",
+     "mode": "record-and-open",
+     "disabled": false
+    },
+    "message": "",
+    "messageColor": ""
+   }
+  ],
+  "failure": [],
+  "absence": "",
+  "empty": ""
+ },
+ "rowContextMenu": [],
+ "after": {
+  "headline": "1 passed, 1 failed · 2.2s",
+  "run": {
+   "label": "▶",
+   "title": "Run the tests (nargo test)",
+   "disabled": false
+  },
+  "rows": [
+   {
+    "testId": "noir-nargo/noir/nargo-test/src/main.nr::test_passes",
+    "state": "passed",
+    "mark": "✓",
+    "markColor": "rgb(187, 247, 208)",
+    "name": "test_passes",
+    "where": "src/main.nr:5",
+    "duration": "357ms",
+    "refresh": {
+     "label": "⟳",
+     "title": "Record test_passes (this test ran, but no recording was kept). Stays in this pane.",
+     "disabled": false
+    },
+    "open": {
+     "label": "⏺⏵",
+     "title": "Record test_passes and open the recording (this test ran, but no recording was kept).",
+     "mode": "record-and-open",
+     "disabled": false
+    },
+    "message": "",
+    "messageColor": ""
+   },
+   {
+    "testId": "noir-nargo/noir/nargo-test/src/main.nr::test_fails",
+    "state": "failed",
+    "mark": "✗",
+    "markColor": "rgb(252, 165, 165)",
+    "name": "test_fails",
+    "where": "src/main.nr:10",
+    "duration": "1.5s",
+    "refresh": {
+     "label": "⟳",
+     "title": "Record test_fails (this test ran, but no recording was kept). Stays in this pane.",
+     "disabled": false
+    },
+    "open": {
+     "label": "⏺⏵",
+     "title": "Record test_fails and open the recording (this test ran, but no recording was kept).",
+     "mode": "record-and-open",
+     "disabled": false
+    },
+    "message": "Failed to solve program: 'Cannot satisfy constraint'\nFailed constraint\nat src/main.nr\nCall stack:\n1: test_fails\n        at src/main.nr:12:5\n2: main\n        at src/main.nr:2:5\nFailed to solve program: 'Cannot satisfy constraint'\nFailed constraint\nat src/main.nr\nCall stack:\n1: test_fails\n        at src/main.nr:12:5\n2: main\n        at src/main.nr:2:5",
+    "messageColor": "rgb(252, 165, 165)"
+   }
+  ],
+  "failure": [],
+  "absence": "",
+  "empty": ""
+ }
+}

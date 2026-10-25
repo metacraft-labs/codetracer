@@ -162,7 +162,8 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 118
+  ExpectedAppModules = 119
+    ## 2026-10-24 (PLAT-53): 118 → 119, `views/test_results_pane.nim`.
     ## 2026-10-24 (PLAT-71): 112 → 118. `theme/terminal_profile.nim` (the
     ## profile's vocabulary and parsers), `theme/terminal_settings.nim` (the
     ## settings as ranks), `theme/terminal_report.nim` (the report and the
@@ -294,7 +295,11 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 285
+  ExpectedStyleLiterals = 293
+    ## 2026-10-24 (PLAT-53): 285 → 293, measured — the Test Results pane's
+    ## eight (`views/test_results_pane.nim`: the headline, the ▶ live and
+    ## dimmed, the controls, a name, the muted cells, the error and success
+    ## colours).
     ## 2026-10-24 (PLAT-71): +8 — `views/terminal_info.nim`'s three (title,
     ## keys, live line) and `theme/terminal_report.nim`'s five (the card's
     ## colour swatch and its four attribute samples).
@@ -413,7 +418,8 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 39
+  ExpectedStyledFiles = 40
+    ## 2026-10-24 (PLAT-53): +1, `views/test_results_pane.nim`.
     ## 2026-10-24 (PLAT-71): +2, `views/terminal_info.nim` and
     ## `theme/terminal_report.nim`.
     ## 2026-10-23 (PLAT-70 Part H): +1, `views/scrollbar_styles.nim`.
