@@ -2873,6 +2873,29 @@ fn wazero_command(wazero: &Path) -> Command {
     cmd
 }
 
+/// Whether the Rust toolchain that `cargo` builds with has the standard
+/// library for `target` (for example `wasm32-wasip1`), i.e. whether
+/// `cargo build --target <target>` can link.
+///
+/// It asks the compiler itself: `$RUSTC` (what cargo honours) or `rustc`,
+/// `--print sysroot`, then looks for `lib/rustlib/<target>/lib` there. The
+/// tests used to ask `rustup target list --installed`, which describes only a
+/// rustup-managed toolchain. The codetracer dev shell's Rust comes from Nix,
+/// with the wasm targets in its sysroot, and the `rustup` it also carries has
+/// no default toolchain and prints nothing on stdout, so every WASM test
+/// reported the target missing on the one host that had it.
+pub fn rust_target_available(target: &str) -> bool {
+    let rustc = env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let Ok(output) = Command::new(rustc).args(["--print", "sysroot"]).output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let sysroot = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    sysroot.join("lib").join("rustlib").join(target).join("lib").is_dir()
+}
+
 /// Build a WASM test program from a Cargo project directory.
 ///
 /// Runs `cargo build --target wasm32-wasip1` in debug mode (preserving DWARF).
