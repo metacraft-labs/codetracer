@@ -54,6 +54,7 @@ import {
   timed,
 } from "./performance-limits";
 import { deploymentModeFromEnv, type DeploymentMode } from "./deployment-mode";
+import { assertHomeFitsSocketBound, scratchBase } from "./socket-path-bound";
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -79,10 +80,17 @@ const codetracerPrefix =
   process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
     ? process.env.CODETRACER_BUILD_DIR
     : path.join(codetracerInstallDir, "src", "build-debug");
+// Both scratch homes are made under `scratchBase()` — `/tmp` on POSIX, not
+// `os.tmpdir()`. The product binds Unix sockets under `CODETRACER_HOME`
+// (`$CODETRACER_HOME/tmp/session-manager/<pid>/<id>.sock`), a socket address
+// holds 104 bytes on macOS, and a home in macOS's per-user `TMPDIR` (deeper
+// still inside a nix shell) left no room: the session manager refused the
+// socket and every spec drove a product with no replay backend
+// (`lib/socket-path-bound.ts`).
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const guiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME ??
-  fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-gui-xdg-config-"));
+  fs.mkdtempSync(path.join(scratchBase(), "codetracer-gui-xdg-config-"));
 const ownsGuiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME === undefined;
 process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
@@ -95,9 +103,27 @@ process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
 const originalCodetracerHome = process.env.CODETRACER_HOME;
 const guiTestCodetracerHome =
   process.env.CODETRACER_GUI_TEST_CODETRACER_HOME ??
-  fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-gui-home-"));
+  fs.mkdtempSync(path.join(scratchBase(), "codetracer-gui-home-"));
 const ownsGuiTestCodetracerHome =
   process.env.CODETRACER_GUI_TEST_CODETRACER_HOME === undefined;
+// Before anything is launched: a home too deep for the sockets under it
+// fails every spec of this worker here, naming the socket path, its length
+// and the limit, instead of a product that opens empty or never opens. A
+// home supplied through CODETRACER_GUI_TEST_CODETRACER_HOME is held to the
+// same bound.
+assertHomeFitsSocketBound(
+  guiTestCodetracerHome,
+  ownsGuiTestCodetracerHome
+    ? "made by lib/fixtures.ts"
+    : "from CODETRACER_GUI_TEST_CODETRACER_HOME",
+);
+// Outside the OS temp directory now (on macOS `/tmp` is not `os.tmpdir()`), so
+// the home carries the marker that names it a harness's scratch home: a Nim
+// test helper a spec runs keeps it instead of replacing it with a private
+// one (`src/frontend/test_support/state_isolation.nim`).
+if (ownsGuiTestCodetracerHome) {
+  fs.writeFileSync(path.join(guiTestCodetracerHome, ".codetracer-test-home"), "");
+}
 process.env.CODETRACER_HOME = guiTestCodetracerHome;
 
 const ctBinaryName = isWindows ? "ct.exe" : "ct";
@@ -2298,6 +2324,7 @@ export { expect } from "@playwright/test";
 // Re-export path constants for tests that need them
 export {
   codetracerInstallDir,
+  codetracerPrefix,
   testProgramsPath,
   codetracerPath,
 };

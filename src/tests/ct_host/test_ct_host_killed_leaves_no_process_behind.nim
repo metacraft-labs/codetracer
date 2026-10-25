@@ -62,7 +62,7 @@
 ##
 ## Lane: `ct-host-admission` (`just test-ct-host-admission`).
 
-import std/[json, os, osproc, posix, strtabs, strutils, tempfiles, times, unittest]
+import std/[json, os, osproc, posix, strtabs, strutils, times, unittest]
 
 import ct_host_harness
 
@@ -214,7 +214,7 @@ proc waitUntilNamed(root: int; name: string; timeoutS: float): seq[ProcId] =
     sleep(100)
 
 proc runArm(signal: cint; forkingWrapper = false) =
-  let scratch = createTempDir("ct-host-killed-", "")
+  let scratch = createHostScratch("ct-host-killed-")
   var host: Host
   try:
     var extraEnv: seq[(string, string)]
@@ -313,7 +313,7 @@ proc startServerFor(scratch: string; owner: int): Process =
     env[key] = value
   env["CODETRACER_PREFIX"] = prefix
   env["NODE_PATH"] = prefix / "node_modules"
-  env["CODETRACER_HOME"] = scratch / "ct-home"
+  env["CODETRACER_HOME"] = scratch / HomeDirName
   env["TMPDIR"] = scratch
   startProcess(findExe("node"), workingDir = root, env = env,
     args = @[prefix / "server_index.js", "-1", "--welcome-screen",
@@ -333,7 +333,7 @@ proc exitsWithin(p: Process; seconds: float): bool =
 
 suite "the server ends with its --caller-pid, which need not be its parent":
   test "an owner already gone when the server starts: the server exits":
-    let scratch = createTempDir("ct-host-owner-gone-", "")
+    let scratch = createHostScratch("ct-host-owner-gone-")
     # A pid that named a process a moment ago and names none now.
     let gone = startProcess("/usr/bin/env", args = @["true"])
     let gonePid = gone.processID
@@ -353,7 +353,7 @@ suite "the server ends with its --caller-pid, which need not be its parent":
       removeDir(scratch)
 
   test "a live owner keeps the server; its death, not the server's parent's, ends it":
-    let scratch = createTempDir("ct-host-owner-live-", "")
+    let scratch = createHostScratch("ct-host-owner-live-")
     let owner = startProcess("/usr/bin/env", args = @["sleep", "600"])
     let server = startServerFor(scratch, owner.processID)
     try:

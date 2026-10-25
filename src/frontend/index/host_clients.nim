@@ -72,6 +72,9 @@ const
                        cstring"CODETRACER::dap-live-session-selected"]
     ## The messages that hand a page its replay: always one client's.
   DapEventChannel = cstring"CODETRACER::dap-receive-event"
+  TraceLoadErrorChannel = cstring"CODETRACER::trace-load-error"
+    ## How a page learns its session could not be opened.
+  TraceLoadedChannel = cstring"CODETRACER::trace-loaded"
 
 type
   HostClient* = ref object
@@ -89,8 +92,8 @@ type
     goneSinceMs: float
       ## When its last socket closed; 0 while it has one.
 
-  ReplayStarter* = proc(): Future[int]
-    ## Start a replay process; resolves with its id, or -1.
+  ReplayStarter* = proc(): Future[ReplayStart]
+    ## Start a replay process; resolves with its id, or -1 and why not.
   ReplayStopper* = proc(replayId: int)
 
   HostClients* = ref object
@@ -167,14 +170,18 @@ proc disconnectAll*(hc: HostClients; reason: cstring; message: cstring) =
 proc cacheable(id: cstring; key: cstring): bool =
   id in bootstrapEvents or (id == DapEventChannel and key.len > 0)
 
-proc remember(cache: var seq[BootstrapPayload]; id, key, payload: cstring) =
-  if cacheable(id, key):
-    upsertBootstrap(cache, BootstrapPayload(id: id, key: key, payload: payload))
-
 proc forget(cache: var seq[BootstrapPayload]; id: cstring) =
   for i in countdown(cache.high, 0):
     if cache[i].id == id:
       cache.delete(i)
+
+proc remember(cache: var seq[BootstrapPayload]; id, key, payload: cstring) =
+  if cacheable(id, key):
+    # A trace that loaded supersedes the error of a load that did not: a
+    # reconnecting page must not be told its working session failed.
+    if id == TraceLoadedChannel:
+      cache.forget(TraceLoadErrorChannel)
+    upsertBootstrap(cache, BootstrapPayload(id: id, key: key, payload: payload))
 
 proc primaryIdFor(replayId: int): string =
   ## The id of the server's session over `replayId` on the shared host.
@@ -237,10 +244,21 @@ proc allocate(hc: HostClients; c: HostClient) =
   c.allocating = true
   let start = hc.startReplay
   proc run() {.async.} =
-    let replayId = await start()
+    let started = await start()
+    let replayId = started.replayId
     c.allocating = false
     if replayId < 0:
-      errorPrint "ct host: could not start a replay for client ", c.id
+      # The page is waiting for its replay: tell it why there is none, as a
+      # failed load (`CODETRACER::trace-load-error`), and keep that for its
+      # next socket, rather than leave it drawing panes over no backend.
+      errorPrint "ct host: could not start a replay for client ", c.id, ": ",
+        started.error
+      var payload = newJsObject()
+      payload["error"] = cstring("Could not start a replay: " & $started.error)
+      let serialized = jsonStringify(payload)
+      c.bootstrap.remember(TraceLoadErrorChannel, cstring"", serialized)
+      if not c.socket.isNil:
+        c.socket.emit(TraceLoadErrorChannel, serialized)
       return
     if hc.clients.getOrDefault(c.id) != c:
       # Released while its replay was starting.

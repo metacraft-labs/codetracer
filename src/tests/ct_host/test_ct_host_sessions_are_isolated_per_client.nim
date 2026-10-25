@@ -54,7 +54,7 @@
 ##
 ## Lane: `ct-host-admission` (`just test-ct-host-admission`).
 
-import std/[json, os, strutils, tempfiles, unittest]
+import std/[json, os, strutils, unittest]
 
 import ct_host_harness
 
@@ -246,7 +246,7 @@ suite "ct host gives each client its own session":
     ck dirExists(nodeModules / "socket.io-client")
 
   test "three clients play their pages against one ct host":
-    scratch = createTempDir("ct-host-isolation-", "")
+    scratch = createHostScratch("ct-host-isolation-")
     host = startHost(scratch)
     started = host.secret.len > 0
     require started

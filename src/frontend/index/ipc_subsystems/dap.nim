@@ -80,6 +80,16 @@ var localEventListeners: Table[int, seq[LocalDapEventListener]] =
     initTable[int, seq[LocalDapEventListener]]()
   ## Keyed by the session whose events the listener receives.
 
+type
+  ReplayStart* = object
+    ## The Backend Manager's answer to one `ct/start-replay`.
+    replayId*: int
+      ## The replay it started; -1 when it started none.
+    error*: cstring
+      ## Why it started none (the answer's `message`: a socket path too long
+      ## to bind, a command that could not run, the session limit), for the
+      ## user; empty when it started one.
+
 proc registerStartReplayHandler*(handler: proc(body: JsObject)) =
   replayStartHandler = handler
 

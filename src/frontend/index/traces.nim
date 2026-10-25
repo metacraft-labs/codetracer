@@ -21,7 +21,7 @@ var
   # Multiple replays can run simultaneously; this tracks which one is
   # the BM's "active" selection for DAP event routing.
   selectedReplayId = -1
-  replayStartResolvers: seq[proc(replayId: int)] = @[]
+  replayStartResolvers: seq[proc(start: ReplayStart)] = @[]
     ## One per `ct/start-replay` written and not yet answered, in the order
     ## they were written: the Backend Manager answers them in that order, and
     ## the answer names no request. A single slot let a second start (another
@@ -37,41 +37,57 @@ proc handleReplayStartResponse(body: JsObject) =
   if replayStartResolvers.len == 0:
     return
 
-  var replayId = -1
+  var start = ReplayStart(replayId: -1, error: cstring"")
   var success = true
   if jsHasKey(body, cstring"success"):
     success = body["success"].to(bool)
   if success and jsHasKey(body, cstring"body"):
     let bodyNode = body["body"]
     if jsHasKey(bodyNode, cstring"replayId"):
-      replayId = bodyNode["replayId"].to(int)
+      start.replayId = bodyNode["replayId"].to(int)
 
-  if replayId >= 0:
-    debugPrint("index: session-manager reported replayId ", $replayId)
+  if start.replayId >= 0:
+    debugPrint("index: session-manager reported replayId ", $start.replayId)
   else:
-    debugPrint("index: session-manager failed to start replay: ", body)
+    # The session manager says why (`message`); keep it, for the user.
+    start.error =
+      if jsHasKey(body, cstring"message") and not body["message"].isNull:
+        body["message"].to(cstring)
+      else:
+        cstring"the session manager answered ct/start-replay without a replay id"
+    errorPrint("index: session-manager failed to start replay: ", start.error)
 
   let resolve = replayStartResolvers[0]
   replayStartResolvers.delete(0)
-  resolve(replayId)
+  resolve(start)
 
 registerStartReplayHandler(handleReplayStartResponse)
 
-proc startReplayProcess*(): Future[int] =
+proc startReplayProcess*(): Future[ReplayStart] =
   ## Ask the Backend Manager for a new replay process (`ct/start-replay`);
-  ## resolves with its replay id, or -1 when it could not start one. The
-  ## replay is not selected and has no trace yet: its client's `launch` names
-  ## the trace.
+  ## resolves with its replay id, or with -1 and the reason when it could not
+  ## start one. The replay is not selected and has no trace yet: its client's
+  ## `launch` names the trace.
   if backendManagerSocket.isNil:
     errorPrint "index: no session-manager connection to start a replay on"
-    return newPromise(proc (resolve: proc (replayId: int)) = resolve(-1))
-  result = newPromise(proc (resolve: proc (replayId: int)) =
+    return newPromise(proc (resolve: proc (start: ReplayStart)) =
+      resolve(ReplayStart(replayId: -1,
+        error: cstring"there is no connection to the session manager")))
+  result = newPromise(proc (resolve: proc (start: ReplayStart)) =
     replayStartResolvers.add resolve)
   backendManagerSocket.write(wrapJsonForSending js{
     "type": cstring"request",
     "command": cstring"ct/start-replay",
     "arguments": @[cstring(dbBackendExe), cstring"dap-server"],
   })
+
+proc reportTraceLoadFailure*(message: cstring) =
+  ## Tell the renderer the load in progress failed, and why
+  ## (`CODETRACER::trace-load-error`, shown as an error notification by
+  ## `ui_js.onTraceLoadError`), for the tab that asked (`forLoadTab`).
+  errorPrint "index: trace load failed: ", message
+  mainWindow.webContents.send "CODETRACER::trace-load-error",
+    forLoadTab(js{error: message})
 
 proc pathExists(path: cstring): bool
 
@@ -876,10 +892,14 @@ proc prepareForLiveTrace*(trace: Trace,
   infoPrint "index: requesting live replay worker for ", $trace.recordingId,
     " folder ", $liveRecordingDir
 
-  let replayId = await startReplayProcess()
-  if replayId < 0:
-    errorPrint "Unable to start live replay worker"
+  let start = await startReplayProcess()
+  if start.replayId < 0:
+    # As for a recorded trace (`startReplayForTrace`): no live session is
+    # selected over a replay that did not start, and the user is told why.
+    reportTraceLoadFailure(cstring("Could not start a live replay worker for " &
+      $liveRecordingDir & ": " & $start.error))
     return
+  let replayId = start.replayId
 
   selectedReplayId = replayId
   let selectPacket = wrapJsonForSending js{
@@ -944,12 +964,18 @@ proc loadExistingRecord*(recordingId: cstring) {.async.} =
   #   debugPrint "warning: exception when starting instance client:"
   #   debugPrint "  that's ok, if this was not started from shell-ui!"
 
-proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
+proc startReplayForTrace*(recordingId: cstring, pid: int): Future[cstring] {.async.} =
+  ## Resolve the trace `recordingId` and start (and select) a replay for it.
+  ## Resolves with "" when the replay runs, else with why it does not, for
+  ## the user. Nothing is reported here: `prepareForLoadingTrace` reports it
+  ## at once, and the startup reports it once the renderer is initialised
+  ## (`startup.init`), since before that nothing would show it.
   ## M-REC-3: UUIDv7 recording-id (cstring in JS/Electron context).
   callerProcessPid = pid
   if prefetchedTrace.isNil or prefetchedTrace.recordingId != recordingId:
     if not await assignTrace(recordingId):
-      return
+      return cstring("Could not open the trace " & $recordingId &
+        ": its metadata was not found")
   else:
     infoPrint "index: reuse prefetched trace ", $prefetchedTrace.recordingId, " folder ", $prefetchedTrace.outputFolder
     data.trace = prefetchedTrace
@@ -966,10 +992,16 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
   # and stopped only when its session is explicitly closed (see
   # stopReplayForSession).
 
-  let replayId = await startReplayProcess()
-  if replayId < 0:
-    errorPrint "Unable to start replay for new trace"
-    return
+  let start = await startReplayProcess()
+  if start.replayId < 0:
+    # A session whose replay did not start has no backend: its panes would
+    # be drawn over nothing. The load fails instead, with the session
+    # manager's reason.
+    let traceName =
+      if data.trace.isNil: $recordingId
+      else: $data.trace.outputFolder
+    return cstring("Could not start a replay for " & traceName & ": " & $start.error)
+  let replayId = start.replayId
 
   # Track the replay so it can be stopped when its session is closed.
   # Also update the legacy selectedReplayId for backwards compatibility
@@ -989,6 +1021,17 @@ proc prepareForLoadingTrace*(recordingId: cstring, pid: int) {.async.} =
   mainWindow.webContents.send(
     "CODETRACER::dap-replay-selected",
     forLoadTab(js{trace: data.trace, replayId: replayId}))
+  return cstring""
+
+proc prepareForLoadingTrace*(recordingId: cstring, pid: int): Future[bool] {.async.} =
+  ## `startReplayForTrace`, reporting a failure to the renderer at once.
+  ## False when the load failed: the caller stops, rather than go on to
+  ## initialise panes for a session with no replay.
+  let failure = await startReplayForTrace(recordingId, pid)
+  if failure.len > 0:
+    reportTraceLoadFailure(failure)
+    return false
+  return true
 
 var
   replayStopAllowed*: proc(replayId: int): bool = nil
@@ -1064,8 +1107,8 @@ proc onLoadRecentTrace*(sender: js, response: jsobject(traceId=cstring)) {.async
   ## payload value is our local recording id.
   # Every message of the load this starts answers the tab that asked.
   startLoadFor(response.toJs)
-  await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int))
-  await loadExistingRecord(response.traceId)
+  if await prepareForLoadingTrace(response.traceId, nodeProcess.pid.to(int)):
+    await loadExistingRecord(response.traceId)
 
 proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.} =
   ## Open a trace as a new tab in the current window, rather than
@@ -1088,16 +1131,16 @@ proc onOpenTraceInTab*(sender: js, response: jsobject(traceId=cstring)) {.async.
     js{traceId: recordingId})
 
   # Prepare the replay backend for this trace (starts a DAP session).
-  await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
-  await loadExistingRecord(recordingId)
+  if await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int)):
+    await loadExistingRecord(recordingId)
 
 proc onLoadRecentTransaction*(sender: js, response: jsobject(txHash=cstring)) {.async.} =
   # Every message of the load this starts answers the tab that asked.
   startLoadFor(response.toJs)
   let (rawOutputOrError, recordingId) = await replayTx(response.txHash, nodeProcess.pid.to(int))
   if recordingId.len > 0:
-    await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int))
-    await loadExistingRecord(recordingId)
+    if await prepareForLoadingTrace(recordingId, nodeProcess.pid.to(int)):
+      await loadExistingRecord(recordingId)
   else:
     # TODO: process notifications in welcome screen, or a different kind of error handler for this case
     # currently not working in frontend, because no status component for now in welcome screen
@@ -1120,8 +1163,8 @@ proc onLoadTraceByRecordProcessId*(sender: js, pid: int) {.async.} =
   prefetchedTrace = trace
   data.trace = trace
   data.pluginClient.trace = trace
-  await prepareForLoadingTrace(trace.recordingId, pid)
-  await loadExistingRecord(trace.recordingId)
+  if await prepareForLoadingTrace(trace.recordingId, pid):
+    await loadExistingRecord(trace.recordingId)
 
 proc onStopRecordingProcess*(sender: js, response: js) {.async.} =
   if not data.recordProcess.isNil:
@@ -1153,8 +1196,8 @@ proc onOpenLocalTrace*(sender: js, response: js) {.async.} =
       prefetchedTrace = trace
       data.trace = trace
       data.pluginClient.trace = trace
-      await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
-      await loadExistingRecord(trace.recordingId)
+      if await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int)):
+        await loadExistingRecord(trace.recordingId)
     else:
       errorPrint "There is no record at given path."
 
@@ -1201,8 +1244,8 @@ proc onLoadTraceFile*(sender: js, response: jsobject(tracePath=cstring)) {.async
     prefetchedTrace = trace
     data.trace = trace
     data.pluginClient.trace = trace
-    await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
-    await loadExistingRecord(trace.recordingId)
+    if await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int)):
+      await loadExistingRecord(trace.recordingId)
   else:
     # Name the path the caller actually asked for, not the dirname.  While
     # `dirname` was the only lookup this handler did, naming it was the same
@@ -1734,8 +1777,8 @@ proc restartDbBackend {.async.} =
   #   and the global ones are ok staying the same as its the same trace:
   #     calltrace/event log/tracpoints
 
-  await prepareForLoadingTrace(data.trace.recordingId, nodeProcess.pid.to(int))
-  await loadExistingRecord(data.trace.recordingId)
+  if await prepareForLoadingTrace(data.trace.recordingId, nodeProcess.pid.to(int)):
+    await loadExistingRecord(data.trace.recordingId)
 
 proc onRestartSubsystem*(sender: JsObject, name: cstring) {.async.} =
   if name == "replay-server" or name == "db-backend":
@@ -1863,9 +1906,8 @@ proc onRunTest*(sender: JsObject, response: RunTestOptions) {.async.} =
           )
         else:
           infoPrint "existing window"
-          await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int))
-
-          await loadExistingRecord(traceId)
+          if await prepareForLoadingTrace(traceId, nodeProcess.pid.to(int)):
+            await loadExistingRecord(traceId)
 
         return
       warnPrint "index: run-test: traced ok, but couldn't extract traceId"

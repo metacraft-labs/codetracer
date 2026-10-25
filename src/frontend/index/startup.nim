@@ -181,6 +181,10 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
     return
 
   # TODO: leave this to backend/DAP if possible
+  # Why the startup trace's replay did not start, or "": reported once the
+  # renderer has its `init` below, because before that it has no window to
+  # show it in.
+  var replayFailure = cstring""
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     if bypass:
       let trace = await electron_vars.app.findTraceWithCodetracer(data.startOptions.recordingID)
@@ -191,7 +195,7 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
-      await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
+      replayFailure = await startReplayForTrace(trace.recordingId, nodeProcess.pid.to(int))
 
   await started()
   let configSnapshot = data.config
@@ -228,7 +232,11 @@ proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
     #   "id": cstring("2")
     # })
 
-    if bypass:
+    if replayFailure.len > 0:
+      # The session has no replay: say so, and load nothing into its panes
+      # (a trace loaded over no backend is the empty editor this replaces).
+      reportTraceLoadFailure(replayFailure)
+    elif bypass:
       if not data.trace.isNil:
         await loadTrace(mainWindow, data.trace, data.config, helpers)
 

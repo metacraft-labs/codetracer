@@ -11,8 +11,14 @@
 ## `CODETRACER_HOME`. The page port is auto-assigned and read back from the
 ## `CODETRACER_HOST_URL=` line, which is also where the generated session
 ## secret comes from, as it would be for an operator.
+##
+## A suite makes its scratch directory with `createHostScratch` (under `/tmp`)
+## and `startHost` refuses a `CODETRACER_HOME` too deep for the Unix sockets
+## the product binds under it (`ct_host_scratch`), before it starts anything.
 
 import std/[httpclient, net, os, osproc, posix, streams, strtabs, strutils, times]
+import ct_host_scratch
+export ct_host_scratch
 
 const
   StartupTimeoutMs* = 120_000
@@ -81,9 +87,17 @@ proc readLog*(path: string): string =
   try: readFile(path) except CatchableError: ""
 
 proc startHost*(scratch: string;
-                extraEnv: openArray[(string, string)] = []): Host =
+                extraEnv: openArray[(string, string)] = [];
+                home = ""): Host =
   ## `ct host` in its own session (so stopping it stops the node index it
   ## starts), its output in a file, and the URL line read from that file.
+  ## Its `CODETRACER_HOME` is `scratch / HomeDirName`, refused when it does
+  ## not fit the socket bound (`requireSocketPathsFit`). `home` names another
+  ## and is used as given, unchecked: for a suite that tests how the product
+  ## meets a home that does not fit.
+  let ctHome = if home.len > 0: home else: scratch / HomeDirName
+  if home.len == 0:
+    requireSocketPathsFit(ctHome)
   result.socketPort = freePort()
   result.logPath = scratch / "ct-host.log"
   var env = newStringTable(modeCaseSensitive)
@@ -92,7 +106,7 @@ proc startHost*(scratch: string;
                "CODETRACER_RECORDING_ID", "CODETRACER_PREFIX", "NODE_PATH"]:
       continue
     env[key] = value
-  env["CODETRACER_HOME"] = scratch / "ct-home"
+  env["CODETRACER_HOME"] = ctHome
   env["XDG_DATA_HOME"] = scratch / "xdg-data"
   env["XDG_CONFIG_HOME"] = scratch / "xdg-config"
   env["TMPDIR"] = scratch

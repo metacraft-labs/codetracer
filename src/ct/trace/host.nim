@@ -1634,3 +1634,9 @@ proc hostCommand*(
   when defined(posix):
     stopForwardingTerminationSignals()
   echo "status code:", exitStatus
+  # The server's failure is `ct host`'s: a server that exits non-zero could
+  # not serve (its session manager could not start, its log says why), and a
+  # supervisor or a test reads that from `ct host`'s exit status, not from a
+  # line in its output.
+  if exitStatus != 0:
+    quit(exitStatus)

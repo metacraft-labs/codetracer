@@ -185,6 +185,36 @@ fn bind_unix_listener(path: &std::path::Path) -> Result<UnixListener, Box<dyn Er
     Ok(UnixListener::bind(path)?)
 }
 
+/// `accept`, the replay's connection to the endpoint it was told to connect
+/// to (`endpoint`: a Unix socket path, or a `host:port` on Windows), unless the replay process `child` (started as
+/// `command`) exits first: then an error saying so, with its exit status.
+///
+/// A replay that dies before it connects (it cannot parse its arguments, a
+/// library it needs is missing) would otherwise leave `accept` waiting for
+/// ever, and it is awaited with the manager's lock held, so the session
+/// manager answered nothing more at all — not the `ct/start-replay`, not a
+/// `ct/ping`.
+async fn accept_unless_exited<T>(
+    child: &mut tokio::process::Child,
+    accept: impl std::future::Future<Output = std::io::Result<T>>,
+    command: &str,
+    endpoint: &(dyn std::fmt::Display + Sync),
+) -> Result<std::io::Result<T>, Box<dyn Error>> {
+    tokio::select! {
+        accepted = accept => Ok(accepted),
+        status = child.wait() => {
+            let status = match status {
+                Ok(status) => status.to_string(),
+                Err(err) => format!("its status could not be read: {err}"),
+            };
+            Err(format!(
+                "the replay process `{command}` exited ({status}) before it connected to {endpoint}"
+            )
+            .into())
+        }
+    }
+}
+
 // TODO: cleanup on exit
 // TODO: Handle signals
 impl BackendManager {
@@ -2091,15 +2121,13 @@ impl BackendManager {
         cmd.creation_flags(CREATE_NO_WINDOW);
 
         let child = cmd.spawn();
-        let child = match child {
+        let mut child = match child {
             Ok(c) => c,
             Err(err) => {
                 error!("Can't start replay: {err}");
                 return Err(Box::new(err));
             }
         };
-
-        self.children[id] = Some(child);
 
         info!("Starting replay with id {id}. Command: {cmd:?}",);
 
@@ -2108,7 +2136,15 @@ impl BackendManager {
 
         info!("Awaiting connection!");
 
-        match listener.accept().await {
+        let accepted = accept_unless_exited(
+            &mut child,
+            listener.accept(),
+            cmd_text,
+            &socket_path.display(),
+        )
+        .await?;
+        self.children[id] = Some(child);
+        match accepted {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
         }
@@ -2225,15 +2261,13 @@ impl BackendManager {
         cmd.creation_flags(CREATE_NO_WINDOW);
 
         let child = cmd.spawn();
-        let child = match child {
+        let mut child = match child {
             Ok(c) => c,
             Err(err) => {
                 error!("Can't start replay: {err}");
                 return Err(Box::new(err));
             }
         };
-
-        self.children[id] = Some(child);
 
         info!("Starting replay with id {id}. Listening on {addr_str}");
 
@@ -2242,7 +2276,10 @@ impl BackendManager {
 
         info!("Awaiting connection!");
 
-        match listener.accept().await {
+        let accepted =
+            accept_unless_exited(&mut child, listener.accept(), cmd_text, &addr_str).await?;
+        self.children[id] = Some(child);
+        match accepted {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
         }
@@ -2466,12 +2503,7 @@ impl BackendManager {
                                                 "replayId": existing_id
                                             }
                                         });
-                                        let client_id = self.lookup_client_for_seq(seq);
-                                        if let Some(cid) = client_id {
-                                            self.send_to_client(cid, response);
-                                        } else {
-                                            self.send_manager_message(response);
-                                        }
+                                        self.answer_request(seq, response);
                                         return Ok(());
                                     }
                                 }
@@ -2488,17 +2520,37 @@ impl BackendManager {
                                             ds.config.max_sessions
                                         )
                                     });
-                                    let client_id = self.lookup_client_for_seq(seq);
-                                    if let Some(cid) = client_id {
-                                        self.send_to_client(cid, response);
-                                    } else {
-                                        self.send_manager_message(response);
-                                    }
+                                    self.answer_request(seq, response);
                                     return Ok(());
                                 }
                             }
 
-                            let replay_id = self.start_replay(command, &cmd_args).await?;
+                            // A start that fails is ANSWERED, like the refusal
+                            // above: the client waits for this response and
+                            // the request has no deadline, so an error only
+                            // logged here left it waiting for ever, and the
+                            // GUI drew its panes over a session with no
+                            // backend.  The message names the cause: a socket
+                            // path too long to bind (`SocketPathTooLong`
+                            // names the path and the limit), a command that
+                            // could not be started.
+                            let replay_id = match self.start_replay(command, &cmd_args).await {
+                                Ok(replay_id) => replay_id,
+                                Err(err) => {
+                                    let message =
+                                        format!("could not start the replay `{command}`: {err}");
+                                    error!("ct/start-replay: {message}");
+                                    let response = json!({
+                                        "type": "response",
+                                        "request_seq": seq,
+                                        "success": false,
+                                        "command": "ct/start-replay",
+                                        "message": message
+                                    });
+                                    self.answer_request(seq, response);
+                                    return Ok(());
+                                }
+                            };
 
                             // Register the session in the session manager.
                             if let Some(ds) = self.daemon_state.as_mut()
@@ -2518,16 +2570,7 @@ impl BackendManager {
                                     "replayId": replay_id
                                 }
                             });
-                            let client_id = self.lookup_client_for_seq(seq);
-                            if self.daemon_state.is_some() {
-                                if let Some(cid) = client_id {
-                                    self.send_to_client(cid, response);
-                                } else {
-                                    self.send_manager_message(response);
-                                }
-                            } else {
-                                self.send_manager_message(response);
-                            }
+                            self.answer_request(seq, response);
                             return Ok(());
                         } else {
                             error!("problem with start-replay: can't process {args:?}");
@@ -2724,6 +2767,17 @@ impl BackendManager {
             }
             "event" | "response" => self.message_selected(message).await,
             _ => self.message_selected(message).await,
+        }
+    }
+
+    /// Sends `response`, the answer to request `seq`, to whoever asked: in
+    /// daemon mode the client that sent it, otherwise (and for a request no
+    /// client is recorded for) the manager channel, which the single-client
+    /// session manager writes to its one connection.
+    fn answer_request(&self, seq: i64, response: Value) {
+        match self.lookup_client_for_seq(seq) {
+            Some(client_id) => self.send_to_client(client_id, response),
+            None => self.send_manager_message(response),
         }
     }
 

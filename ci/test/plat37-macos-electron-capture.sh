@@ -397,53 +397,27 @@ export CODETRACER_PLAT37E_OWNER="${OWNER}"
 export CODETRACER_DEV_TOOLS=0
 
 # ---------------------------------------------------------------------------
-# A SHORT `CODETRACER_HOME`, AND IT IS NOT A TIDINESS PREFERENCE
+# THE FIXTURE'S OWN `CODETRACER_HOME`, WHICH FITS `sun_path`
 # ---------------------------------------------------------------------------
 #
-# MEASURED 2026-10-12, first run of this lane. `src/tests/gui/lib/fixtures.ts`
-# makes its per-worker `CODETRACER_HOME` with `fs.mkdtempSync(os.tmpdir())`,
-# and inside the codetracer dev shell `TMPDIR` is a nested nix-shell scratch:
+# MEASURED 2026-10-12, first run of this lane: the fixture's per-worker
+# `CODETRACER_HOME` was made in `os.tmpdir()`, inside the dev shell a nested
+# nix-shell scratch (`/var/folders/<..>/T/nix-shell.DjiX0m/`), and the replay
+# backend's Unix socket under it was longer than macOS's 104-byte
+# `sockaddr_un.sun_path`. The session manager refused it, and the product drew
+# its shell with an EMPTY editor — zero rendered rows, zero recognised
+# strings, no pane located by the oracle: the exact shape of frame this lane
+# must never grade green.
 #
-#   /var/folders/by/qdc078sx5bn6m3xv734qrjg40000gn/T/nix-shell.DjiX0m/
-#
-# 68 characters before the mkdtemp suffix. The replay backend then binds a
-# Unix-domain socket under it, and macOS's `sockaddr_un.sun_path` is 104
-# bytes. The window opened, the renderer mounted, and the session manager
-# answered:
-#
-#   ERROR [session_manager::backend_manager] Can't handle DAP message.
-#   Error: path must be shorter than SUN_LEN
-#
-# The product then drew its shell with an EMPTY editor — zero rendered rows,
-# zero recognised strings, no pane located by the oracle. That is the exact
-# shape of frame this lane must never grade green, and both the spec's
-# `drawnRows` assertion and the grader's `rendersText` refused it. The frames
-# are only worth capturing once the socket fits.
-#
-# `/tmp/ct-plat37e-$$` is 18 characters. The fixture honours both variables
-# (`CODETRACER_GUI_TEST_CODETRACER_HOME` and
-# `CODETRACER_GUI_TEST_XDG_CONFIG_HOME`); when it creates the directory
-# itself it also deletes it, and when it is given one it does not — so this
-# lane owns the cleanup.
-PLAT37E_HOME="${CODETRACER_PLAT37E_HOME:-/tmp/ct-plat37e-$$}"
-rm -rf "${PLAT37E_HOME}"
-mkdir -p "${PLAT37E_HOME}/home" "${PLAT37E_HOME}/xdg"
-export CODETRACER_GUI_TEST_CODETRACER_HOME="${PLAT37E_HOME}/home"
-export CODETRACER_GUI_TEST_XDG_CONFIG_HOME="${PLAT37E_HOME}/xdg"
-export TMPDIR="${PLAT37E_HOME}"
-# The bound is ASSERTED rather than hoped for, because the failure it guards
-# against is silent in the capture and loud only in a log nobody reads: a
-# window that opened, mounted and drew nothing.
-sun_probe="${CODETRACER_GUI_TEST_CODETRACER_HOME}/tmp/codetracer-backend-0123456789.sock"
-if [ "${#sun_probe}" -ge 104 ]; then
-	fail "the per-run CODETRACER_HOME is ${#sun_probe} characters deep once a
-      backend socket path is appended, and macOS's sun_path limit is 104.
-      The replay backend will fail to bind, the product will draw an EMPTY
-      editor, and the captured frames will be of a session that never
-      attached. Set CODETRACER_PLAT37E_HOME to something shorter."
-fi
-cleanup_home() { rm -rf "${PLAT37E_HOME}"; }
-trap cleanup_home EXIT
+# This lane used to pick a short home itself and assert the bound. It takes
+# the fixture's default now: `src/tests/gui/lib/fixtures.ts` makes the home
+# under `/tmp` and refuses, before it launches anything, one whose longest
+# socket path does not fit — its own or one given in
+# `CODETRACER_GUI_TEST_CODETRACER_HOME` — naming the path, its length and the
+# limit (`src/tests/gui/lib/socket-path-bound.ts`). And a replay that cannot
+# start now fails the session with a `trace-load-error` naming the cause
+# instead of leaving an empty editor, so the frames the spec asserts on are
+# of an attached session or of none.
 # A CAPTURE LANE MEASURES PIXELS, NOT SPEED.
 #
 # `lib/performance-limits.ts` gates every `timed` launch step, and

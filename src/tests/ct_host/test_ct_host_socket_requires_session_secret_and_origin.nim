@@ -48,7 +48,7 @@
 ##
 ## Lane: `ct-host-admission` (`just test-ct-host-admission`).
 
-import std/[json, os, strutils, tempfiles, unittest]
+import std/[json, os, strutils, unittest]
 
 import ct_host_harness
 
@@ -159,7 +159,7 @@ suite "ct host admits only its session secret from its own origin":
     ck fileExists(root / FixtureRelPath)
 
   test "ct host starts and prints its URL with a generated secret":
-    scratch = createTempDir("ct-host-admission-", "")
+    scratch = createHostScratch("ct-host-admission-")
     host = startHost(scratch)
     started = host.secret.len > 0
     checkpoint("page " & host.pageOrigin & ", socket " & $host.socketPort)

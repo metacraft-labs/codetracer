@@ -512,6 +512,41 @@ proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
 
 let runtimePlatform {.importjs: "process.platform", nodecl.}: cstring
 
+proc errorText(error: JsObject): string {.importjs: """
+  (function (e) {
+    if (e === null || e === undefined) { return ''; }
+    return String(e.message !== undefined ? e.message : e);
+  })(#)""".}
+  ## What a Node error says (`message`), or the value itself as text.
+
+proc failStartup(message: string) {.async.} =
+  ## The session this process was started for cannot start: say why and exit
+  ## non-zero, rather than wait for ever or open a window over a session with
+  ## no backend (the session manager is every replay's parent, so without it
+  ## nothing can be shown).
+  ##
+  ## * desktop: the reason on stdout and, outside the test harness, in an
+  ##   error box (an app that disappears without a word is no better than one
+  ##   that never opens); then the app exits 1.
+  ## * `ct host`: every connected page is told the reason
+  ##   (`CODETRACER::connection-disconnected`), and the server exits 1, which
+  ##   `ct host` hands on as its own exit status (`trace/host.nim`), so a
+  ##   supervisor or a test sees a cause rather than a session that never
+  ##   starts.
+  errorPrint "index: cannot start: ", message
+  stopBackendManager()
+  when defined(server):
+    if not serverClients.isNil:
+      serverClients.disconnectAll(cstring"server-error", cstring(message))
+      # An emit is written when the event loop next runs: give the pages'
+      # sockets a moment to carry the reason before the process ends.
+      await asyncSleep(250)
+    nodeProcess.exit(1)
+  else:
+    if not data.startOptions.inTest:
+      electron.dialog.showErrorBox(cstring"CodeTracer cannot start", cstring(message))
+    electron_vars.app.exit(1)
+
 proc ready*(): Future[void] {.async.} =
   infoPrint "index: ready start"
   infoPrint "index: backendManagerExe = ", backendManagerExe
@@ -532,8 +567,21 @@ proc ready*(): Future[void] {.async.} =
     backendManagerProcess = backendManager.value
     infoPrint "index: session-manager started, pid = ", $backendManagerProcess.pid
   else:
-    errorPrint "index: session-manager FAILED to start: ", backendManager.error
-    errorPrint "index: backendManagerExe was: ", backendManagerExe
+    await failStartup(fmt"the session-manager {backendManagerExe} could not be started: " &
+      errorText(backendManager.error))
+    return
+
+  # The session manager listens where the wait below looks only once it has
+  # bound its socket, and it EXITS when it cannot: a socket path longer than
+  # a socket address holds (`sockaddr_un.sun_path`, under a deep
+  # `CODETRACER_HOME`) is refused by name, on its stderr, which this process
+  # shares. The wait used to retry for ever and no window opened, so its exit
+  # ends the wait, with the path waited on and the exit status.
+  var sessionManagerExit = ""
+  backendManagerProcess.toJs.on(cstring"exit", proc(code: JsObject, signal: JsObject) =
+    sessionManagerExit =
+      if not signal.isNil and not signal.isUndefined: "signal " & errorText(signal)
+      else: "code " & errorText(code))
 
   if runtimePlatform == cstring"win32":
     # On Windows, the session-manager uses TCP on localhost.
@@ -552,6 +600,10 @@ proc ready*(): Future[void] {.async.} =
           backendManagerSocket = await startTcpSocket(cstring"127.0.0.1", port)
           if not backendManagerSocket.isNil:
             break
+      if sessionManagerExit.len > 0:
+        await failStartup(fmt"the session-manager {backendManagerExe} exited ({sessionManagerExit}) " &
+          fmt"before it wrote its port file {portFilePath}")
+        return
       socketAttempt += 1
       if socketAttempt mod 5 == 0:
         infoPrint "index: still waiting for session-manager TCP port (attempt ", $socketAttempt, ")"
@@ -568,6 +620,11 @@ proc ready*(): Future[void] {.async.} =
       backendManagerSocket = await startSocket(backendManagerSocketPath)
       if not backendManagerSocket.isNil:
         break
+      if sessionManagerExit.len > 0:
+        await failStartup(fmt"the session-manager {backendManagerExe} exited ({sessionManagerExit}) " &
+          fmt"before its socket {backendManagerSocketPath} appeared " &
+          fmt"({backendManagerSocketPath.len} bytes); its own message is above")
+        return
       socketAttempt += 1
       if socketAttempt mod 5 == 0:
         infoPrint "index: still waiting for session-manager socket (attempt ", $socketAttempt, ")"

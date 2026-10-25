@@ -71,8 +71,13 @@
 ##
 ## Lane: `ct-host-manifest` (`just test-ct-host-manifest`).
 
-import std/[httpclient, json, net, os, osproc, posix, streams, strtabs, strutils, tempfiles,
+import std/[httpclient, json, net, os, osproc, posix, streams, strtabs, strutils,
             times, unittest]
+
+# The scratch directory under `/tmp`, and the check that its `CODETRACER_HOME`
+# leaves room for the session manager's Unix sockets (`sun_path`): shared with
+# the `ct-host-admission` suites.
+import ../ct_host/ct_host_scratch
 
 # One line: `ci/lib/run-nim-test-lane.sh` reads this spelling as the runtime
 # assertion count.
@@ -179,6 +184,8 @@ proc launchHost(scratch, manifestPath: string;
   ## `ct host --manifest` in its own session (so stopping it stops the node
   ## index it starts), its output in a file. A non-empty `startSliceKeyEnv` is
   ## exported as `CODETRACER_START_SLICE_KEY`, as the replay agent does.
+  let ctHome = scratch / HomeDirName
+  requireSocketPathsFit(ctHome)
   result.socketPort = freePort()
   result.logPath = scratch / "ct-host.log"
   var env = newStringTable(modeCaseSensitive)
@@ -189,7 +196,7 @@ proc launchHost(scratch, manifestPath: string;
         key.startsWith("CODETRACER_START_"):
       continue
     env[key] = value
-  env["CODETRACER_HOME"] = scratch / "ct-home"
+  env["CODETRACER_HOME"] = ctHome
   env["XDG_DATA_HOME"] = scratch / "xdg-data"
   env["XDG_CONFIG_HOME"] = scratch / "xdg-config"
   env["TMPDIR"] = scratch
@@ -314,7 +321,7 @@ proc hostSession(replayStart: JsonNode; startSliceKeyEnv = ""):
     tuple[seen: JsonNode, log: string] =
   ## Hosts a manifest with `replayStart` (and `startSliceKeyEnv` in `ct host`'s
   ## environment), opens one session on it, and stops it.
-  let scratch = createTempDir("ct-host-manifest-", "")
+  let scratch = createHostScratch("ct-host-manifest-")
   var host: Host
   try:
     host = launchHost(scratch, writeStore(scratch, replayStart), startSliceKeyEnv)
@@ -331,7 +338,7 @@ proc refusedHost(replayStart: JsonNode; startSliceKeyEnv = ""):
   ## environment) that `ct host` is expected to refuse: waits for it to exit,
   ## and returns its exit code (-1: still running at the deadline, i.e. it
   ## hosted something) and its output.
-  let scratch = createTempDir("ct-host-manifest-", "")
+  let scratch = createHostScratch("ct-host-manifest-")
   var host: Host
   try:
     host = launchHost(scratch, writeStore(scratch, replayStart), startSliceKeyEnv)
