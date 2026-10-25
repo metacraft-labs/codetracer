@@ -6676,9 +6676,13 @@ ensure-ct-native-replay:
 #
 # The ``ensure-*`` prerequisites build the sibling binaries; this recipe
 # then makes them discoverable to the Rust tests:
-#   * ``test_harness::is_mcr_available()`` requires ``ct-mcr`` ON PATH
-#     (it ignores CODETRACER_CT_MCR_CMD), so we symlink the recorder's
-#     ct_cli as ``ct-mcr`` into a scratch dir prepended to PATH.
+#   * ``test_harness::find_ct_mcr()`` (behind ``is_mcr_available()``)
+#     takes CODETRACER_CT_MCR_CMD or ``ct-mcr`` / ``ct_cli`` on PATH, and
+#     when either names the workspace sibling's own ct_cli it refreshes it
+#     with ``scripts/build-siblings.sh --only codetracer-native-recorder/ct-mcr``
+#     (a stamp check after ``ensure-ct-mcr``). The ``ct-mcr`` symlink below
+#     is for the backend-manager tests and other callers that look the
+#     binary up by that name.
 #   * ``test_harness::find_ct_native_replay()`` honours CT_NATIVE_REPLAY_PATH
 #     first, then PATH, then ``../../codetracer-native-backend/target/
 #     debug``; we export the explicit path so the right binary is used.

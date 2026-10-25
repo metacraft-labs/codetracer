@@ -2045,22 +2045,21 @@ pub fn is_ttd_available() -> bool {
     false
 }
 
-/// Check if the MCR recording backend is available.
+/// Whether the MCR recording backend is available: `ct-native-replay` and the
+/// MCR CLI (`ct-mcr`), each found or PROVISIONED by its finder
+/// ([`find_ct_native_replay`], [`find_ct_mcr`]).
 ///
-/// MCR requires `ct-native-replay` plus the MCR CLI. Development builds expose
-/// that CLI as `ct_cli` and export `CODETRACER_CT_MCR_CMD`; production builds
-/// usually expose it as `ct-mcr`.
+/// Both finders build the workspace sibling when no override names a tool,
+/// and panic naming the remedy when it is not checked out or does not build,
+/// so this answers `true` or panics. It used to answer `false` whenever
+/// nobody had built `ct-mcr`, and the MCR suites then skipped, which cargo
+/// reports as a pass: the D and Nim streaming-flow tests "passed" that way
+/// while both failed as soon as `ct-mcr` was built (codetracer-pm issue
+/// 2026-10-24-d-and-nim-mcr-streaming-flow-tests-fail-once-ct-mcr-is-built.md).
+/// The `bool` stays for the callers, which still route a `false` through
+/// `skip_or_fail_missing_prerequisite`.
 pub fn is_mcr_available() -> bool {
-    if find_ct_native_replay().is_none() {
-        return false;
-    }
-    if let Ok(path) = env::var("CODETRACER_CT_MCR_CMD") {
-        let p = PathBuf::from(path);
-        if p.exists() && p.is_file() {
-            return true;
-        }
-    }
-    find_on_path("ct-mcr").is_some() || find_on_path("ct_cli").is_some()
+    find_ct_native_replay().is_some() && find_ct_mcr().is_some()
 }
 
 /// The start of the line `ct-mcr debugserver <trace>` prints, before it
@@ -2072,16 +2071,88 @@ pub fn is_mcr_available() -> bool {
 /// (XMR-B1, decision D9 of HS-M2), which the refusal names.
 pub const MCR_LINUX_MULTI_THREAD_REFUSAL: &str = "error: trace mode cannot serve this recording: ";
 
-/// The `ct-mcr` binary the MCR backend uses: `CODETRACER_CT_MCR_CMD`, else
-/// `ct-mcr` or `ct_cli` on `PATH` (the lookup of [`is_mcr_available`]).
+/// The environment variable that names the `ct-mcr` binary to every process
+/// that records or replays MCR traces: `ct-native-replay`
+/// (`codetracer-native-backend/src/mcr_record.rs`), `ct`, and these tests.
+pub const CT_MCR_CMD_ENV: &str = "CODETRACER_CT_MCR_CMD";
+
+/// The `ct-mcr` binary (codetracer-native-recorder's `ct_cli`) the MCR
+/// backend uses, and the one every process this test starts will use.
+///
+/// Search order, the rule of the other sibling finders (see "Provisioning
+/// workspace siblings" above):
+///
+/// 1. `CODETRACER_CT_MCR_CMD`, unless it names the workspace sibling's own
+///    build: an explicit override, used as given and never built. It must
+///    name a file; a dangling override panics rather than being ignored.
+/// 2. `ct-mcr` or `ct_cli` on `PATH`, unless the hit is the workspace
+///    sibling's own build.
+/// 3. The workspace's `codetracer-native-recorder` sibling, PROVISIONED: built
+///    or refreshed by `scripts/build-siblings.sh --only
+///    codetracer-native-recorder/ct-mcr` (see [`provision_sibling`]), which
+///    panics naming the remedy when the sibling is not checked out or does not
+///    build.
+///
+/// Steps 1 and 2 defer to step 3 for a hit inside the sibling because that is
+/// what the codetracer dev shell supplies (`scripts/detect-siblings.sh`
+/// exports `CODETRACER_CT_MCR_CMD` and puts `ct_cli/` on `PATH` whenever the
+/// sibling has been built once): it says the sibling was built at some point,
+/// not that the build is current.
+///
+/// Whatever was chosen is exported as `CODETRACER_CT_MCR_CMD` in this
+/// process, so the `ct-native-replay` and db-backend processes the test
+/// starts (directly, or through `ct-dap-client`'s runners) record and replay
+/// with the same binary instead of looking it up again.
+///
+/// So this returns `Some` or panics; the `Option` stays for the callers.
 pub fn find_ct_mcr() -> Option<PathBuf> {
-    if let Ok(path) = env::var("CODETRACER_CT_MCR_CMD") {
-        let p = PathBuf::from(path);
-        if p.is_file() {
-            return Some(p);
-        }
+    const SIBLING: &str = "codetracer-native-recorder";
+    let chosen = if let Some(path) = env::var_os(CT_MCR_CMD_ENV).filter(|value| !value.is_empty())
+        && !is_in_workspace_sibling(Path::new(&path), SIBLING)
+    {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_file(),
+            "{CT_MCR_CMD_ENV}='{}' does not name a file. Unset it to build the workspace's \
+             {SIBLING}/ct_cli/ct_cli, or point it at a ct-mcr binary.",
+            path.display()
+        );
+        path
+    } else if let Some(path) = find_on_path("ct-mcr")
+        .or_else(|| find_on_path("ct_cli"))
+        .filter(|path| !is_in_workspace_sibling(path, SIBLING))
+    {
+        path
+    } else {
+        // The artifact is the one build-siblings.sh's entry names
+        // (`just build-ct-mcr` builds ct_cli in place).
+        provision_sibling(
+            "codetracer-native-recorder/ct-mcr",
+            SIBLING,
+            &format!("ct_cli/ct_cli{}", std::env::consts::EXE_SUFFIX),
+        )
+    };
+    export_ct_mcr_cmd(&chosen);
+    Some(chosen)
+}
+
+/// Export `ct_mcr` as `CODETRACER_CT_MCR_CMD` for every process this test
+/// process starts from now on (see [`find_ct_mcr`]). A no-op when the
+/// variable already names it, which is the case in the codetracer dev shell
+/// once the sibling has been built.
+fn export_ct_mcr_cmd(ct_mcr: &Path) {
+    if env::var_os(CT_MCR_CMD_ENV).is_some_and(|current| Path::new(&current) == ct_mcr) {
+        return;
     }
-    find_on_path("ct-mcr").or_else(|| find_on_path("ct_cli"))
+    // SAFETY: the same process-wide export `ensure_replay_license_bypass`
+    // makes, with the same argument. Edition 2024 marks `set_var` unsafe
+    // because a thread reading the environment through libc at the same
+    // moment can observe it mid-update. Rust's own readers (`env::var`,
+    // `Command::spawn`) take the standard library's environment lock, which
+    // `set_var` holds, and the value written is the same for every test of
+    // this binary (`provision_once` caches it), so a test that reads it
+    // before or after sees a usable binary either way.
+    unsafe { env::set_var(CT_MCR_CMD_ENV, ct_mcr) };
 }
 
 /// For an MCR flow test of a program that always runs several threads (a Go
