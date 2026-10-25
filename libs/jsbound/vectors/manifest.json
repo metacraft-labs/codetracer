@@ -65,6 +65,13 @@
       "name": "ws_message"
     },
     {
+      "bytes": "ws_message_event_stream.bin",
+      "class": "valid",
+      "description": "one WsMessage record at seq 1",
+      "expected": "ws_message_event_stream.json",
+      "name": "ws_message_event_stream"
+    },
+    {
       "bytes": "storage_read.bin",
       "class": "valid",
       "description": "one StorageRead record at seq 1",
@@ -154,6 +161,13 @@
       "description": "one DocTask record at seq 1",
       "expected": "doc_task.json",
       "name": "doc_task"
+    },
+    {
+      "bytes": "platform_value.bin",
+      "class": "valid",
+      "description": "one PlatformValue record at seq 1",
+      "expected": "platform_value.json",
+      "name": "platform_value"
     },
     {
       "bytes": "gap.bin",
@@ -408,49 +422,49 @@
     },
     {
       "base": "enum_greatest",
-      "bytes": "enum_task_kind_13.bin",
+      "bytes": "enum_task_kind_14.bin",
       "class": "refusal",
-      "description": "Task.kind is 13, one past its greatest value (1 to 12)",
-      "expected": "enum_task_kind_13.json",
-      "name": "enum_task_kind_13"
+      "description": "Task.kind is 14, one past its greatest value (1 to 13)",
+      "expected": "enum_task_kind_14.json",
+      "name": "enum_task_kind_14"
     },
     {
       "base": "enum_greatest",
       "bytes": "enum_task_kind_0.bin",
       "class": "refusal",
-      "description": "Task.kind is 0, one before its least value (1 to 12)",
+      "description": "Task.kind is 0, one before its least value (1 to 13)",
       "expected": "enum_task_kind_0.json",
       "name": "enum_task_kind_0"
     },
     {
       "base": "enum_greatest",
-      "bytes": "enum_task_reg_kind_13.bin",
+      "bytes": "enum_task_reg_kind_14.bin",
       "class": "refusal",
-      "description": "TaskReg.kind is 13, one past its greatest value (1 to 12)",
-      "expected": "enum_task_reg_kind_13.json",
-      "name": "enum_task_reg_kind_13"
+      "description": "TaskReg.kind is 14, one past its greatest value (1 to 13)",
+      "expected": "enum_task_reg_kind_14.json",
+      "name": "enum_task_reg_kind_14"
     },
     {
       "base": "enum_greatest",
       "bytes": "enum_task_reg_kind_0.bin",
       "class": "refusal",
-      "description": "TaskReg.kind is 0, one before its least value (1 to 12)",
+      "description": "TaskReg.kind is 0, one before its least value (1 to 13)",
       "expected": "enum_task_reg_kind_0.json",
       "name": "enum_task_reg_kind_0"
     },
     {
       "base": "enum_greatest",
-      "bytes": "enum_clock_src_6.bin",
+      "bytes": "enum_clock_src_8.bin",
       "class": "refusal",
-      "description": "Clock.src is 6, one past its greatest value (1 to 5)",
-      "expected": "enum_clock_src_6.json",
-      "name": "enum_clock_src_6"
+      "description": "Clock.src is 8, one past its greatest value (1 to 7)",
+      "expected": "enum_clock_src_8.json",
+      "name": "enum_clock_src_8"
     },
     {
       "base": "enum_greatest",
       "bytes": "enum_clock_src_0.bin",
       "class": "refusal",
-      "description": "Clock.src is 0, one before its least value (1 to 5)",
+      "description": "Clock.src is 0, one before its least value (1 to 7)",
       "expected": "enum_clock_src_0.json",
       "name": "enum_clock_src_0"
     },
@@ -504,6 +518,22 @@
     },
     {
       "base": "enum_greatest",
+      "bytes": "enum_net_response_redirected_2.bin",
+      "class": "refusal",
+      "description": "NetResponse.redirected is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_net_response_redirected_2.json",
+      "name": "enum_net_response_redirected_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_response_type_7.bin",
+      "class": "refusal",
+      "description": "NetResponse.response_type is 7, one past its greatest value (0 to 6)",
+      "expected": "enum_net_response_response_type_7.json",
+      "name": "enum_net_response_response_type_7"
+    },
+    {
+      "base": "enum_greatest",
       "bytes": "enum_ws_message_dir_5.bin",
       "class": "refusal",
       "description": "WsMessage.dir is 5, one past its greatest value (1 to 4)",
@@ -517,6 +547,14 @@
       "description": "WsMessage.dir is 0, one before its least value (1 to 4)",
       "expected": "enum_ws_message_dir_0.json",
       "name": "enum_ws_message_dir_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_ws_message_frame_3.bin",
+      "class": "refusal",
+      "description": "WsMessage.frame is 3, one past its greatest value (0 to 2)",
+      "expected": "enum_ws_message_frame_3.json",
+      "name": "enum_ws_message_frame_3"
     },
     {
       "base": "enum_greatest",
@@ -709,6 +747,22 @@
       "description": "DocTask.kind is 0, one before its least value (1 to 4)",
       "expected": "enum_doc_task_kind_0.json",
       "name": "enum_doc_task_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_platform_value_src_7.bin",
+      "class": "refusal",
+      "description": "PlatformValue.src is 7, one past its greatest value (1 to 6)",
+      "expected": "enum_platform_value_src_7.json",
+      "name": "enum_platform_value_src_7"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_platform_value_src_0.bin",
+      "class": "refusal",
+      "description": "PlatformValue.src is 0, one before its least value (1 to 6)",
+      "expected": "enum_platform_value_src_0.json",
+      "name": "enum_platform_value_src_0"
     }
   ],
   "vocab": 1

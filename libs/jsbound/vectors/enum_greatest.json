@@ -29,14 +29,14 @@
       "viewport_w": 1280
     },
     {
-      "kind": 12,
+      "kind": 13,
       "record": "Task",
       "seq": "1",
       "task_id": "7"
     },
     {
       "delay_ms": 16.5,
-      "kind": 12,
+      "kind": 13,
       "record": "TaskReg",
       "seq": "2",
       "task_id": "7"
@@ -45,7 +45,7 @@
       "bits": "4790036467422310400",
       "record": "Clock",
       "seq": "3",
-      "src": 5
+      "src": 7
     },
     {
       "bytes": "007f80ff10203040",
@@ -70,9 +70,13 @@
       "headers": "[[\"content-type\",\"application/json\"]]",
       "outcome": 5,
       "record": "NetResponse",
+      "redirected": 1,
       "req_id": "3",
+      "response_type": 6,
       "seq": "6",
-      "status": 200
+      "status": 200,
+      "status_text": "OK",
+      "url": "https://api.shop.example/cart/v2?item=…"
     },
     {
       "body": {
@@ -83,9 +87,13 @@
       "headers": "[]",
       "outcome": 5,
       "record": "NetResponse",
+      "redirected": 1,
       "req_id": "4",
+      "response_type": 6,
       "seq": "7",
-      "status": 200
+      "status": 200,
+      "status_text": "",
+      "url": ""
     },
     {
       "data": {
@@ -93,22 +101,38 @@
         "kind": "inline"
       },
       "dir": 4,
+      "event": "",
+      "frame": 2,
+      "last_event_id": "",
       "record": "WsMessage",
       "req_id": "5",
       "seq": "8"
+    },
+    {
+      "data": {
+        "bytes": "7b22657572223a392e357d",
+        "kind": "inline"
+      },
+      "dir": 4,
+      "event": "price-tick",
+      "frame": 2,
+      "last_event_id": "17",
+      "record": "WsMessage",
+      "req_id": "6",
+      "seq": "9"
     },
     {
       "area": 3,
       "key": "cart",
       "present": 2,
       "record": "StorageRead",
-      "seq": "9",
+      "seq": "10",
       "value": "[42]"
     },
     {
       "prop": "getBoundingClientRect",
       "record": "LayoutRead",
-      "seq": "10",
+      "seq": "11",
       "target": "iid:buy-button",
       "value": "{\"x\":10,\"y\":20,\"width\":120,\"height\":40}"
     },
@@ -116,7 +140,7 @@
       "label": "Купи",
       "props": "{\"button\":0,\"clientX\":70,\"clientY\":40}",
       "record": "Input",
-      "seq": "11",
+      "seq": "12",
       "target": "iid:buy-button",
       "task_id": "9",
       "type": "click"
@@ -124,7 +148,7 @@
     {
       "effect": 6,
       "record": "DomEffect",
-      "seq": "12",
+      "seq": "13",
       "target": "iid:email",
       "value": "\"ada@example.com\""
     },
@@ -133,12 +157,12 @@
       "ordinal": 0,
       "record": "Checkpoint",
       "scheme": "isonim-signals/1",
-      "seq": "13",
+      "seq": "14",
       "state_hash": "0f1e2d3c"
     },
     {
-      "first_seq": "14",
-      "last_seq": "16",
+      "first_seq": "15",
+      "last_seq": "17",
       "reason": 3,
       "record": "Gap"
     },
@@ -146,12 +170,12 @@
       "detail": "new Worker('w.js')",
       "feature": "WebWorker",
       "record": "Refusal",
-      "seq": "17"
+      "seq": "18"
     },
     {
       "kind": 5,
       "record": "Navigation",
-      "seq": "18",
+      "seq": "19",
       "url": "https://shop.example/checkout/pay"
     },
     {
@@ -159,20 +183,20 @@
       "kind": 2,
       "message": "TypeError: cannot read {0} of undefined",
       "record": "Error",
-      "seq": "19"
+      "seq": "20"
     },
     {
       "class": 4,
       "length": 16,
       "record": "Scrubbed",
-      "seq": "20",
+      "seq": "21",
       "target": "iid:card"
     },
     {
       "data": "{\"experiment\":\"hero\",\"arm\":\"b\"}",
       "name": "exposure",
       "record": "Mark",
-      "seq": "21"
+      "seq": "22"
     },
     {
       "event": 7,
@@ -180,7 +204,7 @@
       "loaded": "65536",
       "record": "XhrEvent",
       "req_id": "3",
-      "seq": "22",
+      "seq": "23",
       "target": 2,
       "total": "2097152"
     },
@@ -189,16 +213,24 @@
       "phase": 3,
       "record": "Loading",
       "scripts": 2,
-      "seq": "23"
+      "seq": "24"
     },
     {
       "kind": 4,
       "record": "DocTask",
-      "seq": "24",
+      "seq": "25",
       "src": "https://shop.example/assets/app.js"
     },
     {
-      "last_seq": "24",
+      "query": "callback",
+      "record": "PlatformValue",
+      "seq": "26",
+      "src": 6,
+      "task_id": "11",
+      "value": "[{\"target\":\"path:#hero\",\"isIntersecting\":true,\"intersectionRatio\":0.5}]"
+    },
+    {
+      "last_seq": "26",
       "reason": 4,
       "record": "End"
     }

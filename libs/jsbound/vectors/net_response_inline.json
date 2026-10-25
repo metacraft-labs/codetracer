@@ -36,9 +36,13 @@
       "headers": "[[\"content-type\",\"application/json\"]]",
       "outcome": 1,
       "record": "NetResponse",
+      "redirected": 1,
       "req_id": "3",
+      "response_type": 2,
       "seq": "1",
-      "status": 200
+      "status": 200,
+      "status_text": "OK",
+      "url": "https://api.shop.example/cart/v2?item=…"
     },
     {
       "last_seq": "1",

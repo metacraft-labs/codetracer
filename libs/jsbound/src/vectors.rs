@@ -195,6 +195,10 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 req_id: 3,
                 outcome: 1,
                 status: 200,
+                status_text: "OK".into(),
+                url: "https://api.shop.example/cart/v2?item=…".into(),
+                redirected: 1,
+                response_type: 2,
                 headers: r#"[["content-type","application/json"]]"#.into(),
                 body: BlobRef::Inline(br#"{"ok":true}"#.to_vec()),
             },
@@ -206,6 +210,10 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 req_id: 4,
                 outcome: 1,
                 status: 200,
+                status_text: String::new(),
+                url: String::new(),
+                redirected: 0,
+                response_type: 0,
                 headers: "[]".into(),
                 body: BlobRef::Ref {
                     sha256: Sha256::digest(vec![b'x'; 2048]).into(),
@@ -219,7 +227,22 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 seq,
                 req_id: 5,
                 dir: 1,
+                frame: 2,
+                event: String::new(),
+                last_event_id: String::new(),
                 data: BlobRef::Inline(b"ping".to_vec()),
+            },
+        ),
+        (
+            "ws_message_event_stream",
+            Record::WsMessage {
+                seq,
+                req_id: 6,
+                dir: 1,
+                frame: 1,
+                event: "price-tick".into(),
+                last_event_id: "17".into(),
+                data: BlobRef::Inline(br#"{"eur":9.5}"#.to_vec()),
             },
         ),
         (
@@ -343,6 +366,17 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 src: "https://shop.example/assets/app.js".into(),
             },
         ),
+        (
+            "platform_value",
+            Record::PlatformValue {
+                seq,
+                src: 1,
+                task_id: 11,
+                query: "callback".into(),
+                value: r#"[{"target":"path:#hero","isIntersecting":true,"intersectionRatio":0.5}]"#
+                    .into(),
+            },
+        ),
     ]
 }
 
@@ -454,6 +488,9 @@ fn xhr_events_records() -> Vec<Record> {
         seq,
         req_id: 1,
         dir: 1,
+        frame: 0,
+        event: String::new(),
+        last_event_id: String::new(),
         data: BlobRef::Inline(data.to_vec()),
     };
     vec![
@@ -487,6 +524,10 @@ fn xhr_events_records() -> Vec<Record> {
             req_id: 1,
             outcome: 5,
             status: 200,
+            status_text: String::new(),
+            url: String::new(),
+            redirected: 0,
+            response_type: 0,
             headers: r#"[["content-type","text/plain"]]"#.into(),
             body: BlobRef::Inline(Vec::new()),
         },
@@ -501,6 +542,9 @@ fn xhr_events_records() -> Vec<Record> {
             seq: 20,
             req_id: 1,
             dir: 4,
+            frame: 0,
+            event: String::new(),
+            last_event_id: String::new(),
             data: BlobRef::Inline(br#"{"outcome":1}"#.to_vec()),
         },
         xhr_event(21, 1, 2, 9, 0, 0),
@@ -550,6 +594,9 @@ fn streamed_response_records() -> Vec<Record> {
         seq,
         req_id: 1,
         dir: 1,
+        frame: 0,
+        event: String::new(),
+        last_event_id: String::new(),
         data: BlobRef::Inline(data.to_vec()),
     };
     vec![
@@ -579,6 +626,10 @@ fn streamed_response_records() -> Vec<Record> {
             req_id: 1,
             outcome: 5,
             status: 200,
+            status_text: String::new(),
+            url: String::new(),
+            redirected: 0,
+            response_type: 0,
             headers: r#"[["content-type","text/plain"]]"#.into(),
             body: BlobRef::Inline(Vec::new()),
         },
@@ -593,6 +644,9 @@ fn streamed_response_records() -> Vec<Record> {
             seq: 8,
             req_id: 1,
             dir: 4,
+            frame: 0,
+            event: String::new(),
+            last_event_id: String::new(),
             data: BlobRef::Inline(br#"{"outcome":1}"#.to_vec()),
         },
         end(8),
@@ -694,7 +748,8 @@ fn set_seq(r: &mut Record, value: u64) {
         | Record::Mark { seq, .. }
         | Record::XhrEvent { seq, .. }
         | Record::Loading { seq, .. }
-        | Record::DocTask { seq, .. } => *seq = value,
+        | Record::DocTask { seq, .. }
+        | Record::PlatformValue { seq, .. } => *seq = value,
         _ => panic!("set_seq on a record without seq"),
     }
 }
@@ -766,6 +821,10 @@ fn decoding_vectors() -> Vec<Vector> {
                 req_id: 1,
                 outcome: 1,
                 status: 200,
+                status_text: String::new(),
+                url: String::new(),
+                redirected: 0,
+                response_type: 0,
                 headers: "[]".into(),
                 body: BlobRef::Inline(vec![b'a'; MAX_INLINE_BLOB]),
             },
@@ -1011,6 +1070,10 @@ fn refusal_vectors(valid: &BTreeMap<String, Vector>) -> Vec<Vector> {
                     req_id: 1,
                     outcome: 1,
                     status: 200,
+                    status_text: String::new(),
+                    url: String::new(),
+                    redirected: 0,
+                    response_type: 0,
                     headers: "[]".into(),
                     body: BlobRef::Inline(vec![b'a'; MAX_INLINE_BLOB + 1]),
                 });

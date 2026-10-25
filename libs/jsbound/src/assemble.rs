@@ -319,8 +319,8 @@ fn is_uuid_v7(id: &str) -> bool {
 }
 
 /// `meta.dat`'s `program`: the page's origin and path, query and fragment
-/// removed (§5.1). `Env.url` is already recorded that way; this strips
-/// defensively.
+/// removed (§5.1). `Env.url` keeps them (the page reads them, and replay
+/// loads the page at that URL, §5.2, §7.4); the program does not.
 fn program_of(url: &str) -> &str {
     let end = url.find(['?', '#']).unwrap_or(url.len());
     &url[..end]

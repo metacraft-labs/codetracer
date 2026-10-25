@@ -34,6 +34,9 @@
         "kind": "inline"
       },
       "dir": 1,
+      "event": "",
+      "frame": 2,
+      "last_event_id": "",
       "record": "WsMessage",
       "req_id": "5",
       "seq": "1"

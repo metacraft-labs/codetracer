@@ -37,9 +37,13 @@
       "headers": "[]",
       "outcome": 1,
       "record": "NetResponse",
+      "redirected": 0,
       "req_id": "4",
+      "response_type": 0,
       "seq": "1",
-      "status": 200
+      "status": 200,
+      "status_text": "",
+      "url": ""
     },
     {
       "last_seq": "1",

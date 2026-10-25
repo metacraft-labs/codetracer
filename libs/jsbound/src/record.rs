@@ -199,13 +199,25 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     // §10.4: 0 no preference, 1 light, 2 dark; 1 when reduced motion.
     ("Env", "color_scheme", 0, 2),
     ("Env", "reduced_motion", 0, 1),
-    ("Task", "kind", 1, 12),
-    ("TaskReg", "kind", 1, 12),
-    ("Clock", "src", 1, 5),
+    // 13 a platform task: a promise the platform settles in a task of its
+    // own (a whole-body read of a `Blob`, a `Request` or a `Response` the
+    // page made; `crypto.subtle.digest`).
+    ("Task", "kind", 1, 13),
+    ("TaskReg", "kind", 1, 13),
+    // 6 `IdleDeadline.timeRemaining()`, 7 `performance.timeOrigin`.
+    ("Clock", "src", 1, 7),
     ("Random", "src", 1, 3),
     ("NetRequest", "api", 1, 5),
     ("NetResponse", "outcome", 1, 5),
+    // A boolean: the response is the result of a redirect.
+    ("NetResponse", "redirected", 0, 1),
+    // 0 none (not a `fetch` response), then the Fetch standard's response
+    // types: 1 basic, 2 cors, 3 default, 4 error, 5 opaque, 6 opaqueredirect.
+    ("NetResponse", "response_type", 0, 6),
     ("WsMessage", "dir", 1, 4),
+    // 0 not a message (a piece of a body, a close, a body's end), 1 a text
+    // message, 2 a binary message.
+    ("WsMessage", "frame", 0, 2),
     ("StorageRead", "area", 1, 3),
     ("StorageRead", "present", 0, 2),
     ("DomEffect", "effect", 1, 6),
@@ -226,6 +238,10 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     // 3 load, 4 a script ran that wrote no record while it ran (written when
     // it settled).
     ("DocTask", "kind", 1, 4),
+    // 1 IntersectionObserver entries, 2 ResizeObserver entries, 3
+    // MutationObserver records, 4 PerformanceObserver entries, 5 a read of
+    // the performance timeline, 6 `IdleDeadline.didTimeout`.
+    ("PlatformValue", "src", 1, 6),
 ];
 
 /// The value set of `record`.`field`, if it is an enumerated field.
@@ -443,8 +459,27 @@ define_records! {
     0x44 => Clock { seq: u64, src: u8, bits: u64 },
     0x45 => Random { seq: u64, src: u8, bytes: Vec<u8> },
     0x46 => NetRequest { seq: u64, req_id: u64, api: u8, method: String, url: String, body_digest: String },
-    0x47 => NetResponse { seq: u64, req_id: u64, outcome: u8, status: u16, headers: String, body: BlobRef },
-    0x48 => WsMessage { seq: u64, req_id: u64, dir: u8, data: BlobRef },
+    0x47 => NetResponse {
+        seq: u64,
+        req_id: u64,
+        outcome: u8,
+        status: u16,
+        status_text: String,
+        url: String,
+        redirected: u8,
+        response_type: u8,
+        headers: String,
+        body: BlobRef,
+    },
+    0x48 => WsMessage {
+        seq: u64,
+        req_id: u64,
+        dir: u8,
+        frame: u8,
+        event: String,
+        last_event_id: String,
+        data: BlobRef,
+    },
     0x49 => StorageRead { seq: u64, area: u8, key: String, present: u8, value: String },
     0x4A => LayoutRead { seq: u64, target: String, prop: String, value: String },
     0x4B => Input { seq: u64, task_id: u64, r#type: String, target: String, props: String, label: String },
@@ -467,6 +502,7 @@ define_records! {
     },
     0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32 },
     0x58 => DocTask { seq: u64, kind: u8, src: String },
+    0x59 => PlatformValue { seq: u64, src: u8, task_id: u64, query: String, value: String },
     0x5F => End { last_seq: u64, reason: u8 },
 }
 
@@ -567,7 +603,8 @@ impl Record {
             | Record::Mark { seq, .. }
             | Record::XhrEvent { seq, .. }
             | Record::Loading { seq, .. }
-            | Record::DocTask { seq, .. } => Some(*seq),
+            | Record::DocTask { seq, .. }
+            | Record::PlatformValue { seq, .. } => Some(*seq),
         }
     }
 
@@ -611,7 +648,7 @@ mod tests {
         sets.sort_unstable();
         assert_eq!(fields, sets);
         assert!(VALUE_SETS.iter().all(|&(_, _, lo, hi)| lo <= hi));
-        // Vacuity: the table has its twenty-three enumerated fields.
-        assert_eq!(u8_fields.len(), 23);
+        // Vacuity: the table has its twenty-seven enumerated fields.
+        assert_eq!(u8_fields.len(), 27);
     }
 }

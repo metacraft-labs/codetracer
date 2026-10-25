@@ -325,6 +325,10 @@ fn assemble_refuses_what_it_cannot_justify() {
         req_id: 9,
         outcome: 1,
         status: 200,
+        status_text: String::new(),
+        url: String::new(),
+        redirected: 0,
+        response_type: 0,
         headers: "[]".into(),
         body: BlobRef::Ref {
             sha256: [7; 32],

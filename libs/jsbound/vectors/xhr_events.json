@@ -126,9 +126,13 @@
       "headers": "[[\"content-type\",\"text/plain\"]]",
       "outcome": 5,
       "record": "NetResponse",
+      "redirected": 0,
       "req_id": "1",
+      "response_type": 0,
       "seq": "12",
-      "status": 200
+      "status": 200,
+      "status_text": "",
+      "url": ""
     },
     {
       "kind": 4,
@@ -142,6 +146,9 @@
         "kind": "inline"
       },
       "dir": 1,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
       "record": "WsMessage",
       "req_id": "1",
       "seq": "14"
@@ -158,6 +165,9 @@
         "kind": "inline"
       },
       "dir": 1,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
       "record": "WsMessage",
       "req_id": "1",
       "seq": "16"
@@ -184,6 +194,9 @@
         "kind": "inline"
       },
       "dir": 1,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
       "record": "WsMessage",
       "req_id": "1",
       "seq": "19"
@@ -194,6 +207,9 @@
         "kind": "inline"
       },
       "dir": 4,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
       "record": "WsMessage",
       "req_id": "1",
       "seq": "20"

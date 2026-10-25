@@ -355,11 +355,16 @@ fn frames_are_encoded_exactly_as_the_spec_lays_them_out() {
             seq: 1,
             req_id: 5,
             dir: 2,
+            frame: 0,
+            event: String::new(),
+            last_event_id: String::new(),
             data: BlobRef::Inline(b"hi".to_vec())
         }),
         [
-            25, 0, 0, 0, 0x48, 1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0,
-            b'h', b'i'
+            // len 34, tag, seq 1, req_id 5, dir 2, frame 0, two empty strings
+            // (event, last_event_id), an inline blob of 2 bytes.
+            34, 0, 0, 0, 0x48, 1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 2, 0, 0, 0, b'h', b'i'
         ]
     );
     let mut sha = [0u8; 32];
@@ -368,15 +373,18 @@ fn frames_are_encoded_exactly_as_the_spec_lays_them_out() {
         seq: 1,
         req_id: 5,
         dir: 1,
+        frame: 0,
+        event: String::new(),
+        last_event_id: String::new(),
         data: BlobRef::Ref {
             sha256: sha,
             len: 2048,
         },
     });
-    assert_eq!(&frame[..4], &[59, 0, 0, 0]);
-    assert_eq!(frame[22], 1, "blobref kind 1");
-    assert_eq!(frame[23], 0xAB);
-    assert_eq!(&frame[55..63], &2048u64.to_le_bytes());
+    assert_eq!(&frame[..4], &[68, 0, 0, 0]);
+    assert_eq!(frame[31], 1, "blobref kind 1");
+    assert_eq!(frame[32], 0xAB);
+    assert_eq!(&frame[64..72], &2048u64.to_le_bytes());
     // `str` lengths count UTF-8 bytes: "é" is two.
     assert_eq!(
         encode_frame(&Record::Mark {
