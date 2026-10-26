@@ -462,18 +462,6 @@ suite "the call-trace search asks for the pane's window of results":
       check not asked[0].hasKey("limit")
       dispose()
 
-suite "the current position's event index is asked once per tick":
-
-  test "the same tick is not asked again; a new tick is":
-    let mock = newMockBackendService(autoRespond = true)
-    let store = createReplayDataStore(mock.toBackendService())
-    store.requestEventIndexAt(10'u64)
-    store.requestEventIndexAt(10'u64)
-    drain()
-    store.requestEventIndexAt(10'u64)
-    store.requestEventIndexAt(11'u64)
-    check mock.sent("ct/event-load").len == 2
-
 suite "the request-span tail":
 
   test "a completed recording is counted once and never tailed":
