@@ -23,6 +23,7 @@ import {
   codetracerInstallDir,
   codetracerPath,
 } from "../lib/fixtures";
+import { codetracerCiDevShellCommand } from "../lib/codetracer-ci-dev-shell";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
 import {
@@ -879,19 +880,18 @@ async function startStorageHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: StorageHarnessReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "--",
+    "storage-server-manifest",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "--",
-      "storage-server-manifest",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -927,20 +927,19 @@ async function startDebugSessionHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: DebugSessionReplayReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-debug-session",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-debug-session",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1021,20 +1020,19 @@ async function startPlatformLinkHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: PlatformLinkReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-platform-link",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-platform-link",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1070,20 +1068,19 @@ async function startMaterializedPlatformLinkHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: MaterializedPlatformLinkReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-materialized-platform-link",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-materialized-platform-link",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1121,20 +1118,19 @@ async function startRetentionGapHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-retention-gap",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-retention-gap",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1170,20 +1166,19 @@ async function startPolicyDeniedHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-policy-denied",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-policy-denied",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1272,20 +1267,19 @@ function generateReplayAgentCommand(payload: any, rootDir: string): ReplayAgentR
   payloadWithSecret.hostSessionSecret = CT_HOST_SESSION_SECRET;
   const payloadPath = path.join(rootDir, "replay-provisioning-requested.json");
   fs.writeFileSync(payloadPath, JSON.stringify(payloadWithSecret, null, 2));
+  const printRunnerCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    replayAgentProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "print-runner-command",
+    payloadPath,
+  ]);
   const printed = childProcess.execFileSync(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      replayAgentProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "print-runner-command",
-      payloadPath,
-    ],
+    printRunnerCommand.command,
+    printRunnerCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -3387,24 +3381,23 @@ function startStorageFailureProblemBridge(options: {
       );
       const payloadPath = path.join(options.runnerRoot, "replay-provisioning-requested.json");
       fs.writeFileSync(payloadPath, JSON.stringify(options.ready.replayPayload, null, 2));
+      const ctProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+        "dotnet",
+        "run",
+        "--project",
+        replayAgentProject,
+        "-p:NuGetAudit=false",
+        "--",
+        "run-host-entrypoint-problem",
+        payloadPath,
+        options.runnerRoot,
+        codetracerInstallDir,
+        entrypointPath,
+        shimDir,
+      ]);
       const ctProcess = childProcess.spawn(
-        "direnv",
-        [
-          "exec",
-          codetracerCiDir,
-          "dotnet",
-          "run",
-          "--project",
-          replayAgentProject,
-          "-p:NuGetAudit=false",
-          "--",
-          "run-host-entrypoint-problem",
-          payloadPath,
-          options.runnerRoot,
-          codetracerInstallDir,
-          entrypointPath,
-          shimDir,
-        ],
+        ctProcessCommand.command,
+        ctProcessCommand.args,
         {
           cwd: codetracerCiDir,
           env: makeCleanEnv(),
@@ -3554,24 +3547,23 @@ function startPersistedStorageFailureBridge(options: {
       );
       const payloadPath = path.join(options.runnerRoot, `replay-provisioning-${Date.now()}.json`);
       fs.writeFileSync(payloadPath, JSON.stringify(replayPayload, null, 2));
+      const ctProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+        "dotnet",
+        "run",
+        "--project",
+        replayAgentProject,
+        "-p:NuGetAudit=false",
+        "--",
+        "run-host-entrypoint-problem",
+        payloadPath,
+        options.runnerRoot,
+        codetracerInstallDir,
+        entrypointPath,
+        shimDir,
+      ]);
       const ctProcess = childProcess.spawn(
-        "direnv",
-        [
-          "exec",
-          codetracerCiDir,
-          "dotnet",
-          "run",
-          "--project",
-          replayAgentProject,
-          "-p:NuGetAudit=false",
-          "--",
-          "run-host-entrypoint-problem",
-          payloadPath,
-          options.runnerRoot,
-          codetracerInstallDir,
-          entrypointPath,
-          shimDir,
-        ],
+        ctProcessCommand.command,
+        ctProcessCommand.args,
         {
           cwd: codetracerCiDir,
           env: makeCleanEnv(),
