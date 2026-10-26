@@ -213,7 +213,8 @@
       "phase": 1,
       "record": "Loading",
       "scripts": 2,
-      "seq": "24"
+      "seq": "24",
+      "text": 318
     },
     {
       "event": "",

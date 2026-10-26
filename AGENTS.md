@@ -181,7 +181,7 @@ CODETRACER_HOME="$(mktemp -d)" cargo test
 ### Sibling recorders and tools are built by the tests that need them
 
 Suites that drive a recorder or tool from a sibling checkout (BEAM, JS and
-Ruby recorders, `ct-native-replay`, `ct-print`, and the `ct-instrument` +
+Ruby recorders, `ct-native-replay`, `ct-mcr`, `ct-print`, and the `ct-instrument` +
 JS recorder + `session-manager` set the materialised cross-process
 recordings are made with) provision it themselves: when no override names a
 tool, the finder in `tests/test_harness/mod.rs` runs
@@ -194,10 +194,12 @@ minutes building, with the progress on stderr.
 - A sibling that is not checked out, or does not build, FAILS the test with
   the remedy. It never skips: the prerequisite is supplied, not waived.
 - An override is used as given and never built: the finder's environment
-  variable (`CT_NATIVE_REPLAY_PATH`, `CODETRACER_JS_RECORDER_PATH`,
+  variable (`CT_NATIVE_REPLAY_PATH`, `CODETRACER_CT_MCR_CMD`, `CODETRACER_JS_RECORDER_PATH`,
   `CODETRACER_BEAM_RECORDER_BIN`, `CODETRACER_RUBY_RECORDER_PATH`,
   `CODETRACER_CT_PRINT`, `CODETRACER_RECORD_WEB_BIN`, …), or a tool on
-  `PATH` that is not the sibling's own build output.
+  `PATH` that is not the sibling's own build output. `CODETRACER_CT_MCR_CMD`
+  naming the sibling's own `ct_cli` (as the dev shell exports it) is not an
+  override: that build is refreshed like any other.
 
 ### Tests never touch your real CodeTracer state: `CODETRACER_HOME`
 

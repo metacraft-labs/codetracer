@@ -19,6 +19,7 @@ import {
   codetracerInstallDir,
   codetracerPath,
 } from "../lib/fixtures";
+import { codetracerCiDevShellCommand } from "../lib/codetracer-ci-dev-shell";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
 import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
@@ -353,19 +354,18 @@ async function startStorageHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: StorageHarnessReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "--",
+    "storage-server-materialized-manifest",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "--",
-      "storage-server-materialized-manifest",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),

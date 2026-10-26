@@ -28,7 +28,10 @@ from backend/stdio_backend import sendDapRequestNoResponse, drainEvents,
   waitForEvent
 import store/types as store_types   # `CallLine`
 from viewmodels/calltrace_vm import reloadWindow
-from ../app/origin_binding import OriginEventName
+from viewmodels/origin_chain_types import OriginEventName
+  # From the ViewModel, NOT from `../app/origin_binding`: that terminal module
+  # re-exports `views/styled_row` and through it all of `isonim_tui`, and the
+  # GPUI front-end links this driver and must link no terminal renderer.
 from viewmodels/debug_controls_vm import DebugControlsVM, transportAvailable,
   stepForward, stepBackward, stepIn, stepOut, reverseStepIn, reverseStepOut,
   continueExecution, reverseContinue, moveInHistory, HistoryDirection,

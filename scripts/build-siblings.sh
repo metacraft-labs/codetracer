@@ -797,10 +797,18 @@ build_sibling \
 	--help
 
 # MCR / native recorder (ct_cli aka ct-mcr).
+#
+# Keyed `codetracer-native-recorder/ct-mcr` rather than by the bare repo name,
+# because `--only` matches keys by substring and the repo name is contained in
+# the launcher sample's key below: `--only codetracer-native-recorder` builds
+# both (what ci/test/ct-providers.sh wants), while the db-backend test harness,
+# which wants ct_cli alone, asks for `--only codetracer-native-recorder/ct-mcr`
+# (`find_ct_mcr` in src/db-backend/tests/test_harness/mod.rs).
 build_sibling \
 	codetracer-native-recorder \
 	ct_cli/ct_cli \
-	"just build-ct-mcr"
+	"just build-ct-mcr" \
+	codetracer-native-recorder/ct-mcr
 
 # The native edge's E2E sample: a compiled, EXTENSION-LESS binary.
 #

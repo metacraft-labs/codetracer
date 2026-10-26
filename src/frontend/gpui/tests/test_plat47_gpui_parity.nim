@@ -33,6 +33,7 @@
 
 import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import ./gpui_child_env
 
 import headless_app/layout_model
 import headless_app/arrangement_relation
@@ -73,8 +74,7 @@ proc runPlan(cwd = ""): (int, JsonNode, JsonNode, string) =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = state
   let errFile = genTempPath("plat47-gpui-", ".err")
   let dockFile = genTempPath("plat47-gpui-", ".dock.json")

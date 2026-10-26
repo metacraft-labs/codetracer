@@ -242,8 +242,12 @@ pub const VALUE_SETS: &[(&str, &str, u8, u8)] = &[
     // 1 IntersectionObserver entries, 2 ResizeObserver entries, 3
     // MutationObserver records, 4 PerformanceObserver entries, 5 a read of
     // the performance timeline, 6 `IdleDeadline.didTimeout`, 7 a media
-    // element's state or the outcome of its `play()`.
-    ("PlatformValue", "src", 1, 7),
+    // element's state or the outcome of its `play()`, 8 a read of the
+    // platform's own state (`document.referrer`, the navigator's and the
+    // screen's, `WebSocket.bufferedAmount`, …), 9 the outcome of a platform
+    // promise that settles in a platform task (`navigator.storage.estimate()`,
+    // `document.fonts.ready`, `HTMLImageElement.decode()`, …).
+    ("PlatformValue", "src", 1, 9),
 ];
 
 /// The value set of `record`.`field`, if it is an enumerated field.
@@ -502,7 +506,7 @@ define_records! {
         total: u64,
         length_computable: u8,
     },
-    0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32 },
+    0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32, text: u32 },
     0x58 => DocTask { seq: u64, kind: u8, src: String, target: String, event: String },
     0x59 => PlatformValue { seq: u64, src: u8, task_id: u64, query: String, value: String },
     0x5F => End { last_seq: u64, reason: u8 },

@@ -17,12 +17,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
 
-import { test as base, expect, chromium, type Page } from "@playwright/test";
+import { test as base, expect, chromium, type BrowserContext, type Page } from "@playwright/test";
 
 import {
   codetracerInstallDir,
   codetracerPath,
 } from "../lib/fixtures";
+import { codetracerCiDevShellCommand } from "../lib/codetracer-ci-dev-shell";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
 import {
@@ -785,6 +786,26 @@ function forceSelectedSegmentPrimaryReplicaMiss(
   };
 }
 
+/**
+ * The tab a clicked dive-in link opens, or null when it opened none (the
+ * caller then follows the click in its own tab).
+ *
+ * Wait for it as long as for the page itself, not a few seconds.  Playwright
+ * emits a popup's `page` event only once the popup has navigated to its first
+ * URL (https://playwright.dev/docs/api/class-browsercontext#browser-context-event-page),
+ * and the debug-session endpoint answers only after it has resolved the span
+ * and launched the replay.  On a storage failure that answer comes after the
+ * replica reads have failed, which on a loaded host took longer than the 5 s
+ * this used to wait: the popup then showed the expected `storage_failure`
+ * while the test waited for the Grafana tab to navigate, and timed out.
+ */
+function waitForDiveInPopup(
+  context: BrowserContext,
+  timeoutMs: number,
+): Promise<Page | null> {
+  return context.waitForEvent("page", { timeout: timeoutMs }).catch(() => null);
+}
+
 async function waitForOutput(
   output: string[],
   pattern: RegExp,
@@ -859,19 +880,18 @@ async function startStorageHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: StorageHarnessReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "--",
+    "storage-server-manifest",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "--",
-      "storage-server-manifest",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -907,20 +927,19 @@ async function startDebugSessionHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: DebugSessionReplayReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-debug-session",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-debug-session",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1001,20 +1020,19 @@ async function startPlatformLinkHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: PlatformLinkReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-platform-link",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-platform-link",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1050,20 +1068,19 @@ async function startMaterializedPlatformLinkHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: MaterializedPlatformLinkReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-materialized-platform-link",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-materialized-platform-link",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1101,20 +1118,19 @@ async function startRetentionGapHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-retention-gap",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-retention-gap",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1150,20 +1166,19 @@ async function startPolicyDeniedHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: RetentionGapReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "storage-server-policy-denied",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "storage-server-policy-denied",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -1252,20 +1267,19 @@ function generateReplayAgentCommand(payload: any, rootDir: string): ReplayAgentR
   payloadWithSecret.hostSessionSecret = CT_HOST_SESSION_SECRET;
   const payloadPath = path.join(rootDir, "replay-provisioning-requested.json");
   fs.writeFileSync(payloadPath, JSON.stringify(payloadWithSecret, null, 2));
+  const printRunnerCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    replayAgentProject,
+    "-p:NuGetAudit=false",
+    "--",
+    "print-runner-command",
+    payloadPath,
+  ]);
   const printed = childProcess.execFileSync(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      replayAgentProject,
-      "-p:NuGetAudit=false",
-      "--",
-      "print-runner-command",
-      payloadPath,
-    ],
+    printRunnerCommand.command,
+    printRunnerCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -3367,24 +3381,23 @@ function startStorageFailureProblemBridge(options: {
       );
       const payloadPath = path.join(options.runnerRoot, "replay-provisioning-requested.json");
       fs.writeFileSync(payloadPath, JSON.stringify(options.ready.replayPayload, null, 2));
+      const ctProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+        "dotnet",
+        "run",
+        "--project",
+        replayAgentProject,
+        "-p:NuGetAudit=false",
+        "--",
+        "run-host-entrypoint-problem",
+        payloadPath,
+        options.runnerRoot,
+        codetracerInstallDir,
+        entrypointPath,
+        shimDir,
+      ]);
       const ctProcess = childProcess.spawn(
-        "direnv",
-        [
-          "exec",
-          codetracerCiDir,
-          "dotnet",
-          "run",
-          "--project",
-          replayAgentProject,
-          "-p:NuGetAudit=false",
-          "--",
-          "run-host-entrypoint-problem",
-          payloadPath,
-          options.runnerRoot,
-          codetracerInstallDir,
-          entrypointPath,
-          shimDir,
-        ],
+        ctProcessCommand.command,
+        ctProcessCommand.args,
         {
           cwd: codetracerCiDir,
           env: makeCleanEnv(),
@@ -3534,24 +3547,23 @@ function startPersistedStorageFailureBridge(options: {
       );
       const payloadPath = path.join(options.runnerRoot, `replay-provisioning-${Date.now()}.json`);
       fs.writeFileSync(payloadPath, JSON.stringify(replayPayload, null, 2));
+      const ctProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+        "dotnet",
+        "run",
+        "--project",
+        replayAgentProject,
+        "-p:NuGetAudit=false",
+        "--",
+        "run-host-entrypoint-problem",
+        payloadPath,
+        options.runnerRoot,
+        codetracerInstallDir,
+        entrypointPath,
+        shimDir,
+      ]);
       const ctProcess = childProcess.spawn(
-        "direnv",
-        [
-          "exec",
-          codetracerCiDir,
-          "dotnet",
-          "run",
-          "--project",
-          replayAgentProject,
-          "-p:NuGetAudit=false",
-          "--",
-          "run-host-entrypoint-problem",
-          payloadPath,
-          options.runnerRoot,
-          codetracerInstallDir,
-          entrypointPath,
-          shimDir,
-        ],
+        ctProcessCommand.command,
+        ctProcessCommand.args,
         {
           cwd: codetracerCiDir,
           env: makeCleanEnv(),
@@ -4672,7 +4684,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
       ).toBe(true);
 
-      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(context, 120_000);
       await link.click();
       const problemPage = (await popupPromise) ?? page;
       await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -4921,7 +4933,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           ),
         ).toBe(true);
 
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 120_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5287,7 +5299,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           );
         }
 
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5366,7 +5378,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const link = page.locator('a[title="Debug in CodeTracer"]').first();
       await expect(link).toBeVisible({ timeout: 60_000 });
       expect(await link.getAttribute("href")).toBe(mcrDebugUrl);
-      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(page.context(), 60_000);
       await link.click();
       const problemPage = (await popupPromise) ?? page;
       await problemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
@@ -5675,7 +5687,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         const link = page.locator('a[title="Debug in CodeTracer"]').first();
         await expect(link).toBeVisible({ timeout: 60_000 });
         expect(await link.getAttribute("href")).toBe(debugUrl);
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(new RegExp(escapeRegExp(debugUrl)), {
@@ -5705,7 +5717,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       const jaegerMcrLink = page.locator('a[title="Debug in CodeTracer"]').first();
       await expect(jaegerMcrLink).toBeVisible({ timeout: 60_000 });
       expect(await jaegerMcrLink.getAttribute("href")).toBe(mcrDebugUrl);
-      const jaegerMcrPopupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const jaegerMcrPopupPromise = waitForDiveInPopup(page.context(), 60_000);
       await jaegerMcrLink.click();
       const jaegerMcrProblemPage = (await jaegerMcrPopupPromise) ?? page;
       await jaegerMcrProblemPage.waitForURL(new RegExp(escapeRegExp(mcrDebugUrl)), {
@@ -5760,7 +5772,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         } else {
           assertM36DebugUrl(grafanaHref ?? "", retentionCaseAsPlatformReady(policyHarness.ready, testcase));
         }
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 60_000);
         await link.click();
         const problemPage = (await popupPromise) ?? page;
         await problemPage.waitForURL(/\/observability\/v0\/debug-session\?/, {
@@ -5932,7 +5944,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
       await expect(link).toBeVisible({ timeout: 60_000 });
       expect(await link.getAttribute("href")).toBe(debugUrl);
 
-      const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(page.context(), 120_000);
       await link.click();
       const popup = await popupPromise;
       const replayPage = popup ?? page;
@@ -6322,7 +6334,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
           timeout: 60_000,
         });
         expect(await link.getAttribute("href")).toBe(debugUrl);
-        const popupPromise = page.context().waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(page.context(), 120_000);
         await link.click();
         const replayPage = (await popupPromise) ?? page;
         await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
@@ -6547,7 +6559,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ),
       ).toBe(true);
 
-      const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+      const popupPromise = waitForDiveInPopup(context, 120_000);
       await link.click();
       const replayPage = (await popupPromise) ?? page;
       await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {
@@ -6787,7 +6799,7 @@ base.describe("Observability M34 storage-server MCR manifest browser acceptance"
         ).toBe(true);
 
         const previousLaunches = launches.length;
-        const popupPromise = context.waitForEvent("page", { timeout: 5_000 }).catch(() => null);
+        const popupPromise = waitForDiveInPopup(context, 120_000);
         await link.click();
         const replayPage = (await popupPromise) ?? page;
         await replayPage.waitForURL(/http:\/\/127\.0\.0\.1:\d+\//, {

@@ -356,6 +356,7 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 phase: 1,
                 elements: 14,
                 scripts: 2,
+                text: 318,
             },
         ),
         (
@@ -384,17 +385,19 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
 
 /// A document that loads while the visitor moves the pointer (spec §5.2, §6
 /// "The document's own tasks"): a hover while the parser waits for a slow
-/// script (`Loading` phase 1, before the input's `Task`), the script's
+/// script (`Loading` phase 1, with the text the parser had inserted, before
+/// the input's `Task`), the script's
 /// execution (`DocTask` 1, written at its first read), a hover after parsing
 /// (phase 2), a module that ran without a record of its own (`DocTask` 4, written
 /// when it settled), `DOMContentLoaded` (`DocTask` 2) and `load` (`DocTask` 3), then
 /// a task after `load`, which carries no `Loading`.
 fn document_loading_records() -> Vec<Record> {
-    let loading = |seq, phase, elements, scripts| Record::Loading {
+    let loading = |seq, phase, elements, scripts, text| Record::Loading {
         seq,
         phase,
         elements,
         scripts,
+        text,
     };
     let hover = |seq, task_id| Record::Input {
         seq,
@@ -407,14 +410,14 @@ fn document_loading_records() -> Vec<Record> {
     vec![
         header(),
         env(),
-        loading(1, 1, 3, 0),
+        loading(1, 1, 3, 0, 9),
         Record::Task {
             seq: 2,
             task_id: 1,
             kind: 5,
         },
         hover(3, 1),
-        loading(4, 1, 3, 0),
+        loading(4, 1, 3, 0, 9),
         Record::DocTask {
             seq: 5,
             kind: 1,
@@ -427,19 +430,20 @@ fn document_loading_records() -> Vec<Record> {
             src: 1,
             bits: 0x4279_0000_0000_0000,
         },
-        loading(7, 2, 9, 1),
+        loading(7, 2, 9, 1, 0),
         Record::Task {
             seq: 8,
             task_id: 2,
             kind: 5,
         },
         hover(9, 2),
-        loading(10, 2, 9, 1),
+        loading(10, 2, 9, 1, 0),
         Record::Loading {
             seq: 11,
             phase: 2,
             elements: 9,
             scripts: 1,
+            text: 0,
         },
         Record::DocTask {
             seq: 12,
@@ -448,7 +452,7 @@ fn document_loading_records() -> Vec<Record> {
             target: String::new(),
             event: String::new(),
         },
-        loading(13, 2, 9, 2),
+        loading(13, 2, 9, 2, 0),
         Record::DocTask {
             seq: 14,
             kind: 2,
@@ -456,7 +460,7 @@ fn document_loading_records() -> Vec<Record> {
             target: String::new(),
             event: String::new(),
         },
-        loading(15, 3, 9, 2),
+        loading(15, 3, 9, 2, 0),
         Record::DocTask {
             seq: 16,
             kind: 3,
@@ -504,6 +508,7 @@ fn resource_events_records() -> Vec<Record> {
             phase: 1,
             elements: 12,
             scripts: 1,
+            text: 140,
         },
         resource(2, "https://shop.example/hero.png", "path:#hero", "load"),
         Record::Loading {
@@ -511,6 +516,7 @@ fn resource_events_records() -> Vec<Record> {
             phase: 3,
             elements: 20,
             scripts: 2,
+            text: 0,
         },
         resource(4, "", "path:#intro", "loadedmetadata"),
         media(5, 0, r#"duration["path:#intro"]"#, "12.5"),
@@ -543,6 +549,51 @@ fn resource_events_records() -> Vec<Record> {
             kind: 13,
         },
         end(11),
+    ]
+}
+
+/// Values the platform holds that a page reads (spec §5.2 `PlatformValue`
+/// src 8 and 9, §10.4): `document.referrer` and an open socket's
+/// `bufferedAmount`, each read where the page made it, then
+/// `navigator.storage.estimate()`, a platform promise registered when it is
+/// called and settled in a task of its own, followed by what it resolved
+/// with.
+fn platform_state_records() -> Vec<Record> {
+    let state = |seq, query: &str, value: &str| Record::PlatformValue {
+        seq,
+        src: 8,
+        task_id: 0,
+        query: query.into(),
+        value: value.into(),
+    };
+    vec![
+        header(),
+        env(),
+        state(
+            1,
+            "document.referrer",
+            r#""https://search.example/?q=shoes""#,
+        ),
+        state(2, "WebSocket.bufferedAmount[1]", "4096"),
+        Record::TaskReg {
+            seq: 3,
+            task_id: 1,
+            kind: 13,
+            delay_ms: 0.0,
+        },
+        Record::Task {
+            seq: 4,
+            task_id: 1,
+            kind: 13,
+        },
+        Record::PlatformValue {
+            seq: 5,
+            src: 9,
+            task_id: 1,
+            query: "navigator.storage.estimate".into(),
+            value: r#"{"resolved":{"quota":1073741824,"usage":5120}}"#.into(),
+        },
+        end(5),
     ]
 }
 
@@ -937,7 +988,8 @@ fn decoding_vectors() -> Vec<Vector> {
     out.push(complete(
         "document_loading",
         "a document that loads while the pointer moves: Loading before each \
-         task recorded before load (phase 1 while parsing, 2 once parsed), \
+         task recorded before load (phase 1 while parsing, with the character \
+         data the parser had inserted, 2 once parsed, with none), \
          DocTask for a script that runs (1) and one that ran with no record of \
          its own (4), DOMContentLoaded and load, and a task after load with no \
          Loading",
@@ -952,6 +1004,15 @@ fn decoding_vectors() -> Vec<Vector> {
          outcome, and a dynamic import whose module reads the clock before \
          the import settles (TaskReg and Task kind 13)",
         resource_events_records(),
+    ));
+    out.push(complete(
+        "platform_state",
+        "values the platform holds that a page reads: the referrer and a \
+         socket's bufferedAmount (PlatformValue src 8), and \
+         navigator.storage.estimate() settling in a platform task with the \
+         estimate it resolved with (TaskReg and Task kind 13, then \
+         PlatformValue src 9)",
+        platform_state_records(),
     ));
     out.push(complete(
         "storage_shape_reads",

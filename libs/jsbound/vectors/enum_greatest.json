@@ -213,7 +213,8 @@
       "phase": 3,
       "record": "Loading",
       "scripts": 2,
-      "seq": "24"
+      "seq": "24",
+      "text": 318
     },
     {
       "event": "",
@@ -227,7 +228,7 @@
       "query": "callback",
       "record": "PlatformValue",
       "seq": "26",
-      "src": 7,
+      "src": 9,
       "task_id": "11",
       "value": "[{\"target\":\"path:#hero\",\"isIntersecting\":true,\"intersectionRatio\":0.5}]"
     },

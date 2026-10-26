@@ -17,8 +17,10 @@
 //!
 //! # SKIP discipline
 //!
-//! The tests use narrow probes — `ct-mcr` and per-language compilers on
-//! PATH. A missing one goes through `common/origin_dap_gate.rs`: a loud
+//! The tests use narrow probes — per-language compilers on PATH, and
+//! `ct-mcr` from the harness's provisioning finder (`find_ct_mcr`, which
+//! builds the recorder sibling or panics). A missing compiler goes through
+//! `common/origin_dap_gate.rs`: a loud
 //! `SKIPPED: ... asserted NOTHING` on a developer box, and a failure under
 //! `CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false` or
 //! `CT_ORIGIN_DAP_REQUIRED=1`.
@@ -33,8 +35,6 @@
 //!
 //! Sentinels emitted on SKIP:
 //!
-//! - `SKIPPED: M17 <test>: ct-mcr binary not on PATH ...` — covers the
-//!   per-language fixture tests.
 //! - `SKIPPED: M17 <test>: <tool> not on PATH ...` — covers per-language
 //!   compiler probes.
 //!
@@ -68,25 +68,14 @@ use db_backend::task::{
 /// `cargo test` (which threads tests by default).
 static FFI_LOCK: Mutex<()> = Mutex::new(());
 
-/// Narrow probe: is `ct-mcr` on PATH? Returns true if so, otherwise
-/// goes through the origin-DAP prerequisite gate (a loud skip, or a failure
-/// when skipping is disabled) and returns false.
-fn require_ct_mcr(test_label: &str) -> bool {
-    if Command::new("ct-mcr")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        true
-    } else {
-        unavailable::<()>(
-            required_mode(),
-            &format!("M17 {test_label}"),
-            "ct-mcr binary not on PATH (the MCR recorder is needed for an end-to-end fixture trace)",
-        )
-        .is_some()
-    }
+/// The MCR recorder for an end-to-end fixture trace. `find_ct_mcr` takes
+/// an override or a `ct-mcr` on `PATH`, and otherwise builds the workspace's
+/// `codetracer-native-recorder` sibling; it panics naming the remedy when it
+/// cannot supply one. It used to look for `ct-mcr` by name on `PATH` only,
+/// where no dev shell puts it, so the pending tests below returned before
+/// their `unimplemented_end_to_end` even when run with `--ignored`.
+fn require_ct_mcr(_test_label: &str) -> bool {
+    test_harness::find_ct_mcr().is_some()
 }
 
 /// Narrow probe: is `gcc` on PATH?
