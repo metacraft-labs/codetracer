@@ -5490,6 +5490,14 @@ plat48-capture-electron *args:
 plat49-capture-electron *args:
   bash scripts/plat49-capture-electron.sh "$@"
 
+# PLAT-54: the desktop's Agent Activity pane over the AA suites' replayed agent
+# sessions — every evidence card and the `ct test` run card, word for word —
+# written to `src/tests/visual/answers/plat54-agent-activity.electron.json`,
+# which the terminal's Agent Activity suite asserts its feed against.
+[positional-arguments]
+plat54-capture-electron *args:
+  bash scripts/plat54-capture-electron.sh "$@"
+
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.

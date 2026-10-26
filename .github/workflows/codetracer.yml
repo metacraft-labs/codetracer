@@ -4102,6 +4102,16 @@ jobs:
         # its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat53-capture-electron
 
+      - name: The desktop's Agent Activity pane is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Agent Activity pane: a review's agent
+        # session replayed through `ct review` — every evidence card in its
+        # state with its shape, dataset, command and note, the `ct test` run
+        # card and its tests, and what a right-click on a card opens — read
+        # from the REAL Electron app. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat54-capture-electron
+
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
         if: ${{ !cancelled() }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a

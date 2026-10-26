@@ -47,7 +47,7 @@ export signals, computation, components
 
 const VCSContainerClass* = "component-container vcs-container"
 const VCSNoRepoClass* = "vcs-no-repo"
-const VCSNoFilesText* = "No changed files"
+const VCSNoFilesText* = VCSNoChangedFilesText
 
 
 ## Branch lane colour palette — cycled by ``VCSGraphCell.colorIdx``.
@@ -111,12 +111,7 @@ proc statusClass*(status: string): string =
   of "M", "modified": "vcs-status-modified"
   else: "vcs-status-other"
 
-proc statusLabel*(status: string): string =
-  case status
-  of "added": "A"
-  of "deleted": "D"
-  of "modified": "M"
-  else: status
+proc statusLabel*(status: string): string = vcsStatusLabel(status)
 
 proc accordionFileStatusClass*(status: string): string =
   ## CSS class for the coloured status letter inside an expanded accordion row.
@@ -165,24 +160,8 @@ proc abbreviateRelTime*(t: string): string =
     else: unit
   numStr & abbr
 
-proc changedFilesHeaderText(vm: VCSVM): string =
-  ## DeepReview-GUI.md §3: "The section header shows the review's file count
-  ## and, when the changeset came from local git history, the commit it
-  ## belongs to."  A standalone patch names no commit, and then only the file
-  ## count is shown.
-  if vm.deepReviewMode.val:
-    let commit = vm.reviewCommit.val
-    if commit.len > 0:
-      " (" & $vm.fileCount.val & " files, " & commit & ")"
-    else:
-      " (" & $vm.fileCount.val & " files)"
-  elif vm.selectedCommitIndices.val.len == 1:
-    let idx = vm.selectedCommitIndices.val[0]
-    if idx >= 0 and idx < vm.commits.val.len:
-      " (" & vm.commits.val[idx].hash & ")"
-    else: ""
-  else:
-    ""
+# `changedFilesHeaderText` is the ViewModel's (`vcs_vm`), so the native
+# front-ends' review header reads the same words (PLAT-54).
 
 # ---------------------------------------------------------------------------
 # Callback dispatch helpers

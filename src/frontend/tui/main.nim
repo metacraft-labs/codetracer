@@ -98,6 +98,8 @@ import headless_app/headless_app
 import headless_app/session_tabs
 import headless_app/welcome_tabs
 import ./app/views/welcome_view
+import ../viewmodel/host/native_agent_host   # PLAT-54: Agent Activity's host
+import ../viewmodel/viewmodels/trace_open   # PLAT-54: a test recording the agent pane opens
 import ../viewmodel/host/native_state
 from ../viewmodel/viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode
 from backend/stdio_backend import toBackendService
@@ -954,6 +956,9 @@ proc interactive(command: TuiCommand): int =
   var shownId = firstSlot.id
   app.recordings = recordingsBeside(folder)
 
+  var agentWiring: proc(s: TuiSession) = nil
+    ## PLAT-54: wires a session's Agent Activity host to this terminal (set
+    ## once the VCS pane exists, below).
   proc showSession(id: HeadlessSessionId) =
     ## Point the terminal at the session behind tab `id`: its header, its
     ## panes from its current stop, its files and its omnibar index. The
@@ -981,6 +986,9 @@ proc interactive(command: TuiCommand): int =
       # Back from such a tab onto a live session: a replay is Debug mode.
       rt.enterProductMode(pmDebug)
     session.header(rt)
+    if not agentWiring.isNil and session.agent.openRecording.isNil:
+      agentWiring(session)
+    session.refreshAgent(rt)            # PLAT-54: this session's agent
     app.fileTree = FileTreeModel()      # this session's files (`refresh`)
     session.setViewportHeight(rt.sourcePaneRows())
     session.refresh(rt)
@@ -1076,6 +1084,14 @@ proc interactive(command: TuiCommand): int =
     session.stepSearchResult(rt, delta)
   app.toggleSearchOption = proc(operation: string): string =
     session.toggleSearchOption(rt, operation)
+  # PLAT-54: Agent Activity — a press runs the row's action through the
+  # session's `AgentActivityVM`; `/ai <prompt>` sends a prompt to the agent.
+  app.agentPress = proc(row, button: int): string =
+    session.agentPress(rt, row, button)
+  app.agentPrompt = proc(text: string): string =
+    session.agentPrompt(rt, text)
+  app.agentStop = proc(): string =
+    session.agentStop(rt)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.
@@ -1097,6 +1113,35 @@ proc interactive(command: TuiCommand): int =
       app.recordingOpener(folder))
   defer: tests.close()
   tests.refresh(rt)
+  # PLAT-54: each session's Agent Activity host opens a test's recording the
+  # way the welcome tab does — as a session tab (`recordingOpener`) — and
+  # enters a review over an evidence card's dataset in the VCS pane.
+  proc wireAgent(s: TuiSession) =
+    if s.isNil or s.agent.isNil:
+      return
+    s.agent.vcs = vcs.vm
+    s.agent.openRecording = proc(request: TraceOpenRequest): string =
+      if app.recordingOpener.isNil: "this terminal cannot open a recording"
+      else: app.recordingOpener(request.tracePath)
+  agentWiring = wireAgent
+  # An evidence card's review lands in the VCS pane at once, not at its next
+  # refresh.
+  app.agentPress = proc(row, button: int): string =
+    let pressed = session
+    result = pressed.agentPress(rt, row, button)
+    # A recording opened from the pane is a NEW TAB, shown by then: the pane
+    # is that session's, not the one the press was on.
+    if session != pressed:
+      session.refreshAgent(rt)
+    vcs.publish(rt)
+  wireAgent(session)
+  if command.reviewDataset.len > 0:
+    if not session.agent.loadReviewDataset(command.reviewDataset):
+      app.notification = session.agent.message
+    vcs.refresh(rt)
+  if command.reviewSession.len > 0:
+    discard session.agent.loadReviewSession(command.reviewSession)
+  session.refreshAgent(rt)
   app.notification = describe(session)
 
   # PLAT-51 deliverable 8: A NEW TAB'S WELCOME SCREEN, performed. The "+"
@@ -1298,6 +1343,8 @@ proc interactive(command: TuiCommand): int =
       let testsChanged = tests.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
       let searched = session.pumpFindInFiles(rt)
+      # PLAT-54: what a live agent sent since the last tick.
+      let agentChanged = session.pumpAgent(rt)
       # PLAT-51: a welcome tab's recording, when it finishes.
       let recorded = pollRecording()
       # PLAT-49 part B: the auto-hide hover's clock — a preview due after
@@ -1313,7 +1360,7 @@ proc interactive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
-         barsChanged or testsChanged:
+         barsChanged or testsChanged or agentChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:

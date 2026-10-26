@@ -495,6 +495,17 @@ export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
 import viewmodels/[native_welcome, layout_settings]
 export native_welcome, layout_settings
 
+# PLAT-54: the Agent Activity pane's words and rows (`agent_activity_feed`,
+# re-exporting `agent_activity_text`) — the one projection of the desktop's
+# `AgentActivityVM` both native panes draw, so a view under
+# `src/frontend/tui/app/` paints the same rows through this door. The
+# ViewModel itself stays withheld: the feed exports its own row and action
+# types only. Plain Nim over `std/*`, `isonim/core/*` and `store/*` (the
+# ViewModel and the evidence / test-run projections it reads): no renderer,
+# no I/O, no process — the agent connection is the native host's.
+import viewmodels/agent_activity_feed
+export agent_activity_feed
+
 const
   CodeTracerEmbedFacadeModule* = "codetracer_embed"
     ## The one module name a consumer may import from this SDK. The import

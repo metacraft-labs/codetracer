@@ -91,6 +91,9 @@ import viewmodels/vcs_vm
 # PLAT-52 — the Terminal Output pane's ViewModel.
 import viewmodels/terminal_output_vm
 import viewmodels/test_results_vm
+# PLAT-54 — the Agent Activity pane's ViewModel and its shared feed.
+import viewmodels/agent_activity_vm
+import viewmodels/agent_activity_feed
 
 import headless_app/layout_model
 
@@ -137,7 +140,11 @@ const
                                          # PLAT-53: the project's tests and
                                          # the last run, from the window's
                                          # `TestResultsVM`.
-                                         paneTestResults}
+                                         paneTestResults,
+                                         # PLAT-54: the agent session's own
+                                         # content, from the desktop's
+                                         # `AgentActivityVM`.
+                                         paneAgentActivity}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -154,8 +161,8 @@ const
                                             # PLAT-45 — the desktop's panes
                                             # (PLAT-47 drew `paneVcs`,
                                             # PLAT-52 `paneTerminalOutput`,
-                                            # PLAT-53 `paneTestResults`).
-                                            paneAgentActivity,
+                                            # PLAT-53 `paneTestResults`,
+                                            # PLAT-54 `paneAgentActivity`).
                                             paneConstraints,
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks.
@@ -170,9 +177,11 @@ const
     ## reader trusting that somebody thought about it.
     ##
     ## `paneBuildOutput` is an edit-mode pane whose subject is the working
-    ## tree, and the only session in scope is a replay one. The four PLAT-45
-    ## added that remain (it added five; PLAT-47 drew the VCS pane from the
-    ## desktop's `VCSVM`) are the desktop's own panes — placed by the shared
+    ## tree, and the only session in scope is a replay one. The one PLAT-45
+    ## added that remains, `paneConstraints` (it added five; PLAT-47, -52,
+    ## -53 and -54 drew the VCS, Terminal Output, Test Results and Agent
+    ## Activity panes), and PLAT-48's two footer panels are the desktop's own
+    ## panes — placed by the shared
     ## default in every front-end so every product opens with the same panes —
     ## whose ViewModels the headless replay session does not own. See the two
     ## dispatch arms.
@@ -726,6 +735,28 @@ proc testResultsPaneView*(vm: TestResultsVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+proc agentActivityPaneView*(vm: AgentActivityVM): PaneView =
+  ## PLAT-54. THE AGENT ACTIVITY PANE (DeepReview-GUI.md §2.1): the agent
+  ## session's rows as the desktop's panel draws them, in its order and
+  ## words (`agent_activity_feed.agentFeed`) — one `Text` per row, then the
+  ## prompt. The headless replay session owns no `AgentActivityVM` (its
+  ## sessions are the agent backend's, §2.1), so a front-end attaches its
+  ## host's (`viewmodel/host/native_agent_host`), as it attaches its VCS
+  ## pane's.
+  result.pane = paneAgentActivity
+  if vm.isNil:
+    result.report = "agent activity has no ViewModel; no host attached one"
+    result.root = viewText("agent.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children: seq[ViewNode] = @[]
+  for i, row in vm.agentFeed():
+    children.add viewText("agent." & $row.kind & "." & $i, row.plainText)
+  children.add viewText("agent.prompt", promptPlaceholder(vm))
+  result.root = viewTreeNode("agent", "Agent Activity", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc shellPaneView*(vm: ShellVM): PaneView =
   ## The shell: a `Tree` of the input `Input` and a `List` of history.
   ##
@@ -832,6 +863,28 @@ proc vcsPaneView*(vm: VCSVM): PaneView =
     result.root = viewText("vcs.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  if vm.deepReviewMode.val:
+    # PLAT-54: a REVIEW — the desktop's review-mode panel: the header's
+    # title and stats, then Changed Files with the dataset's own counts (an
+    # evidence card opened from Agent Activity, or `--deepreview`).
+    var rows: seq[ViewOption] = @[]
+    for i, f in vm.changedFiles.val:
+      var label = vcsStatusLabel(f.status) & " " & f.baseName
+      if f.additions > 0: label.add " +" & $f.additions
+      if f.deletions > 0: label.add " -" & $f.deletions
+      if f.coverageText.len > 0: label.add "  " & f.coverageText
+      rows.add ViewOption(id: "review-file-" & $i, label: label)
+    var children = @[viewText("vcs.review.title", vm.headerTitle.val)]
+    if vm.statsText.val.len > 0:
+      children.add viewText("vcs.review.stats", vm.statsText.val)
+    children.add viewText("vcs.review.changedFiles",
+                          "Changed Files" & vm.changedFilesHeaderText())
+    children.add(
+      if rows.len == 0: viewText("vcs.review.empty", VCSNoChangedFilesText)
+      else: viewList("vcs.review.files", rows))
+    result.root = viewTreeNode("vcs", "VCS", children, expanded = true)
+    result.entries = entriesOf(result.root)
+    return
   if not vm.isGitRepo.val:
     let why = vm.errorMessage.val
     result.report = if why.len > 0: why else: "Not a git repository"
@@ -920,8 +973,9 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneTerminalOutput: terminalOutputPaneView(TerminalOutputVM(vm))
   # PLAT-53.
   of paneTestResults: testResultsPaneView(TestResultsVM(vm))
-  of paneAgentActivity,
-     paneConstraints, paneProblems, paneRequests:
+  # PLAT-54.
+  of paneAgentActivity: agentActivityPaneView(AgentActivityVM(vm))
+  of paneConstraints, paneProblems, paneRequests:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which
     # the shared default DOCKS: revealed, each says what it is and why it is
