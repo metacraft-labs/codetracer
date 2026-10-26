@@ -413,6 +413,16 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     while getMonoTime() < deadline and s1.text(Rows - 2) == s0.text(Rows - 2):
       sleep(100)
       s1 = sess.snap(Cols, Rows)
+    # The docked band is repainted over several writes: read on until two
+    # snapshots in a row agree, so every row it changes is counted.
+    var settled = false
+    while getMonoTime() < deadline and not settled:
+      sleep(250)
+      let again = sess.snap(Cols, Rows)
+      settled = true
+      for r in 0 ..< Rows:
+        if again.text(r) != s1.text(r): settled = false
+      s1 = again
     # The docked band: the rows that changed at the bottom of the body.
     var changed: seq[int] = @[]
     for r in 1 ..< Rows - 1:
@@ -431,19 +441,23 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     ck changed[^1] == Rows - 2
     ck not sess.rowOf(Cols, Rows - 1).contains("revealing")
     sess.click(Rows - 1, strip.cellFind(" BUILD ") + 1)
-    let deadline2 = getMonoTime() + initDuration(seconds = 10)
+    # Every cell of the body back as it was. The terminal repaints the rows
+    # over several writes, so wait for the WHOLE body (not only the row
+    # above the status row) before reading it as final.
+    proc restored(a, b: Snapshot): bool =
+      for r in 0 ..< Rows - 1:
+        for c in 0 ..< Cols:
+          if a[r][c].rune != b[r][c].rune or
+             colorKey(a[r][c].fg) != colorKey(b[r][c].fg) or
+             colorKey(a[r][c].bg) != colorKey(b[r][c].bg):
+            return false
+      true
+    let deadline2 = getMonoTime() + initDuration(seconds = 20)
     var s2 = sess.snap(Cols, Rows)
-    while getMonoTime() < deadline2 and s2.text(Rows - 2) != s0.text(Rows - 2):
+    while getMonoTime() < deadline2 and not restored(s2, s0):
       sleep(100)
       s2 = sess.snap(Cols, Rows)
-    var same = true
-    for r in 0 ..< Rows - 1:
-      for c in 0 ..< Cols:
-        if s2[r][c].rune != s0[r][c].rune or
-           colorKey(s2[r][c].fg) != colorKey(s0[r][c].fg) or
-           colorKey(s2[r][c].bg) != colorKey(s0[r][c].bg):
-          same = false
-    ck same
+    ck restored(s2, s0)
     sess.quit()
 
   test "a left-docked pane's label reads down, one character per row":
@@ -453,10 +467,17 @@ suite "PLAT-48 on a real terminal: auto-hide panels":
     sess.typeLine("focus left")
     sess.typeLine("dock left")
     discard sess.waitRow(Cols, Rows - 1, "applied")
-    let s = sess.snap(Cols, Rows)
-    var column = ""
-    for r in 1 ..< Rows - 2:
-      column.add s[r][0].rune
+    # The status note can arrive before the docked label is repainted: read
+    # the left column until it settles on the label (bounded).
+    proc leftColumn(sess: var TuiTestSession): string =
+      let s = sess.snap(Cols, Rows)
+      for r in 1 ..< Rows - 2:
+        result.add s[r][0].rune
+    let deadline = getMonoTime() + initDuration(seconds = 20)
+    var column = sess.leftColumn()
+    while getMonoTime() < deadline and not column.startsWith("Files"):
+      sleep(100)
+      column = sess.leftColumn()
     # `:focus left` from the editor is the Files stack.
     ck column.startsWith("Files")
     sess.quit()
