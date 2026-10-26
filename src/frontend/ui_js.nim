@@ -73,6 +73,7 @@ import
   # effects are injected — and compiling it on both arms is what keeps the
   # renderer lanes checking it.
   viewmodel/viewmodels/desktop_test_host,
+  viewmodel/viewmodels/replay_open_setting,
   # `electron_presence` supplies `inElectron`, which the two `if inElectron:`
   # blocks at the bottom of this file read to choose an IPC transport.
   #
@@ -1878,7 +1879,12 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
                           (NarrowColumnLabel, aNarrowColumn),
                           (ScrollLeftLabel, aScrollViewLeft),
                           (ScrollRightLabel, aScrollViewRight),
-                          (FindCancelLabel, aFindCancel)]:
+                          (FindCancelLabel, aFindCancel),
+                          # Test-Results-Pane.md §9.3 (the natives'
+                          # `omnibar_sources.replayOpenCommands`).
+                          (OpenRecordingsInNewTabLabel, aTestsOpenInNewTab),
+                          (OpenRecordingsInCurrentTabLabel,
+                           aTestsOpenInCurrentTab)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -4467,6 +4473,13 @@ proc onNs9PanesCatalog(
     return
   let absence = $response.absence
   testsVM.setRunAbsence(absence)
+  # Test-Results-Pane.md §9.3: the folder's `replay-open-in`, sent with its
+  # tests (absent from an answer the web arm composes).
+  let openIn = response.toJs[cstring"replayOpenIn"]
+  if not openIn.isUndefined and not openIn.isNull:
+    let (known, policy) = parsePolicyWord($openIn.to(cstring))
+    if known:
+      testsVM.setOpenSetting(policy)
   let raw = $response.catalog
   if raw.len == 0:
     return
@@ -4521,6 +4534,84 @@ proc onNs9PanesConstraints(
 # ---------------------------------------------------------------------------
 
 var desktopTestRunHost: DesktopTestHost
+
+proc saveReplayOpenIn(data: Data; policy: TraceOpenPolicy) =
+  ## The palette's **Tests: Open Recordings in …** (§9.3): the edit session's
+  ## folder's `replay-open-in`, written by the main process
+  ## (`index/replay_open_in.onReplayOpenInSave`), answered by
+  ## `CODETRACER::replay-open-in` (`onReplayOpenIn`).
+  let folder = data.startOptions.folder
+  let workspace = if folder.isNil or folder.toJs.isUndefined: "" else: $folder
+  if workspace.len == 0:
+    data.viewsApi.warnMessage(cstring(replayOpenNoWorkspaceText()))
+    return
+  data.ipc.send cstring"CODETRACER::replay-open-in-save",
+    js{workspace: cstring(workspace), policy: cstring($policy)}
+
+proc onReplayOpenIn(sender: js,
+                    response: jsobject(workspace=cstring, policy=cstring,
+                                       error=cstring)) =
+  ## The main process wrote (or could not write) a workspace's
+  ## `replay-open-in`: the pane's destination follows, and the window says so.
+  let error = if response.error.isNil: "" else: $response.error
+  if error.len > 0:
+    data.viewsApi.warnMessage(cstring("could not remember " &
+                                      ReplayOpenSettingName & ": " & error))
+    return
+  let (ok, policy) = parsePolicyWord($response.policy)
+  if not ok:
+    return
+  if not desktopTestRunHost.isNil:
+    desktopTestRunHost.vm.setOpenSetting(policy)
+  data.viewsApi.infoMessage(cstring(replayOpenSetNote($response.workspace,
+                                                      policy)))
+
+proc sessionIndexOfId(data: Data; id: int): int =
+  ## The strip position of the tab whose `ReplaySession.id` is `id`, or -1.
+  for i, s in data.sessions:
+    if not s.isNil and int(s.id) == id:
+      return i
+  -1
+
+proc desktopPlaceTestRecording(data: Data; vm: TestResultsVM;
+                               testId, recordingId: string;
+                               policy: TraceOpenPolicy): string =
+  ## Test-Results-Pane.md §9.5 ON THE DESKTOP: test `testId`'s recording
+  ## placed by the shared rule (`placeTestRecording`).
+  ##
+  ##   * a new tab — `createNewSession`, then `CODETRACER::load-recent-trace`
+  ##     for it: `onOpenTraceInTabReady`'s two calls (the load answers the tab
+  ##     the request is stamped with, which is the new one);
+  ##   * the test's own tab, already showing it — switched to;
+  ##   * a tab replaced in place — switched to, its replay stopped
+  ##     (`CODETRACER::close-replay-session`, rule 2), and the recording loaded
+  ##     into it (`openRecordingById`): the session id and its strip position
+  ##     stay (rule 4).
+  ##
+  ## The edit session the pane lives in is never the one replaced (rule 3):
+  ## the host told the pane it is not replaceable (`setCurrentTab`).
+  var place = vm.placeTestRecording(testId, recordingId, policy)
+  var at = if place.kind == ttpNewTab: -1
+           else: data.sessionIndexOfId(place.tab)
+  if place.kind != ttpNewTab and at < 0:
+    vm.forgetTestTab(place.tab)
+    place = TestTabPlacement(kind: ttpNewTab, tab: -1)
+  case place.kind
+  of ttpShowTab:
+    switchSession(data, at)
+  of ttpReplaceTab:
+    switchSession(data, at)
+    let replaced = data.sessions[at]
+    if replaced.replayId >= 0:
+      data.ipc.send cstring"CODETRACER::close-replay-session",
+        js{"replayId": replaced.replayId}
+    data.openRecordingById(recordingId)
+  of ttpNewTab:
+    createNewSession(data)
+    data.ipc.send cstring"CODETRACER::load-recent-trace",
+      js{traceId: cstring(recordingId)}
+  vm.noteTestTab(testId, int(data.activeSession.id), recordingId)
+  ""
 
 proc onTestRunSettled(
     sender: js,
@@ -4910,6 +5001,8 @@ proc stampAskingTab(data: Data) =
   ##   on disk, which concerns every tab that has the file open;
   ## * `hcr-session-status`: the main process runs ONE live-edit session
   ##   (`index/hcr_launch`), not one per tab;
+  ## * `replay-open-in`: a workspace's setting, written for the window's one
+  ##   Test Results host (`Test-Results-Pane.md` §9.3);
   ## * `open-trace-in-tab-ready`, `open-edit-folder-in-tab-ready`: they ask
   ##   the window for a NEW tab, and the load that follows answers it as the
   ##   tab on screen;
@@ -4952,6 +5045,9 @@ proc configureIPC(data: Data) =
     # AND WHAT SETTLES A DESKTOP SUITE RUN (the pane's header ▶). See
     # `onTestSuiteSettled`.
     "test-suite-settled"
+    # Test-Results-Pane.md §9.3: a workspace's `replay-open-in` written. See
+    # `onReplayOpenIn`.
+    "replay-open-in"
     "welcome-screen"
     # #568: the recent-traces / recent-folders push for startup paths whose own
     # startup message does not carry them (`index/recent_items.nim`).
@@ -6157,6 +6253,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
   aFindCancel: proc(actionData: JsObject) = # aFindCancel
     ## PLAT-70 Part C: **Find: Cancel and Return** (`find.cancel`).
     discard cancelEditorFind(),
+  aTestsOpenInNewTab: proc(actionData: JsObject) = # aTestsOpenInNewTab
+    ## Test-Results-Pane.md §9.3 — see `saveReplayOpenIn`.
+    saveReplayOpenIn(data, topNewTab),
+  aTestsOpenInCurrentTab: proc(actionData: JsObject) = # aTestsOpenInCurrentTab
+    saveReplayOpenIn(data, topCurrentTab),
 ]
 
 data.actions = actions
@@ -7918,12 +8019,18 @@ if inElectron:
           # run-test`. Column 1 matches what `editor.makeTestAction` passed
           # before this host existed; `index/traces.onRunTest` forwards both to
           # `ct record-test` and neither is used to select the test.
+          #
+          # `keepWindow` (Test-Results-Pane.md §9.5): the main process loads
+          # nothing into this window — the host opens the recording on the
+          # settle, where §9 places it (a new tab by default), and the edit
+          # session stays where it is (rule 3).
           data.runTests(RunTestOptions(
             testName: cstring(selector),
             path: cstring(file),
             line: line,
             column: 1,
-            newWindow: false))
+            newWindow: false,
+            keepWindow: true))
           "",
         settleEditor = proc(note: string) =
           editor.settleEditorTestRun(cstring(note)))
@@ -7981,6 +8088,17 @@ if inElectron:
             newWindow: false,
             keepWindow: true))
           "",
-        openRecording = proc(recordingId: string): string =
-          data.openRecordingById(recordingId)
-          "")
+        openRecording = proc(testId, recordingId: string;
+                             policy: TraceOpenPolicy): string =
+          data.desktopPlaceTestRecording(desktopTestRunHost.vm, testId,
+                                         recordingId, policy))
+      # §9: the pane this host drives lists a catalog in EDIT sessions only
+      # (`ns9-panes`), so the tab it is in is an editing session, which a
+      # replay never replaces (rule 3) — whatever `startOptions` says yet at
+      # this point of the start-up; a closed tab is no test's tab any more
+      # (§9.2).
+      if data.sessions.len > 0:
+        desktopTestRunHost.vm.setCurrentTab(int(data.activeSession.id), false)
+      session_switch.sessionClosedImpl = proc(sessionId: int) =
+        if not desktopTestRunHost.isNil:
+          desktopTestRunHost.vm.forgetTestTab(sessionId)

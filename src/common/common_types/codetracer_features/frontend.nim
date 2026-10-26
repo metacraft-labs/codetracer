@@ -337,7 +337,13 @@ type
     # **Find: Cancel and Return** (`find.cancel`) — under CUA the only exit
     # that restores the selection and the scroll. Appended at the end, for
     # the reason every note above gives.
-    aFindCancel                   # palette: Find: Cancel and Return
+    aFindCancel,                  # palette: Find: Cancel and Return
+    # Test-Results-Pane.md §9.3: the workspace's `replay-open-in` — where a
+    # test's recording opens when no modifier is held. Palette entries, the
+    # native omniboxes' `replayOpenCommands`. Appended at the end, for the
+    # reason every note above gives.
+    aTestsOpenInNewTab,           # palette: Tests: Open Recordings in a New Tab
+    aTestsOpenInCurrentTab        # palette: Tests: Open Recordings in the Current Tab
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

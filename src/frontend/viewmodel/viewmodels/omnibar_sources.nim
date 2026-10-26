@@ -21,9 +21,10 @@ import isonim/core/signals
 
 import ../store/[replay_data_store, types]
 import ./[filesystem_vm, layout_settings, menu_vm, omnibar_vm]
+import ./replay_open_setting
 import ../keymap/keymap_selection
 
-export layout_settings
+export layout_settings, replay_open_setting
 from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
   parseEventLogColumn
 from ./table_overflow import ColumnStepCells
@@ -192,6 +193,7 @@ proc parseColumnWidthLine*(words: openArray[string]):
 
 proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry]
 proc baseKeymapCommands*(): seq[OmnibarEntry]
+proc replayOpenCommands*(): seq[OmnibarEntry]
   ## Forward-declared; defined at the end of this module.
 
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
@@ -208,6 +210,17 @@ proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
   result.add findCommands()
   result.add layoutSettingCommands(terminalSettings)
   result.add baseKeymapCommands()
+  result.add replayOpenCommands()
+
+proc replayOpenCommands*(): seq[OmnibarEntry] =
+  ## Test-Results-Pane.md §9.3: **Tests: Open Recordings in a New Tab** and
+  ## **… in the Current Tab**, the workspace's `replay-open-in` — the same two
+  ## words the desktop's palette offers.
+  for policy in [topNewTab, topCurrentTab]:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: replayOpenCommandLabel(policy),
+                            detail: ReplayOpenSettingName & " " & $policy,
+                            target: replayOpenCommandTarget(policy))
 
 proc baseKeymapCommands*(): seq[OmnibarEntry] =
   ## PLAT-68: **Preferences: Select Base Keymap**, one entry per base, on every

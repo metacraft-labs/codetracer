@@ -238,8 +238,13 @@ type
       ## id): record it again and stay (`TestResultsVM.triggerRefresh`).
     pcTestsOpen
       ## PLAT-53: a Test Results row's `⏵` on the test `text` names: open its
-      ## recording in a new tab, recording it first when it has none
-      ## (`TestResultsVM.triggerOpen`).
+      ## recording where Test-Results-Pane.md §9 places it, recording it first
+      ## when it has none (`TestResultsVM.triggerOpen`); `behaviour`
+      ## `TestsRedirectBehaviour` when the press carried Ctrl (§9.3: the
+      ## destination inverted for that press).
+    pcTestsOpenIn
+      ## §9.3: the palette's **Tests: Open Recordings in …** — the project's
+      ## `replay-open-in` set to the policy `text` names.
     pcFrameSeek
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
@@ -749,6 +754,22 @@ proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry =
   if not rt.layoutBindingEnabled():
     return LayoutGeometry()
   rt.app.layoutBinding.geometry(bodyArea(rt.width, rt.height))
+
+proc paintedGeometry*(rt: TuiRuntime): LayoutGeometry =
+  ## THE ARRANGEMENT ON SCREEN, which is what a press is hit-tested against
+  ## (CodeTracer-TUI.md §4.4). The binding's own geometry, except while a
+  ## pane is maximized (`z`): the frame then paints the one-pane tree
+  ## `maximize.layoutFor` builds, beside the same docked panes, and a press
+  ## read against the binding's tree landed on whichever pane holds that
+  ## cell in the UN-maximized arrangement (codetracer-pm issue
+  ## 2026-10-24-tui-maximized-pane-receives-no-pane-clicks). Composed exactly
+  ## as `shell.shellScreen` composes the frame.
+  if not rt.maximize.active or not rt.layoutBindingEnabled():
+    return rt.layoutGeometry()
+  let model = rt.app.shellModel(rt.width, rt.height)
+  geometryOf(initLayout(rt.maximize.layoutFor(model.profile), model.docked),
+             bodyArea(rt.width, rt.height), model.interaction,
+             DefaultProjectionPolicy, footerLeadCells(model.fileInfo))
 
 proc enableLayoutBinding*(rt: TuiRuntime): LayoutBinding =
   ## **THE OPT-IN.** Give this running front-end a layout the user can
@@ -1953,7 +1974,7 @@ proc terminalOutputRows*(rt: TuiRuntime): int =
   ## How many lines the Terminal Output's line view shows on the current
   ## screen — what its viewport reports (Viewport-Driven-Loading Q3); 0 when
   ## the pane is not on the screen.
-  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  let area = rt.terminalOutputArea(rt.paintedGeometry())
   if area.width <= 0:
     return 0
   terminalPaneGeometry(rt.app.terminalOutput, area).contentRows
@@ -1981,7 +2002,7 @@ proc terminalWriteJump(rt: TuiRuntime; write: int;
 proc scrollTerminalOutput(rt: TuiRuntime; delta: int;
                           outcome: var RuntimeOutcome) =
   ## Scroll the line view by `delta` rows (wheel, keys), leaving follow.
-  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  let area = rt.terminalOutputArea(rt.paintedGeometry())
   let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
   let rows = max(1, geo.contentRows)
   let m = rt.app.terminalOutput
@@ -2069,7 +2090,7 @@ proc routeTerminalDrag(rt: TuiRuntime; event: MouseEvent;
     if kind == tdScreen:
       rt.endTerminalScrub()
     return false
-  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  let area = rt.terminalOutputArea(rt.paintedGeometry())
   if event.kind == mekMotion:
     case kind
     of tdScreen: rt.scrubTerminalScreen(area, event.col, outcome)
@@ -2269,8 +2290,8 @@ proc paneAt(geometry: LayoutGeometry; row, col: int):
 proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind` is painted into (its strip row first), or an
   ## empty one when it is not on the screen — PLAT-57: a docked pane shown
-  ## open or revealed included.
-  let geometry = rt.layoutGeometry()
+  ## open or revealed included; a maximized pane's (`paintedGeometry`).
+  let geometry = rt.paintedGeometry()
   for i, region in geometry.projection.regions:
     if region.pane == kind:
       return paneUnderStrip(geometry, i)
@@ -2573,6 +2594,33 @@ proc testsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
                         result.area.row + result.area.height)
   result.screen = paintTestResults(g, result.area, rt.app.tests)
 
+proc testsControlTitleAt(rt: TuiRuntime; row, col: int): string =
+  ## Test-Results-Pane.md §9.6: the title of the Test Results control drawn at
+  ## `(row, col)` — the ▶, a `⟳` or a `⏵`, the desktop's tooltip words — or
+  ## "" when the cell holds none.
+  if not rt.app.tests.loaded:
+    return ""
+  let (area, screen) = rt.testsPaneScreen()
+  if area.width <= 0:
+    return ""
+  let t = rt.app.tests.testsTargetAt(screen, area, row, col)
+  case t.kind
+  of tpRun: rt.app.tests.run.title
+  of tpRefresh: rt.app.tests.rows[t.row].refresh.title
+  of tpOpen: rt.app.tests.rows[t.row].open.title
+  else: ""
+
+proc testsHoverPointer(rt: TuiRuntime; event: MouseEvent;
+                       outcome: var RuntimeOutcome) =
+  ## §9.6: the pointer passing over the screen (`?1003` motion, no button)
+  ## puts the hovered control's title on the status line, and leaving it
+  ## gives the line back (`shellScreenOf` shows the hover over the
+  ## notification, which it does not replace).
+  let title = rt.testsControlTitleAt(event.row, event.col)
+  if title != rt.app.testsHover:
+    rt.app.testsHover = title
+    outcome.repaint = true
+
 proc scrollTests(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-53: the wheel over Test Results scrolls its list.
   let (_, screen) = rt.testsPaneScreen()
@@ -2828,7 +2876,7 @@ type TableCellHit = object
 proc tableCellAt(rt: TuiRuntime; row, col: int): TableCellHit =
   ## The cut cell drawn at `(row, col)` in a table pane, as that pane's
   ## painter drew it (re-run on a scratch grid, so the hit is the paint's).
-  let geometry = rt.layoutGeometry()
+  let geometry = rt.paintedGeometry()
   let (onPane, region, under) = geometry.paneAt(row, col)
   if not onPane or region.pane notin TablePanes or
      not under.contains(row, col):
@@ -3490,7 +3538,7 @@ proc routeTextDrag(rt: TuiRuntime; event: MouseEvent;
   if event.kind == mekRelease:
     rt.app.textDrag = false
   let buf = rt.debugBuffer()
-  let geometry = rt.layoutGeometry()
+  let geometry = rt.paintedGeometry()
   var area = CellArea()
   for i, region in geometry.projection.regions:
     if region.pane == paneEditor: area = paneUnderStrip(geometry, i)
@@ -3921,8 +3969,11 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
         rt.pressTestsControl(r.refresh, PaneClickRequest(kind: pcTestsRefresh,
                              text: r.testId), outcome)
       else:
+        # §9.3: Ctrl on the press inverts the destination for this press.
         rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
-                             text: r.testId), outcome)
+                             text: r.testId,
+                             behaviour: (if event.ctrl: TestsRedirectBehaviour
+                                         else: "")), outcome)
       return true
     of tpRow:
       rt.selectTestRow(t.row)
@@ -4147,7 +4198,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   let (had, focused) = rt.focus.focusedPane()
   if had:
     binding.focus = focused
-  let geometry = rt.layoutGeometry()
+  # THE PRESS IS READ AGAINST THE SCREEN (`paintedGeometry`): while a pane
+  # is maximized its one rectangle, not the arrangement under it. The
+  # binding is still offered what is its own on that screen — the dock
+  # strips and a docked pane shown open, which a maximize leaves where they
+  # were — and nothing else: a tab drag or a divider has no meaning inside
+  # a maximized pane, whose tab menu (`routePaneClick`) restores it.
+  let geometry = rt.paintedGeometry()
   # PLAT-55: a left press on a shown docked pane gives it the list keys.
   if event.kind == mekPress and event.button == mbLeft:
     let r = event.row
@@ -4161,7 +4218,15 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     else:
       rt.hasDockKeys = false
   let before = binding.interaction.kind
-  let acted = binding.onMouse(geometry, event)
+  let bindingsOwn = not rt.maximize.active or
+    geometry.stripIndexAt(event.row, event.col) >= 0 or
+    (not geometry.openDock.isEmptyArea and
+     geometry.openDock.contains(event.row, event.col)) or
+    before in GestureInteractions
+  let acted =
+    if bindingsOwn: binding.onMouse(rt.layoutGeometry(), event)
+    else: LayoutAction(status: lasNoGesture,
+                       message: "a maximized pane's own press")
   # PLAT-49 part B: a click on a label docked its pane open (or closed it)
   # — the preview and its timers end; an overlay closed any other way (an
   # outside press) is no longer the hover machine's either.
@@ -5394,6 +5459,14 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     else: rt.note(operation.operation & " is not available in the terminal")
     outcome.repaint = true
     return
+  # Test-Results-Pane.md §9.3: **Tests: Open Recordings in …** — the
+  # project's `replay-open-in`, written by the host.
+  let openIn = parseReplayOpenCommandTarget(action)
+  if openIn.ok:
+    outcome.requestClick(PaneClickRequest(kind: pcTestsOpenIn,
+                                          text: $openIn.policy))
+    outcome.repaint = true
+    return
   # PLAT-68: the palette's base-keymap commands
   # (`keymap_selection.baseKeymapCommandTargets`).
   let base = parseBaseKeymapCommand(action)
@@ -6429,7 +6502,7 @@ proc runPromptKey(rt: TuiRuntime; key: string;
 proc filesPaneArea(rt: TuiRuntime): CellArea =
   ## The rectangle the Files pane is painted into (its strip row first), or
   ## an empty one when it is not on the screen.
-  let geometry = rt.layoutGeometry()
+  let geometry = rt.paintedGeometry()
   for i, region in geometry.projection.regions:
     if region.pane == paneFileTree:
       return paneUnderStrip(geometry, i)
@@ -6992,6 +7065,13 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         rt.cellHoverPointer(event, nowMs, result)
       elif event.kind == mekPress and rt.dismissCellHover():
         result.repaint = true
+      # Test-Results-Pane.md §9.6: a Test Results control's title on the
+      # status line while the pointer is over it; a press ends the hover.
+      if event.kind == mekMotion and event.button != mbLeft:
+        rt.testsHoverPointer(event, result)
+      elif event.kind == mekPress and rt.app.testsHover.len > 0:
+        rt.app.testsHover = ""
+        result.repaint = true
       # PLAT-50: an open right-click menu or content overlay first — it is
       # over everything, the top bar included.
       if rt.routeOverlayMouse(event, result):
@@ -7238,6 +7318,11 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
     model.layout = rt.maximize.layoutFor(model.profile)
   if rt.app.notification.len > 0:
     model.status.notification = rt.app.notification
+  # Test-Results-Pane.md §9.6: the hovered control's title, over the
+  # notification while the pointer is on the control (the notification is
+  # kept, and is what the line says again when it leaves).
+  if rt.app.testsHover.len > 0:
+    model.status.notification = rt.app.testsHover
   # PLAT-46: the focused pane gets the focused border role.
   let (hasFocus, focused) = rt.focus.focusedPane()
   model.hasFocus = hasFocus

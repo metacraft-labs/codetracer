@@ -26,6 +26,15 @@
  * Isolation: the fixtures give the app a scratch `CODETRACER_HOME`; the test
  * certificate store is pointed at a scratch `TEST_CERTIFICATES_DIR`, because a
  * passing `ct test run` publishes a certificate there.
+ *
+ * WHICH TAB A RECORDING OPENS IN (`Test-Results-Pane.md` §9): the editor's Run
+ * test, a row's `⏵` and record-and-open each open the recording in a NEW
+ * SESSION TAB and leave the edit session in its own tab (rule 3); the same
+ * test's `⏵` again shows the tab it already has (rule 4) rather than a second
+ * one; the palette's **Tests: Open Recordings in the Current Tab** writes the
+ * workspace's `replay-open-in` document. Until 2026-10-25 the desktop loaded
+ * the recording INTO the edit session's window (codetracer-pm
+ * `issues/2026-10-24-desktop-test-results-opens-a-recording-in-place-not-in-a-new-tab.md`).
  */
 import { test, expect } from "../../lib/fixtures";
 import * as fs from "node:fs";
@@ -114,6 +123,30 @@ async function waitForRunOutcome(ctPage: any): Promise<string> {
     )
     .toBe(true);
   return outcome;
+}
+
+/** The window's session tabs, and which is shown (`window.data`). */
+async function sessionTabs(ctPage: any): Promise<{ count: number; active: number; first: string }> {
+  return await ctPage.evaluate(() => {
+    const d = (window as any).data;
+    const sessions = d?.sessions ?? [];
+    const first = sessions[0]?.trace?.recordingId;
+    return {
+      count: sessions.length,
+      active: d?.activeSessionIndex ?? -1,
+      first: first ? String(first) : "",
+    };
+  });
+}
+
+/** Back to the edit session's tab (the first), by clicking it. */
+async function showEditTab(ctPage: any) {
+  await ctPage.locator(".session-tab").first().click();
+  await expect.poll(async () => (await sessionTabs(ctPage)).active, { timeout: 30_000 }).toBe(0);
+  // The edit session's container is shown again, its Tests pane as it was.
+  await expect(ctPage.locator("#session-container-0 .test-results-row").first()).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 /** Every `.ct` container under this worker's scratch `CODETRACER_HOME`. */
@@ -218,6 +251,12 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     }
     // With a `nargo` that knows `trace --test-name`, the Noir test RECORDS.
     expect(ended).toMatch(/^recording:/);
+    // …AND IT OPENED IN A NEW SESSION TAB (§9): the edit session is the first
+    // tab still, holding no recording, and the recording is the second's.
+    const tabs = await sessionTabs(ctPage);
+    expect(tabs.count).toBe(2);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
   });
 
   test("a row's ⟳ records the test and stays; ⏵ then opens that recording without re-running", async ({ ctPage }) => {
@@ -242,20 +281,38 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     await expect(ctPage.locator(".test-results-row")).toHaveCount(2);
     expect(await loadedRecordingId(ctPage)).toBe("");
 
-    // ⏵ — OPEN THAT RECORDING, AND RUN NOTHING.
+    // ⏵ — OPEN THAT RECORDING, AND RUN NOTHING. Its title says where.
     const open = row.locator(".test-results-open-btn");
     await expect(open).toHaveAttribute("data-ct-open-mode", "open-existing");
+    await expect(open).toHaveAttribute("title", /Opens in a new tab\.$/);
     const containersBefore = recordedContainers();
     // The control for the "nothing recorded" check below: the ⟳ above made a
     // container, so a counter that cannot see recordings would read 0 here.
     expect(containersBefore).toBeGreaterThan(0);
+    const tabsBefore = await sessionTabs(ctPage);
+    expect(tabsBefore.count).toBe(1);
     await open.click();
 
-    // The window entered the recording the row carried — the same id…
+    // The recording the row carried — the same id — is shown…
     await expect.poll(async () => loadedRecordingId(ctPage), { timeout: 180_000 }).toBe(
       recordingId,
     );
+    // …IN A NEW SESSION TAB (§9.1 arm 4), the edit session left in the first…
+    const opened = await sessionTabs(ctPage);
+    expect(opened.count).toBe(2);
+    expect(opened.active).toBe(1);
+    expect(opened.first).toBe("");
     // …and nothing was recorded to get there.
+    expect(recordedContainers()).toBe(containersBefore);
+
+    // ⏵ AGAIN, from the edit session: the test's own tab is SHOWN (rule 4),
+    // not a second tab for the same recording — and the title said so.
+    await showEditTab(ctPage);
+    await expect(open).toHaveAttribute("title", /Opens in the tab it already has\.$/);
+    await open.click();
+    await expect.poll(async () => (await sessionTabs(ctPage)).active, { timeout: 60_000 }).toBe(1);
+    expect((await sessionTabs(ctPage)).count).toBe(2);
+    expect(await loadedRecordingId(ctPage)).toBe(recordingId);
     expect(recordedContainers()).toBe(containersBefore);
   });
 
@@ -289,5 +346,34 @@ test.describe("the desktop Test Results pane runs the suite through ct test run"
     expect(ended).toMatch(/^recording:/);
     // And it was RECORDED to get there, unlike ⏵ over an existing recording.
     expect(recordedContainers()).toBe(containersBefore + 1);
+    // In a NEW SESSION TAB; the edit session stays where it was.
+    const tabs = await sessionTabs(ctPage);
+    expect(tabs.count).toBe(2);
+    expect(tabs.active).toBe(1);
+    expect(tabs.first).toBe("");
+  });
+
+  test("the palette's Tests: Open Recordings in the Current Tab writes the workspace's setting", async ({ ctPage }) => {
+    // §9.3: the setting is one document every front-end reads, in the native
+    // state root; the desktop's main process writes it for the edit
+    // session's folder.
+    await showTestsPane(ctPage);
+    await expect(ctPage.locator(".test-results-row")).toHaveCount(2, { timeout: 60_000 });
+    await ctPage.keyboard.press("Control+KeyP");
+    const box = ctPage.locator("#command-query-text");
+    await expect(box).toBeVisible({ timeout: 30_000 });
+    await box.fill(":Open Recordings in the Current");
+    const hit = ctPage
+      .locator(".command-results .command-result.command-command")
+      .filter({ hasText: "Tests: Open Recordings in the Current Tab" })
+      .first();
+    await expect(hit).toBeVisible({ timeout: 30_000 });
+    await hit.click();
+    const home = process.env.CODETRACER_HOME ?? "";
+    const stateRoot = process.env.CODETRACER_TUI_LAYOUT_DIR || path.join(home, "state");
+    const doc = path.join(stateRoot, "replay-open-in");
+    await expect
+      .poll(() => (fs.existsSync(doc) ? fs.readFileSync(doc, "utf8") : ""), { timeout: 30_000 })
+      .toContain(`${project.replace(/\/+$/, "")}\tcurrent-tab`);
   });
 });

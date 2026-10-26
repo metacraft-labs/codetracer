@@ -94,6 +94,9 @@ import ./host/tui_session
 import ./host/vcs_source
 import ./host/test_results_source   # PLAT-53
 import ./host/problems_source       # PLAT-55
+from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
+  TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
+  noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
 # PLAT-49 part B: the session strip's sessions — opened, adopted, closed here.
 import headless_app/headless_app
 import headless_app/session_tabs
@@ -1000,6 +1003,12 @@ proc interactive(command: TuiCommand): int =
   # that stands in for a tab *Stop* ended (`TuiApp.stoppedTabWelcome`); only
   # then does `recordingOpener` start the session in the stopped tab.
   var openingInStoppedTab = false
+  # Test-Results-Pane.md §9.5: set around the open a placement makes in
+  # place — the tab whose session the recording REPLACES (rule 4, or the
+  # current tab chosen by the setting or Ctrl): the new slot takes its place
+  # in the strip and the old session's engine is closed, as for a stopped
+  # tab. -1 for an ordinary open.
+  var replaceTab = -1
 
   app.recordingOpener = proc(path: string): string =
     # The handshake is BOUNDED, as the first one is; no keyboard hatch: the
@@ -1044,9 +1053,12 @@ proc interactive(command: TuiCommand): int =
     # the omnibar) is a new tab and leaves the stopped tab where it is:
     # *Stop* never closes a tab, and neither does a later request for a new
     # one.
-    let stoppedId = shownId
-    let replacing = openingInStoppedTab and not session.isNil and
-                    session.ended and sessions.hasKey(int(stoppedId))
+    let stoppedId = if replaceTab >= 0: HeadlessSessionId(replaceTab)
+                    else: shownId
+    let replacing =
+      (replaceTab >= 0 and sessions.hasKey(replaceTab)) or
+      (openingInStoppedTab and not session.isNil and
+       session.ended and sessions.hasKey(int(stoppedId)))
     if replacing:
       var at = -1
       for i, t in app.shell.tabsOf():
@@ -1062,6 +1074,8 @@ proc interactive(command: TuiCommand): int =
     showSession(slot.id)
     ""
 
+  var testsTabs: proc(tab: int) = nil
+    ## §9.2: tell the Test Results pane a tab closed (set once it exists).
   app.sessionCloser = proc(index: int): bool =
     # Rule 4: "Closing a tab stops its backend and removes it" — and the last
     # tab is not closed (the desktop's close control is not drawn on it).
@@ -1074,6 +1088,9 @@ proc interactive(command: TuiCommand): int =
     if sessions.hasKey(int(id)):
       sessions[int(id)].close()
       sessions.del(int(id))
+    if not testsTabs.isNil:
+      # §9.2: a closed tab is no test's tab any more.
+      testsTabs(int(id))
     showSession(app.shell.activeSessionId())
     true
   # PLAT-57: Find in Files — `:grep` searches the shown session's recording
@@ -1101,18 +1118,60 @@ proc interactive(command: TuiCommand): int =
   vcs.refresh(rt)
   # PLAT-53: the Test Results pane — the window's project (`app.projectRoot`,
   # which a welcome tab's folder re-roots) and the desktop's host over the
-  # native producers; a test's recording opens in a NEW session tab
-  # (`recordingOpener`, Test-Results-Pane.md §8.3).
-  let tests = newTestsSource(
+  # native producers; a test's recording opens where Test-Results-Pane.md §9
+  # places it — a NEW session tab by default (`recordingOpener`), the
+  # test's own tab when it has one, the current tab by the setting or Ctrl.
+  var tests: TestsSource = nil
+  proc placeTestRecording(testId, recordingId, folder: string;
+                          policy: TraceOpenPolicy): string =
+    let problem = traceFolderProblem(folder)
+    if problem.len > 0:
+      return "could not open " & folder & ": " & problem
+    var place = tests.vm.placeTestRecording(testId, recordingId, policy)
+    if place.kind != ttpNewTab and not sessions.hasKey(place.tab):
+      # A tab the bookkeeping outlived: forget it, and open a new one.
+      tests.vm.forgetTestTab(place.tab)
+      place = TestTabPlacement(kind: ttpNewTab, tab: -1)
+    let own = tests.vm.testTabOf(testId) >= 0
+    case place.kind
+    of ttpShowTab:
+      discard app.shell.activate(HeadlessSessionId(place.tab))
+      showSession(HeadlessSessionId(place.tab))
+      tests.host.placedWords = " in its own tab"
+      return ""
+    of ttpReplaceTab:
+      replaceTab = place.tab
+      let why =
+        try: app.recordingOpener(folder)
+        finally: replaceTab = -1
+      if why.len > 0:
+        return why
+      tests.vm.forgetTestTab(place.tab)
+      tests.host.placedWords = if own: " in its own tab" else: " in this tab"
+    of ttpNewTab:
+      let why = app.recordingOpener(folder)
+      if why.len > 0:
+        return why
+      tests.host.placedWords = " in a new tab"
+    tests.vm.noteTestTab(testId, int(shownId), recordingId)
+    ""
+  tests = newTestsSource(
     projectRoot = proc(): string = app.projectRoot,
     ctBinary = proc(): string = nativeCtBinary(),
     resolveFolder = proc(id: string): string = recordingFolderOf(id),
-    openFolder = proc(folder: string): string =
-      let problem = traceFolderProblem(folder)
-      if problem.len > 0:
-        return "could not open " & folder & ": " & problem
-      app.recordingOpener(folder))
+    openFolder = proc(testId, recordingId, folder: string;
+                      policy: TraceOpenPolicy): string =
+      placeTestRecording(testId, recordingId, folder, policy))
   defer: tests.close()
+  proc syncTestsTabs(): bool =
+    ## §9: the current tab, and whether a replay may replace it — a live
+    ## replay in Debug mode (not a tab *Stop* ended, not Edit mode).
+    let live = sessions.hasKey(int(shownId)) and not session.isNil and
+               not session.ended
+    tests.setTabs(int(shownId), live and app.modes.product == pmDebug, true)
+  testsTabs = proc(tab: int) =
+    tests.vm.forgetTestTab(tab)
+  discard syncTestsTabs()
   tests.refresh(rt)
   # PLAT-54: each session's Agent Activity host opens a test's recording the
   # way the welcome tab does — as a session tab (`recordingOpener`) — and
@@ -1350,8 +1409,12 @@ proc interactive(command: TuiCommand): int =
       # verdict, no output and no `:cancel`.
       let built = advanceBuild(rt, edit, report = true)
       let vcsChanged = vcs.tick(rt)
-      # PLAT-53: a test run that ended, and a re-rooted project.
-      let testsChanged = tests.tick(rt)
+      # PLAT-53: a test run that ended, and a re-rooted project; §9: the
+      # tab facts the `⏵` titles read.
+      let tabsMoved = syncTestsTabs()
+      if tabsMoved:
+        tests.publish(rt)
+      let testsChanged = tests.tick(rt) or tabsMoved
       # PLAT-55: the build's diagnostics, as they arrive.
       let problemsChanged = problems.tick(rt)
       # PLAT-57: the search in flight, a bounded step per tick.
@@ -1437,6 +1500,8 @@ proc interactive(command: TuiCommand): int =
         # session: the panes follow it before the outcome is applied.
         if app.shell.activeSessionId() != shownId:
           showSession(app.shell.activeSessionId())
+        if syncTestsTabs():
+          tests.publish(rt)
         # PLAT-50: a click in the VCS pane is the VCS source's; PLAT-53: one
         # on Test Results' controls is the Test Results source's.
         if not vcs.applyClick(rt, outcome.paneClick) and
@@ -1698,9 +1763,12 @@ proc editInteractive(command: TuiCommand): int =
     projectRoot = proc(): string = app.projectRoot,
     ctBinary = proc(): string = nativeCtBinary(),
     resolveFolder = proc(id: string): string = recordingFolderOf(id),
-    openFolder = proc(folder: string): string =
+    openFolder = proc(testId, recordingId, folder: string;
+                      policy: TraceOpenPolicy): string =
       NoSessionTabsText & folder)
   defer: tests.close()
+  # §9: no session tabs here.
+  discard tests.setTabs(-1, false, false)
   tests.refresh(rt)
   # PLAT-55: the Problems pane over this window's builds; a row opens in the
   # editor.

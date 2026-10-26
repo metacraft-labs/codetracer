@@ -28,7 +28,7 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/views/test_results_pane
 
-import isonim/core/[owner, computation]
+import isonim/core/[owner, computation, signals]
 
 const
   NoSessionTabsText* =
@@ -121,6 +121,20 @@ proc refresh*(s: TestsSource; rt: TuiRuntime; force = false) =
   discard s.host.refreshCatalog(force)
   s.publish(rt)
 
+proc setTabs*(s: TestsSource; current: int; replaceable, shown: bool): bool =
+  ## §9: the window's current session tab and whether a replay may replace
+  ## it (a replay in Debug mode: not an editing session, not a tab *Stop*
+  ## ended), and whether the window has session tabs at all. Whether any of
+  ## it changed (the `⏵` titles read it: publish again).
+  if s.isNil:
+    return false
+  let before = (s.vm.currentTab.val, s.vm.currentTabReplaceable.val,
+                s.vm.sessionTabsShown.val)
+  s.vm.setSessionTabsShown(shown)
+  s.vm.setCurrentTab(current, replaceable)
+  before != (s.vm.currentTab.val, s.vm.currentTabReplaceable.val,
+             s.vm.sessionTabsShown.val)
+
 proc tick*(s: TestsSource; rt: TuiRuntime): bool =
   ## Settle a run that ended, follow a re-rooted project, and say what the
   ## host has to say. Whether the pane (or the status line) changed.
@@ -153,8 +167,21 @@ proc applyClick*(s: TestsSource; rt: TuiRuntime; c: PaneClickRequest): bool =
       rt.app.notification = "that test is no longer listed"
       return true
     let row = s.vm.rows.val[i]
-    if c.kind == pcTestsRefresh: s.vm.triggerRefresh(row)
-    else: s.vm.triggerOpen(row)
+    if c.kind == pcTestsRefresh:
+      s.vm.triggerRefresh(row)
+    elif c.behaviour == TestsRedirectBehaviour:
+      # §9.3: THE TERMINAL HAS NO HELD MODIFIER (a terminal reports no key
+      # release), so Ctrl is read off the press: held for this one press,
+      # through the same Signal the GPUI window and the desktop hold.
+      s.vm.setRedirectHeld(true)
+      try: s.vm.triggerOpen(row)
+      finally: s.vm.setRedirectHeld(false)
+    else:
+      s.vm.triggerOpen(row)
+  of pcTestsOpenIn:
+    let (ok, policy) = parsePolicyWord(c.text)
+    if ok:
+      rt.app.notification = s.host.setReplayOpen(policy)
   else:
     return false
   let note = s.host.takeNote()

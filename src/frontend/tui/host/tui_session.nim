@@ -1300,7 +1300,7 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
   of pcNone: discard
   of pcVcsDiff, pcVcsCommit:
     discard   # the VCS source's (`vcs_source.applyClick`)
-  of pcTestsRun, pcTestsRefresh, pcTestsOpen:
+  of pcTestsRun, pcTestsRefresh, pcTestsOpen, pcTestsOpenIn:
     discard   # the Test Results source's (`test_results_source.applyClick`)
   of pcFrameSeek:
     # PLAT-51: the frame viewer's own scrubber (CodeTracer-TUI-Graphics.md

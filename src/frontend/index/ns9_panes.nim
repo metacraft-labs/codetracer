@@ -51,6 +51,9 @@ import ../viewmodel/viewmodels/test_catalog_answer
 # The one sentence every pane shows for a session with no project folder
 # (Files and VCS say it too; `viewmodels/no_project_folder`).
 from ../viewmodel/viewmodels/no_project_folder import NoProjectFolderText
+# Test-Results-Pane.md §9.3: the folder's `replay-open-in`, sent with its
+# tests.
+from ./replay_open_in import replayOpenInFor
 
 # ---------------------------------------------------------------------------
 # The node side, and the one rule it has: CROSS THE BOUNDARY AS `cstring`.
@@ -195,6 +198,7 @@ proc onNs9Panes*(sender: js, response: jsobject(folder=cstring)) =
   mainWindow.webContents.send "CODETRACER::ns9-panes-catalog", js{
     catalog: cstring(catalogJson),
     absence: cstring(catalogAbsence),
+    replayOpenIn: cstring($replayOpenInFor(folder)),
     tab: tab
   }
 

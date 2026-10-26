@@ -53,6 +53,10 @@ type
 var initLayoutImpl: InitLayoutProc = nil
 var ensureTabBarRendererImpl: EnsureTabBarRendererProc = nil
 var sessionBindImpl: SessionBindProc = nil
+var sessionClosedImpl*: proc(sessionId: int) = nil
+  ## Told the id of every tab `closeSession` closes — the Test Results
+  ## pane forgets a test's tab with it (`Test-Results-Pane.md` §9.2). Set
+  ## once by `ui_js`.
 
 proc setInitLayoutProc*(p: InitLayoutProc) =
   ## Called once from layout.nim to wire in the real ``initLayout``.
@@ -365,6 +369,8 @@ proc closeSession*(data: Data, targetIndex: int) =
 
   # Destroy the GL instance for the session being closed.
   let closingSession = data.sessions[targetIndex]
+  if not sessionClosedImpl.isNil:
+    sessionClosedImpl(int(closingSession.id))
 
   # Tell the main process to stop the replay for this session so the
   # Backend Manager can reclaim the child process.

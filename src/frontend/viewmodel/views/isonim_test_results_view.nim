@@ -267,25 +267,44 @@ when defined(js):
     ## rather than a coercion so an event that has no such property answers
     ## `false` instead of `undefined`.
 
+  proc eventRedirectKey(ev: isonim_dom.Event): bool
+    {.importjs: "(function(e){return e.ctrlKey === true || (typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) && e.metaKey === true);})(#)".}
+    ## Test-Results-Pane.md §9.3: the redirect modifier — Ctrl, or Cmd on
+    ## macOS (VS Code's `CtrlCmd`).
+
+  proc platformIsMac(): bool
+    {.importjs: "(typeof navigator !== 'undefined' && /Mac/.test(navigator.platform))".}
+
   proc installShiftTracking(vm: TestResultsVM) =
-    ## Keydown, keyup and blur, on the DOCUMENT.
+    ## Keydown, keyup and blur, on the DOCUMENT — for Shift and, since
+    ## Test-Results-Pane.md §9.3, for the redirect modifier the same way.
     ##
     ## See the header: a listener on the button would never fire, because the
     ## user this exists for is hovering it rather than focused in it. `blur`
     ## is here because alt-tab eats the `keyup` — without it the pane stays
     ## armed and every later click silently re-records.
     let docNode = isonim_dom.Node(isonim_dom.document)
+    if platformIsMac():
+      vm.redirectKeyName = "Cmd"
     isonim_dom.addEventListener(docNode, cstring"keydown",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(eventShiftKey(ev))
+        vm.setRedirectHeld(eventRedirectKey(ev)))
     isonim_dom.addEventListener(docNode, cstring"keyup",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(eventShiftKey(ev))
+        vm.setRedirectHeld(eventRedirectKey(ev)))
     isonim_dom.addEventListener(docNode, cstring"blur",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(false))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(false)
+        vm.setRedirectHeld(false))
     # `mouseover` carries the modifier state too, and it is what corrects the
     # flag when the pointer ARRIVES on the pane with Shift already down — a
     # keydown that happened before the pane existed reached nobody.
     isonim_dom.addEventListener(docNode, cstring"mouseover",
-      proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
+      proc(ev: isonim_dom.Event) =
+        vm.setShiftHeld(eventShiftKey(ev))
+        vm.setRedirectHeld(eventRedirectKey(ev)))
 
 
 proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
@@ -357,8 +376,18 @@ proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
   # is a plain `var`, so reading it creates no dependency and this effect does
   # not re-run when the rows do (the structural effect above has already
   # painted the current mode onto the buttons it just built).
+  #
+  # Test-Results-Pane.md §9.4: the title's last sentence — where the press
+  # opens the recording — reads the redirect modifier, the setting, the
+  # current tab and which tests have tabs, so those are its inputs too.
   createRenderEffect proc() =
     discard vm.shiftHeld.val
+    discard vm.redirectHeld.val
+    discard vm.openSetting.val
+    discard vm.currentTab.val
+    discard vm.currentTabReplaceable.val
+    discard vm.sessionTabsShown.val
+    discard vm.testTabs.val
     for handle in openHandles:
       applyOpenButton[R, N](r, vm, handle)
 

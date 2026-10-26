@@ -112,9 +112,11 @@ suite "PLAT-53: the words every front-end draws":
                        proc(a, b: string) = discard)
       var row = rowOf("test_passes", trsPassed)
       row.recordingId = "rec-1"
-      ck vm.openButtonTitle(row).endsWith("Hold Shift to record it again first.")
+      # The clause, then where it opens (Test-Results-Pane.md §9.4).
+      ck vm.openButtonTitle(row).endsWith("Hold Shift to record it again " &
+                                          "first. " & OpensInNewTabText)
       ck vm.openButtonTitle(row, shiftReachable = false).endsWith(
-        NoShiftRecordAgainText)
+        NoShiftRecordAgainText & " " & OpensInNewTabText)
       ck "nothing is re-run" in vm.openButtonTitle(row, shiftReachable = false)
       dispose()
 

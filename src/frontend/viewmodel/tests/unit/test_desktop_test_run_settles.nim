@@ -170,6 +170,12 @@ type
     lastFile: string
     lastLine: int
     refuseWith: string
+    opened: int
+      ## `openRecording` calls: since `Test-Results-Pane.md` §9.5 the host
+      ## opens a Run-test's recording itself, on the settle.
+    lastOpenTest: string
+    lastOpenRecording: string
+    lastOpenPolicy: TraceOpenPolicy
 
 proc hostOverPane(spies: Spies): (TestResultsVM, MockNode, DesktopTestHost) =
   let vm = createTestResultsVM()
@@ -186,6 +192,15 @@ proc hostOverPane(spies: Spies): (TestResultsVM, MockNode, DesktopTestHost) =
       spies.refuseWith,
     settleEditor = proc(note: string) =
       inc spies.settled)
+  # The desktop's opener (`ui_js.installDesktopRowActions`), spied: it is
+  # what places the recording in a session tab once the run settles.
+  host.openRecording = proc(testId, recordingId: string;
+                            policy: TraceOpenPolicy): string =
+    inc spies.opened
+    spies.lastOpenTest = testId
+    spies.lastOpenRecording = recordingId
+    spies.lastOpenPolicy = policy
+    ""
   (vm, panel, host)
 
 # ---------------------------------------------------------------------------
@@ -252,9 +267,14 @@ suite "a test run dispatched through the desktop host ends, and says how":
             inc recorded
       ck recorded == 1
       ck rows.len == 5
+      # §9.5: and the recording was OPENED, once, as that test's, where the
+      # default destination places it (a new session tab).
+      ck spies.opened == 1
+      ck spies.lastOpenTest == "a" and spies.lastOpenRecording == "rec-1"
+      ck spies.lastOpenPolicy == topNewTab
 
       dispose()
-    expectCount(6)
+    expectCount(9)
 
   test "a run the recorder FAILED settles too, and the pane says why":
     ## THE PATH THE DEFECT IS MOST OFTEN MET ON, and the one the milestone
