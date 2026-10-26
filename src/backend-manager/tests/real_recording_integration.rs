@@ -918,6 +918,138 @@ fn report(test_name: &str, log_path: &Path, success: bool) {
 // RR-based test helpers
 // ---------------------------------------------------------------------------
 
+/// The absolute path of `rust_flow_test.rs`, the program
+/// [`create_rr_recording`] builds and records.  The recording's debug info
+/// names this same path, so a breakpoint must be set on it.
+fn rust_flow_test_source_path() -> Result<PathBuf, String> {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
+        .ok_or_else(|| "cannot determine the path of rust_flow_test.rs".to_string())
+}
+
+/// The 1-based line of the one statement of `source` that contains
+/// `needle`.
+///
+/// Fails when no line or more than one line contains it, and when the line
+/// is a comment, so that a test which targets a statement can never be
+/// moved silently onto another line: `rust_flow_test.rs` is shared by many
+/// tests and suites, and a hard-coded number went stale for four months
+/// when a comment block was added above `main` (codetracer-pm issue
+/// `2026-10-22-real-recording-integration-rr-breakpoints-target-comment-lines-of-rust-flow-test.md`).
+fn statement_line_in(source: &str, needle: &str) -> Result<i64, String> {
+    let mut found = source
+        .lines()
+        .enumerate()
+        .filter(|(_, text)| text.contains(needle));
+    let Some((index, text)) = found.next() else {
+        return Err(format!("no line of the test program contains `{needle}`"));
+    };
+    if let Some((other, _)) = found.next() {
+        return Err(format!(
+            "`{needle}` is on more than one line of the test program (lines {} and {}): \
+             use a needle that names one statement",
+            index + 1,
+            other + 1
+        ));
+    }
+    if text.trim_start().starts_with("//") {
+        return Err(format!(
+            "`{needle}` is on line {}, which is a comment, not a statement",
+            index + 1
+        ));
+    }
+    Ok(index as i64 + 1)
+}
+
+/// The 1-based line of the statement of `rust_flow_test.rs` containing
+/// `needle` (see [`statement_line_in`]).  The source is read when the test
+/// runs, as [`create_rr_recording`] compiles it, so the line always belongs
+/// to the program that was recorded.
+fn rust_flow_test_line(needle: &str) -> Result<i64, String> {
+    let path = rust_flow_test_source_path()?;
+    let source = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    statement_line_in(&source, needle).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The statements of `rust_flow_test.rs` the rr tests below navigate to.
+/// Each is a needle for [`rust_flow_test_line`].
+const RUST_FLOW_LET_X: &str = "let x = 10;";
+const RUST_FLOW_LET_Y: &str = "let y = 32;";
+const RUST_FLOW_CALCULATE_SUM_CALL: &str = "let result = calculate_sum(x, y);";
+const RUST_FLOW_PRINT_RESULT: &str = "println!(\"Result: {}\", result);";
+const RUST_FLOW_WITH_LOOPS_CALL: &str = "with_loops(x);";
+const RUST_FLOW_CALCULATE_SUM_DECLARATION: &str = "fn calculate_sum(a: i32, b: i32)";
+const RUST_FLOW_CALCULATE_SUM_FIRST: &str = "let sum = a + b;";
+const RUST_FLOW_CALCULATE_SUM_TAIL: &str = "final_result";
+
+/// Every statement the rr tests target resolves to exactly one non-comment
+/// line of the program they record.  It needs no recording, so it fails at
+/// once, naming the needle, when an edit to `rust_flow_test.rs` breaks one,
+/// where the rr tests would fail with an unresolved breakpoint instead.
+#[test]
+fn rust_flow_test_statements_targeted_by_the_rr_tests_exist() {
+    for needle in [
+        RUST_FLOW_LET_X,
+        RUST_FLOW_LET_Y,
+        RUST_FLOW_CALCULATE_SUM_CALL,
+        RUST_FLOW_PRINT_RESULT,
+        RUST_FLOW_WITH_LOOPS_CALL,
+        RUST_FLOW_CALCULATE_SUM_DECLARATION,
+        RUST_FLOW_CALCULATE_SUM_FIRST,
+    ] {
+        rust_flow_test_line(needle).unwrap_or_else(|e| panic!("{e}"));
+    }
+    // The program order the breakpoint tests rely on.
+    let line = |needle| rust_flow_test_line(needle).unwrap();
+    assert!(
+        line(RUST_FLOW_LET_Y) < line(RUST_FLOW_CALCULATE_SUM_CALL)
+            && line(RUST_FLOW_CALCULATE_SUM_CALL) < line(RUST_FLOW_PRINT_RESULT)
+            && line(RUST_FLOW_PRINT_RESULT) < line(RUST_FLOW_WITH_LOOPS_CALL),
+        "main's statements must stay in the order the tests step through"
+    );
+    assert!(calculate_sum_body_lines().is_ok());
+}
+
+/// The helper refuses the three ways a needle can name the wrong line.
+#[test]
+fn statement_line_in_refuses_a_missing_repeated_or_commented_needle() {
+    let source =
+        "fn main() {\n    // let a = 1;\n    let b = 2;\n    let b = 2;\n    let c = 3;\n}\n";
+    assert_eq!(statement_line_in(source, "let c = 3;"), Ok(5));
+    let missing = statement_line_in(source, "let d = 4;").unwrap_err();
+    assert!(missing.contains("no line"), "{missing}");
+    let repeated = statement_line_in(source, "let b = 2;").unwrap_err();
+    assert!(repeated.contains("lines 3 and 4"), "{repeated}");
+    let commented = statement_line_in(source, "let a = 1;").unwrap_err();
+    assert!(commented.contains("comment"), "{commented}");
+}
+
+/// The lines of `calculate_sum`'s body, from its first statement to its
+/// tail expression (`final_result` alone on its line): where a step into
+/// the call from `main` lands.
+fn calculate_sum_body_lines() -> Result<std::ops::RangeInclusive<i64>, String> {
+    let first = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_FIRST)?;
+    let path = rust_flow_test_source_path()?;
+    let source = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    // A whole-line comparison: `final_result` is also part of the
+    // `let final_result = …` and `println!("Final: …")` lines.
+    let tail = source
+        .lines()
+        .position(|text| text.trim() == RUST_FLOW_CALCULATE_SUM_TAIL)
+        .map(|index| index as i64 + 1)
+        .ok_or("calculate_sum's tail expression `final_result` is not in the program")?;
+    if tail <= first {
+        return Err(format!(
+            "calculate_sum's tail expression (line {tail}) must follow its first \
+             statement (line {first})"
+        ));
+    }
+    Ok(first..=tail)
+}
+
 /// Builds and records a Rust test program, returning the path to the trace
 /// directory.  The test program source is at a known location relative to
 /// CARGO_MANIFEST_DIR.
@@ -926,11 +1058,7 @@ fn create_rr_recording(
     ct_native_replay: &Path,
     log_path: &Path,
 ) -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = manifest_dir
-        .parent()
-        .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-        .ok_or("cannot determine source path")?;
+    let source_path = rust_flow_test_source_path()?;
 
     if !source_path.exists() {
         return Err(format!(
@@ -2722,10 +2850,10 @@ async fn test_real_rr_navigate_step_over() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
-/// M3-RR-2. Open an RR trace.  Navigate to the `calculate_sum` call (line 19
-/// of `rust_flow_test.rs`) by stepping.  Send step_in.  Verify we land inside
-/// `calculate_sum` (different line, possibly line 4-12).  Send step_out.
-/// Verify we return near the caller (line >= 19).
+/// M3-RR-2. Open an RR trace.  Navigate to main's `calculate_sum` call in
+/// `rust_flow_test.rs` by stepping over.  Send step_in.  Verify we land
+/// inside `calculate_sum`'s body.  Send step_out.  Verify we return to
+/// main at or after the call.  The lines are read from the source.
 #[tokio::test]
 async fn test_real_rr_navigate_step_in_out() {
     let (test_dir, log_path) = setup_test_dir("real_rr_nav_step_in_out");
@@ -2769,44 +2897,35 @@ async fn test_real_rr_navigate_step_in_out() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Step through the program to reach a function call in user code.
-        //
-        // The Rust test program (`rust_flow_test.rs`) has:
-        //   - `main()` at line 15
-        //   - `let result = calculate_sum(x, y);` at line 19
-        //   - `calculate_sum` at lines 4-12
+        // Step over from the start of the recording until the replay stops
+        // on main's `let result = calculate_sum(x, y);`.  The line is read
+        // from the source (`rust_flow_test_line`), so an edit to the shared
+        // test program cannot move the target onto a comment.
         //
         // After opening an RR trace, the initial position is typically in
-        // runtime startup code (e.g., `_start`), not in `main()`.  We step
-        // forward repeatedly until we land in user code (path contains
-        // `rust_flow_test`) with a non-zero line, which ensures we are in
-        // a position with debug info where `step_in` will work reliably.
-        //
-        // If we never reach user code within the step budget, we still
-        // exercise step_in/step_out from wherever we are, but with relaxed
-        // assertions that tolerate the debugger staying in runtime code.
-        let mut seq = 8001;
-        let mut last_path = String::new();
-        let mut last_line: i64 = 0;
-        let mut last_ticks: i64 = 0;
-        let mut in_user_code = false;
+        // runtime startup code (e.g., `_start`), not in `main()`, so the
+        // first steps may be in code without source.
+        let call_line = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_CALL)?;
+        let with_loops_line = rust_flow_test_line(RUST_FLOW_WITH_LOOPS_CALL)?;
+        let calculate_sum_body = calculate_sum_body_lines()?;
+        log_line(
+            &log_path,
+            &format!(
+                "targets: call line {call_line}, calculate_sum body {calculate_sum_body:?}, \
+                 with_loops call line {with_loops_line}"
+            ),
+        );
 
-        // Step up to 40 times to find user code.
+        let mut seq = 8001;
+        let mut on_call_line = None;
         for _ in 0..40 {
-            let resp = navigate(
-                &mut client,
-                seq,
-                &trace_dir,
-                "step_over",
-                None,
-                &log_path,
-            )
-            .await?;
+            let resp = navigate(&mut client, seq, &trace_dir, "step_over", None, &log_path).await?;
             seq += 1;
 
             if resp.get("success").and_then(Value::as_bool) != Some(true) {
-                log_line(&log_path, &format!("step_over failed: {resp}"));
-                break;
+                return Err(format!(
+                    "step_over failed before reaching the calculate_sum call: {resp}"
+                ));
             }
 
             let (path, line, _, ticks, eot) = extract_nav_location(&resp)?;
@@ -2814,62 +2933,36 @@ async fn test_real_rr_navigate_step_in_out() {
                 &log_path,
                 &format!("pre-step: path={path} line={line} ticks={ticks} eot={eot}"),
             );
-            last_path = path.clone();
-            last_line = line;
-            last_ticks = ticks;
-
-            // Check if we've reached user code with debug info.
-            if path.contains("rust_flow_test") && line > 0 {
-                in_user_code = true;
-            }
-
             if eot {
+                return Err(format!(
+                    "the replay reached the end of the trace before stopping on the \
+                     calculate_sum call (line {call_line})"
+                ));
+            }
+            if path.contains("rust_flow_test") && line == call_line {
+                on_call_line = Some((path, line, ticks));
                 break;
             }
-
-            // If we've found user code, stop stepping once we're near
-            // the `calculate_sum` call (line 17-19 area).  We don't need
-            // to be exactly on line 19 — any line in main() is fine
-            // because step_in from any statement will at least enter the
-            // next function call or advance the instruction pointer.
-            if in_user_code && (17..=21).contains(&line) {
-                log_line(
-                    &log_path,
-                    &format!("reached function call area at line {line}"),
-                );
-                break;
+            if path.contains("rust_flow_test") && line > call_line && line <= with_loops_line {
+                return Err(format!(
+                    "step_over went from before the calculate_sum call (line {call_line}) \
+                     to line {line} without stopping on it"
+                ));
             }
         }
-
+        let Some((last_path, last_line, last_ticks)) = on_call_line else {
+            return Err(format!(
+                "40 step_overs never stopped on the calculate_sum call (line {call_line})"
+            ));
+        };
         log_line(
             &log_path,
-            &format!(
-                "before step_in: path={last_path} line={last_line} ticks={last_ticks} in_user_code={in_user_code}"
-            ),
+            &format!("before step_in: path={last_path} line={last_line} ticks={last_ticks}"),
         );
 
-        // If after 40 steps we never reached user code, the test must
-        // fail rather than silently passing without testing anything
-        // meaningful.  This matches the pattern used by M4 locals test.
-        if !in_user_code {
-            return Err(
-                "failed to reach user code after 40 steps; \
-                 cannot verify step_in/step_out without being in user code"
-                    .to_string(),
-            );
-        }
-
-        // Now do step_in.  This should either enter a function or advance
-        // by a single instruction.
-        let step_in_resp = navigate(
-            &mut client,
-            seq,
-            &trace_dir,
-            "step_in",
-            None,
-            &log_path,
-        )
-        .await?;
+        // step_in from the call enters calculate_sum.
+        let step_in_resp =
+            navigate(&mut client, seq, &trace_dir, "step_in", None, &log_path).await?;
         seq += 1;
 
         assert_eq!(
@@ -2878,35 +2971,21 @@ async fn test_real_rr_navigate_step_in_out() {
             "step_in should succeed, got: {step_in_resp}"
         );
 
-        let (path_in, line_in, _, ticks_in, _eot_in) =
-            extract_nav_location(&step_in_resp)?;
+        let (path_in, line_in, _, ticks_in, _eot_in) = extract_nav_location(&step_in_resp)?;
         log_line(
             &log_path,
             &format!("after step_in: path={path_in} line={line_in} ticks={ticks_in}"),
         );
-
-        // step_in should have moved us somewhere different.
-        //
-        // We are guaranteed to be in user code at this point (the early
-        // return above ensures this), so line or ticks must change.
         assert!(
-            line_in != last_line || ticks_in != last_ticks || path_in != last_path,
-            "step_in should change location in user code: \
-             before=(path={last_path}, line={last_line}, ticks={last_ticks}), \
-             after=(path={path_in}, line={line_in}, ticks={ticks_in})"
+            path_in.contains("rust_flow_test") && calculate_sum_body.contains(&line_in),
+            "step_in from the calculate_sum call (line {call_line}) should land in \
+             calculate_sum's body (lines {calculate_sum_body:?}), got \
+             path={path_in} line={line_in}"
         );
 
-        // Now do step_out.  This should bring us back towards the caller
-        // or advance execution forward.
-        let step_out_resp = navigate(
-            &mut client,
-            seq,
-            &trace_dir,
-            "step_out",
-            None,
-            &log_path,
-        )
-        .await?;
+        // step_out returns to the caller, main, at or after the call.
+        let step_out_resp =
+            navigate(&mut client, seq, &trace_dir, "step_out", None, &log_path).await?;
 
         assert_eq!(
             step_out_resp.get("success").and_then(Value::as_bool),
@@ -2914,21 +2993,20 @@ async fn test_real_rr_navigate_step_in_out() {
             "step_out should succeed, got: {step_out_resp}"
         );
 
-        let (path_out, line_out, _, ticks_out, _eot_out) =
-            extract_nav_location(&step_out_resp)?;
+        let (path_out, line_out, _, ticks_out, _eot_out) = extract_nav_location(&step_out_resp)?;
         log_line(
             &log_path,
             &format!("after step_out: path={path_out} line={line_out} ticks={ticks_out}"),
         );
-
-        // step_out should have moved us further in execution.  At minimum,
-        // ticks must advance (or line/path must change).  We also accept
-        // endOfTrace as valid — the trace may end during step_out.
         assert!(
-            ticks_out > ticks_in || line_out != line_in || path_out != path_in || _eot_out,
-            "step_out should advance from the step_in position: \
-             step_in=(path={path_in}, line={line_in}, ticks={ticks_in}), \
-             step_out=(path={path_out}, line={line_out}, ticks={ticks_out})"
+            path_out.contains("rust_flow_test")
+                && (call_line..=with_loops_line).contains(&line_out),
+            "step_out of calculate_sum should return to main at or after the call \
+             (lines {call_line}..={with_loops_line}), got path={path_out} line={line_out}"
+        );
+        assert!(
+            ticks_out >= ticks_in,
+            "step_out runs forward: ticks went from {ticks_in} to {ticks_out}"
         );
 
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -5189,15 +5267,14 @@ async fn step_to_user_code(
 /// continue forward.  Verify that execution stops at (or very near) the
 /// breakpoint line.
 ///
-/// The test program (`rust_flow_test.rs`) has these key lines:
-///   - line 17: `let x = 10;`
-///   - line 18: `let y = 32;`
-///   - line 19: `let result = calculate_sum(x, y);`
-///   - line 20: `println!("Result: {}", result);`
-///   - line 21: `with_loops(x);`
+/// The test program's `main` (`rust_flow_test.rs`) runs `let x = 10;`,
+/// `let y = 32;`, `let result = calculate_sum(x, y);`,
+/// `println!("Result: {}", result);` and `with_loops(x);`.  The rr tests
+/// below find each statement's line in the source with
+/// [`rust_flow_test_line`] rather than hard-coding it.
 ///
-/// We set a breakpoint at line 20 (`println!`), then continue forward from
-/// the program start.  The debugger should stop at (or near) line 20.
+/// We set a breakpoint on the `println!`, then continue forward from the
+/// program start.  The debugger should stop at (or near) that line.
 #[tokio::test]
 async fn test_real_rr_breakpoint_stops_execution() {
     let (test_dir, log_path) = setup_test_dir("real_rr_bp_stops");
@@ -5232,16 +5309,11 @@ async fn test_real_rr_breakpoint_stops_execution() {
         // Determine the source path as it appears in the trace.  The
         // test program is compiled from an absolute path, so breakpoints
         // must use the same absolute path the debugger knows about.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // The breakpoint target line: `println!("Result: {}", result);`
-        // which is line 20 of rust_flow_test.rs.
-        let bp_line: i64 = 20;
+        // The breakpoint target: `println!("Result: {}", result);` in main.
+        let bp_line: i64 = rust_flow_test_line(RUST_FLOW_PRINT_RESULT)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5397,17 +5469,13 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // We set a breakpoint at line 19 (`let result = calculate_sum(x, y);`)
-        // which is early enough in main() that we can later verify execution
-        // goes past it.
-        let bp_line: i64 = 19;
+        // We set a breakpoint on `let result = calculate_sum(x, y);`, which
+        // is early enough in main() that we can later verify execution goes
+        // past it.
+        let bp_line: i64 = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_CALL)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5455,7 +5523,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
             &format!("initial position: line={initial_line} ticks={initial_ticks}"),
         );
 
-        // Add breakpoint at line 19.
+        // Add the breakpoint on the `calculate_sum` call.
         let (bp_id, bp_resp) = send_py_add_breakpoint(
             &mut client,
             17_002,
@@ -5539,7 +5607,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         );
 
         // Continue forward again.  With the breakpoint removed, execution
-        // should go past line 19 — either to a later line in user code,
+        // should go past the breakpoint line — either to a later line in user code,
         // or to end-of-trace if the program runs to completion.
         let cont2_resp = navigate(
             &mut client,
@@ -5623,15 +5691,11 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // Set breakpoint at line 18 (`let y = 32;`) — early in main().
-        let bp_line: i64 = 18;
+        // Set the breakpoint on `let y = 32;` — early in main().
+        let bp_line: i64 = rust_flow_test_line(RUST_FLOW_LET_Y)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5658,14 +5722,14 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Step to user code and then several steps past line 18, so we
+        // Step to user code and then several steps past `let y = 32;`, so we
         // have execution history beyond the breakpoint line.
         let (mut seq, last_path, last_line, last_ticks, in_user_code) = step_to_user_code(
             &mut client,
             18_001,
             &trace_dir,
             50,  // max_steps
-            5,   // min_steps_in_user_code (ensure we are well past line 18)
+            5,   // min_steps_in_user_code (ensure we are well past the breakpoint line)
             &log_path,
         )
         .await?;
@@ -5689,7 +5753,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
             );
         }
 
-        // Now add the breakpoint at line 18.
+        // Now add the breakpoint on `let y = 32;`.
         let (bp_id, bp_resp) = send_py_add_breakpoint(
             &mut client,
             seq,
@@ -5711,7 +5775,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
             &format!("breakpoint set: id={bp_id} at line {bp_line}"),
         );
 
-        // Reverse continue — should hit the breakpoint at line 18.
+        // Reverse continue — should hit the breakpoint on `let y = 32;`.
         let rev_resp = navigate(
             &mut client,
             seq,
@@ -5802,18 +5866,14 @@ async fn test_real_rr_multiple_breakpoints() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // Set breakpoints at two lines in main():
-        //   line 19: `let result = calculate_sum(x, y);`
-        //   line 21: `with_loops(x);`
-        let bp_line_1: i64 = 19;
-        let bp_line_2: i64 = 21;
+        // Set breakpoints on two statements of main():
+        //   `let result = calculate_sum(x, y);`
+        //   `with_loops(x);`
+        let bp_line_1: i64 = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_CALL)?;
+        let bp_line_2: i64 = rust_flow_test_line(RUST_FLOW_WITH_LOOPS_CALL)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5856,7 +5916,7 @@ async fn test_real_rr_multiple_breakpoints() {
             "initial step_over should succeed"
         );
 
-        // Add first breakpoint (line 19).
+        // Add first breakpoint (the `calculate_sum` call).
         let (bp_id_1, bp_resp_1) = send_py_add_breakpoint(
             &mut client,
             19_002,
@@ -5876,7 +5936,7 @@ async fn test_real_rr_multiple_breakpoints() {
             &format!("breakpoint 1: id={bp_id_1} at line {bp_line_1}"),
         );
 
-        // Add second breakpoint (line 21).
+        // Add second breakpoint (the `with_loops` call).
         let (bp_id_2, bp_resp_2) = send_py_add_breakpoint(
             &mut client,
             19_003,
@@ -5902,7 +5962,7 @@ async fn test_real_rr_multiple_breakpoints() {
             "breakpoint IDs should be unique: {bp_id_1} vs {bp_id_2}"
         );
 
-        // Continue forward — should hit the first breakpoint (line 19).
+        // Continue forward — should hit the first breakpoint.
         let cont1_resp = navigate(
             &mut client,
             19_004,
@@ -5931,13 +5991,13 @@ async fn test_real_rr_multiple_breakpoints() {
             path1.contains("rust_flow_test"),
             "should stop in rust_flow_test.rs, got: {path1}"
         );
-        // Should stop at the first breakpoint (line 19) or very near it.
+        // Should stop at the first breakpoint or very near it.
         assert!(
             (bp_line_1 - 1..=bp_line_1 + 1).contains(&line1),
             "first continue should stop at or near line {bp_line_1}, got line {line1}"
         );
 
-        // Continue forward again — should hit the second breakpoint (line 21).
+        // Continue forward again — should hit the second breakpoint.
         let cont2_resp = navigate(
             &mut client,
             19_005,
@@ -5964,7 +6024,7 @@ async fn test_real_rr_multiple_breakpoints() {
             "second continue should advance: ticks2={ticks2} should be > ticks1={ticks1}"
         );
 
-        // Should stop at the second breakpoint (line 21) or very near it.
+        // Should stop at the second breakpoint or very near it.
         // If the second breakpoint wasn't hit (e.g., the program ended or
         // the debugger stopped somewhere else), the line would be quite
         // different.
@@ -6997,11 +7057,7 @@ async fn test_real_rr_flow_returns_steps() {
         );
 
         // Determine the source path as it appears in the trace.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon with the real db-backend.
@@ -7048,14 +7104,14 @@ async fn test_real_rr_flow_returns_steps() {
             );
         }
 
-        // Send flow request for calculate_sum (line 4).  Use a short
-        // timeout since RR flow processing is known to be very slow.
+        // Send flow request for calculate_sum (its declaration line).  Use
+        // a short timeout since RR flow processing is known to be very slow.
         let flow_result = send_py_flow(
             &mut client,
             seq,
             &trace_dir,
             &source_path_str,
-            4, // calculate_sum function declaration line
+            rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_DECLARATION)?,
             "call",
             ticks,
             &log_path,
@@ -7241,11 +7297,7 @@ async fn test_real_rr_flow_diff_mode() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon.
@@ -7290,7 +7342,7 @@ async fn test_real_rr_flow_diff_mode() {
             seq,
             &trace_dir,
             &source_path_str,
-            17, // line 17 in main()
+            rust_flow_test_line(RUST_FLOW_LET_X)?, // a statement of main()
             "diff",
             ticks,
             &log_path,
@@ -16553,11 +16605,7 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path as it appears in the trace.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon with Python API path.
@@ -16576,12 +16624,13 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
 
         let trace_path_str = trace_dir.to_string_lossy().to_string();
 
-        // Python script: set breakpoint at line 20 (println in main),
-        // continue to it, inspect locals, then step over.
-        // Line 20 is `println!("Result: {}", result);` in rust_flow_test.rs.
+        // Python script: set a breakpoint on main's
+        // `println!("Result: {}", result);`, continue to it, inspect
+        // locals, then step over.
+        let bp_line = rust_flow_test_line(RUST_FLOW_PRINT_RESULT)?;
         let script = format!(
             "\
-bp_id = trace.add_breakpoint('{source_path_str}', 20)
+bp_id = trace.add_breakpoint('{source_path_str}', {bp_line})
 print(f'Breakpoint set: id={{bp_id}}')
 trace.continue_forward()
 loc = trace.location
@@ -16691,11 +16740,7 @@ async fn test_cli_trace_query_rr_flow_api() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon with Python API path.
