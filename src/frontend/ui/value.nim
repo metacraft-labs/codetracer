@@ -70,20 +70,6 @@ func findNonExpanded(value: Value): seq[Value] =
   else:
     discard
 
-proc expandValues*(self: ValueComponent, expressions: seq[cstring], depth: int, stateCompleteMoveIndex: int): Future[seq[Value]] {.async.} =
-  # TODO: Fix with db-backend
-  # let values = await self.data.asyncSend(
-  #   "expand-values",
-  #   js{
-  #     expressions: expressions,
-  #     depth: depth,
-  #     stateCompleteMoveIndex: stateCompleteMoveIndex
-  #   },
-  #   $stateCompleteMoveIndex & " " & $expressions,
-  #   seq[Value])
-  # return values
-  discard
-
 proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.async.} =
   if value.kind in ATOM_KINDS:
     return

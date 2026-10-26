@@ -617,10 +617,6 @@ proc followGpuiVcsViewport*(vm: VCSVM; directory: string;
     return refreshGpuiVcs(vm, directory)
   false
 
-const GpuiCalltraceBuffer* = CALLTRACE_BUFFER
-  ## Rows read above and below the ones the pane shows: the desktop's
-  ## `CalltraceVM` pre-fetch, as the terminal's `tui_session.CallTraceBuffer`.
-
 type
   CalltracePage* = object
     top*: int
