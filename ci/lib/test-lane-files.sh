@@ -45,6 +45,8 @@
 #   test_lane_description <id>       # one-line human description
 #   test_lane_recipe <id>            # `just` recipe(s) that own the lane's
 #                                    # execution; empty = the runner owns it
+#   test_lane_run_library_path <id>  # extra LD_LIBRARY_PATH directories for
+#                                    # the run (may be empty)
 #
 # All paths are repo-relative. Callers must run from the repo root.
 
@@ -544,6 +546,45 @@ test_lane_parity_partner() {
 	# this line every `vm-unit` suite `vm-unit-js` excludes would read as
 	# claimed by two different backends.
 	vm-unit-wasm) echo "vm-unit" ;;
+	*) echo "" ;;
+	esac
+}
+
+# test_lane_run_library_path ID — directories the lane's suites need on
+# `LD_LIBRARY_PATH` when they RUN (never when they compile), ahead of the
+# inherited value; empty for most lanes.
+#
+# The three lanes below hold suites that load isonim-gpui's shim INSIDE the
+# test process: they import `isonim_gpui/bindings`, whose procs are
+# `{.dynlib.}`, so the program loads `libgpui_nim_shim.so` when it starts. A
+# shim built with `--features gpui-backend` (the one README.md and
+# AGENTS.md build) links `libxcb`, `libxkbcommon` and the rest of the window
+# stack. The dev shell exports those directories as
+# CODETRACER_GPUI_RUNTIME_LIB_PATH and keeps them off LD_LIBRARY_PATH on
+# purpose, so that only the processes that need them see them
+# (`nix/shells/ci-base.nix`, "PLAT-37 — THE GPUI RUNTIME LIBRARY PATH").
+# Without them each such suite exits 1 before its first case, on NixOS, with
+# `could not load: …/libgpui_nim_shim.so`. Measured 2026-10-26 inside
+# `repro exec .`:
+#
+#   gpui-shell             11 suites (`test_gpui_shell_split`,
+#                          `test_gpui_editing_surface`, …), and
+#                          `test_gpui_handshake_bound`, which starts
+#                          `codetracer-gpui` with the inherited environment
+#   tui                    `test_cross_renderer_panes`, `test_plat42_laws`,
+#                          `test_editor_front_end_observed`,
+#                          `test_plat44_both_arms_write`
+#   vm-collab-integration  `test_collab_m8_cross_frontend`
+#
+# The suites that start `codetracer-gpui` with an environment of their own
+# add the same directories for the child themselves
+# (`src/frontend/gpui/tests/gpui_child_env.nim`). The variable is not set on
+# macOS, so there the answer is empty and the run is unchanged.
+test_lane_run_library_path() {
+	case "$1" in
+	gpui-shell | tui | vm-collab-integration)
+		echo "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}"
+		;;
 	*) echo "" ;;
 	esac
 }

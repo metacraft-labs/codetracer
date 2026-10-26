@@ -38,7 +38,9 @@
 #   * The run inherits CT_LD_LIBRARY_PATH (the dev shell's
 #     sqlite/pcre/glib/openssl/zstd set). It is applied to the RUN only, never
 #     to the compile, so those libraries are not put in front of the Nim
-#     compiler's own loader path.
+#     compiler's own loader path. A lane that needs more run-time libraries
+#     names them in `test_lane_run_library_path` (ci/lib/test-lane-files.sh);
+#     they go in front of that set, for the run only as well.
 #
 #   * The verdict comes from ci/lib/test-lane-report.sh, which reads the exit
 #     status before the [OK]/[FAILED] tally. A lane must never invent `OK (0
@@ -255,6 +257,7 @@ _ct_user_state_snapshot() {
 _ct_user_state_before="$(_ct_user_state_snapshot)"
 backend="$(test_lane_backend "${lane}")"
 read -r -a extra_flags <<<"$(test_lane_extra_flags "${lane}")"
+lane_run_libs="$(test_lane_run_library_path "${lane}")"
 # Expanded below as ${extra_flags[@]+"${extra_flags[@]}"}, not
 # "${extra_flags[@]}": under `set -u`, bash 3.2 -- the /bin/bash every macOS
 # ships -- treats an EMPTY array's "${a[@]}" as an unbound variable and
@@ -461,6 +464,12 @@ while read -r f; do
 	fi
 
 	ct_libs="${CT_LD_LIBRARY_PATH:-${CODETRACER_LD_LIBRARY_PATH:-}}"
+	# The lane's own run-time libraries (`test_lane_run_library_path`), in
+	# front of the dev shell's set; each part only when non-empty, since an
+	# empty element makes the loader search the current directory.
+	if [ -n "${lane_run_libs}" ]; then
+		ct_libs="${lane_run_libs}${ct_libs:+:${ct_libs}}"
+	fi
 	if [ "${backend}" = "js" ]; then
 		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	elif [ "${backend}" = "js-dom" ]; then
@@ -490,7 +499,11 @@ while read -r f; do
 		# a module that only works by emulation.
 		output="$(timeout "${lane_timeout}" node "${artifact}" 2>&1)" && rc=0 || rc=$?
 	else
-		output="$(LD_LIBRARY_PATH="${ct_libs}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+		run_lib_path="${ct_libs}"
+		if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+			run_lib_path="${run_lib_path:+${run_lib_path}:}${LD_LIBRARY_PATH}"
+		fi
+		output="$(LD_LIBRARY_PATH="${run_lib_path}" \
 			timeout "${lane_timeout}" "${artifact}" 2>&1)" && rc=0 || rc=$?
 	fi
 
