@@ -326,7 +326,13 @@ type
     # the end, for the reason every note above gives.
     aShowDetail,                  # palette: Show Detail
     aWidenColumn,                 # palette: Widen Column
-    aNarrowColumn                 # palette: Narrow Column
+    aNarrowColumn,                # palette: Narrow Column
+    # PLAT-70 Part I (Horizontal-Overflow.md §4.4, §5.5): **View: Scroll
+    # Left** / **View: Scroll Right** (`view.scroll-left` / `-right`) on the
+    # focused output pane, or a table pane while its columns scroll.
+    # Appended at the end, for the reason every note above gives.
+    aScrollViewLeft,              # palette: View: Scroll Left
+    aScrollViewRight              # palette: View: Scroll Right
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

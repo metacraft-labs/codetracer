@@ -15,12 +15,20 @@
 ##   * the Call Trace of `test-programs/deep_calls`: a call nested 40 deep
 ##     makes the pane SCROLL (`data-ct-fit`, the bar), and the wheel moves
 ##     the rows (HO-15's GPUI half); the shared solver's widths are the ones
-##     drawn (HO-13: the plan's list width is `callTraceFit`'s floor).
+##     drawn (HO-13: the plan's list width is `callTraceFit`'s floor);
+##   * the table panes' sideways bars answer the pointer, not only the wheel
+##     (`hbar:<pane>:…`, the window's own press / move / release handlers): a
+##     press on the Event Log's track jumps its view, a thumb taken 3 px into
+##     it and moved 40 px moves 40 px (the grab offset, Scrollbar-Scrubbers
+##     §3.3), and a press on the Call Trace's track moves its rows;
+##   * the palette's **View: Scroll Right** (Ctrl+P, `:`) moves the focused
+##     table pane's view (Horizontal-Overflow §4.4), the pane focused by a
+##     press in it as a user focuses it.
 ##
 ## No mocks: the binary, the engine and the recordings are the product's.
 
-import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
-            unittest]
+import std/[json, os, osproc, sequtils, streams, strtabs, strutils,
+            tempfiles, unittest]
 import ./gpui_child_env
 
 import codetracer_embed
@@ -31,7 +39,7 @@ import ../../viewmodel/host/table_column_widths
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 12
+const ExpectedAssertions = 21
 
 var countedAssertions = 0
 
@@ -131,6 +139,13 @@ proc bars(run: Run; pane: string): seq[JsonNode] =
 proc leftOf(bar: JsonNode): int =
   parseInt(bar.attr(TableHBarAttribute).split(',')[0])
 
+proc thumbStartOf(bar: JsonNode): int =
+  ## The thumb's start along the track, in pixels, as drawn.
+  for c in bar{"children"}.getElems:
+    if c.hasAttr("data-ct-hscroll-thumb"):
+      return parseInt(c.attr("data-ct-hscroll-thumb").split(',')[0])
+  -1
+
 suite "PLAT-70 Part I in the GPUI window: fit or scroll":
 
   test "the Event Log: no bar while it fits; a wide column scrolls and the wheel moves header and rows":
@@ -180,6 +195,66 @@ suite "PLAT-70 Part I in the GPUI window: fit or scroll":
       n.attr("data-calltrace") == "rows")
     ck lists2.len == 1 and
        lists2[0].style("margin-left") == "-" & $bar2[0].leftOf & "px"
+
+  test "the Event Log's bar answers a press on its track and a thumb grab, offset kept":
+    let subject = recording("wide_lines", "test-programs/wide_lines/main.py")
+    let state = createTempDir("plat70i-gpui-bar-", "")
+    putEnv(StateDirEnvVar, state)
+    ck saveColumnWidths("event-log",
+                        @[(table: "event-log", column: "output", cells: 400)]) == ""
+    delEnv(StateDirEnvVar)
+    # A press near the track's right end jumps the view there.
+    let jumped = windowPlan(subject, "hbar:" & $paneEventLog & ":track:900", state)
+    let jb = jumped.bars($paneEventLog)
+    checkpoint(jumped.trace[max(0, jumped.trace.len - 1500) .. ^1])
+    ck jb.len == 1 and jb[0].leftOf > 0
+    # A thumb taken 3 px into it and moved 40 px right moves 40 px — the
+    # point it was taken by stays under the pointer (Scrollbar-Scrubbers
+    # §3.3), not the thumb's middle.
+    let before = windowPlan(subject, "", state).bars($paneEventLog)
+    let grabbed = windowPlan(subject, "hbar:" & $paneEventLog & ":grab:3:40",
+                             state).bars($paneEventLog)
+    ck before.len == 1 and grabbed.len == 1
+    if before.len == 1 and grabbed.len == 1:
+      let moved = grabbed[0].thumbStartOf - before[0].thumbStartOf
+      checkpoint("the thumb moved " & $moved & " px")
+      ck abs(moved - 40) <= 1
+
+  test "the Call Trace's bar answers a press on its track":
+    let subject = recording("deep_calls", "test-programs/deep_calls/main.py")
+    let down = "wheel:" & $paneCalltrace & ":40"
+    let run = windowPlan(subject, down & ",hbar:" & $paneCalltrace & ":track:900")
+    let bar = run.bars($paneCalltrace)
+    ck bar.len == 1 and bar[0].leftOf > 0
+    let lists = run.plan.all(proc(n: JsonNode): bool =
+      n.attr("data-calltrace") == "rows")
+    ck lists.len == 1 and bar.len == 1 and
+       lists[0].style("margin-left") == "-" & $bar[0].leftOf & "px"
+
+  test "the palette's View: Scroll Right reaches the focused table pane":
+    let subject = recording("wide_lines", "test-programs/wide_lines/main.py")
+    let state = createTempDir("plat70i-gpui-palette-", "")
+    putEnv(StateDirEnvVar, state)
+    ck saveColumnWidths("event-log",
+                        @[(table: "event-log", column: "output", cells: 400)]) == ""
+    delEnv(StateDirEnvVar)
+    let first = windowPlan(subject, "", state)
+    var body: JsonNode
+    for n in first.geometry{"nodes"}.getElems:
+      if $paneEventLog in n{"panes"}.getElems.mapIt(it.getStr):
+        body = n{"body"}
+    require not body.isNil
+    # Focus the Event Log with a press on its pager's left corner (inert),
+    # then run the command from the command palette.
+    let x = body[0].getInt + 3
+    let y = body[1].getInt + body[3].getInt - 3
+    let ops = "press:" & $x & ":" & $y & ",release:" & $x & ":" & $y &
+              ",key:p:control,type::view: scroll right,key:enter"
+    let run = windowPlan(subject, ops, state)
+    checkpoint(run.trace[max(0, run.trace.len - 2000) .. ^1])
+    ck ($paneEventLog & "-hscroll left=") in run.trace
+    let bar = run.bars($paneEventLog)
+    ck bar.len == 1 and bar[0].leftOf > 0
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

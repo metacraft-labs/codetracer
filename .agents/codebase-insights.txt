@@ -7803,3 +7803,38 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   checkout (src/db-backend + src/libs + libs file bytes); a binary built from
   an older tree is refused by the GPUI suites even when db-backend is
   unchanged (libs/jsbound moves often).
+
+## Grapheme continuation, width fences, cut kinds, stops (PLAT-70 I / PLAT-71 residuals)
+
+- A zero-width rune (combining mark, ZWJ, VS16) is carried WITH the cell before
+  it twice: `styled_row.paint` appends it to the previous StyledCell's rune
+  string, and isonim-tui's `rawCellsForEntry` puts it in `Cell.extra`. Every
+  emitter must write `cellText(cell)`, not `cell.rune` — `ssh_tuning.emitRuns`,
+  `terminal_driver`'s plain frame, `hyperlinks.frameBytesWithHyperlinks` and
+  isonim-tui's drivers/snapshots all do. Controls (TAB) are never attached.
+- Width fences (`CSI <col> G` after a cell) are decided by
+  `ssh_tuning.widthFencesOf(caps)` from the width probe's UNKNOWNS; a terminal
+  that answered nothing (the silent persona, most unit tests' caps) fences
+  every EAW-A / Unicode-13 / text-pictograph content cell. Box drawing and
+  block elements (U+2500–U+259F) never fence, so borders cost no bytes.
+- §9.2's cut position is `table_overflow.fitCellAs(full, cells, kind)` with
+  `cutKindOf(pane, column)`; a middle cut records `FittedCell.midMarker` so
+  `markCut` puts the ASCII tier's `~` where the `…` is. The desktop draws the
+  middle cut by rewriting the cell's TEXT NODE (`table_overflow_dom.
+  middleCutPass`, `data-ct-mid-text` / `data-ct-mid-of`), because CSS
+  `text-overflow` cuts only the end.
+- SIGTSTP: `nim-termctl.onSuspend` restores, raises the stop with SIGTSTP
+  unblocked inside the handler, and on SIGCONT re-takes raw mode / alt screen /
+  modes, writes `setExtraResume` bytes and pokes the SIGWINCH pipe;
+  `terminal_driver.nextEvent` sees `takeResumed()` and returns a resize event
+  after resetting the emitter (a whole frame). Under TermAssert the child is a
+  session leader in an ORPHANED process group, so the kernel discards the stop
+  and the continue happens at once — the pty test sees restore then resume;
+  nim-termctl's own suite uses `setpgid(0,0)` to get a real stop.
+- The desktop command palette's search splits on spaces (the first token is a
+  command name, the rest its argument), so a spec searches `:ScrollRight`, not
+  `:View: Scroll Right`. GPUI's palette commands are reached with Ctrl+P then
+  `:` (`type::view: scroll right`), not Ctrl+Shift+P.
+- docs/book-isonim tests need a hand-written `nim.cfg` (paths to isonim-docs,
+  codetracer-design-system/nim, isonim, vendor chronicles …; see its README);
+  its nav test counts every content page (`entries.len`), so a new page bumps it.

@@ -5,6 +5,8 @@
   "B12": "r45.tier == tierBasic and r45.tierNote.contains(\"[terminal\")",
   "B13": "not linux.contains(XtversionQuery)",
   "B14": "caps.tier == tierExtended and caps.bordersFrom == csProbe",
+  "B15": "after.find(\"\\e[?2027h\", max(0, back)) > back",
+  "B16": "t.screenText() == before",
   "B2": "ambiguous.len == 0",
   "B3": "not r5a.ambiguousWide and r5a.ambiguousFrom == csSetting",
   "B4": "r56.colors == cdAnsi256 and r56.colorsFrom == csSetting",

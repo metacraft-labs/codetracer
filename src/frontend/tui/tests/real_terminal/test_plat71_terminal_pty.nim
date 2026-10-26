@@ -15,8 +15,22 @@
 ##   * TA-3 — nothing the probe writes is visible after the debugger's frame,
 ##     answered and silent;
 ##   * TA-4 — keys typed while the round waits reach the key journal in order;
-##   * TA-10 — every mode set is reset on a normal exit AND on SIGTERM: DEC
-##     2027 (set by the binary on a terminal that recognised it), 2026, 1003;
+##   * TA-10 — every mode set is reset on a normal exit, on SIGTERM, on
+##     SIGHUP and on a crash (SIGSEGV): DEC 2027 (set by the binary on a
+##     terminal that recognised it), 2026, 1003; on a stop (SIGTSTP) they are
+##     reset and the alternate screen left BEFORE the stop, and taken again
+##     after it, with a whole frame painted — the pty's session is the
+##     binary's own, so the kernel discards the stop itself (an orphaned
+##     group) and the continue follows at once; `nim-termctl`'s own suite
+##     stops and continues a real job;
+##   * §6.5 / §6.6 on `test-programs/grapheme_text` (a decomposed accent, an
+##     em dash and an ellipsis — East Asian Width `A` — and a ZWJ emoji
+##     sequence in the program's own text): the combining mark and the
+##     joiner are written with the cell before them and the screen holds the
+##     accent; a cell whose width the terminal left unmeasured is followed by
+##     `CSI <col> G` (the ellipsis on a silent terminal, the joined sequence
+##     on xterm, which sums ZWJ sequences), and none is on foot, which
+##     measured everything;
 ##   * TA-11 — a silent terminal costs frame 0 no more than the round's bound;
 ##   * TA-12 — the per-terminal cache gives a silent session the last
 ##     answers, and a live answer replaces them;
@@ -55,7 +69,7 @@ import ./persona_peer
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 93
+const ExpectedAssertions = 120
 
 var countedAssertions = 0
 
@@ -292,6 +306,100 @@ suite "PLAT-71 Tier 2: the binary adapts to the terminal it runs in":
         ck not silentScreen.contains(g)
       finishSession(quiet)
       quiet.close()
+
+  test "TA-10: SIGHUP and a crash reset every mode; a stop resets them, then takes the terminal again":
+    let calc = resolveFixture(pythonSpec("calc"))
+    ck calc.outcome == foRecorded
+    if calc.outcome == foRecorded:
+      for sig in [SIGHUP, SIGSEGV]:
+        var s = builder(@[calc.tracePath], term = "foot").spawn()
+        discard s.serve(foot())
+        settleOnDebugger(s, Cols, Rows)
+        ck s.transcriptBytes().contains("\x1b[?2027h")
+        let mark = s.transcriptBytes().len
+        s.sendSignal(sig)
+        discard s.waitExit(initDuration(seconds = 20))
+        discard s.drainOutput(100)
+        let after = s.transcriptBytes()[mark .. ^1]
+        checkpoint("after signal " & $sig & ": " & after.escape)
+        ck after.contains("\x1b[?2027l")
+        ck after.contains("\x1b[?2026l")
+        ck after.contains("\x1b[?1003l")
+        ck after.contains("\x1b[?1049l")
+        s.close()
+      # SIGTSTP: the restore before the stop, the claim after it, and a
+      # whole frame — the screen the user returns to is the session's.
+      var t = builder(@[calc.tracePath], term = "foot").spawn()
+      discard t.serve(foot())
+      settleOnDebugger(t, Cols, Rows)
+      let before = t.screenText()
+      let mark = t.transcriptBytes().len
+      t.sendSignal(SIGTSTP)
+      let deadline = getMonoTime() + initDuration(seconds = 20)
+      var after = ""
+      while getMonoTime() < deadline:
+        discard t.drainOutput(100)
+        after = t.transcriptBytes()[mark .. ^1]
+        let claimed = after.find("\x1b[?1049h")
+        if claimed >= 0 and after.find("\x1b[?1003h", claimed) >= 0 and
+           t.screenText() == before:
+          break
+      checkpoint("after SIGTSTP: " & after[0 .. min(after.len, 400) - 1].escape)
+      let left = after.find("\x1b[?1049l")
+      let back = after.find("\x1b[?1049h")
+      ck after.contains("\x1b[?2027l") and after.contains("\x1b[?1003l")
+      ck left >= 0 and back > left
+      ck after.find("\x1b[?2027h", max(0, back)) > back
+      ck after.find("\x1b[?1003h", max(0, back)) > back
+      ck t.screenText() == before
+      finishSession(t)
+      t.close()
+
+  test "§6.5, §6.6: content's zero-width runes are drawn; unmeasured widths are fenced":
+    let text = resolveFixture(pythonSpec("grapheme_text"))
+    if text.outcome != foRecorded:
+      checkpoint(text.detail)
+    ck text.outcome == foRecorded
+    if text.outcome == foRecorded:
+      const Woman = "\u{1F469}"
+      const Laptop = "\u{1F4BB}"
+      proc isFence(bytes: string; at: int): bool =
+        ## `CSI <digits> G` starts at `at`.
+        if at + 3 > bytes.len or bytes[at] != '\x1b' or bytes[at + 1] != '[':
+          return false
+        var k = at + 2
+        while k < bytes.len and bytes[k] in Digits: inc k
+        k > at + 2 and k < bytes.len and bytes[k] == 'G'
+      proc fencedAfter(bytes, glyph: string): bool =
+        var at = bytes.find(glyph)
+        while at >= 0:
+          if bytes.isFence(at + glyph.len): return true
+          at = bytes.find(glyph, at + 1)
+        false
+      proc session(p: Persona; persona: string): (string, string) =
+        var sess = builder(@[text.tracePath], term = persona).spawn()
+        discard sess.serve(p)
+        settleOnDebugger(sess, Cols, Rows)
+        discard sess.drainOutput(200)
+        result = (sess.transcriptBytes(), sess.screenText())
+        finishSession(sess)
+        sess.close()
+      # xterm: the ambiguous policy measured (narrow), ZWJ sequences summed.
+      let (xb, xs) = session(xterm(), "xterm-256color")
+      ck xb.contains("cafe\u0301")
+      ck xs.contains("cafe\u0301")
+      ck xb.contains(Woman & "\u200D")
+      ck xb.fencedAfter(Woman & "\u200D")
+      ck not xb.fencedAfter("\u2026")
+      # A silent terminal: nothing measured, so the ellipsis is fenced too.
+      let (sb, _) = session(silent(), "xterm-256color")
+      ck sb.fencedAfter("\u2026")
+      ck sb.fencedAfter("\u2014")
+      # foot measured every width and clusters: no fence anywhere.
+      let (fb, fs) = session(foot(), "foot")
+      ck fb.contains(Woman & "\u200D" & Laptop)
+      ck not fb.fencedAfter("\u2026") and not fb.fencedAfter(Woman & "\u200D")
+      ck fs.contains("cafe\u0301")
 
   test "TA-5, TA-8: a terminal measured ambiguous-WIDE gets the safe glyphs":
     let calc = resolveFixture(pythonSpec("calc"))

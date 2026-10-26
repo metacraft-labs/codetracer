@@ -916,6 +916,8 @@ var
     ## The caret the view last followed (§4.5: only the caret moves it).
   gEditorBarDrag = false
     ## A press held on the editor bar's thumb: the view follows the pointer.
+  gTableBarDrag: tuple[active: bool, pane: PaneKind]
+    ## PLAT-70 Part I: a press held on a table pane's sideways bar's thumb.
   gEditorVBarDrag = false
     ## M73 (#840): a press held on the editor's VERTICAL scrubber's thumb: the
     ## source window follows the pointer.
@@ -3201,6 +3203,68 @@ proc scrubListPane(r: GpuiRenderer; kind: PaneKind; y: int; dragging: bool) =
   if kind == paneVcs:
     followVcsViewport(r)
 
+proc tableHBarOf(kind: PaneKind): tuple[rect: PxRect; view: HorizontalView] =
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5.4): where `leaves.tableHBar`
+  ## drew a table pane's sideways bar, in window pixels, and the view it was
+  ## drawn from; a zero rectangle while the pane's columns fit.
+  let body = visibleBodyOf(kind)
+  if body.w <= 0:
+    return
+  case kind
+  of paneCalltrace:
+    let v = callTraceHView
+    if not v.overflows or callTracePaneHeightPx <= TableHBarPx:
+      return
+    (PxRect(x: body.x, y: body.y + callTracePaneHeightPx - TableHBarPx,
+            w: v.viewportCols, h: TableHBarPx), v)
+  of paneEventLog:
+    let v = eventLogHView
+    if not v.overflows:
+      return
+    # Under the table's rows; the table shrinks before the toolbar, the bar
+    # and the pager do.
+    let tableH = min(eventLogTableHeightPx,
+                     max(0, body.h - EventToolbarPx - TableHBarPx -
+                            EventFooterPx))
+    (PxRect(x: body.x, y: body.y + EventToolbarPx + tableH,
+            w: v.viewportCols, h: TableHBarPx), v)
+  else: (PxRect(), HorizontalView())
+
+proc scrubTableHBar(r: GpuiRenderer; kind: PaneKind; x: int; click: bool) =
+  ## A press on a table pane's bar: the track centres the column under it
+  ## (§4.2), a held thumb follows the pointer by the point it was taken by
+  ## (Scrollbar-Scrubbers §3.3). The view only (HO-4).
+  let (bar, v0) = tableHBarOf(kind)
+  if bar.w <= 0:
+    return
+  var v = v0
+  let f = trackFractionAt(clamp(x - bar.x, 0, bar.w - 1), bar.w)
+  let moved = if click: v.clickTrack(f)
+              else: v.dragThumb(v.barModel.heldThumbStart(f))
+  if kind == paneCalltrace: callTraceHView = v
+  else: eventLogHView = v
+  traceGesture($kind & "-hscroll left=" & $v.leftCol)
+  if moved:
+    redrawPaneOf(r, kind)
+
+proc pressTableHBar(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on the Call Trace's or the Event Log's sideways bar: the
+  ## bar's, never the row's under it.
+  for kind in [paneCalltrace, paneEventLog]:
+    let (bar, v) = tableHBarOf(kind)
+    if bar.w <= 0 or not bar.contains(x, y):
+      continue
+    let span = v.barModel.thumbSpan(bar.w, TableHBarMinThumbPx)
+    let local = x - bar.x
+    let onThumb = local >= span.start and local < span.start + span.length
+    gTableBarDrag = (onThumb, kind)
+    if onThumb:
+      v.barModel.beginBarGrab(trackFractionAt(clamp(local, 0, bar.w - 1),
+                                              bar.w))
+    scrubTableHBar(r, kind, x, click = not onThumb)
+    return true
+  false
+
 proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
   ## A left press on a list pane's scrubber: the track jumps the view, the
   ## thumb starts a drag.
@@ -3369,6 +3433,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # PLAT-70: the editor's horizontal bar, before the row under it.
     if pressEditorBar(r, x, y):
       return
+    # PLAT-70 Part I: a table pane's sideways bar, before the row under it.
+    if pressTableHBar(r, x, y):
+      return
     # M73 (#840): and its vertical scrubber.
     if pressEditorVBar(r, x, y):
       return
@@ -3395,6 +3462,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     if gEditorBarDrag:
       scrubEditorBar(r, x, click = false)
+      return
+    if gTableBarDrag.active:
+      scrubTableHBar(r, gTableBarDrag.pane, x, click = false)
       return
     if gEditorVBarDrag:
       scrubEditorVBar(r, y, click = false)
@@ -3439,6 +3509,10 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     if gEditorBarDrag:
       scrubEditorBar(r, x, click = false)
       gEditorBarDrag = false
+      return
+    if gTableBarDrag.active:
+      scrubTableHBar(r, gTableBarDrag.pane, x, click = false)
+      gTableBarDrag.active = false
       return
     if gEditorVBarDrag:
       scrubEditorVBar(r, y, click = false)
@@ -5778,6 +5852,68 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
 proc editorPath(): string
 proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp)
 
+proc runGpuiViewOperation(r: GpuiRenderer; operation: string) =
+  ## PLAT-70 (Horizontal-Overflow.md §4.4) / Part I (§5.5): `view.scroll-*`
+  ## — from a key or from the palette — on the focused pane's view.
+  # PLAT-70 Part I (§5.5): the focused table pane's view while its columns
+  # SCROLL — the Call Trace and the Event Log in pixels, a step of
+  # `WheelColumns` columns of the code face; the State pane's scroll box.
+  if gFocusPane in [$paneCalltrace, $paneEventLog, $paneState]:
+    let step = WheelColumns * gpuiCellUnits()
+    if gFocusPane == $paneState:
+      if stateScrollMax.left <= 0:
+        traceGesture("`" & operation & "` scrolls a table pane whose " &
+                     "columns do not fit")
+        return
+      let half = max(1, statePaneSizePx.w div 2)
+      let target = case operation
+                   of "view.scroll-left": stateScroll.left - step
+                   of "view.scroll-right": stateScroll.left + step
+                   of "view.scroll-left-half": stateScroll.left - half
+                   of "view.scroll-right-half": stateScroll.left + half
+                   else: 0
+      stateScroll.left = clamp(target, 0, stateScrollMax.left)
+      traceGesture("state scroll top=" & $stateScroll.top & " left=" &
+                   $stateScroll.left)
+      redrawPaneOf(r, paneState)
+      return
+    let kind = if gFocusPane == $paneCalltrace: paneCalltrace
+               else: paneEventLog
+    var v = if kind == paneCalltrace: callTraceHView else: eventLogHView
+    if not v.overflows:
+      traceGesture("`" & operation & "` scrolls a table pane whose " &
+                   "columns do not fit")
+      return
+    let moved = case operation
+                of "view.scroll-left": v.scrollBy(-step)
+                of "view.scroll-right": v.scrollBy(step)
+                of "view.scroll-left-half": v.scrollHalf(right = false)
+                of "view.scroll-right-half": v.scrollHalf(right = true)
+                else: v.scrollToLineStart()
+    if kind == paneCalltrace: callTraceHView = v
+    else: eventLogHView = v
+    traceGesture($kind & "-hscroll left=" & $v.leftCol)
+    if moved:
+      redrawPaneOf(r, kind)
+    return
+  # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — the
+  # Terminal Output's line view in this window (Build Output is PLAT-56).
+  let vm = terminalVM()
+  if vm.isNil or vm.screenShown:
+    traceGesture("`" & operation & "` scrolls the Terminal Output's line view")
+    return
+  var v = gTerminal.hview
+  discard (case operation
+           of "view.scroll-left": v.scrollBy(-WheelColumns)
+           of "view.scroll-right": v.scrollBy(WheelColumns)
+           of "view.scroll-left-half": v.scrollHalf(right = false)
+           of "view.scroll-right-half": v.scrollHalf(right = true)
+           else: v.scrollToLineStart())
+  gTerminal.hview = v
+  traceGesture("terminal-hscroll leftCol=" & $v.leftCol & " of " &
+               $v.maxLeftCol)
+  drawTerminalPane(r)
+
 proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
   traceGesture("menu action " & action)
   # PLAT-68: the palette's **Preferences: Select Base Keymap** — every open
@@ -5827,6 +5963,9 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
     case name
     of "list.show-detail": showTableDetail(r)
     of "table.resize-column": resizeEventLogColumn(r, arg)
+    of "view.scroll-left", "view.scroll-right":
+      # PLAT-70 Part I: the focused output or table pane's view.
+      runGpuiViewOperation(r, name)
     else: traceGesture(operation.operation & " is not available here")
     drawTopBar(r)
     return
@@ -8223,23 +8362,7 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     return
   of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
      "view.scroll-right-half", "view.scroll-to-line-start":
-    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view — the
-    # Terminal Output's line view in this window (Build Output is PLAT-56).
-    let vm = terminalVM()
-    if vm.isNil or vm.screenShown:
-      traceGesture("`" & op & "` scrolls the Terminal Output's line view")
-      return
-    var v = gTerminal.hview
-    discard (case res.operation
-             of "view.scroll-left": v.scrollBy(-WheelColumns)
-             of "view.scroll-right": v.scrollBy(WheelColumns)
-             of "view.scroll-left-half": v.scrollHalf(right = false)
-             of "view.scroll-right-half": v.scrollHalf(right = true)
-             else: v.scrollToLineStart())
-    gTerminal.hview = v
-    traceGesture("terminal-hscroll leftCol=" & $v.leftCol & " of " &
-                 $v.maxLeftCol)
-    drawTerminalPane(r)
+    runGpuiViewOperation(r, res.operation)
     return
   of "find.open", "find.open-backward":
     # GPUI's find is the omnibar's (`:grep` over the files).
@@ -9422,6 +9545,11 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       #                                                   move in ten steps,
       #                                                   release
       #   hbar:terminalOutput:corner                      press the corner
+      #   hbar:<pane>:grab:<at>:<by>                      hold the thumb
+      #                                                   `at` px into it,
+      #                                                   move `by` px
+      #   PLAT-70 Part I: also `eventLog` and `calltrace` (their sideways
+      #   bars, while their columns scroll).
       var bar, corner: PxRect
       var thumbStart, thumbLen = 0
       case parts[1]
@@ -9438,6 +9566,13 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         bar = lay.hbar
         corner = lay.corner
         let span = lay.view.barModel.thumbSpan(bar.w, TerminalMinThumbPx)
+        (thumbStart, thumbLen) = (span.start, span.length)
+      of $paneEventLog, $paneCalltrace:
+        # PLAT-70 Part I: a table pane's sideways bar while it SCROLLS.
+        let (rect, v) = tableHBarOf(if parts[1] == $paneEventLog: paneEventLog
+                                    else: paneCalltrace)
+        bar = rect
+        let span = v.barModel.thumbSpan(bar.w, TableHBarMinThumbPx)
         (thumbStart, thumbLen) = (span.start, span.length)
       else:
         return "no horizontal bar on '" & parts[1] & "'"
@@ -9457,6 +9592,14 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         for k in 0 .. 10:
           windowPointer(r, gekPointerMove, bx(a + (b - a) * k div 10), y)
         windowPointer(r, gekPointerUp, bx(b), y)
+      of "grab":
+        # PLAT-70 Part H / I: hold the thumb `at` px right of its start,
+        # move the pointer `by` px, release.
+        let x0 = bar.x + thumbStart + at(3)
+        windowPointer(r, gekPointerDown, x0, y)
+        windowPointer(r, gekPointerMove, x0 + at(4) div 2, y)
+        windowPointer(r, gekPointerMove, x0 + at(4), y)
+        windowPointer(r, gekPointerUp, x0 + at(4), y)
       else:
         return "unknown hbar event '" & parts[2] & "'"
     of "wheel":

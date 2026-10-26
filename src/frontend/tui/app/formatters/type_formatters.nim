@@ -118,7 +118,12 @@ func markCut*(f: FittedCell; glyphs: GlyphProfile): string =
   ## (Terminal-Adaptation §6.3: `~` on the ASCII tier). Only the MARKER the
   ## fit added is replaced — never a `…` that is part of the value.
   let marker = glyphs.glyph(grTruncation)
-  if f.truncated and marker != Ellipsis and f.text.endsWith(Ellipsis):
+  if f.truncated and marker != Ellipsis and f.midMarker > 0 and
+     f.text.continuesWith(Ellipsis, f.midMarker):
+    # PLAT-71 (§9.2): a path's cut is in its middle.
+    f.text[0 ..< f.midMarker] & marker &
+      f.text[f.midMarker + Ellipsis.len .. ^1]
+  elif f.truncated and marker != Ellipsis and f.text.endsWith(Ellipsis):
     f.text[0 ..< f.text.len - Ellipsis.len] & marker
   else: f.text
 

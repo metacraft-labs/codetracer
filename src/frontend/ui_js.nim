@@ -101,7 +101,7 @@ import
 from viewmodel/viewmodels/search_results_vm import SearchOptionOperations
 # PLAT-70 Part B: the table panes' palette entries.
 from viewmodel/viewmodels/omnibar_sources import ShowDetailLabel,
-  WidenColumnLabel, NarrowColumnLabel
+  WidenColumnLabel, NarrowColumnLabel, ScrollLeftLabel, ScrollRightLabel
 from viewmodel/viewmodels/table_overflow import ColumnStepCells
 
 
@@ -1873,7 +1873,9 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
   # carries (the terminal's and GPUI's are `omnibar_sources.tableCommands`).
   for (label, action) in [(ShowDetailLabel, aShowDetail),
                           (WidenColumnLabel, aWidenColumn),
-                          (NarrowColumnLabel, aNarrowColumn)]:
+                          (NarrowColumnLabel, aNarrowColumn),
+                          (ScrollLeftLabel, aScrollViewLeft),
+                          (ScrollRightLabel, aScrollViewRight)]:
     data.ui.commandPalette.interpreter.commands[cstring(label)] = Command(
       name: cstring(label), kind: ActionCommand, action: action,
       shortcut: displayedChord(action))
@@ -6112,6 +6114,11 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     runPaletteOperation("table.resize-column", "+" & $ColumnStepCells),
   aNarrowColumn: proc(actionData: JsObject) = # aNarrowColumn
     runPaletteOperation("table.resize-column", "-" & $ColumnStepCells),
+  aScrollViewLeft: proc(actionData: JsObject) = # aScrollViewLeft
+    ## PLAT-70 Part I: the palette's **View: Scroll Left**.
+    runPaletteOperation("view.scroll-left", ""),
+  aScrollViewRight: proc(actionData: JsObject) = # aScrollViewRight
+    runPaletteOperation("view.scroll-right", ""),
 ]
 
 data.actions = actions

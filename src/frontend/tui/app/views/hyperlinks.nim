@@ -142,10 +142,7 @@ proc frameBytesWithHyperlinks*(buf: ScreenBuffer;
       if trans.len > 0:
         result.add trans
         prev = curr
-      if cell.rune.int32 == 0:
-        result.add ' '
-      else:
-        result.add $cell.rune
+      result.add cellText(cell)
     if openUntil >= 0:
       result.add osc8Close()
       openUntil = -1

@@ -18,6 +18,11 @@
 ##     from the drawn width, the remembered document round-tripping, a
 ##     malformed document refused by name, other tables' entries kept apart;
 ##     `table.resize-column`'s argument;
+##   * PLAT-71 (Terminal-Adaptation §9.2) — WHERE the cut goes, decided here
+##     with it: a path loses its middle and keeps its file name, cut at a
+##     separator near the middle; a number is never cut silently (scientific
+##     form, else `…` alone); identifiers and values lose their end; every
+##     cut fits its column and stays `truncated` — swept over widths;
 ##   * §5.3's rows, per base, through the one router: CUA `Ctrl+K Ctrl+I`,
 ##     Emacs `Ctrl+H .`, Vim and Kakoune `Shift+K` — in the table panes, and
 ##     not in the editor.
@@ -42,7 +47,7 @@ template ck(cond: untyped) =
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 142
+const ExpectedAssertions = 163
 
 func wideMeasure(s: string): int {.gcsafe, raises: [].} =
   ## A terminal's measure for this suite's alphabet: CJK two cells, the rest
@@ -306,6 +311,69 @@ suite "PLAT-70 Part B: the Event Log's column widths (§5.2)":
       "event-log", [(table: "event-log", column: "kind", cells: 7)])
     ck merged == @[(table: "other", column: "a", cells: 4),
                    (table: "event-log", column: "kind", cells: 7)]
+
+suite "PLAT-71: where the cut goes, by content kind (§9.2)":
+
+  test "the column kinds are one table":
+    ck cutKindOf(EventLogTablePane, "location") == ckPath
+    ck cutKindOf(EventLogTablePane, "tick") == ckNumber
+    ck cutKindOf(EventLogTablePane, "#") == ckNumber
+    ck cutKindOf(EventLogTablePane, "output") == ckEnd
+    ck cutKindOf(CallTraceTablePane, "call") == ckEnd
+    ck cutKindOf(VariablesTablePane, "value") == ckEnd
+    ck isNumberText("-12") and isNumberText("3.5") and isNumberText("1e21")
+    ck not isNumberText("12abc") and not isNumberText("") and
+       not isNumberText("x")
+
+  test "a path keeps its file name and loses its middle":
+    let path = "src/frontend/tui/app/views/shell.nim"
+    let c = fitCellAs(path, 22, ckPath)
+    checkpoint(c.text)
+    ck c.truncated and c.full == path
+    ck c.text.runeLen <= 22
+    ck c.text.startsWith("src/") and c.text.endsWith("/views/shell.nim")
+    ck c.text.count("…") == 1
+    # The end cut of the same path loses the file name.
+    ck not fitCell(path, 22).text.contains("shell.nim")
+    # Too narrow for the file name: still one `…`, never wider.
+    let tight = fitCellAs(path, 8, ckPath)
+    ck tight.truncated and tight.text.runeLen <= 8 and tight.text.contains("…")
+    # Fits: drawn whole, not cut.
+    let whole = fitCellAs("main.py:12", 20, ckPath)
+    ck whole.text == "main.py:12" and not whole.truncated
+
+  test "every width: one `…`, inside the column, both ends kept":
+    let path = "/home/user/projects/codetracer/src/frontend/viewmodel/table_overflow.nim:123"
+    var bad = 0
+    for cells in 1 .. path.runeLen + 2:
+      let c = fitCellAs(path, cells, ckPath)
+      let w = c.text.runeLen
+      if w > cells: inc bad
+      if c.truncated != (path.runeLen > cells): inc bad
+      if c.truncated and c.text.count("…") != 1: inc bad
+      if c.truncated and cells >= 3 and not c.text.endsWith(path[^1 .. ^1]): inc bad
+    checkpoint("bad widths: " & $bad)
+    ck bad == 0
+
+  test "a number is never cut silently":
+    let big = fitCellAs("1234000000000000000000", 10, ckNumber)
+    checkpoint(big.text)
+    ck big.truncated and big.text == "1.234e+21"
+    let none = fitCellAs("1234567", 3, ckNumber)
+    ck none.truncated and none.text == "…"
+    let fits = fitCellAs("12345", 5, ckNumber)
+    ck fits.text == "12345" and not fits.truncated
+    # Never a prefix of the digits: that reads as a different number.
+    var prefixes = 0
+    for cells in 1 .. 21:
+      let c = fitCellAs("1234000000000000000000", cells, ckNumber)
+      if c.truncated and c.text.len > 1 and
+         "1234000000000000000000".startsWith(c.text): inc prefixes
+    ck prefixes == 0
+
+  test "identifiers and values lose their end":
+    let c = fitCellAs("process_pending_events_now", 20, ckEnd)
+    ck c.text == "process_pending_eve…" and c.truncated
 
 suite "PLAT-70 Part B: the detail's rows, per base (§5.3)":
 

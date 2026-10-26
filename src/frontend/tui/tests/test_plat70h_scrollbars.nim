@@ -21,7 +21,10 @@
 ##     (SB-4); the fade goes out and back in through intermediate frames
 ##     (SB-6); `:set scrollbar-thickness thick` re-draws every bar and is
 ##     remembered (SB-7); every pane with a bar answers hover and a paging
-##     press with its own view only (SB-8).
+##     press with its own view only (SB-8); a table pane's sideways bar that
+##     APPEARS because its columns no longer fit fades in on its own (§7.5,
+##     Part I's HO-11), and the palette's View: Scroll Right / Left move a
+##     table pane's view (Horizontal-Overflow §4.4).
 ##
 ## No mocks: the painters, the runtime, the session and the engine are the
 ## shipped ones; the remembered preference is the runtime's `savePreference`
@@ -48,7 +51,7 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 556
+const ExpectedAssertions = 564
 
 var countedAssertions = 0
 
@@ -492,6 +495,62 @@ suite "PLAT-70 Part H: every bar answers the pointer (a real recording)":
     for i in 0 .. 200:
       discard rt.tickScrollbars(t + 5000 + int64(i) * 16)
       ck rt.scrollbarFrame().faded[paneEditor] == 0
+
+  test "a table pane's sideways bar that APPEARS fades in (§7.5, HO-11)":
+    # The Event Log's columns fit at first; `:column-width output 400`
+    # makes them wider than the pane, so its horizontal bar appears with no
+    # scroll, no pointer and no setting — and it must fade in, not stay gone.
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    discard rt.shellScreenOf()
+    ck not rt.barOf(paneEventLog, axHorizontal).found
+    var t = 10_000'i64
+    while t <= 10_000 + FadeAfterMs + FadeOutMs + 64:
+      discard rt.tickScrollbars(t)
+      t += 16
+    ck rt.scrollbarFrame().faded[paneEventLog] == 1
+    s.send(rt, ":", t)
+    for c in "column-width output 400": s.send(rt, $c, t)
+    s.send(rt, "\r", t)
+    discard rt.shellScreenOf()
+    ck rt.barOf(paneEventLog, axHorizontal).found
+    var levels: seq[float32] = @[]
+    for i in 1 .. 20:
+      discard rt.tickScrollbars(t + int64(i) * 16)
+      levels.add rt.scrollbarFrame().faded[paneEventLog]
+    checkpoint("the Event Log's bars after the bar appeared: " & $levels)
+    ck levels[^1] == 0
+    var between = 0
+    for v in levels:
+      if v > 0 and v < 1: inc between
+    ck between >= 3
+
+  test "the palette's View: Scroll Right / Left reach a table pane (§4.4, §5.5)":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    s.send(rt, ":")
+    for c in "column-width output 400": s.send(rt, $c)
+    s.send(rt, "\r")
+    discard rt.shellScreenOf()
+    discard rt.focusHostedPane(paneEventLog)
+    proc leftCol(): int =
+      let (found, bar) = rt.barOf(paneEventLog, axHorizontal)
+      if found: bar.model.firstVisible else: -1
+    ck leftCol() == 0
+    # Typed in the palette (Ctrl+P, then `:` for its commands), as a user
+    # reaches it: the entry runs `view.scroll-right` on the focused pane.
+    s.send(rt, "\x10")
+    for c in ":view: scroll right": s.send(rt, $c)
+    s.send(rt, "\r")
+    discard rt.shellScreenOf()
+    checkpoint("after Scroll Right: " & $leftCol() & " — " & rt.app.notification)
+    ck leftCol() > 0
+    var o = RuntimeOutcome()
+    rt.runMenuAction("operation:view.scroll-left", o)
+    discard rt.shellScreenOf()
+    ck leftCol() == 0
 
   test "SB-7: `:set scrollbar-thickness thick` re-draws every bar, remembered":
     require calc.outcome == foRecorded

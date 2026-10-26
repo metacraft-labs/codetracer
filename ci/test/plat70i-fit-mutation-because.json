@@ -2,6 +2,7 @@
   "D1": "Error: expect(received).toBe(expected) // Object.is equality",
   "D2": "Error: expect(received).not.toBe(expected) // Object.is equality",
   "D3": "Error: expect(received).toBeLessThanOrEqual(expected)",
+  "D4": "Error: expect(received).toBeGreaterThan(expected)",
   "E1": "flexes == 1",
   "E2": "f.userUnits == 160 and f.minUnits == EventLogOutputMinCells * 9",
   "F1": "bad == 0",
@@ -16,10 +17,15 @@
   "G2": "lists2.len == 1 and",
   "G3": "bar2.len == 1 and bar2[0].leftOf > 0",
   "G4": "bar.len == 1",
+  "G5": "jb.len == 1 and jb[0].leftOf > 0",
+  "G6": "abs(moved - 40) <= 1",
+  "G7": "($paneEventLog & \"-hscroll left=\") in run.trace",
   "T1": "g2.rowText(after.headerRow)[outAt1 ..< outAt1 + \"output\".len] == \"output\"",
   "T2": "wrong == 0",
   "T3": "s.fit.mode == fmScroll",
   "T4": "Unhandled exception: never: the bar on the Event Log's last row",
   "T5": "Unhandled exception: never: the header moved by a notch",
-  "T6": "narrow.fit.mode == fmScroll"
+  "T6": "narrow.fit.mode == fmScroll",
+  "T7": "leftCol() > 0",
+  "W1": "levels[^1] == 0"
 }

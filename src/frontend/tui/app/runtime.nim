@@ -388,6 +388,9 @@ type
       ## The pane the pointer was last in: entering one wakes its bars.
     shownTops*: array[PaneKind, array[BarAxis, int]]
       ## Each bar's first visible row / column as last painted, -1 for none.
+    present*: array[PaneKind, array[BarAxis, bool]]
+      ## Which bars the last frame painted: a table pane's horizontal bar
+      ## that APPEARS (its columns grew past the pane) wakes its pane.
     painted*: seq[BarSpot]
       ## The bars of the last frame painted — what a passing pointer is
       ## hit-tested against (a press reads the bars afresh).
@@ -2151,7 +2154,13 @@ proc copyToClipboard(rt: TuiRuntime; text, what: string) =
   ## next frame) and say what was copied, as the desktop's copy does.
   rt.app.clipboard = text
   rt.app.pasteBuffer = text
-  rt.note("copied " & what)
+  # PLAT-71 (Terminal-Adaptation §8): where the profile found no way to the
+  # system clipboard — no identity that takes OSC 52, no tmux passing it
+  # on — the copy is said to be CodeTracer's own, and where to look.
+  if rt.caps.clipboard == ClipboardInAppOnly:
+    rt.note("copied " & what & " " & InAppOnlyCopyNote)
+  else:
+    rt.note("copied " & what)
 
 proc terminalInfoBody*(rt: TuiRuntime): seq[StyledRow] =
   ## What `:terminal-info` shows under its live lines: the report
@@ -3114,14 +3123,23 @@ proc noteBarsPainted*(rt: TuiRuntime; bars: seq[BarSpot]) =
   ## After a frame: a bar whose view moved since the last frame — a wheel, a
   ## key, a find, a jump — wakes its pane's bars (§7.5: they fade in when the
   ## pane scrolls, by any means).
-  rt.scrollbars.painted = bars
-  rt.scrollbars.paintedValid = true
+  var present: array[PaneKind, array[BarAxis, bool]]
   for b in bars:
+    present[b.pane][b.axis] = true
     let top = b.model.firstVisible
     let shown = rt.scrollbars.shownTops[b.pane][b.axis]
     if shown >= 0 and shown != top:
       rt.scrollbars.fades[b.pane].wake(rt.scrollbars.clockMs)
+    # PLAT-70 Part I (Horizontal-Overflow.md §5.5, Scrollbar-Scrubbers §7.5):
+    # a table pane's sideways bar that was not in the last frame appeared
+    # because the columns no longer fit — it fades in, as a scroll's would.
+    if rt.scrollbars.paintedValid and b.axis == axHorizontal and
+       b.pane in TableViewPanes and not rt.scrollbars.present[b.pane][b.axis]:
+      rt.scrollbars.fades[b.pane].wake(rt.scrollbars.clockMs)
     rt.scrollbars.shownTops[b.pane][b.axis] = top
+  rt.scrollbars.present = present
+  rt.scrollbars.painted = bars
+  rt.scrollbars.paintedValid = true
 
 proc setBarPointer(rt: TuiRuntime; p: BarPointer;
                    outcome: var RuntimeOutcome) =
@@ -5197,6 +5215,9 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     case name
     of "list.show-detail": rt.showDetail(outcome)
     of "table.resize-column": rt.resizeEventLogColumn(arg, outcome)
+    of "view.scroll-left", "view.scroll-right":
+      # PLAT-70 Part I: the focused output or table pane's view.
+      discard rt.runViewOperation(name, outcome)
     else: rt.note(operation.operation & " is not available in the terminal")
     outcome.repaint = true
     return
