@@ -139,6 +139,10 @@ await page.addInitScript(() => {
 const report = {
   url,
   loadError: '',
+  // Each deadline the PROBE ran out of, in words. Non-empty means a check fed
+  // by it measured how busy the host was, not the product; the gate shell
+  // reports it as a give-up (exit 2).
+  outOfTime: [],
   mounted: false,
   buildPaneOpened: false,
   runVerdictRows: [],
@@ -328,22 +332,38 @@ try {
   try {
     const lineTarget = await page.$('.view-line');
     if (lineTarget) {
-      await lineTarget.click({ timeout: 3000 });
+      await lineTarget.click({ timeout: 15000 });
     } else {
-      await page.click('#editorComponent-0', { timeout: 3000 });
+      await page.click('#editorComponent-0', { timeout: 15000 });
     }
     // To the very top, then type the comment and a newline. `Control+Home` is
     // Monaco's "start of file" on Linux/Windows; the CI browser is Chromium on
     // Linux, which is the platform this gate runs on.
     await page.keyboard.press('Control+Home');
     await page.keyboard.type(`// ${marker}\n`);
-    await page.waitForTimeout(400);
-    report.editedContentBeforeRun = await page.evaluate((mk) => {
+    // WAIT FOR THE MODEL TO HOLD THE MARKER, not for 400ms. On a loaded host
+    // (load average 110-145 on 24 cores, codetracer-pm
+    // issues/2026-10-23-noir-replay-in-browser-gate-is-timing-sensitive-under-load.md)
+    // the keystrokes had not all reached Monaco 400ms after `type` returned,
+    // and arm C's "the edit still reached the model" precondition went red
+    // over a product that had done nothing wrong. A deadline that expires is
+    // recorded as the HARNESS running out of time, which the shell reports as
+    // a give-up rather than as a failed check.
+    const readEdited = () => page.evaluate((mk) => {
       const m = (window.monaco?.editor?.getModels() || [])
         .find((x) => x.getValue().includes(mk));
       return m ? m.getValue() : '';
     }, marker);
+    const editDeadline = Date.now() + 15000;
+    report.editedContentBeforeRun = await readEdited();
+    while (!report.editedContentBeforeRun.includes(marker) && Date.now() < editDeadline) {
+      await page.waitForTimeout(100);
+      report.editedContentBeforeRun = await readEdited();
+    }
     report.editReachedModel = report.editedContentBeforeRun.includes(marker);
+    if (!report.editReachedModel) {
+      report.outOfTime.push('the typed edit had not reached the model within 15s');
+    }
     // Save it, because the claim under test is about the project the user is
     // working on rather than an unsaved buffer. Best-effort and recorded: the
     // dedicated persistence gate is what asserts Ctrl+S is answered, and a
@@ -546,9 +566,20 @@ try {
         // utils.nr 6 — `distinctLines` 5 instead of 2, real progress across two
         // files, and two legitimate same-line repeats, which is exactly the mix
         // that tells a caret that FOLLOWS from one that merely CHANGES.
-        await page.click('#step-in-image', { timeout: 3000 });
+        //
+        // A 20s BUDGET PER PRESS, not 3s. Playwright's click waits for the
+        // control to be visible, stable and enabled
+        // (https://playwright.dev/docs/actionability); on a loaded host that
+        // wait outlasted 3s mid-run, the loop broke after 3 of 6 presses, and
+        // the shell's `taken -eq steps_per_probe` check read a product
+        // failure. A press that times out even so is recorded in
+        // `outOfTime`, which the shell reports as a give-up.
+        await page.click('#step-in-image', { timeout: 20000 });
       } catch (e) {
         report.gestureError = String((e && e.message) || e).slice(0, 200);
+        if (e && e.name === 'TimeoutError') {
+          report.outOfTime.push(`step ${i + 1}: the step control was not actionable within 20s`);
+        }
         break;
       }
       // WAIT FOR THE MOVE THE ENGINE REPORTS, not for 900ms and a hope.

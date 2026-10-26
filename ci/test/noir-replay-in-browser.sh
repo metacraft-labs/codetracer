@@ -294,6 +294,28 @@ run_probe() {
 
 field() { jq -r "$2" <"$1"; }
 
+# A PROBE THAT RAN OUT OF TIME IS A GIVE-UP, NOT A RED CHECK.
+#
+# The probe's waits are on conditions (the model holds the typed marker, the
+# step control is actionable), each bounded by a deadline. A deadline that
+# expired means the reading below it measured the host's load, not the
+# product — measured at load average 110-145 on 24 cores, codetracer-pm
+# issues/2026-10-23-noir-replay-in-browser-gate-is-timing-sensitive-under-load.md
+# — so it ends the gate with exit 2, the harness's own "could not measure".
+# Only the runs whose step count or typing feeds a check call this: arms A
+# and B break the session on purpose, and a step control that never becomes
+# actionable there is the arm working.
+give_up_if_out_of_time() {
+	local out="$1" what="$2"
+	local n
+	n="$(jq -r '.outOfTime | length' <"${out}")"
+	[ "${n}" = 0 ] && return 0
+	echo "  ${what}: the probe ran out of time, so its checks would grade the host's load:" >&2
+	jq -r '.outOfTime[]' <"${out}" | sed 's/^/    /' >&2
+	echo "RESULT: GAVE UP — out of time; rerun on a quieter host" >&2
+	exit 2
+}
+
 # ---------------------------------------------------------------------------
 echo "The control: a Run, then a session over the trace it produced"
 # ---------------------------------------------------------------------------
@@ -303,6 +325,7 @@ if ! run_probe "${bundle}" "${control}"; then
 	tail -20 "${control}.err" >&2
 	exit 2
 fi
+give_up_if_out_of_time "${control}" "the control"
 
 mounted="$(field "${control}" '.mounted')"
 load_error="$(field "${control}" '.loadError')"
@@ -733,6 +756,7 @@ grep -q 'ARM C INSTRUMENT' "${arm_c}/index.html" || {
 }
 arm_c_out="${cache}/arm-c.json"
 if run_probe "${arm_c}" "${arm_c_out}"; then
+	give_up_if_out_of_time "${arm_c_out}" "arm C"
 	c_reached="$(field "${arm_c_out}" '.editReachedModel')"
 	c_sent="$(field "${arm_c_out}" '.returnGestureSent')"
 	c_survived="$(field "${arm_c_out}" '.editStillPresentAfterReturn')"
