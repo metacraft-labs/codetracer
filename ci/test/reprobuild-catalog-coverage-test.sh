@@ -26,7 +26,8 @@
 # For the extraction cases the wrong one is the "move the pin" remedy: a parser
 # that rotted must never send a reader to edit a correct pin.
 #
-# Pure bash + python3. No nix, no git, no network.
+# Pure bash + python3. No real nix (one case stands in a stub `nix`; it says
+# why), no git, no network.
 #
 # Run: bash ci/test/reprobuild-catalog-coverage-test.sh
 
@@ -542,6 +543,33 @@ RC=$?
 assert_rc "STRICT=1 turns that skip into exit 1" "$RC" 1
 assert_contains "STRICT=1 says why it is a failure" "$OUT" "CT_CATALOG_COVERAGE_STRICT=1"
 assert_absent "and still judges nothing" "$OUT" "which does not resolve"
+
+echo
+echo "nix's own chatter on stderr does not become the input's path"
+
+# A stand-in `nix`, and the one place this suite has one. What is under test is
+# how the script SEPARATES nix's answer from what else nix prints, and a real
+# nix prints that other text only when its state makes it (a cold Git cache's
+# "unpacking ... into the Git cache", an unknown-setting warning, an auto-GC
+# running inside the call). On a fresh CI runner all of those were on stderr,
+# nix exited 0, and the guard read the whole merged text as a path. The stub
+# reproduces exactly that: a warning on stderr, the path on stdout, exit 0.
+C="$TMP/chattynix"
+make_case "$C"
+mkdir -p "$TMP/chattybin"
+cat >"$TMP/chattybin/nix" <<EOF
+#!$BASH_ABS
+echo "warning: unknown setting 'build-provenance-tags'" >&2
+echo "unpacking 'github:metacraft-labs/reprobuild-packages/$CAT_REV' into the Git cache..." >&2
+printf '%s' "$C/cat"
+EOF
+chmod +x "$TMP/chattybin/nix"
+OUT="$(PATH="$TMP/chattybin:$PATH" CT_CATALOG_COVERAGE_STRICT=1 CT_CATALOG_COVERAGE_REPO_ROOT="$C/repo" \
+	CT_CATALOG_COVERAGE_REPROBUILD_SRC="$C/rb" "$BASH_ABS" "$GUARD" 2>&1)"
+RC=$?
+assert_rc "a located input resolves despite stderr chatter" "$RC" 0
+assert_contains "and the catalog is judged" "$OUT" "OK: all"
+assert_absent "and the pin is not reported unreadable" "$OUT" "could not locate"
 
 echo
 if [ "$FAILED" -ne 0 ]; then
