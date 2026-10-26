@@ -29,6 +29,7 @@
 import replay_prerequisite
 import std/[algorithm, json, os, osproc, sequtils, streams, strtabs, strutils,
             tempfiles, unittest]
+import ./gpui_child_env
 
 import ../../tui/tests/fixtures/fixture_provider
 from viewmodels/product_mode import editorTabLabel
@@ -74,8 +75,7 @@ proc windowPlan(ops: string): tuple[plan: JsonNode, trace: string] =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
   env["CODETRACER_HOME"] = state / "ct-home"

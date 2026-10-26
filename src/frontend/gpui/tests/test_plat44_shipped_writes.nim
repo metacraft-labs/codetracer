@@ -30,10 +30,11 @@
 ##
 ## No mocks: the shipped binary, the real shim, a real directory.
 
-import std/[os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import std/[os, osproc, streams, strutils, tempfiles, unittest]
 
 import codetracer_embed
 import ../../view_vocabulary/editor_surface
+import ./gpui_child_env
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -112,8 +113,7 @@ proc runKeys(project, stateDir: string; specs: seq[string]): (int, string) =
   let p = startProcess(bin,
     args = @["--edit", "--report-plan", "--width=1280", "--height=800",
              "--edit-keys=" & specs.join(","), project],
-    env = newStringTable({"LD_LIBRARY_PATH": shimDir,
-                          "CODETRACER_TUI_LAYOUT_DIR": stateDir}),
+    env = gpuiChildEnv(shimDir, stateDir),
     options = {poStdErrToStdOut})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
@@ -161,9 +161,7 @@ suite "PLAT-44: the shipped binary, headless, through the shim's own dispatch":
     if keys.len > 0: args.add "--edit-keys=" & keys
     args.add project
     let p = startProcess(bin, args = args,
-                         env = newStringTable({"LD_LIBRARY_PATH": shimDir,
-                                               "CODETRACER_TUI_LAYOUT_DIR":
-                                                 project / ".state"}),
+                         env = gpuiChildEnv(shimDir, project / ".state"),
                          options = {poStdErrToStdOut})
     let output = p.outputStream.readAll()
     let rc = p.waitForExit()

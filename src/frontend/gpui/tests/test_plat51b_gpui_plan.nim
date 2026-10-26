@@ -31,6 +31,7 @@
 import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
             times, unittest]
+import ./gpui_child_env
 
 import gpui/chrome
 import gpui/window_geometry
@@ -78,8 +79,7 @@ proc windowPlan(ops: string; geometry: var JsonNode; state = "";
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = root
   env["XDG_STATE_HOME"] = root / "xdg"
   # Every other per-user location of the spawned binary (common/ct_home).

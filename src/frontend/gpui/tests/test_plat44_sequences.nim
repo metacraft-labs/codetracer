@@ -32,10 +32,11 @@
 ##
 ## No mocks: the real core, the shipped binary, the real shim, real files.
 
-import std/[json, os, osproc, sets, streams, strtabs, strutils, tables,
+import std/[json, os, osproc, sets, streams, strutils, tables,
             tempfiles, unittest]
 
 import codetracer_embed
+import ./gpui_child_env
 import ./plat44_translation
 
 var CHECKS = 0
@@ -77,8 +78,7 @@ proc runBinary(project, state: string; specs: seq[string]): (int, string) =
   let p = startProcess(bin,
     args = @["--edit", "--report-plan", "--width=1600", "--height=1200",
              "--edit-keys=" & specs.join(","), project],
-    env = newStringTable({"LD_LIBRARY_PATH": shimDir,
-                          "CODETRACER_TUI_LAYOUT_DIR": state}),
+    env = gpuiChildEnv(shimDir, state),
     options = {poStdErrToStdOut})
   let output = p.outputStream.readAll()
   let rc = p.waitForExit()
