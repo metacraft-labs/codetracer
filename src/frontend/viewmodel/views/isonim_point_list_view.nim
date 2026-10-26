@@ -17,6 +17,9 @@
 ##     span.point-edit-indicator           text + display reactive
 
 import std/options
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -83,7 +86,7 @@ proc renderPointRow[R, N](r: R; vm: PointListVM; point: proc(): PointListEntry;
   ## One point. `indexEach` reuses a row for whatever point now sits at
   ## `index`, so every attribute and text reads `point()`.
   ui(r):
-    tdiv(class = pointRowClass(vm, index, point().enabled),
+    tdiv(role = "button", tabindex = "0", class = pointRowClass(vm, index, point().enabled),
          onclick = onPointClick(vm, index)):
       span(class = "point-list-kind"):
         text point().kind

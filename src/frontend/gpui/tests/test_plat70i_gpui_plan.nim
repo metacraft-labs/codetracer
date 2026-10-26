@@ -21,6 +21,7 @@
 
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles,
             unittest]
+import ./gpui_child_env
 
 import codetracer_embed
 
@@ -73,8 +74,7 @@ proc windowPlan(subject, ops: string; state = ""): Run =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = dir
   env["XDG_STATE_HOME"] = dir
   env["CODETRACER_HOME"] = dir / "ct-home"

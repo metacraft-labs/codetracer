@@ -28,7 +28,7 @@ when not defined(js):
 
 import std/[asyncjs, json, jsffi, strutils, tables]
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, async_compat]
 
 import ../viewmodel/backend/backend_service
 import ../viewmodel/sdk/[debugger_session, trace_source]
@@ -38,8 +38,11 @@ import ../viewmodel/viewport
 import ../viewmodel/sync/[sync_host, transport, webview_transport]
 import ../viewmodel/viewmodels/[calltrace_vm, debug_controls_vm,
                                 filesystem_vm, flow_vm, flow_line_values,
-                                scratchpad_vm, state_vm]
+                                scratchpad_vm, state_vm, trace_log_vm]
 import ../../common/lang as common_lang
+
+const TracepointRunRefused* = "the replay refused to run the tracepoint"
+  ## A tracepoint row's detail when `ct/run-tracepoints` was refused.
 
 type
   HostedDebugSession = ref object
@@ -200,6 +203,10 @@ proc openSession*(host: VsCodeHost; id, traceFolder: string;
         line: stop{"line"}.getBiggestInt(0).int,
         errorMessage: stop{"errorMessage"}.getStr(""))
     debugger.store.applyTracepointResults(hosted.tracepoints, hits)
+    # The Trace Log lists the sweep's hits: the panel `addTracepoint` opens.
+    if not debugger.session.traceLogVM.isNil:
+      debugger.session.traceLogVM.setSweepHits(hits,
+        int(debugger.store.eventLog.maxRRTicks.val))
   debugger.followBackendMoves()
 
 proc deliverEvent*(host: VsCodeHost; id: string; message: JsonNode) =
@@ -275,8 +282,25 @@ proc runTracepoint*(host: VsCodeHost; path: string; line: int;
   hosted.tracepoints.add TracepointSweepSpec(
     tracepointId: hosted.tracepoints.len, path: path, line: line,
     expression: expression)
-  discard hosted.debugger.backend.send("ct/run-tracepoints",
-    tracepointSweepRequest(hosted.tracepoints))
+  # A sweep answers with an event and no response (`Handler::run_tracepoints`,
+  # src/db-backend/src/dap_handler.rs), so the request settles only when the
+  # replay REFUSES it, which `callRequest` reports as `null`. A refused run
+  # is said on the tracepoint's row, as an errored sweep is.
+  let debugger = hosted.debugger
+  let specs = hosted.tracepoints
+  let spec = specs[^1]
+  onComplete(debugger.backend.send("ct/run-tracepoints",
+      tracepointSweepRequest(specs)),
+    proc(response: JsonNode) =
+      if not responseSucceeded(response):
+        debugger.store.applyTracepointResults(@[spec], @[TracepointSweepHit(
+          tracepointId: spec.tracepointId, path: path, line: line,
+          errorMessage: TracepointRunRefused)], replaceHits = false),
+    proc(message: string) =
+      debugger.store.applyTracepointResults(@[spec], @[TracepointSweepHit(
+        tracepointId: spec.tracepointId, path: path, line: line,
+        errorMessage: TracepointRunRefused & ": " & message)],
+        replaceHits = false))
 
 proc onFlowLines*(host: VsCodeHost;
                   listener: proc(path: string; lines: seq[FlowLineValue];

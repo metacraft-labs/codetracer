@@ -303,9 +303,13 @@ fn launch_opens_at_the_start_geid_native_recording() {
             record.env_remove(&key);
         }
     }
+    // The recording's licensing counter (`state.db`) goes to a scratch
+    // `CODETRACER_HOME`, never the developer's own profile. That variable
+    // outranks `HOME`/`XDG_DATA_HOME` for every CodeTracer location
+    // (`libs/ct-home`), so redirecting those instead would not isolate it.
     let recorded = record
         .current_dir(&dir)
-        .env("XDG_DATA_HOME", dir.join("xdg-data"))
+        .env("CODETRACER_HOME", dir.join("ct-home"))
         .args(["record", "-o"])
         .arg(&trace)
         .arg("--")

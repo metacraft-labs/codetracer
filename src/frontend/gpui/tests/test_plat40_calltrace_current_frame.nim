@@ -88,6 +88,7 @@
 import replay_prerequisite
 import std/[json, options, os, osproc, streams, strtabs, strutils, tables,
             tempfiles, unittest]
+import ./gpui_child_env
 
 import codetracer_embed
 import styles/generated/design_tokens
@@ -210,8 +211,7 @@ proc windowPlan(width, height: int; ops: string; windowOps = "";
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
   # Every other per-user location (trace index, config, caches) of the

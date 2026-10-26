@@ -162,6 +162,7 @@ proc syncedSignalsOf*(session: SessionViewModel): SyncRegistry =
   result.walkVM("shell", session.shellVM)
   result.walkVM("fileTree", session.fileTreeVM)
   result.walkVM("terminalOutput", session.terminalOutputVM)
+  result.walkVM("traceLog", session.traceLogVM)
 
 proc find*(reg: SyncRegistry; key: string): Option[SyncedSignal] =
   ## The signal registered under `key`, if any.

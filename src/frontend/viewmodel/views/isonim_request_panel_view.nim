@@ -50,6 +50,9 @@
 ##   each control's value when its event fires.
 
 import std/[strutils, tables]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -445,7 +448,7 @@ proc renderRow[R, N](r: R; vm: RequestPanelVM; req: RequestRecord;
   let statusCls = statusCellClass(req)
   let badgeCls = methodBadgeClass(req.httpMethod)
   ui(r):
-    tdiv(class = rowClass(selected, req.isOpen),
+    tdiv(role = "button", tabindex = "0", class = rowClass(selected, req.isOpen),
          onclick = onRowClick(vm, index),
          ondblclick = onRowDoubleClick(vm, index)):
       tdiv(class = "request-col-id"):

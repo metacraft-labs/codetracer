@@ -24,10 +24,11 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
+import ../viewmodels/agent_activity_text
 import ../keymap/scope_path   # the prompt's scope element
 
 # The generic procs expand the DSL at their instantiation site.
-export signals, computation, components
+export signals, computation, components, agent_activity_text
 
 var expandedToolRowIds = initHashSet[string]()
 
@@ -44,8 +45,6 @@ const AgentActivityInputPrefix* = "agent-query-text"
 const AgentActivityMessageContentClass* = "msg-content"
 const AgentActivityDiffEditorPrefix* = "diff-editor"
 const AgentActivityTerminalShellPrefix* = "shellComponent-"
-const AgentActivityPlaceholderText* = "Ask anything…"
-const AgentActivityFollowUpPlaceholderText* = "Ask for a change, or type a follow-up…"
 
 const AgentActivityTurnFailedClass* = "agent-turn-failed"
   ## #862 — an agent turn that ended in an error (`AgentFailed`,
@@ -58,8 +57,6 @@ const AgentActivityTurnErrorClass* = "agent-turn-error"
   ## The agent's reason for the failure.  Rendered outside the collapsible
   ## thought block, because a finished turn starts collapsed and a reason
   ## nobody sees is the defect #862 reported.
-const AgentActivityTurnNoReasonText* =
-  "The agent ended the turn with an error but gave no reason."
 
 const AgentActivityTestRunClass* = "agent-test-run"
   ## AA-2 — a `ct test` execution, rendered as a summary of the run *in place
@@ -159,309 +156,6 @@ type
       ## whether the dataset can be opened, the VM does
       ## (`AgentActivityVM.openEvidence`), and this fires only when it agreed.
 
-when defined(js):
-  proc dateNowMs(): float {.importjs: "Date.now()".}
-  proc wallClockTimeJs(ms: float): cstring
-    {.importjs: "new Date(#).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})".}
-else:
-  import std/times
-  proc dateNowMs(): float = epochTime() * 1000.0
-
-proc wallClockTime*(createdAtMs: float): string =
-  when defined(js):
-    $wallClockTimeJs(createdAtMs)
-  else:
-    ""
-
-proc thoughtDuration*(durationSec: float): string =
-  if durationSec <= 0.0:
-    "Thinking"
-  elif durationSec < 60.0:
-    "Thought for " & $int(durationSec) & "s"
-  else:
-    let m = int(durationSec / 60.0)
-    let s = int(durationSec) mod 60
-    if s == 0:
-      "Thought for " & $m & "m"
-    else:
-      "Thought for " & $m & "m " & $s & "s"
-
-proc thinkingLabel*(createdAt, thinkingEndedAt: float): string =
-  ## Label for the "Thinking" header once the agent starts producing output.
-  ## Shows how many seconds the pure thinking phase lasted.
-  let sec = int((thinkingEndedAt - createdAt) / 1000.0)
-  "Thinking " & $sec & "s"
-
-type
-  ## A rendered group of consecutive segments: either a block of text or a
-  ## batch of consecutive tool calls that will be shown with expand/collapse.
-  ViewSegGroup* = object
-    isTools*: bool
-    content*: string
-    tools*: seq[AgentActivitySegment]
-
-proc computeSegGroups*(segments: seq[AgentActivitySegment]): seq[ViewSegGroup] =
-  ## Merge consecutive tool-call segments into groups so they can be rendered
-  ## with an expandable history.  Text segments are kept separate.
-  for seg in segments:
-    if not seg.isToolCall:
-      result.add(ViewSegGroup(isTools: false, content: seg.content))
-    else:
-      if result.len > 0 and result[^1].isTools:
-        result[^1].tools.add(seg)
-      else:
-        result.add(ViewSegGroup(isTools: true, tools: @[seg]))
-
-type
-  MsgSegKind = enum
-    mskText, mskCode, mskCodeBlock,
-    mskBold, mskItalic, mskBoldItalic, mskStrike,
-    mskTable, mskImage
-
-  MsgSegment = object
-    kind: MsgSegKind
-    content: string
-    lang: string          # code block language; image alt text
-    rows: seq[seq[string]]
-
-proc isSeparatorLine(line: string): bool =
-  if line.len == 0 or line[0] != '|': return false
-  var hasDash = false
-  for ch in line:
-    if ch notin {'-', ':', ' ', '|'}: return false
-    if ch == '-': hasDash = true
-  hasDash
-
-when defined(js):
-  proc codePointToCStr(cp: int): cstring {.importjs: "String.fromCodePoint(#)".}
-  proc codePointToStr(cp: int): string = $codePointToCStr(cp)
-else:
-  import std/unicode
-  proc codePointToStr(cp: int): string = $Rune(cp)
-
-proc parsePipeRow(line: string): seq[string] =
-  let parts = line.split('|')
-  for p in parts:
-    let cell = p.strip()
-    if cell.len > 0:
-      result.add(cell)
-
-proc parseInlineCode*(s: string): seq[MsgSegment] =
-  var i = 0
-  var cur = ""
-
-  template flushText() =
-    if cur.len > 0:
-      result.add(MsgSegment(kind: mskText, content: cur))
-      cur = ""
-
-  while i < s.len:
-    # Escape sequences: \* \_ \` \\ \~ and literal \n / \t from ACP streams
-    if s[i] == '\\' and i + 1 < s.len:
-      case s[i+1]
-      of '*', '_', '`', '\\', '~':
-        cur.add(s[i+1])
-        inc i, 2
-        continue
-      of 'n':
-        # Literal \n from ACP stream → real newline (renders via pre-wrap)
-        cur.add('\n')
-        inc i, 2
-        continue
-      of 't':
-        cur.add('\t')
-        inc i, 2
-        continue
-      of 'u':
-        # \uXXXX Unicode escape from un-decoded ACP JSON content
-        if i + 5 < s.len:
-          let h = s[i+2 ..< i+6]
-          var allHex = true
-          for c in h:
-            if c notin {'0'..'9', 'a'..'f', 'A'..'F'}:
-              allHex = false
-              break
-          if allHex:
-            cur.add(codePointToStr(parseHexInt(h)))
-            inc i, 6
-            continue
-      else: discard
-
-    # Markdown image: ![alt](src) — only for data: URIs to avoid false positives
-    if s[i] == '!' and i + 1 < s.len and s[i+1] == '[':
-      let altStart = i + 2
-      let altEnd = s.find(']', altStart)
-      if altEnd >= altStart and altEnd + 1 < s.len and s[altEnd + 1] == '(':
-        let srcStart = altEnd + 2
-        let srcEnd = s.find(')', srcStart)
-        if srcEnd > srcStart:
-          let src = s[srcStart ..< srcEnd]
-          if src.startsWith("data:image/") or src.startsWith("data:"):
-            flushText()
-            result.add(MsgSegment(kind: mskImage, content: src, lang: s[altStart ..< altEnd]))
-            i = srcEnd + 1
-            continue
-      cur.add(s[i])
-      inc i
-
-    # Triple backtick code block
-    elif i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
-      flushText()
-      inc i, 3
-      var lang = ""
-      while i < s.len and s[i] != '\n':
-        lang.add(s[i])
-        inc i
-      if i < s.len: inc i
-      var code = ""
-      while i < s.len:
-        if i + 2 < s.len and s[i] == '`' and s[i+1] == '`' and s[i+2] == '`':
-          inc i, 3
-          break
-        code.add(s[i])
-        inc i
-      if code.len > 0 and code[^1] == '\n':
-        code.setLen(code.len - 1)
-      result.add(MsgSegment(kind: mskCodeBlock, content: code, lang: lang))
-
-    # Double-backtick code span: `` content `` (can contain backtick characters)
-    elif i + 1 < s.len and s[i] == '`' and s[i+1] == '`' and
-         (i + 2 >= s.len or s[i+2] != '`'):
-      let j = s.find("``", i + 2)
-      if j >= 0:
-        flushText()
-        var code = s[i+2 ..< j]
-        # CommonMark: strip one leading/trailing space if both present
-        if code.len >= 2 and code[0] == ' ' and code[^1] == ' ':
-          code = code[1 ..< code.len - 1]
-        result.add(MsgSegment(kind: mskCode, content: code))
-        i = j + 2
-      else:
-        cur.add(s[i])
-        inc i
-
-    # Bold+italic ***
-    elif i + 2 < s.len and s[i] == '*' and s[i+1] == '*' and s[i+2] == '*':
-      let j = s.find("***", i + 3)
-      if j >= 0:
-        flushText()
-        result.add(MsgSegment(kind: mskBoldItalic, content: s[i+3 ..< j]))
-        i = j + 3
-      else:
-        cur.add(s[i])
-        inc i
-
-    # Bold **
-    elif i + 1 < s.len and s[i] == '*' and s[i+1] == '*':
-      let j = s.find("**", i + 2)
-      if j >= 0:
-        flushText()
-        result.add(MsgSegment(kind: mskBold, content: s[i+2 ..< j]))
-        i = j + 2
-      else:
-        cur.add(s[i])
-        inc i
-
-    # Italic *
-    elif s[i] == '*':
-      let j = s.find('*', i + 1)
-      if j > i:
-        flushText()
-        result.add(MsgSegment(kind: mskItalic, content: s[i+1 ..< j]))
-        i = j + 1
-      else:
-        cur.add(s[i])
-        inc i
-
-    # Strikethrough ~~
-    elif i + 1 < s.len and s[i] == '~' and s[i+1] == '~':
-      let j = s.find("~~", i + 2)
-      if j >= 0:
-        flushText()
-        result.add(MsgSegment(kind: mskStrike, content: s[i+2 ..< j]))
-        i = j + 2
-      else:
-        cur.add(s[i])
-        inc i
-
-    # Italic _ (only at word boundaries to avoid matching my_var_name)
-    elif s[i] == '_':
-      let prevOk = i == 0 or s[i-1] notin {'a'..'z', 'A'..'Z', '0'..'9', '_'}
-      let nextOk = i + 1 < s.len and s[i+1] notin {' ', '\n', '_'}
-      if prevOk and nextOk:
-        let j = s.find('_', i + 1)
-        let closeOk = j > i and (j + 1 >= s.len or
-          s[j+1] notin {'a'..'z', 'A'..'Z', '0'..'9', '_'})
-        if closeOk:
-          flushText()
-          result.add(MsgSegment(kind: mskItalic, content: s[i+1 ..< j]))
-          i = j + 1
-        else:
-          cur.add(s[i])
-          inc i
-      else:
-        cur.add(s[i])
-        inc i
-
-    # Inline code `
-    elif s[i] == '`':
-      inc i
-      var code = ""
-      while i < s.len and s[i] != '`':
-        code.add(s[i])
-        inc i
-      if i < s.len: inc i
-      if code.len == 0:
-        cur.add("``")
-      else:
-        flushText()
-        result.add(MsgSegment(kind: mskCode, content: code))
-
-    # GFM pipe table (must start at beginning of line)
-    elif s[i] == '|' and (i == 0 or s[i-1] == '\n'):
-      var lineEnd = i
-      while lineEnd < s.len and s[lineEnd] != '\n': inc lineEnd
-      let headerLine = s[i ..< lineEnd]
-      let sepStart = lineEnd + 1
-      if sepStart < s.len and s[sepStart] == '|':
-        var sepEnd = sepStart
-        while sepEnd < s.len and s[sepEnd] != '\n': inc sepEnd
-        let sepLine = s[sepStart ..< sepEnd]
-        if isSeparatorLine(sepLine):
-          flushText()
-          var tableRows: seq[seq[string]] = @[]
-          tableRows.add(parsePipeRow(headerLine))
-          var j = sepEnd + 1
-          while j < s.len and s[j] == '|':
-            var rowEnd = j
-            while rowEnd < s.len and s[rowEnd] != '\n': inc rowEnd
-            tableRows.add(parsePipeRow(s[j ..< rowEnd]))
-            j = if rowEnd < s.len: rowEnd + 1 else: rowEnd
-          result.add(MsgSegment(kind: mskTable, rows: tableRows))
-          i = j
-        else:
-          cur.add(s[i])
-          inc i
-      else:
-        cur.add(s[i])
-        inc i
-
-    else:
-      cur.add(s[i])
-      inc i
-
-  flushText()
-
-proc relativeTime*(createdAtMs: float): string =
-  let nowMs = dateNowMs()
-  let diffSec = (nowMs - createdAtMs) / 1000.0
-  if diffSec < 60.0:
-    "just now"
-  elif diffSec < 3600.0:
-    $int(diffSec / 60.0) & "m ago"
-  else:
-    $int(diffSec / 3600.0) & "h ago"
-
 proc messageWrapperClass*(role: AgentActivityMessageRole): string =
   case role
   of aamrUser: "agent-msg-wrapper user-wrapper"
@@ -553,8 +247,6 @@ when defined(js):
   proc classListAdd(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.add(#)".}
   proc classListRemove(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.remove(#)".}
   proc classListToggle(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.toggle(#)".}
-  proc computeLineStatsJs(original: cstring; modified: cstring): js
-    {.importjs: """(function(o,m){var ol=(o||'').split('\n'),ml=(m||'').split('\n');var oc={},mc={};ol.forEach(function(l){oc[l]=(oc[l]||0)+1;});ml.forEach(function(l){mc[l]=(mc[l]||0)+1;});var a=0,d=0;var seen={};ol.concat(ml).forEach(function(l){if(!seen[l]){seen[l]=1;var ov=oc[l]||0,mv=mc[l]||0;a+=Math.max(0,mv-ov);d+=Math.max(0,ov-mv);}});return {added:a,removed:d};})(#,#)""".}
   proc jsQuerySelector(sel: cstring): isonim_dom.Element {.importjs: "document.querySelector(#)".}
   proc flipDropdownIfNeeded(el: isonim_dom.Element) {.importjs: """
     (function(el) {
@@ -676,13 +368,6 @@ when defined(js):
     ## `syncInputValue` on a value the VM wrote, such as a restored
     ## multi-line draft.
     resizeInputToContentJs(input)
-
-proc computeDiffStats(original: string; modified: string): (int, int) =
-  when defined(js):
-    let stats = computeLineStatsJs(cstring(original), cstring(modified))
-    (stats.added.to(int), stats.removed.to(int))
-  else:
-    (0, 0)
 
 proc readInputElementValue[R, N](r: R; input: N): string =
   ## The prompt's current value.
@@ -855,7 +540,7 @@ proc renderMessage[R](r: R; componentId: int;
             span(class = "user-timestamp"):
               text relativeTime(message.createdAt)
               if message.canceled:
-                span: text " (canceled)"
+                span: text " " & AgentCanceledText
           tdiv(class = "msg-controls"):
             tdiv(class = "agent-user-copy-button",
                  onclick = proc() =
@@ -937,67 +622,17 @@ proc renderMessage[R](r: R; componentId: int;
     # Otherwise we fall back to the last paragraph of the final text segment.
     # finalSegGrpIdx tracks which segGroup index holds this last text so we can
     # skip rendering it inside the thought block (it appears outside instead).
-    var finalTextContent = ""
-    var finalSegGrpIdx = -1
-    if not message.isLoading:
-      for grpIdx in 0 ..< segGroups.len:
-        let grp = segGroups[grpIdx]
-        if not grp.isTools and grp.content.len > 0:
-          finalTextContent = $grp.content
-          finalSegGrpIdx = grpIdx
-      if finalTextContent.len > 0:
-        const lastMsgMarker = "Last agent message: Some(\""
-        let markerIdx = finalTextContent.find(lastMsgMarker)
-        if markerIdx >= 0:
-          let start = markerIdx + lastMsgMarker.len
-          let closingIdx = finalTextContent.rfind("\")")
-          if closingIdx > start:
-            finalTextContent = finalTextContent[start ..< closingIdx].replace("\\n", "\n")
-        else:
-          let paragraphs = finalTextContent.split("\n\n")
-          var lastParagraph = ""
-          for i in countdown(paragraphs.len - 1, 0):
-            let p = paragraphs[i].strip()
-            if p.len > 0:
-              lastParagraph = p
-              break
-          if lastParagraph.len > 0:
-            finalTextContent = lastParagraph
+    let final = finalTurnText(message, segGroups)
+    let finalTextContent = final.text
+    let finalSegGrpIdx = final.groupIndex
     # Header label: "Thinking" while waiting, "Thinking Xs" once output starts
-    let stillThinking = message.thinkingEndedAt == 0.0 and message.isLoading
-    # #862: a failed turn says so in its header (with §3.3's red X below),
-    # rather than "Thought for Ns", which reads as a turn that finished.
-    let durationLabel =
-      if message.failed:
-        "Failed"
-      elif message.duration > 0.0:
-        thoughtDuration(message.duration)
-      elif message.thinkingEndedAt > 0.0:
-        thinkingLabel(message.createdAt, message.thinkingEndedAt)
-      elif message.isLoading:
-        "Thinking"
-      else:
-        # Finished, with no timing to report (every row of a session loaded
-        # into a review): "Thinking" here would be the in-progress
-        # placeholder on a turn that is over, so the header says nothing.
-        ""
-    # Separated from the label only when there is a label to separate from.
-    let canceledSuffix =
-      if durationLabel.len > 0: " (canceled)" else: "(canceled)"
-    # Completed messages start collapsed so the conversation stays readable.
-    # The user can expand by clicking the header; ongoing messages are always open.
-    #
-    # Collapsing works because a finished streamed turn's last text is
-    # promoted out of the block (`finalTextContent` above).  A message with
-    # no segments has nothing to promote: its flat `content` IS the message,
-    # so collapsing it would hide all of it behind the header.  Every row of
-    # a session loaded into a review is such a message
-    # (`review_session.sessionMessages`); collapsed, a replayed transcript
-    # read as a column of bare headers, where DeepReview-GUI.md §2.1 has the
-    # reviewer read "what the agent actually did".  Such a message stays
-    # open.
-    let showsFlatContent = segGroups.len == 0 and message.content.len > 0
-    let isCollapsed = not message.isLoading and not showsFlatContent
+    # (`agent_activity_text.thoughtHeaderLabel` decides, for every front-end).
+    let stillThinking = message.stillThinking
+    let durationLabel = thoughtHeaderLabel(message)
+    let canceledSuffix = canceledSuffix(durationLabel)
+    # Completed messages start collapsed so the conversation stays readable;
+    # one whose flat content is all there is stays open (`startsCollapsed`).
+    let isCollapsed = startsCollapsed(message, segGroups)
     let chevronClass = if isCollapsed: "agent-chevron agent-chevron-collapsed" else: "agent-chevron"
     let contentClass = if isCollapsed: AgentActivityMessageContentClass & " agent-thought-collapsed" else: AgentActivityMessageContentClass
     let wrapperClass =
@@ -1005,9 +640,7 @@ proc renderMessage[R](r: R; componentId: int;
         "agent-msg-wrapper agent-thought-wrapper " & AgentActivityTurnFailedClass
       else:
         "agent-msg-wrapper agent-thought-wrapper"
-    let failureText =
-      if message.errorMessage.len > 0: message.errorMessage
-      else: AgentActivityTurnNoReasonText
+    let failureText = turnFailureText(message)
     ui(r):
       tdiv(class = wrapperClass):
         tdiv(class = "agent-thought-header",
@@ -1038,8 +671,8 @@ proc renderMessage[R](r: R; componentId: int;
             # §3.3: "Red X replaces icon" — where a running turn shows its
             # spinner, a failed one shows the X.
             if message.failed:
-              span(class = AgentActivityTurnFailedIconClass, title = "Failed"):
-                text "\u2715"
+              span(class = AgentActivityTurnFailedIconClass, title = AgentFailedLabel):
+                text AgentFailedIcon
           span(class = "agent-thought-timestamp"):
             text wallClockTime(message.createdAt)
         # Outside the collapsible block below, so the reason is visible while
@@ -1121,10 +754,7 @@ proc renderMessage[R](r: R; componentId: int;
                     tdiv(class = "agent-tc-history", id = grpHistId):
                       for i in 0 ..< grpTools.len - 1:
                         let tc = grpTools[i]
-                        let dotClass =
-                          if tc.toolStatus == "completed": "agent-tc-dot agent-tc-dot-done"
-                          elif tc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
-                          else: "agent-tc-dot agent-tc-dot-running"
+                        let dotClass = "agent-tc-dot agent-tc-dot-" & $toolState(tc.toolStatus)
                         let stableId = "tc-" & tc.toolCallId
                         let initExpanded = isToolRowExpanded(stableId)
                         let rowClass = if initExpanded: "agent-tc-row agent-tc-row-expanded" else: "agent-tc-row"
@@ -1136,12 +766,9 @@ proc renderMessage[R](r: R; componentId: int;
                     tdiv(class = "agent-tc-toggle",
                          onclick = toolHistoryToggleHandler(grpHistId)):
                       span(class = "agent-tc-toggle-icon")
-                      text $grpTools.len & " tools used"
+                      text toolsUsedText(grpTools.len)
                   let currentTc = grpTools[^1]
-                  let currentDotClass =
-                    if currentTc.toolStatus == "completed": "agent-tc-dot agent-tc-dot-done"
-                    elif currentTc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
-                    else: "agent-tc-dot agent-tc-dot-running"
+                  let currentDotClass = "agent-tc-dot agent-tc-dot-" & $toolState(currentTc.toolStatus)
                   let currentStableId = "tc-" & currentTc.toolCallId
                   let currentInitExpanded = isToolRowExpanded(currentStableId)
                   let currentRowClass = if currentInitExpanded:
@@ -1241,23 +868,23 @@ proc renderMessage[R](r: R; componentId: int;
                 img(class = "agent-msg-thumb-img", alt = "agent image", src = capturedSrc)
         # "Agent is working" indicator: visible outside the collapsible block while
         # the agent is still producing output after the thinking phase ended.
-        if message.isLoading and not stillThinking and not message.canceled:
+        if message.showsWorking:
           tdiv(class = "agent-working-indicator"):
             span(class = "ai-status")
-            text " Agent is working"
+            text " " & AgentWorkingText
         if message.diffs.len > 0 and not message.isLoading:
           let msgId = message.id
           tdiv(class = "agent-diff-section"):
             tdiv(class = "agent-diff-header"):
               span(class = "agent-diff-status-dot")
               span(class = "agent-diff-status-label"):
-                text $message.diffs.len & (if message.diffs.len == 1: " file changed" else: " files changed")
+                text filesChangedText(message.diffs.len)
               tdiv(class = "ct-button-md-primary agent-diff-unified-btn",
                    onclick = proc() =
                      if callbacks.onOpenFileDiff != nil:
                        callbacks.onOpenFileDiff("unified:" & msgId)):
                 span(class = "agent-diff-unified-icon")
-                text "Unified diff"
+                text AgentUnifiedDiffLabel
             for diffValue in message.diffs:
               let diff = diffValue
               let (added, removed) = computeDiffStats(diff.original, diff.modified)
@@ -1279,38 +906,11 @@ proc testRunStateClass*(summary: TestRunSummary): string =
   ## The card's overall state, as a class a stylesheet and a test can both
   ## read.  Deliberately three-valued rather than boolean: "running" is not a
   ## kind of failure, and an empty run is not a kind of success.
-  if summary.inProgress:
-    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-running"
-  elif summary.failed > 0 or summary.errored > 0:
-    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-failed"
-  else:
-    AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-passed"
+  AgentActivityTestRunClass & " " & AgentActivityTestRunClass & "-" &
+    $testRunState(summary)
 
 proc testRowClass*(row: TestRunRow): string =
   AgentActivityTestRowClass & " " & AgentActivityTestRowPrefix & $row.outcome
-
-proc testRunTitle*(summary: TestRunSummary): string =
-  ## What the card calls itself.
-  ##
-  ## The runner's own reported command when there is one, because that is the
-  ## thing the reviewer actually asked for; otherwise the provider's id.  Never
-  ## a reconstructed command line — a command CodeTracer invented would read as
-  ## one that ran.
-  if summary.commandLine.len > 0:
-    summary.commandLine
-  elif summary.providerId.len > 0:
-    summary.providerId
-  else:
-    "ct test"
-
-proc testRowDetailText*(row: TestRunRow): string =
-  ## The line an expanded test shows: its status and how long it took.
-  ## §2.1.2: "an individual test can be expanded to its status, duration and
-  ## captured output."  A duration of zero is omitted rather than printed,
-  ## for the same reason a zero count is: it is not a measurement.
-  result = "Status: " & $row.outcome
-  if row.durationMs > 0:
-    result.add " · Duration: " & formatDurationMs(row.durationMs)
 
 proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
                       rowValue: TestRunRow;
@@ -1333,9 +933,9 @@ proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
           text $row.outcome
         span(class = "agent-test-row-name"):
           text row.name
-        if row.durationMs > 0:
+        if testRowDurationText(row).len > 0:
           span(class = "agent-test-row-duration"):
-            text formatDurationMs(row.durationMs)
+            text testRowDurationText(row)
       # §2.1.2: the affordance exists only where the recording does.  A test
       # that was never recorded, and a recording that failed before producing
       # a trace, both fall through here and render no button at all.
@@ -1345,20 +945,19 @@ proc renderTestRow[R](r: R; vm: AgentActivityVM; anchorId: string;
                    AgentActivityOpenRecordingClass,
                  `type` = "button",
                  onclick = proc() = open(topCurrentTab)):
-            text "Open recording"
+            text AgentOpenRecordingLabel
           button(class = "ct-button-sm-secondary " &
                    AgentActivityOpenRecordingClass & "-new-tab",
                  `type` = "button",
                  onclick = proc() = open(topNewTab)):
-            text "Open in new tab"
+            text AgentOpenRecordingNewTabLabel
       if expanded:
         tdiv(class = "agent-test-row-details"):
           tdiv(class = "agent-test-row-detail"):
             text testRowDetailText(row)
           if row.recordingFailed:
             tdiv(class = AgentActivityRecordingFailedClass):
-              text "Recording failed before a trace was produced; " &
-                "there is no recording to open."
+              text AgentRecordingFailedText
           for diagnosticValue in row.diagnostics:
             let diagnostic = diagnosticValue
             tdiv(class = "agent-test-row-diagnostic " &
@@ -1396,7 +995,7 @@ proc renderTestRun[R](r: R; vm: AgentActivityVM; entry: AgentTestRunEntry;
       tdiv(class = "agent-test-run-header",
            onclick = proc() = vm.toggleTestRun(anchorId)):
         span(class = "agent-test-run-toggle"):
-          text (if expanded: "▾" else: "▸")
+          text expansionGlyph(expanded)
         span(class = "agent-test-run-title"):
           text testRunTitle(summary)
         span(class = "agent-test-run-status"):
@@ -1423,15 +1022,7 @@ proc evidenceStateClass*(call: EvidenceCall): string =
   ## command did, and whether its dataset can be read — because "no
   ## affordance" has four different reasons and a reviewer looking at a
   ## screenshot should be able to tell which.
-  let modifier =
-    case call.state
-    of ecsUnreported: "unreported"
-    of ecsFailed: "failed"
-    of ecsCompleted:
-      case call.dataset.state
-      of edsReady: "ready"
-      of edsUnknown: "reading"
-      of edsUnavailable: "unavailable"
+  let modifier = $evidenceCardState(call)
   AgentActivityEvidenceClass & " " & AgentActivityEvidenceClass & "-" & modifier
 
 proc renderEvidenceCall[R](r: R; vm: AgentActivityVM; callValue: EvidenceCall;
@@ -1478,7 +1069,7 @@ proc renderEvidenceCall[R](r: R; vm: AgentActivityVM; callValue: EvidenceCall;
                    AgentActivityEvidenceOpenClass,
                  `type` = "button",
                  onclick = proc() = open()):
-            text "Open review"
+            text AgentOpenReviewLabel
       if call.failureText.len > 0:
         pre(class = "agent-evidence-output"):
           text call.failureText
@@ -1489,7 +1080,7 @@ proc renderTerminal[R](r: R; terminal: AgentActivityTerminalEntry;
     tdiv(class = "terminal-wrapper"):
       tdiv(class = "header-wrapper"):
         tdiv(class = "task-name"):
-          text "Terminal " & terminal.id
+          text terminalTitle(terminal.id)
         tdiv(class = "msg-controls"):
           button(class = "ct-button-image-sm-secondary command-palette-copy-button terminal-copy-button",
                  `type` = "button")
@@ -1502,43 +1093,43 @@ proc renderPasswordPrompt[R](r: R): auto =
     tdiv(class = "prompt-wrapper"):
       tdiv(class = "password-wrapper"):
         input(class = "password-prompt-input", `type` = "password",
-              placeholder = "Password to continue")
+              placeholder = AgentPasswordPlaceholder)
         button(class = "ct-button-sm-primary password-continue-button",
                `type` = "button"):
-          text "Continue"
+          text AgentPasswordContinueLabel
 
 proc renderPermissionPrompt[R](r: R; vm: AgentActivityVM;
                                callbacks: AgentActivityCallbacks): auto =
   let description =
     if vm.permissionInfo.val.len > 0: vm.permissionInfo.val
-    else: "The agent wants to perform an action"
+    else: AgentPermissionDefaultText
   ui(r):
     tdiv(class = "permission-prompt"):
       tdiv(class = "permission-header"):
         tdiv(class = "permission-dot")
-        span(class = "permission-action-label"): text "Action needed"
+        span(class = "permission-action-label"): text AgentPermissionHeading
       tdiv(class = "permission-description"): text description
       tdiv(class = "permission-subtitle"):
-        text "Runs in the sandbox · network off · can't touch your machine."
+        text AgentPermissionSubtitle
       tdiv(class = "permission-buttons"):
         button(class = "ct-button-sm-primary permission-allow-once",
                `type` = "button",
                onclick = proc() =
                  if callbacks.onPermissionResponse != nil:
                    callbacks.onPermissionResponse("allow_once")):
-          text "Allow once"
+          text AgentPermissionChoices[0][1]
         button(class = "ct-button-sm-secondary permission-allow-always",
                `type` = "button",
                onclick = proc() =
                  if callbacks.onPermissionResponse != nil:
                    callbacks.onPermissionResponse("allow_always")):
-          text "Allow always"
+          text AgentPermissionChoices[1][1]
         button(class = "ct-button-sm-secondary permission-deny",
                `type` = "button",
                onclick = proc() =
                  if callbacks.onPermissionResponse != nil:
                    callbacks.onPermissionResponse("deny")):
-          text "Deny"
+          text AgentPermissionChoices[2][1]
 
 proc renderNewAgentButton[R](r: R; callbacks: AgentActivityCallbacks): auto =
   ui(r):
@@ -2003,9 +1594,9 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
                         callbacks: AgentActivityCallbacks): auto =
   ## Empty prompt — idle state rendered in the conversation area when there
   ## are no messages yet. Shows a heading, subtitle, and suggestion chips.
-  let chip1 = "Fix a bug in my code"
-  let chip2 = "Explain this codebase"
-  let chip3 = "Write tests for function"
+  let chip1 = AgentIdleChips[0]
+  let chip2 = AgentIdleChips[1]
+  let chip3 = AgentIdleChips[2]
   # A chip fills the prompt FOR the user, so it is input and goes the way
   # typing does (`invokeInputChange`): the host keeps its own copy of the
   # prompt and republishes it on every sync, so a value written only into
@@ -2015,9 +1606,9 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
     tdiv(class = "agent-idle-state"):
       tdiv(class = "agent-idle-header"):
         tdiv(class = "agent-idle-heading"):
-          text "Start an agent task"
+          text AgentIdleHeading
         tdiv(class = "agent-idle-subtitle"):
-          text "Describe a change, a bug to fix, or a feature to add. The agent works in a sandbox and shows its progress here."
+          text AgentIdleSubtitle
       tdiv(class = "agent-idle-suggestions"):
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =

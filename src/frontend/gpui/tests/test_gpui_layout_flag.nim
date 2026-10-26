@@ -28,6 +28,7 @@
 import replay_prerequisite
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tempfiles,
             unittest]
+import ./gpui_child_env
 
 import headless_app/layout_model
 
@@ -54,8 +55,7 @@ proc runBinary(extra: seq[string]): (int, string, string) =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   let errFile = genTempPath("gpui-layout-flag-", ".err")
   var args = @["--report-plan", "--width=1440", "--height=900"]
   args.add extra

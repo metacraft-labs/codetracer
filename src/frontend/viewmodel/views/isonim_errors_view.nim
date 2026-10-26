@@ -35,6 +35,9 @@
 ## ``createRenderEffect``s automatically.
 
 import std/tables
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -153,7 +156,7 @@ proc onFilterClick(vm: ErrorsVM; filter: ProblemFilterTag): proc() =
 
 proc renderProblemRow[R, N](r: R; vm: ErrorsVM; p: BuildProblemLine; masterIndex: int): N =
   ui(r):
-    tdiv(class = problemRowClass(vm, p, masterIndex),
+    tdiv(role = "button", tabindex = "0", class = problemRowClass(vm, p, masterIndex),
          onclick = onProblemClick(vm, p, masterIndex)):
       tdiv(class = iconClass(p)):
         text severityIcon(p.severity)

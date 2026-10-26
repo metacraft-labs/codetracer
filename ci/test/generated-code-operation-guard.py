@@ -138,6 +138,13 @@ class Link:
     symbol: str
     module: str
     because: str
+    # A link may be reached THROUGH another link of the chain that its own
+    # module declares: `via` names that routine. Then the link counts as
+    # reached when the routine's body calls it and the routine is itself a
+    # link (so it is checked for a cross-module reach in its own right). This
+    # is not the "propped up by its unreached siblings" case the rule above
+    # excludes: the sibling must be a chain link, and it is graded.
+    via: str = ""
 
 
 CHAIN: tuple[Link, ...] = (
@@ -212,15 +219,22 @@ CHAIN: tuple[Link, ...] = (
     # the first draft of this feature — the instructions view is fed by
     # `CtLoadAsmFunction` and knows nothing about a compile artefact, so the
     # tab opened blank.
-    Link("showGeneratedListing", "ui/low_level_code.nim",
+    #
+    # `showGeneratedListing` moved from the retired `ui/low_level_code.nim`
+    # component into the pane's ViewModel (`f2c1d12f9`), so `setAnchors` and
+    # `syncFromSourceLine` are now called by their own module: they are
+    # reached through it, and its body is what is checked.
+    Link("showGeneratedListing", "viewmodel/viewmodels/low_level_code_vm.nim",
          "the listing is computed and handed to nothing — the operation opens "
          "a surface the user finds empty"),
     Link("setAnchors", "viewmodel/viewmodels/low_level_code_vm.nim",
          "the painted rows carry no mapping, so every fidelity badge and every "
-         "sync state describes an empty anchor set"),
+         "sync state describes an empty anchor set",
+         via="showGeneratedListing"),
     Link("syncFromSourceLine", "viewmodel/viewmodels/low_level_code_vm.nim",
          "the pane holds a correct mapping and points at nothing: the listing "
-         "opens at row zero however far down the file the cursor was"),
+         "opens at row zero however far down the file the cursor was",
+         via="showGeneratedListing"),
     Link("rebaseSources", "viewmodel/viewmodels/generated_code_anchors.nim",
          "the anchors keep the compiler's spelling of every source path and "
          "the cursor is in the editor's, so no line ever aligns"),
@@ -234,6 +248,23 @@ CHAIN: tuple[Link, ...] = (
 # Nim identifier equality: style-insensitive after the first character.
 # `markStale` and `mark_stale` are one symbol, as the compiler sees them.
 # ---------------------------------------------------------------------------
+
+def routine_body(lines: list[str], name: str) -> list[str]:
+    """The lines of top-level routine `name`: its header up to the next line
+    that starts in column 0 (the next top-level declaration or section)."""
+    header = re.compile(
+        r"^(?:proc|func|template|macro|iterator|converter|method)\s+"
+        + re.escape(name) + r"\b")
+    for i, line in enumerate(lines):
+        if header.match(line):
+            body = [line]
+            for nxt in lines[i + 1:]:
+                if nxt and not nxt[0].isspace() and not nxt.startswith("#"):
+                    break
+                body.append(nxt)
+            return body
+    return []
+
 
 def nim_key(name: str) -> str:
     if not name:
@@ -347,6 +378,12 @@ def main() -> int:
             if rel not in tests and rel not in declaring_set
             and mentions(lines, key)
         ]
+        if not readers and link.via:
+            via_is_link = any(other.symbol == link.via for other in CHAIN)
+            if via_is_link:
+                for rel in declaring:
+                    if mentions(routine_body(product[rel], link.via)[1:], key):
+                        readers.append(f"{rel.as_posix()} ({link.via})")
         if not readers:
             test_readers = [
                 rel.as_posix() for rel, lines in product.items()

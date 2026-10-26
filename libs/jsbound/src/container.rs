@@ -100,6 +100,71 @@ pub fn encode_checkpoint_index(rows: &[CheckpointRow]) -> Vec<u8> {
     out
 }
 
+/// Decode `jsbound.chk` into its rows, without checking them against a log:
+/// `None` when its length is not a whole number of rows. A reader that
+/// trusts the rows must first check them with [`verify_checkpoint_index`]
+/// (the verifying reader, [`BoundaryRecording`], does).
+pub fn decode_checkpoint_index(bytes: &[u8]) -> Option<Vec<CheckpointRow>> {
+    if !bytes.len().is_multiple_of(CHK_ROW_LEN) {
+        return None;
+    }
+    Some(
+        bytes
+            .chunks_exact(CHK_ROW_LEN)
+            .map(|row| CheckpointRow {
+                ordinal: u32::from_le_bytes(row[0..4].try_into().expect("4 bytes")),
+                seq: u64::from_le_bytes(row[4..12].try_into().expect("8 bytes")),
+                log_offset: u64::from_le_bytes(row[12..20].try_into().expect("8 bytes")),
+            })
+            .collect(),
+    )
+}
+
+/// Rebuild `jsbound.chk` from the bytes of `jsbound.log` (spec §5.5: the
+/// index is derived, and any reader may rebuild it from the log). The log is
+/// decoded strictly; a log the decoder refuses has no index.
+pub fn rebuild_checkpoint_index(log: &[u8]) -> Result<Vec<u8>, DecodeError> {
+    Ok(encode_checkpoint_index(&derive_checkpoint_index(
+        &decode_log(log)?,
+    )))
+}
+
+/// Check a stored `jsbound.chk` against the index rebuilt from `log` and
+/// return the rows (spec §5.5: a reader must refuse an index that disagrees
+/// with the log). The comparison is of the whole encoding, so a row edited,
+/// reordered, added, removed or cut short is refused; the error names the
+/// first row that differs.
+pub fn verify_checkpoint_index(
+    log: &DecodedLog,
+    chk: &[u8],
+) -> Result<Vec<CheckpointRow>, ContainerError> {
+    let rows = derive_checkpoint_index(log);
+    let rebuilt = encode_checkpoint_index(&rows);
+    if rebuilt == chk {
+        return Ok(rows);
+    }
+    let detail = match decode_checkpoint_index(chk) {
+        None => format!(
+            "it holds {} byte(s), not a whole number of {CHK_ROW_LEN}-byte rows; the log's {} Checkpoint record(s) index as {} byte(s)",
+            chk.len(),
+            rows.len(),
+            rebuilt.len()
+        ),
+        Some(stored) => match stored.iter().zip(&rows).position(|(a, b)| a != b) {
+            Some(i) => format!(
+                "row {i} is {:?}, but the log's Checkpoint record there indexes as {:?}",
+                stored[i], rows[i]
+            ),
+            None => format!(
+                "it holds {} row(s), but the log has {} Checkpoint record(s)",
+                stored.len(),
+                rows.len()
+            ),
+        },
+    };
+    Err(ContainerError::CheckpointIndexMismatch(detail))
+}
+
 /// The bodies of `jsbound.blb`, in first-reference order, each hash once.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlobStore {
@@ -358,15 +423,7 @@ impl BoundaryRecording {
         }
         let blobs = BlobStore::decode(&blb_bytes)?;
         check_blob_refs(&log.records, &blobs)?;
-        let checkpoints = derive_checkpoint_index(&log);
-        if encode_checkpoint_index(&checkpoints) != chk_bytes {
-            return Err(ContainerError::CheckpointIndexMismatch(format!(
-                "it holds {} byte(s), but the log's {} Checkpoint record(s) index as {} byte(s) of other content",
-                chk_bytes.len(),
-                checkpoints.len(),
-                checkpoints.len() * CHK_ROW_LEN
-            )));
-        }
+        let checkpoints = verify_checkpoint_index(&log, &chk_bytes)?;
         Ok(BoundaryRecording {
             meta,
             log,

@@ -284,6 +284,11 @@ def capture():
     if os.path.isdir(OUT):
         shutil.rmtree(OUT)
     os.makedirs(OUT)
+    # Persist the capture host, never infer it later from the recorder host.
+    # Monaco's default at 16 px is platform-specific (fontInfo.js).
+    with open(os.path.join(OUT, "capture-context.json"), "w") as f:
+        json.dump({"platform": sys.platform, "editorFontPx": 16,
+                   "editorRowPx": 24 if sys.platform == "darwin" else 22}, f)
     repo = os.path.join(OUT, "vcs-repo")
     subprocess.run(["bash", os.path.join(ROOT, "scripts", "plat47-vcs-fixture.sh"), repo],
                    check=True, stdout=subprocess.DEVNULL)
@@ -631,6 +636,9 @@ def ocr(path, rect, name):
 
 def record():
     manifest = json.load(open(os.path.join(OUT, "manifest.json")))
+    # Required provenance travels with the frames. A missing context requires
+    # a new capture, rather than guessing from the host measuring the pixels.
+    context = json.load(open(os.path.join(OUT, "capture-context.json")))
     desk = json.load(open(os.path.join(ROOT, "src", "tests", "visual", "answers",
                                        "plat47-desktop-parity.electron.json")))
     ed = desk["editor"]
@@ -643,6 +651,7 @@ def record():
             "(ci/test/plat47_gpui_window.py). Asserted by",
             "src/frontend/gpui/tests/test_plat47_gpui_window.nim.",
         ],
+        "captureContext": context,
         "frame": [FRAME_W, FRAME_H],
         "settled": manifest,
     }

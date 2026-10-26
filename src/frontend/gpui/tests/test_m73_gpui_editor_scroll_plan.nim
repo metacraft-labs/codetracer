@@ -44,6 +44,7 @@
 import replay_prerequisite
 import std/[json, math, os, osproc, streams, strtabs, strutils, tempfiles,
             unittest]
+import ./gpui_child_env
 
 import ../../tui/tests/fixtures/fixture_provider
 
@@ -94,8 +95,7 @@ proc windowPlan(ops: string; trace: var string; subject = calc; height = H;
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env["CODETRACER_TUI_LAYOUT_DIR"] = state
   env["XDG_STATE_HOME"] = state
   env["XDG_CONFIG_HOME"] = state / "config"

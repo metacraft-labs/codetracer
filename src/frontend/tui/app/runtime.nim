@@ -63,6 +63,7 @@ import ./views/search_results_pane
 import ./views/terminal_info
 import ./theme/terminal_report
 import ./views/test_results_pane
+import ./views/agent_activity_pane
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -568,6 +569,9 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
   ## FORWARD-DECLARED for the call trace's scroll keys; defined beside
   ## `sourcePaneRows`.
 
+proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome)
+proc openOmnibar*(rt: TuiRuntime; query = "")
+  ## PLAT-54: FORWARD-DECLARED for Agent Activity's prompt row and `/ai`.
 proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome)
 proc runFindInFiles(rt: TuiRuntime; pattern: string;
                     outcome: var RuntimeOutcome)
@@ -2473,6 +2477,44 @@ proc searchPaneScreen(rt: TuiRuntime): tuple[area: CellArea,
                         result.area.row + result.area.height)
   result.screen = paintSearchResults(g, result.area, rt.app.search)
 
+proc agentPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                           screen: AgentPaneScreen] =
+  ## PLAT-54: Agent Activity's rows below its strip and where the painter put
+  ## them — the arithmetic a press, the wheel and the scrollbar read back.
+  let under = rt.paneAreaOf(paneAgentActivity)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintAgentActivity(g, result.area, rt.app.agent)
+
+proc scrollAgentTo*(rt: TuiRuntime; top: int) =
+  ## PLAT-54: the reader moved the view — held on this line, following the
+  ## end again only at the end (`FeedScroll.scrollTo`).
+  let (_, screen) = rt.agentPaneScreen()
+  rt.app.agent.scroll.scrollTo(top, markedRows(rt.app.agent.rows),
+                               screen.lines, screen.listRows)
+
+proc scrollAgent(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-54: the wheel over Agent Activity scrolls its lines.
+  let (_, screen) = rt.agentPaneScreen()
+  rt.scrollAgentTo(screen.top + delta)
+  outcome.repaint = true
+
+proc runAgentPrompt*(rt: TuiRuntime; text: string;
+                     outcome: var RuntimeOutcome) =
+  ## PLAT-54: `/ai <text>` — the desktop's agent query: Agent Activity shown
+  ## and the prompt sent to the agent.
+  outcome.repaint = true
+  rt.showPane(paneAgentActivity, outcome)
+  if rt.app.agentPrompt.isNil:
+    rt.note("this session has no agent to send a prompt to")
+    return
+  let why = rt.app.agentPrompt(text)
+  rt.note(if why.len > 0: why else: "sent to the agent: " & text)
+
 proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
   ## PLAT-57: the wheel over Find in Files scrolls its rows.
   let (_, screen) = rt.searchPaneScreen()
@@ -3027,6 +3069,8 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       rt.app.search.scrollTop = top
     of paneTestResults:
       rt.app.tests.scrollTop = top
+    of paneAgentActivity:
+      rt.scrollAgentTo(top)
     of paneEditor:
       rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top + 1), outcome)
     of InHandPanes:
@@ -3631,6 +3675,42 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     outcome.requestClick(PaneClickRequest(kind: pcScratchpadRemove,
                                           index: hit.row))
     return true
+  of paneAgentActivity:
+    # PLAT-54: a row runs its action (a turn, a run, a test, a tool group
+    # opened or closed), a `[button]` its button's (a recording opened, in
+    # this tab or a new one; a review entered); the prompt row opens the
+    # omnibox on `/ai `; Send / Stop as the desktop's; the scrollbar column
+    # is the scrollbar's (`routeScrollbars`). The desktop's panel has no
+    # context menu of its own, so a right press opens nothing.
+    if event.button != mbLeft or not rt.app.agent.loaded:
+      return false
+    let (area, screen) = rt.agentPaneScreen()
+    let t = rt.app.agent.agentTargetAt(screen, area, event.row, event.col)
+    case t.kind
+    of atRow, atButton:
+      if rt.app.agentPress.isNil:
+        return false
+      let words = rt.app.agentPress(t.row,
+                                    (if t.kind == atButton: t.button else: -1))
+      if words.len > 0:
+        rt.note(words)
+      outcome.repaint = true
+      return true
+    of atPrompt, atSend:
+      rt.openOmnibar(AgentOmnibarPrefix)
+      outcome.repaint = true
+      return true
+    of atStop:
+      if not rt.app.agentStop.isNil:
+        let words = rt.app.agentStop()
+        if words.len > 0:
+          rt.note(words)
+      outcome.repaint = true
+      return true
+    of atTrack:
+      return true
+    of atNone:
+      return false
   of paneSearch:
     # PLAT-57 (K35): a result opens at its line; a toggle flips and the
     # search runs again; the field opens the omnibox on `:grep <query>`;
@@ -4004,6 +4084,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     # PLAT-53: the wheel scrolls Test Results' list.
     if at.found and at.region.pane == paneTestResults and rt.app.tests.loaded:
       rt.scrollTests(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-54: the wheel scrolls Agent Activity's lines.
+    if at.found and at.region.pane == paneAgentActivity and
+       rt.app.agent.loaded:
+      rt.scrollAgent(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -5177,6 +5264,16 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `:keymap` and `:break 12` run as typed. Only a line whose verb is no
   ## command takes the chosen palette entry, which is what fuzzy-picks one.
   let (mode, needle) = classifyOmnibarQuery(rt.app.omnibar.query)
+  # PLAT-54: `/ai <text>` is the agent query — the desktop's: the omnibar
+  # closes, Agent Activity is shown and the prompt goes to the agent.
+  if mode == omAgent:
+    rt.app.omnibar.close()
+    if needle.len == 0:
+      rt.showPane(paneAgentActivity, outcome)
+      rt.note("type a prompt for the agent after /ai")
+    else:
+      rt.runAgentPrompt(needle, outcome)
+    return
   # PLAT-57: `:grep <text>` is Find in Files (§5.1): the omnibar closes and
   # the search runs into the pane; `:grep` alone keeps the field open.
   if mode == omProgram:

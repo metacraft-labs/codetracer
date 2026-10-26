@@ -28,7 +28,7 @@ import std/[algorithm, json, os, sequtils, strutils, unittest]
 
 import gpui/window_top_bar   # `GpuiTopBandPx`: the band above the layout (PLAT-48)
 import gpui/chrome          # `crFocusOutline` (PLAT-51), the window's edges
-from gpui/window_geometry import TabStripPx, FooterPx, GpuiEditorRowPx,
+from gpui/window_geometry import TabStripPx, FooterPx,
   EditorHScrollBandPx
   # the pane's tab strip, the window's footer (PLAT-49 part B), the editor's
   # row pitch and its horizontal scrollbar's band
@@ -49,7 +49,7 @@ const
   Desktop = "src/tests/visual/answers/plat47-desktop-parity.electron.json"
   Desktop50 = "src/tests/visual/answers/plat50-desktop.electron.json"
     ## The desktop's tab strip colours (PLAT-50's capture).
-  ExpectedAssertions = 130
+  ExpectedAssertions = 133
     ## 104 -> 125 (the Electron-parity redesign, 2026-10-17, re-captured and
     ## measured): three more frames settled (counted per frame); the outline
     ## absent before the first press and drawn on the editor's own box; the
@@ -65,6 +65,8 @@ const
     ## a band row, the scrubber lies along the editor's right edge, the end,
     ## the run past it, its colour, and that colour told from the thumb over
     ## the ground (one end check became six).
+    ## 130 -> 133: validate capture platform, font and expected pitch before
+    ## comparing the band against that capture rather than the test host.
   GhostBoxPx = 160 * 32
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
@@ -166,10 +168,19 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
     checkpoint($b)
     ck b["rows"].kind == JArray
     let rows = arr(b["rows"])
-    # ONE FULL TEXT ROW at the window's row pitch (Monaco's 22 px line
-    # height since 2026-10-17; 26 before). Squeezed rows (the fetch window
-    # holding more lines than the pane shows) were shorter.
-    ck rows[1] - rows[0] + 1 == GpuiEditorRowPx
+    # The pixels were captured on another host. Validate the recorded
+    # provenance against Monaco's platform rule, then compare the band with
+    # that capture's expected pitch, never the compiling host's pitch.
+    let context = rec["captureContext"]
+    let platform = context["platform"].getStr
+    let fontPx = context["editorFontPx"].getInt
+    let pitch = context["editorRowPx"].getInt
+    ck platform in ["linux", "darwin", "win32"]
+    ck fontPx == CodeFontPx
+    ck pitch == int(float(fontPx) * (if platform == "darwin": 1.5 else: 1.35) + 0.5)
+    # One full row: squeezed rows (too many fetched lines for the pane)
+    # remain red, even when this record is read on a different platform.
+    ck rows[1] - rows[0] + 1 == pitch
     # It starts right of the line number it belongs to…
     ck b["activeNumberMaxX"].kind == JInt
     ck b["startX"].getInt > b["activeNumberMaxX"].getInt
@@ -256,7 +267,7 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
                        arr(rec["focusRing"]["bbox"])[3]
     let caretOnly =
       r["pressBodyChanged"].getInt == 0 or
-      (box[2] <= 12 and box[3] <= GpuiEditorRowPx + 2) or
+      (box[2] <= 12 and box[3] <= rec["captureContext"]["editorRowPx"].getInt + 2) or
       (box[0] >= r["doneRingLeft"].getInt and
        box[1] >= editorBottom - 1 - EditorHScrollBandPx and
        box[1] + box[3] <= editorBottom and box[3] <= EditorHScrollBandPx)

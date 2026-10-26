@@ -13,7 +13,8 @@
 //! * [`batch`]: the uploaded batch of Boundary-Ingest.md §4.
 //! * [`assemble`]: batches to a recording (§5.6), the work of `ct-jsbound
 //!   assemble`, whose command line is [`cli`].
-//! * [`container`]: writing and verifying the four members.
+//! * [`container`]: writing and verifying the four members, and the
+//!   checkpoint index rebuilt from the log ([`rebuild_checkpoint_index`]).
 //! * [`vectors`]: the byte vectors shared with the TypeScript implementation
 //!   in codetracer-js-recorder `packages/boundary-format`.
 //!
@@ -39,7 +40,10 @@ pub use assemble::{
     assemble, AssembleError, AssembleOptions, Assembled, Finalisation, GapSummary, Summary,
 };
 pub use batch::{encode_batch, parse_batch, Batch, BatchError, Envelope};
-pub use container::{BoundaryRecording, CheckpointRow, ContainerError, Members};
+pub use container::{
+    decode_checkpoint_index, rebuild_checkpoint_index, verify_checkpoint_index, BoundaryRecording,
+    CheckpointRow, ContainerError, Members,
+};
 pub use decode::{decode_log, DecodeError, DecodeErrorKind, DecodedLog, Termination};
 pub use encode::{encode_frame, encode_frames, encode_log};
 pub use record::{BlobRef, Record, RECORD_KINDS};

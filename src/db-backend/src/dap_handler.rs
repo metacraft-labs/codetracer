@@ -937,6 +937,61 @@ impl Handler {
         result
     }
 
+    /// Tell the client when a step, next or continue ended at a boundary of
+    /// the recording: "End of record reached" when it arrived at the end,
+    /// "Beginning of record reached" at the start, and "Limit of record at
+    /// the end/beginning already reached!" when it started there and could
+    /// not move.  The daemon reports the end ones as `endOfTrace` on
+    /// `ct/py-navigate`, where the Python API raises `StopIteration`
+    /// (codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+    /// "Navigation at the end of a recording").
+    ///
+    /// A materialized trace knows its first and last steps.  A recreated
+    /// (rr) replay knows only whether the position it reports is the end:
+    /// [`Location::end_of_trace`], read by `complete_move` into
+    /// `last_location`.  `was_at_end` is that flag from before the move, and
+    /// `location_reloaded` says whether the move reloaded the position;
+    /// without it `last_location` is the one from before the move.
+    fn notify_record_limits(
+        &mut self,
+        original_step_id: StepId,
+        was_at_end: bool,
+        location_reloaded: bool,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::Materialized {
+            if original_step_id == self.step_id {
+                let location = if Some(self.step_id) == self.reader.first_step_id() {
+                    "beginning"
+                } else {
+                    "end"
+                };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                    sender,
+                )?;
+            } else if Some(self.step_id) == self.reader.first_step_id() {
+                self.send_notification(NotificationKind::Info, "Beginning of record reached", false, sender)?;
+            } else if Some(self.step_id) == self.reader.last_step_id() {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender)?;
+            }
+        } else if location_reloaded && self.last_location.end_of_trace {
+            if was_at_end {
+                self.send_notification(
+                    NotificationKind::Warning,
+                    "Limit of record at the end already reached!",
+                    false,
+                    sender,
+                )?;
+            } else {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender)?;
+            }
+        }
+        Ok(())
+    }
+
     fn complete_move(&mut self, is_main: bool, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         info!("complete_move");
 
@@ -1852,6 +1907,7 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let original_step_id = self.step_id;
+        let was_at_end = self.last_location.end_of_trace;
         let use_statement = matches!(
             granularity.as_deref(),
             Some(g) if g.eq_ignore_ascii_case("statement")
@@ -1879,30 +1935,7 @@ impl Handler {
         // ct/complete-move event the GUI listens on).
         self.complete_move(false, sender.clone())?;
 
-        if self.trace_kind == TraceKind::Materialized {
-            if original_step_id == self.step_id {
-                let location = if Some(self.step_id) == self.reader.first_step_id() {
-                    "beginning"
-                } else {
-                    "end"
-                };
-                self.send_notification(
-                    NotificationKind::Warning,
-                    &format!("Limit of record at the {location} already reached!"),
-                    false,
-                    sender.clone(),
-                )?;
-            } else if Some(self.step_id) == self.reader.first_step_id() {
-                self.send_notification(
-                    NotificationKind::Info,
-                    "Beginning of record reached",
-                    false,
-                    sender.clone(),
-                )?;
-            } else if Some(self.step_id) == self.reader.last_step_id() {
-                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
-            }
-        }
+        self.notify_record_limits(original_step_id, was_at_end, true, sender.clone())?;
 
         self.respond_dap(request, 0, sender)?;
         Ok(())
@@ -2373,6 +2406,7 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let original_step_id = self.step_id;
+        let was_at_end = self.last_location.end_of_trace;
         // M8 — Formatted-view step-IN / step-OUT.  Mirrors the M3
         // forward-direction dispatch shape.  Reverse-direction
         // formatted-view step-in / step-out (``ct/reverseStepIn`` /
@@ -2401,30 +2435,7 @@ impl Handler {
         // Surface the post-step location (mirrors M3 / M7's contract).
         self.complete_move(false, sender.clone())?;
 
-        if self.trace_kind == TraceKind::Materialized {
-            if original_step_id == self.step_id {
-                let location = if Some(self.step_id) == self.reader.first_step_id() {
-                    "beginning"
-                } else {
-                    "end"
-                };
-                self.send_notification(
-                    NotificationKind::Warning,
-                    &format!("Limit of record at the {location} already reached!"),
-                    false,
-                    sender.clone(),
-                )?;
-            } else if Some(self.step_id) == self.reader.first_step_id() {
-                self.send_notification(
-                    NotificationKind::Info,
-                    "Beginning of record reached",
-                    false,
-                    sender.clone(),
-                )?;
-            } else if Some(self.step_id) == self.reader.last_step_id() {
-                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
-            }
-        }
+        self.notify_record_limits(original_step_id, was_at_end, true, sender.clone())?;
 
         self.respond_dap(request, 0, sender)?;
         Ok(())
@@ -2473,6 +2484,7 @@ impl Handler {
         // for now not supporting repeat/skip_internal: TODO
         // TODO: reverse
         let original_step_id = self.step_id;
+        let was_at_end = self.last_location.end_of_trace;
         // let original_step = self.db.steps[original_step_id];
         // let original_depth = self.db.calls[original_step.call_key].depth;
         match arg.action {
@@ -2488,30 +2500,7 @@ impl Handler {
             self.complete_move(false, sender.clone())?;
         }
 
-        if self.trace_kind == TraceKind::Materialized {
-            if original_step_id == self.step_id {
-                let location = if Some(self.step_id) == self.reader.first_step_id() {
-                    "beginning"
-                } else {
-                    "end"
-                };
-                self.send_notification(
-                    NotificationKind::Warning,
-                    &format!("Limit of record at the {location} already reached!"),
-                    false,
-                    sender.clone(),
-                )?;
-            } else if Some(self.step_id) == self.reader.first_step_id() {
-                self.send_notification(
-                    NotificationKind::Info,
-                    "Beginning of record reached",
-                    false,
-                    sender.clone(),
-                )?;
-            } else if Some(self.step_id) == self.reader.last_step_id() {
-                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
-            }
-        }
+        self.notify_record_limits(original_step_id, was_at_end, arg.complete, sender.clone())?;
         // } else if arg.action == Action::Next {
         //     let new_step = self.db.steps[self.step_id];
         //     let new_depth = self.db.calls[new_step.call_key].depth;
@@ -5762,16 +5751,17 @@ impl Handler {
                     return Ok(());
                 }
 
-                // Go to the start BEFORE the tracepoint breakpoints exist.  A
-                // recreator replay's `jump_to` is `run_to_entry`, which clears
-                // the breakpoints it used to get there with
-                // `DeleteBreakpoints`, and that query removes every breakpoint
-                // of the session.  Added first, the tracepoint breakpoints were
-                // removed with them and the Continue below ran to the end:
-                // measured on an MCR recording served by `ct-mcr debugserver`
-                // (zero tracepoint results, the run-to-entry's
-                // `DeleteBreakpoints` sending `z0` for each tracepoint site).
-                self.replay.jump_to(self.reader.first_step_id().unwrap_or(StepId(0)))?;
+                // Go to the start BEFORE the tracepoint breakpoints exist.  On
+                // a recreator replay the start is the entry, reached with
+                // `run_to_entry`, which clears the breakpoints it used to get
+                // there with `DeleteBreakpoints`, and that query removes every
+                // breakpoint of the session.  Added first, the tracepoint
+                // breakpoints were removed with them and the Continue below
+                // ran to the end: measured on an MCR recording served by
+                // `ct-mcr debugserver` (zero tracepoint results, the
+                // run-to-entry's `DeleteBreakpoints` sending `z0` for each
+                // tracepoint site).
+                self.go_to_tracepoint_run_start()?;
 
                 for (path, line_map) in tracepoint_locations.iter() {
                     if line_map.is_empty() {
@@ -5913,7 +5903,17 @@ impl Handler {
             }
         }
 
-        if let Err(err) = self.replay.jump_to(original_step_id)
+        // A recreator replay is returned to its entry. The replay is the
+        // tracepoint session `run_tracepoints` opened for this run, so no
+        // position the user navigated to is lost, and `run_to_entry` is
+        // answered by every worker kind where a tick seek is not (see
+        // `go_to_tracepoint_run_start`).
+        let restore = if self.trace_kind == TraceKind::Recreator {
+            self.replay.run_to_entry()
+        } else {
+            self.replay.jump_to(original_step_id).map(|_| ())
+        };
+        if let Err(err) = restore
             && cleanup_error.is_none()
         {
             cleanup_error = Some(err);
@@ -6002,6 +6002,23 @@ impl Handler {
         // }
 
         interpreter.evaluate(tracepoint_index, step_id, &mut *self.replay, lang)
+    }
+
+    /// Move the replay to where a tracepoint run starts: the first step of
+    /// a materialized trace, the entry of a recreator replay.
+    ///
+    /// A recreator replay's `jump_to` seeks to an rr tick count and is
+    /// refused by workers whose positions are not ticks (MCR, Delve, GDB,
+    /// TTD), so the run reaches the beginning by `run_to_entry`, which every
+    /// worker answers.
+    fn go_to_tracepoint_run_start(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::Recreator {
+            self.replay.run_to_entry()
+        } else {
+            self.replay
+                .jump_to(self.reader.first_step_id().unwrap_or(StepId(0)))
+                .map(|_| ())
+        }
     }
 
     pub fn run_tracepoints(

@@ -232,6 +232,7 @@
 import replay_prerequisite
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tables,
             tempfiles, unittest]
+import ./gpui_child_env
 
 import codetracer_embed
 import gpui/app/leaves
@@ -372,8 +373,7 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env["DYLD_LIBRARY_PATH"] = shimDir &
     (if existsEnv("DYLD_LIBRARY_PATH"): ":" & getEnv("DYLD_LIBRARY_PATH")
      else: "")

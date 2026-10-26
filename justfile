@@ -58,6 +58,21 @@ test-build-once-failed-bundle:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert every package name `repro.nim`'s `uses:` list declares (every `when`
+# branch; also `buildDeps:` / `nativeBuildDeps:` / `runtimeDeps:`) resolves
+# against the `reprobuild-packages` catalog this flake pins, by reprobuild's
+# own rule: a catalog interface, else a bundled stdlib
+# selector reprobuild has not moved out, else a repro.lock workspace producer.
+# The dev shell exports that catalog as REPROBUILD_PACKAGES_ROOT, which makes
+# it the ONLY catalog reprobuild consults, so a name it lacks means the recipe
+# does not compile in `nix develop` (it did not, from 2026-09-30, for
+# `shellcheck`). Also asserts flake.lock and repro.lock pin the catalog at the
+# same revision. Locates the two pinned trees with `nix eval`; skips LOUDLY
+# without nix, CT_CATALOG_COVERAGE_STRICT=1 makes that a failure.
+# See the header of scripts/test-reprobuild-catalog-coverage.sh.
+test-reprobuild-catalog-coverage:
+  bash scripts/test-reprobuild-catalog-coverage.sh
+
 # Run inside the dev-env to exercise its provisioned Nix, including 2.28.
 test-dev-env-flake-metadata:
   bash ci/test/dev-env-flake-metadata-test.sh
@@ -1106,6 +1121,7 @@ test:
   bash ci/lib/run-just-lanes.sh test \
     test-build-alignment \
     test-flake-pin-alignment \
+    test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \
     test-flake-lock-node-dates \
     test-npm-install-yarn-lock \
@@ -5474,6 +5490,14 @@ plat48-capture-electron *args:
 plat49-capture-electron *args:
   bash scripts/plat49-capture-electron.sh "$@"
 
+# PLAT-54: the desktop's Agent Activity pane over the AA suites' replayed agent
+# sessions — every evidence card and the `ct test` run card, word for word —
+# written to `src/tests/visual/answers/plat54-agent-activity.electron.json`,
+# which the terminal's Agent Activity suite asserts its feed against.
+[positional-arguments]
+plat54-capture-electron *args:
+  bash scripts/plat54-capture-electron.sh "$@"
+
 # The desktop's caption bar, strips, menu surface, right-click menus and click
 # behaviours, as the terminal's and GPUI's are measured against them —
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.
@@ -6676,9 +6700,13 @@ ensure-ct-native-replay:
 #
 # The ``ensure-*`` prerequisites build the sibling binaries; this recipe
 # then makes them discoverable to the Rust tests:
-#   * ``test_harness::is_mcr_available()`` requires ``ct-mcr`` ON PATH
-#     (it ignores CODETRACER_CT_MCR_CMD), so we symlink the recorder's
-#     ct_cli as ``ct-mcr`` into a scratch dir prepended to PATH.
+#   * ``test_harness::find_ct_mcr()`` (behind ``is_mcr_available()``)
+#     takes CODETRACER_CT_MCR_CMD or ``ct-mcr`` / ``ct_cli`` on PATH, and
+#     when either names the workspace sibling's own ct_cli it refreshes it
+#     with ``scripts/build-siblings.sh --only codetracer-native-recorder/ct-mcr``
+#     (a stamp check after ``ensure-ct-mcr``). The ``ct-mcr`` symlink below
+#     is for the backend-manager tests and other callers that look the
+#     binary up by that name.
 #   * ``test_harness::find_ct_native_replay()`` honours CT_NATIVE_REPLAY_PATH
 #     first, then PATH, then ``../../codetracer-native-backend/target/
 #     debug``; we export the explicit path so the right binary is used.

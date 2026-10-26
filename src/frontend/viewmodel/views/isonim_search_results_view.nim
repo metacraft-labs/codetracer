@@ -80,6 +80,9 @@
 
 
 import isonim/core/[signals, computation]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
@@ -130,7 +133,7 @@ proc matchRow[R, N](r: R; vm: SearchResultsVM; index: int;
   ## One match row: ":line  text", the runner's match highlighted.
   var textSpan: N
   result = ui(r):
-    tdiv(class = matchRowClass(vm, index),
+    tdiv(role = "button", tabindex = "0", class = matchRowClass(vm, index),
          onclick = openResultHandler(vm, index)):
       span(class = "fif-line-number"): text $row.line
       span(ref = textSpan, class = "fif-match-text"): discard
@@ -166,7 +169,7 @@ proc fileGroup[R, N](r: R; vm: SearchResultsVM;
 proc recentItem[R, N](r: R; vm: SearchResultsVM; rec: RecentSearch): N =
   ## One recent search; a click runs it again.
   ui(r):
-    tdiv(class = "fif-recent-item",
+    tdiv(role = "button", tabindex = "0", class = "fif-recent-item",
          onclick = searchAgainHandler(vm, rec.query)):
       span(class = "fif-recent-query"): text rec.query
       span(class = "fif-recent-count"):

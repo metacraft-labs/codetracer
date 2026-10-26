@@ -94,15 +94,18 @@ suite "PLAT-41 LAW-P1 — the three sets COVER PaneKind":
     # PLAT-51 removed `paneTimeline` (native): 19 panes, one native.
     # PLAT-53 moved `paneTestResults` into the vocabulary: it draws the
     # window's `TestResultsVM`.
+    # PLAT-54 moved `paneAgentActivity` into the vocabulary: it draws the
+    # host's `AgentActivityVM`.
     ck card(allPanes()) == 19
-    ck card(PaneVocabularyPanes) == 13
+    ck card(PaneVocabularyPanes) == 14
     ck card(PaneNativePanes) == 1
-    ck card(PaneAcceptedExceptions) == 5
+    ck card(PaneAcceptedExceptions) == 4
     ck paneFileTree in PaneVocabularyPanes
     ck paneVcs in PaneVocabularyPanes
     ck paneTerminalOutput in PaneVocabularyPanes
     ck paneTestResults in PaneVocabularyPanes
-    ck PaneAcceptedExceptions == {paneBuildOutput, paneAgentActivity,
+    ck paneAgentActivity in PaneVocabularyPanes
+    ck PaneAcceptedExceptions == {paneBuildOutput,
                                   paneConstraints, paneProblems,
                                   paneRequests}
     ck card(PaneVocabularyPanes) + card(PaneNativePanes) +

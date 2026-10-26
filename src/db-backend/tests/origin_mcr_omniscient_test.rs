@@ -15,8 +15,8 @@
 //!    = 0.
 //! 3. `test_origin_mcr_omniscient_c_simple_trivial_chain` — C fixture
 //!    chain via persistent write log + metadata. Reuses the M11 C
-//!    `simple_trivial_chain` fixture; SKIPs narrowly when the recorder
-//!    is unavailable.
+//!    `simple_trivial_chain` fixture. Pending (ignored): its end-to-end
+//!    body is not written.
 //! 4. `test_origin_mcr_omniscient_cross_checkpoint_chain` — A chain
 //!    whose hops cross checkpoint intervals returns the correct
 //!    sequence. The M18 omniscient log is keyed by absolute tick
@@ -28,13 +28,23 @@
 //!    wall-clock latency below 100 µs on a representative fixture.
 //!
 //! Per-language fixture coverage matches the M11 surface (C, Rust,
-//! Nim, Go, D) — each fixture test reuses the existing
-//! `tests/fixtures/origin/<lang>/simple_trivial_chain/` directory and
-//! SKIPs narrowly with the same `SKIPPED: ct-mcr binary not on PATH`
-//! sentinel M17 uses when the recorder isn't present. The in-FFI
-//! synthetic fixtures (#1, #2, #4, #5) drive the M20 algorithm
+//! Nim, Go, D) — each fixture test names the existing
+//! `tests/fixtures/origin/<lang>/simple_trivial_chain/` directory. The
+//! in-FFI synthetic fixtures (#1, #2, #4, #5) drive the M20 algorithm
 //! end-to-end against the same FFI surface the production driver
 //! consumes — no live `ct-mcr` binary is required.
+//!
+//! The five per-language fixture tests are `#[ignore]`d as pending, as
+//! `origin_mcr_hybrid_dap_test`'s three are: their end-to-end bodies are
+//! not written, so with every prerequisite present they can only fail
+//! (`unimplemented_end_to_end`). They used to look for `ct-mcr` only by
+//! name on `PATH`, where no dev shell puts it, and returned early when it
+//! was absent, which cargo counts as a pass for a test that ran nothing.
+//! Ignored, the runner reports them as not run. Run with `--ignored` they
+//! take `ct-mcr` from the harness's provisioning finder and their compiler
+//! from the dev shell, and fail naming the missing body; a missing
+//! compiler goes through `common/origin_dap_gate.rs` (a loud skip, or a
+//! failure when skipping is disabled), never a silent return.
 //!
 //! # FFI lock discipline
 //!
@@ -44,8 +54,15 @@
 //! same per-process Nim global state) so two `cargo test` workers
 //! never observe each other's seeded writes.
 
+mod test_harness;
+
+#[path = "common/origin_dap_gate.rs"]
+mod origin_dap_gate;
+
 use std::process::Command;
 use std::time::Instant;
+
+use origin_dap_gate::{required_mode, unavailable};
 
 use db_backend::emulator_ffi;
 use db_backend::omniscient_db::{FfiOmniscientDb, WriteRecord, omniscient_ffi_lock};
@@ -101,43 +118,35 @@ fn default_budget() -> OriginBudget {
     }
 }
 
-/// Narrow probe: is `ct-mcr` on PATH? Returns true if so, otherwise
-/// emits a SKIPPED sentinel and returns false. Mirrors the M17 file's
-/// SKIP discipline so the CI sentinel is identical across M17 + M20
-/// fixture tests.
-fn require_ct_mcr(test_label: &str) -> bool {
-    if Command::new("ct-mcr")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        true
-    } else {
-        eprintln!(
-            "SKIPPED: ct-mcr binary not on PATH (M20 {} requires the MCR recorder for an \
-             end-to-end fixture trace)",
-            test_label
-        );
-        false
-    }
+/// The MCR recorder for an end-to-end fixture trace. `find_ct_mcr` takes
+/// an override or a `ct-mcr` on `PATH`, and otherwise builds the workspace's
+/// `codetracer-native-recorder` sibling; it panics naming the remedy when it
+/// cannot supply one, so this never skips.
+fn require_ct_mcr() {
+    let ct_mcr = test_harness::find_ct_mcr();
+    assert!(ct_mcr.is_some(), "find_ct_mcr supplies ct-mcr or panics");
 }
 
-fn require_compiler(name: &str, test_label: &str) -> bool {
-    if Command::new(name)
-        .arg("--version")
+/// Narrow probe: does `program version_args…` run? Otherwise goes through
+/// the origin-DAP prerequisite gate (a loud skip, or a failure when skipping
+/// is disabled) and returns false. The arguments are the tool's own: Go's
+/// toolchain answers `go version`, not `go --version`, and the dev shell's D
+/// compiler is `ldc2`, not `dmd`.
+fn require_tool(program: &str, version_args: &[&str], test_label: &str) -> bool {
+    if Command::new(program)
+        .args(version_args)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
     {
         true
     } else {
-        eprintln!(
-            "SKIPPED: {name} not on PATH (M20 {test_label} needs the {name} compiler)",
-            name = name,
-            test_label = test_label
-        );
-        false
+        unavailable::<()>(
+            required_mode(),
+            &format!("M20 {test_label}"),
+            &format!("`{program}` not on PATH (the fixture is compiled with it)"),
+        )
+        .is_some()
     }
 }
 
@@ -291,23 +300,22 @@ fn test_origin_mcr_omniscient_with_metadata_skips_classifier() {
 // ---------------------------------------------------------------------------
 
 /// **Fixture:** the M11 C `simple_trivial_chain` directory
-/// (`tests/fixtures/origin/c/simple_trivial_chain/`). When `ct-mcr`
-/// is unavailable the test SKIPs narrowly with the same sentinel the
-/// M17 fixture tests use. The C fixture path provides the full
-/// end-to-end coverage on CI runners with the recorder pipeline
-/// available; the dev-shell run captures the SKIP path.
+/// (`tests/fixtures/origin/c/simple_trivial_chain/`). Pending: the
+/// body that records the fixture with `ct-mcr` and asserts its
+/// `ANSWERS.md` chain is not written, so the test is ignored (see the
+/// module documentation).
 ///
 /// The per-language sibling tests for Rust / Nim / Go / D are spelled
 /// out below — they share the same body modulo the language-specific
 /// compiler probe, mirroring the M11 fixture-coverage matrix.
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/c/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --ignored to see it fail"]
 fn test_origin_mcr_omniscient_c_simple_trivial_chain() {
-    if !require_compiler("gcc", "c_simple_trivial_chain") {
+    if !require_tool("gcc", &["--version"], "c_simple_trivial_chain") {
         return;
     }
-    if !require_ct_mcr("c_simple_trivial_chain") {
-        return;
-    }
+    require_ct_mcr();
     unimplemented_end_to_end(
         "test_origin_mcr_omniscient_c_simple_trivial_chain",
         "c/simple_trivial_chain",
@@ -316,13 +324,13 @@ fn test_origin_mcr_omniscient_c_simple_trivial_chain() {
 
 /// Sibling — Rust fixture coverage (M11 parity).
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/rust/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --ignored to see it fail"]
 fn test_origin_mcr_omniscient_rust_simple_trivial_chain() {
-    if !require_compiler("rustc", "rust_simple_trivial_chain") {
+    if !require_tool("rustc", &["--version"], "rust_simple_trivial_chain") {
         return;
     }
-    if !require_ct_mcr("rust_simple_trivial_chain") {
-        return;
-    }
+    require_ct_mcr();
     unimplemented_end_to_end(
         "test_origin_mcr_omniscient_rust_simple_trivial_chain",
         "rust/simple_trivial_chain",
@@ -331,13 +339,13 @@ fn test_origin_mcr_omniscient_rust_simple_trivial_chain() {
 
 /// Sibling — Nim fixture coverage (M11 parity).
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/nim/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --ignored to see it fail"]
 fn test_origin_mcr_omniscient_nim_simple_trivial_chain() {
-    if !require_compiler("nim", "nim_simple_trivial_chain") {
+    if !require_tool("nim", &["--version"], "nim_simple_trivial_chain") {
         return;
     }
-    if !require_ct_mcr("nim_simple_trivial_chain") {
-        return;
-    }
+    require_ct_mcr();
     unimplemented_end_to_end(
         "test_origin_mcr_omniscient_nim_simple_trivial_chain",
         "nim/simple_trivial_chain",
@@ -346,13 +354,13 @@ fn test_origin_mcr_omniscient_nim_simple_trivial_chain() {
 
 /// Sibling — Go fixture coverage (M11 parity).
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/go/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --ignored to see it fail"]
 fn test_origin_mcr_omniscient_go_simple_trivial_chain() {
-    if !require_compiler("go", "go_simple_trivial_chain") {
+    if !require_tool("go", &["version"], "go_simple_trivial_chain") {
         return;
     }
-    if !require_ct_mcr("go_simple_trivial_chain") {
-        return;
-    }
+    require_ct_mcr();
     unimplemented_end_to_end(
         "test_origin_mcr_omniscient_go_simple_trivial_chain",
         "go/simple_trivial_chain",
@@ -361,13 +369,13 @@ fn test_origin_mcr_omniscient_go_simple_trivial_chain() {
 
 /// Sibling — D fixture coverage (M11 parity).
 #[test]
+#[ignore = "pending: the end-to-end body (record tests/fixtures/origin/d/simple_trivial_chain \
+          with ct-mcr and assert its ANSWERS.md chain) is not written; run with --ignored to see it fail"]
 fn test_origin_mcr_omniscient_d_simple_trivial_chain() {
-    if !require_compiler("dmd", "d_simple_trivial_chain") {
+    if !require_tool("ldc2", &["--version"], "d_simple_trivial_chain") {
         return;
     }
-    if !require_ct_mcr("d_simple_trivial_chain") {
-        return;
-    }
+    require_ct_mcr();
     unimplemented_end_to_end(
         "test_origin_mcr_omniscient_d_simple_trivial_chain",
         "d/simple_trivial_chain",

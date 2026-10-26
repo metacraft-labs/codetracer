@@ -40,6 +40,7 @@
 
 import std/[json, options, os, osproc, sets, streams, strtabs, strutils, tempfiles,
             unicode, unittest]
+import ../../gpui/tests/gpui_child_env
 
 import headless_app/layout_model
 import headless_app/desktop_panes
@@ -186,8 +187,7 @@ proc gpuiRun(): (int, JsonNode, JsonNode, string) =
   let state = createTempDir("plat45-three-", "")
   var env = newStringTable()
   for k, v in envPairs(): env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env["CODETRACER_TUI_LAYOUT_DIR"] = state
   let errFile = state / "err.txt"
   let dockFile = state / "dock.json"

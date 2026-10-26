@@ -7,7 +7,7 @@
 ## ``rev-parse HEAD^{tree}`` after the commit, or Content-Id §4.1's scoped
 ## recipe run verbatim through a shell), it is a known answer from
 ## ``test-certificates-spec/vectors/content/`` at revision
-## d57e83746b16e7d7dc8562aabc7dec6754f4f62b, copied here as a constant with
+## 6f5079337739499c71fa8c44315fad13ebe6bac5, copied here as a constant with
 ## the case it comes from. That group is not WALKED by this suite: the
 ## conformance walker's pin predates it, and moving the pin is a later part
 ## of the work.

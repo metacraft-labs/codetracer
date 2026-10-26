@@ -41,6 +41,16 @@ type
     hash*: string
     subject*: string
 
+  VcsReviewLine* = object
+    ## PLAT-54: one file of a review's changeset, as the desktop's Changed
+    ## Files row shows it.
+    status*: string
+    name*: string
+    path*: string
+    additions*, deletions*: int
+    coverage*: string
+    selected*: bool
+
   VcsPaneModel* = object
     ## Everything the pane shows, as a value.
     loaded*: bool
@@ -65,6 +75,13 @@ type
     scrollTop*: int
       ## M71 (#838): the first row the pane shows — the reader's position,
       ## which the host carries across refreshes (`vcs_source.publish`).
+    review*: bool
+      ## PLAT-54: the pane shows a REVIEW (`VCSVM.deepReviewMode`): its
+      ## title, its stats and its Changed Files, as the desktop's panel does
+      ## in review mode — an evidence card opened from Agent Activity, or
+      ## `--deepreview`.
+    reviewTitle*, reviewStats*, changedHeader*: string
+    reviewFiles*: seq[VcsReviewLine]
 
   VcsRowKind* = enum
     vrNone, vrFile, vrCommit, vrCommitFile
@@ -94,6 +111,8 @@ type
       ## rows fit.
 
 const
+  ChangedFilesTitle* = "CHANGED FILES"
+    ## The desktop's "Changed Files" section, in this pane's caption case.
   BranchMarker* = "on "
     ## The branch row's lead-in: `on main`.
   VcsBranchStyle* = CellStyle(role: srChromeText, bold: true)
@@ -139,12 +158,39 @@ type
     isFile: bool
       ## A working-tree row (`fileRows` counts the ones on screen).
 
-proc vcsLines(model: VcsPaneModel): seq[VcsLine] =
+proc vcsLines(model: VcsPaneModel;
+              glyphs = DefaultGlyphs): seq[VcsLine] =
   ## Every row the pane lists, in order — the branch, the working tree and
   ## its files, the commits and the files of the one opened.
   template line(s: seq[StyledSpan]; t = VcsRowTarget(kind: vrNone);
                 file = false) =
     result.add VcsLine(spans: s, target: t, isFile: file)
+  if model.review:
+    # PLAT-54: a review — the desktop's review-mode panel: the header's title
+    # and stats, then Changed Files with the dataset's own counts.
+    line @[StyledSpan(text: model.reviewTitle, style: VcsBranchStyle)]
+    if model.reviewStats.len > 0:
+      line @[StyledSpan(text: model.reviewStats, style: VcsMessageStyle)]
+    line @[StyledSpan(text: ChangedFilesTitle & model.changedHeader,
+                      style: VcsSectionStyle)]
+    if model.reviewFiles.len == 0:
+      line @[StyledSpan(text: " " & model.cleanText, style: VcsMessageStyle)]
+    for f in model.reviewFiles:
+      var spans = @[StyledSpan(text: (if f.selected: glyphs.glyph(grOverflowRight)
+                                     else: " "),
+                               style: VcsBranchStyle),
+                    StyledSpan(text: f.status, style: statusStyle(f.status)),
+                    StyledSpan(text: " " & f.name, style: VcsPathStyle)]
+      if f.additions > 0:
+        spans.add StyledSpan(text: " +" & $f.additions,
+                             style: CellStyle(role: srChromeSuccess))
+      if f.deletions > 0:
+        spans.add StyledSpan(text: " -" & $f.deletions,
+                             style: CellStyle(role: srChromeError))
+      if f.coverage.len > 0:
+        spans.add StyledSpan(text: "  " & f.coverage, style: VcsHashStyle)
+      line spans
+    return
   if model.isRepo and model.branch.len > 0:
     line @[StyledSpan(text: BranchMarker & model.branch,
                       style: VcsBranchStyle)]
@@ -224,7 +270,7 @@ proc paintVcsPane*(g: var StyledGrid; area: CellArea;
   result = VcsPaneScreen(rows: @[], fileRows: 0, area: area, trackCol: -1)
   if area.width <= 0 or area.height <= 0:
     return
-  let lines = vcsLines(model)
+  let lines = vcsLines(model, g.glyphs)
   result.totalRows = lines.len
   let top = clamp(model.scrollTop, 0, max(0, lines.len - area.height))
   result.top = top

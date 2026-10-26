@@ -506,7 +506,7 @@ define_records! {
         total: u64,
         length_computable: u8,
     },
-    0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32 },
+    0x57 => Loading { seq: u64, phase: u8, elements: u32, scripts: u32, text: u32 },
     0x58 => DocTask { seq: u64, kind: u8, src: String, target: String, event: String },
     0x59 => PlatformValue { seq: u64, src: u8, task_id: u64, query: String, value: String },
     0x5F => End { last_seq: u64, reason: u8 },

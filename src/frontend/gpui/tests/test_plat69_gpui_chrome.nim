@@ -25,6 +25,7 @@
 
 import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import ./gpui_child_env
 
 import codetracer_embed
 import gpui/chrome
@@ -72,8 +73,7 @@ proc run(args: seq[string]; geometry = ""; state = ""): tuple[rc: int;
   let dir = if own: createTempDir("plat69-gpui-", "") else: state
   var env = newStringTable()
   for k, v in envPairs(): env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env["CODETRACER_TUI_LAYOUT_DIR"] = dir
   env["XDG_STATE_HOME"] = dir
   env["CODETRACER_HOME"] = dir / "ct-home"

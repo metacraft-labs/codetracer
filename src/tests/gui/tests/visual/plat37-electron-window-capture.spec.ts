@@ -94,6 +94,13 @@ import {
   debugToolbarSelector,
   type DebugToolbarButton,
 } from "../../page-objects/debug-toolbar-ids";
+import {
+  type ProgramState,
+  type SettledEntry,
+  assertSampledSettled,
+  awaitSettledEntry,
+  settledBetweenOperations,
+} from "../../lib/session-settle";
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
 const visualRoot = path.join(repoRoot, "src", "tests", "visual");
@@ -211,13 +218,6 @@ function resolveRecording(name: string): string {
 
 const recordingPath = resolveRecording(definition.scenarios[0].recording);
 fs.mkdirSync(outDir, { recursive: true });
-
-interface ProgramState {
-  line: number;
-  path: string;
-  rrTicks: number;
-  busy: boolean | null;
-}
 
 async function readProgramState(
   page: import("playwright").Page,
@@ -728,19 +728,28 @@ async function drive(
   trajectory: string[];
   final: ProgramState;
   settled: boolean;
+  entrySettle: SettledEntry;
 }> {
   let moves = 0;
   let settled = true;
   const trajectory: string[] = [];
-  // THE STARTING POINT IS ASSERTED. A session that has not finished opening
-  // reports `rrTicks: -1`, and driving from there makes the first operation's
-  // postcondition true by arithmetic on a sentinel.
-  let state = await readProgramState(layout.page);
-  expect(
-    state.rrTicks,
-    "the session had no position before the first operation; the capture " +
-      "would then be driving a window that has not opened",
-  ).toBeGreaterThanOrEqual(0);
+  // THE STARTING POINT IS SETTLED, not sampled. The only settle this loop
+  // used to have was per operation, inside `waitForMove`, and the
+  // population-control scenario `entry-shell` has no operation to force one:
+  // its route record was the first read of a session still coming up,
+  // `{line: 0, path: "", rrTicks: 0, busy: true}`, beside a frame that drew
+  // line 1 (codetracer-pm issue 2026-10-12-the-electron-capture-lanes-
+  // entry-shell-samples-...). `awaitSettledEntry` waits on the product's own
+  // busy flag until two consecutive reads agree on a resolved position, and
+  // THROWS rather than return a sample that never got there. It also keeps
+  // the sentinel guard: a session with no position (`rrTicks: -1`) would
+  // make the first operation's postcondition true by arithmetic.
+  const entrySettle = await awaitSettledEntry(
+    async () => readProgramState(layout.page),
+    async (ms) => layout.page.waitForTimeout(ms),
+    { what: "PLAT-37/Electron entry" },
+  );
+  let { state } = entrySettle;
   trajectory.push(`entry=${state.line}@${state.rrTicks}`);
 
   for (const op of ops) {
@@ -820,7 +829,11 @@ async function drive(
       if (!(await waitForEditorFrameSettled(layout.page))) settled = false;
     }
   }
-  return { moves, trajectory, final: state, settled };
+  // THE ANSWER IS ASSERTED SETTLED BEFORE IT IS RETURNED. `waitForMove`
+  // already refuses a busy move, but the `setBreakpoint` branch reads without
+  // waiting; a busy final state is a lane failure, never a recorded value.
+  assertSampledSettled(state, "PLAT-37/Electron final state");
+  return { moves, trajectory, final: state, settled, entrySettle };
 }
 
 /**
@@ -1082,8 +1095,18 @@ for (const scenario of definition.scenarios) {
         drivenOperations: scenario.operations,
         trajectory: driven.trajectory,
         movesPerformed: driven.moves,
-        editorSettledBetweenOperations: driven.settled,
+        // `null`, not `true`, over zero operations: "settled between
+        // operations" is vacuously true when there are none, and that vacuous
+        // green is what sat beside entry-shell's wrong line.
+        editorSettledBetweenOperations: settledBetweenOperations(
+          driven.moves,
+          driven.settled,
+        ),
         finalState: driven.final,
+        // The entry settle's evidence: `firstSample` is what the lane would
+        // have recorded before it waited, so an artefact shows whether the
+        // early-sample race was live on this run.
+        entrySettle: driven.entrySettle,
         // PARITY-S5's reference value, from Monaco rather than from ink.
         editorFontMetrics: await readEditorFontMetrics(ctPage),
         // PARITY-P1's: the face the renderer RESOLVED, not the one asked for.

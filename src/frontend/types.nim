@@ -184,8 +184,6 @@ const CALLSTACK_DEFAULT_LIMIT* = -1 # 8
 const MAX_WHITESPACE_WIDTH = 8
 
 type
-  EventOptionalColumn* = enum FullPath, LowLevelLocation
-
   OriginHopLineRef* = object
     ## Value Origin Tracking (M4) — per-hop `(path, line)` reference
     ## used by `ui/editor.nim` to colour origin-chain hop lines

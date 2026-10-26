@@ -939,7 +939,10 @@ impl CtfsRecordingWriter {
         // `None` takes type id 0, which is `NONE_TYPE_ID` by the trace
         // format's convention; every other type is registered on first use.
         let mut types = std::collections::HashMap::new();
-        types.insert("None", TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None"));
+        types.insert(
+            "None",
+            TraceWriter::ensure_type_id(&mut writer, TypeKind::None, "None"),
+        );
 
         let mut boundary = Vec::with_capacity(4096);
         boundary.extend_from_slice(&boundary_log::stream_prefix());
@@ -2428,7 +2431,11 @@ mod tests {
         let ct = drive(&mut writer, &wide_event_sequence()).expect("the sequence ends the session");
 
         assert_eq!(ct, tmp.path().join("frontend.ct"));
-        assert!(ct.is_file(), "a recording is a single CTFS file: {}", ct.display());
+        assert!(
+            ct.is_file(),
+            "a recording is a single CTFS file: {}",
+            ct.display()
+        );
         assert_eq!(visible_entries(tmp.path()), vec!["frontend.ct".to_string()]);
         let partial = tmp.path().join(PARTIAL_DIR_NAME);
         assert!(
@@ -2567,7 +2574,12 @@ mod tests {
     #[test]
     fn a_boundary_log_event_kind_is_exact_or_refused() {
         for kind in EventLogKind::ALL {
-            assert_eq!(event_log_kind(kind as i32).unwrap(), kind, "{}", kind.name());
+            assert_eq!(
+                event_log_kind(kind as i32).unwrap(),
+                kind,
+                "{}",
+                kind.name()
+            );
         }
         for raw in [24, 255, 256, -1] {
             let err = event_log_kind(raw).expect_err("an unassigned kind must be refused");
@@ -2620,7 +2632,10 @@ mod tests {
             vec![
                 Record::Path("src/vendor.js".into()),
                 Record::Path("src/app.js".into()),
-                Record::Step { path_id: 1, line: 20 },
+                Record::Step {
+                    path_id: 1,
+                    line: 20
+                },
                 Record::Function {
                     name: "renderBalance".into(),
                     path_id: 1,
@@ -2630,7 +2645,10 @@ mod tests {
                     function_id: 0,
                     args: vec![(0, int("42"))],
                 },
-                Record::Step { path_id: 1, line: 13 },
+                Record::Step {
+                    path_id: 1,
+                    line: 13
+                },
                 Record::VariableName("total".into()),
                 Record::Value {
                     variable_id: 0,
@@ -2646,14 +2664,20 @@ mod tests {
                     function_id: 1,
                     args: vec![(0, Value::Float("1.5".into())), (1, Value::Bool(true))],
                 },
-                Record::Step { path_id: 2, line: 4 },
+                Record::Step {
+                    path_id: 2,
+                    line: 4
+                },
                 Record::VariableName("cents".into()),
                 Record::Value {
                     variable_id: 1,
                     value: int("7"),
                 },
                 Record::Return(Value::String("12.34".into())),
-                Record::Step { path_id: 1, line: 20 },
+                Record::Step {
+                    path_id: 1,
+                    line: 20
+                },
                 Record::VariableName("rows".into()),
                 Record::Value {
                     variable_id: 2,
@@ -2678,7 +2702,10 @@ mod tests {
                     args: vec![],
                 },
                 Record::Return(Value::None),
-                Record::Step { path_id: 2, line: 7 },
+                Record::Step {
+                    path_id: 2,
+                    line: 7
+                },
                 Record::End,
             ]
         );
@@ -2781,7 +2808,12 @@ mod tests {
             "mid-session the output directory shows nothing: {:?}",
             visible_entries(tmp.path()),
         );
-        assert!(tmp.path().join(PARTIAL_DIR_NAME).join("pending.ct").is_file());
+        assert!(
+            tmp.path()
+                .join(PARTIAL_DIR_NAME)
+                .join("pending.ct")
+                .is_file()
+        );
         writer.session_end().unwrap();
         assert_eq!(visible_entries(tmp.path()), vec!["pending.ct".to_string()]);
     }
@@ -2841,7 +2873,12 @@ mod tests {
         let teed = wait_for_nonempty(&sink);
         let live = decode_log(&teed);
         assert!(!live.complete, "the session is still open");
-        assert_eq!(live.records.len(), 3, "Header, Path, Step: {:?}", live.records);
+        assert_eq!(
+            live.records.len(),
+            3,
+            "Header, Path, Step: {:?}",
+            live.records
+        );
         assert!(!writer.session_ended);
 
         let ct = writer.session_end().unwrap();
@@ -2883,10 +2920,16 @@ mod tests {
             // Dropping the writer without `session_end` is the crash.
         }
         let log = decode_log(&std::fs::read(&sink).unwrap());
-        assert!(!log.complete, "an interrupted stream must NOT look complete");
+        assert!(
+            !log.complete,
+            "an interrupted stream must NOT look complete"
+        );
         assert_eq!(log.torn_bytes, 0, "every frame the consumer got is whole");
         assert!(log.records.len() > 10, "expected a substantial prefix");
-        assert!(visible_entries(&out).is_empty(), "no recording for a killed session");
+        assert!(
+            visible_entries(&out).is_empty(),
+            "no recording for a killed session"
+        );
     }
 
     /// A consumer that cannot be spawned, or that dies early, costs seek
@@ -2935,7 +2978,10 @@ mod tests {
             ],
         };
         let err = config.validate().unwrap_err();
-        assert!(err.contains("{trace_dir}") && err.contains("{trace}"), "{err}");
+        assert!(
+            err.contains("{trace_dir}") && err.contains("{trace}"),
+            "{err}"
+        );
         assert!(StreamConsumerConfig::default().validate().is_ok());
     }
 
@@ -2954,7 +3000,10 @@ mod tests {
             let ct = recordings.join(fixture);
             assert!(ct.is_file(), "{} must be a CTFS file", ct.display());
             let log = decode_log(&stored_boundary_log(&ct));
-            assert!(log.complete, "{fixture}: the page ended its session cleanly");
+            assert!(
+                log.complete,
+                "{fixture}: the page ended its session cleanly"
+            );
             assert!(
                 log.records.len() >= 15,
                 "{fixture} should be a substantial recording; got {} records",
@@ -3024,7 +3073,10 @@ mod tests {
         use codetracer_trace_types::TraceLowLevelEvent as E;
         let events = recorded_events(&ct);
         assert_eq!(events.iter().filter(|e| matches!(e, E::Step(_))).count(), 3);
-        assert_eq!(events.iter().filter(|e| matches!(e, E::Value(_))).count(), 2);
+        assert_eq!(
+            events.iter().filter(|e| matches!(e, E::Value(_))).count(),
+            2
+        );
         let log = decode_log(&stored_boundary_log(&ct));
         assert!(matches!(&log.records[0], Record::Header { program, .. } if program == "smoke"));
     }

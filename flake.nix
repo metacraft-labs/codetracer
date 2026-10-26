@@ -409,17 +409,40 @@
       flake = false;
     };
 
-    # Non-flake input: the reprobuild-packages catalog. `repro.nim` declares
-    # `uses: "sqlite3 >=0"` off Windows, and sqlite3 is no longer bundled with
-    # reprobuild's stdlib: reprobuild looks it up in this catalog, as
-    # `packages/interfaces/sqlite3/repro.nim`, and a recipe that uses a moved
-    # package with no catalog reachable does not compile. Every dev shell that
-    # runs `repro` on this recipe exports it as REPROBUILD_PACKAGES_ROOT
+    # Non-flake input: the reprobuild-packages catalog. Every `uses:` name in
+    # `repro.nim` that reprobuild's stdlib no longer bundles — `sqlite3`,
+    # `shellcheck`, `shfmt` and `prek` so far (reprobuild
+    # `MovedToReprobuildPackages`); this recipe uses the first two — is looked
+    # up here as `packages/interfaces/<name>/repro.nim`, and a recipe naming a
+    # moved package that the catalog lacks does not compile. Every dev shell
+    # that runs `repro` on this recipe exports it as REPROBUILD_PACKAGES_ROOT
     # (`nix/shells/ci-base.nix`), because in CI nothing clones the catalog
-    # beside this checkout and the `repro` this flake pins is built from a store
-    # path, beside which there is no catalog either. `.envrc` overrides it with
-    # a `../reprobuild-packages` sibling when one exists, so a workspace uses
-    # its own checkout.
+    # beside this checkout and the `repro` this flake pins is built from a
+    # store path, beside which there is no catalog either.
+    #
+    # THIS PIN IS THE CATALOG, IN EVERY SHELL, AND A `../reprobuild-packages`
+    # SIBLING DOES NOT REPLACE IT. With REPROBUILD_PACKAGES_ROOT set, reprobuild
+    # consults no other location — that is the point: one catalog every lane
+    # agrees on. This comment used to say `.envrc` substitutes the sibling;
+    # it does not. `.envrc`'s blanket auto-override (NIX_FLAKE_OVERRIDE_AUTO=1)
+    # skips any sibling without a `flake.nix` ("has no flake.nix; skipping",
+    # direnv-nix-flake-overrides d643c23), and the catalog has none
+    # (reprobuild-packages 4e2fd1dc). Believing otherwise is how this pin sat
+    # at 9d9176bff5c5 — a revision without `shellcheck` — from 2026-09-30, the
+    # day it was introduced, until 66f365d26 (2026-10-18) moved it: the dev
+    # shell could not compile the recipe, and a workspace with a newer
+    # sibling saw no sign of it (codetracer-pm issues/2026-10-13-the-
+    # codetracer-dev-shell-pins-a-package-catalog-that-predates-shellcheck-
+    # and-suppresses-the-sibling-that-has-it.md).
+    #
+    # So drift is prevented by a check, not by a fallback:
+    # `scripts/test-reprobuild-catalog-coverage.sh` (`just
+    # test-reprobuild-catalog-coverage`; run in `ci/lint/bash.sh` against
+    # these real pins, and in `just test`) fails when any `uses:` name, on any
+    # platform branch, resolves neither here nor in the stdlib nor in a
+    # workspace producer, and when this revision and repro.lock's
+    # `reprobuild-packages` revision differ. Move both together.
+    #
     # PINNED BY REVISION, NOT BY BRANCH, and the revision is the one
     # reprobuild's own lock declares (`runquota-package-catalog`). Tracking
     # `dev` is what broke this shell: `shellcheck`, `shfmt` and `prek` left

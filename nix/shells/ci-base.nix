@@ -559,8 +559,13 @@ with pkgs;
     # process this shell starts — `cargo`, `node`, Electron, the recorders'
     # own loaders — and putting a GL / Vulkan / Wayland stack in front of all
     # of them to serve one lane is how an unrelated test starts resolving a
-    # different `libGL`. `ci/test/plat37-window-frame.sh` prepends this for
-    # the processes that need it, and nothing else does.
+    # different `libGL`. The processes that need it prepend it themselves: the
+    # window captures and probes under `ci/test/` (`plat37-window-frame.sh`,
+    # `plat38-keystroke.sh`, the `*-window.sh` scripts, through
+    # `ci/lib/gpui-window-capture.sh` too), the GPUI test suites for the
+    # `codetracer-gpui` they start (`src/frontend/gpui/tests/gpui_child_env.nim`),
+    # and the Nim test lanes whose suites load the shim in-process
+    # (`test_lane_run_library_path` in `ci/lib/test-lane-files.sh`).
     # LINUX ONLY, and the guard is not cosmetic: every package in this list
     # is a Linux graphics library. `pkgs.wayland`, `pkgs.mesa`,
     # `pkgs.libglvnd`, `pkgs.vulkan-loader` and the `xorg.*` set all declare
@@ -573,11 +578,9 @@ with pkgs;
     #
     # — which takes out every lane a macOS developer can run, not just the
     # GPUI ones: `just test-vm-native`, `just test-vm-js` and `just
-    # build-once` all start with `nix develop`. The variable itself is
-    # consumed only by `ci/test/plat37-window-frame.sh` and
-    # `ci/test/plat38-keystroke.sh`, both of which drive a real Wayland
-    # compositor and so cannot run on Darwin at all; leaving it unset there
-    # loses nothing.
+    # build-once` all start with `nix develop`. Every consumer
+    # named above treats it as optional, and the shim needs none of these
+    # libraries on Darwin, so leaving it unset there loses nothing.
     ${pkgs.lib.optionalString (!stdenv.isDarwin) ''
       export CODETRACER_GPUI_RUNTIME_LIB_PATH="${
         pkgs.lib.makeLibraryPath [
@@ -771,10 +774,14 @@ with pkgs;
     # via the `.envrc` override. `scripts/build-once.sh` calls `repro`
     # which reads these.
     export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
-    # The package catalog `repro.nim`'s `uses: "sqlite3"` resolves from (see
-    # the `reprobuild-packages` input in flake.nix). When it is set, reprobuild
-    # consults no other location, so this is also the catalog every lane of
-    # this shell agrees on.
+    # The package catalog every `uses:` name in `repro.nim` that reprobuild's
+    # stdlib no longer bundles resolves from — `shellcheck` and `sqlite3` at
+    # codetracer 845e390fb2 (see the `reprobuild-packages` input in flake.nix).
+    # When it is set, reprobuild consults no other location, so this is also
+    # the catalog every lane of this shell agrees on — and a name it lacks
+    # means the recipe does not compile in this shell, whatever a sibling
+    # checkout holds. `scripts/test-reprobuild-catalog-coverage.sh` enforces
+    # that the pinned catalog covers the recipe.
     export REPROBUILD_PACKAGES_ROOT=${inputs.reprobuild-packages}
     export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
     export BLAKE3_PREFIX=${pkgs.libblake3}

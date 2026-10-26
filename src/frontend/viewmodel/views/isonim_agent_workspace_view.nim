@@ -3,6 +3,9 @@
 ## IsoNim DOM-rendering view for the Agent Workspace panel.
 
 import std/[strformat, strutils]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -140,7 +143,7 @@ proc renderFileRow[R, N](r: R; vm: AgentWorkspaceVM; index: int;
   let fileIdx = index
   let hasFlow = entry.hasFlow
   ui(r):
-    tdiv(class = fileItemClass(selected),
+    tdiv(role = "button", tabindex = "0", class = fileItemClass(selected),
          onclick = proc() =
            vm.setSelectedFileIndex(fileIdx)
            if callbacks.onSelectFile != nil:

@@ -675,7 +675,7 @@ async fn fetch_recording_into_dir_limited(
     let object_keys = list_manifest_object_keys(recording_manifest);
     if object_keys.is_empty() {
         return Err(
-            "recording manifest contains no fetchable mcrSlices or shardedMcrSegments".to_string(),
+            "recording manifest contains no fetchable mcrSlices, shardedMcrSegments or materialized CTFS trace".to_string(),
         );
     }
 
@@ -779,7 +779,8 @@ async fn write_object_keys_metadata(dir: &Path, keys: &[String]) -> Result<(), S
 }
 
 // ---------------------------------------------------------------------------
-// Manifest parsing (mirrors browser-replay/app/worker.js:listManifestObjectKeys)
+// Manifest parsing (slices and segments as browser-replay/app/worker.js:
+// listManifestObjectKeys lists them; a materialised trace only here)
 // ---------------------------------------------------------------------------
 
 fn list_manifest_object_keys(manifest: &serde_json::Value) -> Vec<String> {
@@ -815,8 +816,32 @@ fn list_manifest_object_keys(manifest: &serde_json::Value) -> Vec<String> {
             }
         }
     }
+    // A materialised trace (codetracer-ci's `materialized_trace` manifest
+    // kind, such as a browser boundary recording's materialisation) keeps its
+    // trace as an artifact, not a slice. Only a CTFS payload is fetched: the
+    // `materialized_trace_v1` artifact stored as a `.ct` container. Its other
+    // artifacts (indexes, artifact sets) are not traces, and a payload that
+    // is not a container (a JSON trace) cannot be opened as `trace.ct`.
+    if let Some(artifacts) = manifest
+        .get("materializedTraceArtifacts")
+        .and_then(|v| v.as_array())
+    {
+        for artifact in artifacts {
+            let kind = artifact.get("artifactKind").and_then(|v| v.as_str());
+            if let Some(k) = artifact.get("artifactKey").and_then(|v| v.as_str())
+                && kind == Some(MATERIALIZED_TRACE_ARTIFACT_KIND)
+                && k.ends_with(".ct")
+            {
+                keys.push(k.to_string());
+            }
+        }
+    }
     keys
 }
+
+/// The artifact kind of a materialised trace's payload in a codetracer-ci
+/// recording manifest (`MaterializedTraceArtifactKinds.TracePayloadV1`).
+const MATERIALIZED_TRACE_ARTIFACT_KIND: &str = "materialized_trace_v1";
 
 // ---------------------------------------------------------------------------
 // Minimal async HTTP/1.1 client
@@ -2241,6 +2266,26 @@ mod tests {
             ]
         });
         assert_eq!(list_manifest_object_keys(&m2), vec!["alpha", "beta"]);
+
+        // A materialised trace (codetracer-ci's `materialized_trace` kind):
+        // its CTFS payload, never an artifact of another kind or a payload
+        // that is not a container (a JSON trace of the managed upload's
+        // `direct-materialized-finalize`), which the CTFS loader cannot open
+        // as `trace.ct`.
+        let m3 = json!({
+            "kind": "materialized_trace",
+            "mcrSlices": [],
+            "materializedTraceArtifacts": [
+                {"artifactKey": "traces/t/r/slices/index.bin", "artifactKind": "materialized_trace_index_v1"},
+                {"artifactKey": "traces/t/r/slices/trace.ct", "artifactKind": "materialized_trace_v1"},
+                {"artifactKey": "traces/t/r/slices/trace.json", "artifactKind": "materialized_trace_v1"},
+                {"artifactKey": "", "artifactKind": "materialized_trace_v1"},
+            ]
+        });
+        assert_eq!(
+            list_manifest_object_keys(&m3),
+            vec!["traces/t/r/slices/trace.ct"]
+        );
 
         // Empty manifest returns no keys.
         assert!(list_manifest_object_keys(&json!({})).is_empty());

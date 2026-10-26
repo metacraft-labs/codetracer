@@ -12,6 +12,9 @@
 ## the storybook and the standalone app shell under `WebRenderer`.
 
 import std/options
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -126,7 +129,7 @@ proc renderFlowStepRow[R, N](r: R; vm: FlowVM; step: proc(): FlowStepEntry;
                             index: int): N =
   ## One step of the flow: its index, location, expression and value.
   ui(r):
-    tdiv(class = flowStepRowClass(vm, index),
+    tdiv(role = "button", tabindex = "0", class = flowStepRowClass(vm, index),
          onclick = onStepClick(vm, step)):
       span(class = "flow-step-index"):
         text $step().step

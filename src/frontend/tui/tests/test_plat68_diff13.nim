@@ -49,6 +49,7 @@
 
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tables,
             tempfiles, unittest]
+import ../../gpui/tests/gpui_child_env
 
 import codetracer_embed
 import keymap/base_keymaps
@@ -189,8 +190,7 @@ proc gpuiRun(subject: string; base: BaseKeymap; user: bool; si: int;
   defer: removeDir(state)
   var env = newStringTable()
   for k, v in envPairs(): env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env["CODETRACER_TUI_LAYOUT_DIR"] = state
   env["XDG_STATE_HOME"] = state
   env["XDG_CONFIG_HOME"] = state / "config"

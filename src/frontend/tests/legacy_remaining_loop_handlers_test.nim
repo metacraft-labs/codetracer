@@ -1,6 +1,7 @@
 ## Exercise legacy DOM handlers after all loop iterations finish.
-## DataTables is a protocol fake: sorting uses its order/draw API, not its
-## external layout engine. The DOM and production header rendering are real.
+## The event log's DataTables header case left with `1c18341dd`: the desktop
+## Event Log is the shared view over its ViewModel, whose header ordering the
+## ViewModel and view suites cover.
 ## The noUiSlider fake records widget callbacks, and its measured width is
 ## supplied because jsdom has no layout engine. Slider binding and delayed
 ## callback dispatch remain production code. HistorySink replaces only the
@@ -8,28 +9,9 @@
 ## be checked without opening a recording or booting the application.
 import std/[unittest, jsffi, dom]
 import ./legacy_loop_dom_bootstrap
-import ../ui/event_log
 
-proc makeTable(): JsObject {.importjs: "({selection: [], order: function(value) { if (value) { this.selection = value; return this; } return this.selection; }, draw: function() { return this; }})".}
-proc selection(table: JsObject): int {.importjs: "#[\"selection\"][0][0]".}
 proc click(node: Node) {.importjs: "#.dispatchEvent(new window.MouseEvent('click', {bubbles: true}))".}
 proc failExit() {.importjs: "(function() { process.exitCode = 1; })()".}
-
-suite "legacy handlers retain each loop item":
-  test "event header first and middle columns sort their own indices":
-    document.body.innerHTML = cstring"<div class='data-table'><table id='loop-header'></table></div>"
-    let table = makeTable()
-    let columns = @[
-      js{title: cstring"First", className: cstring"first", data: cstring"first", visible: true},
-      js{title: cstring"Middle", className: cstring"middle", data: cstring"middle", visible: true},
-      js{title: cstring"Last", className: cstring"last", data: cstring"last", visible: true}]
-    renderColumnHeader(cstring"loop-header", columns, table)
-    click(document.querySelector(cstring".eventLog-column-header .first"))
-    check selection(table) == 0
-    if selection(table) != 0: failExit()
-    click(document.querySelector(cstring".eventLog-column-header .middle"))
-    check selection(table) == 1
-    if selection(table) != 1: failExit()
 
 import ../types
 import ../js_assoc

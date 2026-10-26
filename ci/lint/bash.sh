@@ -275,6 +275,12 @@ lint_step "contract suite: existence is not freshness" \
 lint_step "shellcheck: flake pin alignment guard" \
 	shellcheck scripts/test-flake-pin-alignment.sh
 
+# scripts/test-reprobuild-catalog-coverage.sh is the static guard on the pair
+# `repro.nim` `uses:` list / pinned `reprobuild-packages` catalog. Same reason:
+# it is under scripts/, which the glob does not reach.
+lint_step "shellcheck: reprobuild catalog coverage guard" \
+	shellcheck scripts/test-reprobuild-catalog-coverage.sh
+
 # CTUI-0's grammar-archive builder. Not under ci/, so the glob does not reach
 # it, and it is the FIRST thing `just tui-prereqs`, `just build-tui` and
 # `just test-tui` all run — a shell defect in it presents as a link error
@@ -322,6 +328,35 @@ lint_step "shellcheck: toolchain resolver" \
 # that defect is invisible to shellcheck and to every happy-path run.
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
+
+# The catalog coverage guard has the same exposure, and more ways to earn it:
+# it PARSES four inputs (repro.nim, two reprobuild source files, repro.lock),
+# and a parser that rots reports the whole recipe unresolved and sends the
+# reader to move a catalog pin that is correct. The suite drives the real
+# script over fixture trees through its overrides -- no nix, about two seconds
+# -- and reconstructs the defect it was written for: a catalog without
+# `shellcheck` (reprobuild-packages 9d9176bff5c5) under a reprobuild that lists
+# `shellcheck` as moved, and a moved name placed in `buildDeps:`,
+# `nativeBuildDeps:` or `runtimeDeps:`, which reprobuild resolves (and fails)
+# exactly as it does `uses:`. Every extraction-failure case asserts the pin
+# remedy is ABSENT. Measured 2026-10-26 at codetracer 845e390fb2 plus this
+# change: mutations of the guard (dropping the moved-name exclusion, the
+# lock-equality check, the three extra dependency blocks, the block-name
+# normalisation) each fail 3-12 of its 151 assertions.
+lint_step "contract suite: reprobuild catalog coverage guard" \
+	bash ci/test/reprobuild-catalog-coverage-test.sh
+
+# ...and the guard itself, against the REAL pins. The suite above proves the
+# script; only this proves the pair is in step. It locates the two pinned trees
+# with `nix eval` on this flake's own inputs -- nix is on PATH here, because
+# this stage is entered with `nix develop`, as the backend-manager suite below
+# also relies on -- and reads only text after that, so it costs two small
+# input fetches on a cold store and under a second on a warm one. STRICT, so a
+# runner where it could not run fails by name instead of skipping: the lane
+# exists to make the drift impossible to miss, and a skip here would be the
+# 2026-09-30 gap again. `just test` runs it too, non-strict.
+lint_step "reprobuild catalog covers every repro.nim uses: name (real pins)" \
+	env CT_CATALOG_COVERAGE_STRICT=1 bash scripts/test-reprobuild-catalog-coverage.sh
 
 # The same argument for the lock-node-dates guard, and it needed making twice
 # over: that guard has SEVEN failure paths that could accuse the wrong thing,
@@ -601,6 +636,12 @@ lint_step "contract suite: recorder probes track the built artefact" \
 # refuses. Pure bash fixtures, no noir needed.
 lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling build" \
 	bash ci/test/detect-siblings-nargo-test.sh
+
+# Likewise for `nim`: a codetracer-nim sibling's bin/nim is whatever that
+# checkout last built, and with it first on PATH a stale build compiled the
+# db-backend tests' Nim fixtures instead of the pinned fork. Pure bash fixtures.
+lint_step "contract suite: the dev shell's nim is not shadowed by a sibling build" \
+	bash ci/test/detect-siblings-nim-test.sh
 
 # A lane that runs with graceful skipping off excludes, by name, the tests it
 # does not provide the tools for. A misspelled or stale entry excludes nothing

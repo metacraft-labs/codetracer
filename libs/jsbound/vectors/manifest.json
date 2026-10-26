@@ -214,7 +214,7 @@
     {
       "bytes": "document_loading.bin",
       "class": "valid",
-      "description": "a document that loads while the pointer moves: Loading before each task recorded before load (phase 1 while parsing, 2 once parsed), DocTask for a script that runs (1) and one that ran with no record of its own (4), DOMContentLoaded and load, and a task after load with no Loading",
+      "description": "a document that loads while the pointer moves: Loading before each task recorded before load (phase 1 while parsing, with the character data the parser had inserted, 2 once parsed, with none), DocTask for a script that runs (1) and one that ran with no record of its own (4), DOMContentLoaded and load, and a task after load with no Loading",
       "expected": "document_loading.json",
       "name": "document_loading"
     },

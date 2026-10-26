@@ -958,7 +958,7 @@ suite "the vectors pin":
   test "a malformed pin file is refused, naming the file":
     let scratch = createTempDir("ct-test-certificate-pin-", "")
     defer: removeDir(scratch)
-    for (label, content) in [("abbreviated", "d57e837\n"),
+    for (label, content) in [("abbreviated", "6f50793\n"),
                              ("empty", ""),
                              ("two lines", pin & "\n" & pin & "\n"),
                              ("uppercase", pin.toUpperAscii & "\n"),
