@@ -51,6 +51,7 @@ import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ./table_fit
 
 const NO_SELECTED_PROBLEM* = -1
   ## ``selectedIndex`` when no row is selected.  Named rather than bare
@@ -342,6 +343,131 @@ proc highlightFirstError*(vm: ErrorsVM): bool =
     return false
   vm.selectedIndex.val = nav[0].index
   true
+
+# ---------------------------------------------------------------------------
+# The pane's words and its list, for every front-end (PLAT-55)
+# ---------------------------------------------------------------------------
+#
+# These were the desktop view's (`views/isonim_errors_view.nim`); they are the
+# ViewModel's so the terminal and the GPUI window say exactly what the desktop
+# says. The desktop's view calls them.
+
+const
+  ProblemsEmptyText* = "No problems detected."
+    ## The list's empty state (the desktop's `.problems-empty`).
+  ProblemFilterLabels*: array[ProblemFilterTag, string] =
+    ["All", "Errors", "Warnings"]
+    ## The header's filter buttons, in the desktop's order.
+  GroupByFileLabel* = "Group by File"
+    ## The header's grouping toggle.
+
+proc severityClassSuffix*(severity: BuildLineSeverity): string =
+  ## `error` / `warning` / `info` — the desktop's `.problems-severity-*` and
+  ## `.problems-icon-*` modifiers, and the native panes' colour choice.
+  case severity
+  of blsError: "error"
+  of blsWarning: "warning"
+  of blsInfo, blsNone: "info"
+
+proc severityIcon*(severity: BuildLineSeverity): string =
+  ## A row's icon: BLACK CIRCLE, WARNING SIGN, CIRCLED LATIN SMALL LETTER I.
+  case severity
+  of blsError: "\xe2\x97\x8f"
+  of blsWarning: "\xe2\x9a\xa0"
+  of blsInfo, blsNone: "\xe2\x93\x98"
+
+proc locationText*(p: BuildProblemLine): string =
+  ## `line:col`, or `line` when the compiler gave no column.
+  if p.col >= 0: $p.line & ":" & $p.col
+  else: $p.line
+
+proc errorBadgeText*(vm: ErrorsVM): string =
+  ## The header's error count (`● 2`).
+  severityIcon(blsError) & " " & $vm.errorCount.val
+
+proc warningBadgeText*(vm: ErrorsVM): string =
+  ## The header's warning count (`⚠ 1`).
+  severityIcon(blsWarning) & " " & $vm.warningCount.val
+
+proc totalBadgeText*(vm: ErrorsVM): string =
+  ## The header's total (`Total: 3`).
+  "Total: " & $vm.totalCount.val
+
+proc groupHeaderText*(path: string; count: int): string =
+  ## A file group's header when grouping by file (`src/main.nr (2)`).
+  path & " (" & $count & ")"
+
+type
+  ProblemsDisplayKind* = enum
+    pdRow        ## one diagnostic
+    pdFileHeader ## a file group's header (grouping by file)
+    pdEmpty      ## the empty state
+
+  ProblemsDisplayRow* = object
+    ## One entry of the pane's list, as the desktop's view lays it out.
+    kind*: ProblemsDisplayKind
+    index*: int
+      ## pdRow: the diagnostic's index in the MASTER `problems` list (what
+      ## selection and navigation hold); -1 otherwise.
+    text*: string
+      ## pdFileHeader: its header; pdEmpty: `ProblemsEmptyText`.
+
+proc displayRows*(vm: ErrorsVM): seq[ProblemsDisplayRow] =
+  ## The list below the header, in the desktop's order: the visible rows
+  ## (the active filter applied), each file's rows under its header in the
+  ## order the files first appear when grouping, or the empty state.
+  let visible = vm.visibleRefs.val
+  if visible.len == 0:
+    return @[ProblemsDisplayRow(kind: pdEmpty, index: -1,
+                                text: ProblemsEmptyText)]
+  if not vm.groupByFile.val:
+    for entry in visible:
+      result.add ProblemsDisplayRow(kind: pdRow, index: entry.index)
+    return
+  var order: seq[string] = @[]
+  for entry in visible:
+    if entry.problem.path notin order:
+      order.add entry.problem.path
+  for path in order:
+    var members: seq[int] = @[]
+    for entry in visible:
+      if entry.problem.path == path:
+        members.add entry.index
+    result.add ProblemsDisplayRow(kind: pdFileHeader, index: -1,
+                                  text: groupHeaderText(path, members.len))
+    for index in members:
+      result.add ProblemsDisplayRow(kind: pdRow, index: index)
+
+# ---------------------------------------------------------------------------
+# The Problems pane's row (PLAT-55, Build-Output-Pane.md §3.3) — the
+# columns are this pane's, so they live with its model
+# ---------------------------------------------------------------------------
+
+const
+  ProblemColumnNames* = ["icon", "path", "location", "message"]
+  ProblemPathFloor* = 8
+    ## The narrowest a path is cut to before the pane scrolls.
+  ProblemMessageFloor* = 12
+    ## The narrowest a message is cut to before the pane scrolls.
+
+proc problemsFit*(iconUnits, pathUnits, locationUnits, messageUnits,
+                  viewport: int; gap = 1): TableFit =
+  ## The four parts of a Problems row in a pane `viewport` units wide, as the
+  ## desktop's row lays them out (`problems.styl`: a flex row — the 16 px
+  ## icon fixed, the path shrinking with an ellipsis, the location never
+  ## shrinking, the message taking the rest): the icon at its width, the
+  ## location never cut, the path and the message at their widest and cut
+  ## (`…`) in proportion to what each would lose when the pane is narrower,
+  ## and the message given every unit of slack.
+  fitTable([
+    FitColumn(name: ProblemColumnNames[0], preferredUnits: iconUnits,
+              fixed: true),
+    FitColumn(name: ProblemColumnNames[1], preferredUnits: pathUnits,
+              minUnits: ProblemPathFloor),
+    FitColumn(name: ProblemColumnNames[2], preferredUnits: locationUnits,
+              neverCut: true),
+    FitColumn(name: ProblemColumnNames[3], preferredUnits: messageUnits,
+              minUnits: ProblemMessageFloor, flex: 1)], viewport, gap)
 
 # ---------------------------------------------------------------------------
 # Helpers

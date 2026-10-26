@@ -284,6 +284,11 @@ export table_overflow
 import viewmodels/table_fit
 export table_fit
 
+# PLAT-55: the Problems pane's row — its four parts as the desktop's flex row
+# lays them out (`errors_vm.problemsFit`), which the terminal's pane fits.
+from viewmodels/errors_vm import problemsFit, ProblemColumnNames
+export problemsFit, ProblemColumnNames
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #
