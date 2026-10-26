@@ -30,9 +30,9 @@
 ##
 ## Readers ask this module for a session's ViewModels and never keep their
 ## own copy: the active tab's (`activeSessionVM`), the one a tab's container
-## holds (`sessionVMOfTab`), the one an event belongs to
-## (`sessionVMOwning`, by the `DapApi` it arrived on), or a legacy
-## component's (`sessionVMOfComponent`). Events from a hidden tab therefore
+## holds (`sessionVMOfTab`), or a session's own (`sessionVMOf`, for the
+## session an event arrived on, `Data.sessionOwning`, or the tab holding a
+## legacy component, `sessionOfComponent`). Events from a hidden tab therefore
 ## update that tab's ViewModels, not the visible one's.
 ##
 ## No DOM and no `ui_js` here, so a headless renderer suite can drive it
@@ -133,14 +133,6 @@ proc sessionVMOfTab*(data: Data; tab: int): SessionViewModel =
     return nil
   sessionVMOf(data.sessions[tab])
 
-proc sessionVMOwning*(data: Data; dapApi: DapApi): SessionViewModel =
-  ## The ViewModels of the session whose `DapApi` is `dapApi` — the session an
-  ## event delivered on that API belongs to, whichever tab is on screen
-  ## (`event_helpers.deliverDapEvent` routes each event by its session tag).
-  if data.isNil:
-    return nil
-  sessionVMOf(data.sessionOwning(dapApi))
-
 proc sessionWithDapSessionId*(data: Data; sessionId: int): ReplaySession =
   ## The session whose `DapApi` carries `sessionId` (the id its requests are
   ## stamped with and `dap.ctRequestId` names them by), or nil when no open
@@ -171,10 +163,6 @@ proc sessionOfComponent*(data: Data; component: Component): ReplaySession =
       if held == component:
         return session
   nil
-
-proc sessionVMOfComponent*(data: Data; component: Component): SessionViewModel =
-  ## The ViewModels of the tab that holds `component`, or nil.
-  sessionVMOf(data.sessionOfComponent(component))
 
 proc shownTabComponent*(data: Data; content: Content): Component =
   ## The first `content` component of the tab on screen, or nil — the one a

@@ -383,10 +383,6 @@ proc panelSession*(): SessionViewModel =
   ## (and therefore shown) pane renders.
   shownSession
 
-proc panelMountSession*(m: PanelMount): SessionViewModel =
-  ## The session `m` rendered over, or nil while it waits for one.
-  if m.isNil: nil else: m.session
-
 proc ensurePanelMountedById*(containerId: cstring; kind: Content;
                              activeTab: int) =
   ## `ensurePanelMounted` on tab `activeTab`'s host with id `containerId`, if

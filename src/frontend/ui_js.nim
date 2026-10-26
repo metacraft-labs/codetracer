@@ -310,7 +310,8 @@ template shownSessionVM(): SessionViewModel =
   ## — for the readers that act on what the user sees: the collaboration
   ## hooks, a replay selected for the shown tab. A reader that handles an
   ## event asks for the ViewModels of the session the event belongs to
-  ## instead (`sessionVMOwning`, or the session it was wired for).
+  ## instead (`sessionVMOf(data.sessionOwning(dapApi))`, or the session it
+  ## was wired for).
   data.activeSessionVM()
 var serverSessionMirrored = false
   ## Whether a tab already mirrors the `ct host` server's session. The server

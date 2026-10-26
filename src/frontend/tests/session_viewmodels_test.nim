@@ -71,7 +71,7 @@
 ## Without `-d:nodejs` `std/unittest` cannot set the exit status, so this suite
 ## sets it.
 
-import std/[unittest, jsffi, dom]
+import std/[unittest, jsffi, dom, importutils]
 
 import ../types
 import ../dap
@@ -90,6 +90,26 @@ from ../viewmodel/viewmodels/test_results_vm import TestResultsVM, setRunAbsence
 from ../viewmodel/store/replay_data_store import ReplayDataStore
 from isonim/web/dom_api as isonim_dom import nil
 import isonim/core/signals
+
+# What the suite asks of the session records and the panel host that no
+# product code asks: the panes and events reach their session through the
+# routes the assertions below exercise, so these readers live here.
+
+proc sessionVMOwning(data: Data; dapApi: DapApi): SessionViewModel =
+  ## The ViewModels of the session whose `DapApi` is `dapApi`.
+  if data.isNil:
+    return nil
+  sessionVMOf(data.sessionOwning(dapApi))
+
+proc sessionVMOfComponent(data: Data; component: Component): SessionViewModel =
+  ## The ViewModels of the tab that holds `component`, or nil.
+  sessionVMOf(data.sessionOfComponent(component))
+
+proc panelMountSession(m: PanelMount): SessionViewModel =
+  ## The session `m` rendered over, or nil while it waits for one (a private
+  ## field of the mount, read through std/importutils).
+  privateAccess(PanelMount)
+  if m.isNil: nil else: m.session
 
 const ExpectedChecks = 49
 proc jsHasOwnProperty(o: JsObject; key: cstring): bool {.importjs:

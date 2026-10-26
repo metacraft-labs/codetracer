@@ -30,13 +30,14 @@
 ## store's call-trace section after a real load — no rows and a call count of
 ## zero, the state a recording with no trace leaves the store in — and
 ## everything after it is real: the session's
-## own `refreshCallStackFallback` asks the real backend for the real stack
+## stop loader's fallback load (`refreshCallStackFallback` below) asks the real
+## backend for the real stack
 ## (`stackTrace`), and the real painters draw it. Nothing answers in the
 ## backend's place.
 
 import std/[options, os, strutils, unittest]
 
-import isonim/core/signals
+import isonim/core/[signals, async_compat]
 
 import headless_session
 import store/[replay_data_store, types]
@@ -55,6 +56,15 @@ import ../host/native_host
 from ../host/session_driver import jumpToCall
 import ../host/tui_session
 import ./fixtures/fixture_provider
+import sdk/[debugger_session, stop_loader]
+
+proc refreshCallStackFallback(s: HeadlessDebugSession) =
+  ## Re-ask the calltrace pane's call-STACK fallback now, even at an
+  ## unchanged stop (`CalltraceVM.fallbackStack`, loaded by the SDK stop
+  ## loader's `StopPane.spCallStackFallback`): this suite empties the call
+  ## trace after a real load, which no stop does.
+  s.sdk.stops.reload(spCallStackFallback)
+  drainPlatformCallbacks()
 
 var CHECKS = 0
 template ck(cond: untyped) =
