@@ -946,6 +946,12 @@ test-rust:
   # tests in those two crates are anchored to. A dark anchor is not an
   # anchor. (ci/test/rust-test-crate-coverage.sh is the gate that says so.)
   ( cd libs/ct-data-breakpoints && cargo nextest run --release )
+  # `libs/ct-open-beneath` is the one rule both read sides (backend-manager's
+  # MCP `read_source_file`, db-backend's reads of a recording's source copies)
+  # open recorded paths through, without following a symlink below the base.
+  # It is a path dependency of both, so for the reason above its tests --
+  # the checks on that confinement -- run only here.
+  ( cd libs/ct-open-beneath && cargo test )
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server
