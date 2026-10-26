@@ -5762,16 +5762,17 @@ impl Handler {
                     return Ok(());
                 }
 
-                // Go to the start BEFORE the tracepoint breakpoints exist.  A
-                // recreator replay's `jump_to` is `run_to_entry`, which clears
-                // the breakpoints it used to get there with
-                // `DeleteBreakpoints`, and that query removes every breakpoint
-                // of the session.  Added first, the tracepoint breakpoints were
-                // removed with them and the Continue below ran to the end:
-                // measured on an MCR recording served by `ct-mcr debugserver`
-                // (zero tracepoint results, the run-to-entry's
-                // `DeleteBreakpoints` sending `z0` for each tracepoint site).
-                self.replay.jump_to(self.reader.first_step_id().unwrap_or(StepId(0)))?;
+                // Go to the start BEFORE the tracepoint breakpoints exist.  On
+                // a recreator replay the start is the entry, reached with
+                // `run_to_entry`, which clears the breakpoints it used to get
+                // there with `DeleteBreakpoints`, and that query removes every
+                // breakpoint of the session.  Added first, the tracepoint
+                // breakpoints were removed with them and the Continue below
+                // ran to the end: measured on an MCR recording served by
+                // `ct-mcr debugserver` (zero tracepoint results, the
+                // run-to-entry's `DeleteBreakpoints` sending `z0` for each
+                // tracepoint site).
+                self.go_to_tracepoint_run_start()?;
 
                 for (path, line_map) in tracepoint_locations.iter() {
                     if line_map.is_empty() {
@@ -5913,7 +5914,17 @@ impl Handler {
             }
         }
 
-        if let Err(err) = self.replay.jump_to(original_step_id)
+        // A recreator replay is returned to its entry. The replay is the
+        // tracepoint session `run_tracepoints` opened for this run, so no
+        // position the user navigated to is lost, and `run_to_entry` is
+        // answered by every worker kind where a tick seek is not (see
+        // `go_to_tracepoint_run_start`).
+        let restore = if self.trace_kind == TraceKind::Recreator {
+            self.replay.run_to_entry()
+        } else {
+            self.replay.jump_to(original_step_id).map(|_| ())
+        };
+        if let Err(err) = restore
             && cleanup_error.is_none()
         {
             cleanup_error = Some(err);
@@ -6002,6 +6013,23 @@ impl Handler {
         // }
 
         interpreter.evaluate(tracepoint_index, step_id, &mut *self.replay, lang)
+    }
+
+    /// Move the replay to where a tracepoint run starts: the first step of
+    /// a materialized trace, the entry of a recreator replay.
+    ///
+    /// A recreator replay's `jump_to` seeks to an rr tick count and is
+    /// refused by workers whose positions are not ticks (MCR, Delve, GDB,
+    /// TTD), so the run reaches the beginning by `run_to_entry`, which every
+    /// worker answers.
+    fn go_to_tracepoint_run_start(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::Recreator {
+            self.replay.run_to_entry()
+        } else {
+            self.replay
+                .jump_to(self.reader.first_step_id().unwrap_or(StepId(0)))
+                .map(|_| ())
+        }
     }
 
     pub fn run_tracepoints(

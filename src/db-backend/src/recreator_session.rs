@@ -1261,12 +1261,24 @@ impl ReplaySession for RecreatorReplaySession {
         Ok(res)
     }
 
-    fn jump_to(&mut self, _step_id: StepId) -> Result<bool, Box<dyn Error>> {
-        // TODO
-        error!("TODO rr jump_to: for now run to entry");
-        self.run_to_entry()?;
-        Ok(true)
-        // todo!()
+    /// Seek the replay to the step id `current_step_id` reported, which for
+    /// an rr recording is the current thread's rr tick count (`trace.ticks`).
+    ///
+    /// The worker answers `SeekToTicks` with rr's `vRun;;t<ticks>` restart:
+    /// the replay stops at the first point at which the thread's tick count
+    /// equals `ticks` (rr `GdbServer::restart_session`, `RESTART_FROM_TICKS`),
+    /// and the worker then resyncs LLDB with one `stepi`, which adds a tick
+    /// only when the instruction there is itself a counted branch.
+    /// Ticks count retired conditional branches, so several consecutive
+    /// stops can share one value, and the seek lands on the earliest of them.
+    /// A tick count the recording never reaches is refused, and the refusal
+    /// is returned as an error with the replay left where it was.
+    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self
+            .stable
+            .dispatch_replay_query(ReplayQuery::SeekToTicks { ticks: step_id.0 })?;
+        parse_bool_or_status_response(&response)
     }
 
     fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
@@ -1366,18 +1378,25 @@ impl ReplaySession for RecreatorReplaySession {
         Ok(())
     }
 
-    #[allow(clippy::expect_used)] // load_location_directly should succeed after ensure_active_stable
     fn current_step_id(&mut self) -> StepId {
         // cache location or step_id and return
         // OR always load from worker
         // TODO: return result or do something else or cache ?
-        match self.ensure_active_stable() {
-            Ok(_) => {
-                let location = self.load_location_directly().expect("access to step_id");
-                StepId(location.rr_ticks.0)
-            }
+        //
+        // A failure to reach the worker or to load its location is reported
+        // as NO_STEP_ID, not a panic. This runs inside request handlers on
+        // the replay-server's `stable` thread: a panic there killed the
+        // thread, so the request being handled was never answered and every
+        // later one queued behind it (the cached-session reset of an rr
+        // replay that had run on to `_exit` hung each next navigation this
+        // way). With NO_STEP_ID the handler goes on to `complete_move`,
+        // whose location load fails with the worker's error, and the request
+        // is answered with it.
+        let location = self.ensure_active_stable().and_then(|_| self.load_location_directly());
+        match location {
+            Ok(location) => StepId(location.rr_ticks.0),
             Err(e) => {
-                error!("current_step_id: can't ensure active worker: error: {e:?}");
+                error!("current_step_id: can't load the worker's location: {e:?}");
                 // hard to change all callsites to handle result for now
                 //   but not sure if NO_STEP_ID is much better: however this is only for rr cases
                 //   so we *should* try to not directly index into db.steps with it even if not NO_STEP_ID?
@@ -2311,5 +2330,111 @@ mod tests {
             Some("/x/trace.ct"),
             "the trace stays last"
         );
+    }
+
+    /// A session whose `stable` worker is a real `sh` on the other end of a
+    /// real socket: it reads one query line, writes it to `query_log`, and
+    /// answers `reply` on the same socket, then waits for the session to
+    /// close it.
+    ///
+    /// A scripted worker, justified as `worker_that_reads_one_query_then` is:
+    /// what these tests check is what the session sends for a call and what
+    /// it does with the worker's answer, on the real wire protocol. The
+    /// answers that matter are failures (a refused seek, a location the
+    /// worker cannot load), and a real `ct-native-replay` gives them only
+    /// from a broken replay; the end-to-end rr behaviour is covered by
+    /// backend-manager's real-recording tests (`test_cli_trace_query_rr_goto_ticks`).
+    #[cfg(unix)]
+    fn session_with_worker_answering(reply: &str, query_log: &Path) -> RecreatorReplaySession {
+        use std::os::fd::OwnedFd;
+        let (client, server) = UnixStream::pair().unwrap();
+        // Bounded, so a regression that stops answering fails instead of hanging.
+        client.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(r#"read -r query; printf '%s\n' "$query" > "$1"; printf '%s\n' "$2" >&0; read -r rest"#)
+            .arg("sh")
+            .arg(query_log)
+            .arg(reply)
+            .stdin(Stdio::from(OwnedFd::from(server)))
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut session = RecreatorReplaySession::new(
+            "stable",
+            0,
+            RecreatorArgs {
+                worker_exe: PathBuf::from("/nonexistent/ct-native-replay"),
+                rr_trace_folder: PathBuf::from("/nonexistent/trace"),
+                ..RecreatorArgs::default()
+            },
+        )
+        .without_respawn_after_worker_death();
+        session.stable.process = Some(child);
+        session.stable.stream = Some(client);
+        session.stable.active = true;
+        session
+    }
+
+    #[cfg(unix)]
+    fn query_log_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("recreator-session-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("query.json")
+    }
+
+    /// `jump_to` (`ct/goto-ticks`) seeks the worker to the tick count it was
+    /// given. It used to answer every jump with `RunToEntry`, which put the
+    /// replay at the entry at best and, from a later point, at `_exit`.
+    #[cfg(unix)]
+    #[test]
+    fn an_rr_jump_to_seeks_the_worker_to_the_given_ticks() {
+        let log = query_log_path("jump-to");
+        let mut session = session_with_worker_answering("true", &log);
+
+        assert!(session.jump_to(StepId(46674)).expect("the worker answered the seek"));
+
+        let sent: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).expect("one JSON query");
+        assert_eq!(sent, serde_json::json!({"kind": "SeekToTicks", "ticks": 46674}));
+    }
+
+    /// A seek the worker refuses (rr answers `E01` for a tick count the
+    /// recording never reaches) is an error, not a jump that went elsewhere.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_rr_seek_is_an_error() {
+        let log = query_log_path("refused-seek");
+        let mut session = session_with_worker_answering(
+            "error: run query error: \"rr refused to seek the replay to `t999999999`\"",
+            &log,
+        );
+
+        let err = session
+            .jump_to(StepId(999_999_999))
+            .expect_err("a refused seek must not report success");
+        assert!(err.to_string().contains("rr refused to seek"), "got: {err}");
+
+        // The error is the seek's own refusal: the query the worker refused
+        // was the seek, not a run-to-entry that failed in its place.
+        let sent: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).expect("one JSON query");
+        assert_eq!(sent, serde_json::json!({"kind": "SeekToTicks", "ticks": 999_999_999}));
+    }
+
+    /// A worker that cannot load its location makes `current_step_id` report
+    /// NO_STEP_ID. It used to panic, which killed the replay-server thread
+    /// serving the request, so that request and every later one went
+    /// unanswered.
+    #[cfg(unix)]
+    #[test]
+    fn current_step_id_reports_no_step_id_when_the_worker_cannot_load_its_location() {
+        let log = query_log_path("step-id");
+        let mut session = session_with_worker_answering(
+            "error: run query error: \"can't parse rr `when-ticks`: can't parse response line\"",
+            &log,
+        );
+
+        assert_eq!(session.current_step_id(), StepId(NO_STEP_ID));
     }
 }

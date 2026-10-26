@@ -674,8 +674,9 @@ Use `session_id` to preserve state across multiple `exec_script` calls:
 
 **Call 1** (session_id="dbg"):
 ```python
-# Set a breakpoint and run to it
-bp = trace.add_breakpoint(trace.source_files[0], 42)
+loc = trace.step_over()
+bp = trace.add_breakpoint(loc.path, loc.line)
+trace.step_back()
 trace.continue_forward()
 print(f"Stopped at {trace.location.path}:{trace.location.line}")
 for v in trace.locals():

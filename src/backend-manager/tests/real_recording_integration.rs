@@ -16897,7 +16897,18 @@ restored_line = trace.location.line
 restored_path = trace.location.path
 print(f'RESTORED: ticks={trace.ticks} line={restored_line}')
 print(f'MATCH: {restored_line == saved_line}')
-print('GOTO_TICKS_OK')";
+print('GOTO_TICKS_OK')
+
+# A tick count the recording never reaches is refused, and the replay stays
+# usable where it was.
+from codetracer.exceptions import NavigationError
+try:
+    trace.goto_ticks(10**12)
+    print('REFUSED: no')
+except NavigationError:
+    print(f'REFUSED: yes ticks={trace.ticks}')
+trace.step_over()
+print(f'STEP_AFTER_REFUSAL: line={trace.location.line}')";
 
         let (stdout, stderr, exit_code) = run_cli_command(
             &test_dir,
@@ -16932,6 +16943,40 @@ print('GOTO_TICKS_OK')";
         assert!(
             stdout.contains("RESTORED:"),
             "stdout should contain 'RESTORED:' marker, got:\n{stdout}"
+        );
+
+        // `goto_ticks` is a tick seek: afterwards the replay's tick count is
+        // the one asked for. The line is not compared: rr ticks count
+        // conditional branches, so several consecutive stops share one tick
+        // value and the seek lands on the earliest point that has it (see
+        // `RecreatorReplaySession::jump_to`). A run-to-entry, which this
+        // used to be, puts the replay at the entry's tick count instead.
+        let ticks_after = |marker: &str| -> Option<i64> {
+            stdout
+                .lines()
+                .find_map(|line| line.strip_prefix(marker))
+                .and_then(|rest| rest.trim().strip_prefix("ticks="))
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|ticks| ticks.parse().ok())
+        };
+        let saved_ticks = ticks_after("SAVED:");
+        let restored_ticks = ticks_after("RESTORED:");
+        assert!(
+            saved_ticks.is_some() && saved_ticks == restored_ticks,
+            "goto_ticks must restore the saved tick count (saved {saved_ticks:?}, restored \
+             {restored_ticks:?}), got:\n{stdout}"
+        );
+
+        // A refused seek is a NavigationError that leaves the tick count
+        // where it was, and the next step answers from there.
+        assert_eq!(
+            ticks_after("REFUSED: yes"),
+            restored_ticks,
+            "goto_ticks past the end must raise NavigationError and keep the position, got:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("STEP_AFTER_REFUSAL: line="),
+            "step_over after a refused goto_ticks must answer, got:\n{stdout}"
         );
 
         // Clean up.

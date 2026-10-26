@@ -173,10 +173,13 @@ class Trace:
     def ticks(self) -> int:
         """Current execution timestamp (rr ticks).
 
-        The ticks value is a monotonically increasing counter maintained
-        by the rr replay engine.  It uniquely identifies an execution
-        point and can be passed to :meth:`goto_ticks` to return to this
-        position later.
+        The ticks value is the current thread's rr tick count: a counter
+        of retired conditional branches (approximated in rr's
+        soft-counter mode) that never decreases as execution moves
+        forward.  It does not identify a single stop: consecutive stops
+        with no counted branch between them, often several lines, share
+        one value.  :meth:`goto_ticks` returns to the earliest point that
+        has it.
 
         Returns:
             An integer tick value.
@@ -360,11 +363,23 @@ class Trace:
     def goto_ticks(self, ticks: int) -> Location:
         """Jump to a specific execution point by ticks.
 
+        On an rr recording the replay goes to the first point at which the
+        current thread's tick count equals *ticks*, and :attr:`ticks` then
+        reads *ticks* (one more when the instruction there is itself a
+        counted branch: after the seek the debugger is resynchronised with
+        one instruction step).  Since consecutive stops can share a tick value
+        (see :attr:`ticks`), that point can be lines before the stop the
+        value was read at, and can be in code without source
+        (``location.line == 0``).
+
         Parameters:
             ticks: The target rr tick value.
 
         Returns:
             The new :class:`Location`.
+
+        Raises:
+            NavigationError: When the recording never reaches *ticks*.
         """
         return self._navigate("goto_ticks", ticks=ticks)
 
