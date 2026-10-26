@@ -1111,6 +1111,9 @@ proc interactive(command: TuiCommand): int =
     session.agentPrompt(rt, text)
   app.agentStop = proc(): string =
     session.agentStop(rt)
+  # The prompt's "add context" menu (DeepReview-GUI.md §2.2.7).
+  app.agentAttach = proc(context: string; mustExist: bool): string =
+    session.agentAttach(rt, context, mustExist)
 
   # PLAT-47 deliverable 4: the VCS pane reads the directory the desktop's VCS
   # panel reads for a replay — the process's own working directory.

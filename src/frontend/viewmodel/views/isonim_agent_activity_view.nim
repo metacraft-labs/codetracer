@@ -1184,22 +1184,22 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
         tdiv(ref = menuRef, class = "agent-add-context-dropdown")
   if isOpen:
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextUploadIcon, "Upload attachment",
+      renderAddContextMenuItem(r, AgentAddContextUploadIcon, aciUpload.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddFiles()))
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextFolderIcon, "Files & folders",
+      renderAddContextMenuItem(r, AgentAddContextFolderIcon, aciFilesFolders.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddFolders()))
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextEditorIcon, "Editor selection",
+      renderAddContextMenuItem(r, AgentAddContextEditorIcon, aciEditorSelection.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddEditorSelection()))
     r.appendRenderedChild(menuRef,
-      renderAddContextMenuItem(r, AgentAddContextTraceIcon, "Recording / trace",
+      renderAddContextMenuItem(r, AgentAddContextTraceIcon, aciRecording.label,
         proc() =
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddTrace()))

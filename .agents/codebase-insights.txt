@@ -7875,3 +7875,27 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - On the desktop, after a failed build the bottom OVERLAY (BUILD/PROBLEMS)
   covers the dock: Playwright presses must Escape it first; clicking a docked
   footer tab again CLOSES it (`openBottomPanel` toggles).
+- Agent Activity's "add context" menu natively (DeepReview-GUI §2.2.7): the
+  menu is a `pane_clicks.ContextMenuModel` (`agentAddContextMenu`,
+  `cmkAgentAddContext`) opened by a LEFT press on the prompt's `[+]` / `+`, so
+  it rides the right-click menu machinery of both front-ends (TUI
+  `runContextAction`, GPUI `runContextAction`; the GPUI scripted op `ctx:<label>`
+  chooses an entry). The file items open the omnibox on `:attach ` /
+  `:attach-recording ` (`omnibar_vm.omAttach*`, mapped to `omCommand` on the
+  desktop by `desktopKindOf`, so `ui/command_interpreter`'s case must list
+  them). Attachments are `contextPaths`, shown as `frContextPath` rows at the
+  END of the feed; the prompt header is `agent_prompt_context.contextPromptText`,
+  which the desktop's main process (`acp_ipc`) uses too.
+- The GPUI window's status line is its footer note (`gStatusNote`,
+  `sayStatus`, `data-ct-footer-note`); before it, GPUI only had the gesture
+  trace for host messages.
+- A native recording press reports through `native_agent_host.message`
+  (`recordingOpenedNote`): both buttons open a NEW session tab natively.
+- `acp-replay-agent.js --prompt-log=<path>` appends each `session/prompt`'s
+  content blocks as a JSON line: assert what the agent RECEIVED.
+- Building in a fresh worktree: the submodules are not checked out (`git
+  submodule update --init -- libs`, then `git submodule foreach 'git checkout
+  -f HEAD'` for any left empty); a `reprobuild.paths` file (gitignored) lists
+  extra `--path`s that win over the workspace siblings (nim-everywhere,
+  nim-agents, nim-acp at their pins). The tup build's nimcache is hard-wired to
+  /tmp/ct-nim-cache, shared by every checkout on the host.

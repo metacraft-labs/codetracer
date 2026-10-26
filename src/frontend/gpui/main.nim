@@ -1288,6 +1288,11 @@ var
   gOpenCmd: GpuiCommand
   gCtxMenu: ContextMenuState
     ## PLAT-50: the open right-click menu (`headless_app/pane_clicks`).
+  gStatusNote = ""
+    ## PLAT-54: what the window's status line (its footer) says last — a
+    ## recording opened from Agent Activity in a new session tab, a context
+    ## attached to the agent's next prompt, a refusal — as the terminal's
+    ## status line says it (`sayStatus`).
   gContent: GContent
     ## PLAT-50: a text over the window (`GContent`).
   gMaximised = none(PaneKind)
@@ -1464,6 +1469,14 @@ proc topBarGeometry(): JsonNode
 proc traceGesture(line: string) =
   if gestureTrace and line.len > 0:
     stderr.writeLine("gesture " & line)
+
+
+proc sayStatus(line: string) =
+  ## PLAT-54: `line` on the window's status line (the footer's note,
+  ## `data-ct-footer-note`) and in the gesture trace. The footer is drawn
+  ## with the top bar (`drawTopBar`).
+  gStatusNote = line
+  traceGesture("status: " & line)
 
 proc committedLayout(): Layout =
   let idx = gShell.windows.indexOf(gWindow)
@@ -3140,6 +3153,9 @@ proc drawFooterBuildStatus(r: GpuiRenderer)
   ## PLAT-56: forward-declared; defined beside the Problems host.
 proc revealGpuiBuildPane(r: GpuiRenderer)
   ## PLAT-56: forward-declared; defined beside the Problems host.
+proc attachAgentContext(r: GpuiRenderer; context: string;
+                        mustExist = true)
+  ## PLAT-54: forward-declared; defined beside `runAgentPrompt`.
 proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string)
 proc openFindInFiles(r: GpuiRenderer)
 proc stepSearchResult(r: GpuiRenderer; delta: int)
@@ -4470,6 +4486,29 @@ proc drawFooter(r: GpuiRenderer) =
       text(r, b, sl.label)
       r.appendChild(strip, b)
     gTopEls.add strip
+  # PLAT-54: the status line's note — after the file info and the bottom
+  # strip, before the right-hand items — in the same face.
+  if gStatusNote.len > 0:
+    var noteX = gGeom.footer.x + FooterFileInfoX
+    if info.len > 0:
+      noteX = max(noteX, FooterFileInfoX + FooterFileInfoPx + 16)
+    for st in gGeom.strips:
+      if st.edge == leBottom and not st.rect.isEmpty:
+        noteX = max(noteX, st.rect.x + st.rect.w + 16)
+    var noteEnd = gGeom.footer.x + gGeom.footer.w - 8
+    if not gSession.isNil:
+      let lw = groteskTextPx(footerLocation(), 14.0)
+      noteEnd = copyPathRect().x - 8 - lw - 16
+      let cert = certificateLabel()
+      if cert.len > 0:
+        noteEnd -= groteskTextPx(cert, 14.0) + 8
+    let note = absBox(r, PxRect(x: noteX, y: rowY, w: max(0, noteEnd - noteX),
+                                h: TabHeightPx))
+    r.setAttribute(note, "data-ct-footer-note", gStatusNote)
+    r.setStyle(note, "color", ink)
+    r.setStyle(note, "overflow", "hidden")
+    text(r, note, gStatusNote)
+    gTopEls.add note
   if not gSession.isNil:
     # From the right: the copy button, the location before it, the
     # certificate label before that.
@@ -6428,6 +6467,19 @@ proc acceptOmnibar(r: GpuiRenderer) =
       showPaneFromMenu(r, paneAgentActivity)
     else:
       runAgentPrompt(r, needle)
+    return
+  # PLAT-54 (§2.2.7): `:attach …` / `:attach-recording …` — the prompt's
+  # "add context" items: the chosen file, folder or recording is attached to
+  # the agent's next prompt.
+  if mode in {omAttach, omAttachRecording}:
+    let (ok, entry) = gOmnibar.accept()
+    if not ok:
+      sayStatus("nothing matches: type the path to attach")
+      drawTopBar(r)
+      return
+    gOmnibar.close()
+    drawTopBar(r)
+    attachAgentContext(r, entry.target)
     return
   if mode == omProgram:
     if needle.len == 0:
@@ -8472,7 +8524,9 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
   traceGesture("context action " & $action)
   # K19: an Edit window has no session; its Files menu acts on the disk.
   if gSession.isNil and
-     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit}:
+     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit,
+                   caAgentAttachUpload, caAgentAttachFilesFolders,
+                   caAgentAttachEditorSelection, caAgentAttachRecording}:
     return
   case action
   of caNone: discard
@@ -8584,6 +8638,14 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
       traceGesture("files: " & $action)
       redrawPaneOf(r, paneFileTree)
       focusEditKeys()
+  of caAgentAttachUpload, caAgentAttachFilesFolders:
+    # PLAT-54 (§2.2.7): no system file dialog in this window — the omnibox,
+    # on a file or folder to attach.
+    openOmnibar(r, AttachQuery)
+  of caAgentAttachRecording:
+    openOmnibar(r, AttachRecordingQuery)
+  of caAgentAttachEditorSelection:
+    attachAgentContext(r, target.path, mustExist = false)
 
 # ---------------------------------------------------------------------------
 # PLAT-68 — the window's keys through the ONE router
@@ -8725,9 +8787,42 @@ proc runAgentPrompt(r: GpuiRenderer; text: string) =
     return
   let why = h.sendPrompt(text)
   traceGesture(if why.len > 0: "agent: " & why else: "agent: sent " & text)
+  if why.len > 0:
+    sayStatus(why)
   drawAgentPane(r)
   drawTopBar(r)
   armHoverTick()
+
+proc gpuiEditorSelection(): string =
+  ## What the "add context" menu's *Editor selection* attaches: the editor's
+  ## file and the lines its selection covers (the caret's line when nothing
+  ## is selected); "" when the editor shows no file.
+  let path = gEditorSurface.path
+  if path.len == 0:
+    return ""
+  if gDebugDocs.hasKey(path):
+    let (first, last) = gDebugDocs[path].selectedLines
+    return editorSelectionContext(path, first, last)
+  editorSelectionContext(path, max(1, gEditorSurface.executionLine),
+                         max(1, gEditorSurface.executionLine))
+
+proc attachAgentContext(r: GpuiRenderer; context: string;
+                        mustExist = true) =
+  ## PLAT-54 (§2.2.7): `context` attached to the agent's next prompt, Agent
+  ## Activity shown (the attachment is listed above its prompt), and the
+  ## status line saying what happened. An editor selection is attached as
+  ## the editor names it (`mustExist` false).
+  showPaneFromMenu(r, paneAgentActivity)
+  let h = agentHost()
+  if h.isNil:
+    sayStatus("this window has no agent to attach context for")
+    drawTopBar(r)
+    return
+  discard h.attachContext(context, mustExist)
+  sayStatus(h.message)
+  h.message = ""
+  drawAgentPane(r)
+  drawTopBar(r)
 
 proc pressAgent(r: GpuiRenderer; x, y: int): bool =
   ## A left press on Agent Activity: a row runs its action, a button its
@@ -8750,12 +8845,21 @@ proc pressAgent(r: GpuiRenderer; x, y: int): bool =
       discard h.runFeed(row, action)
       traceGesture("agent " & $action.kind & " " & row.key &
                    (if h.message.len > 0: ": " & h.message else: ""))
+      # The host's words go on the status line, as the terminal's do: a
+      # recording opened in a new session tab says so (§2.2.4).
+      if h.message.len > 0:
+        sayStatus(h.message)
+        drawTopBar(r)
       h.message = ""
       # An evidence card's review lands in the VCS pane at once.
       redrawPaneOf(r, paneVcs)
     drawAgentPane(r)
   of gaPrompt:
     openOmnibar(r, AgentOmnibarQuery)
+  of gaAddContext:
+    # The desktop's `+`: the "add context" menu, at the press
+    # (DeepReview-GUI.md §2.2.7).
+    openContextMenuAt(r, agentAddContextMenu(gpuiEditorSelection()), x, y)
   of gaControl:
     if h.vm.isLoading.val:
       h.stopAgent()
@@ -10444,6 +10548,8 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
       #                                    (scrolled into view)
       #   agent:row:<kind>[:<nth>]         press the nth row of that kind
       #   agent:prompt                     press the prompt
+      #   agent:add                        press the prompt's `+` (the "add
+      #                                    context" menu)
       #   agent:wheel:<lines>              the wheel over the pane
       #   agent:show / agent:vcs           show Agent Activity / the VCS pane
       if parts[1] == "show":
@@ -10479,6 +10585,12 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
             inc n
       of "prompt":
         let (x, y) = centreOf(lay.prompt)
+        pressAt(x, y)
+        return ""
+      of "add":
+        if lay.add.w <= 0:
+          return "the Agent Activity pane is too narrow for its +"
+        let (x, y) = centreOf(lay.add)
         pressAt(x, y)
         return ""
       of "wheel":

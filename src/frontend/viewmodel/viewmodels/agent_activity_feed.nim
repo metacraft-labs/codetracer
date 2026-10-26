@@ -86,6 +86,9 @@ type
     frPermissionHeading = "permission-heading"
     frPermissionText = "permission-text"
     frPermissionSubtitle = "permission-subtitle"
+    frContextPath = "context-path"
+      ## A path the prompt's `+` attached (the desktop's chip above the
+      ## prompt), sent with the next prompt; its button removes it.
 
   AgentFeedActionKind* = enum
     faNone = "none"
@@ -99,6 +102,7 @@ type
     faOpenDiff = "open-diff"
     faFillPrompt = "fill-prompt"
     faPermission = "permission"
+    faRemoveContext = "remove-context"
 
   AgentFeedAction* = object
     kind*: AgentFeedActionKind
@@ -107,7 +111,7 @@ type
     arg*: string
       ## faOpenDiff: the desktop's target (`file:<msg>:<diff>` /
       ## `unified:<msg>`); faFillPrompt: the chip's text; faPermission: the
-      ## answer (`allow_once` …).
+      ## answer (`allow_once` …); faRemoveContext: the attached path.
     group*: int
       ## faToggleToolHistory: the segment group.
 
@@ -461,10 +465,37 @@ proc promptPlaceholder*(vm: AgentActivityVM): string =
   else:
     AgentActivityPlaceholderText
 
-proc agentFeedAt*(vm: AgentActivityVM; nowMs: float): seq[AgentFeedRow] =
-  ## Every row the desktop's conversation area draws, in its order.
+const
+  AgentContextChipLead* = "context "
+    ## What a native attachment row reads before its path: the desktop's chip
+    ## is a box above the prompt, a native row needs the word.
+  AgentContextRemoveLabel* = "×"
+    ## The chip's remove control (the desktop's `.agent-paste-remove`).
+
+proc contextRows*(vm: AgentActivityVM): seq[AgentFeedRow] =
+  ## The prompt's attachments (`contextPaths`), one row each, in the order
+  ## they were attached: the desktop's chips, drawn by a native front-end at
+  ## the end of the feed, right above its prompt.
   if vm.isNil:
     return
+  for i, p in vm.contextPaths.val:
+    result.add AgentFeedRow(
+      kind: frContextPath, key: "context/" & $i & "/" & p,
+      spans: @[span(AgentContextChipLead, fsMuted), span(p, fsCode)],
+      buttons: @[AgentFeedAction(kind: faRemoveContext,
+                                 label: AgentContextRemoveLabel, arg: p)])
+
+proc conversationRowsAt(vm: AgentActivityVM; nowMs: float): seq[AgentFeedRow]
+
+proc agentFeedAt*(vm: AgentActivityVM; nowMs: float): seq[AgentFeedRow] =
+  ## Every row the desktop's conversation area draws, in its order, then the
+  ## prompt's attachments (`contextRows`).
+  if vm.isNil:
+    return
+  result = vm.conversationRowsAt(nowMs)
+  result.add vm.contextRows()
+
+proc conversationRowsAt(vm: AgentActivityVM; nowMs: float): seq[AgentFeedRow] =
   if vm.feedIsIdle():
     result.add AgentFeedRow(kind: frIdleHeading, key: "idle/heading",
                             spans: @[span(AgentIdleHeading, fsHeading)])
@@ -562,6 +593,13 @@ proc runFeedAction*(vm: AgentActivityVM; row: AgentFeedRow;
   of faFillPrompt:
     vm.setInputValue(action.arg)
     result.handled = true
+  of faRemoveContext:
+    # The desktop's chip `×` (`removeContextPathHandler`), by path so a press
+    # read off a stale line cannot remove a different attachment.
+    let at = vm.contextPaths.val.find(action.arg)
+    if at >= 0:
+      vm.removeContextPath(at)
+      result.handled = true
   of faOpenDiff, faPermission:
     discard   # the host's: it owns the diff tabs and the agent connection
 
