@@ -1070,6 +1070,19 @@ test-ct-print:
   set -e
   ./tests/test_ct_print.sh
 
+# Run the complete API directory, so newly added pytest files join the gate.
+test-python-api:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source ci/lib/codetracer-home.sh
+  ct_export_scratch_codetracer_home python-api
+  trap 'rm -rf ${ct_scratch_home_created:+"$ct_scratch_home_created"}' EXIT
+  cd python-api
+  python3 -m pytest -q tests
+
+test-python-api-gate:
+  bash ci/test/python-api-gate-test.sh
+
 # Run all non-GUI tests.
 # test-frontend-js needs npm-installed jsdom (available after tup build, not in bare nix shell).
 # test-python-recorder needs a built ct binary.
@@ -1126,6 +1139,8 @@ test:
     test-flake-lock-node-dates \
     test-npm-install-yarn-lock \
     test-python-version-alignment \
+    test-python-api-gate \
+    test-python-api \
     test-sibling-backend-path \
     test-agent-api-contract \
     test-rust \

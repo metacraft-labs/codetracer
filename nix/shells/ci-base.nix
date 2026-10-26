@@ -64,6 +64,7 @@ let
   });
   pythonWithRecorder = pythonEnv.package.withPackages (ps: [
     ps.black
+    ps.pytest
     pythonRecorderPkg
   ]);
 
