@@ -722,6 +722,65 @@ fn daemon_paths_in(test_dir: &Path) -> PathBuf {
     test_dir.join("codetracer")
 }
 
+/// The socket (Unix) or port file (Windows) of the test's daemon: where
+/// [`start_daemon_with_real_backend`] starts it and where
+/// [`run_cli_command`] points the CLI. Named for both explicitly
+/// (`CODETRACER_DAEMON_SOCKET`): the default location moves with
+/// `CODETRACER_HOME` and `CODETRACER_TMP_PATH`, which a lane sets, and a
+/// CLI that resolved another socket than the test daemon's started a daemon
+/// of its own, which nothing stopped.
+fn test_daemon_socket_path(test_dir: &Path) -> PathBuf {
+    daemon_paths_in(test_dir).join(if cfg!(windows) {
+        "daemon.port"
+    } else {
+        "daemon.sock"
+    })
+}
+
+/// The test's daemon process. Dropping it stops the daemon if it is still
+/// running: a test that fails before [`shutdown_daemon`] (every `?` and early
+/// `return` in a test body) leaves no daemon behind. The daemon is asked to
+/// stop with `SIGINT`, the one signal it handles (`tokio::signal::ctrl_c` in
+/// `main.rs`: it removes its socket and PID file and exits), and killed if it
+/// has not exited within five seconds.
+struct TestDaemon {
+    child: tokio::process::Child,
+}
+
+impl std::ops::Deref for TestDaemon {
+    type Target = tokio::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for TestDaemon {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+impl Drop for TestDaemon {
+    fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(None)) {
+            return;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            // SAFETY: `kill` takes a pid and a signal number and touches no
+            // memory of ours.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) };
+            for _ in 0..50 {
+                if !matches!(self.child.try_wait(), Ok(None)) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+        let _ = self.child.start_kill();
+    }
+}
+
 /// Starts the daemon process with the given test directory as its tmp root.
 ///
 /// Passes CODETRACER_REPLAY_SERVER_CMD to point to the real replay-server binary.
@@ -730,7 +789,7 @@ async fn start_daemon_with_real_backend(
     log_path: &Path,
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
-) -> (tokio::process::Child, PathBuf) {
+) -> (TestDaemon, PathBuf) {
     start_daemon_with_real_backend_from(
         &binary_path(),
         test_dir,
@@ -750,16 +809,12 @@ async fn start_daemon_with_real_backend_from(
     log_path: &Path,
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
-) -> (tokio::process::Child, PathBuf) {
+) -> (TestDaemon, PathBuf) {
     let ct_dir = daemon_paths_in(test_dir);
     std::fs::create_dir_all(&ct_dir).expect("create ct dir");
 
-    let socket_path = if cfg!(windows) {
-        ct_dir.join("daemon.port")
-    } else {
-        ct_dir.join("daemon.sock")
-    };
-    let pid_path = ct_dir.join("daemon.pid");
+    let socket_path = test_daemon_socket_path(test_dir);
+    let pid_path = socket_path.with_extension("pid");
 
     // Remove any stale files from a previous run.
     let _ = std::fs::remove_file(&socket_path);
@@ -800,7 +855,9 @@ async fn start_daemon_with_real_backend_from(
         cmd.env(key, value);
     }
 
-    let child = cmd.spawn().expect("cannot spawn daemon");
+    let child = TestDaemon {
+        child: cmd.spawn().expect("cannot spawn daemon"),
+    };
 
     // Wait for the socket to appear.
     wait_for_socket(&socket_path, Duration::from_secs(10))
@@ -3204,7 +3261,8 @@ async fn navigate_to_a_position(
 /// must answer; the position at the end must stay there under further
 /// forward navigation (`step_over`, `step_in`, `continue_forward`), each
 /// answering `endOfTrace` again with the same ticks; and a `step_back`
-/// from it must leave the end.
+/// from it must land on the stop before the end, from which two `step_over`s
+/// return to it.
 ///
 /// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
 /// "Navigation at the end of a recording".  Regression test for codetracer-pm
@@ -3256,6 +3314,7 @@ async fn test_real_rr_navigate_step_over_past_end_reports_end_of_trace() {
         let mut seq = 9501;
 
         let mut end = None;
+        let mut first_ticks = None;
         let mut before_end_ticks = None;
         for i in 1..=STEP_BUDGET {
             let (path, line, _, ticks, eot) =
@@ -3266,6 +3325,7 @@ async fn test_real_rr_navigate_step_over_past_end_reports_end_of_trace() {
                 end = Some((path, line, ticks));
                 break;
             }
+            first_ticks.get_or_insert(ticks);
             before_end_ticks = Some(ticks);
         }
         let Some((end_path, end_line, end_ticks)) = end else {
@@ -3299,21 +3359,52 @@ async fn test_real_rr_navigate_step_over_past_end_reports_end_of_trace() {
             }
         }
 
-        // Where step_back lands is not asserted beyond leaving the end
-        // backwards: from the exit path's frames, which have no line
-        // information, a reverse step currently lands at tick 0 instead of
-        // on the previous stop (codetracer-pm issue
+        // step_back from the end lands on the stop before it. The recording
+        // ends inside `exit`, in a frame without line information, where a
+        // step is an instruction step, and rr reports the end at the exit
+        // syscall's entry, the moment before the `syscall` instruction runs:
+        // so the step back lands on the instruction before the `syscall`
+        // (no conditional branch in between, so at most the end's ticks,
+        // and after every position the steps over passed), and exactly two
+        // step_overs (the `syscall` instruction, then the exit) return to
+        // the end (measured 2026-10-26, both counter modes). It used to land
+        // at tick 0 (codetracer-pm issue
         // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`).
-        // That defect is not the end of the recording's, and its fix owns
-        // the stronger assertion.
+        let first_ticks = first_ticks.unwrap_or(end_ticks);
         let (path, line, _, ticks, eot) =
             navigate_to_a_position(&mut client, &mut seq, &trace_dir, "step_back", &log_path)
                 .await
                 .map_err(|e| format!("step_back from the end: {e}"))?;
-        if eot || ticks >= end_ticks {
+        if eot || ticks > end_ticks || ticks <= first_ticks {
             return Err(format!(
-                "step_back from the end must leave it backwards: end ticks {end_ticks}, \
+                "step_back from the end must leave it for the stop before it, at most at the \
+                 end's ticks {end_ticks} and after the first step's {first_ticks}: \
                  got ({path}, {line}, ticks {ticks}, endOfTrace {eot})"
+            ));
+        }
+        let mut forward = Vec::new();
+        while forward.len() < 2
+            && !forward
+                .last()
+                .is_some_and(|at: &(String, i64, i64, bool)| at.3)
+        {
+            let (path, line, _, ticks, eot) =
+                navigate_to_a_position(&mut client, &mut seq, &trace_dir, "step_over", &log_path)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "step over #{} from the stop before the end: {e}",
+                            forward.len() + 1
+                        )
+                    })?;
+            forward.push((path, line, ticks, eot));
+        }
+        let back_at_the_end = (end_path.clone(), end_line, end_ticks, true);
+        if forward.len() != 2 || forward[0].3 || forward[1] != back_at_the_end {
+            return Err(format!(
+                "two step_overs from the stop before the end must return to the end through the \
+                 `syscall` instruction: end=({end_path}, {end_line}, ticks {end_ticks}), \
+                 got {forward:?}"
             ));
         }
 
@@ -10594,7 +10685,10 @@ async fn test_real_custom_query_inline_executes() {
 
 /// M9-RR-3. Execute `import time; time.sleep(10)` with timeout=1 against
 /// a real RR trace.  Verify it returns exit code != 0 within a reasonable
-/// time bound (~3 seconds).
+/// time bound (~3 seconds), that the script process is gone soon after the
+/// timeout (it used to run on to the end of its sleep, an orphan once its
+/// daemon stopped: `tokio::process::Child` does not kill on drop unless asked
+/// to), and that the test leaves no process behind.
 #[tokio::test]
 async fn test_real_rr_query_timeout_kills_script() {
     let (test_dir, log_path) = setup_test_dir("real_rr_query_timeout");
@@ -10620,6 +10714,9 @@ async fn test_real_rr_query_timeout_kills_script() {
 
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
+        // A private home, to find the processes the test starts.
+        let home = private_home(&test_dir);
+        let home_str = home.to_string_lossy().to_string();
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
         let api_dir_str = api_dir.to_string_lossy().to_string();
         let (mut daemon, socket_path) = start_daemon_with_real_backend(
@@ -10627,6 +10724,7 @@ async fn test_real_rr_query_timeout_kills_script() {
             &log_path,
             &db_backend,
             &[
+                ("CODETRACER_HOME", &home_str),
                 ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
                 ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
             ],
@@ -10700,7 +10798,33 @@ async fn test_real_rr_query_timeout_kills_script() {
             elapsed
         );
 
+        // The timed-out script is stopped, not left to run to the end of its
+        // ten-second sleep.
+        let script_runs = || {
+            processes_under_home(&home)
+                .into_iter()
+                .filter(|(_, cmdline)| cmdline.contains("time.sleep(10)"))
+                .collect::<Vec<_>>()
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        while !script_runs().is_empty() && tokio::time::Instant::now() < deadline {
+            sleep(Duration::from_millis(100)).await;
+        }
+        let still_running = script_runs();
+
         shutdown_daemon(&mut client, &mut daemon).await;
+        let left = processes_left_under_home(&home, Duration::from_secs(10)).await;
+        if !still_running.is_empty() {
+            return Err(format!(
+                "M9-RR-3: the timed-out script must be stopped, but 3 s after the timeout it \
+                 still runs: {still_running:#?}"
+            ));
+        }
+        if !left.is_empty() {
+            return Err(format!(
+                "M9-RR-3: after the daemon stopped, processes of the test still run: {left:#?}"
+            ));
+        }
         Ok(())
     }
     .await;
@@ -10838,7 +10962,7 @@ async fn start_mcp_server_with_real_backend(
     log_path: &Path,
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
-) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
+) -> (tokio::process::Child, TestDaemon, PathBuf) {
     start_mcp_server_with_real_backend_in(
         test_dir,
         log_path,
@@ -10861,7 +10985,7 @@ async fn start_mcp_server_with_real_backend_in(
     extra_env: &[(&str, &str)],
     mcp_cwd: Option<&Path>,
     daemon_bin: &Path,
-) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
+) -> (tokio::process::Child, TestDaemon, PathBuf) {
     // Start the real daemon first.
     let (daemon, socket_path) = start_daemon_with_real_backend_from(
         daemon_bin,
@@ -16229,8 +16353,14 @@ async fn test_real_rr_mcp_exec_script_f64_locals() {
 /// Spawns `backend-manager` with the given arguments in a test-isolated
 /// environment and waits for it to complete.
 ///
-/// Sets `TMPDIR=test_dir` so the CLI subprocess connects to the test daemon
-/// (which was also started with the same `TMPDIR`).
+/// Points the CLI at the test daemon's socket ([`test_daemon_socket_path`],
+/// `CODETRACER_DAEMON_SOCKET`), where [`start_daemon_with_real_backend`]
+/// started it. `TMPDIR=test_dir` alone used to stand for that, which holds
+/// only while no `CODETRACER_HOME` or `CODETRACER_TMP_PATH` is set: under a
+/// lane's scratch `CODETRACER_HOME` the CLI resolved
+/// `$CODETRACER_HOME/tmp/daemon.sock`, started a daemon of its own there, and
+/// nothing stopped it. A test that starts no daemon gets one auto-started on
+/// the same socket, inside its own directory.
 ///
 /// Returns `(stdout, stderr, exit_code)`.
 async fn run_cli_command(
@@ -16244,6 +16374,10 @@ async fn run_cli_command(
     let mut cmd = Command::new(&bin);
     cmd.args(args)
         .env("TMPDIR", test_dir)
+        .env(
+            "CODETRACER_DAEMON_SOCKET",
+            test_daemon_socket_path(test_dir),
+        )
         // The CLI can start its own daemon and replay; same environment as
         // the pre-started daemon (`replay_test_env`).
         .envs(replay_test_env())
@@ -16867,7 +17001,8 @@ print('DONE')"
 /// The Python trace API raises `StopIteration` when navigation runs off the
 /// end of an RR recording, through `trace query -c` (the same daemon and
 /// Python runtime as the MCP server's `exec_script`).  A step over from the
-/// end raises it again from the same position, and `step_back` leaves it.
+/// end raises it again from the same position, `step_back` lands on the stop
+/// before the end, and two step overs from there raise it again at the end.
 ///
 /// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
 /// "Navigation at the end of a recording", and the `exec_script` tool
@@ -16918,15 +17053,25 @@ async fn test_cli_trace_query_rr_step_past_end_raises_stop_iteration() {
 
         // About 25 steps over reach the end (measured 2026-10-26); 80 is
         // the budget.  Any error other than StopIteration propagates and
-        // fails the query.  `step_back` is checked only for moving
-        // backwards: where it lands is the subject of codetracer-pm issue
-        // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`.
+        // fails the query.  `step_back` from the end lands on the stop
+        // before it: the recording ends inside `exit`, in a frame without
+        // line information, where a step is an instruction step, and rr
+        // reports the end at the exit syscall's entry, so the stop before it
+        // is the instruction before the `syscall` (at most the end's ticks,
+        // after the first step's), and two `step_over`s (the `syscall`
+        // instruction, then the exit) return to the end (measured
+        // 2026-10-26, both counter modes).  It used to land at tick 0
+        // (codetracer-pm issue
+        // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`).
         let script = "\
 steps = 0
+first = None
 try:
     for _ in range(80):
         trace.step_over()
         steps += 1
+        if first is None:
+            first = trace.ticks
     print('NO END AFTER 80 STEPS')
 except StopIteration:
     end = (trace.location.path, trace.location.line, trace.ticks)
@@ -16939,8 +17084,16 @@ except StopIteration:
     print('STILL AT THE END' if again == end else f'MOVED TO {again}')
 trace.step_back()
 back = trace.ticks
-print(f'BACK BEFORE THE END at {trace.location.line} ticks {back}' if back < end[2]
-      else f'BACK DID NOT MOVE BACKWARDS: ticks {back}, end {end[2]}')
+print(f'BACK BEFORE THE END at {trace.location.line} ticks {back}' if first < back <= end[2]
+      else f'BACK OUT OF PLACE: ticks {back}, first step {first}, end {end[2]}')
+try:
+    trace.step_over()
+    print('FORWARD 1 BEFORE THE END')
+    trace.step_over()
+    print('FORWARD 2 DID NOT REACH THE END')
+except StopIteration:
+    at = (trace.location.path, trace.location.line, trace.ticks)
+    print('FORWARD BACK AT THE END' if at == end else f'FORWARD AT {at}, NOT AT THE END {end}')
 print('DONE')";
 
         let (stdout, stderr, exit_code) = run_cli_command(
@@ -16968,6 +17121,8 @@ print('DONE')";
             "END after ",
             "STILL AT THE END",
             "BACK BEFORE THE END",
+            "FORWARD 1 BEFORE THE END",
+            "FORWARD BACK AT THE END",
             "DONE",
         ] {
             if !stdout.contains(expected) {
@@ -16992,6 +17147,419 @@ print('DONE')";
 
     report(
         "test_cli_trace_query_rr_step_past_end_raises_stop_iteration",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// The Python trace API's `reverse_step_out()` and `reverse_step_in()` on an
+/// RR recording, through `trace query -c` (the daemon and Python runtime of
+/// the MCP server's `exec_script`): each returns to where the matching
+/// forward motion came from.
+///
+/// - From inside `calculate_sum`, `reverse_step_out()` lands on its call, on
+///   the `calculate_sum(x, y)` line of `main`, before the function runs; a
+///   `step_in()` from there enters it at the stop it entered it at before.
+/// - From that call, `reverse_step_in()` lands at the start of the previous
+///   line, where the forward `step_over()` before the call line had stopped.
+///
+/// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`
+/// §3.2 (`reverse_step_in`, `reverse_step_out`) and "Reverse steps on an rr
+/// recording".  Regression test for codetracer-pm issues
+/// `2026-10-26-rr-reverse-step-in-moves-the-replay-forward.md` (it moved
+/// forward) and `2026-10-26-rr-reverse-step-out-runs-back-to-the-start-of-the-recording.md`
+/// (it landed at tick 0).
+#[tokio::test]
+async fn test_cli_trace_query_rr_reverse_step_out_and_in_return_to_the_forward_stops() {
+    let (test_dir, log_path) = setup_test_dir("cli_trace_query_rr_reverse_step_out_in");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!(
+                    "test_cli_trace_query_rr_reverse_step_out_and_in_return_to_the_forward_stops: \
+                     SKIP ({reason})"
+                );
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let call_line = rust_flow_test_line("let result = calculate_sum(x, y);")?;
+        let sum_line = rust_flow_test_line("let sum = a + b;")?;
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+
+        // Each marker line is printed only when its check holds; any
+        // exception fails the query.
+        let script = format!(
+            "\
+def at():
+    return (trace.location.path, trace.location.line, trace.ticks)
+before_call = None
+for _ in range(8):
+    if trace.location.line == {call_line}:
+        break
+    before_call = at()
+    trace.step_over()
+call_stop = at()
+print('AT THE CALL LINE' if call_stop[1] == {call_line} and before_call is not None
+      else f'NOT AT THE CALL LINE: {{call_stop}}')
+for _ in range(3):
+    trace.step_in()
+    if trace.location.line == {sum_line}:
+        break
+inside = at()
+print('IN CALCULATE_SUM' if inside[1] == {sum_line} else f'NOT IN CALCULATE_SUM: {{inside}}')
+trace.step_over()
+trace.reverse_step_out()
+out = at()
+print('OUT AT THE CALL' if out[1] == {call_line} and call_stop[2] <= out[2] <= inside[2]
+      else f'OUT ELSEWHERE: {{out}}, call line {{call_stop}}, inside {{inside}}')
+trace.step_in()
+again = at()
+print('IN AGAIN AT THE SAME STOP' if again == inside else f'IN AGAIN AT {{again}}, before {{inside}}')
+trace.reverse_step_out()
+trace.reverse_step_in()
+back = at()
+print('BACK AT THE STOP BEFORE THE CALL LINE' if back == before_call
+      else f'BACK AT {{back}}, not {{before_call}}')
+print('DONE')"
+        );
+
+        let (stdout, stderr, exit_code) = run_cli_command(
+            &test_dir,
+            &["trace", "query", &trace_path_str, "-c", &script],
+            &[
+                (
+                    "CODETRACER_REPLAY_SERVER_CMD",
+                    db_backend.to_str().unwrap_or(""),
+                ),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+            120,
+            &log_path,
+        )
+        .await?;
+
+        if exit_code != 0 {
+            return Err(format!(
+                "trace query exited with code {exit_code}\nstdout: {stdout}\nstderr: {stderr}"
+            ));
+        }
+        for expected in [
+            "AT THE CALL LINE",
+            "IN CALCULATE_SUM",
+            "OUT AT THE CALL",
+            "IN AGAIN AT THE SAME STOP",
+            "BACK AT THE STOP BEFORE THE CALL LINE",
+            "DONE",
+        ] {
+            if !stdout.lines().any(|line| line == expected) {
+                return Err(format!(
+                    "stdout should contain the line {expected:?}\nstdout: {stdout}\nstderr: {stderr}"
+                ));
+            }
+        }
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_cli_trace_query_rr_reverse_step_out_and_in_return_to_the_forward_stops",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ---------------------------------------------------------------------------
+// Processes a test leaves behind
+// ---------------------------------------------------------------------------
+
+/// The processes whose environment names `home` as their `CODETRACER_HOME`,
+/// as `(pid, command line)`: everything started under a test's private home
+/// (a daemon, its replay-servers and their replay workers inherit it),
+/// wherever the process tree reparented them. Linux only (`/proc`), as the
+/// rr tests are.
+fn processes_under_home(home: &Path) -> Vec<(u32, String)> {
+    let wanted = format!("CODETRACER_HOME={}", home.display());
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .filter(|pid| *pid != std::process::id())
+        .filter_map(|pid| {
+            // Unreadable (gone, or another user's): not ours.
+            let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+            environ
+                .split(|byte| *byte == 0)
+                .any(|var| var == wanted.as_bytes())
+                .then(|| {
+                    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+                    let cmdline = String::from_utf8_lossy(&cmdline).replace('\0', " ");
+                    (pid, cmdline.trim().to_string())
+                })
+        })
+        .collect()
+}
+
+/// Waits up to `deadline` for no process to remain under `home`; returns
+/// the ones still there at the deadline. Then stops those (`SIGTERM`, then
+/// `SIGKILL`), so that a failing check does not leave them running either.
+async fn processes_left_under_home(home: &Path, deadline: Duration) -> Vec<(u32, String)> {
+    let start = tokio::time::Instant::now();
+    let mut left = processes_under_home(home);
+    while !left.is_empty() && start.elapsed() < deadline {
+        sleep(Duration::from_millis(200)).await;
+        left = processes_under_home(home);
+    }
+    for signal in [libc::SIGTERM, libc::SIGKILL] {
+        for (pid, _) in processes_under_home(home) {
+            // SAFETY: `kill` takes a pid and a signal number and touches no
+            // memory of ours.
+            unsafe { libc::kill(pid as libc::pid_t, signal) };
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+    left
+}
+
+/// A private `CODETRACER_HOME` inside the test's directory, for a test that
+/// counts the processes started under it.
+fn private_home(test_dir: &Path) -> PathBuf {
+    let home = test_dir.join("home");
+    std::fs::create_dir_all(&home).expect("create the private CODETRACER_HOME");
+    home
+}
+
+/// A `trace query` through the CLI uses the test's own daemon and leaves no
+/// process behind: after the test shuts its daemon down, nothing started
+/// under the test's `CODETRACER_HOME` is still running.
+///
+/// Regression test for codetracer-pm issue
+/// `2026-10-26-backend-manager-cli-trace-query-tests-leak-an-auto-started-daemon.md`:
+/// under a lane's `CODETRACER_HOME` the CLI resolved the daemon socket to
+/// `$CODETRACER_HOME/tmp/daemon.sock`, not the test daemon's, auto-started a
+/// daemon of its own there, and nothing stopped it. The daemon TTL is the
+/// default 300 s, so the daemon's own idle shutdown cannot hide the leak
+/// within the check.
+#[tokio::test]
+async fn test_cli_trace_query_rr_leaves_no_daemon_behind() {
+    let (test_dir, log_path) = setup_test_dir("cli_trace_query_rr_leaves_no_daemon");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!("test_cli_trace_query_rr_leaves_no_daemon_behind: SKIP ({reason})");
+                return Ok(());
+            }
+        };
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let home = private_home(&test_dir);
+        let home_str = home.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let api_dir_str = python_api_dir().to_string_lossy().to_string();
+        let db_backend_str = db_backend.to_string_lossy().to_string();
+        // `CODETRACER_REPLAY_SERVER_CMD` as the other CLI tests pass it: a
+        // daemon the CLI started (the defect) would need it too.
+        let env = [
+            ("CODETRACER_HOME", home_str.as_str()),
+            ("CODETRACER_DAEMON_TTL", "300"),
+            ("CODETRACER_REPLAY_SERVER_CMD", db_backend_str.as_str()),
+            (
+                "CODETRACER_CT_NATIVE_REPLAY_CMD",
+                ct_native_replay_str.as_str(),
+            ),
+            ("CODETRACER_PYTHON_API_PATH", api_dir_str.as_str()),
+        ];
+        let (mut daemon, socket_path) =
+            start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &env).await;
+
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let (stdout, stderr, exit_code) = run_cli_command(
+            &test_dir,
+            &[
+                "trace",
+                "query",
+                &trace_path_str,
+                "-c",
+                "trace.step_over()\nprint('DONE')",
+            ],
+            &env,
+            120,
+            &log_path,
+        )
+        .await?;
+        if exit_code != 0 || !stdout.lines().any(|line| line == "DONE") {
+            return Err(format!(
+                "trace query must answer: exit {exit_code}\nstdout: {stdout}\nstderr: {stderr}"
+            ));
+        }
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+
+        let left = processes_left_under_home(&home, Duration::from_secs(10)).await;
+        if !left.is_empty() {
+            return Err(format!(
+                "after the test daemon stopped, processes started under the test's \
+                 CODETRACER_HOME are still running: {left:#?}"
+            ));
+        }
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+    report(
+        "test_cli_trace_query_rr_leaves_no_daemon_behind",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// A daemon the CLI auto-starts exits once it is idle: after the query
+/// closed the trace it loaded, the daemon has no trace loaded and stops
+/// itself after the daemon TTL.
+///
+/// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+/// "Daemon Lifecycle" ("auto-starts on first CLI/MCP use and self-terminates
+/// on idle"). It used to shut down only when the last trace's TTL timer
+/// fired; a trace closed by its client (the CLI's query does) ended the
+/// session without arming the shutdown, and the daemon ran on (codetracer-pm
+/// issue `2026-10-26-backend-manager-cli-trace-query-tests-leak-an-auto-started-daemon.md`).
+#[tokio::test]
+async fn test_cli_trace_query_rr_auto_started_daemon_exits_once_idle() {
+    let (test_dir, log_path) = setup_test_dir("cli_trace_query_rr_auto_started_daemon_idle");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!(
+                    "test_cli_trace_query_rr_auto_started_daemon_exits_once_idle: SKIP ({reason})"
+                );
+                return Ok(());
+            }
+        };
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let home = private_home(&test_dir);
+        let home_str = home.to_string_lossy().to_string();
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let api_dir_str = python_api_dir().to_string_lossy().to_string();
+        let db_backend_str = db_backend.to_string_lossy().to_string();
+        // No test daemon: the CLI starts one.
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+        let (stdout, stderr, exit_code) = run_cli_command(
+            &test_dir,
+            &[
+                "trace",
+                "query",
+                &trace_path_str,
+                "-c",
+                "trace.step_over()\nprint('DONE')",
+            ],
+            &[
+                ("CODETRACER_HOME", home_str.as_str()),
+                ("CODETRACER_DAEMON_TTL", "2"),
+                ("CODETRACER_REPLAY_SERVER_CMD", db_backend_str.as_str()),
+                (
+                    "CODETRACER_CT_NATIVE_REPLAY_CMD",
+                    ct_native_replay_str.as_str(),
+                ),
+                ("CODETRACER_PYTHON_API_PATH", api_dir_str.as_str()),
+            ],
+            120,
+            &log_path,
+        )
+        .await?;
+        if exit_code != 0 || !stdout.lines().any(|line| line == "DONE") {
+            return Err(format!(
+                "trace query must answer: exit {exit_code}\nstdout: {stdout}\nstderr: {stderr}"
+            ));
+        }
+        if processes_under_home(&home).is_empty() {
+            return Err(
+                "the CLI must have started a daemon under the test's CODETRACER_HOME \
+                 (otherwise the check below is vacuous)"
+                    .to_string(),
+            );
+        }
+
+        // TTL 2 s, checked about every second: well within 15 s.
+        let left = processes_left_under_home(&home, Duration::from_secs(15)).await;
+        if !left.is_empty() {
+            return Err(format!(
+                "the auto-started daemon must stop itself 2 s after its last trace was closed, \
+                 but 15 s later these processes are still running: {left:#?}"
+            ));
+        }
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+    report(
+        "test_cli_trace_query_rr_auto_started_daemon_exits_once_idle",
         &log_path,
         success,
     );
