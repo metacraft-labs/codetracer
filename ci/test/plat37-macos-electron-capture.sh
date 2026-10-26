@@ -638,6 +638,22 @@ if route is None:
 else:
     if route["finalState"]["rrTicks"] < 0:
         problems.append("the product reported no position at capture time")
+    # A ROUTE SAMPLED BUSY IS REFUSED, NOT GRADED. The driver now settles
+    # before its first sample and throws on a busy final state; this is the
+    # defence in depth against a record that was written anyway. `entry-shell`
+    # once recorded `busy: true, line 0` beside a frame that drew line 1
+    # (codetracer-pm issue 2026-10-12-the-electron-capture-lanes-entry-shell-
+    # samples-...). `is not False`: an absent flag is not "not busy".
+    if route["finalState"].get("busy") is not False:
+        problems.append("the route's final state was sampled with busy="
+                        f"{route['finalState'].get('busy')!r}; the lane "
+                        "measured before the session settled")
+    # A VACUOUS GREEN IS REFUSED: "settled between operations" over zero
+    # operations must be recorded as null, never true.
+    if (route.get("editorSettledBetweenOperations") is True
+            and route.get("movesPerformed") == 0):
+        problems.append("editorSettledBetweenOperations is true over zero "
+                        "operations, which is vacuous; it must be null")
     if not route["pageRoute"]["byteStable"]:
         problems.append("the page never produced two byte-identical "
                         "screenshots, so the window was still moving")
