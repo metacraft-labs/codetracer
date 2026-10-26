@@ -269,6 +269,28 @@ proc windowOffset*(vm: EventLogVM): string =
     $int(float(vm.store.eventLog.loadedStart.val) * vm.rowHeightPx.val) &
     "px)"
 
+proc joinStyle(parts: varargs[string]): string =
+  ## Inline style declarations joined into one `style` attribute.
+  for part in parts:
+    if part.len > 0:
+      if result.len > 0: result.add "; "
+      result.add part
+
+proc scrollSpaceStyle*(vm: EventLogVM): string =
+  ## The scroll area's whole style: its height (`listHeight`) and, in SCROLL,
+  ## its width. ONE `style` binding, because a `style = …` binding replaces
+  ## the element's whole inline style each time it re-runs: a separate
+  ## `height = …` binding beside it was wiped whenever the table's fit
+  ## changed, the scroll area shrank to the held window, and the scrollbar
+  ## reached only the rows already loaded (codetracer-vscode-extension#40).
+  joinStyle("height: " & listHeight(vm), tableMinWidthStyle(vm))
+
+proc rowsTableStyle*(vm: EventLogVM): string =
+  ## The held window's table's whole style: its place in the scroll area
+  ## (`windowOffset`) and, in SCROLL, its width — one binding, for the reason
+  ## `scrollSpaceStyle` gives.
+  joinStyle("transform: " & windowOffset(vm), tableMinWidthStyle(vm))
+
 proc footerStart*(vm: EventLogVM): int =
   ## The footer's first row shown, counted from 1 (0 for an empty list).
   if vm.listTotal <= 0: 0
@@ -595,10 +617,9 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
           discard
         tdiv(ref = scrollBody, class = EventLogScrollBodyClass,
              style = scrollBodyStyle(vm)):
-          tdiv(class = "eventLog-scroll-space", height = listHeight(vm),
-               style = tableMinWidthStyle(vm)):
-            table(class = "eventLog-rows", transform = windowOffset(vm),
-                  style = tableMinWidthStyle(vm)):
+          tdiv(class = "eventLog-scroll-space",
+               style = scrollSpaceStyle(vm)):
+            table(class = "eventLog-rows", style = rowsTableStyle(vm)):
               tbody(ref = tbodyEl):
                 discard
         tdiv(class = "dt-empty", display = emptyDisplay(vm)):

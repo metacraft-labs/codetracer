@@ -26,7 +26,7 @@
 ## The panes reached this way are `PanelHostKinds`; the others still mount
 ## through `ui/layout.mountPaneForState` until their views are converted.
 
-import std/sequtils
+import std/[options, sequtils]
 
 import isonim/core/[owner, signals, computation]
 import isonim/web/web_renderer
@@ -37,12 +37,8 @@ import ../types
 from ../communication import emit
 from ../../common/ct_event import InternalAddToScratchpad
 import ../viewmodel/session_vm
-import ../viewmodel/pane_viewport
-from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall,
-  setViewport, setRowHeightPx
-from ../viewmodel/viewmodels/state_vm import setViewport
+from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall
 from ../viewmodel/viewmodels/low_level_code_vm import setShown
-from ../viewmodel/viewmodels/request_panel_vm import setViewport
 from ../viewmodel/store/replay_data_store import nil
 import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_low_level_code_view,
@@ -53,10 +49,8 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_command_palette_view]
 import ../viewmodel/views/[isonim_search_results_view, isonim_trace_log_view,
                             isonim_terminal_output_view, isonim_event_log_view]
-from ../viewmodel/viewmodels/event_log_vm import followStop, setRowHeightPx,
-  setViewport
-from ../viewmodel/viewmodels/terminal_output_vm import nil
-from ../viewmodel/viewmodels/trace_log_vm import setViewport
+from ../viewmodel/viewmodels/event_log_vm import followStop
+import ../viewmodel/views/pane_measure_dom
 
 const
   PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
@@ -72,16 +66,6 @@ const
                      Content.CommandPalette, Content.Verification,
                      Content.UnifiedDiff, Content.VCS, Content.EventLog}
     ## The panes `mountPanel` renders.
-  RequestRowFallbackPx = 24.0
-    ## The Request panel's row pitch until a row is rendered to measure.
-  StateRowFallbackPx = 22.0
-    ## The State pane's row pitch until a row is rendered to measure.
-  TraceRowFallbackPx = 22.0
-    ## The Trace Log's row pitch until a row is rendered to measure.
-  TerminalLineFallbackPx = 18.0
-    ## A terminal line's height until one is drawn to measure.
-  EventRowFallbackPx = 24.0
-    ## An Event Log row's pitch until a row is rendered to measure.
 
 type
   PanelRenderer* = proc(r: WebRenderer; host: dom_api.Element;
@@ -101,30 +85,8 @@ type
     session: SessionViewModel
       ## The session it was rendered over; nil while it waits for one.
     disposeRoot: proc()
-    stopMeasuring: StopWatching
+    stopMeasuring: StopMeasuring
     disposed: bool
-
-  StopWatching = proc()
-    ## Disconnects a pane's resize observer and scroll listener.
-
-  PaneMeasure = object
-    ## How the host measures a pane it mounted (Viewport-Driven-Loading V3):
-    ## the element that scrolls, a row's selector (the rows' measured
-    ## advance), the pixels one depth level indents, and where the result
-    ## goes. `fallbackRowPx` is the row pitch to use before a row exists.
-    scroller: cstring
-    row: cstring
-    pxPerLevel: float
-    countPartialRow: bool
-      ## A row any of which shows counts (the State pane: it sizes how many
-      ## values a stop and a "Load More" fetch).
-    reportHidden: bool
-      ## A hidden pane reports no rows, so the ViewModel falls back to its
-      ## defaults, rather than keeping the last size it was told.
-    fallbackRowPx: proc(): float
-    report: proc(v: Viewport; rowPx: float)
-    changed: proc()
-      ## Read inside an effect: the pane's rows changed, measure again.
 
 var decorators: array[Content, PanelDecorator]
 var renderers: array[Content, PanelRenderer]
@@ -152,139 +114,28 @@ proc containsNode(outer, inner: dom_api.Element): bool
 # HSF-V2: THE HOST REPORTS WHAT EACH PANE SHOWS
 # ---------------------------------------------------------------------------
 #
-# One ResizeObserver and one scroll listener per mounted pane, owned here and
-# disconnected when the mount is disposed: the pane's body height over the
-# rows' measured advance is its rows, the scroll offset over the advance is
-# the first row shown, and the width over a depth level's indent is the levels
-# that fit (`pane_viewport.pixelPaneViewport`, the conversion every front-end
-# shares). The views measure nothing for their ViewModels.
+# The measurement is `views/pane_measure_dom`, shared with the VS Code panel
+# webviews (`entries/vscode_panel`). The views measure nothing for their
+# ViewModels.
 
-proc qsIn(el: dom_api.Element; sel: cstring): dom_api.Element
-  {.importjs: "(#.querySelector(#) || null)".}
-proc paneClientHeight(el: dom_api.Element): float
-  {.importjs: "(#.clientHeight || 0)".}
-proc paneClientWidth(el: dom_api.Element): float
-  {.importjs: "(#.clientWidth || 0)".}
-proc paneScrollTop(el: dom_api.Element): float
-  {.importjs: "(#.scrollTop || 0)".}
-proc rowPitchIn(el: dom_api.Element; sel: cstring): float {.importjs:
-  "((el, sel) => { var r = el.querySelectorAll(sel); if (r.length === 0) return 0; if (r.length === 1) return r[0].getBoundingClientRect().height; return (r[r.length - 1].getBoundingClientRect().top - r[0].getBoundingClientRect().top) / (r.length - 1); })(#, #)".}
-  ## The rows' ADVANCE, top to top, averaged over the rendered rows: what
-  ## positions them (a sub-pixel advance is recovered exactly), not a row box.
-proc watchPane(el: dom_api.Element; onChange: proc()): StopWatching {.importjs:
-  "((el, cb) => { var ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(() => cb()) : null; if (ro) ro.observe(el); el.addEventListener('scroll', cb, {passive: true}); return () => { if (ro) ro.disconnect(); el.removeEventListener('scroll', cb); }; })(#, #)".}
-  ## Call `onChange` on every resize and scroll of `el`; the result stops it.
-proc panelSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
-
-proc measureOf(kind: Content; session: SessionViewModel): PaneMeasure =
-  ## The measurement of a pane the host mounts.
+proc measuredPaneOf(kind: Content): Option[MeasuredPane] =
+  ## The measurement of a pane the host mounts; none for a pane the host does
+  ## not measure.
   case kind
-  of Content.Calltrace:
-    let vm = session.calltraceVM
-    PaneMeasure(
-      scroller: cstring".local-calltrace-view",
-      row: cstring".calltrace-call-line",
-      pxPerLevel: CallDepthIndentPx,
-      fallbackRowPx: proc(): float = vm.rowHeightPx.val,
-      report: proc(v: Viewport; rowPx: float) =
-        vm.setRowHeightPx(rowPx)
-        vm.setViewport(v),
-      changed: proc() = discard session.store.calltrace.lines.val)
-  of Content.State:
-    let vm = session.stateVM
-    PaneMeasure(
-      scroller: cstring".value-components-container",
-      row: cstring".value-expanded",
-      pxPerLevel: 0.0,
-      countPartialRow: true,
-      reportHidden: true,
-      fallbackRowPx: proc(): float = StateRowFallbackPx,
-      report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
-      changed: proc() = discard session.store.locals.locals.val)
-  of Content.TraceLog:
-    # The rows it shows (Viewport-Driven-Loading Q4): their locals are read
-    # by window. A hidden pane reports none and reads nothing.
-    let vm = session.traceLogVM
-    PaneMeasure(
-      scroller: cstring".trace-log-table-body",
-      row: cstring".trace-log-row",
-      pxPerLevel: 0.0,
-      countPartialRow: true,
-      reportHidden: true,
-      fallbackRowPx: proc(): float = TraceRowFallbackPx,
-      report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
-      changed: proc() = discard vm.entries.val)
-  of Content.TerminalOutput:
-    # The line view asks for the lines it shows (Viewport-Driven-Loading
-    # Q3): the `pre` holding the lines is the scroller. A hidden pane (no
-    # height) reports none and asks nothing until it is shown.
-    let vm = session.terminalOutputVM
-    PaneMeasure(
-      scroller: cstring"pre",
-      row: cstring".terminal-line",
-      pxPerLevel: 0.0,
-      countPartialRow: true,
-      reportHidden: true,
-      fallbackRowPx: proc(): float = TerminalLineFallbackPx,
-      report: proc(v: Viewport; rowPx: float) =
-        terminal_output_vm.setViewport(vm, v),
-      changed: proc() = discard vm.lines.val)
-  of Content.EventLog:
-    # The rows the list shows (Viewport-Driven-Loading V2): the engine is
-    # asked for that window (`ct/event-load`), and the scroll area is as tall
-    # as the whole list at the rows' measured pitch. A hidden pane reports
-    # none and asks nothing until it is shown.
-    let vm = session.eventLogVM
-    PaneMeasure(
-      scroller: cstring".eventLog-scroll-body",
-      row: cstring".eventLog-row",
-      pxPerLevel: 0.0,
-      countPartialRow: true,
-      reportHidden: true,
-      fallbackRowPx: proc(): float = EventRowFallbackPx,
-      report: proc(v: Viewport; rowPx: float) =
-        vm.setRowHeightPx(rowPx)
-        vm.setViewport(v),
-      changed: proc() = discard vm.eventRows.val)
-  of Content.RequestPanel:
-    # The rows the table body shows (Viewport-Driven-Loading V2): a partly
-    # visible row counts; the window held is padded by the view.
-    let vm = session.requestPanelVM
-    PaneMeasure(
-      scroller: cstring".request-table-body",
-      row: cstring".request-row",
-      pxPerLevel: 0.0,
-      countPartialRow: true,
-      fallbackRowPx: proc(): float = RequestRowFallbackPx,
-      report: proc(v: Viewport; rowPx: float) = vm.setViewport(v),
-      changed: proc() = discard vm.filteredRequests.val)
-  else:
-    PaneMeasure()
+  of Content.Calltrace: some(mpCalltrace)
+  of Content.State: some(mpState)
+  of Content.TraceLog: some(mpTraceLog)
+  of Content.TerminalOutput: some(mpTerminalOutput)
+  of Content.EventLog: some(mpEventLog)
+  of Content.RequestPanel: some(mpRequestPanel)
+  else: none(MeasuredPane)
 
 proc startMeasuring(m: PanelMount; session: SessionViewModel) =
-  ## Attach the pane's one observer and one scroll listener; report now (one
-  ## tick later, so the view's elements are laid out) and whenever the pane is
-  ## resized or scrolled, or its rows change.
-  let spec = measureOf(m.kind, session)
-  if spec.report.isNil:
-    return
-  let scroller = qsIn(m.host, spec.scroller)
-  if dom_api.isNodeNil(dom_api.Node(scroller)):
-    return
-  let measure = proc() =
-    var rowPx = rowPitchIn(scroller, spec.row)
-    if rowPx <= 0.0:
-      rowPx = spec.fallbackRowPx()
-    let v = pixelPaneViewport(scroller.paneClientHeight,
-                              scroller.paneClientWidth, rowPx,
-                              scroller.paneScrollTop, spec.pxPerLevel,
-                              countPartialRow = spec.countPartialRow)
-    if v.measured or spec.reportHidden:
-      spec.report(v, rowPx)
-  m.stopMeasuring = watchPane(scroller, measure)
-  createEffect proc() =
-    spec.changed()
-    panelSetTimeout(measure, 0)
+  ## Attach the pane's one observer and one scroll listener
+  ## (`startMeasuringPane`).
+  let pane = measuredPaneOf(m.kind)
+  if pane.isSome:
+    m.stopMeasuring = startMeasuringPane(m.host, pane.get, session)
 
 proc unrender(m: PanelMount) =
   ## Stop `m`'s measuring and dispose its reactive root, keeping the mount.

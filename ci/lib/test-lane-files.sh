@@ -1078,6 +1078,9 @@ test_lane_files() {
 		# `shared_rows_keyboard_dom_test.nim`: Enter and Space on a shared
 		# view's `role="button"` row are its click, in a real DOM.
 		echo src/frontend/tests/shared_rows_keyboard_dom_test.nim
+		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
+		# tall as the whole log, in a real DOM, whatever the table's fit does.
+		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
 		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
 		# `diff`, through the Electron process facade, over real repositories
 		# with a stale stat cache, never rewrite the index or leave

@@ -19,6 +19,8 @@
 when not defined(js):
   {.error: "entries/vscode_panel runs in a VS Code webview (JS).".}
 
+import std/options
+
 import isonim/core/owner
 import isonim/web/web_renderer
 from isonim/web/dom_api import nil
@@ -33,6 +35,7 @@ import ../viewmodel/views/[isonim_state_view, isonim_calltrace_view,
                            isonim_scratchpad_view, isonim_trace_log_view,
                            isonim_flow_view, isonim_point_list_view,
                            isonim_filesystem_view]
+import ../viewmodel/views/pane_measure_dom
 
 const PanelKinds* = ["state", "calltrace", "eventLog", "terminalOutput",
                      "scratchpad", "traceLog", "flow", "pointList",
@@ -76,6 +79,17 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
 var activeMirror: MirrorSession
   ## This webview's mirror; one per page.
 
+proc measuredPaneOf(kind: string): Option[MeasuredPane] =
+  ## The measurement of panel `kind` (`views/pane_measure_dom`); none for a
+  ## panel that loads no window by its viewport.
+  case kind
+  of "calltrace": some(mpCalltrace)
+  of "state": some(mpState)
+  of "traceLog": some(mpTraceLog)
+  of "terminalOutput": some(mpTerminalOutput)
+  of "eventLog": some(mpEventLog)
+  else: none(MeasuredPane)
+
 proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
   ## Mirror the host's session over this webview's channel and mount panel
   ## `kind` into `root`.
@@ -95,6 +109,15 @@ proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =
     let panel = renderPanel(kind, mirror.session)
     if not dom_api.isNodeNil(dom_api.Node(panel)):
       discard dom_api.appendChild(dom_api.Node(root), dom_api.Node(panel))
+      # The panel reports what it shows — its rows, the first row, the depth
+      # levels that fit — as the desktop's panel host does (HSF-V2). The
+      # mirror relays each report to the host's primary, which asks the
+      # replay for that window: the Call Trace's rows as it scrolls, the
+      # Event Log's page (codetracer-vscode-extension#37, #40). The webview
+      # lives as long as the panel, so the observer is never stopped.
+      let pane = measuredPaneOf(kind)
+      if pane.isSome:
+        discard startMeasuringPane(root, pane.get, mirror.session)
   mirror
 
 when isMainModule:
