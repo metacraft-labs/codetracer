@@ -55,7 +55,7 @@ from ../../view_vocabulary/pane_views import testResultsPaneView,
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 94
+const ExpectedAssertions = 103
 
 var countedAssertions = 0
 
@@ -187,6 +187,27 @@ suite "PLAT-53: the terminal's Test Results painter":
     let s = paintTestResults(g, area, m)
     ck g.runeAt(0, s.runCol) == RunLabel
     ck g.styleAt(0, s.runCol).dim
+
+  test "the ▶ is the glyph table's run control on every tier":
+    # The ViewModel's `RunButtonLabel` is the extended spelling; the painter
+    # draws the terminal's own (CodeTracer-TUI-Terminal-Adaptation.md §6.3),
+    # so a basic or ASCII terminal never gets a `▶` it may not have.
+    ck RunLabel == RunButtonLabel
+    let area = CellArea(col: 0, row: 0, width: 80, height: 6)
+    for (profile, want) in [(GlyphProfile(tier: tierExtended), "▶"),
+                            (GlyphProfile(tier: tierBasic), "►"),
+                            (GlyphProfile(tier: tierAscii), ">"),
+                            (GlyphProfile(tier: tierExtended,
+                                          ambiguousWide: true), "▸")]:
+      var m = sampleModel()
+      m.run.label = RunButtonLabel
+      var g = newStyledGrid(80, 6)
+      g.glyphs = profile
+      let s = paintTestResults(g, area, m)
+      checkpoint($profile.tier & " ambiguousWide=" & $profile.ambiguousWide)
+      ck g.runeAt(0, s.runCol) == want
+      # A press on the drawn cell is still the run control.
+      ck m.testsTargetAt(s, area, area.row, s.runCol).kind == tpRun
 
 # ---------------------------------------------------------------------------
 # The runtime over the real host
