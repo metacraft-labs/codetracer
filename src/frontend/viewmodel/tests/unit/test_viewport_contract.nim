@@ -36,10 +36,9 @@ proc storeWithMock(): tuple[store: ReplayDataStore; mock: MockBackendService] =
   (createReplayDataStore(mock.toBackendService()), mock)
 
 proc recordingStore(sent: ref seq[(string, JsonNode)]): ReplayDataStore =
-  ## A store whose backend records every command and answers `{}`. For a
-  ## command `MockBackendService` refuses as unknown to the engine
-  ## (`ct/load-step-lines` has no engine handler yet): the property under
-  ## test is what the ViewModel SENDS, not what an engine would answer.
+  ## A store whose backend records every command and answers `{}`: the
+  ## property under test is what the ViewModel SENDS, not what an engine
+  ## would answer.
   let backend = BackendService(
     sendProc: proc(command: string; args: JsonNode): BackendFuture[JsonNode] =
       sent[].add((command, args))

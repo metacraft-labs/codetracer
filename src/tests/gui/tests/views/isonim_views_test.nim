@@ -7200,25 +7200,16 @@ suite "IsoNim Step List Panel — active row":
 
 suite "IsoNim Step List Panel — backend requests":
 
-  # BOTH CASES IN THIS SUITE ARE REGISTERED REDS
-  # (`ci/lib/known-test-failures.tsv`, signature "MockBackendService:
-  # 'ct/load-step-lines' is not a valid DAP command."). Read that file's
-  # `ct/load-step-lines` entry before touching them.
+  # The first case was a registered red until 2026-10-26: the strict mock
+  # refused `ct/load-step-lines` because no engine dispatched it. The engine
+  # arm landed (`db-backend/tests/load_step_lines_test.rs`) and the command is
+  # in `VALID_DAP_COMMANDS`, so the case runs as written.
   #
-  # Note what registration means HERE specifically: the strict mock raises on
-  # the command name inside `loadStepLinesFor`, which is the FIRST statement
-  # of each case, so nothing below it executes. These payload assertions do
-  # not run today and cannot until something dispatches the command. They are
-  # written to be right on the day it does — which is the whole reason they
-  # were re-grounded rather than left as they were.
-  #
-  # They used to assert `{path, line, rrTicks, count}` — flat, one count.
-  # That object is declared by NOTHING: both peers' `LoadStepLinesArg`
+  # Its payload assertions were re-grounded on 2026-09-05, while it was still
+  # red: they used to assert `{path, line, rrTicks, count}` — flat, one count —
+  # which NOTHING declares. Both peers' `LoadStepLinesArg`
   # (`db-backend/src/task.rs`, `common_types/debugger_features/stepping.nim`)
-  # is `{location, forwardCount, backwardCount}`. So these cases were pinning
-  # a shape that would still have been wrong after the engine arm landed —
-  # a registered entry is only honest while the test it holds open asserts
-  # the CORRECT behaviour.
+  # is `{location, forwardCount, backwardCount}`, and that is what is pinned.
 
   test "loadStepLinesFor emits ct/load-step-lines with location + count":
     createRoot proc(dispose: proc()) =
@@ -7262,6 +7253,56 @@ suite "IsoNim Step List Panel — backend requests":
       check vm.currentLocation.val.path == "src/main.nim"
       check vm.currentLocation.val.line == 7
       check vm.currentLocation.val.rrTicks == 42
+
+      dispose()
+
+  test "the engine's answer becomes the rows, kinds and values decoded":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createStepListVM(store)
+      vm.setViewport(Viewport(rows: 2))
+
+      # A `LoadStepLinesUpdate` as `DapHandler::load_step_lines` answers it
+      # (`db-backend/src/task.rs`): `kind` is `LineStepKind`'s ordinal, and a
+      # value is `{expression, value}` with the engine's `ValueRecord`.
+      let row = proc(kind, delta, line: int; text: string;
+                     values: JsonNode = newJArray()): JsonNode =
+        %*{"kind": kind, "delta": delta, "sourceLine": text, "values": values,
+           "location": {"path": "a.py", "line": line, "rrTicks": 5 + delta,
+                        "functionName": "helper"}}
+      mock.expect("ct/load-step-lines", %*{
+        "argLocation": {"path": "a.py", "line": 11, "rrTicks": 5},
+        "finish": true,
+        "results": [
+          row(0, 1, 12, "  return y"),
+          row(1, 0, 11, "call helper"),
+          row(0, 0, 11, "  y = x + 1", %*[{"expression": "x",
+            "value": {"kind": 7, "i": "41", "typeId": 0}}]),
+          row(0, -1, 2, "b = helper(a)"),
+        ]})
+
+      vm.loadStepLinesFor(StepLineLocation(
+        path: "a.py", line: 11, rrTicks: 5, functionName: "helper"))
+      # The answer is a completed future; its continuation runs on the
+      # platform's callback queue, as a real transport's would.
+      drain()
+      let rows = vm.lineSteps.val
+      check rows.len == 4
+      # Sorted by delta; the call row and its line share delta 0, in the
+      # engine's order.
+      var deltas: seq[int]
+      for r in rows: deltas.add r.delta
+      check deltas == @[-1, 0, 0, 1]
+      check rows[1].kind == slkCall
+      check rows[1].sourceLine == "call helper"
+      check rows[2].kind == slkLine
+      check rows[2].location.line == 11
+      check rows[2].location.rrTicks == 5
+      check rows[2].values.len == 1
+      check rows[2].values[0].expression == "x"
+      check "41" in rows[2].values[0].value
+      check rows[3].sourceLine == "  return y"
 
       dispose()
 

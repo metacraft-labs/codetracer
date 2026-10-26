@@ -6161,29 +6161,51 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_step_lines(&mut self, arg: LoadStepLinesArg, _task: Task) -> Result<(), Box<dyn Error>> {
-        let step_lines = vec![];
-        // self.step_lines_loader.load_lines(
-        //     &arg.location,
-        //     arg.backward_count,
-        //     arg.forward_count,
-        //     &self.db,
-        //     &mut self.flow_preloader,
-        // );
-        let _step_lines_update = LoadStepLinesUpdate {
-            results: step_lines,
+    /// Answers `ct/load-step-lines`: the executed lines either side of
+    /// `arg.location` — `backwardCount` steps before it and `forwardCount`
+    /// from it on — with a synthesised call / return row wherever the call
+    /// depth changes, and each row's values from the flow of its call
+    /// (`StepLinesLoader::load_lines`). The Step List pane asks for the rows
+    /// it shows (Viewport-Driven-Loading V1/V2), so both counts are its
+    /// measured height.
+    ///
+    /// The rows are answered in the response body (a `LoadStepLinesUpdate`,
+    /// `finish: true` — one batch, nothing streams), which is what the
+    /// ViewModel's `customRequest`-style backends read.
+    ///
+    /// The loader indexes a materialized trace's steps by `rr_ticks`, so only
+    /// a materialized trace can answer; any other kind is refused by name
+    /// rather than answered with rows from the wrong index space.
+    pub fn load_step_lines(
+        &mut self,
+        req: dap::Request,
+        arg: LoadStepLinesArg,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind != TraceKind::Materialized {
+            return self.respond_dap_failure(
+                req,
+                format!(
+                    "ct/load-step-lines needs a materialized trace (this one is {:?})",
+                    self.trace_kind
+                ),
+                serde_json::Value::Null,
+                sender,
+            );
+        }
+        let results = self.step_lines_loader.load_lines(
+            &arg.location,
+            arg.backward_count,
+            arg.forward_count,
+            Arc::clone(&self.reader),
+            &mut self.flow_preloader,
+        );
+        let update = LoadStepLinesUpdate {
+            results,
             arg_location: arg.location,
             finish: true,
         };
-        // TODO: send with DAP
-        // self.send_event((
-        //     EventKind::UpdatedLoadStepLines,
-        //     gen_event_id(EventKind::UpdatedLoadStepLines),
-        //     self.serialize(&step_lines_update)?,
-        //     false,
-        // ))?;
-        // self.return_void(task)?;
-        Ok(())
+        self.respond_dap(req, &update, sender)
     }
 
     /// Jump the replay to a specific execution timestamp (RR ticks / step ID).

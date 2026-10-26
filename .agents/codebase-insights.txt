@@ -4549,13 +4549,12 @@ THE `system` SURFACE SWEEP NEEDS NIM'S LOCATION, NOT A RUNNING NIM (2026-09-11)
   four are tests that a deliberate product change left behind, none of which
   touched this file in the same commit:
     * `loadStepLinesFor emits ct/load-step-lines with location + count` and
-      `… falls back to default panel height when unset` —
-      `InvalidDapCommandDefect`. `ct/load-step-lines` is genuinely dead as a
-      command: absent from `VALID_DAP_COMMANDS_SEQ`, no arm in `dap_server.rs`.
-      `backend/dap_dialect.md` §7 records the disposition and says no spec
-      requires the panel. REGISTERED KNOWN FAILURES — do not allow-list the
-      string to go green; `test_mock_backend_validates_dap_commands.nim` pins
-      the §7 set on purpose.
+      `… falls back to default panel height when unset` — RESOLVED. The second
+      was retired on 2026-10-19 (an unmeasured list asks for nothing); the
+      first passes since 2026-10-26, when the engine gained its
+      `ct/load-step-lines` arm (`db-backend/tests/load_step_lines_test.rs`)
+      and the command entered `VALID_DAP_COMMANDS_SEQ`. The known-failure
+      ledger has no rows left.
     * `diff previews and terminals preserve legacy ids` —
       `MockNodeNotFoundError` for class `agent-editor`. `ecd864ed` ("feat: Diff
       view redesign for agent activity") deleted the Monaco diff host AND the

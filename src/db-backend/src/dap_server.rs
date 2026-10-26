@@ -31,8 +31,8 @@ use crate::source_access::{HostSourceReads, SourceAccess};
 use crate::task;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
-    FunctionLocation, GoToTicksArguments, LoadHistoryArg, LocalStepJump, Location, ProgramEvent, RunTracepointsArg,
-    SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
+    FunctionLocation, GoToTicksArguments, LoadHistoryArg, LoadStepLinesArg, LocalStepJump, Location, ProgramEvent,
+    RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg, TraceKind, TracepointId, UpdateTableArgs,
 };
 use crate::transport_endpoint::DapEndpoint;
 #[cfg(not(windows))]
@@ -2149,6 +2149,9 @@ pub fn handle_request(
         )?,
         "ct/event-jump" => handler.event_jump(req.clone(), req.load_args::<ProgramEvent>()?, sender.clone())?,
         "ct/load-history" => handler.load_history(req.clone(), req.load_args::<LoadHistoryArg>()?, sender.clone())?,
+        "ct/load-step-lines" => {
+            handler.load_step_lines(req.clone(), req.load_args::<LoadStepLinesArg>()?, sender.clone())?
+        }
         // Value Origin Tracking — `ct/originChain` (spec §5.3) and
         // `ct/originSummary` (spec §5.3.2 batch placeholder fill).
         "ct/originChain" => handler.origin_chain(
