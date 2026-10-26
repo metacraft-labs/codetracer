@@ -4112,6 +4112,16 @@ jobs:
         # give; the recipe starts its own Xvfb.
         run: nix develop .#devShells.x86_64-linux.default --command just plat54-capture-electron
 
+      - name: The desktop's Problems panel is the reference
+        if: ${{ !cancelled() }}
+        # The desktop column of the Problems pane: its rows after a real
+        # `nargo compile` of a crate with one warning and two errors in two
+        # files, the icons' colours, the Errors filter and Group by File, and
+        # what a right-click and a press on a row open — read from the REAL
+        # Electron app. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat55-capture-electron
+
       - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
         if: ${{ !cancelled() }}
         # The desktop column of the 2026-10-05 decisions: no Timeline (and a

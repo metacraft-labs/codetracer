@@ -1,0 +1,271 @@
+{
+ "_comment": [
+  "PLAT-55 — the desktop's Problems panel, read from the real Electron app after a real `nargo compile`.",
+  "Produced by src/tests/gui/tests/problems-pane/plat55-problems-capture.spec.ts",
+  "(`just plat55-capture-electron`)."
+ ],
+ "project": "plat55_build",
+ "build": {
+  "command": "nargo compile",
+  "code": 1,
+  "stdout": [],
+  "stderr": [
+   "warning: unused variable unused",
+   "  ┌─ src/util.nr:2:9",
+   "  │",
+   "2 │     let unused = 1;",
+   "  │         ------ unused variable",
+   "  │",
+   "",
+   "error: Expected type bool, found type Field",
+   "  ┌─ src/util.nr:3:22",
+   "  │",
+   "3 │     let flag: bool = v;",
+   "  │                      -",
+   "  │",
+   "",
+   "error: Expected type bool, found type Field",
+   "  ┌─ src/main.nr:5:19",
+   "  │",
+   "5 │     let b: bool = a;",
+   "  │                   -",
+   "  │",
+   "",
+   "Aborting due to 2 previous errors"
+  ]
+ },
+ "after": {
+  "counts": [
+   "● 2",
+   "⚠ 1",
+   "Total: 3"
+  ],
+  "status": "",
+  "buttons": [
+   {
+    "label": "All",
+    "active": true
+   },
+   {
+    "label": "Errors",
+    "active": false
+   },
+   {
+    "label": "Warnings",
+    "active": false
+   },
+   {
+    "label": "Group by File",
+    "active": false
+   }
+  ],
+  "rows": [
+   {
+    "severity": "warning",
+    "selected": false,
+    "icon": "⚠",
+    "iconColor": "rgb(210, 153, 34)",
+    "path": "src/util.nr",
+    "location": "2:9",
+    "message": "unused variable unused"
+   },
+   {
+    "severity": "error",
+    "selected": false,
+    "icon": "●",
+    "iconColor": "rgb(248, 81, 73)",
+    "path": "src/util.nr",
+    "location": "3:22",
+    "message": "Expected type bool, found type Field"
+   },
+   {
+    "severity": "error",
+    "selected": false,
+    "icon": "●",
+    "iconColor": "rgb(248, 81, 73)",
+    "path": "src/main.nr",
+    "location": "5:19",
+    "message": "Expected type bool, found type Field"
+   }
+  ],
+  "fileHeaders": [],
+  "empty": ""
+ },
+ "errorsOnly": {
+  "counts": [
+   "● 2",
+   "⚠ 1",
+   "Total: 3"
+  ],
+  "status": "",
+  "buttons": [
+   {
+    "label": "All",
+    "active": false
+   },
+   {
+    "label": "Errors",
+    "active": true
+   },
+   {
+    "label": "Warnings",
+    "active": false
+   },
+   {
+    "label": "Group by File",
+    "active": false
+   }
+  ],
+  "rows": [
+   {
+    "severity": "error",
+    "selected": false,
+    "icon": "●",
+    "iconColor": "rgb(248, 81, 73)",
+    "path": "src/util.nr",
+    "location": "3:22",
+    "message": "Expected type bool, found type Field"
+   },
+   {
+    "severity": "error",
+    "selected": false,
+    "icon": "●",
+    "iconColor": "rgb(248, 81, 73)",
+    "path": "src/main.nr",
+    "location": "5:19",
+    "message": "Expected type bool, found type Field"
+   }
+  ],
+  "fileHeaders": [],
+  "empty": ""
+ },
+ "grouped": {
+  "counts": [
+   "● 2",
+   "⚠ 1",
+   "Total: 3"
+  ],
+  "status": "",
+  "buttons": [
+   {
+    "label": "All",
+    "active": true
+   },
+   {
+    "label": "Errors",
+    "active": false
+   },
+   {
+    "label": "Warnings",
+    "active": false
+   },
+   {
+    "label": "Group by File",
+    "active": true
+   }
+  ],
+  "rows": [
+   {
+    "severity": "warning",
+    "selected": false,
+    "icon": "⚠",
+    "iconColor": "rgb(210, 153, 34)",
+    "path": "src/util.nr",
+    "location": "2:9",
+    "message": "unused variable unused"
+   },
+   {
+    "severity": "error",
+    "selected": false,
+    "icon": "●",
+    "iconColor": "rgb(248, 81, 73)",
+    "path": "src/util.nr",
+    "location": "3:22",
+    "message": "Expected type bool, found type Field"
+   },
+   {
+    "severity": "error",
+    "selected": false,
+    "icon": "●",
+    "iconColor": "rgb(248, 81, 73)",
+    "path": "src/main.nr",
+    "location": "5:19",
+    "message": "Expected type bool, found type Field"
+   }
+  ],
+  "fileHeaders": [
+   "src/util.nr (2)",
+   "src/main.nr (1)"
+  ],
+  "empty": ""
+ },
+ "rowContextMenu": [],
+ "press": {
+  "row": 1,
+  "before": {
+   "path": "src/main.nr",
+   "line": 1
+  },
+  "opened": {
+   "path": "src/main.nr",
+   "line": 1
+  },
+  "after": {
+   "counts": [
+    "● 2",
+    "⚠ 1",
+    "Total: 3"
+   ],
+   "status": "",
+   "buttons": [
+    {
+     "label": "All",
+     "active": true
+    },
+    {
+     "label": "Errors",
+     "active": false
+    },
+    {
+     "label": "Warnings",
+     "active": false
+    },
+    {
+     "label": "Group by File",
+     "active": false
+    }
+   ],
+   "rows": [
+    {
+     "severity": "warning",
+     "selected": false,
+     "icon": "⚠",
+     "iconColor": "rgb(210, 153, 34)",
+     "path": "src/util.nr",
+     "location": "2:9",
+     "message": "unused variable unused"
+    },
+    {
+     "severity": "error",
+     "selected": true,
+     "icon": "●",
+     "iconColor": "rgb(248, 81, 73)",
+     "path": "src/util.nr",
+     "location": "3:22",
+     "message": "Expected type bool, found type Field"
+    },
+    {
+     "severity": "error",
+     "selected": false,
+     "icon": "●",
+     "iconColor": "rgb(248, 81, 73)",
+     "path": "src/main.nr",
+     "location": "5:19",
+     "message": "Expected type bool, found type Field"
+    }
+   ],
+   "fileHeaders": [],
+   "empty": ""
+  }
+ }
+}

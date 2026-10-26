@@ -5522,6 +5522,15 @@ plat52-capture-electron *args:
 plat53-capture-electron *args:
   bash scripts/plat53-capture-electron.sh "$@"
 
+# PLAT-55: the desktop's Problems panel is the reference the terminal's and the
+# GPUI window's are measured against: its rows after a real `nargo compile` of
+# a crate with one warning and two errors in two files, its filters, and what
+# a right-click and a press on a row open — written to
+# `src/tests/visual/answers/plat55-problems.electron.json`.
+[positional-arguments]
+plat55-capture-electron *args:
+  bash scripts/plat55-capture-electron.sh "$@"
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
