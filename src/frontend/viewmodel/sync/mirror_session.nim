@@ -255,8 +255,8 @@ proc rememberViewport(m: MirrorSession; args: JsonNode) =
 
 proc relay*(m: MirrorSession; vm, action: string;
             args: JsonNode = newJObject()) =
-  ## Run `vm`.`action` on the primary this mirror follows. Encode typed
-  ## arguments with `action_relay.actionArg`.
+  ## Run `vm`.`action` on the primary this mirror follows. `args` is decoded
+  ## by `action_relay` on the primary, enums by name.
   if vm == "viewport" and action == "set" and not args.isNil:
     m.rememberViewport(args)
   m.channel.send(serializeAction(vm, action, args, m.following))

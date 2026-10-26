@@ -25,7 +25,7 @@
 ##
 ## Runs on the C and JS backends (`vm-unit`, `vm-unit-js`).
 
-import std/[json, options, sets, tables, unittest]
+import std/[json, jsonutils, options, sets, tables, unittest]
 
 import isonim/core/[async_compat, computation, owner, signals]
 
@@ -42,6 +42,7 @@ import ../../viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm,
                          terminal_output_vm, visual_replay_client,
                          state_vm]
 import ../../viewport
+import ./in_memory_transport
 
 var checks = 0
 template ck(cond: untyped) =
@@ -51,6 +52,13 @@ template ck(cond: untyped) =
 # ---------------------------------------------------------------------------
 # Harness
 # ---------------------------------------------------------------------------
+
+proc actionArg[T](value: T): JsonNode =
+  ## Encode one typed action argument the way `action_relay`'s primary side
+  ## decodes it (enums by name). Product relays build their arguments as JSON
+  ## directly; the suites below encode typed values with this and check that
+  ## the primary decodes them, so a drift between the two fails here.
+  toJson(value, ToJsonOptions(enumMode: joptEnumString))
 
 var queued: seq[proc()]
 let manual: Scheduler = proc(callback: proc()) = queued.add callback

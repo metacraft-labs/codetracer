@@ -10,8 +10,8 @@
 ##
 ##   {"type": "action", "session": id, "vm": "<vm>", "action": "<action>", "args": {…}}
 ##
-## `args` are encoded with `std/jsonutils` (`actionArgs`), the same encoder
-## the signal registry uses, so an enum, an `Option` or an object crosses as
+## `args` are decoded with `std/jsonutils`, the same codec the signal
+## registry uses, so an enum, an `Option` or an object crosses as
 ## it does in a mirrored signal.
 ##
 ## THE VIEWPORT is one action, `viewport` / `set`, with the pane and its
@@ -53,16 +53,11 @@ import ../viewmodels/[
 ]
 
 const
-  EncodeOptions = ToJsonOptions(enumMode: joptEnumString)
   DecodeOptions = Joptions(allowMissingKeys: true, allowExtraKeys: true)
 
 # ---------------------------------------------------------------------------
 # Mirror side
 # ---------------------------------------------------------------------------
-
-proc actionArg*[T](value: T): JsonNode =
-  ## Encode one action argument as the primary decodes it.
-  toJson(value, EncodeOptions)
 
 proc serializeAction*(vm: string; action: string;
                       args: JsonNode = newJObject();

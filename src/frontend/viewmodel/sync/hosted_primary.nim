@@ -109,9 +109,6 @@ proc openHostedPrimary*(backend: BackendService; traceFolder: string;
                 sourceLanguageOf)
   result.ownsHost = true
 
-proc pageCount*(h: HostedPrimary): int =
-  h.pages.len
-
 proc connectPage*(h: HostedPrimary; socket: JsObject) =
   ## Serve the page at the other end of `socket`: it is told to follow THIS
   ## session, and only this one, and receives its state as a snapshot.
