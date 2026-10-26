@@ -450,3 +450,137 @@ fn a_readable_recording_still_opens_and_is_not_refused_on_version() {
         exchange.elapsed, exchange.seen
     );
 }
+
+// ── A readable container whose `meta.dat` this build refuses ────────────
+//
+// The container-version probe above answers off the container header, so a
+// container at a READABLE version whose `meta.dat` carries a superseded
+// schema version passes it. Such a container is classified as a DB trace
+// (`steps.dat`, no MCR fields), `CTFSTraceReader::open` refuses it on the
+// `meta.dat` version — and, before this case existed, `setup` swallowed that
+// refusal and fell through to the replay-worker path, which tried the DB
+// trace as an rr recording and failed with `worker start FAILED: Os { code:
+// 2, kind: NotFound, … }` (codetracer-pm issue
+// `2026-10-26-db-backend-wasm-and-stylus-tests-fail-on-meta-dat-version-6-traces.md`,
+// where every wazero recording made by a v6 writer did exactly that).
+
+/// The superseded `meta.dat` schema version stamped over the refused
+/// fixture: the version the writer one revision back stamps
+/// (`codetracer-trace-format-spec/internal-files.md` § "Version History").
+const REFUSED_META_DAT_VERSION: u16 = 6;
+
+/// A one-container recording folder: a container at the version this build
+/// reads, holding a `meta.dat` at `REFUSED_META_DAT_VERSION`.
+///
+/// The `meta.dat` is serialized by the production serializer and its
+/// version field (bytes 4..6, u16 LE, after the `CTMD` magic) stamped back,
+/// for the reason the module header gives for the container case: the
+/// current writer cannot produce a superseded version. v6 and v7 are the
+/// same bytes apart from the version (`internal-files.md`, "v7"), so every
+/// other byte is what a v6 writer would have produced.
+fn meta_dat_refused_recording_folder(dir: &Path) -> PathBuf {
+    use db_backend::ctfs_trace_reader::meta_dat::{META_DAT_VERSION, MetaDat, serialize_meta_dat};
+
+    assert_ne!(
+        META_DAT_VERSION, REFUSED_META_DAT_VERSION,
+        "the serializer already stamps meta.dat version {REFUSED_META_DAT_VERSION}, so this \
+         fixture no longer demonstrates a version this build refuses"
+    );
+    let mut meta = serialize_meta_dat(&MetaDat {
+        version: META_DAT_VERSION,
+        flags: 0,
+        recording_id: "01949fcc-7d92-7e9c-aaaa-bbbbbbbbbbbb".to_owned(),
+        program: "/srv/proj/main.wasm".to_owned(),
+        args: Vec::new(),
+        workdir: "/srv/proj".to_owned(),
+        recorder_id: "wazero".to_owned(),
+        ext_flags: 0,
+        mcr: None,
+        replay_launch: None,
+        layout_snapshot: None,
+        filter_provenance: Vec::new(),
+        has_filter_provenance: false,
+    });
+    assert_eq!(
+        &meta[0..4],
+        b"CTMD",
+        "the serializer no longer writes a meta.dat header"
+    );
+    meta[4..6].copy_from_slice(&REFUSED_META_DAT_VERSION.to_le_bytes());
+
+    let folder = dir.join("recording");
+    std::fs::create_dir_all(&folder).expect("create recording folder");
+    let container = folder.join("trace.ct");
+    write_minimal_ctfs(&container, &[("meta.dat", &meta), ("steps.dat", b"\x00\x00\x00\x00")])
+        .expect("write container");
+    assert_ne!(
+        container_version(&container),
+        REFUSED_CONTAINER_VERSION,
+        "the container itself must be at a readable version, or this case is the container arm again"
+    );
+    folder
+}
+
+/// A DB recording at a readable container version whose `meta.dat` version
+/// this build refuses must reach the client as a NAMED refusal carrying the
+/// reader's sentence — not be tried as an rr recording.
+///
+/// Before the fix the exchange ended in `launch error: Os { code: 2, kind:
+/// NotFound, … }` from the replay worker, which names no version and no
+/// remedy, and the engine's stderr carried `trying rr trace path`.
+#[test]
+fn a_meta_dat_version_6_recording_is_refused_by_name_on_the_wire() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let folder = meta_dat_refused_recording_folder(temp.path());
+
+    let exchange = drive_launch(&folder, Duration::from_secs(60));
+
+    assert!(
+        !exchange.launch_failed_texts.is_empty(),
+        "a recording whose meta.dat version this build refuses produced NO \
+         `{LAUNCH_FAILED_EVENT}` in {:?}. Messages seen: {:?}",
+        exchange.elapsed,
+        exchange.seen
+    );
+    assert_eq!(
+        exchange.launch_failed_texts, exchange.error_notification_texts,
+        "the two carriers must say the SAME thing"
+    );
+
+    let refusal = exchange.refusal_texts.join(" | ");
+    assert!(
+        refusal.contains(&format!("meta.dat: version {REFUSED_META_DAT_VERSION} is not readable")),
+        "the refusal must be the reader's own: it names the meta.dat version it FOUND. A DB trace \
+         tried as an rr recording fails on the replay worker instead and names neither. \
+         Refusals seen: {:?}",
+        exchange.refusal_texts
+    );
+    assert!(
+        refusal.contains(&format!(
+            "this reader reads version {} only",
+            db_backend::ctfs_trace_reader::meta_dat::META_DAT_VERSION
+        )),
+        "the refusal must name the version this build REQUIRES. Refusals seen: {:?}",
+        exchange.refusal_texts
+    );
+    assert!(
+        refusal.to_lowercase().contains("re-record"),
+        "the refusal must name the REMEDY. Refusals seen: {:?}",
+        exchange.refusal_texts
+    );
+    assert!(
+        !refusal.contains("NotFound") && !refusal.to_lowercase().contains("worker"),
+        "the DB trace was tried as an rr recording: the replay worker's failure reached the \
+         client instead of the reader's refusal: {:?}",
+        exchange.refusal_texts
+    );
+    assert!(
+        !refusal.to_lowercase().contains("corrupt"),
+        "a correctly written older recording must NOT be reported as corrupt. Refusals seen: {:?}",
+        exchange.refusal_texts
+    );
+    assert!(
+        !refusal.contains('\\'),
+        "a debug-escaped Rust literal has reached the client instead of a sentence: {refusal:?}"
+    );
+}

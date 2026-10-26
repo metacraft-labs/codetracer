@@ -376,7 +376,7 @@ where
 }
 
 /// A recording this build structurally cannot open, refused on the container
-/// version the reader found in it.
+/// version, or the `meta.dat` schema version, the reader found in it.
 ///
 /// **Why this is a type and not a formatted string.** `launch_failure_text`
 /// renders anything it cannot downcast with `{err:?}`, so a refusal boxed as a
@@ -519,6 +519,12 @@ fn setup(
 
     if let Some(ctfs_path) = ctfs_candidate {
         info!("detected CTFS container: {}", ctfs_path.display());
+        // A container this build reads whose `meta.dat` schema version it
+        // refuses is refused here, by name, for the same reason as the
+        // container-version probe above: the open below would fail, and its
+        // failure would be swallowed by the fall-through to the replay-worker
+        // path, which then tries a DB trace as an rr recording.
+        refuse_unreadable_meta_dat_version(&ctfs_path)?;
         match CTFSTraceReader::open(&ctfs_path) {
             Ok(ctfs_reader) => {
                 info!(
@@ -586,7 +592,10 @@ fn setup(
                 // here: `refuse_unreadable_ctfs_version` above has already
                 // returned it, structurally, off the header's six bytes. That
                 // is the right place for it — a header probe needs no reader,
-                // so it answers even for a container no reader will open.
+                // so it answers even for a container no reader will open. A
+                // `meta.dat` whose schema version this build refuses never
+                // reaches here either: `refuse_unreadable_meta_dat_version`
+                // returned it before the open.
                 info!(
                     "CTFS open as materialised trace failed for {}: {e} — trying replay-worker path",
                     ctfs_path.display()
@@ -1879,6 +1888,57 @@ fn refuse_unreadable_ctfs_version(path: &Path) -> Result<(), ContainerVersionRef
                 reader_refusal: e.to_string(),
             }
         }),
+    }
+}
+
+/// Refuse, with the reader's own sentence, a DB-trace container whose
+/// `meta.dat` carries a schema version this backend does not read
+/// (`codetracer-trace-format-spec/internal-files.md` § "Version History":
+/// "Readers refuse every other version, naming it").
+///
+/// `refuse_unreadable_ctfs_version` answers off the CONTAINER header, so a
+/// container at a readable version passes it whatever its `meta.dat` says. A
+/// recorder linked against the previous trace writer produces exactly that:
+/// a version-5 container holding a version-6 `meta.dat`. `CTFSTraceReader::open`
+/// refuses it, but `setup` treats an open failure as "not a materialised
+/// trace" and falls through to the replay-worker path, which tried the DB
+/// trace as an rr recording and reported `worker start FAILED: … NotFound`
+/// — naming neither the version nor the remedy.
+///
+/// Only the version is refused here, and as the typed
+/// [`ContainerVersionRefusal`] so `launch_failure_text` delivers the sentence
+/// rather than its debug rendering: it is the one open failure whose remedy
+/// is known (re-record) and that is not corruption. Every other `meta.dat`
+/// problem (missing, short, bad magic, unknown flags) is left to the reader,
+/// which reports it from the open itself. The version is read by the same
+/// parser the reader uses, so the two cannot disagree about which versions
+/// are readable.
+///
+/// A `meta.dat` that declares MCR fields belongs to the replay-worker path
+/// and is not refused here: a native recording's version is that path's to
+/// judge. The flag word sits at bytes 6..8 in every schema version, so it
+/// can be read from a header the parser refuses.
+fn refuse_unreadable_meta_dat_version(path: &Path) -> Result<(), ContainerVersionRefusal> {
+    use crate::ctfs_trace_reader::meta_dat::{FLAG_HAS_MCR_FIELDS, MetaDatError, parse_meta_dat};
+    let Ok(mut ctfs) = CtfsReader::open(path) else {
+        return Ok(());
+    };
+    let Ok(bytes) = ctfs.read_file("meta.dat") else {
+        return Ok(());
+    };
+    match parse_meta_dat(&bytes) {
+        Err(e @ MetaDatError::UnsupportedVersion(_)) => {
+            let flags = bytes.get(6..8).map_or(0, |f| u16::from_le_bytes([f[0], f[1]]));
+            if flags & FLAG_HAS_MCR_FIELDS != 0 {
+                return Ok(());
+            }
+            warn!("refusing {}: {e}", path.display());
+            Err(ContainerVersionRefusal {
+                container: path.to_path_buf(),
+                reader_refusal: e.to_string(),
+            })
+        }
+        _ => Ok(()),
     }
 }
 
@@ -3974,6 +4034,72 @@ mod tests {
         bytes[5] = 0;
         std::fs::write(&ct_path, &bytes).unwrap();
         assert!(refuse_unreadable_ctfs_version(&ct_path).is_ok());
+    }
+
+    /// Stamp a superseded schema version over serialized `meta.dat` bytes
+    /// (u16 LE at bytes 4..6, after the `CTMD` magic). The serializer cannot
+    /// write a superseded version, that being what the bump means; v6 and v7
+    /// differ only in this field (`internal-files.md`, "v7").
+    fn with_meta_dat_version(mut bytes: Vec<u8>, version: u16) -> Vec<u8> {
+        assert_eq!(&bytes[0..4], b"CTMD");
+        bytes[4..6].copy_from_slice(&version.to_le_bytes());
+        bytes
+    }
+
+    /// A readable container whose `meta.dat` schema version this build
+    /// refuses is refused by name, with the reader's own sentence — not left
+    /// to fail the open and fall through to the replay-worker path.
+    #[test]
+    fn a_meta_dat_of_another_version_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // CONTROL: the current version passes, so the arm below discriminates
+        // on the version rather than refusing every container.
+        let current = dir.path().join("current.ct");
+        write_minimal_ctfs(&current, &[("meta.dat", &non_mcr_meta_dat_bytes()), ("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&current).is_ok());
+
+        let old = dir.path().join("v6.ct");
+        let v6 = with_meta_dat_version(non_mcr_meta_dat_bytes(), 6);
+        write_minimal_ctfs(&old, &[("meta.dat", &v6), ("steps.dat", b"")]).unwrap();
+        assert!(
+            refuse_unreadable_ctfs_version(&old).is_ok(),
+            "the container header is at a readable version; only meta.dat is superseded"
+        );
+        let refusal = refuse_unreadable_meta_dat_version(&old).unwrap_err();
+        assert_eq!(refusal.container, old);
+        let err = refusal.to_string();
+        assert!(
+            err.contains("meta.dat: version 6 is not readable")
+                && err.contains(&format!("reads version {META_DAT_VERSION} only")),
+            "{err}"
+        );
+        assert!(err.contains("Re-record"), "{err}");
+    }
+
+    /// A `meta.dat` problem that is not its version is the reader's to
+    /// report from the open, and a native (MCR) recording is the replay
+    /// worker's to judge: neither is refused by the version probe.
+    #[test]
+    fn the_meta_dat_version_probe_refuses_only_a_non_mcr_version() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mcr_v6 = dir.path().join("mcr-v6.ct");
+        let bytes = with_meta_dat_version(mcr_meta_dat_bytes(), 6);
+        write_minimal_ctfs(&mcr_v6, &[("meta.dat", &bytes), ("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&mcr_v6).is_ok());
+
+        let corrupt = dir.path().join("corrupt.ct");
+        write_minimal_ctfs(&corrupt, &[("meta.dat", &[0u8; 4]), ("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&corrupt).is_ok());
+
+        let no_meta = dir.path().join("no-meta.ct");
+        write_minimal_ctfs(&no_meta, &[("steps.dat", b"")]).unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&no_meta).is_ok());
+
+        let not_a_container = dir.path().join("plain.ct");
+        std::fs::write(&not_a_container, b"not a container").unwrap();
+        assert!(refuse_unreadable_meta_dat_version(&not_a_container).is_ok());
     }
 
     /// MCR native recordings may carry stream names that overlap with
