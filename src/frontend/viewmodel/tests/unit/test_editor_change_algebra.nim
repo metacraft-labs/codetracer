@@ -117,7 +117,21 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1876
+const ExpectedAssertions = 1927
+  ## *1876 -> 1927 on 2026-10-26: seventeen production modules net, x three
+  ## assertions. Eighteen were added — `viewmodels/no_project_folder.nim`,
+  ## `views/isonim_flow_inline_view.nim`, `pane_viewport.nim`,
+  ## `sync/webview_transport.nim`, `viewmodels/action_sink.nim`,
+  ## `viewmodels/flow_line_values.nim`, `views/isonim_flow_value_view.nim`,
+  ## `sdk/breakpoints.nim`, `viewmodels/calltrace_navigation.nim`,
+  ## `sdk/scrub_queue.nim`, `codetracer_ui_components.nim`,
+  ## `host/native_file_tree.nim`, `host/native_test_host.nim`,
+  ## `keymap/menu_accelerators.nim`, `viewmodels/scrollbar_interaction.nim`,
+  ## `viewmodels/table_fit.nim`, `viewmodels/test_catalog_answer.nim` and
+  ## `views/table_fit_dom.nim` — and one was deleted:
+  ## `viewmodels/shared_pane_state.nim` (its 1858 -> 1861 entry below). None
+  ## of the eighteen calls `rebase(` or spells `mapOver`; every functional
+  ## check stays.*
   ## *1867 -> 1876 on 2026-10-22: three table-overflow production modules —
   ## `viewmodels/table_overflow.nim`, `host/table_column_widths.nim` and
   ## `views/table_overflow_dom.nim` — x three assertions. None calls `rebase(`.*
