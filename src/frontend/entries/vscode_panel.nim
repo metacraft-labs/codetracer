@@ -14,7 +14,9 @@
 ## bundle.
 ##
 ## The panels: `state`, `calltrace`, `eventLog`, `terminalOutput`,
-## `scratchpad`, `traceLog`, `flow`, `pointList` and `fileTree`.
+## `scratchpad`, `traceLog`, `flow`, `pointList`, `fileTree` and
+## `requestPanel` (Shared-DOM-Front-Ends Q8: the Request Panel role, its
+## window loaded by the host's primary from the size this webview reports).
 
 when not defined(js):
   {.error: "entries/vscode_panel runs in a VS Code webview (JS).".}
@@ -34,12 +36,12 @@ import ../viewmodel/views/[isonim_state_view, isonim_calltrace_view,
                            isonim_event_log_view, isonim_terminal_output_view,
                            isonim_scratchpad_view, isonim_trace_log_view,
                            isonim_flow_view, isonim_point_list_view,
-                           isonim_filesystem_view]
+                           isonim_filesystem_view, isonim_request_panel_view]
 import ../viewmodel/views/pane_measure_dom
 
 const PanelKinds* = ["state", "calltrace", "eventLog", "terminalOutput",
                      "scratchpad", "traceLog", "flow", "pointList",
-                     "fileTree"]
+                     "fileTree", "requestPanel"]
   ## The panels a webview can show, as its HTML names them.
 
 proc panelKindOfPage(): cstring {.importjs:
@@ -74,6 +76,8 @@ proc renderPanel(kind: string; s: SessionViewModel): dom_api.Element =
     renderPointListPanel[WebRenderer, dom_api.Element](r, s.pointListVM)
   of "fileTree":
     renderFilesystemPanel[WebRenderer, dom_api.Element](r, s.fileTreeVM)
+  of "requestPanel":
+    renderRequestPanel[WebRenderer, dom_api.Element](r, s.requestPanelVM)
   else: nil
 
 var activeMirror: MirrorSession
@@ -88,6 +92,7 @@ proc measuredPaneOf(kind: string): Option[MeasuredPane] =
   of "traceLog": some(mpTraceLog)
   of "terminalOutput": some(mpTerminalOutput)
   of "eventLog": some(mpEventLog)
+  of "requestPanel": some(mpRequestPanel)
   else: none(MeasuredPane)
 
 proc mountVsCodePanel*(kind: string; root: dom_api.Element): MirrorSession =

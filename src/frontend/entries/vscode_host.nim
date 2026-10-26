@@ -177,6 +177,12 @@ proc openSession*(host: VsCodeHost; id, traceFolder: string;
       # The panels mark the call the debugger is in after every move, as on
       # the desktop.
       debugger.session.calltraceVM.followDebuggerCall()
+      # The Request Panel role (Shared-DOM-Front-Ends Q8): the first poll
+      # says how many requests the recording served (`recordedTotal`, the
+      # panel's count); a completed recording asks nothing more, and its
+      # rows are the window the panel's webview reports
+      # (`RequestPanelVM.setViewport`, relayed to this primary).
+      debugger.store.requestRequestSpansSince()
       let files = debugger.session.fileTreeVM
       if not files.isNil:
         if hosted.sourceFiles.len > 0:

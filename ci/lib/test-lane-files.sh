@@ -1085,6 +1085,11 @@ test_lane_files() {
 		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
 		# tall as the whole log, in a real DOM, whatever the table's fit does.
 		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
+		# `vscode_request_panel_role_dom_test.nim`: the Request Panel is a VS
+		# Code panel role (Shared-DOM-Front-Ends Q8): the webview entry mounts the
+		# shared view over a mirror, its rows are the window the host's primary
+		# loaded, and a row click and a filter run on the primary.
+		echo src/frontend/tests/vscode_request_panel_role_dom_test.nim
 		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
 		# `diff`, through the Electron process facade, over real repositories
 		# with a stale stat cache, never rewrite the index or leave
