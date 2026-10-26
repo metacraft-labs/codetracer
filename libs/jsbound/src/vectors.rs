@@ -41,7 +41,9 @@ use std::collections::BTreeMap;
 use crate::batch::{encode_batch, parse_batch, Envelope, BATCH_MAGIC, BATCH_VERSION};
 use crate::decode::{decode_log, DecodeErrorKind, Termination};
 use crate::encode::{encode_frame, encode_log};
-use crate::record::{hex, BlobRef, Record, MAX_FRAME_LEN, MAX_INLINE_BLOB, VALUE_SETS, VOCAB};
+use crate::record::{
+    hex, BlobRef, Record, HOLE_TOKEN, MAX_FRAME_LEN, MAX_INLINE_BLOB, VALUE_SETS, VOCAB,
+};
 
 /// The class of a vector, with what the decoder must make of it.
 #[derive(Debug, Clone, PartialEq)]
@@ -335,6 +337,14 @@ fn one_of_each(seq: u64) -> Vec<(&'static str, Record)> {
                 seq,
                 name: "exposure".into(),
                 data: r#"{"experiment":"hero","arm":"b"}"#.into(),
+            },
+        ),
+        (
+            "declassify",
+            Record::Declassify {
+                seq,
+                fn_id: "isValidEmail".into(),
+                output: "false".into(),
             },
         ),
         (
@@ -688,6 +698,85 @@ fn xhr_events_records() -> Vec<Record> {
     ]
 }
 
+/// The holed form of a login request (spec §5.2.1): the password the page
+/// sent in the query and in the JSON body replaced by the hole token. The
+/// digest is taken over the holed body, so any secret, and its replay
+/// placeholder, give these same bytes.
+fn holed_login_request(seq: u64) -> Record {
+    let body = format!(r#"{{"user":"ada","pass":"{HOLE_TOKEN}"}}"#);
+    Record::NetRequest {
+        seq,
+        req_id: 1,
+        api: 1,
+        method: "POST".into(),
+        url: format!("https://shop.example/api/login?pin={HOLE_TOKEN}&lang=en"),
+        body_digest: hex(&Sha256::digest(body.as_bytes())),
+    }
+}
+
+/// A session at a login form whose password and e-mail are sensitive (spec
+/// §11.3): the masked keystrokes of the password (`key` and `data` as `*`,
+/// `code` `Masked`), the `Scrubbed` record in place of its value's
+/// `DomEffect`, a declassifier's two verdicts on the e-mail (`Declassify`),
+/// and the login request in holed form.
+fn sensitive_session_records() -> Vec<Record> {
+    vec![
+        header(),
+        env(),
+        Record::Checkpoint {
+            seq: 1,
+            ordinal: 0,
+            scheme: "dom-v1".into(),
+            state_hash: "5d41402abc4b2a76b9719d911017c592".into(),
+            dom_digest: String::new(),
+        },
+        Record::Task {
+            seq: 2,
+            task_id: 1,
+            kind: 5,
+        },
+        Record::Input {
+            seq: 3,
+            task_id: 1,
+            r#type: "keydown".into(),
+            target: "path:#pass".into(),
+            props: r#"{"key":"*","code":"Masked","location":0,"repeat":false}"#.into(),
+            label: String::new(),
+        },
+        Record::Scrubbed {
+            seq: 4,
+            target: "path:#pass".into(),
+            class: 1,
+            length: 6,
+        },
+        Record::Task {
+            seq: 5,
+            task_id: 2,
+            kind: 5,
+        },
+        Record::Input {
+            seq: 6,
+            task_id: 2,
+            r#type: "input".into(),
+            target: "path:#pass".into(),
+            props: r#"{"data":"*","inputType":"insertText"}"#.into(),
+            label: String::new(),
+        },
+        Record::Declassify {
+            seq: 7,
+            fn_id: "isValidEmail".into(),
+            output: "false".into(),
+        },
+        Record::Declassify {
+            seq: 8,
+            fn_id: "isValidEmail".into(),
+            output: "true".into(),
+        },
+        holed_login_request(9),
+        end(9),
+    ]
+}
+
 fn complete(name: &str, description: &str, records: Vec<Record>) -> Vector {
     Vector {
         name: name.into(),
@@ -880,6 +969,7 @@ fn set_seq(r: &mut Record, value: u64) {
         | Record::Error { seq, .. }
         | Record::Scrubbed { seq, .. }
         | Record::Mark { seq, .. }
+        | Record::Declassify { seq, .. }
         | Record::XhrEvent { seq, .. }
         | Record::Loading { seq, .. }
         | Record::DocTask { seq, .. }
@@ -1013,6 +1103,20 @@ fn decoding_vectors() -> Vec<Vector> {
          estimate it resolved with (TaskReg and Task kind 13, then \
          PlatformValue src 9)",
         platform_state_records(),
+    ));
+    out.push(complete(
+        "net_request_holed",
+        "a NetRequest whose URL and body digest are in holed form: the \
+         password the page sent replaced by the hole token U+FDD0 ct:hole \
+         U+FDD1 in the query, and the digest taken over the holed JSON body",
+        vec![header(), env(), holed_login_request(1), end(1)],
+    ));
+    out.push(complete(
+        "sensitive_session",
+        "a login form with sensitive fields: masked keystrokes, a Scrubbed \
+         record in place of the password's value, two Declassify records of \
+         one declassifier (false, then true) and the login request holed",
+        sensitive_session_records(),
     ));
     out.push(complete(
         "storage_shape_reads",
@@ -1160,8 +1264,16 @@ fn refusal_vectors(valid: &BTreeMap<String, Vector>) -> Vec<Vector> {
             "unknown_tag",
             "clock",
             DecodeErrorKind::UnknownTag,
-            "the third frame's tag is 0x54, unassigned in the jsbound range",
-            Box::new(|b, o| b[o[2] + 4] = 0x54),
+            "the third frame's tag is 0x5a, unassigned in the jsbound range",
+            Box::new(|b, o| b[o[2] + 4] = 0x5a),
+        ),
+        (
+            "reserved_tag_0x55",
+            "declassify",
+            DecodeErrorKind::UnknownTag,
+            "the Declassify frame's tag is 0x55, reserved for the escrow \
+             record vocabulary 1 does not define (§11.3.7)",
+            Box::new(|b, o| b[o[2] + 4] = 0x55),
         ),
         (
             "empty_frame",

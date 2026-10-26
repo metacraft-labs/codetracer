@@ -46,4 +46,4 @@ pub use container::{
 };
 pub use decode::{decode_log, DecodeError, DecodeErrorKind, DecodedLog, Termination};
 pub use encode::{encode_frame, encode_frames, encode_log};
-pub use record::{BlobRef, Record, RECORD_KINDS};
+pub use record::{BlobRef, Record, HOLE_TOKEN, RECORD_KINDS};

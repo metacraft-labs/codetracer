@@ -18,8 +18,8 @@ use sha2::{Digest, Sha256};
 
 use jsbound::record::hex;
 use jsbound::{
-    decode_log, encode_batch, encode_log, parse_batch, DecodeErrorKind, Record, Termination,
-    RECORD_KINDS,
+    decode_log, encode_batch, encode_frame as encode_one_frame, encode_log, parse_batch,
+    DecodeErrorKind, Record, Termination, HOLE_TOKEN, RECORD_KINDS,
 };
 
 fn vectors_dir() -> PathBuf {
@@ -491,4 +491,125 @@ fn test_jsbound_batch_vectors() {
             "no batch vector is refused with {name}"
         );
     }
+}
+
+/// `jsbound_declassify_vectors_decode_identically` (the Rust half;
+/// the TypeScript half is codetracer-js-recorder
+/// `tests/boundary/format.test.ts`, which holds its decoder and encoder to
+/// the same committed files). The vectors of the sensitive-input additions
+/// (JS-Boundary-Recording.md §5.2, §5.2.1, §11.3) decode to their expected
+/// canonical JSON, and the reserved tag `0x55` is refused as `UnknownTag`.
+///
+/// Vacuity guard: before anything is decoded, the manifest's valid vectors
+/// are shown to carry, by the `record` names of their expectation files, at
+/// least one record of every kind, `Declassify` included; the three named
+/// vectors must exist and hold what this test is about (a `Declassify`, a
+/// `NetRequest` whose URL carries the hole token).
+#[test]
+fn jsbound_declassify_vectors_decode_identically() {
+    let vectors = load();
+    let kinds_in_expectations: BTreeSet<String> = vectors
+        .iter()
+        .filter(|v| v.class == "valid")
+        .flat_map(|v| {
+            v.expected["records"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .filter_map(|r| r["record"].as_str().map(str::to_string))
+        .collect();
+    for &(_, kind) in RECORD_KINDS {
+        assert!(
+            kinds_in_expectations.contains(kind),
+            "no valid vector's expectation holds a {kind} record"
+        );
+    }
+    assert!(RECORD_KINDS
+        .iter()
+        .any(|&(t, n)| t == 0x54 && n == "Declassify"));
+    assert!(
+        RECORD_KINDS.iter().all(|&(t, _)| t != 0x55),
+        "0x55 is reserved, not defined"
+    );
+
+    let by_name = |name: &str| {
+        vectors
+            .iter()
+            .find(|v| v.name == name)
+            .unwrap_or_else(|| panic!("vector {name} is missing"))
+    };
+    for name in ["declassify", "net_request_holed", "sensitive_session"] {
+        let v = by_name(name);
+        assert_eq!(v.class, "valid", "{name}");
+        let decoded = decode_log(&v.bytes).unwrap_or_else(|e| panic!("{name}: refused: {e}"));
+        assert_eq!(decoded.termination, Termination::Complete, "{name}");
+        let got = serde_json::json!({
+            "termination": decoded.termination.name(),
+            "records": records_json(&decoded.records),
+        });
+        assert_eq!(got, v.expected, "{name}: canonical JSON");
+        assert_eq!(
+            encode_log(&decoded.records).0,
+            v.bytes,
+            "{name}: re-encoding"
+        );
+    }
+
+    // The Declassify fields in wire order: seq, fn_id, output.
+    let declassify = &decode_log(&by_name("declassify").bytes).unwrap().records[2];
+    assert_eq!(
+        *declassify,
+        Record::Declassify {
+            seq: 1,
+            fn_id: "isValidEmail".into(),
+            output: "false".into()
+        }
+    );
+    assert_eq!(
+        encode_one_frame(&Record::Declassify {
+            seq: 1,
+            fn_id: "f".into(),
+            output: "1".into()
+        }),
+        [19, 0, 0, 0, 0x54, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, b'f', 1, 0, 0, 0, b'1']
+    );
+
+    // The holed request: the token in the URL, and the digest over the holed
+    // body, so that any secret and its placeholder give the same record.
+    let holed = &decode_log(&by_name("net_request_holed").bytes)
+        .unwrap()
+        .records[2];
+    let Record::NetRequest {
+        url, body_digest, ..
+    } = holed
+    else {
+        panic!("net_request_holed's third record is {holed:?}")
+    };
+    assert_eq!(HOLE_TOKEN.len(), 13);
+    assert_eq!(
+        HOLE_TOKEN.as_bytes(),
+        [0xEF, 0xB7, 0x90, b'c', b't', b':', b'h', b'o', b'l', b'e', 0xEF, 0xB7, 0x91]
+    );
+    assert!(url.contains(HOLE_TOKEN), "{url}");
+    let body = format!(r#"{{"user":"ada","pass":"{HOLE_TOKEN}"}}"#);
+    assert_eq!(*body_digest, hex(&Sha256::digest(body.as_bytes())));
+
+    // 0x55: refused as UnknownTag, one edit from the Declassify vector,
+    // which decodes (the negative control).
+    let reserved = by_name("reserved_tag_0x55");
+    assert_eq!(reserved.class, "refusal");
+    assert_eq!(reserved.base.as_deref(), Some("declassify"));
+    assert_eq!(reserved.expected["error"], "UnknownTag");
+    let err = decode_log(&reserved.bytes).expect_err("0x55 is refused");
+    assert_eq!(err.kind, DecodeErrorKind::UnknownTag, "{err}");
+    let base = &by_name("declassify").bytes;
+    assert_eq!(base.len(), reserved.bytes.len());
+    assert_eq!(
+        base.iter()
+            .zip(&reserved.bytes)
+            .filter(|(a, b)| a != b)
+            .count(),
+        1
+    );
 }

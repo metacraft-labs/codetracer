@@ -230,7 +230,7 @@ pub fn decode_record(payload: &[u8], offset: u64) -> Result<Record, DecodeError>
             DecodeError::new(
                 DecodeErrorKind::UnknownTag,
                 offset,
-                format!("frame tag 0x{tag:02x} is not a jsbound record (vocab {VOCAB} defines 0x40-0x53 and 0x5f)"),
+                format!("frame tag 0x{tag:02x} is not a jsbound record (vocab {VOCAB} defines 0x40-0x54, 0x56-0x59 and 0x5f; 0x55 is reserved)"),
             )
         })?;
     if r.position() != payload.len() {

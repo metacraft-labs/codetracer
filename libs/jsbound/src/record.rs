@@ -28,6 +28,15 @@ pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024;
 /// The largest body a `blobref` may carry inline in `jsbound.log` (spec §5.2).
 /// The assembler moves anything longer into `jsbound.blb`.
 pub const MAX_INLINE_BLOB: usize = 1024;
+/// The sensitive-hole token (spec §5.2.1): `U+FDD0 "ct:hole" U+FDD1`, 13
+/// UTF-8 bytes. A recorder writes it in place of every span of a checked
+/// field (`NetRequest.url`, the bytes `body_digest` is taken over, outbound
+/// `WsMessage.data`, `Navigation.url`) that carried a sensitive value. The
+/// two noncharacters never occur in interchange text, so the token cannot
+/// collide with real data; it carries no length and no class, so every
+/// secret, and its replay placeholder, holes to the same bytes. To the
+/// decoder it is ordinary UTF-8.
+pub const HOLE_TOKEN: &str = "\u{FDD0}ct:hole\u{FDD1}";
 
 /// A body that is either carried inline or referenced in `jsbound.blb`
 /// (spec §5.2: `blobref := kind:u8 body`).
@@ -497,6 +506,12 @@ define_records! {
     0x51 => Scrubbed { seq: u64, target: String, class: u8, length: u32 },
     0x52 => Gap { first_seq: u64, last_seq: u64, reason: u8 },
     0x53 => Mark { seq: u64, name: String, data: String },
+    // §11.3.2: a declassifier's output (`output`, the canonical JSON of its
+    // return value), matched on replay by `fn_id` and `seq` and returned
+    // without running the function. 0x55 stays unassigned: it is reserved
+    // for the opt-in escrow record (§11.3.7), which vocabulary 1 does not
+    // define, so a decoder refuses it as `UnknownTag` like any other.
+    0x54 => Declassify { seq: u64, fn_id: String, output: String },
     0x56 => XhrEvent {
         seq: u64,
         req_id: u64,
@@ -613,6 +628,7 @@ impl Record {
             | Record::Error { seq, .. }
             | Record::Scrubbed { seq, .. }
             | Record::Mark { seq, .. }
+            | Record::Declassify { seq, .. }
             | Record::XhrEvent { seq, .. }
             | Record::Loading { seq, .. }
             | Record::DocTask { seq, .. }
