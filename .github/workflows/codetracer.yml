@@ -1366,8 +1366,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             codetracer-native-backend
 
       - name: Upload env.ps1 component decomposition
@@ -1650,7 +1650,7 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -1658,7 +1658,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
 
       - name: Install Nim dependencies
         shell: bash
@@ -2125,8 +2125,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -5063,8 +5063,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
 
       - name: Remove WSL bash stub from System32
         # As in the other eph-win-x64 jobs: let CreateProcessW fall through to
@@ -6655,8 +6655,8 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             nim-stackable-hooks=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -7233,7 +7233,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
 
       - name: Stage codetracer-trace-format into libs/
         # The flake override below points at ./libs/codetracer-trace-format;
@@ -7592,7 +7592,7 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
             io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
@@ -7603,7 +7603,7 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
             codetracer-native-backend=b1e07aabb86536d2c4248cb8fc162381d86350fe
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
             runquota=dev
@@ -7901,12 +7901,12 @@ jobs:
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
-            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
+            codetracer-trace-format-nim=ccc4ba4e05d740659bc1663fb4f39a2f32de9937
             io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
             nim-stackable-hooks=dev
-            codetracer-native-recorder=8fffbbc643bb1cb5acf015c6707c7312375fe911
+            codetracer-native-recorder=36d280180cdab174082af2ac1649dfeeb45e2560
             codetracer-js-recorder=dev
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
