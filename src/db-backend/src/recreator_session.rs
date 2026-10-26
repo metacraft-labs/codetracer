@@ -332,6 +332,17 @@ pub struct RecreatorArgs {
     pub recording_id: String,
 }
 
+/// The `CT_COOP_QUERY=1` route of [`ReplayWorker::start`]: the worker is
+/// `ct-mcr replay-worker --coop-query`, taken from `CT_COOP_RECREATOR` (or
+/// the worker executable when unset), with `CT_COOP_PROGRAM` /
+/// `CT_COOP_FUNC` as its `--coop-program` / `--coop-func`.
+#[derive(Debug, Default, Clone)]
+struct CoopQueryArgs {
+    exe: Option<PathBuf>,
+    program: Option<String>,
+    func: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct WorkerTransportEndpoint {
     transport: String,
@@ -371,6 +382,63 @@ impl ReplayWorker {
             stream: None,
             last_death: None,
         }
+    }
+
+    /// The `replay-worker` command `start` runs for this worker: program and
+    /// arguments, before `start` adds its environment and standard streams.
+    /// `coop` is the `CT_COOP_QUERY` route, when it is asked for.
+    fn worker_command(&self, coop: Option<&CoopQueryArgs>) -> Command {
+        let exe_path = coop
+            .and_then(|coop| coop.exe.clone())
+            .unwrap_or_else(|| self.recreator_exe.clone());
+
+        let mut command = Command::new(&exe_path);
+        command
+            .arg("replay-worker")
+            .arg("--name")
+            .arg(&self.name)
+            .arg("--index")
+            .arg(self.index.to_string());
+        // The worker must not outlive this process. db-backend starts it as
+        // a plain child and connects to its socket afterwards; a db-backend
+        // that dies (or is killed) before connecting used to leave the worker
+        // waiting in `accept` forever, with its `ct-mcr debugserver` or
+        // `rr replay` child (codetracer-pm issue
+        // `2026-10-22-orphaned-mcr-replay-worker-waits-in-accept-after-its-replay-server-is-gone.md`).
+        // With `--parent-pid <this process>` the worker, while nothing is
+        // connected, exits once this process is no longer its parent
+        // (codetracer-pm `spec/CLI/ct-native-replay/README.md`,
+        // `replay-worker` § "Lifetime before db-backend connects"). The
+        // `CT_COOP_QUERY` route's `ct-mcr replay-worker` takes the same
+        // option (`spec/CLI/ct-mcr/replay-worker.md`, "Lifetime of the query
+        // server"). POSIX only: the Windows workers do not take it, and
+        // `ct-mcr replay-worker` refuses it there.
+        #[cfg(unix)]
+        command.arg("--parent-pid").arg(std::process::id().to_string());
+        if let Some(coop) = coop {
+            command.arg("--coop-query");
+            if let Some(program) = &coop.program {
+                command.arg("--coop-program").arg(program);
+            }
+            if let Some(func) = &coop.func {
+                command.arg("--coop-func").arg(func);
+            }
+            command.arg(&self.rr_trace_folder);
+        } else if let Some(program) = &self.live_program {
+            command.arg("--live-program").arg(program);
+            if let Some(dir) = &self.live_recording_dir {
+                command.arg("--live-recording-dir").arg(dir);
+            }
+            if let Some(cwd) = &self.live_cwd {
+                command.arg("--live-cwd").arg(cwd);
+            }
+            for arg in &self.live_program_args {
+                command.arg("--live-arg").arg(arg);
+            }
+        } else {
+            command.arg(&self.rr_trace_folder);
+        }
+        command
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
@@ -436,47 +504,12 @@ impl ReplayWorker {
         // REAL values read from the held child's registers + memory.  The
         // coop env vars (CT_COOP_PROGRAM / CT_COOP_FUNC / CT_COOP_SOURCE) are
         // inherited by the child automatically.
-        let coop_query = std::env::var("CT_COOP_QUERY").as_deref() == Ok("1");
-        let coop_exe = std::env::var("CT_COOP_RECREATOR").ok();
-        let exe_path: PathBuf = if coop_query {
-            match &coop_exe {
-                Some(p) => PathBuf::from(p),
-                None => self.recreator_exe.clone(),
-            }
-        } else {
-            self.recreator_exe.clone()
-        };
-
-        let mut command = Command::new(&exe_path);
-        command
-            .arg("replay-worker")
-            .arg("--name")
-            .arg(&self.name)
-            .arg("--index")
-            .arg(self.index.to_string());
-        if coop_query {
-            command.arg("--coop-query");
-            if let Ok(program) = std::env::var("CT_COOP_PROGRAM") {
-                command.arg("--coop-program").arg(program);
-            }
-            if let Ok(func) = std::env::var("CT_COOP_FUNC") {
-                command.arg("--coop-func").arg(func);
-            }
-            command.arg(&self.rr_trace_folder);
-        } else if let Some(program) = &self.live_program {
-            command.arg("--live-program").arg(program);
-            if let Some(dir) = &self.live_recording_dir {
-                command.arg("--live-recording-dir").arg(dir);
-            }
-            if let Some(cwd) = &self.live_cwd {
-                command.arg("--live-cwd").arg(cwd);
-            }
-            for arg in &self.live_program_args {
-                command.arg("--live-arg").arg(arg);
-            }
-        } else {
-            command.arg(&self.rr_trace_folder);
-        }
+        let coop = (std::env::var("CT_COOP_QUERY").as_deref() == Ok("1")).then(|| CoopQueryArgs {
+            exe: std::env::var("CT_COOP_RECREATOR").ok().map(PathBuf::from),
+            program: std::env::var("CT_COOP_PROGRAM").ok(),
+            func: std::env::var("CT_COOP_FUNC").ok(),
+        });
+        let mut command = self.worker_command(coop.as_ref());
         // The directory the worker creates its socket in is the one
         // `setup_worker_sockets` connects to only if both resolve the same
         // base directory; name it to the worker rather than rely on that
@@ -2213,5 +2246,70 @@ mod tests {
             .expect_err("a dead worker must not be silently replaced");
         assert_eq!(expect_death(later.as_ref()), &first);
         assert_eq!(session.worker_death(), Some(first.to_string()));
+    }
+
+    /// The arguments of `command`, as strings.
+    #[cfg(unix)]
+    fn args_of(command: &Command) -> Vec<String> {
+        command.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
+    }
+
+    /// Every route `start` spawns names this process as the worker's parent,
+    /// so a worker db-backend dies before connecting to does not outlive it
+    /// (codetracer-pm issue
+    /// `2026-10-22-orphaned-mcr-replay-worker-waits-in-accept-after-its-replay-server-is-gone.md`).
+    /// The command is inspected rather than run: what the worker does with
+    /// the option is `ct-native-replay`'s and `ct-mcr`'s to test, and both
+    /// do, against their real binaries.
+    #[cfg(unix)]
+    #[test]
+    fn every_worker_route_is_started_with_this_process_as_its_parent_pid() {
+        let own_pid = std::process::id().to_string();
+        let expect_parent_pid = |args: &[String], route: &str| {
+            let at = args
+                .iter()
+                .position(|a| a == "--parent-pid")
+                .unwrap_or_else(|| panic!("{route}: no --parent-pid in {args:?}"));
+            assert_eq!(args.get(at + 1), Some(&own_pid), "{route}: {args:?}");
+        };
+
+        let trace = ReplayWorker::new("stable", 0, Path::new("/x/ct-native-replay"), Path::new("/x/trace.ct"));
+        let command = trace.worker_command(None);
+        assert_eq!(command.get_program(), "/x/ct-native-replay");
+        let args = args_of(&command);
+        expect_parent_pid(&args, "trace");
+        assert_eq!(args.first().map(String::as_str), Some("replay-worker"));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("/x/trace.ct"),
+            "the trace stays last"
+        );
+
+        let mut live = ReplayWorker::new("stable", 1, Path::new("/x/ct-native-replay"), Path::new(""));
+        live.live_program = Some(PathBuf::from("/x/program"));
+        let args = args_of(&live.worker_command(None));
+        expect_parent_pid(&args, "live");
+        assert!(
+            args.windows(2).any(|w| w == ["--live-program", "/x/program"]),
+            "{args:?}"
+        );
+
+        // `ct-mcr replay-worker --coop-query` serves a socket, so it takes
+        // `--parent-pid` too.
+        let coop = CoopQueryArgs {
+            exe: Some(PathBuf::from("/x/ct-mcr")),
+            program: Some("/x/program".to_string()),
+            func: Some("main".to_string()),
+        };
+        let command = trace.worker_command(Some(&coop));
+        assert_eq!(command.get_program(), "/x/ct-mcr");
+        let args = args_of(&command);
+        expect_parent_pid(&args, "coop-query");
+        assert!(args.iter().any(|a| a == "--coop-query"), "{args:?}");
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("/x/trace.ct"),
+            "the trace stays last"
+        );
     }
 }

@@ -6643,7 +6643,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
-            codetracer-native-backend=01bd6694139edf534cc8052a0569ff4a76f223d2
+            codetracer-native-backend=1cbf62f46c5716d3e02a52cd61c9e9b82a52fa72
             runquota=dev
 
       - name: Stage codetracer-trace-format into libs/
@@ -7276,7 +7276,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.ci_token.outputs.token }}
-          RR_BACKEND_REF: 01bd6694139edf534cc8052a0569ff4a76f223d2
+          RR_BACKEND_REF: 1cbf62f46c5716d3e02a52cd61c9e9b82a52fa72
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -7582,7 +7582,7 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
-            codetracer-native-backend=01bd6694139edf534cc8052a0569ff4a76f223d2
+            codetracer-native-backend=1cbf62f46c5716d3e02a52cd61c9e9b82a52fa72
             codetracer-native-recorder=fc70f957a9ed4e3bdcee4135905313a1e36ef89d
             codetracer-native-test-programs=dev
             codetracer-visual-replay-fixtures=dev
@@ -7893,7 +7893,7 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=01bd6694139edf534cc8052a0569ff4a76f223d2
+            codetracer-native-backend=1cbf62f46c5716d3e02a52cd61c9e9b82a52fa72
             codetracer-visual-replay=71f6b70ee6c3de47973645dae45e661de076eb7b
 
       - name: Allow direnv in the cloned recorder siblings
