@@ -90,6 +90,9 @@ OUTPUT_SEQUENCES = {
     # file -> the exact literals it may hold: screen OUTPUT, not keys.
     "src/frontend/tui/app/views/hyperlinks.nim": {"\\x1b[2J\\x1b[H"},
     "src/frontend/tui/host/ssh_tuning.nim": {"\\x1b[2J\\x1b[H"},
+    # The start-up width probe moves the cursor home before each probe text
+    # and clears the probe row after the last (CUP, EL): written, never read.
+    "src/frontend/tui/host/terminal_probe.nim": {"\\x1b[1;1H", "\\x1b[1;1H\\x1b[2K"},
 }
 DATA_BASES = ["cua_keymap.nim", "emacs_keymap.nim", "navigation_keymap.nim"]
 GENERATED_BASES = {
