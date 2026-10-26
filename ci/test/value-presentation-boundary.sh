@@ -72,7 +72,12 @@
 #       output crossed into the SCRATCHPAD (a migrated surface) through
 #       `viewmodel/views/isonim_calltrace_view.nim`. The gate reported ten
 #       checks and zero failures the whole time, because `calltrace.nim` was
-#       not in the list. It is now — but the BOUND is unchanged: this gate
+#       not in the list. It was added — and then the surface MOVED again:
+#       `730399e0e` reduced `ui/calltrace.nim` to a mount, and the chips' text
+#       is now rendered by `viewmodel/store/replay_data_store.nim`
+#       (`callArgTextOf`, `callReturnTextOf`), which is the entry below. A
+#       moved surface is re-pointed by hand, which is this bound restated.
+#       The BOUND is unchanged: this gate
 #       covers the eleven files below and no others, and adding a surface to
 #       this product means adding it here by hand.
 #
@@ -147,7 +152,7 @@ SURFACES=(
 	"src/frontend/viewmodel/headless_session.nim|the ONLY path by which the terminal, the headless app and the Embed SDK see a value"
 	"src/frontend/tui/app/views/tree_node.nim|the terminal's variables row"
 	"src/frontend/tui/app/formatters/type_formatters.nim|the terminal's style table and cell measure"
-	"src/frontend/ui/calltrace.nim|the call-trace row's argument chips, whose text is stored on the ViewModel and pushed into the scratchpad by 'Add value to scratchpad'"
+	"src/frontend/viewmodel/store/replay_data_store.nim|the call-trace row's argument and return chips, whose text the store renders (callArgTextOf, callReturnTextOf) and the shared Call Trace view shows and pushes into the scratchpad by 'Add value to scratchpad'"
 )
 SURFACE_COUNT=11
 
