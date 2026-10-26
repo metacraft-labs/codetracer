@@ -97,7 +97,6 @@ src/frontend/viewmodel/tests/unit/plat12-visualiser-mutation-control.sha256	src/
 src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	0127ba44e2831c235193b5613baebb0dbcfc004c86aae78bb1e95c413604f505	85316d3b5f35368740f69de6abfa95fbf5f8d7011ea9b997614ba0fa0a1643da
 src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	0127ba44e2831c235193b5613baebb0dbcfc004c86aae78bb1e95c413604f505	85316d3b5f35368740f69de6abfa95fbf5f8d7011ea9b997614ba0fa0a1643da
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	f387a878375d79d884481052f16aeb83098a733b2a2ae773b757e6c21746acd2	79cf7c3f46169497b9436fd56c53d5c3824c2703e22d9e2b7d3ec8b81e68c1e5
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	5c75b9e743b46d04357c9989e27da1f30b0528839fa67742ab05798e8a742231	79cf7c3f46169497b9436fd56c53d5c3824c2703e22d9e2b7d3ec8b81e68c1e5
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	8f97cb6d692b5ecf3531e8c3f7fbdfb5c5a0f42e58bc9bd96bbea840e4347d5e	6262d928851ec44c923ffff7ec925af1174bf93539a38f699dbccf1323807247
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/viewmodel/viewmodels/product_menu.nim	b57f435ae94a864eeeaf4f026cf926c095925500492ccfa89165a28eb47b1ba4	5b6d89417d6522709d402120158161fd738191bec28faab30e6a58ccdc0958c3
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/state_vm.nim	6683caead133305ce5aeb1e57eca82c76f49acd3ae2fce5b66b76df81ebae658	6262d928851ec44c923ffff7ec925af1174bf93539a38f699dbccf1323807247
@@ -199,8 +198,12 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/h
 # test-lane-files.sh line above was updated in place. The harness cannot be
 # re-graded until G1 and G2 are re-aimed: the wasm lane's rejection list has
 # ended with test_native_file_tree_operations since 59f7b4e9d, so neither
-# needle occurs.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	e04991e5e13399c9da1b379ad5268e96592b4198ac2ffabe1e92b10b00c4d687	b9f3753265388235b535f8194a29b8d362d14e6881aca3b4ce40b38c2fb78b54
+# needle occurs. They were re-aimed the same day; plat17-wasm was re-graded in
+# full at d877116b12 (18/18 killed) and plat18-marshalling at bc7e1f6a02 (16/16
+# killed; its subjects are unchanged since), both re-recorded, and their lines
+# deleted (codetracer-pm PLAT-17 and PLAT-18 "Mutation re-grade, 2026-10-26").
+# Before that landed, 04b4b85c94 moved ci/lib/test-lane-files.sh again, so
+# plat17-wasm's line for it is back, against the re-recorded digest.
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/vcs_vm.nim	5a760565ed767e36c539a776fa628a89fe81015cf8434883d30ffbebcdc6c9d3	5a9b4483d970165fafcbf3d367d77bac6ab832de5daf32c36fafdda31ff0a1f7
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/views/vcs_pane.nim	421d6253af14abfcf4c159080a96ede98656174728fc2a28361e154356edb0c7	e20f9faee9778af4d91af596a8e266443f27b8c10d05354eb2940e330e346d4a
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/host/vcs_source.nim	5ef0b95cbdda934c1f8dd6392a860b77e09830d2c7f26648025ecb2ddaf4dbd0	84b0838544676ec33f6ff1bd3c8032ae09a115b3a1da59261698ee28a00cb9eb
@@ -317,7 +320,6 @@ src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/gpui/main.nim	cae545d4131495757173a4bb8ba2894913e0342028c348f285a43105e664ef37	5158540f58d7bfec7e5209ee4fd35142bae898c581651844a91ad0280ae1378b
 src/frontend/tui/tests/plat70h-scrollbar-mutation-control.sha256	src/frontend/tui/app/runtime.nim	b82bbbcefe5491172c4b6aa320bbe689cd63c4402b65645eea29ddb63272be9c	27fc384c941b4a41760c2485fba3e4f770004315eda59c9fb82c040779f7e7d0
 src/frontend/tui/tests/plat71c-report-mutation-control.sha256	src/frontend/tui/app/runtime.nim	1fb3df770e31fb218fa24f79db4eeb761852c6b1273302ca7a3abf767e9aa216	27fc384c941b4a41760c2485fba3e4f770004315eda59c9fb82c040779f7e7d0
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	a109a846e7c2403f2ca295e0c69bc1390b672516f2d76595f8744564024fbce2	5e05b2877f89a16cb163ddc95715426d92f1d8f33b17d89fb7b875ecf4178598
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml	2caecc893a0ca3b2c8bb1533f5b198362e7f67693fa3c16b33fe966354160d77	96deffcb2a3ba35edc0a05f335a4bf50cefa3f4c8683f6d6d5926d86bc2a4717
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	justfile	aff8c896ad5206d9efea25c374b9b7265ca7e4ceadeb4ed3b1b957dda6074121	5e05b2877f89a16cb163ddc95715426d92f1d8f33b17d89fb7b875ecf4178598
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/gpui/main.nim	fbb5e8764aafe4716b21dda8289561e57680bf2a3bb70f42ec8b829b0d7a771f	5158540f58d7bfec7e5209ee4fd35142bae898c581651844a91ad0280ae1378b
@@ -351,6 +353,6 @@ ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	86d9fa9c89ec9fbe148c5b80e1db1d4ea223e97e67a8aeeade4b85d9af3534ce	06b8f16a53e9373118195203cf51834dc905541da1c20c1f726ac6be2526f4d2
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	9d62d21ccd8a303a17af5ec7ec9824fd41cacaf56b6cd6f3955613c1453a3821	06b8f16a53e9373118195203cf51834dc905541da1c20c1f726ac6be2526f4d2
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	86d9fa9c89ec9fbe148c5b80e1db1d4ea223e97e67a8aeeade4b85d9af3534ce	06b8f16a53e9373118195203cf51834dc905541da1c20c1f726ac6be2526f4d2
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	56d555829f2cd2841579d9ef616c806bb2d09c09f2ede1a3492f4fbd73d6ee0f	8e27f70d3b07eabcf52665e6ec3212417b824409306c068ae7760456bd28c0ad
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	13d1772c769eb62cc1cbac693faad89927ce30889d0de4badf3f0200ed337c75	8e27f70d3b07eabcf52665e6ec3212417b824409306c068ae7760456bd28c0ad
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	060ea23131c0e964a38a4be2ecb05af67230943a60c8cd941b5ff3f38bdf1e9f	8e27f70d3b07eabcf52665e6ec3212417b824409306c068ae7760456bd28c0ad
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	060ea23131c0e964a38a4be2ecb05af67230943a60c8cd941b5ff3f38bdf1e9f	8e27f70d3b07eabcf52665e6ec3212417b824409306c068ae7760456bd28c0ad

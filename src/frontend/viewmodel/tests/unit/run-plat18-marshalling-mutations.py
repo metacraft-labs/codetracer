@@ -26,8 +26,8 @@ host applies — because one is an instrument on the current build and the other
 is the slice's actual boundary. Verification-Harness-Traps.md §14's remedy for
 the case where there genuinely have to be two is a mechanical equality between
 them, so the probe renders the SAME panel over the SAME state through BOTH and
-requires the same total (8,278 bytes for MOUNT, 930,814 for EXPAND, measured
-2026-10-23). An arm that changes what either side charges for breaks the
+requires the same total (8,588 bytes for MOUNT, 1,031,671 for EXPAND, measured
+2026-10-26). An arm that changes what either side charges for breaks the
 equality; an arm that changes what BOTH charge for would not, which is why the
 arms below also reach the probe's own floors.
 
@@ -322,16 +322,26 @@ ARMS = [
         id="M8",
         path=PROBE,
         find="  if node.kind == mnkElement and node.attributes.hasKey(\"data-variable-name\") and\n     node.attributes.getOrDefault(\"class\", \"\").contains(\"value-expanded-name\"):\n",
-        replace="  if node.kind == mnkElement and node.attributes.hasKey(\"data-variable-name\"):\n",
+        # RE-AIMED 2026-10-26. The arm used to drop the class filter alone,
+        # which counted the origin badge as a second row while the badge
+        # carried `data-variable-name` too. `isonim_state_view` stopped
+        # putting that attribute on the badge (965b6d9727), so the filter
+        # alone had nothing left to exclude and the arm SURVIVED as an
+        # equivalent mutant. It now makes the counter match rows by a class
+        # PREFIX, the selector defect that still exists in this markup: every
+        # row also holds a `value-expanded-atom-parent` /
+        # `value-expanded-compound-parent` and a `value-expanded-text`, so it
+        # counts three elements per row (measured: 1806 where 602 are drawn).
+        replace="  if node.kind == mnkElement and\n     node.attributes.getOrDefault(\"class\", \"\").contains(\"value-expanded\"):\n",
         grader=G_PROBE,
         killer="(the row-count floor)",
         expect="verdict-fails",
-        why="THE ROW COUNTER COUNTS TWO ELEMENTS PER ROW. "
-            "`renderVariableRowImpl` puts `data-variable-name` on the row "
-            "container AND on the origin badge, so without the class filter "
-            "every figure here is published against a screen the probe "
-            "believes has twice as many rows as it has. The same defect was "
-            "found in the slice's DOM selector and fixed there",
+        why="THE ROW COUNTER COUNTS SEVERAL ELEMENTS PER ROW. A counter that "
+            "matches rows by the `value-expanded` class prefix also matches "
+            "each row's atom/compound parent and its value text, so every "
+            "figure here would be published against a screen the probe "
+            "believes has three times as many rows as it has. The same defect was found in the slice's DOM "
+            "selector and fixed there",
         control_name="the two conditions are hoisted into locals",
         control_find="  if node.kind == mnkElement and node.attributes.hasKey(\"data-variable-name\") and\n     node.attributes.getOrDefault(\"class\", \"\").contains(\"value-expanded-name\"):\n",
         control_replace="  let named = node.kind == mnkElement and node.attributes.hasKey(\"data-variable-name\")\n  let isRow = node.attributes.getOrDefault(\"class\", \"\").contains(\"value-expanded-name\")\n  if named and isRow:\n",
@@ -351,7 +361,7 @@ ARMS = [
         why="THE HANDLE STOPS CROSSING on element creation. §3's whole point "
             "about DOM nodes is that a WASM core holds an INDEX rather than a "
             "node, so the index is part of what every create costs — 4 bytes "
-            "× 9,000 creates on the expand alone",
+            "× 11,401 creates on the expand alone",
         control_name="the handle is written through a local",
         control_find="  op(boCreateElement):\n    wirePutU32(int(result))\n    wirePutStr(tag)\n",
         control_replace="  let handle = int(result)\n  op(boCreateElement):\n    wirePutU32(handle)\n    wirePutStr(tag)\n",
@@ -365,9 +375,9 @@ ARMS = [
         killer="(the wire/meter cross-check)",
         expect="verdict-fails",
         why="A TREE OPERATION LOSES ONE OF ITS TWO HANDLES. `AppendChild` is "
-            "the single commonest operation the pane issues — 13,200 appends on the "
+            "the single commonest operation the pane issues — 15,002 appends on the "
             "expand — so undercharging it by four bytes moves "
-            "the headline figure by 52,800 bytes while the stream still applies",
+            "the headline figure by 60,008 bytes while the stream still applies",
         control_name="the two handles are written from a tuple",
         control_find="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  op(boAppendChild):\n    wirePutU32(int(parent))\n    wirePutU32(int(child))\n",
         control_replace="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  let pair = (int(parent), int(child))\n  op(boAppendChild):\n    wirePutU32(pair[0])\n    wirePutU32(pair[1])\n",
@@ -586,26 +596,33 @@ ARMS = [
 # RE-COLLECTED 2026-10-23 for the table panes' cells: each state value now
 # carries its table-cell key (`data-ct-cell`, `isonim_state_view`), so the
 # wire sizes M1 - M7 quote moved by those bytes alone.
+# RE-COLLECTED 2026-10-26 at codetracer 3a7cb34368 with isonim at its pin
+# bc0a4edd: the variables pane changed again (one list of variables and
+# watches, keyboard-clickable rows), and an unmutated probe run measured
+# MOUNT 8278 -> 8588 and EXPAND 930814 -> 1031671 bytes, `payload_bytes`
+# 5922 -> 5948 and M5's sample figures 19/548 -> 18/510. M1-M7 were
+# re-collected from that tree and pasted verbatim; M9 quotes row counts and did
+# not move; M8 was re-aimed (see the arm) and re-collected.
 BECAUSE: dict = {
     # --- the probe's refusals: COUNTS, quoted verbatim ----------------------
     # Several arms are told apart by WHICH refusals fired together and by the
     # SIZE of the disagreement, so the clauses are ` && `-joined and the
     # numbers are kept. See `derived_because` for why that is the opposite of
     # §17a's usual rule here and why it is right.
-    'M1': 'decode returned 322 byte(s) of 0 && decode returned 3896 byte(s) of 0 && decode returned 497301 byte(s) of 0 && decode returned 5922 byte(s) of 0 && wire/meter disagree on EXPAND: meter 554698 byte(s), wire 1051999 && wire/meter disagree on MOUNT: meter 2752 byte(s), wire 8674',
-    'M2': 'frame size disagreed with frameBytesFor 166 time(s) && frame size disagreed with frameBytesFor 18 time(s) && frame size disagreed with frameBytesFor 22 time(s) && frame size disagreed with frameBytesFor 34221 time(s)',
+    'M1': 'decode returned 297 byte(s) of 0 && decode returned 3867 byte(s) of 0 && decode returned 484786 byte(s) of 0 && decode returned 5948 byte(s) of 0 && wire/meter disagree on EXPAND: meter 546885 byte(s), wire 1031671 && wire/meter disagree on MOUNT: meter 2640 byte(s), wire 8588',
+    'M2': 'frame size disagreed with frameBytesFor 161 time(s) && frame size disagreed with frameBytesFor 17 time(s) && frame size disagreed with frameBytesFor 20 time(s) && frame size disagreed with frameBytesFor 33620 time(s)',
     # M3 is M2's set PLUS the cross-check's, and that is what separates them:
     # M2 breaks the size predicate alone, M3 stops measuring the bytes at all.
-    'M3': 'frame size disagreed with frameBytesFor 166 time(s) && frame size disagreed with frameBytesFor 18 time(s) && frame size disagreed with frameBytesFor 22 time(s) && frame size disagreed with frameBytesFor 34221 time(s) && wire/meter disagree on EXPAND: meter 554698 byte(s), wire 1051999 && wire/meter disagree on MOUNT: meter 2752 byte(s), wire 8674',
-    'M4': 'decode returned 0 byte(s) of 322 && decode returned 0 byte(s) of 3896 && decode returned 0 byte(s) of 497301 && decode returned 0 byte(s) of 5922',
-    'M5': 'structural figures not stable across samples (19/548 vs 19/549)',
+    'M3': 'frame size disagreed with frameBytesFor 161 time(s) && frame size disagreed with frameBytesFor 17 time(s) && frame size disagreed with frameBytesFor 20 time(s) && frame size disagreed with frameBytesFor 33620 time(s) && wire/meter disagree on EXPAND: meter 546885 byte(s), wire 1031671 && wire/meter disagree on MOUNT: meter 2640 byte(s), wire 8588',
+    'M4': 'decode returned 0 byte(s) of 297 && decode returned 0 byte(s) of 3867 && decode returned 0 byte(s) of 484786 && decode returned 0 byte(s) of 5948',
+    'M5': 'structural figures not stable across samples (18/510 vs 18/511)',
     # M6 and M7 print the same SENTENCE and different totals: on the EXPAND
-    # each undercharges four bytes per operation, so 38,400 bytes is 9,600
-    # element creations and 52,800 is 13,200 appends (2026-10-23 figures).
-    'M6': 'wire/meter disagree on EXPAND: meter 1051999 byte(s), wire 1006395 && wire/meter disagree on MOUNT: meter 8674 byte(s), wire 8446',
-    'M7': 'wire/meter disagree on EXPAND: meter 1051999 byte(s), wire 991991 && wire/meter disagree on MOUNT: meter 8674 byte(s), wire 8370',
-    # M8 counts two elements per row; M9 wires no rows at all.
-    'M8': 'COLLAPSE drew 4 row(s), expected 2 && EXPAND drew 1204 row(s), expected 602 && MOUNT drew 4 row(s), expected 2 && STEP drew 1204 row(s), expected 602',
+    # each undercharges four bytes per operation, so 45,604 bytes is 11,401
+    # element creations and 60,008 is 15,002 appends (2026-10-26 figures).
+    'M6': 'wire/meter disagree on EXPAND: meter 1031671 byte(s), wire 986067 && wire/meter disagree on MOUNT: meter 8588 byte(s), wire 8368',
+    'M7': 'wire/meter disagree on EXPAND: meter 1031671 byte(s), wire 971663 && wire/meter disagree on MOUNT: meter 8588 byte(s), wire 8300',
+    # M8 counts three elements per row; M9 wires no rows at all.
+    'M8': 'COLLAPSE drew 6 row(s), expected 2 && EXPAND drew 1806 row(s), expected 602 && MOUNT drew 6 row(s), expected 2 && STEP drew 1806 row(s), expected 602',
     'M9': 'COLLAPSE drew 0 row(s), expected 2 && EXPAND drew 0 row(s), expected 602 && MOUNT drew 0 row(s), expected 2 && STEP drew 0 row(s), expected 602',
 
     # --- the slice's refusals ------------------------------------------------
