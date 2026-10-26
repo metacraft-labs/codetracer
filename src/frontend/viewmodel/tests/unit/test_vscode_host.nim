@@ -15,7 +15,7 @@
 ##
 ## JS only (`-d:nodejs`).
 
-import std/[asyncjs, json, jsffi, options]
+import std/[asyncjs, json, jsffi, options, strutils]
 
 import isonim/core/[owner, signals]
 
@@ -24,7 +24,7 @@ import ../../session_vm
 import ../../store/[replay_data_store, types]
 import ../../sync/[mirror_session, transport, webview_transport]
 import ../../viewmodels/[calltrace_vm, filesystem_vm, flow_line_values,
-                         scratchpad_vm, state_vm]
+                         scratchpad_vm, state_vm, trace_log_vm]
 
 var checks = 0
 var failures = 0
@@ -55,6 +55,18 @@ proc recordingRequest(log: cstring): JsObject {.importjs: """
     };
   })(#)""".}
   ## A `customRequest` that records every request in `globalThis[log]`.
+
+proc refusingRequest(log: cstring; refused: cstring): JsObject {.importjs: """
+  (function (name, refused) {
+    globalThis[name] = [];
+    return function (command, args) {
+      globalThis[name].push({ command: command, args: args });
+      return command === refused
+        ? Promise.reject(new Error('refused')) : Promise.resolve({});
+    };
+  })(#, #)""".}
+  ## A `customRequest` that records every request and REJECTS `refused`, as
+  ## VS Code does when the adapter answers it with an error response.
 
 proc requested(log: cstring; command: cstring): bool {.importjs:
   "(globalThis[#] || []).some(function (r) { return r.command === #; })".}
@@ -164,6 +176,17 @@ proc main() {.async.} =
   ck await eventually(proc(): bool =
     host.sessionView("s1").store.pointList.tracepointHits.val.len == 1),
     "the sweep's hit is the session's"
+  ck await eventually(proc(): bool =
+    host.sessionView("s1").traceLogVM.entries.val.len == 1 and
+      host.sessionView("s1").traceLogVM.entries.val[0].rrTicks == 15),
+    "the sweep's hit is a Trace Log row: the panel the extension opens for it"
+  ck await eventually(proc(): bool =
+    mirror.session.traceLogVM.entries.val.len == 1 and
+      mirror.session.traceLogVM.entries.val[0].line == 5),
+    "and the Trace Log panel shows it"
+  ck host.sessionView("s1").store.pointList.rows.val.len == 1 and
+    host.sessionView("s1").store.pointList.rows.val[0].resolution == "swept",
+    "a run the replay took is not reported as refused"
 
   # ---- a second debug session; VS Code's picker switches the panels to it
   host.openSession("s2", "/other", recordingRequest("s2Requests"))
@@ -183,6 +206,26 @@ proc main() {.async.} =
   ck await eventually(proc(): bool =
     mirror.session.store.debugger.val.rrTicks == 30),
     "switching back shows it where it is"
+
+  # ---- a tracepoint run the replay refuses is said on its row, and the
+  # ---- hits of the earlier sweep stay
+  host.openSession("s3", "/third",
+                   refusingRequest("s3Requests", "ct/run-tracepoints"))
+  host.deliverEvent("s3", completeMove(7, 2))
+  host.activate("s3")
+  let s3 = host.sessionView("s3")
+  s3.store.pointList.tracepointHits.val = @[TracepointSweepHit(
+    tracepointId: 9, rrTicks: 3, path: "/src/a.rs", line: 1)]
+  host.runTracepoint("/src/main.rs", 4, "y")
+  ck await eventually(proc(): bool =
+    s3.store.pointList.rows.val.len == 1 and
+      s3.store.pointList.rows.val[0].detail.startsWith(TracepointRunRefused)),
+    "a refused run says so on the tracepoint's row"
+  ck s3.store.pointList.tracepointHits.val.len == 1 and
+    s3.store.pointList.tracepointHits.val[0].rrTicks == 3,
+    "a refused run leaves the hits it did not answer"
+  host.closeSession("s3")
+  host.activate("s1")
 
   # ---- a debug session that ends is no longer hosted
   host.closeSession("s1")

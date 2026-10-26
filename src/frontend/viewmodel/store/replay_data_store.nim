@@ -2286,7 +2286,8 @@ proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
 
 proc applyTracepointResults*(store: ReplayDataStore;
                              specs: seq[TracepointSweepSpec];
-                             hits: seq[TracepointSweepHit]) =
+                             hits: seq[TracepointSweepHit];
+                             replaceHits = true) =
   ## Write ONE `ct/tracepoint-results` answer into the store.
   ##
   ## THE ONE PLACE A SWEEP BECOMES DATA, and it produces two things because the
@@ -2307,7 +2308,12 @@ proc applyTracepointResults*(store: ReplayDataStore;
   ## so replacing would delete them. A spec that matches an existing row
   ## annotates it in place, which is what lets a pane show a declared
   ## collection and the engine's verdict on it as one list.
-  store.pointList.tracepointHits.val = hits
+  ##
+  ## `replaceHits = false` annotates the rows only and keeps the hits the
+  ## last sweep answered: the caller's `hits` are not a sweep's answer but a
+  ## verdict on the run itself (a refused request, `entries/vscode_host`).
+  if replaceHits:
+    store.pointList.tracepointHits.val = hits
 
   var hitCounts: seq[int] = @[]
   var hitLines: seq[int] = @[]
