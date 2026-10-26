@@ -37,6 +37,8 @@ when defined(js):
   from std/jsffi import JsObject
   from ./list_scrubber_dom import attachListScrubber
   from ./table_fit_dom import attachEventLogFit
+  # Enter and Space on a `role="button"` row or header cell are its click.
+  import ./isonim_activation
 
 import ../store/types
 import ../viewmodels/event_log_vm
@@ -342,6 +344,11 @@ proc onRowClick(vm: EventLogVM; position: int): proc() =
 proc onToggleColumn(vm: EventLogVM; col: EventLogColumn): proc() =
   result = proc() = discard vm.toggleColumn(col)
 
+proc columnShownText(vm: EventLogVM; col: EventLogColumn): string =
+  ## The column menu's check is a toggle button: pressed while the column is
+  ## shown (https://www.w3.org/TR/wai-aria-1.2/#aria-pressed).
+  if vm.columns.val.isVisible(col): "true" else: "false"
+
 proc onMoveColumn(vm: EventLogVM; col: EventLogColumn; delta: int): proc() =
   result = proc() = discard vm.moveColumn(col, delta)
 
@@ -400,8 +407,10 @@ proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int): N =
        `data-max-rr-ticks` = $vm.rowAt(position).maxRRTicks,
        `data-source-generation` = $vm.rowAt(position).sourceGeneration,
        `data-source-digest` = vm.rowAt(position).sourceDigest,
+       role = "button", tabindex = "0",
        onclick = onRowClick(vm, position)):
       discard
+
   forEachKeyed[EventLogColumn, R, N](r, rowEl,
     proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,
     proc(col: proc(): EventLogColumn; index: proc(): int): N =
@@ -423,6 +432,7 @@ proc renderMarkerRow*[R, N](r: R; vm: EventLogVM;
       span(class = "marker-direction-icon"):
         text directionDisplayIcon(item().direction)
       span(class = "marker-boundary-chip",
+           role = "button", tabindex = "0",
            onclick = proc() = vm.jumpToCounterpartOf(item())):
         text markerBoundaryChip(item())
       span(class = "marker-show-value"):
@@ -612,13 +622,15 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
           tdiv(class = "data-tables-footer-rows-count"):
             text $vm.listTotal
 
-  # The header: a cell per shown column, in the ViewModel's order.
+  # The header: a cell per shown column, in the ViewModel's order. A cell
+  # orders the log by its column, so it is a control, as a row is.
   forEachKeyed[EventLogColumn, R, N](r, headerStrip,
     proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,
     proc(col: proc(): EventLogColumn; index: proc(): int): N =
       ui(r):
         span(class = columnClass(col()), `data-column` = $col(),
              style = columnWidthStyle(vm, col()),
+             role = "button", tabindex = "0",
              onclick = onHeaderClick(vm, col())):
           span(class = "eventLog-column-label"):
             text columnHeaderText(vm, col())
@@ -646,6 +658,8 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
       ui(r):
         tdiv(class = EventLogColumnOptionClass, `data-column` = $item()):
           span(class = columnCheckClass(vm, item()),
+               role = "button", tabindex = "0",
+               `aria-pressed` = columnShownText(vm, item()),
                onclick = onToggleColumn(vm, item())):
             text columnCheckGlyph(vm, item())
           span(class = "eventLog-column-title"):

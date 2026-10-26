@@ -1034,6 +1034,9 @@ test_lane_files() {
 		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
 		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
 		echo src/frontend/tests/low_level_code_markup_dom_test.nim
+		# `shared_rows_keyboard_dom_test.nim`: Enter and Space on a shared
+		# view's `role="button"` row are its click, in a real DOM.
+		echo src/frontend/tests/shared_rows_keyboard_dom_test.nim
 		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
 		# `diff`, through the Electron process facade, over real repositories
 		# with a stale stat cache, never rewrite the index or leave

@@ -29,6 +29,9 @@
 ## `N` is the browser's element.
 
 import std/[strformat, strutils]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -806,7 +809,7 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
-    tdiv(ref = rowNode, class = "vcs-accordion-file",
+    tdiv(role = "button", tabindex = "0", ref = rowNode, class = "vcs-accordion-file",
          onclick = proc() =
            callbacks.invokeSelectFile(rowIndex, rowPath, documentTarget,
                                       rowStatus))
@@ -851,7 +854,7 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
   ## ``renderCommitGraph``, ``renderVCSPanelImpl``, etc.
   var entryNode: typeof(r.createElement("div"))
   let entry = ui(r):
-    tdiv(ref = entryNode, class = "vcs-commit-entry")
+    tdiv(role = "button", tabindex = "0", ref = entryNode, class = "vcs-commit-entry")
 
   # Header: a flex row whose children are appended manually so that proc calls
   # returning nodes (renderGraphLanes, the body block) are properly added.
@@ -1004,7 +1007,7 @@ proc renderChangedFileRow[R](r: R; callbacks: VCSCallbacks;
   let rowTarget = "file:" & rowPath
   var diffBtn: typeof(r.createElement("span"))
   let row = ui(r):
-    tdiv(class = fileRowClass(file.selected),
+    tdiv(role = "button", tabindex = "0", class = fileRowClass(file.selected),
          onclick = proc() =
            callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus)):
       span(class = "vcs-file-status " & statusClass(file.status)):

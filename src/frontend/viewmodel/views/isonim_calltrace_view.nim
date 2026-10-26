@@ -42,6 +42,7 @@ when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
   import ../store/replay_data_store
+  import ./isonim_activation
   from ./context_menu_bridge import showContextMenu
   from ../../context_menu_item import ContextMenuItem
   import kdom except Location
@@ -392,6 +393,21 @@ when defined(js):
       handler: proc(ev: kdom.Event) =
         addCallArgToScratchpad(argName, argText)))
 
+  proc eventKeyName(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
+  proc eventRepeats(ev: isonim_dom.Event): bool {.importjs: "(#.repeat === true)".}
+
+  proc wireResultKeys(el: isonim_dom.Element; jump: proc()) =
+    ## A search result jumps on `mousedown`, not on a click, so the
+    ## document's Enter/Space-is-click (`isonim_activation`) would reach
+    ## nothing: its keys run the jump here.
+    isonim_dom.addEventListener(isonim_dom.Node(el), cstring"keydown",
+      proc(ev: isonim_dom.Event) =
+        if ev.eventRepeats() or not isActivationKey($ev.eventKeyName()):
+          return
+        ev.preventDefault()
+        ev.stopPropagation()
+        jump())
+
   proc wireSearchForm(form, input: isonim_dom.Element; vm: CalltraceVM) =
     ## Wire up search form submission and Enter-key handling on the
     ## input. The DSL's `onclick` handler shape is `proc()`, but here
@@ -604,9 +620,30 @@ proc renderCallArg[R, N](r: R; line: proc(): CallLine;
                id = "call-arg-text-" & $line().index & "-" & arg().name):
             text arg().text
 
+proc toggleRole(item: proc(): CallLine): string =
+  ## A call with children has a control that expands or collapses them; a
+  ## leaf's dot is a picture of having none, and is not a control.
+  if item().hasChildren: "button" else: "presentation"
+
+proc toggleTabIndex(item: proc(): CallLine): string =
+  if item().hasChildren: "0" else: "-1"
+
+proc toggleExpanded(item: proc(): CallLine): string =
+  ## `aria-expanded` of the toggle (https://www.w3.org/TR/wai-aria-1.2/#aria-expanded);
+  ## empty on a leaf, which removes the attribute.
+  let line = item()
+  if not line.hasChildren: ""
+  elif line.isExpanded: "true"
+  else: "false"
+
 proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
                               item: proc(): CallLine): N =
   ## One call-trace row (see the markup above).
+  ##
+  ## The call's text and its toggle are the row's two controls, and each is a
+  ## `role="button"` with a tab stop, and Enter or Space on it is its click
+  ## (`isonim_activation`): the call text selects the call and goes to it, the
+  ## toggle expands or collapses its children. A leaf's dot is neither.
   let h = rowHandlers(vm, item)
   var argsHost, callTextEl: N
   let row = ui(r):
@@ -627,11 +664,16 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
              `data-ct-cell` = callCellKey(item),
              `data-ct-full` = callFullText(vm, item),
              `data-ct-callee` = callDisplayName(item())):
-          span(class = "toggle-call", onclick = h.onToggle):
+          span(class = "toggle-call",
+               role = toggleRole(item), tabindex = toggleTabIndex(item),
+               `aria-expanded` = toggleExpanded(item),
+               `aria-label` = "Show or hide the calls it makes",
+               onclick = h.onToggle):
             tdiv(class = toggleClass(vm, item)):
               discard
           tdiv(ref = callTextEl,
                id = "local-call-text-" & $item().index, class = "call-text",
+               role = "button", tabindex = "0",
                onclick = h.onSelect, ondblclick = h.onDblClick):
             text callDisplayName(item()) & " #" & $item().index
           tdiv(class = "call-args", id = "call-args-false-" & $item().index):
@@ -750,10 +792,15 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM): N =
   indexEach[CalltraceSearchResult, R, N](r, resultsHost,
     proc(): seq[CalltraceSearchResult] = vm.backendSearchResults.val,
     proc(res: proc(): CalltraceSearchResult; index: int): N =
-      ui(r):
-        tdiv(class = "search-result",
+      var resultEl: N
+      result = ui(r):
+        tdiv(ref = resultEl, class = "search-result",
+             role = "button", tabindex = "0",
              onmousedown = searchResultJumpHandler(vm, index)):
-          text searchResultLabel(res()))
+          text searchResultLabel(res())
+      when defined(js):
+        when N is isonim_dom.Element:
+          wireResultKeys(resultEl, searchResultJumpHandler(vm, index)))
 
   when defined(js):
     when N is isonim_dom.Element:

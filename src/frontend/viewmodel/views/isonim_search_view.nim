@@ -16,6 +16,9 @@
 ##       span.search-selected-indicator        text + class reactive
 
 import std/options
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -93,7 +96,7 @@ proc renderSearchResultRow[R, N](r: R; vm: SearchVM;
   ## One result row. `indexEach` reuses it as the results change, so its
   ## text reads `entry()`.
   ui(r):
-    tdiv(class = searchResultClass(vm, index),
+    tdiv(role = "button", tabindex = "0", class = searchResultClass(vm, index),
          onclick = onResultClick(vm, index)):
       span(class = "search-result-label"):
         text entry().label

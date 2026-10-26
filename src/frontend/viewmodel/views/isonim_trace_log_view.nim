@@ -40,6 +40,9 @@
 ##   based on ``vm.isEmpty``.
 
 import isonim/core/[signals, computation]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
@@ -104,7 +107,7 @@ proc renderTraceLogRow[R, N](r: R; vm: TraceLogVM; entry: TraceLogEntry;
   ## can colour it independently.
   let lineStyle = rrTicksLineStyle(entry)
   ui(r):
-    tdiv(class = rowClass(selected),
+    tdiv(role = "button", tabindex = "0", class = rowClass(selected),
          onclick = onRowClick(vm, index)):
       tdiv(class = "trace-col-rr-ticks"):
         span(class = "event-rr-ticks-line",

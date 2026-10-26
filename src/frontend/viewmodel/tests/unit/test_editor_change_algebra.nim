@@ -117,7 +117,24 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1876
+const ExpectedAssertions = 1927
+  ## *1876 -> 1927 on 2026-10-26, measured on `c80549db8` plus the shared
+  ## rows' keyboard module: seventeen production modules x three assertions,
+  ## net. Ten had been added without moving the count before 1876 was set,
+  ## and `viewmodels/shared_pane_state.nim` (counted at 1858 -> 1861) has
+  ## since been deleted (codetracer-pm issues/2026-10-23-editor-change-
+  ## algebra-assertion-tally-misses-ten-new-viewmodel-modules.md):
+  ## `viewmodels/no_project_folder.nim`, `views/isonim_flow_inline_view.nim`,
+  ## `pane_viewport.nim`, `sync/webview_transport.nim`,
+  ## `viewmodels/action_sink.nim`, `viewmodels/flow_line_values.nim`,
+  ## `views/isonim_flow_value_view.nim`, `sdk/breakpoints.nim`,
+  ## `viewmodels/calltrace_navigation.nim` and `sdk/scrub_queue.nim`. Eight
+  ## more since: `codetracer_ui_components.nim`, `host/native_file_tree.nim`,
+  ## `viewmodels/scrollbar_interaction.nim`, `viewmodels/table_fit.nim`,
+  ## `views/table_fit_dom.nim`, `views/isonim_activation.nim`,
+  ## `host/native_test_host.nim` and `viewmodels/test_catalog_answer.nim`.
+  ## Each was read for the needles: none calls `rebase(` and none spells
+  ## `mapOver`.*
   ## *1867 -> 1876 on 2026-10-22: three table-overflow production modules —
   ## `viewmodels/table_overflow.nim`, `host/table_column_widths.nim` and
   ## `views/table_overflow_dom.nim` — x three assertions. None calls `rebase(`.*

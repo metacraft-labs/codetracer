@@ -42,6 +42,9 @@
 ##   renderer ops inside the effect handle the dynamic content).
 
 import std/strutils
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -203,7 +206,7 @@ proc renderResultRow[R, N](r: R; vm: CommandPaletteVM;
   let value = entry.value
   let rowIndex = index
   let row = ui(r):
-    tdiv(class = cls,
+    tdiv(role = "button", tabindex = "0", class = cls,
          onclick = proc() =
            vm.runResult(rowIndex)):
       span(class = "command-result-value ct-menu-item-label"):

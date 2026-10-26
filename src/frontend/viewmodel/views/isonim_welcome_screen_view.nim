@@ -17,6 +17,9 @@
 ## VM surface.
 
 import std/[options, os, sequtils, strutils, tables, times]
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 # `untrack` keeps the Start Debugger form's typing from rebuilding the whole
@@ -294,7 +297,7 @@ proc renderRecentTraceRow[R, N](r: R; vm: WelcomeScreenVM;
   let recordingId = trace.recordingId
   ui(r):
     tdiv(class = "recent-trace-container"):
-      tdiv(class = "recent-trace",
+      tdiv(role = "button", tabindex = "0", class = "recent-trace",
            onclick = traceClickHandler(vm, callbacks, recordingId),
            onmouseover = traceMouseOverHandler(vm, recordingId),
            onmouseleave = proc() = vm.clearHoveredTrace()):
@@ -373,7 +376,7 @@ proc renderWelcomeMode[R, N](r: R; vm: WelcomeScreenVM;
                     let folderCopy = folder
                     let path = folderCopy.path
                     tdiv(class = "recent-folder-container"):
-                      tdiv(class = "recent-folder",
+                      tdiv(role = "button", tabindex = "0", class = "recent-folder",
                            onclick = folderClickHandler(vm, callbacks, path)):
                         tdiv(class = "recent-folder-name"):
                           text folderCopy.name

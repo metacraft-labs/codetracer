@@ -38,6 +38,9 @@
 ## tests can assert on the text directly.
 
 import std/strutils
+when defined(js):
+  # Enter and Space on a `role="button"` row are its click.
+  import ./isonim_activation
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -146,7 +149,7 @@ proc renderPlainOutput[R, N](r: R; vm: BuildVM; outputContainer: N) =
       # NOT a closure over this copy -- see that proc for why.
       let lineCopy = line
       let lineNode = ui(r):
-        tdiv(class = lineClass(lineCopy),
+        tdiv(role = "button", tabindex = "0", class = lineClass(lineCopy),
              onclick = lineJumpHandler(vm, lineCopy)):
           text lineCopy.htmlText
       r.appendChild(outputContainer, lineNode)
