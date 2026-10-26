@@ -117,7 +117,13 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1930
+const ExpectedAssertions = 1945
+  ## *1930 -> 1945 on 2026-10-26: the Agent Activity pane's five production
+  ## modules (codetracer `6673057756`) — `host/agent_live_worker.nim`,
+  ## `host/agent_session_files.nim`, `host/native_agent_host.nim`,
+  ## `viewmodels/agent_activity_feed.nim` and
+  ## `viewmodels/agent_activity_text.nim` — x three assertions. None calls
+  ## `rebase(` or spells `mapOver`.*
   ## *1927 -> 1930 on 2026-10-26: `keymap/menu_accelerators.nim` (the macOS
   ## menu's chords from the key router) x three assertions. It calls no
   ## `rebase(` and spells no `mapOver`.*
