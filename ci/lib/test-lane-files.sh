@@ -1078,6 +1078,10 @@ test_lane_files() {
 		# `shared_rows_keyboard_dom_test.nim`: Enter and Space on a shared
 		# view's `role="button"` row are its click, in a real DOM.
 		echo src/frontend/tests/shared_rows_keyboard_dom_test.nim
+		# `row_links_dom_test.nim`: with a host's link builder (Shared-DOM-
+		# Front-Ends D10), a plain click on a shared row's link is the row's
+		# click and does not navigate; a modified click is the browser's.
+		echo src/frontend/tests/row_links_dom_test.nim
 		# `event_log_scroll_area_dom_test.nim`: the Event Log's scroll area is as
 		# tall as the whole log, in a real DOM, whatever the table's fit does.
 		echo src/frontend/tests/event_log_scroll_area_dom_test.nim
