@@ -19,7 +19,7 @@
 ##
 ## JS only (`-d:nodejs`).
 
-import std/[asyncjs, json, jsffi, options, strutils]
+import std/[asyncjs, importutils, json, jsffi, options, strutils]
 
 import isonim/core/[owner, signals]
 
@@ -29,6 +29,14 @@ import ../../store/[replay_data_store, types]
 import ../../sync/[mirror_session, transport, webview_transport]
 import ../../viewmodels/[calltrace_vm, filesystem_vm, flow_line_values,
                          scratchpad_vm, state_vm, trace_log_vm]
+import ../../sync/sync_host
+
+proc sessionView(host: VsCodeHost; id: string): SessionViewModel =
+  ## Debug session `id`'s ViewModels once it is hosted (its first stop); nil
+  ## before, and after it ended. The suite reads the host's private session
+  ## registry: the extension asks the host for actions, never for a session.
+  privateAccess(VsCodeHost)
+  host.sync.primary(id)
 
 var checks = 0
 var failures = 0

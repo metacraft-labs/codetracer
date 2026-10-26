@@ -260,11 +260,6 @@ proc revealFile*(host: VsCodeHost; path: string) =
   if not s.isNil and not s.fileTreeVM.isNil:
     s.fileTreeVM.expandToFile(path)
 
-proc sessionView*(host: VsCodeHost; id: string): SessionViewModel =
-  ## Debug session `id`'s ViewModels once it is hosted (its first stop);
-  ## nil before, and after it ended.
-  host.sync.primary(id)
-
 proc activeSession(host: VsCodeHost): SessionViewModel =
   host.sync.primary(host.active.val)
 

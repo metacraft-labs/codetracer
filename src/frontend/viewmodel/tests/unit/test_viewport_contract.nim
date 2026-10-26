@@ -29,6 +29,14 @@ import viewmodels/[calltrace_vm, event_log_vm, state_vm, step_list_vm,
 import session_vm
 import sdk/stop_loader
 
+proc testClockScheduler(clock: TestClock): ViewportScheduler =
+  ## Debounces on a `TestClock`: a report is applied when the test advances
+  ## the clock past `ViewportDebounceMs`.
+  ViewportScheduler(
+    schedule: proc(delayMs: float64; callback: proc()): int =
+      clock.schedule(callback, delayMs),
+    cancel: proc(id: int) = clock.cancel(id))
+
 proc drain() = drainPlatformCallbacks()
 
 proc storeWithMock(): tuple[store: ReplayDataStore; mock: MockBackendService] =
