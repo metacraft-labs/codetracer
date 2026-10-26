@@ -132,10 +132,12 @@ suite "the Menu ViewModel":
   test "type-to-select finds by prefix, and the same letter cycles":
     let vm = menuWith()
     vm.openFolder(3)               # View
+    # View's items starting with "s", in order: Scratchpad, Start Agent
+    # Worktree Session, Shell (the Variables pane's item is no longer "State").
     vm.typeToSelect("s", 1000)
-    ck vm.highlightedItem().label == "State"
-    vm.typeToSelect("s", 1100)
     ck vm.highlightedItem().label == "Scratchpad"
+    vm.typeToSelect("s", 1100)
+    ck vm.highlightedItem().label == "Start Agent Worktree Session"
     vm.typeToSelect("t", 5000)     # a pause: a new prefix, searched on
     ck vm.highlightedItem().label == "Theme"   # from the highlight
 
