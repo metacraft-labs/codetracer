@@ -64,6 +64,7 @@ import ./views/terminal_info
 import ./theme/terminal_report
 import ./views/test_results_pane
 import ./views/agent_activity_pane
+import ./views/problems_pane
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -416,6 +417,15 @@ type
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
+    dockKeys*: PaneKind
+    hasDockKeys*: bool
+      ## PLAT-55: the docked pane a left press last landed in while it was
+      ## shown (docked open, or revealed). The focus ring holds only the
+      ## arrangement's regions, so a docked pane never has the focus; this is
+      ## how a press on the docked Problems pane gives it the list keys (Build-
+      ## Output-Pane.md §3.3: arrow keys move, Enter jumps), as a click on the
+      ## desktop's docked panel does. Cleared by a press anywhere else, and
+      ## when a row opens the editor.
     scrollbars*: ScrollbarRuntime
       ## PLAT-70 Part H: the scrollbars' options, pointer, grab, paging and
       ## fades (§7).
@@ -2565,6 +2575,96 @@ proc pressTestsControl(rt: TuiRuntime; control: TestsPaneControl;
   else:
     rt.note(control.title)
 
+proc problemsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                               screen: ProblemsPaneScreen] =
+  ## PLAT-55: Problems below its strip, and where the painter put its parts —
+  ## the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneProblems)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintProblems(g, result.area, rt.app.problems)
+
+proc scrollProblems(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-55: the wheel over Problems scrolls its list.
+  let (_, screen) = rt.problemsPaneScreen()
+  rt.app.problems.scrollTop = clampProblemsTop(rt.app.problems.lines.len,
+    rt.app.problems.scrollTop + delta, screen.listRows)
+  outcome.repaint = true
+
+proc revealProblem*(rt: TuiRuntime; index: int) =
+  ## PLAT-55: keep diagnostic `index` (master) in Problems' view.
+  let (_, screen) = rt.problemsPaneScreen()
+  rt.app.problems.scrollTop = rt.app.problems.revealIndex(screen.listRows,
+                                                          index)
+
+proc problemsCommand(rt: TuiRuntime; kind: ProblemsCommandKind; index: int;
+                     outcome: var RuntimeOutcome) =
+  ## PLAT-55: ask the host (`problems_source`) — a selection, an open, a step,
+  ## a filter, the grouping — and say what it said. A step reveals the pane
+  ## (EMT-D22.4: navigation works with the pane hidden, and brings it up)
+  ## without focusing it; an open focuses the editor (EMT-D21).
+  outcome.repaint = true
+  if rt.app.problemsCommand.isNil:
+    rt.note("this window has no Problems pane host")
+    return
+  let said = rt.app.problemsCommand(kind, index)
+  if said.len > 0:
+    rt.note(said)
+  if kind in {pcmOpen, pcmNext, pcmPrevious}:
+    # The editor has the keyboard now (EMT-D21's table).
+    rt.hasDockKeys = false
+  if kind in {pcmNext, pcmPrevious} and rt.app.problems.selected >= 0:
+    let b = rt.app.layoutBinding
+    let at = if rt.layoutBindingEnabled(): b.layout.dockedIndex(paneProblems)
+             else: -1
+    if at >= 0:
+      # Docked (the shared default's footer): revealed unless it is shown
+      # open or already revealed.
+      if not b.layout.docked[at].open and
+         b.interaction.kind != ikRevealingDock:
+        discard b.beginRevealDock(paneProblems)
+    elif rt.layoutBindingEnabled() and b.layout.tree.contains(paneProblems):
+      let acted = b.dispatch(cmdActivateTab(paneProblems))
+      if acted.status == lasApplied:
+        rt.afterLayoutCommit()
+  if rt.app.problems.selected >= 0:
+    rt.revealProblem(rt.app.problems.selected)
+
+proc openWorkingFileAt*(rt: TuiRuntime; path: string; line, col: int): string =
+  ## PLAT-55 (K35): a working-tree file opened in Edit mode's editor — the
+  ## `:e` route (`editServices.readFile`, `EditSession.openFile`) — with the
+  ## caret at `line:col` (1-based; `col` <= 0 for none), kept in view, and
+  ## the editor focused. "" when it opened, else why not. `path` is
+  ## absolute; it must lie inside the project the services read.
+  let root = rt.app.projectRoot
+  var rel = path
+  if root.len > 0:
+    let prefix = if root.endsWith("/"): root else: root & "/"
+    if path.startsWith(prefix):
+      rel = path[prefix.len .. ^1]
+    elif path.startsWith("/"):
+      return path & " is outside the project (" & root & ")"
+  if rt.editServices.readFile.isNil:
+    return "this session cannot read " & rel
+  let opened = rt.editServices.readFile(rel)
+  if not opened.ok:
+    return opened.message
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
+  let rows = max(1, rt.sourcePaneRows())
+  discard rt.app.editSession.openFile(rel, opened.text, rows)
+  let buf = rt.app.editSession.activeBuffer()
+  if not buf.isNil:
+    buf.moveCaretTo(max(1, line) - 1, max(1, col) - 1)
+    buf.followCaret(rows)
+  rt.app.fileTree.openPath = rel
+  discard rt.focus.focusPaneKind(paneEditor)
+  ""
+
 # ---------------------------------------------------------------------------
 # M71 (#838): the panes whose whole content is in hand — State, Files, VCS —
 # keep an ORDINARY scrollbar (Scrollbar-Scrubbers.md §2), drawn by their
@@ -3074,6 +3174,8 @@ proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
       rt.app.tests.scrollTop = top
     of paneAgentActivity:
       rt.scrollAgentTo(top)
+    of paneProblems:
+      rt.app.problems.scrollTop = top
     of paneEditor:
       rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top + 1), outcome)
     of InHandPanes:
@@ -3748,6 +3850,31 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
       return true
     of stFile, stNone:
       return false
+  of paneProblems:
+    # PLAT-55 (K35): a diagnostic opens its file at its line and is selected
+    # (the cursor `next error` continues from); a filter button or Group by
+    # File acts on the list; the scrollbar is the scrollbars'
+    # (`routeScrollbars`). The desktop opens no menu on a row, so a right
+    # press does nothing here.
+    if event.button != mbLeft or not rt.app.problems.loaded:
+      return false
+    let (area, screen) = rt.problemsPaneScreen()
+    let t = rt.app.problems.problemsTargetAt(screen, area, event.row,
+                                             event.col)
+    case t.kind
+    of pbRow:
+      rt.problemsCommand(pcmOpen, t.index, outcome)
+      return true
+    of pbFilter:
+      rt.problemsCommand(pcmFilter, t.index, outcome)
+      return true
+    of pbGroup:
+      rt.problemsCommand(pcmGroup, -1, outcome)
+      return true
+    of pbTrack:
+      return true
+    of pbHeader, pbText, pbNone:
+      return false
   of paneTestResults:
     # PLAT-53: the ▶ runs the suite; a row's `⟳` records it again and `⏵`
     # opens its recording in a new tab; a press elsewhere on a row (or its
@@ -3996,6 +4123,18 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   if had:
     binding.focus = focused
   let geometry = rt.layoutGeometry()
+  # PLAT-55: a left press on a shown docked pane gives it the list keys.
+  if event.kind == mekPress and event.button == mbLeft:
+    let r = event.row
+    let c = event.col
+    if geometry.revealing and geometry.reveal.contains(r, c):
+      rt.dockKeys = geometry.revealPane
+      rt.hasDockKeys = true
+    elif not geometry.openDock.isEmptyArea and geometry.openDock.contains(r, c):
+      rt.dockKeys = geometry.openDockPane
+      rt.hasDockKeys = true
+    else:
+      rt.hasDockKeys = false
   let before = binding.interaction.kind
   let acted = binding.onMouse(geometry, event)
   # PLAT-49 part B: a click on a label docked its pane open (or closed it)
@@ -4090,6 +4229,12 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
     let at = geometry.paneAt(event.row, event.col)
     if at.found and at.region.pane == paneSearch and rt.app.search.loaded:
       rt.scrollSearch(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-55: the wheel scrolls Problems' list.
+    if at.found and at.region.pane == paneProblems and rt.app.problems.loaded:
+      rt.scrollProblems(
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
@@ -5819,6 +5964,12 @@ proc scopePath*(rt: TuiRuntime): ScopePath =
     return rt.focus.scopePathOf([element(ekOverlay, "command-line"),
                                  element(ekInput, "prompt")],
                                 atWindow = true)
+  # PLAT-55: a docked Problems pane a press gave the keys (`dockKeys`) is the
+  # scope the keys resolve in — a list pane, so the shared list table.
+  if rt.hasDockKeys and rt.dockKeys == paneProblems and not rt.prompt.open and
+     rt.paneAreaOf(paneProblems).width > 0:
+    return rt.focus.scopePathOf([element(ekPane, $paneProblems)],
+                                atWindow = true)
   var inner: seq[ScopeElement] = @[]
   if rt.editorFocused:
     let id = rt.editorElementId()
@@ -6181,6 +6332,44 @@ proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
     true
   else: false
 
+proc runProblemsKeyOperation(rt: TuiRuntime; operation: string;
+                             outcome: var RuntimeOutcome): bool =
+  ## PLAT-55 FROM THE KEYBOARD, while Problems has the focus (Build-Output-
+  ## Pane.md §3.3: "Arrow key navigation with Enter to jump"): Up / Down (and
+  ## the modal bases' `j` / `k`), Home / End and the pages move the selected
+  ## diagnostic; Enter opens it. Answers whether `operation` was the pane's.
+  let order = rt.app.problems.listedIndices()
+  let n = order.len
+  let at = order.find(rt.app.problems.selected)
+  case operation
+  of "list.focus-next", "list.focus-previous", "editor.scroll-line-down",
+     "editor.scroll-line-up", "list.focus-first", "list.focus-last",
+     "list.focus-page-down", "list.focus-page-up":
+    outcome.repaint = true
+    if n == 0:
+      rt.note("the Problems pane lists no problem")
+      return true
+    let page = max(1, rt.paneBodyRows(paneProblems) - 2)
+    let next =
+      case operation
+      of "list.focus-first": 0
+      of "list.focus-last": n - 1
+      of "list.focus-page-down": (if at < 0: 0 else: at + page)
+      of "list.focus-page-up": (if at < 0: 0 else: at - page)
+      of "list.focus-next", "editor.scroll-line-down":
+        (if at < 0: 0 else: at + 1)
+      else: (if at < 0: n - 1 else: at - 1)
+    rt.problemsCommand(pcmSelect, order[clamp(next, 0, n - 1)], outcome)
+    true
+  of "list.activate":
+    if at < 0:
+      rt.note("no problem of the Problems pane is selected")
+      outcome.repaint = true
+      return true
+    rt.problemsCommand(pcmOpen, order[at], outcome)
+    true
+  else: false
+
 proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
                   outcome: var RuntimeOutcome) =
   ## **THE TERMINAL'S DISPATCH** of a resolved operation onto its ViewModels:
@@ -6255,6 +6444,15 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     if had and focused == paneTestResults and rt.app.tests.loaded and
        rt.runTestsKeyOperation(res.operation, outcome):
       return
+    if had and focused == paneProblems and rt.app.problems.loaded and
+       rt.runProblemsKeyOperation(res.operation, outcome):
+      return
+  # PLAT-55: the docked Problems pane, pressed while shown, takes the list
+  # keys too (`dockKeys`).
+  if not rt.prompt.open and rt.hasDockKeys and rt.dockKeys == paneProblems and
+     rt.app.problems.loaded and rt.paneAreaOf(paneProblems).width > 0 and
+     rt.runProblemsKeyOperation(res.operation, outcome):
+    return
   if res.operation.startsWith("input.") and rt.prompt.open:
     case res.operation
     of "input.copy", "input.cut":
@@ -6359,6 +6557,12 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
     # without, the pane and its field (`Ctrl+Shift+F`).
     if res.argument.len > 0: rt.runFindInFiles(res.argument, outcome)
     else: rt.openFindInFiles(outcome)
+    return
+  of "problems.next", "problems.previous":
+    # PLAT-55 (EMT-D22): `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
+    # `Ctrl+Alt+P` — the desktop's `aGotoNextError` / `aGotoPreviousError`.
+    rt.problemsCommand((if res.operation == "problems.next": pcmNext
+                        else: pcmPrevious), -1, outcome)
     return
   of "search.next-result", "search.previous-result":
     # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.

@@ -152,6 +152,7 @@ proc startBuild*(kind: BuildKind; command: string; workingDir: string;
   ## screen the front-end owns — visibly, and in a way no repaint can undo
   ## because the front-end does not know it happened.
   let s = newBuildSession(kind, command, nowMs, deadlineMs)
+  s.workingDir = workingDir
   let (exe, args) = shellCommandFor(kind, command)
   var p: Process
   try:

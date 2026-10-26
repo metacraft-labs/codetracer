@@ -152,7 +152,9 @@ suite "Mode-Transitions §4/§6: a bound runtime swaps the binding's arrangement
     ck rt.drawn() == rt.hit()
     ck paneBuildOutput in rt.drawn()
     ck paneCalltrace notin rt.drawn()
-    ck rt.drawnDocked() == 0          # no Debug footer in Edit mode
+    # Edit mode's footer: the desktop's, less the BUILD pane its tree places
+    # (PLAT-55) — PROBLEMS, FIND IN FILES, REQUESTS.
+    ck rt.drawnDocked() == 3
     ck rt.clickTab("VCS")
     ck paneVcs in rt.drawn()
     ck paneFileTree notin rt.drawn()

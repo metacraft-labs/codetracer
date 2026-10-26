@@ -155,6 +155,13 @@ import ../viewmodel/viewmodels/[point_list_vm, scratchpad_vm, state_vm,
 import ./terminal_output_leaf
 import ./search_results_leaf   # PLAT-57: Find in Files, drawn natively
 import ./test_results_leaf     # PLAT-53: Test Results, drawn natively
+import ./problems_leaf         # PLAT-55: Problems, drawn natively
+# PLAT-55: the window's builds (`:build`, the terminal's runner) and the
+# shared reader that fills its Problems pane — PLAT-56's Build Output reads
+# the same `BuildSession`.
+import ../tui/app/build_session
+import ../tui/host/build_runner
+import ../tui/host/build_problems
 import ../viewmodel/host/native_test_host   # PLAT-53: the desktop's host, native producers
 import ./agent_activity_leaf   # PLAT-54: Agent Activity, drawn natively
 import ../viewmodel/host/native_agent_host   # PLAT-54: its host
@@ -256,6 +263,13 @@ OPTIONS:
                       tests:row:<test>  tests:refresh:<test>
                       tests:open:<test>[:shift]  tests:key:<operation>
                       tests:kill  tests:wheel:<rows>
+                    and (PLAT-55) Problems (`problems:wait` lets the build
+                    settle):
+                      problems:show  problems:build:<command>
+                      problems:wait[:<ms>]  problems:row:<index>
+                      problems:filter:<all|errors|warnings>
+                      problems:group  problems:next  problems:previous
+                      problems:key:<operation>  problems:wheel:<rows>
                     and (PLAT-69) what an open window's renderer reports:
                       resize:<width>:<height> (the content area resized)
                       chrome:<spec> (its frame changed; `--window-chrome`'s
@@ -632,6 +646,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
                        "tests",
                        # PLAT-54: Agent Activity's rows and buttons.
                        "agent",
+                       # PLAT-55: Problems' rows, buttons and builds.
+                       "problems",
                        # PLAT-69: the window resized, its frame changed.
                        "resize", "chrome"]:
           return GpuiCommand(kind: gckUsageError,
@@ -1089,6 +1105,8 @@ proc drawTestsPane(r: GpuiRenderer)
   ## PLAT-53: forward-declared; defined beside Find in Files' drawing.
 proc drawAgentPane(r: GpuiRenderer)
   ## PLAT-54: forward-declared; defined beside Find in Files' drawing.
+proc drawProblemsPane(r: GpuiRenderer)
+  ## PLAT-55: forward-declared; defined beside Test Results' drawing.
   ## PLAT-57: forward-declared; defined beside the Terminal Output pane's.
   ## PLAT-52: the Terminal Output pane, drawn natively (defined with its
   ## clicks, before `windowPointer`).
@@ -1229,6 +1247,19 @@ var
   gTestsRoot = ""
     ## PLAT-53: the window's project (§8.2) — its working directory for a
     ## replay, the project of the Edit window, a folder tab's folder.
+  gProblems: BuildProblems = nil
+    ## PLAT-55: the WINDOW's Problems ViewModel and the reader that fills it
+    ## from the window's builds (`tui/host/build_problems`), shared by every
+    ## tab: a build is of the working tree.
+  gProblemsPane = initGProblemsPane()
+    ## PLAT-55: the Problems pane's reading position and a held scrubber.
+  gBuild: RunningBuild = nil
+    ## PLAT-55: the window's `:build` in flight, or the last one (the
+    ## terminal's runner, `tui/host/build_runner`).
+  gBuildRoot = ""
+    ## PLAT-55: where a `:build` runs — the window's project, as for the
+    ## terminal's `:build` (the Edit window's folder, a folder tab's, a
+    ## replay's working directory).
     ## PLAT-57: Find in Files' reading position and a held scrubber thumb.
   gSessionsOpened = initTable[int, HeadlessDebugSession]()
     ## PLAT-49 part B: every session this window holds, by its tab's id —
@@ -2130,6 +2161,8 @@ proc drawArrangement(r: GpuiRenderer): bool =
   drawTestsPane(r)
   # PLAT-54: and Agent Activity from its own.
   drawAgentPane(r)
+  # PLAT-55: and Problems from its own.
+  drawProblemsPane(r)
   # PLAT-51: and the list panes' scrubbers from theirs.
   drawListScrubbers(r)
   # V6: the VCS history follows the body it was laid out with — once the
@@ -2858,6 +2891,31 @@ proc testsBody(): PxRect =
     return PxRect()
   n.body
 
+proc problemsBody(): PxRect =
+  ## PLAT-55: Problems' body in window pixels — revealed, docked open, or the
+  ## visible tab of a box — or a zero rectangle.
+  if gGestures.revealing and gGestures.reveal.pane == paneProblems:
+    return dockedBodyOf(gGeom.revealRectOf(gGestures.reveal.edge))
+  if not gGeom.openDock.isEmpty and gGeom.openDockPane == $paneProblems:
+    return dockedBodyOf(gGeom.openDock)
+  let i = gGeom.tabsNodeOfPane($paneProblems)
+  if i < 0:
+    return PxRect()
+  let n = gGeom.nodes[i]
+  if n.panes.len > 0 and n.active >= 0 and n.active < n.panes.len and
+     n.panes[n.active] != $paneProblems:
+    return PxRect()
+  n.body
+
+proc drawProblemsPane(r: GpuiRenderer) =
+  ## PLAT-55: draw Problems from the window's ViewModel, natively, replacing
+  ## whatever the leaf held.
+  let pane = gPanes.getOrDefault($paneProblems)
+  if pane.isNil or gProblems.isNil:
+    return
+  if drawProblems(r, pane, gProblems.vm, gProblemsPane, problemsBody()):
+    applyTextFaces(r, pane)
+
 proc drawTestsPane(r: GpuiRenderer) =
   ## PLAT-53: draw Test Results from the window's ViewModel, natively,
   ## replacing whatever the leaf held.
@@ -2942,6 +3000,8 @@ proc pressTests(r: GpuiRenderer; x, y: int): bool
   ## PLAT-53: forward-declared; defined beside the Test Results host.
 proc pressAgent(r: GpuiRenderer; x, y: int): bool
 proc runAgentPrompt(r: GpuiRenderer; text: string)
+proc pressProblems(r: GpuiRenderer; x, y: int): bool
+  ## PLAT-55: forward-declared; defined beside the Problems host.
 proc runGpuiFindInFiles(r: GpuiRenderer; pattern: string)
 proc openFindInFiles(r: GpuiRenderer)
 proc stepSearchResult(r: GpuiRenderer; delta: int)
@@ -3399,6 +3459,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
     # pane under a revealed one must not take the press.
     if pressSearch(r, x, y):
       return
+    # PLAT-55: Problems' presses (a row opens its file at its line, a
+    # filter, Group by File, the scrubber). A row's open focuses the editor
+    # (EMT-D21), so the pane takes the focus only for the others.
+    if pressProblems(r, x, y):
+      return
     # PLAT-53: Test Results' presses (its ▶, a row's `⟳` / `⏵`, a row).
     if pressTests(r, x, y):
       gFocusShown = true
@@ -3480,6 +3545,12 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       if not vm.isNil:
         gSearch.scrubSearch(vm, searchBody(), y, dragging = true)
         drawSearchPane(r)
+      return
+    if gProblemsPane.dragging:
+      if not gProblems.isNil:
+        gProblemsPane.scrubProblems(gProblems.vm, problemsBody(), y,
+                                    dragging = true)
+        drawProblemsPane(r)
       return
     if gTests.dragging:
       if not gTestsVM.isNil:
@@ -3563,6 +3634,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
         gSearch.scrollBy(vm, search, (if rows == 0: (if dy < 0: 1 else: -1)
                                       else: rows))
         drawSearchPane(r)
+      return
+    # PLAT-55: and Problems' list.
+    let problemsRect = problemsBody()
+    if problemsRect.w > 0 and problemsRect.contains(x, y) and dy != 0.0 and
+       not gProblems.isNil:
+      let rows = int(round(-dy / float(ProblemsRowPx)))
+      gProblemsPane.scrollBy(gProblems.vm, problemsRect,
+                             (if rows == 0: (if dy < 0: 1 else: -1) else: rows))
+      drawProblemsPane(r)
       return
     # PLAT-53: and Test Results' list.
     let tests = testsBody()
@@ -5079,6 +5159,7 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   drawTerminalPane(r)
   drawSearchPane(r)
   drawTestsPane(r)
+  drawProblemsPane(r)
   drawListScrubbers(r)
   gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                    gSession.session.store, gMenu,
@@ -5090,6 +5171,8 @@ proc attachVcs(leafSet: var GpuiLeafSet; directory: string)
   ## Forward-declared for `showSession`; defined beside the ticks.
 proc attachTests(leafSet: var GpuiLeafSet)
   ## PLAT-53: forward-declared for `showSession`; defined beside the ticks.
+proc attachProblems(leafSet: var GpuiLeafSet)
+  ## PLAT-55: forward-declared for `showSession`; defined beside the ticks.
 
 proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   ## PLAT-49 part B: the window shows the session behind tab `id` — its
@@ -5107,6 +5190,7 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   var leafSet = gShell.leavesFor(gWindow)
   attachVcs(leafSet, getCurrentDir())
   attachTests(leafSet)
+  attachProblems(leafSet)
   gLeafSet = leafSet
   traceGesture("session shown " & $id & " " & gSession.tracePath)
   # PLAT-69: the window is called after the recording it shows.
@@ -5474,7 +5558,7 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   if gEditShell.isNil:
     gEditShell = newGpuiShell(gMainShell.viewport)
     discard gEditShell.openWindow(WindowId(0),
-                                  initLayout(sharedEditLayout().tree))
+                                  initLayout(sharedEditLayout().tree, sharedEditLayout().docked))
   gWelcomeTabs.active = index
   gShell = gEditShell
   gWindow = WindowId(0)
@@ -5484,6 +5568,9 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
   # PLAT-53: the window's project is the folder now (§8.2).
   gTestsRoot = tab.folder
   attachTests(leafSet)
+  # PLAT-55: a `:build` runs in the folder now.
+  gBuildRoot = tab.folder
+  attachProblems(leafSet)
   gLeafSet = leafSet
   openArm = arm
   if editViewportRows <= 0:
@@ -6098,6 +6185,11 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
 proc runWatchCommand(r: GpuiRenderer; query: string): bool
   ## PLAT-51: forward-declared; defined beside the value history.
 
+proc startGpuiBuild(r: GpuiRenderer; command: string): string
+  ## PLAT-55: forward-declared; defined with the Problems pane's host.
+proc cancelGpuiBuild(): string
+  ## PLAT-55: forward-declared; defined with the Problems pane's host.
+
 proc acceptOmnibar(r: GpuiRenderer) =
   # PLAT-51: a watch verb.
   if runWatchCommand(r, gOmnibar.query):
@@ -6138,6 +6230,15 @@ proc acceptOmnibar(r: GpuiRenderer) =
       traceGesture("event log column " & $parsed.column & " " &
                    $vm.columns.val.widths[parsed.column] & " cells")
       redrawListPane(r, paneEventLog)
+    return
+  # PLAT-55: `:build <command>` and `:cancel` — the terminal's verbs, its
+  # runner; the build's diagnostics fill the Problems pane.
+  if mode == omCommand and (needle == "build" or needle.startsWith("build ") or
+                            needle == "cancel"):
+    gOmnibar.close()
+    drawTopBar(r)
+    traceGesture(if needle == "cancel": cancelGpuiBuild()
+                 else: startGpuiBuild(r, needle[min(needle.len, 6) .. ^1].strip()))
     return
   if mode == omCommand and needle in ["cnext", "cn", "cprev", "cp"]:
     gOmnibar.close()
@@ -6475,7 +6576,9 @@ proc armHoverTick() =
   if due < 0 and ((not gRecordJob.isNil and not gRecordJob.done) or
                   (not gTestJob.isNil and not gTestJob.done) or
                   # PLAT-53: a Test Results run, polled on the same tick.
-                  gTestsHost.running):
+                  gTestsHost.running or
+                  # PLAT-55: a `:build`, polled on the same tick.
+                  (not gBuild.isNil and gBuild.session.verdict == bvRunning)):
     gArmedTick = (due: -3'i64, vcs: false)
     gpui_set_tick(uint32(RecordPollMs), recordTick)
     return
@@ -6986,6 +7089,255 @@ proc testsKey(r: GpuiRenderer; operation: string): bool =
   drawTestsPane(r)
   true
 
+# ---------------------------------------------------------------------------
+# PLAT-55: the Problems pane's host (Build-Output-Pane.md §3.3) and `:build`
+# ---------------------------------------------------------------------------
+
+proc wireProblemsJump(r: GpuiRenderer)
+
+proc installProblems(root: string) =
+  ## The window's Problems ViewModel and its build reader; `:build` runs in
+  ## `root`.
+  if not gProblems.isNil:
+    return
+  gBuildRoot = root
+  gProblems = newBuildProblems()
+  var rr: GpuiRenderer
+  wireProblemsJump(rr)
+
+proc attachProblems(leafSet: var GpuiLeafSet) =
+  ## Hand the Problems leaf, when the arrangement places one (the shared
+  ## default docks it in the footer), the window's ViewModel — the headless
+  ## replay session owns none (`headless_app.paneViewModel`).
+  if gProblems.isNil:
+    return
+  for leaf in leafSet.leaves.mitems:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneProblems:
+      leaf.vm = ViewModel(gProblems.vm)
+
+proc pollGpuiBuild(r: GpuiRenderer): bool =
+  ## PLAT-55: the `:build` in flight advanced — its output read into the
+  ## Problems pane as it arrives; its verdict, when it ends, on the trace.
+  if gBuild.isNil or gProblems.isNil:
+    return false
+  let wasRunning = gBuild.session.verdict == bvRunning
+  discard pollBuild(gBuild, nowMonoMs())
+  let changed = gProblems.follow(gBuild.session)
+  if wasRunning and gBuild.session.verdict != bvRunning:
+    traceGesture(describeVerdict(gBuild.session))
+    traceGesture("problems: " & gProblems.vm.errorBadgeText & " " &
+                 gProblems.vm.warningBadgeText & " " &
+                 gProblems.vm.totalBadgeText)
+  if changed:
+    drawProblemsPane(r)
+  changed
+
+proc startGpuiBuild(r: GpuiRenderer; command: string): string =
+  ## `:build <command>` — the terminal's verb (CodeTracer-TUI-Edit-Mode.md
+  ## §5), its runner and its words: one build at a time, in the window's
+  ## project, in the background.
+  if command.len == 0:
+    return ":build needs a command, e.g. ':build just build'"
+  if gProblems.isNil:
+    installProblems(getCurrentDir())
+  if not gBuild.isNil and gBuild.session.verdict == bvRunning:
+    return "a " & $gBuild.session.kind & " is already running; :cancel it first"
+  let root = if gBuildRoot.len > 0: gBuildRoot else: getCurrentDir()
+  gBuild = startBuild(bkBuild, command, root, nowMonoMs())
+  discard gProblems.follow(gBuild.session)
+  drawProblemsPane(r)
+  armRecordTick()
+  if gBuild.session.verdict == bvRunning: "build started: " & command
+  else: describeVerdict(gBuild.session)
+
+proc cancelGpuiBuild(): string =
+  ## `:cancel` — the flag the runner's poll acts on (`requestCancel`).
+  if gBuild.isNil or gBuild.session.verdict != bvRunning:
+    return "nothing is running"
+  gBuild.session.requestCancel()
+  "cancelling " & $gBuild.session.kind & " …"
+
+proc stopGpuiBuild() =
+  ## The window ends: a build still going is cancelled and polled until its
+  ## process is gone.
+  if gBuild.isNil or gBuild.session.verdict != bvRunning:
+    return
+  gBuild.session.requestCancel()
+  let deadline = epochTime() + 5.0
+  while gBuild.session.verdict == bvRunning and epochTime() < deadline:
+    discard pollBuild(gBuild, nowMonoMs())
+    sleep(20)
+
+proc showViewedFile(r: GpuiRenderer; atLine = 1; topLine = 0)
+  ## PLAT-55: forward-declared; defined with the replay editor.
+proc placeCaret(r: GpuiRenderer; path: string; line, column: int)
+  ## PLAT-55: forward-declared; defined with Find in Files.
+
+proc openProblemFile(r: GpuiRenderer; path: string; line, col: int): string =
+  ## K35: the file of a diagnostic opened at its line — in the Edit window's
+  ## editor (its own edit arm, the caret placed and kept in view, the editor
+  ## focused: EMT-D21), or in a replay window from the recording, as a Find
+  ## in Files result is. "" when it opened, else why not.
+  if not openArm.isNil:
+    if not openEditFile(path):
+      return if openArm.status.len > 0: openArm.status
+             else: "could not open " & path
+    openArm.doc.moveCaretTo(max(1, line) - 1, max(1, col) - 1)
+    openArm.viewportTop = followedViewportTop(openArm.viewportTop,
+                                              caretLine(openArm.doc),
+                                              max(1, openArm.viewportRows))
+    redrawEditor()
+    focusEditKeys()
+    # `caretLine` is 1-based, `caretColumn` 0-based (`editing_core`).
+    traceGesture("caret " & $caretLine(openArm.doc) & ":" &
+                 $(caretColumn(openArm.doc) + 1))
+    return ""
+  gViewedFile = path
+  showViewedFile(r, atLine = line)
+  if gViewedFile.len == 0:
+    return path & " is not in this recording"
+  placeCaret(r, path, line, max(1, col))
+  ""
+
+proc problemsSay(what: string) =
+  ## What the Problems pane has to say — on the trace, and in Edit mode as
+  ## the editor's notice (the window has no status line there).
+  if what.len == 0:
+    return
+  traceGesture("problems: " & what)
+
+proc jumpToProblemIn(r: GpuiRenderer; path: string; line, col: int) =
+  ## `ErrorsVM.onJumpToProblem` for this window.
+  let t = gProblems.targetOf(path, line, col)
+  if not t.ok:
+    problemsSay(t.why)
+    return
+  let why = openProblemFile(r, t.path, t.line, t.col)
+  problemsSay(if why.len > 0: why
+              else: "opened " & path & ":" & $line &
+                    (if col > 0: ":" & $col else: ""))
+
+proc wireProblemsJump(r: GpuiRenderer) =
+  if gProblems.isNil:
+    return
+  gProblems.vm.onJumpToProblem = proc(path: string; line, col: int) =
+    var rr: GpuiRenderer
+    jumpToProblemIn(rr, path, line, col)
+  gProblems.vm.onRevealPanel = proc() =
+    # EMT-D22.4: navigation reveals the pane without focusing it — revealed
+    # from the footer when docked, its tab activated when placed.
+    var rr: GpuiRenderer
+    let layout = committedLayout()
+    if layout.dockedIndex(paneProblems) >= 0:
+      if not (gGestures.revealing and gGestures.reveal.pane == paneProblems) and
+         not (not gGeom.openDock.isEmpty and
+              gGeom.openDockPane == $paneProblems):
+        let shown = beginReveal(layout, paneProblems)
+        if shown.isSome:
+          gGestures.reveal = shown.get
+          discard drawArrangement(rr)
+    elif layout.tree.contains(paneProblems):
+      applyGestureCommand(rr, cmdActivateTab(paneProblems))
+      discard drawArrangement(rr)
+
+proc stepProblem(r: GpuiRenderer; next: bool) =
+  ## `problems.next` / `problems.previous` (EMT-D22): the next / previous
+  ## error selected and opened, wrapping, announced.
+  if gProblems.isNil:
+    traceGesture("problems: no errors")
+    return
+  wireProblemsJump(r)
+  discard (if next: gProblems.vm.gotoNextError()
+           else: gProblems.vm.gotoPreviousError())
+  problemsSay(gProblems.vm.statusMessage.val)
+  if gProblems.vm.selectedIndex.val >= 0:
+    gProblemsPane.revealIndex(gProblems.vm, problemsBody(),
+                              gProblems.vm.selectedIndex.val)
+  drawProblemsPane(r)
+
+proc openProblem(r: GpuiRenderer; index: int) =
+  ## A diagnostic selected and its file opened at its line (K35).
+  let vm = gProblems.vm
+  if index < 0 or index >= vm.problems.val.len:
+    problemsSay("that problem is no longer listed")
+    return
+  wireProblemsJump(r)
+  vm.selectProblemIndex(index)
+  vm.jumpToProblem(vm.problems.val[index])
+  drawProblemsPane(r)
+
+proc pressProblems(r: GpuiRenderer; x, y: int): bool =
+  ## A left press on Problems: a row opens its file at its line and is
+  ## selected; a filter button or Group by File acts on the list; the
+  ## scrubber moves the view. The desktop opens no menu on a row.
+  let body = problemsBody()
+  if gProblems.isNil or body.w <= 0 or not body.contains(x, y):
+    return false
+  let vm = gProblems.vm
+  let hit = problemsHitAt(vm, gProblemsPane, body, x, y)
+  var focusPane = true
+  case hit.kind
+  of gpNone, gpText, gpHeader: discard
+  of gpFilter:
+    vm.setFilter(ProblemFilterTag(hit.index))
+    traceGesture("problems filter " & ProblemFilterLabels[vm.filter.val])
+  of gpGroup:
+    vm.toggleGroupByFile()
+    traceGesture("problems group by file " & $vm.groupByFile.val)
+  of gpRow:
+    focusPane = false
+    openProblem(r, hit.index)
+  of gpTrack, gpThumb:
+    gProblemsPane.dragging = hit.kind == gpThumb
+    if gProblemsPane.dragging:
+      let lay = problemsLayout(vm, body)
+      gProblemsPane.scrubberOf(lay.lines.len, lay.rows).beginBarGrab(
+        hit.fraction)
+    gProblemsPane.scrubProblems(vm, body, y, dragging = gProblemsPane.dragging)
+  drawProblemsPane(r)
+  if focusPane:
+    gFocusShown = true
+    if gFocusPane != $paneProblems:
+      focusWindowPane(r, $paneProblems)
+      discard drawArrangement(r)
+  true
+
+proc problemsKey(r: GpuiRenderer; operation: string): bool =
+  ## PLAT-55 from the keyboard, the pane focused (Build-Output-Pane.md §3.3:
+  ## arrow keys move, Enter jumps). Whether it was the pane's.
+  if gProblems.isNil or gFocusPane != $paneProblems:
+    return false
+  let vm = gProblems.vm
+  var order: seq[int] = @[]
+  for d in vm.displayRows():
+    if d.kind == pdRow:
+      order.add d.index
+  let n = order.len
+  let at = order.find(vm.selectedIndex.val)
+  if n == 0 and operation != "list.activate":
+    traceGesture("problems: the Problems pane lists no problem")
+    return true
+  var next = at
+  case operation
+  of "list.focus-next": next = if at < 0: 0 else: at + 1
+  of "list.focus-previous": next = if at < 0: n - 1 else: at - 1
+  of "list.focus-first": next = 0
+  of "list.focus-last": next = n - 1
+  of "list.focus-page-down": next = if at < 0: 0 else: at + 10
+  of "list.focus-page-up": next = if at < 0: 0 else: at - 10
+  of "list.activate":
+    if at < 0:
+      traceGesture("problems: no problem is selected")
+    else:
+      openProblem(r, order[at])
+    return true
+  else:
+    return false
+  vm.selectProblemIndex(order[clamp(next, 0, n - 1)])
+  gProblemsPane.revealIndex(vm, problemsBody(), vm.selectedIndex.val)
+  drawProblemsPane(r)
+  true
+
 proc recordTick() {.cdecl.} =
   ## PLAT-51: the welcome tab's recording, polled; when it finishes its
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
@@ -6994,6 +7346,7 @@ proc recordTick() {.cdecl.} =
   discard pollWelcomeRecording(r)
   discard pollTestRun(r)
   discard pollTestsHost(r)
+  discard pollGpuiBuild(r)
   armHoverTick()
 
 proc agentTick() {.cdecl.} =
@@ -7144,6 +7497,9 @@ proc redrawPaneOf(r: GpuiRenderer; pane: PaneKind) =
     return
   if pane == paneAgentActivity:
     drawAgentPane(r)
+    return
+  if pane == paneProblems:
+    drawProblemsPane(r)
     return
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == pane:
@@ -8327,6 +8683,9 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     # that the operation is not theirs here, as before).
     if testsKey(r, res.operation):
       return
+    # PLAT-55: and the focused Problems pane's.
+    if problemsKey(r, res.operation):
+      return
   of "list.copy":
     let (text, what) = focusedRowText()
     if text.len == 0: traceGesture("nothing is selected here to copy")
@@ -8372,6 +8731,12 @@ proc runWindowOperation(r: GpuiRenderer; res: EditingResolution;
     # PLAT-57: with a pattern, the search; without, the pane and its field.
     if res.argument.len > 0: runGpuiFindInFiles(r, res.argument)
     else: openFindInFiles(r)
+    return
+  of "problems.next", "problems.previous":
+    # PLAT-55 (EMT-D22): the desktop's `aGotoNextError` /
+    # `aGotoPreviousError` — `F8` / `Shift+F8` in Edit mode, `Ctrl+Alt+N` /
+    # `Ctrl+Alt+P`.
+    stepProblem(r, res.operation == "problems.next")
     return
   of "search.next-result", "search.previous-result":
     # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
@@ -9264,6 +9629,70 @@ proc runWindowOp(r: GpuiRenderer; op: string): string =
         windowPointer(r, gekWheel, cx, cy, -float(at(2) * TerminalRowPx))
       else:
         return "unknown terminal event '" & parts[1] & "'"
+    of "problems":
+      # PLAT-55: Problems, aimed from the geometry it was drawn with
+      # (`problems_leaf.problemsLayout`):
+      #   problems:show                 bring it up (revealed from the footer)
+      #   problems:build:<command>      `:build <command>`
+      #   problems:wait[:<ms>]          let the build in flight settle
+      #   problems:row:<index>          press diagnostic <index>'s row
+      #   problems:filter:<name>        press All / Errors / Warnings
+      #   problems:group                press Group by File
+      #   problems:next / :previous     `problems.next` / `.previous`
+      #   problems:key:<operation>      a list operation, the pane focused
+      #   problems:wheel:<rows>         the wheel over the pane
+      case parts[1]
+      of "show":
+        showPaneFromMenu(r, paneProblems)
+      of "build":
+        traceGesture(startGpuiBuild(r, parts[2 .. ^1].join(":")))
+      of "wait":
+        let budget = if parts.len > 2: at(2) else: 300_000
+        let deadline = epochTime() + float(budget) / 1000.0
+        while not gBuild.isNil and gBuild.session.verdict == bvRunning and
+              epochTime() < deadline:
+          sleep(20)
+          discard pollGpuiBuild(r)
+        discard pollGpuiBuild(r)
+        if not gBuild.isNil and gBuild.session.verdict == bvRunning:
+          return "the build did not settle within " & $budget & " ms"
+      of "next", "previous":
+        stepProblem(r, parts[1] == "next")
+      of "key":
+        gFocusPane = $paneProblems
+        if not problemsKey(r, parts[2]):
+          return "the Problems pane does not take '" & parts[2] & "'"
+      else:
+        let body = problemsBody()
+        if gProblems.isNil or body.w <= 0:
+          return "the Problems pane is not drawn"
+        let lay = problemsLayout(gProblems.vm, body)
+        case parts[1]
+        of "row":
+          let index = at(2)
+          gProblemsPane.revealIndex(gProblems.vm, body, index)
+          drawProblemsPane(r)
+          let c = problemsLayout(gProblems.vm, body).rowCentre(gProblemsPane,
+                                                              index)
+          if not c.ok:
+            return "problem " & $index & " is not listed"
+          pressAt(c.x, c.y)
+        of "filter", "group":
+          let i = if parts[1] == "group": lay.buttons.high
+                  else: (case parts[2]
+                         of "all": 0
+                         of "errors": 1
+                         of "warnings": 2
+                         else: -1)
+          if i < 0 or i >= lay.buttons.len:
+            return "no Problems button '" & parts[^1] & "'"
+          let (x, y) = centreOf(lay.buttons[i])
+          pressAt(x, y)
+        of "wheel":
+          let (cx, cy) = centreOf(body)
+          windowPointer(r, gekWheel, cx, cy, -float(at(2) * ProblemsRowPx))
+        else:
+          return "unknown problems event '" & parts[1] & "'"
     of "tests":
       # PLAT-53: Test Results, aimed from the geometry it was drawn with
       # (`test_results_leaf.testsLayout`):
@@ -10246,10 +10675,12 @@ proc runEdit(cmd: GpuiCommand): int =
   ## `ct edit --ui=gpui <project>`, end to end, with NO recording open.
   # PLAT-53: a Test Results run still going ends with the window.
   defer: stopTestsHost()
+  # PLAT-55: and a `:build` still going.
+  defer: stopGpuiBuild()
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
   let surface = editSurfaceFor(cmd,
-    editorRowsFor(initLayout(sharedEditLayout().tree), shell.viewport, cmd))
+    editorRowsFor(initLayout(sharedEditLayout().tree, sharedEditLayout().docked), shell.viewport, cmd))
   # `openWindow` and not `openWindowForSession`: there is no session. That is a
   # real product state rather than a test affordance — `shell.openWindow`'s own
   # header says so — and it is exactly the state edit mode is in, because edit
@@ -10260,7 +10691,7 @@ proc runEdit(cmd: GpuiCommand): int =
   # desktop's edit mode and the terminal's show — at depth 0 (this front-end
   # has no pixel minimums, so it never folds). Not remembered: this product's
   # remembered file holds its Debug arrangement, as the terminal's does.
-  let opened = shell.openWindow(windowId, initLayout(sharedEditLayout().tree))
+  let opened = shell.openWindow(windowId, initLayout(sharedEditLayout().tree, sharedEditLayout().docked))
   if opened.kind == wsRefused:
     stderr.writeLine("codetracer-gpui: could not open a window: " &
                      $opened.problem.kind)
@@ -10278,11 +10709,15 @@ proc runEdit(cmd: GpuiCommand): int =
   installTestsHost(cmd.traceFolder, proc(folder: string): string =
     NoSessionTabsInEditText & folder)
   attachTests(leafSet)
+  # PLAT-55: Problems over this window's builds (`:build` runs in the
+  # project).
+  installProblems(cmd.traceFolder)
+  attachProblems(leafSet)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
   gEditorViewportPx = editorBodyWidthFor(
-    initLayout(sharedEditLayout().tree), shell.viewport, cmd)
+    initLayout(sharedEditLayout().tree, sharedEditLayout().docked), shell.viewport, cmd)
   let drawn = renderLeaves(r, leafSet, surface, gEditorViewportPx)
   editPane = findEditorPane(drawn.root)
   # PLAT-47 part B: the window's gestures act on this shell; edit mode opens
@@ -10350,6 +10785,8 @@ proc runOpen(cmd: GpuiCommand): int =
   defer: session.backend.close()
   # PLAT-53: and a Test Results run still going ends with it (its group).
   defer: stopTestsHost()
+  # PLAT-55: and a `:build` still going.
+  defer: stopGpuiBuild()
   # The shipped product default for the flow overlay — the same constant the
   # terminal host applies, pinned against `default_config.yaml` by a test.
   if not session.session.editorVM.isNil:
@@ -10659,6 +11096,9 @@ proc runOpen(cmd: GpuiCommand): int =
       stderr.writeLine("codetracer-gpui: --deepreview: " & h.message)
     if cmd.reviewSession.len > 0:
       discard h.loadReviewSession(cmd.reviewSession)
+  # PLAT-55: Problems over the window's builds, run in the same directory.
+  installProblems(getCurrentDir())
+  attachProblems(leafSet)
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at — the same reading `editorRowsFor`
   # takes for the row count, over the same layout.

@@ -68,6 +68,7 @@ import ./vcs_pane
 import ./search_results_pane
 import ./test_results_pane
 import ./agent_activity_pane
+import ./problems_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -194,6 +195,9 @@ type
     tests*: TestResultsPaneModel
       ## PLAT-53. TEST RESULTS, as a value: the window's `TestResultsVM`,
       ## read by `test_results_source.paneModelOf`. Not loaded by default.
+    problems*: ProblemsPaneModel
+      ## PLAT-55. PROBLEMS, as a value: the window's `ErrorsVM`, read by
+      ## `problems_source.paneModelOf`. Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -901,6 +905,10 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneAgentActivity and model.agent.loaded:
     belowStrip:
       discard paintAgentActivity(g, content, model.agent)
+  # PLAT-55. PROBLEMS — its counts and buttons are content, so below the strip.
+  elif region.pane == paneProblems and model.problems.loaded:
+    belowStrip:
+      discard paintProblems(g, content, model.problems)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the

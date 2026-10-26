@@ -94,6 +94,8 @@ import viewmodels/test_results_vm
 # PLAT-54 — the Agent Activity pane's ViewModel and its shared feed.
 import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_feed
+# PLAT-55 — the Problems pane's ViewModel.
+import viewmodels/errors_vm
 
 import headless_app/layout_model
 
@@ -144,7 +146,10 @@ const
                                          # PLAT-54: the agent session's own
                                          # content, from the desktop's
                                          # `AgentActivityVM`.
-                                         paneAgentActivity}
+                                         paneAgentActivity,
+                                         # PLAT-55: a build's diagnostics,
+                                         # from the window's `ErrorsVM`.
+                                         paneProblems}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -165,8 +170,9 @@ const
                                             # PLAT-54 `paneAgentActivity`).
                                             paneConstraints,
                                             # PLAT-48 — the desktop's footer
-                                            # panels the shared default docks.
-                                            paneProblems, paneRequests}
+                                            # panels the shared default docks
+                                            # (PLAT-55 drew `paneProblems`).
+                                            paneRequests}
     ## **Panes this front-end deliberately does not draw, with the reason
     ## recorded at the dispatch arm.**
     ##
@@ -757,6 +763,43 @@ proc agentActivityPaneView*(vm: AgentActivityVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+const ProblemsColumns* = @["", "path", "location", "message"]
+  ## PLAT-55: the Problems table's columns — the desktop row's icon, path,
+  ## location and message.
+
+proc problemsPaneView*(vm: ErrorsVM): PaneView =
+  ## PLAT-55. THE PROBLEMS PANE (`Build-Output-Pane.md` §3.3): the header's
+  ## counts (and what navigation last announced), then a `Table` of the
+  ## diagnostics the active filter shows — icon, path, location, message,
+  ## every cell the ViewModel's words — or the empty state as `Text`. The
+  ## headless replay session owns no `ErrorsVM` (a build is the window's), so
+  ## a front-end attaches the window's, as it attaches Test Results'.
+  result.pane = paneProblems
+  if vm.isNil:
+    result.report = "problems have no ViewModel; no host attached one"
+    result.root = viewText("problems.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children = @[viewText("problems.counts", vm.errorBadgeText & "  " &
+                            vm.warningBadgeText & "  " & vm.totalBadgeText)]
+  if vm.statusMessage.val.len > 0:
+    children.add viewText("problems.status", vm.statusMessage.val)
+  let problems = vm.problems.val
+  var cells: seq[seq[string]] = @[]
+  for d in vm.displayRows():
+    if d.kind == pdRow:
+      let p = problems[d.index]
+      cells.add @[severityIcon(p.severity), p.path, locationText(p),
+                  p.message]
+  if cells.len > 0:
+    children.add viewTable("problems.rows", ProblemsColumns, cells)
+  else:
+    children.add viewText("problems.empty", ProblemsEmptyText)
+    result.report = "no problems"
+  result.root = viewTreeNode("problems", "Problems", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc shellPaneView*(vm: ShellVM): PaneView =
   ## The shell: a `Tree` of the input `Input` and a `List` of history.
   ##
@@ -975,7 +1018,9 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneTestResults: testResultsPaneView(TestResultsVM(vm))
   # PLAT-54.
   of paneAgentActivity: agentActivityPaneView(AgentActivityVM(vm))
-  of paneConstraints, paneProblems, paneRequests:
+  # PLAT-55.
+  of paneProblems: problemsPaneView(ErrorsVM(vm))
+  of paneConstraints, paneRequests:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which
     # the shared default DOCKS: revealed, each says what it is and why it is

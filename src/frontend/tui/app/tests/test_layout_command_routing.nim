@@ -104,7 +104,7 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 576
+const ExpectedAssertions = 583
 # PLAT-48: 421 → 474 — the footer strip checks (one decoration, a strip, per
 # geometry: +40), the footer row before and after `:dock bottom`, and the
 # top strip counted apart from the bottom one.
@@ -879,13 +879,15 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
               ":\n  unbound '" & a[i] & "'\n  bound   '" & b[i] & "'"
             break
       ck a == b
-      # The binding holds EDIT mode's panes, and no footer: `dockedForMode`
-      # docks nothing for Edit mode.
+      # The binding holds EDIT mode's panes, and Edit mode's footer:
+      # `dockedForMode` docks the desktop's footer less the BUILD pane the
+      # Edit tree places (PLAT-55).
       let tree = bound.app.layoutBinding.layout.tree
       ck tree.contains(paneVcs)
       ck tree.contains(paneEditor)
       ck not tree.contains(paneCalltrace)
-      ck bound.app.layoutBinding.layout.docked.len == 0
+      ck bound.app.layoutBinding.layout.docked.len == 3
+      ck bound.app.layoutBinding.layout.dockedIndex(paneProblems) >= 0
       # THE CONTROL: Debug mode's bound screen at the same size is another
       # screen, so the equality above is not two runtimes that both drew
       # Debug's arrangement.
