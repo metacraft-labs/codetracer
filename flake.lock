@@ -4326,11 +4326,11 @@
     "nim-acp": {
       "flake": false,
       "locked": {
-        "lastModified": 1792478456,
-        "narHash": "sha256-LY0mUJpWB0NBUjg1WaczF4OjpOqH22053LiwWbEQSAg=",
+        "lastModified": 1792973462,
+        "narHash": "sha256-oZmc15HzcMvDwKkA4a8mnFEhaoMlSFvwnPOioVo16O8=",
         "owner": "metacraft-labs",
         "repo": "nim-acp",
-        "rev": "27192b9dc70889b09940fabdbc8f8d4023f1e613",
+        "rev": "28fafeadeac7b31420eaef9cd7cf87f5c2770abf",
         "type": "github"
       },
       "original": {
