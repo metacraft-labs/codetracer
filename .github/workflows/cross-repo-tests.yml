@@ -127,7 +127,7 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || '1cbf62f46c5716d3e02a52cd61c9e9b82a52fa72' }}
+            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || 'c911917fe1671045423e2575d12d3c24575e8d77' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
