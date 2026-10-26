@@ -3179,6 +3179,163 @@ async fn test_real_rr_navigate_continue_forward() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+/// Sends `ct/py-navigate` with `method` and returns the position it
+/// answers with (`extract_nav_location`), failing when the navigation
+/// does not succeed.  Advances `seq`.
+async fn navigate_to_a_position(
+    client: &mut UnixStream,
+    seq: &mut i64,
+    trace_path: &Path,
+    method: &str,
+    log_path: &Path,
+) -> Result<(String, i64, i64, i64, bool), String> {
+    let resp = navigate(client, *seq, trace_path, method, None, log_path).await?;
+    *seq += 1;
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!("{method} must answer with a position, got: {resp}"));
+    }
+    let location = extract_nav_location(&resp)?;
+    log_line(log_path, &format!("{method}: {location:?}"));
+    Ok(location)
+}
+
+/// M3-RR-5. Open an RR trace and step over from its start until the
+/// `ct/py-navigate` response carries `endOfTrace`.  Every step on the way
+/// must answer; the position at the end must stay there under further
+/// forward navigation (`step_over`, `step_in`, `continue_forward`), each
+/// answering `endOfTrace` again with the same ticks; and a `step_back`
+/// from it must leave the end.
+///
+/// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+/// "Navigation at the end of a recording".  Regression test for codetracer-pm
+/// issue `2026-10-22-rr-step-over-from-the-last-frame-before-exit-never-answers.md`:
+/// the step past the program's last frame killed the replay worker, or
+/// answered "can't parse rr `when-ticks`", instead of reporting the end.
+#[tokio::test]
+async fn test_real_rr_navigate_step_over_past_end_reports_end_of_trace() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_nav_step_past_end");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!(
+                    "test_real_rr_navigate_step_over_past_end_reports_end_of_trace: SKIP ({reason})"
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
+        )
+        .await;
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 9500, &trace_dir, &log_path).await?;
+        if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+            return Err(format!("ct/open-trace should succeed, got: {open_resp}"));
+        }
+        drain_events(&mut client, &log_path).await;
+
+        // `rust_flow_test`'s main, its runtime epilogue and `exit` take
+        // about 25 steps over in both counter modes (measured 2026-10-26).
+        const STEP_BUDGET: usize = 80;
+        let mut seq = 9501;
+
+        let mut end = None;
+        let mut before_end_ticks = None;
+        for i in 1..=STEP_BUDGET {
+            let (path, line, _, ticks, eot) =
+                navigate_to_a_position(&mut client, &mut seq, &trace_dir, "step_over", &log_path)
+                    .await
+                    .map_err(|e| format!("step over #{i}: {e}"))?;
+            if eot {
+                end = Some((path, line, ticks));
+                break;
+            }
+            before_end_ticks = Some(ticks);
+        }
+        let Some((end_path, end_line, end_ticks)) = end else {
+            return Err(format!(
+                "{STEP_BUDGET} step_overs never reported endOfTrace"
+            ));
+        };
+        // The end must be where the steps over arrived, not where the
+        // first one already was.
+        match before_end_ticks {
+            Some(before) if before < end_ticks => {}
+            _ => {
+                return Err(format!(
+                    "the end (ticks {end_ticks}) must follow the positions the steps over \
+                     passed, got {before_end_ticks:?} before it"
+                ));
+            }
+        }
+
+        for method in ["step_over", "step_in", "continue_forward"] {
+            let (path, line, _, ticks, eot) =
+                navigate_to_a_position(&mut client, &mut seq, &trace_dir, method, &log_path)
+                    .await
+                    .map_err(|e| format!("{method} from the end: {e}"))?;
+            if !eot || ticks != end_ticks || path != end_path || line != end_line {
+                return Err(format!(
+                    "{method} from the end must stay at the end and report endOfTrace: \
+                     end=({end_path}, {end_line}, ticks {end_ticks}), \
+                     got=({path}, {line}, ticks {ticks}, endOfTrace {eot})"
+                ));
+            }
+        }
+
+        // Where step_back lands is not asserted beyond leaving the end
+        // backwards: from the exit path's frames, which have no line
+        // information, a reverse step currently lands at tick 0 instead of
+        // on the previous stop (codetracer-pm issue
+        // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`).
+        // That defect is not the end of the recording's, and its fix owns
+        // the stronger assertion.
+        let (path, line, _, ticks, eot) =
+            navigate_to_a_position(&mut client, &mut seq, &trace_dir, "step_back", &log_path)
+                .await
+                .map_err(|e| format!("step_back from the end: {e}"))?;
+        if eot || ticks >= end_ticks {
+            return Err(format!(
+                "step_back from the end must leave it backwards: end ticks {end_ticks}, \
+                 got ({path}, {line}, ticks {ticks}, endOfTrace {eot})"
+            ));
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_navigate_step_over_past_end_reports_end_of_trace",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
 /// M3-RR-4. Open an RR trace.  Step over three times, recording ticks at
 /// each step.  Then step back once and verify that the ticks decreased,
 /// proving bidirectional navigation works against a real RR trace.
@@ -16700,6 +16857,141 @@ print('DONE')"
 
     report(
         "test_cli_trace_query_rr_breakpoint_and_step",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// The Python trace API raises `StopIteration` when navigation runs off the
+/// end of an RR recording, through `trace query -c` (the same daemon and
+/// Python runtime as the MCP server's `exec_script`).  A step over from the
+/// end raises it again from the same position, and `step_back` leaves it.
+///
+/// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+/// "Navigation at the end of a recording", and the `exec_script` tool
+/// description ("All navigation methods raise StopIteration at trace
+/// boundaries").  Regression test for codetracer-pm issue
+/// `2026-10-22-rr-step-over-from-the-last-frame-before-exit-never-answers.md`.
+#[tokio::test]
+async fn test_cli_trace_query_rr_step_past_end_raises_stop_iteration() {
+    let (test_dir, log_path) = setup_test_dir("cli_trace_query_rr_step_past_end");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!(
+                    "test_cli_trace_query_rr_step_past_end_raises_stop_iteration: SKIP ({reason})"
+                );
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+
+        // About 25 steps over reach the end (measured 2026-10-26); 80 is
+        // the budget.  Any error other than StopIteration propagates and
+        // fails the query.  `step_back` is checked only for moving
+        // backwards: where it lands is the subject of codetracer-pm issue
+        // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`.
+        let script = "\
+steps = 0
+try:
+    for _ in range(80):
+        trace.step_over()
+        steps += 1
+    print('NO END AFTER 80 STEPS')
+except StopIteration:
+    end = (trace.location.path, trace.location.line, trace.ticks)
+    print(f'END after {steps} steps at {end}')
+try:
+    trace.step_over()
+    print('A STEP FROM THE END RETURNED')
+except StopIteration:
+    again = (trace.location.path, trace.location.line, trace.ticks)
+    print('STILL AT THE END' if again == end else f'MOVED TO {again}')
+trace.step_back()
+back = trace.ticks
+print(f'BACK BEFORE THE END at {trace.location.line} ticks {back}' if back < end[2]
+      else f'BACK DID NOT MOVE BACKWARDS: ticks {back}, end {end[2]}')
+print('DONE')";
+
+        let (stdout, stderr, exit_code) = run_cli_command(
+            &test_dir,
+            &["trace", "query", &trace_path_str, "-c", script],
+            &[
+                (
+                    "CODETRACER_REPLAY_SERVER_CMD",
+                    db_backend.to_str().unwrap_or(""),
+                ),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+            120,
+            &log_path,
+        )
+        .await?;
+
+        if exit_code != 0 {
+            return Err(format!(
+                "trace query exited with code {exit_code}\nstdout: {stdout}\nstderr: {stderr}"
+            ));
+        }
+        for expected in [
+            "END after ",
+            "STILL AT THE END",
+            "BACK BEFORE THE END",
+            "DONE",
+        ] {
+            if !stdout.contains(expected) {
+                return Err(format!(
+                    "stdout should contain {expected:?}\nstdout: {stdout}\nstderr: {stderr}"
+                ));
+            }
+        }
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_cli_trace_query_rr_step_past_end_raises_stop_iteration",
         &log_path,
         success,
     );

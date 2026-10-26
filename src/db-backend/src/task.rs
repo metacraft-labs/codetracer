@@ -644,6 +644,16 @@ pub struct Location {
     /// branch-free code shares one rr tick count
     /// (`Click-Navigation.md` §3.3).
     pub replay_position: String,
+
+    /// Whether this is the last position of the recording: the replay ran
+    /// to the end of the recorded program and no forward motion can move
+    /// it.  `ct-native-replay` sets it on an rr recording's current
+    /// position (codetracer-native-backend `ct_types.rs`); the step
+    /// handlers turn it into the end-of-record notification that the
+    /// daemon reports as `endOfTrace` (codetracer-pm
+    /// `spec/Planned-Features/CodeTracer-MCP-Server.md`, "Navigation at the
+    /// end of a recording").
+    pub end_of_trace: bool,
 }
 
 /// Response for `LoadLocationWithSourcemap` query from the native replay backend.
@@ -705,6 +715,7 @@ impl Location {
             is_expanded: false,
             missing_path: false,
             replay_position: String::new(),
+            end_of_trace: false,
         }
     }
 }
