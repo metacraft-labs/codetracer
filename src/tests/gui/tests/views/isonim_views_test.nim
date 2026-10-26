@@ -3632,19 +3632,16 @@ suite "IsoNim Flow Panel — active line sync":
       check store.debugger.val.location.line == 12
       check store.debugger.val.rrTicks == 100'u64
 
-      # Verify that auto-load effect was triggered (sends ct/load-flow)
-      var foundLoadFlow = false
+      # The FlowVM does not load by itself on a move: the session's stop
+      # loader asks for the window once per stop (`sdk/stop_loader`, pane
+      # `spFlow`; `fb954e4de`), so a collaboration follower, which runs no
+      # stop loader, asks for nothing. The request the loader sends, and its
+      # `location`, are asserted in `tests/unit/test_stop_loader.nim`.
+      var loadFlowRequests = 0
       for cmd in mock.receivedCommands:
         if cmd.command == "ct/load-flow":
-          # The tick lives inside `location`: `CtLoadFlowArguments`
-          # (src/db-backend/src/task.rs) has exactly `flowMode` and
-          # `location`, both required. See the boundary suite in
-          # `tests/flow/flow_vm_test.nim`.
-          check cmd.args["location"]["rrTicks"].getBiggestInt == 100
-          check cmd.args["location"]["path"].getStr == "test.js"
-          foundLoadFlow = true
-          break
-      check foundLoadFlow
+          inc loadFlowRequests
+      check loadFlowRequests == 0
 
       dispose()
 
