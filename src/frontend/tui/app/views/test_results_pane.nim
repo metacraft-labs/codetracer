@@ -123,9 +123,10 @@ const
   TestsActionsCells* = 4
     ## `⟳`, a space, then `⏵` — two cells for `⏺⏵` / `⟳⏵`.
   TestsGapCells* = 1
-  RunLabel* = "▶"
-    ## The ▶ when the model names none (the host passes the ViewModel's
-    ## `RunButtonLabel`).
+  RunLabel* = canonical(grRunAction)
+    ## The run button's extended spelling (the ViewModel's
+    ## `RunButtonLabel`); drawn through the glyph table, so the terminal's
+    ## profile decides the glyph.
   TestsHeadlineStyle = CellStyle(role: srChromeMuted)
   TestsRunStyle = CellStyle(role: srChromeText, bold: true)
   TestsDisabledStyle = CellStyle(role: srChromeMuted, dim: true)
@@ -204,7 +205,9 @@ proc paintTestResults*(g: var StyledGrid; area: CellArea;
     result.runCol = area.col + area.width - runCells + 1
     headlineCells = area.width - runCells
     g.paint(area.row, result.runCol,
-            (if model.run.label.len > 0: model.run.label else: RunLabel),
+            (if model.run.label.len == 0 or model.run.label == RunLabel:
+               g.glyphText(grRunAction)
+             else: model.run.label),
             if model.run.enabled: TestsRunStyle else: TestsDisabledStyle)
   discard g.paintCell(area.row, area.col, headlineCells, model.headline,
                       TestsHeadlineStyle)
