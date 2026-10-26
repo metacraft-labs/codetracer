@@ -611,6 +611,10 @@ type
       ## How many cursor reports the width probe asked for. A `CSI r ; c R`
       ## is taken as a REPLY only while fewer than this have arrived (§4.3's
       ## F3 rule); after that it is Ctrl+F3 again.
+    replyWindowClosed*: bool
+      ## The reply window passed without the fence (`ReplyWindowMs`). No
+      ## owed cursor report is waited for after it, nor after the fence: a
+      ## terminal that never answers CPR must not take Ctrl+F3 for good.
     cprAnswers*: seq[int]
       ## The width each answered probe measured (column − 1), in probe order.
     rttMeasured*: bool
