@@ -148,6 +148,7 @@ proc relayActions(m: MirrorSession; relays: RelayFilter) =
   if not s.flowVM.isNil: s.flowVM.actionSink = sink
   if not s.pointListVM.isNil: s.pointListVM.actionSink = sink
   if not s.fileTreeVM.isNil: s.fileTreeVM.actionSink = sink
+  if not s.requestPanelVM.isNil: s.requestPanelVM.actionSink = sink
 
 proc createMirrorSession*(
     channel: SyncChannel;
@@ -205,10 +206,17 @@ proc createMirrorSession*(
 
 proc hostedPageRelays*(vm, action: string): bool =
   ## The actions a `ct host` page relays to the server's session
-  ## (`createHostedPageMirror`): the panes' viewports and the call trace's
-  ## actions. The call trace's ViewModel takes no callback from the page, so
-  ## all its actions run the same on either side.
-  vm == "viewport" or vm == "calltrace"
+  ## (`createHostedPageMirror`): the panes' viewports, the call trace's
+  ## actions, and the request panel's selection, filters and detail tab. The
+  ## call trace's ViewModel takes no callback from the page, so all its
+  ## actions run the same on either side. The request panel's window is
+  ## loaded by the server's session, from the viewport the page relays, so
+  ## its filters and selection must be the server's too: a filter set on the
+  ## page alone would filter rows the page does not load. Its row activation
+  ## (`jumpToHandler`) stays on the page, which installs the hook that opens
+  ## a request recorded in another container (`openExternalTrace`).
+  vm == "viewport" or vm == "calltrace" or
+    (vm == "requestPanel" and action != "jumpToHandler")
 
 proc createHostedPageMirror*(
     channel: SyncChannel;
@@ -224,6 +232,8 @@ proc createHostedPageMirror*(
   ##   (Viewport-Driven-Loading V3);
   ## * the call trace's actions: a click on a call jumps over the server's
   ##   connection to the replay, not the mirror's inert backend.
+  ## * the request panel's filters, selection and detail tab: its window is
+  ##   loaded on the server's session, so they must be that session's.
   ##
   ## The other panels' actions stay on the page, as before: several reach
   ## callbacks only the page installs — the file tree opens a file in the

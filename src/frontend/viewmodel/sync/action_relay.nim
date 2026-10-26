@@ -41,6 +41,7 @@ import ../viewmodels/[
   filesystem_vm,
   flow_vm,
   point_list_vm,
+  request_panel_vm,
   scratchpad_vm,
   search_results_vm,
   search_vm,
@@ -129,6 +130,11 @@ proc applyViewport(session: SessionViewModel; args: JsonNode): bool =
     true
   of "traceLog":
     let vm = session.traceLogVM
+    if vm.isNil: return false
+    vm.setViewport(merged(vm.viewport.val))
+    true
+  of "requestPanel":
+    let vm = session.requestPanelVM
     if vm.isNil: return false
     vm.setViewport(merged(vm.viewport.val))
     true
@@ -343,6 +349,18 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     of "setQuery": v.setQuery(a.arg("query", ""))
     of "selectResult": v.selectResult(a.arg("index", none(int)))
     of "toggleResults": v.toggleResults()
+    else: return false
+
+  of "requestPanel":
+    let v = session.requestPanelVM
+    if v.isNil: return false
+    case action
+    of "selectRequest": v.selectRequest(a.arg("index", request_panel_vm.NO_SELECTED_INDEX))
+    of "jumpToHandler": v.jumpToHandler(a.arg("index", request_panel_vm.NO_SELECTED_INDEX))
+    of "setFilterMethod": v.setFilterMethod(a.arg("filter", ""))
+    of "setFilterStatus": v.setFilterStatus(a.arg("filter", ""))
+    of "setSearchText": v.setSearchText(a.arg("text", ""))
+    of "setDetailTab": v.setDetailTab(a.arg("tab", "headers"))
     else: return false
 
   of "pointList":
