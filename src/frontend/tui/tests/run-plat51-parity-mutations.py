@@ -520,7 +520,7 @@ ARMS = [
     # G1 RE-AIMED 2026-10-21 (PLAT-70 Part B): the table panes' own gestures
     # (a `…`, a column separator) sit between the bars and the call row now;
     # the defect is unchanged — the call row answers before the scrubber.
-    # RE-AIMED AGAIN 2026-10-27: PLAT-70 Part I put the table panes' sideways
+    # RE-AIMED AGAIN 2026-10-27: `e2bc8336c` put the table panes' sideways
     # bar between the editor's two bars; the needle stops before it.
     Arm("G1", GMAIN,
         "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n",
