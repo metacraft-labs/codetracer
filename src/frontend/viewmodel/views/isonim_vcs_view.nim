@@ -21,18 +21,26 @@
 ## (user has scrolled near the bottom) ``callbacks.onLoadMoreCommits`` fires to
 ## fetch the next page.  A "Loading…" row is shown while ``vm.loadingMore`` is
 ## true.
+##
+## One view for every renderer (Shared-DOM-Front-Ends D6): the panel is
+## `renderVCSPanel[R, N]`, and what only a browser does — the sentinel's
+## observer, the tooltip, modifier keys on a click, the scroll position kept
+## across a rebuild — is a decoration of the helpers below, made only when
+## `N` is the browser's element.
 
 import std/[strformat, strutils]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/vcs_vm
+
+export signals, computation, components
 
 const VCSContainerClass* = "component-container vcs-container"
 const VCSNoRepoClass* = "vcs-no-repo"
@@ -64,14 +72,18 @@ type
     ## ``shift`` = Shift held → select range from last-clicked to ``index``.
     ## Neither → exclusive select (clears others) or collapse if already sole.
     onToggleCommitExpand*: proc(index: int; ctrl: bool; shift: bool)
+    ## A plain click on commit ``index``: open its whole-commit unified diff
+    ## (``target`` is ``commit:<hash>``) and expand it in the tree
+    ## (VCS-Panel.md, "Commit History", the owner's 2026-10-23 decision).
+    onOpenCommit*: proc(index: int; target: string)
     ## Called when the scroll sentinel becomes visible so the next page of
     ## commits can be appended.
     onLoadMoreCommits*: proc()
     ## Row click.  ``path`` is the repository-relative file path; ``target``
-    ## is the same diff target the row's "View Diff" button dispatches
-    ## (``file:<path>`` or ``commit:<hash>:<path>``), so the host can honour
-    ## the unified-diff view mode without having to re-derive which commit the
-    ## row belonged to.  ``status`` is the row's diff status letter: the open
+    ## is what the click opens in unified-diff mode: ``file:<path>`` for a
+    ## working-tree or review row, and the commit's whole-commit document,
+    ## ``commit:<hash>``, for a row under an expanded commit — the host
+    ## scrolls that document to ``path`` (VCS-Panel.md, "Changed Files").  ``status`` is the row's diff status letter: the open
     ## decision needs it (a deleted file has no source to open — see
     ## ``VCSVM.openActionFor``), and only the row knows it, since row indices
     ## mean different things in the changed-files list and in an expanded
@@ -203,6 +215,16 @@ proc invokeToggleCommitExpand(vm: VCSVM; callbacks: VCSCallbacks;
     else:
       vm.selectedCommitIndices.val = @[index]
 
+proc invokeOpenCommit(vm: VCSVM; callbacks: VCSCallbacks; index: int;
+                      target: string) =
+  ## Open commit ``index``'s whole-commit diff. With no host callback (the
+  ## headless renderers) the commit is expanded, which is the half of the
+  ## click the ViewModel owns.
+  if callbacks.onOpenCommit != nil:
+    callbacks.onOpenCommit(index, target)
+  elif index notin vm.selectedCommitIndices.val:
+    vm.selectedCommitIndices.val = @[index]
+
 proc invokeSelectFile(callbacks: VCSCallbacks; index: int;
                       path, target, status: string) =
   if callbacks.onSelectFile != nil:
@@ -260,56 +282,56 @@ when defined(js):
       io.observe(el);
     })(#, #)""".}
 
-proc attachScrollSentinel(r: MockRenderer; sentinel: MockNode;
-                          callbacks: VCSCallbacks) =
-  ## No-op for the mock renderer (used in unit tests).
-  discard
+proc attachScrollSentinel[R, N](r: R; sentinel: N; callbacks: VCSCallbacks) =
+  ## In a browser, load the next page of commits when `sentinel` scrolls into
+  ## view. Other renderers have no scrolling; their tests call
+  ## `onLoadMoreCommits` directly.
+  when defined(js):
+    when N is isonim_dom.Element:
+      if callbacks.onLoadMoreCommits == nil:
+        return
+      setupScrollSentinel(sentinel, callbacks.onLoadMoreCommits)
 
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
+proc appendRenderedChild[R, N](r: R; host, child: N) =
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
   r.appendChild(host, child)
 
-proc setInnerHtml(r: MockRenderer; node: MockNode; html: string) =
-  ## Set the inner HTML of a mock node.  ``renderBranchPicker`` uses this to
-  ## inject the chevron SVG.  In the mock renderer this is a no-op: tests do
-  ## not inspect the chevron SVG content.
-  discard
-
 when defined(js):
-  proc attachScrollSentinel(r: WebRenderer; sentinel: isonim_dom.Element;
-                            callbacks: VCSCallbacks) =
-    if callbacks.onLoadMoreCommits == nil:
-      return
-    setupScrollSentinel(sentinel, callbacks.onLoadMoreCommits)
+  proc setInnerHtmlJS(node: isonim_dom.Element; html: cstring)
+    {.importjs: "#.innerHTML = #".}
 
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    r.appendChild(host, child)
+proc setInnerHtml[R, N](r: R; node: N; html: string) =
+  ## Set the inner HTML of `node`. ``renderBranchPicker`` uses this to inject
+  ## the chevron SVG, which only a browser draws; elsewhere it is a no-op.
+  when defined(js):
+    when N is isonim_dom.Element:
+      setInnerHtmlJS(node, cstring(html))
 
-  proc setInnerHtml(r: WebRenderer; node: Element; html: string) =
-    node.innerHTML = cstring(html)
+proc attachDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
+                           target: string) =
+  ## Open `target`'s diff on a click on `btn`. In a browser the click does not
+  ## also reach the row underneath, which would select it.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  let t = target
+  template plainClick() =
+    r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(t))
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          callbacks.invokeOpenFileDiff(t)
+          ev.stopPropagation()
+          ev.preventDefault())
+    else:
+      plainClick()
+  else:
+    plainClick()
 
-proc attachFileDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
-  r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
-
-when defined(js):
-  proc attachFileDiffClick(r: WebRenderer; btn: isonim_dom.Element; callbacks: VCSCallbacks; target: string) =
-    let t = target
-    isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeOpenFileDiff(t)
-        ev.stopPropagation()
-        ev.preventDefault())
-
-proc attachCommitDiffClick(r: MockRenderer; btn: MockNode; callbacks: VCSCallbacks; target: string) =
-  r.addEventListener(btn, "click", proc() = callbacks.invokeOpenFileDiff(target))
-
-when defined(js):
-  proc attachCommitDiffClick(r: WebRenderer; btn: isonim_dom.Element; callbacks: VCSCallbacks; target: string) =
-    let t = target
-    isonim_dom.addEventListener(isonim_dom.Node(btn), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeOpenFileDiff(t)
-        ev.stopPropagation()
-        ev.preventDefault())
+proc attachFileDiffClick[R, N](r: R; btn: N; callbacks: VCSCallbacks;
+                               target: string) =
+  r.attachDiffClick(btn, callbacks, target)
 
 proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
                            branch: string): auto =
@@ -333,18 +355,52 @@ proc renderBranchOption[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
 # through to the toggle callback, enabling ctrl+click (toggle one) and
 # shift+click (select range) multi-select.
 
-proc attachCommitClick(r: MockRenderer; header: MockNode;
-                       vm: VCSVM; callbacks: VCSCallbacks; index: int) =
-  r.addEventListener(header, "click", proc() =
-    vm.invokeToggleCommitExpand(callbacks, index, false, false))
+proc attachCommitClick[R, N](r: R; header: N; vm: VCSVM;
+                             callbacks: VCSCallbacks; index: int;
+                             target: string) =
+  ## A plain click on commit `index`'s header opens its whole-commit diff
+  ## (`target`) and expands it; Ctrl/Meta- and Shift-clicks only change which
+  ## commits are expanded, which needs the browser's modifier keys.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  template plainClick() =
+    r.addEventListener(header, "click", proc() =
+      vm.invokeOpenCommit(callbacks, index, target))
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          let ctrl = ev.ctrlOrMetaKey()
+          let shift = ev.shiftKey()
+          if ctrl or shift:
+            vm.invokeToggleCommitExpand(callbacks, index, ctrl, shift)
+          else:
+            vm.invokeOpenCommit(callbacks, index, target))
+    else:
+      plainClick()
+  else:
+    plainClick()
 
-when defined(js):
-  proc attachCommitClick(r: WebRenderer; header: isonim_dom.Element;
-                         vm: VCSVM; callbacks: VCSCallbacks; index: int) =
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        vm.invokeToggleCommitExpand(callbacks, index,
-                                    ev.ctrlOrMetaKey(), ev.shiftKey()))
+proc attachCommitToggle[R, N](r: R; toggle: N; vm: VCSVM;
+                              callbacks: VCSCallbacks; index: int) =
+  ## The commit's expand control: expand or collapse it in the tree, and
+  ## nothing else — the click does not reach the header, which would open the
+  ## commit's diff.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  template plainClick() =
+    r.addEventListener(toggle, "click", proc() =
+      vm.invokeToggleCommitExpand(callbacks, index, true, false))
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(toggle), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          ev.stopPropagation()
+          vm.invokeToggleCommitExpand(callbacks, index, true, false))
+    else:
+      plainClick()
+  else:
+    plainClick()
 
 # ---------------------------------------------------------------------------
 # Commit-detail tooltip
@@ -448,26 +504,26 @@ when defined(js):
       document.body.appendChild(tip);
     })(#)""".}
 
-  proc attachTooltipToBody(r: WebRenderer; tooltip: isonim_dom.Element) =
-    ensureTooltipInBodyJS(tooltip)
+proc attachTooltipToBody[R, N](r: R; tooltip: N) =
+  ## Move the shared tooltip to the document body (browser only).
+  when defined(js):
+    when N is isonim_dom.Element:
+      ensureTooltipInBodyJS(tooltip)
 
-  proc attachCommitTooltip(r: WebRenderer; header: isonim_dom.Element;
-                            hash, fullHash, author, date: string) =
-    let h  = cstring(hash)
-    let fh = cstring(fullHash)
-    let a  = cstring(author)
-    let d  = cstring(date)
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseenter",
-      proc(ev: isonim_dom.Event) = showVCSTooltip(h, fh, a, d, header))
-    isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseleave",
-      proc(ev: isonim_dom.Event) = hideVCSTooltip())
-
-proc attachCommitTooltip(r: MockRenderer; header: MockNode;
-                          hash, fullHash, author, date: string) =
-  discard
-
-proc attachTooltipToBody(r: MockRenderer; tooltip: MockNode) =
-  discard
+proc attachCommitTooltip[R, N](r: R; header: N;
+                               hash, fullHash, author, date: string) =
+  ## Show the commit's details while the pointer is over its header
+  ## (browser only).
+  when defined(js):
+    when N is isonim_dom.Element:
+      let h  = cstring(hash)
+      let fh = cstring(fullHash)
+      let a  = cstring(author)
+      let d  = cstring(date)
+      isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseenter",
+        proc(ev: isonim_dom.Event) = showVCSTooltip(h, fh, a, d, header))
+      isonim_dom.addEventListener(isonim_dom.Node(header), cstring"mouseleave",
+        proc(ev: isonim_dom.Event) = hideVCSTooltip())
 
 # ---------------------------------------------------------------------------
 # Branch picker
@@ -502,15 +558,20 @@ proc parseControlInt(value: string; fallback: int): int =
   except ValueError:
     fallback
 
-proc readSelectedInt(r: MockRenderer; node: MockNode; fallback: int): int =
-  parseControlInt(r.inputValue(node), fallback)
-
 when defined(js):
   proc selectValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
 
-  proc readSelectedInt(r: WebRenderer; node: isonim_dom.Element;
-                       fallback: int): int =
-    parseControlInt($isonim_dom.Node(node).selectValue(), fallback)
+proc readSelectedInt[R, N](r: R; node: N; fallback: int): int =
+  ## The integer value of the `<select>` `node`, or `fallback`.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin inputValue
+  when defined(js):
+    when N is isonim_dom.Element:
+      parseControlInt($isonim_dom.Node(node).selectValue(), fallback)
+    else:
+      parseControlInt(r.inputValue(node), fallback)
+  else:
+    parseControlInt(r.inputValue(node), fallback)
 
 proc renderTraceContextOption[R](r: R; ctx: VCSTraceContextRow;
                                  isSelected: bool): auto =
@@ -737,13 +798,18 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
   let rowIndex = index
   let rowPath = file.path
   let rowStatus = file.status
+  # The row opens the commit's whole-commit document, scrolled to this file;
+  # its "View Diff" button opens this file's diff on its own (VCS-Panel.md,
+  # "Changed Files").
+  let documentTarget = "commit:" & commitHash
   let rowTarget = "commit:" & commitHash & ":" & rowPath
 
   var rowNode: typeof(r.createElement("div"))
   let row = ui(r):
     tdiv(ref = rowNode, class = "vcs-accordion-file",
          onclick = proc() =
-           callbacks.invokeSelectFile(rowIndex, rowPath, rowTarget, rowStatus))
+           callbacks.invokeSelectFile(rowIndex, rowPath, documentTarget,
+                                      rowStatus))
 
   r.appendRenderedChild(rowNode, renderLaneSpacer(r, continuationCells))
 
@@ -795,27 +861,32 @@ proc renderCommitRow[R](r: R; vm: VCSVM; callbacks: VCSCallbacks;
   let header = ui(r):
     tdiv(ref = headerNode, class = commitHeaderClass(isSelected))
 
-  r.attachCommitClick(headerNode, vm, callbacks, index)
+  let commitTarget = "commit:" & commit.hash
+  r.attachCommitClick(headerNode, vm, callbacks, index, commitTarget)
 
   # Graph lanes column — must be appended outside the ui block (see note above).
   r.appendRenderedChild(headerNode,
     renderGraphLanes(r, commit.graphCells, commit.dotLane,
                      commit.connectors, index == 0))
 
-  # Commit message, relative timestamp, and whole-commit unified diff button.
-  var commitDiffBtn: typeof(r.createElement("span"))
-  let commitTarget = "commit:" & commit.hash
+  # The expand control, the commit message and the relative timestamp. The
+  # header itself opens the commit's diff (`attachCommitClick`), so there is
+  # no separate button for it.
+  var toggleNode: typeof(r.createElement("span"))
   let body = ui(r):
     tdiv(class = "vcs-commit-body"):
+      span(ref = toggleNode,
+           class = (if isSelected: "vcs-commit-toggle vcs-commit-toggle-open"
+                    else: "vcs-commit-toggle"),
+           title = (if isSelected: "Collapse" else: "Expand"),
+           `aria-expanded` = (if isSelected: "true" else: "false")):
+        text (if isSelected: "▾" else: "▸")
       span(class = "vcs-commit-msg"):
         text commit.message
       span(class = "vcs-commit-time-col"):
         text abbreviateRelTime(commit.relativeTime)
-      span(ref = commitDiffBtn, class = "vcs-commit-diff-btn"):
-        tdiv(class = "custom-tooltip"):
-          text "View Commit Diff"
   r.appendRenderedChild(headerNode, body)
-  r.attachCommitDiffClick(commitDiffBtn, callbacks, commitTarget)
+  r.attachCommitToggle(toggleNode, vm, callbacks, index)
 
   r.attachCommitTooltip(headerNode, commit.hash, commit.fullHash,
                         commit.author, commit.date)
@@ -889,7 +960,10 @@ proc renderCommitGraph[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
   # targets calls onLoadMoreCommits when this div scrolls into view.
   let bottomArea = ui(r):
     tdiv(ref = sentinel, class = "vcs-load-more-sentinel"):
-      if vm.loadingMore.val:
+      # Shown while the next page is being fetched; an attribute, so it
+      # follows `loadingMore` without rebuilding the list.
+      span(class = "vcs-load-more-label",
+           display = (if vm.loadingMore.val: "inline" else: "none")):
         text "Loading\xe2\x80\xa6"  # "Loading…" — ellipsis U+2026
 
   r.appendRenderedChild(list, bottomArea)
@@ -1089,25 +1163,38 @@ when defined(js):
       }, { passive: true });
     })(#)""".}
 
-proc saveCommitListScroll(body: MockNode)    = discard
-proc restoreCommitListScroll(body: MockNode) = discard
-proc attachMouseTracker(body: MockNode)      = discard
+proc keepCommitListScroll[N](body: N; save: bool) =
+  ## Save (before a rebuild) or restore (after it) the commit list's scroll
+  ## position — a browser's; other renderers do not scroll.
+  when defined(js):
+    when N is isonim_dom.Element:
+      if save: saveCommitListScroll(body) else: restoreCommitListScroll(body)
+
+proc trackMouse[N](body: N) =
+  ## Browser only: see `attachMouseTracker`.
+  when defined(js):
+    when N is isonim_dom.Element:
+      attachMouseTracker(body)
 
 # ---------------------------------------------------------------------------
 # Top-level panel assembly
 # ---------------------------------------------------------------------------
 
-proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
-                           callbacks: VCSCallbacks): auto =
-  var body: typeof(r.createElement("div"))
+proc renderVCSPanel*[R, N](r: R; vm: VCSVM;
+                           callbacks: VCSCallbacks = VCSCallbacks()): N =
+  ## The VCS pane: the review's changed files in DeepReview mode, otherwise
+  ## the branch picker, the working tree and the commit graph.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren
+  var body: N
   let panel = ui(r):
     tdiv(class = VCSContainerClass):
       tdiv(ref = body, class = "vcs-panel-body")
 
-  attachMouseTracker(body)
+  trackMouse(body)
 
   createRenderEffect proc() =
-    saveCommitListScroll(body)
+    keepCommitListScroll(body, save = true)
     r.clearChildren(body)
     if vm.deepReviewMode.val:
       r.appendRenderedChild(body, renderHeader(r, vm, callbacks))
@@ -1127,22 +1214,6 @@ proc renderVCSPanelImpl[R](r: R; vm: VCSVM;
       r.appendRenderedChild(body, renderWorkingTree(r, vm, callbacks))
       # Commit graph with accordion expand/collapse and infinite-scroll.
       r.appendRenderedChild(body, renderCommitGraph(r, vm, callbacks))
-    restoreCommitListScroll(body)
+    keepCommitListScroll(body, save = false)
 
   panel
-
-proc renderVCSPanel*(r: MockRenderer; vm: VCSVM;
-                     callbacks: VCSCallbacks = VCSCallbacks()): MockNode =
-  renderVCSPanelImpl(r, vm, callbacks)
-
-when defined(js):
-  proc renderVCSPanel*(r: WebRenderer; vm: VCSVM;
-                       callbacks: VCSCallbacks = VCSCallbacks()):
-                       isonim_dom.Element =
-    renderVCSPanelImpl(r, vm, callbacks)
-
-  proc mountIsoNimVCSPanel*(container: isonim_dom.Element; vm: VCSVM;
-                            callbacks: VCSCallbacks = VCSCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderVCSPanel(r, vm, callbacks)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

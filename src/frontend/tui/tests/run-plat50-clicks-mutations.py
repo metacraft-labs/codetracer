@@ -33,7 +33,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | request | arms |
   |---|---|
   | 1 the shared menus | PC1 (the tab menu's order), PC2 (Run to Cursor without its key), PC3 (a disabled breakpoint offers "Disable"), PC4 (a leaf may expand), PC5 (a variable's entry disabled), PC6 (Up/Down land on disabled entries), PC7 (a disabled entry is chosen), PC8 (no Unpin on a dock label), PC9 (no word just past its end), PC10 (an ambiguous Rust path taken), PC11 ("Add all values" pins one), PC13 (a row dropped from the table), EV1 (a second header click keeps the direction) |
-  | 1 the sweep's other rows, terminal | RT21 (Alt+click at column 1), RT22 (Ctrl+Alt read as Alt), RT23 (Copy copies nothing), RT24 (a tracepoint on the stop's line), RT25 (the close button inverted), RT26 (header clicks ignored), RT27 (the status line copies nothing), RT28 (a dock label opens the tab menu), RT29 (Unpin does nothing), RT31 (the View menu cannot add a pane), RT32 (the commit below opens), RT33 (`:origin` waits for a move: the freeze), RT34 (Ctrl+click pins nothing), RT35 (an argument opens the call's menu), RF1 (a Files menu again), TS7-TS11 (the host drops the column / the order / the removal / the origin answer / the tracepoint's line), VS1 (a commit only closes), VD1 (a commit's files named by their letter), EL1 (the header arrow reversed), SP1 (the close button a cell off) |
+  | 1 the sweep's other rows, terminal | RT21 (Alt+click at column 1), RT22 (Ctrl+Alt read as Alt), RT23 (Copy copies nothing), RT24 (a tracepoint on the stop's line), RT25 (the close button inverted), RT26 (header clicks ignored), RT27 (the status line copies nothing), RT28 (a dock label opens the tab menu), RT29 (Unpin does nothing), RT31 (the View menu cannot add a pane), RT32 (the commit below opens), RT33 (`:origin` waits for a move: the freeze), RT34 (Ctrl+click pins nothing), RT35 (an argument opens the call's menu), RF1 / RF2 (a Files node opens no menu; its Edit opens nothing), PC14 (a disabled Files entry's reason not drawn), TS7-TS11 (the host drops the column / the order / the removal / the origin answer / the tracepoint's line), VS1 (a commit only closes), VD1 (a commit's files named by their letter), EL1 (the header arrow reversed), SP1 (the close button a cell off) |
   | 1 the sweep's other rows, shared ops | HS5 / HS6 (a column breakpoint sent, or kept, without its column), HS7 (a call jump without its name), HS8 (the order always ascending), HS9 (history rows without values), HS10 (the origin chain dropped), HS11 (the scratchpad never written), HS12 (a disabled column breakpoint still sent) |
   | 1 the sweep's other rows, GPUI | GM14-GM25 (column, call jump, header order, close button, value pin, footer copy, dock label menu, View menu, adopted leaves, commit files, argument menu, the clipboard never written), GL2 (arguments unmarked) |
   | 1 the engine and the shim | EN1-EN3 (`event_db`: output sorted backwards, ties reversed, the column name's key), EN4 (`dap_handler` ignores the order — the shipped defect, graded on the real terminal against a rebuilt replay-server), IG2 / IG3 (the shim never listens for the right / middle button), IG4 (every frame writes the clipboard) |
@@ -41,7 +41,8 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | 1 terminal host | TS1 (collapsed folders still list their files), TS2 (an opened file never shown), TS3 (the status line does not say where), TS4 (the gutter right-click always enables), TS6 (Delete ALL deletes nothing) |
   | 1 shared ops | HS1 (a disabled breakpoint still sent), HS2 (Run to Cursor sent as backward), HS3 (clearing a file sends nothing), HS4 (a jump with no step that way hangs), SD1 (a disabled row stored enabled), NH1 (the tree opens collapsed), PV1 (the vocabulary tree ignores the VM's expansion) |
   | 1 terminal input | MO1 (Ctrl read from the Alt bit), FT1 (a collapsed folder's twisty), PL1 (the selected point not drawn), CM1 (menu rows off by the frame), CM2 (disabled entries not italic), CM3 (the menu far from the press), CM4 (the overlay shows the title for the text) |
-  | 1 GPUI | GW1 (right button read as left), GW2 (ancestors act on the same press), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
+  | 1 GPUI's Edit mode Files | GE1 (the Files leaf gets no model), GE2 (a file press opens nothing), GE3 (opening a file drops the first one's buffer), GE4 (nothing carries the operations out), GE5 (the folder not listed again), GE6 (a new file not opened), GE7 (the name field takes no keys), GE8 (the Edit window draws no menu), GE9 (a Files press does not leave the field), GE10 (a folder tab's Files leaf gets no model), GE11 (an Edit window runs no Files entry), GE12 (Esc keeps the menu), GL3 / GL4 / GL5 (the Create field, Delete's question, the Rename field not drawn), FM1 (Enter on the question keeps the entry), FM2 (any key answers the question), FM3 (Backspace removes nothing), FM4 (Escape keeps the field open) |
+  | 1 GPUI | GW1 (right button read as left), GW2 (RETIRED 2026-10-17, below), GW3 (gutter and code swapped), GW4 (the menu's hit one entry low), GM1 (event right-click shows nothing), GM2 (gutter right-click inverted), GM3 (Ctrl+click ignored), GM4 (Run to Cursor backward), GM5 (collapse sends expand), GM6 (Close does nothing), GM8 (a value press expands nothing), GM9 (a file press opens nothing), GF1 / GF2 (a Files node opens no menu; its Edit opens nothing), GM13 (a press on the menu falls through), IG1 (isonim-gpui: the right button an unknown kind) |
   | 2 colours | RO1 (inactive tabs black), RO2 (the field the raised slab), RO3 (the menu on the card), RO4 (the strip divider in the border colour), RO6 (the strip on raised), RO7 (the top bar on the card), RO8 (the menu frame in the subtle border), SH4 (row 0 on the card), TB3 (controls filled), TB5 (no dropdown frame), GC1 (GPUI's window ground the old raised), GC2 (GPUI's menu on the card), GM11 (GPUI's band on the pane ground), GM12 (GPUI's omnibox border the menu's) |
   | 3 the omnibox | TB1 (not centred), TB2 (a third, not the desktop's share), TB4 (no field edge), GT1 (GPUI not centred), GT2 (GPUI a third wide) |
   | 4 dividers | BD1 (the strip is no divider), BD2 (a lone pane's whole strip is its label), SH1 (a strip-row divider on the panel), SH2 (body dividers in the subtle colour by default), SH3 (body dividers on the canvas), SH5 (a box-drawing line), RO5 (subtle is the strip colour), BO1 (the field edge degrades to `!`), CL1 (`--dividers` inverted), TM1 (the terminal never reads `--dividers`), TA1 (the shell never gets the choice), GM10 (GPUI never draws subtle lines) |
@@ -75,6 +76,18 @@ NO DECLARED SURVIVORS.
 
 PLAT-51 retired RT10, RT30, GM7, GL1 and TS5 with the Timeline panel they
 mutated (K30 / K45 and GPUI's track; a seek's host route is PLAT-51's TS1).
+
+THE ELECTRON-PARITY REDESIGN (2026-10-17) RETIRED GW2 — `window_clicks.admit`
+made off (`if false`), so "every ancestor row acts on the same press". It
+SURVIVED its re-run, and not for want of an assertion: the redesigned GPUI
+panes draw their rows FLAT (the file tree's rows are siblings under one
+unwired `fileTree` mark, as are the call trace's and the state pane's), so no
+listened row has a listened ancestor and the press the dedupe drops is never
+heard twice. `admit` remains, guarding a nesting no pane builds; an arm on it
+can only survive. Should a pane nest listened rows again, restore GW2 with
+that pane's case as its killer. PV1 moved from `pane_views` to
+`leaves.renderFileTree` the same day, and `pane_views.nim` left the subjects
+(no arm aims at it any more).
 
 No mocks: every suite graded here runs the product's own models, the
 product's own runtime and shell, a real PTY with real recordings, the shipped
@@ -123,7 +136,7 @@ WINCLICKS = "src/frontend/gpui/window_clicks.nim"
 GPUIMAIN = "src/frontend/gpui/main.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
 DESKEDITOR = "src/frontend/ui/editor.nim"
-DESKEVENTLOG = "src/frontend/ui/event_log.nim"
+DESKEVLOGVIEW = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
 EVENTLOGVM = "src/frontend/viewmodel/viewmodels/event_log_vm.nim"
 CALLTRACEVM = "src/frontend/viewmodel/viewmodels/calltrace_vm.nim"
 VCSDETAILS = "src/frontend/viewmodel/host/native_vcs_details.nim"
@@ -132,6 +145,15 @@ EVENTLOGVIEW = "src/frontend/tui/app/views/event_log.nim"
 SCRATCHPANE = "src/frontend/tui/app/views/scratchpad_pane.nim"
 EVENTDB = "src/db-backend/src/event_db.rs"
 DAPHANDLER = "src/db-backend/src/dap_handler.rs"
+# ADDED 2026-10-22: the breakpoint planners every front-end shares moved from
+# `headless_session` into the SDK (`f8d57f478`), and the call-trace toggle and
+# the origin wait from `tui_session` / GPUI's main into the host both share
+# (`session_driver`).
+SDKBP = "src/frontend/viewmodel/sdk/breakpoints.nim"
+SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
+# ADDED 2026-10-24: GPUI's Edit mode draws the opened folder's Files tree and
+# its menu acts on the disk; the name field's keys are read beside the model.
+FILETREEMENU = "src/frontend/headless_app/file_tree_menu.nim"
 ISONIM_GPUI_DIR = Path(os.environ.get(
     "ISONIM_GPUI_DIR", str(ROOT.parent / "isonim-gpui")))
 if os.environ.get("ISONIM_GPUI_SRC"):
@@ -153,6 +175,14 @@ T1 = "src/frontend/tui/tests/test_plat50_shell.nim"
 PTYK = "src/frontend/tui/tests/real_terminal/test_plat50_clicks.nim"
 PTYC = "src/frontend/tui/tests/real_terminal/test_plat50_chrome.nim"
 GPLAN = "src/frontend/gpui/tests/test_plat50_gpui_plan.nim"
+# ADDED 2026-10-17: the redesign's caption bar centres the omnibox only where
+# the share exceeds the controls (1920 px, not this plan's 1440), and the case
+# that measures the centring is PLAT-69's — a layout case, no binary.
+G69 = "src/frontend/gpui/tests/test_plat69_gpui_chrome.nim"
+# ADDED 2026-10-24: GPUI's Edit mode over a real temporary folder (the shipped
+# binary's window plan), and the name field's keys in the shared model.
+GEDIT = "src/frontend/gpui/tests/test_files_edit_gpui_plan.nim"
+VFILES = "src/frontend/viewmodel/tests/unit/test_files_node_menu.nim"
 COLVM = "src/frontend/viewmodel/tests/unit/test_plat50_column_ops_vm.nim"
 ENGT = EVENTDB + "#event_order_tests"
 SHIMT = str(SHIM_CRATE / "tests" / "gpui_rendering.rs")
@@ -162,13 +192,14 @@ DESKTOP_GATE = "scripts/plat50-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat50-desktop-capture.spec.ts"
 
 SUBJECTS = [PANECLICKS, RUNTIME, TUISESSION, HSESSION, STORE, NATIVEHOST,
-            PANEVIEWS, MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
+            MOUSE, BINDING, SHELL, ROLES, TOPBAR, CTXMENU,
             FILETREE, POINTLIST, BORDERS, CLI, TUIAPP, TUIMAIN, CHROME,
             WINTOP, WINCLICKS, GPUIMAIN, GPUILEAVES, DESKEDITOR, GRENDERER,
-            DESKEVENTLOG, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
-            EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP]
-SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, IGT, ENGT, SHIMT, CLIPT,
-          DESKTOP_GATE]
+            DESKEVLOGVIEW, EVENTLOGVM, CALLTRACEVM, VCSDETAILS, VCSSOURCE,
+            EVENTLOGVIEW, SCRATCHPANE, EVENTDB, DAPHANDLER, SHIMAPP, SHIMCLIP,
+            SDKBP, SESSDRIVER, FILETREEMENU]
+SUITES = [VMU, COLVM, REF, T1, PTYK, PTYC, GPLAN, G69, GEDIT, VFILES, IGT,
+          ENGT, SHIMT, CLIPT, DESKTOP_GATE]
 
 
 def suite_file(path: str) -> str:
@@ -193,6 +224,9 @@ SUITE_KIND = {
     PTYK: ("c", "tui-real-terminal"),
     PTYC: ("c", "tui-real-terminal"),
     GPLAN: ("c", "gpui-shell"),
+    G69: ("c", "gpui-shell"),
+    GEDIT: ("c", "gpui-shell"),
+    VFILES: ("c", "vm-unit"),
     # isonim-gpui's own suite, compiled in ITS checkout with its `nim.cfg`.
     IGT: ("isonim-gpui", ""),
     # The real desktop, filtered to its one case (a regex without spaces).
@@ -203,7 +237,7 @@ ENGINE_SUBJECTS = {EVENTDB, DAPHANDLER}
   # an arm on these graded by a binary suite rebuilds the replay-server
   # `REPLAY_SERVER_BIN` names, from `ENGINE_DIR`
   # graded against a REBUILT codetracer-tui
-GPUI_BINARY_SUITES = {GPLAN}
+GPUI_BINARY_SUITES = {GPLAN, GEDIT}
   # read the WINDOW's render plan of a REBUILT codetracer-gpui
 UNISOLATED_SUITES: set = set()
   # none: every suite here runs with the harness's own state isolation
@@ -245,7 +279,8 @@ S_POINT = "a click on a point-list row selects it, on the selection ground"
 S_ASCII = "the ASCII tier draws the edge lines as |"
 S_FLAG = "--dividers=strip|subtle, strip by default, anything else refused"
 K_FILES = "a file click opens it in the editor; a folder click collapses it"
-K_FILEMENU = "a right-click on a node opens no menu (the desktop has none)"
+K_FILEMENU = ("a right-click on a node opens the Files pane's menu; Edit opens "
+              "the file")
 K_GUTTER = ("a gutter click sets a breakpoint the replay stops at; a right "
             "click disables it")
 K_CTRL = ("Ctrl+click and a middle click on a line go to it; the status line "
@@ -288,9 +323,27 @@ G_CALL = "a call's menu: Collapse Call Children collapses it"
 G_TAB = "a tab's menu: Close removes the tab"
 G_VALUE = "a value expands; a variable's menu"
 G_FILES = "a file opens in the editor; a folder collapses; a node's menu"
-G_CHROME = "the desktop's grounds, a centred bordered omnibox"
+# RENAMED 2026-10-17 with the redesign: at this plan's 1440 px the omnibox
+# follows the controls (it is centred only where the share exceeds them).
+G_CHROME = "the desktop's grounds, a bordered omnibox after the controls"
+G69_CENTRED = "the omnibar is centred in what the buttons leave of the band"
 G_DIVIDERS = ("--dividers=subtle draws a line in each gap between side-by-side "
               "panes")
+E_TREE = "the leaf plan and the window list the folder, its folder and files"
+E_OPEN = "a click opens a file; the first file's unsaved buffer is kept"
+E_MENU = ("a file's menu: four entries, all enabled; the folder's row is not "
+          "renamed")
+E_CREATE = "Create: a taken name is refused, a free one is created and opened"
+E_RENAME = "Rename: the field holds the name; the file is renamed on disk"
+E_DELETE = ("Delete asks first: Escape keeps the file, Enter moves it to the "
+            "trash")
+E_LEAVE = "a press elsewhere cancels an open name field"
+E_TAB = "a folder tab lists the folder, and its menu acts on the disk"
+U_CREATE = ("Create: characters, Backspace, a refused name kept open, Enter "
+            "sends")
+U_RENAME = "Rename opens on the current name; Escape sends nothing"
+U_DELETE = ("Delete's question: characters do not answer it; Enter and Escape "
+            "do")
 I_POINTER = ("a pointer event decodes its window position, and a wheel its "
              "delta")
 G_SCRATCH = "an argument pinned to the scratchpad; its close button removes it"
@@ -298,7 +351,7 @@ G_ORDER = "an event-log header orders the log; again reverses it"
 G_COLUMN = ("Alt+click anchors a column breakpoint; Ctrl+Alt+click goes into "
             "a call")
 G_FLOW = "an inline value's menu; Ctrl+click pins it"
-G_SWEEP = "the Variables tabs, a point, the footer's location, a dock label"
+G_SWEEP = "the Variables list, a point, the footer's location, a dock label"
 G_VCS = "the VCS pane: a file's diff, a commit's files"
 E_ORDER = "a_column_orders_the_log_and_ties_keep_the_recorded_order"
 E_NAMES = "column_names_select_their_keys"
@@ -322,9 +375,12 @@ CASE_SUITE = {
     C_BAR: PTYC, C_MENU: PTYC, C_STRIPS: PTYC, C_BODY: PTYC,
     G_EVENT: GPLAN, G_GUTTER: GPLAN, G_CTRL: GPLAN, G_TEXTMENU: GPLAN,
     G_CALL: GPLAN, G_TAB: GPLAN, G_VALUE: GPLAN,
-    G_FILES: GPLAN, G_CHROME: GPLAN, G_DIVIDERS: GPLAN,
+    G_FILES: GPLAN, G_CHROME: GPLAN, G_DIVIDERS: GPLAN, G69_CENTRED: G69,
     G_SCRATCH: GPLAN, G_ORDER: GPLAN, G_COLUMN: GPLAN, G_FLOW: GPLAN,
     G_SWEEP: GPLAN, G_VCS: GPLAN,
+    E_TREE: GEDIT, E_OPEN: GEDIT, E_MENU: GEDIT, E_CREATE: GEDIT,
+    E_RENAME: GEDIT, E_DELETE: GEDIT, E_LEAVE: GEDIT, E_TAB: GEDIT,
+    U_CREATE: VFILES, U_RENAME: VFILES, U_DELETE: VFILES,
     I_POINTER: IGT,
     E_ORDER: ENGT, E_NAMES: ENGT, I_BUTTONS: SHIMT, I_CLIP: CLIPT,
     D_DESKTOP: DESKTOP_GATE,
@@ -381,13 +437,14 @@ ARMS = [
         "    if event.button != mbRight:\n      return false\n    let pane = rt.app.layoutBinding.stripPaneAt(",
         "    if event.button != mbMiddle:\n      return false\n    let pane = rt.app.layoutBinding.stripPaneAt(",
         S_TABMENU, "the tab menu opens on the middle button, not the right"),
+    # RE-AIMED 2026-10-24 (K19): the Files press is `activateFilesRow`'s.
     Arm("RT2", RUNTIME,
-        "      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path))",
-        "      kind: pcOpenFile, path: e.path))",
+        "      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path)\n",
+        "      kind: pcOpenFile, path: e.path)\n",
         K_FILES, "a folder click is sent as opening a file"),
-    Arm("RT3", RUNTIME,
-        "    let i = tree.scrollTop + (event.row - under.row - 1)\n",
-        "    let i = tree.scrollTop + (event.row - under.row - 2)\n",
+    Arm("RT3", FILETREE,
+        "  let i = screen.top + (row - screen.area.row - 1)\n",
+        "  let i = screen.top + (row - screen.area.row - 2)\n",
         K_FILES, "a Files click lands on the row above"),
     Arm("RT4", RUNTIME,
         "    if event.button == mbLeft:\n      outcome.requestClick(PaneClickRequest(kind: pcToggleBreakpoint,\n                                            path: src.path, line: line))",
@@ -446,8 +503,8 @@ ARMS = [
         '    of "Enter", "q":\n      rt.app.content = ContentOverlay()\n',
         S_ESC, "Esc leaves the event's content open"),
     Arm("RT19", RUNTIME,
-        '  of "Down": rt.app.contextMenu.move(1)\n',
-        '  of "Down": rt.app.contextMenu.move(-1)\n',
+        '    of "context-menu.focus-next": rt.app.contextMenu.move(1)\n',
+        '    of "context-menu.focus-next": rt.app.contextMenu.move(-1)\n',
         S_TABMENU, "Down in a context menu moves up"),
     Arm("RT20", RUNTIME,
         "  if acted.status == lasNoGesture and not inGesture and\n     rt.routePaneClick(geometry, event, outcome):\n",
@@ -470,14 +527,28 @@ ARMS = [
         "    if session.setBreakpointEnabled(c.path, c.line, c.enabled):\n",
         "    if session.setBreakpointEnabled(c.path, c.line, true):\n",
         K_GUTTER, "the host always enables, whatever the click asked"),
-    Arm("TS6", TUISESSION,
-        "         (c.path.len == 0 or r.path == c.path):\n",
-        "         (c.path.len == 0 and r.path == c.path):\n",
+    # TS6 RE-AIMED 2026-10-21 (M76): the file filter of "Delete breakpoints
+    # in file" / "Delete ALL breakpoints" moved from the terminal's click arm
+    # into the shared `headless_session.clearAllBreakpoints` (via
+    # `breakpointFiles`), which the program menu's "Delete All Breakpoints"
+    # and GPUI's editor menu call too. Same defect, its one copy.
+    # RE-AIMED 2026-10-22 (TS6, HS1, HS5, HS6, HS12, SD1): `f8d57f478` moved
+    # the breakpoint planners into `sdk/breakpoints.nim`, which plans every
+    # change as the file's whole set of `BreakpointSpec`s; each claim is
+    # aimed at the code that now carries it. Graded at codetracer
+    # `e353dcb7b` (a provisional record, retracted after the grade): HS5, HS6
+    # and HS12 killed by `test_plat50_column_ops_vm.nim`. TS6, HS1 and SD1 are
+    # NOT YET GRADED: their killer, the real-terminal `test_plat50_clicks.nim`,
+    # is red unmutated there (its dock-label right-click case, recorded in
+    # codetracer-pm `issues/`), so the harness refuses before any arm runs.
+    Arm("TS6", SDKBP,
+        "       (path.len == 0 or r.path == path):\n",
+        "       (path.len == 0 and r.path == path):\n",
         K_BPMENU, "Delete ALL breakpoints matches no file"),
     # --- 1. the shared operations ------------------------------------------
-    Arm("HS1", HSESSION,
-        "      if enabled: anchors.add a\n      else: disabled.add a\n",
-        "      anchors.add a\n",
+    Arm("HS1", SDKBP,
+        "  for sp in plan:\n    if not sp.enabled:\n      continue\n    var bp",
+        "  for sp in plan:\n    var bp",
         K_GUTTER, "a disabled breakpoint is still sent to the engine"),
     Arm("HS2", HSESSION,
         '  of "forward": 1\n',
@@ -492,16 +563,20 @@ ARMS = [
         "  if false:\n    s.backend.bound = saved\n    raise newException(CatchableError, what)\n",
         G_TEXTMENU, "a line jump that finds no step waits for a move forever"),
     Arm("SD1", STORE,
-        "                              column: max(0, a.column), enabled: false,\n",
-        "                              column: max(0, a.column), enabled: true,\n",
+        "        enabled: sp.enabled, resolution: resolution,\n",
+        "        enabled: true, resolution: resolution,\n",
         K_GUTTER, "the store keeps a disabled breakpoint as an enabled row"),
     Arm("NH1", NATIVEHOST,
         "    expandAllFolders(files)\n",
         "    discard files\n",
         K_FILES, "the native tree opens with its folders collapsed"),
-    Arm("PV1", PANEVIEWS,
-        "               expanded = kids.len > 0 and vm.isExpanded(e.path))\n",
-        "               expanded = kids.len > 0)\n",
+    # PV1 RE-AIMED 2026-10-17: the Electron-parity redesign draws the GPUI
+    # file tree natively (`leaves.renderFileTree` over `fileTreeRows`), not
+    # through the vocabulary tree `pane_views` builds, so the old mutation
+    # SURVIVED as a no-op. The same defect where the rows are decided now.
+    Arm("PV1", GPUILEAVES,
+        "  let open = e.children.len > 0 and vm.isExpanded(e.path)\n",
+        "  let open = e.children.len > 0\n",
         G_FILES, "the vocabulary tree ignores the VM's expansion"),
     # --- 1. terminal input and painters ------------------------------------
     Arm("MO1", MOUSE,
@@ -537,10 +612,7 @@ ARMS = [
         "  of gekContextMenu: gbRight\n",
         "  of gekContextMenu: gbLeft\n",
         G_TEXTMENU, "GPUI reads the right button as the left"),
-    Arm("GW2", WINCLICKS,
-        "  if d.armed and d.kind == ev.kind and d.key == ev.key:\n    return false\n",
-        "  if false:\n    return false\n",
-        G_FILES, "every ancestor row acts on the same press"),
+    # GW2 RETIRED 2026-10-17 — see the module docstring.
     Arm("GW3", WINCLICKS,
         "                       gcpCode else: gcpGutter),\n",
         "                       gcpGutter else: gcpCode),\n",
@@ -565,9 +637,13 @@ ARMS = [
         '         of caRunToCursor: "forward"\n',
         '         of caRunToCursor: "backward"\n',
         G_TEXTMENU, "GPUI's Run to Cursor runs backward"),
-    Arm("GM5", GPUIMAIN,
-        '        (if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"),\n',
-        '        (if line.isExpanded: "ct/expand-calls" else: "ct/collapse-calls"),\n',
+    # RE-AIMED 2026-10-22: GPUI's menu entry calls the toggle the host
+    # shares with the terminal (`session_driver.toggleCallChildren`). NOT YET
+    # GRADED: `test_plat50_gpui_plan.nim` is red unmutated at `e353dcb7b`
+    # (GPUI's call trace draws only its toplevel row; codetracer-pm `issues/`).
+    Arm("GM5", SESSDRIVER,
+        '  let command = if collapse: "ct/collapse-calls" else: "ct/expand-calls"\n',
+        '  let command = if collapse: "ct/expand-calls" else: "ct/collapse-calls"\n',
         G_CALL, "GPUI's Collapse Call Children sends expand"),
     Arm("GM6", GPUIMAIN,
         "  of caClosePane:\n    applyGestureCommand(r, cmdRemovePane(target.pane))\n",
@@ -577,10 +653,22 @@ ARMS = [
         "      session.stateVM.toggleExpand(c.key)\n",
         "      discard c.key\n",
         G_VALUE, "GPUI's value press expands nothing"),
+    # RE-AIMED 2026-10-24 (K19): a file press, and the menu's Edit, open
+    # through `openTreeFile`.
     Arm("GM9", GPUIMAIN,
-        "      gViewedFile = e.path\n      if gViewedFile == gSession.getCurrentFile():\n",
-        "      gViewedFile = \"\"\n      if gViewedFile == gSession.getCurrentFile():\n",
+        "  gViewedFile = path\n  if gViewedFile == gSession.getCurrentFile():\n",
+        "  gViewedFile = \"\"\n  if gViewedFile == gSession.getCurrentFile():\n",
         G_FILES, "GPUI's file press opens nothing"),
+    # K19, 2026-10-24: a Files node opens the Files pane's menu (Filesystem-
+    # Pane.md § "Context menu"), from the shared Files model.
+    Arm("GF1", GPUIMAIN,
+        "    if c.button == gbRight:\n      openContextMenuAt(r, vm.fileTreeContextMenuOf(e.path), c.x, c.y)\n      return\n",
+        "    if c.button == gbRight:\n      return\n",
+        G_FILES, "GPUI's Files node opens no menu again"),
+    Arm("GF2", GPUIMAIN,
+        "      else:\n        openTreeFile(r, target.path)\n      return\n",
+        "      else:\n        discard\n      return\n",
+        G_FILES, "GPUI's menu Edit opens nothing"),
     Arm("GM13", GPUIMAIN,
         "  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and\n     handlePopoverPress(r, kind, x, y):\n",
         "  if kind in {gekPointerDown, gekContextMenu, gekAuxDown} and false and\n     handlePopoverPress(r, kind, x, y):\n",
@@ -589,6 +677,87 @@ ARMS = [
         "  of GpuiEventPointerContext: gekContextMenu\n",
         "  of GpuiEventPointerContext: gekOther\n",
         I_POINTER, "isonim-gpui: the right button decodes to an unknown kind"),
+    # --- 1. GPUI's Edit mode: the opened folder's Files tree (K19) ---------
+    # ADDED 2026-10-24 (codetracer-pm issue
+    # `2026-10-24-gpui-edit-mode-files-pane-lists-no-tree`): the tree is the
+    # shared Files model over the project walk, its menu acts on the disk
+    # (`native_file_tree`), the name is typed into an inline field.
+    Arm("GE1", GPUIMAIN,
+        "      leaf.vm = ViewModel(editFilesVMOf(folder))\n",
+        "      discard folder\n",
+        E_TREE, "GPUI's Edit mode Files leaf gets no model (the issue's state)"),
+    Arm("GE2", GPUIMAIN,
+        "    elif not openArm.isNil:\n      discard openEditFile(e.path)\n",
+        "    elif not openArm.isNil:\n      discard e.path\n",
+        E_OPEN, "a file press in an Edit window opens nothing"),
+    Arm("GE3", GPUIMAIN,
+        "  if not gEditArms.hasKey(shown):\n    gEditArms[shown] = openArm\n",
+        "  if false:\n    gEditArms[shown] = openArm\n",
+        E_OPEN, "opening a file drops the shown file's unsaved buffer"),
+    Arm("GE4", GPUIMAIN,
+        "  wireNativeFileOperations(result, proc(): string = root,\n    proc(res: FileTreeOperationResult) = editFileOperationDone(root, res))\n",
+        "  discard root\n",
+        E_MENU, "nothing carries Edit mode's operations out (a replay's menu)"),
+    Arm("GE5", GPUIMAIN,
+        "  if res.error.len == 0 and not vm.isNil:\n    relistEditFiles(vm, root)\n",
+        "  if res.error.len == 0 and not vm.isNil:\n    discard vm\n",
+        E_CREATE, "the pane does not follow the disk after an operation"),
+    Arm("GE6", GPUIMAIN,
+        "    discard openEditFile(res.path)\n",
+        "    discard res.path\n",
+        E_CREATE, "a created file is not opened in the editor"),
+    Arm("GE7", GPUIMAIN,
+        "  if filesFieldKey(key, mods):\n    return true\n",
+        "  if false:\n    return true\n",
+        E_CREATE, "the name field takes no keys (they type into the editor)"),
+    Arm("GE8", GPUIMAIN,
+        "    drawPopovers(r)\n    for e in gTopEls:\n",
+        "    for e in gTopEls:\n",
+        E_MENU, "an Edit window draws no right-click menu"),
+    Arm("GE9", GPUIMAIN,
+        "    leaveFilesField(r)\n    let vm = windowFilesVM()\n",
+        "    let vm = windowFilesVM()\n",
+        E_LEAVE, "a press on a Files row does not leave the open field"),
+    Arm("GE10", GPUIMAIN,
+        "  attachEditFiles(leafSet, tab.folder)   # K19: the folder's Files tree\n",
+        "  discard tab.folder\n",
+        E_TAB, "a folder tab's Files leaf gets no model"),
+    Arm("GE11", GPUIMAIN,
+        "     action notin {caFileCreate, caFileRename, caFileDelete, caFileEdit}:\n",
+        "     true:\n",
+        E_CREATE, "an Edit window runs no Files entry (no session)"),
+    Arm("GE12", GPUIMAIN,
+        "  if gCtxMenu.open and key.toLowerAscii in [\"escape\", \"esc\"]:\n",
+        "  if false:\n",
+        E_MENU, "Esc does not close an Edit window's menu"),
+    Arm("GL3", GPUILEAVES,
+        "      result.add (ftlField, i, row.depth + 1)\n",
+        "      discard i\n",
+        E_CREATE, "Create's name field is not drawn"),
+    Arm("GL4", GPUILEAVES,
+        "      result.add (ftlQuestion, i, row.depth)\n",
+        "      discard i\n",
+        E_DELETE, "Delete's question is not drawn"),
+    Arm("GL5", GPUILEAVES,
+        "    if edit.kind == fneRename and row.node.path.len > 0 and\n",
+        "    if false and edit.kind == fneRename and row.node.path.len > 0 and\n",
+        E_RENAME, "Rename's field is not drawn in place of the label"),
+    Arm("FM1", FILETREEMENU,
+        "    of \"Enter\":\n      discard vm.confirmDelete()\n",
+        "    of \"Enter\":\n      vm.cancelDelete()\n",
+        U_DELETE, "Enter on Delete's question keeps the entry"),
+    Arm("FM2", FILETREEMENU,
+        "    else:\n      return ffsAbsorbed\n",
+        "    else:\n      discard vm.confirmDelete()\n      return ffsAbsorbed\n",
+        U_DELETE, "any key answers Delete's question yes"),
+    Arm("FM3", FILETREEMENU,
+        "    vm.nameEditDraft.dropLastRune()\n",
+        "    discard\n",
+        U_CREATE, "Backspace removes nothing from the name"),
+    Arm("FM4", FILETREEMENU,
+        "  of \"Esc\":\n    vm.cancelNameEdit()\n    ffsCancelled\n",
+        "  of \"Esc\":\n    ffsCancelled\n",
+        U_RENAME, "Escape leaves the name field open"),
     # --- 1. the sweep's other rows: the shared models ------------------------
     Arm("PC8", PANECLICKS,
         "  result.entries.add entry(UnpinLabel, caUnpin)\n",
@@ -618,29 +787,39 @@ ARMS = [
         "    result.add CallSegment(kind: csArgValue, text: a.value, arg: i + 1)\n",
         "    result.add CallSegment(kind: csArgValue, text: a.value, arg: i)\n",
         K_SCRATCH, "an argument's value belongs to the argument before it"),
-    Arm("DL1", DESKEVENTLOG,
-        '        let direction = if again and ascending: cstring"desc" else: cstring"asc"\n',
-        '        let direction = cstring"asc"\n',
+    # RE-AIMED 2026-10-23: the desktop Event Log is one view over its
+    # ViewModel (`1c18341dd`); the DataTables header handler DL1 mutated is
+    # gone, and the desktop's header click is the view's `onHeaderClick`.
+    # The shared reversal rule itself is EV1's.
+    Arm("DL1", DESKEVLOGVIEW,
+        "  result = proc() = vm.sortBy(vm.order().clickedHeader(col))\n",
+        "  result = proc() = vm.sortBy(EventLogOrder(column: col, ascending: true))\n",
         D_DESKTOP, "the desktop's second header click does not reverse the order"),
-    Arm("HS5", HSESSION,
-        "  anchors.add (line, column)\n  s.sendBreakpoints(path, anchors, disabled)\n",
-        "  anchors.add (line, 0)\n  s.sendBreakpoints(path, anchors, disabled)\n",
+    Arm("HS5", SDKBP,
+        "  result.add BreakpointSpec(line: line, column: max(0, column),\n",
+        "  result.add BreakpointSpec(line: line, column: 0,\n",
         COL_STOP, "a column breakpoint sent without its column"),
-    Arm("HS6", HSESSION,
-        "      if r.enabled: result.enabled.add (r.line, r.column)\n",
-        "      if r.enabled: result.enabled.add (r.line, 0)\n",
+    Arm("HS6", SDKBP,
+        "      result.add BreakpointSpec(line: r.line, column: r.column,\n",
+        "      result.add BreakpointSpec(line: r.line, column: 0,\n",
         COL_STOP, "an edit elsewhere drops the column breakpoints' columns"),
-    Arm("HS12", HSESSION,
-        "      if enabled: anchors.add a\n      else: disabled.add a\n    elif a in held.enabled: anchors.add a\n",
-        "      anchors.add a\n      if not enabled: disabled.add a\n    elif a in held.enabled: anchors.add a\n",
+    Arm("HS12", SDKBP,
+        "  for sp in plan:\n    if not sp.enabled:\n      continue\n    var bp",
+        "  for sp in plan:\n    if not sp.enabled and sp.column == 0:\n      continue\n    var bp",
         COL_OFF, "a disabled column breakpoint is still sent, and also listed disabled"),
     Arm("HS7", HSESSION,
         '              %*{"path": path, "line": line, "token": token,',
         '              %*{"path": path, "line": line, "token": "",',
         K_CALLJUMP, "a call jump sent without the function's name"),
-    Arm("HS8", HSESSION,
-        '    args["sortAscending"] = %order.ascending\n',
-        '    args["sortAscending"] = %true\n',
+    # RE-AIMED 2026-10-23: `683918518` made the terminal page its event log
+    # through the ViewModel, so a header click's order reaches the engine in
+    # the ViewModel's window request, not `headless_session`'s
+    # `requestAndLoadEventLog` (only GPUI's header click still calls that,
+    # and GM16 is its arm). The needle there still matched, so the scan was
+    # clean while K_ORDER could no longer reach it, and HS8 SURVIVED.
+    Arm("HS8", EVENTLOGVM,
+        '        "sortAscending": asc,\n',
+        '        "sortAscending": true,\n',
         K_ORDER, "the log's order always sent ascending"),
     Arm("HS9", HSESSION,
         '      valueText: presentedValueText(r{"value"}, budget))\n',
@@ -719,10 +898,20 @@ ARMS = [
         "    if hit.arg >= 0 and hit.arg < call.args.len:\n",
         "    if false:\n",
         K_SCRATCH, "an argument's right-click opens the call's menu"),
+    # RE-AIMED 2026-10-24: K19 is the Files pane's menu (Filesystem-Pane.md),
+    # where it was no menu.
     Arm("RF1", RUNTIME,
-        "    # K17 / K18 (K19: the desktop has no Files menu).\n    if event.button != mbLeft:\n",
-        "    # K17 / K18 (K19: the desktop has no Files menu).\n    if event.button == mbRight:\n      rt.openContextMenu(tabContextMenu(paneFileTree, false), event.row,\n                         event.col, outcome)\n      return true\n    if event.button != mbLeft:\n",
-        K_FILEMENU, "a Files node opens a menu again"),
+        "    if event.button == mbRight:\n      rt.openFilesMenu(i, event.row, event.col, outcome)\n      return true\n",
+        "    if event.button == mbRight:\n      return false\n",
+        K_FILEMENU, "a Files node opens no menu again"),
+    Arm("RF2", RUNTIME,
+        "      outcome.paneClick = PaneClickRequest(kind: pcOpenFile, path: target.path)\n",
+        "      discard target\n",
+        K_FILEMENU, "the menu's Edit opens nothing in a replay"),
+    Arm("PC14", PANECLICKS,
+        "                             hint = (if d.enabled: \"\" else: d.reason),\n",
+        "                             hint = \"\",\n",
+        K_FILEMENU, "a disabled Files entry's reason is not drawn"),
     Arm("TS7", TUISESSION,
         "    if session.setColumnBreakpoint(c.path, c.line, c.column):\n",
         "    if session.setColumnBreakpoint(c.path, c.line, 1):\n",
@@ -735,9 +924,11 @@ ARMS = [
         "      vm.removeValue(int(c.index))\n",
         "      discard vm\n",
         K_SCRATCH, "the terminal's close button removes nothing"),
-    Arm("TS10", TUISESSION,
-        "      event = s.session.backend.waitForEvent(OriginEventName)\n",
-        "      event = nil\n",
+    # RE-AIMED 2026-10-22: the wait moved into `session_driver.awaitOriginEvent`.
+    # NOT YET GRADED, for TS6's reason above.
+    Arm("TS10", SESSDRIVER,
+        "    result = s.backend.waitForEvent(OriginEventName)\n",
+        "    result = nil\n",
         K_VALUE, "the origin query's answer never read"),
     Arm("TS11", TUISESSION,
         "    line: request.line, expression: request.expression)])\n",
@@ -793,7 +984,9 @@ ARMS = [
         "    applyGestureCommand(r, cmdActivateTab(pane))\n    discard (cmdAddPane(pane,\n",
         G_SWEEP, "GPUI's View menu cannot open a pane the arrangement lacks"),
     Arm("GM22", GPUIMAIN,
-        "    gPanes[leaf.paneId] = node\n    gLeafSet.leaves.add leaf\n",
+        "    gPanes[leaf.paneId] = node\n    markPaneScope(r, node, leaf.paneId)\n"
+        "    if openArm.isNil and not probeEnabled:\n      armPaneKeys(r, node)\n"
+        "    gLeafSet.leaves.add leaf\n",
         "    discard node\n",
         G_SWEEP, "a pane added after open is never drawn"),
     Arm("GM23", GPUIMAIN,
@@ -918,10 +1111,15 @@ ARMS = [
         '  FieldEdgeLeft* = "▕"\n',
         '  FieldEdgeLeft* = " "\n',
         C_BAR, "the field's left border not drawn"),
+    # GT1 RE-AIMED 2026-10-17: the redesigned caption bar centres the slot
+    # between two equal shares (`share`) unless the controls are wider; the
+    # defect drops the share, so the slot always follows the controls. Its
+    # killer is PLAT-69's centring case (1920 px), since at the plan's 1440
+    # px the slot follows the controls anyway.
     Arm("GT1", WINTOP,
-        "    x = max(x, min(centred, latest))\n",
-        "    x = max(x, min(x, latest))\n",
-        G_CHROME, "GPUI's omnibox left, not centred"),
+        "  let slotX = controlsStart + max(share, controlsW) + MenuPartGapPx\n",
+        "  let slotX = controlsStart + controlsW + MenuPartGapPx\n",
+        G69_CENTRED, "GPUI's omnibox left, not centred"),
     Arm("GT2", WINTOP,
         "  clamp(int(float(width) * OmnibarDesktopShare + 0.5), OmnibarDesktopFloorPx,\n",
         "  clamp(int(float(width) * 0.3 + 0.5), OmnibarDesktopFloorPx,\n",
@@ -982,9 +1180,11 @@ ARMS = [
         "    elif e.target.position.isNil or e.target.element.isNil:\n",
         "    elif false:\n",
         D_DESKTOP, "the desktop's press with no text position throws again"),
+    # RE-AIMED 2026-10-22: `5c52d631f` made the class test one helper that
+    # also matches the empty slot. Killed by the Electron gate at `e353dcb7b`.
     Arm("DE3", DESKEDITOR,
-        '         cstrutils.startsWith(element, cstring"gutter-breakpoint"):\n',
-        '         element == cstring"gutter-breakpoint":\n',
+        '    if cstrutils.startsWith(element, cstring"gutter-breakpoint") or\n',
+        '    if element == cstring"gutter-breakpoint" or\n',
         D_DESKTOP, "the desktop's marker right-click matched by a class it lacks"),
 ]
 
@@ -1601,7 +1801,16 @@ def main() -> int:
                     return 2
             # The restored tree's binary is rebuilt before the harness exits
             # (`rebuild_restored`), not after every arm: the next binary arm
-            # rebuilds it with its own defect anyway.
+            # rebuilds it with its own defect anyway. THE ENGINE IS THE
+            # EXCEPTION: no later arm rebuilds it, and every suite that opens
+            # a recording refuses a replay-server built from other sources
+            # (`replay_prerequisite`'s provenance check), so a mutant engine
+            # left in place turns each later arm into a HARNESS-FAILURE.
+            if "engine" in _DIRTY:
+                _DIRTY.discard("engine")
+                if not build_engine():
+                    print("the restored tree's engine does not build")
+                    return 2
             if suite in BINARY_SUITES or suite in GPUI_BINARY_SUITES:
                 _DIRTY.add(suite in BINARY_SUITES and "tui" or "gpui")
         if res.hung:

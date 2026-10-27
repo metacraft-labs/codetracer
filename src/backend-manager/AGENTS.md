@@ -51,6 +51,18 @@ Add to `.claude/mcp.json` in your project root:
 
 If `backend-manager` is not on your PATH, use the full path to the binary.
 
+`read_source_file` serves the source copies a recording embeds. To also read
+the files a recording's source list names from this machine, which most
+recordings need because most recorders embed no copies, add
+`"--allow-host-source-reads"` to `args`. The option also governs every other
+tool: without it, the replay backend the daemon starts reads source text only
+from the recording's own copies, so origin answers (`sourceText`,
+`assignment`), flow expressions and `exec_script`'s `read_source` carry no line
+of a host file, and say so. Leave it out for an agent that reads recordings of
+other people's programs or traffic: a recording's source list can name any file
+on the machine that replays it. The `ct trace` commands read host sources, as
+the desktop GUI does.
+
 ### Other MCP Clients
 
 Any MCP-compatible client can connect by spawning `backend-manager trace mcp`
@@ -95,8 +107,34 @@ and communicating via stdin/stdout with newline-delimited JSON-RPC 2.0.
   working directory and is skipped. There is no override variable: put the wanted
   interpreter's directory earlier in `PATH`. On Windows the same lookup
   looks for `python3.exe`.
-- `CODETRACER_DAEMON_SOCK` - Override the daemon socket path (used in tests).
-- `TMPDIR` - Affects where the daemon socket and PID files are created.
+- `CODETRACER_CI_BASE_URL` - The codetracer-ci origin (`scheme://host[:port]`)
+  that a dive-in URL given as `trace_path` may be fetched from. A URL whose
+  host, or whose `gatewayBaseUrl` parameter, names any other origin is
+  refused before a connection is opened; unset, every dive-in URL is refused.
+- `CODETRACER_GATEWAY_TOKEN` - The bearer token for that gateway, when the
+  dive-in URL carries none (`authToken`). It is sent to the configured origin
+  only.
+- `CODETRACER_GATEWAY_SHARE_TOKEN` - A codetracer-ci share token (the token
+  of a Trace share link with download permission), sent as `X-Share-Token`
+  when the dive-in URL carries none (`shareToken`). The gateway reads a
+  recording for an authenticated caller only with it (or as a signed-in
+  member of the recording's tenant). Both tokens must be RFC 6750
+  b64tokens.
+- `CODETRACER_DAEMON_SOCKET` - Override the daemon socket path (the PID file
+  becomes `<socket>.pid`; `socket_path` in the daemon config file does the
+  same). The daemon and every client (the `trace` verbs, `daemon
+  stop`/`status`/`connect`, the MCP server) resolve it through one function,
+  `DaemonConfig::daemon_paths`, so it moves both sides or neither. The Python
+  API (`python-api/codetracer/connection.py`, `default_daemon_socket_path`)
+  cannot call it and mirrors it instead; `python_daemon_socket_agreement_test`
+  fails when the two disagree, so change both together.
+- `CODETRACER_DAEMON_SOCK` - The MCP server: connect to the daemon at this
+  socket and never auto-start one (used in tests). The daemon also sets it
+  for `exec_script`'s Python process, and the Python API connects to it
+  ahead of any other resolution.
+- `CODETRACER_TMP_PATH`, else `$CODETRACER_HOME/tmp`, else the per-OS default
+  (`TMPDIR`-based on Linux) - where the daemon socket and PID file go without
+  an override.
 
 ### Trace Paths
 
@@ -110,7 +148,9 @@ in a different one.
 - `exec_script` - Execute a Python script against a trace.
 - `trace_info` - Get metadata about a trace.
 - `list_source_files` - List source files in a trace.
-- `read_source_file` - Read a source file from a trace.
+- `read_source_file` - Read a source file from a trace: an embedded copy, or
+  with `--allow-host-source-reads` a file the trace's source list names, read
+  from this machine.
 
 ### Available MCP Prompts
 

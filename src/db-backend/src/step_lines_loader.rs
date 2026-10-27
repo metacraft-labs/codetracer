@@ -15,7 +15,7 @@ use crate::trace_reader::TraceReader;
 
 #[derive(Debug, Clone)]
 pub struct StepLinesLoader {
-    pub global_line_steps: DistinctVec<StepId, LineStep>,
+    pub global_line_steps: DistinctVec<StepId, Option<LineStep>>,
     flow_loaded: HashSet<i64>,
 }
 
@@ -25,8 +25,9 @@ impl StepLinesLoader {
         let mut global_line_steps = DistinctVec::new();
         for step_id_int in 0..reader.step_count() {
             let step_id = StepId(step_id_int as i64);
-            let step = *reader.step(step_id).expect("StepLinesLoader::new: invalid step_id");
-            let line_step = Self::simple_line_step(step_id, step, reader, expr_loader);
+            let line_step = reader
+                .step(step_id)
+                .map(|step| Self::simple_line_step(step_id, *step, reader, expr_loader));
             global_line_steps.push(line_step);
         }
         StepLinesLoader {
@@ -94,9 +95,15 @@ impl StepLinesLoader {
                 break;
             }
             let step_id = StepId(step_id_int as i64);
+            if self.global_line_steps[step_id].is_none() {
+                continue;
+            }
             let call_key = reader.call_key_for_step(step_id).unwrap_or(CallKey(-1));
             if !self.flow_loaded.contains(&call_key.0) {
-                let location = self.global_line_steps[step_id].location.clone();
+                let Some(line_step) = self.global_line_steps[step_id].as_ref() else {
+                    continue;
+                };
+                let location = line_step.location.clone();
                 let mut replay = MaterializedReplaySession::new(Arc::clone(&reader));
                 let flow_update = flow_preloader.load(location, FlowMode::Call, TraceKind::Materialized, &mut replay);
                 if !flow_update.error && !flow_update.view_updates.is_empty() {
@@ -110,13 +117,17 @@ impl StepLinesLoader {
                                 value: value.clone(),
                             })
                             .collect();
-                        self.global_line_steps[StepId(flow_step.rr_ticks.0)].values = flow_values;
+                        if let Some(Some(line_step)) = self.global_line_steps.get_mut(StepId(flow_step.rr_ticks.0)) {
+                            line_step.values = flow_values;
+                        }
                     }
                     self.flow_loaded.insert(call_key.0);
                 }
             }
             if step_id_int < self.global_line_steps.len() {
-                let mut line_step = self.global_line_steps[step_id].clone();
+                let Some(mut line_step) = self.global_line_steps[step_id].clone() else {
+                    continue;
+                };
                 // should be
                 //   negative for step_id < location_step_index: (backwards)
                 //   positive for step_id >= location_step_index: (forwards)

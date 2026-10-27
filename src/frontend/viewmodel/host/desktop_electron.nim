@@ -328,7 +328,15 @@ proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
 # Process
 # ---------------------------------------------------------------------------
 
-proc electronProcess(profile: PlatformProfile): ProcessFacade =
+proc electronProcess*(profile: PlatformProfile): ProcessFacade =
+  ## The Electron renderer's process facade.
+  ##
+  ## Exported for the readers that run `ui/git_cli.nim` under node in the
+  ## `renderer-dom` lane — `tests/git_cli_index_lock_test.nim` and
+  ## `tests/vcs_panel_reload_test.nim` — for the reason `electronVcs` below
+  ## is: there `newDesktopElectronPlatform` finds no `require('electron')` and
+  ## falls back to the web profile, so the process facade the shipped window
+  ## runs git through is reachable only by name.
   result = unavailableProcess(profile)
 
   result.run = proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
@@ -349,6 +357,50 @@ proc electronProcess(profile: PlatformProfile): ProcessFacade =
       resolvedOk(ProcessRunResult(
         exit: ProcessExit(exitCode: 1, signalled: false),
         stdout: "", stderr: errorText()))
+
+  # `run` without the wait: `child_process.spawn` through the runner the VCS
+  # facade's asynchronous reads use (`node_certificate_host.nodeAsyncGitRunner`
+  # — named for git, but it runs whatever argv it is given), the future
+  # settled when the child closes. `run` above stays `execFileSync`: see
+  # `ProcessFacade.runLater` for who relies on that.
+  #
+  # What it reports is what the child did — its exit status, stdout and
+  # stderr — where `run` folds every failure into exit 1 with empty output.
+  # A child that could not be launched (ENOENT, a missing working
+  # directory), was killed, or wrote more than the runner captures, is a
+  # `pkFailed` carrying node's account of why: there is no exit status to
+  # report for it.
+  #
+  # `stdinText` and `clearEnv` are refused rather than dropped: the runner
+  # gives the child `/dev/null` and the inherited environment, so a caller
+  # that asked for either would otherwise get a different run from the one
+  # it described. `timeoutMs` is not enforced, as it is not by `run`.
+  let laterRunner = nodeAsyncGitRunner()
+  result.runLater = proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]] =
+    if spec.stdinText.len > 0 or spec.clearEnv:
+      return resolvedErr[ProcessRunResult](pkNotSupported,
+        "runLater cannot feed stdin or clear the environment on this platform")
+    let shown = spec.command
+    var env: seq[(string, string)] = @[]
+    for (key, value) in spec.env:
+      env.add (key, value)
+    jsGuard:
+      settledLater(proc(settle: proc(value: PlatformOutcome[ProcessRunResult])) =
+        laterRunner(GitCall(argv: @[spec.command] & spec.args,
+                            cwd: spec.workingDir, env: env),
+          proc(reply: GitReply) {.closure, gcsafe.} =
+            {.cast(gcsafe).}:
+              if reply.exitCode < 0 or not reply.complete:
+                settle(failed[ProcessRunResult](pkFailed, "running " & shown & " failed",
+                  if reply.stderr.strip().len > 0: reply.stderr.strip()
+                  elif not reply.complete: "the output was more than could be captured"
+                  else: "exit " & $reply.exitCode))
+              else:
+                settle(succeeded(ProcessRunResult(
+                  exit: ProcessExit(exitCode: reply.exitCode, signalled: false),
+                  stdout: reply.stdout, stderr: reply.stderr)))))
+    do:
+      resolvedErr[ProcessRunResult](pkFailed, "running " & shown & " failed", errorText())
 
   # `start`, `signal`, `writeStdin`, `closeStdin` and `isRunning` are left
   # refusing, and the profile below drops `capProcessSpawn`'s watchable half
@@ -374,12 +426,101 @@ proc electronProcess(profile: PlatformProfile): ProcessFacade =
 # VCS
 # ---------------------------------------------------------------------------
 
-proc electronVcs(profile: PlatformProfile): VcsFacade =
+const ElectronLogFormat =
+  "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1e"
+  ## One commit per `\x1e`-terminated record, its fields `\x1f`-separated:
+  ## two bytes that cannot occur in a hash, a name, an address or a subject
+  ## line, so no field can be split by its own content
+  ## (https://git-scm.com/docs/pretty-formats).
+
+proc parseElectronLog(output: string): seq[VcsCommit] =
+  ## `ElectronLogFormat`'s output, read. A record with too few fields — which
+  ## git never writes — is skipped rather than guessed at.
+  for record in output.split('\x1e'):
+    let trimmed = record.strip()
+    if trimmed.len == 0: continue
+    let f = trimmed.split('\x1f')
+    if f.len < 7: continue
+    var authoredAt: int64 = 0
+    try: authoredAt = parseBiggestInt(f[5]) * 1000
+    except ValueError: discard
+    result.add VcsCommit(
+      id: f[0], shortId: f[1],
+      parents: if f[2].len > 0: f[2].split(' ') else: @[],
+      authorName: f[3], authorEmail: f[4], authoredAtMs: authoredAt,
+      subject: f[6])
+
+proc gitReadLater[T](runner: AsyncContentGitRunner; repository: string;
+                     args: seq[string]; parse: proc(output: string): T
+                    ): PlatformFuture[PlatformOutcome[T]] =
+  ## One git read that does not block the calling thread: `args` (the
+  ## subcommand first) behind `noIndexLockGitArgs`, launched through
+  ## `child_process.spawn`, the future settled with `parse(stdout)` when git
+  ## exits 0 with its whole output.
+  ##
+  ## Every other ending is the failure `execFileSync` gave the same command:
+  ## `pkFailed`, `git <args> failed`, and in `detail` git's own diagnostic —
+  ## or, for a git that never ran (ENOENT, a missing working directory),
+  ## node's account of why, which `node_certificate_host.replyOf` puts where
+  ## git's stderr would be. One mapping for every asynchronous read below, so
+  ## they cannot drift apart in what a failure looks like.
+  let shown = "git " & args.join(" ")
+  jsGuard:
+    settledLater(proc(settle: proc(value: PlatformOutcome[T])) =
+      runner(GitCall(argv: @["git"] & noIndexLockGitArgs(args), cwd: repository),
+        proc(reply: GitReply) {.closure, gcsafe.} =
+          {.cast(gcsafe).}:
+            if reply.exitCode == 0 and reply.complete:
+              settle(succeeded(parse(reply.stdout)))
+            else:
+              settle(failed[T](pkFailed, shown & " failed",
+                if reply.stderr.strip().len > 0: reply.stderr.strip()
+                elif not reply.complete: "the output was more than could be captured"
+                else: "exit " & $reply.exitCode))))
+  do:
+    resolvedErr[T](pkFailed, shown & " failed", errorText())
+
+proc electronVcs*(profile: PlatformProfile): VcsFacade =
+  ## The Electron renderer's version-control facade.
+  ##
+  ## Exported for the suites that reach it under node:
+  ## `tests/electron_vcs_content_id_async_test.nim`,
+  ## `tests/electron_vcs_refresh_async_test.nim` and
+  ## `tests/electron_vcs_index_lock_test.nim` in the `main-process` lane,
+  ## and `tests/git_cli_refresh_snapshot_test.nim` in `renderer-dom`, which
+  ## installs it behind `ui/git_cli`. Under plain node
+  ## `newDesktopElectronPlatform` finds no `require('electron')` and —
+  ## rightly, for a browser tab — falls back to the web profile, so this
+  ## facade, the one the shipped window installs, is reachable from a Nim
+  ## lane only by name.
+  ##
+  ## ## The reads a periodic refresh makes do not block
+  ##
+  ## `contentId`, `repositoryRoot`, `status` and `log` run git through
+  ## `child_process.spawn` and settle their futures when it answers. The
+  ## certificate indicator gathers W, H, S and the root on every refresh, and
+  ## the VCS pane reads the status and the last 30 commit ids every 5 s and on
+  ## focus (`ui/git_cli.readRefreshSnapshot`). Through `execFileSync` /
+  ## `spawnSync` each of those froze the window: up to 1.2 s per indicator
+  ## refresh, 150-185 ms per pane tick (Status-Bar.md, "A refresh never
+  ## stalls the window"; VCS-Panel.md, "An auto-refresh never stalls the
+  ## window"; codetracer-pm issue
+  ## `2026-10-21-vcs-auto-refresh-runs-git-synchronously-on-the-renderer-main-thread`).
+  ## No renderer code settles `status` or `log` with `ctAwaitSync`, so
+  ## answering later changes no caller's answer.
+  ##
+  ## The other operations still use `execFileSync`. They run when the user
+  ## acts (stage, a diff, a blob) rather than on a timer. The pane's own
+  ## reload runs git through `ui/git_cli.gitReadLater` and the process
+  ## facade's `runLater`, which does not block either.
   result = unavailableVcs(profile)
 
   proc git(repository: string; args: seq[string]): PlatformOutcome[string] =
+    ## Every git call this facade makes is built by `noIndexLockGitArgs`, so
+    ## the pane's refresh never writes the index nor takes its lock
+    ## (`platform/vcs.NoIndexLockGitOptions`).
     var jsArgs: seq[cstring] = @[]
-    for a in args: jsArgs.add a.cstring
+    for a in noIndexLockGitArgs(args): jsArgs.add a.cstring
     jsGuard:
       succeeded($nodeExecFileSync(cstring"git", jsArgs, repository.cstring, cstring""))
     do:
@@ -389,69 +530,33 @@ proc electronVcs(profile: PlatformProfile): VcsFacade =
     let res = git(path, @["rev-parse", "--is-inside-work-tree"])
     resolvedOk(res.ok and res.value.strip() == "true")
 
-  result.repositoryRoot = proc(path: string): PlatformFuture[PlatformOutcome[string]] =
-    let res = git(path, @["rev-parse", "--show-toplevel"])
-    if res.ok: resolvedOk(res.value.strip())
-    else: resolved(failed[string](res.error))
+  # The three reads below settle later and share one runner and one outcome
+  # mapping (`gitReadLater`), so a failure means the same on each.
+  let readGit = nodeAsyncGitRunner()
 
+  # `git rev-parse --show-toplevel`: the top level, without its line
+  # terminator.
+  result.repositoryRoot = proc(path: string): PlatformFuture[PlatformOutcome[string]] =
+    gitReadLater(readGit, path, @["rev-parse", "--show-toplevel"],
+      proc(output: string): string = output.strip())
+
+  # Read by the porcelain-v2 reader every instantiation shares
+  # (`platform/vcs.parsePorcelainV2`) rather than by one of this facade's
+  # own. The one it replaces skipped unmerged (`u `) lines, so a conflict
+  # starting or ending was invisible to the pane's refresh, and cut a path
+  # at its first space.
   result.status = proc(repository: string): PlatformFuture[PlatformOutcome[VcsStatus]] =
-    let res = git(repository, @["status", "--porcelain=v2", "--branch"])
-    if not res.ok:
-      return resolved(failed[VcsStatus](res.error))
-    var status = VcsStatus()
-    for line in res.value.splitLines():
-      if line.len == 0: continue
-      if line.startsWith("# branch.head "):
-        status.branch = line[14 .. ^1]
-        status.detached = status.branch == "(detached)"
-      elif line.startsWith("# branch.upstream "):
-        status.upstream = line[18 .. ^1]
-      elif line.startsWith("? "):
-        status.changes.add VcsFileChange(
-          path: line[2 .. ^1], workingTreeStatus: vfsUntracked)
-      elif line.startsWith("1 ") or line.startsWith("2 "):
-        let fields = line.split(' ')
-        if fields.len >= 9:
-          let xy = fields[1]
-          proc code(c: char): VcsFileStatus =
-            case c
-            of 'M': vfsModified
-            of 'A': vfsAdded
-            of 'D': vfsDeleted
-            of 'R': vfsRenamed
-            of 'C': vfsCopied
-            of 'U': vfsConflicted
-            else: vfsUnmodified
-          status.changes.add VcsFileChange(
-            path: fields[^1], indexStatus: code(xy[0]),
-            workingTreeStatus: code(xy[1]))
-    resolvedOk(status)
+    gitReadLater(readGit, repository, @["status", "--porcelain=v2", "--branch"],
+      proc(output: string): VcsStatus = parsePorcelainV2(output))
 
   result.log = proc(repository: string; maxCount: int;
                     path: string): PlatformFuture[PlatformOutcome[seq[VcsCommit]]] =
-    var args = @["log", "--max-count=" & $maxCount,
-                 "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1e"]
+    var args = @["log", "--max-count=" & $maxCount, ElectronLogFormat]
     if path.len > 0:
       args.add "--"
       args.add path
-    let res = git(repository, args)
-    if not res.ok:
-      return resolved(failed[seq[VcsCommit]](res.error))
-    var commits: seq[VcsCommit] = @[]
-    for record in res.value.split('\x1e'):
-      let trimmed = record.strip()
-      if trimmed.len == 0: continue
-      let f = trimmed.split('\x1f')
-      if f.len < 7: continue
-      var authoredAt: int64 = 0
-      try: authoredAt = parseBiggestInt(f[5]) * 1000
-      except ValueError: discard
-      commits.add VcsCommit(
-        id: f[0], shortId: f[1],
-        parents: if f[2].len > 0: f[2].split(' ') else: @[],
-        authorName: f[3], authorEmail: f[4], authoredAtMs: authoredAt,
-        subject: f[6])
-    resolvedOk(commits)
+    gitReadLater(readGit, repository, args,
+      proc(output: string): seq[VcsCommit] = parseElectronLog(output))
 
   result.readBlob = proc(repository, path: string;
                          source: VcsBlobSource): PlatformFuture[PlatformOutcome[string]] =
@@ -486,17 +591,19 @@ proc electronVcs(profile: PlatformProfile): VcsFacade =
     let res = git(repository, args)
     if res.ok: resolvedOk(res.value) else: resolved(failed[string](res.error))
 
-  # The content-id recipe through node's `spawnSync`, its temporary index
-  # under the OS temporary directory. `node_certificate_host` returns every
+  # The content-id recipe through node's `child_process.spawn`, its temporary
+  # index under the OS temporary directory, settling when the last git call
+  # answers (`contentIdOverAsync`). `node_certificate_host` returns every
   # failure as a value; `jsGuard` is the facade's own contract on top, so even
-  # a lapse there arrives as an outcome rather than on `window.onerror`.
-  let contentHost = nodeContentIdHost()
+  # a lapse there — a throw before the first git call is launched — arrives
+  # as an outcome rather than on `window.onerror`.
+  let contentHost = nodeAsyncContentIdHost()
   result.contentId = proc(repository: string; state: VcsBlobSource;
                           algorithm: string; scope: seq[string]
                          ): PlatformFuture[PlatformOutcome[VcsContentId]] =
     jsGuard:
-      resolved(contentIdOver(contentHost, profile, repository, state,
-                             algorithm, scope))
+      contentIdOverAsync(contentHost, profile, repository, state, algorithm,
+                         scope)
     do:
       resolvedErr[VcsContentId](pkFailed, "computing a content id failed",
                                 errorText())
@@ -518,9 +625,10 @@ proc electronVcs(profile: PlatformProfile): VcsFacade =
 
   result.applyPatch = proc(repository, patch: string;
                            reverse: bool): PlatformFuture[PlatformOutcome[Nothing]] =
-    var jsArgs: seq[cstring] = @[cstring"apply"]
-    if reverse: jsArgs.add cstring"--reverse"
-    jsArgs.add cstring"-"
+    var jsArgs: seq[cstring] = @[]
+    for a in noIndexLockGitArgs(if reverse: @["apply", "--reverse", "-"]
+                                else: @["apply", "-"]):
+      jsArgs.add a.cstring
     jsGuard:
       discard nodeExecFileSync(cstring"git", jsArgs, repository.cstring, patch.cstring)
       resolvedOk()

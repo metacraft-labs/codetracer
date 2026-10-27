@@ -1302,26 +1302,20 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 
 .collapsed-icon
   font-size: 14px
-  // The glyph needs its own colour, because the chip it sits on has its own
-  // background. `.collapsed-icon-zone.has-icons` paints `#3a5070`; the button
-  // declared no `color`, so it inherited — black before `#status-base`
-  // declared one (**2.56:1** on that blue), and grey-300 after, which is
-  // **2.60:1** and still under the 3:1 floor for a non-text control. The bar
-  // fix does not reach this one: inheriting a colour chosen for `#1b1b1b`
-  // onto a `#3a5070` chip is how it stayed dark either way.
+  // The glyph declares its own colour rather than inheriting one. It once sat
+  // on a fixed `#3a5070` chip and inherited black (2.56:1) and then
+  // grey-300 (2.60:1) from the bar; the chip is gone (the group now sits on
+  // the status bar's own background, see `.collapsed-icon-zone.has-icons`),
+  // so its ground is the bar's, which follows the theme.
   //
-  // `colors-ui-icon-primary-default` (grey-100, `#dddddd`) is the design
-  // system's own default icon colour and gives 6.04:1 here, and 4.72:1
-  // against the `#4a6080` this lightens to on hover — so both resting and
-  // hover states clear the threshold, which is why the hover background did
-  // not have to move. Hover is the tighter of the two and the only reason
-  // this rule is not simply grey-150: `#c8c8c8` would land at 3.83:1 once
-  // the chip lightens, i.e. legible at rest and not while being pointed at,
-  // which is the wrong way round. It clears 4.5:1 as well, which matters
-  // because these
-  // are rendered as TEXT glyphs (`text icon.icon` in
-  // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images,
-  // so the stricter text threshold is the honest one to hold them to.
+  // `colors-ui-icon-primary-default` is the design system's default icon
+  // colour, and like the bar it takes each theme's mode: grey-100 (`#dddddd`)
+  // on the dark bar, and the Light mode's near-black (`#353430`) on the light
+  // bar (`#f8f6f2`). A fixed light grey would be 1.26:1 there. These are
+  // rendered as TEXT glyphs (`text icon.icon` in
+  // `isonim_auto_hide_collapsed_icons_view.nim`), not as background images, so
+  // the stricter text threshold is the one `footer-contrast-guard.spec.ts`
+  // holds them to.
   color: colors-ui-icon-primary-default
   cursor: pointer
   padding: 1px 3px
@@ -1437,11 +1431,17 @@ body:has(#auto-hide-strip-right .auto-hide-strip-tab.active:first-child)
 .collapsed-icon-zone.has-icons
   flex-shrink: 0
 
-// Hidden for now (Nikolay, 2026-10-15): the per-panel icons of a minimal
-// sidebar.  Only the sidebar toggle shows in the group; the panels are still
-// reached through the thin edge line.  Delete this rule to bring them back.
-.collapsed-icon-zone .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button)
-  display: none
+// The per-panel icons of a minimal sidebar are SHOWN: `Auto-Hide-Panes.md`
+// §10.3 makes the icon zone the collapsed sidebar's panel directory, "one
+// small icon per auto-hidden panel", each opening the overlay on its own
+// panel.  They were hidden "for now" on 2026-10-15 (d83de2484) with no change
+// to that section, which left every minimal sidebar without its directory and
+// its icons without an accessible name.  The zone's `gap` is 0 for the
+// toggle/tab-list pair (below), so the icons keep their former 2px spacing
+// from their neighbours here.
+.collapsed-icon-zone .collapsed-icon + .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button),
+.collapsed-icon-zone .collapsed-icon:not(.auto-hide-restore-button):not(.auto-hide-tablist-button) + .collapsed-icon
+  margin-left: 2px
 
 SIDEBAR_OPEN_ICON_PATH = url('../../public/resources/shared/sidebar_open.svg')
 SIDEBAR_CLOSE_ICON_PATH = url('../../public/resources/shared/sidebar_close.svg')
@@ -1522,8 +1522,8 @@ CLOSE_SM_ICON_PATH = url('../../public/resources/shared/close_sm.svg')
 
 // 8px between the toggle's icon and the tab-list icon (Nikolay, 2026-10-16):
 // the two 24px buttons touch, and each insets its 16px icon by 4px.  So the
-// zone's 2px item gap goes (the per-panel icons it spaced are hidden for now —
-// restore it with them).
+// zone's 2px item gap goes; the per-panel icons get it back as a margin (the
+// §10.3 rule above).
 .collapsed-icon-zone.has-icons
   gap: 0
 
@@ -1584,4 +1584,3 @@ CLOSE_SM_ICON_PATH = url('../../public/resources/shared/close_sm.svg')
   &.active,
   &.active .ct-menu-item-label
     color: colors-ui-text-primary-active
-

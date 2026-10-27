@@ -18,44 +18,32 @@
 ##    ``ReplComponent`` and registers it under ``Content.Repl`` (one
 ##    instance per panel id — typically id = 0 since the layout opens
 ##    a single REPL pane).
-## 2. ``layout.nim`` registers the GL container, then detects
-##    ``Content.Repl`` is in ``isIsoNimComponent`` and calls
-##    ``tryMountIsoNimReplPanel`` instead of invoking Karax.
-## 3. The mount helper appends the IsoNim panel inside the
-##    ``replComponent-{id}`` container and the reactive effects keep
-##    the DOM in sync with the VM.
+## 2. GoldenLayout's component factory (``layout.nim``) builds the
+##    pane's container and the panel host (``ui/panel_host``) mounts the
+##    generic view into it; reactive effects keep the DOM in sync with the
+##    VM.
+## 3. The legacy event handlers feed the session's VM.
 ## 4. ``configureMiddleware`` (in ``ui_js.nim``) installs the shared-
-##    store version of the VM via ``initReplVMWithStore`` so the panel
+##    store version of the VM via ``initReplVMFromSession`` so the panel
 ##    uses the production ``ReplayDataStore``.
 ## ---------------------------------------------------------------------------
 
 import
   std/[strutils, json],
-  ui_imports, value, ../[types, communication]
+  ui_imports, value, session_viewmodels, ../[types, communication]
 
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import isonim/core/signals
-import ../viewmodel/store/replay_data_store
 import ../viewmodel/viewmodels/repl_vm
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_repl_view import mountIsoNimRepl
 
 # ---------------------------------------------------------------------------
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by step_list / search_results / no_source.
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other. The pane's view
+# is mounted by the panel host (`ui/panel_host`).
 # ---------------------------------------------------------------------------
 
 var replVMInstance*: ReplVM
-var replVMStore: ReplayDataStore
 var replComponentRef: ReplComponent
-# Track which ReplComponent ids have already mounted their IsoNim
-# view.  The GL container is keyed by ``replComponent-{id}`` so each
-# panel instance gets its own mount.
-var isoNimReplMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
 
-proc tryMountIsoNimReplPanel*()
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers.
@@ -109,8 +97,11 @@ method onDebugOutput*(self: ReplComponent, response: DebugOutput) {.async.} =
   if self.history.len > 0:
     self.history[^1].output = response
     self.data.redraw()
-  if not replVMInstance.isNil:
-    replVMInstance.onDebugOutput(debugOutputToVm(response))
+  # THIS TAB'S ViewModel: the answer belongs to the tab whose REPL asked,
+  # shown or not (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, replVMInstance, replVM)
+  if not vm.isNil:
+    vm.onDebugOutput(debugOutputToVm(response))
 
 method run*(self: ReplComponent, input: cstring) {.async.} =
   ## Submit a user-entered REPL expression.  Mirrors the legacy
@@ -128,15 +119,16 @@ method run*(self: ReplComponent, input: cstring) {.async.} =
       )
     )
     debugRepl(self.history[^1].input)
-    if not replVMInstance.isNil:
+    let vm = ownPaneVM(self, replVMInstance, replVM)
+    if not vm.isNil:
       # Append directly so we do not double-dispatch ``debugRepl``
       # (the VM action would call it again via the dispatcher).
-      var entries = replVMInstance.history.val
+      var entries = vm.history.val
       entries.add(ReplInteraction(
         input: safeStr(input),
         output: ReplOutput(kind: rokLoading, output: ""),
       ))
-      replVMInstance.history.val = entries
+      vm.history.val = entries
 
 # ---------------------------------------------------------------------------
 # IsoNim VM bridge
@@ -147,9 +139,12 @@ proc syncLegacyReplIntoVM*(self: ReplComponent) =
   ## Used by the layout when the panel container becomes visible (or
   ## is rebuilt) so the panel reflects every interaction already
   ## accumulated by the previous IPC stream.
-  if replVMInstance.isNil or self.isNil:
+  if self.isNil:
     return
-  replVMInstance.setHistory(historyToVm(self.history))
+  let vm = ownPaneVM(self, replVMInstance, replVM)
+  if vm.isNil:
+    return
+  vm.setHistory(historyToVm(self.history))
 
 proc syncReplConfigIntoVM*() =
   ## Refresh the materialized / replEnabled / langName signals from
@@ -190,141 +185,36 @@ proc replDispatcher(): ReplDispatcher =
   result = proc(input: string) =
     debugRepl(cstring(input))
 
-proc initReplVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``ReplVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initReplVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
-  if replVMInstance != nil:
-    clog "ReplVM: replacing existing instance with shared-store version"
-    isoNimReplMountedIds = JsAssoc[int, bool]{}
-  replVMStore = store
-  replVMInstance = createReplVM(store, replDispatcher())
-  clog "ReplVM: parallel ViewModel instance created (shared store)"
+proc initReplVMFromSession*(vm: ReplVM) =
+  ## Hand the pane the session's `ReplVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## The REPL's dispatcher is the renderer's (`replDispatcher`), so it is
+  ## installed here, before the pane can send anything. The history the
+  ## shown tab's component already holds is replayed into it once, when the
+  ## ViewModel is first handed over — not again on every tab switch, which
+  ## would overwrite what it gained since.
+  vm.dispatcher = replDispatcher()
+  replVMInstance = vm
   syncReplConfigIntoVM()
-  tryMountIsoNimReplPanel()
-
-proc initReplVM*() =
-  ## Lazy fallback used when no shared store has been provided yet
-  ## (e.g. early-render paths or tests that bypass
-  ## ``configureMiddleware``).  Same shape as ``initStepListVM`` /
-  ## ``initNoSourceVM`` — a stub backend so the panel can still
-  ## render before the real session VM is wired.
-  if replVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  replVMStore = createReplayDataStore(stubBackend)
-  replVMInstance = createReplVM(replVMStore, replDispatcher())
-  clog "ReplVM: parallel ViewModel instance created (stub backend)"
-  syncReplConfigIntoVM()
-  tryMountIsoNimReplPanel()
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.Repl)
+    if not component.isNil:
+      syncLegacyReplIntoVM(ReplComponent(component))
 
 # ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc tryMountIsoNimReplPanel*() =
-    ## Mount the IsoNim REPL view into the GoldenLayout-managed
-    ## container.  The container's id is ``replComponent-{id}`` —
-    ## each open REPL panel instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component
-    ## id.  Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes (mirrors
-    ## ``tryMountIsoNimStepListPanel``).
-    if replVMInstance.isNil:
-      return
-    if replComponentRef.isNil:
-      return
-    let componentId = replComponentRef.id
-    if isoNimReplMountedIds.hasKey(componentId):
-      return
-
-    let key = cstring("replComponent-" & $componentId)
-    var retryCount = 0
-    proc doMount() =
-      if isoNimReplMountedIds.hasKey(componentId):
-        return
-      retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimReplPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimReplMountedIds[componentId] = true
-      try:
-        mountIsoNimRepl(container, replVMInstance)
-      except:
-        cerror "tryMountIsoNimReplPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-      # Re-sync config + history so the freshly-mounted view reflects
-      # the latest state.
-      syncReplConfigIntoVM()
-      if not replComponentRef.isNil:
-        syncLegacyReplIntoVM(replComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimReplPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initReplVM*``) compile on every backend.
-    discard
-
-# ---------------------------------------------------------------------------
-# Component registration — IsoNim primary renderer; no Karax method
-# render.  Generic callers are expected to use direct IsoNim mount paths.
+# Component registration. The pane's view is mounted by the panel host.
 # ---------------------------------------------------------------------------
 
 method unregister*(self: ReplComponent) =
-  ## Release the module-global slot and the mounted marker before the base
-  ## implementation drops the event-bus subscriptions.
+  ## Release the module-global slot before the base implementation drops the
+  ## event-bus subscriptions: `register` assigns `replComponentRef` only
+  ## `if isNil`, so a slot left pointing at an unregistered component would
+  ## keep the next one from being fed (`ui/session_switch` unregisters every
+  ## component of a closing session; `ui/layout` a closed panel).
   ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY, AND SILENTLY. Both
-  ## globals are write-once: `register` assigns `replComponentRef` only
-  ## `if isNil`, and the mount returns early at its
-  ## `isoNimReplMountedIds.hasKey` guard. Neither was ever cleared. After a
-  ## teardown `replComponentRef` still points at a component whose DOM
-  ## container is gone, and the marker for its id survives into the next
-  ## component handed the same id — GoldenLayout reuses them, and ids restart
-  ## from 0 after a layout reset — whose mount then returns at the guard and
-  ## draws nothing.
-  ##
-  ## It is an ordinary transition, not an exotic one:
-  ## `ui/session_switch.nim:337` unregisters EVERY component of a closing
-  ## session and `ui/layout.nim` unregisters a closed panel. And the failure is
-  ## silent, which is what made it survive — a pane that returns early at a
-  ## guard is indistinguishable from a pane with nothing to show.
-  ##
-  ## The VM is deliberately NOT reset: it is a singleton by design and holds
+  ## The VM is deliberately NOT reset: it is its tab's session's and holds
   ## state about the trace rather than about this panel, so dropping it would
   ## make closing and reopening the pane lose data that is still true.
   ##
@@ -332,16 +222,11 @@ method unregister*(self: ReplComponent) =
   ## `ui/scratchpad.nim`, which is the original.
   if replComponentRef == self:
     replComponentRef = nil
-  discard jsDelete(isoNimReplMountedIds[self.id])
   procCall unregister(Component(self))
 
 method register*(self: ReplComponent, api: MediatorWithSubscribers) =
-  ## Register the ReplComponent with the mediator.  Bring up the
-  ## IsoNim ReplVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## Register the ReplComponent with the mediator. Its handlers feed the
+  ## session's `ReplVM` once `initReplVMFromSession` has installed it.
   self.api = api
-  initReplVM()
   if replComponentRef.isNil:
     replComponentRef = self
-    tryMountIsoNimReplPanel()

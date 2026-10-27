@@ -69,6 +69,8 @@ import ./gutter
 # palette is how that is guaranteed rather than checked.
 import ./source_pane
 import ./styled_row
+import ./scrubber_track
+from codetracer_embed import HorizontalView, setViewport, overflows, barModel
 
 export gutter, styled_row, highlighter, profile
 
@@ -124,6 +126,15 @@ type
       ## path does not wait on a parse.
     spansFrom*: int
     spansProvided*: bool
+    hview*: HorizontalView
+      ## PLAT-70 (Horizontal-Overflow.md §4): the editor's horizontal view —
+      ## the buffer's, after the runtime's caret-follow. The code is drawn
+      ## from `hview.leftCol`; the bar is drawn while the content overflows.
+    caretViewColumn*: int
+      ## The caret's 0-based view column (`editing_core.caretViewColumn`):
+      ## the bar's mark (§4.2).
+    overflowMarkers*: bool
+      ## `view.overflow-markers` (§4.6): the `‹` / `›` per row.
 
   EditPaneScreen* = object
     ## One painted pane, plus the counts a test asserts on. Same shape as
@@ -140,6 +151,8 @@ type
       ## real terminal cursor there and two derivations of one coordinate is
       ## how a cursor ends up one row from the character it is editing.
     caretCol*: int
+    barRow*: int
+      ## The horizontal bar's row, -1 when the content fits (§4.1).
 
 const
   EditPaneTitle* = "EDIT"
@@ -176,7 +189,7 @@ const
   EditDirtyStyle* = CellStyle(role: srChromeNotification, bold: true)
   EditStatementStyle* = CellStyle(role: srChromeMuted, italic: true)
   EditRuleStyle* = CellStyle(role: srBorderPane)
-  EditPaneRule* = "─"
+  EditPaneRule* = canonical(grDividerH)
 
 proc initEditPaneModel*(path = ""; sourceStatement = "";
                         lines: seq[string] = @[]; viewportTop = 1;
@@ -222,7 +235,8 @@ proc paneGutterWidth*(model: EditPaneModel): int =
 # re-exported by `shell.nim`, so a consumer would have had to qualify a call
 # that has exactly one right answer.
 
-proc titleRowSpans*(model: EditPaneModel; width: int): StyledRow =
+proc titleRowSpans*(model: EditPaneModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## The title row as styled spans, exactly `width` cells wide.
   ##
   ## FOUR FIELDS AND THE THIRD IS THE REQUIREMENT: `EDIT`, the basename, the
@@ -257,17 +271,30 @@ proc titleRowSpans*(model: EditPaneModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(EditPaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: EditRuleStyle)
 
 proc titleRowText*(model: EditPaneModel; width: int): string =
   rowText(titleRowSpans(model, width))
 
+proc editBarOf*(model: EditPaneModel; area: CellArea):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## PLAT-70: where `paintEditPane` draws the horizontal bar in `area`, and
+  ## the view it is drawn over — what a press on it is hit-tested against.
+  let gw = paneGutterWidth(model)
+  let codeW = max(0, area.width - gw)
+  var view = model.hview
+  view.setViewport(codeW)
+  (shown: view.overflows and area.height >= 3,
+   row: area.row + area.height - 1, left: area.col + gw, cols: codeW,
+   view: view)
+
 proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
                     cache: HighlighterCache = nil): EditPaneScreen =
   ## Paint the pane into `area` of `g`, and report what it painted.
   result = EditPaneScreen(rows: @[], area: area, gutterWidth: 0, codeWidth: 0,
-                          renderedLines: 0, caretRow: -1, caretCol: -1)
+                          renderedLines: 0, caretRow: -1, caretCol: -1,
+                          barRow: -1)
   if area.width <= 0 or area.height <= 0:
     return
 
@@ -279,7 +306,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
   # Row 0 is the title; the body starts at row 1. Same split as the Debug pane,
   # so the two modes' first code row is the same screen row.
   var at = area.row
-  var titleSpans = titleRowSpans(model, area.width)
+  var titleSpans = titleRowSpans(model, area.width, g.glyphs)
   var x = area.col
   for span in titleSpans:
     g.paint(at, x, span.text, span.style)
@@ -287,10 +314,15 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
   result.rows.add titleSpans
   inc at
 
-  let bodyRows = area.height - 1
+  let codeW = result.codeWidth
+  # PLAT-70: THE HORIZONTAL VIEW, at this pane's code width. The bar takes the
+  # pane's last row only while the content overflows (§4.7).
+  let bar = model.editBarOf(area)
+  let view = bar.view
+  let bodyRows = area.height - 1 - (if bar.shown: 1 else: 0)
   if bodyRows <= 0:
     return
-  let codeW = result.codeWidth
+  let left = view.leftCol
 
   # WITH SPANS PROVIDED (the product path, since PLAT-29) NOTHING IS PARSED
   # HERE: the producer ran off the render path and the model carries what it
@@ -339,7 +371,7 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     # and the three cells stay reserved. §3: "the gutter reused from Debug mode
     # minus the execution pointer (there is no execution)."
     spec.isInspectionLine = false
-    let gutterSpans = gutterRow(spec)
+    let gutterSpans = gutterRow(spec, g.glyphs)
     var gx = area.col
     for span in gutterSpans:
       if gx >= area.col + gw:
@@ -354,14 +386,14 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
     if codeW > 0:
       let codeCol = area.col + gw
       let raw = model.lineAt(line)
-      let text = truncateToCells(raw, codeW)
+      let text = cellSlice(raw, left, left + codeW)
       g.paint(row, codeCol, text, DefaultCellStyle)
       let shown = cellWidthOf(text)
       for span in file.spansForLine(line):
         if span.class == tcPlain:
           continue
-        let lo = codeCol + max(0, span.startCell)
-        let hi = min(codeCol + min(shown, span.endCell), limit)
+        let lo = codeCol + max(0, span.startCell - left)
+        let hi = min(codeCol + min(shown, span.endCell - left), limit)
         if hi <= lo:
           continue
         let style = tokenStyle(span.class)
@@ -370,6 +402,8 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
                     var out2 = style
                     out2.surface = s.surface
                     out2)
+      if model.overflowMarkers:
+        paintOverflowMarkers(g, row, codeCol, cellWidthOf(raw), view)
     inc result.renderedLines
 
     if line == model.caretLine:
@@ -382,8 +416,18 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
                   var out2 = s
                   out2.surface = EditCaretLineBackground
                   out2)
-      result.caretRow = row
-      # The caret's cell is the gutter plus its cluster column, clamped into
-      # the pane. Clamped rather than allowed to run out: a caret past the
-      # right edge would park the terminal's real cursor in the NEXT pane.
-      result.caretCol = min(area.col + gw + model.caretColumn, limit - 1)
+      # The caret's cell is the gutter plus its column less the view's left
+      # column, clamped into the pane. Clamped rather than allowed to run
+      # out: a caret past the right edge would park the terminal's real
+      # cursor in the NEXT pane. A caret the wheel or the bar scrolled out of
+      # view (§4.5: only the caret moves the view) is not parked at all.
+      let caretCell = model.caretColumn - left
+      if caretCell >= 0 and (caretCell < codeW or not view.overflows):
+        result.caretRow = row
+        result.caretCol = min(area.col + gw + caretCell, limit - 1)
+  if bar.shown:
+    # §4.7: the last row, one cell high, over the code columns; the gutter's
+    # cells of the row are left to the editor's ground.
+    result.barRow = bar.row
+    paintHorizontalBar(g, bar.row, bar.left, bar.cols,
+                       view.barModel(model.caretViewColumn))

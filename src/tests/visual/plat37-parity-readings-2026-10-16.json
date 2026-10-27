@@ -1,0 +1,270 @@
+{
+  "_comment": [
+    "plat37-parity-readings-2026-10-16.json — the build-repair pass.",
+    "",
+    "ITS PURPOSE WAS TO MAKE THE PARITY QUESTIONS MEASURABLE AGAIN, not to",
+    "answer them. Both renderer arms were down when it started: the Electron",
+    "arm had no `src/build-debug-repro/bin/ct` at all, and the GPUI binary was",
+    "stale. This pass rebuilt the GPUI arm, cleared its freshness gate and ran",
+    "its capture lane end to end — so PARITY-G1 is re-measured here. The",
+    "Electron arm now LINKS, which it did not before, but its build still",
+    "cannot complete, so its lane could not run and PARITY-S1 and PARITY-P1",
+    "are NOT re-measured. They are recorded below as not measured rather than",
+    "inherited with a fresh date, which is the failure this campaign keeps",
+    "producing.",
+    "",
+    "ONE FINDING OF THIS PASS IS ABOUT THE INSTRUMENT, NOT THE RENDERERS:",
+    "`ci/lib/build-freshness.sh` computes a DIFFERENT input digest outside the",
+    "dev shell than inside it, and reports a false STALE outside. See",
+    "`gateIsEnvironmentDependent`."
+  ],
+  "schemaVersion": 1,
+  "supersedes": "plat37-parity-readings-2026-10-14.json — for PARITY-G1 AND PARITY-S1. G1 was re-measured in this file's FIRST pass (2026-10-16 morning); S1 is re-measured in its SECOND pass (2026-10-16 afternoon, recorded under `secondPass`), on a real captured Electron frame, and the 2026-10-14 prediction that the census would drop to 5 is REFUTED — see regrade[PARITY-S1]. Every OTHER finding in the 2026-10-14 file and in plat37-parity-readings-2026-10-13.json stands unamended; neither pass re-measured them. PARITY-P1 is still NOT measured as a cross-renderer figure, and the second pass establishes WHY with a specific, newly-known cause: see regrade[PARITY-P1].",
+  "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. The GPUI window lane needs a live macOS GUI session and a kTCCServiceScreenCapture grant held by com.metacraft-labs.guiassert.capture. Neither exists on a fresh host or in CI.",
+  "measuredAt": "2026-10-16",
+  "host": {
+    "platform": "aarch64-darwin",
+    "os": "macOS 26.5.2 build 25F84 (Darwin 25.5.0 arm64)",
+    "displays": 1,
+    "displayPoints": "1728x1117",
+    "pointPixelScale": 2.0
+  },
+  "provenance": {
+    "codetracer": "6b6d05a081 (agents) — the tree every measurement below was taken against",
+    "codetracerPm": "220b2448c4 (latest)",
+    "isonimGpui": "bd434ca9a1 (agents)",
+    "isonim": "f1dff218e0 (agents)",
+    "nimEverywhere": "6ebac0b632 (agents)",
+    "reprobuild": "2391fa8cb9 (agents)",
+    "reprobuildPackages": "9f981af6c7 (agents)",
+    "reproWhichOne": "repro 0.2.5, REBUILT during this pass at 2026-10-16 12:00 from the workspace checkout reprobuild 2391fa8cb9 (`nix develop --command just build`, exit 0). The previously installed build/bin/repro dated 2026-10-14 13:50 could NOT be used: see electronArm.envelopeVersionMismatch.",
+    "gpuiBinary": "build/bin/codetracer-gpui, input_digest 379c6803efc781dfceb89d20de40b97324a36df41507762e57e1a3d92df6d233, artefact 95ad3d27cd17, built 2026-10-16T10:41:39Z by /nix/store/2ry3sav2ghbn7a8xmcadvxksjgd94rhd-nim-fork-2.3.1-codetracer/bin/nim",
+    "framesAnalysed": "frames captured BY THIS PASS at 2026-10-16, from the rebuilt and freshness-gated GPUI binary above. No frame from an earlier pass was re-read."
+  },
+  "buildOutcomes": {
+    "gpuiArm": {
+      "command": "nix develop --command just build-gpui",
+      "environment": "codetracer dev shell; PATH led by reprobuild/build/bin; RUNQUOTA_SOCKET=/tmp/rq-adopt-501/runquota.sock; REPRO_BOOTSTRAP_CC=/nix/store/z0dmrxbgqi98f7n8ljza91y5qazdyhcp-clang-wrapper-21.1.8/bin/clang; REPRO_FOREIGN_ENV_BASH=bash 5.3.9",
+      "exit": 0,
+      "note": "Built TWICE. The first build (11:38) emitted `WARNING: isonim-gpui's Rust shim is not built`, and because `isonim_gpui/bindings.nim` resolves the shim path with a COMPILE-TIME `when fileExists(...)`, that binary baked the bare leaf name `libgpui_nim_shim.dylib` and every lane run died with `could not load: libgpui_nim_shim.dylib`. Building the shims first (`cd isonim-gpui && nix develop --command just plat37-shims`, exit 0) and rebuilding made the lane work. THE BUILD ORDER IS LOAD-BEARING and is not expressed as a dependency anywhere.",
+      "gateDigestUnchangedAcrossThatFix": "379c6803 both times, while the artefact sha moved d1d1cf78b1ec -> 95ad3d27cd17. The freshness closure therefore does NOT cover shim presence: two materially different binaries share one input digest."
+    },
+    "electronArm": {
+      "command": "nix develop --command env REPROBUILD_PACKAGES_ROOT=<workspace reprobuild-packages> REPROBUILD_ACTION_CACHE_ROOT=<private> REPRO_DAEMON=off REPRO_NIM_COMPILER=<provisioned nim 2.2.10> just build-once",
+      "exit": 1,
+      "whatSucceeded": "`src/build-debug-repro/bin/ct` IS now produced — 11,389,600 bytes, and `ct --version` prints `CodeTracer version: 26.10.1(debug)` and exits 0. The link no longer fails on `-lcrypto`.",
+      "theLcryptoQuestionIsAnswered": "RESOLVED, and the hypothesis in the brief is CONFIRMED. codetracer's dev shell itself populates LIBRARY_PATH with all five libraries the native link asks for. Measured under `nix develop`, with a positive control (the probe printed its own POSITIVE-CONTROL line) and a negative control (`libZZQQnonsense: NOT-FOUND`): LIBRARY_PATH length 361, carrying openssl-3.6.2/lib (libssl, libcrypto), sqlite-3.50.4/lib (libsqlite3), pcre-8.45/lib (libpcre), libzip-1.11.4/lib (libzip), zstd-1.5.7/lib (libzstd). `scripts/build-once.sh:400` independently derives the same set through `nix build --print-out-paths nixpkgs#openssl.out nixpkgs#sqlite.out nixpkgs#pcre.out nixpkgs#libzip.out nixpkgs#zstd.dev nixpkgs#zstd.out nixpkgs#clingo`. The earlier failure came from invoking `repro build ct-binary` DIRECTLY, which bypasses both. No store path was hardcoded.",
+      "whereItStops": "`nim c` with debug info on macOS shells out to a BARE `dsymutil` after the link. The `ctNative` edge became hermetic in codetracer 01d8b6e54 (2026-10-15 16:37) and declares only `clang` and `zstd-dev`, so the composed PATH has no `dsymutil` and the action dies with `sh: line 1: dsymutil: command not found` AFTER writing a working binary. `src/build-debug-repro/bin/ct.dSYM` is empty, consistent with this never having succeeded since that commit. At least TWO edges are affected: `ct` and `db-backend-record`.",
+      "whyThatBlocksTheMeasurement": "`scripts/build-once.sh:508` writes the Electron freshness stamp only after `repro build` returns 0. It never runs, so the stamp still describes an older artefact (stamp 17793057…, on disk 7ddad09b…), `build-freshness.sh electron-assert` exits 1, and `ci/test/plat37-macos-electron-capture.sh` refuses to capture through it BY DESIGN. The gate was not weakened, bypassed or hand-edited.",
+      "fixAttemptedAndReverted": "A `dsymutil` interface package (nixPackage \"nixpkgs#llvm\", executablePath \"bin/dsymutil\" — verified: nixpkgs#llvm resolves to llvm-21.1.8 whose bin/dsymutil is present, negative control bin/zzqq absent) plus adding \"dsymutil\" to the edge's tool identity refs did NOT clear the failure: both `ct` and `db-backend-record` still reported `dsymutil: command not found`. Both edits were REVERTED rather than left in the tree, because an unverified partial fix in a tracked file is worse than a clean tree plus this record. The real fix needs to cover every affected edge and belongs to the owner.",
+      "twoOtherBlockersClearedOnTheWay": {
+        "shellcheckCatalog": "The dev shell exports REPROBUILD_PACKAGES_ROOT to a flake-pinned catalog carrying only four interfaces (busybox, llvm, patchelf, sqlite3) and no `shellcheck`, which codetracer/repro.nim:564 `uses:`. Pointing REPROBUILD_PACKAGES_ROOT at the workspace sibling reprobuild-packages @ 9f981af6c7, which HAS packages/interfaces/shellcheck, cleared it — one of the three remedies the error message itself names.",
+        "envelopeVersionMismatch": "With the 2026-10-14 engine the build died with `repro interface extract: error: unsupported interface envelope version`. Cause, established by date rather than guess: `EnvelopeVersion` in libs/repro_interface_artifacts was bumped 27 -> 28 in reprobuild e5a62bf143 (2026-10-15 17:21), AFTER build/bin/reprobuild was compiled (2026-10-14 13:47). The `extract_runner` is compiled from the CURRENT checkout sources and so writes a v28 envelope that the older engine refuses. Rebuilding repro from the checkout cleared it. This is the stale-local-build hazard AGENTS.md documents, observed in the wild."
+      }
+    }
+  },
+  "freshnessGates": {
+    "gpuiAssert": {
+      "command": "nix develop --command bash ci/lib/build-freshness.sh assert",
+      "exit": 0
+    },
+    "electronAssert": {
+      "command": "nix develop --command bash ci/lib/build-freshness.sh electron-assert",
+      "exit": 1,
+      "reason": "stamp 17793057… vs artefact 7ddad09b… — the build that would rewrite it cannot complete; see electronArm.whereItStops"
+    },
+    "gateIsEnvironmentDependent": {
+      "finding": "`build-freshness.sh` computes a different input digest depending on whether it runs inside the codetracer dev shell, and reports a FALSE STALE outside it.",
+      "measured": "Outside `nix develop`, `digest` returned d7e6c03ac2fb20222b43eb0f422fbc404d32f8a9a7f86de6b248111781b5b6f9 on three consecutive runs (deterministic, so not flakiness). Inside `nix develop`, the same command on the same tree at the same moment returned 379c6803efc781dfceb89d20de40b97324a36df41507762e57e1a3d92df6d233, which is what the build stamped — and `assert` then exited 0.",
+      "consequence": "A reader who runs the gate outside the shell is told a freshly built binary is stale. The opening reading of this pass was taken that way and is therefore not evidence about the tree. The gate's own remedy line prints a `nix develop --command` recipe but does not say the ASSERT must also run inside the shell.",
+      "notAWeakening": "Nothing here was worked around. The gate's verdict was obtained in the environment where its two halves agree."
+    }
+  },
+  "laneOutcomes": {
+    "gpui": {
+      "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-window-capture.sh",
+      "exit": 0,
+      "captured": 7,
+      "refused": 0,
+      "exitCodeCapturedDirectly": "rc=$? on its own line, never through a pipe. The `| head` trap is live in this session: an earlier probe in this pass reported exit 0 while its command had in fact been killed by a timeout, because the pipeline's exit status was tail's.",
+      "prerequisitesThatHadToBeRepairedFirst": [
+        "isonim-gpui's three plat37 shims were absent (`just plat37-shims`, exit 0).",
+        "`.python-recorder-venv/bin/python3` was a DANGLING symlink — its nix store path had been garbage-collected after the venv was created. The venv is gitignored and untracked; deleting it and re-entering the dev shell rebuilt it (Python 3.12.13).",
+        "`codetracer-gpui` had to be rebuilt AFTER the shims existed (see buildOutcomes.gpuiArm.note).",
+        "REPLAY_SERVER_BIN had to be set; the binary exists at src/build-debug-repro/bin/replay-server, rebuilt by this pass at 12:21, `--help` exit 0."
+      ]
+    },
+    "electron": {
+      "command": "ci/test/plat37-macos-electron-capture.sh",
+      "exit": "NOT RUN",
+      "captured": 0,
+      "why": "The lane refuses to capture through an unstamped/mismatched bundle, and that refusal is correct. Running it anyway, or hand-writing the stamp, would have produced exactly the kind of reading this ledger exists to prevent."
+    },
+    "electronSecondPass": {
+      "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-electron-capture.sh",
+      "exit": 1,
+      "captured": 1,
+      "refused": 5,
+      "exitCodeCapturedDirectly": "rc=$? on its own line immediately after the command, never through a pipe. The pipe trap fired once more in this pass and was caught: a compare.sh invocation written as `... | tail -3` followed by rc=$? reported tail's status, and that number is NOT recorded anywhere in this file.",
+      "whyExit1IsTheCorrectOutcome": "The five refusals are the pane-census refusal of PARITY-S1, which is the lane working as specified. Geometry was honoured on all six.",
+      "subject": "src/build-debug-repro, bin/ct 2026-10-16T12:23:35Z, ui.js 2026-10-16T09:18:02Z, checkout 6b6d05a08 (agents)"
+    }
+  },
+  "regrade": [
+    {
+      "id": "PARITY-G1",
+      "previousVerdict": "REPRODUCES — 'the clamp reproduces and is measured, not read' (2026-10-13, at codetracer df80efc8d, on a rebuilt and gated GPUI binary).",
+      "verdict": "REPRODUCES, re-measured on a fresh build at codetracer 6b6d05a081. GPUI still cannot reach the `wide` viewport on this display.",
+      "deficientSide": "SEE belowWhichReportMatchesThePhysicalWindow — this pass declines to call GPUI the deficient side, and the previous files' framing is the thing most in need of revisiting.",
+      "measuredThisPass": true,
+      "reading": "All 7 scenarios captured, 0 refused, every record carrying satisfiesG1: true. The split is exactly by viewport. The three `wide` scenarios (shell, editor, eventLog) each asked 1920x1080 points, got a 1728x1084-point window — `viewportHonoured: false`, `viewportDeviationPoints` {width: -192, height: -25} — and captured 3456x2168 device px. The four `laptop` scenarios (state, calltrace, editorWithMark, gutterLanes) each asked 1440x900 points, got 1440x929 points — `viewportHonoured: true`, deviation {0, 0} — and captured 2880x1858 device px. Read off the lane's own *.capture.json records, not off a picture and not off the console summary.",
+      "theGeometryIsSelfConsistent": "The honoured case is the control for the clamped one. At `laptop` the window is 29 points TALLER than requested (929 vs 900) with deviation recorded as {0,0}, i.e. the 29-point title bar sits outside the content box. 929 - 29 = 900 exactly, and 2880x1858 device px minus the 58-px title bar is 2880x1800 — the extent the FLIP comparison has always run at. The same 29 points explain the clamped height deviation: 1084 - 29 = 1055, and 1080 - 1055 = 25, the recorded -25. The 58-device-px crop constant in build/plat37-parity/compare.sh is therefore confirmed by this pass, independently of any FLIP number.",
+      "whichReportMatchesThePhysicalWindow": "This display is 1728x1117 points. GPUI's `wide` window is 1728x1084 points, which FITS it; a 1920-point-wide window does not exist on a 1728-point display. So GPUI's report is the physically realisable one. The counterpart measurement — what Electron reports for the same request, and whether its 1920x1080 is a logical framebuffer rather than a window — COULD NOT BE TAKEN this pass, because the Electron lane did not run. Until it is, the attribution of a 'deficient side' for G1 should be treated as open, not as settled by the earlier files.",
+      "consequenceForPixelComparison": "Unchanged and now re-confirmed on fresh frames: 3 of the 7 captured scenarios sit at an extent no Electron frame can be compared against without resampling, and compare.sh refuses to resample. Only the 4 `laptop` scenarios are candidates for a pixel comparison."
+    },
+    {
+      "id": "PARITY-S1",
+      "verdict": "REINSTATED. The Electron pane census does NOT come out at 5 — it is 7. Measured 2026-10-16 (second pass) on real captured frames from the freshly built, freshly stamped bundle at codetracer 6b6d05a081.",
+      "measuredThisPass": true,
+      "theOracleIsDerivedNotLiteral": "The lane computes the expectation from the layout rather than hardcoding it: `_shared_default_visible_panes` over src/frontend/headless_app/shared_default_layout.generated.json evaluates to exactly ['calltrace','editor','eventLog','fileTree','state'] — 5 panes. That matched the brief's stated oracle exactly.",
+      "whatTheFramesActuallyShow": "saw ['calltrace','editor','eventLog','fileTree','other','other','state'] — 7 drawn, 5 expected, extra ['other'] twice. Identical census on every one of the five refused scenarios (state, calltrace, eventLog, editorWithMark and one more), which is consistent with a layout-level cause rather than a per-scenario one.",
+      "soThe20261014PredictionIsRefuted": "The 2026-10-14 fix set `noUserLayout` and the implied prediction was that the census would drop from 7 to 5. It did not. The two extra panes are classified `other`, i.e. they are panes the shared default layout does not place at all — so this is not a counting disagreement, it is two panes that should not be on the frame.",
+      "howTheLaneTreatsIt": "Correctly, and consequentially: it REFUSES to write a reference .png for a frame whose census disagrees, on the stated grounds that such a frame is not a reference frame for parity. That refusal is what makes this finding block PARITY-P1 — see below.",
+      "control": "Not a uniform-across-rows result in the vacuous sense: the geometry half of the same grading passed on all six scenarios ('honoured' for every one), and one scenario (shell) DID produce a graded frame. So the harness was capable of passing a frame and the census is what singled these out."
+    },
+    {
+      "id": "PARITY-P1",
+      "verdict": "STILL NOT MEASURED as a cross-renderer figure — but this pass establishes the CAUSE, and the cause is PARITY-S1, not a missing Electron build.",
+      "measuredThisPass": false,
+      "whatChangedSinceTheFirstPass": "The Electron arm now BUILDS and the lane now RUNS (it could not before). So the first pass's reason — 'no fresh Electron frames at all' — no longer applies. The new, narrower reason is below.",
+      "theBlockingFactMeasured": "The Electron lane produced exactly ONE graded frame: `shell`. The other five were refused on the pane census (PARITY-S1), and a refused scenario gets NO reference .png written. `shell` is a `wide` scenario, and `wide` is precisely the class PARITY-G1 shows is dimensionally incomparable: compare.sh on it returns {\"label\":\"shell\",\"notComparable\":\"extent mismatch: gpui 3456x2168 (cropped 3456x2110) vs electron 3840x2160\"}.",
+      "theExtentTableThatShowsTheTrap": "gpui vs electron, device px, with GPUI's 58-px title-bar crop applied: shell 3456x2168->3456x2110 vs 3840x2160 MISMATCH; editor same MISMATCH; eventLog same MISMATCH; state 2880x1858->2880x1800 vs 2880x1800 MATCH; calltrace MATCH; editorWithMark MATCH. So the three scenarios that ARE comparable are exactly the three the census refused, and the one the lane graded is one of the three that are not.",
+      "whyNoNumberWasProducedAnyway": "The three comparable views DO have Electron .png files on disk — but from 2026-10-12, four days and an unknown number of commits old. Comparing a fresh GPUI frame against those would reproduce the precise defect the build stamp exists to prevent (scripts/build-once.sh:485-500 records a published parity reading over artefacts '127 commits apart'). No such number was computed, and none should be.",
+      "theInstrumentWasVerIFIEDSOUNDThisPass": "So that 'not measured' is not confused with 'instrument broken'. On the FRESH electron shell frame: identity comparison with itself gives mean 0.0, p50 0.0, p90 0.0, max 0.0, fracOver0_10 0.0; a 4-pixel self-shift of the same frame gives mean 0.06807, p50 0.0, p90 0.234431, max 0.983332, fracOver0_10 0.133547. Non-zero and non-uniform, so the tool discriminates.",
+      "statisticsAreAvailableWhenTheFigureCanBeTaken": "The first pass asked for mean/p50/p90/maxError beside fracOver0_10 because the thresholded fraction saturates. `flipdiff` ALREADY emits all of them (mean, p50, p90, p99, max, fracOver0_10, fracOver0_25, fracOver0_50) — no tooling change is needed, only a comparable fresh pair.",
+      "oneNoteOnTheSATURATIONLADDER": "The brief's ladder (4 px -> 0.173) and this pass's 4-px self-shift on the shell frame (0.1335) differ. That is not a contradiction: the ladder is frame-dependent, being a function of how much high-frequency content the particular frame carries. It does mean the ladder should be quoted WITH the frame it was taken on.",
+      "readAlongsideNotApart": "Unchanged from the standing analysis and not re-litigated here: when P1 is finally taken it belongs beside PARITY-S3 and PARITY-S5 (GPUI gives the editor essentially Electron's width, 352 vs 362, while making every other pane ~30% wider, with row pitch 25.8-26 against 24.3-25), because the distribution is bimodal (p50 ~0.0001, p90 ~0.68) and that is the signature of displaced structure rather than a global difference."
+    }
+  ],
+  "measuredVsInferred": {
+    "measured": [
+      "PARITY-G1, from 7 of 7 fresh attested window frames at codetracer 6b6d05a081.",
+      "The GPUI freshness gate passing (exit 0) inside the dev shell, and the gate's environment dependence, from three deterministic digest runs outside the shell against one inside it.",
+      "The Electron arm's `-lcrypto` resolution: LIBRARY_PATH populated by the dev shell, with positive and negative controls, and `ct` linked, 11,389,600 bytes, `--version` exit 0.",
+      "The point at which the Electron build stops (`dsymutil` absent from a hermetic PATH), on two edges, with the dating of codetracer 01d8b6e54 that introduced the hermetic PATH.",
+      "The reprobuild envelope-version mismatch, dated against reprobuild e5a62bf143 vs the 2026-10-14 binary.",
+      "The FLIP instrument's identity and self-shift behaviour.",
+      "The 58-device-px title-bar crop constant, from the honoured-viewport control."
+    ],
+    "inferred": [
+      "That the Electron pane census will drop to 5. NOT measured; the oracle's expected set is 5, which is not the same statement.",
+      "That the cross-renderer FLIP figure persists at ~37%. NOT measured this pass; only bounded against the instrument's saturation ceiling.",
+      "That declaring `dsymutil` on every affected edge would complete the Electron build. The one-edge attempt did NOT clear it, and the full fix is unvalidated."
+    ]
+  },
+  "issuesToFile": {
+    "policyConflictDeclared": "metacraft-dev-guidelines/policies/recording-issues.md says to push an issue immediately. This pass was instructed to make NO git commits, and that instruction was followed. Nothing below was committed or pushed; the owning pm repo (codetracer-pm, 220b2448c4 latest) was NOT synced to its mainline either, so these are drafted findings rather than filed issues.",
+    "preferAppendingTo": "codetracer-pm/issues/2026-10-14-ct-binary-splices-trace-format-nim-source-without-its-zstd-header.md already documents the `-lcrypto` link failure and the catalog gap at lines 251-278. The `dsymutil` finding is the direct successor to its §'per-action ref for the C backend compiler' row and belongs there as an append, not as a rival issue.",
+    "new": [
+      {
+        "id": "FRESHNESS-ENV-DEPENDENCE",
+        "status": "UNFILED — drafted here only. This pass was instructed to make no git commits, which conflicts with metacraft-dev-guidelines/policies/recording-issues.md ('push the issue immediately'). The owner should file it in codetracer-pm/issues/.",
+        "title": "ci/lib/build-freshness.sh's GPUI half reports a FALSE STALE outside the dev shell, because it recomputes the input closure with whatever `nim` is on PATH (the Electron half is immune and must not be lumped in with it)",
+        "rootCauseFoundThisPass": "ci/lib/build-freshness.sh:395-440 `bf_gpui_input_digest` does not read a recorded closure; it REGENERATES one by running `nim c --genDeps:on --compileOnly` (line 416) with the `nim` resolved from PATH (guarded only by a `command -v nim` existence check at line 400). `bf_deps_input_digest` (line 175-201) then folds every `/nix/store/...` line of the resulting `main.deps` into the digest as `store\\t<path>`. The Nim standard-library modules in that listing live under the COMPILER'S OWN store path, so changing which nim is on PATH changes those lines and therefore the digest.",
+        "measured": "Inside the codetracer dev shell the nim on PATH is /nix/store/2ry3sav2ghbn7a8xmcadvxksjgd94rhd-nim-fork-2.3.1-codetracer/bin/nim (Nim 2.3.1); outside it is a different compiler. Measured 2026-10-16 against codetracer 6b6d05a081: the previous pass recorded digest d7e6c03a... outside the shell on three consecutive runs (deterministic, not flaky) and 379c6803... inside it on the same tree at the same moment. The build stamps the inside-the-shell value, so the outside-the-shell verdict is a false STALE.",
+        "whyItMatters": "The gate's whole purpose is to refuse a stale artefact. A false STALE is the opposite failure and it trains readers to disbelieve the gate. It also makes every gate reading un-interpretable unless the environment is stated, which is why every gate exit code in this file is recorded WITH its environment.",
+        "suggestedRemedy": "Either (a) pin the compiler the digest is computed with — the stamp already records `built_by`, so the assertion could refuse when the nim on PATH is not that compiler, rather than silently digesting against a different one; or (b) exclude the compiler's own store subtree from the closure, so the digest describes the PROJECT's inputs rather than the toolchain's. (a) is the smaller change and keeps the closure honest; (b) risks dropping a real input. The existing `BF_BUILDER` note at lines 216-238 already works through exactly this class of error for `built_by`, so the file's own reasoning supports (a).",
+        "scopeCorrectedBySecondPass": "The first pass wrote this up as a property of `build-freshness.sh`. Measured in the second pass, it is a property of the GPUI half ONLY. gpui: digest 379c6803… inside the dev shell vs d7e6c03a… outside, assert 0 inside and 1 outside. electron: digest 554173229a15d950… in BOTH environments and equal to the stamp, assert 0 in both. The difference is structural — `bf_electron_input_digest` digests git-tracked source content and never runs a compiler, while `bf_gpui_input_digest` shells out to `nim c --genDeps`.",
+        "additionalSuspectFoundThisPass": "'Inside vs outside the dev shell' may not be the real variable. scripts/build-once.sh:46 sources codetracer/.direnv/flake-profile-*.rc, dated 2026-08-27, which carries a DIFFERENT nim store path (y1cfnbf4…-nim-fork-2.3.1-codetracer) from the live dev shell's (2ry3sav2…-nim-fork-2.3.1-codetracer) — same version string, different store path, which is sufficient to move the digest. A third measurement arm (inside the shell, with the cached profile sourced) was NOT taken."
+      },
+      {
+        "id": "FRESHNESS-CLOSURE-MISSES-SHIM",
+        "status": "UNFILED — drafted here only; same policy conflict as above.",
+        "title": "The gpui input closure does not cover the isonim-gpui Rust shim, so two materially different binaries share one digest",
+        "measured": "Recorded by the previous pass and carried forward unamended (measured 2026-10-16 at codetracer 6b6d05a081): the GPUI binary was built twice. The first build emitted `WARNING: isonim-gpui's Rust shim is not built`; the second, after the shim was built, produced a different artefact — artefact sha moved d1d1cf78b1ec -> 95ad3d27cd17 — while the freshness digest stayed 379c6803 BOTH TIMES.",
+        "whyItMatters": "A digest that is equal across two binaries that differ is not a freshness closure for those binaries. The gate would have passed a shim-less binary as fresh.",
+        "relatedTo": "GPUI-SHIM-BUILD-ORDER below — the same shim, seen from the ordering side rather than the hashing side."
+      },
+      {
+        "id": "GPUI-SHIM-BUILD-ORDER",
+        "status": "UNFILED — drafted here only; same policy conflict as above.",
+        "title": "An unexpressed build order: the plat37 shims must exist before codetracer-gpui is compiled",
+        "detail": "isonim_gpui/bindings.nim resolves the shim path with a COMPILE-TIME `when fileExists(...)`. The decision is therefore baked at compile time: if the Rust shim is not on disk when `codetracer-gpui` is compiled, the resulting binary is permanently shim-less and rebuilding the shim afterwards does not change it. Nothing in the graph expresses this ordering, so it holds only by the order a human happens to run two commands in.",
+        "whyItMatters": "It is an ordering constraint enforced by nothing, and its violation is silent apart from one WARNING line — and, per FRESHNESS-CLOSURE-MISSES-SHIM, invisible to the freshness gate as well. The two defects compound: the order can be got wrong, and the gate cannot detect that it was."
+      },
+      {
+        "id": "DSYMUTIL-REGRESSION",
+        "status": "FIXED IN THE TREE BY THIS PASS, but UNFILED as an issue and UNCOMMITTED — this pass makes no commits. Same policy conflict as the three above.",
+        "title": "Making the ctNative edge hermetic dropped `dsymutil`, so every macOS debug build of `ct` and `db-backend-record` has failed since codetracer 01d8b6e54",
+        "weCausedIt": "codetracer 01d8b6e54 (2026-10-15 16:37) added `appendRegisteredActionToolIdentityRefs(ctNativeAction.id, [CtBackendCompiler, \"zstd-dev\"])` at repro.nim:972. Naming ANY tool ref opts the edge into a hermetic PATH (`actionPathDecision`, repro_cli_support.nim:1596-1750), so the edge stopped inheriting the ambient PATH on which it had been finding `dsymutil` by luck. The trade was correct — the ambient PATH was an undeclared input channel — but the declaration was incomplete.",
+        "failureShape": "`nim c` with debugInfo on macOS shells out to a BARE `dsymutil` AFTER the link. The action therefore dies having ALREADY WRITTEN A WORKING BINARY: measured 2026-10-16, `src/build-debug-repro/bin/ct` was 11,389,600 bytes and `ct --version` printed `26.10.1(debug)`, while `ct.dSYM` held only an August artefact. 'The binary is there' must not be read as 'the edge succeeded'.",
+        "whyThePreviousAttemptFailed": "The previous pass added a `dsymutil` package AND the tool-identity ref, and both edges still reported `dsymutil: command not found`. The missing third piece is that A TOOL REF IS INERT UNLESS THE RECIPE ALSO HAS A MATCHING `uses:` ENTRY — the resolver returns `none` for a name no `uses:` entry declares (repro_cli_support.nim:7686-7712; the rule is stated in the stdlib at packages/nim.nim:741-743). With no `uses: \"dsymutil\"` in codetracer/repro.nim the ref added no directory to the composed PATH, so the fix was a no-op by design rather than by accident. A bare `uses:` entry additionally only auto-resolves if the selector is registered in `BundledStdlibSelectors`.",
+        "fixAppliedThisPass": "Three edits, matching the shape by which `zstd-dev` was added the day before: (1) reprobuild libs/repro_dsl_stdlib/src/repro_dsl_stdlib/packages/dsymutil.nim — a new selector, `nixPackage \"nixpkgs#llvm\", executablePath = \"bin/dsymutil\"` at CanonicalNixpkgsRev; (2) reprobuild libs/repro_project_dsl/src/repro_project_dsl/macros_a.nim — `\"dsymutil\"` added to BundledStdlibSelectors so a bare `uses:` resolves; (3) codetracer repro.nim — `uses: \"dsymutil >=0\"` under the existing `when defined(macosx):` block, and a macOS-gated `appendRegisteredActionToolIdentityRefs(ctNativeAction.id, [\"dsymutil\"])` on the shared `ctNative` template, which is what both affected edges (`ct` and `db-backend-record`) are built from.",
+        "whyNotTheClangPackage": "Rejected on a measurement, not a preference: the realized clang-wrapper-21.1.8/bin on this host holds 17 binaries and `dsymutil` is not among them, so there is no toolchain bin directory to expose. Rejected equally is letting the edge reach /usr/bin/dsymutil, which is a SIP platform binary (measured 2026-10-16: `codesign -dv` reports `Platform identifier=26` for it and NO platform identifier for the nix one) and so an unknown-scope loss for the interpose monitor.",
+        "remainingClassGap": "`packages/nim.nim:745-758` auto-appends the backend C compiler ref for the edges the `binary` shorthand lowers. It does NOT append `dsymutil`, so any OTHER recipe that compiles with debug info on macOS through that shorthand will hit this same failure the moment it declares any tool ref. The catalog package added here is the prerequisite for closing that; the append itself was NOT made, because codetracer uses the `output =` overload rather than the shorthand and the change would therefore have been unverifiable in this pass."
+      }
+    ],
+    "secondPassNote": "The four records in `new` are DRAFTS ONLY and are UNFILED. This pass was instructed to make no git commits, which conflicts with metacraft-dev-guidelines/policies/recording-issues.md ('push the issue immediately'); the conflict is declared rather than resolved. A fifth candidate — the stale August cached dev-shell profile — is written up under `secondPass.aStaleCachedDevShellProfileWasFoundThisPass` and is also unfiled."
+  },
+  "secondPass": {
+    "what": "A second pass on 2026-10-16 (afternoon). It fixed the `dsymutil` regression that blocked the first pass's Electron arm, then ran the Electron lane. Everything in the first pass's sections above was measured BEFORE that fix and is left exactly as written; where this pass supersedes a reading it says so here rather than editing the earlier text.",
+    "reproWhichOne": "reprobuild REBUILT TWICE from the workspace checkout at 2391fa8cb9 — once at 14:26/14:28 before any edit (`nix develop --command just build`, exit 0, `build_apps: OK`) and once at ~15:00 after the stdlib edit below, also exit 0. The engine reports `repro 0.2.5`. The first pass's `unsupported interface envelope version` (EnvelopeVersion 27->28 in reprobuild e5a62bf143) did NOT recur: `e5a62bf143` was confirmed an ANCESTOR of the checkout tip 2391fa8cb9 before building.",
+    "theDsymutilRegressionIsFixed": {
+      "verdict": "FIXED AND VERIFIED, for BOTH affected edges, measured 2026-10-16 against codetracer 6b6d05a081 (working tree) with reprobuild rebuilt from 2391fa8cb9.",
+      "whyThePreviousAttemptFailed": "The first pass added a `dsymutil` package AND the edge's tool-identity ref, and both edges still said `dsymutil: command not found`. The missing piece is that A TOOL REF IS INERT UNLESS THE RECIPE ALSO CARRIES A MATCHING `uses:` ENTRY — the resolver returns `none` for a name no `uses:` entry declares (reprobuild libs/repro_cli_support/src/repro_cli_support.nim:7686-7712; the rule is written down in the stdlib at packages/nim.nim:741-743). With no `uses: \"dsymutil\"` in codetracer/repro.nim the ref contributed no directory to the composed PATH, so the attempt was a no-op BY DESIGN, not by accident. A bare `uses:` entry additionally only auto-resolves when the selector is registered in `BundledStdlibSelectors`, which it also was not.",
+      "howTheHermeticPathIsActuallyComposed": "`toolPathPrefix` (repro_cli_support.nim:2340-2364) adds `parentDir(resolvedExecutablePath)` per declared ref, in declaration order, deduped. So the fix had to make `dsymutil` RESOLVE; declaring it was never going to be enough on its own.",
+      "fixApplied": [
+        "reprobuild libs/repro_dsl_stdlib/src/repro_dsl_stdlib/packages/dsymutil.nim (NEW): `package dsymutil` with `nixPackage \"nixpkgs#llvm\", executablePath = \"bin/dsymutil\"` at CanonicalNixpkgsRev.",
+        "reprobuild libs/repro_project_dsl/src/repro_project_dsl/macros_a.nim: \"dsymutil\" added to BundledStdlibSelectors so a bare `uses:` resolves and the module is linked into the engine.",
+        "codetracer repro.nim: `uses: \"dsymutil >=0\"` inside the existing `when defined(macosx):` block, plus a macOS-gated `appendRegisteredActionToolIdentityRefs(ctNativeAction.id, [\"dsymutil\"])` on the SHARED `ctNative` template — which is what both `ct` and `db-backend-record` are built from, so one declaration covers both edges."
+      ],
+      "whyThatLocationAndNotTheClangPackage": "Measured, not preferred. The realized clang-wrapper-21.1.8/bin on this host holds 17 binaries and `dsymutil` is not one of them, so there is no toolchain bin directory to 'expose'. A selector of its own is also the shape the catalog already uses for exactly this situation (`llvm-objdump`, `llvm-config`, and `zstd-dev` added the day before).",
+      "notUsrBinDsymutil": "/usr/bin/dsymutil is a SIP platform binary — `codesign -dv` reports `Platform identifier=26` for it and reports NO platform identifier for the nix one (measured 2026-10-16). The edge was confirmed NOT to reach it: .repro/build/repro/nix-tool-identities.inspect.json records resolvedExecutablePath = /nix/store/3q0facdwp42jawa24zd01kp9wf49g7xd-llvm-21.1.2/bin/dsymutil.",
+      "positiveControlsOnTheFix": "Both edges produce a dSYM whose UUID MATCHES its binary — ct: F46D1004-4EF2-343F-8333-1A5C06476536 for both bin/ct and ct.dSYM/Contents/Resources/DWARF/ct (12,121,463 bytes, written 15:13); db-backend-record: 039D3B44-2DBE-3938-BCDE-D8C752A7C194 for both (15:12). A matching UUID is what distinguishes a freshly generated dSYM from the stale August one that was sitting there before. The whole build log contains ZERO occurrences of `dsymutil` and zero of `command not found`.",
+      "engineLinkageControl": "Probing the rebuilt engine binary for provisioning strings gave a NON-UNIFORM result, which is what makes it a probe rather than a formality: `bin/dsymutil` 2, `include/zstd.h` 1 (zstd-dev, positive control), `bin/create-dmg` 1 (positive control), `bin/llvm-objdump` 0 (real, but NOT in BundledStdlibSelectors, so never linked), `bin/zzqqnotatool` 0 (negative control)."
+    },
+    "buildOnceOutcome": {
+      "fullDefaultTarget": {
+        "command": "nix develop --command env REPROBUILD_PACKAGES_ROOT=<workspace reprobuild-packages @9f981af6c7> REPRO_DAEMON=off REPRO_NIM_COMPILER=/nix/store/4m0ffd42…-nim-unwrapped-2.2.4/bin/nim just build-once",
+        "exit": 1,
+        "butNotOnDsymutil": "The two native edges this pass fixed both SUCCEEDED. The exit 1 comes from two unrelated, pre-existing environment gaps, neither of which is in the Electron bundle's closure: `stage-app-for-dmg` (preserveTree source file disappeared: non-nix-build/CodeTracer.app/Contents/MacOS/node_modules/.bin/glob — npm drift in a gitignored staging tree; that .bin directory exists and has entries, `glob` is simply absent) and `docs-book-assets` (missing /Users/zahary/m/fix-pxor-issues/codetracer-native-recorder/ct_cli/ct_cli — the dev shell itself warns about this on every entry). `dmg` is blocked behind the first. NEITHER WAS TOUCHED by this pass, and neither is my regression."
+      },
+      "scopedToTheBundle": {
+        "command": "the same, plus CODETRACER_REPROBUILD_TARGET=ct-binary",
+        "exit": 0,
+        "whyThisIsLegitimateAndNotABypass": "`CODETRACER_REPROBUILD_TARGET` is build-once.sh's own documented knob (scripts/build-once.sh:466), and the Electron stamp's closure provably excludes the two failing actions: `bf_electron_write_stamp` (ci/lib/build-freshness.sh:576-595) anchors to bin/ct and folds in ui.js and index.js only. The stamp was written BY THE REAL BUILD PATH, after `require-runtime-assets.sh: ok` — it was NOT hand-written, which the first pass correctly refused to do. Stated here plainly because it IS a deviation from `just build-once` with no arguments.",
+        "stampWritten": "src/build-debug-repro/.codetracer-bundle.build-stamp, input_digest 554173229a15d950d11ce41bc0383f7f8def4c0d89a62d33417dd2bc589b6748, artefact_sha256 59f35eab54664e5131f503354b6bdeea19c4d7467143f6522ace469164304345 — which was independently confirmed to equal `shasum -a 256` of the actual bin/ct."
+      }
+    },
+    "freshnessGatesThisPass": {
+      "electronAssertInsideDevShell": {
+        "command": "nix develop --command bash ci/lib/build-freshness.sh electron-assert",
+        "exit": 0
+      },
+      "electronAssertOutsideDevShell": {
+        "command": "bash ci/lib/build-freshness.sh electron-assert",
+        "exit": 0
+      },
+      "gpuiAssertInsideDevShell": {
+        "command": "nix develop --command bash ci/lib/build-freshness.sh assert",
+        "exit": 0
+      },
+      "gpuiAssertOutsideDevShell": {
+        "command": "bash ci/lib/build-freshness.sh assert",
+        "exit": 1
+      },
+      "THIS_REFINES_THE_FIRST_PASS_FINDING": "The first pass recorded `build-freshness.sh` as environment-dependent without qualification. Measured this pass, THAT IS TRUE OF THE GPUI HALF ONLY, and the Electron half is immune. GPUI digest: 379c6803efc781dfceb89d20de40b97324a36df41507762e57e1a3d92df6d233 inside the dev shell, d7e6c03ac2fb20222b43eb0f422fbc404d32f8a9a7f86de6b248111781b5b6f9 outside — reproducing the first pass's two values exactly, with assert 0 inside and 1 (false stale) outside. Electron digest: 554173229a15d950… in BOTH environments, equal to the stamp, assert 0 in both.",
+      "theMechanism": "`bf_gpui_input_digest` (ci/lib/build-freshness.sh:395-440) REGENERATES the closure by running `nim c --genDeps:on --compileOnly` with whatever `nim` is on PATH (guarded only by a `command -v nim` existence test at line 400), and `bf_deps_input_digest` folds every resulting `/nix/store/...` line in verbatim as `store\\t<path>`. The Nim stdlib modules live under the COMPILER'S own store path, so a different nim means a different digest. `bf_electron_input_digest` (line 537) instead digests git-tracked source content (`git ls-files -s`, the worktree overlay, and untracked non-ignored files) and never invokes a compiler — which is exactly why it does not drift."
+    },
+    "aStaleCachedDevShellProfileWasFoundThisPass": {
+      "finding": "codetracer/.direnv/flake-profile-cf2df07cbb616d2c5dcce72526b6d1365498d5b0.rc is dated 2026-08-27 and is SOURCED by scripts/build-once.sh:46. It restores an August PATH over the live one.",
+      "firstConsequenceObserved": "The freshness stamp this pass wrote records `built_by=repro 0.1.3`, while the build was actually driven by the rebuilt /Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro, which reports 0.2.5. The cached profile carries /nix/store/fi801q3ikr5b5amalxyi2rm8xa83r894-reprobuild-0.1.3, which does report `repro 0.1.3`. Re-running the stamp's own BF_BUILDER probe in the live environment yields `repro 0.2.5`, so the 0.1.3 can only have come from the cached profile. build-once.sh invokes the ENGINE by absolute path (line 466) so the BUILD itself was not affected, but every bare-name lookup under it was.",
+      "whyThatMatters": "ci/lib/build-freshness.sh's own docstring (lines 216-238) argues at length that 'a provenance record that names the wrong compiler is worse than one that names none'. This is that exact defect, in the same file, reached by a different route — not the ambient shell this time but a four-week-old cached profile.",
+      "secondConsequenceSuspected": "The cached profile also carries a DIFFERENT nim store path than the live dev shell — /nix/store/y1cfnbf4kn76ikqslxlcsy4s5xa2s2fw-nim-fork-2.3.1-codetracer versus the live /nix/store/2ry3sav2ghbn7a8xmcadvxksjgd94rhd-nim-fork-2.3.1-codetracer. SAME VERSION STRING, DIFFERENT STORE PATH. Given the mechanism above, that is sufficient on its own to move the GPUI digest, so 'inside vs outside the dev shell' may be an incomplete description of the real variable: the sharper statement is 'with or without the August cached profile'. NOT fully run down this pass — the GPUI gate was measured as inside/outside only, and a third arm (inside the shell but with the cached profile sourced) was not taken."
+    },
+    "contradictionWorthFlagging": {
+      "observation": "Every one of the six Electron scenarios had its requested window HONOURED, including the three `wide` ones at 1920x1080 points (captured 3840x2160 px at scale 2.0), on this 1728x1117-point display.",
+      "whyItMatters": "regrade[PARITY-G1].whichReportMatchesThePhysicalWindow in this same file argues that 'a 1920-point-wide window does not exist on a 1728-point display'. The Electron arm appears to have obtained one. That does not overturn G1 — GPUI's clamp is still measured and still real — but the REASON given for it ('the display cannot hold such a window') is contradicted by the other renderer doing it on the same display in the same session. PARITY-G1 was deliberately NOT re-measured this pass, so this is logged as an observation for the next pass rather than a regrade."
+    }
+  }
+}

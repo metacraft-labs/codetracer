@@ -51,6 +51,7 @@ import std/[algorithm, strutils, unittest]
 import codetracer_embed
 
 import ../input/keymap
+import ./navigation_table
 import ../input/modal_state
 import ../layout/profile
 import ../views/status_bar
@@ -182,21 +183,18 @@ suite "PLAT-16: keymap scoping is by PRODUCT mode, not by a fifth input mode":
     # in NORMAL input mode; the INPUT mode is identical in both calls and only
     # the PRODUCT mode differs.
     var state = initModalState()
-    var pending = initPendingState()
-    let km = defaultKeymap()
+    var km = newNavResolver()
 
-    var pDebug = pending
-    let inDebug = km.resolve(state, pDebug, "n", 0, pmDebug)
+    let inDebug = km.resolve(state, "n", 0, pmDebug)
     checkpoint("debug: " & $inDebug.kind & " " & $inDebug.action)
-    ck inDebug.kind == krAction
+    ck inDebug.kind == "action"
     ck inDebug.action == kaStepOver
     ck inDebug.reason.len == 0
 
-    var pEdit = pending
-    let inEdit = km.resolve(state, pEdit, "n", 0, pmEdit)
+    let inEdit = km.resolve(state, "n", 0, pmEdit)
     checkpoint("edit: " & $inEdit.kind & " reason='" & inEdit.reason & "'")
     # §8.1: "must be inert AND SAY SO".
-    ck inEdit.kind == krInertInMode
+    ck inEdit.kind == "inert-in-mode"
     ck inEdit.action == kaStepOver
     ck inEdit.reason.len > 0
     ck inEdit.reason.contains("step-over")
@@ -207,12 +205,11 @@ suite "PLAT-16: keymap scoping is by PRODUCT mode, not by a fifth input mode":
     # the product mode had reached the input machine.
     ck state.mode == mmNormal
 
-    # `krInertInMode` IS A SIXTH KIND AND NOT A SECOND REASON FOR `krNone`
-    # (Verification-Harness-Traps §5a). An unbound key still answers `krNone`
+    # `"inert-in-mode"` IS A SIXTH KIND AND NOT A SECOND REASON FOR `"none"`
+    # (Verification-Harness-Traps §5a). An unbound key still answers `"none"`
     # in Edit mode, with no reason, and the two are told apart.
-    var pUnbound = pending
-    let unbound = km.resolve(state, pUnbound, "Y", 0, pmEdit)
-    ck unbound.kind == krNone
+    let unbound = km.resolve(state, "Y", 0, pmEdit)
+    ck unbound.kind == "none"
     ck unbound.reason.len == 0
     ck unbound.action == kaNone
 
@@ -221,12 +218,10 @@ suite "PLAT-16: keymap scoping is by PRODUCT mode, not by a fifth input mode":
     # negation). `Tab` is `asBoth`, so if the Edit answer above were produced by
     # "everything is inert in Edit mode" rather than by the scope table, this
     # would be inert too. It is not.
-    var pTabDebug = pending
-    var pTabEdit = pending
-    let tabDebug = km.resolve(state, pTabDebug, "\t", 0, pmDebug)
-    let tabEdit = km.resolve(state, pTabEdit, "\t", 0, pmEdit)
-    ck tabDebug.kind == krAction
-    ck tabEdit.kind == krAction
+    let tabDebug = km.resolve(state, "\t", 0, pmDebug)
+    let tabEdit = km.resolve(state, "\t", 0, pmEdit)
+    ck tabDebug.kind == "action"
+    ck tabEdit.kind == "action"
     ck tabDebug.action == kaFocusNextPane
     ck tabEdit.action == kaFocusNextPane
 
@@ -239,14 +234,12 @@ suite "PLAT-16: keymap scoping is by PRODUCT mode, not by a fifth input mode":
     # so the resolution below is grounded in a real byte sequence rather than
     # in a name this file invented.
     ck keyName("\x1b[15;5~") == "Ctrl+F5"
-    let km = defaultKeymap()
+    var km = newNavResolver()
     var state = initModalState()
-    var pending = initPendingState()
     for product in ProductMode:
-      var p = pending
-      let r = km.resolve(state, p, "\x1b[15;5~", 0, product)
+      let r = km.resolve(state, "\x1b[15;5~", 0, product)
       checkpoint($product & " -> " & $r.kind & " " & $r.action)
-      ck r.kind == krAction
+      ck r.kind == "action"
       ck r.action == kaToggleProductMode
     # ONE COMMAND IN BOTH DIRECTIONS, as a property of `toggled` rather than of
     # two one-way commands: applying it twice is the identity, and applying it
@@ -269,7 +262,7 @@ suite "PLAT-16: keymap scoping is by PRODUCT mode, not by a fifth input mode":
     checkpoint("Mode-Transitions-sourced: " & fromModeTransitions.join(", "))
     ck fromModeTransitions == @["toggle-product-mode"]
     ck specAction(kaToggleProductMode) == ""
-    ck defaultKeymap().bindingsOf(kaToggleProductMode).len == 1
+    ck navigationKeymap().bindingsOf(kaToggleProductMode).len == 1
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

@@ -65,13 +65,7 @@ proc driveRandomOperation(harness: CollabHeadlessHarness;
   of 2:
     harness.toggleStatePath(peerId, "frame.locals.value" & $rng.rand(40))
   of 3:
-    let tabPick = rng.rand(2)
-    let tab =
-      case tabPick
-      of 0: stLocals
-      of 1: stGlobals
-      else: stWatches
-    harness.selectStateTab(peerId, tab)
+    harness.selectStatePath(peerId, "frame.locals.value" & $rng.rand(40))
   else:
     harness.addWatch(peerId, "soak_watch_" & $(opIndex mod 80))
 

@@ -3,7 +3,7 @@
 ## (`headless_app/pane_clicks`).
 ##
 ##   * the INVENTORY — every desktop click behaviour the milestone's table
-##     lists, one row each (`K1` … `K56`), every row with a target, gestures,
+##     lists, one row each (`K1` … `K57`), every row with a target, gestures,
 ##     the desktop's behaviour and a state for each native front-end (done,
 ##     existing, or n/a with the reason the front-end draws no such target);
 ##   * the WORD UNDER THE POINTER (`callTokenAt`), Monaco's rule, with Rust's
@@ -35,7 +35,7 @@ import viewmodels/event_log_vm
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 215
+const ExpectedAssertions = 248
 
 var countedAssertions = 0
 
@@ -51,13 +51,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K56, once, complete":
+  test "every row K1..K57, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 56
+    ck ClickInventory.len == 57
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
@@ -80,9 +80,9 @@ suite "PLAT-50: the click inventory":
                "K45", "K53"]:
       ck id in terminal
       ck id in gpui
-    # The one row only GPUI draws a target for: the Locals / Globals /
-    # Watches tabs.
-    ck "K29" in gpui and "K29" notin terminal
+    # K29 (the Variables pane's hide-other-process-watches toggle, since
+    # the one list of variables and watches) is drawn by both front-ends.
+    ck "K29" in gpui and "K29" in terminal
     ck behaviour("K20").terminal == nsExisting
     # An argument's left press is the row's: the desktop opens no tooltip.
     ck behaviour("K38").terminal == nsExisting
@@ -90,6 +90,8 @@ suite "PLAT-50: the click inventory":
     # PLAT-52 drew the Terminal Output pane on both native front-ends.
     ck behaviour("K32").terminal == nsDone
     ck behaviour("K32").gpui == nsDone
+    # PLAT-57 drew Find in Files on both: its row opens the result.
+    ck behaviour("K35").terminal == nsDone and behaviour("K35").gpui == nsDone
     ck behaviour("K99").id.len == 0
     ck describe(behaviour("K24")).startsWith("K24 Event log: row [click]")
 
@@ -235,6 +237,43 @@ suite "PLAT-50: an open menu":
     var leaf: ContextMenuState
     leaf.openAt(callTraceContextMenu(4, false, false), 0, 0)
     ck leaf.selected == -1                    # nothing enabled
+
+  test "Home and End: the first and the last ENABLED entry, at every size":
+    # They used to be `move(-1000)` / `move(1000)`, which wrap rather than
+    # clamp: End from the first entry of a two-entry menu stayed on the first,
+    # and Home from its last entry computed index -1 (Nim's `mod` keeps a
+    # negative operand's sign) — out of range.
+    for n in 1 .. 9:
+      var s: ContextMenuState
+      var entries: seq[ContextMenuEntry]
+      for i in 0 ..< n:
+        entries.add ContextMenuEntry(label: $i, action: caCopy, enabled: true)
+      s.openAt(ContextMenuModel(entries: entries), 0, 0)
+      s.moveToEnd(last = true)
+      ck s.selected == n - 1
+      s.moveToEnd(last = false)
+      ck s.selected == 0
+      s.move(-1)
+      s.moveToEnd(last = false)
+      ck s.selected == 0
+    # Disabled entries at both ends are skipped; with none enabled nothing is.
+    var mixed: ContextMenuState
+    mixed.openAt(ContextMenuModel(entries: @[
+      ContextMenuEntry(label: "a", action: caCopy, enabled: false),
+      ContextMenuEntry(label: "b", action: caFind, enabled: true),
+      ContextMenuEntry(label: "c", action: caCopy, enabled: true),
+      ContextMenuEntry(label: "d", action: caFind, enabled: false)]), 0, 0)
+    mixed.moveToEnd(last = true)
+    ck mixed.selected == 2
+    mixed.moveToEnd(last = false)
+    ck mixed.selected == 1
+    var leaf: ContextMenuState
+    leaf.openAt(callTraceContextMenu(4, false, false), 0, 0)
+    leaf.moveToEnd(last = true)
+    ck leaf.selected == -1
+    var closed: ContextMenuState
+    closed.moveToEnd(last = true)             # a closed menu: nothing moves
+    ck closed.selected == 0 and not closed.open
 
   test "choosing: a disabled entry keeps the menu, an enabled one closes it":
     var s: ContextMenuState

@@ -15,15 +15,21 @@ keyboard). After every step it waits for the window to SETTLE (two identical
 
   session A — `calc`, Debug mode, run from a git repository holding a
   modified, an added and an untracked file (`scripts/plat47-vcs-fixture.sh`):
-    base            the first screen (editor colours, focus border, tabs)
+    pristine        the first screen before any input (no focus outline: it
+                    is an overlay shown after the first press)
+    base            after one press on the editor's body (editor colours,
+                    its focus outline, tabs)
     resize-live     a divider pressed and dragged 80 px, the button HELD
     resize-done     ... released
     press-body      a press and release inside the editor's body (no divider)
     drop-base       the arrangement before a tab drag
-    drop-split      the Variables tab dragged over the editor's right edge
-    drop-whole      ... over the editor's centre
+    drop-pressed    the Variables tab pressed, not yet moved (it is focused)
+    drop-lifted     ... moved straight past the layout's right edge: the pane
+                    lifted out (PLAT-51) and nothing indicated
+    drop-split      ... over the editor's right edge
+    drop-whole      ... over the editor's centre (the smaller middle: a join)
     drop-slot       ... over the Call Trace stack's second tab
-    drop-dock       ... over the window's left margin
+    drop-dock       ... over the window's left margin (the ground's band)
     drop-cancel     Esc pressed, the button still held
     drop-released   the button released after the cancel
     drop-commit     a second drag, released over the editor's right edge
@@ -31,8 +37,9 @@ keyboard). After every step it waits for the window to SETTLE (two identical
     vcs-refresh     a new untracked file written into the repository by
                     another program, then the pane's refresh interval waited
                     out: the pane lists it without any input
-    dock-committed  the Variables tab dragged to the window's left margin
-                    and RELEASED: docked, it is a label in the left strip
+    dock-committed  the Variables tab's pin icon pressed: docked to the
+                    footer, it is a label there (a drop docks nothing since
+                    PLAT-51)
     dock-revealed   the pointer resting on that label: the pane drawn over
                     the tree (a click would dock it open)
     dock-dismissed  Esc: the tree exactly as before the reveal
@@ -44,8 +51,8 @@ The window writes its geometry (`CODETRACER_GPUI_GEOMETRY_OUT`) so this
 script can AIM — which tab to press, where a divider is. Every VERDICT the
 record carries is read from the frames' pixels (and OCR, and the layout
 document the window saved), never from that file: the regions a drop tinted
-are the pixels that CHANGED, compared with the editor's own box found by its
-focus ring.
+are the pixels that CHANGED against the lifted frame, compared with the
+editor's own box found by its focus outline.
 
 `record` measures the frames and writes
 `src/tests/visual/plat47-gpui-window.json`, which
@@ -89,6 +96,16 @@ SETTLE_MAX_S = 150
 # step down the design system's border ramp, ui/border/secondary — a
 # declared deviation (Native-Front-End-Parity.md §2), so it is named here.
 FOCUS_RING = (0x3a, 0x3a, 0x3a)
+RING_CORNER = 8
+  # The outline's rounded corners (6 px) and their antialiasing, left out of
+  # every side's measurement.
+EDITOR_GUTTER = 110
+  # `leaves.EditorGutterPx`: the editor's gutter (Monaco's lanes).
+INDENT_GUIDE = (0x4f, 0x4f, 0x4f)
+  # The editor's indent guides (`leaves.IndentGuideColour`, the desktop's
+  # `editorIndentGuide` on its ground) — the colour PLAT-47 B1 removed as a
+  # full-width BAND is the guides' now, so a 4f pixel is only a defect when
+  # it is part of a band.
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +293,17 @@ def capture():
     win = Window("a", CALC, repo)
     ptr = Pointer()
     try:
+        # The first screen BEFORE any input: since 2026-10-17 the focus
+        # outline is an overlay shown only after the first press (the
+        # desktop's `.ct-selected-outline`), so no pane is outlined here.
+        steps["pristine"] = settle("pristine")
+        g = win.geom()
+        # One press on the editor's body (its caret placed, nothing else):
+        # the editor is focused and its outline drawn — the first screen
+        # every later frame is compared with.
+        eb = node_of(g, "editor")["body"]
+        ptr.jump(eb[0] + eb[2] // 2, eb[1] + eb[3] - 40)
+        ptr.send("down", "sleep 120", "up", "sleep 300")
         steps["base"] = settle("base")
         shutil.copy(win.geometry, os.path.join(OUT, "a-base.geometry.json"))
         g = win.geom()
@@ -303,6 +331,22 @@ def capture():
         g = win.geom()
         state = node_of(g, "state")
         sx, sy = centre(state["tabs"][0])
+        # PLAT-51: GoldenLayout's drag proxy LIFTS the pane out before
+        # anything is measured, so the window is laid out again without it.
+        # The first motion past the slop goes straight past the layout's
+        # right edge, where a fresh drag finds no drop area: the lifted
+        # arrangement with nothing indicated (and the ghost label off the
+        # frame) — the frame each drop's tint is read against, and the
+        # geometry its targets are aimed in.
+        ptr.jump(sx, sy)
+        ptr.send("down", "sleep 150")
+        # The press alone, before any motion: it focuses the Variables pane
+        # (its outline and strip), and is the frame `Esc` must restore.
+        steps["drop-pressed"] = settle("drop-pressed")
+        ptr.jump(FRAME_W - 2, FRAME_H // 2)
+        steps["drop-lifted"] = settle("drop-lifted")
+        shutil.copy(win.geometry, os.path.join(OUT, "a-lift.geometry.json"))
+        g = win.geom()
         eb = node_of(g, "editor")["body"]
         ct = node_of(g, "calltrace")
         targets = {
@@ -312,8 +356,6 @@ def capture():
             "drop-dock": (4, FRAME_H // 2),
         }
         pointers = {}
-        ptr.jump(sx, sy)
-        ptr.send("down", "sleep 150")
         for name, (tx, ty) in targets.items():
             ptr.move(tx, ty)
             pointers[name] = [tx, ty]
@@ -322,9 +364,12 @@ def capture():
         steps["drop-cancel"] = settle("drop-cancel")
         ptr.send("up", "sleep 200")
         steps["drop-released"] = settle("drop-released")
-        # A second drag, released: the split is committed.
+        # A second drag, released: the split is committed. Lifted the same
+        # way first, so the target is where it was aimed above.
         ptr.jump(sx, sy)
         ptr.send("down", "sleep 150")
+        ptr.jump(FRAME_W - 2, FRAME_H // 2)
+        time.sleep(0.5)
         tx, ty = targets["drop-split"]
         ptr.move(tx, ty)
         ptr.send("sleep 300", "up", "sleep 300")
@@ -344,25 +389,23 @@ def capture():
             f.write("written while the window was open\n")
         time.sleep(7.0)
         steps["vcs-refresh"] = settle("vcs-refresh")
-        # --- a docked pane stays reachable: dock the Variables pane on the
-        # left edge (dragged there and released), click its strip label to
-        # reveal it, Esc to hide it again.
+        # --- a docked pane stays reachable: dock the Variables pane with its
+        # tab's pin icon (`.lm_pin_tab`, the desktop's way: GoldenLayout docks
+        # nothing on a drop since PLAT-51, and a pin docks to the footer),
+        # rest the pointer on its footer label to reveal it, Esc to hide it.
         g = win.geom()
         state = node_of(g, "state")
-        sx, sy = centre(state["tabs"][state["panes"].index("state")]
-                        if state["tabs"] else
-                        [state["body"][0], state["body"][1], state["body"][2], 30])
-        ptr.jump(sx, sy)
-        ptr.send("down", "sleep 150")
-        ptr.move(4, FRAME_H // 2)
-        ptr.send("sleep 300", "up", "sleep 300")
+        tab = state["tabs"][state["panes"].index("state")]
+        # The pin's box as `window_geometry` places it in a tab
+        # (`x + w - 36`, `y + 5`, `TabPinPx` square).
+        ptr.jump(tab[0] + tab[2] - 36 + 7, tab[1] + 5 + 7)
+        ptr.send("down", "sleep 120", "up", "sleep 300")
+        ptr.jump(FRAME_W // 2, FRAME_H // 3)
         steps["dock-committed"] = settle("dock-committed")
         shutil.copy(win.geometry, os.path.join(OUT, "a-dock.geometry.json"))
         g = win.geom()
-        # The LEFT strip (since PLAT-48 the shared default's footer is a
-        # bottom strip too).
-        left = next((st for st in g.get("strips", []) if st["edge"] == "left"), None)
-        slot = left["slots"][0]["rect"] if left else None
+        slot = next((sl["rect"] for st in g.get("strips", [])
+                     for sl in st["slots"] if sl["pane"] == "state"), None)
         if slot is not None:
             # The pointer ends inside the overlay, off the label (whose hover
             # label, PLAT-48, is not the reveal's to compare).
@@ -443,41 +486,49 @@ def body_top():
         return 0
 
 
-def ring_bbox(frame, colour):
-    """The bounding box of every pixel of exactly `colour`, below the top
-    bar (`body_top`)."""
-    w, h, raster = frame
-    x0 = y0 = 10 ** 9
-    x1 = y1 = -1
+def ring_box(frame, colour, min_run=200):
+    """THE FOCUS OUTLINE, found by its shape: since 2026-10-17 it is an
+    overlay with rounded corners (6 px, `TabRadiusPx`) drawn over the
+    focused pane's box, and the band's icons and the panes' search fields
+    hold stray pixels of the same colour, so a bounding box of every pixel
+    of the colour is not the ring. Its sides are: the outermost two columns
+    holding a long vertical run of the colour (below the top bar), and the
+    first and last rows covered along their whole width between them.
+    None when there is no outline."""
+    w, h, _ = frame
     top = body_top()
-    target = bytes(colour)
-    i = raster.find(target, top * w * 3)
-    while i >= 0:
-        if i % 3 == 0:
-            p = i // 3
-            x, y = p % w, p // w
-            x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x), max(y1, y)
-        i = raster.find(target, i + 1)
-    if x1 < 0:
+    cols = [x for x in range(w)
+            if sum(1 for y in range(top, h) if px(frame, x, y) == colour) > min_run]
+    if len(cols) < 2:
         return None
-    return [x0, y0, x1 - x0 + 1, y1 - y0 + 1]
+    x0, x1 = cols[0], cols[-1]
+    span = range(x0 + RING_CORNER, x1 - RING_CORNER + 1)
+    rows = [y for y in range(top, h)
+            if all(px(frame, x, y) == colour for x in span)]
+    if not rows:
+        return None
+    return [x0, rows[0], x1 - x0 + 1, rows[-1] - rows[0] + 1]
 
 
 def ring_closed(frame, r, colour):
-    """Every pixel of the rectangle's 1px perimeter is `colour`, and the
-    pixels one inside it are not (a 1px ring, closed on all four sides)."""
+    """Every pixel of the rectangle's 1px perimeter is `colour` (its rounded
+    corners left out), and the pixels one inside it are not (a 1px ring,
+    closed on all four sides). The TOP side's inside is the focused pane's
+    strip, whose ground is the focus colour too (PLAT-51): it is measured,
+    and the test says what it must be."""
     x, y, w, h = r
+    c = RING_CORNER
     sides = {
-        "top": [(i, y) for i in range(x + 4, x + w - 4)],
-        "bottom": [(i, y + h - 1) for i in range(x + 4, x + w - 4)],
-        "left": [(x, j) for j in range(y + 4, y + h - 4)],
-        "right": [(x + w - 1, j) for j in range(y + 4, y + h - 4)],
+        "top": [(i, y) for i in range(x + c, x + w - c)],
+        "bottom": [(i, y + h - 1) for i in range(x + c, x + w - c)],
+        "left": [(x, j) for j in range(y + c, y + h - c)],
+        "right": [(x + w - 1, j) for j in range(y + c, y + h - c)],
     }
     inner = {
-        "top": [(i, y + 1) for i in range(x + 4, x + w - 4)],
-        "bottom": [(i, y + h - 2) for i in range(x + 4, x + w - 4)],
-        "left": [(x + 1, j) for j in range(y + 4, y + h - 4)],
-        "right": [(x + w - 2, j) for j in range(y + 4, y + h - 4)],
+        "top": [(i, y + 1) for i in range(x + c, x + w - c)],
+        "bottom": [(i, y + h - 2) for i in range(x + c, x + w - c)],
+        "left": [(x + 1, j) for j in range(y + c, y + h - c)],
+        "right": [(x + w - 2, j) for j in range(y + c, y + h - c)],
     }
     out = {}
     for s in sides:
@@ -553,21 +604,27 @@ def ocr(path, rect, name):
         f.write(f"P6\n{w} {h}\n255\n".encode())
         for j in range(y, y + h):
             f.write(raster[(j * fw + x) * 3:(j * fw + x + w) * 3])
-    # Upscaled 2x for the OCR engine, as PLAT-39's reader does.
-    big = os.path.join(OUT, name + ".big.ppm")
-    subprocess.run(["python3", "-c", f"""
-import sys
-w,h={w},{h}
-d=open({crop!r},'rb').read().split(b'\\n',3)[3]
-out=bytearray()
-for j in range(h):
-    row=bytearray()
-    for i in range(w):
-        p=d[(j*w+i)*3:(j*w+i)*3+3]
-        row+=p+p
-    out+=row+row
-open({big!r},'wb').write(b'P6\\n%d %d\\n255\\n'%(2*w,2*h)+bytes(out))
-"""], check=True)
+    # Upscaled 2x for the OCR engine, as PLAT-39's reader does — in grey,
+    # INVERTED (dark text on a light ground) and SMOOTHLY (each new pixel the
+    # mean of its neighbours): with plain pixel replication tesseract reads
+    # the design system's Space Grotesk "4" as a "d" (`plat47-vcs` came out
+    # `platd7-vcs` on every capture of 2026-10-17).
+    big = os.path.join(OUT, name + ".big.pgm")
+    grey = [255 - int(0.299 * raster[(j * fw + i) * 3] +
+                      0.587 * raster[(j * fw + i) * 3 + 1] +
+                      0.114 * raster[(j * fw + i) * 3 + 2])
+            for j in range(y, y + h) for i in range(x, x + w)]
+
+    def g(i, j):
+        return grey[min(j, h - 1) * w + min(i, w - 1)]
+    out = bytearray()
+    for j in range(2 * h):
+        for i in range(2 * w):
+            a, b = i // 2, j // 2
+            di, dj = i % 2, j % 2
+            out.append((g(a, b) + g(a + di, b) + g(a, b + dj) + g(a + di, b + dj)) // 4)
+    with open(big, "wb") as f:
+        f.write(b"P5\n%d %d\n255\n" % (2 * w, 2 * h) + bytes(out))
     res = subprocess.run(["tesseract", big, "-", "--psm", "6"], capture_output=True, text=True)
     return res.stdout
 
@@ -592,9 +649,24 @@ def record():
 
     # ---- B2 + B1: the first screen ----------------------------------------
     base = frames["base"]
-    ring = ring_bbox(base, FOCUS_RING)
-    out["focusRing"] = {"bbox": ring, "sides": ring_closed(base, ring, FOCUS_RING) if ring else None}
-    # The editor's box is the ring; its body is inside the 1px border.
+    ring = ring_box(base, FOCUS_RING)
+    ga0 = json.load(open(os.path.join(OUT, "a-base.geometry.json")))
+    ed_node = next(n for n in ga0["nodes"] if n["kind"] == "tabs" and "editor" in n["panes"])
+    out["focusRing"] = {
+        "bbox": ring,
+        "sides": ring_closed(base, ring, FOCUS_RING) if ring else None,
+        # Before the first press no pane is outlined (the overlay is shown
+        # after the first press, as the desktop's).
+        "pristine": ring_box(frames["pristine"], FOCUS_RING),
+        # The pane the window says it drew there, for the test to compare
+        # the pixels' box with (an AIM, not a verdict).
+        "editorRect": ed_node["rect"],
+        # The focused strip's ground, one row inside the top side.
+        "stripGround": "#%02x%02x%02x" % px(base, ring[0] + ring[2] // 2, ring[1] + 1)
+                       if ring else None,
+    }
+    # The editor's box is the ring (an overlay on the pane's own edge); its
+    # body is inside the 1px outline.
     body = [ring[0] + 1, ring[1] + 1, ring[2] - 2, ring[3] - 2]
     ground = hexrgb(ed["background"])
     # A glyph's pixels are its colour blended toward the ground by coverage,
@@ -604,15 +676,22 @@ def record():
     fg_classes = ("keyword", "string", "comment", "identifier", "delimiter",
                   "lineNumber", "activeLineNumber")
     counts = {c: 0 for c in fg_classes}
-    others = {"oldBand4f4f4f": 0, "chromePaneFill": 0}
+    others = {"oldBand4f4f4f": 0, "indentGuide4f4f4f": 0, "chromePaneFill": 0}
     x, y, w, h = body
     for j in range(y, y + h):
+        n4f = sum(1 for i in range(x, x + w) if px(base, i, j) == INDENT_GUIDE)
+        # The old execution band was a whole ROW of 4f: a row more than a
+        # third covered is a band. A guide is a 1 px column.
+        if n4f > w // 3:
+            others["oldBand4f4f4f"] += n4f
         for i in range(x, x + w):
             p = px(base, i, j)
             if p == ground:
                 continue
-            if p == (0x4f, 0x4f, 0x4f):
-                others["oldBand4f4f4f"] += 1
+            if p == INDENT_GUIDE and px(base, i - 1, j) != INDENT_GUIDE and \
+                    px(base, i + 1, j) != INDENT_GUIDE and \
+                    (px(base, i, j - 1) == INDENT_GUIDE or px(base, i, j + 1) == INDENT_GUIDE):
+                others["indentGuide4f4f4f"] += 1
             if p == (0x1b, 0x22, 0x2c):
                 others["chromePaneFill"] += 1
             for cls in fg_classes:
@@ -640,10 +719,40 @@ def record():
         if n > body[2] // 3:
             rows.append(y)
     out["band"] = {"rows": [rows[0], rows[-1]] if rows else None}
+    # The editor's vertical scrubber (M73), as the WINDOW says it placed it
+    # (`main.editorVScrollbarGeometry`) — an aim, like every geometry read
+    # here: what is under it is read from the pixels below. Since
+    # Scrollbar-Scrubbers.md §4.1 the scrubber is an overlay: the band runs
+    # under it to the editor's right edge, and a shown thumb is composited
+    # over the band, so the band's own colour ends at the scrubber's left
+    # edge on a row the thumb covers.
+    vbar = ga0.get("editorVScrollbar")
     if rows:
-        y = (rows[0] + rows[-1]) // 2
+        # The row the band's extent is read on: the band's middle, unless the
+        # window says the scrubber's current-position mark (§3.5) or a
+        # rounded end of its thumb lies on that row — those pixels are
+        # neither the band nor the thumb over it — then the band row nearest
+        # the middle that is clear of both. Chosen from the geometry alone,
+        # never from what the pixels there are.
+        def clear(yy):
+            if not vbar:
+                return True
+            mark = vbar["mark"]
+            if mark and mark[1] <= yy < mark[1] + mark[3]:
+                return False
+            t, r = vbar["thumb"], vbar["thumbRadius"]
+            on_thumb = t[1] <= yy < t[1] + t[3]
+            straight = t[1] + r <= yy < t[1] + t[3] - r
+            return straight or not on_thumb
+        mid = (rows[0] + rows[-1]) // 2
+        y = min((yy for yy in range(rows[0], rows[-1] + 1) if clear(yy)),
+                key=lambda yy: abs(yy - mid), default=mid)
         xs = [x for x in range(body[0], body[0] + body[2]) if px(base, x, y) == band]
-        numbers = [x for x in range(body[0], body[0] + body[2])
+        # The active line's number, in the editor's gutter (`leaves
+        # .EditorGutterPx`, 110 px — Monaco's line-number lanes): the code on
+        # the band's row is in colours of its own, a string's near the
+        # number's grey.
+        numbers = [x for x in range(body[0], min(body[0] + EDITOR_GUTTER, body[0] + body[2]))
                    for yy in range(rows[0], rows[-1] + 1)
                    if near(px(base, x, yy), active_no, 24)]
         out["band"].update({
@@ -656,6 +765,16 @@ def record():
                 px(base, x, y) for x in range(body[0], xs[0])).most_common(1)[0][0],
             "afterBandAtRow": "#%02x%02x%02x" % px(base, xs[-1] + 1, y),
             "bodyLeft": body[0], "bodyRight": body[0] + body[2] - 1,
+            "row": y,
+            # The scrubber as the window placed it, for the test to derive
+            # where the band's own colour must end (null: the file fits).
+            "vscrollbar": vbar,
+            # Every pixel of the measured row from the band's last pixel on
+            # to the body's right edge: a band that runs under the scrubber
+            # reads the thumb over the band there, one that stopped at it
+            # reads the thumb over the editor's ground.
+            "afterBandRun": ["#%02x%02x%02x" % px(base, x, y)
+                             for x in range(xs[-1] + 1, body[0] + body[2])],
         })
 
     # Tabs: the SAME label drawn active and inactive — the Files stack's
@@ -687,15 +806,40 @@ def record():
         return {"mass": round(mass, 1), "ink": "#%02x%02x%02x" % bright,
                 "ground": "#%02x%02x%02x" % ground_c}
 
+    # Since 2026-10-17 the desktop tells the active tab by its TITLE colour
+    # (#c8c8c8 against the disabled tier) and by the tab running on down into
+    # its pane's body (`.lm_active`'s bridge), not by weight: each tab's
+    # title area (left of its pin and close icons) is read for the desktop's
+    # two title colours, and the strip's last rows under the tab's middle for
+    # the bridge.
+    strip50 = json.load(open(os.path.join(ROOT, "src", "tests", "visual", "answers",
+                                          "plat50-desktop.electron.json")))["chrome"]["strip"]
+    act_t, inact_t = hexrgb(strip50["activeTitle"]), hexrgb(strip50["inactiveTitle"])
+
+    def tab_look(frame, r, strip):
+        title = [r[0] + 8, r[1], max(1, r[2] - 8 - 40), r[3]]
+        # The title's ink: its brightest pixel (a glyph's full-coverage
+        # pixels are exactly its colour).
+        bright = max((px(frame, i, j) for j in range(title[1], title[1] + title[3])
+                      for i in range(title[0], title[0] + title[2])), key=lum)
+        return {"titleInk": "#%02x%02x%02x" % bright,
+                "activeTitlePixels": colour_count(frame, title, act_t, tol=0),
+                "inactiveTitlePixels": colour_count(frame, title, inact_t, tol=0),
+                "bridge": "#%02x%02x%02x" % px(frame, r[0] + r[2] // 2,
+                                                strip[1] + strip[3] - 2)}
+
     tabs = {}
     for pane in ("fileTree", "vcs"):
         r = stack["tabs"][stack["panes"].index(pane)]
-        tabs[pane] = {"rect": r, "base": ink(base, r), "vcs": ink(vcs_frame, r)}
+        tabs[pane] = {"rect": r, "base": tab_look(base, r, stack["strip"]),
+                      "vcs": tab_look(vcs_frame, r, stack["strip"]),
+                      "bodyGround": "#%02x%02x%02x" % px(base, stack["body"][0] + 2,
+                                                         stack["body"][1] + stack["body"][3] - 4)}
     out["tabs"] = tabs
 
     # ---- deliverable 5: the divider --------------------------------------
     def left_of_ring(frame):
-        r = ring_bbox(frame, FOCUS_RING)
+        r = ring_box(frame, FOCUS_RING)
         return r[0] if r else None
     out["resize"] = {
         "baseRingLeft": left_of_ring(base),
@@ -713,23 +857,45 @@ def record():
     # ---- deliverable 6: the drop indication -------------------------------
     pointers = json.load(open(os.path.join(OUT, "a.pointers.json")))
     db = frames["drop-base"]
-    dring = ring_bbox(db, FOCUS_RING)
-    dbody = [dring[0] + 1, dring[1] + 1, dring[2] - 2, dring[3] - 2]
-    drops = {"editorBody": dbody, "pointers": pointers}
+    dl = frames["drop-lifted"]
+    # PLAT-51: the drag LIFTS the pane out and the window is laid out again
+    # without it, so a drop's tint is the change against the LIFTED frame
+    # (nothing indicated, the ghost off the frame), and the editor's box is
+    # the lifted arrangement's: the outline before the lift is the editor's
+    # (`drop-base`), and in the lifted frame the editor is where the window's
+    # lifted geometry put it.
+    dring = ring_box(db, FOCUS_RING)
+    gl = json.load(open(os.path.join(OUT, "a-lift.geometry.json")))
+    lifted = {n["panes"][0]: n for n in gl["nodes"] if n["kind"] == "tabs"}
+    drops = {"editorBox": dring, "liftedEditorRect": lifted["editor"]["rect"],
+             "liftedPanes": sorted(p for n in gl["nodes"] if n["kind"] == "tabs"
+                                   for p in n["panes"]),
+             "liftedRing": ring_box(dl, FOCUS_RING),
+             "liftedChangedPixels": changed_bbox(db, dl)[1],
+             "liftedInner": gl["inner"],
+             "liftedRects": {n["panes"][0]: {"rect": n["rect"], "strip": n["strip"]}
+                             for n in gl["nodes"] if n["kind"] == "tabs"},
+             "pointers": pointers}
     action = None
     for name in ("drop-split", "drop-whole", "drop-slot", "drop-dock"):
         f = frames[name]
         px_, py_ = pointers[name]
         # The ghost label: drawn at the pointer + 12, excluded from the tint.
         ghost = [px_ + 12, py_ + 12, 160, 32]
-        bbox, count = changed_bbox(db, f, exclude=ghost)
-        ghost_changed = changed_bbox(db, f)[1] - count
+        bbox, count = changed_bbox(dl, f, exclude=ghost)
+        ghost_changed = changed_bbox(dl, f)[1] - count
         drops[name] = {"tintBBox": bbox, "changedPixels": count,
                        "ghostChangedPixels": ghost_changed,
                        "ghostCentre": list(px(f, px_ + 60, py_ + 12 + 15))}
-    drops["cancelChangedPixels"] = changed_bbox(db, frames["drop-cancel"])[1]
-    drops["releasedChangedPixels"] = changed_bbox(db, frames["drop-released"])[1]
-    cring = ring_bbox(frames["drop-commit"], FOCUS_RING)
+    # `Esc` restores the window as the press left it (the press focused the
+    # Variables pane; the drag is what is cancelled), and a release after it
+    # does nothing.
+    dp = frames["drop-pressed"]
+    drops["pressFocusChangedPixels"] = changed_bbox(db, dp)[1]
+    drops["cancelChangedPixels"] = changed_bbox(dp, frames["drop-cancel"])[1]
+    drops["releasedChangedPixels"] = changed_bbox(dp, frames["drop-released"])[1]
+    # The dropped pane is focused after the drop: its outline is its box.
+    cring = ring_box(frames["drop-commit"], FOCUS_RING)
     drops["commitRing"] = cring
     gf = json.load(open(os.path.join(OUT, "a-final.geometry.json")))
     # The committed arrangement, read from the pixels: the editor's box and
@@ -758,10 +924,14 @@ def record():
     dock = {"strips": gd.get("strips", []),
             "treePanes": sorted(p for n in gd["nodes"] if n["kind"] == "tabs"
                                 for p in n["panes"])}
-    left = next((st for st in gd.get("strips", []) if st["edge"] == "left"), None)
-    if left:
-        st = left
-        sr = st["rect"]
+    # The strip holding the docked State label (the footer since the pin
+    # docks there), measured over that label's own box.
+    holder = next(((st, sl) for st in gd.get("strips", [])
+                   for sl in st["slots"] if sl["pane"] == "state"), None)
+    if holder:
+        st, slot = holder
+        dock["edge"] = st["edge"]
+        sr = slot["rect"]
         fc = frames["dock-committed"]
         # The strip is drawn: its label's ink on the strip's ground.
         hist = {}
@@ -773,8 +943,8 @@ def record():
         dock["stripGround"] = "#%02x%02x%02x" % ground_c
         dock["stripInk"] = sum(v for c, v in hist.items()
                                if abs(lum(c) - lum(ground_c)) > 40)
-        # The left strip's label, one character per row, read row by row.
-        sl = st["slots"][0]["rect"]
+        # The label itself.
+        sl = slot["rect"]
         dock["slotText"] = ocr(os.path.join(OUT, "dock-committed.ppm"),
                                [sl[0] - 4, sl[1], sl[2] + 8, sl[3]], "dock-slot")
         saved = os.path.join(OUT, "a-state", "gpui-layout.json")

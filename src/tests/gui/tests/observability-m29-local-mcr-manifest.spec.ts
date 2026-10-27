@@ -21,6 +21,7 @@ import {
   codetracerPath,
 } from "../lib/fixtures";
 import { getFreeTcpPort } from "../lib/port-allocator";
+import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
 import { retry } from "../lib/retry-helpers";
 
 const workspaceRoot = path.dirname(codetracerInstallDir);
@@ -156,6 +157,9 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_PREFIX;
   delete env.WAYLAND_DISPLAY;
   delete env.XDG_SESSION_TYPE;
+  // The session secret every `ct host` started here is given
+  // (../lib/ct-host-session.ts).
+  withCtHostSessionSecret(env);
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   env.CODETRACER_ELECTRON_ARGS = [
@@ -268,10 +272,13 @@ function prepareLocalMcrManifest(): { rootDir: string; manifestPath: string } {
         retentionStatus: "available",
         sizeBytes: fs.statSync(portableTracePath).size,
       },
+      // No geid: the session opens at the recording's entry. A start geid
+      // is a position the hosted session seeks to at launch (ct host's
+      // CODETRACER_START_GEID), and geid 1 is not one a native replay can
+      // stop after.
       replay_start: {
         trace_id: "m25-real-mcr-request-001",
         span_id: "30000000000025cc",
-        geid: "1",
       },
     },
   };
@@ -493,7 +500,7 @@ async function connectToHost(
   let connected = false;
   for (let attempt = 1; attempt <= maxConnectAttempts && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: gotoTimeoutMs,
       });
       connected = true;

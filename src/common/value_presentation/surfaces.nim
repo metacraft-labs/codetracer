@@ -284,6 +284,19 @@ func gpuiRowBudget*(media = MediaCapabilityNote): Budget =
   Budget(name: "gpui-row", lines: 1, cells: 0, depth: 1,
          members: 8, expandable: false, annotated: false, media: media)
 
+func tableFullBudget*(): Budget =
+  ## PLAT-70 Part B (Horizontal-Overflow.md §5.3): a TABLE cell's whole value —
+  ## what its tooltip, its detail and `list.copy` show on every front-end. The
+  ## state panel's depth and member caps (the desktop's value cell, the
+  ## rendering a reader already knows as "the value"), on ONE line with no
+  ## cell bound: the detail wraps it, the presenter does not cut it.
+  ##
+  ## NOT a member of `SurfaceBudgets`, for `tuiRowBudget`'s reason: it is
+  ## `state-panel` narrowed to a line, not a surface of its own.
+  Budget(name: "table-full", lines: 1, cells: 0,
+         depth: StatePanelBudget.depth, members: StatePanelBudget.members,
+         expandable: false, annotated: false, media: MediaCapabilityNote)
+
 func tuiValueBudget*(): Budget =
   ## The rendering stored on a `store/types.Variable` when a `ct/load-locals`
   ## response is decoded.

@@ -48,6 +48,23 @@ layout: "default_layout"
 #   you can also choose default_white or default_dark
 theme: "default_dark"
 
+# the window, on the desktop and in the GPUI front-end alike:
+#   initial: maximized | windowed
+#   width / height: the windowed size, which a maximized window restores to
+#   (never below 1050x600). The GPUI front-end's `--width` / `--height`
+#   override it and open a window of exactly that size.
+window:
+  initial: maximized
+  width: 1900
+  height: 1400
+
+# VCS panel. `fileClickOpensFullFile: true` makes a click on a file in the
+# panel open the full file instead of the unified diff (the panel's
+# "Unified Diff / Open File" toggle starts from it). Either way, the file name
+# in a unified diff's per-file heading opens the full file.
+vcs:
+  fileClickOpensFullFile: false
+
 # project open
 default: ""
 
@@ -60,6 +77,15 @@ showMinimap: true
 # # you can use KEY+OTHER
 # # use PageUp, PageDown, CTRL, ALT, SHIFT
 # # we'll fix it, but for now have to match to two apis and to process it more
+# LEGACY DATA SINCE PLAT-68. No key is delivered through this table any more:
+# every front-end's keys go through ONE router over the shared base keymaps
+# (CUA by default; codetracer-specs GUI/CUA-Keymap.md) and the user's
+# `keybindings.json`. This block is read only by the ONE-TIME IMPORT of a
+# user's customised `bindings:` into `keybindings.json`
+# (`index/keybindings.importOldConfigsOnce`) and, on macOS, for the native
+# menu's accelerators. The notes below record why each chord was chosen under
+# the Mousetrap / Monaco registries the router replaced; they describe that
+# history, not the running product.
 bindings:
   forwardContinue: "F8 F2"
   reverseContinue: "SHIFT+F8"

@@ -73,6 +73,13 @@ type
     InternalNewOperation,
     InternalTraceMapUpdate,
     CtNotification,
+    # `ct/launch-failed`: the replay server's statement that a `launch` it
+    # acknowledged cannot succeed, with the reason as `{message}`. It travels
+    # beside the Error `ct/notification` carrying the same sentence; the
+    # notification is what the status bar shows, and this event is what ends
+    # the tab's busy state (`ui/status.nim`). Without a kind here the renderer
+    # dropped it as an unmapped event.
+    CtLaunchFailed,
     TracepointLocals,
     CtTracepointResults,
     CtFlowJump,
@@ -109,6 +116,15 @@ type
     # §RS-M3 and codetracer-specs/GUI/Core-Panes/Request-Panel.md.
     CtLoadRequestSpansSince,
     CtUpdatedHttpRequests,
+    # Viewport-Driven-Loading (HSF-V1): windowed reads a ViewModel sends
+    # through `BackendService`. Each needs a kind, or `dapCommandToEventKind`
+    # raises and the Electron renderer never writes the request. Their
+    # answers come back to the sender's continuation (M49); the response
+    # fans out as the request's own kind, as `ct/load-request-spans-since`'s.
+    CtLoadRequestSpans,
+    CtLoadSymbols,
+    CtLoadValueElements,
+    CtLoadTerminalLines,
     # Multi-process sessions (M29 §5.2 / M42 §14.8). `ct/listProcesses`
     # is unusual in that the backend speaks it in BOTH directions: as a
     # request the frontend may issue, and as an unsolicited event
@@ -206,6 +222,10 @@ func commandToCtResponseEventKind*(command: string): CtEventKind =
   # `src/tests/gui/tests/request-panel/request_panel_live_vm_test.nim`):
   # `reset` replaces and a non-reset delta merges on `id`, last wins.
   of "ct/load-request-spans-since": CtLoadRequestSpansSince
+  of "ct/load-request-spans": CtLoadRequestSpans
+  of "ct/load-symbols": CtLoadSymbols
+  of "ct/load-value-elements": CtLoadValueElements
+  of "ct/load-terminal-lines": CtLoadTerminalLines
   # Multi-process sessions (M42 §14.8)
   of "ct/listProcesses": CtListProcessesResponse
   of "ct/pairIndexLookup": CtPairIndexLookupResponse

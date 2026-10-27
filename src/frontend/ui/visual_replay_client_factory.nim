@@ -6,6 +6,7 @@ import isonim/core/async_compat
 
 when defined(js):
   import ../lib/logging
+  import std/jsffi
 
 when not defined(js):
   import std/asyncdispatch
@@ -21,8 +22,11 @@ when defined(js):
     })(#))
   """.}
 
-  proc fetchFrameText(url, infoUrl: cstring): VisualReplayFuture[cstring] {.importjs: """
-    ((async function(url, infoUrl) {
+  proc newInfoCache(): JsObject {.importjs: "({})".}
+
+  proc fetchFrameText(url, infoUrl: cstring;
+                      infoCache: JsObject): VisualReplayFuture[cstring] {.importjs: """
+    ((async function(url, infoUrl, cache) {
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error("visual replay frame request failed: " + response.status);
@@ -33,13 +37,25 @@ when defined(js):
         return await response.text();
       }
 
-      const infoResponse = await fetch(infoUrl);
-      if (!infoResponse.ok) {
-        throw new Error("visual replay info request failed: " + infoResponse.status);
+      // THE FRAME SAYS ITS OWN SIZE (MCR-Visual-Replay.md, `GET /frame`):
+      // `X-Width` / `X-Height` are the image's, `X-Source-Width` /
+      // `X-Source-Height` the framebuffer's. Only a player that does not
+      // expose them is asked `/info`, once per client, never per frame.
+      let width = Number(response.headers.get("x-width") || 0);
+      let height = Number(response.headers.get("x-height") || 0);
+      let sourceWidth = Number(response.headers.get("x-source-width") || 0);
+      let sourceHeight = Number(response.headers.get("x-source-height") || 0);
+      if (width <= 0 || height <= 0) {
+        if (!cache.info) {
+          const infoResponse = await fetch(infoUrl);
+          if (!infoResponse.ok) {
+            throw new Error("visual replay info request failed: " + infoResponse.status);
+          }
+          cache.info = await infoResponse.json();
+        }
+        width = Number(cache.info.width || 0);
+        height = Number(cache.info.height || 0);
       }
-      const info = await infoResponse.json();
-      const width = Number(info.width || 0);
-      const height = Number(info.height || 0);
       if (width <= 0 || height <= 0) {
         throw new Error("visual replay player returned invalid frame dimensions");
       }
@@ -66,6 +82,8 @@ when defined(js):
         imageSrc: canvas.toDataURL("image/png"),
         width,
         height,
+        sourceWidth: sourceWidth > 0 ? sourceWidth : width,
+        sourceHeight: sourceHeight > 0 ? sourceHeight : height,
       };
       if (parsedUrl.searchParams.has("geid")) {
         frame.geid = Number(parsedUrl.searchParams.get("geid") || 0);
@@ -74,7 +92,7 @@ when defined(js):
         frame.frame = Number(parsedUrl.searchParams.get("frame") || 0);
       }
       return JSON.stringify(frame);
-    })(#, #))
+    })(#, #, #))
   """.}
 
   proc postJsonText(url, body: cstring): VisualReplayFuture[cstring] {.importjs: """
@@ -125,7 +143,7 @@ proc createInactiveVisualReplayClient*(playerUrl: string): VisualReplayClient =
         frame: none(int),
         width: 0,
         height: 0)),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       completedVisualFuture(newSeq[VisualReplayDrawCall]()),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -162,8 +180,10 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
           onError = proc(message: string) =
             raise newException(CatchableError, message))
 
+    let infoCache = newInfoCache()
     proc getFrame(url: string): VisualReplayFuture[VisualReplayFrame] =
-      let textFuture = fetchFrameText(cstring(url), cstring(infoUrl(baseUrl)))
+      let textFuture = fetchFrameText(cstring(url), cstring(infoUrl(baseUrl)),
+                                      infoCache)
       result = newPromise proc(resolve: proc(value: VisualReplayFrame)) =
         async_compat.onComplete(textFuture,
           onSuccess = proc(raw: cstring) =
@@ -171,7 +191,8 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
           onError = proc(message: string) =
             raise newException(CatchableError, message))
 
-    VisualReplayClient(
+    var client: VisualReplayClient
+    client = VisualReplayClient(
       playerUrl: baseUrl,
       getInfoProc: proc(): VisualReplayFuture[VisualReplayInfo] =
         let fut = getJson(infoUrl(baseUrl))
@@ -181,13 +202,13 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
             onError = proc(message: string) =
               raise newException(CatchableError, message)),
       getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
-        getFrame(frameByGeidUrl(baseUrl, geid)),
+        getFrame(client.sizedFrameUrl(frameByGeidUrl(baseUrl, geid))),
       getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
-        getFrame(frameByFrameUrl(baseUrl, frame)),
+        getFrame(client.sizedFrameUrl(frameByFrameUrl(baseUrl, frame))),
       getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
-        getFrame(frameByDrawUrl(baseUrl, draw)),
-      getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
-        let fut = getJson(drawCallsUrl(baseUrl))
+        getFrame(client.sizedFrameUrl(frameByDrawUrl(baseUrl, draw))),
+      getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+        let fut = getJson(drawCallsUrl(baseUrl, frame))
         result = newPromise proc(resolve: proc(value: seq[VisualReplayDrawCall])) =
           async_compat.onComplete(fut,
             onSuccess = proc(node: JsonNode) =
@@ -229,5 +250,6 @@ proc createHttpVisualReplayClient*(playerUrl: string): VisualReplayClient =
             onError = proc(message: string) =
               raise newException(CatchableError, message)),
     )
+    client
   else:
     createInactiveVisualReplayClient(playerUrl)

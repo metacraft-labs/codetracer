@@ -78,6 +78,7 @@ proc consumeListProcessesEvent*(session: SessionViewModel; body: JsonNode) =
 
 when defined(js):
   import isonim/web/dom_api as isonim_dom
+  import isonim/web/web_renderer
 
   proc bodyOf(d: isonim_dom.Document): isonim_dom.Node {.importjs: "#.body".}
     ## `isonim/web/dom_api` exposes no `document.body` accessor.
@@ -117,22 +118,32 @@ when defined(js):
     processTreeHost = host
     host
 
+  var processTreeSession: Signal[SessionViewModel]
+    ## The session whose tree the one host shows: the tab on screen.
+
   proc mountProcessTree*(session: SessionViewModel) =
-    ## Install the reactive render effect. Idempotent — repeated calls
-    ## (the State Pane bootstrap re-runs on a stub → shared-store
-    ## upgrade) do not stack effects.
+    ## Show `session`'s process tree — the tab now on screen — in the window's
+    ## one host. The render effect is installed once and follows the session
+    ## (`processTreeSession`), so a tab switch redraws the host from the
+    ## target's tree and repeated calls (every switch, and the State Pane
+    ## bootstrap's stub → shared-store upgrade) do not stack effects.
     if session.isNil or session.processTree.isNil:
       return
     if processTreeEffectInstalled:
+      processTreeSession.val = session
       return
     processTreeEffectInstalled = true
-    let callbacks = session.processTreeCallbacks()
+    processTreeSession = createSignal(session)
     createEffect proc() =
-      let model = session.processTreeModel()
+      let shown = processTreeSession.val
+      if shown.isNil:
+        return
+      let model = shown.processTreeModel()
       let host = ensureProcessTreeHost()
       if isonim_dom.isNodeNil(isonim_dom.Node(host)):
         return
-      renderProcessTreeInto(host, model, callbacks)
+      renderProcessTreeInto[WebRenderer, isonim_dom.Element](
+        WebRenderer(), host, model, shown.processTreeCallbacks())
 
 else:
   proc mountProcessTree*(session: SessionViewModel) =

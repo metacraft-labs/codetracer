@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # watch-expressions-in-browser.sh — a user types a watch expression into the
-# State pane, in a real browser, and sees a correct value.
+# Variables pane, in a real browser, and sees a correct value.
 #
 # WHAT THIS ASSERTS THAT NOTHING ELSE DOES
 # ----------------------------------------
@@ -17,8 +17,13 @@
 # had no tab strip at all. `stWatches` was reachable from `vm.selectTab`
 # and from no gesture anywhere.
 #
-# So this gate's subject is the gesture: CLICK the Watches tab, TYPE into
-# the watch box, press Enter, and read what painted.
+# So this gate's subject is the gesture: TYPE into the watch box, press
+# Enter, and read what painted.
+#
+# ONE LIST (Variable-State-Pane.md, "Decisions (2026-10-24)"): the pane no
+# longer has tabs. The watches are listed after the variables, each row
+# marked `value-watch`, and a watch the stop cannot answer stays listed,
+# marked `watch-invalid`, with its reason.
 #
 # WHAT IT DOES NOT COVER, said plainly: there is no engine on this page. The
 # transport half is `watch_expressions_dap_test.rs`'s, and the fixture this
@@ -164,7 +169,7 @@ q() {
 }
 
 # ---------------------------------------------------------------------------
-echo "The control: the State pane, in a browser, driven by gestures"
+echo "The control: the Variables pane, in a browser, driven by gestures"
 # ---------------------------------------------------------------------------
 control="${cache}/control.out"
 if ! run_probe "${cache}" "${control}" "${shot}"; then
@@ -176,54 +181,52 @@ fi
 note "summary line: $(q "${control}" 'd["summary"]')"
 
 ck "$([ "$(q "${control}" 'd["paneMounted"]')" = True ] && echo ok || echo no)" \
-	"the State pane mounted in a browser"
+	"the Variables pane mounted in a browser"
 
-# THE TAB STRIP, asserted on its own and FIRST. It was absent from the web
-# renderer entirely; without this every assertion below fails for one reason
-# and the report cannot say which layer broke.
-ck "$([ -n "$(q "${control}" 'd["tabsBefore"]["watchesTab"]')" ] &&
-	[ "$(q "${control}" 'd["tabsBefore"]["watchesTab"]')" != None ] && echo ok || echo no)" \
-	"the Watches TAB BUTTON exists in the WebRenderer panel (it existed only in the Mock one)"
+# ONE LIST, asserted on its own and FIRST, so a pane that still had tabs
+# fails for that reason and not for every assertion below.
+ck "$([ "$(q "${control}" 'd["paneBefore"]["tabStrip"]')" = False ] && echo ok || echo no)" \
+	"the pane has no Locals / Globals / Watches tab strip"
 ck "$([ "$(q "${control}" 'd["watchInputPresent"]')" = True ] && echo ok || echo no)" \
 	"the watch input is present as #watch-0"
 
-# The pane opens on Locals and holds the recorded locals.
-ck "$([ "$(q "${control}" 'rowtext(d["localsRows"], "initial_shield")')" != "" ] && echo ok || echo no)" \
-	"the Locals tab paints the recorded local initial_shield"
-ck "$([ "$(q "${control}" '"10000" in rowtext(d["localsRows"], "initial_shield")')" = True ] && echo ok || echo no)" \
+# The list holds the recorded locals.
+ck "$([ "$(q "${control}" 'rowtext(d["rows"], "initial_shield")')" != "" ] && echo ok || echo no)" \
+	"the list paints the recorded local initial_shield"
+ck "$([ "$(q "${control}" '"10000" in rowtext(d["rows"], "initial_shield")')" = True ] && echo ok || echo no)" \
 	"and its value is the recorded 10000"
-# A WATCH ROW MUST NOT BE IN THE LOCALS TAB. The two lists arrive in one
-# response and a host that forgot to split them would show watches here.
-ck "$([ "$(q "${control}" 'rowtext(d["localsRows"], "asteroid_masses[1]")')" = "" ] && echo ok || echo no)" \
-	"and a watch answer is NOT among the locals"
-
-# ---- the gesture ----------------------------------------------------------
-ck "$([ "$(q "${control}" '"active" in (d["tabsAfterClick"]["watchesTab"] or "")')" = True ] && echo ok || echo no)" \
-	"clicking the Watches tab button selects it"
+# A LOCAL IS NOT A WATCH. The two arrive in one response; the rows a host
+# would show as variables must not carry the watch mark.
+ck "$([ "$(q "${control}" 'next((r["watch"] for r in d["rows"] if r["name"] == "initial_shield"), None)')" = False ] && echo ok || echo no)" \
+	"and the local is not marked as a watch"
 
 # THE HEADLINE: a named expression, a known value.
 #
 # `asteroid_masses[1]` is 2000 while `[0]` is 100 and the recorded sequence
 # contains both, so a pane that showed the container, the wrong element, or
 # the locals list cannot satisfy this.
-watch_1="$(q "${control}" 'rowtext(d["watchRows"], "asteroid_masses[1]")')"
+watch_1="$(q "${control}" 'rowtext(d["rows"], "asteroid_masses[1]")')"
 note "asteroid_masses[1] row: ${watch_1}"
 ck "$([ "${watch_1}" != "" ] && echo ok || echo no)" \
-	"the Watches tab paints a row for asteroid_masses[1]"
-ck "$([ "$(q "${control}" '"2000" in rowtext(d["watchRows"], "asteroid_masses[1]")')" = True ] && echo ok || echo no)" \
+	"the list paints a row for the watch asteroid_masses[1]"
+ck "$([ "$(q "${control}" 'next((r["watch"] for r in d["rows"] if r["name"] == "asteroid_masses[1]"), None)')" = True ] && echo ok || echo no)" \
+	"and the row is marked as a watch"
+ck "$([ "$(q "${control}" '"2000" in rowtext(d["rows"], "asteroid_masses[1]")')" = True ] && echo ok || echo no)" \
 	"and its value is 2000 — the element, from the recording"
-ck "$([ "$(q "${control}" '"100," in rowtext(d["watchRows"], "asteroid_masses[1]")')" = False ] && echo ok || echo no)" \
+ck "$([ "$(q "${control}" '"100," in rowtext(d["rows"], "asteroid_masses[1]")')" = False ] && echo ok || echo no)" \
 	"and it is that ELEMENT, not the sequence containing it"
 
 # THE REFUSAL PATH, with its own assertion. A pane whose two states are "a
 # value" and "nothing" is the defect this whole change exists to remove.
-refusal="$(q "${control}" 'rowtext(d["watchRows"], "initial_shield + 1")')"
+refusal="$(q "${control}" 'rowtext(d["rows"], "initial_shield + 1")')"
 note "initial_shield + 1 row: ${refusal}"
 ck "$([ "${refusal}" != "" ] && echo ok || echo no)" \
 	"an unanswerable watch is a ROW, not an absence"
-ck "$([ "$(q "${control}" '"cannot evaluate" in rowtext(d["watchRows"], "initial_shield + 1")')" = True ] && echo ok || echo no)" \
+ck "$([ "$(q "${control}" 'next((r["invalid"] for r in d["rows"] if r["name"] == "initial_shield + 1"), None)')" = True ] && echo ok || echo no)" \
+	"and it is marked not valid"
+ck "$([ "$(q "${control}" '"cannot evaluate" in rowtext(d["rows"], "initial_shield + 1")')" = True ] && echo ok || echo no)" \
 	"and it carries a stated reason"
-ck "$([ "$(q "${control}" '"only holds the values that were actually recorded" in rowtext(d["watchRows"], "initial_shield + 1")')" = True ] && echo ok || echo no)" \
+ck "$([ "$(q "${control}" '"only holds the values that were actually recorded" in rowtext(d["rows"], "initial_shield + 1")')" = True ] && echo ok || echo no)" \
 	"and the reason says why a RECORDING cannot answer it"
 
 # ---- typing ---------------------------------------------------------------
@@ -232,7 +235,7 @@ ck "$([ "$(q "${control}" 'd["inputClearedAfterSubmit"]')" = True ] && echo ok |
 ck "$([ "$(q "${control}" '"3" in rowtext(d["rowsAfterTyping"], "landing_point.x")')" = True ] && echo ok || echo no)" \
 	"a TYPED expression landing_point.x shows its recorded value 3"
 ck "$([ "$(q "${control}" '"cannot evaluate" in rowtext(d["rowsAfterRefusal"], "not_recorded_here")')" = True ] && echo ok || echo no)" \
-	"a TYPED expression the recording cannot answer shows a reason, not a blank tab"
+	"a TYPED expression the recording cannot answer shows a reason, not a blank row"
 
 ck "$([ "$(q "${control}" 'd["loadingVisible"]')" = False ] && echo ok || echo no)" \
 	'the pane is not still saying "Loading..." over the rows it has painted'
@@ -241,31 +244,31 @@ errs="$(q "${control}" 'len(d["pageErrors"])')"
 ck "$([ "${errs}" = "0" ] && echo ok || echo no)" \
 	"zero uncaught page errors (${errs})"
 
-note "rows rejected by the hit test (rows with no laid-out element at all): $(q "${control}" 'd["watchRejected"]')"
+note "rows rejected by the hit test (rows with no laid-out element at all): $(q "${control}" 'd["rejected"]')"
 note "painted characters: $(q "${control}" 'd["paintedChars"]')"
 [ -n "${shot}" ] && note "screenshot: ${shot}"
 echo
 
 # ---------------------------------------------------------------------------
-echo "Mutation arm A: the WebRenderer has no tab strip (the pre-fix panel)"
-echo "    Reddens the TAB assertion and, through it, everything the user"
-echo "    could only reach by clicking that tab. This is the state the"
-echo "    product shipped in: the Watches tab existed and no gesture opened it."
+echo "Mutation arm A: the pane drops a watch it cannot answer"
+echo "    Reddens the REFUSAL assertions. This is the behaviour the pane had"
+echo "    before a watch was the session's: a watch the stop could not answer"
+echo "    vanished instead of saying why."
 # ---------------------------------------------------------------------------
 arm_a="${cache}/arm-a"
 mkdir -p "${arm_a}"
 cp -R "${cache}/index.html" "${cache}/run.mjs" "${cache}/codetracer.css" "${arm_a}/" 2>/dev/null
 ln -sfn "${nm}" "${arm_a}/node_modules"
-# Remove the tab strip from the mounted panel, in the page, so the arm
-# reproduces the pre-fix WebRenderer without editing the Nim source.
+# Remove the not-valid watch rows from the mounted panel, in the page, so the
+# arm reproduces a pane that drops them without editing the Nim source.
 python3 - "${arm_a}/index.html" <<'PY'
 import sys
 path = sys.argv[1]
 html = open(path).read()
 inject = """<script>
-/* ARM A INSTRUMENT — the pre-fix WebRenderer panel, which had no tab strip. */
+/* ARM A INSTRUMENT — a pane that drops the watches it cannot answer. */
 new MutationObserver(function () {
-  document.querySelectorAll('#ct-state-pane .state-tabs').forEach(function (el) {
+  document.querySelectorAll('#ct-state-pane .value-watch.watch-invalid').forEach(function (el) {
     el.remove();
   });
 }).observe(document.documentElement, { childList: true, subtree: true });
@@ -280,18 +283,13 @@ grep -q 'ARM A INSTRUMENT' "${arm_a}/index.html" || {
 cp "${cache}/probe.js" "${arm_a}/probe.js"
 arm_a_out="${cache}/arm-a.out"
 if run_probe "${arm_a}" "${arm_a_out}"; then
-	a_tab="$(q "${arm_a_out}" 'd["tabsBefore"]["watchesTab"]')"
-	ck "$({ [ "${a_tab}" = "None" ] || [ "${a_tab}" = "" ]; } && echo ok || echo no)" \
-		"arm A: with no tab strip the Watches tab button is absent (was: ${a_tab})"
-	# AND THE GESTURE FAILS, which is the user-visible consequence: with no
-	# button there is nothing to click, so the Watches tab cannot be opened.
-	ck "$([ "$(q "${arm_a_out}" 'd["watchesTabClicked"]')" = False ] && echo ok || echo no)" \
-		"arm A: and the Watches tab CANNOT BE OPENED by a gesture — the shipped defect"
-	# THE ARM BREAKS ONE THING. The watch input is a sibling of the strip, so
-	# if it vanished too the red above would be evidence that the arm broke the
+	ck "$([ "$(q "${arm_a_out}" 'rowtext(d["rows"], "initial_shield + 1")')" = "" ] && echo ok || echo no)" \
+		"arm A: the unanswerable watch has no row — the refusal assertion would redden"
+	# THE ARM BREAKS ONE THING. The answered watch is a sibling row, so if it
+	# vanished too the red above would be evidence that the arm broke the
 	# probe rather than that the assertion works.
-	ck "$([ "$(q "${arm_a_out}" 'd["watchInputPresent"]')" = True ] && echo ok || echo no)" \
-		"arm A: the watch input is still there (the arm removes the STRIP, not the pane)"
+	ck "$([ "$(q "${arm_a_out}" '"2000" in rowtext(d["rows"], "asteroid_masses[1]")')" = True ] && echo ok || echo no)" \
+		"arm A: the answered watch is still there (the arm removes the NOT-VALID rows only)"
 else
 	ck no "arm A: the probe did not complete"
 fi
@@ -336,13 +334,15 @@ if nim js -d:ctWeb -d:ctRenderer -d:chronicles_enabled=off \
 	[ -s "${arm_b}/probe.js" ]; then
 	arm_b_out="${cache}/arm-b.out"
 	if run_probe "${arm_b}" "${arm_b_out}"; then
-		ck "$([ "$(q "${arm_b_out}" 'rowtext(d["watchRows"], "asteroid_masses[1]")')" = "" ] && echo ok || echo no)" \
-			"arm B: no watch value is painted"
-		ck "$([ "$(q "${arm_b_out}" 'rowtext(d["watchRows"], "initial_shield + 1")')" = "" ] && echo ok || echo no)" \
-			"arm B: no refusal is painted either — a watch simply vanishes"
+		ck "$([ "$(q "${arm_b_out}" '"2000" in rowtext(d["rows"], "asteroid_masses[1]")')" = False ] && echo ok || echo no)" \
+			"arm B: no watch value is painted — the value assertion would redden"
+		# AND THE WATCH IS STILL LISTED: the session's watch list does not
+		# depend on the answer, so an unanswered watch is a not-valid row.
+		ck "$([ "$(q "${arm_b_out}" 'next((r["invalid"] for r in d["rows"] if r["name"] == "asteroid_masses[1]"), None)')" = True ] && echo ok || echo no)" \
+			"arm B: the unanswered watch stays listed, marked not valid"
 		# The arm must leave the LOCALS intact, or its red says only that the
 		# fixture broke.
-		ck "$([ "$(q "${arm_b_out}" '"10000" in rowtext(d["localsRows"], "initial_shield")')" = True ] && echo ok || echo no)" \
+		ck "$([ "$(q "${arm_b_out}" '"10000" in rowtext(d["rows"], "initial_shield")')" = True ] && echo ok || echo no)" \
 			"arm B: the locals are still correct (the arm removes WATCHES, not the response)"
 	else
 		ck no "arm B: the probe did not complete"

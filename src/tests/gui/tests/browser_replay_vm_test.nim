@@ -81,7 +81,7 @@ proc seedBrowserReplay(config: BrowserReplayConfig) =
     session.store.calltrace.startLineIndex.val = 0'i64
     session.store.calltrace.totalCallsCount.val = 1'u64
     session.store.calltrace.finished.val = true
-    session.calltraceVM.setViewportHeight(20)
+    session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
 
     session.eventLogVM.eventRows.val = @[
       makeEventRow(1'u64, 1, config.outputText),

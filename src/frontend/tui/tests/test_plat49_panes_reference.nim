@@ -113,7 +113,7 @@ suite "PLAT-49 part B: the desktop is the reference":
     test "every desktop call-trace row is the ViewModel's row of that call":
       let r = resolveFixture("calc")
       ck r.outcome == foRecorded
-      let s = newHeadlessDebugSession(r.tracePath, getEnv("REPLAY_SERVER_BIN"))
+      let s = newHeadlessDebugSession(r.tracePath, findReplayServer())
       try:
         s.requestAndLoadCalltrace(height = 40, depth = 20)
         let store = s.session.store

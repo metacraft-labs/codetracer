@@ -6,6 +6,14 @@
 ## the GoldenLayout instance.  This preserves Monaco editors and all
 ## GL-managed component state across tab switches.
 ##
+## Each session owns its ViewModels (`session_viewmodels.nim`), so a switch
+## does not copy any pane state between tabs: it shows the target's container
+## and points the window's pane bridges at the target's ViewModels
+## (`setSessionBindProc`, installed by `ui_js` — rule 2 of
+## `GUI/Multi-Window-Tab-Management.md` §Tab Behavior: clicking a tab switches
+## all panels to that session's data). What the tab being left showed stays in
+## its own ViewModels (rule 6).
+##
 ## To avoid circular imports (layout -> session_tabs -> session_switch ->
 ## layout), the actual ``initLayout`` call is wired in at runtime via
 ## ``setInitLayoutProc``.
@@ -14,13 +22,20 @@ import
   std/[strformat, jsffi, asyncjs],
   ../types,
   ../dap,
+  ../event_helpers,
   ../renderer,
   menu,
-  debug,
+  debug_toolbar,
   welcome_screen,
   search_results,
+  session_viewmodels,
+  panel_host,
   ../utils,
   ../lib/[logging, jslib]
+
+from isonim/web/dom_api import nil
+from ./tab_answer_routing import deliverPendingTabAnswers
+from ./test_results import forgetTestResultsVM
 
 import kdom except Location
 
@@ -32,9 +47,12 @@ type
   InitLayoutProc = proc(config: GoldenLayoutResolvedConfig,
                         containerElement: kdom.Element = nil) {.nimcall.}
   EnsureTabBarRendererProc = proc() {.nimcall.}
+  SessionBindProc* = proc(session: ReplaySession)
+    ## Point the window's pane bridges at `session`'s ViewModels.
 
 var initLayoutImpl: InitLayoutProc = nil
 var ensureTabBarRendererImpl: EnsureTabBarRendererProc = nil
+var sessionBindImpl: SessionBindProc = nil
 
 proc setInitLayoutProc*(p: InitLayoutProc) =
   ## Called once from layout.nim to wire in the real ``initLayout``.
@@ -45,6 +63,20 @@ proc setEnsureTabBarRendererProc*(p: EnsureTabBarRendererProc) =
   ## This allows session creation to ensure the session-tab-bar
   ## direct mount exists even when ``initLayout`` is not called.
   ensureTabBarRendererImpl = p
+
+proc setSessionBindProc*(p: SessionBindProc) =
+  ## Called once by `ui_js` to wire in `bindWindowToSession`, which knows
+  ## every pane module the window's bridges reach and which this module
+  ## cannot import.
+  sessionBindImpl = p
+
+proc bindWindowTo(session: ReplaySession) =
+  if not sessionBindImpl.isNil:
+    try:
+      sessionBindImpl(session)
+    except CatchableError as e:
+      cerror "session_switch: binding the window to the shown tab failed: " &
+        e.msg
 
 proc refreshSessionTabBar() =
   if not ensureTabBarRendererImpl.isNil:
@@ -133,35 +165,36 @@ proc createNewSession*(data: Data) =
   ##
   ## This implements the core of M12: clicking "+" in the tab bar creates
   ## a new tab backed by its own ReplaySession.
-  let sessionId = data.sessions.len
+  # THE TAB'S POSITION AND ITS ID ARE TWO NUMBERS. The position (`index`) is
+  # where it sits in `data.sessions` and which `session-container-<n>` holds
+  # it, and shifts when a tab before it closes. The id names it to the main
+  # process: its DAP requests carry it and its events come back tagged with it
+  # (`event_helpers.deliverDapEvent`), so it must never be an id another open
+  # tab holds — which `data.sessions.len` was, once a tab had closed: close
+  # the middle of three tabs and the next new tab took the third's id, and
+  # their events reached whichever matched first. One past the largest id in
+  # use: equal to the position until a tab closes.
+  let index = data.sessions.len
+  var sessionId = index
+  for open in data.sessions:
+    if not open.isNil:
+      sessionId = max(sessionId, int(open.id) + 1)
+      if not open.dapApi.isNil:
+        sessionId = max(sessionId, open.dapApi.sessionId + 1)
   var session = newReplaySession(ReplaySessionId(sessionId))
-  # M8/issue #327: tag the per-session DapApi with the session index so
-  # outgoing DAP requests carry the correct `sessionId` field and the
-  # main-process router in ipc_subsystems/dap.nim can switch the Backend
-  # Manager to the right replay.  Defaulting to 0 here would make every
-  # non-default session impersonate session 0 on the wire.
-  #
-  # Desktop sessions need the Electron IPC bridge copied from the app-wide
-  # data object. Extension builds use a different DapApi shape and fill in the
-  # VS Code handles elsewhere.
-  when defined(ctInExtension):
-    session.dapApi = DapApi(sessionId: sessionId)
-  else:
-    session.dapApi = DapApi(sessionId: sessionId, ipc: data.ipc)
-  session.viewsApi = setupSinglePageViewsApi(
-    cstring("single-page-frontend-to-views-" & $sessionId))
+  # The tab's own DAP API and views mediator, wired so its backend notices
+  # reach its own status bar: see `event_helpers.attachSessionApis`.
+  attachSessionApis(session, sessionId, data.ipc)
   session.services = Services(
     eventLog: EventLogService(),
     debugger: DebuggerService(
       locals: @[],
       registerState: JsAssoc[cstring, cstring]{},
-      breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{},
       valueHistory: JsAssoc[cstring, ValueHistory()]{},
       paths: @[],
       skipInternal: true,
       skipNoSource: false,
-      historyIndex: 1,
-      showInlineValues: true),
+      historyIndex: 1),
     editor: EditorService(
       open: JsAssoc[cstring, TabInfo]{},
       loading: @[],
@@ -193,6 +226,23 @@ proc createNewSession*(data: Data) =
       activeCommandName: cstring"",
       selected: 0),
     shell: ShellService())
+  # The back-references the first tab's services get when `utils` loads: a
+  # service method reaches the window through `self.data` (the debugger
+  # service's move handler reads `self.data.testRunner`, the editor service's
+  # opens tabs through `self.data`), so a later tab's services need them as
+  # soon as they follow that tab's moves (`wireSessionServiceMoves` below).
+  for service in [Service(session.services.eventLog),
+                  Service(session.services.debugger),
+                  Service(session.services.editor),
+                  Service(session.services.calltrace),
+                  Service(session.services.history),
+                  Service(session.services.flow),
+                  Service(session.services.search)]:
+    service.data = data
+  session.services.eventLog.debugger = session.services.debugger
+  # And the request cache `utils` gives the first tab's (`asyncSend`, which the
+  # editor service reaches when it opens the file a move lands in).
+  session.asyncSendCache = JsAssoc[cstring, JsAssoc[cstring, Future[JsObject]]]{}
   session.ui = Components(
     editors: JsAssoc[cstring, EditorViewComponent]{},
     idMap: JsAssoc[cstring, int]{value: 0, chart: 0},
@@ -269,13 +319,15 @@ proc createNewSession*(data: Data) =
     session.savedLayoutConfig = data.ui.resolvedConfig
 
   data.sessions.add(session)
+  # Its legacy services follow ITS moves, as the first tab's do — the
+  # callbacks copied from the tab it was opened from.
+  wireSessionServiceMoves(data, session, data.activeSession.services)
 
   # Empty tabs still need the shared chrome and welcome screen components.
   # Component factory helpers write through Data's active-session forwarding,
   # so initialise the new session while it is temporarily active.
   let previousActiveSessionIndex = data.activeSessionIndex
-  data.activeSessionIndex = sessionId
-  discard data.makeDebugComponent()
+  data.activeSessionIndex = index
   discard data.makeMenuComponent()
   discard data.makeBuildComponent()
   discard data.makeErrorsComponent()
@@ -288,10 +340,10 @@ proc createNewSession*(data: Data) =
   data.activeSessionIndex = previousActiveSessionIndex
 
   clog "session_switch: created new session " & $sessionId &
-    " (total: " & $data.sessions.len & ")"
+    " at position " & $index & " (total: " & $data.sessions.len & ")"
 
   # Switch to the newly created session.
-  switchSession(data, sessionId)
+  switchSession(data, index)
 
 proc closeSession*(data: Data, targetIndex: int) =
   ## Close the session at ``targetIndex``.  Destroys its GL container and
@@ -343,6 +395,13 @@ proc closeSession*(data: Data, targetIndex: int) =
     except:
       cwarn "session_switch: GL destroy failed for session " & $targetIndex
 
+  # Dispose the panes the panel host rendered in the closed tab — GoldenLayout's
+  # destroy above may not have reached every host (an auto-hide pin moves a
+  # pane's DOM out of its container) — before their session goes.
+  let closingContainer = getSessionContainer(targetIndex)
+  if not closingContainer.isNil:
+    panel_host.disposePanelsIn(cast[dom_api.Element](closingContainer))
+
   # Remove the DOM container for the closed session.
   destroySessionContainer(targetIndex)
 
@@ -350,6 +409,17 @@ proc closeSession*(data: Data, targetIndex: int) =
   if targetIndex == data.activeSessionIndex:
     let newActive = if targetIndex > 0: targetIndex - 1 else: targetIndex + 1
     switchSession(data, newActive)
+
+  # THE CLOSED TAB'S VIEWMODELS GO WITH IT: its debugger session, its store
+  # and every effect its panel ViewModels own. No other tab holds a reference
+  # to them — each tab has its own (`session_viewmodels.nim`) and the window's
+  # bridges were moved to the adjacent tab just above — so nothing in another
+  # tab can keep feeding or reading them. The window's list of Test Results
+  # ViewModels its host installers ran on lets go of this tab's first.
+  let closingVMs = viewModelsOf(closingSession)
+  if not closingVMs.isNil:
+    forgetTestResultsVM(closingVMs.testResultsVM)
+  disposeViewModels(closingSession)
 
   # Remove the session from the list.
   data.sessions.delete(targetIndex)
@@ -374,6 +444,9 @@ proc closeSession*(data: Data, targetIndex: int) =
         if not oldContainer.isNil:
           oldContainer.id = sessionContainerId(i)
 
+  # The containers' numbers moved with the sessions' positions; each pane
+  # still shows the session of the tab that holds it.
+  panel_host.refreshPanelSessions()
   refreshSessionTabBar()
   redrawAfterSessionSwitch()
 
@@ -400,8 +473,11 @@ proc switchSession*(data: Data, targetIndex: int) =
     currentContainer.classList.add(cstring"hidden")
 
   # 2. Switch active session index — all Data forwarding templates now
-  #    resolve to the target session's fields.
+  #    resolve to the target session's fields — and point the window's pane
+  #    bridges at the target's ViewModels. The tab being left keeps what it
+  #    showed in its own ViewModels; there is nothing to save or restore.
   data.activeSessionIndex = targetIndex
+  bindWindowTo(data.activeSession)
 
   # 3. Show (or create) the target session's container.
   var targetContainer = getSessionContainer(targetIndex)
@@ -439,7 +515,20 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    Empty welcome sessions also own the singleton shared components, so
   #    redraw them even though they do not create a GoldenLayout instance.
   refreshSessionTabBar()
-  debug.rewireDebugControlsBridgeForActiveSession(data)
+  # THE STATUS BAR FOLLOWS THE TARGET SESSION, whatever else is redrawn below.
+  # `#status` shows only the active tab's `StatusComponent`; a notification
+  # that reached the target while it was hidden — a replay that could not
+  # start — has been waiting for this render, and the branch below is skipped
+  # for a session that has neither a layout nor a welcome screen.
+  if not data.ui.status.isNil:
+    data.ui.status.redraw()
+  # THE TOPBAR FOLLOWS THE TARGET SESSION'S MODE. `data.ui.mode` is per
+  # session and the topbar is one bar shared by every tab, so without this a
+  # Debug tab reached from an Edit tab kept the edit bar, and an Edit tab
+  # reached from a Debug tab kept the stepping controls (#812). Recomposed
+  # rather than re-shown, because the edit bar's listing is the target's too.
+  debug_toolbar.syncTopbarToMode()
+  debug_toolbar.ensureDebugToolbar()
   if not data.activeSession.ui.layout.isNil or data.activeSession.startOptions.welcomeScreen:
     if data.activeSession.startOptions.welcomeScreen:
       if not data.ui.welcomeScreen.isNil:
@@ -451,5 +540,8 @@ proc switchSession*(data: Data, targetIndex: int) =
     if not data.ui.menu.isNil:
       discard windowSetTimeout(proc() = data.ui.menu.requestMenuRender(), 0)
       discard windowSetTimeout(proc() =
-        debug.rewireDebugControlsBridgeForActiveSession(data), 0)
+        debug_toolbar.ensureDebugToolbar(), 0)
     discard windowSetTimeout(proc() = requestFixedSearchRender(), 0)
+
+  # 5. What reached the target while it was hidden, now that it is shown.
+  deliverPendingTabAnswers(data.activeSession)

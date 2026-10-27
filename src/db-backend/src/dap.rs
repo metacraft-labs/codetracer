@@ -159,6 +159,16 @@ pub struct LaunchRequestArguments {
     /// to do instead — see [`TraceSourceArgument::unsupported_reason`].
     #[serde(rename = "traceSource", skip_serializing_if = "Option::is_none")]
     pub trace_source: Option<TraceSourceArgument>,
+    /// Whether the session may read the recording's listed sources where
+    /// they point on this host (`crate::source_access`). `false` limits
+    /// every source read of the session to the recording's own copies;
+    /// `true` or no value keeps reading the host, as a client that launches
+    /// this server directly (the desktop GUI) expects. The CodeTracer daemon
+    /// always sends it. A server that predates the field refuses a launch
+    /// carrying it (`deny_unknown_fields`), so a daemon never ends up with a
+    /// backend that silently ignores a refusal.
+    #[serde(rename = "hostSourceReads", skip_serializing_if = "Option::is_none")]
+    pub host_source_reads: Option<bool>,
 }
 
 /// The trace-source vocabulary shared with the embed SDK.
@@ -259,6 +269,21 @@ pub struct Capabilities {
     /// step-in / step-out buttons.
     #[serde(rename = "supportsColumnMotions", skip_serializing_if = "Option::is_none")]
     pub supports_column_motions: Option<bool>,
+    /// DAP standard — this adapter answers `setDataBreakpoints` and
+    /// `dataBreakpointInfo`.
+    ///
+    /// Load-bearing for discoverability, not decorative: a conforming
+    /// DAP client greys out its "break on value change" affordance
+    /// unless this bit is set, so a backend that implements the
+    /// commands but omits the bit has a feature no client will offer.
+    ///
+    /// What is advertised is the value-change (write) watchpoint
+    /// described in `ct_data_breakpoints`.  `dataBreakpointInfo`
+    /// reports `accessTypes: ["write"]` per variable, so a client that
+    /// honours the handshake never offers `read` — which a recording
+    /// cannot answer, because reads leave no trace in the data.
+    #[serde(rename = "supportsDataBreakpoints", skip_serializing_if = "Option::is_none")]
+    pub supports_data_breakpoints: Option<bool>,
 }
 
 pub fn new_dap_variable(name: &str, value: &str, variables_reference: i64) -> dap_types::Variable {
@@ -412,7 +437,9 @@ impl DapClient {
     pub fn stopped_event(&mut self, reason: &str) -> DapResult<DapMessage> {
         let body = StoppedEventBody {
             reason: reason.to_string(),
-            thread_id: Some(1),
+            // The replayed process is always DAP thread 1
+            // (`dap_handler::REPLAYED_THREAD_ID`); it is the one that stopped.
+            thread_id: Some(i64::from(crate::dap_handler::REPLAYED_THREAD_ID)),
             all_threads_stopped: Some(true),
             hit_breakpoint_ids: Some(vec![]),
             description: None,

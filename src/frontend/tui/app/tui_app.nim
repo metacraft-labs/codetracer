@@ -51,6 +51,7 @@ import headless_app/layout_interaction
 import isonim_tui
 
 import ./edit_binding
+import ./views/terminal_info
 import ./views/shell
 # PLAT-48: the top bar's shared models come through `codetracer_embed`.
 import headless_app/welcome_tabs   # exports `session_tabs`
@@ -61,6 +62,8 @@ import ./views/header       # `textCells`
 import ./layout/binding     # `slotExtent`, `footerLeadCells`
 import ./layout/cells       # `terminalPaneName`
 import ./views/vcs_pane
+import ./views/search_results_pane
+import ./views/test_results_pane
 import ./views/point_list
 
 export headless_app
@@ -68,10 +71,11 @@ export shell
 
 type
   TerminalDragKind* = enum
-    ## PLAT-52: which of the Terminal Output pane's scrubbers a held press is
-    ## on — the line view's scrollbar (it scrolls the VIEW) or the screen's
-    ## built-in one (it previews, and its release moves the debugger).
-    tdNone, tdLineThumb, tdScreen
+    ## PLAT-52: whether a press is held on the Terminal Output screen's
+    ## built-in scrubber (it previews, and its release moves the debugger).
+    ## (The line view's scrollbar is every bar's since PLAT-70 Part H —
+    ## `runtime.routeScrollbars`.)
+    tdNone, tdScreen
 
   TuiApp* = ref object
     ## The terminal front-end's application state.
@@ -142,6 +146,14 @@ type
       ## PLAT-51 (Native-Front-End-Parity.md §2): the focus highlight is off
       ## (`--focus-highlight=off`, `:set focus-highlight off`, the remembered
       ## preference). The zero value is ON, the default.
+    overflowMarkersOff*: bool
+      ## PLAT-70 (Horizontal-Overflow.md §4.6, OQ-H1): the `‹` / `›` markers
+      ## of the text panes are off (`--overflow-markers=off`, `:set
+      ## overflow-markers off`, the palette's toggle, the remembered
+      ## preference). The zero value is ON — the terminal's default.
+    buildView*: BuildView
+      ## PLAT-70: Build Output's horizontal view and the widest line measured
+      ## so far of the build it shows.
     contextMenu*: ContextMenuState
       ## PLAT-50: the open right-click menu, if any.
     content*: ContentOverlay
@@ -160,10 +172,23 @@ type
       ## `follow`) and the screen scrubber's preview are the pane's own.
     terminalDrag*: TerminalDragKind
       ## PLAT-52: a press held on one of the pane's scrubbers.
-    listScrub*: tuple[active: bool, pane: PaneKind]
+    textDrag*: bool
+      ## PLAT-68: a left press on the editor's text is held — the pointer's
+      ## motion extends the selection from where it was pressed.
       ## PLAT-51: a press held on a list pane's scrollbar scrubber thumb (the
       ## Event Log's or the Call Trace's) — the motion that follows drags the
       ## VIEW (never the debugger) until the release.
+    eventLogResize*: tuple[active: bool, column: EventLogColumn, startCol: int]
+      ## PLAT-70 Part B: an Event Log column separator is held — the motion
+      ## that follows sets the column's width until the release
+      ## (Horizontal-Overflow.md §5.2).
+    cellHover*: HoverClock
+      ## PLAT-70 Part B: the truncated cell the pointer rests on (`?1003`
+      ## motion), and since when (§5.3's 500 ms).
+    cellHoverAnchor*: tuple[row, col, bodyRows: int]
+      ## Where that cell was drawn, and its pane's body rows (the cap).
+    cellTooltip*: CellTooltip
+      ## The tooltip shown, once the clock is up.
     variablesResize*: tuple[active: bool, area: CellArea]
       ## PLAT-51: the Variables pane's name / value separator is held — the
       ## motion that follows resizes the name column (the desktop's column
@@ -193,6 +218,20 @@ type
       ## PLAT-50: text a click copied (Copy, the status bar's location),
       ## handed to the terminal's clipboard by the next frame (OSC 52) and
       ## cleared.
+    pasteBuffer*: string
+      ## PLAT-68: THE INTERNAL CLIPBOARD — the last text this session copied
+      ## or cut (kept, unlike `clipboard`, which is the one-shot OSC 52
+      ## write), and the text a terminal answered to an OSC 52 READ. `Ctrl+V`
+      ## pastes it; a terminal's own paste (bracketed paste) still arrives
+      ## as text.
+    findOwner*: string
+      ## PLAT-68: the scope element the open find widget belongs to — the
+      ## editor or list it searches — named when `find.open` ran, so its
+      ## pushed layer is active only while that element is on the scope
+      ## path (Base-Keymaps §5.3).
+    findQuery*: string
+      ## PLAT-68: the last query the find widget searched, for `F3` with the
+      ## widget closed.
     caret*: tuple[path: string, line, column: int]
       ## PLAT-51: the read-only debugging editor's CARET (Editor-Pane.md, "The
       ## caret in a read-only editor") — placed by a click on the text, moved
@@ -241,6 +280,17 @@ type
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. `paneVcs`'s model, as a value, filled by the
       ## host (`host/vcs_source.nim`) from the shared `VCSVM`.
+    search*: SearchResultsPaneModel
+      ## PLAT-57. FIND IN FILES' model, as a value, filled by the host
+      ## (`host/tui_session.searchModelOf`) from the session's
+      ## `SearchResultsVM`; its
+      ## `scrollTop` is the pane's own reading position.
+    tests*: TestResultsPaneModel
+      ## PLAT-53. The TEST RESULTS pane's model, as a value, filled by the
+      ## host (`host/test_results_source.nim`) from the window's
+      ## `TestResultsVM`; its `selected` and `scrollTop` are the pane's own.
+      ## The window's, not a session's: every tab shares the project
+      ## (`Test-Results-Pane.md` §8.2).
     build*: BuildSession
       ## PLAT-16. The build or run in flight, or the last one's verdict, or
       ## `nil` for a session that has never built. `nil` is a state the pane
@@ -267,10 +317,24 @@ type
     graphicsDrawn*: bool
       ## The terminal answered the kitty graphics query: it draws pictures.
     hoveredControl*: int
+    hoveredStop*: bool
+      ## M76: the pointer is on the top bar's Stop control.
     hoveredTab*: int
       ## PLAT-49 part B: the session tab under the pointer, -1 for none.
     hoveredTabAdd*: bool
       ## PLAT-49 part B: the pointer is on the strip's "+".
+    findInFiles*: proc(query: string): string {.closure.}
+      ## PLAT-57: the HOST's Find in Files — run the search for `query` into
+      ## the session's `SearchResultsVM` through the shared runner
+      ## (`viewmodel/host/find_in_files`); "" when it started, else why not.
+      ## Nil when no host searches (an in-process caller).
+    toggleSearchOption*: proc(operation: string): string {.closure.}
+      ## PLAT-57: the HOST's Find in Files toggle, by its operation
+      ## (`search.toggle-case` / `-whole-word` / `-regex`): flipped, and a
+      ## search that ran run again. The words the status line shows.
+    stepSearchResult*: proc(delta: int): string {.closure.}
+      ## PLAT-57: the HOST's next (`1`) / previous (`-1`) result: selected and
+      ## opened in the editor at its line. "" when one opened, else why not.
     recordingOpener*: proc(path: string): string {.closure.}
       ## PLAT-49 part B: the HOST's "open this recording in a new session
       ## tab" — "" when it opened, else why not. Nil when the host cannot
@@ -289,6 +353,15 @@ type
     welcomes*: seq[NativeWelcome]
       ## Each welcome tab's screen (`viewmodels/native_welcome`), parallel to
       ## `welcomeTabs.tabs`.
+    stoppedTabWelcome*: int
+      ## M76: the serial of the welcome tab *File › Open Trace…* (or *Record
+      ## New Trace…*) opened FROM a tab whose session *Stop* ended, -1 for
+      ## none (`runtime.openWelcomeOption`). A recording opened from that
+      ## welcome tab starts its session IN the stopped tab, taking its place
+      ## (Debugger-Controls.md § "Ending a session from inside it",
+      ## requirement 3). A recording opened any other way — *Open Trace in
+      ## New Tab…*, the strip's "+", the omnibar — is a new tab, and the
+      ## stopped tab stays, because *Stop* never closes a tab.
     recentFolders*: seq[string]
       ## PLAT-51: the folders opened in this process, newest first — the
       ## Welcome Screen's "Recent folders".
@@ -307,6 +380,11 @@ type
     controls*: DebugControlsVM
       ## The session's transport ViewModel, for which controls are available.
     filesVM*: FilesystemVM
+    editFilesVM*: FilesystemVM
+      ## K19: Edit mode's Files model — the opened folder (`projectTreeOf`
+      ## over the project walk), so the Files menu decides on it as the
+      ## desktop's does; `nil` until Edit mode lists the project
+      ## (`runtime.installProjectListing`).
     store*: ReplayDataStore
       ## What the omnibar's index is gathered from (`omnibar_sources`).
       ## §3.1's header fields for a session a HOST opened.
@@ -329,13 +407,20 @@ proc newTuiApp*(title: string = "CodeTracer TUI"): TuiApp =
          modes: initModeRegister(),
          menu: newMenuVM(nativeFrontEndMenu("CodeTracer")),
          omnibar: newOmnibarVM(), icons: imUnicode, hoveredControl: -1,
-         hoveredTab: -1,
+         hoveredTab: -1, stoppedTabWelcome: -1,
          # The event log's default columns before any session (PLAT-49 part
          # B): `:column-*` acts on these when no log is open yet.
          eventLog: initEventLogModel(),
          terminalOutput: TerminalOutputPaneModel(follow: true,
                                                  shownWrite: -1,
                                                  currentLine: -1))
+
+proc hasDebugSession*(app: TuiApp): bool =
+  ## M76: whether a replay session is behind the panes — the host pointed
+  ## them at one (`tui_session.refresh` installs its store) and *Stop* has
+  ## not made the runtime forget it (`runtime.forgetSession`). What the
+  ## Stop control's enabled state and Stop itself read.
+  not app.isNil and not app.store.isNil
 
 proc controlsEnabledOf*(app: TuiApp): seq[bool] =
   ## Per `TransportControls`: whether the session's ViewModel offers it now
@@ -350,7 +435,12 @@ proc refreshOmnibarIndex*(app: TuiApp) =
   if app.isNil or app.omnibar.isNil:
     return
   app.omnibar.setIndex(omnibarIndexOf(app.filesVM, app.store, app.menu) &
-                       app.recordings)
+                       app.recordings &
+                       # PLAT-71: the terminal's own report (§10.1).
+                       @[OmnibarEntry(kind: OmnibarMode.omCommand,
+                                      label: TerminalInfoLabel,
+                                      detail: ":terminal-info",
+                                      target: TerminalInfoCommandTarget)])
 
 proc openSession*(app: TuiApp; backend: BackendService;
                   title: string = ""): HeadlessSessionSlot =
@@ -446,15 +536,28 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # proposed weights (Layout-ViewModel §4.3a) — `binding.presentedLayout`.
   let boundLayout = if bound: app.layoutBinding.presentedLayout
                     else: initLayout(nil)
-  # PLAT-16: THE REGISTER WINS WHEN IT HOLDS A TREE FOR THE CURRENT MODE.
+  # PLAT-16: WITHOUT A BINDING, THE REGISTER WINS WHEN IT HOLDS A TREE FOR THE
+  # CURRENT MODE.
   #
   # It holds one only after a `Ctrl+F5` has been made, and what it holds for
   # Debug mode is the session's own node rather than a copy of it (see
   # `shell.ModeRegister`), so this is not a second layout authority: in Debug
   # mode with no switch ever made, and in Debug mode after a round trip, the
-  # tree is the same object either way. In Edit mode the register is the only
-  # authority there is — a session's `LayoutNode` is a REPLAY arrangement and
-  # `HeadlessApp` has no edit slot to hold a second one.
+  # tree is the same object either way. In Edit mode entered by a switch the
+  # register is the only authority there is — a session's `LayoutNode` is a
+  # REPLAY arrangement and `HeadlessApp` has no edit slot to hold a second
+  # one.
+  #
+  # WITH A BINDING, THE BINDING WINS, ALWAYS. It is what a click is hit-tested
+  # against, so anything else drawn here would put the screen and the hit-test
+  # on two trees. A bound `Ctrl+F5` swaps the binding's arrangement with the
+  # register's cell for the entering mode (`runtime`'s `kaToggleProductMode`,
+  # `shell.switchBound`), so the binding already holds the current mode's
+  # arrangement; the register's `bound` cells are storage for the mode that is
+  # not on screen and are never drawn. Before codetracer-pm issue 2026-10-21's
+  # fix the register won here even when bound: the replay loop toggled into
+  # Edit mode drew Edit's tree and hit-tested Debug's, and after a round trip
+  # the frame drew a snapshot while every gesture moved only the hit-test.
   let registered = app.modes.activeLayout()
   # PLAT-49 part B: the status bar's file info — the file the editor shows
   # (the Edit buffer's in Edit mode) — and the width it takes before the
@@ -465,6 +568,12 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
       app.editSession.activeBuffer().path
     else: app.source.path
   let fullInfo = footerFileInfoText(infoPath)
+  # PLAT-70: the output panes' horizontal views and the markers setting.
+  var terminalOutput = app.terminalOutput
+  terminalOutput.overflowMarkers = not app.overflowMarkersOff
+  var build = buildPaneModelFor(app.build)
+  build.hview = app.buildView.hview
+  build.overflowMarkers = not app.overflowMarkersOff
   result = ShellModel(
     header: header,
     dividers: app.dividers,
@@ -473,10 +582,13 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                      else: (false, "", -1, 0)),
     contextMenu: app.contextMenu,
     content: app.content,
+    cellTooltip: app.cellTooltip,
     topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),
                         hoveredControl: app.hoveredControl,
+                        stopEnabled: app.hasDebugSession,
+                        hoveredStop: app.hoveredStop,
                         hoverTooltip: app.hoveredTooltip,
                         hoveredTab: app.hoveredTab,
                         canAddTab: not app.welcomeHost.isNil or
@@ -495,8 +607,8 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
                                           app.layoutBinding.userModified: ""
                                        else: foldNote(app.modes.product,
                                                       selected))),
-    layout: (if not registered.isNil: registered
-             elif bound: boundLayout.tree
+    layout: (if bound: boundLayout.tree
+             elif not registered.isNil: registered
              elif active.isNil: layoutForMode(app.modes.product, selected)
              else: active.layout.tree),
     docked: (if bound: boundLayout.docked
@@ -521,11 +633,13 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     eventLog: app.eventLog,
     points: app.points,
     scratchpad: app.scratchpad,
-    terminalOutput: app.terminalOutput,
+    terminalOutput: terminalOutput,
     frameViewer: app.frameViewer,
     fileTree: app.fileTree,
     vcs: app.vcs,
-    build: buildPaneModelFor(app.build),
+    search: app.search,
+    tests: app.tests,
+    build: build,
     product: app.modes.product,
     edit: (if app.editSession.isNil: initEditPaneModel()
            else: editPaneModelFor(app.editSession,
@@ -535,6 +649,14 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   # not all fit, the file info is the one left out — a message the user
   # cannot read is the failure this row exists to prevent (`statusBarText`),
   # and the language of the file on screen is the least urgent fact on it.
+  # The note is measured at the fewest cells it can be READ in
+  # (`noteMinCells`): a note naming an absolute path — the startup's
+  # `describe` — is drawn with that path's directories given way
+  # (`fitNoteCells`), so its full length depends on where the checkout lives,
+  # and measured whole it took the file info away on a long checkout path.
+  # It is counted with the gap `statusBarText` keeps after the indicators
+  # (`noteRowCells`), or the few widths just past the yield point would keep
+  # the file info and cut the note's last facts instead.
   var labelsW = 0
   for d in result.docked:
     if d.edge == leBottom:
@@ -543,8 +665,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
   let modeW = textCells("COMMAND " & productIndicator(result.product) &
                         (if result.status.fold.len > 0: " " & result.status.fold
                          else: ""))
-  let noteW = (if app.notification.len > 0: textCells(app.notification) + 2
-               else: 0)
+  let noteW = noteRowCells(app.notification)
   let fileInfo =
     if footerLeadCells(fullInfo) + labelsW + 1 + modeW + noteW <= width:
       fullInfo
@@ -561,19 +682,31 @@ proc enableLayoutBinding*(app: TuiApp; width, height: int): LayoutBinding =
   ## one, so enabling
   ## the binding changes nothing on screen at the moment it is enabled: the
   ## first frame after this call is the frame that would have been painted
-  ## without it. With no session open it starts from the profile's default,
-  ## which is what `shellModel` would have drawn anyway.
+  ## without it. With no session open it starts from the CURRENT PRODUCT
+  ## MODE'S default (`layoutValueForMode`), which is what `shellModel` would
+  ## have drawn anyway.
+  ##
+  ## THE MODE MATTERS SINCE `ct edit` ENABLES ONE TOO (codetracer-pm issue
+  ## 2026-10-21). `main.editInteractive` sets `modes` to Edit before the
+  ## runtime exists and has no session; seeding from Debug's default there —
+  ## what this did while only the replay loop called it — would have painted
+  ## the call trace, the event log and the footer strip on the first frame of
+  ## an editor. A session's tree is a REPLAY arrangement (`HeadlessApp` has no
+  ## edit slot), so it seeds only a Debug-mode binding; the binding remembers
+  ## its mode (`LayoutBinding.product`) so a resize and `:reset-layout` return
+  ## to the same mode's default rather than to Debug's.
   ##
   ## Explicit rather than automatic in `newTuiApp`, because a host that has not
   ## wired the gesture surface would otherwise gain a layout nothing can drive
   ## and, with it, a second thing that decides what the screen shows.
   let selected = selectProfile(width, height)
   let active = app.shell.activeSlot()
+  let product = app.modes.product
   let seed =
-    if active.isNil or active.layout.tree.isNil:
-      profileLayoutValue(selected)
+    if product != pmDebug or active.isNil or active.layout.tree.isNil:
+      layoutValueForMode(product, selected)
     else: active.layout
-  app.layoutBinding = newLayoutBinding(seed, selected)
+  app.layoutBinding = newLayoutBinding(seed, selected, product = product)
   app.layoutBinding
 
 proc renderScreen*(app: TuiApp; r: TerminalRenderer;

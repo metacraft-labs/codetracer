@@ -3,7 +3,17 @@
 # workspace-lock-freshness-test.sh — contract suite for
 # ci/verdict/workspace-lock-freshness.sh.
 #
-# # What this suite is really about
+# # Two modes
+#
+# The check has two modes, one per lock store `clone-siblings` can read
+# (reprobuild-specs Unified-Locking-And-Hooks.md §14.5). Section 10 covers the
+# default, `lock-store: committed`: the commit's own `repro.lock`, which is the
+# mode CI runs. Sections 1-9 cover `lock-store: record-store`, the per-commit
+# record in the shared manifests repo, which the check uses only when a
+# workflow opts into it. Everything below, down to "Run directly", is about
+# the record-store mode.
+#
+# # What this suite is really about (record-store mode)
 #
 # The alarm asks "does a published workspace lock exist for this commit?".
 # Locks are published ASYNCHRONOUSLY, by the pusher's pre-push hook, into a
@@ -221,10 +231,9 @@ fi
 #
 # So the sections that are not ABOUT the derivation declare exactly one repo —
 # ${PROBE_SIBLING}, which every fixture lock pins — and section 9 drives the
-# derivation from its own fixtures and from the real files. This mirrors
-# `--publisher-workflow`: the overridable input exists so a contract can state
-# the world it is testing, and there is a contract (9g) that the DEFAULTS still
-# point at the real declaration sites.
+# derivation from its own fixtures and from the real files. The overridable
+# inputs exist so a contract can state the world it is testing, and there is a
+# contract (9g) that the DEFAULTS still point at the real declaration sites.
 DECL_DIR="${tmp_root}/declarations"
 mkdir -p "$DECL_DIR"
 DEFAULT_DECL_LIST="${DECL_DIR}/one-repo"
@@ -236,25 +245,27 @@ mkdir -p "$DEFAULT_DECL_WF"
 
 # run_check ... -> sets RC, OUT, ELAPSED
 #
-# DEFAULT --branch dev. Every fixture below this line except the branch-coverage
-# contracts is about a PUBLISHING branch whose record did not arrive, which is
-# what `dev` is — and the check now refuses to call that a stall unless it can
-# see a publisher configured for the branch. Without a branch it would answer
-# "cause not determined", which is the correct answer to a question these
-# fixtures are not asking. The coverage contracts pass their own `--branch` and
-# `--publisher-workflow`, and this default steps aside when they do.
+# DEFAULT --branch dev, the branch CI passes; it is only printed in the report.
+# It steps aside when a fixture passes its own.
 #
 # DEFAULT --sibling-list / --workflow-dir, for the reason given just above. Each
 # steps aside independently when a fixture passes its own.
+#
+# DEFAULT --lock-store record-store: sections 1-9 are the record-store mode's
+# contracts, and the store the check would otherwise derive from the fixture
+# workflow directory is `committed`. Section 10 passes `--lock-store committed`
+# and the default steps aside.
 run_check() {
-	local start end arg has_branch=0 has_list=0 has_wf=0
+	local start end arg has_branch=0 has_list=0 has_wf=0 has_store=0
 	for arg in "$@"; do
 		case "$arg" in
 		--branch) has_branch=1 ;;
 		--sibling-list) has_list=1 ;;
 		--workflow-dir) has_wf=1 ;;
+		--lock-store) has_store=1 ;;
 		esac
 	done
+	[ "$has_store" -eq 0 ] && set -- "$@" --lock-store record-store
 	[ "$has_branch" -eq 0 ] && set -- "$@" --branch dev
 	[ "$has_list" -eq 0 ] && set -- "$@" --sibling-list "$DEFAULT_DECL_LIST"
 	[ "$has_wf" -eq 0 ] && set -- "$@" --workflow-dir "$DEFAULT_DECL_WF"
@@ -599,149 +610,6 @@ expect_rc 1 "usage/zero-sha"
 expect_contains "$STALL_BANNER" "usage/zero-sha"
 ok "the all-zero SHA is skipped and still yields a report"
 
-# --- the cause of a missing lock is DERIVED, not assumed -------------------
-#
-# A report that names the missing thing but not the cause is how the `cloud`
-# family stayed unexamined for its whole history: the check said "publication
-# has stalled" and pointed at a local post-commit log, while the real cause was
-# that no publisher was configured for the branch at all — a fact sitting in a
-# file in the same checkout. These contracts pin that the check reads that file
-# and that BOTH verdicts are reachable, because a cause-detector that can only
-# ever return one answer detects nothing.
-readonly NOPUB_BANNER="NO PUBLISHER IS CONFIGURED FOR BRANCH"
-readonly UNDET_BANNER="WORKSPACE LOCK IS MISSING"
-
-wf_dir="${tmp_root}/publisher-workflows"
-mkdir -p "$wf_dir"
-
-# Flow sequence — the spelling publish-workspace-lock.yml actually uses.
-cat >"${wf_dir}/flow.yml" <<'YAML'
-on:
-  push:
-    branches: [dev, cloud]
-  pull_request_target:
-    branches: [dev, cloud, stable]
-jobs: {}
-YAML
-
-# Block sequence — equally valid YAML. A parser that read only the flow form
-# would report a covered branch as uncovered, which is the most expensive way
-# this check could be wrong: it would send a reader to edit a workflow that is
-# already correct.
-cat >"${wf_dir}/block.yml" <<'YAML'
-on:
-  push:
-    branches:
-      - dev
-      - cloud
-jobs: {}
-YAML
-
-# THE COMMENT TRAP. A branch named only in a TRAILING comment on a `branches:`
-# line is not configuration — but it sits after the key, on a line the parser
-# does match, so it is the one place a missing comment-strip actually changes
-# the answer. Without stripping, `cloud` becomes a token of this list and the
-# check reports the branch as COVERED: it goes quiet on precisely the condition
-# it exists to report, which is worse than never having looked.
-#
-# A comment on its OWN line is not this trap — it fails the `^branches:` match
-# either way — so a fixture built from one passes with the strip removed and
-# pins nothing. This suite had exactly that fixture first; mutation testing
-# reported the strip as removable, which is how the weaker fixture was caught.
-cat >"${wf_dir}/comment-trap.yml" <<'YAML'
-on:
-  push:
-    branches: [dev]  # cloud is deliberately excluded here
-jobs: {}
-YAML
-
-# No `branches:` anywhere: the question cannot be answered from this file, and
-# an empty parse must read as UNKNOWN rather than as "covers nothing" — the
-# latter would send every reader to edit a workflow that may be fine.
-cat >"${wf_dir}/no-list.yml" <<'YAML'
-on:
-  push: {}
-jobs: {}
-YAML
-
-new_world coverage
-snapshot coverage
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/flow.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/covered-flow"
-expect_contains "$STALL_BANNER" "coverage/covered-flow"
-expect_not_contains "$NOPUB_BANNER" "coverage/covered-flow"
-ok "a branch the publisher covers is reported as a STALL, not as a missing publisher"
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/block.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_contains "$STALL_BANNER" "coverage/covered-block"
-ok "a block-sequence \`branches:\` list is read too, so a covered branch is never called uncovered"
-
-# THE CONTRACT THAT MATTERS. This is the exact condition that took out 11 of 21
-# jobs on `cloud`, and the check must name it rather than blame the workspace.
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/block.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_contains "$STALL_BANNER" "coverage/guard"
-cat >"${wf_dir}/dev-only.yml" <<'YAML'
-on:
-  push:
-    branches: [dev]
-  pull_request_target:
-    branches: [dev, stable]
-jobs: {}
-YAML
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/dev-only.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/uncovered"
-expect_contains "$NOPUB_BANNER" "coverage/uncovered"
-expect_not_contains "$STALL_BANNER" "coverage/uncovered"
-# The candidates AND the cause, in one report: naming one without the other is
-# the defect being fixed.
-expect_contains "$SHA_UNDER_TEST" "coverage/uncovered"
-expect_contains "REMEDY:" "coverage/uncovered"
-ok "an UNCOVERED branch is named as such, with the candidates and a remedy — the two verdicts are distinguishable"
-
-# Not-determined is a third answer, and it must not masquerade as either. A
-# parser that silently yields nothing would otherwise read as "not covered" and
-# send every reader to edit a workflow that was fine.
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --publisher-workflow "${wf_dir}/comment-trap.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/comment-trap"
-expect_contains "$NOPUB_BANNER" "coverage/comment-trap"
-expect_not_contains "$STALL_BANNER" "coverage/comment-trap"
-ok "a branch named only in a TRAILING COMMENT is not configuration — the check still reports it uncovered"
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch ghost --publisher-workflow "${wf_dir}/no-list.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/undetermined-parse"
-expect_contains "$UNDET_BANNER" "coverage/undetermined-parse"
-expect_contains "NOT DETERMINED" "coverage/undetermined-parse"
-expect_not_contains "$NOPUB_BANNER" "coverage/undetermined-parse"
-ok "a workflow with no \`branches:\` at all reads as UNKNOWN, not as 'covers nothing'"
-
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch "" --publisher-workflow "${wf_dir}/flow.yml" \
-	--grace-seconds 0 --poll-seconds 1
-expect_rc 1 "coverage/no-branch"
-expect_contains "NOT DETERMINED" "coverage/no-branch"
-ok "with no --branch the check declines to answer the cause rather than answering it wrongly"
-
-# The default must point at the real workflow, or CI would silently run the
-# undetermined path forever and this whole mechanism would be decorative.
-run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
-	--branch cloud --grace-seconds 0 --poll-seconds 1
-expect_contains "$STALL_BANNER" "coverage/default-workflow"
-expect_not_contains "NOT DETERMINED" "coverage/default-workflow"
-ok "the DEFAULT --publisher-workflow resolves to this repo's real publish-workspace-lock.yml, and it covers 'cloud'"
-
 # ---------------------------------------------------------------------------
 # 9. A DECLARED REPO THAT NEVER REACHED THE LOCK.
 #
@@ -750,11 +618,11 @@ ok "the DEFAULT --publisher-workflow resolves to this repo's real publish-worksp
 # bare entries of the `siblings:` blocks in `.github/workflows/*.yml`, and the
 # names-only list `.github/sibling-repos` — while locks are PRODUCED elsewhere:
 # by a developer's pre-push hook, whose repo set is whatever that developer had
-# checked out, or by the server-side re-anchor in publish-workspace-lock.yml,
-# which copies every sibling pin verbatim from an older lock named only by
-# `source-sha`. NEITHER PRODUCER READS THE DECLARATIONS. So a newly declared
-# bare-name repo has no pin to copy, is absent from the next lock, and is absent
-# from every lock carried forward from that one — the hole sustains itself.
+# checked out, and (until it was retired) by the server-side re-anchor in
+# publish-workspace-lock.yml, which copied every sibling pin verbatim from an
+# older lock named only by `source-sha`. NEITHER PRODUCER READ THE
+# DECLARATIONS. So a newly declared bare-name repo had no pin to copy, was
+# absent from the next lock, and from every lock carried forward from that one.
 #
 # It surfaced only at build time, as `resolve-sibling-rev: sibling '<name>' not
 # present in lock`, taking out every job that reached `clone-siblings`. That is
@@ -919,7 +787,8 @@ run_check --manifest-dir "$SNAP" --sha "$SHA_UNDER_TEST" \
 expect_rc 4 "derivation/workflow-bare"
 expect_contains "declared-bare-in-workflow" "derivation/workflow-bare"
 expect_contains "mixed.yml" "derivation/workflow-bare"
-ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is named"
+# shellcheck disable=SC2016 # literal backticks, nothing to expand
+ok 'a BARE `siblings:` entry in a workflow is probed, and the workflow is named'
 
 # 9e — the same block's `name=ref`, SHA-pinned and commented entries are NOT
 # probed, and neither is the `name=ref` in the sibling list. They are in the
@@ -928,7 +797,8 @@ ok "a BARE \`siblings:\` entry in a workflow is probed, and the workflow is name
 expect_not_contains "pinned-by-ref" "derivation/workflow-ref"
 expect_not_contains "sha-pinned" "derivation/workflow-ref"
 expect_not_contains "commented-out-repo" "derivation/workflow-ref"
-ok "a \`name=ref\` entry bypasses the lock and is NOT probed — nor is a commented one"
+# shellcheck disable=SC2016 # literal backticks, nothing to expand
+ok 'a `name=ref` entry bypasses the lock and is NOT probed — nor is a commented one'
 
 # 9g — THE DEFAULTS. Everything above drives fixtures; if the defaults did not
 # point at this repo's real declaration sites the whole mechanism would be
@@ -947,13 +817,24 @@ expect_contains "codetracer-launcher" "derivation/defaults"
 expect_contains "nim-everywhere" "derivation/defaults"
 ok "the default set spans BOTH declaration sites, from the real files"
 
-# ...and stops at the declarations. `codetracer-native-backend` appears in this
-# repo's `siblings:` blocks only ever as `name=ref`, and `io-mon` only ever
-# SHA-pinned; neither resolves from the lock, so neither may be probed against
-# it. A derivation that swept every token in those blocks would fail here.
-expect_not_contains "codetracer-native-backend" "derivation/defaults"
+# ...and stops at the declarations. `nim-stackable-hooks` appears in this
+# repo's `siblings:` blocks only ever as `name=ref` (`=dev`), and `io-mon` only
+# ever SHA-pinned; neither resolves from the lock, so neither may be probed
+# against it. A derivation that swept every token in those blocks would fail
+# here.
+#
+# This contract used to name `codetracer-native-backend` as the `=ref`-only
+# repo. e705fbad5 (2026-09-19, LRC-4: the native edge of the launcher<->recorder
+# gate) declared it bare in `.github/sibling-repos`, so it IS declared now and
+# the derivation is right to include it; the expectation went stale and failed
+# this suite on every run from then on. The name chosen for the `=ref`-only
+# role must be one that no declaration site names bare — check with
+# `--list-declared` before replacing it.
+expect_contains "codetracer-native-backend" "derivation/defaults"
+expect_not_contains "nim-stackable-hooks" "derivation/defaults"
 expect_not_contains "io-mon" "derivation/defaults"
-ok "names that are only ever \`=ref\` or SHA-pinned in the real workflows are excluded"
+# shellcheck disable=SC2016 # literal backticks, nothing to expand
+ok 'names that are only ever `=ref` or SHA-pinned in the real workflows are excluded'
 
 # --- 9h. an empty declared set is refused, not passed -----------------------
 #
@@ -972,13 +853,279 @@ expect_contains "no declared sibling repos could be derived" "derivation/empty"
 expect_not_contains "Workspace lock present" "derivation/empty"
 ok "an empty declared set is a refusal (exit 2), never a vacuous pass"
 
+# ---------------------------------------------------------------------------
+# 10. THE COMMITTED LOCK (lock-store: committed, the default).
+#
+# Since reprobuild-specs Unified-Locking-And-Hooks.md §14 the lock CI reads is
+# the commit's own `repro.lock`, so this is the mode CI runs. The fixtures are a
+# real `reprobuild.solved-graph-lock.v2` `deps` line, in the exact shape
+# `repro lock refresh` writes, and two real sibling upstreams on disk for
+# `--verify-remote` to fetch from. No manifests repo exists anywhere in this
+# section: the healthy case passing without one is itself a contract.
+# ---------------------------------------------------------------------------
+echo "committed lock: the commit's own repro.lock pins every declared repo"
+
+CL_DIR="${tmp_root}/committed"
+mkdir -p "$CL_DIR"
+
+# sibling_upstream <name> — a real upstream with two commits on `dev`. Sets
+# UP_URL and UP_HEAD.
+sibling_upstream() {
+	local up="${CL_DIR}/$1.git" work="${CL_DIR}/$1-work"
+	git_q -c init.defaultBranch=dev init --quiet --bare "$up"
+	git_q -c init.defaultBranch=dev init --quiet "$work"
+	git_q -C "$work" commit --quiet --allow-empty -m "$1 one"
+	git_q -C "$work" commit --quiet --allow-empty -m "$1 two"
+	git_q -C "$work" push --quiet "$up" HEAD:dev
+	UP_URL="file://${up}"
+	UP_HEAD="$(git -C "$work" rev-parse HEAD)"
+}
+sibling_upstream "$PROBE_SIBLING"
+TF_URL="$UP_URL"
+TF_REV="$UP_HEAD"
+sibling_upstream "$SECOND_SIBLING"
+NB_URL="$UP_URL"
+NB_REV="$UP_HEAD"
+# The integrity contradiction below substitutes one sibling's revision for
+# the other's. Empty commits made in the same second must still differ.
+if [ "$TF_REV" = "$NB_REV" ]; then
+	echo "fixture error: sibling upstream revisions must differ" >&2
+	exit 1
+fi
+
+# dep_entry <name> <url> <revision> [<integrity>] — one inline table, keys in
+# the order `repro lock refresh` writes them. Integrity defaults to the
+# matching `git-sha1:<revision>`.
+dep_entry() {
+	printf '{ name = "%s", path = "../%s", coord_kind = "vcs", url = "%s", ref = "dev", revision = "%s", integrity = "%s", version = "", visibility = "public", participation = "" }' \
+		"$1" "$1" "$2" "$3" "${4:-git-sha1:$3}"
+}
+
+# committed_lock <file> <entry>... — a whole lock: header, an empty solve, and
+# a `deps` line whose first entry is the repo itself (`path = "."`), which the
+# check must skip exactly as `clone-siblings` does.
+committed_lock() {
+	local file="$1" deps self
+	shift
+	self="$(printf '{ name = "codetracer", path = ".", coord_kind = "vcs", url = "https://github.com/metacraft-labs/codetracer", ref = "dev", revision = "%s", integrity = "git-sha1:%s", version = "", visibility = "public", participation = "", depends = "%s,%s" }' \
+		"$SHA_UNDER_TEST" "$SHA_UNDER_TEST" "$PROBE_SIBLING" "$SECOND_SIBLING")"
+	deps="$self"
+	while [ "$#" -gt 0 ]; do
+		deps="${deps}, $1"
+		shift
+	done
+	{
+		printf '%s\n' 'schema = "reprobuild.solved-graph-lock.v2"'
+		printf '%s\n' ''
+		printf '%s\n' '[lock]'
+		printf '%s\n' 'platform = "amd64-linux"'
+		printf '%s\n' 'packages = []'
+		printf 'deps = [%s]\n' "$deps"
+	} >"$file"
+}
+
+TWO_DECL_LIST="${DECL_DIR}/two-repos"
+printf '%s\n' "$PROBE_SIBLING" "$SECOND_SIBLING" >"$TWO_DECL_LIST"
+
+# run_committed <lock-file> [args...] — committed mode against the two-repo
+# declaration, with the commit under test named for the report.
+run_committed() {
+	local lock="$1"
+	shift
+	run_check --lock-store committed --lock-file "$lock" --sha "$SHA_UNDER_TEST" \
+		--sibling-list "$TWO_DECL_LIST" "$@"
+}
+
+# --- 10a. the healthy case, with and without fetching the pins --------------
+GOOD_LOCK="${CL_DIR}/good.lock"
+committed_lock "$GOOD_LOCK" \
+	"$(dep_entry "$PROBE_SIBLING" "$TF_URL" "$TF_REV")" \
+	"$(dep_entry "$SECOND_SIBLING" "$NB_URL" "$NB_REV")"
+run_committed "$GOOD_LOCK"
+expect_rc 0 "committed/healthy"
+expect_contains "pins all 2 declared sibling repo(s)" "committed/healthy"
+expect_not_contains "$STALL_BANNER" "committed/healthy"
+run_committed "$GOOD_LOCK" --verify-remote
+expect_rc 0 "committed/healthy-verified"
+expect_contains "Each of the 2 pinned commit(s) was fetched" "committed/healthy-verified"
+ok "a committed lock pinning every declared repo passes — no manifests repo exists at all"
+
+# A v3 lock carries only portable identities and an explicit self marker.
+V3_LOCK="${CL_DIR}/v3.lock"
+sed -e 's/solved-graph-lock.v2/solved-graph-lock.v3/' \
+	-e 's/path = "\.", /self = "true", /g' \
+	-e 's/path = "[^" ]*", //g' "$GOOD_LOCK" >"$V3_LOCK"
+run_committed "$V3_LOCK" --verify-remote
+expect_rc 0 "committed/v3-verified"
+expect_contains "Each of the 2 pinned commit(s) was fetched" "committed/v3-verified"
+V3_SELF_LIST="${DECL_DIR}/v3-declares-self"
+printf '%s\n' "codetracer" "$SECOND_SIBLING" >"$V3_SELF_LIST"
+run_committed "$V3_LOCK" --sibling-list "$V3_SELF_LIST"
+expect_rc 4 "committed/v3-self-excluded"
+expect_contains "  - codetracer" "committed/v3-self-excluded"
+ok "path-free v3 pins are fetched and self is excluded"
+
+# --- 10b. a declared repo the lock does not pin ------------------------------
+MISSING_LOCK="${CL_DIR}/missing.lock"
+committed_lock "$MISSING_LOCK" "$(dep_entry "$PROBE_SIBLING" "$TF_URL" "$TF_REV")"
+run_committed "$MISSING_LOCK"
+expect_rc 4 "committed/missing"
+expect_contains "NOT PINNED BY THE COMMITTED LOCK" "committed/missing"
+expect_contains "  - ${SECOND_SIBLING}" "committed/missing"
+expect_contains "declared in: ${TWO_DECL_LIST}" "committed/missing"
+expect_not_contains "  - ${PROBE_SIBLING}" "committed/missing"
+expect_not_contains "$STALL_BANNER" "committed/missing"
+ok "a declared repo absent from the committed lock is exit 4, named with where it was declared"
+
+# --- 10c. no lock, and a lock that is not a v2 lock --------------------------
+run_committed "${CL_DIR}/does-not-exist.lock"
+expect_rc 1 "committed/absent"
+expect_contains "No committed repro.lock" "committed/absent"
+expect_not_contains "$STALL_BANNER" "committed/absent"
+V1_LOCK="${CL_DIR}/v1.lock"
+sed 's/solved-graph-lock\.v2/solved-graph-lock.v1/' "$GOOD_LOCK" >"$V1_LOCK"
+run_committed "$V1_LOCK"
+expect_rc 1 "committed/unreadable"
+expect_contains "cannot be read" "committed/unreadable"
+ok "no repro.lock, or one that is not a solved-graph v2 lock, is exit 1"
+
+# --- 10d. entries clone-siblings refuses -------------------------------------
+BRANCH_LOCK="${CL_DIR}/branch.lock"
+committed_lock "$BRANCH_LOCK" \
+	"$(dep_entry "$PROBE_SIBLING" "$TF_URL" "dev" "")" \
+	"$(dep_entry "$SECOND_SIBLING" "$NB_URL" "$NB_REV")"
+run_committed "$BRANCH_LOCK"
+expect_rc 1 "committed/branch-name"
+expect_contains "not a commit id" "committed/branch-name"
+CONTRA_LOCK="${CL_DIR}/contra.lock"
+committed_lock "$CONTRA_LOCK" \
+	"$(dep_entry "$PROBE_SIBLING" "$TF_URL" "$TF_REV")" \
+	"$(dep_entry "$SECOND_SIBLING" "$NB_URL" "$NB_REV" "git-sha1:${TF_REV}")"
+run_committed "$CONTRA_LOCK"
+expect_rc 1 "committed/contradiction"
+expect_contains "self-contradictory" "committed/contradiction"
+ok "a branch name as a revision, or an integrity naming another commit, is exit 1"
+
+# A refused entry outranks a missing one (the worse report wins), and both are
+# still listed, so one run names everything that needs fixing.
+BOTH_LOCK="${CL_DIR}/both.lock"
+committed_lock "$BOTH_LOCK" "$(dep_entry "$SECOND_SIBLING" "$NB_URL" "main" "")"
+run_committed "$BOTH_LOCK"
+expect_rc 1 "committed/refused-and-missing"
+expect_contains "not a commit id" "committed/refused-and-missing"
+expect_contains "  - ${PROBE_SIBLING}" "committed/refused-and-missing"
+ok "a refused entry outranks a missing repo (exit 1), and both are reported"
+
+# --- 10e. a pin the remote does not have -------------------------------------
+# A well-formed pin of a commit that was never pushed. Only --verify-remote can
+# see it: the same lock passes without it, which proves the fetch is what
+# caught it rather than some other check.
+UNPUSHED_REV="$(hex40 0badc0de)"
+UNPUSHED_LOCK="${CL_DIR}/unpushed.lock"
+committed_lock "$UNPUSHED_LOCK" \
+	"$(dep_entry "$PROBE_SIBLING" "$TF_URL" "$TF_REV")" \
+	"$(dep_entry "$SECOND_SIBLING" "$NB_URL" "$UNPUSHED_REV")"
+run_committed "$UNPUSHED_LOCK"
+expect_rc 0 "committed/unpushed-unverified"
+run_committed "$UNPUSHED_LOCK" --verify-remote
+expect_rc 1 "committed/unpushed"
+expect_contains "cannot be fetched" "committed/unpushed"
+expect_contains "  - ${SECOND_SIBLING}: ${UNPUSHED_REV}" "committed/unpushed"
+expect_not_contains "  - ${PROBE_SIBLING}:" "committed/unpushed"
+ok "--verify-remote reports a pinned commit its remote does not have (exit 1), by name"
+
+# --- 10e2. how an entry is matched to a declared name ------------------------
+# Names are stable identities. A stale legacy path cannot impersonate one,
+# and either schema's root marker excludes the consuming repo.
+RENAMED_LOCK="${CL_DIR}/renamed.lock"
+committed_lock "$RENAMED_LOCK" \
+	"$(printf '{ name = "renamed-entry", path = "../%s", coord_kind = "vcs", url = "%s", ref = "dev", revision = "%s", integrity = "git-sha1:%s", version = "", visibility = "public", participation = "" }' \
+		"$PROBE_SIBLING" "$TF_URL" "$TF_REV" "$TF_REV")" \
+	"$(dep_entry "$SECOND_SIBLING" "$NB_URL" "$NB_REV")"
+run_committed "$RENAMED_LOCK"
+expect_rc 4 "committed/stale-path-is-not-an-identity"
+expect_contains "  - ${PROBE_SIBLING}" "committed/stale-path-is-not-an-identity"
+SELF_DECL_LIST="${DECL_DIR}/declares-self"
+printf '%s\n' "codetracer" "$SECOND_SIBLING" >"$SELF_DECL_LIST"
+run_committed "$GOOD_LOCK" --sibling-list "$SELF_DECL_LIST"
+expect_rc 4 "committed/self-entry-is-not-a-pin"
+expect_contains "  - codetracer" "committed/self-entry-is-not-a-pin"
+ok "entries match by name, legacy sibling paths are ignored, and the root is excluded"
+
+# --- 10f. which store: derived from the workflows' lock-store inputs ---------
+echo "committed lock: the store is derived from the workflows, like the declared set"
+
+STORE_WF="${DECL_DIR}/store-workflows"
+mkdir -p "$STORE_WF"
+cat >"${STORE_WF}/ci.yml" <<'YAML'
+jobs:
+  build:
+    steps:
+      - uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          # lock-store: record-store   <- a comment, not an opt-in
+          siblings: |
+            codetracer-trace-format
+YAML
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --print-lock-store --workflow-dir "$STORE_WF" 2>&1)"
+RC=$?
+expect_rc 0 "store/default"
+[ "$OUT" = "committed" ] || fail "store/default: expected 'committed', got: ${OUT}"
+
+printf '%s\n' "          lock-store: committed" >>"${STORE_WF}/ci.yml"
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --print-lock-store --workflow-dir "$STORE_WF" 2>&1)"
+RC=$?
+expect_rc 0 "store/explicit-committed"
+[ "$OUT" = "committed" ] || fail "store/explicit-committed: expected 'committed', got: ${OUT}"
+
+cat >"${STORE_WF}/other.yml" <<'YAML'
+jobs:
+  other:
+    steps:
+      - uses: metacraft-labs/metacraft-github-actions/clone-siblings@dev
+        with:
+          lock-store: "record-store"
+YAML
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --print-lock-store --workflow-dir "$STORE_WF" 2>&1)"
+RC=$?
+expect_rc 0 "store/opt-in"
+[ "$OUT" = "record-store" ] || fail "store/opt-in: expected 'record-store', got: ${OUT}"
+# Derived record-store routes to record-store mode, which needs a manifests repo.
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --lock-file "$GOOD_LOCK" \
+	--sibling-list "$TWO_DECL_LIST" --workflow-dir "$STORE_WF" 2>&1)"
+RC=$?
+expect_rc 2 "store/opt-in-needs-manifests"
+ok "no lock-store input (or 'committed') means committed; any 'record-store' opts the repo in"
+
+# shellcheck disable=SC2016 # a literal GitHub expression, nothing to expand
+printf '%s\n' '          lock-store: ${{ inputs.store }}' >>"${STORE_WF}/other.yml"
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --print-lock-store --workflow-dir "$STORE_WF" 2>&1)"
+RC=$?
+expect_rc 2 "store/unknown"
+expect_contains "cannot be determined" "store/unknown"
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --print-lock-store --lock-store committed --workflow-dir "$STORE_WF" 2>&1)"
+RC=$?
+expect_rc 0 "store/explicit-overrides"
+[ "$OUT" = "committed" ] || fail "store/explicit-overrides: expected 'committed', got: ${OUT}"
+ok "an unresolvable lock-store input is a usage error unless --lock-store is given"
+
+# The defaults read this repo's real workflows and answer.
+OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --print-lock-store 2>&1)"
+RC=$?
+expect_rc 0 "store/real-defaults"
+case "$OUT" in
+committed | record-store) : ;;
+*) fail "store/real-defaults: expected 'committed' or 'record-store', got: ${OUT}" ;;
+esac
+ok "the default derivation reads this repo's real workflows and names a store"
+
 # EXPECTED_ASSERTIONS — the number of `ok` calls this file reaches on a clean
 # run, counted from the source rather than copied from a previous run's output.
 # A suite that dies part-way prints a partial tally that looks exactly like a
 # result; comparing against a number derived from the file is what tells the two
 # apart. If your count comes out LOWER than this, the suite stopped early or a
 # contract was deleted — find out which. Never lower this to make it match.
-readonly EXPECTED_ASSERTIONS=44
+readonly EXPECTED_ASSERTIONS=48
 
 echo
 echo "workspace-lock-freshness-test summary: executed=${pass_count} failed=0"

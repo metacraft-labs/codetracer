@@ -13,6 +13,8 @@
 ##     the one-frame call STACK the pane drew before PLAT-47 — and marks the
 ##     call the debugger is in (the innermost frame's call at the stack's
 ##     depth), at the first stop and at a later one;
+##   * a collapse that hides the current call leaves NO row marked, never an
+##     earlier call of the same name that has returned (codetracer#845);
 ##   * GPUI's calltrace view (`pane_views.calltracePaneView`, over the same
 ##     VM) lists the same rows;
 ##   * the FILES pane lists the recording's tree (`source folders`, `calc`,
@@ -32,7 +34,7 @@
 ## (`stackTrace`), and the real painters draw it. Nothing answers in the
 ## backend's place.
 
-import std/[os, strutils, unittest]
+import std/[options, os, strutils, unittest]
 
 import isonim/core/signals
 
@@ -43,11 +45,14 @@ import view_vocabulary/pane_views
 import ../../../common/view_vocabulary
 
 import ../app/runtime
+import codetracer_embed   # `bkVim`, `ksFlag`
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/views/shell
-from ../app/views/call_trace import StackFallbackTitle
+from ../app/views/call_trace import StackFallbackTitle, paintCallTrace,
+  currentTraceIndex
 import ../host/native_host
+from ../host/session_driver import jumpToCall
 import ../host/tui_session
 import ./fixtures/fixture_provider
 
@@ -125,11 +130,14 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
     # FILES: the recording's tree, on the interactive path.
     ck screen.contains("source folders")
     ck screen.contains("main.py")
-    # GPUI's view over the same VM lists the same calls.
+    # GPUI's view over the same VM lists the same calls — the ones the pane
+    # shows (`visibleLines`: the viewport the terminal reported, HSF-V2),
+    # each held row it shows once.
     let pv = calltracePaneView(session.calltrace)
     var labels: seq[string] = @[]
     viewLabels(pv.root, labels)
-    ck labels.len >= lines.len
+    ck labels.len > 0
+    ck labels.len >= session.calltrace.visibleLines.val.len
     # A row is "callee #index(args) => return" (PLAT-49 part B); its head
     # names the call.
     let head = labels[0].strip().split('(')[0]
@@ -163,6 +171,102 @@ suite "PLAT-47: the calltrace pane lists the call trace; FILES the tree":
       ck rt.app.callStack.frames[0].name == "evaluate"
       ck rt.app.callStack.frames[1].name == "main"
       ck rt.app.callTrace.rows[cur].depth == rt.app.callStack.frames.len - 1
+
+  test "collapsing the current call's parent marks no call that returned (#845)":
+    # codetracer#845: at a stop inside a later `apply_op`, collapsing the
+    # `evaluate` that contains it hid the current call, and the pane then
+    # marked an EARLIER `apply_op` — same name, same depth, already
+    # returned. `calc` evaluates its expressions each in its own `evaluate`,
+    # each with one or more `apply_op`s, so the trace has that shape.
+    require resolved.outcome == foRecorded
+    let rt = newRuntime()
+    let session = openTuiSession(resolved.tracePath, viewportHeight = Rows - 6)
+    defer: session.close()
+    session.header(rt)
+    session.learnExtent()
+    session.refresh(rt)
+    let store = session.session.session.store
+    let vm = session.session.session.calltraceVM
+    # Found by what the calls are, not by number. The parent: the first
+    # `evaluate` after an `apply_op`. The target: the first `apply_op`
+    # inside it. The namesake: the last `apply_op` before the parent, which
+    # returned before the parent was entered.
+    var parent, target, namesake = -1'i64
+    var targetDepth, namesakeDepth = -1
+    var targetKey = ""
+    for l in session.session.getCalltraceLines():
+      if parent < 0:
+        if l.name == "evaluate" and namesake >= 0:
+          parent = l.index
+          targetDepth = l.depth + 1
+        elif l.name == "apply_op":
+          namesake = l.index
+          namesakeDepth = l.depth
+      elif target < 0 and l.name == "apply_op" and l.depth == targetDepth:
+        target = l.index
+        targetKey = l.callKey
+    checkpoint("parent " & $parent & ", target " & $target & ", namesake " &
+               $namesake)
+    require parent >= 0 and target > parent and namesake >= 0
+    ck namesakeDepth == targetDepth   # the instrument: a true namesake
+    ck targetKey.len > 0
+
+    # ---- step into the later call, as a click on its row does ------------
+    ck session.session.jumpToCall(target) == ""
+    # The terminal's own path after a click moved the debugger: `refresh`,
+    # which reads no section when the rows the pane shows are already held —
+    # so the collapse below is the FIRST calltrace request at the new stop.
+    # The engine must shape its listing for this stop before applying that
+    # collapse, or the read the toggle makes after it re-expands every call
+    # and the collapse is lost (codetracer-pm issue 2026-10-21, "a call-trace
+    # collapse made after a move is undone by the next section read"). The
+    # `parentCollapsed` instrument below fails if it is.
+    session.refresh(rt)
+    session.session.selectCurrentCall()
+    ck rt.app.callStack.frames.len > 0
+    ck rt.app.callStack.frames[0].name == "apply_op"
+    # The control: expanded, the current call is the target, marked and
+    # selected.
+    ck rt.app.callTrace.currentTraceIndex == target.int
+    ck vm.selectedEntry.val == some(target)
+    let selectedBefore = vm.selectedEntry.val
+
+    # ---- collapse its parent, as a click on the row's toggle does --------
+    session.toggleCallChildren(rt, parent)
+    checkpoint("notification: " & rt.app.notification)
+    var targetListed, namesakeListed, parentCollapsed = false
+    for l in store.calltrace.lines.val:
+      if l.callKey == targetKey: targetListed = true
+      if l.index == namesake and l.name == "apply_op": namesakeListed = true
+      if l.index == parent and not l.isExpanded: parentCollapsed = true
+    # The instrument: the parent is collapsed, so the current call is not
+    # listed; its returned namesake still is.
+    ck parentCollapsed
+    ck not targetListed
+    ck namesakeListed
+    checkpoint("current row after the collapse: " & $rt.app.callTrace.current)
+    # THE DEFECT: the returned namesake was the current row. No row is now.
+    ck rt.app.callTrace.current == -1
+    ck rt.app.callTrace.currentTraceIndex != namesake.int
+    # And the painted pane carries no current-call ground on any row.
+    var g = newStyledGrid(Cols, Rows)
+    discard paintCallTrace(g, CellArea(col: 0, row: 0, width: Cols,
+                                       height: Rows), rt.app.callTrace)
+    var marked = 0
+    for r in 0 ..< Rows:
+      for sp in g.rowSpans(r):
+        if sp.text.strip.len > 0 and sp.style.surface == srSurfaceActiveRow:
+          inc marked
+          break
+    ck marked == 0
+    # The collapse moved no selection.
+    ck vm.selectedEntry.val == selectedBefore
+    # GPUI selects by the same rule (`selectCurrentCall`): over the
+    # collapsed listing it selects nothing rather than the returned
+    # namesake.
+    session.session.selectCurrentCall()
+    ck vm.selectedEntry.val != some(namesake)
+    ck vm.selectedEntry.val.isNone
 
   test "no call trace: the pane shows the call stack and says so, in both front-ends":
     require resolved.outcome == foRecorded
@@ -239,7 +343,7 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     let body = rt.paneBodyRows(paneCalltrace)
     ck body > 5
 
-    # ---- scroll to the end with the half-page key, as a reader would ----
+    # ---- scroll to the end with the page key, as a reader would ----
     # Until the pane stops moving: its last row is then the trace's last
     # call, whatever the backend counts there (a trace read to its end lists
     # the recorder's `<end of program>` too, one call more than the first
@@ -249,7 +353,9 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     var sections: seq[int64] = @[store.calltrace.startLineIndex.val]
     var lastTop = -1
     while pages < 400:
-      let outcome = rt.handleToken("\x04", now)       # Ctrl+d
+      # PageDown: the list's `list.focus-page-down` (CUA; §4.2's `Ctrl+d`
+      # under the Vim base).
+      let outcome = rt.handleToken("\e[6~", now)
       ck outcome.pagesCallTrace
       session.applyOutcome(rt, outcome)
       now += 10
@@ -309,13 +415,16 @@ suite "PLAT-47: the call trace pages as it scrolls, as the desktop's does":
     var ups = 0
     while not screenText(rt).contains("main #2") and ups < 400:
       now += 10
-      let outcome = rt.handleToken("\x15", now)       # Ctrl+u
+      let outcome = rt.handleToken("\e[5~", now)      # PageUp
       session.applyOutcome(rt, outcome)
       inc ups
     ck screenText(rt).contains("main #2")
     ck store.calltrace.startLineIndex.val == 0
 
     # ---- `.` follows the current call again ------------------------------
+    # (§3.3.5's `.` is the Vim base's; CUA's is the read-only editor's
+    # `editor.center-on-pointer`, CUA-Keymap §4.)
+    rt.selectBase(bkVim, ksFlag)
     let dot = rt.handleToken(".", now + 10)
     session.applyOutcome(rt, dot)
     ck not rt.app.callTraceScrolled

@@ -59,6 +59,7 @@ NIM_REPO_PATH_FLAGS=\
 --path:$(ROOT)/libs/nim-prompt\
 --path:$(ROOT)/libs/nim-stew\
 --path:$(ROOT)/libs/nim-unicodedb/src\
+--path:$(ROOT)/libs/nim-regex/src\
 --path:$(ROOT)/libs/poly\
 --path:$(ROOT)/libs/quicktest\
 --path:$(ROOT)/libs/chronos\
@@ -524,6 +525,8 @@ export RUSTUP_HOME
 # default ~/.cargo, which tup doesn't allow as an undeclared output.
 export CARGO_HOME
 export PATH
+# Let Cargo/Nim FFI caches follow the operator's scratch directory.
+export TMPDIR
 export LIB
 export LIBPATH
 export INCLUDE

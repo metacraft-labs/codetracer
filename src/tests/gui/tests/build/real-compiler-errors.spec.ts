@@ -25,12 +25,11 @@
  * instance — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
 import { ProblemsPane } from "../../page-objects/panes/build/problems-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   DOCKED_BOTTOM_CONTENT_SELECTOR,
   openBottomPanel,
@@ -231,9 +230,6 @@ test.describe("Real compiler errors in build panels", () => {
   // Any real recording gives a working CodeTracer instance; we do not need
   // a real build -- the output is injected programmatically.
   test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
-
-  test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
-  test.afterAll(() => restoreUserLayout());
 
   // -- BUILD panel rendering tests ------------------------------------------
 

@@ -508,6 +508,22 @@ button
   top: calc(100% + 0.3125em)
   transition-delay: TOOLTIP_DELAY_TIMER
 
+// A debug-toolbar control that cannot act yet still says, on a rest, what it
+// does and which chord it is bound to (`Debugger-Controls.md`: every
+// debug-control button carries a tooltip). The shared `button:disabled` rule
+// above sets `pointer-events: none`, which takes a disabled button out of
+// hit-testing altogether: it never matches `:hover`, so the rule just above
+// never shows its tooltip. History back / forward are disabled on every trace
+// that has no history yet, so theirs were the two that never appeared.
+//
+// Hit-testing is restored for the toolbar's buttons only. They stay inert: a
+// browser dispatches no `click` to a disabled form control
+// (https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#enabling-and-disabling-form-controls:-the-disabled-attribute),
+// so the action handler cannot run, and the `cursor: not-allowed` that
+// `pointer-events: none` made unreachable now shows.
+.isonim-debug-controls button:disabled
+  pointer-events: auto
+
 // The value-origin badge on each State row sits beside the value-history toggle
 // (above), so it is built as the same extra-small icon button: 20px tall, the
 // shared control outline (CONTROL_BORDER_*, 6px corners), 8px from its

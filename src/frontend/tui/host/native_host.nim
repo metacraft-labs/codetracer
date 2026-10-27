@@ -45,14 +45,22 @@ when defined(js):
 import std/[algorithm, json, os, osproc, posix, sets, streams, strutils]
 
 import isonim/core/signals   # `Signal.val`, for `PaneLoad`'s reads of the store
+import isonim/core/async_compat   # `drainPlatformCallbacks`: applies the answers
 
 import headless_session
+import sdk/stop_loader   # the SDK's per-stop loads, which `loadStopPanes` runs
 import store/types as store_types   # `FilesystemEntryNode`
+from store/replay_data_store import applySymbolsResponse   # the omnibar's symbols
 import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
-from viewmodels/calltrace_vm import selectEntry, currentCallOf   # PLAT-49 part B
+from viewmodels/calltrace_vm import selectEntry, currentCallInSectionOf   # PLAT-49 part B
+from viewmodels/debug_controls_vm import invokeToolbarAction   # M76: the native Stop
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
 import ../../../common/trace_source_paths   # the shared source-folder rule
+import ../../../common/replay_server_path   # the one replay-server search order
+import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
+from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
 import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
+import ../../../ct/trace/recorder_output   # `ct record-test`'s recording id
 export headless_session
 
 type
@@ -87,28 +95,23 @@ proc repoRoot(): string =
 proc findReplayServer*(): string =
   ## Where `replay-server` is, or "" when it has not been built.
   ##
-  ## The search order is the one `src/frontend/viewmodel/tests/unit/
-  ## test_column_evm_vm.nim` and the rest of the headless suites already use —
-  ## `REPLAY_SERVER_BIN`, then the debug build tree, then cargo's own output
-  ## directories — because a front-end that looked somewhere else would find a
-  ## different binary than the tests do, which is a difference nobody would
-  ## notice until it mattered.
+  ## The search order is `src/common/replay_server_path`'s, and deliberately
+  ## not a list of this module's own: `REPLAY_SERVER_BIN`, the output root the
+  ## build published (`CT_BUILD_OUT_ROOT`, `CODETRACER_BUILD_DIR`), the Repro
+  ## and tup trees, and cargo's own directories last. Every headless suite
+  ## resolves through the same module, because a front-end that looked
+  ## somewhere else would find a different binary than the tests do — and
+  ## that is exactly what happened while this list was private: it did not
+  ## know the Repro output root, so a `repro`-built checkout ran a stale cargo
+  ## engine and the window hung on a DAP read with no output at all
+  ## (codetracer-pm
+  ## `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
   ##
   ## Returns "" rather than raising: a caller that only wants `--version` must
   ## not need a backend, and CTUI-1's fixture provider needs to be able to
   ## report the absence as a named, counted prerequisite rather than catch an
   ## exception.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-  let root = repoRoot()
-  for candidate in [
-      root / "src" / "build-debug" / "bin" / "replay-server",
-      root / "src" / "db-backend" / "target" / "debug" / "replay-server",
-      root / "src" / "db-backend" / "target" / "release" / "replay-server"]:
-    if fileExists(candidate):
-      return candidate
-  ""
+  locateReplayServer()
 
 proc traceFolderProblem*(path: string): string
   ## Forward-declared; defined below.
@@ -128,6 +131,13 @@ proc findCtBinary*(): string =
     return candidate
   findExe("ct")
 
+proc nativeCtBinary*(): string =
+  ## `findCtBinary` under a name of its own: this module re-exports
+  ## `headless_session`, whose narrower `findCtBinary` (no `PATH`, raises) a
+  ## caller importing both would otherwise be ambiguous with. PLAT-53's Test
+  ## Results host (`test_results_source`) runs `ct test run` with it.
+  findCtBinary()
+
 type
   NativeRecordJob* = ref object
     ## PLAT-51 deliverable 8: a welcome tab's `ct record`, running. The host
@@ -140,6 +150,11 @@ type
     done*: bool
     ok*: bool
     message*: string
+    testRun*: bool
+      ## A `ct record-test` (`startRecordTestJob`): it records into the
+      ## trace store, and says where by the recording id it prints.
+    recordingId*: string
+      ## That id, once the run finished.
 
 proc startRecordJob*(program: string; args: seq[string];
                      outputFolder: string): NativeRecordJob =
@@ -175,6 +190,49 @@ proc startRecordJob*(program: string; args: seq[string];
     result.message = "could not start ct record: " & e.msg
     result.process = nil
 
+proc startRecordTestJob*(path: string): NativeRecordJob =
+  ## THE DESKTOP'S RUN-TESTS (`ui/debug.nim`'s `run-tests` action, answered
+  ## by `index/traces.onRunTest`): `ct record-test "" <path> 0 0
+  ## --with-diff=HEAD --store-trace-folder-for-pid=<pid>` in the background —
+  ## the tests of the file the debugger is in, recorded. Its log is a
+  ## temporary file; `recordingId` names the recording when it finishes.
+  result = NativeRecordJob(program: path, testRun: true)
+  let ct = findCtBinary()
+  if ct.len == 0:
+    result.done = true
+    result.message = "no ct found to run the tests with; set CT_BIN"
+    return
+  result.logPath = getTempDir() / ("codetracer-record-test-" &
+                                   $getCurrentProcessId() & ".log")
+  try:
+    writeFile(result.logPath, "")
+    result.process = startProcess(ct, workingDir = path.parentDir,
+      args = @["record-test", "", path, "0", "0", "--with-diff=HEAD",
+               "--store-trace-folder-for-pid=" & $getCurrentProcessId()],
+      options = {poStdErrToStdOut})
+  except CatchableError as e:
+    result.done = true
+    result.message = "could not start ct record-test: " & e.msg
+    result.process = nil
+
+proc recordingFolderOf*(recordingId: string): string =
+  ## Where the trace store keeps a recording (`ct trace-metadata --id`, as
+  ## the desktop's `findTraceWithCodetracer` asks), or "".
+  let ct = findCtBinary()
+  if ct.len == 0 or recordingId.len == 0:
+    return ""
+  try:
+    let (output, code) = execCmdEx(quoteShellCommand(
+      [ct, "trace-metadata", "--id=" & recordingId]))
+    if code != 0:
+      return ""
+    let start = output.find('{')
+    if start < 0:
+      return ""
+    result = parseJson(output[start .. ^1]){"outputFolder"}.getStr("")
+  except CatchableError:
+    result = ""
+
 proc pollRecordJob*(job: NativeRecordJob): bool =
   ## Whether the job FINISHED on this poll (once): `ok` and `message` say
   ## how. The recorder's output is drained so a chatty program cannot fill
@@ -205,9 +263,19 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
   if code == -1:
     return false
   job.done = true
-  job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
+  if job.testRun:
+    var log = ""
+    try: log = readFile(job.logPath)
+    except CatchableError: discard
+    job.recordingId = recordingIdFromOutput(log)
+    job.ok = code == 0 and job.recordingId.len > 0
+    if code == 0 and job.recordingId.len == 0:
+      job.message = "ct record-test finished without reporting a " &
+                    "recording id, so there is nothing to replay"
+  else:
+    job.ok = code == 0 and traceFolderProblem(job.outputFolder).len == 0
   job.process.close()
-  if not job.ok:
+  if not job.ok and job.message.len == 0:
     var last = ""
     try:
       for l in readFile(job.logPath).splitLines():
@@ -215,7 +283,8 @@ proc pollRecordJob*(job: NativeRecordJob): bool =
           last = l.strip
     except CatchableError:
       discard
-    job.message = "recording " & job.program & " failed (exit " & $code &
+    job.message = (if job.testRun: "running the tests of " else: "recording ") &
+                  job.program & " failed (exit " & $code &
                   ")" & (if last.len > 0: ": " & last else: "")
   true
 
@@ -312,6 +381,11 @@ const
     ## refusing to open a trace that was merely slow.
     ##
     ## PER MESSAGE, not per session. See `DapReadBound.timeoutMs`.
+    ##
+    ## The GPUI window uses the same default while it opens a recording
+    ## (`gpui_host.openGpuiTrace`): it has no window to take a keystroke yet,
+    ## so for it the clock is the ONLY way out, and the argument above for a
+    ## generous budget applies with more force, not less.
   HandshakeEnvVar* = "CODETRACER_TUI_HANDSHAKE_MS"
     ## Overrides `DefaultHandshakeMs`, in milliseconds.
     ##
@@ -321,15 +395,21 @@ const
     ## reason it exists. `app/cli.parseTuiCommand` therefore never sees it and
     ## `TuiHelpText` never mentions it.
 
-proc handshakeBudgetMs*(): int =
-  ## The per-message budget this process will use, from the environment or
-  ## from `DefaultHandshakeMs`.
+proc handshakeBudgetMs*(envVar = HandshakeEnvVar): int =
+  ## The per-message budget this process will use, from the environment
+  ## variable `envVar` or from `DefaultHandshakeMs`.
   ##
   ## A value that does not parse, or that is not positive, falls back to the
   ## default rather than disabling the bound: "the clock is off" is exactly the
   ## state this milestone exists to remove, and it must not be reachable by
   ## mistyping an environment variable.
-  let raw = getEnv(HandshakeEnvVar, "")
+  ##
+  ## `envVar` is a parameter because each native front-end has its own knob —
+  ## the terminal reads `HandshakeEnvVar`, the GPUI window
+  ## `gpui_host.GpuiHandshakeEnvVar` — and both must parse it by THIS rule: a
+  ## second copy of the fallback is a second place where a typo could switch
+  ## the clock off.
+  let raw = getEnv(envVar, "")
   if raw.len == 0:
     return DefaultHandshakeMs
   try:
@@ -337,6 +417,26 @@ proc handshakeBudgetMs*(): int =
     if parsed > 0: parsed else: DefaultHandshakeMs
   except ValueError:
     DefaultHandshakeMs
+
+# §8b's stall after the open, raised by `newHeadlessDebugSession` and by
+# `tui_session`; re-exported for the terminal's call sites that report it.
+export headless_session.EngineStalledAfterOpenError
+
+const StalledAfterOpenPhrase* =
+  "the replay engine stopped answering after the recording opened"
+  ## §8b's wording for `EngineStalledAfterOpenError`, shared by every
+  ## terminal call site that reports one.
+
+proc stalledAfterOpenReport*(program, folder, detail: string;
+                             envVar = HandshakeEnvVar): seq[string] =
+  ## The two stderr lines a run that ends on `EngineStalledAfterOpenError`
+  ## prints: what happened, naming the folder and the budget (`detail` is the
+  ## stall's own message), then a remedy that does NOT suggest re-recording.
+  @[program & ": " & folder & ": " & StalledAfterOpenPhrase & " (" & detail &
+      ")",
+    "  the engine read the recording and then went quiet on a request; run" &
+      " again, or raise " & envVar & " if the host is slow, and report it" &
+      " with the engine's log if it recurs."]
 
 const
   MaxListedRecordings* = 64
@@ -370,6 +470,86 @@ proc recordingsBeside*(traceFolder: string): seq[OmnibarEntry] =
                             label: extractFilename(path),
                             detail: parent, target: path)
 
+# ---------------------------------------------------------------------------
+# M76 (codetracer#843): THE NATIVE STOP
+# ---------------------------------------------------------------------------
+#
+# Debugger-Controls.md § "Ending a session from inside it", requirement 2:
+# "The replay backend for that session is terminated." `DebugControlsVM`'s
+# `invokeToolbarAction` is "the one route a button, a key chord and a menu
+# item take, on every front-end", and its `stop` entry is a host's to supply
+# (`defaultDebugCommands` cannot end a process). Until M76 no native host
+# supplied it, so `invokeToolbarAction("stop")` was a silent no-op on the
+# terminal and GPUI. `openLocalTrace` — the one function both native front
+# ends open a recording with — now installs it, so no native session has a
+# nil Stop, and both front ends' Stop (button, menu, chord) goes through it
+# (`stopThroughControls`).
+
+type
+  NativeStopOutcome* = object
+    ## What the native Stop did to the session's replay — a VALUE, so a test
+    ## and a host read the same fact.
+    ended*: bool
+      ## The replay was running and has been ended by this call.
+    pid*: int
+      ## The `replay-server` that was ended (or that had already gone), -1
+      ## when the session had none.
+    message*: string
+
+proc endDebugSession*(s: HeadlessDebugSession): NativeStopOutcome =
+  ## End the session's replay: the SDK session disposed and the
+  ## `replay-server` child terminated, its handles released
+  ## (`HeadlessDebugSession.close`). Idempotent: a session already ended
+  ## answers `ended = false` and says so. The workspace's return to Edit mode
+  ## and the tab that survives as an edit tab (requirements 1 and 3) are the
+  ## front end's.
+  result.pid = s.replayPid()
+  if not s.replayRunning():
+    result.message = "the debugging session had already ended"
+    s.close()
+    return
+  s.close()
+  result.ended = true
+  result.message = "stopped the debugging session"
+
+proc installNativeStop*(s: HeadlessDebugSession;
+                        afterStop: proc() {.closure.} = nil) =
+  ## Give the session's `DebugControlsVM` its host Stop: `commands.stop` ends
+  ## this session's replay (`endDebugSession`), then runs `afterStop` — the
+  ## front end's own half (its mode, its tab, forgetting the session), so a
+  ## caller that reaches the ViewModel's Stop from anywhere leaves the front
+  ## end consistent, not holding a dead engine. Installed again by a front end
+  ## that has its half to add (`tui_session.header`).
+  let vm = s.session.debugControlsVM
+  if vm.isNil:
+    return
+  let sess = s
+  vm.commands.stop = proc() =
+    discard sess.endDebugSession()
+    if not afterStop.isNil:
+      afterStop()
+
+proc stopThroughControls*(s: HeadlessDebugSession): NativeStopOutcome =
+  ## A native front end's Stop, through THE route: the session's
+  ## `DebugControlsVM.invokeToolbarAction("stop")`, which runs the host Stop
+  ## `installNativeStop` gave it. Answers what happened to the replay.
+  result.pid = s.replayPid()
+  let wasRunning = s.replayRunning()
+  let vm = s.session.debugControlsVM
+  if vm.isNil or vm.commands.stop.isNil:
+    # A session built without `openLocalTrace` (a test harness): end it the
+    # same way, directly, rather than leaving its engine running.
+    result = s.endDebugSession()
+    return
+  if not wasRunning:
+    result.message = "the debugging session had already ended"
+    return
+  vm.invokeToolbarAction("stop")
+  result.ended = wasRunning and not s.replayRunning()
+  result.message =
+    if result.ended: "stopped the debugging session"
+    else: "the replay did not end"
+
 proc openLocalTrace*(traceFolder: string;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
                     ): HeadlessDebugSession =
@@ -388,7 +568,8 @@ proc openLocalTrace*(traceFolder: string;
   let bin = findReplayServer()
   if bin.len == 0:
     raiseHost(replayServerRemedy())
-  newHeadlessDebugSession(resolved, bin, handshake = bound)
+  result = newHeadlessDebugSession(resolved, bin, handshake = bound)
+  result.installNativeStop()
 
 # ---------------------------------------------------------------------------
 # The panes' producers — ONE set, called by both native front-ends
@@ -410,19 +591,14 @@ proc openLocalTrace*(traceFolder: string;
 # "empty because nothing asked" from "empty because the engine declined".
 
 const
-  RecordingEventWindow* = 4096
-    ## How much of the event log is read at open: enough to learn the
-    ## recording's extent (`ct/event-load`'s `maxRRTicks`) and to fill the
-    ## event-log pane's first pages.
-    ##
-    ## CTUI-8 established that `TimelineVM.bounds` (named `markers` until
-    ## 2026-09-24) is filled by nothing on a
-    ## replay session and that the recording's extent comes from
-    ## `ct/event-load`'s `maxRRTicks` instead. So the timeline's bounds are a
-    ## property of that one answer, and this is the window both native
-    ## front-ends read it from.
   RecordingCalltraceLevels* = 400
+    ## The call STACK's depth cap — the frames `stackTrace` is asked for when
+    ## the current call is selected (`selectCurrentCall`) and by the stop
+    ## loader's call-stack fallback. A bound on one stack, not a page of a
+    ## windowed list.
   RecordingCalltraceDepth* = 200
+    ## The call-trace depth a native host pages its own call trace at, until
+    ## its pane reports a viewport (Viewport-Driven-Loading V3).
 
 type
   PaneLoad* = object
@@ -478,6 +654,18 @@ proc outermostRoots(roots: seq[string]): seq[string] =
     if not inside and r notin result:
       result.add r
 
+proc recordedSourcePaths(traceFolder: string): seq[string] =
+  ## The recording's source paths: its `paths.json`, else its `files/`
+  ## store's own listing (the desktop's `loadFilenames` fallback).
+  let pathsFile = traceFolder / "paths.json"
+  if fileExists(pathsFile):
+    try:
+      for p in parseJson(readFile(pathsFile)): result.add p.getStr("")
+    except CatchableError:
+      result = @[]
+  if result.len == 0:
+    result = storedSourcePaths(traceFolder / "files")
+
 proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   ## **The replay session's file tree**: the recording's own source folders,
   ## derived from its `paths.json` by the rule the desktop's Files pane uses
@@ -495,15 +683,7 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
   result = FilesystemEntryNode(text: "source folders", isFolder: true,
                                isExpanded: true)
   let store = traceFolder / "files"
-  let pathsFile = traceFolder / "paths.json"
-  var recorded: seq[string] = @[]
-  if fileExists(pathsFile):
-    try:
-      for p in parseJson(readFile(pathsFile)): recorded.add p.getStr("")
-    except CatchableError:
-      recorded = @[]
-  if recorded.len == 0:
-    recorded = storedSourcePaths(store)
+  let recorded = recordedSourcePaths(traceFolder)
   for root in outermostRoots(sourceFolderRootsOf(recorded)):
     let dir = store / root
     if dirExists(dir):
@@ -512,6 +692,32 @@ proc recordingFileTree*(traceFolder: string): FilesystemEntryNode =
       result.children.add FilesystemEntryNode(text: root.extractFilename,
                                               path: "/" & root)
 
+
+# ---------------------------------------------------------------------------
+# PLAT-57: Find in Files on the native front-ends
+# ---------------------------------------------------------------------------
+
+proc recordingSearchScope*(traceFolder: string): FindInFilesScope =
+  ## What Find in Files reads for this recording — the runner's
+  ## `findInFilesScope`, the desktop's rule: the recording's `files/` store
+  ## (every recording the native front-ends open is read from it), else its
+  ## source folders.
+  findInFilesScope(traceFolder / "files", preferStore = true,
+                   sourceFolderRootsOf(recordedSourcePaths(traceFolder)))
+
+var nativeFindInFiles* = newFindInFilesService()
+  ## The process's one runner service: a front-end runs one search at a
+  ## time, and a new one cancels the one in flight. The host's loop pumps it.
+
+proc wireFindInFiles*(vm: SearchResultsVM; scope: proc(): FindInFilesScope) =
+  ## Hand `vm`'s searches to the shared runner: each runs over `scope()` and
+  ## streams its batches into `vm`, which drops any that are not its latest.
+  if vm.isNil:
+    return
+  vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
+    discard nativeFindInFiles.search(runId, query, options, scope(),
+      proc(b: FindInFilesBatch) =
+        discard vm.acceptBatch(b.runId, b.rows, b.done, b.note))
 
 proc expandAllFolders*(vm: FilesystemVM) =
   ## PLAT-50: mark every folder of `vm`'s tree expanded.
@@ -526,21 +732,54 @@ proc expandAllFolders*(vm: FilesystemVM) =
   walk(vm.rootEntry.val)
   vm.setExpandedPaths(paths)
 
-proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
-  ## The per-RECORDING producers, asked once at open: the event log's first
-  ## window and the call trace. Both decode into the store, which is the one
-  ## place the rows live; this returns whether each arrived.
+proc loadRecordingPanes*(s: HeadlessDebugSession;
+                         raiseOnStall = false): PaneLoad =
+  ## The per-RECORDING facts, asked once at open: the event log's size and
+  ## the recording's extent, whether there is a call trace, and the
+  ## recording's functions (the omnibar's symbols). The ROWS are not loaded
+  ## here: each pane asks for the window it shows when it is drawn
+  ## (Viewport-Driven-Loading V2). This returns what arrived.
+  ##
+  ## ONE ROW IS ENOUGH TO LEARN THE EXTENT: every event row carries the
+  ## recording's `maxRRTicks` (CTUI-8: the timeline's bounds come from it),
+  ## and `ct/event-load` answers the whole log's `total` with any window. A
+  ## one-row call-trace section likewise answers `totalCallsCount`. These
+  ## replaced reading 4096 events and a 400 x 200 call trace at open.
+  ##
+  ## `raiseOnStall`: A STALL IS NOT A DECLINE. A request the engine answers
+  ## with a refusal is recorded as not loaded, as this section's header says.
+  ## With `raiseOnStall`, an engine that answers NOTHING for a whole read
+  ## budget (`DapStalledError`) is raised instead, because swallowing it makes
+  ## the next request wait out the budget again — one budget per request
+  ## before a run that will never get an answer says so — and reports a
+  ## silent engine as a recording with empty panes. Both native front-ends
+  ## pass it and report the stall by name: GPUI in `gpui/main.nim`, the
+  ## terminal through `tui_session.learnExtent`, which raises it as
+  ## `EngineStalledAfterOpenError` for its four call sites to report (§8b:
+  ## one budget, then `ExitEngineStalled` worded as a stall after the open).
+  ## The default is kept for suites that read what loaded on a real engine.
+  let store = s.session.store
   try:
-    discard s.requestAndLoadEventLog(start = 0, count = RecordingEventWindow)
-    result.events = s.session.store.eventLog.rows.val.len > 0
+    discard s.requestAndLoadEventLog(start = 0, count = 1)
+    result.events = store.eventLog.rows.val.len > 0
+  except DapStalledError:
+    if raiseOnStall: raise
   except CatchableError:
     result.events = false
   try:
-    s.requestAndLoadCalltrace(height = RecordingCalltraceLevels,
-                              depth = RecordingCalltraceDepth)
-    result.calltrace = s.getCalltraceLines().len > 0
+    s.requestAndLoadCalltrace(height = 1, depth = RecordingCalltraceDepth)
+    result.calltrace = store.calltrace.totalCallsCount.val > 0'u64
+  except DapStalledError:
+    if raiseOnStall: raise
   except CatchableError:
     result.calltrace = false
+  try:
+    store.applySymbolsResponse(s.sendRawDapRequest("ct/load-symbols"))
+    discard s.drainEvents()
+  except DapStalledError:
+    if raiseOnStall: raise
+  except CatchableError:
+    discard
   # PLAT-41: the recording's own source tree, read off the trace folder — a
   # host concern, which is why it is here and not in the ViewModel layer.
   let files = s.session.fileTreeVM
@@ -556,34 +795,24 @@ proc loadRecordingPanes*(s: HeadlessDebugSession): PaneLoad =
 
 proc refreshCallStackFallback*(s: HeadlessDebugSession) =
   ## PLAT-47: hand the calltrace pane the call STACK when — and only when —
-  ## the recording provides no call trace (`CalltraceVM.fallbackStack`). Per
-  ## stop, because the stack is a fact about the stop. A recording WITH a
-  ## trace pays nothing here: the store's lines are checked first.
-  let vm = s.session.calltraceVM
-  if vm.isNil:
-    return
-  if s.session.store.calltrace.lines.val.len > 0:
-    if vm.fallbackStack.val.len > 0:
-      vm.fallbackStack.val = newSeq[string]()
-    return
-  var names: seq[string] = @[]
-  try:
-    let response = s.sendRawDapRequest("stackTrace", %*{
-      "threadId": 1, "startFrame": 0, "levels": RecordingCalltraceLevels})
-    discard s.drainEvents()
-    for f in response{"body", "stackFrames"}.getElems:
-      names.add f{"name"}.getStr("")
-  except CatchableError:
-    names = @[]
-  vm.fallbackStack.val = names
+  ## the recording provides no call trace (`CalltraceVM.fallbackStack`),
+  ## re-asked now even at an unchanged stop. The load itself is the SDK stop
+  ## loader's (`StopPane.spCallStackFallback`).
+  s.sdk.stops.reload(spCallStackFallback)
+  drainPlatformCallbacks()
 
 proc selectCurrentCall*(s: HeadlessDebugSession) =
   ## PLAT-49 part B: select the call the debugger is in, as the desktop does
   ## on every move (`CalltraceComponent.onCompleteMove` -> `selectEntry`) —
   ## `calltrace_vm.currentCallOf` over the section held, the stop's tick and
-  ## its call stack.
+  ## its call stack, through `currentCallInSectionOf`: never a call that has
+  ## returned (codetracer#845: a collapsed parent hides the current call),
+  ## and, when the section cannot show its answer has not returned, only the
+  ## call the engine's `currentCallLineIndex` names too. Otherwise nothing
+  ## is selected.
   let vm = s.session.calltraceVM
-  let lines = s.session.store.calltrace.lines.val
+  let calltrace = s.session.store.calltrace
+  let lines = calltrace.lines.val
   if vm.isNil or lines.len == 0:
     return
   var names: seq[string] = @[]
@@ -595,17 +824,24 @@ proc selectCurrentCall*(s: HeadlessDebugSession) =
       names.add f{"name"}.getStr("")
   except CatchableError:
     return
-  vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))
+  # The lines carry their trace index (`startCallLineIndex + i`), the
+  # numbering of `totalCallsCount` and `currentCallLineIndex` too.
+  let reachesEnd =
+    lines[^1].index + 1 >= calltrace.totalCallsCount.val.int64
+  vm.selectEntry(currentCallInSectionOf(lines, s.getCurrentRRTicks(), names,
+    reachesEnd, calltrace.currentLineIndex.val))
 
 proc loadStopPanes*(s: HeadlessDebugSession): PaneLoad =
-  ## The per-STOP producer: the values in scope where the debugger now is,
-  ## which the state pane and the editor's inline values both read.
-  try:
-    s.requestAndLoadLocals()
-    result.locals = true
-  except CatchableError:
-    result.locals = false
-  refreshCallStackFallback(s)
+  ## The per-STOP producers — the values in scope where the debugger now is
+  ## (the state pane and the editor's inline values), the flow window (the
+  ## editor's flow overlay and the flow pane) and the PLAT-47 call stack
+  ## fallback — through the SDK's stop loader, the one per-stop loader
+  ## of every front-end. Each is asked once per stop; the stdio transport's
+  ## answers are applied when the platform callbacks are drained, below.
+  let loader = s.sdk.stops
+  loader.loadStop()
+  drainPlatformCallbacks()
+  result.locals = loader.status[spLocals].val == plsApplied
 
 proc stdoutIsTerminal*(): bool =
   ## Whether standard output is a terminal.

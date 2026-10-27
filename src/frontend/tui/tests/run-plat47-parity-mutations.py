@@ -82,7 +82,7 @@ ONE ARM PER CLAIM, each naming the case (or the gate) that must die:
   | FILES is filled on the interactive path (the D3 root cause) | F1 |
   | the calltrace pane lists the TRACE, marks the call the debugger is in | C1, C4 |
   | GPUI's calltrace rows read `name #index`, as the desktop's `.call-text` | C3 |
-  | the fallback is the stack, and it says so, in both front-ends | C2 (terminal caption), C5 (GPUI's stack) |
+  | the fallback is the stack, and it says so, in both front-ends | C2 (terminal caption), C5 (the shared stop loader's stack) |
   | no brackets, no rule, colour and weight; reverse+bold in monochrome | B1, B2, B4, B3 |
   | the focused pane's ring: the desktop's colour, closed on every edge | K1, K2, K3 |
   | GPUI's outline colour and active-tab weight | K4, K5 |
@@ -181,7 +181,10 @@ ROLES = "src/frontend/tui/app/theme/roles.nim"
 EDTHEME = "src/frontend/tui/app/theme/editor_theme.nim"
 GUTTER = "src/frontend/tui/app/views/gutter.nim"
 SESSION = "src/frontend/tui/host/tui_session.nim"
-NATIVE = "src/frontend/tui/host/native_host.nim"
+# The per-stop loads every front-end runs (`d883db0e2`, one per-stop loader
+# for every front-end): the no-call-trace stack fallback moved here from
+# `tui/host/native_host.nim`, which now only asks the loader for it.
+STOPLOADER = "src/frontend/viewmodel/sdk/stop_loader.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 CTVIEW = "src/frontend/tui/app/views/call_trace.nim"
 SRCPANE = "src/frontend/tui/app/views/source_pane.nim"
@@ -244,7 +247,7 @@ TOKENS_GATE = "ci/test/design-tokens-fresh.sh"
 DESKTOP_GATE = "scripts/plat45-capture-electron.sh"
 
 SUBJECTS = [DESK, FRONT, GENERATED, TOKENS, EMITTER, ROLES, EDTHEME, GUTTER,
-            SESSION, NATIVE, SHELL, CTVIEW, PANEVIEWS, TABSTRIP, CHROME, CAPS,
+            SESSION, STOPLOADER, SHELL, CTVIEW, PANEVIEWS, TABSTRIP, CHROME, CAPS,
             SOURCEVM, CELLS, SRCPANE, RUNTIME, LEXER, WHITE, DESKCONFIG,
             LEXICAL, MONARCH, JSREGEX, MONARCH_JSON, ISOLATION, VCSPARSE,
             VCSVM, VCSPANE, VCSSOURCE, INTERACTION, BINDING, FRAMEOVERLAY,
@@ -493,11 +496,16 @@ ARMS = [
         "        discard content\n",
         C_FALLBACK,
         "the terminal's stack fallback no longer says it is one"),
-    Arm("C5", NATIVE,
-        "  vm.fallbackStack.val = names\n",
-        "  vm.fallbackStack.val = newSeq[string]()\n",
+    # C5 RE-AIMED 2026-10-22: `d883db0e2` moved the fallback's load from
+    # `native_host` into the SDK's stop loader (`loadCallStackFallback`),
+    # which both native front-ends run; the defect is the same line there.
+    Arm("C5", STOPLOADER,
+        "      vm.fallbackStack.val = names\n",
+        "      vm.fallbackStack.val = newSeq[string]()\n",
         C_FALLBACK,
-        "GPUI's calltrace VM is never handed the stack when there is no trace"),
+        "the calltrace VM GPUI renders is never handed the stack when there "
+        "is no trace: the shared stop loader answers the fallback with "
+        "nothing"),
     # --- tab strips -----------------------------------------------------------
     Arm("B1", TABSTRIP,
         '  ActiveTabOpen* = " "\n  ActiveTabClose* = " "\n',
@@ -568,27 +576,43 @@ ARMS = [
 
 ARMS += [
     # --- the execution band ------------------------------------------------------
+    # X1/X2 RE-AIMED 2026-10-22: M73 (`d1b009363`) ends the band at the
+    # code's last column (`codeW`, the pane's last column unless the vertical
+    # bar holds it) instead of `area.col + area.width - codeCol`; the claim
+    # is unchanged. X1, X2, P1, P2, P5 and P6 were each killed at codetracer
+    # `e353dcb7b`, in a grade of 64 of the 73 arms (all 64 killed) over a
+    # provisional record that was then retracted: T4's gate and
+    # `test_plat47_gpui_parity.nim` (K4-K6, Q3, H1, H2, H4, P7) are red
+    # unmutated there, for reasons recorded in codetracer-pm `issues/`.
     Arm("X1", SRCPANE,
-        "      g.restyle(row, codeCol, area.col + area.width - codeCol,\n",
-        "      g.restyle(row, codeCol, min(12, area.col + area.width - codeCol),\n",
+        "      g.restyle(row, codeCol, codeW,\n",
+        "      g.restyle(row, codeCol, min(12, codeW),\n",
         C_COLOURS,
         "the execution band ends a few cells in, as CTUI-5's text-length band "
         "did, instead of reaching the pane's right edge like Monaco's"),
     Arm("X2", SRCPANE,
-        "      g.restyle(row, codeCol, area.col + area.width - codeCol,\n",
-        "      g.restyle(row, area.col, area.width,\n",
+        "      g.restyle(row, codeCol, codeW,\n",
+        "      g.restyle(row, area.col, codeCol - area.col + codeW,\n",
         C_COLOURS,
         "the band covers the gutter too, where the desktop draws none"),
     # --- the call trace pages ----------------------------------------------------
+    # P1/P2 (and P5/P6 below) RE-AIMED 2026-10-22: HSF-V2 (`2a3cfeb5f`)
+    # makes the pane REPORT its viewport to `CalltraceVM.setViewport`, which
+    # asks for the section, instead of each front-end requesting it. The
+    # claims are the same: the window the pane scrolled to is reported (P1),
+    # at the row it is scrolled to (P2).
     Arm("P1", SESSION,
-        "  if top >= first and last <= first + model.rows.len:\n    return\n",
-        "  if true:\n    return\n",
+        "  let held = (model.firstIndex.int, model.rows.len)\n"
+        "  s.calltrace.setViewport(cellPaneViewport(\n",
+        "  let held = (model.firstIndex.int, model.rows.len)\n"
+        "  if true: return\n"
+        "  s.calltrace.setViewport(cellPaneViewport(\n",
         C_PAGES,
         "the pane never loads a section past the first: the trace ends where "
         "the open-time section ended"),
     Arm("P2", SESSION,
-        "      startIndex = start.int64, height = body + 2 * CallTraceBuffer,\n",
-        "      startIndex = 0'i64, height = body + 2 * CallTraceBuffer,\n",
+        "    body, rt.paneBodyCols(paneCalltrace), top,\n",
+        "    body, rt.paneBodyCols(paneCalltrace), 0,\n",
         C_PAGES,
         "a page request always reads the trace's head, not the rows scrolled to"),
     # P3 (the title counts the whole trace, not the loaded section) retired
@@ -772,13 +796,16 @@ ARMS += [
         "GPUI's panes carry no border: the outline is not drawn at all"),
     # --- GPUI's call trace (B3) --------------------------------------------------
     Arm("P5", GPUIHOST,
-        "  if result.top >= first and last <= first + held:\n    return\n",
-        "  if true:\n    return\n",
+        "  let held = (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len)\n"
+        "  vm.setViewport(cellPaneViewport(body, widthPx, result.top,\n",
+        "  let held = (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len)\n"
+        "  if true: return\n"
+        "  vm.setViewport(cellPaneViewport(body, widthPx, result.top,\n",
         C_G_PAGES,
         "GPUI never reads a section past the first"),
     Arm("P6", GPUIHOST,
-        "    session.requestAndLoadCalltrace(startIndex = int64(start),\n",
-        "    session.requestAndLoadCalltrace(startIndex = 0'i64,\n",
+        "  vm.setViewport(cellPaneViewport(body, widthPx, result.top,\n",
+        "  vm.setViewport(cellPaneViewport(body, widthPx, 0,\n",
         C_G_PAGES,
         "GPUI's page request always reads the trace's head"),
     Arm("P7", GPUIMAIN,
@@ -829,8 +856,12 @@ ARMS += [
         C_G_DISMISS,
         "a press outside the revealed pane leaves it over the tree"),
     # --- GPUI's editor rows are whole lines ---------------------------------------
+    # D4 RE-AIMED 2026-10-17: the redesign counts the partly visible last
+    # row as Monaco does (`EditorPadTopPx`, rounded up), so the count's
+    # expression spans two lines; the defect is unchanged.
     Arm("D4", WINGEOM,
-        "  max(1, (h - 2 * ChromePaddingPx - EditorLinesAbovePx) div GpuiEditorRowPx)\n",
+        "  max(1, (h - EditorPadTopPx - EditorLinesAbovePx + GpuiEditorRowPx - 1) div\n"
+        "         GpuiEditorRowPx)\n",
         "  max(1, g.viewport.h div 20)\n",
         C_G_ROWS,
         "the fetch window counted from the WINDOW's height at a nominal 20 px "

@@ -134,11 +134,16 @@ SESSTABS = "src/frontend/headless_app/session_tabs.nim"
 CALLVIEW = "src/frontend/tui/app/views/call_trace.nim"
 EVLOGVIEW = "src/frontend/tui/app/views/event_log.nim"
 TUISESSION = "src/frontend/tui/host/tui_session.nim"
+# The native hosts' shared driver (`ad7805dbd`): what follows a call-trace
+# click or toggle, for the terminal and GPUI alike.
+SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
 NATIVEHOST = "src/frontend/tui/host/native_host.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
 GESTURES = "src/frontend/gpui/window_gestures.nim"
-DESKEVLOG = "src/frontend/ui/event_log.nim"
-DESKCALL = "src/frontend/ui/calltrace.nim"
+# `ui/event_log.nim` and `ui/calltrace.nim` are no longer subjects: the
+# desktop draws both panes through the ONE generic view each
+# (`1c18341dd`, `730399e0e`) and decodes the call trace with the shared
+# store, so EL8, EM1 and CT14 aim there (re-aimed 2026-10-23).
 OMNISRC = "src/frontend/viewmodel/viewmodels/omnibar_sources.nim"
 # The review's subjects (2026-10-03): the footer's file info, the session
 # strip's "+" and the hosts that open a second session, the desktop's column
@@ -169,12 +174,18 @@ GPLAN2 = "src/frontend/gpui/tests/test_plat49_panes_gpui_plan.nim"
 DESKTOP_GATE_B = DESKTOP_GATE + "#panes"
 SPEC_B = "src/tests/gui/tests/visual/plat49-panes-capture.spec.ts"
 
+# PANEVIEWS LEFT THE SUBJECTS 2026-10-17: its two arms (TI5, EL7) graded
+# what the GPUI window drew through the vocabulary's State and Event Log
+# views, and the Electron-parity redesign draws both panes natively
+# (`leaves.renderState`, `leaves.renderEventLog`), so both arms SURVIVED as
+# no-ops and were re-aimed at those procs. No arm of this harness aims at
+# `pane_views.nim` any more, and a subject with no arm is refused.
 SUBJECTS = [TOPBAR, SHELL, BINDING, RUNTIME, ROLES, STATUS, VARS, TUIMAIN,
             DCVM, OMNIVM, STATEVM, DESKPALETTE, WINTOP, WINGEOM, CHROME,
-            GPUIMAIN, PRODMODE, PANEVIEWS, CARET,
+            GPUIMAIN, PRODMODE, CARET,
             CALLVM, EVLOGVM, STORE, INTERACT, LAYMODEL, HOVER, SESSTABS,
             CALLVIEW, EVLOGVIEW, TUISESSION, NATIVEHOST, GPUILEAVES,
-            GESTURES, DESKEVLOG, DESKCALL, OMNISRC,
+            GESTURES, SESSDRIVER, OMNISRC,
             FOOTERINFO, TUIAPP, DESKEVLOGVIEW, GPUISHELL, GLHIT]
 SUITES = [VMU, T1, REF, PROF, PTY, GPLAN, DESKTOP_GATE,
           VMU2, T2, REF2, PTY2, GPLAN2, DESKTOP_GATE_B]
@@ -246,7 +257,7 @@ R_GPUIMENU = ("GPUI draws the same menu: one button, a first level below it, "
 R_TOOLTIPS = ("every transport tooltip is the ViewModel's, over the desktop's "
               "binding")
 H_NOHINTS = "the status bar carries no key-hint strip, at any profile or mode"
-P_MENU = ("row 0 holds one root button; F12 drops the first level; Right "
+P_MENU = ("row 0 holds one root button; Alt+` drops the first level; Right "
           "cascades")
 P_CLICKS = ("clicks never drag; a tab click activates; past the threshold is a "
             "drag")
@@ -262,8 +273,10 @@ P_VARS = ("no category rows, no lone first column: each row starts with its "
 G_MENU = ("one root menu button; the first level below it; submenus cascade "
           "right")
 G_HEADINGS = "no heading in any pane; every pane box has a strip naming it"
-G_STRIPS = ("strips on their own ground; the selected tab its own background "
-            "and foreground")
+# RENAMED 2026-10-17 with the Electron-parity redesign: the desktop's strip
+# is transparent over the window's ground, the selected tab on its pane's.
+G_STRIPS = ("strips on the window's ground; the selected tab one shape with its "
+            "pane")
 G_EDITORTAB = "a lone editor's tab is its file; an Edit window's marks it dirty"
 G_TOOLTIP = "the pointer over a control: the ViewModel's tooltip"
 G_OMNIBAR = "the omnibar: the ViewModel's placeholder; the query with its caret"
@@ -442,8 +455,8 @@ ARMS = [
         S_STRIPS,
         "no strip is painted over a pane: the painters' headings show"),
     Arm("TI3", GPUIMAIN,
-        "    if id.len > 0 and id notin gPanes: gPanes[id] = pane\n    stripHeading(r, pane)\n",
-        "    if id.len > 0 and id notin gPanes: gPanes[id] = pane\n",
+        "      markPaneScope(r, pane, id)\n    stripHeading(r, pane)\n",
+        "      markPaneScope(r, pane, id)\n",
         G_HEADINGS,
         "the GPUI window keeps every leaf's heading"),
     Arm("TI4", WINGEOM,
@@ -452,9 +465,15 @@ ARMS = [
         G_HEADINGS,
         "a bare pane in the GPUI window has no strip naming it"),
 
-    Arm("TI5", PANEVIEWS,
-        '  result.root = viewCollapsible("state", "", @[tabs, tree],\n',
-        '  result.root = viewCollapsible("state", "State", @[tabs, tree],\n',
+    # TI5 RE-AIMED 2026-10-17: the redesigned GPUI State pane is drawn
+    # natively by `leaves.renderState` (the desktop's head, code line and
+    # rows); the vocabulary's collapsible root it used to title no longer
+    # reaches the window, so the old mutation SURVIVED as a no-op. The same
+    # defect, planted where the pane is drawn now: a "State" row at its top.
+    Arm("TI5", GPUILEAVES,
+        '  r.setAttribute(body, "data-ct-state", "desktop")\n',
+        '  r.setAttribute(body, "data-ct-state", "desktop")\n'
+        '  r.appendChild(body, r.createTextNode("State"))\n',
         G_HEADINGS,
         "GPUI's State pane titles itself again under its strip"),
 
@@ -464,9 +483,14 @@ ARMS = [
         "    if false:\n      lone = file\n",
         P_STRIPS,
         "the terminal's lone editor tab names the pane, not its file"),
+    # ET2 RE-AIMED 2026-10-17: the label is the file's folder and name now
+    # (`calc/main.py`, the desktop's), so the dirty mark closes a two-line
+    # expression; the defect still drops it.
     Arm("ET2", PRODMODE,
-        '  name & (if dirty: " ●" else: "")\n',
-        '  name\n',
+        '  (if folder.len > 0: folder & "/" & name else: name) &\n'
+        '    (if dirty: " ●" else: "")\n',
+        '  (if folder.len > 0: folder & "/" & name else: name) &\n'
+        '    ""\n',
         G_EDITORTAB,
         "the shared editor tab label drops the unsaved-changes mark"),
     Arm("ET3", GPUIMAIN,
@@ -501,14 +525,31 @@ ARMS = [
         "                      mono = {raBold}),\n    # PLAT-50 (the user, 2026-10-02: \"the black",
         P_MONO,
         "monochrome: the selected tab without reverse video"),
-    Arm("TC5", CHROME,
-        '       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]\n',
-        '       chromeOf(if focused: crFocusOutline else: crTabStripBackground))]\n',
+    # TC5 RE-AIMED 2026-10-17: the window's strips no longer read
+    # `chrome.tabStyle` (only the root menu button does); the selected tab's
+    # ground is set in `main`'s strip loop — lifted onto the window's ground
+    # on a focused strip, its pane's ground elsewhere. The defect leaves the
+    # focused strip's selected tab on the strip's own (focus) ground.
+    Arm("TC5", GPUIMAIN,
+        '          r.setStyle(tab, "background-color", chromeOf(crTabStripBackground))\n',
+        '          discard\n',
         G_STRIPS,
         "GPUI's selected tab on the strip's own ground"),
+    # TC5b ADDED 2026-10-17: TC5's original defect, kept on `chrome.tabStyle`
+    # where the band's SESSION tabs still read it (the window's strips no
+    # longer do); graded by the session-tab grounds the + case now asserts.
+    Arm("TC5b", CHROME,
+        '       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]\n',
+        '       chromeOf(if focused: crTabStripBackground else: crTabStripBackground))]\n',
+        G3_ADD,
+        "GPUI's active session tab on the strip's own ground"),
+    # TC6 RE-AIMED 2026-10-17: the desktop's strip is transparent over the
+    # window's ground, so only the FOCUSED strip takes `stripStyle` now (the
+    # focus colour); the defect drops that ground.
     Arm("TC6", GPUIMAIN,
-        "      for (key, value) in stripStyle(focusedHere):\n        r.setStyle(strip, key, value)\n",
-        "      discard stripStyle(focusedHere)\n",
+        "      if focusedHere:\n        for (key, value) in stripStyle(focusedHere):\n"
+        "          r.setStyle(strip, key, value)\n",
+        "      if focusedHere:\n        discard stripStyle(focusedHere)\n",
         G_STRIPS,
         "GPUI's strip without its own ground"),
 
@@ -570,9 +611,11 @@ ARMS = [
         "        if false:\n",
         P_DRAWN,
         "no caret at all where the terminal does not shape its cursor"),
+    # OB7 RE-AIMED 2026-10-17: the redesigned field picks its caret once
+    # (`let caret`), for the query and the open placeholder alike.
     Arm("OB7", GPUIMAIN,
-        '            (if gOmnibar.overwrite: "█" else: "▏") &\n            gOmnibar.query[c .. ^1]\n',
-        '            (if gOmnibar.overwrite: "▏" else: "█") &\n            gOmnibar.query[c .. ^1]\n',
+        '        let caret = if gOmnibar.overwrite: "█" else: "▏"\n',
+        '        let caret = if gOmnibar.overwrite: "▏" else: "█"\n',
         G_OMNIBAR,
         "GPUI's caret glyphs swapped between insert and overwrite"),
     Arm("CR1", CARET,
@@ -580,14 +623,14 @@ ARMS = [
         '  NoShapeTerms* = ["dumb", ',
         P_DRAWN,
         "isonim-tui tells the Linux console it shapes its cursor"),
+    # DT1 RE-AIMED 2026-10-23: `277ebc777` made the palette ONE view for
+    # every renderer, so the DOM variant's copy of the placeholder is gone;
+    # the one left is the desktop's input.
     Arm("DT1", DESKPALETTE,
-        "variant above draws it.\n                  placeholder = OmnibarPlaceholder,\n",
-        'variant above draws it.\n                  placeholder = "Search...",\n',
+        "draw the same words.\n                placeholder = OmnibarPlaceholder,\n",
+        'draw the same words.\n                placeholder = "Search...",\n',
         D_DESKTOP,
-        "the desktop's palette (the DOM renderer's input) keeps words of its own",
-        also=((DESKPALETTE,
-               "draw the same words.\n                placeholder = OmnibarPlaceholder,\n",
-               'draw the same words.\n                placeholder = "Search...",\n'),)),
+        "the desktop's palette (the DOM renderer's input) keeps words of its own"),
 
     # --- 10. key hints ---------------------------------------------------------
     Arm("KH1", STATUS,
@@ -672,9 +715,11 @@ ARMS = [
         "      of cthRow:\n        outcome.jumpsToCall = false\n",
         P2_JUMP,
         "a click on a call-trace row goes nowhere"),
-    Arm("CT9", TUISESSION,
-        "  let command = if line.isExpanded: \"ct/collapse-calls\" else: \"ct/expand-calls\"\n",
-        "  let command = if line.isExpanded: \"ct/expand-calls\" else: \"ct/collapse-calls\"\n",
+    # CT9 RE-AIMED 2026-10-23: `ad7805dbd` moved the terminal's toggle into
+    # the hosts' shared driver (`session_driver.toggleCallChildren`).
+    Arm("CT9", SESSDRIVER,
+        "  let command = if collapse: \"ct/collapse-calls\" else: \"ct/expand-calls\"\n",
+        "  let command = if collapse: \"ct/expand-calls\" else: \"ct/collapse-calls\"\n",
         P2_JUMP,
         "the terminal's toggle expands an expanded call instead of collapsing it"),
     Arm("CT10", GPUILEAVES,
@@ -682,14 +727,16 @@ ARMS = [
         "        of csPunct, csArgName, csArgValue: CallTextColour\n",
         G2_ROWS,
         "GPUI draws the arguments in the body text, not their colour"),
+    # CT11 RE-AIMED 2026-10-23: `ad7805dbd`: GPUI's row press goes to the
+    # call through the shared driver (`session_driver.jumpToCall`).
     Arm("CT11", GPUIMAIN,
-        "    gSession.calltraceJumpByLine(line)\n",
-        "    discard line\n",
+        "  let why = gSession.jumpToCall(row.index)\n",
+        "  let why = \"\"\n",
         G2_JUMP,
         "a press on a GPUI call-trace row goes nowhere"),
     Arm("CT12", NATIVEHOST,
-        "  vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), names))\n",
-        "  vm.selectEntry(currentCallOf(lines, s.getCurrentRRTicks(), @[\"?\"]))\n",
+        "  vm.selectEntry(currentCallInSectionOf(lines, s.getCurrentRRTicks(), names,\n",
+        "  vm.selectEntry(currentCallInSectionOf(lines, s.getCurrentRRTicks(), @[\"?\"],\n",
         G2_ROWS,
         "GPUI selects no call where the desktop selects the current one"),
     Arm("CT13", CALLVM,
@@ -697,9 +744,12 @@ ARMS = [
         "       l.depth == stack.len:\n",
         S2_ROLES,
         "the current call is looked for one level too deep"),
-    Arm("CT14", DESKCALL,
-        "    if text.len > 0:\n      result.add makeCallArg(\"__return\", text)\n",
-        "    if false:\n      result.add makeCallArg(\"__return\", text)\n",
+    # CT14 RE-AIMED 2026-10-23: `730399e0e` made the desktop decode its call
+    # trace sections with the shared store (`applyCalltraceResponse`), so its
+    # return values come from `callArgsOf`, the line the native decoder uses.
+    Arm("CT14", STORE,
+        "  if r.len > 0:\n    result.add CallArg(name: \"__return\", text: r)\n",
+        "  if false:\n    result.add CallArg(name: \"__return\", text: r)\n",
         D_DESKTOP_B,
         "the desktop's decoder drops the return values again"),
 
@@ -724,9 +774,11 @@ ARMS = [
         "  let header = false\n",
         S2_LOGHEAD,
         "the terminal's event log draws no column header"),
+    # EL5 RE-AIMED 2026-10-21 (PLAT-70 Part B): the rows and the header are
+    # laid out by ONE table, `columnCellsOf`; hidden columns enter there.
     Arm("EL5", EVLOGVIEW,
-        "  let shown = model.columns.visibleColumns\n  for k, col in shown:\n",
-        "  let shown = model.columns.order\n  for k, col in shown:\n",
+        "  let shown = model.columns.visibleColumns\n  var at = startCol\n",
+        "  let shown = model.columns.order\n  var at = startCol\n",
         S2_LOGHEAD,
         "the terminal's rows draw every column, hidden ones included"),
     Arm("EL6", RUNTIME,
@@ -734,16 +786,25 @@ ARMS = [
         "  describeColumns(c)\n",
         P2_LOG,
         "`:column-show` reports a change it never makes"),
-    Arm("EL7", PANEVIEWS,
+    # EL7 RE-AIMED 2026-10-17: the GPUI event log is drawn natively by
+    # `leaves.renderEventLog` (the desktop's table); the vocabulary table
+    # this arm hid columns in no longer reaches the window. Same defect there.
+    Arm("EL7", GPUILEAVES,
         "  let shown = vm.columns.val.visibleColumns\n",
         "  let shown = vm.columns.val.order\n",
         G2_LOG,
         "GPUI's table draws every column, hidden ones included"),
-    Arm("EL8", DESKEVLOG,
-        "        let shown = columnState.isVisible(column)\n",
-        "        let shown = true\n",
+    # EL8 RE-AIMED 2026-10-23: `1c18341dd` made the desktop Event Log ONE
+    # view over its ViewModel; its header and its rows take the shown columns
+    # from `visibleColumns`, and the arm draws every column in both.
+    Arm("EL8", DESKEVLOGVIEW,
+        "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
+        "    proc(): seq[EventLogColumn] = vm.columns.val.order,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
         D_DESKTOP_B,
-        "the desktop shows the location column again"),
+        "the desktop shows the location column again",
+        also=((DESKEVLOGVIEW,
+               "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`",
+               "    proc(): seq[EventLogColumn] = vm.columns.val.order,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`"),)),
 
     Arm("EL9", TUISESSION,
         "  if keptColumns.order.len > 0:\n    rt.app.eventLog.columns = keptColumns\n",
@@ -856,9 +917,11 @@ ARMS = [
         "        discard\n",
         P2_HOVER,
         "the terminal's pointer passing over a label previews nothing"),
+    # FT10 RE-AIMED 2026-10-21 (PLAT-70 Part B): the same clock line now
+    # also ticks the table cells' hover (`or rt.tickCellHover`).
     Arm("FT10", TUIMAIN,
-        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = rt.tickAutoHide(nowMs())\n",
-        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = false\n",
+        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = rt.tickAutoHide(nowMs()) or\n",
+        "      # the pointer rested on a label, a dismissal due after it left.\n      let hoverChanged = false or\n",
         P2_HOVER,
         "the terminal's loop never runs the hover's clock"),
     Arm("FT11", GESTURES,
@@ -866,9 +929,11 @@ ARMS = [
         "        let cmd = cmdCloseDocked(was.source)\n",
         G2_DOCK,
         "a GPUI label click never docks its pane open"),
+    # FT12 RE-AIMED 2026-10-17: the desktop's layout runs directly into its
+    # status bar (no gap), so the area's cut is at the footer's own top.
     Arm("FT12", WINGEOM,
-        "    result.area.h = max(1, bottom - result.area.y)\n",
-        "    discard bottom\n",
+        "    result.area.h = max(1, result.footer.y - result.area.y)\n",
+        "    discard\n",
         G2_FOOTER,
         "GPUI's layout area runs under its footer"),
     Arm("FT13", GPUIMAIN,
@@ -1030,10 +1095,12 @@ ARMS = [
         P2_ROWSCUR,
         "the active-row ground is the panel's: nothing marks the row"),
     Arm("CG3", GPUILEAVES,
-        "          (if selected: CallTextColour else: CallToggleColour)\n",
-        "          CallToggleColour\n",
+        '                                                (if selected: "-active" else: "")))\n',
+        '                                                (if false: "-active" else: "")))\n',
         G2_ROWS,
-        "GPUI's selected row keeps the muted toggle, illegible on its ground"),
+        "GPUI's selected row keeps the plain toggle, not the desktop's active "
+        "one (re-aimed 2026-10-17: the muted toggle colour it targeted was "
+        "removed with the redesign; the toggle is an SVG now)"),
 
     # --- review: the session strip's "+" ---------------------------------------
     Arm("NT1", TOPBAR,
@@ -1071,8 +1138,10 @@ ARMS = [
         "  discard gShell.app.activateTab(index)\n",
         G3_ADD,
         "GPUI's tab click switches the strip, not the window"),
+    # NT8 RE-AIMED 2026-10-17: the caption bar's row ends at `x1` (the
+    # measured desktop bar); the "+" is laid out against it.
     Arm("NT8", WINTOP,
-        "  if canAddTab and x + SessionTabAddPx <= band.x + band.w:\n",
+        "  if canAddTab and x + SessionTabAddPx <= x1:\n",
         "  if false:\n",
         G3_ADD,
         "GPUI's band has no \"+\""),
@@ -1088,14 +1157,27 @@ ARMS = [
         "GPUI's window keeps the first session's ViewModels in every leaf"),
 
     # --- review: the desktop's column menu --------------------------------------
-    Arm("EM1", DESKEVLOG,
-        "        if comp.init and wanted != appliedEventLogColumns:\n",
-        "        if false:\n",
+    # EM1 RE-AIMED 2026-10-23: the desktop's table is no longer rebuilt by
+    # its host when the columns change (`1c18341dd`): the generic view's
+    # header and rows read `vm.columns` in the closures that key them, so a
+    # menu change redraws them. The arm reads the columns UNTRACKED in both,
+    # so the menu changes the ViewModel and the table stays as it was.
+    Arm("EM1", DESKEVLOGVIEW,
+        "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
+        "    proc(): seq[EventLogColumn] = untrack(proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns),\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      renderEventCell",
         D_DESKTOP_B,
-        "the desktop's column menu changes the ViewModel and not the table"),
+        "the desktop's column menu changes the ViewModel and not the table",
+        also=((DESKEVLOGVIEW,
+               "    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`",
+               "    proc(): seq[EventLogColumn] = untrack(proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns),\n    proc(col: proc(): EventLogColumn; index: proc(): int): N =\n      ui(r):\n        span(class = columnClass(col()), `data-column`"),
+              (DESKEVLOGVIEW,
+               "import isonim/core/[signals, computation]\n",
+               "import isonim/core/[signals, computation, batch]\n"))),
+    # EM2 RE-AIMED 2026-10-23: the menu's buttons take their handlers from
+    # `onMoveColumn` (`1c18341dd`).
     Arm("EM2", DESKEVLOGVIEW,
-        "                   onclick = proc() = discard vm.moveColumn(item(), -1)):\n",
-        "                   onclick = proc() = discard vm.moveColumn(item(), 1)):\n",
+        "                 onclick = onMoveColumn(vm, item(), -1)):\n",
+        "                 onclick = onMoveColumn(vm, item(), 1)):\n",
         D_DESKTOP_B,
         "the desktop menu's move-left moves right"),
 ]

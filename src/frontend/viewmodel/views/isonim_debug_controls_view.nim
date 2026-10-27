@@ -1,62 +1,60 @@
 ## views/isonim_debug_controls_view.nim
 ##
-## IsoNim DOM-rendering view for the Debug Controls toolbar — primary
-## renderer.
+## The topbar's debugger controls, as ONE view generic over the renderer
+## (Shared-DOM-Front-Ends D3): the same proc runs under `MockRenderer` in the
+## headless lanes and under `WebRenderer` in Electron and the web page.
 ##
-## Renders a live, reactive DOM tree driven by `DebugControlsVM`
-## signals. Button enabled/disabled state is reactive on the VM's
-## `canStepForward`, `canStepBackward`, `canContinue` memos; the
-## status text reads `vm.statusText.val`.
-##
-## Two structures are produced:
-##
-## - `MockRenderer` — a minimal toolbar with text-glyph buttons used by
-##   headless unit tests.
-## - `WebRenderer` — the Karax-compatible toolbar with SVG icons,
-##   tooltips and `.separate-bar` dividers, IDs `{action}-image` for
-##   Playwright targeting (see `page-objects/debug-toolbar-ids.ts`; the
-##   ids were renamed from `{action}-debug` and this line said so for
-##   longer than it was true — `jump-to-live-debug` is the one control
-##   the rename left alone), and click handlers that delegate to the
-##   VM's legacy bridge callbacks (`onDapStep`, `onAction`).
+## Every button is the toolbar action its id names, dispatched through
+## `DebugControlsVM.invokeToolbarAction` — the one route a click, a key chord
+## and a menu item take. Ids follow the `{action}-image` pattern the
+## Playwright page objects expect (`page-objects/debug-toolbar-ids.ts`).
 ##
 ## Every button carries a `.custom-tooltip` child whose text is built by
-## `DebugControlsVM.toolbarTooltip`, which READS the chord currently bound
-## to that control instead of restating it. Both panels use it, so the
-## headless lane can assert the same text the browser paints.
+## `DebugControlsVM.toolbarTooltip`, which READS the chord bound to that
+## control instead of restating it.
 ##
-## Each panel is expressed as a single `ui()` block; per-button
-## reactivity (the `disabled` attribute) is wired afterwards via the
-## `reactiveDisabled` helper so the structure remains visible at one
-## source location.
+## Structure that changes is expressed with IsoNim's control-flow components,
+## never with `if` / `for` over a signal inside `ui(r)`: the mode label and
+## the history lists are `show` regions, the lists' rows an `indexEach`. A
+## button's `disabled` attribute is a render effect on its VM memo.
+##
+## `renderTopbar` is what the menu shell puts in its toolbar host: this panel
+## or the edit-mode toolbar, chosen by `DebugControlsVM.topbarSurface`.
+
+import std/[options, strutils]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 import ./debug_control_marks
+import ./isonim_edit_mode_toolbar_view
 
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
-import ../viewmodels/debug_controls_vm
+import ../viewmodels/[debug_controls_vm, edit_mode_toolbar]
+# A generic view is instantiated where it is called, and the `ui` macro's
+# expansion names `createRenderEffect` and the control-flow components there:
+# exported so a caller needs no IsoNim import of its own to render this view.
+export signals, computation, components
+
+const
+  HistoryListId* = "history-list"
+    ## The open jump-history list's container.
 
 # ---------------------------------------------------------------------------
-# Reactive disabled — a small helper used by both panels
+# Reactive attributes
 # ---------------------------------------------------------------------------
 #
-# Browsers treat any value of `disabled` (including the empty string)
-# as "disabled", so we must add the attribute when the condition is
-# true and *remove* it when false. The DSL's dynamic-attribute path
-# always emits `setAttribute`, so this case is wired imperatively
-# against an element captured via `ref = var` in the surrounding
-# `ui()` block.
+# Browsers treat any value of `disabled` (including the empty string) as
+# "disabled", so the attribute is added when the condition holds and REMOVED
+# when it does not. The DSL's dynamic-attribute path always emits
+# `setAttribute`, so this case is wired against an element captured with
+# `ref = …` in the surrounding `ui()` block.
 
 proc reactiveDisabled[R, N](r: R; el: N; isDisabled: proc(): bool) =
-  ## Reactively toggle the `disabled` attribute on `el`. Call once per
-  ## button after the panel is built; the effect re-fires whenever a
-  ## signal read by `isDisabled()` changes.
   createRenderEffect proc() =
     if isDisabled():
       r.setAttribute(el, "disabled", "true")
@@ -64,317 +62,246 @@ proc reactiveDisabled[R, N](r: R; el: N; isDisabled: proc(): bool) =
       r.removeAttribute(el, "disabled")
 
 proc reactiveHidden[R, N](r: R; el: N; isHidden: proc(): bool) =
-  ## Reactively hide/show an element while keeping its DOM identity stable.
+  ## Hide or show an element while keeping its DOM identity stable.
   createRenderEffect proc() =
     if isHidden():
       r.setAttribute(el, "style", "display: none")
     else:
       r.removeAttribute(el, "style")
 
+proc action(vm: DebugControlsVM; actionId: string): proc() =
+  ## A click handler for one toolbar action, closing over THIS id.
+  let id = actionId
+  proc() = vm.invokeToolbarAction(id)
+
+proc historyEntryLabel*(entry: JumpEntry): string =
+  ## How a jump-history entry reads in the list: where, and when.
+  let file = entry.location.file
+  let base = file[file.rfind('/') + 1 .. ^1]
+  result = base & ":" & $entry.location.line & "  tick " & $entry.rrTicks
+  if entry.lastOperation.len > 0:
+    result.add "  (" & entry.lastOperation & ")"
+
 # ---------------------------------------------------------------------------
-# MockRenderer panel — minimal toolbar for headless tests
+# The history lists (`jump-before` / `jump-after`)
 # ---------------------------------------------------------------------------
 
-proc renderDebugControlsPanel*(r: MockRenderer;
-                               vm: DebugControlsVM): MockNode =
-  ## Render the complete Debug Controls toolbar for headless tests.
-  ##
-  ## Structure:
-  ##   div.debug-controls
-  ##     button.step-backward[disabled reactive]   ◀
-  ##     button.step-forward[disabled reactive]    ▶
-  ##     button.step-in[disabled reactive]         ↓
-  ##     button.step-out[disabled reactive]        ↑
-  ##     button.continue-btn[disabled reactive]    ⏩
-  ##     button.reverse-continue[disabled reactive] ⏪
-  ##     span.debug-toolbar-mode                   mode reactive
-  ##     span.recording-head-indicator             head reactive
-  ##     button.jump-to-live                       Live
-  ##     span.debug-status-text                    text reactive
+proc renderHistoryList[R, N](r: R; parent: N; vm: DebugControlsVM) =
+  ## The open history list: one row per entry, most relevant first; choosing
+  ## a row jumps there, `Escape`-like closing is the close button.
+  show(r, parent,
+    condition = proc(): bool = vm.historyList.val != hlNone,
+    body = proc(): N =
+      var rows: N
+      let list = ui(r):
+        tdiv(id = HistoryListId, class = "history-list",
+             `data-history-list` = (if vm.historyList.val == hlBefore: "before"
+                                    else: "after")):
+          tdiv(ref = rows, class = "history-list-rows"):
+            discard
+          button(class = "history-list-close",
+                 onclick = proc() = vm.stopJump()):
+            text "Close"
+      indexEach[JumpEntry, R, N](r, rows,
+        proc(): seq[JumpEntry] = vm.historyListEntries.val,
+        proc(entry: proc(): JumpEntry, index: int): N =
+          let position = index
+          ui(r):
+            button(class = "history-list-entry",
+                   onclick = proc() = vm.chooseHistoryEntry(position)):
+              text historyEntryLabel(entry()))
+      list)
+
+# ---------------------------------------------------------------------------
+# The debugger controls
+# ---------------------------------------------------------------------------
+
+proc renderDebugControlsPanel*[R, N](r: R; vm: DebugControlsVM): N =
+  ## The debugger-controls toolbar. Its layout is the desktop's, which the
+  ## Mode-Transitions rules forbid reordering:
+  ##   [history-back] [history-list-before] [history-forward]
+  ##   [history-list-after] | [reverse-next] [next] | [reverse-step-in]
+  ##   [step-in] | [reverse-step-out] [step-out] | [reverse-continue]
+  ##   [continue] | [run-to-entry] | [reset-operation] | [run-tests] | [stop]
+  ## `stop` is last behind its own divider: it is the only control here that
+  ## LEAVES the session rather than moving within it.
   var
-    stepBack, stepFwd, stepIn, stepOut, contBtn, revContBtn: MockNode
-    headIndicator, jumpLiveBtn: MockNode
+    backBtn, forwardBtn: N
+    revNextBtn, nextBtn: N
+    revStepInBtn, stepInBtn: N
+    revStepOutBtn, stepOutBtn: N
+    revContBtn, contBtn: N
+    runTestsBtn: N
+    modeHost, headIndicator, listHost: N
 
   let panel = ui(r):
-    tdiv(class = "debug-controls",
+    tdiv(class = "ct-header isonim-debug-controls",
+         # WHICH SURFACE THIS IS. The toolbar host carries this panel or the
+         # edit-mode toolbar, and they share `run-tests-image`; the root says
+         # which one a selector is looking at.
+         `data-topbar-surface` = DebugToolbarSurfaceValue,
          `data-session-mode` = $vm.store.session.val.debugSessionMode,
          `data-recording-head` = $vm.store.session.val.recordingHeadRRTicks):
-      button(ref = stepBack, class = "step-backward",
-             onclick = proc() = vm.stepBackward()):
-        text "◀"
+      tdiv(class = "separate-bar"):
+        discard
+      # -- History navigation, and its two lists --
+      button(ref = backBtn, id = "history-back-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "history-back")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("history-back", "History back")
+      button(id = "history-list-before-image",
+             class = "ct-button-image-md-secondary ct-button-no-border history-list-toggle",
+             onclick = action(vm, "jump-before")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("jump-before", "Earlier positions")
+      button(ref = forwardBtn, id = "history-forward-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "history-forward")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("history-forward", "History forward")
+      button(id = "history-list-after-image",
+             class = "ct-button-image-md-secondary ct-button-no-border history-list-toggle",
+             onclick = action(vm, "jump-after")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("jump-after", "Later positions")
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Reverse next / Next --
+      button(ref = revNextBtn, id = "reverse-next-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "reverse-next")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("reverse-next")
-      button(ref = stepFwd, class = "step-forward",
-             onclick = proc() = vm.stepForward()):
-        text "▶"
+      button(ref = nextBtn, id = "next-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "next")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("next")
-      button(ref = stepIn, class = "step-in",
-             onclick = proc() = vm.stepIn()):
-        text "↓"
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Reverse step-in / Step-in --
+      button(ref = revStepInBtn, id = "reverse-step-in-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "reverse-step-in")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("reverse-step-in")
+      button(ref = stepInBtn, id = "step-in-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "step-in")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("step-in")
-      button(ref = stepOut, class = "step-out",
-             onclick = proc() = vm.stepOut()):
-        text "↑"
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Reverse step-out / Step-out --
+      button(ref = revStepOutBtn, id = "reverse-step-out-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "reverse-step-out")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("reverse-step-out")
+      button(ref = stepOutBtn, id = "step-out-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "step-out")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("step-out")
-      button(ref = contBtn, class = "continue-btn",
-             onclick = proc() = vm.continueExecution()):
-        text "⏩"
-        tdiv(class = "custom-tooltip"):
-          text vm.toolbarTooltip("continue")
-      button(ref = revContBtn, class = "reverse-continue",
-             onclick = proc() = vm.reverseContinue()):
-        text "⏪"
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Reverse continue / Continue --
+      button(ref = revContBtn, id = "reverse-continue-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "reverse-continue")):
         tdiv(class = "custom-tooltip"):
           text vm.toolbarTooltip("reverse-continue")
-      if vm.toolbarModeText.val.len > 0:
-        span(class = "debug-toolbar-mode"):
-          text vm.toolbarModeText.val
-      span(ref = headIndicator, class = "recording-head-indicator"):
+      button(ref = contBtn, id = "continue-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "continue")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("continue")
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Run to entry --
+      button(id = "run-to-entry-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "run-to-entry")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("run-to-entry")
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Reset operation --
+      button(id = "reset-operation-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "reset-operation")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("reset-operation", "Reset operation")
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Run tests: pending while the run it started is in progress --
+      button(ref = runTestsBtn, id = "run-tests-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "run-tests")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("run-tests", "Record and replay tests in a new window")
+      tdiv(class = "separate-bar"):
+        discard
+      # -- Stop: the way out of the replay session, and back to editing.
+      # `GUI/Debugging-Features/Debugger-Controls.md` requires Stop to be
+      # reachable as a button, a menu entry and a chord.
+      button(id = "stop-image",
+             class = "ct-button-image-md-secondary ct-button-no-border",
+             onclick = action(vm, "stop")):
+        tdiv(class = "custom-tooltip"):
+          text vm.toolbarTooltip("stop", "Stop and return to editing")
+      span(ref = modeHost, class = "debug-toolbar-mode-host"):
+        discard
+      span(ref = headIndicator,
+           id = "recording-head-indicator",
+           class = "recording-head-indicator"):
         text vm.recordingHeadText.val
-      button(ref = jumpLiveBtn, class = "jump-to-live",
-             onclick = proc() = vm.jumpToLive()):
-        text "Live"
-      span(class = "debug-status-text"):
-        text vm.statusText.val
+      tdiv(ref = listHost, class = "history-list-host"):
+        discard
 
-  reactiveDisabled(r, stepBack,    proc(): bool = not vm.canStepBackward.val)
-  reactiveDisabled(r, stepFwd,     proc(): bool = not vm.canStepForward.val)
-  reactiveDisabled(r, stepIn,      proc(): bool = not vm.canStepForward.val)
-  reactiveDisabled(r, stepOut,     proc(): bool = not vm.canStepForward.val)
-  reactiveDisabled(r, contBtn,     proc(): bool = not vm.canContinue.val)
-  reactiveDisabled(r, revContBtn,  proc(): bool = not vm.canReverseContinue.val)
-  reactiveDisabled(r, jumpLiveBtn, proc(): bool = not vm.canJumpToLive.val)
-  reactiveHidden(r, headIndicator, proc(): bool = not vm.showRecordingHead.val)
-  reactiveHidden(r, jumpLiveBtn,   proc(): bool = not vm.showJumpToLive.val)
+  show(r, modeHost,
+    condition = proc(): bool = vm.toolbarModeText.val.len > 0,
+    body = proc(): N =
+      ui(r):
+        span(id = "debug-toolbar-mode", class = "debug-toolbar-mode"):
+          text vm.toolbarModeText.val)
+  renderHistoryList(r, listHost, vm)
+
+  reactiveDisabled(r, backBtn,       proc(): bool = not vm.canGoBack.val)
+  reactiveDisabled(r, forwardBtn,    proc(): bool = not vm.canGoForward.val)
+  reactiveDisabled(r, revNextBtn,    proc(): bool = not vm.canStepBackward.val)
+  reactiveDisabled(r, nextBtn,       proc(): bool = not vm.canStepForward.val)
+  reactiveDisabled(r, revStepInBtn,  proc(): bool = not vm.canStepBackward.val)
+  reactiveDisabled(r, stepInBtn,     proc(): bool = not vm.canStepForward.val)
+  reactiveDisabled(r, revStepOutBtn, proc(): bool = not vm.canStepBackward.val)
+  reactiveDisabled(r, stepOutBtn,    proc(): bool = not vm.canStepForward.val)
+  reactiveDisabled(r, revContBtn,    proc(): bool = not vm.canReverseContinue.val)
+  reactiveDisabled(r, contBtn,       proc(): bool = not vm.canContinue.val)
+  reactiveDisabled(r, runTestsBtn,   proc(): bool = vm.runTestsPending.val)
+  reactiveHidden(r, headIndicator,   proc(): bool = not vm.showRecordingHead.val)
+
+  # The stepping marks, attached from the `ControlMarks` table on the web: they
+  # are inline SVG painted with `currentColor` (see `debug_control_marks`).
+  when defined(js):
+    when N is isonim_dom.Element:
+      discard attachControlMarks(panel)
 
   panel
 
 # ---------------------------------------------------------------------------
-# WebRenderer panel — Karax-compatible toolbar
+# The topbar host's content
 # ---------------------------------------------------------------------------
-#
-# The toolbar layout matches the legacy Karax debug controls exactly:
-#   [history-back] [history-forward] | [reverse-next] [next] |
-#   [reverse-step-in] [step-in] | [reverse-step-out] [step-out] |
-#   [reverse-continue] [continue] | [run-to-entry] |
-#   [reset-operation] | [run-tests] | [stop]
-#
-# `stop` is the one addition to that legacy row, and it is last behind its own
-# divider: it is the only control here that LEAVES the session rather than
-# moving within it.
-#
-# All button IDs use the `{action}-image` pattern that Playwright page
-# objects expect (e.g. `#next-image`, `#continue-image`), mapped in
-# `src/tests/gui/page-objects/debug-toolbar-ids.ts`.
 
-when defined(js):
-
-  template stepClick(vm: DebugControlsVM; actionId: string): proc() =
-    ## Build a click handler that dispatches through the VM. The VM prefers
-    ## the legacy DAP bridge when installed and falls back to the shared
-    ## backend otherwise, so clicks do not silently disappear during VM
-    ## replacement/mount ordering.
-    let action = cstring(actionId)
-    proc() =
-      vm.invokeToolbarStep($action)
-
-  template actionClick(vm: DebugControlsVM; actionId: string): proc() =
-    ## Build a click handler for non-step actions (run-to-entry,
-    ## reset-operation, run-tests). Delegates to `vm.onAction`.
-    let action = actionId
-    proc() =
-      if not vm.onAction.isNil:
-        vm.onAction(action)
-
-  proc renderDebugControlsPanel*(r: WebRenderer;
-                                 vm: DebugControlsVM): isonim_dom.Element =
-    ## Render the complete Debug Controls toolbar using real DOM
-    ## elements. Every step button's `disabled` attribute is reactive
-    ## on the relevant VM memo; the structure itself is static.
-    var
-      revNextBtn, nextBtn:        isonim_dom.Element
-      revStepInBtn, stepInBtn:    isonim_dom.Element
-      revStepOutBtn, stepOutBtn:  isonim_dom.Element
-      revContBtn, contBtn:        isonim_dom.Element
-      headIndicator: isonim_dom.Element
-      # jumpLiveBtn: isonim_dom.Element  # TODO: re-enable with jump-to-live-debug button
-
-    let panel = ui(r):
-      tdiv(class = "ct-header isonim-debug-controls",
-           # WHICH SURFACE THIS IS. `#isonim-debug-controls` now holds one of
-           # two panels — this one or the edit-mode toolbar — and they share
-           # `run-tests-image`. Declaring the surface on both roots is what
-           # lets a selector say which one it means, and it lets a check
-           # distinguish "the debugger controls are mounted" from "no panel is
-           # mounted at all", which reading the buttons alone cannot.
-           `data-topbar-surface` = "debugger-controls",
-           `data-session-mode` = $vm.store.session.val.debugSessionMode,
-           `data-recording-head` = $vm.store.session.val.recordingHeadRRTicks):
-        tdiv(class = "separate-bar"):
-          discard
-        # -- History navigation --
-        button(id = "history-back-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = actionClick(vm, "history-back")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("history-back", "History back")
-        button(id = "history-forward-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = actionClick(vm, "history-forward")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("history-forward", "History forward")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Reverse next / Next --
-        button(ref = revNextBtn, id = "reverse-next-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "reverse-next")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-next")
-        button(ref = nextBtn, id = "next-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "next")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("next")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Reverse step-in / Step-in --
-        button(ref = revStepInBtn, id = "reverse-step-in-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "reverse-step-in")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-step-in")
-        button(ref = stepInBtn, id = "step-in-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "step-in")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("step-in")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Reverse step-out / Step-out --
-        button(ref = revStepOutBtn, id = "reverse-step-out-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "reverse-step-out")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-step-out")
-        button(ref = stepOutBtn, id = "step-out-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "step-out")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("step-out")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Reverse continue / Continue --
-        button(ref = revContBtn, id = "reverse-continue-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "reverse-continue")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reverse-continue")
-        button(ref = contBtn, id = "continue-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = stepClick(vm, "continue")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("continue")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Run to entry --
-        button(id = "run-to-entry-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = actionClick(vm, "run-to-entry")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("run-to-entry")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Reset operation --
-        button(id = "reset-operation-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = actionClick(vm, "reset-operation")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("reset-operation", "Reset operation")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- Run tests --
-        button(id = "run-tests-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = actionClick(vm, "run-tests")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("run-tests", "Record and replay tests in a new window")
-        tdiv(class = "separate-bar"):
-          discard
-        # -- STOP: the way out of the replay session, and back to editing.
-        #
-        # `GUI/Debugging-Features/Debugger-Controls.md` requires Stop to be
-        # reachable by all three of the routes CodeTracer offers a command —
-        # "a toolbar button, a menu entry and a chord". `renderer.stopAction`
-        # (now `ui/stop_command.stopReplaySession`) supplies the behaviour and
-        # `SHIFT+F5` supplies the chord; this is the BUTTON, which did not
-        # exist. The panel rendered thirteen controls and not one of them left
-        # the session, so the only way back to Edit mode was a chord with
-        # nothing on screen to suggest it.
-        #
-        # LAST IN THE BAR, behind its own divider, because it is the only
-        # control here that ENDS the session rather than moving within it.
-        # `Mode-Transitions.md` §3 rule 3 forbids re-ordering slots that are
-        # present in both modes and says nothing against giving a
-        # mode-leaving control its own group.
-        #
-        # `actionClick`, not `stepClick`: Stop is not a DAP step and must not
-        # go through `onDapStep`, which would send it to the engine as a move.
-        button(id = "stop-image",
-               class = "ct-button-image-md-secondary ct-button-no-border",
-               onclick = actionClick(vm, "stop")):
-          tdiv(class = "custom-tooltip"):
-            text vm.toolbarTooltip("stop", "Stop and return to editing")
-        if vm.toolbarModeText.val.len > 0:
-          span(id = "debug-toolbar-mode",
-               class = "debug-toolbar-mode"):
-            text vm.toolbarModeText.val
-        span(ref = headIndicator,
-             id = "recording-head-indicator",
-             class = "recording-head-indicator"):
-          text vm.recordingHeadText.val
-        # TODO: re-enable jump-to-live-debug button when ready
-        # button(ref = jumpLiveBtn,
-        #        id = "jump-to-live-debug",
-        #        class = "ct-button-image-md-secondary ct-button-no-border jump-to-live-debug",
-        #        onclick = proc() = vm.jumpToLive()):
-        #   tdiv(class = "custom-tooltip"):
-        #     text "Jump to live"
-        # tdiv(class = "separate-bar"):
-        #   discard
-
-    reactiveDisabled(r, revNextBtn,    proc(): bool = not vm.canStepBackward.val)
-    reactiveDisabled(r, nextBtn,       proc(): bool = not vm.canStepForward.val)
-    reactiveDisabled(r, revStepInBtn,  proc(): bool = not vm.canStepBackward.val)
-    reactiveDisabled(r, stepInBtn,     proc(): bool = not vm.canStepForward.val)
-    reactiveDisabled(r, revStepOutBtn, proc(): bool = not vm.canStepBackward.val)
-    reactiveDisabled(r, stepOutBtn,    proc(): bool = not vm.canStepForward.val)
-    reactiveDisabled(r, revContBtn,    proc(): bool = not vm.canReverseContinue.val)
-    reactiveDisabled(r, contBtn,       proc(): bool = not vm.canContinue.val)
-    # reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.canJumpToLive.val)  # TODO: re-enable with jump-to-live-debug
-    # reactiveDisabled(r, jumpLiveBtn,   proc(): bool = not vm.showJumpToLive.val)  # TODO: re-enable with jump-to-live-debug
-    reactiveHidden(r, headIndicator,   proc(): bool = not vm.showRecordingHead.val)
-
-    # The stepping marks. They are attached from the `ControlMarks` table
-    # rather than written into the twelve `button(...)` calls above, so the
-    # bar's structure stays readable at one glance and the marks stay in one
-    # place. They are inline SVG painted with `currentColor` — see
-    # `debug_control_marks` for why a `background-image` could not be themed.
-    # A short count logs itself there: a bar whose marks failed to attach
-    # still renders its buttons and they still click, so nothing else notices.
-    discard attachControlMarks(panel)
-
-    panel
-
-  proc mountIsoNimDebugControls*(container: isonim_dom.Element;
-                                 vm: DebugControlsVM) =
-    ## Mount the IsoNim debug controls toolbar as a child of
-    ## `container`. Reactive effects handle every subsequent update —
-    ## no manual redraw is needed. Call once after the
-    ## `DebugControlsVM` exists.
-    let r = WebRenderer()
-    let panel = renderDebugControlsPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+proc renderTopbar*[R, N](r: R; parent: N; vm: DebugControlsVM) =
+  ## Fill the menu shell's toolbar host: the debugger controls, or the
+  ## edit-mode commands a platform installed, by `vm.topbarSurface`.
+  show(r, parent,
+    condition = proc(): bool = vm.topbarSurface.val == tsDebuggerControls,
+    body = proc(): N = renderDebugControlsPanel[R, N](r, vm),
+    fallback = proc(): N =
+      renderEditModeToolbarPanel[R, N](r,
+        proc(): EditToolbarModel = vm.editToolbar.val.get(EditToolbarModel()),
+        proc(id: string) =
+          if not vm.editToolbarInvoke.isNil:
+            vm.editToolbarInvoke(id)))

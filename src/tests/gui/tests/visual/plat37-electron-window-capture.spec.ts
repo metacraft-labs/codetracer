@@ -1,0 +1,1212 @@
+/**
+ * plat37-electron-window-capture.spec.ts — **the Electron half of PLAT-37's
+ * macOS window-capture lane**, and the reference set GPUI parity is measured
+ * against.
+ *
+ * Driven by `ci/test/plat37-macos-electron-capture.sh`, which is the Electron
+ * twin of `ci/test/plat37-macos-window-capture.sh`. Run it through that lane,
+ * not directly: the lane owns the three controls, the shared capture/grade
+ * binaries and the manifest, and this file writes only per-scenario records.
+ *
+ * ===========================================================================
+ * WHY THE WINDOW AND NOT `page.screenshot()` — AND WHAT THAT COSTS
+ * ===========================================================================
+ *
+ * Both are taken, every run, from the SAME settled state, because the choice
+ * was made by measurement rather than by argument and the measurement is kept
+ * live. `<view>.png` is the window, through
+ * `CGWindowListCopyWindowInfo` + `SCContentFilter(desktopIndependentWindow:)`
+ * — byte-for-byte the path `plat37-macos-window-capture.sh` uses on the GPUI
+ * window. `<view>.page.png` is Chromium's own raster of the web contents,
+ * through the CDP screenshot the existing `visual-alignment-capture.spec.ts`
+ * uses. `<view>.route.json` records both, so the parity step can see what
+ * the two routes disagree about instead of inheriting an assumption.
+ *
+ * What the window route BUYS: one compositor, one display, one scale factor,
+ * one font stack and one capture path shared with the GPUI arm, so a
+ * difference between the two front-ends is a difference between the two
+ * front-ends. The GPUI frame is a window and nothing can make
+ * `page.screenshot()` into one.
+ *
+ * What it COSTS, stated rather than discovered later:
+ *
+ *   * **Title-bar chrome is in the frame.** The GPUI lane's `TitleBarPoints`
+ *     (29) is subtracted when deciding `viewportHonoured`, but the PIXELS are
+ *     still there in both arms' PNGs. A parity differ must either crop both
+ *     by the same 29 points or accept that the top strip compares two
+ *     different title bars.
+ *   * **No `toHaveScreenshot` machinery.** No masking, no retry-until-stable,
+ *     no per-pixel tolerance. The replacement is `codetracer-image-diff`'s
+ *     FLIP, which is the perceptual differ this tree already builds on
+ *     darwin, plus `captureSettled` below for the stability `toHaveScreenshot`
+ *     would have retried into.
+ *   * **Nothing else can be hidden.** A window capture shows whatever the
+ *     compositor put there. The lane keeps the window in the foreground and
+ *     records the attested window id, which is what makes "an overlapping
+ *     window got in" a visible failure rather than a silent one.
+ *
+ * ===========================================================================
+ * THE dpr ASSERTION THIS LANE DOES NOT INHERIT, AND WHY
+ * ===========================================================================
+ *
+ * `visual-alignment-capture.spec.ts`'s `applyViewport` ends with
+ * `expect(dpr).toBe(1)` and the remedy *"Run this lane under 'Xvfb -dpi 96'"*.
+ * That is correct for the Linux lane it was written for and it is
+ * **unsatisfiable on this host**: this display is 1728x1117 POINTS at
+ * `pointPixelScale` 2.000, so `window.devicePixelRatio` is 2 and no flag
+ * brings it to 1.
+ *
+ * Dropping the number is not dropping the assertion. What that line was
+ * protecting is the relation *captured pixels == viewport x dpr* — the
+ * failure it caught was a PNG 1.046875x the CSS viewport in each axis while
+ * the record claimed the viewport. So this lane MEASURES dpr, records it, and
+ * asserts the relation against the measured value. The identity case (dpr 1)
+ * is unchanged; a host that drifts to 1.046875 still fails, now by the
+ * relation rather than by the constant.
+ *
+ * ===========================================================================
+ * SAME SCENARIOS, SAME POSTCONDITIONS
+ * ===========================================================================
+ *
+ * The scenario set is READ from `src/tests/visual/scenarios.json` with the
+ * same two-sided cardinality assertions both existing readers use. The
+ * operations go through the product's own debug-toolbar buttons and **every
+ * one asserts that the program moved**, by `rrTicks`, with a step asserted to
+ * move EXACTLY ONE tick. That technique, and the five measurements behind it,
+ * belong to `visual-alignment-capture.spec.ts`; its helpers are file-local
+ * there, so the postconditions are restated here rather than imported. The
+ * SCENARIO DEFINITION is not restated — it is read — which is the copy
+ * Verification-Harness-Traps §30 is about.
+ *
+ * `gpuiProbes` has no Electron arm by `scenarios.json`'s own statement
+ * (*"A probe is NOT part of the cross-renderer comparison: it has no Electron
+ * arm, so nothing here claims one"*), so this lane drives the SIX and refuses
+ * a seventh.
+ */
+
+import * as fs from "fs";
+import * as path from "path";
+import * as childProcess from "child_process";
+
+import { test, expect } from "../../lib/fixtures";
+import { LayoutPage } from "../../page-objects/layout-page";
+import {
+  debugToolbarSelector,
+  type DebugToolbarButton,
+} from "../../page-objects/debug-toolbar-ids";
+
+const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
+const visualRoot = path.join(repoRoot, "src", "tests", "visual");
+
+/** Where the lane wants the artefacts. REQUIRED — this spec invents no path. */
+const outDir = process.env.CODETRACER_PLAT37E_OUT ?? "";
+/** The shared capture binary. REQUIRED — the lane builds it and names it. */
+const captureBin = process.env.CODETRACER_PLAT37E_CAPTURE ?? "";
+/**
+ * The CGWindowList owner name of CodeTracer's Electron window.
+ *
+ * MEASURED on this host 2026-10-12 rather than guessed: with the product
+ * launched from `src/build-debug-repro/bin/ct`, `listWindows` reported
+ * `id=1657 pid=81956 layer=0 onScreen=true bounds=1728x1084@0,33
+ * owner='Electron'`. It is `Electron` and not `ct` or `CodeTracer` because
+ * `ct` **execv()s** into the Electron executable on POSIX
+ * (`src/ct/launch/electron.nim`), so the process that owns the window is the
+ * unbranded nix `electron-41.3.0` bundle. A product that later ships a
+ * renamed bundle changes this string, which is why it is an env var with a
+ * measured default rather than a literal buried in a call.
+ */
+const owner = process.env.CODETRACER_PLAT37E_OWNER ?? "Electron";
+
+if (outDir.length === 0 || captureBin.length === 0) {
+  throw new Error(
+    "PLAT-37/Electron: CODETRACER_PLAT37E_OUT and CODETRACER_PLAT37E_CAPTURE " +
+      "must both be set. Run this through ci/test/plat37-macos-electron-capture.sh, " +
+      "which builds the capture binary and owns the controls and the manifest. " +
+      "This FAILS rather than defaulting: a capture written to a path nobody " +
+      "reads is the silent half of the Silent-Self-Pass audit.",
+  );
+}
+if (!fs.existsSync(captureBin)) {
+  throw new Error(
+    `PLAT-37/Electron: the capture binary is not at ${captureBin}. The lane ` +
+      `builds it from ci/test/plat37_macos_window_capture.nim.`,
+  );
+}
+
+interface ScenarioOp {
+  kind: string;
+  times?: number;
+  line?: number;
+}
+interface Scenario {
+  id: string;
+  view: string;
+  recording: string;
+  viewport: string;
+  operations: ScenarioOp[];
+  tier1Canary: boolean;
+}
+interface ScenarioFile {
+  expectedScenarios: number;
+  expectedViewports: number;
+  expectedCanaries: number;
+  expectedGpuiProbes: number;
+  operationKinds: string[];
+  viewports: Record<string, { width: number; height: number }>;
+  scenarios: Scenario[];
+  gpuiProbes: Scenario[];
+}
+
+const definition: ScenarioFile = JSON.parse(
+  fs.readFileSync(path.join(visualRoot, "scenarios.json"), "utf8"),
+) as ScenarioFile;
+
+// THE PARSE IS ASSERTED AT MODULE SCOPE, both directions, as every other
+// reader of this file asserts it. A Playwright file that generates zero
+// `test` blocks exits 0 and reads exactly like a clean run.
+if (definition.scenarios.length !== definition.expectedScenarios) {
+  throw new Error(
+    `scenarios.json declares expectedScenarios=${definition.expectedScenarios} ` +
+      `and holds ${definition.scenarios.length}`,
+  );
+}
+if (Object.keys(definition.viewports).length !== definition.expectedViewports) {
+  throw new Error(
+    `scenarios.json declares expectedViewports=${definition.expectedViewports} ` +
+      `and holds ${Object.keys(definition.viewports).length}`,
+  );
+}
+if ((definition.gpuiProbes ?? []).length !== definition.expectedGpuiProbes) {
+  throw new Error(
+    `scenarios.json declares expectedGpuiProbes=${definition.expectedGpuiProbes} ` +
+      `and holds ${(definition.gpuiProbes ?? []).length}`,
+  );
+}
+for (const s of definition.scenarios) {
+  for (const op of s.operations) {
+    if (!definition.operationKinds.includes(op.kind)) {
+      throw new Error(
+        `scenario '${s.id}' uses operation '${op.kind}', which is not in the ` +
+          `closed vocabulary ${definition.operationKinds.join(", ")}`,
+      );
+    }
+  }
+}
+
+function resolveRecording(name: string): string {
+  const cache = path.join(repoRoot, "test-logs", "tui-fixtures");
+  if (fs.existsSync(cache)) {
+    const hit = fs
+      .readdirSync(cache)
+      .filter((e) => e.startsWith(`${name}-`))
+      .sort();
+    if (hit.length > 0) return path.join(cache, hit[hit.length - 1]);
+  }
+  throw new Error(
+    `PLAT-37/Electron: the '${name}' recording is not in ` +
+      `test-logs/tui-fixtures/. It is produced by the product's own ` +
+      `'ct record'; run 'just test-tui' once. This FAILS rather than skipping.`,
+  );
+}
+
+const recordingPath = resolveRecording(definition.scenarios[0].recording);
+fs.mkdirSync(outDir, { recursive: true });
+
+interface ProgramState {
+  line: number;
+  path: string;
+  rrTicks: number;
+  busy: boolean | null;
+}
+
+async function readProgramState(
+  page: import("playwright").Page,
+): Promise<ProgramState> {
+  return page.evaluate(() => {
+    const w = window as unknown as {
+      data?: {
+        status?: { stableBusy?: boolean };
+        services?: {
+          debugger?: {
+            location?: { line?: number; path?: string; rrTicks?: number };
+          };
+        };
+      };
+    };
+    const l = w.data?.services?.debugger?.location;
+    return {
+      line: l?.line ?? -1,
+      path: l?.path ?? "",
+      rrTicks: l?.rrTicks ?? -1,
+      busy: w.data?.status?.stableBusy ?? null,
+    };
+  });
+}
+
+/**
+ * THE REFERENCE'S OWN ROW PITCH, read from the live editor rather than
+ * estimated from the frame.
+ *
+ * PARITY-S5 is "the two front-ends draw editor rows at different pitches",
+ * and every reading of it so far has been an INFERENCE from ink: the
+ * OCR-free instrument's mode of consecutive line-band centre deltas. That is
+ * a sound estimator, but it is an estimator on both sides, so a disagreement
+ * between the two arms could always have been the estimator rather than the
+ * product.
+ *
+ * Monaco knows the answer exactly. `editor.getOption(EditorOption.lineHeight)`
+ * is the resolved `fontInfo.lineHeight` — the value after
+ * `BareFontInfo._create` has applied `GOLDEN_LINE_HEIGHT_RATIO * fontSize`
+ * and rounded it (`monaco-editor/esm/vs/editor/common/config/fontInfo.js`).
+ * Recording it makes the Electron side of S5 a MEASUREMENT of the reference
+ * and not a reading of a photograph of it, and it is what the GPUI side's
+ * `chrome.monacoLineHeightPx` derivation has to reproduce.
+ *
+ * Soft on purpose: a scenario with no editor (entry-shell draws none) must
+ * record `null` and not fail a capture lane over a diagnostic.
+ */
+async function readEditorFontMetrics(
+  page: import("playwright").Page,
+): Promise<{
+  lineHeightPx: number;
+  fontSizePx: number;
+  fontFamily: string;
+  source: string;
+} | null> {
+  return page.evaluate(() => {
+    // `EditorOption.lineHeight` is 75 and `.fontSize` is 61 in the Monaco
+    // this product ships (`editorOptions.js`); `config` is the snapshot
+    // `editor.nim` keeps as `monacoEditor.config` (`getConfiguration`).
+    const w = window as unknown as {
+      data?: {
+        ui?: {
+          monacoEditors?: Array<{
+            config?: { lineHeight?: number; fontInfo?: Record<string, unknown> };
+            getOption?: (id: number) => unknown;
+          }>;
+        };
+      };
+    };
+    const requestedFamilyFromOption = (ed: {
+      getOption?: (id: number) => unknown;
+    }): string => {
+      const id = (
+        window as unknown as {
+          monaco?: { editor?: { EditorOption?: { fontFamily?: number } } };
+        }
+      ).monaco?.editor?.EditorOption?.fontFamily;
+      if (typeof id !== "number" || typeof ed.getOption !== "function") return "";
+      const v = ed.getOption(id);
+      return typeof v === "string" ? v : "";
+    };
+    const editors = w.data?.ui?.monacoEditors ?? [];
+    for (const ed of editors) {
+      if (!ed) continue;
+      const fromOption =
+        typeof ed.getOption === "function"
+          ? (ed.getOption(75) as number | undefined)
+          : undefined;
+      const lh = ed.config?.lineHeight ?? fromOption;
+      if (typeof lh !== "number" || !(lh > 0)) continue;
+      const fi = (ed.config?.fontInfo ?? {}) as {
+        fontSize?: number;
+        fontFamily?: string;
+      };
+      const fs =
+        fi.fontSize ??
+        (typeof ed.getOption === "function"
+          ? (ed.getOption(61) as number | undefined)
+          : undefined) ??
+        -1;
+      return {
+        lineHeightPx: lh,
+        fontSizePx: fs,
+        // `config.fontInfo` does not exist on CodeTracer's own `config`
+        // snapshot (`trace.nim`'s `getConfiguration` builds no such field),
+        // so without a fallback the family is `""` on every capture —
+        // PLAT37-ISSUE-A.
+        //
+        // THE OPTION ID IS LOOKED UP, NOT WRITTEN DOWN. A first attempt
+        // hard-coded 51 by analogy with the 75 and 61 above and recorded
+        // `fontFamily: true` on every capture, because 51 is some boolean
+        // option in this Monaco. An id that names a different option is
+        // indistinguishable from a correct one unless the ANSWER is
+        // type-checked, so the lookup is symbolic and the result is
+        // rejected unless it is a string.
+        //
+        // Both of these are still the REQUEST. The face the renderer
+        // RESOLVED is `resolvedEditorFace`.
+        fontFamily: fi.fontFamily ?? requestedFamilyFromOption(ed),
+        source:
+          ed.config?.lineHeight !== undefined
+            ? "monacoEditor.config.lineHeight"
+            : "editor.getOption(EditorOption.lineHeight)",
+      };
+    }
+    return null;
+  });
+}
+
+/**
+ * THE FACE CHROMIUM ACTUALLY RESOLVED for the editor's code text — not the
+ * face the CSS or the Monaco option ASKED FOR.
+ *
+ * PARITY-P1's residual is a glyph-positioning difference that grows along a
+ * line, which is what two different per-character ADVANCES produce. Advance
+ * is a property of the resolved FACE, so the comparison cannot be grounded
+ * until each arm records the face its renderer chose. `readEditorFontMetrics`
+ * above records the REQUEST (and, through `fontInfo` never existing on
+ * CodeTracer's own `config` snapshot, records it as `""`); this records the
+ * ANSWER.
+ *
+ * TWO INDEPENDENT READINGS, because each covers the other's failure:
+ *
+ *  1. `CSS.getPlatformFontsForNode` over CDP NAMES the faces the renderer
+ *     used for a node's text, with a glyph count per face. This is Blink's
+ *     own record of what it shaped with. It is the authoritative answer and
+ *     it is the one that can be absent — the command is not in every
+ *     Electron, so it is wrapped and may come back null.
+ *  2. A canvas FINGERPRINT: the advance of the resolved face, measured with
+ *     the editor row's own computed `font` shorthand, beside the advance of
+ *     each candidate family measured explicitly. Two faces with the same
+ *     name and different `hmtx` tables are distinguished by this and not by
+ *     the name. It is also the reading that is directly comparable with the
+ *     GPUI arm's, whose text system can be asked for metrics and cannot be
+ *     asked for a file.
+ *
+ * THE CONTROLS, both of which would fail a probe that reported the REQUEST:
+ *
+ *  - NEGATIVE (`controlBogus`): a node asking for a family no host has. A
+ *    probe echoing its input answers with that name; this one must answer
+ *    with something else.
+ *  - POSITIVE (`controlMenlo`): a node asking for `Menlo`, which macOS has.
+ *    A probe stuck on one answer — the "uniform result" failure — gives the
+ *    same face here as for the editor; this one must give Menlo, and Menlo's
+ *    advance must differ from the editor's if the editor is not in Menlo.
+ *
+ * Soft on purpose, like `readEditorFontMetrics`: a scenario with no editor
+ * records `null`, and a CDP that refuses records the fingerprint alone. A
+ * diagnostic must not fail a capture lane.
+ */
+async function readResolvedEditorFace(
+  page: import("playwright").Page,
+): Promise<Record<string, unknown> | null> {
+  // `.view-line` is a container: its text lives in `mtk*` spans, and
+  // `CSS.getPlatformFontsForNode` on the container answered `[]` on the
+  // 2026-10-19 run. The token span is asked first and the container is kept
+  // as a fallback, with `resolvedFromSelector` recording which answered, so
+  // an empty list is never read as "no face".
+  const CODE_SELECTORS = [
+    '.monaco-editor .view-line span[class^="mtk"]',
+    ".monaco-editor .view-line span",
+    ".monaco-editor .view-line",
+  ];
+  const CODE_SELECTOR = CODE_SELECTORS[CODE_SELECTORS.length - 1];
+  const BOGUS_FAMILY = "ZZ No Such Face ZZ";
+
+  // ---- Reading 2 and the computed request, in the page. ----
+  const inPage = await page.evaluate(
+    ([selector, bogus]) => {
+      const row = document.querySelector(selector as string);
+      if (!row) return null;
+      const cs = getComputedStyle(row as Element);
+
+      // The advance of a face, measured over a long run so that any
+      // per-glyph rounding in `measureText` is divided away rather than
+      // reported as the advance.
+      const N = 200;
+      const run = "M".repeat(N);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const advanceOf = (fontShorthand: string): number | null => {
+        if (!ctx) return null;
+        ctx.font = fontShorthand;
+        // A browser that cannot parse the shorthand silently keeps the old
+        // `font`; comparing the readback catches that instead of reporting
+        // the previous face's advance under this one's name.
+        if (ctx.font === "" ) return null;
+        return ctx.measureText(run).width / N;
+      };
+
+      const size = cs.fontSize;
+      const candidates: Record<string, number | null> = {};
+      for (const fam of [
+        '"SpaceMono"',
+        '"Space Mono"',
+        "Menlo",
+        "Monaco",
+        "monospace",
+        `"${bogus}"`,
+      ]) {
+        candidates[fam] = advanceOf(`${size} ${fam}`);
+      }
+
+      const faces: Array<Record<string, unknown>> = [];
+      try {
+        (document as unknown as { fonts: Set<FontFace> }).fonts.forEach(
+          (f: FontFace) => {
+            faces.push({
+              family: f.family,
+              weight: f.weight,
+              style: f.style,
+              status: f.status,
+            });
+          },
+        );
+      } catch {
+        /* document.fonts is optional for this reading */
+      }
+
+      return {
+        // THE REQUEST, recorded so the answer can be seen to differ from it.
+        requestedCssFontFamily: cs.fontFamily,
+        computedFontShorthand: cs.font,
+        computedFontSize: cs.fontSize,
+        computedFontWeight: cs.fontWeight,
+        computedFontStyle: cs.fontStyle,
+        computedLetterSpacing: cs.letterSpacing,
+        // THE FINGERPRINT.
+        advancePxResolved: advanceOf(cs.font || `${size} ${cs.fontFamily}`),
+        advancePxByCandidate: candidates,
+        loadedFontFaces: faces.filter(
+          (f) => typeof f.family === "string" && /Space|Fira/.test(f.family as string),
+        ),
+        sampleRowText: ((row as HTMLElement).innerText ?? "").slice(0, 40),
+      };
+    },
+    [CODE_SELECTOR, BOGUS_FAMILY] as const,
+  );
+
+  if (inPage === null) return null;
+
+  // ---- Reading 1: Blink's own record, over CDP. ----
+  let platformFonts: unknown = null;
+  let platformFontsError: string | null = null;
+  let resolvedFromSelector: string | null = null;
+  let controlBogus: unknown = null;
+  let controlMenlo: unknown = null;
+  try {
+    const session = await page.context().newCDPSession(page);
+    try {
+      await session.send("DOM.enable");
+      await session.send("CSS.enable");
+      const fontsFor = async (selector: string) => {
+        const { root } = (await session.send("DOM.getDocument", {
+          depth: -1,
+        })) as { root: { nodeId: number } };
+        const { nodeId } = (await session.send("DOM.querySelector", {
+          nodeId: root.nodeId,
+          selector,
+        })) as { nodeId: number };
+        if (!nodeId) return null;
+        const r = (await session.send("CSS.getPlatformFontsForNode", {
+          nodeId,
+        })) as { fonts: unknown };
+        return r.fonts;
+      };
+
+      for (const sel of CODE_SELECTORS) {
+        const f = await fontsFor(sel);
+        if (Array.isArray(f) && f.length > 0) {
+          platformFonts = f;
+          resolvedFromSelector = sel;
+          break;
+        }
+        if (platformFonts === null) platformFonts = f;
+      }
+
+      // The two controls need nodes of their own, carrying real text so the
+      // renderer has something to shape.
+      await page.evaluate(
+        ([bogus]) => {
+          const mk = (id: string, family: string) => {
+            document.getElementById(id)?.remove();
+            const el = document.createElement("div");
+            el.id = id;
+            el.textContent = "MMMMMMMMMMMMMMMM";
+            el.style.cssText =
+              `position:fixed;left:0;top:0;opacity:0.01;pointer-events:none;` +
+              `font-size:16px;font-family:${family};`;
+            document.body.appendChild(el);
+          };
+          mk("plat37-face-control-bogus", `"${bogus}"`);
+          mk("plat37-face-control-menlo", "Menlo");
+        },
+        [BOGUS_FAMILY] as const,
+      );
+      controlBogus = await fontsFor("#plat37-face-control-bogus");
+      controlMenlo = await fontsFor("#plat37-face-control-menlo");
+      await page.evaluate(() => {
+        document.getElementById("plat37-face-control-bogus")?.remove();
+        document.getElementById("plat37-face-control-menlo")?.remove();
+      });
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  } catch (e) {
+    platformFontsError = String(e).slice(0, 300);
+  }
+
+  const firstFamily = (v: unknown): string | null => {
+    const arr = v as Array<{ familyName?: string }> | null;
+    return Array.isArray(arr) && arr.length > 0 ? (arr[0].familyName ?? null) : null;
+  };
+  const editorFace = firstFamily(platformFonts);
+  const bogusFace = firstFamily(controlBogus);
+  const menloFace = firstFamily(controlMenlo);
+
+  return {
+    how:
+      "CDP CSS.getPlatformFontsForNode over the first Monaco view-line (the " +
+      "faces Blink SHAPED with), beside a canvas advance fingerprint of the " +
+      "row's own computed font",
+    selector: CODE_SELECTOR,
+    ...inPage,
+    resolvedPlatformFonts: platformFonts,
+    resolvedPlatformFontsError: platformFontsError,
+    resolvedFromSelector,
+    resolvedFamily: editorFace,
+    controls: {
+      bogusFamilyRequested: BOGUS_FAMILY,
+      bogusResolvedTo: bogusFace,
+      // A probe echoing the request answers the bogus family with itself.
+      bogusProvesResolution:
+        bogusFace !== null && bogusFace !== BOGUS_FAMILY,
+      menloResolvedTo: menloFace,
+      // A probe stuck on one answer gives the editor's face here too.
+      menloProvesNotUniform:
+        menloFace !== null && editorFace !== null && menloFace !== editorFace,
+      meaning:
+        "bogusProvesResolution false => the probe is echoing its input. " +
+        "menloProvesNotUniform false => either the editor really is in " +
+        "Menlo, or the probe answers the same thing for every node; the " +
+        "advance fingerprint separates those two.",
+    },
+  };
+}
+
+const fmtState = (s: ProgramState) =>
+  `line ${s.line} @ ticks ${s.rrTicks}${s.busy === true ? " (busy)" : ""}`;
+
+/**
+ * ONE synthesized click on a debug-toolbar button. EXACTLY ONE.
+ *
+ * `LayoutPage.clickDebugButton`'s try-click-then-dispatch chain delivers the
+ * pointer event and then dispatches a second one whenever Playwright's
+ * post-click stability wait throws on a toolbar that re-rendered under the
+ * cursor — two steps for one operation. Measured by
+ * `visual-alignment-capture.spec.ts` on 2026-09-21: a run that recorded
+ * `stepIn=34@4` then `stepIn=44@6`, with tick 5 never appearing. Going
+ * straight to `dispatchEvent` is that file's remedy and it is this file's too.
+ */
+async function clickToolbar(
+  page: import("playwright").Page,
+  which: DebugToolbarButton,
+): Promise<void> {
+  const selector = debugToolbarSelector(which);
+  const button = page.locator(selector);
+  await expect(
+    button,
+    `the '${which}' toolbar button (${selector}) is not in the DOM`,
+  ).toHaveCount(1, { timeout: 15_000 });
+  await button.dispatchEvent("click");
+}
+
+/**
+ * WAIT FOR THE EFFECT, AND FAIL BY NAME WHEN THERE IS NONE.
+ *
+ * `rrTicks` is the only field that moves on EVERY operation: the first step-in
+ * on `calc` advances ticks 0 -> 1 and leaves `line` at 1, so "the stopped line
+ * changed" is a postcondition that is false for a step that genuinely
+ * happened. `stableBusy` is required too — `ui/debug.nim`'s `dapStep` gates a
+ * new request on it, so it is the renderer's own "this move is finished".
+ *
+ * A step is EXACTLY ONE tick. `stepOut` and `continueForward` run as far as
+ * the frame or the program does, so for those the claim is only "forward".
+ */
+async function waitForMove(
+  page: import("playwright").Page,
+  before: ProgramState,
+  what: string,
+  exactlyOneTick: boolean,
+): Promise<ProgramState> {
+  const BUDGET_MS = 60_000;
+  const t0 = Date.now();
+  let last = before;
+  let moved = false;
+  while (Date.now() - t0 < BUDGET_MS) {
+    last = await readProgramState(page);
+    if (last.rrTicks !== before.rrTicks && last.busy !== true) {
+      moved = true;
+      break;
+    }
+    await page.waitForTimeout(100);
+  }
+  if (!moved) {
+    throw new Error(
+      `PLAT-37/Electron: '${what}' was performed on the product's own toolbar ` +
+        `and the program did not move within ${BUDGET_MS}ms. Before: ` +
+        `${fmtState(before)}; still: ${fmtState(last)}. An operation that ` +
+        `lands nowhere must fail here — a capture that counts clicks issued ` +
+        `rather than moves made is how four of six scenarios reached a ` +
+        `different program state on a re-run of the identical specification.`,
+    );
+  }
+  if (exactlyOneTick && last.rrTicks !== before.rrTicks + 1) {
+    throw new Error(
+      `PLAT-37/Electron: '${what}' advanced the recording from tick ` +
+        `${before.rrTicks} to tick ${last.rrTicks}. A step is exactly one ` +
+        `tick; more than one means the operation was delivered twice.`,
+    );
+  }
+  if (last.rrTicks < before.rrTicks) {
+    throw new Error(
+      `PLAT-37/Electron: '${what}' moved the recording BACKWARD, ` +
+        `${before.rrTicks} -> ${last.rrTicks}.`,
+    );
+  }
+  return last;
+}
+
+/** The editor's rendered geometry as one signature string. */
+async function editorFrameSignature(
+  page: import("playwright").Page,
+): Promise<string> {
+  return page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>(
+      "div[id^='editorComponent']",
+    );
+    if (!root) return "no-editor-root";
+    const m = (window as any).monaco;
+    const eds =
+      m && m.editor && m.editor.getEditors ? m.editor.getEditors() : [];
+    if (!eds || eds.length === 0) return "no-editors";
+    const e = eds[0];
+    const lines = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        ".monaco-editor .view-lines .view-line",
+      ),
+    ).map((l) => l.offsetTop);
+    const zones = Array.from(
+      root.querySelectorAll<HTMLElement>(".monaco-editor .view-zones > *"),
+    )
+      .map((z) => `${z.style.top || "?"}/${z.style.height || "?"}`)
+      .join(",");
+    return [
+      `sT=${e.getScrollTop()}`,
+      `cH=${e.getContentHeight ? e.getContentHeight() : -1}`,
+      `lH=${e.getLayoutInfo().height}`,
+      `rows=${lines.length}`,
+      `top=${lines.length ? Math.min(...lines) : -1}`,
+      `zones=[${zones}]`,
+    ].join(";");
+  });
+}
+
+/** Bounded and soft: a frame that will not settle is a finding, not a stop. */
+async function waitForEditorFrameSettled(
+  page: import("playwright").Page,
+): Promise<boolean> {
+  const DEADLINE_MS = 10_000;
+  const INTERVAL_MS = 120;
+  const started = Date.now();
+  let previous = await editorFrameSignature(page);
+  while (Date.now() - started < DEADLINE_MS) {
+    await page.waitForTimeout(INTERVAL_MS);
+    const current = await editorFrameSignature(page);
+    if (current === previous) return true;
+    previous = current;
+  }
+  return false;
+}
+
+async function drive(
+  layout: LayoutPage,
+  ops: ScenarioOp[],
+): Promise<{
+  moves: number;
+  trajectory: string[];
+  final: ProgramState;
+  settled: boolean;
+}> {
+  let moves = 0;
+  let settled = true;
+  const trajectory: string[] = [];
+  // THE STARTING POINT IS ASSERTED. A session that has not finished opening
+  // reports `rrTicks: -1`, and driving from there makes the first operation's
+  // postcondition true by arithmetic on a sentinel.
+  let state = await readProgramState(layout.page);
+  expect(
+    state.rrTicks,
+    "the session had no position before the first operation; the capture " +
+      "would then be driving a window that has not opened",
+  ).toBeGreaterThanOrEqual(0);
+  trajectory.push(`entry=${state.line}@${state.rrTicks}`);
+
+  for (const op of ops) {
+    const times = op.times ?? 1;
+    for (let i = 0; i < times; i++) {
+      const before = state;
+      const what = `${op.kind} #${i + 1}/${times}`;
+      switch (op.kind) {
+        case "stepIn":
+          await clickToolbar(layout.page, "stepIn");
+          state = await waitForMove(layout.page, before, what, true);
+          moves++;
+          break;
+        case "next":
+          await clickToolbar(layout.page, "next");
+          state = await waitForMove(layout.page, before, what, true);
+          moves++;
+          break;
+        case "stepOut":
+          await clickToolbar(layout.page, "stepOut");
+          state = await waitForMove(layout.page, before, what, false);
+          moves++;
+          break;
+        case "continueForward":
+          await clickToolbar(layout.page, "continue");
+          state = await waitForMove(layout.page, before, what, false);
+          moves++;
+          break;
+        case "setBreakpoint": {
+          // Relative to the FIRST DRAWN ROW, resolved against the recording's
+          // own source by clicking the gutter the product drew — never a
+          // literal line number. ASSERTED by the mark appearing, because a
+          // scenario that claims a mark and gets none answers
+          // `<stopped line>=execution` on every scenario, which is a
+          // perfectly equal comparison about nothing.
+          const gutters = layout.page.locator(
+            "div[id^='editorComponent'] .margin-view-overlays .gutter",
+          );
+          const lines = await gutters.evaluateAll((els) =>
+            els
+              .map((e) => parseInt((e as HTMLElement).dataset.line || "-1", 10))
+              .filter((n) => n > 0)
+              .sort((a, b) => a - b),
+          );
+          expect(lines.length, "the editor drew no gutter rows").toBeGreaterThan(
+            0,
+          );
+          const target = lines[Math.min(op.line ?? 1, lines.length - 1)];
+          const cell = layout.page.locator(
+            `div[id^='editorComponent'] .margin-view-overlays ` +
+              `.gutter[data-line='${target}']`,
+          );
+          await cell.dispatchEvent("click");
+          await expect(
+            layout.page.locator(
+              `div[id^='editorComponent'] .margin-view-overlays ` +
+                `.gutter[data-line='${target}'] .gutter-breakpoint-enabled`,
+            ),
+          ).toHaveCount(1, { timeout: 15_000 });
+          // ITS NON-EFFECT IS ALSO ASSERTED: setting a mark is not a step.
+          state = await readProgramState(layout.page);
+          expect(
+            state.rrTicks,
+            `${what} moved the program from ${fmtState(before)} to ` +
+              `${fmtState(state)}; setting a mark is not a step`,
+          ).toBe(before.rrTicks);
+          trajectory.push(`setBreakpoint@${target}`);
+          moves++;
+          break;
+        }
+        default:
+          throw new Error(`unknown operation kind '${op.kind}'`);
+      }
+      if (op.kind !== "setBreakpoint") {
+        trajectory.push(`${op.kind}=${state.line}@${state.rrTicks}`);
+      }
+      if (!(await waitForEditorFrameSettled(layout.page))) settled = false;
+    }
+  }
+  return { moves, trajectory, final: state, settled };
+}
+
+/**
+ * THE VIEWPORT, APPLIED FOR REAL AND THEN MEASURED — never asserted equal to
+ * the request.
+ *
+ * `scenarios.json`'s `wide` is 1920x1080 POINTS and this display is 1728x1117.
+ * **A window CAN be given it, and Electron's is** — measured 2026-10-12:
+ * `CGWindowListCopyWindowInfo` attests 1920x1080 at origin (0,33), 192 points
+ * off the right edge, and the capture reads the window's OWN surface so the
+ * off-screen strip comes back as rendered product. The GPUI window asked for
+ * the same thing is clamped to 1728x1084 and records
+ * `viewportHonoured: false` with the deviation in CONTENT points (the frame's
+ * height minus `TitleBarPoints` = 29); neither lane relabels.
+ *
+ * The asymmetry is the two front-ends, not the host: gpui opens a
+ * `NSTitled | NSClosable | NSResizable | NSMiniaturizable` window and never
+ * overrides `constrainFrameRect:toScreen:`, so AppKit's default visible-frame
+ * constraint applies to it. This returns the same three numbers from the
+ * Electron side so the two records are comparable; the lane's capture binary
+ * computes the authoritative `viewportHonoured` from the window the system
+ * actually made.
+ */
+async function applyViewport(
+  page: import("playwright").Page,
+  app: import("playwright").ElectronApplication,
+  size: { width: number; height: number },
+): Promise<{
+  requested: { width: number; height: number };
+  cssViewport: { width: number; height: number };
+  contentSize: { width: number; height: number };
+  devicePixelRatio: number;
+  honouredInCss: boolean;
+}> {
+  // Resized through the window that OWNS THE PAGE, not `getAllWindows()[0]`:
+  // they are the same window here and relying on that is how a second window
+  // would silently make this a no-op.
+  const win = await app.browserWindow(page);
+  await win.evaluate((w, s) => {
+    const bw = w as unknown as {
+      setResizable: (b: boolean) => void;
+      unmaximize: () => void;
+      setFullScreen: (b: boolean) => void;
+      setContentSize: (a: number, b: number) => void;
+    };
+    bw.setResizable(true);
+    bw.setFullScreen(false);
+    bw.unmaximize();
+    bw.setContentSize(s.width, s.height);
+  }, size);
+
+  // Let the resize land. Polled rather than slept: the CSS viewport is what
+  // the capture is of, and it follows the window asynchronously.
+  const deadline = Date.now() + 20_000;
+  let css = { width: -1, height: -1 };
+  while (Date.now() < deadline) {
+    css = await page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    if (css.width === size.width && css.height === size.height) break;
+    await page.waitForTimeout(200);
+  }
+
+  const contentSize = (await win.evaluate((w) => {
+    const bw = w as unknown as { getContentSize: () => number[] };
+    const [cw, ch] = bw.getContentSize();
+    return { width: cw, height: ch };
+  })) as { width: number; height: number };
+  const dpr = await page.evaluate(() => window.devicePixelRatio);
+
+  // **THE RELATION, NOT THE CONSTANT.** See this file's header: the Linux
+  // lane asserts `dpr === 1`, which is unsatisfiable on a 2x display. What
+  // that assertion protected is checked instead by `captureBoth` below, which
+  // compares the page PNG's own IHDR against `cssViewport x dpr`. A dpr that
+  // is neither an exact integer nor a half step is the 1.046875 failure mode
+  // and still fails, here, by name.
+  expect(
+    Math.abs(dpr * 2 - Math.round(dpr * 2)),
+    `device pixel ratio is ${dpr}, which is not a half-integer. The lane that ` +
+      `wrote this check caught an X server reporting 100.5 dpi, from which ` +
+      `Chromium derived dpr 1.046875 and every captured PNG was 1.046875x the ` +
+      `CSS viewport it was recorded as.`,
+  ).toBeLessThan(1e-9);
+  expect(dpr, "device pixel ratio must be positive").toBeGreaterThan(0);
+
+  return {
+    requested: size,
+    cssViewport: css,
+    contentSize,
+    devicePixelRatio: dpr,
+    honouredInCss: css.width === size.width && css.height === size.height,
+  };
+}
+
+/**
+ * HOLD THE WINDOW STILL, HARD, BEFORE ANY PIXEL IS READ.
+ *
+ * `toHaveScreenshot`'s retry-until-two-match is the machinery the window route
+ * does not inherit, so the stability it provides is produced here instead:
+ * two consecutive byte-identical CDP screenshots of the whole page. The
+ * attempt count is returned and recorded — a capture that needed many
+ * attempts is a finding about the surface, not a detail.
+ */
+async function captureSettled(
+  page: import("playwright").Page,
+  target: string,
+): Promise<{ attempts: number; stable: boolean }> {
+  const MAX = 8;
+  // Moving the pointer away and blurring is what a screenshot of a settled
+  // product looks like: no hover state, no focus ring chasing the cursor.
+  await page.mouse.move(2, 2);
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.());
+  let previous: Buffer | null = null;
+  for (let attempt = 1; attempt <= MAX; attempt++) {
+    const shot = await page.screenshot();
+    if (previous !== null && previous.equals(shot)) {
+      fs.writeFileSync(target, shot);
+      return { attempts: attempt, stable: true };
+    }
+    previous = shot;
+    await page.waitForTimeout(250);
+  }
+  if (previous !== null) fs.writeFileSync(target, previous);
+  return { attempts: MAX, stable: false };
+}
+
+/** The PNG's own IHDR — the artefact's word, not the harness's. */
+function pngSize(file: string): { width: number; height: number } {
+  const head = fs.readFileSync(file).subarray(0, 33);
+  if (head.subarray(0, 8).toString("binary") !== "\x89PNG\r\n\x1a\n") {
+    throw new Error(`${file} is not a PNG`);
+  }
+  return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+}
+
+for (const scenario of definition.scenarios) {
+  test.describe(`plat37-electron ${scenario.id}`, () => {
+    // NO LAYOUT OPTION: THE PRODUCT'S OWN FIRST-RUN LAYOUT, NOT THE BUNDLED
+    // TREE. The launch fixture removes the saved layout by default, so the
+    // index process runs `index/config.installModeDefault` — and with it
+    // `mode_default_layout.modeDefaultLayout` — exactly as on a machine that
+    // has never run CodeTracer (`layout-reset.prepareUserLayout`). Do not set
+    // `bundledLayout` here: that copies `src/config/default_layout.json`
+    // VERBATIM into the run's `$CODETRACER_HOME/config`, and the index process
+    // then loads it as-is.
+    //
+    // That matters for this lane above all, because the bundled tree is the
+    // one the product's own source calls "nobody's layout": it gives TEST
+    // RESULTS and CONSTRAINTS a top-level column of their own
+    // (`src/config/default_layout.json`, third column, 25%), which the
+    // editing surface wants and a REPLAY does not. Debug mode's default
+    // moves TESTS into the FILES stack (`frontend.paneHomesForMode`) and
+    // omits CONSTRAINTS outright (`frontend.modeDefaultOmittedContentIds`),
+    // and that derived tree is what `headless_app/layout_model`'s
+    // `sharedDefaultLayout` is generated from — the arrangement every
+    // CodeTracer front-end opens with.
+    //
+    // MEASURED COST OF THE BUNDLED TREE (2026-10-12/13 passes, re-read
+    // 2026-10-14, when the fixture still installed it by default and this
+    // spec had not opted out): every Electron frame carried a standing TESTS
+    // ("no tests found") / CONSTRAINTS ("No circuit has been compiled for
+    // this project yet.") column at x1165-1440 that no mode draws. The screen
+    // oracle counted 7 panes against the GPUI window's 5, and that census was
+    // filed as PARITY-S1, "GPUI draws 5 panes where Electron draws 7", with
+    // GPUI named the deficient side. It was an artefact of the launch layout.
+    // The control that settles it is PLAT-45's own first-run capture
+    // (`src/tests/visual/answers/plat45-default-arrangement.electron.json`),
+    // taken on the first-run path against the real app: five stacks,
+    // `[9,41,48] [2] [4,17] [6,35] [8,24]`, TESTS a tab of FILES and no
+    // CONSTRAINTS component anywhere. Since 2026-10-22 that path is the
+    // fixture's default for every spec (codetracer-pm issue
+    // `2026-10-14-gui-test-fixture-defaults-every-launch-to-the-bundled-layout-the-product-calls-nobodys-layout.md`).
+    test.use({
+      sourcePath: recordingPath,
+      launchMode: "trace-folder",
+    });
+    test.setTimeout(600_000);
+
+    test(`capture ${scenario.view}`, async ({ ctPage, electronApp }) => {
+      expect(
+        electronApp,
+        "the Electron application fixture is null, so the window cannot be " +
+          "resized and this lane would capture whatever size the product " +
+          "happened to open at",
+      ).not.toBeNull();
+      const app = electronApp as import("playwright").ElectronApplication;
+      const layout = new LayoutPage(ctPage);
+
+      const vp = definition.viewports[scenario.viewport];
+      const viewportRecord = await applyViewport(ctPage, app, vp);
+
+      // The editor must finish re-laying-out BEFORE the first operation:
+      // measured on the Linux lane, two of four probed runs drove the
+      // debugger with a 1298px-tall editor inside a 900px-tall window.
+      await waitForEditorFrameSettled(ctPage);
+
+      const driven = await drive(layout, scenario.operations);
+
+      const pagePng = path.join(outDir, `${scenario.view}.page.png`);
+      const settle = await captureSettled(ctPage, pagePng);
+      const pagePngSize = pngSize(pagePng);
+
+      // ----------------------------------------------------------------
+      // THE WINDOW CAPTURE — the same binary, the same probe and the same
+      // attestation the GPUI arm goes through, aimed at this owner.
+      // ----------------------------------------------------------------
+      const windowPng = path.join(outDir, `${scenario.view}.png`);
+      const windowRec = path.join(outDir, `${scenario.view}.capture.json`);
+      const args = [
+        "capture",
+        `--owner=${owner}`,
+        `--out=${windowPng}`,
+        `--record=${windowRec}`,
+        `--view=${scenario.view}`,
+        `--scenario=${scenario.id}`,
+        `--requested-width=${vp.width}`,
+        `--requested-height=${vp.height}`,
+        // **ZERO, AND THE DRIVER EARNS IT BELOW.**
+        //
+        // The capture binary subtracts `--title-bar-points` from the attested
+        // FRAME height before deciding `viewportHonoured`, because a standard
+        // macOS titled window's frame is 29 points taller than the content
+        // area the request was about. CodeTracer's Electron window is NOT a
+        // standard titled window: measured 2026-10-12 at `wide`, the frame
+        // `CGWindowListCopyWindowInfo` reports is 1920x1080 and the page's
+        // own `window.innerHeight` is 1080 — frame and content are the same
+        // rectangle. Subtracting 29 reported `viewportHonoured: false` with a
+        // `-29` deviation for a viewport that was honoured EXACTLY.
+        //
+        // So 0 is passed, and `frameEqualsContent` below asserts the premise
+        // against the window the system actually made. A product that grows a
+        // real title bar fails there rather than silently reporting its
+        // viewport 29 points short.
+        "--title-bar-points=0",
+        "--timeout-ms=30000",
+        "--wait-ms=15000",
+      ];
+      const cap = childProcess.spawnSync(captureBin, args, {
+        encoding: "utf-8",
+        timeout: 240_000,
+      });
+
+      // THE RECORD IS THE VERDICT, not the exit code. The driver writes one
+      // on every path it reaches, including a refusal.
+      const captureRecord = fs.existsSync(windowRec)
+        ? JSON.parse(fs.readFileSync(windowRec, "utf8"))
+        : null;
+
+      const route = {
+        schemaVersion: 1,
+        lane: "plat37-macos-electron-capture",
+        milestone: "PLAT-37",
+        scenario: scenario.id,
+        view: scenario.view,
+        viewportName: scenario.viewport,
+        renderer: "electron",
+        recording: recordingPath,
+        drivenOperations: scenario.operations,
+        trajectory: driven.trajectory,
+        movesPerformed: driven.moves,
+        editorSettledBetweenOperations: driven.settled,
+        finalState: driven.final,
+        // PARITY-S5's reference value, from Monaco rather than from ink.
+        editorFontMetrics: await readEditorFontMetrics(ctPage),
+        // PARITY-P1's: the face the renderer RESOLVED, not the one asked for.
+        resolvedEditorFace: await readResolvedEditorFace(ctPage),
+        viewport: viewportRecord,
+        pageRoute: {
+          how: "page.screenshot() over CDP — Chromium's own raster of the web contents, no window chrome, no compositor",
+          path: pagePng,
+          ihdr: pagePngSize,
+          settleAttempts: settle.attempts,
+          byteStable: settle.stable,
+          expectedIhdr: {
+            width: Math.round(
+              viewportRecord.cssViewport.width * viewportRecord.devicePixelRatio,
+            ),
+            height: Math.round(
+              viewportRecord.cssViewport.height *
+                viewportRecord.devicePixelRatio,
+            ),
+          },
+        },
+        windowRoute: {
+          how: "CGWindowListCopyWindowInfo attestation then SCScreenshotManager over SCContentFilter(desktopIndependentWindow:) — the same binary and the same probe the GPUI arm uses",
+          owner,
+          path: windowPng,
+          exitCode: cap.status,
+          stderr: (cap.stderr ?? "").trim().split("\n").slice(-6).join("\n"),
+          record: captureRecord,
+        },
+      };
+      fs.writeFileSync(
+        path.join(outDir, `${scenario.view}.route.json`),
+        `${JSON.stringify(route, null, 2)}\n`,
+      );
+
+      // ----------------------------------------------------------------
+      // THE ASSERTIONS. Each one has a state a broken run reaches.
+      // ----------------------------------------------------------------
+
+      // 1. The page PNG is the CSS viewport times the measured dpr. This is
+      //    the `dpr === 1` assertion's actual content, kept. A PNG 1.046875x
+      //    its viewport fails here.
+      expect(
+        `${pagePngSize.width}x${pagePngSize.height}`,
+        `the page screenshot's own IHDR disagrees with the CSS viewport ` +
+          `(${viewportRecord.cssViewport.width}x` +
+          `${viewportRecord.cssViewport.height}) times the measured device ` +
+          `pixel ratio (${viewportRecord.devicePixelRatio})`,
+      ).toBe(
+        `${route.pageRoute.expectedIhdr.width}x${route.pageRoute.expectedIhdr.height}`,
+      );
+
+      // 2. The window capture produced a record and that record claims G1
+      //    over a window that was attested FIRST and captured by id.
+      expect(
+        captureRecord,
+        `the capture driver wrote no record at ${windowRec} (rc ${cap.status}). ` +
+          `"the capture ran and the window was not there" must stay ` +
+          `distinguishable from "the capture did not run".`,
+      ).not.toBeNull();
+      expect(captureRecord.outcome, captureRecord.refusal ?? "").toBe(
+        "captured",
+      );
+      expect(captureRecord.satisfiesG1).toBe(true);
+      expect(
+        captureRecord.attestation.matched,
+        "G1 is claimed and no window was attested",
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        captureRecord.capture.sameWindowAsAttested,
+        "ScreenCaptureKit captured a different window than the one " +
+          "CGWindowListCopyWindowInfo attested",
+      ).toBe(true);
+
+      // 3. The window PNG's own IHDR equals the captured POINT extent times
+      //    the captured scale — the artefact's word against the driver's.
+      const windowIhdr = pngSize(windowPng);
+      expect(`${windowIhdr.width}x${windowIhdr.height}`).toBe(
+        `${captureRecord.capturedPixels.width}x${captureRecord.capturedPixels.height}`,
+      );
+
+      // 3a. **THE PREMISE BEHIND `--title-bar-points=0`.** The attested frame
+      //     and the page's own content area are the same rectangle, so
+      //     nothing is subtracted. A product that grows a real title bar
+      //     fails here, by name, instead of reporting every viewport short by
+      //     whatever that bar turns out to be. Width is included because a
+      //     frame that gained a border would move it and not the height.
+      const frameEqualsContent =
+        `${captureRecord.windowFramePoints.width}x` +
+        `${captureRecord.windowFramePoints.height}`;
+      expect(
+        frameEqualsContent,
+        "the Electron window's attested FRAME is no longer its content " +
+          "area, so `--title-bar-points=0` is now subtracting the wrong " +
+          "number and every viewport below it is mis-graded. Measure the " +
+          "new frame and pass it.",
+      ).toBe(
+        `${viewportRecord.contentSize.width}x${viewportRecord.contentSize.height}`,
+      );
+
+      // 4. **THE ASSERTION A BLANK WINDOW FAILS.** Everything above is true
+      //    of a window that drew nothing: it is attested, it is captured, its
+      //    IHDR matches. What distinguishes a rendering CodeTracer is that
+      //    the product's own debugger reported a position and the editor drew
+      //    rows — both read from the live DOM, both zero on a dead renderer.
+      //    The frame's own glyph count is graded separately by the lane's
+      //    `plat37_macos_window_grade`, which fails a flat frame; this is the
+      //    renderer-side half of the same question.
+      expect(
+        driven.final.rrTicks,
+        "the product reported no position at capture time, so the window " +
+          "above is of a session that never opened",
+      ).toBeGreaterThanOrEqual(0);
+      const drawnRows = await ctPage
+        .locator(
+          "div[id^='editorComponent'] .monaco-editor .view-lines .view-line",
+        )
+        .count();
+      expect(
+        drawnRows,
+        "the editor drew no rows, so the captured window holds no source " +
+          "text whatever its pane grounds look like",
+      ).toBeGreaterThan(0);
+    });
+  });
+}

@@ -26,8 +26,6 @@ method register*(self: ValueComponent, api: MediatorWithSubscribers) =
         self.baseAddress != NO_ADDRESS and response.address == self.baseAddress:
       discard self.onUpdatedHistory(response))
 
-proc registerValueComponent*(component: ValueComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
 
 proc intValue*(i: int): Value {.exportc.} =
   Value(
@@ -35,33 +33,6 @@ proc intValue*(i: int): Value {.exportc.} =
     i: cstring($i),
     typ: Type(kind: TypeKind.Int, langType: "Int"),
   )
-
-proc deleteWatch*(self: StateComponent, expression: cstring) =
-  var i = self.watchExpressions.find(expression)
-
-  if i != -1:
-    delete(self.watchExpressions, i..i)
-    self.locals = self.locals.filterIt(it.expression != expression)
-    self.redraw()
-
-proc updateWatches*(self: StateComponent, handler: proc(locals: seq[Variable])) {.async.} =
-  # TODO: Fix up with new communication
-  # data.ipc.send "CODETRACER::update-watches", js{watchExpressions: self.watchExpressions}
-  # self.onUpdatedWatches = handler
-  discard
-
-proc renameWatch*(self: StateComponent, expression: cstring, newExpression: cstring) =
-  self.deleteWatch(expression)
-
-  if ($newExpression).find("\n") != NO_INDEX:
-    self.api.errorMessage(cstring"newlines forbidden in watch expressions: not registered")
-  else:
-    self.watchExpressions.add(newExpression)
-
-    discard self.updateWatches(proc(locals: seq[Variable]) =
-      self.locals = locals
-      self.redraw()
-    )
 
 proc uiExpanded*(self: ValueComponent, value: Value, expression: cstring): bool =
   if not self.expanded.hasKey(expression):
@@ -126,28 +97,6 @@ proc toggleExpanded*(self: ValueComponent, value: Value, expression: cstring) {.
   else:
     self.customRedraw(self)
 
-  if uiExpanded and self.stateID != -1: # expanded and in state
-
-    let nonExpandedItems = findNonExpanded(value)
-    let nonExpandedItemExpressions = nonExpandedItems.mapIt(it.expression)
-    let state = self.data.stateComponent(self.stateID)
-    let originalStateIndex = state.completeMoveIndex
-    let expandedItems = await self.expandValues(nonExpandedItemExpressions, 1, originalStateIndex)
-
-    if state.completeMoveIndex != originalStateIndex:
-      return
-
-    for i, item in nonExpandedItems:
-      if i < expandedItems.len:
-        let expandedItem = expandedItems[i]
-        objectAssign(item.toJs, expandedItem.toJs)
-      else:
-        cerror &"no expanded item {i}"
-
-    if self.customRedraw.isNil:
-      self.redraw()
-    else:
-      self.customRedraw(self)
 
 proc expandValue(self: ValueComponent, path: seq[SubPath], isLoadMore: bool = false, startIndex: int = 0): Future[Value] {.async.} =
   # We need to emit expand value event and sub to the expand value response
@@ -497,13 +446,11 @@ proc historyClick(self: ValueComponent, location: types.Location) =
 
 proc historyContextAction(self: ValueComponent, event: HistoryResult, ev: Event) =
   ev.stopPropagation()
-  if self.state.inExtension:
-    ev.preventDefault()
   let contextMenu = self.createHistoryContextMenu(self.baseExpression, event.value, ev)
   let e = ev.toJs
 
   if contextMenu != []:
-    showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), self.state.inExtension)
+    showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
 
 proc appendText(parent: Node, value: cstring)
 
@@ -519,7 +466,7 @@ proc renderChartCanvasDom(self: ChartComponent, kind: cstring, hidden: bool): No
   canvas.setAttribute(cstring"id", cstring(fmt"chart-{kind}-canvas-{self.getId}"))
   result.appendChild(canvas)
 
-proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: ChartComponent): Node =
+proc renderHistoryTableDom*(self: ValueComponent, expression: cstring, chart: ChartComponent): Node =
   let key =
     if self.baseAddress == NO_ADDRESS:
       expression
@@ -549,70 +496,71 @@ proc renderHistoryTableDom(self: ValueComponent, expression: cstring, chart: Cha
     else: originVM.preferences.val
 
   if self.state.valueHistory.hasKey(key):
-    for event in self.state.valueHistory[key].results:
-      let historyEvent = event
-      let locationNode = newElement(cstring"div", cstring"history-location")
-      locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-        ev.preventDefault()
-        self.historyContextAction(historyEvent, ev)
-      )
-      locationNode.appendText(cstring($historyEvent.location.rrTicks))
-      locationElement.appendChild(locationNode)
-
-      let valueNode = newElement(cstring"div", cstring"history-value")
-      valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
-        if cast[MouseEvent](ev).button == 0:
-          self.historyClick(historyEvent.location)
-      )
-      valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
-        ev.preventDefault()
-        self.historyContextAction(historyEvent, ev)
-      )
-      valueNode.appendText(statePanelValue(historyEvent.value).root.text)
-
-      # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
-      # attach the icon-only origin badge per entry.  The per-entry
-      # summary is read from the raw JsObject because
-      # ``HistoryResult`` in ``common_types/language_features/
-      # value_history.nim`` does not yet carry a typed field; the
-      # Rust serde-derived wire JSON does carry it (see
-      # ``task::HistoryResult.origin_summary``).  Placeholder pills
-      # are auto-enqueued into the shared lazy-fill batch when they
-      # scroll into view (spec §3.2.3 V1
-      # ``originDisplay.batchFillVisible: on``).
-      let summaryOpt = extractOriginSummary(historyEvent.toJs)
-      if summaryOpt.isSome:
-        let summary = summaryOpt.get
-        let badge = renderBadgeDom(
-          parent = valueNode,
-          summary = summary,
-          prefs = prefs,
-          atSidePanel = false,
-          iconOnly = true,
-          onClick = proc(token: string) =
-            # Click on a placeholder pill resolves it through the
-            # same lazy-fill batch the scroll observer drives.  Click
-            # on a resolved badge issues a full
-            # ``ct/originChain`` request via the shared bridge so
-            # the side panel pops in with the chain.
-            if summary.isPlaceholder and token.len > 0:
-              enqueueOriginPlaceholderToken(token)
-              flushPlaceholdersNow()
-            elif not originVM.isNil:
-              # The ``OriginChainVM.onShowOrigin`` signature uses the
-              # store-types ``Location`` (file/line) — reach into the
-              # VM's own debugger position rather than try to convert
-              # the legacy ``types.Location`` (which uses ``path``,
-              # ``rrTicks``, …) on the fly.  The debugger position is
-              # the same one the row was rendered against so the chain
-              # query targets the right step.
-              let loc = originVM.store.debugger.val.location
-              originVM.onShowOrigin($expression, loc)
+    for eventIndex in 0 ..< self.state.valueHistory[key].results.len:
+      closureScope: # Each history row owns its listeners and origin-badge callbacks.
+        let historyEvent = self.state.valueHistory[key].results[eventIndex]
+        let locationNode = newElement(cstring"div", cstring"history-location")
+        locationNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
+          ev.preventDefault()
+          self.historyContextAction(historyEvent, ev)
         )
-        if summary.isPlaceholder:
-          observePlaceholderBadge(badge)
+        locationNode.appendText(cstring($historyEvent.location.rrTicks))
+        locationElement.appendChild(locationNode)
 
-      valueElement.appendChild(valueNode)
+        let valueNode = newElement(cstring"div", cstring"history-value")
+        valueNode.addEventListener(cstring"mousedown", proc(ev: Event) =
+          if cast[MouseEvent](ev).button == 0:
+            self.historyClick(historyEvent.location)
+        )
+        valueNode.addEventListener(cstring"contextmenu", proc(ev: Event) =
+          ev.preventDefault()
+          self.historyContextAction(historyEvent, ev)
+        )
+        valueNode.appendText(statePanelValue(historyEvent.value).root.text)
+
+        # Value Origin Tracking (M4 deliverable §3.2.3 + Gap 1) —
+        # attach the icon-only origin badge per entry.  The per-entry
+        # summary is read from the raw JsObject because
+        # ``HistoryResult`` in ``common_types/language_features/
+        # value_history.nim`` does not yet carry a typed field; the
+        # Rust serde-derived wire JSON does carry it (see
+        # ``task::HistoryResult.origin_summary``).  Placeholder pills
+        # are auto-enqueued into the shared lazy-fill batch when they
+        # scroll into view (spec §3.2.3 V1
+        # ``originDisplay.batchFillVisible: on``).
+        let summaryOpt = extractOriginSummary(historyEvent.toJs)
+        if summaryOpt.isSome:
+          let summary = summaryOpt.get
+          let badge = renderBadgeDom(
+            parent = valueNode,
+            summary = summary,
+            prefs = prefs,
+            atSidePanel = false,
+            iconOnly = true,
+            onClick = proc(token: string) =
+              # Click on a placeholder pill resolves it through the
+              # same lazy-fill batch the scroll observer drives.  Click
+              # on a resolved badge issues a full
+              # ``ct/originChain`` request via the shared bridge so
+              # the side panel pops in with the chain.
+              if summary.isPlaceholder and token.len > 0:
+                enqueueOriginPlaceholderToken(token)
+                flushPlaceholdersNow()
+              elif not originVM.isNil:
+                # The ``OriginChainVM.onShowOrigin`` signature uses the
+                # store-types ``Location`` (file/line) — reach into the
+                # VM's own debugger position rather than try to convert
+                # the legacy ``types.Location`` (which uses ``path``,
+                # ``rrTicks``, …) on the fly.  The debugger position is
+                # the same one the row was rendered against so the chain
+                # query targets the right step.
+                let loc = originVM.store.debugger.val.location
+                originVM.onShowOrigin($expression, loc)
+          )
+          if summary.isPlaceholder:
+            observePlaceholderBadge(badge)
+
+        valueElement.appendChild(valueNode)
 
   textElement.appendChild(locationElement)
   textElement.appendChild(valueElement)
@@ -636,7 +584,6 @@ proc renderInlineHistoryDom(self: ValueComponent, expression: cstring): Node =
     let container = document.getElementById(cstring(fmt"history-{expression}"))
     if not container.isNil:
       container.toJs.scrollTop = self.historyScrollTop
-      self.state.redrawForExtension()
   , 0)
 
   result = newElement(cstring"div", cstring"history-container")
@@ -711,7 +658,6 @@ method showHistory*(self: ValueComponent, expression: cstring, redraw: bool = tr
     discard
 
   if redraw:
-    self.state.redrawForExtension()
     self.state.redraw()
 
 method onUpdatedHistory*(self: ValueComponent, update: HistoryUpdate) {.async.} =
@@ -1139,7 +1085,7 @@ proc renderValueRowDom(
 
   let atomParent = newElement(cstring"div", atomClass)
   atomParent.addEventListener(cstring"contextmenu", proc(ev: Event) =
-    # `preventDefault` used to be conditional on `inExtension`, so everywhere
+    # `preventDefault` used to be conditional on the extension, so everywhere
     # else — the State pane, the value tooltips drawn over the editor — the
     # browser menu opened on top of ours.  The third sibling of the leak fixed
     # in `ui/editor.nim`; see the comment there, including why Shift stands
@@ -1149,9 +1095,8 @@ proc renderValueRowDom(
     ev.preventDefault()
     let contextMenu = self.createContextMenuItems(value, ev)
     let e = ev.toJs
-    let inExtension = not self.state.isNil and self.state.inExtension
     if contextMenu != []:
-      showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y), inExtension)
+      showContextMenu(contextMenu, cast[int](e.x), cast[int](e.y))
   )
 
   let nameContainer = newElement(cstring"div", cstring"value-name-container")
@@ -1221,11 +1166,6 @@ proc renderValueRowDom(
 
   if expression == self.baseExpression and self.inlineHistoryVisible(expression):
     result.appendChild(self.renderInlineHistoryDom(expression))
-
-method delete*(self: ValueComponent) {.async.} =
-  if self.selected:
-    var state = self.data.stateComponent(self.stateID)
-    state.deleteWatch(self.baseExpression)
 
 proc createContextMenuItems(self: ValueComponent, value: Value, ev: Event): seq[ContextMenuItem] =
   var showHistory:  ContextMenuItem

@@ -22,11 +22,12 @@ import std/[json, options, strutils, tables]
 # package graph (CodeTracer-Embed-SDK.md §3.2). See vm_log.nim.
 import ../vm_log
 
-import isonim/core/[signals, owner, async_compat]
+import isonim/core/[signals, owner, async_compat, batch]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import types, request_tracker, degraded_state, stop_timeline
+import ../viewport   # the windowed panes' debounce timer
 # PLAT-49 part B: a call's arguments and return value, rendered by the one
 # presenter at the `calltrace-arg` budget — the desktop renders its chips with
 # the same budget (`ui/presented_value.callArgValue`).
@@ -237,6 +238,13 @@ type
     recordsFiltered*: Signal[int]
       ## The same count after the server-side search filter, for a host that
       ## has one. Equal to `recordsTotal` when nothing filtered.
+    windowSearched*: Signal[bool]
+      ## Whether the rows on hand are the engine's answer to a SEARCH
+      ## (`ct/event-load`'s `search`). A live debugger stop does not enter
+      ## such a window (`appendLiveEventRow`): whether it matches is the
+      ## engine's question, answered by the next searched request. A table
+      ## page (`ct/update-table`) is not one: the desktop's live stops are
+      ## synthetic rows the engine never reports, so they join its window.
     maxRRTicks*: Signal[uint64]
       ## The recording's last step id, as reported by the events themselves.
       ## CTUI-8 established that this is the ONLY surface in the workspace that
@@ -296,6 +304,13 @@ type
       ## producer the last delta came from.  Diagnostics only; the merge
       ## rules do not depend on it.
     loadingState*: Signal[LoadingState]
+    snapshotAnswered*: bool
+      ## The first poll (the snapshot) has been answered. A completed
+      ## recording is not polled again (`requestRequestSpansSince`).
+    recordedTotal*: Signal[int]
+      ## How many requests a COMPLETED recording served, -1 until known. Its
+      ## rows are not tailed: the panel asks for the window it shows
+      ## (`RequestPanelVM.setViewport`, `ct/load-request-spans`).
 
   DegradedStateStore* = object
     ## The degraded-state catalogue's four axes, as signals
@@ -331,6 +346,18 @@ type
     storeId*: int  ## Unique identity for diagnostics — assigned in createReplayDataStore.
     session*: Signal[SessionState]
     debugger*: Signal[DebuggerState]
+    stop*: Signal[StopLocation]
+      ## The stop's whole location, for an editor (`applyStopLocation`).
+    positionReported*: Signal[bool]
+      ## Whether the engine has stated a position for this session yet.
+      ##
+      ## `debugger.rrTicks` starts at 0, and 0 is also a real position — the
+      ## first step of the trace, where `run-to-entry` lands — so "no answer
+      ## yet" and "parked on tick 0" cannot be told apart from the tick. A host
+      ## that shows a served or cached frame until the engine answers reads
+      ## this instead (BlockTracer's `arrived`, moved here by
+      ## Shared-DOM-Front-Ends D8). Set by every write of an engine-reported
+      ## position (`updateDebuggerPosition`), whatever tick it names.
     currentGeid*: Signal[Option[uint64]]
     timeline*: Signal[TimelineState]
     agentSessions*: Signal[AgentSessionsState]
@@ -341,6 +368,15 @@ type
     requestSpans*: RequestSpansStore
     degraded*: DegradedStateStore
     backend*: BackendService
+    navigationBackend*: BackendService
+      ## Where `requestHistoricalNavigation` sends a move to a recorded
+      ## moment, when it is not `backend`. A `ct host` page's store is its
+      ## mirror's, over an inert backend (`sync/mirror_session`), while the
+      ## page drives the replay it launched — its toolbar steps through the
+      ## page's own connection and the server's session follows the moves
+      ## it makes. A jump from a pane that runs on the page (a Pixel History
+      ## entry, a frame, an event) has to take that same connection, or it
+      ## is sent to a backend that never answers. nil: `backend`.
     requestTracker*: RequestTracker
     stops*: StopTimeline
       ## PLAT-29. The stops the debugger has been at, as versions — so a
@@ -374,11 +410,26 @@ type
       ## value through the language's own printers (a Rust `String` or `Vec`
       ## as Rust, not as a C struct), so a request that says `c` about a Rust
       ## stop gets C-shaped values back. Installed by every host that can
-      ## answer (the web's `ui/state.initStateVMWithStore`, the native hosts'
+      ## answer (the web's `ui/state.installSourceLanguage`, the native hosts'
       ## `headless_session`); nil means "unknown", and `localsLanguage` falls
       ## back to `LoadLocalsDefaultLang`. A hook rather than an import
       ## because this module is in the Embed SDK's package graph and does not
       ## import `common_lang` (see `LoadLocalsDefaultLang`).
+    viewportScheduler*: ViewportScheduler
+    symbols*: Signal[seq[RecordedSymbol]]
+      ## Every function the recording called, once (`ct/load-symbols`) — the
+      ## omnibar's symbol index, independent of the call-trace window held.
+    eventIndexAskedFor*: string
+      ## The tick `requestEventIndexAt` last asked about; the same tick is not
+      ## asked again. Cleared with the event log.
+      ## The timer every windowed ViewModel over this store debounces its
+      ## viewport reports with (Viewport-Driven-Loading V2). Immediate by
+      ## default; a host that reports on every resize and scroll event (the
+      ## DOM's) installs a deferring one, a test a `TestClock`'s.
+    sessionGeneration*: Signal[int]
+      ## Bumped each time a backend becomes reachable for a different trace
+      ## (`resetForNewSession`). What a ViewModel remembers across stops —
+      ## the toolbar's jump history — starts again on it.
     localsLoadedByHost*: bool
       ## The host requests and applies the locals itself, synchronously, after
       ## each stop (`headless_session.fetchLocals` / `applyLocals`, which the
@@ -581,7 +632,10 @@ proc requestHistoricalNavigation*(store: ReplayDataStore; command: string;
   ## from a live session, the UI enters historical mode immediately; the
   ## backend's complete-move event will refresh the exact debugger position.
   store.enterHistoricalModeForNavigation()
-  discard store.backend.send(command, args)
+  let backend =
+    if store.navigationBackend.isNil: store.backend
+    else: store.navigationBackend
+  discard backend.send(command, args)
 
 proc updateRecordingHead*(store: ReplayDataStore; rrTicks: uint64) =
   ## Mirror a backend recording-head update into session and timeline state.
@@ -645,6 +699,7 @@ proc parseRequestRecord*(node: JsonNode): RequestRecord =
     # ``null`` and an absent key to "", which is this layer's "no external
     # container" sentinel (avoids Option noise across the JS/native split).
     externalTracePath: node{"externalTracePath"}.getStr(""),
+    seekUnavailableReason: node{"seekUnavailableReason"}.getStr(""),
   )
 
 proc mergeRequestSpans*(existing: seq[RequestRecord];
@@ -705,6 +760,8 @@ proc clearRequestSpans*(store: ReplayDataStore) =
   ## "Clear" button is pressed.
   store.requestSpans.requests.val = @[]
   store.requestSpans.cursor.val = 0'i64
+  store.requestSpans.snapshotAnswered = false
+  store.requestSpans.recordedTotal.val = -1
   store.requestSpans.source.val = ""
   store.requestSpans.loadingState.val = lsIdle
 
@@ -718,7 +775,7 @@ proc resetForNewSession*(store: ReplayDataStore) =
   ##
   ## WHY A STORE CAN HOLD A REQUEST THAT WAS NEVER ASKED. The panel
   ## ViewModels issue their first request from an effect that runs at
-  ## CONSTRUCTION, and construction happens in `configureMiddleware` —
+  ## CONSTRUCTION, and construction happens in `configureSessionMiddleware` —
   ## before `openSession` has made a worker on the web path, and before
   ## the DAP session is selected on the desktop one. `requestLocals` marks
   ## `"load-locals"` pending, hands the frame to a channel with no peer
@@ -755,6 +812,7 @@ proc resetForNewSession*(store: ReplayDataStore) =
   ## never answered.
   store.requestTracker.clear()
   store.locals.loadingState.val = lsIdle
+  store.sessionGeneration.val = store.sessionGeneration.val + 1
   # AND THE PREVIOUS RECORDING'S EVENT ROWS GO WITH THEM. All three call sites
   # in `ui_js.nim` run at the moment a backend first becomes reachable for a
   # DIFFERENT trace — two immediately before `DapLaunch`, one on the web path
@@ -768,6 +826,26 @@ proc resetForNewSession*(store: ReplayDataStore) =
   # is still true of the next recording of the same program. Only the sweep
   # results are recording-specific, and the next sweep replaces them whole.
   store.clearEventLog()
+
+proc applySymbolsResponse*(store: ReplayDataStore; payload: JsonNode) =
+  ## Write a `ct/load-symbols` answer (the body, or the whole response) into
+  ## `symbols`. An answer without a `symbols` list leaves them alone.
+  if payload.isNil or payload.kind != JObject:
+    return
+  let body =
+    if payload.hasKey("symbols"): payload
+    else: payload.getOrDefault("body")
+  if body.isNil or body.kind != JObject or
+      body.getOrDefault("symbols").kind != JArray:
+    return
+  var symbols: seq[RecordedSymbol]
+  for node in body["symbols"]:
+    symbols.add RecordedSymbol(
+      name: node{"name"}.getStr(""),
+      path: node{"path"}.getStr(""),
+      line: node{"line"}.getInt(0),
+      firstCallTicks: node{"firstCallTicks"}.getBiggestInt(0).int64)
+  store.symbols.val = symbols
 
 proc requestRequestSpansSince*(store: ReplayDataStore) =
   ## Poll for spans committed since the stored cursor.
@@ -784,6 +862,30 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   let cursor = store.requestSpans.cursor.val
   if store.requestTracker.isDuplicate(key, $cursor):
     return
+  # A COMPLETED RECORDING DOES NOT GROW: once its snapshot has been answered
+  # there is nothing to tail, and the panel's poll timer asks nothing more.
+  # Only a live session (or a replay of one that is still recording) keeps
+  # polling (UI-Data-Loading-Guidelines anti-pattern 3).
+  if store.requestSpans.snapshotAnswered and
+      not store.session.val.debugSessionMode.historicalModeTarget():
+    return
+  # A COMPLETED RECORDING IS READ BY WINDOW (Viewport-Driven-Loading V2): its
+  # requests are not loaded whole into a snapshot. One `limit: 1` page says
+  # how many there are; the panel asks for the rows it shows.
+  if not store.session.val.debugSessionMode.historicalModeTarget():
+    store.requestTracker.markPending(key, $cursor)
+    let s = store
+    async_compat.onComplete(
+      store.backend.send("ct/load-request-spans", %*{"limit": 1}),
+      onSuccess = proc(response: JsonNode) =
+        s.requestTracker.markComplete(key, $cursor)
+        s.requestSpans.snapshotAnswered = true
+        if responseSucceeded(response):
+          s.requestSpans.recordedTotal.val =
+            responseBody(response){"total"}.getInt(0),
+      onError = proc(msg: string) =
+        s.requestTracker.markComplete(key, $cursor))
+    return
 
   store.requestTracker.markPending(key, $cursor)
   store.requestSpans.loadingState.val = lsLoading
@@ -793,12 +895,13 @@ proc requestRequestSpansSince*(store: ReplayDataStore) =
   let s = store
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, $cursor)
       s.applyRequestSpanDelta(response)
+      s.requestSpans.snapshotAnswered = true
       if s.requestSpans.loadingState.val == lsLoading:
         s.requestSpans.loadingState.val = lsIdle,
     onError = proc(msg: string) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, $cursor)
       s.requestSpans.loadingState.val = lsError,
   )
 
@@ -808,11 +911,21 @@ proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
   ## (`ct/event-load` with `indexOnly`: no window, no `ct/updated-events`, so a
   ## host whose table reloads on that event is not made to redraw by a move).
   ## The answer lands in `eventLog.currentIndex` (the list scrubber's mark).
+  # ONE QUESTION PER TICK (Pattern 5): a move re-asks only when the tick
+  # changed, and not while the same question is still in flight.
+  let key = "event-index-at"
+  let argsStr = $rrTicks
+  if store.requestTracker.isDuplicate(key, argsStr) or
+      store.eventIndexAskedFor == argsStr:
+    return
+  store.requestTracker.markPending(key, argsStr)
+  store.eventIndexAskedFor = argsStr
   let fut = store.backend.send("ct/event-load", %*{
     "indexOnly": true, "atRRTicks": int64(rrTicks)})
   let s = store
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
+      s.requestTracker.markComplete(key, argsStr)
       var body = response
       if not body.isNil and body.kind == JObject and body.hasKey("body") and
           body["body"].kind == JObject:
@@ -821,7 +934,10 @@ proc requestEventIndexAt*(store: ReplayDataStore; rrTicks: uint64) =
         return
       if body.hasKey("indexAtTick") and body["indexAtTick"].kind == JInt:
         s.eventLog.currentIndex.val = body["indexAtTick"].getInt,
-    onError = proc(msg: string) = discard)
+    onError = proc(msg: string) =
+      s.requestTracker.markComplete(key, argsStr)
+      # A failed question may be asked again.
+      s.eventIndexAskedFor = "")
 
 proc installBackendEventHandlers(store: ReplayDataStore) =
   ## Consume backend responses/events that are not mirrored through the
@@ -874,18 +990,23 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
     when defined(js):
       vmDebug "[PIPELINE] createReplayDataStore: creating store id=" & $assignedId
     let store = ReplayDataStore(
+      sessionGeneration: createSignal(0),
       storeId: assignedId,
       stops: initStopTimeline(),
+      viewportScheduler: immediateScheduler(),
+      symbols: createSignal(newSeq[RecordedSymbol]()),
       # -- top-level state --
       session: createSignal(SessionState(
         connectionStatus: csDisconnected,
       )),
+      stop: createSignal(StopLocation(frameOffset: -1)),
       debugger: createSignal(DebuggerState(
         location: Location(file: "", line: 0, column: 0),
         rrTicks: 0'u64,
         status: dsIdle,
         threadId: 0'u32,
       )),
+      positionReported: createSignal(false),
       currentGeid: createSignal(none(uint64)),
       timeline: createSignal(TimelineState(
         minRRTicks: 0'u64,
@@ -922,6 +1043,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         totalReported: createSignal(false),
         currentIndex: createSignal(-1),
         recordsFiltered: createSignal(0),
+        windowSearched: createSignal(false),
         maxRRTicks: createSignal(0'u64),
         loadedStart: createSignal(0),
         windowSource: createSignal(elwsUnknown),
@@ -941,6 +1063,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         cursor: createSignal(0'i64),
         source: createSignal(""),
         loadingState: createSignal(lsIdle),
+        recordedTotal: createSignal(-1),
       ),
 
       # -- degraded state (Page-Descriptions.md §14) --
@@ -990,10 +1113,47 @@ proc localsLanguage*(store: ReplayDataStore): string =
   if result.len == 0:
     result = LoadLocalsDefaultLang
 
+const
+  LocalsCountBudget* = 3000
+    ## `ct/load-locals`' value budget while the state pane has not been
+    ## measured — the Electron GUI's number (`ui/state.nim` `loadLocals`).
+    ## Once it has, the budget follows the pane (`localsCountBudgetFor`).
+  LocalsMinCountLimit* = 50
+  LocalsDepthLimit* = 7
+
+func localsCountBudgetFor*(v: Viewport): int =
+  ## The value budget for a state pane showing `v` (Viewport-Driven-Loading
+  ## Q2): every row the pane shows or pre-fetches may be a collection that
+  ## shows its first `LocalsMinCountLimit` items, so the budget is those rows
+  ## times that. A 30-row pane gets (30 + 30) x 50 = 3000, the GUI's
+  ## constant; an unmeasured pane gets that constant.
+  # The pane's rows plus both buffers, independent of where it is scrolled:
+  # the budget bounds the values held for the stop, not a window of them.
+  if not v.measured: LocalsCountBudget
+  else: (v.rows + LeadRows + TrailRows) * LocalsMinCountLimit
+
+proc localsLoadArgs*(store: ReplayDataStore; rrTicks: uint64;
+                     watchExpressions: seq[string];
+                     countBudget = LocalsCountBudget;
+                     minCountLimit = LocalsMinCountLimit;
+                     depthLimit = LocalsDepthLimit;
+                     lang = ""): JsonNode =
+  ## The full `CtLoadLocalsArguments` for a `ct/load-locals` sent now. An
+  ## empty `lang` is the language of the file the debugger is stopped in
+  ## (`localsLanguage`).
+  %*{
+    "rrTicks": rrTicks,
+    "countBudget": countBudget,
+    "minCountLimit": minCountLimit,
+    "depthLimit": depthLimit,
+    "watchExpressions": watchExpressions,
+    "lang": (if lang.len > 0: lang else: store.localsLanguage()),
+  }
+
 proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
-                    countBudget: int = 3000;
-                    minCountLimit: int = 50;
-                    depthLimit: int = 7;
+                    countBudget: int = LocalsCountBudget;
+                    minCountLimit: int = LocalsMinCountLimit;
+                    depthLimit: int = LocalsDepthLimit;
                     watchExpressions: seq[string] = @[];
                     lang: string = "") =
   ## Request locals/globals from the backend for the given rrTicks.
@@ -1047,14 +1207,8 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   store.requestTracker.markPending(key, argsStr)
   store.locals.loadingState.val = lsLoading
 
-  let args = %*{
-    "rrTicks": rrTicks,
-    "countBudget": countBudget,
-    "minCountLimit": minCountLimit,
-    "depthLimit": depthLimit,
-    "watchExpressions": watchExpressions,
-    "lang": (if lang.len > 0: lang else: store.localsLanguage()),
-  }
+  let args = store.localsLoadArgs(rrTicks, watchExpressions, countBudget,
+                                  minCountLimit, depthLimit, lang)
   let fut = store.backend.send("ct/load-locals", args)
 
   # In the native (C) backend the future resolves synchronously in
@@ -1066,13 +1220,16 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
   let ticks = rrTicks
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       s.locals.loadingState.val = lsIdle
       s.locals.loadedForRRTicks.val = ticks,
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       s.locals.loadingState.val = lsError,
   )
+
+proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int
+  ## Forward-declared: `requestCalltraceSection` decodes its own answer.
 
 proc requestCalltraceSection*(store: ReplayDataStore;
                               startIndex: int64;
@@ -1094,13 +1251,6 @@ proc requestCalltraceSection*(store: ReplayDataStore;
   ## The backend responds with CtUpdatedCalltrace which is handled by
   ## the existing event-bus subscription in calltrace.nim.
   let key = "load-calltrace"
-  let argsStr = $startIndex & "|" & $height & "|" & $depth & "|" & $rrTicks
-  if store.requestTracker.isDuplicate(key, argsStr):
-    return
-
-  store.requestTracker.markPending(key, argsStr)
-  store.calltrace.loadingState.val = lsLoading
-
   # Build a location sub-object matching the legacy CalltraceLoadArgs format.
   let args = %*{
     "location": {
@@ -1116,17 +1266,36 @@ proc requestCalltraceSection*(store: ReplayDataStore;
     "autoCollapsing": autoCollapsing,
     "renderCallLineIndex": renderCallLineIndex,
   }
+  # THE KEY IS EVERY FIELD THE ANSWER DEPENDS ON — the canonical
+  # serialisation of the arguments themselves (Pattern 5). It used to be
+  # `start|height|depth|rrTicks`, so a change of filter patterns, location or
+  # collapsing at the same window was taken for the request already in flight.
+  let argsStr = $args
+  if store.requestTracker.isDuplicate(key, argsStr):
+    return
+
+  store.requestTracker.markPending(key, argsStr)
+  store.calltrace.loadingState.val = lsLoading
   let fut = store.backend.send("ct/load-calltrace-section", args)
 
   let s = store
-  fut.onComplete(
-    onSuccess = proc() =
-      s.requestTracker.markComplete(key)
-      s.calltrace.loadingState.val = lsIdle,
-    onError = proc() =
-      s.requestTracker.markComplete(key)
-      s.calltrace.loadingState.val = lsError,
-  )
+  onComplete(fut,
+    proc(response: JsonNode) =
+      s.requestTracker.markComplete(key, argsStr)
+      # THE STORE DECODES ITS OWN ANSWER, on every transport, through the one
+      # section decoder (`applyCalltraceResponse`). The desktop used to read
+      # it from the legacy call-trace component's event subscription instead,
+      # so a host without that component showed an empty pane. A body that is
+      # not a section (an older engine answering only with the event) leaves
+      # the store as it was.
+      if responseSucceeded(response):
+        discard s.applyCalltraceResponse(responseBody(response))
+        s.calltrace.loadingState.val = lsIdle
+      else:
+        s.calltrace.loadingState.val = lsError,
+    proc(message: string) =
+      s.requestTracker.markComplete(key, argsStr)
+      s.calltrace.loadingState.val = lsError)
 
 # ---------------------------------------------------------------------------
 # Bridge procs — used by the legacy UI layer to feed data into the store
@@ -1144,6 +1313,9 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   ## Update the store's debugger signal with a new rrTicks position.
   ## Used by legacy UI code to mirror move events into the ViewModel layer.
   let current = store.debugger.val
+  # The engine has spoken, whatever it said — tick 0 included.
+  if not store.positionReported.val:
+    store.positionReported.val = true
   when defined(js):
     vmDebug "[PIPELINE] updateDebuggerPosition: storeId=" &
       $store.storeId & " setting rrTicks=" & $rrTicks & " (was " &
@@ -1183,6 +1355,114 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
   # PLAT-29: a move is a new stop, so a locals answer requested before it is
   # about a stop the debugger has left.
   store.stops.observe(store.debugger.val)
+
+proc applyStopLocation*(store: ReplayDataStore; body: JsonNode) =
+  ## Adopt the whole location a `ct/complete-move` event reports
+  ## (`MoveState`: `location`, `cLocation`, `frameInfo`) as `stop` — what an
+  ## editor needs beyond the position (`StopLocation`). The desktop's renderer
+  ## calls it with each move it receives; `applyCompleteMove` calls it for
+  ## the hosts that read the event themselves.
+  if body.isNil or body.kind != JObject:
+    return
+  var stop = StopLocation(frameOffset: -1)
+  let loc = body.getOrDefault("location")
+  if not loc.isNil and loc.kind == JObject:
+    stop.path = loc.getOrDefault("path").getStr("")
+    stop.line = loc.getOrDefault("line").getInt(0)
+    stop.highLevelLine = loc.getOrDefault("highLevelLine").getInt(0)
+    stop.functionName = loc.getOrDefault("functionName").getStr("")
+    stop.key = loc.getOrDefault("key").getStr("")
+    stop.functionFirst = loc.getOrDefault("functionFirst").getInt(0)
+    stop.functionLast = loc.getOrDefault("functionLast").getInt(0)
+    stop.asmName = loc.getOrDefault("asmName").getStr("")
+    stop.isExpanded = loc.getOrDefault("isExpanded").getBool(false)
+    stop.expansionFirstLine = loc.getOrDefault("expansionFirstLine").getInt(0)
+    stop.rrTicks = loc.getOrDefault("rrTicks").getBiggestInt(0).uint64
+  let c = body.getOrDefault("cLocation")
+  if not c.isNil and c.kind == JObject:
+    stop.cPath = c.getOrDefault("path").getStr("")
+    stop.cLine = c.getOrDefault("line").getInt(0)
+    stop.cAsmName = c.getOrDefault("asmName").getStr("")
+    stop.cFunctionName = c.getOrDefault("functionName").getStr("")
+    stop.cKey = c.getOrDefault("key").getStr("")
+  let frame = body.getOrDefault("frameInfo")
+  if not frame.isNil and frame.kind == JObject and
+     frame.getOrDefault("hasSelected").getBool(false):
+    stop.frameOffset = frame.getOrDefault("offset").getInt(-1)
+  store.stop.val = stop
+
+proc asmFunctionOf*(path, name, key: string; line: int;
+                    cPath, cName, cKey: string; cLine: int): AsmFunctionLocation =
+  ## The function a stop's low-level code is for: the C-level location for a
+  ## Nim recording (its assembly is the generated C's, and the engine names
+  ## that function by the C path and name), the location itself otherwise. A
+  ## Noir recording asks again on every move. The desktop's low-level pane
+  ## made the same choice (`data.trace.lang == LangNim and cLocation.path !=
+  ## ""`); the recording's language is read here from the source path.
+  let nim = path.endsWith(".nim") and cPath.len > 0
+  if nim:
+    AsmFunctionLocation(path: cPath, name: cName, key: cKey, line: cLine)
+  else:
+    AsmFunctionLocation(path: path, name: name, key: key, line: line,
+                        forceReload: path.endsWith(".nr"))
+
+proc asmFunction*(store: ReplayDataStore): AsmFunctionLocation =
+  ## The function the debugger's stop is in, for the low-level code pane —
+  ## read from `stop`, so a reader of it follows the stop.
+  let s = store.stop.val
+  asmFunctionOf(s.path, s.functionName, s.key, s.line,
+                s.cPath, s.cFunctionName, s.cKey, s.cLine)
+
+proc applyCompleteMove*(store: ReplayDataStore; body: JsonNode) =
+  ## Adopt the position a `ct/complete-move` event reports, and mark the
+  ## debugger idle again.
+  ##
+  ## The event body is a `MoveState` (`src/db-backend/src/task.rs`): the
+  ## position is nested under `location` (`path`, `line`, `rrTicks`,
+  ## `geid`, `sourceGeneration`, `sourceDigest`), with the global event id
+  ## optionally on the body itself (`geid` / `currentGeid`). One decoder for
+  ## every host that reads the event itself — the native harness that pumps
+  ## it, and a host whose session follows its backend's events
+  ## (`DebuggerSession.followBackendMoves`).
+  if body.isNil or body.kind != JObject:
+    return
+  var rrTicks: uint64 = 0
+  var file = ""
+  var line = 0
+  var sourceGeneration = 0
+  var sourceDigest = ""
+  var geid = none(uint64)
+  let loc = body.getOrDefault("location")
+  if not loc.isNil and loc.kind == JObject:
+    file = loc.getOrDefault("path").getStr("")
+    line = loc.getOrDefault("line").getInt(0)
+    sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
+    sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
+    if loc.hasKey("rrTicks"):
+      rrTicks = loc["rrTicks"].getBiggestInt().uint64
+    if loc.hasKey("geid"):
+      geid = some(loc["geid"].getBiggestInt().uint64)
+  if body.hasKey("geid"):
+    geid = some(body["geid"].getBiggestInt().uint64)
+  elif body.hasKey("currentGeid"):
+    geid = some(body["currentGeid"].getBiggestInt().uint64)
+  # One batch: a reader of the stop (the stop loader) must see the position
+  # and the stop's location together, not the new position with the
+  # previous stop's function first.
+  batch(proc() =
+    store.updateDebuggerPosition(rrTicks, file, line, geid,
+                                 sourceGeneration = sourceGeneration,
+                                 sourceDigest = sourceDigest)
+    store.applyStopLocation(body))
+  # A FRESH object: on the JS backend `var dbg = store.debugger.val` is the
+  # signal's own reference, so writing it back compares equal to itself and
+  # the status change never fires — the debugger stayed `dsStepping` and every
+  # step control stayed disabled after the first move.
+  let moved = store.debugger.val
+  if moved.status != dsIdle:
+    store.debugger.val = DebuggerState(
+      rrTicks: moved.rrTicks, location: moved.location, status: dsIdle,
+      threadId: moved.threadId)
 
 proc updateCurrentGeid*(store: ReplayDataStore; geid: Option[uint64]) =
   ## Update the current visual replay GEID independently of rrTicks. MCR
@@ -1399,6 +1679,19 @@ func firstTicks(node: JsonNode; names: varargs[string]): uint64 =
       return if raw > 0.0: uint64(raw) else: 0'u64
   0'u64
 
+func hasTicks(node: JsonNode; names: varargs[string]): bool =
+  ## Whether this object reports a tick under any of `names` — a number that
+  ## is not negative (-1 is how some producers spell "no position"). Tick 0 is
+  ## a position; absence is not.
+  if node.isNil or node.kind != JObject:
+    return false
+  for name in names:
+    let child = node.getOrDefault(name)
+    if child.isNil: continue
+    if child.kind == JInt: return child.getBiggestInt(0) >= 0
+    if child.kind == JFloat: return child.getFloat(0.0) >= 0.0
+  false
+
 func firstInt(node: JsonNode; names: varargs[string]): int =
   ## The first of `names` this object carries as a number, or 0.
   ##
@@ -1448,6 +1741,8 @@ proc eventLogRowFromJson*(node: JsonNode; positionIndex: int): EventLogRow =
   result.line = firstInt(node, "highLevelLine", "high_level_line")
   result.rrTicks = firstTicks(node, "directLocationRRTicks",
                               "direct_location_rr_ticks")
+  result.noPosition = not hasTicks(node, "directLocationRRTicks",
+                                   "direct_location_rr_ticks")
   result.sourceGeneration = firstInt(node, "sourceGeneration",
                                      "source_generation")
   result.sourceDigest = firstStr(node, "sourceDigest", "source_digest")
@@ -1640,6 +1935,24 @@ func eventLogRowFromProgramEvent*[E](event: E;
     stdout: event.stdout,
   )
 
+proc raiseEventLogExtent(store: ReplayDataStore; rows: openArray[EventLogRow]) =
+  ## Raise the recording's extent to the largest `maxRRTicks` of `rows`.
+  ##
+  ## THE TIMELINE'S EXTENT FOLLOWS WHAT THE LOG LEARNS (PLAT-41). The
+  ## recording's extent is one fact, and for a completed recording the event
+  ## log's `maxRRTicks` is where every front-end learns it; the timeline's own
+  ## copy was raised only by LIVE recording-head updates, so on a replay the
+  ## native timeline drew `tick 4 / 0`. Raised, never lowered — as the log's.
+  var maxTicks = store.eventLog.maxRRTicks.val
+  for row in rows:
+    if row.maxRRTicks > maxTicks:
+      maxTicks = row.maxRRTicks
+  store.eventLog.maxRRTicks.val = maxTicks
+  if maxTicks > store.timeline.val.maxRRTicks:
+    var timeline = store.timeline.val
+    timeline.maxRRTicks = maxTicks
+    store.timeline.val = timeline
+
 proc applyEventLogRows*(store: ReplayDataStore;
                         rows: seq[EventLogRow];
                         start: int = 0;
@@ -1675,6 +1988,10 @@ proc applyEventLogRows*(store: ReplayDataStore;
     store.eventLog.loadedStart.val = start
     if source != elwsUnknown:
       store.eventLog.windowSource.val = source
+    # A SEARCHED `ct/event-load` window reports its matches and not the
+    # log's size (`applyEventLogResponse`). See `windowSearched`.
+    store.eventLog.windowSearched.val =
+      source == elwsEventLoad and recordsFiltered >= 0 and recordsTotal < 0
   if recordsTotal >= 0:
     store.eventLog.recordsTotal.val = recordsTotal
   else:
@@ -1690,25 +2007,13 @@ proc applyEventLogRows*(store: ReplayDataStore;
     # just established and put the pane's footer back to "of <everything>"
     # while it is showing a filtered page.
     store.eventLog.recordsFiltered.val = store.eventLog.recordsTotal.val
-  var maxTicks = store.eventLog.maxRRTicks.val
-  for row in rows:
-    if row.maxRRTicks > maxTicks:
-      maxTicks = row.maxRRTicks
-  store.eventLog.maxRRTicks.val = maxTicks
-  # THE TIMELINE'S EXTENT FOLLOWS WHAT THE LOG LEARNS (PLAT-41). The
-  # recording's extent is one fact, and for a completed recording the event
-  # log's `maxRRTicks` is where every front-end learns it; the timeline's own
-  # copy was raised only by LIVE recording-head updates, so on a replay the
-  # native timeline drew `tick 4 / 0`. Raised, never lowered — as the log's.
-  if maxTicks > store.timeline.val.maxRRTicks:
-    var timeline = store.timeline.val
-    timeline.maxRRTicks = maxTicks
-    store.timeline.val = timeline
+  store.raiseEventLogExtent(rows)
   store.eventLog.loadingState.val = lsIdle
 
 proc applyEventLogResponse*(store: ReplayDataStore;
                             payload: JsonNode;
-                            start: int = 0) =
+                            start: int = 0;
+                            searched: bool = false) =
   ## Write ONE `ct/event-load` answer into the store.
   ##
   ## THE `applyLocalsResponse` OF THE EVENT LOG, and it exists for the same
@@ -1723,6 +2028,10 @@ proc applyEventLogResponse*(store: ReplayDataStore;
   ## load" are different facts and only one of them means the log is empty; the
   ## marker-only answers `EventLogVM`'s own effect routes through here are the
   ## second kind.
+  ##
+  ## `searched`: the answer is to a filtered request (`ct/event-load`'s
+  ## `search` or `selectedKinds`), so its `total` counts the matching events
+  ## only.
   if payload.isNil:
     return
   var hasEvents = false
@@ -1747,11 +2056,28 @@ proc applyEventLogResponse*(store: ReplayDataStore;
     if not holder.isNil and holder.hasKey("total") and
         holder["total"].kind == JInt:
       total = holder["total"].getInt
+  # `unfilteredTotal`: the whole log's size, which the engine reports beside
+  # the filtered `total` (a search, a kind selection).
+  var unfilteredTotal = -1
+  if payload.kind == JObject:
+    let body = payload.getOrDefault("body")
+    let holder = if payload.hasKey("unfilteredTotal"): payload
+                 elif not body.isNil and body.kind == JObject: body
+                 else: nil
+    if not holder.isNil and holder.hasKey("unfilteredTotal") and
+        holder["unfilteredTotal"].kind == JInt:
+      unfilteredTotal = holder["unfilteredTotal"].getInt
   if total >= 0:
     store.eventLog.totalReported.val = true
 
+  # A SEARCHED (or kind-filtered) answer's `total` is the number of MATCHING
+  # events — the filtered count; the log's size is its `unfilteredTotal` when
+  # the engine says it, and otherwise stays what it was.
   store.applyEventLogRows(eventLogRowsFromJson(payload, start), start,
-                          recordsTotal = total,
+                          recordsTotal = (if unfilteredTotal >= 0: unfilteredTotal
+                                          elif searched: -1
+                                          else: total),
+                          recordsFiltered = (if searched: total else: -1),
                           source = elwsEventLoad)
 
 proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
@@ -1763,6 +2089,18 @@ proc appendLiveEventRow*(store: ReplayDataStore; row: EventLogRow): bool =
   ## load. The duplicate test is the identity the live producer can supply —
   ## `(eventId, kind, sourceGeneration, sourceDigest)` — because a live stop
   ## has no `eventIndex` of its own until it is appended.
+  ##
+  ## NOT INTO A SEARCHED WINDOW (`windowSearched`). The rows on hand are then
+  ## the engine's answer to a search, and so is the count the pager reads.
+  ## Whether the stop matches is the engine's question, not one to answer by
+  ## filtering on the client. Appending it anyway put an unmatched row among
+  ## the matches and reset the match count to the whole log. Only the
+  ## recording's extent, a fact about the recording, is raised; the next
+  ## searched request reports the stop if it matches. Answers false: the row
+  ## was not added.
+  if store.eventLog.windowSearched.val:
+    store.raiseEventLogExtent([row])
+    return false
   var rows = store.eventLog.rows.val
   for existing in rows:
     if existing.eventId == row.eventId and
@@ -1783,7 +2121,9 @@ proc clearEventLog*(store: ReplayDataStore) =
   store.eventLog.recordsTotal.val = 0
   store.eventLog.totalReported.val = false
   store.eventLog.currentIndex.val = -1
+  store.eventIndexAskedFor = ""
   store.eventLog.recordsFiltered.val = 0
+  store.eventLog.windowSearched.val = false
   store.eventLog.maxRRTicks.val = 0'u64
   store.eventLog.loadedStart.val = 0
   # AND THE WINDOW'S OWNER. A restart that left `elwsTable` behind would make
@@ -1811,10 +2151,20 @@ type
   BreakpointAnchor* = tuple[line, column: int]
     ## PLAT-50: where a breakpoint is — a line, and the column it is anchored
     ## at (0: the whole line).
+  BreakpointSpec* = object
+    ## One breakpoint as a front-end holds it: where it is, what it asks of
+    ## the engine, and whether it is armed. A DISABLED one is not sent (the
+    ## engine holds only the enabled ones) and stays a row of the point list.
+    line*: int
+    column*: int
+      ## The column it is anchored at; 0 for the whole line.
+    condition*: string
+    logMessage*: string
+    enabled*: bool
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
-                               verified: openArray[BreakpointAnchor];
-                               disabled: openArray[BreakpointAnchor] = []) =
+                               specs: openArray[BreakpointSpec];
+                               resolution = "verified") =
   ## Replace `path`'s breakpoint rows with the anchors the ENGINE verified.
   ##
   ## **THE ONE DECODER OF BREAKPOINT ROWS** (PLAT-40), on every runtime: the
@@ -1832,6 +2182,12 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   ## (only enabled ones are sent, as the desktop's `dapSetBreakpoints` sends
   ## them) and stays a row of the point list — and a dimmed mark in the
   ## gutter — until it is deleted.
+  ##
+  ## `specs` is the set held for `path` after the engine answered: the
+  ## enabled ones at the line and column it BOUND, the disabled ones as they
+  ## were. A breakpoint carries its condition and log message (Column-Aware
+  ## Navigation M9 and M10) onto its row. `resolution` is `requested` for a
+  ## set held before the engine has answered (`sdk/breakpoints.requestBreakpoints`).
   var rows: seq[PointListEntry] = @[]
   for r in store.pointList.rows.val:
     if not (r.kind == PointKindBreakpoint and r.path == path):
@@ -1840,23 +2196,32 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   let slash = max(path.rfind('/'), path.rfind('\\'))
   if slash >= 0: name = path[slash + 1 .. ^1]
   var lines: seq[int] = @[]
-  proc label(a: BreakpointAnchor): string =
-    name & ":" & $a.line & (if a.column > 0: ":" & $a.column else: "")
-  for a in verified:
-    if a.line >= 1 and a.line notin lines:
-      lines.add a.line
-      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
-                              path: path, line: a.line,
-                              column: max(0, a.column), enabled: true,
-                              resolution: "verified")
-  for a in disabled:
-    if a.line >= 1 and a.line notin lines:
-      lines.add a.line
-      rows.add PointListEntry(kind: PointKindBreakpoint, label: label(a),
-                              path: path, line: a.line,
-                              column: max(0, a.column), enabled: false,
-                              resolution: "verified")
+  # The armed ones first: a line carrying both an armed and a disabled
+  # breakpoint stops, so the armed one is the line's row.
+  for armed in [true, false]:
+    for sp in specs:
+      if sp.enabled != armed or sp.line < 1 or sp.line in lines:
+        continue
+      lines.add sp.line
+      rows.add PointListEntry(kind: PointKindBreakpoint,
+        label: name & ":" & $sp.line &
+               (if sp.column > 0: ":" & $sp.column else: ""),
+        path: path, line: sp.line, column: max(0, sp.column),
+        enabled: sp.enabled, resolution: resolution,
+        condition: sp.condition, logMessage: sp.logMessage)
   store.applyPointRows(rows)
+
+proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
+                               verified: openArray[BreakpointAnchor];
+                               disabled: openArray[BreakpointAnchor] = []) =
+  ## The anchor form: `verified` armed, `disabled` held unarmed, none of them
+  ## conditional.
+  var specs: seq[BreakpointSpec] = @[]
+  for a in verified:
+    specs.add BreakpointSpec(line: a.line, column: a.column, enabled: true)
+  for a in disabled:
+    specs.add BreakpointSpec(line: a.line, column: a.column, enabled: false)
+  store.applyVerifiedBreakpoints(path, specs)
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
                                verifiedLines: openArray[int];
@@ -1869,7 +2234,8 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   store.applyVerifiedBreakpoints(path, verified, disabled)
 
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
-                             stopAfter = -1): JsonNode =
+                             stopAfter = -1; withLocals = false;
+                             sweepId = 0): JsonNode =
   ## The ``ct/run-tracepoints`` arguments for ``specs``: THE ONE PLACE THE
   ## WIRE SHAPE OF A ``Tracepoint`` IS SPELLED on this side, so that a
   ## reader of the Rust ``task::Tracepoint`` has exactly one Nim builder to
@@ -1882,6 +2248,15 @@ proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
   ## the Rust struct required the key, while the engine never read it; it was
   ## measured dead on ``calc`` (12 and 21 answered identically) and deleted on
   ## both sides rather than moved to a name.
+  ##
+  ## ``withLocals`` (Viewport-Driven-Loading, Decided Q4): the answer carries
+  ## each hit's tick and location; its locals only when asked. A pane reads
+  ## the locals of the hits it shows by window (`ct/update-table`).
+  ##
+  ## ``sweepId`` is sent as ``session.id``, which the engine echoes as the
+  ## answer's ``sessionId`` (``TracepointResultsAggregate``): how
+  ## ``headless_session.runTracepoints`` tells its own answer from an earlier
+  ## sweep's late one.
   var tracepoints = newJArray()
   for spec in specs:
     tracepoints.add %*{
@@ -1903,9 +2278,10 @@ proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
       "found": newJArray(),
       "lastCount": 0,
       "results": newJObject(),
-      "id": 0,
+      "id": sweepId,
     },
     "stopAfter": stopAfter,
+    "withLocals": withLocals,
   }
 
 proc applyTracepointResults*(store: ReplayDataStore;
@@ -1971,12 +2347,22 @@ proc applyTracepointResults*(store: ReplayDataStore;
       else: "the sweep reached this line no times"
     var replaced = false
     for j in 0 ..< rows.len:
-      if rows[j].path == spec.path and rows[j].line == spec.line and
+      # A BREAKPOINT at the line is not this tracepoint (M76): merging into
+      # it would leave the sweep with no tracepoint row — none for the Debug
+      # menu's tracepoint items to act on, none for "Run All Tracepoints" to
+      # send again — and would mark the breakpoint as swept.
+      if rows[j].kind != PointKindBreakpoint and
+         rows[j].path == spec.path and rows[j].line == spec.line and
          rows[j].line != 0:
         rows[j].line = line
         rows[j].path = path
         rows[j].resolution = resolution
         rows[j].detail = detail
+        # The expression this sweep RAN: a second `:tracepoint` on the line
+        # replaces the first, and "Run All Tracepoints" sends the row's
+        # expression again (`enabledTracepointSpecs`).
+        if spec.expression.len > 0:
+          rows[j].expression = spec.expression
         replaced = true
         break
     if not replaced:
@@ -1993,9 +2379,81 @@ proc applyTracepointResults*(store: ReplayDataStore;
         enabled: true,
         collection: "",
         resolution: resolution,
-        detail: detail)
+        detail: detail,
+        expression: spec.expression)
   store.pointList.rows.val = rows
   store.pointList.loadingState.val = lsIdle
+
+# ---------------------------------------------------------------------------
+# The program menu's tracepoint items (M76, codetracer#843)
+# ---------------------------------------------------------------------------
+#
+# The desktop's Debug menu enables, disables and deletes the tracepoint at the
+# editor's caret line, or all of them, and "Run All Tracepoints" sweeps the
+# enabled ones again (`ui_js.nim`'s `enableTracepointAtPosition` …
+# `ui/trace.runTracepoints`, which skips a disabled trace). The native front
+# ends hold their tracepoints as `pointList.rows` of kind
+# `PointKindTracepoint` — what a sweep wrote — so the operations are written
+# HERE, once, over those rows, and both native menus call them. Pure store
+# writes: no request is sent, because a post-hoc tracepoint is not on the
+# engine between sweeps; what an enabled flag changes is the next sweep.
+
+proc tracepointMatches(r: PointListEntry; path: string; line: int;
+                       every: bool): bool =
+  ## Whether row `r` is a tracepoint the operation names: every tracepoint, or
+  ## the one at `path:line` (a row with no line — an unresolved point — is
+  ## never "at" a line).
+  r.kind == PointKindTracepoint and
+    (every or (r.line != 0 and r.line == line and r.path == path))
+
+proc setTracepointsEnabled*(store: ReplayDataStore; path: string; line: int;
+                            enabled: bool; every = false): int =
+  ## Enable or disable the tracepoint at `path:line` — or, with `every`, every
+  ## tracepoint (the menu's "Enable / Disable All Tracepoints"). Answers how
+  ## many rows CHANGED; 0 when none was there to change, which the caller
+  ## reports rather than claiming it acted. Rows of other kinds are untouched.
+  var rows = store.pointList.rows.val
+  for r in rows.mitems:
+    if r.tracepointMatches(path, line, every) and r.enabled != enabled:
+      r.enabled = enabled
+      inc result
+  if result > 0:
+    store.pointList.rows.val = rows
+
+proc deleteTracepoint*(store: ReplayDataStore; path: string; line: int): bool =
+  ## Delete the tracepoint at `path:line` — its point-list row and the hits
+  ## its sweeps left at that line (`tracepointHits`), so the gutter and a trace
+  ## pane stop showing what is no longer a tracepoint. False when there was
+  ## none.
+  var kept: seq[PointListEntry] = @[]
+  for r in store.pointList.rows.val:
+    if r.tracepointMatches(path, line, every = false):
+      result = true
+    else:
+      kept.add r
+  if not result:
+    return
+  store.pointList.rows.val = kept
+  var hits: seq[TracepointSweepHit] = @[]
+  for h in store.pointList.tracepointHits.val:
+    if not (h.path == path and h.line == line):
+      hits.add h
+  store.pointList.tracepointHits.val = hits
+
+proc enabledTracepointSpecs*(store: ReplayDataStore;
+                             firstId: int): seq[TracepointSweepSpec] =
+  ## The sweep "Run All Tracepoints" sends: one spec per ENABLED tracepoint
+  ## row that has a line and an expression, numbered from `firstId` (a sweep's
+  ## ids are how its hits are matched back to its specs, so a caller that has
+  ## swept before passes the next unused id). A disabled tracepoint is not
+  ## swept, as the desktop's `runTracepoints` skips a disabled trace.
+  var id = firstId
+  for r in store.pointList.rows.val:
+    if r.kind == PointKindTracepoint and r.enabled and r.line != 0 and
+       r.expression.len > 0:
+      result.add TracepointSweepSpec(tracepointId: id, path: r.path,
+                                     line: r.line, expression: r.expression)
+      inc id
 
 proc updateCodeStateLine*(store: ReplayDataStore;
                           line: int;
@@ -2083,7 +2541,8 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
                    codeGeneration: int = 0;
                    callstackDepth: int = 0;
                    hasChildren: bool = false; isExpanded: bool = false;
-                   callKey: string = ""): CallLine =
+                   callKey: string = "";
+                   replayPosition: string = ""): CallLine =
   ## Convenience constructor for CallLine — avoids the need for callers
   ## to import store/types.
   CallLine(
@@ -2096,7 +2555,8 @@ proc makeCallLine*(name: string; depth: int; rrTicks: uint64;
       line: line,
       sourceGeneration: sourceGeneration,
       sourceDigest: sourceDigest,
-      callstackDepth: callstackDepth),
+      callstackDepth: callstackDepth,
+      replayPosition: replayPosition),
     codeGeneration: codeGeneration,
     hasChildren: hasChildren,
     isExpanded: isExpanded,
@@ -2130,6 +2590,8 @@ type
     sourceGeneration*: int
     sourceDigest*: string
     callstackDepth*: int
+    replayPosition*: string
+      ## `location.replayPosition`: a native row's exact stop.
     count*: int
       ## `content.count` — the backend's child count for the line.
     hiddenChildren*: bool
@@ -2162,7 +2624,8 @@ proc callLineOf*(w: CallLineWire; globalIndex: int64): CallLine =
     name = name, depth = w.depth, rrTicks = w.rrTicks, file = file,
     line = line, sourceGeneration = w.sourceGeneration,
     sourceDigest = w.sourceDigest, codeGeneration = w.sourceGeneration,
-    callstackDepth = w.callstackDepth, hasChildren = hasChildren,
+    callstackDepth = w.callstackDepth, replayPosition = w.replayPosition,
+    hasChildren = hasChildren,
     isExpanded = hasChildren and (not w.hiddenChildren or w.loadedChildren > 0),
     callKey = w.callKey)
   result.index = globalIndex
@@ -2196,6 +2659,7 @@ proc callLineWireOf*(entry: JsonNode): Option[CallLineWire] =
     w.sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
     w.sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
     w.callstackDepth = loc.getOrDefault("callstackDepth").getInt(0)
+    w.replayPosition = loc.getOrDefault("replayPosition").getStr("")
   some(w)
 
 const NoneValueKind = 30
@@ -2310,14 +2774,23 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
   ## raising ``ValueError``.
   let key = "step"
   let dirStr = $direction
-  if store.requestTracker.isDuplicate(key, dirStr):
+  let current = store.debugger.val
+  let threadId =
+    if current.threadId == 0'u32:
+      1
+    else:
+      current.threadId.int
+  let command = stepDirectionToDapCommand(direction)
+  # THE KEY IS EVERY ARGUMENT (Pattern 5): the command, the direction and the
+  # thread. A step on another thread is another request.
+  let stepKey = command & "|" & dirStr & "|" & $threadId
+  if store.requestTracker.isDuplicate(key, stepKey):
     return
 
-  store.requestTracker.markPending(key, dirStr)
+  store.requestTracker.markPending(key, stepKey)
 
   # Update debugger status to stepping.
   # Construct a NEW object to avoid JS reference semantics bug.
-  let current = store.debugger.val
   store.debugger.val = DebuggerState(
     rrTicks: current.rrTicks,
     location: current.location,
@@ -2325,21 +2798,15 @@ proc requestStep*(store: ReplayDataStore; direction: StepDirection) =
     threadId: current.threadId,
   )
 
-  let command = stepDirectionToDapCommand(direction)
-  let threadId =
-    if current.threadId == 0'u32:
-      1
-    else:
-      current.threadId.int
   let args = %*{"direction": dirStr, "threadId": threadId}
   let fut = store.backend.send(command, args)
 
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key),
+      s.requestTracker.markComplete(key, stepKey),
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, stepKey)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,
@@ -2361,11 +2828,11 @@ proc requestRecordingHead*(store: ReplayDataStore) =
   let s = store
   async_compat.onComplete(fut,
     onSuccess = proc(response: JsonNode) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, "")
       let head = response.readRRTicks(s.session.val.recordingHeadRRTicks)
       s.updateRecordingHead(head),
     onError = proc(msg: string) =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, "")
       var failedSession = s.session.val
       failedSession.recordingHeadLoadingState = lsError
       s.session.val = failedSession,
@@ -2375,31 +2842,34 @@ proc requestLiveToolbarAction*(store: ReplayDataStore; actionId: string) =
   ## Route a toolbar action to the fake/real live MCR command path instead of
   ## the completed-replay DAP step commands.
   let key = "mcr-live-step"
-  if store.requestTracker.isDuplicate(key, actionId):
-    return
-
-  store.requestTracker.markPending(key, actionId)
   let current = store.debugger.val
-  let runningStatus =
-    if actionId == "continue": dsRunning
-    else: dsStepping
-  store.setDebuggerSnapshot(current.rrTicks, runningStatus)
-
   let threadId =
     if current.threadId == 0'u32:
       1
     else:
       current.threadId.int
+  # THE KEY IS EVERY ARGUMENT (Pattern 5): the live command, the action and
+  # the thread.
+  let actionKey = LiveMcrStepCommand & "|" & actionId & "|" & $threadId
+  if store.requestTracker.isDuplicate(key, actionKey):
+    return
+
+  store.requestTracker.markPending(key, actionKey)
+  let runningStatus =
+    if actionId == "continue": dsRunning
+    else: dsStepping
+  store.setDebuggerSnapshot(current.rrTicks, runningStatus)
+
   let args = %*{"action": actionId, "threadId": threadId}
   let fut = store.backend.send(LiveMcrStepCommand, args)
 
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, actionKey)
       s.setDebuggerSnapshot(s.debugger.val.rrTicks, dsIdle),
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, actionKey)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,
@@ -2432,7 +2902,7 @@ proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
   let s = store
   fut.onComplete(
     onSuccess = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
 
       var session = s.session.val
       if not jumpToLive and session.debugSessionMode in {liveMcr, liveMaterialized}:
@@ -2450,7 +2920,7 @@ proc requestRestoreAt*(store: ReplayDataStore; rrTicks: uint64;
       s.timeline.val = timeline
       s.setDebuggerSnapshot(rrTicks, dsIdle),
     onError = proc() =
-      s.requestTracker.markComplete(key)
+      s.requestTracker.markComplete(key, argsStr)
       var dbg = s.debugger.val
       dbg.status = dsError
       s.debugger.val = dbg,

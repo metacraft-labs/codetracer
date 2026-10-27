@@ -189,17 +189,8 @@ when defined(js):
     ## because that module is being edited by the mark restoration and a new
     ## export is the kind of edit that turns into a conflict.
 
-  proc querySelector(e: isonim_dom.Element; sel: cstring): isonim_dom.Element
-    {.importcpp: "#.querySelector(#)".}
-    ## Scoped to the panel root, not the document. `#isonim-debug-controls`
-    ## holds either this toolbar or the debugger's, and the two share
-    ## `run-tests-image`, so a document-wide lookup is how a mark reaches the
-    ## wrong surface's button.
-
   proc firstElementChild(e: isonim_dom.Element): isonim_dom.Element
     {.importcpp: "#.firstElementChild".}
-
-  proc consoleError(msg: cstring) {.importjs: "console.error(#)".}
 
   proc buildEditMark(m: EditMark): isonim_dom.Element =
     ## Build the mark as real namespaced SVG nodes.
@@ -234,32 +225,17 @@ when defined(js):
       svg.appendChild(p)
     svg
 
-  proc attachEditToolbarMarks*(panel: isonim_dom.Element): int {.discardable.} =
-    ## Put each mark on its button, and answer how many were placed.
-    ##
-    ## The count is RETURNED, not assumed, for the reason
-    ## `attachControlMarks` gives: a bar whose marks failed to attach still
-    ## renders its buttons and they still click, so a caller that only checks
-    ## "the toolbar mounted" cannot tell a drawn bar from a bare one.
-    ##
-    ## A miss is not an error here the way it is on the debugger strip: Build
-    ## and Run are ABSENT in Debug mode by design (EMT-D12), so this walks the
-    ## marks and skips the ones whose button is not on this panel. Only a
-    ## button that IS present and did not receive its mark is worth a word.
-    var placed = 0
-    var present = 0
+  proc attachEditMark*(btn: isonim_dom.Element; buttonId: string): bool
+      {.discardable.} =
+    ## Put the mark of the button `buttonId` on `btn`, the button just
+    ## rendered (a toolbar whose buttons come and go with its model attaches
+    ## them one by one). `false` when the button carries no mark.
     for m in EditToolbarMarks:
-      let btn = panel.querySelector(cstring("#" & m.buttonId))
-      if btn.isNil:
-        continue
-      inc present
-      let existing = btn.firstElementChild
-      if existing.isNil:
-        btn.appendChild(buildEditMark(m))
-      else:
-        discard btn.insertBefore(buildEditMark(m), existing)
-      inc placed
-    if placed != present:
-      consoleError(cstring("edit toolbar: attached " & $placed & " of " &
-                           $present & " marks — the bar is drawn short"))
-    placed
+      if m.buttonId == buttonId:
+        let existing = btn.firstElementChild
+        if existing.isNil:
+          btn.appendChild(buildEditMark(m))
+        else:
+          discard btn.insertBefore(buildEditMark(m), existing)
+        return true
+    false

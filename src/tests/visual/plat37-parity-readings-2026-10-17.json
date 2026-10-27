@@ -1,0 +1,1638 @@
+{
+ "_comment": [
+  "PLAT-37 \u2014 GPUI-vs-ELECTRON PARITY, RE-MEASURED AFTER THE 2026-10-17 UPSTREAM SYNC.",
+  "",
+  "WHY THIS FILE EXISTS. 26 codetracer commits landed between the last pass's",
+  "subject (6b6d05a08) and this one's (596cb6e50), +6,904/-1,947 over 46 files in",
+  "src/frontend/gpui/ alone, aimed squarely at the findings below. Every reading",
+  "taken before them is stale by construction. This file re-takes them.",
+  "",
+  "EVERY FINDING SAYS WHETHER IT WAS RE-MEASURED OR INHERITED (`measuredThisPass`),",
+  "and every claim names the commit it was measured against, in the same sentence.",
+  "",
+  "STANDING: HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. Both lanes need a",
+  "live macOS GUI session and a kTCCServiceScreenCapture grant. A gate that cannot",
+  "run is not a gate.",
+  "",
+  "THE MEASUREMENT APPARATUS ITSELF MOVED THIS PASS and two of its constants were",
+  "re-derived rather than inherited; see `titleBarCropReDerived` and",
+  "`instrumentControls`. The raw per-frame records are in",
+  "build/plat37-parity-2026-10-17/ (gitignored): struct.jsonl, flip-results.jsonl,",
+  "ladder.jsonl, geometry.json, measurements.json."
+ ],
+ "schemaVersion": 5,
+ "supersedes": [
+  "src/tests/visual/plat37-parity-readings.json (2026-10-12, build-skew contaminated)",
+  "src/tests/visual/plat37-parity-readings-2026-10-13.json (re-grade on a gated GPUI binary)",
+  "src/tests/visual/plat37-parity-readings-2026-10-14.json",
+  "src/tests/visual/plat37-parity-readings-2026-10-16.json (Electron arm never built)"
+ ],
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE.",
+ "measuredAt": "2026-10-17",
+ "subject": {
+  "codetracer": "596cb6e50a5949e5cd424814d570e5f9176eee78 (agents)",
+  "codetracerWorkingTree": "clean except repro.nim, which carries an uncommitted `dsymutil` tool declaration (`uses: \"dsymutil >=0\"` plus a macOS-gated ref on the shared ctNative template).",
+  "isonimGpui": "03175361527a393fa0cc5f341b29a18a1657f839 (agents), clean",
+  "isonim": "deb3c8a7623ddf5dac0485c4af374c0ea4ac92f1",
+  "codetracerPm": "b5634817486d9bf09bc652e70529951da0425694",
+  "guiAssert": "3058e0c030b6db13af0452f2cc9870e56548942c",
+  "codetracerImageDiff": "ee9fb397b94155557d730ee6997db60687214988",
+  "reprobuildPackages": "9f981af6c771ce062de810dcdd3affae21857f22",
+  "reprobuildCheckout": "a192a91295aa88eb35f1599d40a32a0904d31cf0 (dsymutil selector, committed-unpushed, on 2391fa8cb9)",
+  "reprobuildBinariesUsed": "build/bin/repro (1,059,144 B, mtime 2026-10-16T14:42) and build/bin/reprobuild (30,222,440 B, mtime 2026-10-16T14:40). BOTH PREDATE the commit their checkout is on (a192a91295 was committed 2026-10-17T14:49:53+03:00), so they were built from the working tree that later became it. Stated rather than smoothed over: this is the 'built at X from the checkout at Y' trap, and the only positive evidence that the selector is IN them is the literal count \u2014 `grep -a -c dsymutil` reads 5 in build/bin/reprobuild and 1 in the pinned nix /nix/store/fa4x7yh\u2026-reprobuild-0.2.5 engine \u2014 plus the fact that the ct native edge, which declares the tool, built clean."
+ },
+ "upstreamRecheckedAtTheEnd": {
+  "when": "2026-10-17T13:50:40Z, by `git ls-remote origin refs/heads/agents` in each repo",
+  "codetracer": "origin/agents is now d883db0e2b94b04a10d0160b68219032b47394b5 \u2014 UPSTREAM HAS MOVED past the 596cb6e50 this pass measured.",
+  "isonimGpui": "origin/agents is now ab520c05fccbc08adec17606b201d7db19960eea \u2014 UPSTREAM HAS MOVED past the 0317536 this pass measured.",
+  "ruling": "Not chased mid-pass, by instruction. Every number in this file is against codetracer 596cb6e50 with isonim-gpui 0317536, and both have been superseded upstream since the captures were taken. Re-check by ancestry before acting on any of it."
+ },
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 build 25F84 (Darwin 25.5.0 arm64)",
+  "displayPoints": "1728x1117, one display",
+  "pointPixelScale": 2.0,
+  "devShell": "nix develop in codetracer; nim = /nix/store/2ry3sav2ghbn7a8xmcadvxksjgd94rhd-nim-fork-2.3.1-codetracer/bin/nim (Nim 2.3.1)",
+  "reproBootstrapCc": "/nix/store/2my3q4ffmph0md3p0d4l31wkqgbxgz5w-clang-wrapper-21.1.8/bin/clang, PROVEN by AGENTS.md's control pair run this pass: under `env -i`, a bare `#include <stdlib.h>` compiled with the wrapper (rc 0, captured into a variable before any other command) and FAILED with /nix/store/15n3slfdsd5zhyxrvaa7vm36f1jydwqp-clang-21.1.8/bin/clang (rc 1).",
+  "reproForeignEnvBash": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9)",
+  "diskFreeAtStart": "82G",
+  "diskFreeAtEnd": "70G"
+ },
+ "prerequisitesRepairedBeforeAnythingCouldBeMeasured": [
+  {
+   "what": "`libs/nim-regex` was an UNINITIALISED git submodule.",
+   "measured": "`git submodule status` printed `-a0f1df6a6512340df9ababe59f55140c94a2200f libs/nim-regex`. `just build-gpui` died with `src/frontend/viewmodel/host/text_match.nim(66, 8) Error: cannot open file: regex`, and `just build-once`'s own preflight named the cause exactly: `MISSING 1 uninitialised submodule(s)`. config.nims line 31 adds `libs/nim-regex/src` to the path; the submodule arrived with 2097ae648 (Find in Files).",
+   "repair": "`git submodule update --init libs/nim-regex`, exit 0, checked out a0f1df6a (v0.27.0). No other submodule was uninitialised.",
+   "worthKnowing": "A workspace sync that does not run `git submodule update --init` leaves every checkout one commit behind a build that cannot start. The dev shell's `.envrc` does run it; a scripted sync may not."
+  },
+  {
+   "what": "isonim-gpui's staged PLAT-37 shims were TWO COMMITS STALE, over exactly the surface this campaign measures.",
+   "measured": "`rust/target/plat37/libgpui_nim_shim.*.dylib` were dated 2026-10-16T12:35\u201312:37, while isonim-gpui HEAD 0317536 is dated 2026-10-17T05:04. The two commits in between are `6b7ce61` (register font files, draw line-height) and `0317536` (per-corner radii, per-side margins, Chromium's text antialiasing) \u2014 font metrics and antialiasing, i.e. the row pitch and glyph rendering that PARITY-S5 and PARITY-P1 are about.",
+   "repair": "`nix develop --command just plat37-shims` in isonim-gpui, exit 0. Positive control that it really rebuilt: the windowed shim went 66,439,976 -> 66,770,072 bytes and the featureless one 1,595,192 -> 1,640,200.",
+   "andTheGateCannotSeeThis": "`ci/lib/build-freshness.sh` says so itself at lines 114-116: link-time inputs that are not Nim modules \u2014 'the isonim-gpui cdylib above all' \u2014 are OUTSIDE the GPUI input digest. So `build-freshness.sh assert` would have returned 0 over a stale shim. The gate is not wrong; it is scoped, and the scope has to be covered by hand."
+  }
+ ],
+ "buildOutcomes": {
+  "gpuiArm": {
+   "command": "nix develop --command just build-gpui",
+   "environment": "INSIDE the codetracer dev shell, with PATH led by reprobuild/build/bin, REPRO_BOOTSTRAP_CC and REPRO_FOREIGN_ENV_BASH set as above.",
+   "exit": 0,
+   "firstAttempt": "exit 1 \u2014 `cannot open file: regex`, the uninitialised submodule above. Recorded because the second attempt is only meaningful beside it.",
+   "artefact": "build/bin/codetracer-gpui, stamped `built at 2026-10-17T12:21:38Z by /nix/store/2ry3sav2\u2026-nim-fork-2.3.1-codetracer/bin/nim`."
+  },
+  "electronArm": {
+   "commandFull": "nix develop --command env REPROBUILD_PACKAGES_ROOT=<workspace reprobuild-packages @9f981af6> REPRO_DAEMON=off REPRO_NIM_COMPILER=/nix/store/4m0ffd42r0qn0rzpjjibdrb97kadc5j2-nim-unwrapped-2.2.4/bin/nim just build-once",
+   "exitFull": 1,
+   "whereTheFullTargetStops": "TWO pre-existing actions, neither in the Electron bundle's closure: `dmg` (`hdiutil: convert failed - File exists`) and `docs-book-assets` (`capture-visual-recording-screenshots: missing executable the MCR command (ct_cli): \u2026/codetracer-native-recorder/ct_cli/ct_cli`, which the dev shell warns about on every entry). This is NOT the same pair the 2026-10-16 pass saw: `stage-app-for-dmg` (missing node_modules/.bin/glob) succeeded this time and `dmg` failed one step later.",
+   "commandScoped": "the same, plus CODETRACER_REPROBUILD_TARGET=ct-binary",
+   "exitScoped": 0,
+   "deviationDeclared": "SCOPING THE ELECTRON BUILD IS A DEVIATION FROM `just build-once` WITH NO ARGUMENTS, and it is flagged as one. `CODETRACER_REPROBUILD_TARGET` is build-once.sh's own documented knob (scripts/build-once.sh:466) and the Electron stamp's closure provably excludes both failing actions (`bf_electron_write_stamp` anchors to bin/ct and folds in ui.js and index.js only). The stamp was written by the real build path, not by hand.",
+   "threeEnvironmentVariablesWithoutWhichITDOESNOTBUILD": "The first attempt omitted them and died with `could not provision the Nim compiler that compiles the recipe \u2026 package \"nim@2.2.10\" has no tarball realization for aarch64-macos`. That is reprobuild's OWN printed remedy being followed, not a workaround around it: `reprobuild does not fall back to PATH by itself`. The 2026-10-16 pass used the same three.",
+   "artefact": "src/build-debug-repro/bin/ct, 11,410,880 B, 2026-10-17T16:11 local."
+  },
+  "theBuildStampNAMESTHEWRONGBINARY": {
+   "observed": "The stamp reads `built_by=repro 0.1.3 (compiles with its own tool-store nim, not the nim on PATH)` although the build was driven by the local 0.2.5.",
+   "mechanismMeasuredThisPass": "`tup` IS NOT IN THE CODETRACER DEV SHELL ON aarch64-darwin. Measured directly: inside `nix develop`, `command -v tup` is empty while `command -v nim` resolves. scripts/build-once.sh:45 therefore fires its guard and sources `.direnv/flake-profile-cf2df07c\u2026.rc` \u2014 dated 2026-08-27 \u2014 which prepends `/nix/store/fi801q3ikr5b5amalxyi2rm8xa83r894-reprobuild-0.1.3/bin`. After that source, `command -v repro` resolves to 0.1.3; before it, to the local 0.2.5. Reproduced on demand in a standalone probe.",
+   "whyTheBUILDwasSTILLthelocal0_2_5": "build-once.sh:193 resolves the engine from the SIBLING checkout's `build/bin/` BEFORE falling back to PATH, so `$repro_bin` is \u2026/reprobuild/build/bin/repro whatever the profile does. Confirmed by the running process \u2014 `\u2026/fix-pxor-issues/reprobuild/build/bin/reprobuild build . --tool-provisioning=nix` \u2014 and by the ct native edge building clean, which the 0.1.3 image cannot do because it has no `dsymutil` selector.",
+   "soTheDEFECTisNARROW": "`bf_electron_write_stamp` (ci/lib/build-freshness.sh:583) composes BF_BUILDER from `repro --version` off the ambient PATH instead of from the `$repro_bin` build-once already resolved. The stamp's provenance line is wrong; the stamp's `input_digest` and `artefact_sha256` \u2014 the only fields the gate compares \u2014 are unaffected, so no measurement in this file rests on it.",
+   "whatIdidAboutTheStaleDirenvProfile": "NOTHING, deliberately. Deleting `.direnv/flake-profile*` is a derived-cache deletion and would be safe for `nim`, but it is also what supplies `tup` to this build path, and removing it mid-pass would have changed the build environment between my run and the 2026-10-16 run I am comparing against. The contamination is confined to one provenance string. Recorded as an unfiled issue below."
+  }
+ },
+ "freshnessGates": {
+  "_rule": "Every gate was run INSIDE the dev shell, because `bf_gpui_input_digest` regenerates the closure with `nim c --genDeps` using whatever nim is on PATH and therefore answers differently outside it.",
+  "gpuiAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh assert",
+   "exit": 0,
+   "inputDigest": "d23bac099ed1e6679c409417f771a5cb5d61ac5996348654e284c7b88ad583bf",
+   "note": "Not comparable with the 2026-10-16 pass's 379c6803\u2026 : the tree moved by 26 commits and libs/nim-regex entered the closure."
+  },
+  "gpuiAssertRerunAfterTheElectronBuild": {
+   "command": "the same, after `just build-once`",
+   "exit": 0,
+   "why": "The Electron build touches the shared frontend; re-asserting shows the GPUI binary did not go stale under it."
+  },
+  "electronAssert": {
+   "command": "nix develop --command bash ci/lib/build-freshness.sh electron-assert",
+   "exit": 0,
+   "note": "This is the one that was EXIT 1 on 2026-10-16, because the bundle could not be built at all then. It passes now."
+  }
+ },
+ "laneOutcomes": {
+  "_rule": "Each exit code was captured with `rc=$?` on its own line, never through a pipe.",
+  "gpui": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<src/build-debug-repro/bin/replay-server> bash ci/test/plat37-macos-window-capture.sh",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "controlsThatRan": [
+    "control 1 host + Screen Recording grant + a display still: OK",
+    "control 2 a capture aimed at an owner that does not exist: refused, attestation matched 0, no G1 claim",
+    "control 3 the grader's rendersText assertion made to fail on a flat frame: OK, both arms live"
+   ],
+   "replayServerIsOlderThanTheTreeAndThatIsFINE": "src/build-debug-repro/bin/replay-server is dated 2026-10-16T12:21 and `ct-binary` does not rebuild it. MEASURED justification rather than assumed: `git diff --name-only 6b6d05a08..596cb6e50 -- src/db-backend src/ct` is EMPTY, so no source of that binary changed between the last pass and this one."
+  },
+  "electron": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<\u2026> bash ci/test/plat37-macos-electron-capture.sh",
+   "exit": 1,
+   "captured": 6,
+   "censusRefusals": 4,
+   "playwright": "2 passed, 4 failed (6.4m). All four failures are the same assertion at plat37-electron-window-capture.spec.ts:862, `the editor drew no rows`, which counts `div[id^='editorComponent'] .monaco-editor .view-lines .view-line` in the live DOM AFTER the window has been captured and recorded.",
+   "whyExit1": "The four census refusals are PARITY-S1 (below). Geometry was honoured on all six and `satisfiesG1` is true on all six.",
+   "theSpecFAILSoNtheEDITORwhileTHEframeSHOWSone": "In 3 of the 4 failures the captured frame DOES hold a drawn editor: the screen oracle located an `editor` pane in editor/state/calltrace and read highlightedLineNumber 44 and 110 in two of them, and every route record is settled and correct (busy=false; final lines 110/44/44/113/1/56, each matching its pin). So for those three the spec's DOM locator and the frame disagree, and this pass did not establish which is right. In the fourth \u2014 entry-shell \u2014 the frame genuinely has no editor: see PARITY-S14."
+  }
+ },
+ "titleBarCropReDerived": {
+  "why": "Every extent comparison in the previous readings rests on a 58-device-pixel crop. `d61a918ab` (the top bar is the window's title bar, and the window is a normal desktop window) landed between those readings and this tree, so the constant could not be inherited.",
+  "answer": "58 DEVICE PIXELS = 29 POINTS at scale 2.0. UNCHANGED at 596cb6e50.",
+  "derivedThreeIndependentWays": [
+   "1. THE ATTESTATION. The GPUI lane asks for a 900-point content height at `laptop`; CGWindowListCopyWindowInfo reports a 1440x929-point frame in all three laptop scenarios. 929 - 900 = 29 points = 58 device pixels.",
+   "2. THE OTHER RENDERER'S EXTENT. Electron asks for the same 1440x900, its attested frame IS 1440x900 (its spec asserts frame == getContentSize() live, which is what entitles it to --title-bar-points=0), and it captures 2880x1800. GPUI captures 2880x1858. 1858 - 1800 = 58.",
+   "3. THE PIXELS. Walking the modal gray level down the first 80 device rows of a GPUI capture: rows 0-1 are 246/240, rows 2-55 are 234 \u2014 the macOS server-drawn title bar \u2014 and the first row with a dark mode is 56. The remaining 2 device rows are the bar's dark bottom separator, giving 58. The same walk on an Electron capture finds a dark mode (27) at row 0: no title bar at all."
+  ],
+  "whyD61a918abDidNotMoveIt": "Its own message says so: 'Where the platform draws the frame (KDE, sway's default, macOS, Windows) the bar shows no buttons and its empty space does nothing, as before.' The client-decoration path it adds is the GNOME/Wayland one. The macOS window is still a standard titled NSWindow.",
+  "controlOnTheCROP": "compare.sh was given CROP_PX=0 first: it refused with `extent mismatch: gpui 2880x1858 (cropped 2880x1858) vs electron 2880x1800` and compared nothing. The harness cannot silently resample two different extents, and the refusal path is live.",
+  "changeMadeToTheHARNESS": "compare.sh no longer has a DEFAULT crop. The caller must pass the band it measured. A constant carried across d61a918ab is a constant nobody re-measured."
+ },
+ "instrumentControls": {
+  "flipIdentity": "A frame against itself (shift 0 px) reads mean 0.0000, p90 0.0000, max 0.0000, fracOver0_10 0.0000. The differ is not reading noise.",
+  "flipSizeRefusal": "flipdiff exits 3 on any extent mismatch; compare.sh refuses before reaching it. Exercised this pass with CROP_PX=0.",
+  "flipdiffProvenance": "REUSED the binary built 2026-10-12 at build/plat37-parity/flipdiff rather than rebuilt, and compiled OUTSIDE the dev shell was never needed as a result. Justified: it was built from codetracer-image-diff ee9fb397b and that repo is STILL at ee9fb397b today, so the FLIP implementation is byte-identical. A fresh `nim c` of it inside the dev shell FAILED (`invalid argument '-std=c++17' not allowed with 'C'`) because image_diff adds -std=c++17 through {.passC.}; `nim cpp` is the right spelling (codetracer-image-diff/Justfile:9), and a retry was abandoned when that dev-shell entry began rebuilding Noir from source. Stated as a deviation.",
+  "paneAndRowProbe": "ci-side probe build/plat37-parity-2026-10-17/structdump.nim, compiled INSIDE the dev shell (exit 0). S1/S3/S5 use the EXPORTED oracle primitives unchanged \u2014 readFrame (the grader's own entry point), lineBands (ink projection, no OCR) and readGutterDigits. Readings are not uniform across frames (paneCount 4/5/7, highlightedLineNumber 1/44/56/110/113, recognised strings 80-205), so the probe is alive.",
+  "chipDetectorIsAPORTandITSCONTROLFAILSONONESIDE": "The inline-value detector is a port of plat42_window_record.nim's private `chipsOf` (constants ChipGround 27, EyeGround 51, GroundTolerance 3, MinChipPx 12) because that proc is not exported. Its negative control \u2014 the same detector over the fileTree pane, which cannot hold an inline value \u2014 HOLDS on every Electron frame (0 found) and FAILS on every GPUI frame (exactly 2 found). So GPUI's chip counts below are an UPPER BOUND carrying about two false positives per frame, and Electron's are clean. This is stated rather than smoothed over; it does not change S4's verdict, because the finding under test was 'at most one'.",
+  "rowPitchInstrumentHADTOBECHANGEDMIDPASS": "The first pitch estimator took the median centre delta only between bands whose gutter numbers differ by exactly 1 \u2014 plat42's own rule. It reads 15-22 usable steps per GPUI frame and 0-2 per Electron frame, with slips like a first line of `3738` and `1870`: the oracle's gutter grammar is far weaker on Electron frames, which PARITY-O1 already records. An estimator that good on one side and blind on the other cannot compare them. The figures reported are therefore the MODE of all consecutive lineBands centre deltas at 0.5-point resolution, which uses no OCR at all and has 6-17 supporting deltas on both sides.",
+  "pixelShiftLadder": "Re-measured this pass on this pass's own Electron `state` frame (2880x1800), so it is directly comparable with the P1 readings beside it."
+ },
+ "regrade": [
+  {
+   "id": "PARITY-S1",
+   "previousVerdict": "REPRODUCES \u2014 Electron 7 panes, GPUI 5, in 6 of 6 (2026-10-13); 5 of 6 census refusals (2026-10-16)",
+   "verdict": "CHANGED \u2014 STILL OPEN, BUT NARROWER, AND THE TWO `other` PANES ARE NOW NAMED",
+   "measuredThisPass": true,
+   "deficientSide": "Electron",
+   "theTwoOtherPanesAre": "TESTS and CONSTRAINTS, read from their own title strips by the probe: at `laptop` they occupy x 1170..1440, y 38..449 (TESTS) and y 457..868 (CONSTRAINTS) \u2014 a fourth column the shared default does not place. At `wide` they sit at x 1560..1920. This confirms by titleText what earlier passes inferred from a picture.",
+   "censusGpui": "5 panes \u2014 fileTree, editor, state, calltrace, eventLog \u2014 in ALL SEVEN frames, EXACTLY the derived oracle's set. GPUI agrees with shared_default_layout.generated.json.",
+   "censusElectron": "3 of 6 draw the 7-pane set (state, calltrace, editor); 2 of 6 draw exactly the expected 5 (eventLog, editorWithMark) and the lane passes them; 1 of 6 (shell) draws FOUR \u2014 fileTree, state, `search`, eventLog \u2014 with no editor and no calltrace.",
+   "whatMoved": "On 2026-10-16 the lane refused 5 of 6 on this census; it now refuses 4 of 6, and two Electron frames match the shared default exactly. The extra column is no longer unconditional \u2014 it is scenario-dependent, which is new information and the most useful thing this reading produces.",
+   "didUpstreamsLayoutFIXcloseIT": "NO, and it could not have. 9268c8ab3's `noUserLayout` change is to src/tests/gui/tests/visual/visual-alignment-capture.spec.ts, the PLAT-35 Electron reference. The PLAT-37 lane's own spec got the same fixture option earlier, in 9226bc5ed (2026-10-15T16:40), which was ALREADY in the tree the 2026-10-16 pass measured. Whatever draws TESTS and CONSTRAINTS survives `noUserLayout`.",
+   "whoIsDeficient": "ELECTRON, and the lane's own header already said the original finding 'read them backwards'. The expectation is DERIVED from shared_default_layout.generated.json and GPUI matches it in 7 of 7 frames while Electron does not in 4 of 6.",
+   "corroboratingDetail": "GPUI's Files stack title strip reads `FILES * X VCS * X TESTS *X` \u2014 Tests is a TAB of the stack, where the shared default puts it. Electron's reads `FILES VCS` and it draws TESTS as a pane instead.",
+   "panes": {
+    "state": {
+     "gpui": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 289,
+       "y": 66,
+       "bottom": 897,
+       "titleText": "FILES * X VCS * X TESTS *X"
+      },
+      {
+       "id": "editor",
+       "x": 293,
+       "right": 650,
+       "y": 66,
+       "bottom": 897,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 653,
+       "right": 1043,
+       "y": 66,
+       "bottom": 480,
+       "titleText": "STATE SCRATCHPAD X *"
+      },
+      {
+       "id": "calltrace",
+       "x": 1047,
+       "right": 1440,
+       "y": 66,
+       "bottom": 480,
+       "titleText": "CALLTRACE 8 X AGENT ACTIVITY 8 X"
+      },
+      {
+       "id": "eventLog",
+       "x": 653,
+       "right": 1440,
+       "y": 487,
+       "bottom": 897,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ],
+     "electron": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 218,
+       "y": 38,
+       "bottom": 868,
+       "titleText": "FILES VCS"
+      },
+      {
+       "id": "editor",
+       "x": 222,
+       "right": 577,
+       "y": 38,
+       "bottom": 868,
+       "titleText": "calc/main.py 8 X"
+      },
+      {
+       "id": "state",
+       "x": 581,
+       "right": 872,
+       "y": 38,
+       "bottom": 450,
+       "titleText": "STATE SCRATCHPAD"
+      },
+      {
+       "id": "calltrace",
+       "x": 876,
+       "right": 1166,
+       "y": 38,
+       "bottom": 450,
+       "titleText": "CALLTRACE * X AGENT ACTI... * X"
+      },
+      {
+       "id": "eventLog",
+       "x": 581,
+       "right": 1166,
+       "y": 457,
+       "bottom": 868,
+       "titleText": "EVENT LOG * X TERMINAL OUTPUT"
+      },
+      {
+       "id": "other",
+       "x": 1170,
+       "right": 1440,
+       "y": 38,
+       "bottom": 449,
+       "titleText": "TESTS"
+      },
+      {
+       "id": "other",
+       "x": 1170,
+       "right": 1440,
+       "y": 457,
+       "bottom": 868,
+       "titleText": "CONSTRAINTS"
+      }
+     ]
+    },
+    "calltrace": {
+     "gpui": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 289,
+       "y": 66,
+       "bottom": 897,
+       "titleText": "FILES * X VCS * X TESTS *X"
+      },
+      {
+       "id": "editor",
+       "x": 293,
+       "right": 649,
+       "y": 66,
+       "bottom": 897,
+       "titleText": "calc/main.py 8 X"
+      },
+      {
+       "id": "state",
+       "x": 653,
+       "right": 1043,
+       "y": 66,
+       "bottom": 480,
+       "titleText": "STATE SCRATCHPAD X *"
+      },
+      {
+       "id": "calltrace",
+       "x": 1047,
+       "right": 1440,
+       "y": 66,
+       "bottom": 480,
+       "titleText": "CALLTRACE 8 X AGENT ACTIVITY 8 X"
+      },
+      {
+       "id": "eventLog",
+       "x": 653,
+       "right": 1440,
+       "y": 487,
+       "bottom": 897,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ],
+     "electron": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 218,
+       "y": 38,
+       "bottom": 868,
+       "titleText": "FILES VCS"
+      },
+      {
+       "id": "editor",
+       "x": 222,
+       "right": 577,
+       "y": 38,
+       "bottom": 868,
+       "titleText": "calc/main.py 8 X"
+      },
+      {
+       "id": "state",
+       "x": 581,
+       "right": 872,
+       "y": 38,
+       "bottom": 450,
+       "titleText": "STATE SCRATCHPAD"
+      },
+      {
+       "id": "calltrace",
+       "x": 876,
+       "right": 1166,
+       "y": 38,
+       "bottom": 450,
+       "titleText": "CALLTRACE * X AGENT ACTI... * X"
+      },
+      {
+       "id": "eventLog",
+       "x": 581,
+       "right": 1166,
+       "y": 457,
+       "bottom": 868,
+       "titleText": "EVENT LOG * X TERMINAL OUTPUT"
+      },
+      {
+       "id": "other",
+       "x": 1170,
+       "right": 1440,
+       "y": 38,
+       "bottom": 449,
+       "titleText": "TESTS"
+      },
+      {
+       "id": "other",
+       "x": 1170,
+       "right": 1440,
+       "y": 457,
+       "bottom": 868,
+       "titleText": "CONSTRAINTS"
+      }
+     ]
+    },
+    "editorWithMark": {
+     "gpui": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 289,
+       "y": 66,
+       "bottom": 897,
+       "titleText": "FILES * X VCS * X TESTS *X"
+      },
+      {
+       "id": "editor",
+       "x": 293,
+       "right": 650,
+       "y": 66,
+       "bottom": 897,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 653,
+       "right": 1043,
+       "y": 66,
+       "bottom": 480,
+       "titleText": "STATE SCRATCHPAD X *"
+      },
+      {
+       "id": "calltrace",
+       "x": 1047,
+       "right": 1440,
+       "y": 66,
+       "bottom": 480,
+       "titleText": "CALLTRACE 8 X AGENT ACTIVITY 8 X"
+      },
+      {
+       "id": "eventLog",
+       "x": 653,
+       "right": 1440,
+       "y": 487,
+       "bottom": 897,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ],
+     "electron": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 289,
+       "y": 38,
+       "bottom": 868,
+       "titleText": "FILES $ X VCS 8 X TESTS $ X"
+      },
+      {
+       "id": "editor",
+       "x": 293,
+       "right": 650,
+       "y": 38,
+       "bottom": 868,
+       "titleText": "calc/main.py & X"
+      },
+      {
+       "id": "state",
+       "x": 653,
+       "right": 1043,
+       "y": 38,
+       "bottom": 450,
+       "titleText": "STATE * X SCRATCHPAD 8 X"
+      },
+      {
+       "id": "calltrace",
+       "x": 1047,
+       "right": 1440,
+       "y": 38,
+       "bottom": 450,
+       "titleText": "CALLTRACE 8 X AGENT ACTIVITY"
+      },
+      {
+       "id": "eventLog",
+       "x": 653,
+       "right": 1440,
+       "y": 457,
+       "bottom": 868,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ]
+    },
+    "editor": {
+     "gpui": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 347,
+       "y": 66,
+       "bottom": 1052,
+       "titleText": "FILES VCS X X TESTS 8 X"
+      },
+      {
+       "id": "editor",
+       "x": 351,
+       "right": 780,
+       "y": 66,
+       "bottom": 1052,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 783,
+       "right": 1252,
+       "y": 66,
+       "bottom": 555,
+       "titleText": "STATE 8 X SCRATCHPAD 8 X"
+      },
+      {
+       "id": "calltrace",
+       "x": 1256,
+       "right": 1728,
+       "y": 66,
+       "bottom": 555,
+       "titleText": "CALLTRACE AGENT ACTIVITY"
+      },
+      {
+       "id": "eventLog",
+       "x": 783,
+       "right": 1728,
+       "y": 563,
+       "bottom": 1052,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ],
+     "electron": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 290,
+       "y": 38,
+       "bottom": 1048,
+       "titleText": "FILES * X VCS"
+      },
+      {
+       "id": "editor",
+       "x": 294,
+       "right": 769,
+       "y": 38,
+       "bottom": 1048,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 773,
+       "right": 1163,
+       "y": 38,
+       "bottom": 539,
+       "titleText": "STATE * X SCRATCHPAD 8 X"
+      },
+      {
+       "id": "calltrace",
+       "x": 1167,
+       "right": 1556,
+       "y": 38,
+       "bottom": 539,
+       "titleText": "CALLTRACE 8 X AGENT ACTIVITY 8 X"
+      },
+      {
+       "id": "eventLog",
+       "x": 773,
+       "right": 1556,
+       "y": 547,
+       "bottom": 1048,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      },
+      {
+       "id": "other",
+       "x": 1560,
+       "right": 1920,
+       "y": 38,
+       "bottom": 539,
+       "titleText": "TESTS 8 X"
+      },
+      {
+       "id": "other",
+       "x": 1560,
+       "right": 1920,
+       "y": 547,
+       "bottom": 1048,
+       "titleText": "CONSTRAINTS * X"
+      }
+     ]
+    },
+    "eventLog": {
+     "gpui": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 347,
+       "y": 66,
+       "bottom": 1052,
+       "titleText": "FILES VCS X X TESTS 8 X"
+      },
+      {
+       "id": "editor",
+       "x": 351,
+       "right": 780,
+       "y": 66,
+       "bottom": 1052,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 783,
+       "right": 1252,
+       "y": 66,
+       "bottom": 555,
+       "titleText": "STATE 8 X SCRATCHPAD 8 X"
+      },
+      {
+       "id": "calltrace",
+       "x": 1256,
+       "right": 1728,
+       "y": 66,
+       "bottom": 555,
+       "titleText": "CALLTRACE AGENT ACTIVITY"
+      },
+      {
+       "id": "eventLog",
+       "x": 783,
+       "right": 1728,
+       "y": 563,
+       "bottom": 1052,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ],
+     "electron": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 385,
+       "y": 38,
+       "bottom": 1048,
+       "titleText": "FILES 8 X VCS 8 X TESTS \u00d7 \u00d7"
+      },
+      {
+       "id": "editor",
+       "x": 389,
+       "right": 865,
+       "y": 38,
+       "bottom": 1048,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 869,
+       "right": 1391,
+       "y": 38,
+       "bottom": 539,
+       "titleText": "STATE SCRATCHPAD"
+      },
+      {
+       "id": "calltrace",
+       "x": 1395,
+       "right": 1920,
+       "y": 38,
+       "bottom": 539,
+       "titleText": "CALLTRACE * X AGENT ACTIVITY"
+      },
+      {
+       "id": "eventLog",
+       "x": 869,
+       "right": 1920,
+       "y": 547,
+       "bottom": 1048,
+       "titleText": "EVENT LOG TERMINAL OUTPUT 8 X"
+      }
+     ]
+    },
+    "shell": {
+     "gpui": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 347,
+       "y": 66,
+       "bottom": 1052,
+       "titleText": "FILES VCS X X TESTS 8 X"
+      },
+      {
+       "id": "editor",
+       "x": 351,
+       "right": 780,
+       "y": 66,
+       "bottom": 1052,
+       "titleText": "calc/main.py"
+      },
+      {
+       "id": "state",
+       "x": 783,
+       "right": 1252,
+       "y": 66,
+       "bottom": 555,
+       "titleText": "STATE 8 X SCRATCHPAD 8 X"
+      },
+      {
+       "id": "calltrace",
+       "x": 1256,
+       "right": 1728,
+       "y": 66,
+       "bottom": 555,
+       "titleText": "CALLTRACE AGENT ACTIVITY"
+      },
+      {
+       "id": "eventLog",
+       "x": 783,
+       "right": 1728,
+       "y": 563,
+       "bottom": 1052,
+       "titleText": "EVENT LOG TERMINAL OUTPUT"
+      }
+     ],
+     "electron": [
+      {
+       "id": "fileTree",
+       "x": 0,
+       "right": 513,
+       "y": 36,
+       "bottom": 1048,
+       "titleText": "FILES * X VCS TESTS 8 X"
+      },
+      {
+       "id": "state",
+       "x": 517,
+       "right": 1215,
+       "y": 36,
+       "bottom": 539,
+       "titleText": "STATE SCRATCHPAD"
+      },
+      {
+       "id": "search",
+       "x": 1219,
+       "right": 1920,
+       "y": 66,
+       "bottom": 539,
+       "titleText": "Search"
+      },
+      {
+       "id": "eventLog",
+       "x": 517,
+       "right": 1920,
+       "y": 547,
+       "bottom": 1048,
+       "titleText": "EVENT LOG"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "PARITY-S14",
+   "previousVerdict": "NEW THIS PASS",
+   "verdict": "OPEN \u2014 Electron's entry-shell opens with a `Search` pane where the editor and call trace should be",
+   "measuredThisPass": true,
+   "deficientSide": "Electron",
+   "reading": "electron/shell at `wide` holds four panes: fileTree (x 0..513), state (517..1215), a pane the oracle labels `search` whose title strip OCRs literally as `Search` (1219..1920), and eventLog (517..1920). No editor pane, no calltrace pane. gpui/shell at the same viewport holds the usual five, with an editor showing lines 1..46.",
+   "whyItMatters": "It is the cleanest of the four Playwright `the editor drew no rows` failures: in that scenario the editor really is absent, so the assertion is right and what the window opened with is wrong. The Search surface arrived with 2097ae648 (Find in Files), the same commit that added the libs/nim-regex submodule.",
+   "notDiagnosed": "Whether this is the product's runtime default layout diverging from the generated one, or `noUserLayout` not removing everything, was NOT established. Recorded as measured, not as diagnosed."
+  },
+  {
+   "id": "PARITY-S3",
+   "previousVerdict": "REPRODUCES \u2014 every column boundary 60-80 points apart (carried forward unmeasured on 2026-10-13)",
+   "verdict": "CLOSED",
+   "measuredThisPass": true,
+   "deficientSide": "neither",
+   "theDecisiveReading": "On the one `laptop` pair where BOTH renderers draw the shared default's five panes \u2014 breakpoint-editor / editorWithMark \u2014 every horizontal boundary is IDENTICAL TO THE POINT: fileTree 0..289, editor 293..650, state 653..1043, calltrace 1047..1440, eventLog 653..1440, in BOTH. Vertically GPUI's content starts at y=66 of a frame that includes the 29-point title bar (66-29 = 37) against Electron's y=38; pane heights 831/414/410 against 830/412/411.",
+   "andAtTheWideViewport": "electron/eventLog (the other clean-census frame, 1920 points wide) against gpui/eventLog (1728 points, clamped): fileTree 385 vs 347, editor 476 vs 429, right column 1051 vs 945. Scaling GPUI by 1920/1728 = 1.1111 gives 385.5 / 476.7 / 1050.0 \u2014 the same layout to within one point.",
+   "whereTheOld60to80PointsWent": "Fully accounted for by two OTHER findings; it is not an independent defect. Where Electron draws the TESTS/CONSTRAINTS column (PARITY-S1) that column takes 270 points at `laptop` and squeezes the other three; at `wide` GPUI's window is 192 points narrower because it is clamped (PARITY-G1). Remove those two and the layouts coincide.",
+   "whatClosedIt": "0835c7926 \u2014 'golden-layout floors each child and hands the leftover pixels to the first ones, so every divider sat a pixel left.'",
+   "contradictsThePriorReading": "The prior finding said GPUI gave the editor essentially Electron's width (352 vs 362) while making every other pane ~30% wider. At 596cb6e50 that is no longer true of ANY pane in a clean-census pair: the editor is 357 vs 357 and the others match exactly."
+  },
+  {
+   "id": "PARITY-S5",
+   "previousVerdict": "REPRODUCES \u2014 GPUI ~25.8-26 points, Electron ~24.3-25, so Electron shows more rows",
+   "verdict": "CHANGED \u2014 STILL OPEN, AND THE DIRECTION HAS FLIPPED. GPUI IS NOW THE TIGHTER ONE.",
+   "measuredThisPass": true,
+   "deficientSide": "GPUI (by overshoot)",
+   "rowPitchPoints": {
+    "state": {
+     "gpui": {
+      "modePoints": 22.0,
+      "support": 13,
+      "deltas": 36,
+      "medianPoints": 22.0
+     },
+     "electron": {
+      "modePoints": 23.5,
+      "support": 6,
+      "deltas": 36,
+      "medianPoints": 23.5
+     }
+    },
+    "calltrace": {
+     "gpui": {
+      "modePoints": 22.0,
+      "support": 17,
+      "deltas": 36,
+      "medianPoints": 22.0
+     },
+     "electron": {
+      "modePoints": 24.0,
+      "support": 9,
+      "deltas": 36,
+      "medianPoints": 23.75
+     }
+    },
+    "editorWithMark": {
+     "gpui": {
+      "modePoints": 22.0,
+      "support": 13,
+      "deltas": 36,
+      "medianPoints": 22.0
+     },
+     "electron": {
+      "modePoints": 24.5,
+      "support": 9,
+      "deltas": 37,
+      "medianPoints": 23.5
+     }
+    },
+    "editor": {
+     "gpui": {
+      "modePoints": 22.5,
+      "support": 13,
+      "deltas": 44,
+      "medianPoints": 22.0
+     },
+     "electron": {
+      "modePoints": 24.5,
+      "support": 11,
+      "deltas": 46,
+      "medianPoints": 23.5
+     }
+    },
+    "eventLog": {
+     "gpui": {
+      "modePoints": 22.0,
+      "support": 17,
+      "deltas": 43,
+      "medianPoints": 22.0
+     },
+     "electron": {
+      "modePoints": 24.0,
+      "support": 14,
+      "deltas": 42,
+      "medianPoints": 24.0
+     }
+    },
+    "shell": {
+     "gpui": {
+      "modePoints": 22.5,
+      "support": 12,
+      "deltas": 46,
+      "medianPoints": 22.0
+     },
+     "electron": null
+    }
+   },
+   "summary": "GPUI 22.0-22.5 points in all six frames; Electron 23.5-24.5 in the five where an editor exists. The gap is about 2 points with GPUI tighter, where it was about 1.5 points with GPUI looser.",
+   "crossInstrumentCheck": "The Electron side barely moved between instruments or passes \u2014 23.5-24.5 now against 24.3-25 from a human reader on 2026-10-12 \u2014 which is the reason to believe the GPUI side really travelled from ~25.9 to ~22.1 rather than the instrument having moved under both.",
+   "consequence": "Over an 830-point pane that is about 37.7 GPUI rows against 35.3 Electron rows for the same stop, so the two editors still disagree about how much source is on screen, and PARITY-S6's mechanism \u2014 a corpus line number expressed relative to the first drawn row \u2014 stays live."
+  },
+  {
+   "id": "PARITY-S4",
+   "previousVerdict": "REPRODUCES \u2014 Electron annotates several editor rows, GPUI at most one and none at all in two of four scenarios",
+   "verdict": "CLOSED as stated. GPUI now draws inline values on many rows.",
+   "measuredThisPass": true,
+   "deficientSide": "neither as stated; Electron still draws more in two of five",
+   "chipSpansAndRows": {
+    "state": {
+     "gpui": {
+      "editorLocated": true,
+      "chipSpans": 9,
+      "rowsWithChips": 7,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 2,
+       "expect": 0,
+       "holds": false
+      }
+     },
+     "electron": {
+      "editorLocated": true,
+      "chipSpans": 9,
+      "rowsWithChips": 8,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 0,
+       "expect": 0,
+       "holds": true
+      }
+     }
+    },
+    "calltrace": {
+     "gpui": {
+      "editorLocated": true,
+      "chipSpans": 7,
+      "rowsWithChips": 5,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 2,
+       "expect": 0,
+       "holds": false
+      }
+     },
+     "electron": {
+      "editorLocated": true,
+      "chipSpans": 16,
+      "rowsWithChips": 9,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 0,
+       "expect": 0,
+       "holds": true
+      }
+     }
+    },
+    "editorWithMark": {
+     "gpui": {
+      "editorLocated": true,
+      "chipSpans": 10,
+      "rowsWithChips": 9,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 2,
+       "expect": 0,
+       "holds": false
+      }
+     },
+     "electron": {
+      "editorLocated": true,
+      "chipSpans": 11,
+      "rowsWithChips": 10,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 0,
+       "expect": 0,
+       "holds": true
+      }
+     }
+    },
+    "editor": {
+     "gpui": {
+      "editorLocated": true,
+      "chipSpans": 14,
+      "rowsWithChips": 9,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 2,
+       "expect": 0,
+       "holds": false
+      }
+     },
+     "electron": {
+      "editorLocated": true,
+      "chipSpans": 17,
+      "rowsWithChips": 12,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 0,
+       "expect": 0,
+       "holds": true
+      }
+     }
+    },
+    "eventLog": {
+     "gpui": {
+      "editorLocated": true,
+      "chipSpans": 8,
+      "rowsWithChips": 6,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 2,
+       "expect": 0,
+       "holds": false
+      }
+     },
+     "electron": {
+      "editorLocated": true,
+      "chipSpans": 17,
+      "rowsWithChips": 14,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 0,
+       "expect": 0,
+       "holds": true
+      }
+     }
+    },
+    "shell": {
+     "gpui": {
+      "editorLocated": true,
+      "chipSpans": 7,
+      "rowsWithChips": 4,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 2,
+       "expect": 0,
+       "holds": false
+      }
+     },
+     "electron": {
+      "editorLocated": false,
+      "negativeControl": {
+       "ran": true,
+       "pane": "fileTree",
+       "chipsFound": 0,
+       "expect": 0,
+       "holds": true
+      }
+     }
+    }
+   },
+   "readingInWords": "GPUI draws 7-14 chip spans over 4-9 rows in EVERY frame, against Electron's 9-17 over 8-14. Near parity on state (9 spans / 7 rows vs 9 / 8) and editorWithMark (10 / 9 vs 11 / 10); Electron still ahead on calltrace (7 / 5 vs 16 / 9) and eventLog (8 / 6 vs 17 / 14).",
+   "controlCaveat": "GPUI's figures carry about two false positives per frame \u2014 the detector's negative control finds exactly 2 chips in GPUI's fileTree pane, where none can exist, and 0 in Electron's. Even at the bottom of that error bar GPUI is far past 'at most one', which is the claim under test. Electron's figures are clean.",
+   "whatClosedIt": "0835c7926 \u2014 'Inline values at the flow's calc(len ch + 1ch) (10.18 px), a loop's steps only at the iteration its control shows, step events as <stdout> chips.'"
+  },
+  {
+   "id": "PARITY-P1",
+   "previousVerdict": "REPRODUCES \u2014 mean fracOver0_10 0.3677 (2026-10-12), 0.3725 (2026-10-13), the three scenarios within 0.63 points of one another",
+   "verdict": "CHANGED \u2014 IMPROVED, AND IT NOW TRACKS PARITY-S1 INSTEAD OF BEING BLIND TO THE SCENARIO",
+   "measuredThisPass": true,
+   "deficientSide": "neither \u2014 this is not a parity score",
+   "flip": {
+    "state": {
+     "width": 2880,
+     "height": 1800,
+     "mean": 0.15512005984783173,
+     "p50": 0.0,
+     "p90": 0.6643553972244263,
+     "p99": 0.9795165061950684,
+     "max": 0.990104079246521,
+     "fracOver0_10": 0.3019448302469136,
+     "fracOver0_25": 0.2121587577160494,
+     "fracOver0_50": 0.13376466049382715
+    },
+    "calltrace": {
+     "width": 2880,
+     "height": 1800,
+     "mean": 0.15500107407569885,
+     "p50": 0.0,
+     "p90": 0.6547751426696777,
+     "p99": 0.9790412783622742,
+     "max": 0.990104079246521,
+     "fracOver0_10": 0.3057276234567901,
+     "fracOver0_25": 0.21293672839506173,
+     "fracOver0_50": 0.13221759259259258
+    },
+    "editorWithMark": {
+     "width": 2880,
+     "height": 1800,
+     "mean": 0.10145961493253708,
+     "p50": 0.0,
+     "p90": 0.4333486557006836,
+     "p99": 0.9734138250350952,
+     "max": 0.990104079246521,
+     "fracOver0_10": 0.20191975308641974,
+     "fracOver0_25": 0.1399710648148148,
+     "fracOver0_50": 0.08820505401234568
+    }
+   },
+   "numbersInWords": "state fracOver0_10 0.3019 (mean 0.1551, p50 0.000000, p90 0.6644, p99 0.9795, max 0.9901); calltrace 0.3057 (0.1550 / 0.000000 / 0.6548 / 0.9790 / 0.9901); editorWithMark 0.2019 (0.1015 / 0.000000 / 0.4333 / 0.9734 / 0.9901). Mean over the three 0.2698, against 0.3725 on 2026-10-13.",
+   "theSpreadIsTheFinding": "The three used to agree to within 0.63 points, which is what made the metric 'nearly blind to scenario content'. They now span TEN points \u2014 and the low one, editorWithMark at 0.2019, is EXACTLY the pair whose Electron census is clean, while the two high ones are the pairs where Electron draws the extra TESTS/CONSTRAINTS column. P1 is the pixel shadow of S1, measured rather than asserted.",
+   "pixelShiftLadder": [
+    {
+     "shiftPx": "0",
+     "fracOver0_10": 0.0,
+     "mean": 0.0,
+     "p90": 0.0,
+     "max": 0.0
+    },
+    {
+     "shiftPx": "1",
+     "fracOver0_10": 0.10308314043209876,
+     "mean": 0.035819802433252335,
+     "p90": 0.10738012194633484,
+     "max": 0.8484741449356079
+    },
+    {
+     "shiftPx": "2",
+     "fracOver0_10": 0.1305391589506173,
+     "mean": 0.055343981832265854,
+     "p90": 0.18327100574970245,
+     "max": 0.9772748947143555
+    },
+    {
+     "shiftPx": "4",
+     "fracOver0_10": 0.1570846836419753,
+     "mean": 0.07753370702266693,
+     "p90": 0.304814875125885,
+     "max": 0.9832233190536499
+    },
+    {
+     "shiftPx": "8",
+     "fracOver0_10": 0.18739081790123457,
+     "mean": 0.09140452742576599,
+     "p90": 0.3810599744319916,
+     "max": 0.9873916506767273
+    },
+    {
+     "shiftPx": "16",
+     "fracOver0_10": 0.20481751543209878,
+     "mean": 0.09969603270292282,
+     "p90": 0.42124122381210327,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "24",
+     "fracOver0_10": 0.2185090663580247,
+     "mean": 0.10735385864973068,
+     "p90": 0.44453877210617065,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "32",
+     "fracOver0_10": 0.22832793209876542,
+     "mean": 0.11311859637498856,
+     "p90": 0.4700339436531067,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "48",
+     "fracOver0_10": 0.24148090277777778,
+     "mean": 0.11908644437789917,
+     "p90": 0.48978161811828613,
+     "max": 0.9890531301498413
+    },
+    {
+     "shiftPx": "64",
+     "fracOver0_10": 0.2523099922839506,
+     "mean": 0.12466011941432953,
+     "p90": 0.5065245628356934,
+     "max": 0.9890531301498413
+    }
+   ],
+   "whatTheLadderSettles": "fracOver0_10 saturates: a 1-pixel rigid shift of the Electron frame against itself reads 0.1031 and a 64-pixel one reads 0.2523 \u2014 a 64-fold displacement for a 2.4-fold reading. editorWithMark's 0.2019 sits between an 8-px (0.1874) and a 16-px (0.2048) pure translation. state and calltrace at ~0.30 are BEYOND any translation on this ladder, which is what a structural difference looks like and a sub-pixel offset does not.",
+   "p50StaysZero": "p50 is 0.000000 on all three while p90 is 0.43-0.66 \u2014 the bimodality earlier readings called 'the signature of displaced structure'.",
+   "ladderDiffersFromTheOneInheritedWithTheTask": "The inherited ladder quotes 16/24/32/48/64 -> 0.275/0.306/0.311/0.290/0.349, which is NOT monotonic. This pass's is monotonic throughout (0.2048/0.2185/0.2283/0.2415/0.2523). Different frame, and a rigid pad-and-crop translation. Where they disagree, these are the ones measured against 596cb6e50."
+  },
+  {
+   "id": "PARITY-G1",
+   "previousVerdict": "REPRODUCES \u2014 GPUI cannot reach the `wide` viewport; a prior that Electron must be reporting a logical framebuffer was recorded and doubted",
+   "verdict": "REPRODUCES UNCHANGED, AND THE DOUBTED PRIOR IS SETTLED: ELECTRON REALLY DOES OBTAIN AN OVERSIZED WINDOW",
+   "measuredThisPass": true,
+   "deficientSide": "GPUI (the clamp)",
+   "theDisplay": "ONE display, 1728x1117 POINTS, pointPixelScale 2.000, and the usable band below the menu bar starts at y=33, so 1728x1084 is the largest frame the visible frame allows.",
+   "gpui": "At `wide` the GPUI window is 1728x1084 points in all three scenarios \u2014 exactly the visible frame \u2014 with windowContentHeightPoints 1055 and viewportDeviationPoints {width -192, height -25}. Captured 3456x2168 device pixels at scale 2.0. At `laptop` it is honoured exactly: 1440x929 frame, 900 content, 2880x1858 pixels. IDENTICAL to the 2026-10-16 readings, so d61a918ab did not move it.",
+   "electron": "At `wide` the Electron window is 1920x1080 points, at x=0 y=33, on a 1728-point-wide display \u2014 i.e. 192 points of it are off the right edge \u2014 with titleBarPoints 0, viewportHonoured true, deviation {0,0}, captured 3840x2160 device pixels at scale 2.0. All three `wide` scenarios agree, and all three `laptop` ones report 1440x900 / 2880x1800.",
+   "whatEACHreportCORRESPONDStoPHYSICALLY": "Both are the window's OWN surface, not a crop of the screen: the capture goes through SCContentFilter(desktopIndependentWindow:) and `satisfiesG1` is true on all thirteen frames, meaning ScreenCaptureKit handed back the same window id CGWindowListCopyWindowInfo attested. A macOS window is NOT clipped to its display in its backing store, so a 1920-point-wide window on a 1728-point display is a real 1920x1080-point surface of which 192 points are never visible, and 3840x2160 device pixels of it are real pixels the compositor rendered.",
+   "soTheCORRECTIONisCONFIRMED": "The prior claim that 'no window can exceed its display, therefore Electron must be reporting a logical framebuffer' is WRONG and is withdrawn here on measurement. Electron obtains the oversized window; GPUI does not, because AppKit's default constrainFrameRect:toScreen: clamps it and isonim-gpui's build_window_class never overrides it.",
+   "owner": "codetracer-specs/issues/2026-10-12-gpui-clamps-a-window-to-the-visible-frame-because-it-never-overrides-constrainframerect-and-electron-does-not.md \u2014 stays open.",
+   "contentLossHalfNOTreMEASURED": "The half that matters \u2014 whether GPUI's Call Trace rows are cut mid-glyph by the window edge \u2014 was attempted and the probe FAILED ITS OWN CONTROL. Counting rows with ink in the last 6 device columns of the calltrace pane reads 0.970-0.976 for EVERY pane that reaches the window's right edge and 0.55-0.57 for every interior pane \u2014 and it reads the same 0.970 for ELECTRON's calltrace when that pane reaches the window edge too (editorWithMark 0.9704, eventLog 0.9769) as for GPUI's (0.9705, 0.9763). A reading that is identical on both sides and near-1 wherever a pane touches the edge is measuring a border, not a clipped glyph. Reported as not measured rather than as a null result.",
+   "geometry": {
+    "gpui": {
+     "calltrace": {
+      "windowFramePoints": {
+       "x": 144,
+       "y": 109,
+       "width": 1440,
+       "height": 929
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1858
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 929
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "editor": {
+      "windowFramePoints": {
+       "x": -96,
+       "y": 33,
+       "width": 1728,
+       "height": 1084
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 1055,
+      "viewportHonoured": false,
+      "viewportDeviationPoints": {
+       "width": -192,
+       "height": -25
+      },
+      "capturedPixels": {
+       "width": 3456,
+       "height": 2168
+      },
+      "capturedPoints": {
+       "width": 1728,
+       "height": 1084
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "editorWithMark": {
+      "windowFramePoints": {
+       "x": 144,
+       "y": 109,
+       "width": 1440,
+       "height": 929
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1858
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 929
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "eventLog": {
+      "windowFramePoints": {
+       "x": -96,
+       "y": 33,
+       "width": 1728,
+       "height": 1084
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 1055,
+      "viewportHonoured": false,
+      "viewportDeviationPoints": {
+       "width": -192,
+       "height": -25
+      },
+      "capturedPixels": {
+       "width": 3456,
+       "height": 2168
+      },
+      "capturedPoints": {
+       "width": 1728,
+       "height": 1084
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "gutterLanes": {
+      "windowFramePoints": {
+       "x": 144,
+       "y": 109,
+       "width": 1440,
+       "height": 929
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1858
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 929
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "shell": {
+      "windowFramePoints": {
+       "x": -96,
+       "y": 33,
+       "width": 1728,
+       "height": 1084
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 1055,
+      "viewportHonoured": false,
+      "viewportDeviationPoints": {
+       "width": -192,
+       "height": -25
+      },
+      "capturedPixels": {
+       "width": 3456,
+       "height": 2168
+      },
+      "capturedPoints": {
+       "width": 1728,
+       "height": 1084
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "state": {
+      "windowFramePoints": {
+       "x": 144,
+       "y": 109,
+       "width": 1440,
+       "height": 929
+      },
+      "titleBarPoints": 29,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1858
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 929
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     }
+    },
+    "electron": {
+     "calltrace": {
+      "windowFramePoints": {
+       "x": 0,
+       "y": 33,
+       "width": 1440,
+       "height": 900
+      },
+      "titleBarPoints": 0,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1800
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 900
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "editor": {
+      "windowFramePoints": {
+       "x": 0,
+       "y": 33,
+       "width": 1920,
+       "height": 1080
+      },
+      "titleBarPoints": 0,
+      "windowContentHeightPoints": 1080,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 3840,
+       "height": 2160
+      },
+      "capturedPoints": {
+       "width": 1920,
+       "height": 1080
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "editorWithMark": {
+      "windowFramePoints": {
+       "x": 0,
+       "y": 33,
+       "width": 1440,
+       "height": 900
+      },
+      "titleBarPoints": 0,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1800
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 900
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "eventLog": {
+      "windowFramePoints": {
+       "x": 0,
+       "y": 33,
+       "width": 1920,
+       "height": 1080
+      },
+      "titleBarPoints": 0,
+      "windowContentHeightPoints": 1080,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 3840,
+       "height": 2160
+      },
+      "capturedPoints": {
+       "width": 1920,
+       "height": 1080
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "shell": {
+      "windowFramePoints": {
+       "x": 0,
+       "y": 33,
+       "width": 1920,
+       "height": 1080
+      },
+      "titleBarPoints": 0,
+      "windowContentHeightPoints": 1080,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 3840,
+       "height": 2160
+      },
+      "capturedPoints": {
+       "width": 1920,
+       "height": 1080
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     },
+     "state": {
+      "windowFramePoints": {
+       "x": 0,
+       "y": 33,
+       "width": 1440,
+       "height": 900
+      },
+      "titleBarPoints": 0,
+      "windowContentHeightPoints": 900,
+      "viewportHonoured": true,
+      "viewportDeviationPoints": {
+       "width": 0,
+       "height": 0
+      },
+      "capturedPixels": {
+       "width": 2880,
+       "height": 1800
+      },
+      "capturedPoints": {
+       "width": 1440,
+       "height": 900
+      },
+      "pointPixelScale": 2.0,
+      "satisfiesG1": true,
+      "refusal": null
+     }
+    }
+   }
+  },
+  {
+   "id": "PARITY-G2",
+   "previousVerdict": "REPRODUCES \u2014 GPUI's frame carries a 29-point macOS title bar that Electron's frameless window does not",
+   "verdict": "REPRODUCES UNCHANGED",
+   "measuredThisPass": true,
+   "deficientSide": "GPUI (and it is cosmetic, not content)",
+   "reading": "29 points, 58 device pixels, re-derived three independent ways \u2014 see `titleBarCropReDerived`. Cropping exactly 58 device pixels from the top of a GPUI laptop capture makes it 2880x1800, the extent of the Electron capture to the pixel; flipdiff refuses any other crop.",
+   "noteAboutD61a918ab": "This is the finding d61a918ab was most likely to have moved, and it did not. On macOS the platform still draws the frame."
+  },
+  {
+   "id": "PARITY-S13",
+   "previousVerdict": "NOT RE-MEASURED since 2026-10-12, where GPUI was read as drawing a bottom status bar at `laptop` and none at the clamped `wide`",
+   "verdict": "CLOSED \u2014 THE STATUS BAR IS DRAWN AT BOTH VIEWPORTS",
+   "measuredThisPass": true,
+   "deficientSide": "neither",
+   "instrument": "The strip between the panes' lowest edge and the frame's bottom, measured as the fraction of its pixels differing from its own modal gray by more than 12. No OCR. Its positive control is the same measure over the top 30 points of the same frame, in the same run.",
+   "reading": "GPUI at `laptop` (state, calltrace, editorWithMark): the strip is y 897..929 and inkFrac is 0.2349 / 0.2355 / 0.2346. GPUI at the clamped `wide` (shell, editor, eventLog): the strip is y 1052..1084 and inkFrac is 0.1943 / 0.1955 / 0.1964. Electron for comparison: 0.2225-0.2241 at laptop, 0.1658-0.1674 at wide.",
+   "whyTheWIDEnumberISlowerANDitDOESNOTmeanABSENT": "The strip is the same 32 points tall over a 1728-point-wide frame instead of a 1440-point one, so the same text covers a smaller FRACTION. In absolute ink the two are the same: 0.1955 x 1728 = 338 against 0.2355 x 1440 = 339.",
+   "whyThePreviousREADINGwasWRONG": "It came from two disposable human frame readers looking at different viewports. A status bar whose text sits at the two ends of a 1728-point strip is easy to miss; the ink measure is not."
+  },
+  {
+   "id": "PARITY-O1",
+   "previousVerdict": "REPRODUCES EXACTLY \u2014 the oracle cannot read the stopped line from 2 of 6 Electron frames and 0 of 6 GPUI frames",
+   "verdict": "REPRODUCES EXACTLY, SAME TWO FRAMES",
+   "measuredThisPass": true,
+   "deficientSide": "Electron (oracle instrumentation)",
+   "reading": "From this pass's own grade records: the oracle reports `highlightedLineNumber` on 7 of 7 GPUI frames (1, 1, 44, 44, 56, 110, 113) and on 4 of 6 Electron frames. The two it cannot read are `shell` and `state` \u2014 the same two as 2026-10-12 and 2026-10-13 \u2014 and in both the editor reading is `unreadable`.",
+   "andITgotWORSEinANOTHERplace": "The gutter grammar on Electron frames is far weaker than on GPUI's, which this pass had to work around: `readGutterDigits` accepts 25-33 of ~37 bands per GPUI frame and only 4-7 per Electron frame, returning slips such as a first line of 3738 and 1870. That is why the row-pitch instrument had to be rebuilt without OCR."
+  },
+  {
+   "id": "PARITY-I1",
+   "previousVerdict": "SYMPTOM GONE, MECHANISM INTACT \u2014 entry-shell sampled before the session settled",
+   "verdict": "SYMPTOM STILL GONE; MECHANISM STILL UNTOUCHED",
+   "measuredThisPass": true,
+   "deficientSide": "Electron (lane instrumentation)",
+   "reading": "shell.route.json reads trajectory ['entry=1@1'], finalState line 1, rrTicks 1, busy false, with a resolved path \u2014 agreeing with its pin. Every other Electron route is settled too (busy false; final lines 110 / 44 / 44 / 113 / 56, each matching its pin).",
+   "butNOTE": "`editorSettledBetweenOperations` is FALSE in 5 of 6 Electron records (true only for shell, which has zero operations). The settle logic the issue is about was not changed; the issue should stay open."
+  }
+ ],
+ "carriedForwardNotMeasured": [
+  {
+   "id": "PARITY-S6",
+   "status": "carried forward \u2014 the MECHANISM is confirmed still live by PARITY-S5 (the row windows still disagree), the ABSOLUTE line numbers were not re-read.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S7",
+   "status": "carried forward (value truncation: GPUI elides, Electron clips hard).",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S8",
+   "status": "carried forward (Electron's browser-shell toolbar controls).",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S9",
+   "status": "PARTLY contradicted and not re-graded. The title strips this pass read show Electron UPPERCASE (`FILES VCS`, `STATE SCRATCHPAD`, `CALLTRACE * X AGENT ACTIVITY`) and GPUI ALSO UPPERCASE (`FILES * X VCS * X TESTS *X`, `STATE SCRATCHPAD X *`, `CALLTRACE 8 X AGENT ACTIVITY 8 X`) \u2014 the Title-Case-vs-UPPERCASE half of S9 no longer holds, and both now spell it CALLTRACE. The icon and chevron half was not examined.",
+   "measuredThisPass": "partly"
+  },
+  {
+   "id": "PARITY-S10",
+   "status": "carried forward as DOWNGRADED by the 2026-10-13 re-grade; not re-examined.",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S11",
+   "status": "carried forward (Event Log columns and controls).",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S12",
+   "status": "carried forward (Electron's run-together `NNNo certificates` status item).",
+   "measuredThisPass": false
+  },
+  {
+   "id": "PARITY-S2",
+   "status": "WITHDRAWN, unchanged.",
+   "measuredThisPass": false
+  }
+ ],
+ "doesTheUpstreamPLAT35LANESUPERSEDETHEPLAT37PAIR": {
+  "verdict": "NO \u2014 COMPLEMENTARY. Neither can run where the other does, and they answer different questions. Keep both; do not restructure them in this pass, as instructed.",
+  "platform": "ci/test/plat35-gpui-window-capture.sh is Linux/Wayland only: plat35_gpui_window_capture.nim imports gui_assert/desktop_env/sway and builds `newSwayTarget(2560, 1440, \u2026)`; the shell builds `${target}/debug/libgpui_nim_shim.so` (an ELF name), propagates LD_LIBRARY_PATH, sets ISONIM_GPUI_DECORATIONS=client and shells out to `nix shell nixpkgs#imagemagick` per frame. ci/test/plat37-macos-window-capture.sh refuses outright off Darwin (lines 182-186) and drives ScreenCaptureKit and the Quartz window server. On aarch64-darwin there is no sway, no grim and no `.so`.",
+  "evidenceClass": "The PLAT-35 window lane writes NO JSON RECORD AT ALL \u2014 its outputs are <view>.ppm, <view>.run.log and an ImageMagick <view>.png, and it reports failure as a list of view names. It enforces exact geometry in-process as a wait predicate and never writes the fact down. The PLAT-37 pair is the only thing in the tree entitled to `satisfiesG1: true` and carries windowFramePoints, titleBarPoints, windowContentHeightPoints, viewportHonoured, viewportDeviationPoints, capturedPixels, capturedPoints, pointPixelScale and `standing: HOST-CONDITIONAL EVIDENCE` per frame. Everything measured in this file comes from fields PLAT-35's lane does not produce.",
+  "shouldMINEdelegateTOciLIBgpuiWindowCapture": "NO. ci/lib/gpui-window-capture.sh factors out window driving plus a settle-polled capture plus a one-line manifest; its capture primitive is `grim`, which does not exist on Darwin, it captures the SCREEN rather than the window surface, and its manifest carries no window id, bounds or scale \u2014 so satisfiesG1, windowFramePoints and titleBarPoints would have no source. Its consumers are plat40-panes-window.sh and plat41-panes-window.sh; the PLAT-35 window lane does not use it either.",
+  "didUpstreamsLayoutFIXresolveTHEpaneCENSUS": "NO. 9268c8ab3's `noUserLayout` is set in visual-alignment-capture.spec.ts (test.use at line ~888). The PLAT-37 Electron spec already had the same fixture option from 9226bc5ed, dated 2026-10-15T16:40 \u2014 before the pass that measured 7 panes. The census still refuses 4 of 6.",
+  "theONErealDUPLICATION": "Both families now request the shared default layout by the same fixture option but run two different specs into two different output trees (src/tests/visual/captures/electron/ versus build/plat37-macos-electron). That is duplication worth collapsing later, not supersession. The one genuine divergence to reconcile is decoration semantics: PLAT-35 forces client-side decorations so the GPUI window draws its own title bar, while PLAT-37 measures a 29-point SERVER title bar and subtracts it. The two lanes are not measuring the same window chrome."
+ },
+ "issuesToFile": {
+  "policyConflictDeclared": "metacraft-dev-guidelines' recording-issues.md says to push a found defect to the owning specs repo immediately. This agent was instructed to make NO git commits. The no-commits instruction wins; these are DRAFTED HERE AND UNFILED.",
+  "preferAppendingTo": "codetracer-pm/issues/",
+  "new": [
+   {
+    "id": "UNFILED-1",
+    "title": "the Electron build stamp names a `repro` that did not build it, because the stale .direnv profile wins the PATH race",
+    "measured": "At codetracer 596cb6e50 the stamp reads `built_by=repro 0.1.3` while the build ran through \u2026/reprobuild/build/bin/reprobuild (0.2.5). `tup` is absent from the codetracer dev shell on aarch64-darwin, so scripts/build-once.sh:45 sources .direnv/flake-profile-cf2df07c\u2026.rc (2026-08-27), which prepends /nix/store/fi801q3i\u2026-reprobuild-0.1.3/bin; build-once.sh:193 meanwhile resolves the ENGINE from the sibling checkout's build/bin before PATH, so the two disagree. bf_electron_write_stamp (ci/lib/build-freshness.sh:583) takes BF_BUILDER from `repro --version` off PATH.",
+    "suggestedRemedy": "Have bf_electron_write_stamp take the builder from the `$repro_bin` build-once already resolved, and have build-once.sh say when it has sourced a dev-shell profile over an active one.",
+    "severity": "P3 \u2014 provenance only; input_digest and artefact_sha256, the fields the gate compares, are unaffected."
+   },
+   {
+    "id": "UNFILED-2",
+    "title": "the PLAT-37 Electron capture spec fails `the editor drew no rows` on frames whose editor the screen oracle can read",
+    "measured": "4 of 6 Playwright cases failed at plat37-electron-window-capture.spec.ts:862 at codetracer 596cb6e50. In three of them (editor, state, calltrace) the captured frame holds an editor pane the oracle located, with highlightedLineNumber 44 and 110 in two, and every route record is settled with the pinned final line. Either the DOM selector `div[id^='editorComponent'] .monaco-editor .view-lines .view-line` no longer matches what the product draws, or it is queried against the wrong page.",
+    "severity": "P2 \u2014 it turns a real census finding into an opaque Playwright failure and makes the lane's exit code uninformative."
+   },
+   {
+    "id": "UNFILED-3",
+    "title": "Electron's entry-shell opens with a Search pane instead of the editor and call trace",
+    "measured": "electron/shell at 596cb6e50 draws four panes \u2014 fileTree, state, a pane titled `Search`, eventLog \u2014 against the shared default's five, with no editor and no calltrace. gpui/shell draws the five.",
+    "severity": "P2 \u2014 it is the only scenario where a renderer omits two panes of the shared default outright."
+   },
+   {
+    "id": "UNFILED-4",
+    "title": "the GPUI freshness gate cannot see a stale isonim-gpui cdylib, and this pass found one",
+    "measured": "The staged PLAT-37 shims were built 2026-10-16T12:35-12:37, two isonim-gpui commits behind the pinned 0317536 (2026-10-17T05:04) \u2014 commits that change font registration, line-height, per-corner radii and text antialiasing. `build-freshness.sh assert` returns 0 over that, by design (its own note, lines 114-116). The GPUI lane's two-polarity font_kit probe catches a shim with NO text, not a shim with the WRONG text metrics.",
+    "suggestedRemedy": "Fold the staged shim's sha256 into the GPUI stamp with bf_digest_extra_file, or have the lane refuse a shim older than the pinned isonim-gpui revision.",
+    "severity": "P2 \u2014 it is the exact contamination class the 2026-10-12 pass was invalidated by, one layer down."
+   },
+   {
+    "id": "UNFILED-5",
+    "title": "`libs/nim-regex` is a submodule a scripted sync leaves uninitialised, and nothing builds without it",
+    "measured": "At 596cb6e50 `git submodule status` printed `-a0f1df6a\u2026 libs/nim-regex` on a freshly synced checkout; `just build-gpui` died with `cannot open file: regex`. build-once.sh's preflight DOES name the cause (`MISSING 1 uninitialised submodule(s)`); the GPUI recipe does not.",
+    "severity": "P3 \u2014 a workspace-sync gap; the remedy is one command."
+   },
+   {
+    "id": "UNFILED-6",
+    "title": "reprobuild spends longer recording the portable fingerprint than running the build",
+    "measured": "`just build-once` at codetracer 596cb6e50 with reprobuild build/bin/reprobuild (a192a91295-era): the 45-action graph reached `checked=43/45 running=0` and then spent ~43 further minutes single-threaded in recordPortableFingerprint -> portableAccessesOf -> isOwnOutput -> materialPath -> joinPathImpl, sampled twice six minutes apart in the same frame (28:56 CPU at 42:48 elapsed, RSS 1.87 GB). It did complete.",
+    "severity": "P2 for anyone timing a build; belongs in reprobuild-pm, not codetracer-pm."
+   }
+  ]
+ },
+ "whatIcouldNOTdo": [
+  "The CONTENT-LOSS half of PARITY-G1 was not re-measured: my right-edge ink probe failed its own control (identical readings for GPUI and Electron, near-1 for every pane touching the window edge), so it measures a border and not a clipped glyph. Stated as not measured.",
+  "`just build-once` with no arguments does not succeed on this host; the Electron bundle was built with CODETRACER_REPROBUILD_TARGET=ct-binary, which is a declared deviation.",
+  "flipdiff was not recompiled from source this pass. The 2026-10-12 binary was reused because codetracer-image-diff is still at the revision it was built from; a `nim c` rebuild failed on -std=c++17 and the `nim cpp` retry was abandoned when that dev-shell entry started rebuilding Noir from source.",
+  "PARITY-S6, S7, S8, S10, S11 and S12 were not re-measured and are labelled carried-forward. S9 is partly contradicted by the title strips this pass read, and is labelled so rather than re-graded.",
+  "Both capture lanes ran while no other heavy job was on the machine, but the GPUI lane ran before the Electron one in the same session; no cross-check was made for capture-time contention.",
+  "No issue was filed, by instruction. The six drafts above are unfiled."
+ ]
+}

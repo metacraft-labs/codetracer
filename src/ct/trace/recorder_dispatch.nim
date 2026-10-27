@@ -109,6 +109,12 @@ type
     server*: bool
       ## ``ct record --server``: the recorded program is a long-lived server
       ## rather than a run that ends on its own.  See ``serverSupport``.
+    noirTestName*: string
+      ## ``ct record-test`` on a Noir test: the test function nargo traces
+      ## instead of `main` (`nargo trace --test-name`). Either nargo's
+      ## fully-qualified name (`tests::test_main`) or the bare function name;
+      ## nargo matches both the way `nargo debug --test-name` does (substring,
+      ## then exact last `::` segment).
 
   RecorderInvocation* = object
     exe*: string                  ## the process to spawn
@@ -784,6 +790,7 @@ proc recorderInvocation*(sel: RecorderSelector, program: string,
   ## ``src/ct/db_backend_record.nim`` owns their argv (a compile step before
   ## ``ct-mcr``; ``nim e --trace:`` for the script VM), so their selectors
   ## return an empty invocation and the table only names the tool for them.
+  ## The compile step's flags are ``nimNativeCompileArgs`` below.
   case sel.approach
   of raInstrumentedRuntime:
     case sel.targetIsa
@@ -868,9 +875,11 @@ proc recorderInvocation*(sel: RecorderSelector, program: string,
       # is expressed as the working directory rather than an argument.
       let backendArgs = if opts.backend == "plonky2": @["--trace-plonky2"]
                         else: @[]
+      let testArgs = if opts.noirTestName.len > 0: @["--test-name", opts.noirTestName]
+                     else: @[]
       RecorderInvocation(
         exe: noirExe(),
-        args: @["trace", "--out-dir", traceFolder] & backendArgs,
+        args: @["trace", "--out-dir", traceFolder] & backendArgs & testArgs,
         workdir: if dirExists(program): program else: program.parentDir)
     of tiWasm:
       var args = @["run"]
@@ -888,6 +897,74 @@ proc recorderInvocation*(sel: RecorderSelector, program: string,
       RecorderInvocation()
   of raMcr, raRr, raTtd, raUnknown:
     RecorderInvocation()
+
+proc nimNativeCompileArgs*(program, binaryPath, nimcacheDir: string):
+    seq[string] =
+  ## The ``nim`` argv that compiles ``program`` to ``binaryPath`` for a native
+  ## (``ct-mcr``) recording — the compile step of ``recordNim``'s ``.nim`` flow
+  ## in ``src/ct/db_backend_record.nim``.  PURE, so the flags are asserted by
+  ## ``src/tests/cli/record_dispatch_test.nim`` rather than discovered in a
+  ## replay that cannot start.
+  ##
+  ## The counterpart is ``compile_nim`` in the codetracer-native-backend
+  ## sibling (``src/build.rs``), the build ``ct-native-replay build`` / the old
+  ## ``ct run`` path used: the same debug flags, so a program recorded by
+  ## ``ct record main.nim`` replays exactly as one built there does.  Keep the
+  ## two in step.  Spec: codetracer-pm ``spec/Recording-Backends/RR.md``
+  ## §"Build Command" ("Ensures DWARF debug info is generated") and
+  ## §"Nim-Specific Handling", ``spec/Trace-Files/RR-Trace-Folders.md``
+  ## §"nimcache/ Directory (Nim only)".
+  ##
+  ## Why each flag is here:
+  ##
+  ## * NO ``-d:release``.  This used to be the whole flag list (with
+  ##   ``--hints:off``): an optimised build with no DWARF, whose MCR replay
+  ##   failed at launch with "MCR run-to-entry stopped without source
+  ##   location: <unknown>:0" (codetracer-pm issue 2026-10-22, "ct record
+  ##   compiles a nim program without debug info").
+  ## * ``--debugInfo --debugger:native`` — DWARF line tables and Nim-level
+  ##   variable info.  ``--debugger:native`` is deprecated in Nim 2.2 but still
+  ##   needed: without it the debug info is incomplete and locals read as
+  ##   ``<NONE>`` (build.rs says the same).
+  ## * ``--stacktrace:on`` — Nim's own frame bookkeeping, which the call-trace
+  ##   views rely on; ``-d:release`` turned it off.
+  ## * ``--passC:-O0 --passL:-O0`` and ``--<cc>.options.debug:-g3 -O0`` — no
+  ##   optimisation, so lines and locals are where the source says they are.
+  ##   ``--debugger:native`` appends ``<cc>.options.debug`` AFTER ``--passC``
+  ##   (Nim's own config has ``-g3 -Og`` for gcc), so ``-Og`` would otherwise
+  ##   win; it is replaced rather than appended to.  build.rs's
+  ##   ``compile_nim`` pins ``--cc:gcc`` (on Windows build.rs builds with MSVC
+  ##   through ``compile_nim_msvc`` instead, unless ``CODETRACER_USE_GCC=1``);
+  ##   here the host's default C compiler is kept (gcc on Linux and Windows,
+  ##   clang on macOS — the Nim config's defaults), so the option is set for
+  ##   BOTH backends and whichever Nim picks gets ``-g3 -O0``.  Not carried
+  ##   over: build.rs's Windows-only ``--passL:-Wl,--disable-dynamicbase``.
+  ## * ``--sourcemap:on`` — the codetracer Nim fork writes a Source Map v3
+  ##   ``<generated>.c.map`` beside each generated C file, which the native
+  ##   replay uses for Nim <-> C line mapping, and the
+  ##   ``macro_sourcemap_<name>.json`` macro-expansion map.
+  ## * ``--nimcache:<nimcacheDir>`` — the generated C is kept IN the trace
+  ##   (``<trace>/nimcache``), so the C files the DWARF names, and the
+  ##   ``.c.map`` files beside them, travel with the recording.
+  ##
+  ## Deliberately NOT passed: ``--forceBuild:on`` (build.rs passes it against
+  ## stale shared caches; ``nimcacheDir`` is the fresh trace folder's own, so
+  ## there is nothing stale to bypass).
+  @[
+    "c",
+    "--hints:off",
+    "--debugInfo",
+    "--debugger:native",
+    "--stacktrace:on",
+    "--passC:-O0",
+    "--passL:-O0",
+    "--gcc.options.debug:-g3 -O0",
+    "--clang.options.debug:-g3 -O0",
+    "--sourcemap:on",
+    "--nimcache:" & nimcacheDir,
+    "-o:" & binaryPath,
+    program,
+  ]
 
 proc serverGuidance*(sel: RecorderSelector, traceFolder: string): seq[string] =
   ## What ``ct record --server`` prints before handing control to the
@@ -907,3 +984,24 @@ proc serverGuidance*(sel: RecorderSelector, traceFolder: string): seq[string] =
   result.add("watch requests arrive live with, in another terminal:")
   result.add("  ct replay -t " & traceFolder)
   result.add("stop the recording with Ctrl-C; the container stays readable")
+
+const NoirPackageManifest* = "Nargo.toml"
+
+proc noirPackageRoot*(path: string): string =
+  ## The Noir package `path` belongs to: the nearest directory, starting at
+  ## `path` itself when it is a directory and at its parent otherwise, that
+  ## holds a `Nargo.toml`. "" when there is none up to the filesystem root.
+  ##
+  ## nargo traces the package it is run INSIDE (EXCEPTION 3 in
+  ## `recorderInvocation`), so `ct record-test` on `src/tests/foo.nr` has to
+  ## find the crate root before it can hand nargo a test name — the same walk
+  ## nargo's own `get_package_manifest` makes from its working directory.
+  var dir = if dirExists(path): path else: path.parentDir
+  while dir.len > 0:
+    if fileExists(dir / NoirPackageManifest):
+      return dir
+    let parent = dir.parentDir
+    if parent == dir or parent.len == 0:
+      break
+    dir = parent
+  ""

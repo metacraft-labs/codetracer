@@ -1,0 +1,254 @@
+{
+  "records": [
+    {
+      "build_hash": "9c1e4b7a2d5f8e3c6b9a0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a",
+      "capabilities": "[]",
+      "framework": "",
+      "prev_session": "",
+      "protocol_level": 0,
+      "record": "Header",
+      "recorder_id": "codetracer-boundary-shim/0.1.0",
+      "session_id": "5f0c2a9e7b6d4e1f8a3c9b2d1e0f7a6b",
+      "vocab": 1
+    },
+    {
+      "arms": "{\"hero\":\"b\"}",
+      "color_scheme": 1,
+      "dpr": 1.5,
+      "fonts_digest": "a1b2c3d4",
+      "locale": "en-GB",
+      "record": "Env",
+      "reduced_motion": 0,
+      "referrer_origin": "https://search.example",
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "tz": "Europe/Sofia",
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0",
+      "ua_major": 141,
+      "url": "https://shop.example/checkout",
+      "viewport_h": 800,
+      "viewport_w": 1280
+    },
+    {
+      "api": 2,
+      "body_digest": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+      "method": "POST",
+      "record": "NetRequest",
+      "req_id": "1",
+      "seq": "1",
+      "url": "https://shop.example/api/upload"
+    },
+    {
+      "delay_ms": 0.0,
+      "kind": 4,
+      "record": "TaskReg",
+      "seq": "2",
+      "task_id": "1"
+    },
+    {
+      "event": 1,
+      "length_computable": 0,
+      "loaded": "0",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "3",
+      "target": 1,
+      "total": "0"
+    },
+    {
+      "event": 1,
+      "length_computable": 1,
+      "loaded": "0",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "4",
+      "target": 2,
+      "total": "3000000"
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "5",
+      "task_id": "1"
+    },
+    {
+      "event": 2,
+      "length_computable": 1,
+      "loaded": "65536",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "6",
+      "target": 2,
+      "total": "3000000"
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "7",
+      "task_id": "1"
+    },
+    {
+      "event": 5,
+      "length_computable": 1,
+      "loaded": "3000000",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "8",
+      "target": 2,
+      "total": "3000000"
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "9",
+      "task_id": "1"
+    },
+    {
+      "event": 7,
+      "length_computable": 1,
+      "loaded": "3000000",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "10",
+      "target": 2,
+      "total": "3000000"
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "11",
+      "task_id": "1"
+    },
+    {
+      "body": {
+        "bytes": "",
+        "kind": "inline"
+      },
+      "headers": "[[\"content-type\",\"text/plain\"]]",
+      "outcome": 5,
+      "record": "NetResponse",
+      "redirected": 0,
+      "req_id": "1",
+      "response_type": 0,
+      "seq": "12",
+      "status": 200,
+      "status_text": "",
+      "url": ""
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "13",
+      "task_id": "1"
+    },
+    {
+      "data": {
+        "bytes": "63300a",
+        "kind": "inline"
+      },
+      "dir": 1,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
+      "record": "WsMessage",
+      "req_id": "1",
+      "seq": "14"
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "15",
+      "task_id": "1"
+    },
+    {
+      "data": {
+        "bytes": "63310a",
+        "kind": "inline"
+      },
+      "dir": 1,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
+      "record": "WsMessage",
+      "req_id": "1",
+      "seq": "16"
+    },
+    {
+      "event": 2,
+      "length_computable": 0,
+      "loaded": "6",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "17",
+      "target": 1,
+      "total": "0"
+    },
+    {
+      "kind": 4,
+      "record": "Task",
+      "seq": "18",
+      "task_id": "1"
+    },
+    {
+      "data": {
+        "bytes": "63320a",
+        "kind": "inline"
+      },
+      "dir": 1,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
+      "record": "WsMessage",
+      "req_id": "1",
+      "seq": "19"
+    },
+    {
+      "data": {
+        "bytes": "7b226f7574636f6d65223a317d",
+        "kind": "inline"
+      },
+      "dir": 4,
+      "event": "",
+      "frame": 0,
+      "last_event_id": "",
+      "record": "WsMessage",
+      "req_id": "1",
+      "seq": "20"
+    },
+    {
+      "event": 2,
+      "length_computable": 0,
+      "loaded": "9",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "21",
+      "target": 1,
+      "total": "0"
+    },
+    {
+      "event": 5,
+      "length_computable": 0,
+      "loaded": "9",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "22",
+      "target": 1,
+      "total": "0"
+    },
+    {
+      "event": 7,
+      "length_computable": 0,
+      "loaded": "9",
+      "record": "XhrEvent",
+      "req_id": "1",
+      "seq": "23",
+      "target": 1,
+      "total": "0"
+    },
+    {
+      "last_seq": "23",
+      "reason": 1,
+      "record": "End"
+    }
+  ],
+  "termination": "Complete"
+}

@@ -56,15 +56,18 @@
 import std/os
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../store/types
 import ../viewmodels/step_list_vm
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
@@ -105,7 +108,8 @@ proc onLineClick(vm: StepListVM; line: StepLine): proc() =
   let captured = line
   result = proc() = vm.jumpToStepLine(captured)
 
-template renderLineRow(r, vm, line, isCurrent: untyped): untyped =
+proc renderLineRow[R, N](r: R; vm: StepListVM; line: StepLine;
+                         isCurrent: bool): N =
   ui(r):
     tdiv(class = rowClass(isCurrent),
          onclick = onLineClick(vm, line)):
@@ -126,7 +130,7 @@ template renderLineRow(r, vm, line, isCurrent: untyped): untyped =
             span(class = "step-line-flow-value-repr"):
               text fv.value
 
-template renderCallRow(r, line: untyped): untyped =
+proc renderCallRow[R, N](r: R; line: StepLine): N =
   ui(r):
     tdiv(class = "step-line step-line-call"):
       span(class = "step-line-description step-line-call-description"):
@@ -140,7 +144,7 @@ template renderCallRow(r, line: untyped): untyped =
             span(class = "step-line-value-repr"):
               text arg.value
 
-template renderReturnRow(r, line: untyped): untyped =
+proc renderReturnRow[R, N](r: R; line: StepLine): N =
   ui(r):
     tdiv(class = "step-line step-line-return"):
       span(class = "step-line-description step-line-return-description"):
@@ -153,7 +157,7 @@ template renderReturnRow(r, line: untyped): untyped =
           span(class = "step-line-return-value-repr"):
             text arg.value
 
-template renderStepListShell(r, linesContainer: untyped): untyped =
+proc renderStepListShell[R, N](r: R; linesContainer: var N): N =
   ui(r):
     tdiv(class = "step-list"):
       tdiv(class = "step-list-lines-box"):
@@ -161,14 +165,17 @@ template renderStepListShell(r, linesContainer: untyped): untyped =
           discard
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderStepListPanel*(r: MockRenderer; vm: StepListVM): MockNode =
-  ## Render the Step List panel for the Mock renderer.
-  var linesContainer: MockNode
-
-  let panel = renderStepListShell(r, linesContainer)
+proc renderStepListPanel*[R, N](r: R; vm: StepListVM): N =
+  ## The Step List panel, under any renderer (Shared-DOM-Front-Ends D3),
+  ## mounted on the desktop by `ui/panel_host`. The rows are rebuilt from
+  ## `vm.lineSteps` whenever it or the current location changes.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
+  var linesContainer: N
+  let panel = renderStepListShell[R, N](r, linesContainer)
 
   createRenderEffect proc() =
     let lines = vm.lineSteps.val
@@ -178,49 +185,11 @@ proc renderStepListPanel*(r: MockRenderer; vm: StepListVM): MockNode =
       let line = lines[lineIndex]
       let row = case line.kind
         of slkLine:
-          renderLineRow(r, vm, line, isCurrentRow(line, loc))
+          renderLineRow[R, N](r, vm, line, isCurrentRow(line, loc))
         of slkCall:
-          renderCallRow(r, line)
+          renderCallRow[R, N](r, line)
         of slkReturn:
-          renderReturnRow(r, line)
+          renderReturnRow[R, N](r, line)
       r.appendChild(linesContainer, row)
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc renderStepListPanel*(r: WebRenderer; vm: StepListVM): isonim_dom.Element =
-    ## Render the Step List panel for the real DOM.
-    var linesContainer: isonim_dom.Element
-
-    let panel = renderStepListShell(r, linesContainer)
-
-    createRenderEffect proc() =
-      let lines = vm.lineSteps.val
-      let loc = vm.currentLocation.val
-      r.clearChildren(linesContainer)
-      for lineIndex in 0 ..< lines.len:
-        let line = lines[lineIndex]
-        let row = case line.kind
-          of slkLine:
-            renderLineRow(r, vm, line, isCurrentRow(line, loc))
-          of slkCall:
-            renderCallRow(r, line)
-          of slkReturn:
-            renderReturnRow(r, line)
-        r.appendChild(linesContainer, row)
-
-    panel
-
-  proc mountIsoNimStepList*(container: isonim_dom.Element;
-                            vm: StepListVM) =
-    ## Mount the IsoNim step-list panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderStepListPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

@@ -11,11 +11,15 @@
 ## - `isLoading`: whether a flow data request is in flight
 ## - `totalIterations`: total number of iterations available
 ##
-## Also creates an auto-load effect that requests flow data from the
-## backend whenever the debugger location or flowMode changes, **and
-## consumes the response**: the loop shape of the returned window and the
-## trace tick the window was computed for are stored, and the selected
-## iteration is re-derived from them.
+## Holds the flow window of the stop — decoded once (`flowLayoutWindowOf`),
+## for every view, and read by every surface that draws flow: the desktop's
+## inline flow in Monaco, the terminal's and GPUI's overlays, the flow pane,
+## the VS Code host (Shared-DOM-Front-Ends D7.4 (b)). The window is asked for
+## once per stop by the session's stop loader (`sdk/stop_loader`, pane
+## `spFlow`, through `requestWindow`) **and the response is consumed**: the
+## loop shape of the returned window and the trace tick the window was
+## computed for are stored, and the selected iteration is re-derived from
+## them.
 ##
 ## That last part is the whole point (#593/#595). The Omniscience loop
 ## counter is not a free-standing widget: it must show which iteration the
@@ -30,9 +34,11 @@
 ##   let vm = createFlowVM(store)
 ##   echo vm.flowMode.val          # fmCall
 ##   vm.setMode(fmLine)
+##   vm.requestWindow()            # what the stop loader does at each stop
 ##   echo vm.totalIterations.val   # derived from the loaded flow window
 
 import std/[algorithm, json, options, strutils, tables]
+import ./action_sink
 
 import isonim/core/[signals, computation, owner, async_compat]
 import isonim/viewmodel
@@ -45,6 +51,7 @@ import ../store/[replay_data_store, types]
 # which iteration a tick belongs to. `flow_loop_math` imports nothing and
 # compiles on both backends; see its header.
 import ../../ui/flow_loop_math
+import ./flow_layout
 # PLAT-42 — the per-line flow decision. `flowStyledLines` is the body of the
 # desktop editor's `flowStyleLines`; calling it here rather than re-deriving
 # "which lines ran" is what keeps every medium on ONE rule
@@ -81,6 +88,23 @@ type
     expression*: string
     beforeValue*: string
     afterValue*: string
+    loop*: int
+      ## The loop the step ran in (the backend's `FlowStep.loop`; 0: none).
+    iteration*: int
+      ## Its iteration of that loop.
+
+  FlowStepEvent* = object
+    ## An event a step recorded (`FlowStep.events`): output the program
+    ## wrote, an error — what the desktop's flow draws as a `<stdout>` chip
+    ## before the step's values (`ui/flow.nim`'s `flowEventValue`).
+    step*: int
+    location*: string
+    name*: string
+      ## The chip's name, `flowEventValue`'s: `stdout`, `stderr`, `stdin`,
+      ## `error`, or the EVM event's metadata.
+    text*: string
+    loop*: int
+    iteration*: int
 
   FlowLoopInfo* = object
     ## One loop of the loaded flow window, as the backend describes it in
@@ -95,6 +119,16 @@ type
     registeredLine*: int     ## Line the loop control is attached to.
     rrTicksForIterations*: seq[int]
 
+  FlowWindowReturn* = object
+    ## A value a step of the window returned (its `return` expression), with
+    ## the pass it belongs to — what an editor overlay draws at the line.
+    line*: int
+    loop*: int
+      ## The step's loop; 0 when it ran outside every real loop, in which case
+      ## it belongs to no pass and is shown whatever pass is selected.
+    iteration*: int
+    text*: string
+
   FlowVM* = ref object of ViewModel
     ## Reactive state for the Flow panel.
     ##
@@ -108,8 +142,12 @@ type
     ##   isLoading         — whether a flow data request is in flight
     ##   totalIterations   — total number of iterations from the backend
     ##
-    ## The store reference is kept for the auto-load effect and
-    ## for navigation actions (click-step jump).
+    ## The store reference is kept for the window request (`requestWindow`,
+    ## at the debugger's position) and for navigation actions (click-step
+    ## jump).
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
@@ -124,6 +162,8 @@ type
     iterationCount*: Signal[int]
     loadingState*: Signal[LoadingState]
     steps*: Signal[seq[FlowStepEntry]]
+    events*: Signal[seq[FlowStepEvent]]
+      ## The window's steps' events, in step order.
 
     # -- Loaded flow window (written by `applyFlowUpdate`) --
     loops*: Signal[seq[FlowLoopInfo]]
@@ -134,6 +174,23 @@ type
       ## Index into `loops` of the loop whose control is on screen, or -1
       ## when the window contains no loop.
     windowRRTicks*: Signal[int]
+    layoutWindow*: Signal[FlowLayoutWindow]
+      ## The window as the inline-value layout reads it (`flow_layout`): every
+      ## step with its expressions' values, and every loop with its passes.
+      ## `sourceLines` is left empty — the source belongs to the consumer.
+      ## Decoded here once, so a consumer that draws its own overlay (a web
+      ## page, BlockTracer) does not keep a second decoder of the wire
+      ## (Shared-DOM-Front-Ends D8).
+    layoutWindows*: Signal[seq[FlowLayoutWindow]]
+      ## The same, for every view of the window, index-aligned with the
+      ## wire's `viewUpdates` (`EditorView`'s ordinals: the source, the
+      ## target source, the instructions …). `layoutWindow` is entry 0. An
+      ## editor showing another view of the code reads its own entry.
+    windowReturns*: Signal[seq[FlowWindowReturn]]
+    windowPath*: Signal[string]
+      ## The file the window is on, as the engine names it.
+    windowFunction*: Signal[string]
+      ## The function the window is on.
     appliedWindows*: int
       ## How many windows `applyFlowUpdate` has adopted. Not a signal: nothing
       ## renders it. The load effect compares it across a request to learn
@@ -150,6 +207,18 @@ type
       ## keeping only the loops.
       ## The debugger tick the current window was loaded for. This is the
       ## input the active iteration is derived from.
+
+    # -- The trace diff's flow (a `--diff` session) --
+    diffSession*: Signal[bool]
+      ## The session was started with a diff (`ct run --diff`): the flow of
+      ## the changed lines is loaded once, beside the call flow
+      ## (the stop loader's `spDiffFlow`).
+    diffLoadingState*: Signal[LoadingState]
+    diffStyledLines*: Signal[seq[FlowStyledLine]]
+      ## The diff flow's per-line facts, across the recording's changed lines
+      ## — never the call window's (`styledLines`).
+    diffSteps*: Signal[seq[FlowStepEntry]]
+      ## The diff flow's steps.
 
     # -- Derived state --
     isLoading*: Memo[bool]
@@ -184,7 +253,8 @@ proc engineFlowModeWireName*(mode: FlowMode): string =
   ## All three view granularities are call flow as far as the engine is
   ## concerned — they differ in how the returned steps are laid out, which
   ## is a rendering decision this panel makes locally. `diff` has no view
-  ## granularity behind it yet and is reached from the legacy Karax editor.
+  ## granularity behind it: it is a separate query (the stop loader's
+  ## `spDiffFlow`), whose answer is held apart from the call window.
   ##
   ## The `case` is exhaustive on purpose: a fourth `fm*` member will not
   ## compile until someone decides what it means to the engine, which is the
@@ -193,13 +263,24 @@ proc engineFlowModeWireName*(mode: FlowMode): string =
   of fmCall, fmLine, fmFunction:
     FlowModeWireCall
 
+proc isDiffFlowUpdate*(update: JsonNode): bool =
+  ## Whether a `ct/updated-flow` payload answers the `diff` query. The engine
+  ## names the query it answered (`FlowUpdate.mode`); an update without the
+  ## field is a call flow, which is all an engine that predates it served on
+  ## that path.
+  not update.isNil and update.kind == JObject and
+    update{"mode"}.getStr(FlowModeWireCall) == FlowModeWireDiff
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
 
 proc setMode*(vm: FlowVM; mode: FlowMode) =
-  ## Switch to a different flow mode. The auto-load effect will
-  ## request new data because it depends on flowMode.
+  ## Switch to a different flow mode. The stop loader asks for the window
+  ## again, because its `spFlow` key includes the flow mode.
+  if vm.actionSink.forwards("flow", "setMode",
+      %*{"mode": sinkArg(mode)}):
+    return
   vm.flowMode.val = mode
 
 proc maxIteration*(vm: FlowVM): int =
@@ -213,6 +294,9 @@ proc maxIteration*(vm: FlowVM): int =
 proc selectIteration*(vm: FlowVM; iteration: int) =
   ## Set the currently selected iteration index.
   ## Clamped to [0, totalIterations - 1].
+  if vm.actionSink.forwards("flow", "selectIteration",
+      %*{"iteration": iteration}):
+    return
   let maxIter = vm.maxIteration()
   if iteration < 0:
     vm.selectedIteration.val = 0
@@ -227,19 +311,28 @@ proc stepIterationForward*(vm: FlowVM) =
   ## Spec (`codetracer-specs/GUI/Debugging-Features/Omniscience-Flow.md`,
   ## "Loop Slider Control"): "Click arrows for previous/next" — one click is
   ## one iteration, never two (#595).
+  if vm.actionSink.forwards("flow", "stepIterationForward", %*{}):
+    return
   vm.selectIteration(nextIteration(vm.selectedIteration.val, vm.maxIteration()))
 
 proc stepIterationBackward*(vm: FlowVM) =
   ## The "previous iteration" arrow of the loop control. See above.
+  if vm.actionSink.forwards("flow", "stepIterationBackward", %*{}):
+    return
   vm.selectIteration(previousIteration(vm.selectedIteration.val, vm.maxIteration()))
 
 proc hoverStep*(vm: FlowVM; step: Option[int]) =
   ## Set the currently hovered step. Pass `none(int)` to clear.
+  if vm.actionSink.forwards("flow", "hoverStep",
+      %*{"step": sinkArg(step)}):
+    return
   vm.hoveredStep.val = step
 
 proc clickStep*(vm: FlowVM; step: int) =
   ## Navigate to the source location of the given flow step.
   ## Sends a jump command to the backend.
+  if vm.actionSink.forwards("flow", "clickStep", %*{"step": step}):
+    return
   let args = %*{
     "step": step,
     "flowMode": $vm.flowMode.val,
@@ -249,6 +342,8 @@ proc clickStep*(vm: FlowVM; step: int) =
 
 proc toggleRawValues*(vm: FlowVM) =
   ## Toggle whether raw (unformatted) values are shown.
+  if vm.actionSink.forwards("flow", "toggleRawValues", %*{}):
+    return
   vm.showRawValues.val = not vm.showRawValues.val
 
 proc setSteps*(vm: FlowVM; steps: openArray[FlowStepEntry]) =
@@ -300,25 +395,6 @@ proc pickFocusedLoop(loops: seq[FlowLoopInfo]): int =
       return index
   -1
 
-type
-  # A typed view of ONE flow window, holding exactly the fields
-  # `flowStyledLines` reads. The wire's own type (`FlowViewUpdate`) is built on
-  # `TableLike`, which is a JS object on the web backend; this view is what the
-  # shared predicate is instantiated over on the native one. It is a second
-  # SHAPE for the one rule's input, not a second rule.
-  FlowLineExtent = object
-    firstLine, lastLine: int
-  FlowLineBranches = object
-    table: Table[int, int]
-    extents: Table[int, FlowLineExtent]
-  FlowLineSpan = object
-    functionFirst, functionLast: int
-  FlowLineWindow = object
-    location: FlowLineSpan
-    branchesTaken: seq[seq[FlowLineBranches]]
-    commentLines: seq[int]
-    relevantStepCount: seq[int]
-
 const NotTaken = 2
   ## `BranchState.NotTaken`'s ordinal on the wire (`Unknown, Taken, NotTaken`
   ## in `common_types/codetracer_features/flow.nim`). `insideUntakenBranch`
@@ -364,29 +440,27 @@ proc intList(node: JsonNode): seq[int] =
   for n in node:
     if n.kind == JInt: result.add n.getInt
 
-proc flowLineWindow(view: JsonNode): FlowLineWindow =
-  ## Parse the fields `flowStyledLines` needs out of one wire view update.
-  let loc = view{"location"}
-  if not loc.isNil and loc.kind == JObject:
-    result.location = FlowLineSpan(
-      functionFirst: loc{"functionFirst"}.getInt(0),
-      functionLast: loc{"functionLast"}.getInt(0))
-  result.commentLines = intList(view{"commentLines"})
-  result.relevantStepCount = intList(view{"relevantStepCount"})
-  let bt = view{"branchesTaken"}
-  if not bt.isNil and bt.kind == JArray:
-    for group in bt:
-      var row: seq[FlowLineBranches] = @[]
-      if group.kind == JArray:
-        for entry in group:
-          row.add FlowLineBranches(
-            table: intKeyedTable[int](entry{"table"},
-              proc (n: JsonNode): int = n.getInt(0)),
-            extents: intKeyedTable[FlowLineExtent](entry{"extents"},
-              proc (n: JsonNode): FlowLineExtent =
-                FlowLineExtent(firstLine: n{"firstLine"}.getInt(0),
-                               lastLine: n{"lastLine"}.getInt(0))))
-      result.branchesTaken.add row
+proc flowLayoutWindowOf*(view: JsonNode; envelope: JsonNode = nil):
+    FlowLayoutWindow
+
+proc flowStyledLinesOf*(window: FlowLayoutWindow; finished: bool):
+    seq[FlowStyledLine] =
+  ## The shared dimming rule (`common/flow_line_rule.flowStyledLines`) over a
+  ## decoded window — the rule the desktop editor styles its lines with.
+  ## Instantiated HERE, where `NotTaken` / `Taken` are the wire's ordinals;
+  ## a consumer that also sees the `BranchState` enum (the desktop renderer)
+  ## calls this rather than instantiating the rule over ints itself.
+  flowStyledLines(window, finished)
+
+proc flowLineFactsOf*(window: FlowLayoutWindow): seq[FlowStyledLine] =
+  ## The per-line facts of one decoded window. See `flowLineFacts`.
+  result = flowStyledLines(window, finished = false)
+  if window.branchesTaken.len > 0 and window.branchesTaken[0].len > 0:
+    for header, state in window.branchesTaken[0][0].table:
+      if state != 0 and header > window.location.functionFirst and
+         header <= window.location.functionLast:
+        result.add FlowStyledLine(position: header, kind: flskHit)
+  result.sort(proc (a, b: FlowStyledLine): int = cmp(a.position, b.position))
 
 proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
   ## The per-line facts of one wire view update, decided by the shared rule.
@@ -406,14 +480,7 @@ proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
   ## Sorted by line, one entry per line.
   if view.isNil or view.kind != JObject:
     return @[]
-  let window = flowLineWindow(view)
-  result = flowStyledLines(window, finished = false)
-  if window.branchesTaken.len > 0 and window.branchesTaken[0].len > 0:
-    for header, state in window.branchesTaken[0][0].table:
-      if state != 0 and header > window.location.functionFirst and
-         header <= window.location.functionLast:
-        result.add FlowStyledLine(position: header, kind: flskHit)
-  result.sort(proc (a, b: FlowStyledLine): int = cmp(a.position, b.position))
+  flowLineFactsOf(flowLayoutWindowOf(view))
 
 proc flowValueText(value: JsonNode): string =
   ## One recorded value as the flow pane prints it: PLAT-2's pipeline at the
@@ -454,7 +521,236 @@ proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
         location: base & ":" & $line,
         expression: expr,
         beforeValue: flowValueText(if before.isNil: nil else: before{expr}),
-        afterValue: flowValueText(if after.isNil: nil else: after{expr}))
+        afterValue: flowValueText(if after.isNil: nil else: after{expr}),
+        loop: jsonInt(st{"loop"}, 0),
+        iteration: jsonInt(st{"iteration"}, 0))
+
+const FlowReturnExpression = "return"
+  ## The pseudo-expression a step records its return value under.
+
+proc flowValueOf(name: string; value: JsonNode): FlowValueText =
+  ## One recorded value: PLAT-2's text at the flow budget, whether it was cut,
+  ## and the tree itself.
+  result = FlowValueText(expression: name)
+  if value.isNil or value.kind == JNull:
+    return
+  let presented = present(json_adapter.toPValue(value), FlowBudget)
+  result.text = presented.root.text
+  result.truncated = presented.truncated
+  result.value = value
+
+proc flowValueList(node: JsonNode): seq[FlowValueText] =
+  if node.isNil or node.kind != JObject: return
+  for name, value in node:
+    if name == FlowReturnExpression: continue
+    result.add flowValueOf(name, value)
+
+proc flowLayoutLoopOf(node, passes: JsonNode): FlowLayoutLoop =
+  result = FlowLayoutLoop(first: -1, last: -1, registeredLine: -1)
+  if node.isNil or node.kind != JObject: return
+  proc ints(n: JsonNode): seq[int] =
+    if n.isNil or n.kind != JArray: return
+    for item in n: result.add jsonInt(item, 0)
+  result.first = jsonInt(node{"first"}, -1)
+  result.last = jsonInt(node{"last"}, -1)
+  result.registeredLine = jsonInt(node{"registeredLine"}, -1)
+  result.base = jsonInt(node{"base"}, 0)
+  result.baseIteration = jsonInt(node{"baseIteration"}, 0)
+  result.internal = ints(node{"internal"})
+  result.stepCounts = ints(node{"stepCounts"})
+  result.rrTicksForIterations = ints(node{"rrTicksForIterations"})
+  result.iteration = jsonInt(node{"iteration"}, 0)
+  if passes.isNil or passes.kind != JArray: return
+  for pass in passes:
+    var entries: seq[tuple[line: int, stepCount: int]] = @[]
+    # A pass is `{table: {line: stepCount}}` on the wire; a bare table is
+    # accepted too.
+    let table = if pass.kind == JObject and pass.hasKey("table"): pass{"table"}
+                else: pass
+    if not table.isNil and table.kind == JObject:
+      for line, stepCount in table:
+        entries.add (line: (try: parseInt(line) except ValueError: 0),
+                     stepCount: jsonInt(stepCount, 0))
+    result.iterationSteps.add entries
+
+proc flowEventsOf(node: JsonNode): seq[FlowLayoutEvent] =
+  if node.isNil or node.kind != JArray: return
+  for ev in node:
+    if ev.kind != JObject: continue
+    result.add FlowLayoutEvent(kind: jsonInt(ev{"kind"}, -1),
+                               text: ev{"text"}.getStr(""),
+                               metadata: ev{"metadata"}.getStr(""))
+
+proc flowBranchTableOf(node: JsonNode): FlowBranchTable =
+  result.table = intKeyedTable[int](node{"table"},
+    proc (n: JsonNode): int = jsonInt(n, 0))
+  result.extents = intKeyedTable[FlowBranchExtent](node{"extents"},
+    proc (n: JsonNode): FlowBranchExtent =
+      FlowBranchExtent(firstLine: n{"firstLine"}.getInt(0),
+                       lastLine: n{"lastLine"}.getInt(0)))
+
+proc flowLayoutWindowOf*(view: JsonNode; envelope: JsonNode = nil):
+    FlowLayoutWindow =
+  ## One `FlowViewUpdate` view (`viewUpdates[i]`) decoded: the whole window
+  ## every surface draws from — the steps with their recorded values and
+  ## events, the loops with their passes, the per-line facts the line styling
+  ## reads, and which call and tick the window is of. `position` is the
+  ## step's source line; `loops` and `loopIterationSteps` are index-aligned
+  ## (entry `i` is loop `i`'s passes). `envelope` is the `FlowUpdate` the view
+  ## came in (its `location` and `finished`); without it the view's own
+  ## location is used.
+  ##
+  ## The one decoder of the wire's window (Shared-DOM-Front-Ends D7.4 (b)):
+  ## the desktop's inline flow, the terminal's and GPUI's overlays and the
+  ## VS Code host all read what this returns.
+  result = FlowLayoutWindow(tabSize: 4)
+  if view.isNil or view.kind != JObject: return
+  var location = view{"location"}
+  if not envelope.isNil and envelope.kind == JObject and
+     not envelope{"location"}.isNil and envelope{"location"}.kind == JObject:
+    location = envelope{"location"}
+  if not location.isNil and location.kind == JObject:
+    result.key = location{"key"}.getStr("")
+    result.path = location{"path"}.getStr("")
+    result.highLevelPath = location{"highLevelPath"}.getStr("")
+    result.functionName = location{"functionName"}.getStr("")
+    result.rrTicks = jsonInt(location{"rrTicks"}, 0)
+  # The function extent is the VIEW's: a view of another file (the target
+  # source, the instructions) has its own.
+  let viewLocation = view{"location"}
+  if not viewLocation.isNil and viewLocation.kind == JObject:
+    result.location = FlowWindowSpan(
+      functionFirst: jsonInt(viewLocation{"functionFirst"}, 0),
+      functionLast: jsonInt(viewLocation{"functionLast"}, 0))
+  if not envelope.isNil and envelope.kind == JObject:
+    result.finished = envelope{"finished"}.getBool(false)
+  result.commentLines = intList(view{"commentLines"})
+  result.relevantStepCount = intList(view{"relevantStepCount"})
+  let branches = view{"branchesTaken"}
+  if not branches.isNil and branches.kind == JArray:
+    for group in branches:
+      var row: seq[FlowBranchTable] = @[]
+      if group.kind == JArray:
+        for entry in group:
+          row.add flowBranchTableOf(entry)
+      result.branchesTaken.add row
+  result.positionStepCounts = intKeyedTable[seq[int]](
+    view{"positionStepCounts"}, proc (n: JsonNode): seq[int] = intList(n))
+  let passesByLoop = view{"loopIterationSteps"}
+  let loopNodes = view{"loops"}
+  if not loopNodes.isNil and loopNodes.kind == JArray:
+    var index = 0
+    for loopNode in loopNodes:
+      let passes =
+        if not passesByLoop.isNil and passesByLoop.kind == JArray and
+           index < passesByLoop.len: passesByLoop[index]
+        else: nil
+      result.loops.add flowLayoutLoopOf(loopNode, passes)
+      inc index
+  let stepNodes = view{"steps"}
+  if stepNodes.isNil or stepNodes.kind != JArray: return
+  for st in stepNodes:
+    if st.isNil or st.kind != JObject: continue
+    var order: seq[string] = @[]
+    let orderNode = st{"exprOrder"}
+    if not orderNode.isNil and orderNode.kind == JArray:
+      for e in orderNode:
+        if e.kind == JString: order.add e.getStr
+    let before = st{"beforeValues"}
+    let after = st{"afterValues"}
+    result.steps.add FlowLayoutStep(
+      stepCount: jsonInt(st{"stepCount"}, 0),
+      line: jsonInt(st{"position"}, 0),
+      loopIndex: jsonInt(st{"loop"}, 0),
+      iteration: jsonInt(st{"iteration"}, 0),
+      rrTicks: jsonInt(st{"rrTicks"}, 0),
+      exprOrder: order,
+      beforeValues: flowValueList(before),
+      afterValues: flowValueList(after),
+      beforeReturn: flowValueOf(FlowReturnExpression,
+        if before.isNil or before.kind != JObject: nil
+        else: before{FlowReturnExpression}),
+      afterReturn: flowValueOf(FlowReturnExpression,
+        if after.isNil or after.kind != JObject: nil
+        else: after{FlowReturnExpression}),
+      events: flowEventsOf(st{"events"}),
+      originSummaries: st{"originSummaries"})
+
+proc flowWindowReturnsOf*(view: JsonNode): seq[FlowWindowReturn] =
+  ## The values the window's steps returned. A `None` return (no value) is not
+  ## one.
+  if view.isNil or view.kind != JObject: return
+  let stepNodes = view{"steps"}
+  if stepNodes.isNil or stepNodes.kind != JArray: return
+  const NoneValueKind = 30   # `TypeKind.None` (`common_types`)
+  for st in stepNodes:
+    if st.isNil or st.kind != JObject: continue
+    var text = ""
+    for field in ["afterValues", "beforeValues"]:
+      let map = st{field}
+      if map.isNil or map.kind != JObject: continue
+      let value = map{FlowReturnExpression}
+      if value.isNil or value.kind != JObject: continue
+      if value{"kind"}.getInt(-1) == NoneValueKind: continue
+      text = flowValueText(value)
+      if text.len > 0: break
+    if text.len > 0:
+      result.add FlowWindowReturn(line: jsonInt(st{"position"}, 0),
+        loop: jsonInt(st{"loop"}, 0), iteration: jsonInt(st{"iteration"}, 0),
+        text: text)
+
+proc flowStepEventsOf*(view: JsonNode): seq[FlowStepEvent] =
+  ## The window's steps' events, named as `ui/flow.nim`'s `flowEventValue`
+  ## names them; a kind it draws no chip for is left out.
+  if view.isNil or view.kind != JObject: return
+  let steps = view{"steps"}
+  if steps.isNil or steps.kind != JArray: return
+  var file = ""
+  let loc = view{"location"}
+  if not loc.isNil and loc.kind == JObject:
+    file = loc{"highLevelPath"}.getStr("")
+    if file.len == 0: file = loc{"path"}.getStr("")
+  let base = file[file.rfind('/') + 1 .. ^1]
+  for st in steps:
+    if st.kind != JObject: continue
+    let events = st{"events"}
+    if events.isNil or events.kind != JArray: continue
+    for ev in events:
+      if ev.kind != JObject: continue
+      # `EventLogKind`'s ordinals (`common_types/codetracer_features/events`).
+      let name = case jsonInt(ev{"kind"}, -1)
+                 of 0, 1: "stdout"
+                 of 3, 4: "stdin"
+                 of 11: "error"
+                 of 13: ev{"metadata"}.getStr("")
+                 of 14: "stderr"
+                 else: ""
+      if name.len == 0: continue
+      result.add FlowStepEvent(
+        step: jsonInt(st{"stepCount"}, 0),
+        location: base & ":" & $jsonInt(st{"position"}, 0),
+        name: name,
+        text: ev{"text"}.getStr(""),
+        loop: jsonInt(st{"loop"}, 0),
+        iteration: jsonInt(st{"iteration"}, 0))
+
+proc applyDiffFlowUpdate*(vm: FlowVM; response: JsonNode) =
+  ## Adopt the answer to the `diff` query: the flow of the recording's
+  ## changed lines (`diffStyledLines`, `diffSteps`). The call window is left
+  ## as it is.
+  let viewUpdates = response{"viewUpdates"}
+  if response{"error"}.getBool(false) or viewUpdates.isNil or
+     viewUpdates.kind != JArray or viewUpdates.len == 0:
+    vm.diffLoadingState.val = lsError
+    return
+  var lines: seq[FlowStyledLine] = @[]
+  var steps: seq[FlowStepEntry] = @[]
+  for view in viewUpdates:
+    lines.add flowLineFacts(view)
+    steps.add flowStepEntriesOf(view)
+  vm.diffStyledLines.val = lines
+  vm.diffSteps.val = steps
+  vm.diffLoadingState.val = lsIdle
 
 proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## Adopt a `ct/load-flow` response.
@@ -470,6 +766,12 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## sends alongside the window, is what keeps the two in agreement.
   if response.isNil or response.kind != JObject:
     vm.loadingState.val = lsError
+    return
+  # A DIFF FLOW IS NOT THE CALL WINDOW. It arrives on the same event, and
+  # adopting it here replaced the window of the call the debugger is in with
+  # the changed lines of the whole recording.
+  if isDiffFlowUpdate(response):
+    vm.applyDiffFlowUpdate(response)
     return
 
   let viewUpdates = response{"viewUpdates"}
@@ -498,12 +800,29 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
 
   vm.loops.val = loops
   vm.focusedLoop.val = focused
-  vm.styledLines.val = flowLineFacts(view)
+  var windows: seq[FlowLayoutWindow] = @[]
+  for viewNode in viewUpdates:
+    windows.add flowLayoutWindowOf(viewNode, response)
+  vm.styledLines.val = flowLineFactsOf(windows[0])
   # PLAT-41: THE STEPS ARE KEPT. The flow pane's rows are the window's own
   # steps, and until 2026-09-23 this function adopted the loops and the line
   # facts and dropped the steps on the floor, so the pane said "no flow steps
   # have been loaded" beside an editor drawing the same window's overlay.
   vm.steps.val = flowStepEntriesOf(view)
+  vm.events.val = flowStepEventsOf(view)
+  vm.layoutWindows.val = windows
+  vm.layoutWindow.val = windows[0]
+  vm.windowReturns.val = flowWindowReturnsOf(view)
+  # The window's file and function are the same on the envelope's location
+  # and the view's own; whichever is populated is taken.
+  proc locationField(field: string): string =
+    for node in [response{"location"}, view{"location"}]:
+      if not node.isNil and node.kind == JObject:
+        let v = node{field}.getStr("")
+        if v.len > 0: return v
+    ""
+  vm.windowPath.val = locationField("path")
+  vm.windowFunction.val = locationField("functionName")
   vm.windowRRTicks.val = ticks
   vm.iterationCount.val =
     if focused >= 0: loops[focused].rrTicksForIterations.len else: 0
@@ -520,6 +839,76 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
 # Factory
 # ---------------------------------------------------------------------------
 
+proc requestWindow*(vm: FlowVM;
+                    onDone: proc(applied: bool) {.closure.} = nil) =
+  ## Ask the engine for the flow window of the stop the store is at, in the
+  ## VM's view granularity, and adopt the answer. `onDone` is told whether a
+  ## window was adopted for this request. Called by the session's stop loader
+  ## once per stop (`spFlow`); does nothing before the debugger has a tick.
+  ##
+  ## `CtLoadFlowArguments` (src/db-backend/src/task.rs) requires `flowMode`
+  ## and `location`; `rrTicks` lives inside `location`. `wireMode` is the
+  ## engine's vocabulary (`engineFlowModeWireName`): all three view
+  ## granularities are the same `call` query.
+  let store = vm.store
+  let ticks = store.debugger.val.rrTicks
+  if ticks == 0'u64:
+    if not onDone.isNil: onDone(false)
+    return
+  let position = store.debugger.val.location
+  # The engine's vocabulary, never this panel's: `$vm.flowMode.val` would put
+  # the view granularity (`fmLine`, `fmFunction`) on the wire, which the
+  # engine refuses (`FlowMode::from_wire_name`). The stop loader's dedup keys
+  # on the VIEW mode instead, so switching granularity still asks again.
+  let wireMode = engineFlowModeWireName(vm.flowMode.val)
+  let args = %*{
+    "flowMode": wireMode,
+    "location": {
+      "path": position.file,
+      "line": position.line,
+      "rrTicks": ticks,
+      "callstackDepth": position.callstackDepth,
+    },
+  }
+  vm.loadingState.val = lsLoading
+  # Consume the response. Firing the request and dropping the reply is what
+  # made every loop-iteration assertion at this layer vacuous; see the module
+  # header.
+  let appliedBefore = vm.appliedWindows
+  let vmRef = vm
+  onComplete(store.backend.send("ct/load-flow", args),
+    proc(response: JsonNode) =
+      # The reply is only *sometimes* the window. `ct/load-flow`'s real answer
+      # is the queued `ct/updated-flow` event (dap.rs:329); the backend-manager
+      # converts that event into a response for some deployments
+      # (backend_manager.rs:1001), so both paths feed the same applier.
+      #
+      # BUT NOT BOTH FOR ONE REQUEST. A synchronous transport (the native
+      # hosts' stdio adapter) delivers the event before the reply completes,
+      # and a reply adopted after it would replace the real window with
+      # whatever the reply carries — or, when the reply is a bare DAP
+      # envelope, flip a loaded panel to `lsError`.
+      if vmRef.appliedWindows != appliedBefore:
+        if not onDone.isNil: onDone(true)
+        return
+      # A DAP envelope carries the window under `body`.
+      let window =
+        if not response.isNil and response.kind == JObject and
+           response{"viewUpdates"}.isNil and
+           not response{"body"}.isNil: response["body"]
+        else: response
+      vmRef.applyFlowUpdate(window)
+      if not onDone.isNil: onDone(vmRef.appliedWindows != appliedBefore),
+    proc(message: string) =
+      # A failed flow load must not leave the panel claiming to still be
+      # loading forever, and must not leave a stale window's loop shape in
+      # place attributed to the new position.
+      vmRef.loops.val = @[]
+      vmRef.focusedLoop.val = -1
+      vmRef.iterationCount.val = 0
+      vmRef.loadingState.val = lsError
+      if not onDone.isNil: onDone(false))
+
 proc createFlowVM*(store: ReplayDataStore): FlowVM =
   ## Create a FlowVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
@@ -527,8 +916,8 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
   ## Sets up:
   ## 1. Mutable signals with sensible defaults
   ## 2. Derived memos for `isLoading` and `totalIterations`
-  ## 3. An auto-load effect that requests flow data when the debugger
-  ##    location or flowMode changes
+  ## 3. The `ct/updated-flow` event handler that adopts a window (the window
+  ##    is ASKED for by the session's stop loader, `requestWindow`)
   withViewModel proc(dispose: proc()): FlowVM =
     let flowMode = createSignal(fmCall)
     let selectedIteration = createSignal(0)
@@ -539,10 +928,15 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
     let iterationCount = createSignal(0)
     let loadingState = createSignal(lsIdle)
     let steps = createSignal(newSeq[FlowStepEntry]())
+    let events = createSignal(newSeq[FlowStepEvent]())
     let loops = createSignal(newSeq[FlowLoopInfo]())
     let focusedLoop = createSignal(-1)
     let windowRRTicks = createSignal(0)
     let styledLines = createSignal(newSeq[FlowStyledLine]())
+    let diffSession = createSignal(false)
+    let diffLoadingState = createSignal(lsIdle)
+    let diffStyledLines = createSignal(newSeq[FlowStyledLine]())
+    let diffSteps = createSignal(newSeq[FlowStepEntry]())
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -561,11 +955,21 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
       iterationCount: iterationCount,
       loadingState: loadingState,
       steps: steps,
+      events: events,
       loops: loops,
       focusedLoop: focusedLoop,
       windowRRTicks: windowRRTicks,
+      layoutWindow: createSignal(FlowLayoutWindow(tabSize: 4)),
+      layoutWindows: createSignal(newSeq[FlowLayoutWindow]()),
+      windowReturns: createSignal(newSeq[FlowWindowReturn]()),
+      windowPath: createSignal(""),
+      windowFunction: createSignal(""),
       appliedWindows: 0,
       styledLines: styledLines,
+      diffSession: diffSession,
+      diffLoadingState: diffLoadingState,
+      diffStyledLines: diffStyledLines,
+      diffSteps: diffSteps,
       isLoading: isLoading,
       totalIterations: totalIterations,
       disposeProc: dispose,
@@ -591,104 +995,9 @@ proc createFlowVM*(store: ReplayDataStore): FlowVM =
           else: event
         vmRef.applyFlowUpdate(payload)
 
-    # Auto-load effect: whenever the debugger position or flow mode
-    # changes, request fresh flow data from the backend.
-    #
-    # See the matching dedup in ``event_log_vm.nim`` for the rationale.
-    #
-    # THIS COMMENT USED TO SAY ``updateDebuggerPosition`` "reassigns
-    # ``store.debugger`` without value equality". THAT IS FALSE, and it was
-    # believed long enough to be quoted into a bug brief as though it were a
-    # measurement. IsoNim's ``writeSignal`` (isonim/core/signals.nim) returns
-    # early on ``state.value == value``, and ``DebuggerState`` is a plain
-    # object, so a byte-identical reassignment notifies nobody — measured at
-    # 145 identical writes re-running an effect exactly once, in
-    # ``src/tests/gui/tests/state/state_render_storm_test.nim``, which exists
-    # to keep that from being re-derived wrongly a third time.
-    #
-    # What the guard below is actually for: ``store.debugger`` is reassigned
-    # once per panel per CtCompleteMove, and those writes are not all equal —
-    # each panel syncs the position it saw, so location fields can differ at
-    # one ``rrTicks``. Keying on the tick and the view mode collapses that to
-    # one request. Without it ``ct/load-flow`` is issued several times per
-    # move, which is
-    # both wasteful and (in combination with the ``fmCall`` JSON-arg
-    # mismatch the backend currently rejects) noisy in the host logs.
-    var lastTicks: uint64 = 0
-    var lastMode = ""
-    var hasFired = false
-    createEffect proc() =
-      let ticks = store.debugger.val.rrTicks
-      let mode = flowMode.val
-      # Two different strings, deliberately.
-      #
-      # `wireMode` is the engine's vocabulary — see
-      # `engineFlowModeWireName`. All three view granularities map to
-      # `call`, because that is genuinely the same query.
-      #
-      # `viewMode` is this panel's, and it is what the dedup keys on. Keying
-      # the dedup on the wire name instead would silently stop re-requesting
-      # when the user switched granularity, which is a behaviour change this
-      # fix has no business making.
-      let wireMode = engineFlowModeWireName(mode)
-      let viewMode = $mode
-      if ticks > 0'u64:
-        if hasFired and ticks == lastTicks and viewMode == lastMode:
-          return
-        lastTicks = ticks
-        lastMode = viewMode
-        hasFired = true
-        # `CtLoadFlowArguments` (src/db-backend/src/task.rs) requires
-        # `flowMode` and `location`; `rrTicks` is not a field it reads, it
-        # lives inside `location`. Sending the tick at the top level and no
-        # location at all is why this request never once succeeded.
-        let position = store.debugger.val.location
-        let args = %*{
-          "flowMode": wireMode,
-          "location": {
-            "path": position.file,
-            "line": position.line,
-            "rrTicks": ticks,
-            "callstackDepth": position.callstackDepth,
-          },
-        }
-        loadingState.val = lsLoading
-        # Consume the response. Firing the request and dropping the reply is
-        # what made every loop-iteration assertion at this layer vacuous; see
-        # the module header.
-        let appliedBefore = vm.appliedWindows
-        let future = store.backend.send("ct/load-flow", args)
-        let vmRef = vm
-        onComplete(future,
-          proc(response: JsonNode) =
-            # The reply is only *sometimes* the window. `ct/load-flow`'s real
-            # answer is the queued `ct/updated-flow` event (dap.rs:329); the
-            # backend-manager converts that event into a response for some
-            # deployments (backend_manager.rs:1001), so both paths must feed
-            # the same applier. Consuming only the reply is how a panel ends
-            # up permanently empty against the engine while its tests pass.
-            #
-            # BUT NOT BOTH FOR ONE REQUEST. A synchronous transport (the
-            # native hosts' stdio adapter) delivers the event before the reply
-            # completes, and a reply adopted after it would replace the real
-            # window with whatever the reply carries — or, when the reply is a
-            # bare DAP envelope, flip a loaded panel to `lsError`.
-            if vmRef.appliedWindows != appliedBefore:
-              return
-            # A DAP envelope carries the window under `body`.
-            let window =
-              if not response.isNil and response.kind == JObject and
-                 response{"viewUpdates"}.isNil and
-                 not response{"body"}.isNil: response["body"]
-              else: response
-            vmRef.applyFlowUpdate(window),
-          proc(message: string) =
-            # A failed flow load must not leave the panel claiming to still be
-            # loading forever, and must not leave a stale window's loop shape
-            # in place attributed to the new position.
-            vmRef.loops.val = @[]
-            vmRef.focusedLoop.val = -1
-            vmRef.iterationCount.val = 0
-            vmRef.loadingState.val = lsError)
+    # The window is loaded per stop by the session's stop loader
+    # (`sdk/stop_loader`, pane `spFlow`), which calls `requestWindow`; this VM
+    # holds and decodes it. The `ct/updated-flow` handler above adopts a
+    # window whichever request it answers.
 
     vm

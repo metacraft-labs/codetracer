@@ -70,8 +70,8 @@ suite "collaborative ViewModel M2 session core":
   test "test_collab_collaborator_role_does_not_send_backend_autoload":
     let (session, mock) = makeSession(vrrCollaborator)
 
-    session.calltraceVM.setViewportHeight(25)
-    session.calltraceVM.scroll(10)
+    session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(25))
+    session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(10))
     var dbg = session.store.debugger.val
     dbg.rrTicks = 99'u64
     session.store.debugger.val = dbg
@@ -93,12 +93,12 @@ suite "collaborative ViewModel M2 session core":
 
     calltrace.selectEntry(some(7'i64))
     state.addWatch("legacyValue")
-    state.selectTab(stWatches)
+    state.selectPath("legacyValue")
     drain()
 
     check calltrace.selectedEntry.val == some(7'i64)
     check state.watchExpressions.val == @["legacyValue"]
-    check state.activeTab.val == stWatches
+    check state.selectedPath.val == "legacyValue"
     check mock.findCommand("ct/load-locals").isSome
     calltrace.dispose()
     state.dispose()
@@ -108,7 +108,7 @@ suite "collaborative ViewModel M2 session core":
     let (session, _) = makeSession()
 
     session.calltraceVM.selectEntry(some(9'i64))
-    session.stateVM.selectTab(stWatches)
+    session.stateVM.selectPath("root.child")
     session.stateVM.toggleExpand("root.child")
     session.stateVM.addWatch("root.child")
 
@@ -116,7 +116,7 @@ suite "collaborative ViewModel M2 session core":
     check snap.documentRevision == 4'u64
     check snap.appliedOpIds.len == 4
     check snap.state.calltrace.selectedEntry.value == "9"
-    check snap.state.statePane.activeTab.value == "stWatches"
+    check snap.state.statePane.selectedPath.value == "root.child"
     check "root.child" in visibleExpansionIds(snap.state.statePane.expandedPaths)
     check snap.state.statePane.visibleWatches.len == 1
     check snap.state.statePane.visibleWatches[0].expression == "root.child"
@@ -147,4 +147,44 @@ suite "collaborative ViewModel M2 session core":
     check session.collabCore.dispatchLog[^1].localOnly
     check not session.collabCore.dispatchLog[^1].publishedToPeer
     check mock.receivedCommands.len == 0
+    session.dispose()
+
+  test "test_collab_peer_selection_is_not_taken_back_by_a_followed_call":
+    # A front end whose selection follows a call (`selectCall`: the
+    # current-call mark, a row click) re-derives the row from that call on
+    # every section load. When a peer then selects another row, the local
+    # call must be dropped: otherwise the next local section load (a
+    # scroll, a collapse) republishes the local row and silently takes the
+    # shared selection back from the peer.
+    let (session, _) = makeSession()
+    let vm = session.calltraceVM
+    proc keyed(index: int64; key: string): CallLine =
+      CallLine(index: index, callKey: key, name: "call" & key)
+    let section = @[keyed(0, "0"), keyed(1, "1"), keyed(2, "2")]
+    session.store.updateCalltraceSection(section, 0, 3)
+    drain()
+
+    vm.selectCall("1")
+    check vm.selectedEntry.val == some(1'i64)
+    check vm.selectedCallKey.val == "1"
+
+    let core = session.collabCore
+    var op = core.nextLocalViewOp(vokSetCalltraceSelection,
+      "calltrace.selectedEntry", %*{"entryId": "2"})
+    # Another replica of the session (the same principal, so it holds the
+    # capability to select), whose op arrives as a remote one.
+    op.actorId = "peer-actor"
+    op.replicaId = "peer-replica"
+    op.opId = "peer-actor:1"
+    check core.applyRemoteViewOp(op).status != asRejected
+    check vm.selectedEntry.val == some(2'i64)
+    check vm.selectedCallKey.val == ""
+
+    let publishedBefore = core.localOperationLog.len
+    # A later section (here one more row loaded below) re-runs the follow.
+    session.store.updateCalltraceSection(section & @[keyed(3, "3")], 0, 4)
+    drain()
+    check vm.selectedEntry.val == some(2'i64)
+    check core.document.state.calltrace.selectedEntry.value == "2"
+    check core.localOperationLog.len == publishedBefore
     session.dispose()

@@ -22,19 +22,22 @@
 ##
 ##   * POINTER: the line the terminal paints `-->` on == the line PLAT-39
 ##     read off the GPUI frame, at every calc stop the reader could read;
-##   * INLINE VALUES: at each stop the terminal draws a value on, the first
-##     name it draws is legible on the same line of the GPUI frame; at the
-##     quiet stop neither medium draws one;
+##   * INLINE VALUES: on every line both media show, the first name the
+##     terminal draws is the one legible on the same line's first GPUI chip,
+##     and a line GPUI drew no chip on carries no value in the terminal — the
+##     flow's values on every line the run reached, one rule for both
+##     (`editor_surface.flowValuesByLine`);
 ##   * PER-LINE STATUS: the one gutter line the GPUI mark twin changed is the
 ##     one line the terminal marks after `:break` on it — and no other;
 ##   * FLOW: the lines whose code the terminal recolours when the overlay is
 ##     hidden (`--no-flow-overlay`, both binaries' flag) == the lines the GPUI
-##     flow twin's pixels changed on.
+##     flow twin's pixels changed on, with the lines whose value chips the
+##     overlay added (the flow's values are the overlay's on both media).
 ##
 ## NO MOCKS. Two shipped binaries, two real recordings, a real pty, real
 ## window frames; nothing constructed by this file is compared with anything.
 
-import std/[json, monotimes, os, sets, strutils, times, unicode, unittest]
+import std/[algorithm, json, monotimes, os, sets, strutils, times, unicode, unittest]
 
 import term_assert
 
@@ -59,9 +62,11 @@ const
   CalcScenarios = ["entry-shell", "stepped-editor", "advanced-state",
                    "returned-calltrace", "continued-event-log",
                    "breakpoint-editor"]
-  ValueScenarios = ["advanced-state", "returned-calltrace",
+  ValueScenarios = ["stepped-editor", "advanced-state", "returned-calltrace",
                     "continued-event-log"]
-  QuietScenario = "stepped-editor"
+    ## The stops whose EXECUTION line carries a value on both media
+    ## (`stepped-editor` was the quiet stop until the values became the
+    ## flow's: its `def` line now carries the module's globals).
   MaxFlowStepIns = 200
     ## A bound on the walk to the `noir-declined-arm` stop of
     ## `plat42-surfaces.json` / the window record's `noir-flow` twin, not the
@@ -94,6 +99,9 @@ proc recordedFlowStop(): tuple[line: int, code: string] =
       let comment = code.find("/*")
       if comment >= 0: code = code[0 ..< comment]
       result.code = code.strip()
+      # Since 2026-10-17 the row's text runs the inline-value chips onto the
+      # code with no separator; the record carries the code span on its own.
+      if r{"code"}.getStr.len > 0: result.code = r["code"].getStr.strip()
       return
 
 type
@@ -208,13 +216,22 @@ proc pointerLine(sess: var TuiTestSession): int =
 
 proc firstValueName(code: string): string =
   ## The first name in the row's `/* name: value, … */` annotation, or "".
+  ## An event's chip is named `<stdout>`.
   let at = code.find("/*")
   if at < 0: return ""
   var i = at + 2
   while i < code.len and code[i] == ' ': inc i
   var name = ""
+  let event = i < code.len and code[i] == '<'
+  if event:
+    name.add '<'
+    inc i
   while i < code.len and (code[i].isAlphaNumeric or code[i] == '_'):
     name.add code[i]
+    inc i
+  if event:
+    if i >= code.len or code[i] != '>': return ""
+    name.add '>'
     inc i
   if i < code.len and code[i] == ':': name else: ""
 
@@ -232,10 +249,29 @@ proc codeColours(sess: var TuiTestSession; r: TermRow): seq[string] =
 
 proc gpuiFrame(sid: string): JsonNode = windowRecord["frames"][sid]
 
-proc gpuiRowText(sid: string; line: int): string =
+proc gpuiChipText(sid: string; line: int): string =
+  ## The row's FIRST inline-value chip as the window record read it (the box
+  ## found by its ground, then OCR'd alone), or "" when the row has none.
   for r in gpuiFrame(sid)["rows"]:
-    if r["line"].getInt == line: return r["text"].getStr
+    if r["line"].getInt == line and r{"chips"}.len > 0:
+      return r["chips"][0]["text"].getStr
   ""
+
+proc gpuiRowLines(sid: string): seq[int] =
+  for r in gpuiFrame(sid)["rows"]:
+    result.add r["line"].getInt
+
+proc gpuiHasChips(sid: string; line: int): bool =
+  for r in gpuiFrame(sid)["rows"]:
+    if r["line"].getInt == line and r{"chips"}.len > 0:
+      return true
+  false
+
+proc gpuiChipLinesAdded(shown, hidden: string): seq[int] =
+  ## The lines with a chip on frame `shown` and none on frame `hidden`.
+  for line in gpuiRowLines(shown):
+    if gpuiHasChips(shown, line) and not gpuiHasChips(hidden, line):
+      result.add line
 
 proc gpuiChanged(twin: string): seq[int] =
   for r in windowRecord[twin]:
@@ -278,7 +314,7 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
       else:
         var sess = open(calc.tracePath)
         defer:
-          sess.send("q")
+          sess.send("\x11")  # Ctrl+Q, the CUA base's quit
           discard sess.waitExit(initDuration(seconds = 10))
           sess.close()
         var bpLine = -1
@@ -300,7 +336,7 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
         let termLine = sess.pointerLine()
         let gpuiLine = gpuiFrame(sid)["executionLine"].getInt
         checkpoint(sid & ": terminal pointer " & $termLine &
-                   ", GPUI frame (PLAT-39) " & $gpuiLine)
+                   ", GPUI frame (execution-mark lane) " & $gpuiLine)
         ck termLine > 0
         ck gpuiLine > 0
         ck termLine == gpuiLine
@@ -310,17 +346,39 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
         for r in sess.sourceRows():
           if r.line == termLine: execCode = r.code
         let name = firstValueName(execCode)
-        let gpuiText = gpuiRowText(sid, gpuiLine)
-        checkpoint("terminal: " & execCode.strip & " | GPUI: " & gpuiText)
-        # The GPUI side is read from its value COMMENT (`plat42_gutter`),
-        # never from the row: the variable is named in the code on that line.
+        let gpuiText = gpuiChipText(sid, gpuiLine)
+        checkpoint("terminal: " & execCode.strip & " | GPUI chip: " & gpuiText)
+        # The GPUI side is read from its value CHIP (`plat42_gutter`), never
+        # from the row: the variable is named in the code on that line.
         let gpuiName = valueCommentName(gpuiText)
         if sid in ValueScenarios:
           ck name.len > 0
           ck legiblyNames(gpuiName, name)
-        if sid == QuietScenario:
-          ck name.len == 0
-          ck gpuiName.len == 0
+        # …and on EVERY line both media show: the flow's values, one rule.
+        # A chip OCR could not parse (read with its eye cell) is not compared
+        # rather than guessed; a line with no chip must carry no value.
+        let gpuiLines = gpuiRowLines(sid)
+        var compared, valued = 0
+        for r in sess.sourceRows():
+          if r.line notin gpuiLines: continue
+          let termName = firstValueName(r.code)
+          if not gpuiHasChips(sid, r.line):
+            checkpoint("line " & $r.line & ": terminal " & termName &
+                       " | GPUI no chip")
+            ck termName.len == 0
+            inc compared
+            continue
+          let chipName = valueCommentName(gpuiChipText(sid, r.line))
+          if chipName.len == 0: continue
+          checkpoint("line " & $r.line & ": terminal " & termName &
+                     " | GPUI chip " & chipName)
+          ck legiblyNames(chipName, termName)
+          inc compared
+          inc valued
+        checkpoint(sid & ": compared " & $compared & " lines, " & $valued &
+                   " with values")
+        ck compared > 0
+        ck valued > 0
 
         # --- PER-LINE STATUS ------------------------------------------------
         var marked: seq[int] = @[]
@@ -356,7 +414,7 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
         ck sess.atStop()
         for r in sess.sourceRows():
           colours[i].add (r.line, sess.codeColours(r))
-        sess.send("q")
+        sess.send("\x11")  # Ctrl+Q, the CUA base's quit
         discard sess.waitExit(initDuration(seconds = 10))
         sess.close()
       var changed: seq[int] = @[]
@@ -366,8 +424,19 @@ suite "PLAT-42 DIFF-11: the four surfaces on both native media, as painted":
             changed.add line
             checkpoint("line " & $line & " shown=" & $shown & " hidden=" &
                        $hidden)
-      let gpui = gpuiChanged("flowTwin")
-      checkpoint("terminal recoloured " & $changed & "; GPUI pixels " & $gpui)
+      # GPUI's side: the rows the flow twin's pixels changed on, and the rows
+      # whose CHIPS the overlay added (the flow's values, `flowValuesByLine`,
+      # drawn only with the overlay, on both media). The second is needed
+      # because a short chip at a row's end — line 34's clipped `damage` —
+      # moves less ink than `TwinFloor`, though the window record read the
+      # chip on the shown frame and none on the hidden one.
+      var gpui = gpuiChanged("flowTwin")
+      let chipped = gpuiChipLinesAdded("noir-flow", "noir-flow-off")
+      for line in chipped:
+        if line notin gpui: gpui.add line
+      gpui.sort()
+      checkpoint("terminal recoloured " & $changed & "; GPUI pixels " &
+                 $gpuiChanged("flowTwin") & " + chips added " & $chipped)
       ck gpui.len > 0
       ck changed == gpui
 

@@ -1,43 +1,8 @@
 /**
- * !!! UNEXECUTED AS WRITTEN — THIS FILE HAS NEVER BEEN RUN. !!!
- *
- * Every other assertion in this change was executed and has recorded mutation
- * arms (see `src/frontend/tests/debug_toolbar_tooltips_test.nim` and the
- * "tooltips read the binding" suite in `isonim_views_test.nim`). THIS ONE HAS
- * NOT. An unexecuted spec is not evidence — it is the same category as a
- * mutation arm that never mutated, and the presence of a plausible-looking
- * file is exactly the kind of thing that reads as coverage when it is not.
- * Treat every claim below as UNVERIFIED until someone runs it and deletes this
- * banner.
- *
- * WHY IT COULD NOT BE RUN, precisely, so the next reader does not repeat the
- * attempt blind. `just test-gui` requires `build-once`, which failed in this
- * workspace for three reasons, none of them related to this change and all of
- * them reproduced deterministically on a second run:
- *
- *   1. `db-replay-server-cargo` dies with
- *      `dyld: Symbol not found: _SSL_set_quic_tls_cbs`, referenced from
- *      `ngtcp2-1.17.0` and expected in `openssl-3.4.3` — an ABI mismatch
- *      inside the dev shell. Upstream of it, `nix` refused the flake with a
- *      `narHash` mismatch on the `ethereum.nix` input, so direnv fell back to
- *      a CACHED shell; the stale closure is the likely cause of the mismatch.
- *   2. `docs-book` / `docs-book-assets` fail with
- *      `cannot open file: docs_scaffold` (the `isonim-docs` nimble dependency
- *      is not installed, though the sibling repo is present).
- *   3. `codetracer-visual-replay/ct_gfx_player` is not built.
- *
- * No `src/build-debug` output is produced, so there is no app to drive.
- *
- * ALSO NOTE, for anyone running this from an agent worktree: `just test-gui`
- * resolves sibling repos against the worktree's PARENT directory. A worktree
- * under `.agent-wt/` fails the `runquota` check outright, and `runquota` has
- * an empty override column in `scripts/require-siblings.sh` by design, so no
- * environment variable papers over it. Run from a checkout that sits beside
- * the sibling repos.
- *
- * TO RUN IT:
- *   just storybook-build   # only needed for the sibling storybook spec
+ * RUN IT with
  *   just test-gui tests/debug-controls/toolbar-tooltip-chords.spec.ts
+ * from a checkout that sits beside its sibling repos: `just test-gui`
+ * resolves them against the checkout's parent directory.
  *
  * ---------------------------------------------------------------------------
  *
@@ -174,6 +139,70 @@ async function isTooltipShown(page: Page, id: string): Promise<boolean> {
 
 
 /**
+ * Rest on a control and report whether its tooltip is already shown, read at
+ * an instant the page itself confirms is still inside the tooltip's delay.
+ *
+ * "Absent before the delay" is a claim about a moment, and the moment is
+ * measured in the page, not in the test process. A read that sleeps
+ * `CROSSING_MS` and then asks can still land after the delay has run out: any
+ * main-thread task longer than the delay that falls between the hover and the
+ * read (a synchronous git refresh, for instance) defers the read and not the
+ * CSS transition, so the read then sees a correctly delayed tooltip and the
+ * check fails for a reason that has nothing to do with the delay. Such a read
+ * says nothing about the claim, so it is discarded and the rest is taken again.
+ *
+ * The page stamps the `mouseover` the rest produces and the read reports how
+ * long after it it ran, together with the delay the control's own computed
+ * style declares — read off the page, so this file still does not turn the
+ * number into a requirement. A tooltip with no delay at all declares 0, so no
+ * read can qualify and the helper throws rather than passing.
+ */
+async function tooltipShownBeforeItsDelay(page: Page, id: string): Promise<boolean> {
+  const attempts = 5;
+  const late: string[] = [];
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await restOffToolbar(page);
+    await sleep(400);
+    await page.evaluate((elementId: string) => {
+      const w = window as unknown as { __tooltipHoverAt?: number };
+      w.__tooltipHoverAt = undefined;
+      document.getElementById(elementId)?.addEventListener(
+        "mouseover",
+        () => {
+          w.__tooltipHoverAt = performance.now();
+        },
+        { once: true },
+      );
+    }, id);
+    await restOn(page, id);
+    await sleep(CROSSING_MS);
+    const read = await page.evaluate((elementId: string) => {
+      const now = performance.now();
+      const hoverAt = (window as unknown as { __tooltipHoverAt?: number }).__tooltipHoverAt;
+      const tip = document.querySelector(`#${elementId} .custom-tooltip`);
+      if (!tip) return { shown: false, elapsedMs: -1, delayMs: -1 };
+      const style = window.getComputedStyle(tip);
+      const delayMs = Math.max(
+        ...style.transitionDelay.split(",").map((d) => {
+          const t = d.trim();
+          return t.endsWith("ms") ? parseFloat(t) : parseFloat(t) * 1000;
+        }),
+      );
+      return {
+        shown: style.visibility === "visible" && Number(style.opacity) > 0.5,
+        elapsedMs: hoverAt === undefined ? -1 : now - hoverAt,
+        delayMs,
+      };
+    }, id);
+    if (read.elapsedMs >= 0 && read.elapsedMs < read.delayMs) return read.shown;
+    late.push(`read ${read.elapsedMs.toFixed(0)} ms after the hover, delay ${read.delayMs} ms`);
+  }
+  throw new Error(
+    `#${id}: no read landed inside the tooltip's delay in ${attempts} rests (${late.join("; ")})`,
+  );
+}
+
+/**
  * Turn a chord as the TOOLTIP SPELLS IT into the key string Playwright presses.
  *
  * Deliberately a dumb transliteration with no table of known chords in it: the
@@ -305,10 +334,8 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
       await sleep(400); // let any previous tooltip finish hiding
       expect(await isTooltipShown(page, id)).toBe(false);
 
-      await restOn(page, id);
-      await sleep(CROSSING_MS);
       // BEFORE the delay — this is an assertion, not a warm-up.
-      expect(await isTooltipShown(page, id)).toBe(false);
+      expect(await tooltipShownBeforeItsDelay(page, id)).toBe(false);
 
       await sleep(REST_MS);
       // AFTER.
@@ -362,6 +389,59 @@ test.describe("Debug toolbar tooltips name the bound chord, and wait for a rest"
 
     expect(controlsThatRaised).toBe(TOOLBAR_BUTTON_IDS.length);
     expect(controlsThatRaised).toBe(13);
+  });
+
+  test("a DISABLED control still raises its tooltip on a rest, and stays inert", async ({ ctPage }) => {
+    const page = ctPage as unknown as Page;
+    // `Debugger-Controls.md` requires a tooltip on EVERY debug-control button:
+    // a control that cannot act yet still says what it does and which chord
+    // it is bound to. The two history controls are the ones a fresh trace
+    // shows disabled (no history yet), and they were the two whose tooltip
+    // never appeared: the shared `button:disabled` rule took them out of
+    // hit-testing with `pointer-events: none`, so they never matched `:hover`.
+    //
+    // NON-VACUITY: the subject is a control the page itself reports disabled.
+    // If a fresh trace ever starts with history, this test is no longer about
+    // a disabled control and says so here rather than passing on an enabled one.
+    const subjects = await page.evaluate((ids: string[]) => {
+      return ids.filter((id) => document.getElementById(id)?.hasAttribute("disabled"));
+    }, ["history-back-image", "history-forward-image"]);
+    expect(subjects).toEqual(["history-back-image", "history-forward-image"]);
+
+    for (const id of subjects) {
+      await restOffToolbar(page);
+      await sleep(400);
+      await restOn(page, id);
+      await sleep(REST_MS);
+      expect(await isTooltipShown(page, id), `#${id} is disabled and raised no tooltip`).toBe(true);
+      expect(await visibleTooltipCount(page)).toBe(1);
+
+      // The tooltip must not have cost the control its inertness: a click on
+      // the disabled button reaches no handler on it (the browser dispatches
+      // no `click` to a disabled form control) and leaves it disabled.
+      await page.evaluate((elementId: string) => {
+        const w = window as unknown as { __disabledClicks?: number };
+        w.__disabledClicks = 0;
+        const el = document.getElementById(elementId);
+        document.addEventListener(
+          "click",
+          (event) => {
+            if (el && event.composedPath().includes(el)) w.__disabledClicks! += 1;
+          },
+          { capture: true },
+        );
+      }, id);
+      const box = await page.locator(`#${id}`).boundingBox();
+      if (!box) throw new Error(`#${id} has no box — it is not laid out`);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await sleep(CROSSING_MS);
+      const after = await page.evaluate((elementId: string) => ({
+        clicks: (window as unknown as { __disabledClicks?: number }).__disabledClicks,
+        disabled: document.getElementById(elementId)?.hasAttribute("disabled"),
+      }), id);
+      expect(after.clicks, `#${id}: a click reached the disabled control`).toBe(0);
+      expect(after.disabled).toBe(true);
+    }
   });
 
   test("EVERY control's tooltip names a chord, and none is a bare label", async ({ ctPage }) => {

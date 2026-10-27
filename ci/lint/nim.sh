@@ -43,6 +43,21 @@ lint_step "test-lane coverage guard: contract suite" \
 lint_step "test-lane coverage: every test-shaped file runs somewhere" \
 	bash ci/test/test-lane-coverage.sh
 
+# The other half of the lane list's honesty: every lane is run through
+# ci/lib/run-nim-test-lane.sh by some recipe XOR marked recipe-owned, and the
+# runner refuses a recipe-owned lane by name before compiling anything (checked
+# against the real runner with a recording stub `nim`). Pure bash, seconds.
+lint_step "test-lane runner: recipe-owned lanes are refused, by name" \
+	bash ci/test/recipe-owned-lanes-test.sh
+
+# The lanes' BACKEND honesty: `vm-unit` compiles with C, so it must not collect
+# a suite that imports a stdlib module which is fatal off the JS target, and
+# every such suite must be in `vm-unit-js` instead. It holds the JS-only module
+# list against this shell's `nim` stdlib and proves the discovery on synthetic
+# suites. Pure bash + awk over the tree, seconds.
+lint_step "test-lane backends: JS-only ViewModel suites run in vm-unit-js, never in vm-unit" \
+	bash ci/test/vm-unit-js-only-suites-test.sh
+
 # THE SAME QUESTION, ONE FILE EXTENSION OVER. `test-lane-coverage.sh` is scoped
 # in its own first line to "any test-shaped **Nim** file", and `ci/test/` holds
 # sixty-three SHELL gates that nothing measured. Twelve of them were reachable
@@ -302,7 +317,8 @@ lint_step "reachability prose guard: contract suite" \
 # 2026-09-12, how the equality that replaced it could be reverted to a ceiling
 # with the arms in this suite carrying the measurement that decided it rather
 # than a preference. Four synthetic unreached exports, no Nim toolchain,
-# milliseconds.
+# milliseconds — and, since 2026-10-22, a second synthetic tree (arm 5) pinning
+# what a declaration line counts, which is what the ceiling's number is made of.
 lint_step "reachability ratchet: contract suite (a ceiling, and it still bites above it)" \
 	bash ci/test/reachability-ratchet-test.sh
 
@@ -650,8 +666,72 @@ lint_step "frontend reachability: the ratchet's prose agrees with its threshold"
 #   front door's accessors (`device_grant`, `jwt`, `session`, `token`,
 #   `endpoint_codec`, `endpoint_protocol`), tested and awaiting their product
 #   callers; they are left for those features' owners, inside the ceiling.
-lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1285 + allow-list hygiene)" \
-	env CT_REACHABILITY_MAX=1285 bash ci/test/frontend-reachability.sh
+#
+# 1285 -> 1196 ON 2026-10-22, after `agents` had drifted to 1298 (red on the
+# branch itself, at `d46def9e3`). Every count below is a DIFF OF TWO RUNS of the
+# guard, and each says which tree and which rule it was measured on.
+#   -89, a CLASSIFICATION FIX, not a hiding. `mentions_in` skipped EVERY
+#       identifier on a declaration line so that a symbol would not reach
+#       itself, and with it everything the line uses: a one-line signature's
+#       parameter and return types, a const's initializer, a one-line routine's
+#       body. `CallRowPitch* = CallRowToggleEmRatio * float(CodeFontPx)` in
+#       `gpui/app/leaves.nim` did not count as reading `gpui/chrome.CodeFontPx`.
+#       The same signature WRAPPED did count, from its continuation line. The
+#       guard now drops only the name(s) declared on the line. At `d46def9e3`:
+#       1298 under the old rule, 1209 under the new — 89 removed (64 types, 21
+#       values, 4 routines), 0 added. WHERE THE 89 WENT, which is not the same
+#       place: 13 now have a reader in ANOTHER module (`CodeFontPx` above), and
+#       76 are read only on their OWN module's one-line declarations
+#       (`CallRowToggleEmRatio`, the other operand), so they moved to bucket C,
+#       "only its own module reaches it" — the bucket a wrapped signature
+#       already put them in, uncounted unless `--include-own-module`.
+#       `reachability-ratchet-test.sh` arm 5 pins the rule and fails against
+#       the old one.
+#   THE BASE, RE-MEASURED: `2fc6c5764`, where 1285 was set, carries 1203 under
+#       the corrected rule. So the tree had added +6 REAL findings net (49 in,
+#       43 out, by path, name and line): 17 reached by nothing, which the next three
+#       paragraphs account for one by one, and 32 tested-only. The ceiling was
+#       NOT moved to 1209 to absorb them.
+#   -3, ALLOW-LISTED, the list's first entries: `keybindings.onKeybindingsImport`,
+#       `onKeybindingsRequest` and `traces.onRunTestSuite` are IPC handlers that
+#       `indexIpcHandlers` (index/base_handlers.nim) names from the message
+#       strings in `ipc_utils.configureIpcMain` — reached, by a name no source
+#       line spells. The older handlers of that shape are still counted; they
+#       are their own triage pass. Adding the entries exposed that the guard
+#       always read the REPOSITORY's allow-list, so the ratchet suite's fixture
+#       reported them stale and exited 2; the guard now takes `--allowlist` and
+#       the suite passes its own empty one.
+#   -10, DELETED, reached by nothing — not product, not tests, not a string,
+#       `exportc` or macro (`git grep -i -w` over the repository and its
+#       workspace siblings): `design_font_metrics.monoTextPx` (and `MonoAdvance`,
+#       which only it read), `window_chrome.launchedContentSize`,
+#       `inline_annotations.annotationTargets` (`shownAnnotationTargets` is the
+#       one `source_pane` calls), `types.LogMessage` (and its `MessageLevel`; its
+#       last reader went with `DebugComponent.message` in `b7f451152`),
+#       `locals_answer.valueTypeName`, `replay_data_store.requestSymbols` (the
+#       native host reads symbols synchronously through `applySymbolsResponse`),
+#       `sync_host.sessionIds` and `removePrimary` (the one product host,
+#       `hosted_primary`, hosts a single session for the server's life),
+#       `vcs_vm.setHistoryViewport` (NOTHING SETS `historyViewport` now, so the
+#       history reads `VcsHistoryUnmeasured` commits — the field's comment says
+#       so; since restored WITH callers, the terminal's and GPUI's history
+#       views, by the fix for codetracer-pm issue 2026-10-22 "the VCS history
+#       list's viewport is written by nothing", the count staying 1196), and
+#       `edit_toolbar_marks.attachEditToolbarMarks` (the toolbar
+#       attaches per button through `attachEditMark`). Twelve exports in all;
+#       `MonoAdvance` and `MessageLevel` were uncounted while their one reader
+#       lived, so the count falls by ten.
+#   LEFT, AND WHY: three `$` (`keymap/scope_path` x2, `keymap/when_expr`) and
+#       one `==` (`keymap/layer_stack`) are new "nothing" findings that a name
+#       scan cannot judge: an operator is used by `echo`, `&`, `fmt`, `check`
+#       and comparisons without its name being written, so deleting one on this
+#       guard's word risks breaking a caller it cannot see. The 32 tested-only
+#       additions are exports with a suite and no product caller yet
+#       (`viewmodel/platform`'s session helpers, `viewmodel/sync`, `gpui/app`
+#       and others), left for their features, inside the ceiling.
+#   1209 - 3 - 10 = 1196, measured, 7 under the corrected base.
+lint_step "frontend reachability: exported symbols nothing reaches (ratchet at 1196 + allow-list hygiene)" \
+	env CT_REACHABILITY_MAX=1196 bash ci/test/frontend-reachability.sh
 
 # ONE CHAIN, ENFORCED, BECAUSE THE RATCHET ABOVE CANNOT ENFORCE IT.
 #
@@ -726,6 +806,15 @@ lint_step "Plugin reactive boundary: a plugin cannot reach a raw reactive primit
 # builder rather than a fixture directory.
 lint_step "Editor import closure: no async, no I/O, no clock in the editor model" \
 	bash ci/test/editor-import-closure.sh
+
+# PLAT-68: the CUA base keymap is VS Code's. Every row CUA-Keymap.md cites
+# from VS Code re-extracts from VS Code 1.105.0 (monaco-editor 0.54.0's ESM and
+# the workbench sources at the same commit), and every default the extraction
+# finds is taken or declined with a reason. The data's agreement with the
+# DOCUMENT is `test_plat68_cua_oracle.nim`'s (vm-unit); this is the
+# document's agreement with VS Code — the two halves of KL-3.
+lint_step "CUA keymap: every cited VS Code binding re-extracts, every default accounted for" \
+	bash ci/test/cua-keymap-extractor.sh
 
 # PLAT-2's verification gate: no surface formats a value by a path that
 # bypasses the one presenter, and the presenter is pure.
@@ -823,6 +912,23 @@ lint_step "DAP command sync: the allow-list names everything the engine dispatch
 # (`ci/lib/harness_guard.py`). Pure Python start-up per harness, no build.
 lint_step "Mutation harnesses refuse an unknown flag or arm id before touching a file" \
 	bash ci/test/harness-argument-refusal.sh
+
+# Each harness refuses to grade while a recorded control digest disagrees with
+# the tree, and nothing told the change that MOVED the digest: 6 harnesses had
+# stale entries on 2026-09-20, 30 of the 49 control files on 2026-10-21, and
+# 244 in-repo entries over 34 files at 4183c5f84 (codetracer-pm issue
+# 2026-10-21, "30 of 49 mutation-control digest files are stale on agents";
+# Verification-Harness-Traps §39c). The guard names every control file whose
+# digests disagree with the tree, with its harness and subject, unless the owed
+# re-grade is in mutation-control-drift.known-stale.txt at exactly those digests
+# — and the ledger fails in both directions, so it cannot outlive the debt.
+# Pure bash, git and sha256sum, a few seconds. Contract suite first, for the
+# reason the first block of this file gives.
+lint_step "Mutation control drift guard: contract suite" \
+	bash ci/test/mutation-control-drift-test.sh
+
+lint_step "Mutation control digests agree with the tree, or the owed re-grade is ledgered" \
+	bash ci/test/mutation-control-drift.sh
 
 # Canary for the chronicles/distinct-type breakage that takes every editor in
 # the project down. Currently QUARANTINED against an upstream nimsuggest crash;

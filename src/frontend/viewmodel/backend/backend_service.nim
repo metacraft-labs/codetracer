@@ -56,3 +56,43 @@ proc disconnect*(b: BackendService) =
   ## Disconnect from the backend.
   if b.disconnectProc != nil:
     b.disconnectProc()
+
+# ---------------------------------------------------------------------------
+# Response envelopes
+#
+# The transports do not resolve `send` with the same shape. `DapApi`'s
+# `asyncSendCtRequest`, under `RealBackendService`, resolves with the DAP
+# response's `body` alone (and `{}`/`null` when the request failed), while the
+# stdio and worker transports, and the mock, resolve with the whole response
+# — `{"success": …, "body": …}`. Every decoder that reads an answer used to
+# guess at the envelope on its own (`flow_vm`, `event_log_vm`, the store's
+# event-log and event-index decoders); these two procs are the one place that
+# guess is made.
+# ---------------------------------------------------------------------------
+
+func isResponseEnvelope*(resp: JsonNode): bool =
+  ## A whole DAP response, as opposed to a bare body. DAP makes `success` a
+  ## mandatory boolean on every response
+  ## (https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_Response),
+  ## and no `ct/*` body this front-end reads has a top-level `success`.
+  if resp.isNil or resp.kind != JObject:
+    return false
+  let success = resp.getOrDefault("success")
+  not success.isNil and success.kind == JBool
+
+func responseSucceeded*(resp: JsonNode): bool =
+  ## Whether `resp`, as any transport resolves it, is a successful answer. A
+  ## bare body counts as one unless it is missing (`null`), which is how the
+  ## body-only transport reports a failed or timed-out request.
+  if isResponseEnvelope(resp):
+    resp["success"].getBool
+  else:
+    not resp.isNil and resp.kind != JNull
+
+func responseBody*(resp: JsonNode): JsonNode =
+  ## The DAP `body` of `resp`, as any transport resolves it; an empty object
+  ## when there is none, so a decoder can index it without nil checks.
+  let body =
+    if isResponseEnvelope(resp): resp.getOrDefault("body")
+    else: resp
+  if body.isNil or body.kind != JObject: newJObject() else: body

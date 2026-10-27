@@ -13,6 +13,17 @@
 #   lean-flow   Run Lean build/record/replay tests
 #   origin-rr   Run the rr value-origin tests (origin_rr_dap_test rr::)
 #   origin-rr-smoke  Run the rr origin API smoke (origin_rr_smoke)
+#   calltrace-jump-rr  Run the rr and Delve call-trace jump tests
+#               (native_calltrace_jump_test, its `_rr_` tests; its MCR ones run
+#               in mcr-dap-flow)
+#
+# Selectors (backend-manager tests, need ct-native-replay + replay-server):
+#   backend-manager-rr  Run backend-manager's rr tests (real_recording_integration):
+#               the entries ci/test/non-gui-not-provided.linux.txt names for
+#               rr-backend-tests, selected from that list by
+#               ci/lib/not-provided-filter.sh --lane, so the tests the non-gui
+#               lane excludes are exactly the tests run here. Needs
+#               cargo-nextest and the codetracer-native-backend checkout.
 #
 # Selectors (rr-backend tests, need db-backend):
 #   c-flow      Run C flow tests (in rr-backend repo)
@@ -124,13 +135,13 @@ expand_selectors() {
 	for sel in "${SELECTORS[@]}"; do
 		case "$sel" in
 		all)
-			expanded+=(nim-flow rust-flow go-flow lean-flow origin-rr origin-rr-smoke c-flow cpp-flow d-flow pascal-flow)
+			expanded+=(nim-flow rust-flow go-flow lean-flow origin-rr origin-rr-smoke calltrace-jump-rr backend-manager-rr c-flow cpp-flow d-flow pascal-flow)
 			;;
-		nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | c-flow | cpp-flow | d-flow | pascal-flow)
+		nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | calltrace-jump-rr | backend-manager-rr | c-flow | cpp-flow | d-flow | pascal-flow)
 			expanded+=("$sel")
 			;;
 		*)
-			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, origin-rr, origin-rr-smoke, c-flow, cpp-flow, d-flow, pascal-flow, all)"
+			die "Unknown selector: $sel (valid: nim-flow, rust-flow, go-flow, lean-flow, origin-rr, origin-rr-smoke, calltrace-jump-rr, backend-manager-rr, c-flow, cpp-flow, d-flow, pascal-flow, all)"
 			;;
 		esac
 	done
@@ -178,6 +189,13 @@ check_prerequisites() {
 		lean-flow)
 			command -v lake >/dev/null 2>&1 || warn "lake not found — lean-flow tests may fail"
 			command -v lean >/dev/null 2>&1 || warn "lean not found — lean-flow tests may fail"
+			;;
+		backend-manager-rr)
+			# Required, not advisory: without them the selector cannot select
+			# or build what it runs, and a warning would end in a red run that
+			# names neither.
+			cargo nextest --version >/dev/null 2>&1 || die "cargo-nextest not found — backend-manager-rr selects its tests with a nextest filterset"
+			command -v jq >/dev/null 2>&1 || die "jq not found — backend-manager-rr reads cargo's and nextest's JSON output"
 			;;
 		esac
 	done
@@ -520,7 +538,8 @@ mkdir -p "$LOG_DIR"
 # Returns "db-backend" or "rr-backend" depending on where the test lives
 selector_test_location() {
 	case "$1" in
-	nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke) echo "db-backend" ;;
+	nim-flow | rust-flow | go-flow | lean-flow | origin-rr | origin-rr-smoke | calltrace-jump-rr) echo "db-backend" ;;
+	backend-manager-rr) echo "backend-manager" ;;
 	c-flow | cpp-flow | d-flow | pascal-flow) echo "rr-backend" ;;
 	*) die "Unknown selector: $1" ;;
 	esac
@@ -535,6 +554,7 @@ selector_to_test_name() {
 	lean-flow) echo "test_lean" ;;
 	origin-rr) echo "rr::test_origin_rr" ;;
 	origin-rr-smoke) echo "test_origin_rr_smoke" ;;
+	calltrace-jump-rr) echo "_rr_calltrace_jump_" ;;
 	*) die "Unknown db-backend selector: $1" ;;
 	esac
 }
@@ -548,6 +568,55 @@ selector_to_rr_test_file() {
 	pascal-flow) echo "pascal_flow_test" ;;
 	*) die "Unknown rr-backend selector: $1" ;;
 	esac
+}
+
+# backend-manager-rr: the native-backend checkout CODETRACER_RR_BACKEND_PATH
+# must name. real_recording_integration's `check_rr_prerequisites()` refuses
+# to run without it: it is how those tests know the rr wrapper and libraries
+# are the native backend's and not whatever `rr` is on PATH.
+resolve_rr_backend_path() {
+	if [[ -n ${CODETRACER_RR_BACKEND_PATH:-} ]]; then
+		[[ -d $CODETRACER_RR_BACKEND_PATH ]] ||
+			die "CODETRACER_RR_BACKEND_PATH='$CODETRACER_RR_BACKEND_PATH' is not a directory"
+		echo "$CODETRACER_RR_BACKEND_PATH"
+		return 0
+	fi
+	if find_rr_backend_repo; then
+		return 0
+	fi
+	if [[ -d "$CLONE_DIR/.git" ]]; then
+		echo "$CLONE_DIR"
+		return 0
+	fi
+	return 1
+}
+
+# backend-manager-rr: build replay-server where real_recording_integration's
+# `find_db_backend()` looks first, and print its path.
+#
+# The tests run in the debug profile, so replay-server is built in it too.
+# `find_db_backend()` tries the test binary's own target directory (the shared
+# CARGO_TARGET_DIR, when the runner sets one) and then
+# src/db-backend/target/debug/ -- debug before release, so a stale debug build
+# there would outrank a fresh release one. Building debug into the directory
+# cargo itself reports, and checking that it is the one the probe reaches
+# first, keeps the replay engine under test the one just built.
+build_replay_server_for_backend_manager() {
+	local exe expected
+	exe="$(cd "$REPO_ROOT/src/db-backend" &&
+		cargo build --bin replay-server --message-format=json-render-diagnostics |
+		jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' |
+			tail -n 1)" || return 1
+	[[ -x $exe ]] || {
+		warn "cargo build of replay-server reported no executable"
+		return 1
+	}
+	expected="${CARGO_TARGET_DIR:-$REPO_ROOT/src/db-backend/target}/debug/replay-server"
+	if [[ "$(realpath "$exe")" != "$(realpath -m "$expected")" ]]; then
+		warn "replay-server was built at $exe, but find_db_backend() looks first at $expected"
+		return 1
+	fi
+	echo "$exe"
 }
 
 OVERALL_EXIT=0
@@ -580,7 +649,59 @@ run_test() {
 
 	local exit_code=0
 
-	if [[ $location == "db-backend" ]]; then
+	if [[ $location == "backend-manager" ]]; then
+		log "Running: $selector (backend-manager tests selected from the non-gui lane's list)"
+		local list="$REPO_ROOT/ci/test/non-gui-not-provided.linux.txt"
+		# Every status in this subshell is checked by hand: it runs on the left
+		# of `||`, where bash ignores `set -e`.
+		(
+			local filter rr_backend replay_server selected listed ran run_status=0 run_out
+			# The filterset: the list's rr-backend-tests entries for
+			# backend-manager. not-provided-filter.sh exits non-zero when there
+			# are none, which is a failure here, not an empty run.
+			filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" --lane rr-backend-tests \
+				"$list" "$REPO_ROOT/src/backend-manager/tests")" ||
+				die "no backend-manager test is assigned to rr-backend-tests in $list"
+			echo "filterset: $filter"
+			rr_backend="$(resolve_rr_backend_path)" ||
+				die "no codetracer-native-backend checkout found; backend-manager's rr tests need CODETRACER_RR_BACKEND_PATH to name it"
+			echo "CODETRACER_RR_BACKEND_PATH=$rr_backend"
+			replay_server="$(build_replay_server_for_backend_manager)" ||
+				die "could not build replay-server where the backend-manager tests look for it"
+			echo "replay-server: $replay_server"
+			cd "$REPO_ROOT/src/backend-manager" || die "no src/backend-manager"
+			# What the filterset selects, counted before the run, so that the
+			# run can be required to have executed every one of them.
+			selected="$(cargo nextest list -E "$filter" --message-format json)" ||
+				die "cargo nextest list failed for: $filter"
+			# The tests a plain `run` with this filterset executes: those whose
+			# filter-match status is "matches" (an #[ignore]d one is a mismatch).
+			listed="$(jq '[.["rust-suites"][].testcases[] | select(.["filter-match"].status == "matches")] | length' <<<"$selected")" ||
+				die "could not read cargo nextest list's JSON"
+			[[ $listed -gt 0 ]] ||
+				die "the filterset selects no backend-manager test; refusing to report an empty run as passed"
+			echo "selected: $listed test(s)"
+			# The run's own output, kept apart from the log this subshell is
+			# writing so that its summary can be read back.
+			run_out="$(mktemp "${TMPDIR:-/tmp}/backend-manager-rr.XXXXXX")" || die "mktemp failed"
+			# Graceful skipping off, and the file's local-only opt-out cleared:
+			# a missing prerequisite FAILS here, it is what this lane provides.
+			env -u REAL_RECORDING_INTEGRATION_ALLOW_MISSING "${env_vars[@]}" \
+				CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false \
+				REQUIRE_REAL_RECORDINGS=1 \
+				CODETRACER_RR_BACKEND_PATH="$rr_backend" \
+				CT_NATIVE_REPLAY_PATH="$CT_NATIVE_REPLAY_PATH" \
+				cargo nextest run --no-fail-fast -E "$filter" 2>&1 | tee "$run_out" || run_status=$?
+			# nextest's summary line: `Summary [ <t>s] <n> test(s) run: ...`.
+			ran="$(sed -nE 's/^ *Summary \[[^]]*\] +([0-9]+) tests? run:.*/\1/p' "$run_out" | tail -n 1)"
+			rm -f "$run_out"
+			[[ $run_status -eq 0 ]] || exit "$run_status"
+			if [[ ${ran:-0} -ne $listed ]]; then
+				echo "ERROR: $listed test(s) selected but ${ran:-no} run; refusing to report it as passed" >&2
+				exit 1
+			fi
+		) >"$log_file" 2>&1 || exit_code=$?
+	elif [[ $location == "db-backend" ]]; then
 		local test_name
 		test_name="$(selector_to_test_name "$selector")"
 		log "Running: $selector (db-backend test: $test_name)"
@@ -597,6 +718,14 @@ run_test() {
 		# tests actually ran.
 		if [[ $selector == origin-rr* && $exit_code -eq 0 ]] &&
 			! grep -q "^test $test_name.* ok$" "$log_file"; then
+			log "$selector: no $test_name test ran; refusing to report it as passed"
+			exit_code=1
+		fi
+		# The same for the call-trace jump tests, whose names carry the filter
+		# in the middle and whose output interleaves with the `test` lines, so
+		# it is read from the binaries' summaries instead.
+		if [[ $selector == calltrace-jump-rr && $exit_code -eq 0 ]] &&
+			! grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$log_file"; then
 			log "$selector: no $test_name test ran; refusing to report it as passed"
 			exit_code=1
 		fi

@@ -231,6 +231,36 @@ async fn connect_to_daemon_socket(
     }
 }
 
+/// The environment every session-manager process this file starts gets
+/// (daemon, MCP server, CLI), and through them every replay-server and
+/// ct-native-replay they spawn.
+///
+/// * `CODETRACER_IN_UI_TEST=1` -- ct-native-replay enforces a free-tier quota
+///   of 5 replays a day (`DEFAULT_FREE_TIER_DAILY_LIMIT`) and refuses the
+///   sixth with "Free tier: 5 replays per day", which reaches a test as a
+///   failed `ct/open-trace`. This is the bypass ct-native-replay provides for
+///   headless tests (`codetracer-native-backend` src/licensing/cli.rs), and
+///   the one db-backend's harness sets (`ensure_replay_license_bypass` in
+///   src/db-backend/tests/test_harness/mod.rs). Without it the rr tests here
+///   pass or fail by how many replays ran before them that day.
+///
+/// `CODETRACER_HOME` is deliberately NOT set here. The CLI tests find the
+/// pre-started daemon through `TMPDIR` (`Paths::default()` falls back to it
+/// only when no `CODETRACER_HOME` is set), so a per-test home would send the
+/// CLI to a daemon of its own instead of the one the test started. Scratch
+/// state is the harness's job, as for every bare `cargo test` here: `just
+/// test-rust` and scripts/run-cross-repo-tests.sh export a scratch
+/// `CODETRACER_HOME` (ci/lib/codetracer-home.sh), and a developer running
+/// nextest by hand exports one (AGENTS.md, "Tests never touch your real
+/// CodeTracer state").
+///
+/// Applied BEFORE a caller's `extra_env`, so a test that needs a different
+/// value still gets it. `every_session_manager_spawn_gets_the_replay_test_env`
+/// fails if a spawn site stops applying it.
+fn replay_test_env() -> [(&'static str, &'static str); 1] {
+    [("CODETRACER_IN_UI_TEST", "1")]
+}
+
 /// Returns the path to the compiled `session-manager` (formerly `backend-manager`) binary.
 fn binary_path() -> PathBuf {
     let mut path = std::env::current_exe().expect("cannot determine test binary path");
@@ -511,6 +541,106 @@ fn setup_test_dir(test_name: &str) -> (PathBuf, PathBuf) {
     (dir, log_path)
 }
 
+/// Stages `<test_dir>/install` as a CodeTracer install prefix and returns the
+/// `session-manager` in it: a copy of the cargo-built binary at
+/// `<prefix>/bin/session-manager` and a copy of this checkout's `python-api`
+/// at `<prefix>/share/codetracer/python-api`.
+///
+/// It is a layout `resolve_python_api_path` finds in every build profile and
+/// wherever the build directory is.  The cargo build directory is a layout
+/// only when it sits inside the checkout (`src/backend-manager/target/...`),
+/// and the compiled-checkout fallback exists only in debug builds, while
+/// `just test-rust` runs this crate in release with a `CARGO_TARGET_DIR` the
+/// CI runners place outside the checkout.  A daemon run straight from the build directory then has no
+/// candidate at all, so a test that needs the daemon to find the Python API
+/// on its own runs it from here.
+///
+/// Both are copies, not symbolic links: the lookup resolves the executable's
+/// links before it looks beside it, and follows a link inside the python-api
+/// tree to its target, so a link would lead back to the build directory or
+/// make the checkout's own directories part of the trust check.  Every staged
+/// entry is given owner-only write permission, because the trust rule refuses
+/// a copy that is writable by group or others and the process umask would
+/// otherwise decide.  `__pycache__` directories are not copied: `-B` keeps the
+/// daemon's scripts from writing them, and they hold nothing the package needs.
+fn stage_install_prefix(test_dir: &Path) -> Result<PathBuf, String> {
+    let prefix = test_dir.join("install");
+    let bin_dir = prefix.join("bin");
+    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("create {}: {e}", bin_dir.display()))?;
+    let source_bin = binary_path();
+    let staged_bin = bin_dir.join(format!("session-manager{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(&source_bin, &staged_bin).map_err(|e| {
+        format!(
+            "copy {} to {}: {e}",
+            source_bin.display(),
+            staged_bin.display()
+        )
+    })?;
+
+    let checkout_api = python_api_dir();
+    let staged_api = prefix.join("share/codetracer/python-api");
+    copy_python_tree(&checkout_api, &staged_api)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut stack = vec![prefix.clone()];
+        while let Some(path) = stack.pop() {
+            let meta = std::fs::symlink_metadata(&path)
+                .map_err(|e| format!("stat {}: {e}", path.display()))?;
+            let mode = if meta.is_dir() || path == staged_bin {
+                0o755
+            } else {
+                0o644
+            };
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+            if meta.is_dir() {
+                for entry in
+                    std::fs::read_dir(&path).map_err(|e| format!("list {}: {e}", path.display()))?
+                {
+                    stack.push(
+                        entry
+                            .map_err(|e| format!("list {}: {e}", path.display()))?
+                            .path(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(staged_bin)
+}
+
+/// Copies the directory tree at `from` to `to` (which must not exist yet),
+/// leaving out `__pycache__` directories.  Only regular files and
+/// directories are expected in `python-api`; anything else is an error
+/// rather than a silently different copy.
+fn copy_python_tree(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| format!("create {}: {e}", to.display()))?;
+    for entry in std::fs::read_dir(from).map_err(|e| format!("list {}: {e}", from.display()))? {
+        let entry = entry.map_err(|e| format!("list {}: {e}", from.display()))?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        let kind = entry
+            .file_type()
+            .map_err(|e| format!("stat {}: {e}", source.display()))?;
+        if kind.is_dir() {
+            if entry.file_name() != "__pycache__" {
+                copy_python_tree(&source, &target)?;
+            }
+        } else if kind.is_file() {
+            std::fs::copy(&source, &target)
+                .map_err(|e| format!("copy {} to {}: {e}", source.display(), target.display()))?;
+        } else {
+            return Err(format!(
+                "{} is neither a file nor a directory",
+                source.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Appends a line to the test log file.
 fn log_line(log_path: &Path, line: &str) {
     let mut f = std::fs::OpenOptions::new()
@@ -601,6 +731,26 @@ async fn start_daemon_with_real_backend(
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
 ) -> (tokio::process::Child, PathBuf) {
+    start_daemon_with_real_backend_from(
+        &binary_path(),
+        test_dir,
+        log_path,
+        db_backend_path,
+        extra_env,
+    )
+    .await
+}
+
+/// [`start_daemon_with_real_backend`], running the daemon from `daemon_bin`
+/// instead of the cargo-built `session-manager` (see
+/// [`stage_install_prefix`]).
+async fn start_daemon_with_real_backend_from(
+    daemon_bin: &Path,
+    test_dir: &Path,
+    log_path: &Path,
+    db_backend_path: &Path,
+    extra_env: &[(&str, &str)],
+) -> (tokio::process::Child, PathBuf) {
     let ct_dir = daemon_paths_in(test_dir);
     std::fs::create_dir_all(&ct_dir).expect("create ct dir");
 
@@ -618,7 +768,8 @@ async fn start_daemon_with_real_backend(
     log_line(
         log_path,
         &format!(
-            "starting daemon, TMPDIR={}, replay-server={}",
+            "starting daemon {}, TMPDIR={}, replay-server={}",
+            daemon_bin.display(),
             test_dir.display(),
             db_backend_path.display()
         ),
@@ -626,7 +777,7 @@ async fn start_daemon_with_real_backend(
 
     let db_backend_str = db_backend_path.to_string_lossy().to_string();
 
-    let mut cmd = Command::new(binary_path());
+    let mut cmd = Command::new(daemon_bin);
     cmd.arg("daemon")
         .arg("start")
         .env("TMPDIR", test_dir)
@@ -639,6 +790,9 @@ async fn start_daemon_with_real_backend(
             socket_path.to_string_lossy().as_ref(),
         )
         .env("CODETRACER_REPLAY_SERVER_CMD", &db_backend_str)
+        // The replay quota bypass (see `replay_test_env`), applied
+        // before `extra_env` so a caller can still override it.
+        .envs(replay_test_env())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -764,6 +918,138 @@ fn report(test_name: &str, log_path: &Path, success: bool) {
 // RR-based test helpers
 // ---------------------------------------------------------------------------
 
+/// The absolute path of `rust_flow_test.rs`, the program
+/// [`create_rr_recording`] builds and records.  The recording's debug info
+/// names this same path, so a breakpoint must be set on it.
+fn rust_flow_test_source_path() -> Result<PathBuf, String> {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
+        .ok_or_else(|| "cannot determine the path of rust_flow_test.rs".to_string())
+}
+
+/// The 1-based line of the one statement of `source` that contains
+/// `needle`.
+///
+/// Fails when no line or more than one line contains it, and when the line
+/// is a comment, so that a test which targets a statement can never be
+/// moved silently onto another line: `rust_flow_test.rs` is shared by many
+/// tests and suites, and a hard-coded number went stale for four months
+/// when a comment block was added above `main` (codetracer-pm issue
+/// `2026-10-22-real-recording-integration-rr-breakpoints-target-comment-lines-of-rust-flow-test.md`).
+fn statement_line_in(source: &str, needle: &str) -> Result<i64, String> {
+    let mut found = source
+        .lines()
+        .enumerate()
+        .filter(|(_, text)| text.contains(needle));
+    let Some((index, text)) = found.next() else {
+        return Err(format!("no line of the test program contains `{needle}`"));
+    };
+    if let Some((other, _)) = found.next() {
+        return Err(format!(
+            "`{needle}` is on more than one line of the test program (lines {} and {}): \
+             use a needle that names one statement",
+            index + 1,
+            other + 1
+        ));
+    }
+    if text.trim_start().starts_with("//") {
+        return Err(format!(
+            "`{needle}` is on line {}, which is a comment, not a statement",
+            index + 1
+        ));
+    }
+    Ok(index as i64 + 1)
+}
+
+/// The 1-based line of the statement of `rust_flow_test.rs` containing
+/// `needle` (see [`statement_line_in`]).  The source is read when the test
+/// runs, as [`create_rr_recording`] compiles it, so the line always belongs
+/// to the program that was recorded.
+fn rust_flow_test_line(needle: &str) -> Result<i64, String> {
+    let path = rust_flow_test_source_path()?;
+    let source = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    statement_line_in(&source, needle).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The statements of `rust_flow_test.rs` the rr tests below navigate to.
+/// Each is a needle for [`rust_flow_test_line`].
+const RUST_FLOW_LET_X: &str = "let x = 10;";
+const RUST_FLOW_LET_Y: &str = "let y = 32;";
+const RUST_FLOW_CALCULATE_SUM_CALL: &str = "let result = calculate_sum(x, y);";
+const RUST_FLOW_PRINT_RESULT: &str = "println!(\"Result: {}\", result);";
+const RUST_FLOW_WITH_LOOPS_CALL: &str = "with_loops(x);";
+const RUST_FLOW_CALCULATE_SUM_DECLARATION: &str = "fn calculate_sum(a: i32, b: i32)";
+const RUST_FLOW_CALCULATE_SUM_FIRST: &str = "let sum = a + b;";
+const RUST_FLOW_CALCULATE_SUM_TAIL: &str = "final_result";
+
+/// Every statement the rr tests target resolves to exactly one non-comment
+/// line of the program they record.  It needs no recording, so it fails at
+/// once, naming the needle, when an edit to `rust_flow_test.rs` breaks one,
+/// where the rr tests would fail with an unresolved breakpoint instead.
+#[test]
+fn rust_flow_test_statements_targeted_by_the_rr_tests_exist() {
+    for needle in [
+        RUST_FLOW_LET_X,
+        RUST_FLOW_LET_Y,
+        RUST_FLOW_CALCULATE_SUM_CALL,
+        RUST_FLOW_PRINT_RESULT,
+        RUST_FLOW_WITH_LOOPS_CALL,
+        RUST_FLOW_CALCULATE_SUM_DECLARATION,
+        RUST_FLOW_CALCULATE_SUM_FIRST,
+    ] {
+        rust_flow_test_line(needle).unwrap_or_else(|e| panic!("{e}"));
+    }
+    // The program order the breakpoint tests rely on.
+    let line = |needle| rust_flow_test_line(needle).unwrap();
+    assert!(
+        line(RUST_FLOW_LET_Y) < line(RUST_FLOW_CALCULATE_SUM_CALL)
+            && line(RUST_FLOW_CALCULATE_SUM_CALL) < line(RUST_FLOW_PRINT_RESULT)
+            && line(RUST_FLOW_PRINT_RESULT) < line(RUST_FLOW_WITH_LOOPS_CALL),
+        "main's statements must stay in the order the tests step through"
+    );
+    assert!(calculate_sum_body_lines().is_ok());
+}
+
+/// The helper refuses the three ways a needle can name the wrong line.
+#[test]
+fn statement_line_in_refuses_a_missing_repeated_or_commented_needle() {
+    let source =
+        "fn main() {\n    // let a = 1;\n    let b = 2;\n    let b = 2;\n    let c = 3;\n}\n";
+    assert_eq!(statement_line_in(source, "let c = 3;"), Ok(5));
+    let missing = statement_line_in(source, "let d = 4;").unwrap_err();
+    assert!(missing.contains("no line"), "{missing}");
+    let repeated = statement_line_in(source, "let b = 2;").unwrap_err();
+    assert!(repeated.contains("lines 3 and 4"), "{repeated}");
+    let commented = statement_line_in(source, "let a = 1;").unwrap_err();
+    assert!(commented.contains("comment"), "{commented}");
+}
+
+/// The lines of `calculate_sum`'s body, from its first statement to its
+/// tail expression (`final_result` alone on its line): where a step into
+/// the call from `main` lands.
+fn calculate_sum_body_lines() -> Result<std::ops::RangeInclusive<i64>, String> {
+    let first = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_FIRST)?;
+    let path = rust_flow_test_source_path()?;
+    let source = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    // A whole-line comparison: `final_result` is also part of the
+    // `let final_result = …` and `println!("Final: …")` lines.
+    let tail = source
+        .lines()
+        .position(|text| text.trim() == RUST_FLOW_CALCULATE_SUM_TAIL)
+        .map(|index| index as i64 + 1)
+        .ok_or("calculate_sum's tail expression `final_result` is not in the program")?;
+    if tail <= first {
+        return Err(format!(
+            "calculate_sum's tail expression (line {tail}) must follow its first \
+             statement (line {first})"
+        ));
+    }
+    Ok(first..=tail)
+}
+
 /// Builds and records a Rust test program, returning the path to the trace
 /// directory.  The test program source is at a known location relative to
 /// CARGO_MANIFEST_DIR.
@@ -772,11 +1058,7 @@ fn create_rr_recording(
     ct_native_replay: &Path,
     log_path: &Path,
 ) -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = manifest_dir
-        .parent()
-        .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-        .ok_or("cannot determine source path")?;
+    let source_path = rust_flow_test_source_path()?;
 
     if !source_path.exists() {
         return Err(format!(
@@ -1050,8 +1332,8 @@ fn find_nargo() -> Option<PathBuf> {
 ///    backend-manager's `read_trace_metadata` can read (M-REC-1.5
 ///    retired the JSON sidecar fallback).
 /// 3. The native gem launcher at its in-repo location, provided the
-///    Rust `.so` extension has been built.  We probe for the `.so`
-///    explicitly because the launcher script otherwise silently
+///    Rust extension has been built (see `ruby_native_extension_built`).
+///    We probe for it explicitly because the launcher script otherwise silently
 ///    falls back to an event-less mode that produces no `.ct` and
 ///    breaks downstream session tests.
 /// 4. As a last resort, the pure-Ruby recorder — kept around so dev
@@ -1074,6 +1356,121 @@ fn is_pure_ruby_launcher(path: &std::path::Path) -> bool {
     })
 }
 
+/// Ruby's `RbConfig::CONFIG["DLEXT"]`: the extension `require` loads a C
+/// extension under — `bundle` on macOS, `so` on Linux and on Windows
+/// (RubyInstaller).  Asked of the `ruby` on `PATH`, which is the
+/// interpreter the gem launcher's `#!/usr/bin/env ruby` runs; when Ruby
+/// cannot be asked, fall back to the per-OS default, mirroring
+/// `scripts/detect-siblings.sh`.
+fn ruby_dlext() -> String {
+    let asked = std::process::Command::new("ruby")
+        .args(["-e", "print RbConfig::CONFIG['DLEXT']"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|ext| !ext.is_empty());
+    asked.unwrap_or_else(|| {
+        if cfg!(target_os = "macos") {
+            "bundle".to_string()
+        } else {
+            "so".to_string()
+        }
+    })
+}
+
+/// True when `ext_release` (the gem's `ext/native_tracer/target/release/`)
+/// holds a native extension the gem will actually load.
+///
+/// The source of truth is `load_extension!` in
+/// `codetracer-ruby-recorder/gems/codetracer-ruby-recorder/lib/codetracer/native.rb`:
+/// it loads `codetracer_ruby_recorder.<DLEXT>`, or else any
+/// `libcodetracer_ruby_recorder.{so,bundle,dylib,dll}` (cargo's own name for
+/// the cdylib).  This probe accepts exactly that set, so it cannot pick a
+/// launcher whose extension the loader then refuses, nor reject one it would
+/// load — on macOS DLEXT is `bundle` and cargo emits `.dylib`, which a
+/// `.so`-only probe missed.  On Windows the recorder's build renames cargo's
+/// `codetracer_ruby_recorder.dll` to `codetracer_ruby_recorder.so`, which is
+/// the `<DLEXT>` name there (RubyInstaller's DLEXT is `so`); an un-renamed
+/// `codetracer_ruby_recorder.dll` is not loaded, so it is not accepted.
+fn ruby_native_extension_built(ext_release: &std::path::Path, dlext: &str) -> bool {
+    std::iter::once(format!("codetracer_ruby_recorder.{dlext}"))
+        .chain(
+            ["so", "bundle", "dylib", "dll"]
+                .iter()
+                .map(|ext| format!("libcodetracer_ruby_recorder.{ext}")),
+        )
+        .any(|name| ext_release.join(name).is_file())
+}
+
+/// Creates a scratch `target/release/` directory holding exactly `names`.
+fn ext_release_with(names: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("create scratch ext_release dir");
+    for name in names {
+        std::fs::write(dir.path().join(name), b"").expect("create scratch artifact");
+    }
+    dir
+}
+
+/// macOS: `cargo build --release` leaves the cdylib as
+/// `libcodetracer_ruby_recorder.dylib`, which `load_extension!` accepts.
+/// Platform-independent: the DLEXT is passed in, no recorder is needed.
+#[test]
+fn ruby_extension_probe_accepts_cargo_dylib() {
+    let dir = ext_release_with(&["libcodetracer_ruby_recorder.dylib"]);
+    assert!(
+        ruby_native_extension_built(dir.path(), "bundle"),
+        "libcodetracer_ruby_recorder.dylib must count as a built extension"
+    );
+}
+
+/// macOS: the build copies the cdylib to `codetracer_ruby_recorder.bundle`
+/// (Ruby's DLEXT there), the primary name `load_extension!` loads.
+#[test]
+fn ruby_extension_probe_accepts_dlext_bundle() {
+    let dir = ext_release_with(&["codetracer_ruby_recorder.bundle"]);
+    assert!(
+        ruby_native_extension_built(dir.path(), "bundle"),
+        "codetracer_ruby_recorder.bundle must count as a built extension when DLEXT is bundle"
+    );
+}
+
+/// Linux and Windows (RubyInstaller): DLEXT is `so`, and
+/// `codetracer_ruby_recorder.so` is the name `load_extension!` requires.
+#[test]
+fn ruby_extension_probe_accepts_dlext_so() {
+    let dir = ext_release_with(&["codetracer_ruby_recorder.so"]);
+    assert!(ruby_native_extension_built(dir.path(), "so"));
+}
+
+/// A `codetracer_ruby_recorder.<ext>` whose `<ext>` is not this Ruby's DLEXT
+/// is never `require`d, so it must not make the launcher count as usable:
+/// on macOS a stray `.so`, and anywhere cargo's un-renamed Windows
+/// `codetracer_ruby_recorder.dll`.
+#[test]
+fn ruby_extension_probe_rejects_names_the_loader_skips() {
+    let so_only = ext_release_with(&["codetracer_ruby_recorder.so"]);
+    assert!(!ruby_native_extension_built(so_only.path(), "bundle"));
+    let dll_only = ext_release_with(&["codetracer_ruby_recorder.dll"]);
+    assert!(!ruby_native_extension_built(dll_only.path(), "so"));
+    assert!(!ruby_native_extension_built(dll_only.path(), "bundle"));
+}
+
+/// Nothing built, or only files the loader would not load: not built.
+#[test]
+fn ruby_extension_probe_rejects_missing_extension() {
+    let empty = ext_release_with(&[]);
+    assert!(!ruby_native_extension_built(empty.path(), "bundle"));
+    assert!(!ruby_native_extension_built(empty.path(), "so"));
+    let unrelated = ext_release_with(&[
+        "libsomething_else.dylib",
+        "codetracer_ruby_recorder.d",
+        "libcodetracer_ruby_recorder.rlib",
+    ]);
+    assert!(!ruby_native_extension_built(unrelated.path(), "bundle"));
+    assert!(!ruby_native_extension_built(unrelated.path(), "so"));
+}
+
 fn find_ruby_recorder() -> Option<PathBuf> {
     // 1. Explicit environment variable override.  Honour it only when it
     //    is a CTFS-capable (native) launcher — a pure-Ruby launcher here
@@ -1094,8 +1491,9 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     }
 
     // 2. Native gem launcher on PATH.  This is the production path —
-    //    the launcher loads `codetracer_ruby_recorder.so` from the
-    //    gem and emits a CTFS container the daemon can read.
+    //    the launcher loads the gem's native extension
+    //    (`codetracer_ruby_recorder.<DLEXT>`) and emits a CTFS container
+    //    the daemon can read.
     if let Ok(output) = std::process::Command::new("which")
         .arg("codetracer-ruby-recorder")
         .output()
@@ -1113,9 +1511,9 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     //    the candidate paths first: `CARGO_MANIFEST_DIR` is an absolute
     //    path with native separators, but joining a `../../..`-style
     //    relative literal leaves an un-normalized mixed-separator path
-    //    whose `.parent()` / `.join()` arithmetic for the `.so` probe is
+    //    whose `.parent()` / `.join()` arithmetic for the extension probe is
     //    fragile on Windows.  Canonicalizing the launcher up-front gives a
-    //    clean absolute path so the `.so` existence probe is reliable.
+    //    clean absolute path so the extension existence probe is reliable.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let native_launcher_paths = [
         "../../../codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder",
@@ -1132,25 +1530,17 @@ fn find_ruby_recorder() -> Option<PathBuf> {
         }
         // The launcher lives in `bin/` of the gem; the compiled native
         // extension lives in `<gem>/ext/native_tracer/target/release/`.
-        // The crate's `cdylib` artifact is named `codetracer_ruby_recorder`
-        // with a platform-specific extension (`.so` on Linux/macOS,
-        // `.dll`/`.so` on Windows depending on the Ruby ABI), so probe
-        // every candidate name before deciding the extension is built.
+        // Its file name depends on the platform (`.so` on Linux,
+        // `.bundle`/`.dylib` on macOS, `.so`/`.dll` on Windows), so accept
+        // exactly the names the gem's loader accepts — see
+        // `ruby_native_extension_built`.
         let gem_root = launcher
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| launcher.clone());
         let ext_release = gem_root.join("ext/native_tracer/target/release");
-        let native_artifact_names = [
-            "codetracer_ruby_recorder.so",
-            "codetracer_ruby_recorder.dll",
-            "libcodetracer_ruby_recorder.so",
-        ];
-        let extension_built = native_artifact_names
-            .iter()
-            .any(|name| ext_release.join(name).exists());
-        if extension_built {
+        if ruby_native_extension_built(&ext_release, &ruby_dlext()) {
             return Some(launcher);
         }
     }
@@ -1163,9 +1553,11 @@ fn find_ruby_recorder() -> Option<PathBuf> {
     panic!(
         "no CTFS-capable Ruby recorder found.  The native gem launcher \
          (codetracer-ruby-recorder/gems/codetracer-ruby-recorder) and its \
-         compiled `ext/native_tracer/target/release/codetracer_ruby_recorder` \
-         extension are required — run `just build-extension` in \
-         codetracer-ruby-recorder, or set CODETRACER_RUBY_RECORDER_PATH to a \
+         compiled extension in `ext/native_tracer/target/release/` \
+         (`codetracer_ruby_recorder.<DLEXT>` or \
+         `libcodetracer_ruby_recorder.{{so,bundle,dylib,dll}}`, the names \
+         lib/codetracer/native.rb loads) are required — run \
+         `just build-extension` in codetracer-ruby-recorder, or set CODETRACER_RUBY_RECORDER_PATH to a \
          native launcher."
     );
 }
@@ -2458,10 +2850,10 @@ async fn test_real_rr_navigate_step_over() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
-/// M3-RR-2. Open an RR trace.  Navigate to the `calculate_sum` call (line 19
-/// of `rust_flow_test.rs`) by stepping.  Send step_in.  Verify we land inside
-/// `calculate_sum` (different line, possibly line 4-12).  Send step_out.
-/// Verify we return near the caller (line >= 19).
+/// M3-RR-2. Open an RR trace.  Navigate to main's `calculate_sum` call in
+/// `rust_flow_test.rs` by stepping over.  Send step_in.  Verify we land
+/// inside `calculate_sum`'s body.  Send step_out.  Verify we return to
+/// main at or after the call.  The lines are read from the source.
 #[tokio::test]
 async fn test_real_rr_navigate_step_in_out() {
     let (test_dir, log_path) = setup_test_dir("real_rr_nav_step_in_out");
@@ -2505,44 +2897,35 @@ async fn test_real_rr_navigate_step_in_out() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Step through the program to reach a function call in user code.
-        //
-        // The Rust test program (`rust_flow_test.rs`) has:
-        //   - `main()` at line 15
-        //   - `let result = calculate_sum(x, y);` at line 19
-        //   - `calculate_sum` at lines 4-12
+        // Step over from the start of the recording until the replay stops
+        // on main's `let result = calculate_sum(x, y);`.  The line is read
+        // from the source (`rust_flow_test_line`), so an edit to the shared
+        // test program cannot move the target onto a comment.
         //
         // After opening an RR trace, the initial position is typically in
-        // runtime startup code (e.g., `_start`), not in `main()`.  We step
-        // forward repeatedly until we land in user code (path contains
-        // `rust_flow_test`) with a non-zero line, which ensures we are in
-        // a position with debug info where `step_in` will work reliably.
-        //
-        // If we never reach user code within the step budget, we still
-        // exercise step_in/step_out from wherever we are, but with relaxed
-        // assertions that tolerate the debugger staying in runtime code.
-        let mut seq = 8001;
-        let mut last_path = String::new();
-        let mut last_line: i64 = 0;
-        let mut last_ticks: i64 = 0;
-        let mut in_user_code = false;
+        // runtime startup code (e.g., `_start`), not in `main()`, so the
+        // first steps may be in code without source.
+        let call_line = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_CALL)?;
+        let with_loops_line = rust_flow_test_line(RUST_FLOW_WITH_LOOPS_CALL)?;
+        let calculate_sum_body = calculate_sum_body_lines()?;
+        log_line(
+            &log_path,
+            &format!(
+                "targets: call line {call_line}, calculate_sum body {calculate_sum_body:?}, \
+                 with_loops call line {with_loops_line}"
+            ),
+        );
 
-        // Step up to 40 times to find user code.
+        let mut seq = 8001;
+        let mut on_call_line = None;
         for _ in 0..40 {
-            let resp = navigate(
-                &mut client,
-                seq,
-                &trace_dir,
-                "step_over",
-                None,
-                &log_path,
-            )
-            .await?;
+            let resp = navigate(&mut client, seq, &trace_dir, "step_over", None, &log_path).await?;
             seq += 1;
 
             if resp.get("success").and_then(Value::as_bool) != Some(true) {
-                log_line(&log_path, &format!("step_over failed: {resp}"));
-                break;
+                return Err(format!(
+                    "step_over failed before reaching the calculate_sum call: {resp}"
+                ));
             }
 
             let (path, line, _, ticks, eot) = extract_nav_location(&resp)?;
@@ -2550,62 +2933,36 @@ async fn test_real_rr_navigate_step_in_out() {
                 &log_path,
                 &format!("pre-step: path={path} line={line} ticks={ticks} eot={eot}"),
             );
-            last_path = path.clone();
-            last_line = line;
-            last_ticks = ticks;
-
-            // Check if we've reached user code with debug info.
-            if path.contains("rust_flow_test") && line > 0 {
-                in_user_code = true;
-            }
-
             if eot {
+                return Err(format!(
+                    "the replay reached the end of the trace before stopping on the \
+                     calculate_sum call (line {call_line})"
+                ));
+            }
+            if path.contains("rust_flow_test") && line == call_line {
+                on_call_line = Some((path, line, ticks));
                 break;
             }
-
-            // If we've found user code, stop stepping once we're near
-            // the `calculate_sum` call (line 17-19 area).  We don't need
-            // to be exactly on line 19 — any line in main() is fine
-            // because step_in from any statement will at least enter the
-            // next function call or advance the instruction pointer.
-            if in_user_code && (17..=21).contains(&line) {
-                log_line(
-                    &log_path,
-                    &format!("reached function call area at line {line}"),
-                );
-                break;
+            if path.contains("rust_flow_test") && line > call_line && line <= with_loops_line {
+                return Err(format!(
+                    "step_over went from before the calculate_sum call (line {call_line}) \
+                     to line {line} without stopping on it"
+                ));
             }
         }
-
+        let Some((last_path, last_line, last_ticks)) = on_call_line else {
+            return Err(format!(
+                "40 step_overs never stopped on the calculate_sum call (line {call_line})"
+            ));
+        };
         log_line(
             &log_path,
-            &format!(
-                "before step_in: path={last_path} line={last_line} ticks={last_ticks} in_user_code={in_user_code}"
-            ),
+            &format!("before step_in: path={last_path} line={last_line} ticks={last_ticks}"),
         );
 
-        // If after 40 steps we never reached user code, the test must
-        // fail rather than silently passing without testing anything
-        // meaningful.  This matches the pattern used by M4 locals test.
-        if !in_user_code {
-            return Err(
-                "failed to reach user code after 40 steps; \
-                 cannot verify step_in/step_out without being in user code"
-                    .to_string(),
-            );
-        }
-
-        // Now do step_in.  This should either enter a function or advance
-        // by a single instruction.
-        let step_in_resp = navigate(
-            &mut client,
-            seq,
-            &trace_dir,
-            "step_in",
-            None,
-            &log_path,
-        )
-        .await?;
+        // step_in from the call enters calculate_sum.
+        let step_in_resp =
+            navigate(&mut client, seq, &trace_dir, "step_in", None, &log_path).await?;
         seq += 1;
 
         assert_eq!(
@@ -2614,35 +2971,21 @@ async fn test_real_rr_navigate_step_in_out() {
             "step_in should succeed, got: {step_in_resp}"
         );
 
-        let (path_in, line_in, _, ticks_in, _eot_in) =
-            extract_nav_location(&step_in_resp)?;
+        let (path_in, line_in, _, ticks_in, _eot_in) = extract_nav_location(&step_in_resp)?;
         log_line(
             &log_path,
             &format!("after step_in: path={path_in} line={line_in} ticks={ticks_in}"),
         );
-
-        // step_in should have moved us somewhere different.
-        //
-        // We are guaranteed to be in user code at this point (the early
-        // return above ensures this), so line or ticks must change.
         assert!(
-            line_in != last_line || ticks_in != last_ticks || path_in != last_path,
-            "step_in should change location in user code: \
-             before=(path={last_path}, line={last_line}, ticks={last_ticks}), \
-             after=(path={path_in}, line={line_in}, ticks={ticks_in})"
+            path_in.contains("rust_flow_test") && calculate_sum_body.contains(&line_in),
+            "step_in from the calculate_sum call (line {call_line}) should land in \
+             calculate_sum's body (lines {calculate_sum_body:?}), got \
+             path={path_in} line={line_in}"
         );
 
-        // Now do step_out.  This should bring us back towards the caller
-        // or advance execution forward.
-        let step_out_resp = navigate(
-            &mut client,
-            seq,
-            &trace_dir,
-            "step_out",
-            None,
-            &log_path,
-        )
-        .await?;
+        // step_out returns to the caller, main, at or after the call.
+        let step_out_resp =
+            navigate(&mut client, seq, &trace_dir, "step_out", None, &log_path).await?;
 
         assert_eq!(
             step_out_resp.get("success").and_then(Value::as_bool),
@@ -2650,21 +2993,20 @@ async fn test_real_rr_navigate_step_in_out() {
             "step_out should succeed, got: {step_out_resp}"
         );
 
-        let (path_out, line_out, _, ticks_out, _eot_out) =
-            extract_nav_location(&step_out_resp)?;
+        let (path_out, line_out, _, ticks_out, _eot_out) = extract_nav_location(&step_out_resp)?;
         log_line(
             &log_path,
             &format!("after step_out: path={path_out} line={line_out} ticks={ticks_out}"),
         );
-
-        // step_out should have moved us further in execution.  At minimum,
-        // ticks must advance (or line/path must change).  We also accept
-        // endOfTrace as valid — the trace may end during step_out.
         assert!(
-            ticks_out > ticks_in || line_out != line_in || path_out != path_in || _eot_out,
-            "step_out should advance from the step_in position: \
-             step_in=(path={path_in}, line={line_in}, ticks={ticks_in}), \
-             step_out=(path={path_out}, line={line_out}, ticks={ticks_out})"
+            path_out.contains("rust_flow_test")
+                && (call_line..=with_loops_line).contains(&line_out),
+            "step_out of calculate_sum should return to main at or after the call \
+             (lines {call_line}..={with_loops_line}), got path={path_out} line={line_out}"
+        );
+        assert!(
+            ticks_out >= ticks_in,
+            "step_out runs forward: ticks went from {ticks_in} to {ticks_out}"
         );
 
         shutdown_daemon(&mut client, &mut daemon).await;
@@ -2833,6 +3175,163 @@ async fn test_real_rr_navigate_continue_forward() {
     }
 
     report("test_real_rr_navigate_continue_forward", &log_path, success);
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// Sends `ct/py-navigate` with `method` and returns the position it
+/// answers with (`extract_nav_location`), failing when the navigation
+/// does not succeed.  Advances `seq`.
+async fn navigate_to_a_position(
+    client: &mut UnixStream,
+    seq: &mut i64,
+    trace_path: &Path,
+    method: &str,
+    log_path: &Path,
+) -> Result<(String, i64, i64, i64, bool), String> {
+    let resp = navigate(client, *seq, trace_path, method, None, log_path).await?;
+    *seq += 1;
+    if resp.get("success").and_then(Value::as_bool) != Some(true) {
+        return Err(format!("{method} must answer with a position, got: {resp}"));
+    }
+    let location = extract_nav_location(&resp)?;
+    log_line(log_path, &format!("{method}: {location:?}"));
+    Ok(location)
+}
+
+/// M3-RR-5. Open an RR trace and step over from its start until the
+/// `ct/py-navigate` response carries `endOfTrace`.  Every step on the way
+/// must answer; the position at the end must stay there under further
+/// forward navigation (`step_over`, `step_in`, `continue_forward`), each
+/// answering `endOfTrace` again with the same ticks; and a `step_back`
+/// from it must leave the end.
+///
+/// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+/// "Navigation at the end of a recording".  Regression test for codetracer-pm
+/// issue `2026-10-22-rr-step-over-from-the-last-frame-before-exit-never-answers.md`:
+/// the step past the program's last frame killed the replay worker, or
+/// answered "can't parse rr `when-ticks`", instead of reporting the end.
+#[tokio::test]
+async fn test_real_rr_navigate_step_over_past_end_reports_end_of_trace() {
+    let (test_dir, log_path) = setup_test_dir("real_rr_nav_step_past_end");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!(
+                    "test_real_rr_navigate_step_over_past_end_reports_end_of_trace: SKIP ({reason})"
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str)],
+        )
+        .await;
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 9500, &trace_dir, &log_path).await?;
+        if open_resp.get("success").and_then(Value::as_bool) != Some(true) {
+            return Err(format!("ct/open-trace should succeed, got: {open_resp}"));
+        }
+        drain_events(&mut client, &log_path).await;
+
+        // `rust_flow_test`'s main, its runtime epilogue and `exit` take
+        // about 25 steps over in both counter modes (measured 2026-10-26).
+        const STEP_BUDGET: usize = 80;
+        let mut seq = 9501;
+
+        let mut end = None;
+        let mut before_end_ticks = None;
+        for i in 1..=STEP_BUDGET {
+            let (path, line, _, ticks, eot) =
+                navigate_to_a_position(&mut client, &mut seq, &trace_dir, "step_over", &log_path)
+                    .await
+                    .map_err(|e| format!("step over #{i}: {e}"))?;
+            if eot {
+                end = Some((path, line, ticks));
+                break;
+            }
+            before_end_ticks = Some(ticks);
+        }
+        let Some((end_path, end_line, end_ticks)) = end else {
+            return Err(format!(
+                "{STEP_BUDGET} step_overs never reported endOfTrace"
+            ));
+        };
+        // The end must be where the steps over arrived, not where the
+        // first one already was.
+        match before_end_ticks {
+            Some(before) if before < end_ticks => {}
+            _ => {
+                return Err(format!(
+                    "the end (ticks {end_ticks}) must follow the positions the steps over \
+                     passed, got {before_end_ticks:?} before it"
+                ));
+            }
+        }
+
+        for method in ["step_over", "step_in", "continue_forward"] {
+            let (path, line, _, ticks, eot) =
+                navigate_to_a_position(&mut client, &mut seq, &trace_dir, method, &log_path)
+                    .await
+                    .map_err(|e| format!("{method} from the end: {e}"))?;
+            if !eot || ticks != end_ticks || path != end_path || line != end_line {
+                return Err(format!(
+                    "{method} from the end must stay at the end and report endOfTrace: \
+                     end=({end_path}, {end_line}, ticks {end_ticks}), \
+                     got=({path}, {line}, ticks {ticks}, endOfTrace {eot})"
+                ));
+            }
+        }
+
+        // Where step_back lands is not asserted beyond leaving the end
+        // backwards: from the exit path's frames, which have no line
+        // information, a reverse step currently lands at tick 0 instead of
+        // on the previous stop (codetracer-pm issue
+        // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`).
+        // That defect is not the end of the recording's, and its fix owns
+        // the stronger assertion.
+        let (path, line, _, ticks, eot) =
+            navigate_to_a_position(&mut client, &mut seq, &trace_dir, "step_back", &log_path)
+                .await
+                .map_err(|e| format!("step_back from the end: {e}"))?;
+        if eot || ticks >= end_ticks {
+            return Err(format!(
+                "step_back from the end must leave it backwards: end ticks {end_ticks}, \
+                 got ({path}, {line}, ticks {ticks}, endOfTrace {eot})"
+            ));
+        }
+
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_rr_navigate_step_over_past_end_reports_end_of_trace",
+        &log_path,
+        success,
+    );
     assert!(success, "see log at {}", log_path.display());
     let _ = std::fs::remove_dir_all(&test_dir);
 }
@@ -4925,15 +5424,14 @@ async fn step_to_user_code(
 /// continue forward.  Verify that execution stops at (or very near) the
 /// breakpoint line.
 ///
-/// The test program (`rust_flow_test.rs`) has these key lines:
-///   - line 17: `let x = 10;`
-///   - line 18: `let y = 32;`
-///   - line 19: `let result = calculate_sum(x, y);`
-///   - line 20: `println!("Result: {}", result);`
-///   - line 21: `with_loops(x);`
+/// The test program's `main` (`rust_flow_test.rs`) runs `let x = 10;`,
+/// `let y = 32;`, `let result = calculate_sum(x, y);`,
+/// `println!("Result: {}", result);` and `with_loops(x);`.  The rr tests
+/// below find each statement's line in the source with
+/// [`rust_flow_test_line`] rather than hard-coding it.
 ///
-/// We set a breakpoint at line 20 (`println!`), then continue forward from
-/// the program start.  The debugger should stop at (or near) line 20.
+/// We set a breakpoint on the `println!`, then continue forward from the
+/// program start.  The debugger should stop at (or near) that line.
 #[tokio::test]
 async fn test_real_rr_breakpoint_stops_execution() {
     let (test_dir, log_path) = setup_test_dir("real_rr_bp_stops");
@@ -4968,16 +5466,11 @@ async fn test_real_rr_breakpoint_stops_execution() {
         // Determine the source path as it appears in the trace.  The
         // test program is compiled from an absolute path, so breakpoints
         // must use the same absolute path the debugger knows about.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // The breakpoint target line: `println!("Result: {}", result);`
-        // which is line 20 of rust_flow_test.rs.
-        let bp_line: i64 = 20;
+        // The breakpoint target: `println!("Result: {}", result);` in main.
+        let bp_line: i64 = rust_flow_test_line(RUST_FLOW_PRINT_RESULT)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5133,17 +5626,13 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // We set a breakpoint at line 19 (`let result = calculate_sum(x, y);`)
-        // which is early enough in main() that we can later verify execution
-        // goes past it.
-        let bp_line: i64 = 19;
+        // We set a breakpoint on `let result = calculate_sum(x, y);`, which
+        // is early enough in main() that we can later verify execution goes
+        // past it.
+        let bp_line: i64 = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_CALL)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5191,7 +5680,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
             &format!("initial position: line={initial_line} ticks={initial_ticks}"),
         );
 
-        // Add breakpoint at line 19.
+        // Add the breakpoint on the `calculate_sum` call.
         let (bp_id, bp_resp) = send_py_add_breakpoint(
             &mut client,
             17_002,
@@ -5275,7 +5764,7 @@ async fn test_real_rr_remove_breakpoint_continues_past() {
         );
 
         // Continue forward again.  With the breakpoint removed, execution
-        // should go past line 19 — either to a later line in user code,
+        // should go past the breakpoint line — either to a later line in user code,
         // or to end-of-trace if the program runs to completion.
         let cont2_resp = navigate(
             &mut client,
@@ -5359,15 +5848,11 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // Set breakpoint at line 18 (`let y = 32;`) — early in main().
-        let bp_line: i64 = 18;
+        // Set the breakpoint on `let y = 32;` — early in main().
+        let bp_line: i64 = rust_flow_test_line(RUST_FLOW_LET_Y)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5394,14 +5879,14 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
 
         drain_events(&mut client, &log_path).await;
 
-        // Step to user code and then several steps past line 18, so we
+        // Step to user code and then several steps past `let y = 32;`, so we
         // have execution history beyond the breakpoint line.
         let (mut seq, last_path, last_line, last_ticks, in_user_code) = step_to_user_code(
             &mut client,
             18_001,
             &trace_dir,
             50,  // max_steps
-            5,   // min_steps_in_user_code (ensure we are well past line 18)
+            5,   // min_steps_in_user_code (ensure we are well past the breakpoint line)
             &log_path,
         )
         .await?;
@@ -5425,7 +5910,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
             );
         }
 
-        // Now add the breakpoint at line 18.
+        // Now add the breakpoint on `let y = 32;`.
         let (bp_id, bp_resp) = send_py_add_breakpoint(
             &mut client,
             seq,
@@ -5447,7 +5932,7 @@ async fn test_real_rr_reverse_continue_hits_breakpoint() {
             &format!("breakpoint set: id={bp_id} at line {bp_line}"),
         );
 
-        // Reverse continue — should hit the breakpoint at line 18.
+        // Reverse continue — should hit the breakpoint on `let y = 32;`.
         let rev_resp = navigate(
             &mut client,
             seq,
@@ -5538,18 +6023,14 @@ async fn test_real_rr_multiple_breakpoints() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
-        // Set breakpoints at two lines in main():
-        //   line 19: `let result = calculate_sum(x, y);`
-        //   line 21: `with_loops(x);`
-        let bp_line_1: i64 = 19;
-        let bp_line_2: i64 = 21;
+        // Set breakpoints on two statements of main():
+        //   `let result = calculate_sum(x, y);`
+        //   `with_loops(x);`
+        let bp_line_1: i64 = rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_CALL)?;
+        let bp_line_2: i64 = rust_flow_test_line(RUST_FLOW_WITH_LOOPS_CALL)?;
 
         // Start the daemon.
         let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
@@ -5592,7 +6073,7 @@ async fn test_real_rr_multiple_breakpoints() {
             "initial step_over should succeed"
         );
 
-        // Add first breakpoint (line 19).
+        // Add first breakpoint (the `calculate_sum` call).
         let (bp_id_1, bp_resp_1) = send_py_add_breakpoint(
             &mut client,
             19_002,
@@ -5612,7 +6093,7 @@ async fn test_real_rr_multiple_breakpoints() {
             &format!("breakpoint 1: id={bp_id_1} at line {bp_line_1}"),
         );
 
-        // Add second breakpoint (line 21).
+        // Add second breakpoint (the `with_loops` call).
         let (bp_id_2, bp_resp_2) = send_py_add_breakpoint(
             &mut client,
             19_003,
@@ -5638,7 +6119,7 @@ async fn test_real_rr_multiple_breakpoints() {
             "breakpoint IDs should be unique: {bp_id_1} vs {bp_id_2}"
         );
 
-        // Continue forward — should hit the first breakpoint (line 19).
+        // Continue forward — should hit the first breakpoint.
         let cont1_resp = navigate(
             &mut client,
             19_004,
@@ -5667,13 +6148,13 @@ async fn test_real_rr_multiple_breakpoints() {
             path1.contains("rust_flow_test"),
             "should stop in rust_flow_test.rs, got: {path1}"
         );
-        // Should stop at the first breakpoint (line 19) or very near it.
+        // Should stop at the first breakpoint or very near it.
         assert!(
             (bp_line_1 - 1..=bp_line_1 + 1).contains(&line1),
             "first continue should stop at or near line {bp_line_1}, got line {line1}"
         );
 
-        // Continue forward again — should hit the second breakpoint (line 21).
+        // Continue forward again — should hit the second breakpoint.
         let cont2_resp = navigate(
             &mut client,
             19_005,
@@ -5700,7 +6181,7 @@ async fn test_real_rr_multiple_breakpoints() {
             "second continue should advance: ticks2={ticks2} should be > ticks1={ticks1}"
         );
 
-        // Should stop at the second breakpoint (line 21) or very near it.
+        // Should stop at the second breakpoint or very near it.
         // If the second breakpoint wasn't hit (e.g., the program ended or
         // the debugger stopped somewhere else), the line would be quite
         // different.
@@ -6733,11 +7214,7 @@ async fn test_real_rr_flow_returns_steps() {
         );
 
         // Determine the source path as it appears in the trace.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon with the real db-backend.
@@ -6784,14 +7261,14 @@ async fn test_real_rr_flow_returns_steps() {
             );
         }
 
-        // Send flow request for calculate_sum (line 4).  Use a short
-        // timeout since RR flow processing is known to be very slow.
+        // Send flow request for calculate_sum (its declaration line).  Use
+        // a short timeout since RR flow processing is known to be very slow.
         let flow_result = send_py_flow(
             &mut client,
             seq,
             &trace_dir,
             &source_path_str,
-            4, // calculate_sum function declaration line
+            rust_flow_test_line(RUST_FLOW_CALCULATE_SUM_DECLARATION)?,
             "call",
             ticks,
             &log_path,
@@ -6977,11 +7454,7 @@ async fn test_real_rr_flow_diff_mode() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start the daemon.
@@ -7026,7 +7499,7 @@ async fn test_real_rr_flow_diff_mode() {
             seq,
             &trace_dir,
             &source_path_str,
-            17, // line 17 in main()
+            rust_flow_test_line(RUST_FLOW_LET_X)?, // a statement of main()
             "diff",
             ticks,
             &log_path,
@@ -10366,23 +10839,38 @@ async fn start_mcp_server_with_real_backend(
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
 ) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
-    start_mcp_server_with_real_backend_in(test_dir, log_path, db_backend_path, extra_env, None)
-        .await
+    start_mcp_server_with_real_backend_in(
+        test_dir,
+        log_path,
+        db_backend_path,
+        extra_env,
+        None,
+        &binary_path(),
+    )
+    .await
 }
 
 /// [`start_mcp_server_with_real_backend`], with the MCP server started in
 /// `mcp_cwd` when one is given (the daemon keeps this test's working
-/// directory), so a test can tell the two apart.
+/// directory), so a test can tell the two apart, and the daemon run from
+/// `daemon_bin` (the MCP server is always the cargo-built binary).
 async fn start_mcp_server_with_real_backend_in(
     test_dir: &Path,
     log_path: &Path,
     db_backend_path: &Path,
     extra_env: &[(&str, &str)],
     mcp_cwd: Option<&Path>,
+    daemon_bin: &Path,
 ) -> (tokio::process::Child, tokio::process::Child, PathBuf) {
     // Start the real daemon first.
-    let (daemon, socket_path) =
-        start_daemon_with_real_backend(test_dir, log_path, db_backend_path, extra_env).await;
+    let (daemon, socket_path) = start_daemon_with_real_backend_from(
+        daemon_bin,
+        test_dir,
+        log_path,
+        db_backend_path,
+        extra_env,
+    )
+    .await;
 
     log_line(
         log_path,
@@ -10397,11 +10885,18 @@ async fn start_mcp_server_with_real_backend_in(
     let mut cmd = Command::new(&bin);
     cmd.arg("trace")
         .arg("mcp")
+        // These recordings are the test's own, and most of their recorders
+        // embed no source copies, so `read_source_file` reads the files
+        // their source lists name from this host, as a developer's server
+        // does (the rule itself: mcp_read_source_file_confinement_test.rs).
+        .arg("--allow-host-source-reads")
         .env("TMPDIR", test_dir)
         .env(
             "CODETRACER_DAEMON_SOCK",
             socket_path.to_string_lossy().to_string(),
         )
+        // Same environment as the daemon it talks to (`replay_test_env`).
+        .envs(replay_test_env())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -11251,10 +11746,14 @@ async fn test_real_custom_mcp_exec_script() {
 /// that failed to open cannot pass.
 ///
 /// `CODETRACER_PYTHON_API_PATH` must be absent from the daemon's environment,
-/// so the daemon has to find the Python API itself (`resolve_python_api_path`):
-/// at a known layout beside its binary, or, in this debug build, in the
-/// checkout it was compiled from when the build directory is elsewhere
-/// (`CARGO_TARGET_DIR`), and only if that copy passes the ownership check.
+/// so the daemon has to find the Python API itself (`resolve_python_api_path`),
+/// and only if that copy passes the ownership check.  The daemon runs from an
+/// install prefix staged by [`stage_install_prefix`], so it finds the package
+/// at `<prefix>/share/codetracer/python-api` in a release build too and
+/// wherever `CARGO_TARGET_DIR` puts the build: a release binary run from a
+/// build directory outside the checkout has no layout to look in, and the
+/// compiled-checkout fallback exists only in debug builds (`just test-rust`
+/// runs this crate in release).
 ///
 /// No mocks: real recorder, daemon, replay-server, MCP server and Python.
 #[tokio::test]
@@ -11305,12 +11804,14 @@ async fn test_real_custom_mcp_exec_script_relative_trace_path() {
                 .to_string());
         }
 
+        let daemon_bin = stage_install_prefix(&test_dir)?;
         let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend_in(
             &test_dir,
             &log_path,
             &db_backend,
             &[],
             Some(&test_dir),
+            &daemon_bin,
         )
         .await;
 
@@ -11380,6 +11881,856 @@ async fn test_real_custom_mcp_exec_script_relative_trace_path() {
 
     report(
         "test_real_custom_mcp_exec_script_relative_trace_path",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ===========================================================================
+// MCP `exec_script` + `Trace.goto_geid` on a native (MCR) recording
+// ===========================================================================
+//
+// `mcp_exec_script_goto_geid_native_recording` (codetracer-specs
+// milestones/Self-Healing-Pipeline.milestones.org, HS-M2 unit U4b5; spec
+// spec/Planned-Features/CodeTracer-MCP-Server.md, Python API `goto_geid`).
+//
+// The program, `tests/fixtures/native/span_goto_probe.c` (`-O0 -g`), declares
+// three spans through the recorder call and prints, for each, its marker
+// geids, the value the local `value` holds after the span's end call, and the
+// source line (`__LINE__`) of that call.  `ct-mcr record --split` records it
+// under the default attach; the test takes the recording's first slice, the
+// one a `--split` recording's replay is served from (debugserver.md: a slice
+// starting at a periodic checkpoint is refused until CAS-K3).  Oracles, never
+// values the test supplies: the program's own output, the fixture's source,
+// and `ct-mcr dump-events` (the recorder's own reader of the slice: which
+// slice holds the span markers, the first lock release in it, and the first
+// geid of the last slice).
+//
+// Through `session-manager trace mcp` (started in the test directory, given
+// the slice as a RELATIVE `trace_path`, as an agent would), one `exec_script`
+// calls `trace.goto_geid` and reports, as JSON lines:
+//   * span 2's end marker: the location (the result and `trace.location`)
+//     is the fixture at the printed line, and the local `value` is span 2's
+//     printed value;
+//   * back to span 1's end marker (a replay from the stage0 boundary) reads
+//     span 1's value; forward to span 3's reads span 3's;
+//   * the first geid of the last slice, beyond this slice: `NavigationError`
+//     naming `E02`; the slice's first lock release: `NavigationError`
+//     naming `E09` and the server's reason (`evSyncLockRelease`);
+//   * `0`, `-1`, `True`, `"12"` and `None`: `ValueError`, nothing sent;
+//   * the session still serves a seek afterwards (span 1 again);
+//   * the replay executes from the restored position: `step_over` stops on
+//     the fixture's next line (the `printf`), where the local `end_line` is
+//     the line the program printed (its own `__LINE__`, stored by the rest
+//     of the end call's line) and `value` is still span 1's; a second
+//     `step_over` steps over the call to the `fflush` line; a breakpoint on
+//     the loop's `probe_step` line and `continue_forward` stop there in the
+//     next iteration (`i` is 1); `step_back` raises `NavigationError` naming
+//     `E0C` (the replay does not execute backward); a seek to span 3 and a
+//     step from it read span 3's value on the `printf` line (codetracer-specs
+//     spec/Planned-Features/CodeTracer-MCP-Server.md, `goto_geid`: the
+//     replay executes forward from the restored position);
+//   * from there `continue_forward` runs to the end of the recording (no
+//     breakpoint ahead); `step_over` then raises `NavigationError` naming
+//     the end of the recording, and a seek to span 2 and a step from it
+//     still read span 2's line and value (ct-native-replay starts the
+//     debugserver on the slice again: LLDB drops the connection when the
+//     program exits).
+// Negative control: the same program recorded with a second thread (the
+// whole recording: its first slice is refused for another reason, see
+// codetracer-specs issue
+// 2026-10-12-slice-0-of-a-two-thread-split-recording-is-refused-as-a-broken-acquisition-order.md);
+// the replay refuses it and the agent's error names two threads and XMR-B1.
+//
+// Falsifying mutations (milestone U4b5 entry): `goto_geid` mapped to
+// `ct/goto-ticks`, or its geid dropped or replaced (the seek lands elsewhere),
+// the replay's reason dropped from the error, and, in ct-native-replay, a
+// step after a seek taken through the historical path again, a seek after
+// the end of the recording made without starting the debugserver again, and
+// a step after the end answered as a stop, all red here.
+//
+// No mocks: a real compiler, `ct-mcr record`, `session-manager` (daemon and
+// MCP server), `replay-server`, `ct-native-replay`, LLDB, `ct-mcr debugserver`
+// and Python.
+//
+// Prerequisites, each a failure when missing (`prereq_missing`): a C compiler
+// (`cc`, or `CC`), `ct-mcr` (`CODETRACER_CT_MCR_CMD`, else the sibling
+// `codetracer-native-recorder/ct_cli/ct_cli`, else `ct-mcr` on `PATH`),
+// `ct-native-replay` and `replay-server`.  Hermetic: the recorder, the daemon
+// and the MCP server run without any `CT_*_DEBUG_*` variable from the
+// caller's environment.  `ct-mcr record` refuses a host without CPUID
+// faulting (Multi-Core-Recorder.md §8.3), so on such a host this test fails
+// at the recording step and says why; replay needs no CPUID faulting.
+
+/// The span probe's source.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn span_goto_probe_source() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/span_goto_probe.c")
+}
+
+/// Locate `ct-mcr`, or report it missing through [`prereq_missing`].
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn find_ct_mcr() -> Option<PathBuf> {
+    if let Ok(cmd) = std::env::var("CODETRACER_CT_MCR_CMD")
+        && !cmd.is_empty()
+    {
+        return Some(PathBuf::from(cmd));
+    }
+    let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../codetracer-native-recorder/ct_cli/ct_cli");
+    if sibling.is_file() {
+        return Some(sibling.canonicalize().unwrap_or(sibling));
+    }
+    if let Ok(output) = std::process::Command::new("which").arg("ct-mcr").output()
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+    prereq_missing(&format!(
+        "ct-mcr was not found (CODETRACER_CT_MCR_CMD is unset, {} does not \
+         exist, and ct-mcr is not on PATH).  Build it with `just build-ct-mcr` \
+         in codetracer-native-recorder.",
+        sibling.display()
+    ));
+    None
+}
+
+/// The names of the `CT_*_DEBUG_*` variables in this process's environment:
+/// the recorder's and the replay's debug knobs, which a hermetic run removes.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn debug_knob_names() -> Vec<String> {
+    std::env::vars_os()
+        .map(|(key, _)| key.to_string_lossy().into_owned())
+        .filter(|key| key.starts_with("CT_") && key.contains("_DEBUG_"))
+        .collect()
+}
+
+/// A command whose environment carries no `CT_*_DEBUG_*` variable.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn hermetic_command(program: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    for key in debug_knob_names() {
+        command.env_remove(&key);
+    }
+    command
+}
+
+/// What the recorded run printed for one span.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug, Clone, Copy)]
+struct PrintedSpan {
+    end: u64,
+    value: i64,
+    line: i64,
+}
+
+/// The `span <i> start <s> end <e> value <v> line <l>` lines.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn parse_printed_spans(stdout: &str) -> Vec<PrintedSpan> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            if words.len() == 10 && words[0] == "span" && words[2] == "start" {
+                Some(PrintedSpan {
+                    end: words[5].parse().ok()?,
+                    value: words[7].parse().ok()?,
+                    line: words[9].parse().ok()?,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// A recording of the span probe and the facts the test reads from it.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct SpanProbeRecording {
+    /// `ct-mcr record`'s standard output (the program's lines among them).
+    stdout: String,
+    /// The whole recording.
+    trace: PathBuf,
+    /// The `--split` slices, in order.
+    slices: Vec<PathBuf>,
+}
+
+/// Build the probe and record it with `ct-mcr record --split` (hermetic).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn record_span_probe(
+    ct_mcr: &Path,
+    dir: &Path,
+    name: &str,
+    args: &[&str],
+) -> Result<SpanProbeRecording, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    let binary = dir.join(name);
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".to_owned());
+    // `-z now`: resolve every symbol at load time.  With lazy binding the
+    // dynamic linker's resolver saves the vector registers with XSAVEC,
+    // which the stage0 emulator does not execute, so the replay would stop
+    // (`E06`) at the first call through the PLT.
+    let compiled = std::process::Command::new(&cc)
+        .args([
+            "-O0",
+            "-g",
+            "-U_FORTIFY_SOURCE",
+            "-Wall",
+            "-Wl,-z,now",
+            "-o",
+        ])
+        .arg(&binary)
+        .arg(span_goto_probe_source())
+        .arg("-lpthread")
+        .output();
+    let compiled = match compiled {
+        Ok(output) => output,
+        Err(e) => {
+            prereq_missing(&format!("cannot run the C compiler {cc:?}: {e}"));
+            return Err(format!("no C compiler ({cc:?}): {e}"));
+        }
+    };
+    if !compiled.status.success() {
+        return Err(format!(
+            "compiling the span probe failed: {}",
+            String::from_utf8_lossy(&compiled.stderr)
+        ));
+    }
+    let trace = dir.join(format!("{name}.ct"));
+    let recorded = hermetic_command(ct_mcr)
+        .current_dir(dir)
+        // The licensing counter of this recording goes to a scratch
+        // directory, never the developer's own profile.
+        .env("XDG_DATA_HOME", dir.join("xdg-data"))
+        .args(["record", "--split", "-o"])
+        .arg(&trace)
+        .arg("--")
+        .arg(&binary)
+        .args(args)
+        .output()
+        .map_err(|e| format!("run {}: {e}", ct_mcr.display()))?;
+    let stdout = String::from_utf8_lossy(&recorded.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&recorded.stderr).into_owned();
+    if !recorded.status.success() || !stdout.contains("span 2 ") {
+        return Err(format!(
+            "ct-mcr record did not record the span probe (exit {:?}); recording needs \
+             a host with CPUID faulting (Multi-Core-Recorder.md §8.3).\nstdout:\n{stdout}\n\
+             stderr:\n{stderr}",
+            recorded.status.code()
+        ));
+    }
+    // `split: <n> slices -> <dir>`
+    let slice_dir = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("split: "))
+        .and_then(|rest| rest.split_once(" -> "))
+        .map(|(_, dir)| PathBuf::from(dir.trim()))
+        .ok_or_else(|| format!("ct-mcr record printed no `split:` line:\n{stdout}"))?;
+    let mut slices: Vec<PathBuf> = std::fs::read_dir(&slice_dir)
+        .map_err(|e| format!("read {}: {e}", slice_dir.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "ct"))
+        .collect();
+    slices.sort();
+    if slices.len() < 2 {
+        return Err(format!(
+            "expected several slices in {}",
+            slice_dir.display()
+        ));
+    }
+    Ok(SpanProbeRecording {
+        stdout,
+        trace,
+        slices,
+    })
+}
+
+/// The geids `ct-mcr dump-events` lists for events of `event_type` in
+/// `trace`, at most `limit` of them (`[geid=<n> ...]` lines).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn dump_event_geids(
+    ct_mcr: &Path,
+    trace: &Path,
+    event_type: Option<&str>,
+    limit: usize,
+) -> Result<Vec<u64>, String> {
+    let mut command = hermetic_command(ct_mcr);
+    command.arg("dump-events").arg(trace);
+    if let Some(event_type) = event_type {
+        command.args(["--type", event_type]);
+    }
+    let output = command
+        .args(["--limit", &limit.to_string()])
+        .output()
+        .map_err(|e| format!("run ct-mcr dump-events: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        return Err(format!(
+            "ct-mcr dump-events {} failed: {stdout} {}",
+            trace.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(stdout
+        .lines()
+        .filter_map(|line| {
+            let rest = line.split_once("[geid=")?.1;
+            rest.split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()
+        })
+        .collect())
+}
+
+/// Start a daemon over the real replay server and an MCP server in
+/// `mcp_cwd`, both without any `CT_*_DEBUG_*` variable: the replay of a
+/// native recording needs none.  Returns `(mcp, daemon, socket)`.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+async fn start_hermetic_mcp_server(
+    test_dir: &Path,
+    log_path: &Path,
+    db_backend_path: &Path,
+    extra_env: &[(&str, &str)],
+    mcp_cwd: &Path,
+) -> Result<(tokio::process::Child, tokio::process::Child, PathBuf), String> {
+    let ct_dir = daemon_paths_in(test_dir);
+    std::fs::create_dir_all(&ct_dir).map_err(|e| format!("create ct dir: {e}"))?;
+    let socket_path = ct_dir.join("daemon.sock");
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(ct_dir.join("daemon.pid"));
+    let knobs = debug_knob_names();
+    log_line(
+        log_path,
+        &format!("hermetic daemon and MCP server: removing {knobs:?}"),
+    );
+
+    let mut daemon = Command::new(binary_path());
+    daemon
+        .arg("daemon")
+        .arg("start")
+        .env("TMPDIR", test_dir)
+        .env("CODETRACER_DAEMON_SOCKET", &socket_path)
+        .env("CODETRACER_REPLAY_SERVER_CMD", db_backend_path)
+        .envs(replay_test_env())
+        .envs(extra_env.iter().copied())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in &knobs {
+        daemon.env_remove(key);
+    }
+    let mut daemon = daemon.spawn().map_err(|e| format!("spawn daemon: {e}"))?;
+    if let Err(e) = wait_for_socket(&socket_path, Duration::from_secs(10)).await {
+        let _ = daemon.kill().await;
+        return Err(e);
+    }
+
+    let mut mcp = Command::new(binary_path());
+    mcp.arg("trace")
+        .arg("mcp")
+        // The test's own recordings: see `start_mcp_server_with_real_backend`.
+        .arg("--allow-host-source-reads")
+        .current_dir(mcp_cwd)
+        .env("TMPDIR", test_dir)
+        .env("CODETRACER_DAEMON_SOCK", &socket_path)
+        .envs(replay_test_env())
+        .envs(extra_env.iter().copied())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in &knobs {
+        mcp.env_remove(key);
+    }
+    match mcp.spawn() {
+        Ok(mcp) => Ok((mcp, daemon, socket_path)),
+        Err(e) => {
+            let _ = daemon.kill().await;
+            Err(format!("spawn MCP server: {e}"))
+        }
+    }
+}
+
+/// The script the agent runs: each step prints one `STEP <json>` line.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn goto_geid_script(spans: &[PrintedSpan], beyond: u64, release: u64, probe_line: i64) -> String {
+    format!(
+        r#"import json
+
+def report(step, **fields):
+    print("STEP " + json.dumps(dict(step=step, **fields)), flush=True)
+
+def failure(step, error, **fields):
+    report(step, error=type(error).__name__, message=str(error), **fields)
+
+def at(step, geid):
+    try:
+        loc = trace.goto_geid(geid)
+    except Exception as error:
+        failure(step, error)
+        return
+    values = {{v.name: v.value for v in trace.locals()}}
+    report(step, path=loc.path, line=loc.line, value=values.get("value"),
+           current=trace.location.line)
+
+at("span2", {g2})
+at("span1", {g1})
+at("span3", {g3})
+at("beyond", {beyond})
+at("release", {release})
+for bad in (0, -1, True, "12", None):
+    try:
+        trace.goto_geid(bad)
+        report("invalid", arg=repr(bad), error=None)
+    except Exception as error:
+        failure("invalid", error, arg=repr(bad))
+at("again", {g1})
+
+def where(step):
+    loc = trace.location
+    values = {{v.name: v.value for v in trace.locals()}}
+    report(step, path=loc.path, line=loc.line, value=values.get("value"),
+           end_line=values.get("end_line"), i=values.get("i"))
+
+def move(step, action):
+    try:
+        action()
+    except Exception as error:
+        failure(step, error)
+        return
+    where(step)
+
+move("next1", trace.step_over)
+move("next2", trace.step_over)
+try:
+    trace.add_breakpoint(trace.location.path, {probe_line})
+    move("continue", trace.continue_forward)
+except Exception as error:
+    failure("continue", error)
+move("back", trace.step_back)
+at("span3again", {g3})
+move("next3", trace.step_over)
+move("toend", trace.continue_forward)
+move("afterend", trace.step_over)
+at("span2again", {g2})
+move("next4", trace.step_over)
+"#,
+        g1 = spans[0].end,
+        g2 = spans[1].end,
+        g3 = spans[2].end,
+    )
+}
+
+/// The `STEP` lines of a script's output, in order.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn script_steps(text: &str) -> Vec<Value> {
+    text.lines()
+        .filter_map(|line| line.split_once("STEP ").map(|(_, json)| json))
+        .filter_map(|json| serde_json::from_str(json).ok())
+        .collect()
+}
+
+/// One `exec_script` call; returns `(is_error, text)`.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+async fn mcp_exec_script(
+    stdin: &mut tokio::process::ChildStdin,
+    reader: &mut BufReader<tokio::process::ChildStdout>,
+    id: i64,
+    trace_path: &Path,
+    script: &str,
+    log_path: &Path,
+) -> Result<(bool, String), String> {
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/call",
+        "params": {
+            "name": "exec_script",
+            "arguments": {
+                "trace_path": trace_path.to_string_lossy(),
+                "script": script,
+                "timeout_seconds": 300
+            }
+        }
+    });
+    mcp_send(stdin, &req).await?;
+    let resp = mcp_read(reader, Duration::from_secs(400), log_path).await?;
+    log_line(log_path, &format!("exec_script {id} response: {resp}"));
+    if resp["id"] != id {
+        return Err(format!("response to another request: {resp}"));
+    }
+    let text = resp["result"]["content"][0]["text"]
+        .as_str()
+        .ok_or_else(|| format!("no text in {resp}"))?
+        .to_owned();
+    Ok((resp["result"]["isError"] == Value::Bool(true), text))
+}
+
+/// The fixture's lines the steps after a seek stop on (read from its source).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug, Clone, Copy)]
+struct StepLines {
+    /// The `printf` after the end call: the next line a step reaches.
+    printf: i64,
+    /// The `fflush` after it: a step over the `printf` call.
+    fflush: i64,
+    /// The loop's `probe_step` call: the breakpoint of the continue.
+    probe: i64,
+}
+
+/// The checks of the `goto_geid` script's steps against the recorded run.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn check_goto_geid_steps(
+    steps: &[Value],
+    spans: &[PrintedSpan],
+    beyond: u64,
+    release: u64,
+    lines: StepLines,
+) -> Result<(), String> {
+    let step = |name: &str, nth: usize| -> Result<&Value, String> {
+        steps
+            .iter()
+            .filter(|s| s["step"] == name)
+            .nth(nth)
+            .ok_or_else(|| format!("the script reported no `{name}` step #{nth}: {steps:?}"))
+    };
+    let at_span = |name: &str, index: usize| -> Result<(), String> {
+        let s = step(name, 0)?;
+        let span = spans[index];
+        let path = s["path"].as_str().unwrap_or("");
+        if !path.ends_with("span_goto_probe.c") || s["line"].as_i64() != Some(span.line) {
+            return Err(format!(
+                "`{name}`: goto_geid({}) should land on span_goto_probe.c:{} (span {}'s end \
+                 call), got {s}",
+                span.end,
+                span.line,
+                index + 1
+            ));
+        }
+        if s["current"].as_i64() != Some(span.line) {
+            return Err(format!(
+                "`{name}`: trace.location disagrees with the result: {s}"
+            ));
+        }
+        if s["value"].as_str() != Some(span.value.to_string().as_str()) {
+            return Err(format!(
+                "`{name}`: the local `value` should be {} (printed inside span {}), got {s}",
+                span.value,
+                index + 1
+            ));
+        }
+        Ok(())
+    };
+    at_span("span2", 1)?;
+    at_span("span1", 0)?;
+    at_span("span3", 2)?;
+    at_span("again", 0)?;
+
+    let refused = |name: &str, code: &str, reason: &str| -> Result<(), String> {
+        let s = step(name, 0)?;
+        let message = s["message"].as_str().unwrap_or("");
+        if s["error"] != "NavigationError" || !message.contains(code) || !message.contains(reason) {
+            return Err(format!(
+                "`{name}` should raise NavigationError naming {code} and {reason:?}, got {s}"
+            ));
+        }
+        Ok(())
+    };
+    refused("beyond", "E02", &format!("geid {beyond}"))?;
+    refused("release", "E09", "evSyncLockRelease")?;
+    if !step("release", 0)?["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains(&format!("geid {release}"))
+    {
+        return Err(format!(
+            "the E09 refusal names the geid {release}: {steps:?}"
+        ));
+    }
+    let invalid: Vec<&Value> = steps.iter().filter(|s| s["step"] == "invalid").collect();
+    if invalid.len() != 5 || invalid.iter().any(|s| s["error"] != "ValueError") {
+        return Err(format!(
+            "goto_geid(0 / -1 / True / \"12\" / None) should each raise ValueError: {invalid:?}"
+        ));
+    }
+
+    // Steps from the restored position (after `again`, span 1's end).
+    let moved = |name: &str, line: i64, fields: &[(&str, String)]| -> Result<(), String> {
+        let s = step(name, 0)?;
+        let path = s["path"].as_str().unwrap_or("");
+        if !path.ends_with("span_goto_probe.c") || s["line"].as_i64() != Some(line) {
+            return Err(format!(
+                "`{name}` should stop on span_goto_probe.c:{line}, got {s}"
+            ));
+        }
+        for (field, expected) in fields {
+            if s[*field].as_str() != Some(expected.as_str()) {
+                return Err(format!("`{name}`: `{field}` should be {expected}, got {s}"));
+            }
+        }
+        Ok(())
+    };
+    moved(
+        "next1",
+        lines.printf,
+        &[
+            ("end_line", spans[0].line.to_string()),
+            ("value", spans[0].value.to_string()),
+        ],
+    )?;
+    moved(
+        "next2",
+        lines.fflush,
+        &[("value", spans[0].value.to_string())],
+    )?;
+    moved("continue", lines.probe, &[("i", "1".to_string())])?;
+    let back = step("back", 0)?;
+    if back["error"] != "NavigationError" || !back["message"].as_str().unwrap_or("").contains("E0C")
+    {
+        return Err(format!(
+            "`step_back` should raise NavigationError naming E0C, got {back}"
+        ));
+    }
+    at_span("span3again", 2)?;
+    moved(
+        "next3",
+        lines.printf,
+        &[
+            ("end_line", spans[2].line.to_string()),
+            ("value", spans[2].value.to_string()),
+        ],
+    )?;
+    // From span 3's `printf` no breakpoint is ahead: the continue runs to
+    // the end of the recording.  A step after it is refused naming the end,
+    // and a seek still positions the replay, which executes from there.
+    let toend = step("toend", 0)?;
+    if toend.get("error").is_some() {
+        return Err(format!(
+            "`continue_forward` to the end of the recording should return, got {toend}"
+        ));
+    }
+    let afterend = step("afterend", 0)?;
+    if afterend["error"] != "NavigationError"
+        || !afterend["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("end of the recording")
+    {
+        return Err(format!(
+            "`step_over` after the end of the recording should raise NavigationError naming \
+             the end, got {afterend}"
+        ));
+    }
+    at_span("span2again", 1)?;
+    moved(
+        "next4",
+        lines.printf,
+        &[
+            ("end_line", spans[1].line.to_string()),
+            ("value", spans[1].value.to_string()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// HS-M2 U4b5: an agent positions a native recording's first slice at its
+/// span markers with `trace.goto_geid` through the MCP server (header above).
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[tokio::test]
+async fn mcp_exec_script_goto_geid_native_recording() {
+    let (test_dir, log_path) = setup_test_dir("mcp_exec_script_goto_geid_native_recording");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let Some(db_backend) = find_db_backend() else {
+            return Err("replay-server not found".to_string());
+        };
+        let Some(ct_native_replay) = find_ct_native_replay() else {
+            return Err("ct-native-replay not found".to_string());
+        };
+        let Some(ct_mcr) = find_ct_mcr() else {
+            return Err("ct-mcr not found".to_string());
+        };
+
+        // --- The recording and its oracles -------------------------------
+        let recording = record_span_probe(&ct_mcr, &test_dir.join("rec"), "span_goto_probe", &[])?;
+        log_line(&log_path, &format!("recorded:\n{}", recording.stdout));
+        let spans = parse_printed_spans(&recording.stdout);
+        if spans.len() != 3 {
+            return Err(format!("the probe printed three spans: {spans:?}"));
+        }
+        let source = std::fs::read_to_string(span_goto_probe_source())
+            .map_err(|e| format!("read the fixture: {e}"))?;
+        let line_of = |needle: &str| {
+            source
+                .lines()
+                .position(|line| line.contains(needle))
+                .map(|index| index as i64 + 1)
+        };
+        let end_call_line = line_of("RECORDER_CALL(end, 11, &c); end_line = __LINE__;");
+        if spans.iter().any(|span| Some(span.line) != end_call_line) {
+            return Err(format!(
+                "every printed line is the fixture's end call ({end_call_line:?}): {spans:?}"
+            ));
+        }
+        let step_lines = match (
+            line_of("printf(\"span %d start"),
+            line_of("fflush(stdout);"),
+            line_of("int value = probe_step(i);"),
+        ) {
+            (Some(printf), Some(fflush), Some(probe)) => StepLines {
+                printf,
+                fflush,
+                probe,
+            },
+            other => return Err(format!("the fixture's loop lines: {other:?}")),
+        };
+        if spans[0].value == spans[1].value || spans[1].value == spans[2].value {
+            return Err(format!("the printed values tell the spans apart: {spans:?}"));
+        }
+        let slice0 = recording.slices[0].clone();
+        let ends_in_slice0 =
+            dump_event_geids(&ct_mcr, &slice0, Some("evTraceContextSpanEnd"), 10)?;
+        let printed_ends: Vec<u64> = spans.iter().map(|span| span.end).collect();
+        if ends_in_slice0 != printed_ends {
+            return Err(format!(
+                "slice 0 holds the three span end markers the program printed: \
+                 dump-events {ends_in_slice0:?}, printed {printed_ends:?}"
+            ));
+        }
+        let release = *dump_event_geids(&ct_mcr, &slice0, Some("evSyncLockRelease"), 1)?
+            .first()
+            .ok_or("slice 0 holds a lock release")?;
+        let last_slice = recording.slices.last().expect("several slices");
+        let beyond = *dump_event_geids(&ct_mcr, last_slice, None, 1)?
+            .first()
+            .ok_or("the last slice holds events")?;
+        if beyond <= spans[2].end {
+            return Err(format!("the last slice starts after the spans: {beyond}"));
+        }
+        log_line(
+            &log_path,
+            &format!("spans {spans:?}; lock release {release}; last slice from {beyond}"),
+        );
+
+        // A two-thread recording of the same program (negative control).
+        let threaded = record_span_probe(
+            &ct_mcr,
+            &test_dir.join("rec-threads"),
+            "span_goto_probe_threads",
+            &["threads"],
+        )?;
+        let threaded_spans = parse_printed_spans(&threaded.stdout);
+        if threaded_spans.len() != 3 || !threaded.stdout.contains("threads: 2") {
+            return Err(format!(
+                "the threaded probe recorded two threads and three spans:\n{}",
+                threaded.stdout
+            ));
+        }
+
+        // --- The agent's view: MCP exec_script on a relative path ---------
+        let relative = |path: &Path| -> Result<PathBuf, String> {
+            path.strip_prefix(&test_dir)
+                .map(Path::to_path_buf)
+                .map_err(|e| format!("{} is not under the test dir: {e}", path.display()))
+        };
+        let slice0_relative = relative(&slice0)?;
+        let threaded_relative = relative(&threaded.trace)?;
+        let ct_native_replay = ct_native_replay.to_string_lossy().into_owned();
+        let ct_mcr = ct_mcr.to_string_lossy().into_owned();
+        // The replay's free-tier daily replay quota is bypassed the way
+        // db-backend's harness does it (`CODETRACER_IN_UI_TEST`), and its
+        // counter, index and sockets go to a scratch home, never the
+        // developer's own profile.
+        let scratch_home = test_dir.join("ct-home").to_string_lossy().into_owned();
+        let scratch_data = test_dir.join("xdg-data").to_string_lossy().into_owned();
+        let (mut mcp, mut daemon, socket_path) = start_hermetic_mcp_server(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", ct_native_replay.as_str()),
+                ("CODETRACER_CT_MCR_CMD", ct_mcr.as_str()),
+                ("CODETRACER_IN_UI_TEST", "1"),
+                ("CODETRACER_HOME", scratch_home.as_str()),
+                ("XDG_DATA_HOME", scratch_data.as_str()),
+            ],
+            &test_dir,
+        )
+        .await?;
+        let mut stdin = mcp.stdin.take().expect("no stdin");
+        let stdout = mcp.stdout.take().expect("no stdout");
+        let mut reader = BufReader::new(stdout);
+
+        // The exchange returns a Result so that both servers are shut down
+        // whatever the outcome.
+        let exchange: Result<(), String> = async {
+            mcp_initialize(&mut stdin, &mut reader, &log_path).await?;
+            let script = goto_geid_script(&spans, beyond, release, step_lines.probe);
+            let (is_error, text) = mcp_exec_script(
+                &mut stdin,
+                &mut reader,
+                15001,
+                &slice0_relative,
+                &script,
+                &log_path,
+            )
+            .await?;
+            if is_error {
+                return Err(format!("exec_script failed: {text}"));
+            }
+            let steps = script_steps(&text);
+            log_line(&log_path, &format!("steps: {steps:?}"));
+            check_goto_geid_steps(&steps, &spans, beyond, release, step_lines)?;
+
+            // Negative control: the two-thread recording is refused, and the
+            // agent sees why.
+            let threaded_script = format!(
+                "try:\n    trace.goto_geid({})\n    print('STEP {{\"step\": \"threads\", \"error\": null}}')\n\
+                 except Exception as error:\n    print('REFUSED', type(error).__name__, error)\n",
+                threaded_spans[1].end
+            );
+            let (_, text) = mcp_exec_script(
+                &mut stdin,
+                &mut reader,
+                15002,
+                &threaded_relative,
+                &threaded_script,
+                &log_path,
+            )
+            .await?;
+            if !(text.contains("XMR-B1") && text.contains("2 threads")) {
+                return Err(format!(
+                    "the two-thread recording's refusal names 2 threads and XMR-B1: {text}"
+                ));
+            }
+            Ok(())
+        }
+        .await;
+
+        drop(stdin);
+        let _ = timeout(Duration::from_secs(2), mcp.wait()).await;
+        let _ = mcp.kill().await;
+        match connect_to_daemon_socket(&socket_path).await {
+            Ok(mut client) => shutdown_daemon(&mut client, &mut daemon).await,
+            Err(_) => {
+                let _ = daemon.kill().await;
+            }
+        }
+        exchange
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+    report(
+        "mcp_exec_script_goto_geid_native_recording",
         &log_path,
         success,
     );
@@ -12189,8 +13540,20 @@ async fn test_real_rr_mcp_error_actionable() {
 
         // Start MCP server backed by real daemon + db-backend.
         // No ct-native-replay or recording needed for error-path tests.
-        let (mut mcp, mut daemon, socket_path) =
-            start_mcp_server_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+        // The daemon is given this checkout's Python API, as the other
+        // exec_script tests give it: the error this test asserts on is the
+        // missing trace's, and left to its own lookup a release daemon built
+        // outside the checkout fails earlier, on importing the package
+        // (`test_real_custom_mcp_exec_script_relative_trace_path` covers
+        // that lookup).
+        let api_dir_str = python_api_dir().to_string_lossy().to_string();
+        let (mut mcp, mut daemon, socket_path) = start_mcp_server_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[("CODETRACER_PYTHON_API_PATH", &api_dir_str)],
+        )
+        .await;
 
         let mut stdin = mcp.stdin.take().expect("no stdin");
         let stdout = mcp.stdout.take().expect("no stdout");
@@ -12232,15 +13595,21 @@ async fn test_real_rr_mcp_error_actionable() {
             .expect("should have error text");
         log_line(&log_path, &format!("error text: {text}"));
 
-        // Verify the error message is actionable: it should mention the
-        // failure and provide some guidance.
+        // Verify the error message is actionable: it names the failure and
+        // the path that caused it.  The failure is named by the exception
+        // the Python API documents for a trace that does not exist
+        // (`open_trace` raises `TraceNotFoundError`), which is also what
+        // the MCP error format shows ("Error: TraceNotFoundError: ... at
+        // <path>").  Matching the class rather than words of the message
+        // keeps the check off prose the API is free to reword.
         assert!(
-            text.contains("not found")
-                || text.contains("failed")
-                || text.contains("error")
-                || text.contains("Failed")
-                || text.contains("Cannot"),
-            "M11-RR-4: error text should indicate the trace was not found or failed, got: {text}"
+            text.contains("TraceNotFoundError"),
+            "M11-RR-4: error text should name TraceNotFoundError, got: {text}"
+        );
+        let nonexistent_str = nonexistent_path.to_string_lossy();
+        assert!(
+            text.contains(nonexistent_str.as_ref()),
+            "M11-RR-4: error text should name the missing path {nonexistent_str}, got: {text}"
         );
 
         // Also verify enhanced errors via resources/read for an unloaded
@@ -14875,6 +16244,9 @@ async fn run_cli_command(
     let mut cmd = Command::new(&bin);
     cmd.args(args)
         .env("TMPDIR", test_dir)
+        // The CLI can start its own daemon and replay; same environment as
+        // the pre-started daemon (`replay_test_env`).
+        .envs(replay_test_env())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -15390,11 +16762,7 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path as it appears in the trace.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon with Python API path.
@@ -15413,12 +16781,13 @@ async fn test_cli_trace_query_rr_breakpoint_and_step() {
 
         let trace_path_str = trace_dir.to_string_lossy().to_string();
 
-        // Python script: set breakpoint at line 20 (println in main),
-        // continue to it, inspect locals, then step over.
-        // Line 20 is `println!("Result: {}", result);` in rust_flow_test.rs.
+        // Python script: set a breakpoint on main's
+        // `println!("Result: {}", result);`, continue to it, inspect
+        // locals, then step over.
+        let bp_line = rust_flow_test_line(RUST_FLOW_PRINT_RESULT)?;
         let script = format!(
             "\
-bp_id = trace.add_breakpoint('{source_path_str}', 20)
+bp_id = trace.add_breakpoint('{source_path_str}', {bp_line})
 print(f'Breakpoint set: id={{bp_id}}')
 trace.continue_forward()
 loc = trace.location
@@ -15495,6 +16864,141 @@ print('DONE')"
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+/// The Python trace API raises `StopIteration` when navigation runs off the
+/// end of an RR recording, through `trace query -c` (the same daemon and
+/// Python runtime as the MCP server's `exec_script`).  A step over from the
+/// end raises it again from the same position, and `step_back` leaves it.
+///
+/// Spec: codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+/// "Navigation at the end of a recording", and the `exec_script` tool
+/// description ("All navigation methods raise StopIteration at trace
+/// boundaries").  Regression test for codetracer-pm issue
+/// `2026-10-22-rr-step-over-from-the-last-frame-before-exit-never-answers.md`.
+#[tokio::test]
+async fn test_cli_trace_query_rr_step_past_end_raises_stop_iteration() {
+    let (test_dir, log_path) = setup_test_dir("cli_trace_query_rr_step_past_end");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let (ct_native_replay, db_backend) = match check_rr_prerequisites() {
+            Ok(paths) => paths,
+            Err(reason) => {
+                log_line(&log_path, &format!("SKIP: {reason}"));
+                println!(
+                    "test_cli_trace_query_rr_step_past_end_raises_stop_iteration: SKIP ({reason})"
+                );
+                return Ok(());
+            }
+        };
+
+        let api_dir = python_api_dir();
+        if !api_dir.exists() {
+            return Err(format!(
+                "python-api directory does not exist: {}",
+                api_dir.display()
+            ));
+        }
+
+        let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
+
+        let ct_native_replay_str = ct_native_replay.to_string_lossy().to_string();
+        let api_dir_str = api_dir.to_string_lossy().to_string();
+        let (mut daemon, socket_path) = start_daemon_with_real_backend(
+            &test_dir,
+            &log_path,
+            &db_backend,
+            &[
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+        )
+        .await;
+
+        let trace_path_str = trace_dir.to_string_lossy().to_string();
+
+        // About 25 steps over reach the end (measured 2026-10-26); 80 is
+        // the budget.  Any error other than StopIteration propagates and
+        // fails the query.  `step_back` is checked only for moving
+        // backwards: where it lands is the subject of codetracer-pm issue
+        // `2026-10-26-rr-reverse-next-from-a-frame-without-line-info-reports-ticks-0.md`.
+        let script = "\
+steps = 0
+try:
+    for _ in range(80):
+        trace.step_over()
+        steps += 1
+    print('NO END AFTER 80 STEPS')
+except StopIteration:
+    end = (trace.location.path, trace.location.line, trace.ticks)
+    print(f'END after {steps} steps at {end}')
+try:
+    trace.step_over()
+    print('A STEP FROM THE END RETURNED')
+except StopIteration:
+    again = (trace.location.path, trace.location.line, trace.ticks)
+    print('STILL AT THE END' if again == end else f'MOVED TO {again}')
+trace.step_back()
+back = trace.ticks
+print(f'BACK BEFORE THE END at {trace.location.line} ticks {back}' if back < end[2]
+      else f'BACK DID NOT MOVE BACKWARDS: ticks {back}, end {end[2]}')
+print('DONE')";
+
+        let (stdout, stderr, exit_code) = run_cli_command(
+            &test_dir,
+            &["trace", "query", &trace_path_str, "-c", script],
+            &[
+                (
+                    "CODETRACER_REPLAY_SERVER_CMD",
+                    db_backend.to_str().unwrap_or(""),
+                ),
+                ("CODETRACER_CT_NATIVE_REPLAY_CMD", &ct_native_replay_str),
+                ("CODETRACER_PYTHON_API_PATH", &api_dir_str),
+            ],
+            120,
+            &log_path,
+        )
+        .await?;
+
+        if exit_code != 0 {
+            return Err(format!(
+                "trace query exited with code {exit_code}\nstdout: {stdout}\nstderr: {stderr}"
+            ));
+        }
+        for expected in [
+            "END after ",
+            "STILL AT THE END",
+            "BACK BEFORE THE END",
+            "DONE",
+        ] {
+            if !stdout.contains(expected) {
+                return Err(format!(
+                    "stdout should contain {expected:?}\nstdout: {stdout}\nstderr: {stderr}"
+                ));
+            }
+        }
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect for shutdown: {e}"))?;
+        shutdown_daemon(&mut client, &mut daemon).await;
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_cli_trace_query_rr_step_past_end_raises_stop_iteration",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
 /// Tests the Python trace API's `flow()` method through `trace query -c`.
 ///
 /// Exercises `trace.flow(path, line, mode="call")` and verifies that the
@@ -15528,11 +17032,7 @@ async fn test_cli_trace_query_rr_flow_api() {
         let trace_dir = create_rr_recording(&test_dir, &ct_native_replay, &log_path)?;
 
         // Determine the source path.
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source_path = manifest_dir
-            .parent()
-            .map(|p| p.join("db-backend/test-programs/rust/rust_flow_test.rs"))
-            .ok_or("cannot determine source path")?;
+        let source_path = rust_flow_test_source_path()?;
         let source_path_str = source_path.to_string_lossy().to_string();
 
         // Start daemon with Python API path.
@@ -15734,7 +17234,18 @@ restored_line = trace.location.line
 restored_path = trace.location.path
 print(f'RESTORED: ticks={trace.ticks} line={restored_line}')
 print(f'MATCH: {restored_line == saved_line}')
-print('GOTO_TICKS_OK')";
+print('GOTO_TICKS_OK')
+
+# A tick count the recording never reaches is refused, and the replay stays
+# usable where it was.
+from codetracer.exceptions import NavigationError
+try:
+    trace.goto_ticks(10**12)
+    print('REFUSED: no')
+except NavigationError:
+    print(f'REFUSED: yes ticks={trace.ticks}')
+trace.step_over()
+print(f'STEP_AFTER_REFUSAL: line={trace.location.line}')";
 
         let (stdout, stderr, exit_code) = run_cli_command(
             &test_dir,
@@ -15769,6 +17280,40 @@ print('GOTO_TICKS_OK')";
         assert!(
             stdout.contains("RESTORED:"),
             "stdout should contain 'RESTORED:' marker, got:\n{stdout}"
+        );
+
+        // `goto_ticks` is a tick seek: afterwards the replay's tick count is
+        // the one asked for. The line is not compared: rr ticks count
+        // conditional branches, so several consecutive stops share one tick
+        // value and the seek lands on the earliest point that has it (see
+        // `RecreatorReplaySession::jump_to`). A run-to-entry, which this
+        // used to be, puts the replay at the entry's tick count instead.
+        let ticks_after = |marker: &str| -> Option<i64> {
+            stdout
+                .lines()
+                .find_map(|line| line.strip_prefix(marker))
+                .and_then(|rest| rest.trim().strip_prefix("ticks="))
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|ticks| ticks.parse().ok())
+        };
+        let saved_ticks = ticks_after("SAVED:");
+        let restored_ticks = ticks_after("RESTORED:");
+        assert!(
+            saved_ticks.is_some() && saved_ticks == restored_ticks,
+            "goto_ticks must restore the saved tick count (saved {saved_ticks:?}, restored \
+             {restored_ticks:?}), got:\n{stdout}"
+        );
+
+        // A refused seek is a NavigationError that leaves the tick count
+        // where it was, and the next step answers from there.
+        assert_eq!(
+            ticks_after("REFUSED: yes"),
+            restored_ticks,
+            "goto_ticks past the end must raise NavigationError and keep the position, got:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("STEP_AFTER_REFUSAL: line="),
+            "step_over after a refused goto_ticks must answer, got:\n{stdout}"
         );
 
         // Clean up.
@@ -16196,5 +17741,331 @@ fn every_skip_site_is_routed_through_the_prerequisite_gate() {
         "these prerequisite probes no longer refuse a missing prerequisite -- \
          they can hand back `None`/`Err` silently, which puts every test that \
          calls them back to reporting PASSED while doing nothing: {unenforced:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// M5-Custom-1c: `ct/py-add-watchpoint` must not answer for the backend
+// ---------------------------------------------------------------------------
+
+/// Sends `ct/py-add-watchpoint` and waits for the response, skipping any
+/// interleaved events.  Returns the full response JSON.
+async fn send_py_add_watchpoint(
+    client: &mut UnixStream,
+    seq: i64,
+    trace_path: &Path,
+    expression: &str,
+    log_path: &Path,
+) -> Result<Value, String> {
+    let req = json!({
+        "type": "request",
+        "command": "ct/py-add-watchpoint",
+        "seq": seq,
+        "arguments": {
+            "tracePath": trace_path.to_string_lossy(),
+            "expression": expression,
+        }
+    });
+
+    log_line(
+        log_path,
+        &format!("-> ct/py-add-watchpoint seq={seq} expression={expression}"),
+    );
+
+    client
+        .write_all(&dap_encode(&req))
+        .await
+        .map_err(|e| format!("write ct/py-add-watchpoint: {e}"))?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timeout waiting for ct/py-add-watchpoint response".to_string());
+        }
+
+        let msg = timeout(remaining, dap_read(client))
+            .await
+            .map_err(|_| "timeout waiting for ct/py-add-watchpoint response".to_string())?
+            .map_err(|e| format!("read ct/py-add-watchpoint: {e}"))?;
+
+        if msg.get("type").and_then(Value::as_str).unwrap_or("") == "event" {
+            log_line(log_path, &format!("add-watchpoint: skipped event: {msg}"));
+            continue;
+        }
+
+        log_line(
+            log_path,
+            &format!("<- ct/py-add-watchpoint response: {msg}"),
+        );
+        return Ok(msg);
+    }
+}
+
+/// M5-Custom-1c. `ct/py-add-watchpoint` MUST report the REAL backend's own
+/// verdict -- both when it refuses and when it accepts.
+///
+/// Runs against a real Ruby recording and a real `db-backend`, because the
+/// whole history of this surface is a story about test doubles.
+///
+/// ## History
+///
+/// The replay backend used to have NO `setDataBreakpoints` arm in its DAP
+/// dispatch (`src/db-backend/src/dap_server.rs::handle_request`).  The
+/// command fell through to `dap_command_to_step_action`, which failed, and
+/// the backend answered the free-text
+///
+///   success: false,
+///   message: "command setDataBreakpoints not supported here"
+///
+/// -- the `_` arm meant for commands nobody had thought about.  On top of
+/// that the daemon sent the request fire-and-forget and answered the Python
+/// client `success: true` with a positive `watchpointId` BEFORE the backend
+/// had seen it, swallowing the refusal on the `FireAndForget` arm of the
+/// response router.  `Trace.add_watchpoint()` returned an id for a
+/// watchpoint no component anywhere had accepted, and the following
+/// `continue_forward()` ran to the end of the trace and raised
+/// `StopIteration` with nothing to explain it.
+///
+/// No test could catch it, because the ONLY implementation of
+/// `setDataBreakpoints` in the tree was the daemon's own mock DAP backend,
+/// which answered `verified: true` unconditionally -- a test double more
+/// capable than the component it stood in for.  Which is why this test
+/// insists on the real backend, and why the earlier version of it asserted
+/// that watchpoints FAIL: at the time, that was the truth.
+///
+/// ## What it asserts now
+///
+/// The backend implements value-change watchpoints (see the
+/// `ct-data-breakpoints` crate), so this test pins both directions against
+/// `RUBY_TEST_PROGRAM`, whose locals are `a`, `result`, `x`, `y`:
+///
+///   * `counter` -- a name this recording never captured -- is REFUSED, and
+///     refused by NAME from the closed set (`variableNotInTrace`), not by
+///     the free-text dispatch fallthrough.  An empty reason here means the
+///     command stopped being dispatched again.
+///   * `x` -- a name it DID capture -- is ACCEPTED, with a positive id.
+///     This assertion is the feature: before the backend had an arm for
+///     `setDataBreakpoints`, no watchpoint could ever be accepted.
+///
+/// The second half also covers the rollback: a watchpoint the backend
+/// refused must be dropped from the daemon's table, or it would be re-sent
+/// with this add and drag its failure along.
+#[tokio::test]
+async fn test_real_py_add_watchpoint_reports_the_backends_own_verdict() {
+    let (test_dir, log_path) = setup_test_dir("real_py_add_watchpoint_verdict");
+    let mut success = false;
+
+    let result: Result<(), String> = async {
+        let db_backend = match find_db_backend() {
+            Some(path) => path,
+            None => {
+                log_line(&log_path, "SKIP: db-backend not found");
+                println!(
+                    "test_real_py_add_watchpoint_reports_the_backends_own_verdict: \
+                     SKIP (db-backend not found)"
+                );
+                return Ok(());
+            }
+        };
+        let recorder = match find_ruby_recorder() {
+            Some(p) => p,
+            None => {
+                log_line(&log_path, "SKIP: ruby recorder not found");
+                println!(
+                    "test_real_py_add_watchpoint_reports_the_backends_own_verdict: \
+                     SKIP (ruby recorder not found)"
+                );
+                return Ok(());
+            }
+        };
+
+        let trace_dir = create_ruby_recording(&test_dir, &recorder, &log_path)?;
+
+        let (mut daemon, socket_path) =
+            start_daemon_with_real_backend(&test_dir, &log_path, &db_backend, &[]).await;
+
+        let mut client = connect_to_daemon_socket(&socket_path)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        sleep(Duration::from_millis(200)).await;
+
+        let open_resp = open_trace(&mut client, 26_000, &trace_dir, &log_path).await?;
+        assert_eq!(
+            open_resp.get("success").and_then(Value::as_bool),
+            Some(true),
+            "ct/open-trace should succeed for the ruby recording, got: {open_resp}"
+        );
+
+        drain_events(&mut client, &log_path).await;
+
+        // `counter` is not a variable of RUBY_TEST_PROGRAM (its locals
+        // are `a`, `result`, `x`, `y`), so the backend must refuse it
+        // -- and must refuse it by NAME, from the closed set.
+        let resp =
+            send_py_add_watchpoint(&mut client, 26_001, &trace_dir, "counter", &log_path).await?;
+
+        // The daemon must report the backend's verdict, whatever it is --
+        // never a verdict of its own invented before the backend answered.
+        let reported = resp.get("success").and_then(Value::as_bool);
+        assert_eq!(
+            reported,
+            Some(false),
+            "ct/py-add-watchpoint answered success for `counter`, which this \
+             recording never captured.  A `watchpointId` here names a \
+             watchpoint that exists nowhere but in the daemon's own table, \
+             and the caller's next `continue_forward()` runs to the end of \
+             the trace with nothing to say why.  got: {resp}"
+        );
+
+        // THE REFUSAL MUST COME FROM THE CLOSED SET, not from the
+        // free-text fallthrough.  Before `setDataBreakpoints` was
+        // implemented, this arrived as
+        //   "command setDataBreakpoints not supported here"
+        // -- the `_` arm of the DAP dispatch, meant for commands nobody
+        // had thought about, and indistinguishable from a typo in the
+        // command name.  A caller could not tell "this backend cannot
+        // watch anything" from "your expression was wrong".
+        let refusal = resp
+            .get("body")
+            .and_then(|b| b.get("refusal"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_eq!(
+            refusal, "variableNotInTrace",
+            "a watchpoint on a name this recording never captured must refuse \
+             as `variableNotInTrace` from the closed set.  An empty reason here \
+             means the request fell through to the free-text dispatch \
+             fallthrough again, which is the defect this test exists to pin.  \
+             got: {resp}"
+        );
+        assert!(
+            resp.get("body")
+                .and_then(|b| b.get("watchpointId"))
+                .is_none(),
+            "a refused add_watchpoint must not hand back an id; got: {resp}"
+        );
+
+        // And the refused watchpoint must be rolled out of the daemon's own
+        // table, so the next add for this trace does not re-send it and
+        // inherit its failure.
+        //
+        // `x` IS a local of RUBY_TEST_PROGRAM, so this one must be
+        // ACCEPTED -- against a real Ruby recording and a real replay
+        // backend.  This assertion is the whole feature: before
+        // `setDataBreakpoints` had an arm in the backend's DAP dispatch,
+        // NO watchpoint could ever be accepted, and the previous version
+        // of this test asserted exactly that.
+        let second =
+            send_py_add_watchpoint(&mut client, 26_002, &trace_dir, "x", &log_path).await?;
+        assert_eq!(
+            second.get("success").and_then(Value::as_bool),
+            Some(true),
+            "a watchpoint on `x` -- a local this recording DOES capture -- must \
+             be accepted by the real backend.  A refusal here means either the \
+             refused `counter` was left in the daemon's table and poisoned the \
+             re-send, or `setDataBreakpoints` is not reaching the backend at \
+             all.  got: {second}"
+        );
+        let wp_id = second
+            .get("body")
+            .and_then(|b| b.get("watchpointId"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        assert!(
+            wp_id > 0,
+            "an accepted watchpoint must come back with a positive id; got: {second}"
+        );
+
+        let _ = daemon.kill().await;
+        Ok(())
+    }
+    .await;
+
+    match &result {
+        Ok(()) => success = true,
+        Err(e) => log_line(&log_path, &format!("TEST FAILED: {e}")),
+    }
+
+    report(
+        "test_real_py_add_watchpoint_reports_the_backends_own_verdict",
+        &log_path,
+        success,
+    );
+    assert!(success, "see log at {}", log_path.display());
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// Every process this file starts from the session-manager binary -- the
+/// daemon, the MCP server and the CLI, each of which can start a replay --
+/// gets [`replay_test_env`], so no test here depends on ct-native-replay's
+/// free-tier replay quota.
+///
+/// Before this, only the goto_geid test passed `CODETRACER_IN_UI_TEST`; the
+/// rr tests did not, and run together they exhausted the quota (5 replays a
+/// day) after the first few and failed on "Free tier: 5 replays per day" in
+/// `ct/open-trace` -- 43 of 47 in one run of the rr-backend-tests selection.
+///
+/// The check is structural: every `Command::new(...)` of `binary_path()` (or
+/// of a `bin` bound to it, or of the `daemon_bin` a caller hands the daemon
+/// launcher, such as a staged install prefix's copy) must sit in a function that applies the helper,
+/// so a new spawn site cannot quietly leave it out. Needles are assembled
+/// with `concat!` so this test's own source does not match them.
+#[test]
+fn every_session_manager_spawn_gets_the_replay_test_env() {
+    let env = replay_test_env();
+    assert!(
+        env.contains(&("CODETRACER_IN_UI_TEST", "1")),
+        "replay_test_env must set CODETRACER_IN_UI_TEST=1 (ct-native-replay's \
+         supported bypass of the free-tier replay quota for headless tests): {env:?}"
+    );
+
+    let source = include_str!("real_recording_integration.rs");
+    let lines: Vec<&str> = source.lines().collect();
+    let spawn_needles = [
+        concat!("Command::new(", "binary_path())"),
+        concat!("Command::new(", "&bin)"),
+        concat!("Command::new(", "daemon_bin)"),
+    ];
+    let applied = concat!("replay_", "test_env(");
+    let mut spawns = 0usize;
+    let mut offenders: Vec<String> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim_start().starts_with("//") || !spawn_needles.iter().any(|n| line.contains(n)) {
+            continue;
+        }
+        spawns += 1;
+        // The enclosing function: the nearest top-level `fn` line above, and
+        // its body up to the closing `}` in column 0.
+        let start = (0..i)
+            .rev()
+            .find(|&j| {
+                let l = lines[j];
+                l.starts_with("fn ") || l.starts_with("async fn ")
+            })
+            .unwrap_or(0);
+        let end = (i..lines.len())
+            .find(|&j| lines[j] == "}")
+            .unwrap_or(lines.len());
+        let body = lines[start..end].join("\n");
+        if !body.contains(applied) {
+            offenders.push(format!(
+                "line {}: `{}` spawns session-manager without replay_test_env()",
+                i + 1,
+                lines[start].trim()
+            ));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "session-manager spawn site(s) without the replay test env:\n{}",
+        offenders.join("\n")
+    );
+    // Guard the guard: five spawn sites when this was written (daemon, MCP
+    // server, the hermetic daemon and MCP server, the CLI).
+    assert!(
+        spawns >= 5,
+        "found only {spawns} session-manager spawn site(s); the needles no longer \
+         match the file, so this test would pass vacuously"
     );
 }

@@ -588,7 +588,9 @@ pane_replay="$(field "${panes_out}" '.replayReached')"
 ck "$([ "${pane_replay}" = true ] && echo ok || echo no)" \
 	"the pane probe reached a replay session (so a zero below is a give-up, not a run that never started)"
 
-for pane in state calltrace timeline eventLog terminal; do
+# The panes `pane_children_probe.mjs` reads (its `PANES`); the Timeline is
+# not one since `740d76be2` removed it.
+for pane in state calltrace eventLog terminal; do
 	kids="$(field "${panes_out}" ".panes.${pane}.descendants")"
 	present="$(field "${panes_out}" ".panes.${pane}.present")"
 	ck "$([ "${present}" = true ] && echo ok || echo no)" \

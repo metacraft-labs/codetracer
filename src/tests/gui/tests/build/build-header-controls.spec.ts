@@ -14,12 +14,11 @@
  * recorded language — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
 import { LayoutPage } from "../../page-objects/layout-page";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   DOCKED_BOTTOM_CONTENT_SELECTOR,
   openBottomPanel,
@@ -31,9 +30,6 @@ const fixture = recordChromeTraceFixture("build-header-controls");
 test.describe("Build Header Controls", () => {
   test.setTimeout(120_000);
   test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
-
-  test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
-  test.afterAll(() => restoreUserLayout());
 
   test("header controls container is present in the build panel", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);

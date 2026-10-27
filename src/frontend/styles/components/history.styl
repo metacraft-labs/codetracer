@@ -85,7 +85,8 @@
 
 .history-list-item.active
   background-color: colors-ui-surface-primary-secondary-hover
-  color: red
+  // The error text token in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(red, colors-ui-text-error-primary)
 
 #history
   display: flex
@@ -103,12 +104,6 @@
 
 .history-expandable
   color: colors-ui-text-primary-body
-
-.history-even
-  background-color: colors-ui-surface-base-panel
-
-.history-odd
-  background-color: BACKGROUND_NEIGHBOUR_COLOR
 
 .value-name-container
   white-space: nowrap
@@ -199,20 +194,6 @@
   top: 0
   height: 30px
   margin-top: 5px
-
-.history-button-close
-  z-index: 1
-  padding-left: 10px
-  background-image: ELEMENT_COMPONENT_CLOSE_ICON
-  background-size: 22px 22px
-  background-position: center
-  background-repeat: no-repeat
-  width: 24px
-  height: 24px
-  background-color: transparent
-
-  &:hover
-    background-color: colors-ui-surface-base-canvas
 
 .history-container
   display: flex

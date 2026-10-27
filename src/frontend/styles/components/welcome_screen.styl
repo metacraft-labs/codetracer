@@ -1,5 +1,16 @@
 // Welcome screen widget styles
 
+// The upload progress ring's colours in the light theme (`.progress-circle`
+// below, and the gradient `onUploadTraceProgress` writes inline). The dark
+// theme does not define them, so both fall back to its greys there: the fill
+// #6B6B6B a step lighter than the #2C2C2C track. The light theme keeps that
+// relation in its own mode: a caption-grey fill a step darker than the
+// tertiary-surface track.
+if COLOR_MODE is defined and COLOR_MODE == "Light"
+  :root
+    --ct-upload-ring-fill: colors-ui-text-primary-caption
+    --ct-upload-ring-track: colors-ui-surface-primary-tertiary
+
 // How far the "Welcome to CodeTracer" title and the version number sit above
 // the logo's bottom edge (see `.welcome-title`).  4px.
 WELCOME_TITLE_RAISE = 0.25rem
@@ -62,10 +73,14 @@ body:has(> #welcomeScreen .welcome-screen-wrapper)
       opacity: 0.5
       pointer-events: none
 
+// A veil over the welcome screen while a trace loads, in the mode's own
+// ground: black under the dark theme, the light ground under the light one,
+// so the light theme does not black the window out. The text and the dots
+// icon below it change with it.
 .welcome-screen-loading-overlay
   position: absolute
   top: 0
-  background-color: black
+  background-color: by-mode(black, colors-ui-surface-primary-default)
   width: 100%
   height: 100%
   opacity: 0.8
@@ -76,7 +91,7 @@ body:has(> #welcomeScreen .welcome-screen-wrapper)
 
   &-text
     padding-left: 0.625em
-    color: white
+    color: by-mode(white, colors-ui-text-primary-body)
     font-size: x-large
     font-style: italic
 
@@ -89,6 +104,16 @@ body:has(> #welcomeScreen .welcome-screen-wrapper)
     animation: infinite linear
     animation-name: loading
     animation-duration: 3s
+
+    // The dots file is white ink, which vanishes on the light veil. The light
+    // theme draws the same file as a mask, filled with the icon colour; the
+    // dark theme's rule is unchanged.
+    if COLOR_MODE is defined and COLOR_MODE == "Light"
+      background-image: none
+      background-color: colors-ui-icon-primary-default
+      mask-image: url("../../public/resources/welcome/loading_sign_dots_32.svg")
+      mask-repeat: no-repeat
+      mask-position: center
 
 .welcome-logo
   background-image: url('../../public/resources/shared/codetracer_welcome_logo.svg')
@@ -404,7 +429,10 @@ welcome-heading-type()
       // (`.vcs-commit-header:hover`, vcs.styl): `surface/primary/secondary-hover`.
       // The same for the Recent folders rows below, so the two lists match.
       .recent-trace
-        color: colors-ui-text-warning-on-color
+        // `text/warning/on-color` is for a coloured surface; on the light
+        // window ground it is #fdba74, 1.6:1. The light theme takes the
+        // warning text token (`by-mode`, defaults.styl).
+        color: by-mode(colors-ui-text-warning-on-color, colors-ui-text-warning-primary)
         background-color: transparent
         height: 1.75em
         margin-top: 0.125em
@@ -467,10 +495,12 @@ welcome-heading-type()
             text-overflow: ellipsis
             flex: 1
 
+        // A raised surface, like every tooltip (`TOOLTIP_BACKGROUND` in the
+        // light palette is the same token's Light value).
         .recent-trace-tooltip
           position: fixed
-          background-color: #1B1B1B
-          color: #f3f3f3
+          background-color: by-mode(#1B1B1B, colors-ui-surface-base-raised)
+          color: by-mode(#f3f3f3, colors-ui-text-primary-body)
           padding: 0.5em 0.75em
           font-size: 0.75em
           font-family: "SpaceGrotesk"
@@ -549,7 +579,8 @@ welcome-heading-type()
 
       // Same rows as Recent traces: no fill at rest, the VCS row hover.
       .recent-folder
-        color: colors-ui-text-warning-on-color
+        // As `.recent-trace` above.
+        color: by-mode(colors-ui-text-warning-on-color, colors-ui-text-warning-primary)
         background-color: transparent
         height: 1.75em
         margin-top: 0.125em
@@ -851,7 +882,15 @@ welcome-heading-type()
     height: 1.25em
     border-radius: 50%
     position: absolute
-    background-image: conic-gradient(#6B6B6B 0% 0%, #2C2C2C 0% 100%)
+    // A trace upload's progress ring: the fill sweeps over the track as
+    // `onUploadTraceProgress` (ui/welcome_screen.nim) rewrites the stops. The
+    // dark theme keeps its greys. The light one reads its two colours from the
+    // custom properties defined at the top of this file, which that proc's
+    // inline gradient reads too, with the dark greys as its fallbacks.
+    if COLOR_MODE is defined and COLOR_MODE == "Light"
+      background-image: conic-gradient(var(--ct-upload-ring-fill) 0% 0%, var(--ct-upload-ring-track) 0% 100%)
+    else
+      background-image: conic-gradient(#6B6B6B 0% 0%, #2C2C2C 0% 100%)
     background-size: auto
     z-index: 1
     transform: translate(0.25em, 0.25em)
@@ -958,7 +997,8 @@ welcome-heading-type()
   width: -moz-available
   width: -webkit-fill-available
   width: stretch
-  color: colors-ui-text-warning-on-color
+  // As `.recent-trace` above.
+  color: by-mode(colors-ui-text-warning-on-color, colors-ui-text-warning-primary)
   font-family: "SpaceMono"
 
   #tx-success

@@ -727,7 +727,9 @@ proc installTemplatePaneHost*() =
         # ASKED, NOT ASSERTED. "" on a deployment that placed the Noir
         # compiler module, and `degradedBehaviour`'s own sentence on one that
         # did not — see `noirTestRunAbsence`.
-        absence: cstring(noirTestRunAbsence())
+        absence: cstring(noirTestRunAbsence()),
+        # The asking tab, echoed (`ui_js.ns9PanesTarget`).
+        tab: (if payload.isNil: jsUndefined else: payload["tab"])
       })
       # ALL THREE FIELDS NOW COME FROM ONE PROJECT. Two of them used to be
       # module constants while `absence` was derived from `currentProject()`,
@@ -739,7 +741,8 @@ proc installTemplatePaneHost*() =
       data.ipc.deliver(cstring"CODETRACER::ns9-panes-constraints", js{
         info: cstring(openProject.nargoInfoJson),
         provenance: cstring(openProject.constraintProvenance),
-        absence: cstring(report.absence)
+        absence: cstring(report.absence),
+        tab: (if payload.isNil: jsUndefined else: payload["tab"])
       }))
 
 proc templateNoTracePayload*(tmpl: ProjectTemplate; layout: JsObject): JsObject =

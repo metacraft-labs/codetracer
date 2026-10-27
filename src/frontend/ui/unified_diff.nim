@@ -31,6 +31,9 @@
 ##   models are created with.  It never sees a mode, which is VCS-Panel.md's
 ##   "the diff rendering code does NOT check which mode is active" made
 ##   structural.
+## - ``viewmodel/viewmodels/diff_target.nim`` — pure: which git command a
+##   target (and the active review's commit) asks for, when the diff comes
+##   from git.
 ## - ``viewmodel/viewmodels/vcs_vm.nim`` — the hunk editor's selection model
 ##   and its patch builder, shared with the docked panel's state rather than
 ##   duplicated here.
@@ -43,7 +46,7 @@
 ## process happens to be started in — and live git serves everything else.
 
 import
-  ui_imports
+  ui_imports, session_viewmodels
 
 import std/strformat
 import isonim/core/signals
@@ -56,14 +59,16 @@ import review_flow_adapter
 import review_flow_selection
 import ../viewmodel/viewmodels/vcs_vm
 import ../viewmodel/viewmodels/diff_document
+import ../viewmodel/viewmodels/diff_target
 import ../viewmodel/viewmodels/context_expansion
 import ../viewmodel/viewmodels/review_flow_overlay
 import diff_expansion
 
-when defined(js):
-  from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_unified_diff_view import
-    mountIsoNimUnifiedDiffTab, UnifiedDiffCallbacks
+from isonim/web/dom_api as isonim_dom_api import nil
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
+import ../viewmodel/views/isonim_unified_diff_view
 
 var unifiedDiffVMInstances*: JsAssoc[int, VCSVM] = JsAssoc[int, VCSVM]{}
 var unifiedDiffComponentRefs: JsAssoc[int, UnifiedDiffComponent] =
@@ -75,8 +80,6 @@ var unifiedDiffSourceCaches: JsAssoc[int, SourceTextCache] =
   ## §4.2).  Per tab rather than global because a tab's lifetime is exactly the
   ## lifetime the cached blobs are wanted for, and `forgetUnifiedDiffTab`
   ## drops both this and the tab's ViewModel when the tab closes.
-var isoNimUnifiedDiffMountedIds {.used.}: JsAssoc[int, bool] =
-  JsAssoc[int, bool]{}
 
 # ---------------------------------------------------------------------------
 # Monaco FFI
@@ -317,6 +320,21 @@ proc rawTarget*(self: UnifiedDiffComponent): string =
   let text = $self.diffTarget
   if text.startsWith("diff:"): text[5 .. ^1] else: text
 
+proc scopedKey(self: UnifiedDiffComponent): int =
+  ## The key this tab's ViewModel, source cache and component ref are filed
+  ## under: `tabScopedId`, which makes it unique across the window's tabs. A
+  ## section of a whole-commit document is in no tab's component mapping, so
+  ## it is keyed in its document's tab rather than in whichever tab is on
+  ## screen when it is looked up.
+  if self.isNil:
+    return -1
+  if self.sectionOf.isNil:
+    return data.tabScopedId(self)
+  var session = data.sessionOfComponent(self.sectionOf)
+  if session.isNil and data.sessions.len > 0:
+    session = data.activeSession
+  tabScopedKey(session, self.id)
+
 proc ensureUnifiedDiffVM*(self: UnifiedDiffComponent): VCSVM =
   ## One ``VCSVM`` per diff tab.
   ##
@@ -326,21 +344,22 @@ proc ensureUnifiedDiffVM*(self: UnifiedDiffComponent): VCSVM =
   ## DR-R4's constraint is one model, not a second one that happens to agree.
   if self.isNil:
     return nil
-  if unifiedDiffVMInstances.hasKey(self.id):
-    return unifiedDiffVMInstances[self.id]
+  if unifiedDiffVMInstances.hasKey(self.scopedKey()):
+    return unifiedDiffVMInstances[self.scopedKey()]
   result = createVCSVM()
-  unifiedDiffVMInstances[self.id] = result
+  unifiedDiffVMInstances[self.scopedKey()] = result
 
 proc ensureSourceCache(self: UnifiedDiffComponent): SourceTextCache =
   if self.isNil:
     return nil
-  if unifiedDiffSourceCaches.hasKey(self.id):
-    return unifiedDiffSourceCaches[self.id]
+  if unifiedDiffSourceCaches.hasKey(self.scopedKey()):
+    return unifiedDiffSourceCaches[self.scopedKey()]
   result = newSourceTextCache()
-  unifiedDiffSourceCaches[self.id] = result
+  unifiedDiffSourceCaches[self.scopedKey()] = result
 
 proc forgetUnifiedDiffTab*(componentId: int) =
-  ## Drop everything a closed diff tab owned.
+  ## Drop everything a closed diff tab owned. `componentId` is the tab-scoped
+  ## key (`session_viewmodels.tabScopedKey`) the tables are keyed by.
   ##
   ## DR-R5's deliverable: "Expansion state resets when the tab is closed and
   ## does not leak between files."  Since UD-2 the expansion lives in the
@@ -357,8 +376,6 @@ proc forgetUnifiedDiffTab*(componentId: int) =
     discard jsDelete(unifiedDiffSourceCaches[componentId])
   if unifiedDiffComponentRefs.hasKey(componentId):
     discard jsDelete(unifiedDiffComponentRefs[componentId])
-  if isoNimUnifiedDiffMountedIds.hasKey(componentId):
-    discard jsDelete(isoNimUnifiedDiffMountedIds[componentId])
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -399,6 +416,21 @@ proc loadFromReview(self: UnifiedDiffComponent): bool =
   self.reviewBacked = true
   true
 
+proc gitPlan(self: UnifiedDiffComponent): DiffGitPlan =
+  ## The git command this tab's target resolves to, in the context of the
+  ## active review (if any).
+  ##
+  ## The review's ``commitSha`` / ``baseCommitSha`` are passed only while a
+  ## review is active: VCS-Panel.md, "Which two revisions a file row
+  ## compares", scopes a review's ``file:<path>`` fallback to the commit under
+  ## review, and outside a review the same target means the working tree.
+  var reviewCommit = ""
+  var reviewBase = ""
+  if self.data.deepReviewActive and not self.data.deepReviewData.isNil:
+    reviewCommit = safeStr(self.data.deepReviewData.commitSha)
+    reviewBase = safeStr(self.data.deepReviewData.baseCommitSha)
+  diffGitPlan(self.rawTarget(), reviewCommit, reviewBase)
+
 proc loadFromGit(self: UnifiedDiffComponent) =
   ## Fill the tab by asking git for the target's diff.
   ##
@@ -410,46 +442,36 @@ proc loadFromGit(self: UnifiedDiffComponent) =
   ## per-commit diff came back empty — silently, since git treats "no path
   ## matched" as an empty diff rather than an error.  Only the two targets with
   ## no pathspec (Working Tree, whole-commit) ever worked.
+  ##
+  ## Which command each target asks for is decided by the pure
+  ## ``diff_target.diffGitPlan``, together with the active review's commit
+  ## context (``gitPlan`` above); this proc only runs it and parses the result.
   let cwd = gitRepositoryRoot(self.data)
+  let plan = self.gitPlan()
   var args: seq[cstring] = @[]
-  var sessionTitle = cstring"Working Tree Changes"
-  let target = self.rawTarget()
-
-  if target.len == 0 or target == "Working Tree":
-    args = @[cstring"diff", cstring"HEAD"]
-    sessionTitle = cstring"Working Tree Changes"
-  elif target.startsWith("file:"):
-    let filepath = target[5 .. ^1]
-    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(filepath)]
-    sessionTitle = cstring("Diff: " & filepath)
-  elif target.startsWith("commit:"):
-    let commitPart = target[7 .. ^1]
-    let colonIdx = commitPart.find(':')
-    if colonIdx >= 0:
-      let hash = commitPart[0 ..< colonIdx]
-      let filepath = commitPart[colonIdx + 1 .. ^1]
-      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id",
-               cstring"--root", cstring(hash), cstring"--", cstring(filepath)]
-      sessionTitle = cstring("Diff: " & filepath & " (" &
-                             hash[0 ..< min(12, hash.len)] & ")")
-    else:
-      args = @[cstring"diff-tree", cstring"-p", cstring"--no-commit-id",
-               cstring"--root", cstring(commitPart)]
-      sessionTitle = cstring("Commit Diff: " &
-                             commitPart[0 ..< min(12, commitPart.len)])
-  else:
-    args = @[cstring"diff", cstring"HEAD", cstring"--", cstring(target)]
-    sessionTitle = cstring("Diff: " & target)
+  for arg in plan.args:
+    args.add(cstring(arg))
 
   let raw = gitExec(args, cwd)
+  # Record the revisions actually compared: a review-scoped `file:` fallback
+  # diffs the review's commit (against its base, when it names one), not
+  # `HEAD` — VCS-Panel.md, "Which two revisions a file row compares".
+  let comparedCommit =
+    if plan.reviewScoped: self.data.deepReviewData.commitSha
+    else: cstring"HEAD"
+  let comparedBase =
+    if plan.reviewScoped: self.data.deepReviewData.baseCommitSha
+    else: cstring""
   self.diffData = DeepReviewData(
-    commitSha: cstring"HEAD",
-    baseCommitSha: cstring"",
+    commitSha: comparedCommit,
+    baseCommitSha: comparedBase,
     collectionTimeMs: 0,
     recordingCount: 0,
-    sessionTitle: sessionTitle,
+    sessionTitle: cstring(plan.sessionTitle),
     files: parseGitDiffHunks($raw))
   self.reviewBacked = false
+  self.gitNewRevision = cstring(plan.newRevision)
+  self.gitReviewScoped = plan.reviewScoped
 
 proc expansionRevision(self: UnifiedDiffComponent): string =
   ## The revision whose text the *new* side of this tab's diff shows.
@@ -461,12 +483,15 @@ proc expansionRevision(self: UnifiedDiffComponent): string =
   ## `gitFileText` reads as "the file itself".  A `commit:<hash>[:<path>]`
   ## target is the case §4.2 names: the lines are neither in the diff nor in
   ## the working tree, and only `git show <hash>:<path>` has them.
-  let target = self.rawTarget()
-  if target.startsWith("commit:"):
-    let commitPart = target[7 .. ^1]
-    let colonIdx = commitPart.find(':')
-    return if colonIdx >= 0: commitPart[0 ..< colonIdx] else: commitPart
-  ""
+  ##
+  ## So is a `file:` target during a review of a commit: VCS-Panel.md, "Which
+  ## two revisions a file row compares", diffs that commit, so its new side is
+  ## the commit and not the working tree.
+  ##
+  ## Recorded by ``loadFromGit`` from the plan it ran rather than resolved
+  ## again here, so the revision the diff was taken against and the one
+  ## expansion reads cannot disagree, not even after the review has ended.
+  safeStr(self.gitNewRevision)
 
 proc sourceLinesFor(self: UnifiedDiffComponent; file: DeepReviewFileData;
                     path: string): seq[string] =
@@ -610,9 +635,23 @@ proc ensureLoaded(self: UnifiedDiffComponent) =
   if self.initialized:
     return
   self.initialized = true
+  # Only `loadFromGit` sets these; a reload served from elsewhere must not
+  # inherit them from an earlier git load.
+  self.gitNewRevision = cstring""
+  self.gitReviewScoped = false
   if not self.loadFromReview():
     if not self.loadFromAgentRegistry():
       self.loadFromGit()
+  # A section of a whole-commit document whose target has no per-file form
+  # loaded the whole target; it shows only its own file
+  # (`diff_target.diffSectionTarget`).
+  let onlyPath = safeStr(self.sectionPath)
+  if onlyPath.len > 0 and not self.diffData.isNil:
+    var kept: seq[DeepReviewFileData] = @[]
+    for file in self.diffData.files:
+      if safeStr(file.path) == onlyPath:
+        kept.add(file)
+    self.diffData.files = kept
 
 # ---------------------------------------------------------------------------
 # Monaco
@@ -873,12 +912,13 @@ proc monacoFlowDecorations(decorations: seq[ReviewFlowDecoration]):
 #     side by side at all. RV-5 therefore showed ONE pass and made the loop
 #     control the only way to see the others.
 #
-# What replaces it is the debugger's own arrangement: one Monaco **content
-# widget** per annotated line, holding the `.flow-parallel` row that
-# `ui/flow.renderFlow` builds out of `ui/flow_value_dom.nim` — the same module,
-# the same elements — anchored at ONE `left` offset for every line, past the
+# What replaces it is the parallel arrangement: one Monaco **content widget**
+# per annotated line, holding a `.flow-parallel` row built out of
+# `ui/flow_value_dom.nim` — the shared flow views, the same elements the
+# debugger's chips are — anchored at ONE `left` offset for every line, past the
 # longest line of the document, with one `.flow-parallel-values` column per
-# recorded pass.
+# recorded pass. (The debugger's own builder of this row, `ui/flow.renderFlow`,
+# had no call site and was removed.)
 
 proc udAddContentWidget(editor: MonacoEditor, widget: js)
   {.importjs: "#.addContentWidget(#)".}
@@ -1083,9 +1123,8 @@ proc reviewValueBandDom(self: UnifiedDiffComponent;
                 " flow-loop-step-container active-flow-step"))
     columnDom.setAttribute(cstring"data-iteration", cstring($column.iteration))
     if column.values.len == 0:
-      # A pass that never reached this line. `renderFlow` draws exactly this
-      # span in the same slot, and keeping the empty column is what stops the
-      # next pass's values sliding under this pass's heading.
+      # A pass that never reached this line. Keeping the empty column is
+      # what stops the next pass's values sliding under this pass's heading.
       columnDom.appendChild(flowValueEmptyDom(style(), cstring""))
     # A column wider than the pane drops whole chips from its end rather than
     # squeezing them — see `reviewChipsThatFit`. The marker says it happened.
@@ -1190,8 +1229,7 @@ proc applyFlowValueBands(self: UnifiedDiffComponent; doc: DiffDocument) =
   ## Two placements, and which one is used is MEASURED rather than chosen:
   ##
   ##   * **Beside the code**, in a content widget at a common left offset —
-  ##     `FlowParallel`, the placement `ui/flow.renderFlow` uses and the one
-  ##     §4.4 describes. Used whenever the pane is wide enough to hold a whole
+  ##     `FlowParallel`, the placement §4.4 describes. Used whenever the pane is wide enough to hold a whole
   ##     column past the widest annotated line.
   ##   * **On its own row under the line**, in a Monaco view zone — the
   ##     placement the debugger's `FlowMultiline` mode uses
@@ -1593,6 +1631,32 @@ proc loopZoneDom(self: UnifiedDiffComponent; zone: ReviewLoopZone): Node =
       cstring(fmt"review-loop-slider-{self.id}-{zone.functionKey}-{zone.loopIndex}"),
       "review-loop-slider"))
 
+proc reviewLoopSlideHandler(functionKey: string; loopIndex: int;
+    onIteration: proc(functionKey: string; loopIndex, iteration: int)):
+    proc(iteration: int) =
+  # A widget invokes this after the zone loop has finished; its identity must
+  # live in a separate factory call rather than shared loop-body locals.
+  result = proc(iteration: int) = onIteration(functionKey, loopIndex, iteration)
+
+proc bindReviewLoopSliders*(componentId: int; zones: seq[ReviewLoopZone];
+    onIteration: proc(functionKey: string; loopIndex, iteration: int)): bool =
+  ## Bind each rendered slider; return whether a later layout pass is needed.
+  for zone in zones:
+    let container = document.getElementById(cstring(
+      fmt"review-loop-slider-{componentId}-{zone.functionKey}-{zone.loopIndex}"))
+    if container.isNil:
+      continue
+    let element = cast[Node](container.querySelector(
+      cstring("." & FlowLoopSliderClass)))
+    if element.isNil:
+      continue
+    # `total - 1`: the range is over ITERATION INDICES, and the debugger's
+    # `maxLoopIteration` is the same 0-based bound.
+    if not ensureFlowLoopSlider(element, zone.total - 1, zone.iteration,
+        reviewLoopSlideHandler(zone.functionKey, zone.loopIndex, onIteration)):
+      if zone.total > 1:
+        result = true
+
 proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
                          attempt: int) =
   ## Build the loop controls' sliders once their view zones have been laid out.
@@ -1620,26 +1684,9 @@ proc scheduleLoopSliders(self: UnifiedDiffComponent; doc: DiffDocument;
     return
   if not self.editorInitialized or self.editor.isNil:
     return
-  var pending = false
-  for zone in self.reviewLoopZonesFor(doc):
-    let container = document.getElementById(cstring(
-      fmt"review-loop-slider-{self.id}-{zone.functionKey}-{zone.loopIndex}"))
-    if container.isNil:
-      continue
-    let element = cast[Node](container.querySelector(
-      cstring("." & FlowLoopSliderClass)))
-    if element.isNil:
-      continue
-    let functionKey = zone.functionKey
-    let loopIndex = zone.loopIndex
-    let component = self
-    # `total - 1`: the range is over ITERATION INDICES, and the debugger's
-    # `maxLoopIteration` is the same 0-based bound.
-    if not ensureFlowLoopSlider(element, zone.total - 1, zone.iteration,
-        proc(iteration: int) =
-          component.setLoopIterationTo(functionKey, loopIndex, iteration)):
-      if zone.total > 1:
-        pending = true
+  let pending = bindReviewLoopSliders(self.id, self.reviewLoopZonesFor(doc),
+    proc(functionKey: string; loopIndex, iteration: int) =
+      self.setLoopIterationTo(functionKey, loopIndex, iteration))
   if pending:
     discard windowSetTimeout(
       proc() = self.scheduleLoopSliders(doc, attempt + 1), 150)
@@ -1696,7 +1743,7 @@ proc syncIntoVM*(self: UnifiedDiffComponent) =
   ## alone: it is the VM's own state and survives a re-sync.
   if self.isNil:
     return
-  unifiedDiffComponentRefs[self.id] = self
+  unifiedDiffComponentRefs[self.scopedKey()] = self
   let vm = self.ensureUnifiedDiffVM()
   if vm.isNil:
     return
@@ -1705,7 +1752,11 @@ proc syncIntoVM*(self: UnifiedDiffComponent) =
   # (`VCSVM.mutatingHunkOpsEnabled`); the diff itself renders identically
   # either way, which is the rule VCS-Panel.md states under "Unified Diff View
   # (Shared)".
-  vm.setDeepReviewMode(self.reviewBacked)
+  #
+  # A git fallback scoped to the review's commit is read-only as well: its
+  # hunks are that commit's change, not the working tree's, so staging or
+  # discarding them would apply the wrong patch to the repository.
+  vm.setDeepReviewMode(self.reviewBacked or self.gitReviewScoped)
   vm.setUnifiedDiff(true, self.diffRows())
 
 proc handleHunkClick(self: UnifiedDiffComponent; modelLine: int;
@@ -1956,6 +2007,48 @@ proc scheduleDeletedLineTokens(self: UnifiedDiffComponent; attempt: int) =
   discard windowSetTimeout(
     proc() = self.scheduleDeletedLineTokens(attempt + 1), 150)
 
+proc fitSectionHost(diffEditor: js; hostId: cstring; onFirstFit: proc())
+  {.importjs: """(function(de, hostId, onFirstFit) {
+    var host = document.getElementById(hostId);
+    var ed = de.getModifiedEditor();
+    var fitted = false;
+    function fit() {
+      if (!host) return;
+      var h = Math.max(ed.getContentHeight(), 24);
+      if (host.style.height !== h + 'px') {
+        host.style.height = h + 'px';
+        de.layout();
+      }
+      if (!fitted) { fitted = true; onFirstFit(); }
+    }
+    ed.onDidContentSizeChange(fit);
+    fit();
+  })(#, #, #)""".}
+  ## Size a section's editor host to the editor's content, now and whenever
+  ## the content grows or shrinks (an unchanged region expanded, a zone
+  ## added), so the document scrolls as one page instead of each section
+  ## scrolling inside a box.
+
+proc applyDocumentScroll(self: UnifiedDiffComponent)
+
+proc fitSectionEditor(self: UnifiedDiffComponent) =
+  ## A section of a whole-commit document (VCS-Panel.md, "Whole-Commit
+  ## Document") is one of a column of editors: no minimap of its own, no
+  ## scrolling of its own — the wheel scrolls the document — and as tall as
+  ## its content.
+  self.diffEditor.udUpdateDiffOptions(JsObject(js{
+    minimap: js{enabled: false},
+    scrollBeyondLastLine: false,
+    scrollbar: js{
+      vertical: cstring"hidden",
+      alwaysConsumeMouseWheel: false,
+      handleMouseWheel: false
+    }
+  }))
+  let document = self.sectionOf
+  fitSectionHost(self.diffEditor, cstring(editorHostId(self.id)),
+    proc() = document.applyDocumentScroll())
+
 proc initEditor(self: UnifiedDiffComponent) =
   ## Create the Monaco instance once its host element exists.
   if self.editorInitialized:
@@ -2103,79 +2196,252 @@ proc initEditor(self: UnifiedDiffComponent) =
   self.applyFlowDecorations(pair.modified)
   self.rebuildInvocationZones(pair.modified)
 
+  if not self.sectionOf.isNil:
+    self.fitSectionEditor()
+
   self.scheduleDeletedLineTokens(attempt = 0)
 
-proc tryMountUnifiedDiffTab*(componentId: int) =
-  when defined(js):
-    if not unifiedDiffComponentRefs.hasKey(componentId):
-      return
-    let component = unifiedDiffComponentRefs[componentId]
-    if component.isNil:
-      return
-    let vm = component.ensureUnifiedDiffVM()
-    if vm.isNil:
-      return
-    let container = document.getElementById(
-      cstring(fmt"unifiedDiffComponent-{componentId}"))
-    if container.isNil:
-      return
+proc resetEditor(self: UnifiedDiffComponent) =
+  ## Drop the Monaco instance of a tab whose container GoldenLayout re-created
+  ## (a tab drag, a layout restore): the previous mount's DOM, and the editor
+  ## attached to it, is gone.
+  self.editorInitialized = false
+  # A diff editor's two models are created explicitly and therefore
+  # outlive it; disposing the editor without them leaks a model pair —
+  # and with it a tokenizer's state — on every tab drag or layout
+  # restore.  Order matters: the editor first, so nothing is holding the
+  # models when they go.
+  udDisposeDiffEditor(self.diffEditor)
+  udDisposeModel(self.originalModel)
+  udDisposeModel(self.modifiedModel)
+  self.diffEditor = nil
+  self.originalModel = nil
+  self.modifiedModel = nil
+  self.editor = nil
+  self.originalEditor = nil
+  self.decorationCollection = nil
+  self.originalDecorationCollection = nil
+  # The review overlay's two handles belong to the destroyed Monaco
+  # instance as much as `decorationCollection` does: a stale collection
+  # would be written to an editor that no longer exists, and a stale zone
+  # id would make the next `rebuildInvocationZones` remove a zone from it.
+  self.flowDecorationCollection = nil
+  self.flowViewZoneIds = @[]
+  # The value bands' content widgets belong to the destroyed editor too.
+  # Dropped without `removeContentWidget`, deliberately: there is nothing
+  # left to remove them FROM, and calling it on a disposed editor throws.
+  self.flowValueWidgets = @[]
+  self.flowValueZoneIds = @[]
+  self.flowValueWidgetMax = 0
 
-    if isoNimUnifiedDiffMountedIds.hasKey(componentId) and
-       isoNimUnifiedDiffMountedIds[componentId] and
-       container.childNodes.len == 0:
-      # GoldenLayout re-created the host element (a tab drag, a layout
-      # restore), so the previous mount's DOM — and with it the Monaco
-      # instance — is gone.  Without this the tab would come back permanently
-      # blank, because the mounted flag alone said the work was already done.
-      isoNimUnifiedDiffMountedIds[componentId] = false
-      component.editorInitialized = false
-      # A diff editor's two models are created explicitly and therefore
-      # outlive it; disposing the editor without them leaks a model pair —
-      # and with it a tokenizer's state — on every tab drag or layout
-      # restore.  Order matters: the editor first, so nothing is holding the
-      # models when they go.
-      udDisposeDiffEditor(component.diffEditor)
-      udDisposeModel(component.originalModel)
-      udDisposeModel(component.modifiedModel)
-      component.diffEditor = nil
-      component.originalModel = nil
-      component.modifiedModel = nil
-      component.editor = nil
-      component.originalEditor = nil
-      component.decorationCollection = nil
-      component.originalDecorationCollection = nil
-      # The review overlay's two handles belong to the destroyed Monaco
-      # instance as much as `decorationCollection` does: a stale collection
-      # would be written to an editor that no longer exists, and a stale zone
-      # id would make the next `rebuildInvocationZones` remove a zone from it.
-      component.flowDecorationCollection = nil
-      component.flowViewZoneIds = @[]
-      # The value bands' content widgets belong to the destroyed editor too.
-      # Dropped without `removeContentWidget`, deliberately: there is nothing
-      # left to remove them FROM, and calling it on a disposed editor throws.
-      component.flowValueWidgets = @[]
-      component.flowValueZoneIds = @[]
-      component.flowValueWidgetMax = 0
+proc unifiedDiffComponentFor(host: isonim_dom_api.Element): UnifiedDiffComponent =
+  ## The tab `host` (`unifiedDiffComponent-<id>`) belongs to, or nil — in the
+  ## window tab whose container holds `host`.
+  UnifiedDiffComponent(data.hostTabComponent(host, Content.UnifiedDiff,
+    panelHostComponentId(host)))
 
-    if not (isoNimUnifiedDiffMountedIds.hasKey(componentId) and
-            isoNimUnifiedDiffMountedIds[componentId]):
-      component.syncIntoVM()
-      let callbacks = UnifiedDiffCallbacks(
-        onCopySelectedHunks: proc() = component.copySelectedHunks(),
-        onStageSelectedHunks: proc() = component.stageSelectedHunks(),
-        onClearSelectedHunks: proc() =
-          vm.clearHunkSelection()
-          component.applyDecorations(),
-      )
-      mountIsoNimUnifiedDiffTab(
-        cast[isonim_dom_api.Element](container), vm,
-        editorHostId(componentId), callbacks)
-      isoNimUnifiedDiffMountedIds[componentId] = true
-
-    # The editor host only exists once the view above has mounted, and the
-    # GoldenLayout container can be re-created (a tab drag, a layout restore)
-    # after that, so this runs on every mount attempt rather than once.
-    if not component.editorInitialized:
-      component.initEditor()
+proc isCurrent(self: UnifiedDiffComponent; host: isonim_dom_api.Element): bool =
+  ## Whether `self` still shows in `host`: a tab still mapped to its
+  ## container, or a section still part of its document.
+  if self.sectionOf.isNil:
+    unifiedDiffComponentFor(host) == self
   else:
-    discard
+    self in self.sectionOf.sections
+
+proc hostIsConnected(host: isonim_dom_api.Element): bool
+  {.importjs: "Boolean(#.isConnected)".}
+
+proc requestFrame(f: proc()) {.importjs: "requestAnimationFrame(#)".}
+
+const EditorAttachFrameLimit = 120
+  ## About two seconds of frames: GoldenLayout attaches a container it has
+  ## built within a frame or two, so a tab still detached after this is not
+  ## going to be shown.
+
+proc initEditorWhenAttached(self: UnifiedDiffComponent;
+                            host: isonim_dom_api.Element; frame = 0) =
+  ## Create the tab's Monaco instance once `host` is in the document.
+  ##
+  ## The panel host renders the tab into the container GoldenLayout has just
+  ## built, which GoldenLayout may attach to the document a frame later, and
+  ## Monaco (and this module's id-based lookups of its host) needs the
+  ## element in the document. This waits for THAT element — it never looks
+  ## for a container — and stops when the tab is closed or remounted.
+  if self.isNil or self.editorInitialized:
+    return
+  if not self.isCurrent(host):
+    return
+  if host.hostIsConnected():
+    self.initEditor()
+    return
+  if frame >= EditorAttachFrameLimit:
+    cerror "unified diff: tab " & $self.id & " was never attached; " &
+      "its editor is not created"
+    return
+  let component = self
+  requestFrame(proc() =
+    component.initEditorWhenAttached(host, frame + 1))
+
+proc openFullFile(self: UnifiedDiffComponent; path: string) =
+  ## The heading's file name was clicked: open the full file in the editor,
+  ## as the VCS panel's Open File mode does (`vcs.dispatchOpenAction`) — the
+  ## working tree's file, or, in a review opened from a dataset, the
+  ## dataset's own copy under the reviewed repository's path.
+  if path.len == 0:
+    return
+  if self.data.isReviewDatasetSession() or utils.isAbsolutePath(path):
+    self.data.openTab(cstring(path), ViewSource)
+  else:
+    self.data.openTab(
+      cstring($gitRepositoryRoot(self.data) & "/" & path), ViewSource)
+
+proc tabCallbacks(self: UnifiedDiffComponent; vm: VCSVM): UnifiedDiffCallbacks =
+  ## What a diff tab's (or section's) toolbar and heading do.
+  let component = self
+  UnifiedDiffCallbacks(
+    onCopySelectedHunks: proc() = component.copySelectedHunks(),
+    onStageSelectedHunks: proc() = component.stageSelectedHunks(),
+    onClearSelectedHunks: proc() =
+      vm.clearHunkSelection()
+      component.applyDecorations(),
+    onOpenFullFile: proc(path: string) = component.openFullFile(path),
+  )
+
+var documentRoots: JsAssoc[int, isonim_dom_api.Element] =
+  JsAssoc[int, isonim_dom_api.Element]{}
+  ## Each document tab's rendered document, by tab id: where a section that
+  ## has grown re-applies the scroll. Every session tab repeats the same
+  ## container ids, so the element is held rather than looked up.
+
+var nextSectionId = -1
+  ## Section ids count down from -1, so a section's VCSVM, source cache and
+  ## editor host id (`unifiedDiffEditor--3`) never collide with a tab's,
+  ## which GoldenLayout numbers upwards from 0.
+
+proc sectionFor(self: UnifiedDiffComponent; index: int;
+                path: string): UnifiedDiffComponent =
+  ## The document's section for file `index` (`path`), made on first use and
+  ## kept for the tab's lifetime, like the tab's own target.
+  if index < self.sections.len and not self.sections[index].isNil and
+      safeStr(self.sections[index].sectionPath) == path:
+    return self.sections[index]
+  let plan = diffSectionTarget(self.rawTarget(), path)
+  let section = UnifiedDiffComponent(
+    id: nextSectionId,
+    data: self.data,
+    config: self.config,
+    content: Content.UnifiedDiff,
+    diffTarget: cstring("diff:" & plan.target),
+    sectionPath: cstring(plan.onlyPath),
+    sectionOf: self)
+  dec nextSectionId
+  while self.sections.len <= index:
+    self.sections.add(nil)
+  self.sections[index] = section
+  section
+
+proc forgetSection(section: UnifiedDiffComponent) =
+  ## Dispose a section's editor and drop what it owned.
+  if section.isNil:
+    return
+  if section.editorInitialized:
+    section.resetEditor()
+  forgetUnifiedDiffTab(section.scopedKey())
+
+proc forgetDocumentSections*(componentId: int) =
+  ## A closed document tab disposes every section's editor and model
+  ## (VCS-Panel.md, "Whole-Commit Document").
+  let mapping = data.ui.componentMapping[Content.UnifiedDiff]
+  if mapping.isNil or not mapping.hasKey(componentId):
+    return
+  let document = UnifiedDiffComponent(mapping[componentId])
+  if document.isNil:
+    return
+  let sections = document.sections
+  document.sections = @[]
+  let key = document.scopedKey()
+  if documentRoots.hasKey(key):
+    discard jsDelete(documentRoots[key])
+  for section in sections:
+    section.forgetSection()
+
+proc renderSectionInto(self: UnifiedDiffComponent; r: WebRenderer;
+                       index: int; path: string;
+                       host: isonim_dom_api.Element) =
+  ## Fill one section of the document: that file's diff tab, whose editor is
+  ## created as soon as the section is in the page.
+  let section = self.sectionFor(index, path)
+  let vm = section.ensureUnifiedDiffVM()
+  if vm.isNil:
+    return
+  if section.editorInitialized:
+    section.resetEditor()
+  section.syncIntoVM()
+  let tab = renderUnifiedDiffTab[WebRenderer, isonim_dom_api.Element](
+    r, vm, editorHostId(section.id), section.tabCallbacks(vm))
+  isonim_dom_api.appendChild(isonim_dom_api.Node(host), isonim_dom_api.Node(tab))
+  section.initEditorWhenAttached(host)
+
+proc documentElement(self: UnifiedDiffComponent): isonim_dom_api.Element =
+  ## The rendered document of this tab, or nil.
+  let key = self.scopedKey()
+  if documentRoots.hasKey(key): documentRoots[key] else: nil
+
+proc applyDocumentScroll(self: UnifiedDiffComponent) =
+  ## Re-apply the document's scroll request: a section that has just grown to
+  ## its content moved every section below it.
+  if self.isNil or not unifiedDiffVMInstances.hasKey(self.scopedKey()):
+    return
+  let request = unifiedDiffVMInstances[self.scopedKey()].documentScroll.val
+  let host = self.documentElement()
+  if host.isNil or request.path.len == 0:
+    return
+  scrollToSection(host, request.path)
+
+proc requestDocumentScroll*(data: Data; target, path: string) =
+  ## Bring `path` into view in the open diff tab for `target` (VCS-Panel.md,
+  ## "Scrolling to a file"): what a click on a file under an expanded commit
+  ## does after opening or focusing the commit's document. The request is
+  ## kept on the tab's ViewModel, so a tab rendered after it still scrolls.
+  let mapping = data.ui.componentMapping[Content.UnifiedDiff]
+  if mapping.isNil:
+    return
+  for _, component in mapping:
+    let tab = UnifiedDiffComponent(component)
+    if not tab.isNil and tab.rawTarget() == target:
+      let vm = tab.ensureUnifiedDiffVM()
+      if not vm.isNil:
+        vm.requestDocumentScroll(path)
+
+# The panel host mounts each diff tab into the container GoldenLayout creates
+# (`ui/panel_host`); the factory has created the tab's component by then.
+setPanelRenderer(Content.UnifiedDiff,
+  proc(r: WebRenderer; host: isonim_dom_api.Element;
+       session: SessionViewModel): isonim_dom_api.Element =
+    let component = unifiedDiffComponentFor(host)
+    let vm = if component.isNil: nil else: component.ensureUnifiedDiffVM()
+    if vm.isNil:
+      return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")
+    if component.editorInitialized:
+      component.resetEditor()
+    component.syncIntoVM()
+    if vm.isDiffDocument():
+      # Several files: one section per file, each its own diff editor.
+      let document = component
+      let root = renderUnifiedDiffDocument[WebRenderer, isonim_dom_api.Element](
+        r, vm,
+        proc(index: int; path: string; sectionHost: isonim_dom_api.Element) =
+          document.renderSectionInto(r, index, path, sectionHost))
+      documentRoots[component.scopedKey()] = root
+      root
+    else:
+      renderUnifiedDiffTab[WebRenderer, isonim_dom_api.Element](
+        r, vm, editorHostId(component.id), component.tabCallbacks(vm)))
+
+# The editor host exists once the tab is rendered into its container. A
+# document's sections create their editors themselves.
+setPanelDecorator(Content.UnifiedDiff,
+  proc(host: isonim_dom_api.Element; session: SessionViewModel) =
+    let component = unifiedDiffComponentFor(host)
+    if not component.isNil and component.sections.len == 0:
+      component.initEditorWhenAttached(host))

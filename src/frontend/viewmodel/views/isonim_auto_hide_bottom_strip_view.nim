@@ -9,8 +9,12 @@
 ## Bottom-specific overrides live in auto_hide.styl under #auto-hide-bottom-strip.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -99,96 +103,72 @@ proc invokeHoverLeave(cb: AutoHideBottomStripCallbacks; i: int) =
 proc invokeContextMenu(cb: AutoHideBottomStripCallbacks; i: int; x: int; y: int) =
   if not cb.onContextMenu.isNil: cb.onContextMenu(i, x, y)
 
-# ---------------------------------------------------------------------------
-# MockRenderer path (for tests)
-# ---------------------------------------------------------------------------
-
-proc renderBottomStripTab(
-    r: MockRenderer;
-    tab: AutoHideBottomStripRecord;
-    index: int;
-    cb: AutoHideBottomStripCallbacks): MockNode =
-  let cls = if tab.active: AutoHideBottomStripTabActiveClass
-            else: AutoHideBottomStripTabClass
-  result = ui(r):
-    tdiv(class = cls, onclick = proc() = cb.invokeSelect(index)):
-      span(class = AutoHideBottomStripTabLabelClass):
-        text tab.title
-  if cb.showsHide(tab):
-    let hide = ui(r):
-      span(class = AutoHideBottomStripTabHideClass, role = "button",
-          title = HideTabLabel, `aria-label` = HideTabLabel,
-          onclick = proc() = cb.invokeHide(index))
-    r.appendChild(result, hide)
-
-proc renderAutoHideBottomStripPanel*(
-    r: MockRenderer;
-    tabs: seq[AutoHideBottomStripRecord];
-    cb: AutoHideBottomStripCallbacks = AutoHideBottomStripCallbacks()): MockNode =
-  result = ui(r):
-    tdiv(class = if tabs.len > 0: AutoHideBottomStripHasTabsClass else: "")
-  for i, tab in tabs:
-    r.appendChild(result, renderBottomStripTab(r, tab, i, cb))
-
-# ---------------------------------------------------------------------------
-# WebRenderer path (live DOM)
-# ---------------------------------------------------------------------------
-
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
   proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
   proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
   proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
 
-  proc renderBottomStripTab(
-      r: WebRenderer;
-      tab: AutoHideBottomStripRecord;
-      index: int;
-      cb: AutoHideBottomStripCallbacks): isonim_dom.Element =
-    let cls = if tab.active: AutoHideBottomStripTabActiveClass
-              else: AutoHideBottomStripTabClass
-    # mouseenter on the tab triggers the 200ms hover-preview timer.
-    var tabEl: isonim_dom.Element
-    result = ui(r):
-      tdiv(ref = tabEl,
-           class = cls,
-           onclick = proc() = cb.invokeSelect(index)):
-        span(class = AutoHideBottomStripTabLabelClass):
-          text tab.title
-    if cb.showsHide(tab):
-      var hideEl: isonim_dom.Element
-      let hide = ui(r):
-        span(ref = hideEl, class = AutoHideBottomStripTabHideClass, role = "button",
-            title = HideTabLabel, `aria-label` = HideTabLabel)
-      # Its own listener, stopped there: the tab's click would reopen the
-      # panel the × just closed.
-      isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+# ---------------------------------------------------------------------------
+# One tab, and the strip, for every renderer
+# ---------------------------------------------------------------------------
+
+proc renderBottomStripTab[R, N](
+    r: R;
+    tab: AutoHideBottomStripRecord;
+    index: int;
+    cb: AutoHideBottomStripCallbacks): N =
+  let cls = if tab.active: AutoHideBottomStripTabActiveClass
+            else: AutoHideBottomStripTabClass
+  var tabEl: N
+  result = ui(r):
+    tdiv(ref = tabEl,
+         class = cls,
+         onclick = proc() = cb.invokeSelect(index)):
+      span(class = AutoHideBottomStripTabLabelClass):
+        text tab.title
+  if cb.showsHide(tab):
+    var hideEl: N
+    let hide = ui(r):
+      span(ref = hideEl, class = AutoHideBottomStripTabHideClass, role = "button",
+          title = HideTabLabel, `aria-label` = HideTabLabel,
+          onclick = proc() = cb.invokeHide(index))
+    r.appendChild(result, hide)
+    when defined(js):
+      when N is isonim_dom.Element:
+        # Stopped here: the tab's click would reopen the panel the × just
+        # closed.
+        isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+          proc(ev: isonim_dom.Event) =
+            ev.preventDefault()
+            ev.stopPropagation())
+  when defined(js):
+    when N is isonim_dom.Element:
+      # mouseenter on the tab triggers the 200ms hover-preview timer.
+      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
+        proc(ev: isonim_dom.Event) =
+          cb.invokeHoverEnter(index))
+      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
+        proc(ev: isonim_dom.Event) =
+          cb.invokeHoverLeave(index))
+      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
         proc(ev: isonim_dom.Event) =
           ev.preventDefault()
           ev.stopPropagation()
-          cb.invokeHide(index))
-      discard isonim_dom.appendChild(isonim_dom.Node(result), isonim_dom.Node(hide))
-    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
-      proc(ev: isonim_dom.Event) =
-        cb.invokeHoverEnter(index))
-    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
-      proc(ev: isonim_dom.Event) =
-        cb.invokeHoverLeave(index))
-    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventDefault()
-        ev.stopPropagation()
-        cb.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
+          cb.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
 
-  proc renderAutoHideBottomStripPanel*(
-      r: WebRenderer;
-      tabs: seq[AutoHideBottomStripRecord];
-      cb: AutoHideBottomStripCallbacks = AutoHideBottomStripCallbacks()): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = if tabs.len > 0: AutoHideBottomStripHasTabsClass else: "")
-    for i, tab in tabs:
-      r.appendChild(result, renderBottomStripTab(r, tab, i, cb))
+proc renderAutoHideBottomStripPanel*[R, N](
+    r: R;
+    tabs: seq[AutoHideBottomStripRecord];
+    cb: AutoHideBottomStripCallbacks = AutoHideBottomStripCallbacks()): N =
+  ## The bottom strip, for every renderer. `tabs` is a value the caller
+  ## re-derives and redraws (`renderAutoHideBottomStripInto`).
+  result = ui(r):
+    tdiv(class = if tabs.len > 0: AutoHideBottomStripHasTabsClass else: "")
+  for i, tab in tabs:
+    r.appendChild(result, renderBottomStripTab[R, N](r, tab, i, cb))
 
+when defined(js):
   proc renderAutoHideBottomStripInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -209,7 +189,8 @@ when defined(js):
         else:
           AutoHideBottomStripHostClass))
 
-    let panel = renderAutoHideBottomStripPanel(r, tabs, cb)
+    let panel = renderAutoHideBottomStripPanel[WebRenderer, isonim_dom.Element](
+      r, tabs, cb)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):
       discard isonim_dom.appendChild(containerNode, panelNode.firstChild)

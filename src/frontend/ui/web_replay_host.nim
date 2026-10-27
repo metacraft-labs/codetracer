@@ -268,7 +268,7 @@ proc openSession(request: ReplaySessionRequest) =
           report("could not open the debugging surface: " & e.msg)
         except:
           report("could not open the debugging surface")
-      # `initialize` was already sent once, from `configureMiddleware`, into a
+      # `initialize` was already sent once, from `configureSessionMiddleware`, into a
       # channel with no peer — it timed out and resolved `{}`. Re-sending is
       # what gives the engine the handshake it expects; the DapApi's `seq`
       # counter makes the second one a distinct request.

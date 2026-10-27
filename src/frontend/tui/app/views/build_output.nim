@@ -13,9 +13,12 @@
 ## invisible to a Tier-2 read; a verdict expressed only in words would be
 ## invisible to somebody skimming. `test_edit_mode_build.nim` asserts both.
 
+import codetracer_embed
+
 import ../build_session
 import ../layout/profile
 import ./styled_row
+import ./scrubber_track
 
 export styled_row, profile, build_session
 
@@ -29,16 +32,30 @@ type
     lines*: seq[string]
     truncated*: bool
     scrollTop*: int
+    hview*: HorizontalView
+      ## PLAT-70 (Horizontal-Overflow.md §4): the output's horizontal view —
+      ## the pane's own (`BuildView`), its content the widest line measured
+      ## so far of this build.
+    overflowMarkers*: bool
+      ## `view.overflow-markers` (§4.6).
+
+  BuildView* = object
+    ## PLAT-70: what the pane keeps across frames — the view, and the widest
+    ## line measured so far of the build it is showing (§4.1).
+    hview*: HorizontalView
+    widths*: ContentWidth
 
   BuildPaneScreen* = object
     rows*: seq[StyledRow]
     area*: CellArea
     renderedLines*: int
+    barRow*: int
+      ## PLAT-70: the horizontal bar's row, -1 when the output fits.
 
 const
   BuildOutputStyle* = CellStyle(role: srChromeText)
   BuildTruncatedStyle* = CellStyle(role: srChromeNotification, italic: true)
-  TruncatedNote* = "… earlier output dropped"
+  TruncatedNote* = canonical(grTruncation) & " earlier output dropped"
 
 proc verdictStyle*(verdict: BuildVerdict): CellStyle =
   ## ONE COLOUR PER VERDICT, NO TWO THE SAME, on exactly the rule
@@ -64,9 +81,27 @@ proc buildPaneModelFor*(s: BuildSession): BuildPaneModel =
   initBuildPaneModel(verdict = s.verdict, headline = describeVerdict(s),
                      lines = s.lines, truncated = s.truncated)
 
+proc measureContent*(v: var BuildView; s: BuildSession) =
+  ## §4.1: the widest line measured so far of THIS build — a new build (a
+  ## new `BuildSession`) starts again from nothing; the same one only grows.
+  let generation = if s.isNil: 0 else: cast[int](s)
+  let lines = if s.isNil: @[] else: s.lines
+  v.hview.setContent(v.widths.measureLines(generation, lines, cellWidthOf))
+
+proc buildBarOf*(model: BuildPaneModel; area: CellArea):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## PLAT-70: where `paintBuildOutput` draws the horizontal bar in `area`
+  ## (the rows below the strip), and the view it is drawn over.
+  var view = model.hview
+  view.setViewport(area.width)
+  (shown: view.overflows and area.height >= 3,
+   row: area.row + area.height - 1, left: area.col, cols: area.width,
+   view: view)
+
 proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
                        model: BuildPaneModel): BuildPaneScreen =
-  result = BuildPaneScreen(rows: @[], area: area, renderedLines: 0)
+  result = BuildPaneScreen(rows: @[], area: area, renderedLines: 0,
+                           barRow: -1)
   if area.width <= 0 or area.height <= 0:
     return
   # PLAT-49: NO TITLE BAR — the tab strip above the pane names it. The
@@ -86,19 +121,28 @@ proc paintBuildOutput*(g: var StyledGrid; area: CellArea;
     used += cellWidthOf(fitted)
   result.rows.add parts
 
+  let bar = model.buildBarOf(area)
+  let view = bar.view
   var row = area.row + 1
-  let lastRow = area.row + area.height - 1
+  let lastRow = area.row + area.height - 1 - (if bar.shown: 1 else: 0)
   if model.truncated and row <= lastRow:
-    g.paint(row, area.col, truncateToCells(TruncatedNote, area.width),
+    let note = g.glyphText(grTruncation) & " earlier output dropped"
+    g.paint(row, area.col, truncateToCells(note, area.width),
             BuildTruncatedStyle)
-    result.rows.add @[StyledSpan(text: TruncatedNote,
+    result.rows.add @[StyledSpan(text: note,
                                  style: BuildTruncatedStyle)]
     inc row
   var i = model.scrollTop
   while row <= lastRow and i < model.lines.len:
-    let text = truncateToCells(model.lines[i], area.width)
+    let text = cellSlice(model.lines[i], view.leftCol,
+                         view.leftCol + area.width)
     g.paint(row, area.col, text, BuildOutputStyle)
+    if model.overflowMarkers:
+      paintOverflowMarkers(g, row, area.col, cellWidthOf(model.lines[i]), view)
     result.rows.add @[StyledSpan(text: text, style: BuildOutputStyle)]
     inc result.renderedLines
     inc row
     inc i
+  if bar.shown:
+    result.barRow = bar.row
+    paintHorizontalBar(g, bar.row, bar.left, bar.cols, view.barModel)

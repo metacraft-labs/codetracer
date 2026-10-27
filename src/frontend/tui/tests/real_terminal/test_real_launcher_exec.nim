@@ -121,7 +121,7 @@ const
     ## `S_ERR_NO_HANDLER` + the command, from
     ## `codetracer-launcher/src/install.nim`'s emit block. Not importable: that
     ## string lives in C inside an `--os:standalone` module.
-  PaneTitles: array[4, string] = [" Call Trace ", " main.py ", " Variables ",
+  PaneTitles: array[4, string] = [" Call Trace ", " calc/main.py ", " Variables ",
                                   "Event Log"]   # PLAT-51: was the Timeline tab
     ## §3.1's screen, as the shared default draws it: the panes' tab labels
     ## (PLAT-49: no pane carries a title row; a lone editor's tab names its
@@ -129,8 +129,8 @@ const
     ## counted sweep rather than four loose `contains` calls so a partially
     ## painted screen cannot satisfy "at least one".
 
-  MeasurementDate = "2026-10-08"
-  MeasuredBinaryBytes = 17_282_128
+  MeasurementDate = "2026-10-24"
+  MeasuredBinaryBytes = 20_359_600
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -241,8 +241,48 @@ const
     ## and cell-size answers), `shell` and `palette` (the focused strip, the
     ## dimmed future), ~44 KB between them. No data table is linked in. The
     ## ceiling keeps 8.02% over the anchor.
+    ##
+    ##   18_138_608  2026-10-16: `agents` at 6b6d05a08 with `dev` merged in,
+    ##               built fresh; inside the band (PLAT-52…68 growth, 4.95%
+    ##               over the 17_282_128 anchor)
+    ##   18_755_344  2026-10-16: Find in Files with regular expressions
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. Find in Files costs +616_736 bytes
+    ## (+3.40%) over that tree built the same way, which tripped the band.
+    ## Attributed by summing `nm -S` per Nim module: a regular-expression
+    ## engine linked in for the first time — nim-regex (`libs/nim-regex`:
+    ## `parser`, `exptransformation`, `nfa`, `litopt`, `nfamatch2`,
+    ## `nfafindall2`, `types` and the rest, ~159 KB of code) and the Unicode
+    ## DATA TABLES it reads (nim-unicodedb's `casing_data`, `types_data`,
+    ## `properties_data`, ~191 KB, said so: case folding and `\w` / `\p{…}`
+    ## need them, and they are the one thing linked in as data); the search
+    ## runner and its matcher (`find_in_files`, `text_match`, ~29 KB); the
+    ## pane's ViewModel linked into the terminal for the first time
+    ## (`search_results_vm`, ~35 KB) and its painter (`search_results_pane`,
+    ## ~11 KB); and growth in `tui_session`, `runtime`, `native_host` and
+    ## `tui_app` (~24 KB). The ceiling keeps 8.02% over the anchor.
+    ##
+    ##   20_270_192  2026-10-24: `agents` at a25862343a (PLAT-70 Part B, the
+    ##               table panes), built fresh; ALREADY OVER the 20_259_500
+    ##               ceiling (8.08% over the 18_755_344 anchor: the growth
+    ##               since 2026-10-16, never re-anchored)
+    ##   20_359_600  2026-10-24: the scrollbar options (PLAT-70 Part H),
+    ##               re-measured on review over `agents` fd2dc3495b (with
+    ##               PLAT-70 Part I), which built the same way is 20_295_120
+    ##
+    ## RE-ANCHORED WITH ATTRIBUTION. The scrollbar options cost +64_480 bytes
+    ## (+0.32%) over `agents` built the same way; the band had been tripped
+    ## by the growth before them. Attributed by summing `nm -S` per Nim
+    ## module: the valued layout settings (`layout_settings`, ~10 KB), the one
+    ## glyph table and bar painter (`scrollbar_styles`, ~11 KB), the fade's
+    ## colour blend (`palette`, ~4 KB), the shared bar model
+    ## (`scrollbar_interaction`, ~1.5 KB), the ASCII bar glyphs
+    ## (`degradation`, ~1.5 KB), the five flags (`cli`, ~4 KB) and growth in
+    ## `shell` and `runtime`, less the per-pane bar paths it replaced
+    ## (`scrubber_track`, -2 KB). No data table is linked in. The ceiling
+    ## keeps 8.02% over the anchor.
 
-  BinaryCeilingBytes = 18_668_200
+  BinaryCeilingBytes = 21_992_400
     ## MeasuredBinaryBytes + 8.02%. Wide enough that ordinary work — a pane, a
     ## formatter, a grammar's parser table growing — does not redden the lane on
     ## the day it lands, narrow enough that a link-line accident (a second
@@ -457,10 +497,10 @@ template ckDebuggerFrame(sess: var TuiTestSession) =
   ck compared == PaneTitles.len
 
 template ckQuitsCleanly(sess: var TuiTestSession) =
-  ## `q` is §4.2's quit. Exit 0 EXACTLY: `main.nim` separates a usage error (2)
+  ## `Ctrl+Q` is the CUA base's quit. Exit 0 EXACTLY: `main.nim` separates a usage error (2)
   ## from "no terminal" (3) and from an unhandled exception (1), and `rc != 0`
   ## would be satisfied by the binary crashing on the way out.
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   let status = sess.waitExit(initDuration(seconds = 15))
   checkpoint("exit: " & (if status.isSome: $status.get() else: "none"))
   ck status.isSome

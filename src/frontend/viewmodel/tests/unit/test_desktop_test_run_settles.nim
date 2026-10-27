@@ -175,7 +175,7 @@ proc hostOverPane(spies: Spies): (TestResultsVM, MockNode, DesktopTestHost) =
   let vm = createTestResultsVM()
   vm.setCatalog(TestCatalog(items: fiveTests()))
   let r = MockRenderer()
-  let panel = renderTestResultsPanel(r, vm)
+  let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
   let host = newDesktopTestHost(
     vm,
     dispatch = proc(selector, file: string; line: int): string =
@@ -363,7 +363,7 @@ suite "a test run dispatched through the desktop host ends, and says how":
       let vm = createTestResultsVM()
       vm.setCatalog(TestCatalog(items: fiveTests()))
       let r = MockRenderer()
-      let panel = renderTestResultsPanel(r, vm)
+      let panel = renderTestResultsPanel[MockRenderer, MockNode](r, vm)
       let host = newDesktopTestHost(
         vm,
         dispatch = proc(selector, file: string; line: int): string =

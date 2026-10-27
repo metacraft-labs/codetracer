@@ -44,7 +44,11 @@ if (!url) {
 
 // THE PANES, and why each is here.
 //
-//   state / calltrace / timeline — the three the desktop logs showed blank.
+//   state / calltrace           — two of the three the desktop logs showed
+//                                 blank. The third, the Timeline, is gone:
+//                                 `740d76be2` removed the pane (the list
+//                                 scrollbars became scrubbers), so no layout
+//                                 has a `#timelineComponent-0` to look for.
 //   eventLog / terminal         — the same shape, moved into the factory by
 //                                 the same commit, listed so a regression in
 //                                 them is visible rather than inferred.
@@ -61,7 +65,6 @@ if (!url) {
 const PANES = [
   ['state', 'stateComponent-0'],
   ['calltrace', 'calltraceComponent-0'],
-  ['timeline', 'timelineComponent-0'],
   ['eventLog', 'eventLogComponent-0'],
   ['terminal', 'terminalComponent-0'],
 ];
@@ -147,8 +150,8 @@ try {
   // walked in on.
   report.panesBeforeRun = await page.evaluate(readPanes, PANES);
 
-  // Blur the editor: Mousetrap ignores a chord raised inside a TEXTAREA, and
-  // Monaco's input surface is one.
+  // Blur the editor, so the press starts outside Monaco as it always has here
+  // (the key router resolves it either way).
   try {
     await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
   } catch { /* a missing topbar shows up as `mounted: false` */ }

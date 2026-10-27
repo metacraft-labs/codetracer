@@ -1,26 +1,30 @@
 ## views/isonim_event_log_view.nim
 ##
-## IsoNim DOM-rendering view for the Event Log panel.
+## The Event Log panel: ONE generic view, `renderEventLogPanel[R, N]`, over
+## `EventLogVM` — under `MockRenderer` for the headless tests, under
+## `WebRenderer` for the desktop (mounted by `ui/panel_host.mountPanel`), the
+## VS Code webview and the storybook.
 ##
-## Two output structures:
+## The rows are a keyed list (`forEachKeyed`) of the window the ViewModel
+## holds, each keyed by its position in the list the pane pages through, so a
+## scroll that slides the window keeps the rows it still shows. They sit
+## `loadedStart` rows down inside a scroll area as tall as the whole
+## (filtered) list, so the scrollbar spans the log and a scrolled-to window
+## lands where it belongs. The panel host measures the area and reports it to
+## the ViewModel (`setViewport`, `setRowHeightPx`), which asks the engine for
+## the rows it shows (`ct/event-load`).
 ##
-## - `MockRenderer` — simple test-friendly DOM (search row, column
-##   header row, event row list via `indexEach`, pagination, loading).
-##   Used by `src/tests/gui/tests/views/isonim_views_test.nim`.
+## The markup keeps the class names the desktop's Event Log always had — the
+## dense table's `tbody tr` rows with their `data-*` identity, the
+## `.eventLog-index` / `.rr-ticks-time` / `.eventLog-text` cells, the
+## `.data-tables-footer` counters — which the Playwright page objects read
+## (`src/tests/gui/page-objects/panes/event-log/`) and the stylesheets size.
 ##
-## - `WebRenderer` — Karax-compatible DOM that hosts the DataTables
-##   widget. The IsoNim view creates the static container shell
-##   (outer container, header with filter + search, `<table>`
-##   placeholders, footer); after mount the caller initialises
-##   DataTables on the `<table>` elements. DataTables manages its
-##   own DOM from there.
-##
-## Both renderers express the panel structure in a single `ui()` block
-## per overload. Reactive attributes (sort indicator class, pagination
-## button enabled/disabled, page indicator text, loading display) use
-## DSL helpers so the macro emits per-attribute `createRenderEffect`s.
+## What only a browser has — the search field's typing, the footer's row
+## field, the expander of a multi-line event and the scrollbar scrubber — is
+## decoration added under `when N is isonim_dom.Element`.
 
-import std/[options]
+import std/[math, options, strutils]
 
 import isonim/core/[signals, computation]
 import isonim/dsl/ui
@@ -30,55 +34,21 @@ import isonim/testing/mock_dom
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  from std/jsffi import JsObject
+  from ./list_scrubber_dom import attachListScrubber
+  from ./table_fit_dom import attachEventLogFit
 
 import ../store/types
 import ../viewmodels/event_log_vm
+from ../viewmodels/table_overflow import pxOfCells, EventLogTablePane, oneLine
+from std/unicode import runeLen
+# PLAT-70 Part I: fit or scroll (Horizontal-Overflow.md §5.5).
+import ../viewmodels/table_fit
+
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
-# Column header configuration
-# ---------------------------------------------------------------------------
-
-const
-  COLUMN_NAMES = ["ID", "Kind", "Line", "Value"]
-    ## Display labels for the Mock-renderer event-log columns.
-    ## Index 0 = eventId, 1 = kind, 2 = line, 3 = value.
-
-# ---------------------------------------------------------------------------
-# Reactive expressions used inside DSL attributes
-# ---------------------------------------------------------------------------
-
-proc displayIf(cond: bool): string =
-  if cond: "block" else: "none"
-
-proc reactiveDisabled[R, N](r: R; el: N; isDisabled: proc(): bool) =
-  ## Reactively toggle the `disabled` attribute on `el`. Browsers treat
-  ## any value of `disabled` (including the empty string) as
-  ## "disabled", so we add the attribute when the condition is true
-  ## and *remove* it when false. The DSL's dynamic-attribute path
-  ## always emits `setAttribute`, so we wire this case imperatively
-  ## against an element captured via `ref = var` in the surrounding
-  ## `ui()` block.
-  createRenderEffect proc() =
-    if isDisabled():
-      r.setAttribute(el, "disabled", "true")
-    else:
-      r.removeAttribute(el, "disabled")
-
-proc columnHeaderClass(vm: EventLogVM; col: int): string =
-  ## Column header class with a reactive `sort-active` modifier.
-  let base = "column-header column-" & $col
-  if vm.sortColumn.val == col: base & " sort-active" else: base
-
-proc columnHeaderText(vm: EventLogVM; col: int; baseName: string): string =
-  ## Column header text with a reactive sort-direction indicator.
-  if vm.sortColumn.val != col: return baseName
-  if vm.sortAscending.val: baseName & " ^"
-  else: baseName & " v"
-
-# ---------------------------------------------------------------------------
-# The column menu (PLAT-49 part B, finding 14) — Event-Log-Pane.md's
-# "[+ Columns]": every column of the ViewModel's order, a check to show or
-# hide it and a move left / right, all through `EventLogVM`.
+# What the DSL binds: free procs, so each attribute and text is one effect
 # ---------------------------------------------------------------------------
 
 const
@@ -89,6 +59,23 @@ const
   EventLogColumnCheckClass* = "eventLog-column-check"
   EventLogColumnLeftClass* = "eventLog-column-left"
   EventLogColumnRightClass* = "eventLog-column-right"
+  EventLogColumnGripClass* = "eventLog-column-grip"
+    ## A header cell's separator grip, at its right edge (Horizontal-
+    ## Overflow.md §5.2): a drag on it resizes the column (`ui/event_log`).
+  EventLogColumnGripAttribute* = "data-ct-column-separator"
+    ## On the grip: its column.
+  EventLogRowClass* = "eventLog-row"
+    ## Every event row; the panel host measures the rows' advance by it.
+  EventLogScrollBodyClass* = "eventLog-scroll-body"
+    ## The element that scrolls: the panel host's measured viewport.
+  EventLogEmptyText* =
+    "The current record appears to not have any system events like " &
+    "std read/write, network or disc operations. You can add trace point " &
+    "events to your code by selecting any line of code and pressing \"Enter\""
+    ## What an empty log says (the desktop table's `emptyTable` text).
+
+proc displayIf(cond: bool): string =
+  if cond: "block" else: "none"
 
 proc columnCheckClass*(vm: EventLogVM; col: EventLogColumn): string =
   EventLogColumnCheckClass &
@@ -100,82 +87,207 @@ proc columnCheckGlyph*(vm: EventLogVM; col: EventLogColumn): string =
 proc columnOptionTitle*(col: EventLogColumn): string =
   eventLogColumnTitle(col)
 
-proc rowClass(vm: EventLogVM; index: int): string =
+proc columnClass*(col: EventLogColumn): string =
+  ## A column's cells' class — a header cell's and a body cell's alike, so
+  ## the rules that size one size the other.
+  case col
+  of elcTick: "direct-location-rr-ticks eventLog-cell"
+  of elcIndex: "eventLog-index eventLog-cell"
+  of elcLocation: "eventLog-fullpath eventLog-cell"
+  of elcKind: "eventLog-event eventLog-cell"
+  of elcOutput: "eventLog-text eventLog-cell"
+
+# ---------------------------------------------------------------------------
+# PLAT-70 Part I: the columns fit or scroll (Horizontal-Overflow.md §5.5)
+# ---------------------------------------------------------------------------
+
+const DesktopColumnGapCells* = 1
+  ## The space between two columns, in characters (the cells' padding): the
+  ## terminal's `GapCells`, so both lay out the same table.
+
+var fitCache: tuple[key: string; fit: TableFit]
+
+proc rowLocation*(row: EventLogRow): string
+
+proc desktopFit*(vm: EventLogVM): TableFit =
+  ## The Event Log's columns in CHARACTERS of the table's font, laid out by
+  ## the shared solver over the viewport the panel measured
+  ## (`EventLogVM.tableMetrics`) and each column's widest cell over the rows
+  ## held — the terminal's declaration (`eventLogFitColumns`,
+  ## `eventLogDefaultCells`) in the terminal's units, so the desktop and the
+  ## terminal make the same decision for the same rows and width (HO-13).
+  let m = vm.tableMetrics.val
+  let columns = vm.columns.val
+  let rows = vm.eventRows.val
+  var key = $m.cells & "|" & $columns.visibleColumns & "|" & $rows.len
+  for col in EventLogColumn: key.add "," & $columns.widths[col]
+  if rows.len > 0:
+    key.add "|" & $rows[0].eventId & "|" & $rows[^1].eventId
+  if fitCache.key == key:
+    return fitCache.fit
+  var widest: array[EventLogColumn, int]
+  for row in rows:
+    widest[elcTick] = max(widest[elcTick], ($row.rrTicks).len)
+    widest[elcIndex] = max(widest[elcIndex], ($row.eventId).len)
+    widest[elcLocation] = max(widest[elcLocation], rowLocation(row).runeLen)
+    widest[elcOutput] = max(widest[elcOutput],
+                            oneLine(eventLogText(row)).runeLen)
+  result = fitTable(columns.eventLogFitColumns(widest, eventLogDefaultCells()),
+                    m.cells, DesktopColumnGapCells)
+  fitCache = (key, result)
+
+proc desktopScrolls*(vm: EventLogVM): bool =
+  ## SCROLL: the columns' floors do not fit the measured viewport — the
+  ## table is laid out at them and its body scrolls sideways (HO-11).
+  vm.tableMetrics.val.cells > 0 and vm.desktopFit.overflows
+
+proc fitPx(vm: EventLogVM; cells: int): int =
+  int(round(float(cells) * vm.tableMetrics.val.charPx))
+
+proc tableMinWidthStyle*(vm: EventLogVM): string =
+  ## The header's and the rows' width in SCROLL: the laid-out table's.
+  if vm.desktopScrolls: "min-width: " & $vm.fitPx(vm.desktopFit.contentUnits) & "px"
+  else: ""
+
+proc scrollBodyStyle*(vm: EventLogVM): string =
+  ## The body scrolls sideways only in SCROLL (the bar is overflow-only).
+  if vm.desktopScrolls: "overflow-x: auto" else: ""
+
+proc fitModeOf*(vm: EventLogVM): string =
+  ## `data-ct-fit` on the table: the solver's mode, `fit` until measured.
+  if vm.tableMetrics.val.cells <= 0: $fmFit else: $vm.desktopFit.mode
+
+proc columnWidthStyle*(vm: EventLogVM; col: EventLogColumn): string =
+  ## A column's width as its cells' style — header and body alike. In SCROLL
+  ## (PLAT-70 Part I) every column is the solver's width; otherwise a column
+  ## the user set (`EventLogColumns.widths`, `ColumnCellPx` pixels a cell) is
+  ## that width and the others the stylesheet's own (Horizontal-Overflow.md
+  ## §5.2), whose flex layout is the solver's FIT and SHRINK rule (fixed
+  ## columns, the output the flex column).
+  if vm.desktopScrolls:
+    let fit = vm.desktopFit
+    let k = vm.columns.val.visibleColumns.find(col)
+    if k >= 0 and k < fit.widths.len:
+      let px = $vm.fitPx(fit.widths[k] + DesktopColumnGapCells) & "px"
+      return "flex: 0 0 " & px & "; width: " & px & "; max-width: " & px &
+             "; min-width: " & px & "; box-sizing: border-box"
+  let cells = vm.columns.val.widths[col]
+  if cells <= 0: ""
+  else:
+    let px = $pxOfCells(cells) & "px"
+    "flex: 0 0 " & px & "; width: " & px & "; max-width: " & px &
+      "; min-width: " & px
+
+proc columnHeaderText*(vm: EventLogVM; col: EventLogColumn): string =
+  ## A header's label, with the order's arrow on the ordering column once the
+  ## order is not the recorded one (tick, ascending).
+  let order = vm.order()
+  let title = if col == elcKind: "" else: eventLogColumnTitle(col)
+  if order != RecordedEventOrder and order.column == col and title.len > 0:
+    title & (if order.ascending: " ▲" else: " ▼")
+  else:
+    title
+
+proc listPositions*(vm: EventLogVM): seq[int] =
+  ## The positions, in the list the pane pages through, of the rows the
+  ## ViewModel holds — the keys of the rows drawn.
+  let start = vm.store.eventLog.loadedStart.val
+  for i in 0 ..< vm.eventRows.val.len:
+    result.add start + i
+
+proc rowAt*(vm: EventLogVM; position: int): EventLogRow =
+  ## The held row at `position`; an empty row once the window moved past it
+  ## (its node is about to be dropped).
+  let at = position - vm.store.eventLog.loadedStart.val
+  let rows = vm.eventRows.val
+  if at >= 0 and at < rows.len: rows[at] else: EventLogRow()
+
+proc cellKey*(vm: EventLogVM; position: int; col: EventLogColumn): string =
+  ## A body cell's name in the table panes' model (`data-ct-cell`): the pane,
+  ## the event's id and the column, so it is cut, hovered and its `…`
+  ## pressed through `table_overflow_dom` (Horizontal-Overflow.md §5).
+  EventLogTablePane & "|" & $vm.rowAt(position).eventId & "|" & $col
+
+proc rowClass*(vm: EventLogVM; position: int): string =
+  ## A row's class: where it is against the debugger's position (`past`,
+  ## `active`, `future` — the dimming a move changes, and the only thing it
+  ## changes), and whether it is the current event (`event-selected`).
+  let row = vm.rowAt(position)
+  let now = vm.store.debugger.val.rrTicks
+  let timing =
+    if row.rrTicks < now: "past"
+    elif row.rrTicks == now: "active"
+    else: "future"
+  var cls = EventLogRowClass & " " & timing
+  if vm.store.eventLog.currentIndex.val == position:
+    cls.add " event-selected"
   let sel = vm.selectedRow.val
-  if sel.isSome and sel.get == index: "event-row selected" else: "event-row"
+  if sel.isSome and sel.get == position - vm.store.eventLog.loadedStart.val:
+    cls.add " selected"
+  cls
 
-proc pageIndicatorText(vm: EventLogVM): string =
-  let page = vm.currentPage.val + 1
-  let total = vm.totalPages.val
-  "Page " & $page & " / " & $total
+proc tickPercent(vm: EventLogVM; row: EventLogRow): float =
+  ## Where the event's tick is on the recording's extent, for its tick bar.
+  let timeline = vm.store.timeline.val
+  let lo = float(timeline.minRRTicks)
+  let hi = float(max(timeline.maxRRTicks, row.maxRRTicks))
+  let t = float(row.rrTicks)
+  if hi <= lo or t < lo: 0.0
+  else: min(100.0, (t - lo) * 100.0 / (hi - lo))
 
-proc prevButtonDisabled(vm: EventLogVM): bool =
-  vm.currentPage.val <= 0
+proc tickRemainingWidth*(vm: EventLogVM; position: int): string =
+  $(101.0 - tickPercent(vm, vm.rowAt(position))) & "%"
 
-proc nextButtonDisabled(vm: EventLogVM): bool =
-  let maxPage = vm.totalPages.val - 1
-  vm.currentPage.val >= maxPage or maxPage < 0
+proc tickRemainingLeft*(vm: EventLogVM; position: int): string =
+  $tickPercent(vm, vm.rowAt(position)) & "%"
 
-# ---------------------------------------------------------------------------
-# Click handler factories
-# ---------------------------------------------------------------------------
+proc rowLocation*(row: EventLogRow): string =
+  ## The location column's text: the file's name and the line.
+  if row.file.len == 0: ""
+  else: row.file.rsplit('/', maxsplit = 1)[^1] & ":" & $row.line
 
-proc onSortColumn(vm: EventLogVM; col: int): proc() =
-  let c = col
-  result = proc() = vm.sort(c)
+proc isMultiline*(row: EventLogRow): bool =
+  ## Whether the event's text spans lines (a trailing line break aside), so
+  ## its kind cell offers to expand it.
+  row.value.strip(leading = false, chars = {'\n', '\r'}).contains('\n')
 
-proc onSelectRow(vm: EventLogVM; index: int): proc() =
-  let i = index
-  result = proc() = vm.selectRow(some(i))
+proc expanderClass*(vm: EventLogVM; position: int): string =
+  if vm.rowAt(position).isMultiline:
+    "row-expander flow-hide-content flow-view-more-button"
+  else:
+    "row-expander-none"
 
-proc onDoubleClickRow(vm: EventLogVM; index: int): proc() =
-  let i = index
-  result = proc() = vm.doubleClickRow(i)
+proc listHeight*(vm: EventLogVM): string =
+  ## The scroll area's height: the whole list's rows.
+  $int(float(vm.listTotal) * vm.rowHeightPx.val) & "px"
 
-# ---------------------------------------------------------------------------
-# Row body (shared between Mock and Web simple variants)
-# ---------------------------------------------------------------------------
+proc windowOffset*(vm: EventLogVM): string =
+  ## The held window's place in the scroll area.
+  "translateY(" &
+    $int(float(vm.store.eventLog.loadedStart.val) * vm.rowHeightPx.val) &
+    "px)"
 
-template renderEventRowImpl(r, vm, item, index: untyped): untyped =
-  ## Reactive event-log row. Class is reactive on selection; cell
-  ## texts are reactive on the row's signal.
-  let onClick    = onSelectRow(vm, index)
-  let onDblClick = onDoubleClickRow(vm, index)
-  ui(r):
-    tdiv(class = rowClass(vm, index),
-         `data-event-kind` = item().kind,
-         `data-event-path` = item().file,
-         `data-rr-ticks` = $item().rrTicks,
-         `data-max-rr-ticks` = $item().maxRRTicks,
-         `data-source-generation` = $item().sourceGeneration,
-         `data-source-digest` = item().sourceDigest,
-         onclick = onClick, ondblclick = onDblClick):
-      span(class = "event-id"):
-        text $item().eventId
-      span(class = "event-kind"):
-        text item().kind
-      span(class = "event-line"):
-        text $item().line
-      span(class = "event-value"):
-        text item().value
+proc footerStart*(vm: EventLogVM): int =
+  ## The footer's first row shown, counted from 1 (0 for an empty list).
+  if vm.listTotal <= 0: 0
+  else: min(vm.listTotal, max(0, vm.viewport.val.firstRow) + 1)
 
-proc renderEventRow*(r: MockRenderer; vm: EventLogVM;
-                     item: proc(): EventLogRow; index: int): MockNode =
-  renderEventRowImpl(r, vm, item, index)
+proc footerEnd*(vm: EventLogVM): int =
+  ## The footer's last row shown.
+  let v = vm.viewport.val
+  min(vm.listTotal, max(0, v.firstRow) + max(0, v.rows))
 
-when defined(js):
-  proc renderEventRow*(r: WebRenderer; vm: EventLogVM;
-                       item: proc(): EventLogRow; index: int):
-                       isonim_dom.Element =
-    renderEventRowImpl(r, vm, item, index)
+proc footerClass*(vm: EventLogVM): string =
+  ## The footer's class carries `<start>to<end>`, which the page objects
+  ## read (`EventLogPane.rows`).
+  "data-tables-footer " & $vm.footerStart & "to" & $vm.footerEnd
 
-# ---------------------------------------------------------------------------
-# MockRenderer panel — simple structure for headless tests
-# ---------------------------------------------------------------------------
+proc emptyDisplay*(vm: EventLogVM): string =
+  displayIf(vm.loadingState.val != lsLoading and vm.listTotal <= 0 and
+            vm.eventRows.val.len == 0)
 
 proc markerBannerText*(vm: EventLogVM): string =
-  ## §5.4.1 banner text. Composed in a free proc so the DSL can bind
-  ## a single text node reactively.
+  ## §5.4.1 banner text.
   let banner = vm.loadingBanner.val
   case banner.phase
   of mlbLoading:
@@ -187,9 +299,7 @@ proc markerBannerDisplay*(vm: EventLogVM): string =
   displayIf(vm.loadingBanner.val.phase == mlbLoading)
 
 proc markerEmptyStateText*(vm: EventLogVM): string =
-  ## §5.5 "N markers declared in source; none fired" banner. Empty
-  ## string when `mesHidden` — the surrounding div is hidden via the
-  ## display reactive binding.
+  ## §5.5 "N markers declared in source; none fired" banner.
   let state = vm.emptyState.val
   case state.kind
   of mesHidden: ""
@@ -212,20 +322,96 @@ proc markerToastDisplay*(vm: EventLogVM): string =
   displayIf(vm.toastState.val.kind == mtVisible)
 
 proc markerBoundaryChip*(row: MarkerEventRow): string =
-  ## §5.1 boundary chip text. Wrapped in brackets to match the spec's
-  ## "[order-processing]" example.
+  ## §5.1 boundary chip text, "[order-processing]".
   "[" & row.boundaryId & "]"
 
-template renderMarkerRowImpl(r, vm, item: untyped): untyped =
-  ## §5.1 marker row layout. Renders direction icon, boundary chip,
-  ## formatted show value, and the counterpart-set indicator. Each
-  ## attribute is reactive on the row's signal — the data binding is
-  ## entirely declarative.
-  ##
-  ## §5.3 — the boundary chip is the jump control. Clicking it walks
-  ## to this firing's counterpart on the other side of the boundary,
-  ## rotating the session's active recording when the counterpart
-  ## lives in a sibling trace.
+# ---------------------------------------------------------------------------
+# Handlers, made by factories so each closes over its own value
+# ---------------------------------------------------------------------------
+
+proc onHeaderClick(vm: EventLogVM; col: EventLogColumn): proc() =
+  result = proc() = vm.sortBy(vm.order().clickedHeader(col))
+
+proc onRowClick(vm: EventLogVM; position: int): proc() =
+  ## A click selects the event and moves the debugger to it.
+  result = proc() =
+    let at = position - vm.store.eventLog.loadedStart.val
+    vm.selectRow(some(at))
+    vm.doubleClickRow(at)
+
+proc onToggleColumn(vm: EventLogVM; col: EventLogColumn): proc() =
+  result = proc() = discard vm.toggleColumn(col)
+
+proc onMoveColumn(vm: EventLogVM; col: EventLogColumn; delta: int): proc() =
+  result = proc() = discard vm.moveColumn(col, delta)
+
+# ---------------------------------------------------------------------------
+# Rows
+# ---------------------------------------------------------------------------
+
+proc renderEventCell*[R, N](r: R; vm: EventLogVM; position: int;
+                            col: EventLogColumn): N =
+  ## One cell of the row at `position`, for column `col`.
+  case col
+  of elcTick:
+    ui(r):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col)):
+        tdiv(class = "rr-ticks-time-container"):
+          span(class = "rr-ticks-time"):
+            text $vm.rowAt(position).rrTicks
+        tdiv(class = "rr-ticks-line-container"):
+          span(class = "rr-ticks-line event-rr-ticks-line"):
+            discard
+          span(class = "rr-ticks-empty-remaining",
+               width = tickRemainingWidth(vm, position),
+               left = tickRemainingLeft(vm, position)):
+            discard
+  of elcIndex:
+    ui(r):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
+        text $vm.rowAt(position).eventId
+  of elcLocation:
+    ui(r):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
+        text rowLocation(vm.rowAt(position))
+  of elcKind:
+    ui(r):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col)):
+        span(class = expanderClass(vm, position)):
+          discard
+  of elcOutput:
+    ui(r):
+      td(class = columnClass(col), style = columnWidthStyle(vm, col),
+         `data-ct-cell` = cellKey(vm, position, col)):
+        text eventLogText(vm.rowAt(position))
+
+proc renderEventRow*[R, N](r: R; vm: EventLogVM; position: int): N =
+  ## The row at `position` of the list: its identity as `data-*` attributes
+  ## (what the page objects find rows by), a cell per shown column.
+  var rowEl: N
+  let row = ui(r):
+    tr(ref = rowEl, class = rowClass(vm, position),
+       `data-position` = $position,
+       `data-event-kind` = eventLogKindName(vm.rowAt(position)),
+       `data-event-path` = vm.rowAt(position).file,
+       `data-rr-ticks` = $vm.rowAt(position).rrTicks,
+       `data-max-rr-ticks` = $vm.rowAt(position).maxRRTicks,
+       `data-source-generation` = $vm.rowAt(position).sourceGeneration,
+       `data-source-digest` = vm.rowAt(position).sourceDigest,
+       onclick = onRowClick(vm, position)):
+      discard
+  forEachKeyed[EventLogColumn, R, N](r, rowEl,
+    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,
+    proc(col: proc(): EventLogColumn; index: proc(): int): N =
+      renderEventCell[R, N](r, vm, position, col()))
+  row
+
+proc renderMarkerRow*[R, N](r: R; vm: EventLogVM;
+                            item: proc(): MarkerEventRow): N =
+  ## §5.1 marker row: direction icon, boundary chip (§5.3, the jump to the
+  ## counterpart on the other side of the boundary), formatted show value.
   ui(r):
     tdiv(class = "marker-row marker-direction-" & directionWireText(item().direction),
          `data-marker-id` = $item().markerId,
@@ -242,41 +428,145 @@ template renderMarkerRowImpl(r, vm, item: untyped): untyped =
       span(class = "marker-show-value"):
         text formatShowValue(item())
 
-proc renderMarkerRow*(r: MockRenderer; vm: EventLogVM;
-                     item: proc(): MarkerEventRow): MockNode =
-  renderMarkerRowImpl(r, vm, item)
+# ---------------------------------------------------------------------------
+# Browser decoration
+# ---------------------------------------------------------------------------
 
 when defined(js):
-  proc renderMarkerRow*(r: WebRenderer; vm: EventLogVM;
-                       item: proc(): MarkerEventRow): isonim_dom.Element =
-    renderMarkerRowImpl(r, vm, item)
+  proc inputValueOf(el: isonim_dom.Element): cstring
+    {.importjs: "(#.value || '')".}
+  proc setInputValue(el: isonim_dom.Element; v: cstring)
+    {.importjs: "#.value = #".}
+  proc onDomEvent(el: isonim_dom.Element; name: cstring;
+                  handler: proc(ev: JsObject); capture: bool)
+    {.importjs: "#.addEventListener(#, #, #)".}
+  proc targetOf(ev: JsObject): isonim_dom.Element {.importjs: "#.target".}
+  proc closestOf(el: isonim_dom.Element; sel: cstring): isonim_dom.Element
+    {.importjs: "((e, s) => (e && e.closest && e.closest(s)) || null)(#, #)".}
+  proc classListToggle(el: isonim_dom.Element; cls: cstring)
+    {.importjs: "#.classList.toggle(#)".}
+  proc stopPropagationOf(ev: JsObject) {.importjs: "#.stopPropagation()".}
+  proc keyOf(ev: JsObject): cstring {.importjs: "(#.key || '')".}
+  proc scrollTopOf(el: isonim_dom.Element): float
+    {.importjs: "(#.scrollTop || 0)".}
+  proc setScrollTop(el: isonim_dom.Element; v: float)
+    {.importjs: "#.scrollTop = #".}
+  proc clientHeightOf(el: isonim_dom.Element): float
+    {.importjs: "(#.clientHeight || 0)".}
+  proc isFocused(el: isonim_dom.Element): bool
+    {.importjs: "(document.activeElement === #)".}
 
-proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
-  ## Render the full Event Log panel for headless tests.
+  proc decorateEventLogPanel*(vm: EventLogVM;
+                              searchInput, footerInput, scrollBody,
+                              dataTable: isonim_dom.Element) =
+    ## The browser half of the panel.
+    ##
+    ## * The search field searches as the user types (`setSearchQuery`; the
+    ##   engine matches, and the list restarts from the top).
+    ## * The footer's row field scrolls the list to the row typed into it,
+    ##   and otherwise follows the scroll.
+    ## * A multi-line event's expander opens its text in place, without the
+    ##   row click that would move the debugger.
+    ## * The scrollbar is a scrubber over the whole (filtered) log
+    ##   (Scrollbar-Scrubbers.md): its track jumps there, its thumb drags,
+    ##   and a mark shows the current event (`currentIndex`).
+    let rowPx = proc(): float = max(1.0, vm.rowHeightPx.val)
+    # PLAT-70 Part I (§5.5): the columns' viewport, measured on every resize
+    # and reported to the ViewModel; in SCROLL the header follows the body.
+    attachEventLogFit(cast[JsObject](scrollBody), cast[JsObject](dataTable),
+                      proc(cells: int; charPx: float) =
+                        vm.setTableMetrics(cells, charPx))
+    onDomEvent(searchInput, cstring"input", proc(ev: JsObject) =
+      vm.setSearchQuery($inputValueOf(searchInput)), false)
+
+    createEffect proc() =
+      let shown = $vm.footerStart
+      if not footerInput.isFocused:
+        footerInput.setInputValue(cstring(shown))
+    onDomEvent(footerInput, cstring"keydown", proc(ev: JsObject) =
+      if ev.keyOf == cstring"Enter":
+        try:
+          let row = max(1, parseInt($inputValueOf(footerInput)))
+          scrollBody.setScrollTop(float(row - 1) * rowPx())
+        except ValueError:
+          discard, false)
+
+    onDomEvent(scrollBody, cstring"click", proc(ev: JsObject) =
+      let expander = closestOf(ev.targetOf, cstring".row-expander")
+      if isonim_dom.isNodeNil(isonim_dom.Node(expander)):
+        return
+      ev.stopPropagationOf()
+      let row = closestOf(expander, cstring"tr")
+      if not isonim_dom.isNodeNil(isonim_dom.Node(row)):
+        row.classListToggle(cstring"eventLog-expanded")
+      expander.classListToggle(cstring"flow-hide-content")
+      expander.classListToggle(cstring"flow-show-content"), true)
+
+    let visible = proc(): int =
+      max(1, int(clientHeightOf(scrollBody) / rowPx()))
+    discard attachListScrubber(
+      cast[JsObject](scrollBody), cast[JsObject](dataTable),
+      total = proc(): int = vm.listTotal,
+      current = proc(): int = vm.store.eventLog.currentIndex.val,
+      rowHeight = rowPx,
+      paneId = "eventLog",
+      # ROUNDED, as the shared scrubber's own default is: a jump to row `k`
+      # asks for the offset `k * rowPx()`, which the scroll body can clamp a
+      # few pixels short when the list's height is not a whole number of
+      # rows (measured on a 70-event log: a press at the track's end asked
+      # for row 50, the body stopped at 1337 px over 26.8 px rows, 49.9 rows,
+      # with the last event in view; the floor read row 49 and reported the
+      # last event as out of view).
+      firstVisible = proc(): int = int(round(scrollTopOf(scrollBody) / rowPx())),
+      visibleRows = visible,
+      jumpTo = proc(row: int) =
+        scrollBody.setScrollTop(float(max(0, row)) * rowPx()))
+
+# ---------------------------------------------------------------------------
+# The panel
+# ---------------------------------------------------------------------------
+
+proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM): N =
+  ## The Event Log panel.
   ##
-  ## Structure:
-  ##   div.event-log-component
-  ##     div.event-log-search-row
-  ##       input.event-log-search-input
-  ##     div.event-log-marker-banner[display reactive]   §5.4.1 banner
-  ##     div.event-log-marker-toast[display reactive]    §7 toast
-  ##     div.event-log-marker-empty[display reactive]    §5.5 empty
-  ##     div.event-log-header-row
-  ##       span.column-header.column-{i}[.sort-active]   text reactive
-  ##     div.event-log-loading[display reactive]
-  ##     div.event-log-marker-rows                       §5.1 marker rows
-  ##     div.event-log-rows                             populated by indexEach
-  ##     div.event-log-pagination
-  ##       button.page-prev[disabled reactive]
-  ##       span.page-indicator                         text reactive
-  ##       button.page-next[disabled reactive]
-  var rowsContainer, markerContainer, prevBtn, nextBtn: MockNode
-
+  ##   div.component-container.eventLog.event-log-component
+  ##     div.ct-flex                      filter button, search, columns menu
+  ##     div.eventLog-columns-menu        a row per column (show, move)
+  ##     marker banner / toast / empty    Correlation-Markers §5.4.1, §7, §5.5
+  ##     div.event-log-marker-rows        §5.1 marker rows
+  ##     div.eventLog-dense-table.data-table
+  ##       div.eventLog-column-header     a cell per shown column (sorts)
+  ##       div.eventLog-scroll-body       the scroller
+  ##         div.eventLog-scroll-space    as tall as the whole list
+  ##           table > tbody              the held window, `loadedStart` down
+  ##       div.dt-empty                   the empty log's text
+  ##     div.data-tables-footer           Rows <start> to <end> of <total>
+  ##
+  ## The filter button (`#category-image`) is the desktop's: its drop-down,
+  ## a selection of event kinds by tag, is the host's (`ui/event_log.nim`),
+  ## and sets `EventLogVM.selectedKinds`.
+  var searchInput, columnsMenu, markerContainer, headerStrip: N
+  var scrollBody, tbodyEl, dataTable, footerInput: N
   let panel = ui(r):
-    tdiv(class = "event-log-component"):
-      tdiv(class = "event-log-search-row"):
-        input(class = "event-log-search-input",
-              placeholder = "Search events...")
+    tdiv(class = "component-container eventLog event-log-component",
+         tabindex = "2"):
+      tdiv(class = "ct-flex"):
+        button(id = "category-image",
+               class = "ct-button-image-md-secondary ct-button-no-border",
+               title = "Filter", tabindex = "0"):
+          discard
+        input(ref = searchInput,
+              class = "ct-input-panel ct-input-search-image eventLog-search-field",
+              `type` = "text",
+              placeholder = "Find event",
+              value = vm.searchQuery.val)
+        button(class = "ct-button-sm-secondary " & EventLogColumnsButtonClass,
+               title = "Show, hide or move the event log's columns",
+               onclick = proc() = vm.toggleColumnsMenu()):
+          text EventLogColumnsButtonText
+      tdiv(ref = columnsMenu, class = EventLogColumnsMenuClass,
+           display = displayIf(vm.columnsMenuOpen.val)):
+        discard
       tdiv(class = "event-log-marker-banner",
            display = markerBannerDisplay(vm)):
         text markerBannerText(vm)
@@ -286,257 +576,89 @@ proc renderEventLogPanel*(r: MockRenderer; vm: EventLogVM): MockNode =
       tdiv(class = "event-log-marker-empty",
            display = markerEmptyStateDisplay(vm)):
         text markerEmptyStateText(vm)
-      tdiv(class = "event-log-header-row"):
-        for i, name in COLUMN_NAMES:
-          span(class = columnHeaderClass(vm, i),
-               onclick = onSortColumn(vm, i)):
-            text columnHeaderText(vm, i, name)
-      tdiv(class = "event-log-loading",
-           display = displayIf(vm.isLoading.val)):
-        text "Loading..."
       tdiv(ref = markerContainer, class = "event-log-marker-rows"):
         discard
-      tdiv(ref = rowsContainer, class = "event-log-rows"):
-        discard
-      tdiv(class = "event-log-pagination"):
-        button(ref = prevBtn, class = "page-prev",
-               onclick = proc() = vm.prevPage()):
-          text "Prev"
-        span(class = "page-indicator"):
-          text pageIndicatorText(vm)
-        button(ref = nextBtn, class = "page-next",
-               onclick = proc() = vm.nextPage()):
-          text "Next"
-
-  reactiveDisabled(r, prevBtn, proc(): bool = prevButtonDisabled(vm))
-  reactiveDisabled(r, nextBtn, proc(): bool = nextButtonDisabled(vm))
-
-  indexEach[EventLogRow, MockRenderer, MockNode](r, rowsContainer,
-    proc(): seq[EventLogRow] = vm.eventRows.val,
-    proc(item: proc(): EventLogRow, index: int): MockNode =
-      renderEventRow(r, vm, item, index))
-
-  indexEach[MarkerEventRow, MockRenderer, MockNode](r, markerContainer,
-    proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,
-    proc(item: proc(): MarkerEventRow, index: int): MockNode =
-      renderMarkerRow(r, vm, item))
-
-  panel
-
-# ---------------------------------------------------------------------------
-# WebRenderer — DataTables-compatible structure
-# ---------------------------------------------------------------------------
-#
-# This shell mirrors what the legacy Karax `EventLogComponent.render()`
-# produced, so the existing DataTables FFI initialisation code can run
-# unchanged on the IsoNim-created elements.
-#
-#   div.component-container.eventLog
-#     div.ct-flex                           (header row)
-#       button#category-image               (filter dropdown trigger)
-#       input.ct-input-panel#…              (search input)
-#       div.eventLog-switch                 (dense/detailed toggle)
-#         span#detailed
-#     div.eventLog-dense-table.data-table
-#       table#{denseTableId}                (DataTables target)
-#     div.data-tables-footer
-#       div.data-tables-footer-info         (Rows … of … counter)
-#     div.eventLog-detailed-table.data-table
-#       table#{detailedTableId}             (DataTables target)
-
-when defined(js):
-
-  proc renderWebEventLogPanel*(r: WebRenderer;
-                                vm: EventLogVM;
-                                componentId: int;
-                                denseTableId: string;
-                                detailedTableId: string;
-                                searchInputId: string
-                               ): isonim_dom.Element =
-    ## Render the Event Log shell. The `<table>` elements are empty
-    ## placeholders; DataTables populates them after `afterMount`.
-    ## `componentId` is threaded into the legacy `eventLogComponent-N`
-    ## root id so page objects and DataTables helpers can locate it.
-    var markerContainer, columnsMenu: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(id = "eventLogComponent-" & $componentId,
-           class = "component-container eventLog event-log-component",
-           tabindex = "2"):
-        tdiv(class = "ct-flex"):
-          button(id = "category-image",
-                 class = "ct-button-image-md-secondary ct-button-no-border",
-                 tabindex = "0"):
-            discard
-          input(class = "ct-input-panel ct-input-search-image",
-                id = searchInputId,
-                `type` = "text",
-                placeholder = "Find event")
-          tdiv(class = "eventLog-switch eventLog-button eventLog-normal-color-button"):
-            span(id = "detailed"):
-              text "detailed"
-          button(class = "ct-button-sm-secondary " & EventLogColumnsButtonClass,
-                 title = "Show, hide or move the event log's columns",
-                 onclick = proc() = vm.toggleColumnsMenu()):
-            text EventLogColumnsButtonText
-        tdiv(ref = columnsMenu, class = EventLogColumnsMenuClass,
-             display = displayIf(vm.columnsMenuOpen.val)):
+      tdiv(ref = dataTable, class = "eventLog-dense-table data-table",
+           `data-ct-fit` = fitModeOf(vm)):
+        tdiv(ref = headerStrip, class = "eventLog-column-header",
+             style = tableMinWidthStyle(vm)):
           discard
-        tdiv(class = "event-log-marker-banner",
-             display = markerBannerDisplay(vm)):
-          text markerBannerText(vm)
-        tdiv(class = "event-log-marker-toast",
-             display = markerToastDisplay(vm)):
-          text markerToastText(vm)
-        tdiv(class = "event-log-marker-empty",
-             display = markerEmptyStateDisplay(vm)):
-          text markerEmptyStateText(vm)
-        tdiv(ref = markerContainer, class = "event-log-marker-rows"):
-          discard
-        tdiv(class = "eventLog-dense-table data-table"):
-          table(id = denseTableId):
-            discard
-        tdiv(class = "data-tables-footer 0to0"):
-          tdiv(class = "data-tables-footer-info"):
-            span:
-              text "Rows"
-            input(class = "ct-input-small mx-2 data-tables-footer-input",
-                  value = "0")
-            span:
-              text "to"
-            tdiv(class = "data-tables-footer-end-row"):
-              text "0"
-            span:
-              text "of"
-            tdiv(class = "data-tables-footer-rows-count"):
-              text "0"
-        tdiv(class = "eventLog-detailed-table data-table"):
-          table(id = detailedTableId):
-            discard
-
-    indexEach[MarkerEventRow, WebRenderer, isonim_dom.Element](r, markerContainer,
-      proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,
-      proc(item: proc(): MarkerEventRow, index: int): isonim_dom.Element =
-        renderMarkerRow(r, vm, item))
-
-    # The column menu's rows: the ViewModel's ORDER, hidden columns in their
-    # places (a hidden column cannot move; its arrows do nothing).
-    indexEach[EventLogColumn, WebRenderer, isonim_dom.Element](r, columnsMenu,
-      proc(): seq[EventLogColumn] = vm.columns.val.order,
-      proc(item: proc(): EventLogColumn, index: int): isonim_dom.Element =
-        ui(r):
-          tdiv(class = EventLogColumnOptionClass,
-               `data-column` = $item()):
-            span(class = columnCheckClass(vm, item()),
-                 onclick = proc() = discard vm.toggleColumn(item())):
-              text columnCheckGlyph(vm, item())
-            span(class = "eventLog-column-title"):
-              text columnOptionTitle(item())
-            button(class = EventLogColumnLeftClass,
-                   title = "Move left",
-                   onclick = proc() = discard vm.moveColumn(item(), -1)):
-              text "◀"
-            button(class = EventLogColumnRightClass,
-                   title = "Move right",
-                   onclick = proc() = discard vm.moveColumn(item(), 1)):
-              text "▶")
-
-    panel
-
-  proc renderEventLogPanel*(r: WebRenderer;
-                            vm: EventLogVM): isonim_dom.Element =
-    ## Simple IsoNim-only rendering (no DataTables) — the same
-    ## structure as the Mock panel, but using real DOM elements.
-    ## Retained for backward compatibility with non-DataTables paths
-    ## and tests that exercise the IsoNim row list directly.
-    var rowsContainer, prevBtn, nextBtn: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = "event-log-component isonim-event-log"):
-        tdiv(class = "event-log-search-row"):
-          input(class = "event-log-search-input",
-                placeholder = "Search events...")
-        tdiv(class = "event-log-header-row"):
-          for i, name in COLUMN_NAMES:
-            span(class = columnHeaderClass(vm, i),
-                 onclick = onSortColumn(vm, i)):
-              text columnHeaderText(vm, i, name)
+        tdiv(ref = scrollBody, class = EventLogScrollBodyClass,
+             style = scrollBodyStyle(vm)):
+          tdiv(class = "eventLog-scroll-space", height = listHeight(vm),
+               style = tableMinWidthStyle(vm)):
+            table(class = "eventLog-rows", transform = windowOffset(vm),
+                  style = tableMinWidthStyle(vm)):
+              tbody(ref = tbodyEl):
+                discard
+        tdiv(class = "dt-empty", display = emptyDisplay(vm)):
+          text EventLogEmptyText
         tdiv(class = "event-log-loading",
              display = displayIf(vm.isLoading.val)):
-          text "Loading..."
-        tdiv(ref = rowsContainer, class = "event-log-rows"):
           discard
-        tdiv(class = "event-log-pagination"):
-          button(ref = prevBtn, class = "page-prev",
-                 onclick = proc() = vm.prevPage()):
-            text "Prev"
-          span(class = "page-indicator"):
-            text pageIndicatorText(vm)
-          button(ref = nextBtn, class = "page-next",
-                 onclick = proc() = vm.nextPage()):
-            text "Next"
+      tdiv(class = footerClass(vm)):
+        tdiv(class = "data-tables-footer-info"):
+          span:
+            text "Rows"
+          input(ref = footerInput,
+                class = "ct-input-small mx-2 data-tables-footer-input",
+                value = "0")
+          span:
+            text "to"
+          tdiv(class = "data-tables-footer-end-row"):
+            text $vm.footerEnd
+          span:
+            text "of"
+          tdiv(class = "data-tables-footer-rows-count"):
+            text $vm.listTotal
 
-    reactiveDisabled(r, prevBtn, proc(): bool = prevButtonDisabled(vm))
-    reactiveDisabled(r, nextBtn, proc(): bool = nextButtonDisabled(vm))
+  # The header: a cell per shown column, in the ViewModel's order.
+  forEachKeyed[EventLogColumn, R, N](r, headerStrip,
+    proc(): seq[EventLogColumn] = vm.columns.val.visibleColumns,
+    proc(col: proc(): EventLogColumn; index: proc(): int): N =
+      ui(r):
+        span(class = columnClass(col()), `data-column` = $col(),
+             style = columnWidthStyle(vm, col()),
+             onclick = onHeaderClick(vm, col())):
+          span(class = "eventLog-column-label"):
+            text columnHeaderText(vm, col())
+          # Its separator: the grip a drag resizes the column by (§5.2).
+          span(class = EventLogColumnGripClass,
+               `data-ct-column-separator` = $col()):
+            discard)
 
-    indexEach[EventLogRow, WebRenderer, isonim_dom.Element](r, rowsContainer,
-      proc(): seq[EventLogRow] = vm.eventRows.val,
-      proc(item: proc(): EventLogRow, index: int): isonim_dom.Element =
-        renderEventRow(r, vm, item, index))
+  # The rows: the held window, keyed by position in the list.
+  forEachKeyed[int, R, N](r, tbodyEl,
+    proc(): seq[int] = listPositions(vm),
+    proc(position: proc(): int; index: proc(): int): N =
+      renderEventRow[R, N](r, vm, position()))
 
-    panel
+  indexEach[MarkerEventRow, R, N](r, markerContainer,
+    proc(): seq[MarkerEventRow] = vm.visibleMarkerRows.val,
+    proc(item: proc(): MarkerEventRow, index: int): N =
+      renderMarkerRow[R, N](r, vm, item))
 
-  proc mountIsoNimEventLog*(container: isonim_dom.Element;
-                            vm: EventLogVM) =
-    ## Mount the simple IsoNim event log view (no DataTables) into a
-    ## real DOM container. Reactive effects handle every subsequent
-    ## update — no manual redraw is needed.
-    let r = WebRenderer()
-    let panel = renderEventLogPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+  # The column menu: the ViewModel's ORDER, hidden columns in their places
+  # (a hidden column cannot move; its arrows do nothing).
+  forEachKeyed[EventLogColumn, R, N](r, columnsMenu,
+    proc(): seq[EventLogColumn] = vm.columns.val.order,
+    proc(item: proc(): EventLogColumn; index: proc(): int): N =
+      ui(r):
+        tdiv(class = EventLogColumnOptionClass, `data-column` = $item()):
+          span(class = columnCheckClass(vm, item()),
+               onclick = onToggleColumn(vm, item())):
+            text columnCheckGlyph(vm, item())
+          span(class = "eventLog-column-title"):
+            text columnOptionTitle(item())
+          button(class = EventLogColumnLeftClass, title = "Move left",
+                 onclick = onMoveColumn(vm, item(), -1)):
+            text "◀"
+          button(class = EventLogColumnRightClass, title = "Move right",
+                 onclick = onMoveColumn(vm, item(), 1)):
+            text "▶")
 
-  proc mountIsoNimEventLogWithDataTables*(
-      container: isonim_dom.Element;
-      vm: EventLogVM;
-      componentId: int;
-      denseTableId: string;
-      detailedTableId: string;
-      searchInputId: string;
-      afterMount: proc()
-    ) =
-    ## Mount the IsoNim event log shell (DataTables-compatible) and
-    ## then invoke `afterMount` so the caller can initialise DataTables
-    ## on the `<table>` elements. A microtask delay is **not** added
-    ## here — the caller is responsible for ordering if DataTables
-    ## requires the nodes to be already attached.
-    ##
-    ## ## WHY THIS SHELL DOES NOT `indexEach` OVER `vm.eventRows`
-    ##
-    ## `renderEventLogPanel` above does, and this one deliberately does not,
-    ## which used to mean the desktop — the only host that mounts this
-    ## overload — rendered no store row at all. That is no longer true, and the
-    ## difference is WHERE the store is read rather than WHETHER it is:
-    ##
-    ## The `<table>` below is a DataTables target with `serverSide: true` and
-    ## the Scroller extension, so its rows are owned by the widget: it asks for
-    ## a window, renders it into its own `<tbody>`, and virtualises the scroll
-    ## height from a `recordsTotal` no single window carries. A second
-    ## `indexEach` list beside it would not be the pane reading the store — it
-    ## would be a second visible copy of the same events, unpaged and
-    ## unfiltered, under the one the user is scrolling.
-    ##
-    ## So the desktop reads the store one layer further in:
-    ## `ui/event_log.nim:loadEvents` decodes each `ct/update-table` window into
-    ## `ReplayDataStore` and projects the rows back out, and
-    ## `dataTablePayload` is what the widget's ajax callback is handed. The
-    ## rows DataTables paints are the rows this VM's `eventRows` holds — the
-    ## binding is through the widget rather than around it.
-    ##
-    ## A host with no DataTables (the storybook, the mock renderer, a future
-    ## GPUI or web surface) mounts `mountIsoNimEventLog` and gets the
-    ## `indexEach` list, which reads the same signal directly.
-    let r = WebRenderer()
-    let panel = renderWebEventLogPanel(
-      r, vm, componentId, denseTableId, detailedTableId, searchInputId)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
-    afterMount()
+  when defined(js):
+    when N is isonim_dom.Element:
+      decorateEventLogPanel(vm, searchInput, footerInput, scrollBody,
+                            dataTable)
+  panel

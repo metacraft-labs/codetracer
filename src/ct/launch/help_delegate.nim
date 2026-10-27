@@ -68,8 +68,13 @@ const
     ## help-delegate scan.
 
   registryEnvVar* = "CODETRACER_REGISTRY_PATH"
-    ## Test-only override: forces a specific registry root. Matches the
-    ## launcher's ``CODETRACER_REGISTRY_PATH`` convention.
+    ## Test-only override: forces a specific registry root -- the DIRECTORY
+    ## holding ``registry.txt``. The launcher's ``CODETRACER_REGISTRY_PATH``
+    ## names the ``registry.txt`` file itself (see :proc:`registryRoot`).
+
+  launcherUserRootEnvVar = "CODETRACER_USER_ROOT"
+    ## The launcher's user root, which holds the registry when the override
+    ## above is unset (grant_store's ``userRootEnvVar`` is the same name).
 
   componentsRootEnvVar* = "CODETRACER_COMPONENTS_ROOT"
     ## Test-only override: forces a specific components root. Matches
@@ -563,10 +568,24 @@ type
     fileTypes*: seq[string]
 
 proc registryRoot*(): string =
-  ## Resolve the registry root following launcher conventions.
+  ## The registry root -- the DIRECTORY holding `registry.txt` and the cached
+  ## `latest/<component>` files -- where the launcher keeps it:
+  ##
+  ## 1. `$CODETRACER_REGISTRY_PATH`, verbatim. Here it names that directory;
+  ##    the launcher's variable of the same name names the `registry.txt`
+  ##    FILE itself (codetracer-launcher `src/ct_home.nim`, `ulRegistryFile`).
+  ##    The two spellings are not interchangeable.
+  ## 2. `$CODETRACER_USER_ROOT/registry/v1`: the registry lives inside the
+  ##    launcher's user root, so moving the root moves it -- the launcher's
+  ##    `ct install` / `ct update` and its own suggestion read it there.
+  ## 3. `$CODETRACER_HOME/launcher/registry/v1`, else
+  ##    `$HOME/.codetracer/registry/v1`.
   let override = getEnv(registryEnvVar, "")
   if override.len > 0:
     return override
+  let launcherRoot = getEnv(launcherUserRootEnvVar, "")
+  if launcherRoot.len > 0:
+    return launcherRoot / "registry" / "v1"
   # `$CODETRACER_HOME/launcher`, else `$HOME/.codetracer` exactly as this
   # site always spelt it (no trailing-`/` strip: `HOME=/` is `/.codetracer`).
   let home = getEnv("HOME", "")

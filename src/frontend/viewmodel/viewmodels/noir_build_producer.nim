@@ -56,8 +56,12 @@ import ../platform/process
 import ../store/types
 import ./build_vm
 import ../backend/replay_session_service
+import ../../../common/html_text
 
 export noir_build
+export html_text.escapeHtmlText
+  # Re-exported: the helper lived here until the desktop Event Log needed the
+  # same escaping, and this module's callers and tests reach it through it.
 
 type
   NoirBuildPhase* = enum
@@ -208,20 +212,8 @@ const
 # Escaping and paths
 # ---------------------------------------------------------------------------
 
-proc escapeHtmlText*(text: string): string =
-  ## The five characters that must not reach `innerHTML` as markup.
-  ##
-  ## `&` first, or every entity this proc writes gets its own `&` escaped a
-  ## second time and the pane renders `&amp;lt;` where a user wrote `<`.
-  result = newStringOfCap(text.len + 16)
-  for ch in text:
-    case ch
-    of '&': result.add "&amp;"
-    of '<': result.add "&lt;"
-    of '>': result.add "&gt;"
-    of '"': result.add "&quot;"
-    of '\'': result.add "&#39;"
-    else: result.add ch
+# `escapeHtmlText` is `common/html_text`'s, shared with the desktop Event Log
+# and re-exported from this module above.
 
 proc rendererPathFor*(projectRoot, packageDir, vfsPath: string): string =
   ## `rendererPath`'s rule, WITHOUT a producer.

@@ -26,8 +26,11 @@
 ## 3. **THE PRODUCER PARTITION.** For each pane, the production procedures that
 ##    write its rows are EXACTLY a declared set — both set differences empty,
 ##    the cardinality asserted on both sides — and no procedure defined under a
-##    `tests/` directory writes them. A pane fed only by a test helper is the
-##    campaign's signature defect.
+##    `tests/` directory masquerades as a producer. A test's own fixture may
+##    seed the store it built (`calltrace_guides_chromium_test`'s
+##    `mountPanel`); it is reported, never counted as a producer, and it may
+##    not carry a declared producer's name. A pane fed only by a test helper is
+##    the campaign's signature defect.
 ## 4. **`DIFF-9` — ONE PRODUCER, THE SURFACES THAT DRAW THE PANE.** The shipped
 ##    terminal's screen is composited in this process (`plainFrame`, the
 ##    compositor `--headless` prints) under the arrangement
@@ -56,6 +59,7 @@ import store/types as store_types
 import store/replay_data_store
 import backend/stdio_backend
 import viewmodels/[calltrace_vm, event_log_vm, point_list_vm]
+import viewport
 import headless_app/layout_model
 import ../../view_vocabulary/pane_views
 import ../../../common/value_presentation
@@ -131,6 +135,13 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
   for k in ExpectedPanes: before[k] = paneOf(k, s).report
   let loaded = s.loadRecordingPanes()
   let stop = s.loadStopPanes()
+  # VIEWPORT-DRIVEN LOADING (HSF-V1): the open reads only what it needs to
+  # learn the recording's extent; each pane then holds the window its
+  # viewport shows. The panes' ViewModels are told a 40-row pane, and the
+  # store applies each window's answer whatever transport resolved it.
+  s.session.eventLogVM.setViewport(Viewport(rows: 40))
+  s.session.calltraceVM.setViewport(Viewport(rows: 40, cols: RecordingCalltraceDepth))
+  pumpCallbacks()
 
   test "the census is ARMED: over a store no producer has written, each pane is a report":
     # The census's "no". Fresh ViewModels over a FRESH store on the live
@@ -146,15 +157,15 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
       checkpoint($k & ": " & report)
       ck report.len > 0
 
-  test "before the shared producers run, the call trace and the breakpoints are reports and the event log is not":
-    # MEASURED, and recorded as the fact it is: the event log is fed AT OPEN,
-    # by `EventLogVM`'s own `ct/event-load` effect — the desktop's producer —
-    # before either native producer is called. The other two panes are
-    # reports until theirs run.
+  test "before the shared producers run, every pane is a report":
+    # Viewport-Driven-Loading V2: no pane asks for anything before it is
+    # measured, so the event log is no longer fed at open by `EventLogVM`'s
+    # own `ct/event-load` effect — like the other two, it is a report until
+    # a producer or a viewport fills it.
     checkpoint($before)
     ck before[paneCalltrace].len > 0
     ck before[panePointList].len > 0
-    ck before[paneEventLog].len == 0
+    ck before[paneEventLog].len > 0
 
   test "a producer that runs and loads nothing fails BY NAME":
     # `PLAT35-PD3`'s lesson: "ran" is a claim about raising, and the gate is
@@ -235,29 +246,28 @@ suite "PLAT-40 1 — the producers, on the shipped path, over the recording's ow
 
   s.close()
 
-  test "the RECORDING-WIDE event window arrives, not only the view model's first page":
-    # The event log is fed twice at open: `EventLogVM`'s own effect loads its
-    # first page (`DEFAULT_PAGE_SIZE` rows), and `loadRecordingPanes` asks for
-    # `RecordingEventWindow`. On `calc` (6 events) the two are indistinguishable;
-    # the terminal's timeline bounds and mutation marks are computed over the
-    # whole window, so it is asserted where the difference exists —
-    # `noir_space_ship`, which has more events than one page holds.
+  test "open learns the log's size and the extent, without loading the log":
+    # `loadRecordingPanes` reads ONE event: every row carries the recording's
+    # `maxRRTicks` (the timeline's bounds) and `ct/event-load` answers the
+    # whole log's `total` with any window. The rows themselves are each
+    # pane's to ask for, for the window it shows (Viewport-Driven-Loading V2).
+    # Asserted on `noir_space_ship`, which has many more events than one.
     let noir = resolveFixture("noir_space_ship")
     doAssert noir.outcome != foMissingPrereq,
       missingPrereqMessage(noir.spec, noir.detail)
     let ns = openLocalTrace(noir.tracePath)
     defer: ns.close()
-    let before = ns.session.store.eventLog.rows.val.len
     let got = ns.loadRecordingPanes()
-    let rows = ns.session.store.eventLog.rows.val
-    checkpoint("rows at open " & $before & ", after the producer " & $rows.len)
+    let ev = ns.session.store.eventLog
+    checkpoint("rows held " & $ev.rows.val.len & ", total " &
+               $ev.recordsTotal.val)
     ck got.events
-    ck rows.len > event_log_vm.DEFAULT_PAGE_SIZE
-    # A contiguous window from the first event: no page left out.
-    var contiguous = true
-    for i, r in rows:
-      if r.eventIndex != i: contiguous = false
-    ck contiguous
+    ck ev.rows.val.len == 1
+    ck ev.totalReported.val
+    ck ev.recordsTotal.val > 1
+    ck ns.session.store.timeline.val.maxRRTicks > 0'u64
+    # The recording's functions arrived for the omnibar.
+    ck ns.session.store.symbols.val.len > 0
 
 # ===========================================================================
 suite "PLAT-40 2 — one decoder: what a call-trace row IS":
@@ -328,14 +338,16 @@ suite "PLAT-40 2 — one decoder: what a call-trace row IS":
     # §30b: one predicate, one function, every consumer calling it. The
     # desktop decodes a TYPED response and the native front-ends a JSON one,
     # so the two cannot share the parse — they share the decision.
-    let desktop = readFile(repo / "src/frontend/ui/calltrace.nim")
+    # Every pane reads the session's store since HSF-D1 and HSF-X2
+    # (`ui/calltrace` decodes nothing; the extension's panels mirror the
+    # host's session), so the store is the one decoder.
     let native = readFile(repo / "src/frontend/viewmodel/headless_session.nim")
     let store = readFile(repo / "src/frontend/viewmodel/store/replay_data_store.nim")
-    ck "callLineOf(CallLineWire(" in desktop
-    ck "makeCallLine(" notin desktop
     ck "applyCalltraceResponse(" in native
     ck "parseCallLine" notin native
-    let apply = store[store.find("proc applyCalltraceResponse*(") .. ^1]
+    # The DEFINITION — the store forward-declares the proc above
+    # `requestCalltraceSection`, which decodes its own answer through it.
+    let apply = store[store.rfind("proc applyCalltraceResponse*(") .. ^1]
     ck "callLineOf(" in apply[0 ..< apply.find("\nproc ")]
 
   decoderSession.close()
@@ -382,15 +394,14 @@ suite "PLAT-40 3 — the producer partition":
 
   const Declared = {
     "calltrace": @[
-      ("src/frontend/ui/calltrace.nim", "syncCalltraceData"),
       ("src/frontend/viewmodel/collab/backend_snapshots.nim",
        "projectBackendSnapshotToStore"),
       ("src/frontend/viewmodel/store/replay_data_store.nim",
        "applyCalltraceResponse"),
       ("src/frontend/viewmodel/sync/signal_serializer.nim", "applySignalUpdate")],
+    # The desktop's Event Log is a view over `EventLogVM` since 1c18341dd, so
+    # it writes no rows of its own: every front-end's rows come from the store.
     "eventLog": @[
-      ("src/frontend/ui/event_log.nim", "loadEvents"),
-      ("src/frontend/ui/event_log.nim", "onUpdatedEvents"),
       ("src/frontend/viewmodel/store/replay_data_store.nim", "appendLiveEventRow"),
       ("src/frontend/viewmodel/store/replay_data_store.nim", "applyEventLogResponse"),
       ("src/frontend/viewmodel/store/replay_data_store.nim", "clearEventLog")],
@@ -398,6 +409,13 @@ suite "PLAT-40 3 — the producer partition":
       ("src/frontend/viewmodel/store/replay_data_store.nim", "applyTracepointResults"),
       ("src/frontend/viewmodel/store/replay_data_store.nim",
        "applyVerifiedBreakpoints"),
+      # M76 (codetracer#843): the Debug menu's tracepoint items, the one place
+      # a tracepoint row is enabled, disabled or deleted, shared by both
+      # native menus (`session_driver.performPointMenuOp`).
+      ("src/frontend/viewmodel/store/replay_data_store.nim",
+       "setTracepointsEnabled"),
+      ("src/frontend/viewmodel/store/replay_data_store.nim",
+       "deleteTracepoint"),
       ("src/frontend/viewmodel/viewmodels/point_list_vm.nim", "setPoints")]}.toTable
   const Sinks = {
     "calltrace": ("updateCalltraceSection", @["updateCalltraceSection(",
@@ -428,9 +446,17 @@ suite "PLAT-40 3 — the producer partition":
       ck (declared - production).len == 0
       ck production.len == Declared[pane].len
       ck declared.len == Declared[pane].len
-      # NO TEST-ONLY DEFINITION MASQUERADES AS A PRODUCER.
-      checkpoint("defined under tests/: " & $testDefined)
-      ck testDefined.len == 0
+      # NO TEST-ONLY DEFINITION MASQUERADES AS A PRODUCER. A test's own
+      # fixture may seed the store it built (`test_calltrace_navigation`'s
+      # `setup`); it is reported, and it may not carry a declared producer's
+      # name, which is how a test definition would pass for one.
+      checkpoint("defined under tests/ (fixtures): " & $testDefined)
+      var producerNames = initHashSet[string]()
+      for d in Declared[pane]: producerNames.incl d[1]
+      var masquerading = 0
+      for w in testDefined:
+        if w.name in producerNames: inc masquerading
+      ck masquerading == 0
 
 # ===========================================================================
 suite "PLAT-40 4 — DIFF-9: the surfaces that draw each pane, compared as domain values":

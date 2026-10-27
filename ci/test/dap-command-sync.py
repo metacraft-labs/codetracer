@@ -141,7 +141,6 @@ EXPECTED_RESIDUE = {
     # CodeTracer extension requests answered by the engine and driven from
     # `headless_session.nim` / the origin-mode bridge rather than from a VM.
     "ct/originMode",
-    "ct/load-request-spans",
     # `source` (CTUI-4). The engine answers it in `Handler::source` and the
     # Embed SDK's `sdk/source_provider.nim` sends it through `BackendService`,
     # but it produces no EVENT, so it has no `CtEventKind` and
@@ -153,6 +152,14 @@ EXPECTED_RESIDUE = {
     # verbatim) and the WASM worker transport, neither of which goes through
     # the event-kind translation.
     "source",
+    # Data breakpoints (watchpoints), the two standard DAP requests the engine
+    # answers in `handle_request` since 09b8e3443. Their senders reach the
+    # engine over DAP directly — `backend-manager` for the Python API's
+    # `Trace.add_watchpoint`, and `codetracer-bench`'s `watchpoint` op — and
+    # no ViewModel sends them through `BackendService`, so neither has a
+    # `CtEventKind`.
+    "dataBreakpointInfo",
+    "setDataBreakpoints",
 }
 
 # ---------------------------------------------------------------------------

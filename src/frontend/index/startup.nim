@@ -2,7 +2,7 @@ import
   std/[ async, jsffi, jsconsole, json, os, strformat ],
   results,
   window, traces, files, config, install, electron_vars, debugger, launch_config,
-  recent_items,
+  recent_items, keybindings,
   ipc_subsystems/socket,
   ../[ config, types, trace_metadata ],
   ../lib/[ jslib, electron_lib ],
@@ -36,6 +36,10 @@ when not defined(server):
     f.call(self, cast[cstring](id), data)
 
 proc onStarted*(sender: js, response: js) {.async.} =
+  # PLAT-68: the renderer is listening — its key router gets the user's
+  # `keybindings.json` (imported once from the old files first), and again
+  # whenever the file changes.
+  startKeybindings()
   if not startedFuture.isNil:
     startedReceived = true
     startedFuture()
@@ -112,12 +116,18 @@ proc onLoadCodetracerShell*(sender: js, response: js) {.async.} =
   await wait(1_000)
   await started()
 
-proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers) {.async.} =
-  # Copy into a local var to work around Nim 2.2's capture check for
-  # var parameters in async procs.  On the JS backend, ServerData is a
-  # reference type (JS object), so mutations to 'data' propagate back
-  # to the caller.
-  var data = dataArg
+proc init*(config: Config, layout: js, helpers: Helpers) {.async.} =
+  ## Start the session this process was launched for: a replay, an edit
+  ## session, the welcome screen, the shell UI or a DeepReview.
+  ##
+  ## Works on the index process's own state, the global `config.data`, which
+  ## every handler after startup reads. It used to take `dataArg: var
+  ## ServerData` and work on `var data = dataArg` (an async proc cannot
+  ## capture a `var` parameter), but `ServerData` is an `object`, so on the
+  ## JS backend that was a COPY (`nimCopy`): the edit session's folder and
+  ## save, and the start options' `isInstalled`, never reached the process
+  ## state. A replay's trace did, but only because `prepareForLoadingTrace`
+  ## assigns the global itself.
   debugPrint "index: init"
   let bypass = true
 
@@ -171,6 +181,10 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     return
 
   # TODO: leave this to backend/DAP if possible
+  # Why the startup trace's replay did not start, or "": reported once the
+  # renderer has its `init` below, because before that it has no window to
+  # show it in.
+  var replayFailure = cstring""
   if not data.startOptions.edit and not data.startOptions.welcomeScreen:
     if bypass:
       let trace = await electron_vars.app.findTraceWithCodetracer(data.startOptions.recordingID)
@@ -181,7 +195,7 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
       data.pluginClient.trace = trace
       if data.trace.compileCommand.len == 0:
         data.trace.compileCommand = data.config.defaultBuild
-      await prepareForLoadingTrace(trace.recordingId, nodeProcess.pid.to(int))
+      replayFailure = await startReplayForTrace(trace.recordingId, nodeProcess.pid.to(int))
 
   await started()
   let configSnapshot = data.config
@@ -218,9 +232,13 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
     #   "id": cstring("2")
     # })
 
-    if bypass:
+    if replayFailure.len > 0:
+      # The session has no replay: say so, and load nothing into its panes
+      # (a trace loaded over no backend is the empty editor this replaces).
+      reportTraceLoadFailure(replayFailure)
+    elif bypass:
       if not data.trace.isNil:
-        await data.loadTrace(mainWindow, data.trace, data.config, helpers)
+        await loadTrace(mainWindow, data.trace, data.config, helpers)
 
     try:
       let instanceClient = await startSocket(CT_DEBUG_INSTANCE_PATH_BASE & cstring($callerProcessPid), expectPossibleFail=true)
@@ -236,7 +254,8 @@ proc init*(dataArg: var ServerData, config: Config, layout: js, helpers: Helpers
   elif startOptionsSnapshot.edit:
     let file = ($startOptionsSnapshot.name)
     var folder = startOptionsSnapshot.folder
-    # Store workspace folder for later use when switching modes
+    # The opened folder, which the Files pane's operations, its lazy loads
+    # and a later mode switch read.
     data.workspaceFolder = folder
     var filenames = await loadFilenames(@[folder], traceFolder=cstring"", selfContained=false)
     var filesystem = await loadFilesystem(@[folder], traceFilesPath=cstring"", selfContained=false)

@@ -15,6 +15,11 @@
 ##   welcome surface and shared chrome are mounted.
 ## - initLayout installs shared chrome renderers before taking the welcome
 ##   screen early return.
+## - switchSession fills the debug toolbar's host for the target tab, and the
+##   toolbar's replay routes read the tab on screen when they are dispatched
+##   rather than capturing one. That the routes then really reach the tab on
+##   screen is RUN, not grepped, in ``frontend/tests/
+##   debug_toolbar_follows_active_tab_test.nim`` (the ``renderer-dom`` lane).
 ##
 ## The rendered DOM shape for the menu/debug/controls hosts is covered in
 ## ``views/isonim_views_test.nim``.  Together these tests catch the regressions
@@ -44,7 +49,7 @@ const
   SessionSwitchPath = "src/frontend/ui/session_switch.nim"
   LayoutPath = "src/frontend/ui/layout.nim"
   RendererPath = "src/frontend/renderer.nim"
-  DebugPath = "src/frontend/ui/debug.nim"
+  DebugToolbarPath = "src/frontend/ui/debug_toolbar.nim"
   IndexPath = "src/frontend/index.nim"
   IndexTracesPath = "src/frontend/index/traces.nim"
   IndexConfigPath = "src/frontend/index/config.nim"
@@ -263,8 +268,11 @@ else:
         "proc createNewSession*(data: Data) =",
         "proc closeSession*(data: Data, targetIndex: int) =")
 
-      let activateIndex = indexOfRequired(body, "data.activeSessionIndex = sessionId")
-      let debugIndex = indexOfRequired(body, "discard data.makeDebugComponent()")
+      # NO DEBUG COMPONENT, because there is none to make. The toolbar became
+      # one ViewModel and view for the whole window (`ui/debug_toolbar.nim`):
+      # the menu shell creates its host and `switchSession` fills it — see
+      # "switchSession fills the debug toolbar host for the target tab".
+      let activateIndex = indexOfRequired(body, "data.activeSessionIndex = index")
       let menuIndex = indexOfRequired(body, "discard data.makeMenuComponent()")
       let commandPaletteIndex =
         indexOfRequired(body, "discard data.makeCommandPaletteComponent()")
@@ -272,11 +280,10 @@ else:
       let restoreIndex =
         indexOfRequired(body, "data.activeSessionIndex = previousActiveSessionIndex")
 
-      check activateIndex < debugIndex
+      check not body.contains("makeDebugComponent")
       check activateIndex < menuIndex
       check activateIndex < commandPaletteIndex
       check activateIndex < welcomeIndex
-      check debugIndex < restoreIndex
       check menuIndex < restoreIndex
       check commandPaletteIndex < restoreIndex
       check welcomeIndex < restoreIndex
@@ -355,30 +362,51 @@ else:
         "proc invalidPath(")
       check noTraceBody.contains("hideWelcomeScreenSurface()")
 
-    test "switchSession rebinds debug toolbar bridge for active session":
+    test "switchSession fills the debug toolbar host for the target tab":
+      ## These two cases replace the ones that asserted
+      ## `debug.rewireDebugControlsBridgeForActiveSession`, deleted with
+      ## `ui/debug.nim` when the toolbar became one ViewModel for the window.
+      ## The contract they guarded — the toolbar acts on the tab on screen —
+      ## did not go away with the component: a switch still has to put the
+      ## toolbar in the target tab's chrome (this case), and its replay
+      ## actions still have to reach the target tab's replay (the next).
       let source = readFile(SessionSwitchPath)
       let body = sectionBetween(source,
         "proc switchSession*(data: Data, targetIndex: int) =",
         "")
 
+      let activateIndex =
+        indexOfRequired(body, "data.activeSessionIndex = targetIndex")
       let tabBarIndex = indexOfRequired(body, "refreshSessionTabBar()")
-      let rewireIndex =
-        indexOfRequired(body, "debug.rewireDebugControlsBridgeForActiveSession(data)")
+      let ensureIndex =
+        indexOfRequired(body, "debug_toolbar.ensureDebugToolbar()")
       let redrawIndex =
         indexOfRequired(body, "if not data.activeSession.ui.layout.isNil")
 
-      check tabBarIndex < rewireIndex
-      check rewireIndex < redrawIndex
+      check activateIndex < ensureIndex
+      check tabBarIndex < ensureIndex
+      check ensureIndex < redrawIndex
 
-    test "debug bridge rewire uses active session component mediator":
-      let source = readFile(DebugPath)
-      let body = sectionBetween(source,
-        "proc rewireDebugControlsBridgeForActiveSession*(data: Data) =",
-        "proc jumpBeforeList*(self: DebugComponent) =")
+    test "debug toolbar replay routes read the tab on screen when dispatched":
+      ## The source half of `frontend/tests/debug_toolbar_follows_active_tab_
+      ## test.nim`, which runs the routes against two tabs: here, that no
+      ## route is handed a mediator when the routes are built — the window
+      ## builds them once, while its first tab is on screen — and that the
+      ## mediator they look up is the active tab's.
+      let source = readFile(DebugToolbarPath)
+      let lookupBody = sectionBetween(source,
+        "proc toolbarApiFor*(data: Data): MediatorWithSubscribers =",
+        "proc desktopDebugCommands*")
+      check lookupBody.contains("data.activeSession")
+      check lookupBody.contains("session.viewsApi")
 
-      check body.contains("data.ui.componentMapping[Content.Debug][0]")
-      check body.contains("component.api")
-      check body.contains("debugControlsVMInstance.onDapStep")
+      let commandsBody = sectionBetween(source,
+        "proc desktopDebugCommands*(data: Data; store: ReplayDataStore): DebugCommands =",
+        "proc settleToolbarTestRun*")
+      check commandsBody.count("toolbarApiFor(data)") == 3
+
+      let uiJsSource = readFile(UiJsPath)
+      check not uiJsSource.contains("cstring\"debug toolbar api\"")
 
     test "folder edit mode opens an indexed project file":
       let source = readFile(UiJsPath)
@@ -537,7 +565,6 @@ else:
       check noTraceBody.contains("hideWelcomeScreenSurface()")
       check noTraceBody.contains("filesystem.refreshIsoNimFilesystemPanel()")
       check noTraceBody.contains("vcs.resetAndRefreshVCS(")
-      check noTraceBody.contains("vcs.tryMountIsoNimVCSPanel(")
 
       let ipcBody = sectionBetween(uiSource,
         "proc configureIPC(data: Data) =",
@@ -572,7 +599,7 @@ else:
       let welcomeIndex =
         indexOfRequired(body, "if data.startOptions.welcomeScreen and data.trace.isNil:")
       let mountIndex =
-        indexOfRequired(body, "welcome_screen.tryMountIsoNimWelcomeScreen()")
+        indexOfRequired(body, "welcome_screen.mountWelcomeScreen()")
 
       check sharedIndex < welcomeIndex
       check welcomeIndex < mountIndex

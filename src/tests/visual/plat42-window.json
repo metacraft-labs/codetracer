@@ -4,8 +4,8 @@
     "reader, and two pixel twins. Regenerate: `just plat42-surfaces-window`",
     "then `just plat42-window-record`. Asserted by test_plat42_window.nim."
   ],
-  "takenAt": "2026-09-30T00:19:37Z",
-  "host": "gpu-server-001",
+  "takenAt": "2026-10-17T04:52:13Z",
+  "host": "nixos-ci-bare-001",
   "pixelDelta": 16,
   "manifest": [
     {
@@ -24,21 +24,21 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 12
+      "settledAfterS": 18
     },
     {
       "id": "stepped-editor",
       "trace": "calc-2f0db4f45192",
-      "ops": "stepIn=6",
+      "ops": "stepIn=5",
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 39
+      "settledAfterS": 48
     },
     {
       "id": "advanced-state",
       "trace": "calc-2f0db4f45192",
-      "ops": "stepIn=6,next=3",
+      "ops": "stepIn=5,next=3",
       "extra": "",
       "rc": 143,
       "settled": true,
@@ -51,7 +51,7 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 120
+      "settledAfterS": 84
     },
     {
       "id": "continued-event-log",
@@ -60,1361 +60,2677 @@
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 18
+      "settledAfterS": 21
     },
     {
       "id": "breakpoint-editor",
       "trace": "calc-2f0db4f45192",
-      "ops": "stepIn=6,setBreakpoint@1",
+      "ops": "stepIn=5,setBreakpoint@1",
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 45
+      "settledAfterS": 48
     },
     {
       "id": "noir-flow",
       "trace": "noir_space_ship-f9f31b01a0d2",
-      "ops": "stepIn=33",
+      "ops": "stepIn=28",
       "extra": "",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 39
+      "settledAfterS": 30
     },
     {
       "id": "noir-flow-off",
       "trace": "noir_space_ship-f9f31b01a0d2",
-      "ops": "stepIn=33",
+      "ops": "stepIn=28",
       "extra": "--no-flow-overlay",
       "rc": 143,
       "settled": true,
-      "settledAfterS": 42
+      "settledAfterS": 21
     }
   ],
   "frames": {
     "blank": {
       "frame": "blank.ppm",
       "present": true,
-      "executionLine": -1,
+      "plat39ExecutionLine": -1,
       "editorLocated": false,
+      "pointerLines": [],
+      "executionLine": -1,
       "rows": []
     },
     "entry-shell": {
       "frame": "entry-shell.ppm",
       "present": true,
-      "executionLine": 1,
+      "plat39ExecutionLine": 1,
       "editorLocated": true,
+      "codeWidth": 562,
       "lineVote": {
         "firstLine": 1,
-        "support": 30,
-        "rows": 30
+        "support": 44,
+        "rows": 44,
+        "nonLineRows": 0
       },
+      "pointerLines": [
+        1
+      ],
+      "executionLine": 1,
       "rows": [
         {
           "line": 1,
-          "text": "» 1 #!/usr/bin/env python3"
+          "pointer": true,
+          "text": "> 1 #! /usr/bin/env python3 o",
+          "chips": []
         },
         {
           "line": 2,
-          "text": "\"\"\"calc — the small, fast, deterministic program b"
+          "pointer": false,
+          "text": "\"\"\"calc — the small, fast, deterministic program behind C1",
+          "chips": []
         },
         {
           "line": 3,
-          "text": "3 |"
+          "pointer": false,
+          "text": "3",
+          "chips": []
         },
         {
           "line": 4,
-          "text": "WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS"
+          "pointer": false,
+          "text": "WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS LIKE THIS",
+          "chips": []
         },
         {
           "line": 5,
-          "text": "I R R R R R R"
+          "pointer": false,
+          "text": "BT e e e e e e e T e e e T T e",
+          "chips": []
         },
         {
           "line": 6,
-          "text": "\" codetracer-specs/Front-Ends/CodeTracer-TUl.mil"
+          "pointer": false,
+          "text": "\" “codetracer-specs/Front-Ends/CodeTracer-TUI.milestones. o1",
+          "chips": []
         },
         {
           "line": 7,
-          "text": "a fixture that is \"small, fast, deterministic; the del"
+          "pointer": false,
+          "text": "a fixture that is \"small, fast, deterministic; the defaulf",
+          "chips": []
         },
         {
           "line": 8,
-          "text": "layout tests\". Every constraint in that sentence is"
+          "pointer": false,
+          "text": "layout tests\". Every constraint in that sentence is a cor",
+          "chips": []
         },
         {
           "line": 9,
-          "text": "9 |"
+          "pointer": false,
+          "text": "9",
+          "chips": []
         },
         {
           "line": 10,
-          "text": "‘ * *ksmall / fast** — the fixture is recorded on der ‘"
+          "pointer": false,
+          "text": "v % **%small / fast** — the fixture is recorded on demand by",
+          "chips": []
         },
         {
           "line": 11,
-          "text": "*“src/frontend/tui/tests/fixtures/fixture_provider."
+          "pointer": false,
+          "text": "*“src/frontend/tui/tests/fixtures/fixture_provider.nim",
+          "chips": []
         },
         {
           "line": 12,
-          "text": "lane pays for that recording the first time it run¢"
+          "pointer": false,
+          "text": "lane pays for that recording the first time it runs on c",
+          "chips": []
         },
         {
           "line": 13,
-          "text": "whole program is a few hundred recorded steps"
+          "pointer": false,
+          "text": "3 whole program is a few hundred recorded steps, so the re",
+          "chips": []
         },
         {
           "line": 14,
-          "text": "‘ seconds rather than minutes. ‘"
+          "pointer": false,
+          "text": "seconds rather than minutes.",
+          "chips": []
         },
         {
           "line": 15,
-          "text": "‘ * *kdeterministic** — no clock, no randomness, r ‘"
+          "pointer": false,
+          "text": "v % **deterministic** — no clock, no randomness, no environn",
+          "chips": []
         },
         {
           "line": 16,
-          "text": "other than *“print™*. A fixture whose trace diffe"
+          "pointer": false,
+          "text": "other than \"“print°°. A fixture whose trace differs bet",
+          "chips": []
         },
         {
           "line": 17,
-          "text": "cannot be the ground truth for a stepping test."
+          "pointer": false,
+          "text": "cannot be the ground truth for a stepping test.",
+          "chips": []
         },
         {
           "line": 18,
-          "text": "‘ * *kstepping and layout®* — it is written as a cha ‘"
+          "pointer": false,
+          "text": "v % **stepping and layout** — it is written as a chain of *:",
+          "chips": []
         },
         {
           "line": 19,
-          "text": "‘ (*“main’\" -> ““evaluate™” -> “Tapply op™\" -> ‘"
+          "pointer": false,
+          "text": "(\" \"main\" \" -> \"“evaluate = -> ““apply_op \" -> “add’ \"/ s",
+          "chips": []
         },
         {
           "line": 20,
-          "text": "rather than as one flat loop, because a calltrace"
+          "pointer": false,
+          "text": "rather than as one flat loop, because a calltrace pane v",
+          "chips": []
         },
         {
           "line": 21,
-          "text": "it exercises nothing. Every step lands in a nam"
+          "pointer": false,
+          "text": "it exercises nothing. Every step lands in a named funct",
+          "chips": []
         },
         {
           "line": 22,
-          "text": "| 22 |"
+          "pointer": false,
+          "text": "22",
+          "chips": []
         },
         {
           "line": 23,
-          "text": "Nothing here asserts anything. The assertions li\\"
+          "pointer": false,
+          "text": "3 Nothing here asserts anything. The assertions live in",
+          "chips": []
         },
         {
           "line": 24,
-          "text": "*“src/frontend/tui/tests/test_fixture_corpus.nim™\""
+          "pointer": false,
+          "text": "*“src/frontend/tui/tests/test_fixture_corpus.nim’ °, which",
+          "chips": []
         },
         {
           "line": 25,
-          "text": "trace through a real \" \"HeadlessDebugSession™ ."
+          "pointer": false,
+          "text": "trace through a real \" \"HeadlessDebugSession™ .",
+          "chips": []
+        },
+        {
+          "line": 26,
+          "pointer": false,
+          "text": "26 nun",
+          "chips": []
         },
         {
           "line": 27,
-          "text": "| 27 |"
+          "pointer": false,
+          "text": "27",
+          "chips": []
         },
         {
           "line": 28,
-          "text": "28 |"
+          "pointer": false,
+          "text": "28",
+          "chips": []
         },
         {
           "line": 29,
-          "text": "def add(left, right):"
+          "pointer": false,
+          "text": "v def add(left, right): & _ builtins__ @[(\"__name__\", \"builti",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 30,
-          "text": "\"\"\"Integer addition, as its own frame so steppi"
+          "pointer": false,
+          "text": "\"\"\"Integer addition, as its own frame so stepping has",
+          "chips": []
         },
         {
           "line": 31,
-          "text": "return left + right"
+          "pointer": false,
+          "text": "return left + right",
+          "chips": []
         },
         {
           "line": 32,
-          "text": "| 32 |"
+          "pointer": false,
+          "text": "32",
+          "chips": []
         },
         {
           "line": 33,
-          "text": "33 |"
+          "pointer": false,
+          "text": "33",
+          "chips": []
         },
         {
           "line": 34,
-          "text": "def sub(left, right):"
+          "pointer": false,
+          "text": "v def sub(left, right): & _ builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 35,
-          "text": "‘ \"\"\"Integer subtraction.\"\"\" ‘"
+          "pointer": false,
+          "text": "\"\"\"Integer subtraction.\"\"\"",
+          "chips": []
         },
         {
           "line": 36,
-          "text": "return left - right"
+          "pointer": false,
+          "text": "return left - right",
+          "chips": []
         },
         {
           "line": 37,
-          "text": "| 37 |"
+          "pointer": false,
+          "text": "37",
+          "chips": []
         },
         {
           "line": 38,
-          "text": "| |"
+          "pointer": false,
+          "text": "38",
+          "chips": []
+        },
+        {
+          "line": 39,
+          "pointer": false,
+          "text": "v def mul(left, right): & _builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
+        },
+        {
+          "line": 40,
+          "pointer": false,
+          "text": "\"\"\"Integer multiplication.™\"\"",
+          "chips": []
+        },
+        {
+          "line": 41,
+          "pointer": false,
+          "text": "return left * right",
+          "chips": []
+        },
+        {
+          "line": 42,
+          "pointer": false,
+          "text": "42",
+          "chips": []
+        },
+        {
+          "line": 43,
+          "pointer": false,
+          "text": "43",
+          "chips": []
+        },
+        {
+          "line": 44,
+          "pointer": false,
+          "text": "v def div(left, right): & _ builtins__ @[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         }
       ]
     },
     "stepped-editor": {
       "frame": "stepped-editor.ppm",
       "present": true,
-      "executionLine": 44,
+      "plat39ExecutionLine": -1,
       "editorLocated": true,
+      "codeWidth": 562,
       "lineVote": {
-        "firstLine": 25,
-        "support": 20,
-        "rows": 21
+        "firstLine": 22,
+        "support": 44,
+        "rows": 44,
+        "nonLineRows": 0
       },
+      "pointerLines": [
+        44
+      ],
+      "executionLine": 44,
       "rows": [
         {
+          "line": 22,
+          "pointer": false,
+          "text": "P",
+          "chips": []
+        },
+        {
+          "line": 23,
+          "pointer": false,
+          "text": "3 Nothing here asserts anything. The assertions live in",
+          "chips": []
+        },
+        {
+          "line": 24,
+          "pointer": false,
+          "text": "*“src/frontend/tui/tests/test_fixture_corpus.nim’ °, which",
+          "chips": []
+        },
+        {
           "line": 25,
-          "text": "the recording's source"
+          "pointer": false,
+          "text": "trace through a real \" \"HeadlessDebugSession™ .",
+          "chips": []
+        },
+        {
+          "line": 26,
+          "pointer": false,
+          "text": "26 nun",
+          "chips": []
         },
         {
           "line": 27,
-          "text": "| 27 |"
+          "pointer": false,
+          "text": "27",
+          "chips": []
         },
         {
           "line": 28,
-          "text": "28 |"
+          "pointer": false,
+          "text": "28",
+          "chips": []
         },
         {
           "line": 29,
-          "text": "def add(left, right):"
+          "pointer": false,
+          "text": "v def add(left, right): & _ builtins__ @[(\"__name__\", \"builti",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 30,
-          "text": "\"\"\"Integer addition, as its own frame so steppi"
+          "pointer": false,
+          "text": "\"\"\"Integer addition, as its own frame so stepping has",
+          "chips": []
         },
         {
           "line": 31,
-          "text": "return left + right"
+          "pointer": false,
+          "text": "return left + right",
+          "chips": []
         },
         {
           "line": 32,
-          "text": "| 32 |"
+          "pointer": false,
+          "text": "32",
+          "chips": []
         },
         {
           "line": 33,
-          "text": "33 |"
+          "pointer": false,
+          "text": "33",
+          "chips": []
         },
         {
           "line": 34,
-          "text": "def sub(left, right):"
+          "pointer": false,
+          "text": "v def sub(left, right): & _ builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 35,
-          "text": "‘ \"\"\"Integer subtraction.\"\"\" ‘"
+          "pointer": false,
+          "text": "\"\"\"Integer subtraction.\"\"\"",
+          "chips": []
         },
         {
           "line": 36,
-          "text": "return left - right"
+          "pointer": false,
+          "text": "return left - right",
+          "chips": []
         },
         {
           "line": 37,
-          "text": "| 37 |"
+          "pointer": false,
+          "text": "37",
+          "chips": []
         },
         {
           "line": 38,
-          "text": "38 |"
+          "pointer": false,
+          "text": "—",
+          "chips": []
         },
         {
           "line": 39,
-          "text": "def mul(left, right):"
+          "pointer": false,
+          "text": "v def mul(left, right): & _builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 40,
-          "text": "‘ \"“\"Integer multiplication.\"\"\" ‘"
+          "pointer": false,
+          "text": "\"\"\"Integer multiplication.™\"\"",
+          "chips": []
         },
         {
           "line": 41,
-          "text": "return left * right"
+          "pointer": false,
+          "text": "return left * right",
+          "chips": []
         },
         {
           "line": 42,
-          "text": "| 42 |"
+          "pointer": false,
+          "text": "42",
+          "chips": []
         },
         {
           "line": 43,
-          "text": "|43 —|"
+          "pointer": false,
+          "text": "43",
+          "chips": []
         },
         {
           "line": 44,
-          "text": "p 44  def div(left, right):"
+          "pointer": true,
+          "text": "> 44 v def div(left, right): & _ builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 45,
-          "text": "‘ \"\"\"Floor division. //°\" rather than ~*/\"\" keeps ‘"
+          "pointer": false,
+          "text": "\"\"\"Floor division. °'// ' rather than \"'/ ' keeps eve",
+          "chips": []
         },
         {
           "line": 46,
-          "text": "“Yint® \": a float would make the printed output"
+          "pointer": false,
+          "text": "“\"int\" ': a float would make the printed output depend",
+          "chips": []
         },
         {
           "line": 47,
-          "text": "repr, and this program's whole job is to be idel"
+          "pointer": false,
+          "text": "repr, and this program's whole job is to be identical",
+          "chips": []
         },
         {
           "line": 48,
-          "text": "return left // right"
+          "pointer": false,
+          "text": "return left // right",
+          "chips": []
         },
         {
           "line": 49,
-          "text": "49 |"
+          "pointer": false,
+          "text": "49",
+          "chips": []
         },
         {
           "line": 50,
-          "text": "50 |"
+          "pointer": false,
+          "text": "50",
+          "chips": []
         },
         {
           "line": 51,
-          "text": "‘ 51 # The dispatch table is deliberately module-level ‘"
+          "pointer": false,
+          "text": "51 # The dispatch table is deliberately module-level and cons",
+          "chips": []
         },
         {
           "line": 52,
-          "text": "‘ 52 # lookup is then a value the debugger can show, ‘"
+          "pointer": false,
+          "text": "52 # lookup is then a value the debugger can show, not a brar",
+          "chips": []
         },
         {
           "line": 53,
-          "text": "OPERATIONS = {"
+          "pointer": false,
+          "text": "~ OPERATIONS = | & OPERATIONS @[(\"+\", <function add at Ox7f.",
+          "chips": [
+            {
+              "x": 153,
+              "text": "OPERATIONS @[(\"+\", <function add at Ox7f.",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 54,
-          "text": "“+\": add,"
+          "pointer": false,
+          "text": "\"+\": add, & add <function add at Ox7fffe862c4..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "add <function add at Ox7fffe862c4..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 55,
-          "text": "“-\": sub,"
+          "pointer": false,
+          "text": "\"-\": sub, & sub <function sub at Ox7fffe862c4..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "sub <function sub at Ox7fffe862c4..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 56,
-          "text": "\"+ mul,"
+          "pointer": false,
+          "text": "\"%\": mul, & mul <function mul at Ox7fffe862chH..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "mul <function mul at Ox7fffe862ch..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 57,
-          "text": "‘\" div,"
+          "pointer": false,
+          "text": "\"/™: div, & div <function div at Ox7fffe862ch..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "div <function div at Ox7fffe862ch..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 58,
-          "text": "|58} |"
+          "pointer": false,
+          "text": "58 }",
+          "chips": []
         },
         {
           "line": 59,
-          "text": "59 |"
+          "pointer": false,
+          "text": "59",
+          "chips": []
         },
         {
           "line": 60,
-          "text": "60 |"
+          "pointer": false,
+          "text": "60",
+          "chips": []
         },
         {
           "line": 61,
-          "text": "def apply_op(symbol, left, right):"
+          "pointer": false,
+          "text": "v def apply_op(sumbol, left, right): & OPERATIONS a[(\"+\", <",
+          "chips": [
+            {
+              "x": 356,
+              "text": "OPERATIONS a[(\"+\", <",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 62,
-          "text": "\"\"\"Resolve one operator symbol and apply it."
+          "pointer": false,
+          "text": "\"\"\"Resolve one operator symbol and apply it.",
+          "chips": []
         },
         {
           "line": 63,
-          "text": "| |"
+          "pointer": false,
+          "text": "63 |",
+          "chips": []
+        },
+        {
+          "line": 64,
+          "pointer": false,
+          "text": "This frame exists so that the calltrace has a middle ]",
+          "chips": []
+        },
+        {
+          "line": 65,
+          "pointer": false,
+          "text": "“\"left \" visibly flows main -> evaluate -> apply_op -",
+          "chips": []
         }
       ]
     },
     "advanced-state": {
       "frame": "advanced-state.ppm",
       "present": true,
-      "executionLine": 56,
+      "plat39ExecutionLine": -1,
       "editorLocated": true,
+      "codeWidth": 561,
       "lineVote": {
-        "firstLine": 37,
-        "support": 18,
-        "rows": 19
+        "firstLine": 34,
+        "support": 44,
+        "rows": 44,
+        "nonLineRows": 0
       },
+      "pointerLines": [
+        56
+      ],
+      "executionLine": 56,
       "rows": [
         {
+          "line": 34,
+          "pointer": false,
+          "text": "v def sub(left, right): & _builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 223,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
+        },
+        {
+          "line": 35,
+          "pointer": false,
+          "text": "\"\"\"Integer subtraction.\"\"\"",
+          "chips": []
+        },
+        {
+          "line": 36,
+          "pointer": false,
+          "text": "return left - right",
+          "chips": []
+        },
+        {
           "line": 37,
-          "text": "the recording's source"
+          "pointer": false,
+          "text": "37",
+          "chips": []
         },
         {
           "line": 38,
-          "text": "38 |"
+          "pointer": false,
+          "text": "38",
+          "chips": []
         },
         {
           "line": 39,
-          "text": "def mul(left, right):"
+          "pointer": false,
+          "text": "v def mul(left, right): & _builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 223,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 40,
-          "text": "‘ \"“\"Integer multiplication.\"\"\" ‘"
+          "pointer": false,
+          "text": "\"\"\"Integer multiplication.™\"\"",
+          "chips": []
         },
         {
           "line": 41,
-          "text": "return left * right"
+          "pointer": false,
+          "text": "return left * right",
+          "chips": []
         },
         {
           "line": 42,
-          "text": "| 42 |"
+          "pointer": false,
+          "text": "42",
+          "chips": []
         },
         {
           "line": 43,
-          "text": "43 |"
+          "pointer": false,
+          "text": "43",
+          "chips": []
         },
         {
           "line": 44,
-          "text": "def div(left, right):"
+          "pointer": false,
+          "text": "v def div(left, right): & _ builtins__ @[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 223,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 45,
-          "text": "‘ \"\"\"Floor division. //°\" rather than ~*/\"\" keeps ‘"
+          "pointer": false,
+          "text": "\"\"\"Floor division. °'// ' rather than \"'/ ' keeps eve",
+          "chips": []
         },
         {
           "line": 46,
-          "text": "“Yint® \": a float would make the printed output"
+          "pointer": false,
+          "text": "“\"int\" ': a float would make the printed output depend",
+          "chips": []
         },
         {
           "line": 47,
-          "text": "repr, and this program's whole job is to be idel"
+          "pointer": false,
+          "text": "repr, and this program's whole job is to be identical",
+          "chips": []
         },
         {
           "line": 48,
-          "text": "return left // right"
+          "pointer": false,
+          "text": "return left // right",
+          "chips": []
         },
         {
           "line": 49,
-          "text": "49 |"
+          "pointer": false,
+          "text": "49",
+          "chips": []
         },
         {
           "line": 50,
-          "text": "50 |"
+          "pointer": false,
+          "text": "50",
+          "chips": []
         },
         {
           "line": 51,
-          "text": "‘ 51 # The dispatch table is deliberately module-level ‘"
+          "pointer": false,
+          "text": "51 # The dispatch table is deliberately module-level and cons",
+          "chips": []
         },
         {
           "line": 52,
-          "text": "‘ 52 # lookup is then a value the debugger can show, ‘"
+          "pointer": false,
+          "text": "52 # lookup is then a value the debugger can show, not a brar",
+          "chips": []
         },
         {
           "line": 53,
-          "text": "OPERATIONS = {"
+          "pointer": false,
+          "text": "~ OPERATIONS = | & OPERATIONS @[(\"+\", <function add at Ox7f.",
+          "chips": [
+            {
+              "x": 152,
+              "text": "OPERATIONS @[(\"+\", <function add at Ox7f.",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 54,
-          "text": "“+\": add,"
+          "pointer": false,
+          "text": "\"+\": add, & add <function add at Ox7fffe862c4.. L",
+          "chips": [
+            {
+              "x": 142,
+              "text": "add <function add at Ox7fffe862c4..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 55,
-          "text": "“-\": sub,"
+          "pointer": false,
+          "text": "\"-\": sub, & sub <function sub at Ox7fffe862c4..",
+          "chips": [
+            {
+              "x": 142,
+              "text": "sub <function sub at Ox7fffe862c4..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 56,
-          "text": "» 56 “#: mul,/* mul: <function mul at Ox7fffe7..."
+          "pointer": true,
+          "text": "> 56 \"¥\": mul, & mul <function mul at Ox7fffe862ch..",
+          "chips": [
+            {
+              "x": 142,
+              "text": "mul <function mul at Ox7fffe862ch..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 57,
-          "text": "‘\" div,"
+          "pointer": false,
+          "text": "\"/™: div, & div <function div at Ox7fffe862ch..",
+          "chips": [
+            {
+              "x": 142,
+              "text": "div <function div at Ox7fffe862ch..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 58,
-          "text": "| 58 } |"
+          "pointer": false,
+          "text": "58 }",
+          "chips": []
         },
         {
           "line": 59,
-          "text": "59 |"
+          "pointer": false,
+          "text": "59",
+          "chips": []
         },
         {
           "line": 60,
-          "text": "60 |"
+          "pointer": false,
+          "text": "60",
+          "chips": []
         },
         {
           "line": 61,
-          "text": "def apply_op(symbol, left, right):"
+          "pointer": false,
+          "text": "v def apply_op(sumbol, left, right): & OPERATIONS a[(\"+\", <",
+          "chips": [
+            {
+              "x": 355,
+              "text": "OPERATIONS a[(\"+\", <",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 62,
-          "text": "\"\"\"Resolve one operator symbol and apply it."
+          "pointer": false,
+          "text": "\"\"\"Resolve one operator symbol and apply it.",
+          "chips": []
         },
         {
           "line": 63,
-          "text": "63 |"
+          "pointer": false,
+          "text": "63 |",
+          "chips": []
         },
         {
           "line": 64,
-          "text": "This frame exists so that the calltrace has a m"
+          "pointer": false,
+          "text": "This frame exists so that the calltrace has a middle ]",
+          "chips": []
         },
         {
           "line": 65,
-          "text": "“left”” visibly flows main -> evaluate -> apply"
+          "pointer": false,
+          "text": "“\"left \" visibly flows main -> evaluate -> apply_op -",
+          "chips": []
         },
         {
           "line": 66,
-          "text": "shape a value-origin or a call-stack pane is rea"
+          "pointer": false,
+          "text": "shape a value-origin or a call-stack pane is read agai",
+          "chips": []
+        },
+        {
+          "line": 67,
+          "pointer": false,
+          "text": "67 I",
+          "chips": []
         },
         {
           "line": 68,
-          "text": "operation = OPERATIONS[symbol]"
+          "pointer": false,
+          "text": "operation = OPERATIONS [symbol]",
+          "chips": []
         },
         {
           "line": 69,
-          "text": "return operation(left, right)"
+          "pointer": false,
+          "text": "return operation(left, right)",
+          "chips": []
         },
         {
           "line": 70,
-          "text": "70 |"
+          "pointer": false,
+          "text": "70",
+          "chips": []
         },
         {
           "line": 71,
-          "text": "71 |"
+          "pointer": false,
+          "text": "71",
+          "chips": []
         },
         {
           "line": 72,
-          "text": "def evaluate(expression):"
+          "pointer": false,
+          "text": "v def evaluate(expression): & OPERATIONS a@[(\"+\", <function ac",
+          "chips": [
+            {
+              "x": 264,
+              "text": "OPERATIONS @[(\"+\", <function ac",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 73,
-          "text": "\"\"\"Evaluate a strictly left-to-right space-separz"
+          "pointer": false,
+          "text": "\"\"\"Evaluate a strictly left-to-right space-separated i",
+          "chips": []
         },
         {
           "line": 74,
-          "text": "74 |"
+          "pointer": false,
+          "text": "74 |",
+          "chips": []
         },
         {
           "line": 75,
-          "text": "| |"
+          "pointer": false,
+          "text": "No operator precedence on purpose: precedence would ne",
+          "chips": []
+        },
+        {
+          "line": 76,
+          "pointer": false,
+          "text": "parser is a second thing that can be wrong in a file v",
+          "chips": []
+        },
+        {
+          "line": 77,
+          "pointer": false,
+          "text": "be boring.",
+          "chips": []
         }
       ]
     },
     "returned-calltrace": {
       "frame": "returned-calltrace.ppm",
       "present": true,
-      "executionLine": 110,
+      "plat39ExecutionLine": 110,
       "editorLocated": true,
+      "codeWidth": 562,
       "lineVote": {
-        "firstLine": 79,
-        "support": 26,
-        "rows": 27
+        "firstLine": 75,
+        "support": 39,
+        "rows": 40,
+        "nonLineRows": 2
       },
+      "pointerLines": [
+        110
+      ],
+      "executionLine": 110,
       "rows": [
         {
+          "line": 75,
+          "pointer": false,
+          "text": "No operator precedence on purpose: precedence would ne",
+          "chips": []
+        },
+        {
+          "line": 76,
+          "pointer": false,
+          "text": "parser is a second thing that can be wrong in a file v",
+          "chips": []
+        },
+        {
+          "line": 77,
+          "pointer": false,
+          "text": "be boring.",
+          "chips": []
+        },
+        {
+          "line": 78,
+          "pointer": false,
+          "text": "78 [ ===",
+          "chips": []
+        },
+        {
           "line": 79,
-          "text": "the recording's source"
+          "pointer": false,
+          "text": "tokens = expression.split()",
+          "chips": []
         },
         {
           "line": 80,
-          "text": "total = int(tokens[0])"
+          "pointer": false,
+          "text": "total = int(tokens|[0])",
+          "chips": []
         },
         {
           "line": 81,
-          "text": "index = 1"
+          "pointer": false,
+          "text": "index = 1",
+          "chips": []
         },
         {
           "line": 82,
-          "text": "while index < len(tokens):"
+          "pointer": false,
+          "text": "v while index < len(tokens):",
+          "chips": []
         },
         {
           "line": 83,
-          "text": "symbol = tokens[index]"
+          "pointer": false,
+          "text": "symbol = tokens[index]",
+          "chips": []
         },
         {
           "line": 84,
-          "text": "operand = int(tokens[index + 1])"
+          "pointer": false,
+          "text": "operand = int(tokens|index + 1))",
+          "chips": []
         },
         {
           "line": 85,
-          "text": "total = apply_op(symbol, total, operand)"
+          "pointer": false,
+          "text": "total = apply_op(symbol, total, operand)",
+          "chips": []
         },
         {
           "line": 86,
-          "text": "index += 2"
+          "pointer": false,
+          "text": "index += 2",
+          "chips": []
         },
         {
           "line": 87,
-          "text": "return total"
+          "pointer": false,
+          "text": "return total",
+          "chips": []
         },
         {
           "line": 88,
-          "text": "| 88 |"
+          "pointer": false,
+          "text": "88",
+          "chips": []
         },
         {
           "line": 89,
-          "text": "| 89 |"
+          "pointer": false,
+          "text": "89",
+          "chips": []
         },
         {
           "line": 90,
-          "text": "EXPRESSIONS = ["
+          "pointer": false,
+          "text": "~ EXPRESSIONS = |",
+          "chips": []
+        },
+        {
+          "line": 91,
+          "pointer": false,
+          "text": "\"2 + 3\",",
+          "chips": []
         },
         {
           "line": 92,
-          "text": "\"10-4 + 1\","
+          "pointer": false,
+          "text": "\"0 - 4 + 17,",
+          "chips": []
+        },
+        {
+          "line": 93,
+          "pointer": false,
+          "text": "2 \"B % 7\",",
+          "chips": []
         },
         {
           "line": 94,
-          "text": "\\ )4 “100/5 - 3\", \\"
+          "pointer": false,
+          "text": "\"00 / 5 - 3\",",
+          "chips": []
         },
         {
           "line": 95,
-          "text": "\\ ) \"1+2%3-4/2\", \\"
+          "pointer": false,
+          "text": "\"L+ 2 %3 -4/ 2\",",
+          "chips": []
         },
         {
           "line": 96,
-          "text": "96 1 |"
+          "pointer": false,
+          "text": "96 ]",
+          "chips": []
         },
         {
           "line": 97,
-          "text": "97 |"
+          "pointer": false,
+          "text": "97",
+          "chips": []
         },
         {
           "line": 98,
-          "text": "| 98 |"
+          "pointer": false,
+          "text": "98",
+          "chips": []
         },
         {
           "line": 99,
-          "text": "def main():"
+          "pointer": false,
+          "text": "v def main(): return nil",
+          "chips": [
+            {
+              "x": 122,
+              "text": "return nil",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 100,
-          "text": "\"\"\"Evaluate every expression and print the re"
+          "pointer": false,
+          "text": "\"\"\"Evaluate every expression and print the result.",
+          "chips": []
         },
         {
           "line": 101,
-          "text": "| 101 |"
+          "pointer": false,
+          "text": "101 |",
+          "chips": []
         },
         {
           "line": 102,
-          "text": "Called unconditionally at module level rather"
+          "pointer": false,
+          "text": "Called unconditionally at module level rather than frc",
+          "chips": []
         },
         {
           "line": 103,
-          "text": "“Uif _name__ ==\"_main_ \"\"\" guard: record"
+          "pointer": false,
+          "text": "“\"if __name__ == \"__main__\" \" gquard: recorders launch",
+          "chips": []
         },
         {
           "line": 104,
-          "text": "! different ways (as a script, as a module, throi"
+          "pointer": false,
+          "text": "different ways (as a script, as a module, through a wi",
+          "chips": []
         },
         {
           "line": 105,
-          "text": "is one more way for a recording to come bacl"
+          "pointer": false,
+          "text": "is one more way for a recording to come back empty.",
+          "chips": []
         },
         {
           "line": 106,
-          "text": "| 106 |"
+          "pointer": false,
+          "text": "106 I",
+          "chips": []
         },
         {
           "line": 107,
-          "text": "results =[]"
+          "pointer": false,
+          "text": "results = [] results a[]",
+          "chips": [
+            {
+              "x": 173,
+              "text": "results a[]",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 108,
-          "text": "for expression in EXPRESSIONS:"
+          "pointer": false,
+          "text": "e for expression in EXPRESSIONS:",
+          "chips": []
         },
         {
           "line": 109,
-          "text": "value = evaluate(expression)"
+          "pointer": false,
+          "text": "value = evaluate(expression)",
+          "chips": []
         },
         {
           "line": 110,
-          "text": "p» 110 results.append(value)/* results: @[], v..."
+          "pointer": true,
+          "text": "> 110 results.append(value) results @[] value",
+          "chips": [
+            {
+              "x": 305,
+              "text": "results a[]",
+              "more": false,
+              "clipped": false
+            },
+            {
+              "x": 419,
+              "text": "value &",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 111,
-          "text": "print(\"%s = %d\" % (expression, value))"
+          "pointer": false,
+          "text": "print(\"%s = %d\" % (expression, value))",
+          "chips": []
         },
         {
           "line": 112,
-          "text": "print(“checksum = %d\" % sum(results))"
+          "pointer": false,
+          "text": "print(\"checksum = %d\" % sum(results)) <stdout> o",
+          "chips": [
+            {
+              "x": 428,
+              "text": "<stdout> CHNCCKS",
+              "more": false,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 113,
-          "text": "return results"
+          "pointer": false,
+          "text": "return results results a[6, 7, 42, 17, 2] return nil",
+          "chips": [
+            {
+              "x": 193,
+              "text": "results a[s, 7, 42, 17, 2]",
+              "more": false,
+              "clipped": false
+            },
+            {
+              "x": 436,
+              "text": "return nil",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 114,
-          "text": "114 |"
+          "pointer": false,
+          "text": "L",
+          "chips": []
         },
         {
           "line": 115,
-          "text": "115 |"
+          "pointer": false,
+          "text": "115",
+          "chips": []
         },
         {
           "line": 116,
-          "text": "main()"
-        },
-        {
-          "line": 117,
-          "text": "| |"
+          "pointer": false,
+          "text": "main()",
+          "chips": []
         }
       ]
     },
     "continued-event-log": {
       "frame": "continued-event-log.ppm",
       "present": true,
-      "executionLine": 113,
+      "plat39ExecutionLine": -1,
       "editorLocated": true,
+      "codeWidth": 562,
       "lineVote": {
-        "firstLine": 79,
-        "support": 26,
-        "rows": 27
+        "firstLine": 75,
+        "support": 39,
+        "rows": 40,
+        "nonLineRows": 2
       },
+      "pointerLines": [
+        113
+      ],
+      "executionLine": 113,
       "rows": [
         {
+          "line": 75,
+          "pointer": false,
+          "text": "No operator precedence on purpose: precedence would ne",
+          "chips": []
+        },
+        {
+          "line": 76,
+          "pointer": false,
+          "text": "parser is a second thing that can be wrong in a file v",
+          "chips": []
+        },
+        {
+          "line": 77,
+          "pointer": false,
+          "text": "be boring.",
+          "chips": []
+        },
+        {
+          "line": 78,
+          "pointer": false,
+          "text": "78 [ ===",
+          "chips": []
+        },
+        {
           "line": 79,
-          "text": "the recording's source"
+          "pointer": false,
+          "text": "tokens = expression.split()",
+          "chips": []
         },
         {
           "line": 80,
-          "text": "total = int(tokens[0])"
+          "pointer": false,
+          "text": "total = int(tokens|[0])",
+          "chips": []
         },
         {
           "line": 81,
-          "text": "index = 1"
+          "pointer": false,
+          "text": "index = 1",
+          "chips": []
         },
         {
           "line": 82,
-          "text": "while index < len(tokens):"
+          "pointer": false,
+          "text": "v while index < len(tokens):",
+          "chips": []
         },
         {
           "line": 83,
-          "text": "symbol = tokens[index]"
+          "pointer": false,
+          "text": "symbol = tokens[index]",
+          "chips": []
         },
         {
           "line": 84,
-          "text": "operand = int(tokens[index + 1])"
+          "pointer": false,
+          "text": "operand = int(tokens|index + 1))",
+          "chips": []
         },
         {
           "line": 85,
-          "text": "total = apply_op(symbol, total, operand)"
+          "pointer": false,
+          "text": "total = apply_op(symbol, total, operand)",
+          "chips": []
         },
         {
           "line": 86,
-          "text": "index += 2"
+          "pointer": false,
+          "text": "index += 2",
+          "chips": []
         },
         {
           "line": 87,
-          "text": "return total"
+          "pointer": false,
+          "text": "return total",
+          "chips": []
         },
         {
           "line": 88,
-          "text": "| 88 |"
+          "pointer": false,
+          "text": "88",
+          "chips": []
         },
         {
           "line": 89,
-          "text": "| 89 |"
+          "pointer": false,
+          "text": "89",
+          "chips": []
         },
         {
           "line": 90,
-          "text": "EXPRESSIONS = ["
+          "pointer": false,
+          "text": "~ EXPRESSIONS = |",
+          "chips": []
+        },
+        {
+          "line": 91,
+          "pointer": false,
+          "text": "\"2 + 3\",",
+          "chips": []
         },
         {
           "line": 92,
-          "text": "\"10-4 + 1\","
+          "pointer": false,
+          "text": "\"0 - 4 + 17,",
+          "chips": []
+        },
+        {
+          "line": 93,
+          "pointer": false,
+          "text": "2 \"B % 7\",",
+          "chips": []
         },
         {
           "line": 94,
-          "text": "\\ )4 “100/5 - 3\", \\"
+          "pointer": false,
+          "text": "\"00 / 5 - 3\",",
+          "chips": []
         },
         {
           "line": 95,
-          "text": "\\ ) \"1+2%3-4/2\", \\"
+          "pointer": false,
+          "text": "\"L+ 2 %3 -4/ 2\",",
+          "chips": []
         },
         {
           "line": 96,
-          "text": "96 1 |"
+          "pointer": false,
+          "text": "96 ]",
+          "chips": []
         },
         {
           "line": 97,
-          "text": "97 |"
+          "pointer": false,
+          "text": "97",
+          "chips": []
         },
         {
           "line": 98,
-          "text": "| 98 |"
+          "pointer": false,
+          "text": "98",
+          "chips": []
         },
         {
           "line": 99,
-          "text": "def main():"
+          "pointer": false,
+          "text": "v def main(): return nil",
+          "chips": [
+            {
+              "x": 122,
+              "text": "return nil",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 100,
-          "text": "\"\"\"Evaluate every expression and print the re"
+          "pointer": false,
+          "text": "\"\"\"Evaluate every expression and print the result.",
+          "chips": []
         },
         {
           "line": 101,
-          "text": "| 101 |"
+          "pointer": false,
+          "text": "101 |",
+          "chips": []
         },
         {
           "line": 102,
-          "text": "Called unconditionally at module level rather"
+          "pointer": false,
+          "text": "Called unconditionally at module level rather than frc",
+          "chips": []
         },
         {
           "line": 103,
-          "text": "“Uif _name__ ==\"_main_ \"\"\" guard: record"
+          "pointer": false,
+          "text": "“\"if __name__ == \"__main__\" \" gquard: recorders launch",
+          "chips": []
         },
         {
           "line": 104,
-          "text": "! different ways (as a script, as a module, throi"
+          "pointer": false,
+          "text": "different ways (as a script, as a module, through a wi",
+          "chips": []
         },
         {
           "line": 105,
-          "text": "is one more way for a recording to come bacl"
+          "pointer": false,
+          "text": "is one more way for a recording to come back empty.",
+          "chips": []
         },
         {
           "line": 106,
-          "text": "| 106 |"
+          "pointer": false,
+          "text": "106 I",
+          "chips": []
         },
         {
           "line": 107,
-          "text": "results =[]"
+          "pointer": false,
+          "text": "results = [] results a[]",
+          "chips": [
+            {
+              "x": 173,
+              "text": "results a[]",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 108,
-          "text": "for expression in EXPRESSIONS:"
+          "pointer": false,
+          "text": "e for expression in EXPRESSIONS:",
+          "chips": []
         },
         {
           "line": 109,
-          "text": "value = evaluate(expression)"
+          "pointer": false,
+          "text": "value = evaluate(expression)",
+          "chips": []
         },
         {
           "line": 110,
-          "text": "results.append(value)"
+          "pointer": false,
+          "text": "results.append(value)",
+          "chips": []
         },
         {
           "line": 111,
-          "text": "print(\"%s = %d\" % (expression, value))"
+          "pointer": false,
+          "text": "print(\"%s = %d\" % (expression, value))",
+          "chips": []
         },
         {
           "line": 112,
-          "text": "print(“checksum = %d\" % sum(results))"
+          "pointer": false,
+          "text": "print(\"checksum = %d\" % sum(results)) <stdout> o",
+          "chips": [
+            {
+              "x": 428,
+              "text": "<stdout> CHNCCKS",
+              "more": false,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 113,
-          "text": "p 113 return results/* results: @[5, 7, 42, 17, 2] ¥/"
+          "pointer": true,
+          "text": "> 113 return results results a[b, 7, 42, 17, 2] @ return nil",
+          "chips": [
+            {
+              "x": 193,
+              "text": "results a[s, 7, 42, 17, 2]",
+              "more": false,
+              "clipped": false
+            },
+            {
+              "x": 436,
+              "text": "return nil",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 114,
-          "text": "| 114 |"
+          "pointer": false,
+          "text": "114",
+          "chips": []
         },
         {
           "line": 115,
-          "text": "| 115 |"
+          "pointer": false,
+          "text": "115",
+          "chips": []
         },
         {
           "line": 116,
-          "text": "main()"
-        },
-        {
-          "line": 117,
-          "text": "| |"
+          "pointer": false,
+          "text": "main() I~",
+          "chips": []
         }
       ]
     },
     "breakpoint-editor": {
       "frame": "breakpoint-editor.ppm",
       "present": true,
-      "executionLine": 44,
+      "plat39ExecutionLine": -1,
       "editorLocated": true,
+      "codeWidth": 562,
       "lineVote": {
-        "firstLine": 25,
-        "support": 19,
-        "rows": 20
+        "firstLine": 22,
+        "support": 43,
+        "rows": 43,
+        "nonLineRows": 0
       },
+      "pointerLines": [
+        44
+      ],
+      "executionLine": 44,
       "rows": [
         {
+          "line": 22,
+          "pointer": false,
+          "text": "",
+          "chips": []
+        },
+        {
+          "line": 23,
+          "pointer": false,
+          "text": "3 Nothing here asserts anything. The assertions live in",
+          "chips": []
+        },
+        {
+          "line": 24,
+          "pointer": false,
+          "text": "*“src/frontend/tui/tests/test_fixture_corpus.nim’ °, which",
+          "chips": []
+        },
+        {
           "line": 25,
-          "text": "the recording's source"
+          "pointer": false,
+          "text": "trace through a real \" \"HeadlessDebugSession™ .",
+          "chips": []
+        },
+        {
+          "line": 26,
+          "pointer": false,
+          "text": "26 nun",
+          "chips": []
         },
         {
           "line": 27,
-          "text": "| @27 |"
+          "pointer": false,
+          "text": "27",
+          "chips": []
         },
         {
           "line": 28,
-          "text": "28 |"
+          "pointer": false,
+          "text": "28",
+          "chips": []
         },
         {
           "line": 29,
-          "text": "def add(left, right):"
+          "pointer": false,
+          "text": "v def add(left, right): & _ builtins__ @[(\"__name__\", \"builti",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 30,
-          "text": "\"\"\"Integer addition, as its own frame so steppi"
+          "pointer": false,
+          "text": "\"\"\"Integer addition, as its own frame so stepping has",
+          "chips": []
         },
         {
           "line": 31,
-          "text": "return left + right"
+          "pointer": false,
+          "text": "return left + right",
+          "chips": []
         },
         {
           "line": 32,
-          "text": "| 32 |"
+          "pointer": false,
+          "text": "32",
+          "chips": []
         },
         {
           "line": 33,
-          "text": "33 |"
+          "pointer": false,
+          "text": "33",
+          "chips": []
         },
         {
           "line": 34,
-          "text": "def sub(left, right):"
+          "pointer": false,
+          "text": "v def sub(left, right): & _ builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 35,
-          "text": "‘ \"\"\"Integer subtraction.\"\"\" ‘"
+          "pointer": false,
+          "text": "\"\"\"Integer subtraction.\"\"\"",
+          "chips": []
         },
         {
           "line": 36,
-          "text": "return left - right"
+          "pointer": false,
+          "text": "return left - right",
+          "chips": []
         },
         {
           "line": 37,
-          "text": "| 37 |"
+          "pointer": false,
+          "text": "37",
+          "chips": []
         },
         {
           "line": 38,
-          "text": "38 |"
+          "pointer": false,
+          "text": "—",
+          "chips": []
         },
         {
           "line": 39,
-          "text": "def mul(left, right):"
+          "pointer": false,
+          "text": "v def mul(left, right): & _builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 40,
-          "text": "‘ \"“\"Integer multiplication.\"\"\" ‘"
+          "pointer": false,
+          "text": "\"\"\"Integer multiplication.™\"\"",
+          "chips": []
         },
         {
           "line": 41,
-          "text": "return left * right"
+          "pointer": false,
+          "text": "return left * right",
+          "chips": []
         },
         {
           "line": 42,
-          "text": "| 42 |"
+          "pointer": false,
+          "text": "42",
+          "chips": []
         },
         {
           "line": 43,
-          "text": "|43 —|"
+          "pointer": false,
+          "text": "43",
+          "chips": []
         },
         {
           "line": 44,
-          "text": "p 44  def div(left, right):"
+          "pointer": true,
+          "text": "> 44 v def div(left, right): & _ builtins__ a[(\"__name__\", \"builtir",
+          "chips": [
+            {
+              "x": 224,
+              "text": "__builtins__ al(\"__name__\", \"builti",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 45,
-          "text": "‘ \"\"\"Floor division. //°\" rather than ~*/\"\" keeps ‘"
+          "pointer": false,
+          "text": "\"\"\"Floor division. °'// ' rather than \"'/ ' keeps eve",
+          "chips": []
         },
         {
           "line": 46,
-          "text": "“Yint® \": a float would make the printed output"
+          "pointer": false,
+          "text": "“\"int\" ': a float would make the printed output depend",
+          "chips": []
         },
         {
           "line": 47,
-          "text": "repr, and this program's whole job is to be idel"
+          "pointer": false,
+          "text": "repr, and this program's whole job is to be identical",
+          "chips": []
         },
         {
           "line": 48,
-          "text": "return left // right"
+          "pointer": false,
+          "text": "return left // right",
+          "chips": []
         },
         {
           "line": 49,
-          "text": "49 |"
+          "pointer": false,
+          "text": "49",
+          "chips": []
         },
         {
           "line": 50,
-          "text": "50 |"
+          "pointer": false,
+          "text": "50",
+          "chips": []
         },
         {
           "line": 51,
-          "text": "‘ 51 # The dispatch table is deliberately module-level ‘"
+          "pointer": false,
+          "text": "51 # The dispatch table is deliberately module-level and cons",
+          "chips": []
         },
         {
           "line": 52,
-          "text": "‘ 52 # lookup is then a value the debugger can show, ‘"
+          "pointer": false,
+          "text": "52 # lookup is then a value the debugger can show, not a brar",
+          "chips": []
         },
         {
           "line": 53,
-          "text": "OPERATIONS = {"
+          "pointer": false,
+          "text": "~ OPERATIONS = | & OPERATIONS @[(\"+\", <function add at Ox7f.",
+          "chips": [
+            {
+              "x": 153,
+              "text": "OPERATIONS @[(\"+\", <function add at Ox7f.",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 54,
-          "text": "“+\": add,"
+          "pointer": false,
+          "text": "\"+\": add, & add <function add at Ox7fffe862c4..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "add <function add at Ox7fffe862c4..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 55,
-          "text": "“-\": sub,"
+          "pointer": false,
+          "text": "\"-\": sub, & sub <function sub at Ox7fffe862c4..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "sub <function sub at Ox7fffe862c4..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 56,
-          "text": "\"+ mul,"
+          "pointer": false,
+          "text": "\"%\": mul, & mul <function mul at Ox7fffe862chH..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "mul <function mul at Ox7fffe862ch..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 57,
-          "text": "‘\" div,"
+          "pointer": false,
+          "text": "\"/™: div, & div <function div at Ox7fffe862ch..",
+          "chips": [
+            {
+              "x": 143,
+              "text": "div <function div at Ox7fffe862ch..",
+              "more": true,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 58,
-          "text": "|58} |"
+          "pointer": false,
+          "text": "58 }",
+          "chips": []
         },
         {
           "line": 59,
-          "text": "59 |"
+          "pointer": false,
+          "text": "59",
+          "chips": []
         },
         {
           "line": 60,
-          "text": "60 |"
+          "pointer": false,
+          "text": "60",
+          "chips": []
         },
         {
           "line": 61,
-          "text": "def apply_op(symbol, left, right):"
+          "pointer": false,
+          "text": "v def apply_op(sumbol, left, right): & OPERATIONS a[(\"+\", <",
+          "chips": [
+            {
+              "x": 356,
+              "text": "OPERATIONS a[(\"+\", <",
+              "more": true,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 62,
-          "text": "\"\"\"Resolve one operator symbol and apply it."
+          "pointer": false,
+          "text": "\"\"\"Resolve one operator symbol and apply it.",
+          "chips": []
         },
         {
           "line": 63,
-          "text": "| |"
+          "pointer": false,
+          "text": "63 |",
+          "chips": []
+        },
+        {
+          "line": 64,
+          "pointer": false,
+          "text": "This frame exists so that the calltrace has a middle ]",
+          "chips": []
+        },
+        {
+          "line": 65,
+          "pointer": false,
+          "text": "“\"left \" visibly flows main -> evaluate -> apply_op -",
+          "chips": []
         }
       ]
     },
     "noir-flow": {
       "frame": "noir-flow.ppm",
       "present": true,
-      "executionLine": 29,
+      "plat39ExecutionLine": -1,
       "editorLocated": true,
+      "codeWidth": 561,
       "lineVote": {
         "firstLine": 1,
-        "support": 30,
-        "rows": 30
+        "support": 44,
+        "rows": 45,
+        "nonLineRows": 0
       },
+      "pointerLines": [
+        29
+      ],
+      "executionLine": 29,
       "rows": [
         {
           "line": 1,
-          "text": "pub fn iterate_asteroids(initial_shield: Field, shiel"
+          "pointer": false,
+          "text": "v pub fn iterate_asteroids(initial_shield: Field, shield_re",
+          "chips": []
         },
         {
           "line": 2,
-          "text": "let mut remaining_shield = initial_shield;"
+          "pointer": false,
+          "text": "let mut remaining_shield = initial_shield;",
+          "chips": []
         },
         {
           "line": 3,
-          "text": "3 |"
+          "pointer": false,
+          "text": "3",
+          "chips": []
         },
         {
           "line": 4,
-          "text": "foriin 0..8 {"
+          "pointer": false,
+          "text": "v for i in 0..8 {",
+          "chips": []
         },
         {
           "line": 5,
-          "text": "let mass = masseslil;"
+          "pointer": false,
+          "text": "let mass = masses|[il;",
+          "chips": []
         },
         {
           "line": 6,
-          "text": "let damage = calculate_damage(initial_shie"
+          "pointer": false,
+          "text": "let damage = calculate_damage(initial_shield, rem",
+          "chips": []
         },
         {
           "line": 7,
-          "text": "remaining_shield -= damage;"
+          "pointer": false,
+          "text": "remaining_shield -= damage;",
+          "chips": []
         },
         {
           "line": 8,
-          "text": "8 |"
+          "pointer": false,
+          "text": "8",
+          "chips": []
         },
         {
           "line": 9,
-          "text": "let mut regeneration = 0;"
+          "pointer": false,
+          "text": "let mut regeneration = 0;",
+          "chips": []
         },
         {
           "line": 10,
-          "text": "it (remaining_shield as u32 > 0){"
+          "pointer": false,
+          "text": "if (remaining_shield as u32 > 0)/",
+          "chips": []
         },
         {
           "line": 11,
-          "text": "regeneration = calculate_shield_regeneratit"
+          "pointer": false,
+          "text": "regeneration = calculate_shield_regeneration(init:",
+          "chips": []
         },
         {
           "line": 12,
-          "text": "remaining_shield += regeneration;"
+          "pointer": false,
+          "text": "remaining_shield += regeneration;",
+          "chips": []
         },
         {
           "line": 13,
-          "text": "|13 } |"
+          "pointer": false,
+          "text": "13 1",
+          "chips": []
         },
         {
           "line": 14,
-          "text": "status_report(i,initial_shield, remaining_shi¢"
+          "pointer": false,
+          "text": "status_report(i,initial_shield, remaining_shield,",
+          "chips": []
         },
         {
           "line": 15,
-          "text": "|15 } |"
+          "pointer": false,
+          "text": "15 }",
+          "chips": []
         },
         {
           "line": 16,
-          "text": "16 |"
+          "pointer": false,
+          "text": "16",
+          "chips": []
         },
         {
           "line": 17,
-          "text": "‘ 17 // We need to have at least 1 unit of shields lef ‘"
+          "pointer": false,
+          "text": "17 // We need to have at least 1 unit of shields left in",
+          "chips": []
         },
         {
           "line": 18,
-          "text": "let result = remaining_shield as u32 > 0;"
+          "pointer": false,
+          "text": "let result = remaining_shield as u32 > 0;",
+          "chips": []
         },
         {
           "line": 19,
-          "text": "result"
+          "pointer": false,
+          "text": "result -",
+          "chips": []
         },
         {
           "line": 20,
-          "text": "|20} |"
+          "pointer": false,
+          "text": "20 }",
+          "chips": []
         },
         {
           "line": 21,
-          "text": "21 |"
+          "pointer": false,
+          "text": "21",
+          "chips": []
         },
         {
           "line": 22,
-          "text": "fn calculate_damage(initial_shield: Field, remain"
+          "pointer": false,
+          "text": "v fn calculate_damqge(initial_shield: Field, remaining_shie:",
+          "chips": []
         },
         {
           "line": 23,
-          "text": "‘ 23 // Shields get exponentially less efficient ‘"
+          "pointer": false,
+          "text": "23 // Shields get exponentially less efficient",
+          "chips": []
         },
         {
           "line": 24,
-          "text": "\\ 24 /I At 100% shields 1 unit of mass will drain 1 p \\"
+          "pointer": false,
+          "text": "24 // At 100% shields 1 unit of mass will drain 1 point",
+          "chips": []
         },
         {
           "line": 25,
-          "text": "\\ 25 /I At 50% shields 1 unit of mass will drain 50 p \\"
+          "pointer": false,
+          "text": "25 // At 50% shields 1 unit of mass will drain 50 points",
+          "chips": []
         },
         {
           "line": 26,
-          "text": "let shield_pct = calculate_remaining_shield_p«"
+          "pointer": false,
+          "text": "let shield_pct = calculate_remaining_shield_pct(initi",
+          "chips": []
         },
         {
           "line": 27,
-          "text": "let mut damage = 0;"
+          "pointer": false,
+          "text": "let mut damage = 0; damage ©x@©",
+          "chips": [
+            {
+              "x": 243,
+              "text": "damage Ox8",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 28,
-          "text": "if(shield_pct == 100){"
+          "pointer": false,
+          "text": "v if(shield_pct == 100){ shield_pct ©x64",
+          "chips": [
+            {
+              "x": 274,
+              "text": "shield _pct Ox64",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 29,
-          "text": "» 29 damage = mass * 1;/* damage: \"0x000..."
+          "pointer": true,
+          "text": "> 29 damage = mass * 1; damage ©x@ mass Ox64",
+          "chips": [
+            {
+              "x": 274,
+              "text": "damage Ox8",
+              "more": false,
+              "clipped": false
+            },
+            {
+              "x": 380,
+              "text": "mass Ox64",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 30,
-          "text": "|3o } |"
+          "pointer": false,
+          "text": "30 }",
+          "chips": []
         },
         {
           "line": 31,
-          "text": "| 31 else{ |"
+          "pointer": false,
+          "text": "31 v else|",
+          "chips": []
         },
         {
           "line": 32,
-          "text": "’ 32 damage = mass * (100 - shield_pct); ‘"
+          "pointer": false,
+          "text": "32 damage = mass * (100 - shield_pct);",
+          "chips": []
         },
         {
           "line": 33,
-          "text": "|33 } |"
+          "pointer": false,
+          "text": "33 }",
+          "chips": []
         },
         {
           "line": 34,
-          "text": "if(damage as u32 > remaining_shield as u32"
+          "pointer": false,
+          "text": "v if(damage as u32 > remaining_shield as u32) ! damage",
+          "chips": [
+            {
+              "x": 498,
+              "text": "damage",
+              "more": false,
+              "clipped": true
+            }
+          ]
         },
         {
           "line": 35,
-          "text": "‘ 35 damage = remaining_shield; ‘"
+          "pointer": false,
+          "text": "35 damage = remaining_shield;",
+          "chips": []
         },
         {
           "line": 36,
-          "text": "|36 } |"
+          "pointer": false,
+          "text": "36 1",
+          "chips": []
         },
         {
           "line": 37,
-          "text": "damage as Field"
+          "pointer": false,
+          "text": "damage as Field",
+          "chips": []
         },
         {
           "line": 38,
-          "text": "| |"
+          "pointer": false,
+          "text": "38 }",
+          "chips": []
+        },
+        {
+          "line": 39,
+          "pointer": false,
+          "text": "39",
+          "chips": []
+        },
+        {
+          "line": 40,
+          "pointer": false,
+          "text": "v fn calculate_shield_regeneration(initial_shield:Field, rel",
+          "chips": []
+        },
+        {
+          "line": 41,
+          "pointer": false,
+          "text": "41 // shields regain a percentage of the maxium capacity",
+          "chips": []
+        },
+        {
+          "line": 42,
+          "pointer": false,
+          "text": "let mut regen = (initial_shield * shield_regen_percen",
+          "chips": []
+        },
+        {
+          "line": 43,
+          "pointer": false,
+          "text": "v if((remaining_shield + regen) as u32 > initial_shield",
+          "chips": []
+        },
+        {
+          "line": 44,
+          "pointer": false,
+          "text": "regen = initial_shield - remaining_shield;",
+          "chips": []
         }
       ]
     },
     "noir-flow-off": {
       "frame": "noir-flow-off.ppm",
       "present": true,
-      "executionLine": 29,
+      "plat39ExecutionLine": -1,
       "editorLocated": true,
+      "codeWidth": 561,
       "lineVote": {
         "firstLine": 1,
-        "support": 30,
-        "rows": 30
+        "support": 44,
+        "rows": 45,
+        "nonLineRows": 0
       },
+      "pointerLines": [
+        29
+      ],
+      "executionLine": 29,
       "rows": [
         {
           "line": 1,
-          "text": "pub fn iterate_asteroids(initial_shield: Field, shiel"
+          "pointer": false,
+          "text": "v pub fn iterate_asteroids(initial_shield: Field, shield_re",
+          "chips": []
         },
         {
           "line": 2,
-          "text": "let mut remaining_shield = initial_shield;"
+          "pointer": false,
+          "text": "let mut remaining_shield = initial_shield;",
+          "chips": []
         },
         {
           "line": 3,
-          "text": "3 |"
+          "pointer": false,
+          "text": "3",
+          "chips": []
         },
         {
           "line": 4,
-          "text": "foriin 0..8 {"
+          "pointer": false,
+          "text": "v for i in 0..8 {",
+          "chips": []
         },
         {
           "line": 5,
-          "text": "let mass = masseslil;"
+          "pointer": false,
+          "text": "let mass = masses|[il;",
+          "chips": []
         },
         {
           "line": 6,
-          "text": "let damage = calculate_damage(initial_shie"
+          "pointer": false,
+          "text": "let damage = calculate_damage(initial_shield, rem",
+          "chips": []
         },
         {
           "line": 7,
-          "text": "remaining_shield -= damage;"
+          "pointer": false,
+          "text": "remaining_shield -= damage;",
+          "chips": []
         },
         {
           "line": 8,
-          "text": "8 |"
+          "pointer": false,
+          "text": "8",
+          "chips": []
         },
         {
           "line": 9,
-          "text": "let mut regeneration = 0;"
+          "pointer": false,
+          "text": "let mut regeneration = 0;",
+          "chips": []
         },
         {
           "line": 10,
-          "text": "it (remaining_shield as u32 > 0){"
+          "pointer": false,
+          "text": "if (remaining_shield as u32 > 0)/",
+          "chips": []
         },
         {
           "line": 11,
-          "text": "regeneration = calculate_shield_regeneratit"
+          "pointer": false,
+          "text": "regeneration = calculate_shield_regeneration(init:",
+          "chips": []
         },
         {
           "line": 12,
-          "text": "remaining_shield += regeneration;"
+          "pointer": false,
+          "text": "remaining_shield += regeneration;",
+          "chips": []
         },
         {
           "line": 13,
-          "text": "|13 } |"
+          "pointer": false,
+          "text": "13 1",
+          "chips": []
         },
         {
           "line": 14,
-          "text": "status_report(i,initial_shield, remaining_shi¢"
+          "pointer": false,
+          "text": "status_report(i,initial_shield, remaining_shield,",
+          "chips": []
         },
         {
           "line": 15,
-          "text": "|15 } |"
+          "pointer": false,
+          "text": "15 }",
+          "chips": []
         },
         {
           "line": 16,
-          "text": "16 |"
+          "pointer": false,
+          "text": "16",
+          "chips": []
         },
         {
           "line": 17,
-          "text": "‘ 17 // We need to have at least 1 unit of shields lef ‘"
+          "pointer": false,
+          "text": "17 // We need to have at least 1 unit of shields left in",
+          "chips": []
         },
         {
           "line": 18,
-          "text": "let result = remaining_shield as u32 > 0;"
+          "pointer": false,
+          "text": "let result = remaining_shield as u32 > 0;",
+          "chips": []
         },
         {
           "line": 19,
-          "text": "result"
+          "pointer": false,
+          "text": "result -",
+          "chips": []
         },
         {
           "line": 20,
-          "text": "|20} |"
+          "pointer": false,
+          "text": "20 }",
+          "chips": []
         },
         {
           "line": 21,
-          "text": "21 |"
+          "pointer": false,
+          "text": "21",
+          "chips": []
         },
         {
           "line": 22,
-          "text": "fn calculate_damage(initial_shield: Field, remain"
+          "pointer": false,
+          "text": "v fn calculate_damqge(initial_shield: Field, remaining_shie:",
+          "chips": []
         },
         {
           "line": 23,
-          "text": "‘ 23 // Shields get exponentially less efficient ‘"
+          "pointer": false,
+          "text": "23 // Shields get exponentially less efficient",
+          "chips": []
         },
         {
           "line": 24,
-          "text": "\\ 24 /I At 100% shields 1 unit of mass will drain 1 p \\"
+          "pointer": false,
+          "text": "24 // At 100% shields 1 unit of mass will drain 1 point",
+          "chips": []
         },
         {
           "line": 25,
-          "text": "\\ 25 /I At 50% shields 1 unit of mass will drain 50 p \\"
+          "pointer": false,
+          "text": "25 // At 50% shields 1 unit of mass will drain 50 points",
+          "chips": []
         },
         {
           "line": 26,
-          "text": "let shield_pct = calculate_remaining_shield_p«"
+          "pointer": false,
+          "text": "let shield_pct = calculate_remaining_shield_pct(initi",
+          "chips": []
         },
         {
           "line": 27,
-          "text": "let mut damage = 0;"
+          "pointer": false,
+          "text": "let mut damage = 0O;",
+          "chips": []
         },
         {
           "line": 28,
-          "text": "if(shield_pct == 100){"
+          "pointer": false,
+          "text": "v if(shield_pct == 100){",
+          "chips": []
         },
         {
           "line": 29,
-          "text": "» 29 damage = mass * 1;/* damage: \"0x000..."
+          "pointer": true,
+          "text": "> 29 damage = mass * 1; damage ©x@ mass Ox64",
+          "chips": [
+            {
+              "x": 274,
+              "text": "damage Ox8",
+              "more": false,
+              "clipped": false
+            },
+            {
+              "x": 380,
+              "text": "mass Ox64",
+              "more": false,
+              "clipped": false
+            }
+          ]
         },
         {
           "line": 30,
-          "text": "|3o } |"
+          "pointer": false,
+          "text": "30 }",
+          "chips": []
         },
         {
           "line": 31,
-          "text": "| 31 else{ |"
+          "pointer": false,
+          "text": "31 v else|",
+          "chips": []
         },
         {
           "line": 32,
-          "text": "damage = mass * (100 - shield_pct);"
+          "pointer": false,
+          "text": "damage = mass * (100 - shield_pct);",
+          "chips": []
         },
         {
           "line": 33,
-          "text": "|33 } |"
+          "pointer": false,
+          "text": "33 }",
+          "chips": []
         },
         {
           "line": 34,
-          "text": "if(damage as u32 > remaining_shield as u32"
+          "pointer": false,
+          "text": "v if(damage as u32 > remaining_shield as u32) !",
+          "chips": []
         },
         {
           "line": 35,
-          "text": "damage = remaining_shield;"
+          "pointer": false,
+          "text": "damage = remaining_shield;",
+          "chips": []
         },
         {
           "line": 36,
-          "text": "|36 } |"
+          "pointer": false,
+          "text": "36 }",
+          "chips": []
         },
         {
           "line": 37,
-          "text": "damage as Field"
+          "pointer": false,
+          "text": "damage as Field",
+          "chips": []
         },
         {
           "line": 38,
-          "text": "| |"
+          "pointer": false,
+          "text": "38 }",
+          "chips": []
+        },
+        {
+          "line": 39,
+          "pointer": false,
+          "text": "39",
+          "chips": []
+        },
+        {
+          "line": 40,
+          "pointer": false,
+          "text": "v fn calculate_shield_regeneration(initial_shield:Field, rel",
+          "chips": []
+        },
+        {
+          "line": 41,
+          "pointer": false,
+          "text": "41 // shields regain a percentage of the maxium capacity",
+          "chips": []
+        },
+        {
+          "line": 42,
+          "pointer": false,
+          "text": "let mut regen = (initial_shield * shield_regen_percen",
+          "chips": []
+        },
+        {
+          "line": 43,
+          "pointer": false,
+          "text": "v if((remaining_shield + regen) as u32 > initial_shield",
+          "chips": []
+        },
+        {
+          "line": 44,
+          "pointer": false,
+          "text": "regen = initial_shield - remaining_shield;",
+          "chips": []
         }
       ]
     }
   },
   "markTwin": [
     {
+      "line": 22,
+      "changed": 0.2749003984063745
+    },
+    {
+      "line": 23,
+      "changed": 0.0
+    },
+    {
+      "line": 24,
+      "changed": 0.0
+    },
+    {
       "line": 25,
       "changed": 0.0
     },
     {
+      "line": 26,
+      "changed": 0.0
+    },
+    {
       "line": 27,
-      "changed": 0.7589285714285714
+      "changed": 0.0
     },
     {
       "line": 28,
@@ -1559,6 +2875,14 @@
     {
       "line": 63,
       "changed": 0.0
+    },
+    {
+      "line": 64,
+      "changed": 0.0
+    },
+    {
+      "line": 65,
+      "changed": 0.0
     }
   ],
   "flowTwin": [
@@ -1668,11 +2992,11 @@
     },
     {
       "line": 27,
-      "changed": 0.0
+      "changed": 0.3634669151910531
     },
     {
       "line": 28,
-      "changed": 0.0
+      "changed": 0.36389891696750903
     },
     {
       "line": 29,
@@ -1688,23 +3012,23 @@
     },
     {
       "line": 32,
-      "changed": 0.9438622754491018
+      "changed": 0.954954954954955
     },
     {
       "line": 33,
-      "changed": 0.975
+      "changed": 0.8717948717948718
     },
     {
       "line": 34,
-      "changed": 0.0
+      "changed": 0.11166007905138339
     },
     {
       "line": 35,
-      "changed": 0.9229422066549913
+      "changed": 0.9669117647058824
     },
     {
       "line": 36,
-      "changed": 0.975
+      "changed": 0.8717948717948718
     },
     {
       "line": 37,
@@ -1712,6 +3036,30 @@
     },
     {
       "line": 38,
+      "changed": 0.0
+    },
+    {
+      "line": 39,
+      "changed": 0.0
+    },
+    {
+      "line": 40,
+      "changed": 0.0
+    },
+    {
+      "line": 41,
+      "changed": 0.0
+    },
+    {
+      "line": 42,
+      "changed": 0.0
+    },
+    {
+      "line": 43,
+      "changed": 0.0
+    },
+    {
+      "line": 44,
       "changed": 0.0
     }
   ]

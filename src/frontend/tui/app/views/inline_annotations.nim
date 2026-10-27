@@ -78,7 +78,7 @@ const
     ## program — and a marker that changed per language would make the
     ## annotation look like code in the language that uses that marker.
   AnnotationSeparator* = ", "
-  AnnotationEllipsis* = "…"
+  AnnotationEllipsis* = canonical(grTruncation)
   AnnotationGap* = 2
     ## Cells between the end of the code and the start of the annotation.
 
@@ -170,7 +170,8 @@ func cellWidth(s: string): int =
   for r in runes(s):
     result += max(1, displayWidth($r, TerminalAmbiguousWidth))
 
-proc fitAnnotation*(text: string; room: int): string =
+proc fitAnnotation*(text: string; room: int;
+                    glyphs = DefaultGlyphs): string =
   ## `text` truncated to `room` cells, with `…` marking the loss.
   ##
   ## Returns "" when there is not room for a legible annotation at all
@@ -209,14 +210,15 @@ proc fitAnnotation*(text: string; room: int): string =
     return text
   var kept = ""
   var cells = 0
-  let budget = room - cellWidth(AnnotationEllipsis)
+  let marker = glyphs.glyph(grTruncation)
+  let budget = room - cellWidth(marker)
   for r in runes(text):
     let w = max(1, displayWidth($r, TerminalAmbiguousWidth))
     if cells + w > budget:
       break
     kept.add $r
     cells += w
-  kept & AnnotationEllipsis
+  kept & marker
 
 proc annotationRoom*(codeWidth, renderedCells: int): int =
   ## Cells left for an annotation after the code has been drawn.
@@ -228,6 +230,21 @@ proc annotationRoom*(codeWidth, renderedCells: int): int =
   ## its room from a width the pane never drew. Exposed so a test can compute
   ## the same number the pane did instead of re-deriving it.
   codeWidth - max(0, renderedCells) - AnnotationGap
+
+proc shownAnnotationSpan*(selected: openArray[Annotation];
+                          codeWidth, renderedCells: int;
+                          glyphs = DefaultGlyphs): StyledSpan =
+  ## `selected` — already the line's values — as one styled span fitted to
+  ## the room the code left, or an empty span. The flow's per-line values
+  ## (`editor_surface.flowValuesByLine`) are drawn through this directly: the
+  ## flow already decided which values belong to the line, so they are not
+  ## filtered by the names the line's text mentions.
+  let text = annotationText(selected)
+  if text.len == 0:
+    return StyledSpan(text: "", style: AnnotationStyle)
+  let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells),
+                             glyphs)
+  StyledSpan(text: fitted, style: AnnotationStyle)
 
 proc annotationSpan*(lineText: string; values: openArray[Annotation];
                      codeWidth, renderedCells: int): StyledSpan =
@@ -243,12 +260,8 @@ proc annotationSpan*(lineText: string; values: openArray[Annotation];
   ## variable whose name sits past the pane's right edge is still a variable
   ## this statement touches, and dropping it would make the annotation depend
   ## on the terminal's width in a way a reader cannot see.
-  let selected = annotationsForLine(lineText, values)
-  let text = annotationText(selected)
-  if text.len == 0:
-    return StyledSpan(text: "", style: AnnotationStyle)
-  let fitted = fitAnnotation(text, annotationRoom(codeWidth, renderedCells))
-  StyledSpan(text: fitted, style: AnnotationStyle)
+  shownAnnotationSpan(annotationsForLine(lineText, values), codeWidth,
+                      renderedCells)
 
 type
   AnnotationTarget* = object
@@ -258,13 +271,14 @@ type
       ## `[startCell, endCell)`, relative to the annotation's start.
     value*: Annotation
 
-proc annotationTargets*(lineText: string; values: openArray[Annotation];
-                        codeWidth, renderedCells: int): seq[AnnotationTarget] =
-  ## Where each value of `annotationSpan`'s text is, by the same arithmetic:
+proc shownAnnotationTargets*(selected: openArray[Annotation];
+                             codeWidth, renderedCells: int):
+                            seq[AnnotationTarget] =
+  ## Where each of the already-chosen values `selected` is drawn
+  ## (`shownAnnotationSpan`'s counterpart), by the span's own arithmetic:
   ## `/* ` then `name: value` pairs joined by `, `, cut where the span was cut
   ## (a value the `…` replaced is not a target; one the cut runs through is,
   ## over the cells still drawn).
-  let selected = annotationsForLine(lineText, values)
   let full = annotationText(selected)
   if full.len == 0:
     return

@@ -69,6 +69,8 @@ type
   TopBarPart* = enum
     tpMenuButton = "menu"
     tpControl = "control"
+    tpStop = "stop"
+      ## M76: the toolbar's Stop, at its tail (`StopControl`).
     tpOmnibar = "omnibar"
     tpTab = "tab"
     tpTabMore = "tab-more"
@@ -89,6 +91,9 @@ type
     menu*: MenuVM
     omnibar*: OmnibarVM
     icons*: IconsMode
+    glyphs*: GlyphProfile
+      ## PLAT-71: the terminal's glyph profile (set with the shell's), which
+      ## decides whether the `unicode` icons can be drawn (`effectiveIconsOf`).
     graphicsDrawn*: bool
       ## The terminal was measured to draw pictures (kitty graphics). In
       ## `graphics` mode without it the controls fall back to `unicode`
@@ -98,6 +103,10 @@ type
       ## Empty means "no session": every control is drawn disabled.
     hoveredControl*: int
       ## The control under the pointer (or keyboard-focused), -1 for none.
+    stopEnabled*: bool
+      ## M76: a debugging session is open, so the Stop control can end it.
+    hoveredStop*: bool
+      ## M76: the pointer is on Stop; `hoverTooltip` is its tooltip.
     hoverTooltip*: string
       ## PLAT-49: its tooltip (`debug_controls_vm.transportTooltip`), drawn
       ## as a one-row label under it (`paintControlTooltip`).
@@ -141,16 +150,16 @@ type
 
   TopBarHitKind* = enum
     thNone, thMenuButton, thControl, thOmnibar, thTab, thTabMore, thTabClose,
-    thTabAdd
+    thTabAdd, thStop
 
   TopBarHit* = object
     kind*: TopBarHitKind
     index*: int
 
 const
-  MenuButtonGlyph* = "≡"
-  OmnibarGlyph* = "⌕"
-  FolderMarker* = "›"
+  MenuButtonGlyph* = canonical(grMenuButton)
+  OmnibarGlyph* = canonical(grOmnibar)
+  FolderMarker* = canonical(grOverflowRight)
   OmnibarOpenMinCells* = 16
   OmnibarFieldMinCells* = 14
   OmnibarResultRows* = 10
@@ -178,12 +187,12 @@ const
     ## surface, not text on the bar. Since PLAT-50 the padding cell on each
     ## side carries the field's border as an edge line (`FieldEdgeLeft` /
     ## `FieldEdgeRight`).
-  FieldEdgeLeft* = "▕"
+  FieldEdgeLeft* = canonical(grFieldEdgeLeft)
     ## PLAT-50: the field's (and the menu button's) left border — U+2595
     ## RIGHT ONE EIGHTH BLOCK, a line at the cell's right edge, against the
     ## field — in ui/border/secondary on the bar's ground, the desktop's
     ## `.command-input-row` 1px border in a cell.
-  FieldEdgeRight* = "▏"
+  FieldEdgeRight* = canonical(grFieldEdgeRight)
     ## PLAT-50: the field's right border — U+258F LEFT ONE EIGHTH BLOCK.
   DesktopEmPx = 16.0
     ## PLAT-50: the desktop caption bar's em (its 16px root font), which its
@@ -211,30 +220,45 @@ const
     ## tabs, so each is a separate item on its own ground (the desktop's
     ## `.session-tab` `margin-right 0.25em`).
 
-func agentGlyph*(a: SessionTabAgent): string =
+func agentGlyph*(a: SessionTabAgent; glyphs = DefaultGlyphs): string =
   ## The agent indicator a tab draws before its label (DeepReview
   ## Agentic-Coding-Integration.md §3.3's icon per state): working ⟳,
   ## completed ✓, failed ✗, cancelled ■; nothing without an agent.
   if not a.present: ""
   else:
     case a.lifecycle
-    of aslConnecting, aslRunning: "⟳"
-    of aslCompleted: "✓"
-    of aslError: "✗"
-    of aslCancelled, aslDisconnected: "■"
+    of aslConnecting, aslRunning: glyphs.glyph(grStatusRunning)
+    of aslCompleted: glyphs.glyph(grStatusOk)
+    of aslError: glyphs.glyph(grStatusError)
+    of aslCancelled, aslDisconnected: glyphs.glyph(grStatusStopped)
 
-func tabText*(t: SessionTabView): string =
-  ## A session tab's cells: ` [agent ]label [× ]`.
-  let glyph = agentGlyph(t.agent)
+func tabText*(t: SessionTabView; glyphs = DefaultGlyphs): string =
+  ## A session tab's cells: ` [agent ]label [× ]`. Every glyph in it is one
+  ## cell in every column of the glyph table, so its width is the same on
+  ## every profile.
+  let glyph = agentGlyph(t.agent, glyphs)
   result = " " & (if glyph.len > 0: glyph & " " else: "") &
            (if t.label.len > 0: t.label else: t.title) & " "
   if t.closable:
-    result.add SessionTabCloseGlyph & " "
+    result.add glyphs.glyph(grTabClose) & " "
 
 proc tabCells*(t: SessionTabView): int = textCells(tabText(t))
 
 proc effectiveIconsOf*(m: TopBarModel): IconsMode =
-  if m.icons == imGraphics and not m.graphicsDrawn: imUnicode else: m.icons
+  ## The icons the bar actually draws. PLAT-71 (Terminal-Adaptation §6.1):
+  ## the `unicode` icons (`⏮ ⏵ ↷ …`) are outside the `basic` tier and some
+  ## are East Asian Width `A`, so a `basic`, ambiguous-wide or ASCII profile
+  ## draws the `text` icons instead — as the ASCII tier does for any glyph
+  ## icon. Pictures (`graphics`) are not glyphs and are kept.
+  result = if m.icons == imGraphics and not m.graphicsDrawn: imUnicode
+           else: m.icons
+  if result == imGraphics:
+    return
+  if m.glyphs.tier == tierAscii:
+    return imText
+  if result == imUnicode and (m.glyphs.tier == tierBasic or
+                              m.glyphs.ambiguousWide):
+    return imText
 
 proc controlCells*(mode: IconsMode; i: int): int =
   ## One control's cells, its padding included.
@@ -242,6 +266,15 @@ proc controlCells*(mode: IconsMode; i: int): int =
   of imGraphics: GraphicsControlCells + 1
   of imText: textButtonCells(TransportControls[i])
   else: textCells(TransportControls[i].glyphFor(mode)) + 2
+
+proc stopCells*(mode: IconsMode): int =
+  ## The Stop control's cells, its padding included. `graphics` draws its
+  ## square as text: the desktop's Stop is an image (`stop_16_dark.svg`),
+  ## not one of the marks this terminal rasterises (`debug_control_marks`).
+  case mode
+  of imText: textButtonCells(StopControl)
+  of imNerd: textCells(StopControl.nerd) + 2
+  else: textCells(StopControl.unicode) + 2
 
 proc controlsSubset*(mode: IconsMode; budget: int): seq[int] =
   ## The controls that fit `budget` cells: every one when they all do, else
@@ -335,6 +368,13 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   let controlsW = controlsWidth(result.effectiveIcons, result.shownControls)
   if controlsW > 0:
     discard take(controlsW + 1)
+  # 4b. M76: Stop, at the toolbar's tail, with the room the transports
+  # left — never in place of one of them, so the priority subset above is
+  # exactly what it was; on a row too narrow for it, Stop stays the menu's
+  # and the chord's.
+  var stopW = 0
+  if controlsW > 0 and take(stopCells(result.effectiveIcons) + 1):
+    stopW = stopCells(result.effectiveIcons)
   # 5. The omnibar field.
   if not omnibarOpen and omniW > 0:
     let room = avail - used
@@ -419,6 +459,10 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
                                         index: i)
       col += w
     inc col
+  if stopW > 0:
+    # One cell after the last transport, as the controls are spaced.
+    result.segments.add TopBarSegment(part: tpStop, col: col, width: stopW)
+    col += stopW + 1
   if omniW > 0:
     var after = 0
     if tabSegs.len > 0:
@@ -472,17 +516,18 @@ proc segmentOf*(lay: TopBarLayout; part: TopBarPart; index = 0): TopBarSegment =
 # The omnibar's field and its caret (PLAT-49)
 # ---------------------------------------------------------------------------
 
-proc omnibarFieldText*(m: TopBarModel; width: int): tuple[text: string,
-                                                          caretCell: int] =
+proc omnibarFieldText*(m: TopBarModel; width: int;
+                       glyphs = DefaultGlyphs): tuple[text: string,
+                                                      caretCell: int] =
   ## What the field shows inside its padding, and the caret's cell within
   ## that text: `⌕ ` and the query — scrolled so the caret stays in view — or
   ## the placeholder when there is no query.
   let room = max(0, width - 2 * OmnibarPad)
   let ob = m.omnibar
   if ob.isNil or not ob.isOpen or ob.query.len == 0:
-    return (fitCells(OmnibarGlyph & " " & TopBarPlaceholder, room),
-            textCells(OmnibarGlyph & " "))
-  let lead = OmnibarGlyph & " "
+    return (fitCells(glyphs.glyph(grOmnibar) & " " & TopBarPlaceholder, room),
+            textCells(glyphs.glyph(grOmnibar) & " "))
+  let lead = glyphs.glyph(grOmnibar) & " "
   let runes = ob.query.toRunes
   let caret = min(ob.cursorChars, runes.len)
   # The caret needs a cell of its own after the last character.
@@ -525,20 +570,26 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       # PLAT-50); open, it takes the active tab's surface.
       if open:
         g.fillSurface(0, s.col, s.width, 1, srTabActive)
-        g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
+        g.paint(0, s.col, fitCells(" " & g.glyphText(grMenuButton) & " ", s.width),
                 CellStyle(role: srTabActive, bold: true))
       else:
-        g.paint(0, s.col, fitCells(" " & MenuButtonGlyph & " ", s.width),
+        g.paint(0, s.col, fitCells(" " & g.glyphText(grMenuButton) & " ", s.width),
                 CellStyle(role: srChromeText, surface: srSurfaceTopBar))
         if s.width >= 3:
-          g.paint(0, s.col, FieldEdgeLeft,
+          g.paint(0, s.col, g.glyphText(grFieldEdgeLeft),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
-          g.paint(0, s.col + s.width - 1, FieldEdgeRight,
+          g.paint(0, s.col + s.width - 1, g.glyphText(grFieldEdgeRight),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
-    of tpControl:
-      let enabled = s.index < m.controlsEnabled.len and
-                    m.controlsEnabled[s.index]
-      let hovered = m.hoveredControl == s.index
+    of tpControl, tpStop:
+      # M76: Stop (`tpStop`) is drawn exactly as a transport is — the same
+      # ground and roles — with its own enabled state (a session to stop),
+      # its own hover and its square in every mode (`StopControl`).
+      let isStop = s.part == tpStop
+      let enabled =
+        if isStop: m.stopEnabled
+        else: s.index < m.controlsEnabled.len and m.controlsEnabled[s.index]
+      let hovered = if isStop: m.hoveredStop
+                    else: m.hoveredControl == s.index
       let role = if hovered: srTabActive
                  elif enabled: srChromeText
                  else: srChromeMuted
@@ -548,10 +599,13 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       # #1b1b1b on the #1b1b1b `#menu`); only the hovered one is lifted.
       g.fillSurface(0, s.col, s.width, 1,
                     if hovered: srTabActive else: srSurfaceTopBar)
-      let c = TransportControls[s.index]
+      let c = if isStop: StopControl else: TransportControls[s.index]
       let text =
         case lay.effectiveIcons
-        of imGraphics: spaces(s.width)   # the picture is drawn over these
+        of imGraphics:
+          # The picture is drawn over these; Stop has no rasterised mark (the
+          # desktop's is an image), so it keeps its square.
+          if isStop: " " & c.unicode & " " else: spaces(s.width)
         of imText: " " & c.text & " "
         else: " " & c.glyphFor(lay.effectiveIcons) & " "
       g.paint(0, s.col, fitCells(text, s.width),
@@ -578,17 +632,17 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
         # user still read as "white".
         g.fillSurface(0, s.col, s.width, 1, OmnibarGround)
         g.paint(0, s.col, spaces(s.width), OmnibarTextStyle)
-        let (text, _) = omnibarFieldText(m, s.width)
+        let (text, _) = omnibarFieldText(m, s.width, g.glyphs)
         let showsPlaceholder = m.omnibar.isNil or m.omnibar.query.len == 0
         g.paint(0, s.col + OmnibarPad, text,
                 if showsPlaceholder: OmnibarPlaceholderStyle
                 else: OmnibarTextStyle)
         if s.width > 2 * OmnibarPad:
           g.fillSurface(0, s.col, 1, 1, srSurfaceTopBar)
-          g.paint(0, s.col, FieldEdgeLeft,
+          g.paint(0, s.col, g.glyphText(grFieldEdgeLeft),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
           g.fillSurface(0, s.col + s.width - 1, 1, 1, srSurfaceTopBar)
-          g.paint(0, s.col + s.width - 1, FieldEdgeRight,
+          g.paint(0, s.col + s.width - 1, g.glyphText(grFieldEdgeRight),
                   CellStyle(role: srBorderPane, surface: srSurfaceTopBar))
         let caret = omnibarCaret(m, lay)
         if caret.shown and m.caretDrawn:
@@ -599,7 +653,7 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
                       else: r.underline = true
                       r)
       else:
-        g.paint(0, s.col, fitCells(" " & OmnibarGlyph & " ", s.width),
+        g.paint(0, s.col, fitCells(" " & g.glyphText(grOmnibar) & " ", s.width),
                 CellStyle(role: srChromeText, surface: srSurfaceTopBar))
     of tpTab:
       # PLAT-49 part B (finding 7): EACH SESSION TAB ON ITS OWN GROUND, a
@@ -611,10 +665,10 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
       let t = m.tabs[s.index]
       let role = if t.active: srTabActive else: srSessionTab
       g.fillSurface(0, s.col, s.width, 1, role)
-      g.paint(0, s.col, fitCells(tabText(t), s.width),
+      g.paint(0, s.col, fitCells(tabText(t, g.glyphs), s.width),
               CellStyle(role: role, bold: t.active))
       if t.agent.present:
-        let glyph = agentGlyph(t.agent)
+        let glyph = agentGlyph(t.agent, g.glyphs)
         g.paint(0, s.col + 1, glyph,
                 CellStyle(role: (case t.agent.lifecycle
                                  of aslError: srChromeError
@@ -622,10 +676,11 @@ proc paintTopBar*(g: var StyledGrid; m: TopBarModel; lay: TopBarLayout) =
                                  else: srChromeInfo),
                           surface: role, bold: t.agent.running))
       if t.closable and s.width >= 3:
-        g.paint(0, s.col + s.width - 2, SessionTabCloseGlyph,
+        g.paint(0, s.col + s.width - 2, g.glyphText(grTabClose),
                 CellStyle(role: srChromeMuted, surface: role))
     of tpTabMore:
-      g.paint(0, s.col, (if s.index < 0: "‹" else: "›"),
+      g.paint(0, s.col, (if s.index < 0: g.glyphText(grOverflowLeft)
+                         else: g.glyphText(grOverflowRight)),
               CellStyle(role: srChromeMuted, surface: srSurfaceTopBar))
     of tpTabAdd:
       # The desktop's `.session-tab-add`: a borderless button on the bar,
@@ -645,7 +700,7 @@ proc tooltipText*(m: TopBarModel): string =
   ## The tooltip under the pointer: a control's, else a session tab's
   ## (PLAT-49 part B — `SessionTabView.tooltip`, with the agent's task and
   ## progress while one works in that session).
-  if m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
+  if (m.hoveredControl >= 0 or m.hoveredStop) and m.hoverTooltip.len > 0:
     m.hoverTooltip
   elif m.hoveredTab >= 0 and m.hoveredTab < m.tabs.len:
     m.tabs[m.hoveredTab].tooltip
@@ -661,7 +716,9 @@ proc controlTooltipArea*(m: TopBarModel; lay: TopBarLayout;
   let text = m.tooltipText
   if text.len == 0:
     return CellArea()
-  let s = if m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
+  let s = if m.hoveredStop and m.hoverTooltip.len > 0:
+            lay.segmentOf(tpStop)
+          elif m.hoveredControl >= 0 and m.hoverTooltip.len > 0:
             lay.segmentOf(tpControl, m.hoveredControl)
           elif m.hoveredTab >= 0: lay.segmentOf(tpTab, m.hoveredTab)
           else: lay.segmentOf(tpTabAdd)
@@ -712,13 +769,16 @@ proc paintDropdownFrame*(g: var StyledGrid; a: CellArea) =
   g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
   let st = CellStyle(role: srBorderMenu, surface: srSurfaceMenu)
   let inner = a.width - 2
-  g.paint(a.row, a.col, "┌" & repeat("─", inner) & "┐", st)
-  g.paint(a.row + a.height - 1, a.col, "└" & repeat("─", inner) & "┘", st)
+  let h = g.glyphText(grBoxHorizontal)
+  g.paint(a.row, a.col, g.glyphText(grBoxTopLeft) & repeat(h, inner) &
+          g.glyphText(grBoxTopRight), st)
+  g.paint(a.row + a.height - 1, a.col, g.glyphText(grBoxBottomLeft) &
+          repeat(h, inner) & g.glyphText(grBoxBottomRight), st)
   for r in a.row + 1 ..< a.row + a.height - 1:
-    g.paint(r, a.col, "│", st)
+    g.paint(r, a.col, g.glyphText(grBoxVertical), st)
     g.paint(r, a.col + 1, spaces(inner),
             CellStyle(role: srChromeText, surface: srSurfaceMenu))
-    g.paint(r, a.col + a.width - 1, "│", st)
+    g.paint(r, a.col + a.width - 1, g.glyphText(grBoxVertical), st)
 
 proc menuDropdowns*(m: TopBarModel; lay: TopBarLayout;
                     width, height: int): seq[MenuDropdown] =
@@ -793,9 +853,15 @@ proc paintMenuDropdowns*(g: var StyledGrid; dropdowns: seq[MenuDropdown]) =
       g.fillSurface(dr.row, ic, iw, 1, surface)
       g.paint(dr.row, ic, fitCells(" " & it.label, iw),
               CellStyle(role: role, bold: it.active))
+      # The folder's access key underlined (CUA-Keymap.md §3.8:
+      # `Alt+<letter>`). Labels are ASCII, so its index is its cell.
+      if it.mnemonic >= 0 and 1 + it.mnemonic < iw:
+        g.paint(dr.row, ic + 1 + it.mnemonic, $it.label[it.mnemonic],
+                CellStyle(role: role, bold: it.active, underline: true))
       var tail = ""
       if it.shortcut.len > 0: tail.add it.shortcut
-      tail.add (if it.folder: " " & FolderMarker & " " else: "   ")
+      tail.add (if it.folder: " " & g.glyphText(grOverflowRight) & " "
+                else: "   ")
       let tw = textCells(tail)
       if tw < iw:
         g.paint(dr.row, ic + iw - tw, tail,
@@ -908,6 +974,7 @@ proc topBarHitAt*(lay: TopBarLayout; col: int;
       case s.part
       of tpMenuButton: return TopBarHit(kind: thMenuButton)
       of tpControl: return TopBarHit(kind: thControl, index: s.index)
+      of tpStop: return TopBarHit(kind: thStop)
       of tpOmnibar: return TopBarHit(kind: thOmnibar)
       of tpTab:
         # The close control: the `×` two cells from the tab's end, drawn

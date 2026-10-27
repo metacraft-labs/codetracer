@@ -1,9 +1,9 @@
-use std::{
-    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
-};
 #[cfg(windows)]
 #[allow(unused_imports)]
 use std::os::windows::process::CommandExt;
+use std::{
+    collections::HashMap, error::Error, fmt::Debug, path::PathBuf, sync::Arc, time::Duration,
+};
 
 /// Windows `CREATE_NO_WINDOW` flag — prevents console apps from creating
 /// a visible console window when spawned as child processes.
@@ -11,6 +11,12 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use serde_json::{Value, json};
+#[cfg(unix)]
+use tokio::fs::remove_file;
+#[cfg(windows)]
+use tokio::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     fs::create_dir_all,
     io::{AsyncReadExt, AsyncWriteExt, WriteHalf},
@@ -21,15 +27,9 @@ use tokio::{
     },
     time::sleep,
 };
-#[cfg(unix)]
-use tokio::fs::remove_file;
-#[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
-#[cfg(windows)]
-use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(unix)]
-use crate::errors::SocketPathError;
+use crate::errors::{SocketPathError, SocketPathTooLong};
 use crate::{
     config::DaemonConfig,
     dap_init,
@@ -40,7 +40,7 @@ use crate::{
         self, PendingPyNavState, PendingPyRequest, PendingPyRequestKind, PyBridgeState,
     },
     script_executor,
-    session::SessionManager,
+    session::{HostSourceReads, SessionKey, SessionManager},
     trace_metadata,
 };
 
@@ -62,6 +62,29 @@ use crate::{
 /// drift silently; if it ever did, the request would be REFUSED and named,
 /// not decoded as a different language.
 const LOAD_LOCALS_DEFAULT_LANG: &str = "c";
+
+/// The field the single-client forwarder adds to every message a replay
+/// sends, naming that replay (the id `ct/start-replay` answered with).
+///
+/// The forwarder multiplexes every replay onto ONE frontend connection, and a
+/// DAP event carries nothing that says which replay emitted it: the frontend
+/// had to assume "the replay last selected", which is wrong whenever two
+/// replays run at once — an event of one replay that arrives after a request
+/// for the other was attributed to the other. `ct host` gives every connected
+/// client its own replay (`CLI/ct/host.md`, "Sessions are isolated"), so an
+/// event attributed to the wrong replay is shown to the wrong client. The tag
+/// names the source exactly; a frontend that does not read it is unaffected,
+/// since DAP consumers ignore fields they do not know.
+pub const REPLAY_ID_TAG: &str = "ctReplayId";
+
+/// `message` with [`REPLAY_ID_TAG`] set to `replay_id` when it is a JSON
+/// object (every DAP message is); anything else is passed through untouched.
+fn tag_with_replay_id(mut message: Value, replay_id: usize) -> Value {
+    if let Some(object) = message.as_object_mut() {
+        object.insert(REPLAY_ID_TAG.to_string(), json!(replay_id));
+    }
+    message
+}
 
 /// Write handle for a single connected daemon client, together with its
 /// unique identifier.  Used by the daemon-mode response router.
@@ -128,6 +151,70 @@ fn has_ctfs_magic(path: &std::path::Path) -> bool {
     f.read_exact(&mut magic).is_ok() && magic == [0xC0, 0xDE, 0x72, 0xAC, 0xE2]
 }
 
+/// The longest path, in bytes, a Unix socket address holds: the size of
+/// `sockaddr_un.sun_path` less its terminating NUL (unix(7)).
+#[cfg(unix)]
+pub(crate) const MAX_UNIX_SOCKET_PATH: usize = std::mem::size_of::<libc::sockaddr_un>()
+    - std::mem::offset_of!(libc::sockaddr_un, sun_path)
+    - 1;
+
+/// `path` if a Unix socket can be bound there, else [`SocketPathTooLong`]
+/// naming it: `bind(2)` would refuse it with an error that names neither the
+/// path nor the limit.
+#[cfg(unix)]
+pub(crate) fn check_unix_socket_path(path: &std::path::Path) -> Result<(), SocketPathTooLong> {
+    use std::os::unix::ffi::OsStrExt;
+    let len = path.as_os_str().as_bytes().len();
+    if len > MAX_UNIX_SOCKET_PATH {
+        return Err(SocketPathTooLong {
+            path: path.to_path_buf(),
+            len,
+            max: MAX_UNIX_SOCKET_PATH,
+        });
+    }
+    Ok(())
+}
+
+/// Bind a Unix socket listener at `path`, refusing a path too long for a
+/// socket address by name ([`check_unix_socket_path`]).  Every listener the
+/// session manager binds (the daemon's socket, a replay backend's socket)
+/// goes through here.
+#[cfg(unix)]
+fn bind_unix_listener(path: &std::path::Path) -> Result<UnixListener, Box<dyn Error>> {
+    check_unix_socket_path(path)?;
+    Ok(UnixListener::bind(path)?)
+}
+
+/// `accept`, the replay's connection to the endpoint it was told to connect
+/// to (`endpoint`: a Unix socket path, or a `host:port` on Windows), unless the replay process `child` (started as
+/// `command`) exits first: then an error saying so, with its exit status.
+///
+/// A replay that dies before it connects (it cannot parse its arguments, a
+/// library it needs is missing) would otherwise leave `accept` waiting for
+/// ever, and it is awaited with the manager's lock held, so the session
+/// manager answered nothing more at all — not the `ct/start-replay`, not a
+/// `ct/ping`.
+async fn accept_unless_exited<T>(
+    child: &mut tokio::process::Child,
+    accept: impl std::future::Future<Output = std::io::Result<T>>,
+    command: &str,
+    endpoint: &(dyn std::fmt::Display + Sync),
+) -> Result<std::io::Result<T>, Box<dyn Error>> {
+    tokio::select! {
+        accepted = accept => Ok(accepted),
+        status = child.wait() => {
+            let status = match status {
+                Ok(status) => status.to_string(),
+                Err(err) => format!("its status could not be read: {err}"),
+            };
+            Err(format!(
+                "the replay process `{command}` exited ({status}) before it connected to {endpoint}"
+            )
+            .into())
+        }
+    }
+}
+
 // TODO: cleanup on exit
 // TODO: Handle signals
 impl BackendManager {
@@ -166,7 +253,7 @@ impl BackendManager {
 
         info!("Socket listening on: {}", socket_path.display());
 
-        let listener = UnixListener::bind(socket_path)?;
+        let listener = bind_unix_listener(&socket_path)?;
         match listener.accept().await {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
@@ -186,10 +273,12 @@ impl BackendManager {
                 sleep(Duration::from_millis(10)).await;
 
                 let mut res = res2.lock().await;
-                for rx in res.children_receivers.iter_mut().flatten() {
+                for (replay_id, rx_opt) in res.children_receivers.iter_mut().enumerate() {
+                    let Some(rx) = rx_opt else { continue };
                     if !rx.is_empty()
                         && let Some(message) = rx.recv().await
                     {
+                        let message = tag_with_replay_id(message, replay_id);
                         let write_res =
                             socket_write.write_all(&DapParser::to_bytes(&message)).await;
 
@@ -302,7 +391,11 @@ impl BackendManager {
         // Write the port number so the frontend can discover it.
         tokio::fs::write(&port_file, port.to_string()).await?;
 
-        info!("TCP listening on: 127.0.0.1:{} (port file: {})", port, port_file.display());
+        info!(
+            "TCP listening on: 127.0.0.1:{} (port file: {})",
+            port,
+            port_file.display()
+        );
 
         let mut socket_read;
         let mut socket_write;
@@ -326,10 +419,12 @@ impl BackendManager {
                 sleep(Duration::from_millis(10)).await;
 
                 let mut res = res2.lock().await;
-                for rx in res.children_receivers.iter_mut().flatten() {
+                for (replay_id, rx_opt) in res.children_receivers.iter_mut().enumerate() {
+                    let Some(rx) = rx_opt else { continue };
                     if !rx.is_empty()
                         && let Some(message) = rx.recv().await
                     {
+                        let message = tag_with_replay_id(message, replay_id);
                         let write_res =
                             socket_write.write_all(&DapParser::to_bytes(&message)).await;
 
@@ -462,7 +557,7 @@ impl BackendManager {
         }
         _ = remove_file(&socket_path).await;
 
-        let listener = UnixListener::bind(&socket_path)?;
+        let listener = bind_unix_listener(&socket_path)?;
         info!("Daemon listening on: {}", socket_path.display());
 
         // --- Accept loop: spawns per-client read and write tasks. ---
@@ -628,7 +723,11 @@ impl BackendManager {
 
         // Write the port number to the port file so clients can discover it.
         tokio::fs::write(&socket_path, port.to_string()).await?;
-        info!("Daemon listening on: 127.0.0.1:{} (port file: {})", port, socket_path.display());
+        info!(
+            "Daemon listening on: 127.0.0.1:{} (port file: {})",
+            port,
+            socket_path.display()
+        );
 
         // --- Accept loop: spawns per-client read and write tasks. ---
         let mgr_accept = mgr.clone();
@@ -1334,9 +1433,8 @@ impl BackendManager {
                                             .get("first")
                                             .and_then(Value::as_str)
                                             .unwrap_or("");
-                                        let value = python_bridge::extract_value_str(
-                                            local.get("second"),
-                                        );
+                                        let value =
+                                            python_bridge::extract_value_str(local.get("second"));
                                         json!({"name": name, "value": value})
                                     })
                                     .collect()
@@ -1359,10 +1457,7 @@ impl BackendManager {
                     })
                     .collect();
 
-                let errors = body
-                    .get("errors")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+                let errors = body.get("errors").cloned().unwrap_or_else(|| json!({}));
 
                 let py_response = serde_json::json!({
                     "type": "response",
@@ -1439,7 +1534,16 @@ impl BackendManager {
                 if nav_success {
                     // Silently consume — don't forward to any client.
                     // The subsequent `stopped` event will advance the
-                    // state machine.
+                    // state machine.  A command that answered success
+                    // without reaching its target (a seek answered
+                    // `false`) is remembered and answered as an error once
+                    // the location arrives.
+                    let command_name = msg.get("command").and_then(Value::as_str).unwrap_or("");
+                    if let Some(reason) =
+                        python_bridge::navigation_not_reached_reason(command_name, msg)
+                    {
+                        ds.py_bridge.pending_navigations[idx].not_reached = Some(reason);
+                    }
                     return;
                 }
 
@@ -1472,6 +1576,17 @@ impl BackendManager {
                     && p.state == PendingPyNavState::AwaitingStackTrace
             }) {
                 let pending = ds.py_bridge.pending_navigations.remove(idx);
+                if let Some(reason) = pending.not_reached {
+                    let py_error = serde_json::json!({
+                        "type": "response",
+                        "request_seq": pending.original_seq,
+                        "success": false,
+                        "command": "ct/py-navigate",
+                        "message": reason,
+                    });
+                    self.send_to_client(pending.client_id, py_error);
+                    return;
+                }
                 let mut location = python_bridge::extract_location_from_stack_trace(msg);
 
                 // Inject rrTicks captured from the ct/complete-move event if
@@ -1517,37 +1632,105 @@ impl BackendManager {
             {
                 let pending = ds.py_bridge.pending_requests.remove(idx);
 
-                // Fire-and-forget requests: silently consume the backend
-                // response without forwarding anything to the client.
-                // This is used for setDataBreakpoints commands whose
-                // results the client does not need.
-                if pending.kind == PendingPyRequestKind::FireAndForget {
+                // Responses this daemon deliberately does not inspect,
+                // each carrying the reason that made not inspecting it
+                // safe (see `UnobservedReason`).  Silently consume.
+                if matches!(pending.kind, PendingPyRequestKind::Unobserved(_)) {
                     return;
                 }
 
-                // `ct/py-add-breakpoint`: the backend's per-line
-                // `verified` flag decides whether this succeeded, and it
-                // is handled here rather than in the formatter table
-                // below because a refusal also has to be rolled back out
-                // of the daemon's own breakpoint table.
-                if let PendingPyRequestKind::AddBreakpoint {
-                    trace_path,
-                    bp_id,
-                    index,
+                // `ct/py-remove-watchpoint`: the re-sent
+                // `setDataBreakpoints` states the set MINUS the removed
+                // entry, so the removal succeeded iff the backend
+                // accepted the re-send.  A refusal means the engine is
+                // still watching, so the watchpoint goes back into the
+                // daemon's table and the client is told the truth --
+                // NOT `removed: true`, which is what this path used to
+                // answer before the backend saw anything.
+                if let PendingPyRequestKind::RemoveWatchpoint {
+                    session: trace_path,
+                    wp_id,
+                    expression,
                 } = &pending.kind
                 {
-                    let (success, body_or_error) =
-                        python_bridge::format_add_breakpoint_response(msg, *index, *bp_id);
-
-                    if !success {
-                        // Drop the breakpoint the backend refused, so it
-                        // is not re-sent with every subsequent add for
-                        // this file — and so a later `remove_breakpoint`
-                        // cannot be answered for an id that never bound.
+                    let accepted = msg.get("success").and_then(Value::as_bool).unwrap_or(false);
+                    let py_response = if accepted {
+                        json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": true,
+                            "command": "ct/py-remove-watchpoint",
+                            "body": {"removed": true},
+                        })
+                    } else {
+                        let message = msg
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("backend refused the watchpoint removal");
+                        let message = format!(
+                            "the watchpoint is still live: the backend refused the                              setDataBreakpoints that would have removed it ({message})"
+                        );
                         if let Some(ds) = self.daemon_state.as_mut() {
                             ds.py_bridge
                                 .breakpoint_state_mut(trace_path)
-                                .forget_breakpoint(*bp_id);
+                                .restore_watchpoint(*wp_id, expression);
+                        }
+                        json!({
+                            "type": "response",
+                            "request_seq": pending.original_seq,
+                            "success": false,
+                            "command": "ct/py-remove-watchpoint",
+                            "message": message,
+                        })
+                    };
+                    self.send_to_client(pending.client_id, py_response);
+                    return;
+                }
+
+                // `ct/py-add-breakpoint` and `ct/py-add-watchpoint`: the
+                // backend's per-entry `verified` flag decides whether
+                // these succeeded, and they are handled here rather than
+                // in the formatter table below because a refusal also
+                // has to be rolled back out of the daemon's own table.
+                let point_verdict = match &pending.kind {
+                    PendingPyRequestKind::AddBreakpoint {
+                        session: trace_path,
+                        bp_id,
+                        index,
+                    } => Some((
+                        python_bridge::format_add_breakpoint_response(msg, *index, *bp_id),
+                        trace_path.clone(),
+                        *bp_id,
+                        false,
+                    )),
+                    PendingPyRequestKind::AddWatchpoint {
+                        session: trace_path,
+                        wp_id,
+                        index,
+                    } => Some((
+                        python_bridge::format_add_watchpoint_response(msg, *index, *wp_id),
+                        trace_path.clone(),
+                        *wp_id,
+                        true,
+                    )),
+                    _ => None,
+                };
+
+                if let Some(((success, body_or_error), trace_path, point_id, is_watchpoint)) =
+                    point_verdict
+                {
+                    if !success {
+                        // Drop the point the backend refused, so it is
+                        // not re-sent with every subsequent add for this
+                        // file — and so a later `remove_*` cannot be
+                        // answered for an id that never bound.
+                        if let Some(ds) = self.daemon_state.as_mut() {
+                            let state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                            if is_watchpoint {
+                                state.forget_watchpoint(point_id);
+                            } else {
+                                state.forget_breakpoint(point_id);
+                            }
                         }
                     }
 
@@ -1560,7 +1743,7 @@ impl BackendManager {
                             "body": body_or_error,
                         })
                     } else {
-                        serde_json::json!({
+                        let mut refusal = serde_json::json!({
                             "type": "response",
                             "request_seq": pending.original_seq,
                             "success": false,
@@ -1568,7 +1751,25 @@ impl BackendManager {
                             "message": body_or_error.get("message")
                                 .and_then(Value::as_str)
                                 .unwrap_or("unknown error"),
-                        })
+                        });
+                        // Carry the backend's CLOSED-SET refusal code
+                        // through to the client when there is one (see
+                        // `ct_data_breakpoints::DataBreakpointRefusal`).
+                        // Without it the caller has to parse English to
+                        // tell "you named something this recording never
+                        // captured" from "this kind of watchpoint is not
+                        // possible over a recording at all" — two
+                        // refusals with entirely different fixes.
+                        let structured: serde_json::Map<String, Value> = ["refusalCode", "refusal"]
+                            .iter()
+                            .filter_map(|k| {
+                                body_or_error.get(*k).map(|v| ((*k).to_string(), v.clone()))
+                            })
+                            .collect();
+                        if !structured.is_empty() {
+                            refusal["body"] = Value::Object(structured);
+                        }
+                        refusal
                     };
                     self.send_to_client(pending.client_id, py_response);
                     return;
@@ -1615,11 +1816,16 @@ impl BackendManager {
                         // at request-dispatch time (same convention as Evaluate),
                         // so the formatter can pick the matching local from
                         // the backend's history update.
-                        python_bridge::format_resolve_variable_step_response(msg, &pending.expression)
+                        python_bridge::format_resolve_variable_step_response(
+                            msg,
+                            &pending.expression,
+                        )
                     }
                     PendingPyRequestKind::AddBreakpoint { .. }
-                    | PendingPyRequestKind::FireAndForget => {
-                        // Both are answered above; unreachable.
+                    | PendingPyRequestKind::AddWatchpoint { .. }
+                    | PendingPyRequestKind::RemoveWatchpoint { .. }
+                    | PendingPyRequestKind::Unobserved(_) => {
+                        // All are answered above; unreachable.
                         return;
                     }
                 };
@@ -1700,7 +1906,10 @@ impl BackendManager {
     ///
     /// When the last session is removed (and at least one session existed),
     /// triggers automatic daemon shutdown.
-    async fn ttl_expiry_loop(mgr: Arc<Mutex<Self>>, mut ttl_expiry_rx: UnboundedReceiver<PathBuf>) {
+    async fn ttl_expiry_loop(
+        mgr: Arc<Mutex<Self>>,
+        mut ttl_expiry_rx: UnboundedReceiver<SessionKey>,
+    ) {
         while let Some(trace_path) = ttl_expiry_rx.recv().await {
             let mut locked = mgr.lock().await;
 
@@ -1712,16 +1921,12 @@ impl BackendManager {
             // Remove the session (this also aborts its timer, though the
             // timer already fired in this case).
             if let Some(backend_id) = ds.session_manager.remove_session(&trace_path) {
-                info!(
-                    "TTL expired for session {} (backend_id={backend_id})",
-                    trace_path.display()
-                );
+                info!("TTL expired for session {trace_path} (backend_id={backend_id})");
 
                 // Stop the child replay process.
                 if let Err(e) = locked.stop_replay(backend_id).await {
                     warn!(
-                        "Failed to stop replay {backend_id} for expired session {}: {e}",
-                        trace_path.display()
+                        "Failed to stop replay {backend_id} for expired session {trace_path}: {e}"
                     );
                 }
 
@@ -1762,7 +1967,7 @@ impl BackendManager {
             let mut locked = mgr.lock().await;
 
             // First pass: collect (path, backend_id) pairs for all sessions.
-            let sessions: Vec<(PathBuf, usize)> = {
+            let sessions: Vec<(SessionKey, usize)> = {
                 let ds = match locked.daemon_state.as_ref() {
                     Some(ds) => ds,
                     None => continue,
@@ -1770,13 +1975,13 @@ impl BackendManager {
                 ds.session_manager
                     .list_sessions()
                     .iter()
-                    .map(|s| (s.trace_path.clone(), s.backend_id))
+                    .map(|s| (s.key.clone(), s.backend_id))
                     .collect()
             };
 
             // Second pass: check which backends are dead (only borrows
             // locked.children, not daemon_state).
-            let mut dead_sessions: Vec<(PathBuf, usize)> = Vec::new();
+            let mut dead_sessions: Vec<(SessionKey, usize)> = Vec::new();
             for (path, backend_id) in &sessions {
                 if let Some(true) = locked.is_child_dead(*backend_id) {
                     dead_sessions.push((path.clone(), *backend_id));
@@ -1785,10 +1990,7 @@ impl BackendManager {
 
             // Third pass: clean up dead sessions.
             for (path, backend_id) in dead_sessions {
-                warn!(
-                    "Crash detected for backend {backend_id} (trace: {})",
-                    path.display()
-                );
+                warn!("Crash detected for backend {backend_id} (session: {path})");
 
                 if let Some(ds) = locked.daemon_state.as_mut() {
                     ds.session_manager.remove_session(&path);
@@ -1798,7 +2000,8 @@ impl BackendManager {
                         "type": "event",
                         "event": "ct/session-crashed",
                         "body": {
-                            "tracePath": path.to_string_lossy(),
+                            "tracePath": path.trace_path.to_string_lossy(),
+                            "hostSourceReads": path.host_source_reads.is_allowed(),
                             "backendId": backend_id,
                             "message": "backend process exited unexpectedly",
                         }
@@ -1912,21 +2115,19 @@ impl BackendManager {
             None => return Err(Box::new(SocketPathError)),
         }
 
-        let listener = UnixListener::bind(socket_path)?;
+        let listener = bind_unix_listener(&socket_path)?;
 
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
 
         let child = cmd.spawn();
-        let child = match child {
+        let mut child = match child {
             Ok(c) => c,
             Err(err) => {
                 error!("Can't start replay: {err}");
                 return Err(Box::new(err));
             }
         };
-
-        self.children[id] = Some(child);
 
         info!("Starting replay with id {id}. Command: {cmd:?}",);
 
@@ -1935,7 +2136,15 @@ impl BackendManager {
 
         info!("Awaiting connection!");
 
-        match listener.accept().await {
+        let accepted = accept_unless_exited(
+            &mut child,
+            listener.accept(),
+            cmd_text,
+            &socket_path.display(),
+        )
+        .await?;
+        self.children[id] = Some(child);
+        match accepted {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
         }
@@ -2052,15 +2261,13 @@ impl BackendManager {
         cmd.creation_flags(CREATE_NO_WINDOW);
 
         let child = cmd.spawn();
-        let child = match child {
+        let mut child = match child {
             Ok(c) => c,
             Err(err) => {
                 error!("Can't start replay: {err}");
                 return Err(Box::new(err));
             }
         };
-
-        self.children[id] = Some(child);
 
         info!("Starting replay with id {id}. Listening on {addr_str}");
 
@@ -2069,7 +2276,10 @@ impl BackendManager {
 
         info!("Awaiting connection!");
 
-        match listener.accept().await {
+        let accepted =
+            accept_unless_exited(&mut child, listener.accept(), cmd_text, &addr_str).await?;
+        self.children[id] = Some(child);
+        match accepted {
             Ok((socket, _addr)) => (socket_read, socket_write) = tokio::io::split(socket),
             Err(err) => return Err(Box::new(err)),
         }
@@ -2263,7 +2473,18 @@ impl BackendManager {
                             // replay tool and subsequent arguments identify the trace.
                             // We join all arguments into a single key so that
                             // different sessions are distinguished.
-                            let trace_path = Self::trace_path_from_args(command, &cmd_args);
+                            //
+                            // The replay this starts is launched by its
+                            // client, with whatever launch arguments that
+                            // client sends, so the daemon does not restrict
+                            // its source reads: it is a host-reads session,
+                            // and a client asking for recording sources only
+                            // (`ct/open-trace` without `hostSourceReads`) is
+                            // never routed to it.
+                            let trace_path = SessionKey::new(
+                                Self::trace_path_from_args(command, &cmd_args),
+                                HostSourceReads::Allowed,
+                            );
 
                             // In daemon mode, check session limits before starting.
                             if let Some(ds) = self.daemon_state.as_mut() {
@@ -2282,12 +2503,7 @@ impl BackendManager {
                                                 "replayId": existing_id
                                             }
                                         });
-                                        let client_id = self.lookup_client_for_seq(seq);
-                                        if let Some(cid) = client_id {
-                                            self.send_to_client(cid, response);
-                                        } else {
-                                            self.send_manager_message(response);
-                                        }
+                                        self.answer_request(seq, response);
                                         return Ok(());
                                     }
                                 }
@@ -2304,17 +2520,37 @@ impl BackendManager {
                                             ds.config.max_sessions
                                         )
                                     });
-                                    let client_id = self.lookup_client_for_seq(seq);
-                                    if let Some(cid) = client_id {
-                                        self.send_to_client(cid, response);
-                                    } else {
-                                        self.send_manager_message(response);
-                                    }
+                                    self.answer_request(seq, response);
                                     return Ok(());
                                 }
                             }
 
-                            let replay_id = self.start_replay(command, &cmd_args).await?;
+                            // A start that fails is ANSWERED, like the refusal
+                            // above: the client waits for this response and
+                            // the request has no deadline, so an error only
+                            // logged here left it waiting for ever, and the
+                            // GUI drew its panes over a session with no
+                            // backend.  The message names the cause: a socket
+                            // path too long to bind (`SocketPathTooLong`
+                            // names the path and the limit), a command that
+                            // could not be started.
+                            let replay_id = match self.start_replay(command, &cmd_args).await {
+                                Ok(replay_id) => replay_id,
+                                Err(err) => {
+                                    let message =
+                                        format!("could not start the replay `{command}`: {err}");
+                                    error!("ct/start-replay: {message}");
+                                    let response = json!({
+                                        "type": "response",
+                                        "request_seq": seq,
+                                        "success": false,
+                                        "command": "ct/start-replay",
+                                        "message": message
+                                    });
+                                    self.answer_request(seq, response);
+                                    return Ok(());
+                                }
+                            };
 
                             // Register the session in the session manager.
                             if let Some(ds) = self.daemon_state.as_mut()
@@ -2322,10 +2558,7 @@ impl BackendManager {
                                     .session_manager
                                     .add_session(trace_path.clone(), replay_id)
                             {
-                                warn!(
-                                    "Failed to register session for {}: {e}",
-                                    trace_path.display()
-                                );
+                                warn!("Failed to register session for {trace_path}: {e}");
                             }
 
                             let response = json!({
@@ -2337,16 +2570,7 @@ impl BackendManager {
                                     "replayId": replay_id
                                 }
                             });
-                            let client_id = self.lookup_client_for_seq(seq);
-                            if self.daemon_state.is_some() {
-                                if let Some(cid) = client_id {
-                                    self.send_to_client(cid, response);
-                                } else {
-                                    self.send_manager_message(response);
-                                }
-                            } else {
-                                self.send_manager_message(response);
-                            }
+                            self.answer_request(seq, response);
                             return Ok(());
                         } else {
                             error!("problem with start-replay: can't process {args:?}");
@@ -2446,7 +2670,9 @@ impl BackendManager {
                             let count = infos.len();
                             let paths: Vec<Value> = infos
                                 .iter()
-                                .map(|s| Value::String(s.trace_path.to_string_lossy().to_string()))
+                                .map(|s| {
+                                    Value::String(s.key.trace_path.to_string_lossy().to_string())
+                                })
                                 .collect();
                             (count, paths)
                         } else {
@@ -2541,6 +2767,17 @@ impl BackendManager {
             }
             "event" | "response" => self.message_selected(message).await,
             _ => self.message_selected(message).await,
+        }
+    }
+
+    /// Sends `response`, the answer to request `seq`, to whoever asked: in
+    /// daemon mode the client that sent it, otherwise (and for a request no
+    /// client is recorded for) the manager channel, which the single-client
+    /// session manager writes to its one connection.
+    fn answer_request(&self, seq: i64, response: Value) {
+        match self.lookup_client_for_seq(seq) {
+            Some(client_id) => self.send_to_client(client_id, response),
+            None => self.send_manager_message(response),
         }
     }
 
@@ -2643,13 +2880,13 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Look up the backend for this trace.
         let backend_id = match self
             .daemon_state
             .as_ref()
-            .and_then(|ds| ds.session_manager.get_session_backend_id(&trace_path))
+            .and_then(|ds| ds.session_manager.get_session_backend_id(&session))
         {
             Some(id) => id,
             None => {
@@ -2670,16 +2907,14 @@ impl BackendManager {
             }
         };
 
-        // Build DAP request arguments.
-        // For goto_ticks, include the ticks value; for all others, just threadId.
-        let dap_args = if method == "goto_ticks" {
-            let ticks = args
-                .and_then(|a| a.get("ticks"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
-            serde_json::json!({"threadId": 1, "ticks": ticks})
-        } else {
-            serde_json::json!({"threadId": 1})
+        // Build DAP request arguments (`goto_ticks` carries the ticks,
+        // `goto_geid` the geid; an invalid geid is refused, not defaulted).
+        let dap_args = match python_bridge::navigation_dap_arguments(&method, args) {
+            Ok(dap_args) => dap_args,
+            Err(message) => {
+                self.send_py_error(seq, &message);
+                return Ok(());
+            }
         };
 
         // Get a unique seq for the DAP command sent to the backend.
@@ -2719,6 +2954,7 @@ impl BackendManager {
                     nav_command_seq: Some(dap_seq),
                     rr_ticks: None,
                     end_of_trace: false,
+                    not_reached: None,
                 });
         }
 
@@ -2773,10 +3009,10 @@ impl BackendManager {
     /// Looks up the backend ID for a given trace path from the session
     /// manager.  Returns `None` if not in daemon mode or the trace has
     /// no active session.
-    fn backend_id_for_trace(&self, trace_path: &PathBuf) -> Option<usize> {
+    fn backend_id_for_trace(&self, session: &SessionKey) -> Option<usize> {
         self.daemon_state
             .as_ref()
-            .and_then(|ds| ds.session_manager.get_session_backend_id(trace_path))
+            .and_then(|ds| ds.session_manager.get_session_backend_id(session))
     }
 
     /// Builds an actionable error message for "no session loaded" errors.
@@ -2848,9 +3084,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3030,9 +3266,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3155,9 +3391,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3283,9 +3519,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3508,9 +3744,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3529,7 +3765,7 @@ impl BackendManager {
         // backend's per-line `setBreakpoints` response.
         let (bp_id, all_lines, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.add_breakpoint(&source_path, line)
             }
             None => return Ok(()),
@@ -3570,7 +3806,7 @@ impl BackendManager {
             // breakpoint the backend has never heard of.
             if let Some(ds) = self.daemon_state.as_mut() {
                 ds.py_bridge
-                    .breakpoint_state_mut(&trace_path)
+                    .breakpoint_state_mut(&session)
                     .forget_breakpoint(bp_id);
             }
             self.send_py_command_error(
@@ -3585,7 +3821,7 @@ impl BackendManager {
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
                 kind: PendingPyRequestKind::AddBreakpoint {
-                    trace_path,
+                    session,
                     bp_id,
                     index,
                 },
@@ -3666,9 +3902,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3685,7 +3921,7 @@ impl BackendManager {
         // Remove the breakpoint and get remaining lines for the affected file.
         let removal_result = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.remove_breakpoint(bp_id)
             }
             None => return Ok(()),
@@ -3714,7 +3950,9 @@ impl BackendManager {
                 let _ = self.message(backend_id, dap_request).await;
                 if let Some(ds) = self.daemon_state.as_mut() {
                     ds.py_bridge.pending_requests.push(PendingPyRequest {
-                        kind: PendingPyRequestKind::FireAndForget,
+                        kind: PendingPyRequestKind::Unobserved(
+                            python_bridge::UnobservedReason::SetPointsResyncAfterRemoval,
+                        ),
                         client_id: 0,
                         original_seq: 0,
                         backend_seq: dap_seq,
@@ -3809,9 +4047,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3825,10 +4063,12 @@ impl BackendManager {
 
         self.reset_ttl_for_backend_id(backend_id);
 
-        // Update the watchpoint state.
-        let (wp_id, all_expressions) = match self.daemon_state.as_mut() {
+        // Update the watchpoint state.  `index` is where this
+        // watchpoint's verdict will sit in the backend's per-entry
+        // `setDataBreakpoints` response.
+        let (wp_id, all_expressions, index) = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.add_watchpoint(&expression)
             }
             None => return Ok(()),
@@ -3854,26 +4094,57 @@ impl BackendManager {
             }
         });
 
-        let _ = self.message(backend_id, dap_request).await;
+        // WAIT for the backend, exactly as `ct/py-add-breakpoint` does,
+        // and for the same reason: the backend's answer is the only
+        // place that says whether the watchpoint was accepted.
+        //
+        // HISTORY, because it is why this waits rather than fires and
+        // forgets: the replay backend used to have NO `setDataBreakpoints`
+        // arm at all, and answered the free-text
+        // `command setDataBreakpoints not supported here`.  While this
+        // was fire-and-forget that refusal was discarded and
+        // `Trace.add_watchpoint()` returned a positive id for a
+        // watchpoint nothing anywhere had accepted, after which
+        // `continue_forward()` ran to the end of the trace and raised
+        // `StopIteration` with nothing to explain why.
+        //
+        // The backend implements the command now (value-change
+        // watchpoints — see the `ct-data-breakpoints` crate), so the
+        // answer read here is a real per-entry verdict: `verified: true`
+        // with an id, or `verified: false` with a code from that crate's
+        // closed set naming which of the recording's limits was hit.
+        if let Err(e) = self.message(backend_id, dap_request).await {
+            // Roll back: nothing was sent, so the daemon must not keep a
+            // watchpoint the backend has never heard of.
+            if let Some(ds) = self.daemon_state.as_mut() {
+                ds.py_bridge
+                    .breakpoint_state_mut(&session)
+                    .forget_watchpoint(wp_id);
+            }
+            self.send_py_command_error(
+                seq,
+                "ct/py-add-watchpoint",
+                &format!("failed to send command to backend: {e}"),
+            );
+            return Ok(());
+        }
+
+        let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
         if let Some(ds) = self.daemon_state.as_mut() {
             ds.py_bridge.pending_requests.push(PendingPyRequest {
-                kind: PendingPyRequestKind::FireAndForget,
-                client_id: 0,
-                original_seq: 0,
+                kind: PendingPyRequestKind::AddWatchpoint {
+                    session,
+                    wp_id,
+                    index,
+                },
+                client_id,
+                original_seq: seq,
                 backend_seq: dap_seq,
-                response_command: String::new(),
-                expression: String::new(),
+                response_command: "ct/py-add-watchpoint".to_string(),
+                expression,
             });
         }
 
-        let response = json!({
-            "type": "response",
-            "request_seq": seq,
-            "success": true,
-            "command": "ct/py-add-watchpoint",
-            "body": {"watchpointId": wp_id}
-        });
-        self.send_response_for_seq(seq, response);
         Ok(())
     }
 
@@ -3942,9 +4213,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -3958,10 +4229,14 @@ impl BackendManager {
 
         self.reset_ttl_for_backend_id(backend_id);
 
-        let removal_result = match self.daemon_state.as_mut() {
+        // Read the expression BEFORE removing it: if the backend
+        // refuses the re-send below, this is what gets restored so the
+        // daemon's table and the replay engine still agree.
+        let (removed_expression, removal_result) = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
-                bp_state.remove_watchpoint(wp_id)
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
+                let expression = bp_state.watchpoint_expression(wp_id);
+                (expression, bp_state.remove_watchpoint(wp_id))
             }
             None => return Ok(()),
         };
@@ -3986,26 +4261,50 @@ impl BackendManager {
                         "breakpoints": breakpoints_array,
                     }
                 });
-                let _ = self.message(backend_id, dap_request).await;
+                // WAIT for the backend rather than answering ahead of
+                // it.  This used to be an `Unobserved` fire-and-forget,
+                // justified by the fact that no watchpoint ever bound —
+                // the backend had no `setDataBreakpoints` arm at all —
+                // so none could fail to be removed.  That justification
+                // expired the moment watchpoints started working: a
+                // refused re-send now leaves a live watchpoint in the
+                // replay engine while the client has been told
+                // `removed: true`, and the caller's next
+                // `continue_forward()` stops somewhere it has no reason
+                // to expect.
+                if let Err(e) = self.message(backend_id, dap_request).await {
+                    // The re-send never reached the backend, so the
+                    // engine still holds the watchpoint.  Put it back
+                    // and say so.
+                    if let (Some(ds), Some(expression)) =
+                        (self.daemon_state.as_mut(), removed_expression.as_ref())
+                    {
+                        ds.py_bridge
+                            .breakpoint_state_mut(&session)
+                            .restore_watchpoint(wp_id, expression);
+                    }
+                    self.send_py_command_error(
+                        seq,
+                        "ct/py-remove-watchpoint",
+                        &format!("could not send the watchpoint removal to the backend: {e}"),
+                    );
+                    return Ok(());
+                }
+                let client_id = self.lookup_client_for_seq(seq).unwrap_or(0);
                 if let Some(ds) = self.daemon_state.as_mut() {
                     ds.py_bridge.pending_requests.push(PendingPyRequest {
-                        kind: PendingPyRequestKind::FireAndForget,
-                        client_id: 0,
-                        original_seq: 0,
+                        kind: PendingPyRequestKind::RemoveWatchpoint {
+                            session: session.clone(),
+                            wp_id,
+                            expression: removed_expression.unwrap_or_default(),
+                        },
+                        client_id,
+                        original_seq: seq,
                         backend_seq: dap_seq,
-                        response_command: String::new(),
+                        response_command: "ct/py-remove-watchpoint".to_string(),
                         expression: String::new(),
                     });
                 }
-
-                let response = json!({
-                    "type": "response",
-                    "request_seq": seq,
-                    "success": true,
-                    "command": "ct/py-remove-watchpoint",
-                    "body": {"removed": true}
-                });
-                self.send_response_for_seq(seq, response);
             }
             None => {
                 self.send_py_command_error(
@@ -4077,10 +4376,7 @@ impl BackendManager {
             }
         };
 
-        let source_path = match args
-            .and_then(|a| a.get("path"))
-            .and_then(Value::as_str)
-        {
+        let source_path = match args.and_then(|a| a.get("path")).and_then(Value::as_str) {
             Some(p) => p.to_string(),
             None => {
                 self.send_py_command_error(
@@ -4092,10 +4388,7 @@ impl BackendManager {
             }
         };
 
-        let line = match args
-            .and_then(|a| a.get("line"))
-            .and_then(Value::as_i64)
-        {
+        let line = match args.and_then(|a| a.get("line")).and_then(Value::as_i64) {
             Some(l) => l,
             None => {
                 self.send_py_command_error(
@@ -4122,12 +4415,12 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Validate that a session exists for this trace (but no DAP
         // command is sent — tracepoints are stored daemon-side until
         // ct/py-run-tracepoints).
-        if self.backend_id_for_trace(&trace_path).is_none() {
+        if self.backend_id_for_trace(&session).is_none() {
             self.send_py_command_error(
                 seq,
                 "ct/py-add-tracepoint",
@@ -4138,7 +4431,7 @@ impl BackendManager {
 
         let tp_id = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 let (tp_id, _entry) = bp_state.add_tracepoint(&source_path, line, &expression);
                 tp_id
             }
@@ -4220,11 +4513,11 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         let removed = match self.daemon_state.as_mut() {
             Some(ds) => {
-                let bp_state = ds.py_bridge.breakpoint_state_mut(&trace_path);
+                let bp_state = ds.py_bridge.breakpoint_state_mut(&session);
                 bp_state.remove_tracepoint(tp_id)
             }
             None => return Ok(()),
@@ -4267,7 +4560,7 @@ impl BackendManager {
     ///   "seq": 3,
     ///   "arguments": {
     ///     "tracePath": "/path/to/trace",
-    ///     "stopAfter": -1
+    ///     "limit": 100
     ///   }
     /// }
     /// ```
@@ -4314,14 +4607,17 @@ impl BackendManager {
             }
         };
 
+        // THE SCRIPT'S LIMIT (Viewport-Driven-Loading, Decided Q4): `limit`
+        // hits, or every hit for `null` / a negative one. `stopAfter` is the
+        // older spelling of the same bound.
         let stop_after = args
-            .and_then(|a| a.get("stopAfter"))
-            .and_then(Value::as_i64)
+            .and_then(|a| a.get("limit").or_else(|| a.get("stopAfter")))
+            .map(|v| v.as_i64().unwrap_or(-1))
             .unwrap_or(-1);
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4341,7 +4637,7 @@ impl BackendManager {
                 let bp_state = ds
                     .py_bridge
                     .breakpoint_states
-                    .get(&trace_path)
+                    .get(&session)
                     .map(|s| s.all_tracepoints())
                     .unwrap_or_default();
                 bp_state
@@ -4403,7 +4699,10 @@ impl BackendManager {
                     "lastCount": 0,
                     "results": {}
                 },
-                "stopAfter": stop_after
+                "stopAfter": stop_after,
+                // The script reads every hit's values: they ride the
+                // results event, bounded by the script's own limit (Q4).
+                "withLocals": true
             }
         });
 
@@ -4492,9 +4791,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4669,9 +4968,9 @@ impl BackendManager {
             .and_then(Value::as_i64)
             .unwrap_or(100);
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4785,9 +5084,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4919,9 +5218,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -4989,8 +5288,13 @@ impl BackendManager {
 
     /// Handles `ct/py-read-source` requests from Python clients.
     ///
-    /// Translates the request into a `ct/read-source` DAP command,
-    /// sends it to the backend, and registers a pending request.
+    /// Translates the request into a DAP `source` request
+    /// (<https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Source>),
+    /// sends it to the session's backend, and registers a pending request.
+    /// The request carries `allowWorkingTree` from the session's host-read
+    /// setting, so a session with host reads off asks the backend for the
+    /// recording's own copy only; the backend applies the same rule from
+    /// its own launch setting as well.
     ///
     /// # Wire protocol
     ///
@@ -5047,9 +5351,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5070,13 +5374,16 @@ impl BackendManager {
             None => return Ok(()),
         };
 
-        // Build and send the ct/read-source command to the backend.
+        // Build and send the DAP `source` request to the backend.
         let dap_request = serde_json::json!({
             "type": "request",
-            "command": "ct/read-source",
+            "command": "source",
             "seq": dap_seq,
             "arguments": {
-                "path": source_path,
+                "source": {"path": source_path},
+                // Required by the DAP schema; 0 means "read by path".
+                "sourceReference": 0,
+                "allowWorkingTree": session.host_source_reads.is_allowed(),
             },
         });
 
@@ -5175,9 +5482,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5328,9 +5635,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5450,9 +5757,9 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
-        let backend_id = match self.backend_id_for_trace(&trace_path) {
+        let backend_id = match self.backend_id_for_trace(&session) {
             Some(id) => id,
             None => {
                 self.send_py_command_error(
@@ -5609,8 +5916,8 @@ impl BackendManager {
         // Reset TTL for the session (if any) backing this trace; the
         // memory-diff query doesn't actually drive the backend, but if
         // a session is loaded we don't want it to expire mid-bisect.
-        let trace_path = PathBuf::from(&trace_path_str);
-        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+        let session = SessionKey::for_request(&trace_path_str, args);
+        if let Some(backend_id) = self.backend_id_for_trace(&session) {
             self.reset_ttl_for_backend_id(backend_id);
         }
 
@@ -5682,7 +5989,10 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     COMMAND,
-                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                    &format!(
+                        "failed spawning ct_memdiff_helper at {}: {e}",
+                        helper.display()
+                    ),
                 );
                 return Ok(());
             }
@@ -5705,9 +6015,15 @@ impl BackendManager {
             }
         };
 
-        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let success = parsed
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let response = if success {
-            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            let body = parsed
+                .get("body")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
             json!({
                 "type": "response",
                 "request_seq": seq,
@@ -5737,7 +6053,7 @@ impl BackendManager {
         } else {
             self.send_manager_message(response);
         }
-        let _ = send_response;  // silence the unused-closure warning when refactored
+        let _ = send_response; // silence the unused-closure warning when refactored
         Ok(())
     }
 
@@ -5820,8 +6136,8 @@ impl BackendManager {
 
         // Refresh the session TTL if one is loaded for this trace —
         // bisect agents call back-to-back and shouldn't lose state.
-        let trace_path = PathBuf::from(&record_trace);
-        if let Some(backend_id) = self.backend_id_for_trace(&trace_path) {
+        let session = SessionKey::for_request(&record_trace, args);
+        if let Some(backend_id) = self.backend_id_for_trace(&session) {
             self.reset_ttl_for_backend_id(backend_id);
         }
 
@@ -5883,7 +6199,10 @@ impl BackendManager {
                 self.send_py_command_error(
                     seq,
                     COMMAND,
-                    &format!("failed spawning ct_memdiff_helper at {}: {e}", helper.display()),
+                    &format!(
+                        "failed spawning ct_memdiff_helper at {}: {e}",
+                        helper.display()
+                    ),
                 );
                 return Ok(());
             }
@@ -5905,9 +6224,15 @@ impl BackendManager {
             }
         };
 
-        let success = parsed.get("success").and_then(Value::as_bool).unwrap_or(false);
+        let success = parsed
+            .get("success")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let response = if success {
-            let body = parsed.get("body").cloned().unwrap_or_else(|| serde_json::json!({}));
+            let body = parsed
+                .get("body")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
             json!({
                 "type": "response",
                 "request_seq": seq,
@@ -6027,6 +6352,10 @@ impl BackendManager {
         };
 
         let trace_path = PathBuf::from(&trace_path_str);
+        // The session is the trace AND the host-read setting the request
+        // carries: a backend started for one setting is never reused for a
+        // request with the other (see `crate::session::SessionKey`).
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Check if already loaded — return existing session and reset TTL.
         //
@@ -6037,17 +6366,15 @@ impl BackendManager {
         // the `setBreakpoints` DAP command sends ALL accumulated
         // breakpoints, causing `continue` to hit unexpected locations.
         if let Some(ds) = self.daemon_state.as_mut()
-            && ds.session_manager.has_session(&trace_path)
+            && ds.session_manager.has_session(&session)
         {
-            ds.session_manager.reset_ttl(&trace_path);
+            ds.session_manager.reset_ttl(&session);
 
             // Clear accumulated breakpoint/watchpoint state from previous
             // script runs so the new script starts with a clean slate.
-            ds.py_bridge
-                .breakpoint_state_mut(&trace_path)
-                .clear_all();
+            ds.py_bridge.breakpoint_state_mut(&session).clear_all();
 
-            if let Some(info) = ds.session_manager.get_session(&trace_path) {
+            if let Some(info) = ds.session_manager.get_session(&session) {
                 let backend_id = info.backend_id;
 
                 // Send an empty setBreakpoints to the backend so its
@@ -6075,7 +6402,9 @@ impl BackendManager {
                 });
                 // Fire-and-forget: consume the responses silently.
                 ds.py_bridge.pending_requests.push(PendingPyRequest {
-                    kind: PendingPyRequestKind::FireAndForget,
+                    kind: PendingPyRequestKind::Unobserved(
+                        python_bridge::UnobservedReason::OpenTraceCachedSessionReset,
+                    ),
                     client_id: 0,
                     original_seq: 0,
                     backend_seq: clear_bp_seq,
@@ -6083,7 +6412,9 @@ impl BackendManager {
                     expression: String::new(),
                 });
                 ds.py_bridge.pending_requests.push(PendingPyRequest {
-                    kind: PendingPyRequestKind::FireAndForget,
+                    kind: PendingPyRequestKind::Unobserved(
+                        python_bridge::UnobservedReason::OpenTraceCachedSessionReset,
+                    ),
                     client_id: 0,
                     original_seq: 0,
                     backend_seq: reset_seq,
@@ -6107,6 +6438,7 @@ impl BackendManager {
                         "sourceFiles": info.source_files,
                         "program": info.program,
                         "workdir": info.workdir,
+                        "hostSourceReads": session.host_source_reads.is_allowed(),
                         "cached": true,
                     }
                 });
@@ -6157,14 +6489,13 @@ impl BackendManager {
             .unwrap_or_else(|_| "replay-server".to_string());
 
         // Build the arguments: the backend command + "dap-server" subcommand.
-        let backend_args_owned: Vec<String> = if backend_cmd.contains("backend-manager")
-            || backend_cmd.contains("session-manager")
-        {
-            // For mock-dap-backend, the subcommand is `mock-dap-backend`.
-            vec!["mock-dap-backend".to_string()]
-        } else {
-            vec!["dap-server".to_string()]
-        };
+        let backend_args_owned: Vec<String> =
+            if backend_cmd.contains("backend-manager") || backend_cmd.contains("session-manager") {
+                // For mock-dap-backend, the subcommand is `mock-dap-backend`.
+                vec!["mock-dap-backend".to_string()]
+            } else {
+                vec!["dap-server".to_string()]
+            };
         let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
 
         // Spawn the backend process (raw, without installing channels).
@@ -6195,7 +6526,10 @@ impl BackendManager {
         //
         // Reference: replay-server/src/dap.rs — `LaunchRequestArguments.ctRRWorkerExe`
         let dap_launch_opts = {
-            let mut opts = dap_init::DapLaunchOptions::default();
+            let mut opts = dap_init::DapLaunchOptions {
+                host_source_reads: Some(session.host_source_reads),
+                ..dap_init::DapLaunchOptions::default()
+            };
             let needs_rr_support = trace_path.join("rr").is_dir()
                 || trace_path.join("ttd-trace-manifest.json").is_file()
                 || trace_path.extension().is_some_and(|ext| ext == "ct")
@@ -6247,7 +6581,10 @@ impl BackendManager {
                     });
 
                 if let Some(ref exe) = rr_support_cmd {
-                    info!("RR trace detected, using ct-native-replay: {}", exe.display());
+                    info!(
+                        "RR trace detected, using ct-native-replay: {}",
+                        exe.display()
+                    );
                     opts.ct_rr_worker_exe = rr_support_cmd;
                 } else {
                     warn!(
@@ -6348,16 +6685,11 @@ impl BackendManager {
 
         // Register session with metadata.
         if let Some(ds) = self.daemon_state.as_mut()
-            && let Err(e) = ds.session_manager.add_session_with_metadata(
-                trace_path.clone(),
-                backend_id,
-                &metadata,
-            )
+            && let Err(e) =
+                ds.session_manager
+                    .add_session_with_metadata(session.clone(), backend_id, &metadata)
         {
-            warn!(
-                "Failed to register session for {}: {e}",
-                trace_path.display()
-            );
+            warn!("Failed to register session for {session}: {e}");
         }
 
         let response = json!({
@@ -6379,6 +6711,7 @@ impl BackendManager {
                 "sourceFiles": metadata.source_files,
                 "program": metadata.program,
                 "workdir": metadata.workdir,
+                "hostSourceReads": session.host_source_reads.is_allowed(),
                 "cached": false,
                 "initialLocation": initial_location,
             }
@@ -6409,12 +6742,12 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         let session_info = self
             .daemon_state
             .as_ref()
-            .and_then(|ds| ds.session_manager.get_session(&trace_path));
+            .and_then(|ds| ds.session_manager.get_session(&session));
 
         match session_info {
             Some(info) => {
@@ -6430,6 +6763,7 @@ impl BackendManager {
                         "sourceFiles": info.source_files,
                         "program": info.program,
                         "workdir": info.workdir,
+                        "hostSourceReads": session.host_source_reads.is_allowed(),
                     }
                 });
                 self.send_response_for_seq(seq, response);
@@ -6515,6 +6849,14 @@ impl BackendManager {
             .and_then(Value::as_u64)
             .unwrap_or(script_executor::DEFAULT_TIMEOUT_SECS);
 
+        // --- The host-read setting the script's trace session uses ---
+        //
+        // The script's Python process opens the trace through this daemon
+        // like any other client, so it must ask for the session this
+        // request's client asked for; otherwise a script started by a
+        // client with host reads off would reach a backend that reads them.
+        let host_source_reads = HostSourceReads::from_request(args);
+
         // --- Extract optional session ID ---
         let session_id = args
             .and_then(|a| a.get("sessionId"))
@@ -6524,19 +6866,26 @@ impl BackendManager {
         // --- Determine the daemon socket path ---
         //
         // The Python subprocess connects back to the daemon using this socket.
-        // In daemon mode we use the socket path from the daemon state config;
-        // otherwise fall back to the well-known default.
-        let socket_path = self
-            .daemon_state
-            .as_ref()
-            .and_then(|ds| ds.config.socket_path.as_ref())
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| {
-                CODETRACER_PATHS
-                    .lock()
-                    .map(|p| p.daemon_socket_path().to_string_lossy().to_string())
-                    .unwrap_or_else(|_| "/tmp/codetracer/daemon.sock".to_string())
-            });
+        // It is the path this daemon bound, resolved by the same function
+        // (`DaemonConfig::daemon_paths`) from the daemon state's config; a
+        // manager without daemon state has no override, so the defaults.
+        // `Paths` is never mutated, so a poisoned lock still holds a valid
+        // value.
+        let socket_path = {
+            let no_override = DaemonConfig::default();
+            let config = self
+                .daemon_state
+                .as_ref()
+                .map_or(&no_override, |ds| &ds.config);
+            let defaults = CODETRACER_PATHS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            config
+                .daemon_paths(&defaults)
+                .socket
+                .to_string_lossy()
+                .to_string()
+        };
 
         // --- Determine the Python API path ---
         //
@@ -6619,6 +6968,7 @@ impl BackendManager {
                 &python_api,
                 timeout_secs,
                 session_id.as_deref(),
+                host_source_reads,
             )
             .await
             {
@@ -6680,13 +7030,13 @@ impl BackendManager {
             }
         };
 
-        let trace_path = PathBuf::from(&trace_path_str);
+        let session = SessionKey::for_request(&trace_path_str, args);
 
         // Look up the session and remove it.
         let backend_id = self
             .daemon_state
             .as_mut()
-            .and_then(|ds| ds.session_manager.remove_session(&trace_path));
+            .and_then(|ds| ds.session_manager.remove_session(&session));
 
         match backend_id {
             Some(bid) => {
@@ -6753,5 +7103,27 @@ impl BackendManager {
 
     pub async fn message_selected(&self, message: Value) -> Result<(), Box<dyn Error>> {
         self.message(self.selected, message).await
+    }
+}
+
+#[cfg(test)]
+mod replay_id_tag_tests {
+    use super::{REPLAY_ID_TAG, tag_with_replay_id};
+    use serde_json::json;
+
+    #[test]
+    fn a_replays_message_names_the_replay_and_keeps_its_fields() {
+        let event =
+            json!({"type": "event", "event": "ct/complete-move", "seq": 7, "body": {"x": 1}});
+        let tagged = tag_with_replay_id(event, 3);
+        assert_eq!(tagged[REPLAY_ID_TAG], json!(3));
+        assert_eq!(tagged["event"], json!("ct/complete-move"));
+        assert_eq!(tagged["seq"], json!(7));
+        assert_eq!(tagged["body"], json!({"x": 1}));
+    }
+
+    #[test]
+    fn a_message_that_is_not_an_object_passes_through() {
+        assert_eq!(tag_with_replay_id(json!("raw"), 1), json!("raw"));
     }
 }

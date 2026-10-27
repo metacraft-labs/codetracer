@@ -899,3 +899,78 @@ suite "an ISA stated by --lang overrides the assessment, and keeps two routes al
     check overridden.targetIsa == tiSolanaSbf     # ...and the user overrides it
     check assessRecordingTarget(dir, LangRust, isaOverride = tiUnknown) == fromMarker
     removeDir(dir)
+
+suite "ct record-test on a Noir test":
+  ## `ct record-test` routes a `.nr` test through `db-backend-record` with
+  ## `--noir-test-name`, which becomes `RecorderOptions.noirTestName`; nargo is
+  ## then run IN the package with `trace --test-name <test>`. The pure halves
+  ## are asserted here; `record_test_noir_e2e_test.nim` records for real.
+
+  test "a test name reaches nargo as --test-name, after the trace arguments":
+    let s = assessedSelector("/work/crate/src/main.nr", LangNoir)
+    check s.targetIsa == tiAcir
+    let plain = recorderInvocation(s, "/work/crate", TraceFolder)
+    let test = recorderInvocation(s, "/work/crate", TraceFolder,
+                                  RecorderOptions(noirTestName: "tests::test_main"))
+    check plain.args == @["trace", "--out-dir", TraceFolder]
+    check test.args == @["trace", "--out-dir", TraceFolder,
+                         "--test-name", "tests::test_main"]
+    # Still run INSIDE the package, exactly as `ct record <crate>` is.
+    check test.workdir == plain.workdir
+
+  test "the package root is the nearest directory holding Nargo.toml":
+    let root = getTempDir() / "ct-dispatch-test-noir-root"
+    removeDir(root)
+    createDir(root / "src" / "nested")
+    writeFile(root / NoirPackageManifest, "[package]\nname = \"n\"\ntype = \"bin\"\n")
+    writeFile(root / "src" / "nested" / "deep.nr", "")
+    check noirPackageRoot(root / "src" / "nested" / "deep.nr") == root
+    check noirPackageRoot(root / "src") == root
+    check noirPackageRoot(root) == root
+    removeDir(root)
+
+  test "a file in no Noir package has no root":
+    let lonely = getTempDir() / "ct-dispatch-test-noir-none"
+    removeDir(lonely)
+    createDir(lonely)
+    writeFile(lonely / "x.nr", "")
+    # The temp directory's ancestors carry no Nargo.toml on any sane host.
+    check noirPackageRoot(lonely / "x.nr") == ""
+    removeDir(lonely)
+
+suite "the .nim compile step builds a replayable program":
+  # The `.nim` arm's argv is not in `recorderInvocation` (recordNim owns it),
+  # so its compile flags are asserted here, against `nimNativeCompileArgs`.
+  # The flags are what decides whether the MCR replay can place its entry
+  # stop: a `-d:release` build with no DWARF recorded fine and then failed
+  # every launch with "MCR run-to-entry stopped without source location"
+  # (codetracer-pm issue 2026-10-22). `record_nim_debuginfo_e2e_test.nim`
+  # proves the replay end to end; this pins the flags without a toolchain.
+  let trace = "/traces/0190-abc"
+  let args = nimNativeCompileArgs("/src/main.nim", trace / "main",
+                                  trace / "nimcache")
+
+  test "it compiles (the `c` command) the program to the binary in the trace":
+    check args[0] == "c"
+    check args[^1] == "/src/main.nim"
+    check ("-o:" & trace / "main") in args
+
+  test "it is a debug build: DWARF, native debugger info, no optimisation":
+    check "-d:release" notin args
+    check "-d:danger" notin args
+    check "--debugInfo" in args
+    check "--debugger:native" in args
+    check "--stacktrace:on" in args
+    check "--passC:-O0" in args
+    # `--debugger:native` appends `<cc>.options.debug` after `--passC`, so
+    # Nim's default `-Og` must be replaced for whichever C backend runs.
+    check "--gcc.options.debug:-g3 -O0" in args
+    check "--clang.options.debug:-g3 -O0" in args
+
+  test "the generated C and its source maps stay in the trace folder":
+    check ("--nimcache:" & trace / "nimcache") in args
+    check "--sourcemap:on" in args
+    var nimcacheFlags = 0
+    for arg in args:
+      if arg.startsWith("--nimcache"): inc nimcacheFlags
+    check nimcacheFlags == 1

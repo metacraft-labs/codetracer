@@ -66,7 +66,16 @@ func classOfDoc(id: string): int =
   ## that filters by class and the manifest that records it cannot disagree.
   parseInt($id[1])
 
-const ExpectedAssertions = 10353
+const ExpectedAssertions = 11181
+  ## 10729 -> 11181 (2026-10-21): `source_vm.nim` (`CorpusMid`) grew by the
+  ## read-only source pane's wheel, key and caret scrolling (`d1b009363`),
+  ## which did not move the count. Measured by A/B: 10729 with `source_vm.nim`
+  ## as of `d1b009363^`, 11181 as of `d1b009363`, nothing else changed.
+  ## 10475 -> 10729: `source_vm.nim` (`CorpusMid`) grew by the viewport
+  ## contract (`403d8d7db0`), which did not move the count.
+  ## 10353 -> 10475: `source_vm.nim` (`CorpusMid`) grew by `trimToWindow`
+  ## forgetting the previous file's length with its text (a new file's window
+  ## is no longer clamped to the old file's length).
   ## 9857 -> 10353 (PLAT-47 part B): `source_vm.nim` (`CorpusMid`) grew by the
   ## held line contexts (`heldLineContexts`, carried through fills, trims and
   ## merges).

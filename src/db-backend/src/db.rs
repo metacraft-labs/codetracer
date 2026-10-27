@@ -16,6 +16,7 @@ use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::replay::ReplaySession;
+use crate::step_table::StepTable;
 use crate::task::{
     Action, Breakpoint, Call, CallArg, CallLine, CoreTrace, CtLoadLocalsArguments, DapTracepoint, Events,
     HistoryResultWithRecord, LoadHistoryArg, Location, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, ProgramEvent,
@@ -53,7 +54,7 @@ pub struct Db {
     pub workdir: PathBuf,
     pub functions: DistinctVec<FunctionId, FunctionRecord>,
     pub calls: DistinctVec<CallKey, DbCall>,
-    pub steps: DistinctVec<StepId, DbStep>,
+    pub steps: StepTable,
     pub variables: DistinctVec<StepId, Vec<FullValueRecord>>,
     pub instructions: DistinctVec<StepId, Vec<String>>,
     pub types: DistinctVec<TypeId, TypeRecord>,
@@ -111,7 +112,7 @@ impl Db {
             workdir: PathBuf::from(workdir),
             functions: DistinctVec::new(),
             calls: DistinctVec::new(),
-            steps: DistinctVec::new(),
+            steps: StepTable::new(),
             variables: DistinctVec::new(),
             instructions: DistinctVec::new(),
             types: DistinctVec::new(),
@@ -336,7 +337,9 @@ impl Db {
                         let mut last_line = function_record.line.0;
                         let steps_len = self.steps.len() as i64;
                         for i in step_id_int..steps_len {
-                            let step = self.steps[StepId(i)];
+                            let Some(step) = self.steps.get(StepId(i)).copied() else {
+                                continue;
+                            };
                             if step.call_key == CallKey(call_key_int) {
                                 if step.line.0 > last_line {
                                     last_line = step.line.0;
@@ -360,7 +363,9 @@ impl Db {
                     let mut last_line = function_record.line.0;
                     let steps_len = self.steps.len() as i64;
                     for i in step_id_int..steps_len {
-                        let step = self.steps[StepId(i)];
+                        let Some(step) = self.steps.get(StepId(i)).copied() else {
+                            continue;
+                        };
                         if step.call_key == CallKey(call_key_int) {
                             if step.line.0 > last_line {
                                 last_line = step.line.0;
@@ -955,7 +960,10 @@ impl Db {
             // Guard against negative step_id wrapping: only iterate when
             // the next id is non-negative and within bounds.
             while current_step_id.0 >= 0 && (current_step_id.0 as usize) < self.steps.len() {
-                let step = self.steps[current_step_id];
+                let Some(step) = self.steps.get(current_step_id).copied() else {
+                    current_step_id = current_step_id + 1;
+                    continue;
+                };
                 if step.path_id != original_path_id || step.line != original_line {
                     break;
                 } else {
@@ -978,7 +986,7 @@ impl Db {
 
 impl Db {
     pub fn new_for_test() -> Db {
-        let steps: DistinctVec<StepId, DbStep> = DistinctVec::new();
+        let steps = StepTable::new();
         let mut step_map_0: HashMap<usize, Vec<DbStep>> = HashMap::new();
         // GDH-M7: the map holds EVERY version interned under a path string.
         let mut path_map: HashMap<String, Vec<PathId>> = HashMap::new();
@@ -1031,61 +1039,24 @@ pub struct StepIterator<'a> {
     pub forward: bool,
 }
 
-impl StepIterator<'_> {
-    fn on_step_id_limit(&self) -> bool {
-        // Guard against negative step IDs (e.g. StepId(-1) / NO_STEP_ID) and
-        // empty step vectors.  A negative i64 cast to usize wraps to a huge
-        // value, so we must check the sign first.
-        if self.db.steps.is_empty() || self.step_id.0 < 0 {
-            return true;
-        }
-        let idx = self.step_id.0 as usize;
-        if self.forward {
-            // moving forward: we're at (or past) the last step
-            idx >= self.db.steps.len() - 1
-        } else {
-            // moving backwards: we're at the first step
-            idx == 0
-        }
-    }
-
-    fn single_step_line(&self) -> StepId {
-        // Caller (`Iterator::next`) must call `on_step_id_limit` first, so
-        // these conditions should always hold.  We still avoid a hard panic
-        // and clamp to the boundary instead, logging the unexpected situation.
-        if self.forward {
-            if self.step_id.0 < 0 || (self.step_id.0 as usize) >= self.db.steps.len().saturating_sub(1) {
-                warn!(
-                    "single_step_line: forward step from {:?} is at or beyond limit (steps len {})",
-                    self.step_id,
-                    self.db.steps.len()
-                );
-                return self.step_id;
-            }
-            self.step_id + 1
-        } else {
-            if self.step_id.0 <= 0 {
-                warn!(
-                    "single_step_line: backward step from {:?} is at or beyond limit",
-                    self.step_id
-                );
-                return self.step_id;
-            }
-            self.step_id - 1
-        }
-    }
-}
-
 impl Iterator for StepIterator<'_> {
     type Item = DbStep;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.on_step_id_limit() {
-            self.step_id = self.single_step_line();
-            Some(self.db.steps[self.step_id])
-        } else {
-            None
+        if self.step_id.0 < 0 {
+            return None;
         }
+        let steps = &self.db.steps.items;
+        let index = if self.forward {
+            steps.partition_point(|step| step.step_id <= self.step_id)
+        } else {
+            steps
+                .partition_point(|step| step.step_id < self.step_id)
+                .checked_sub(1)?
+        };
+        let step = *steps.get(index)?;
+        self.step_id = step.step_id;
+        Some(step)
     }
 }
 
@@ -1605,6 +1576,20 @@ pub struct MaterializedReplaySession {
     /// coexist on the per-line slot map.
     pub tracepoint_list: Vec<HashMap<(usize, Option<i64>), DapTracepoint>>,
     tracepoint_next_id: i64,
+    /// Registered value-change watchpoints, as resolved `VariableId`s.
+    ///
+    /// A DAP `setDataBreakpoints` replaces this whole set (the same
+    /// semantics `setBreakpoints` has for a source file).  Resolved to
+    /// ids at registration rather than compared by name during the
+    /// scan: `variable_id_for` is O(n) over the interning table, and
+    /// paying that per step per watchpoint would make Continue
+    /// quadratic in the trace length.
+    ///
+    /// Empty is the overwhelmingly common case, and `step_continue`
+    /// checks that before doing any per-step value work — a trace with
+    /// no watchpoints must cost exactly what it cost before
+    /// watchpoints existed.
+    watchpoint_list: Vec<VariableId>,
     /// M10 — buffered tracepoint hits awaiting drain by the DAP
     /// handler.  The handler calls `drain_tracepoint_hits()` after
     /// `step(Action::Continue, ...)` returns and emits one DAP
@@ -1659,6 +1644,58 @@ pub struct MaterializedReplaySession {
     /// is the regression test for this specific trap; it reddens the
     /// moment anyone collapses this field back down to a `bool`.
     breakpoint_suppression: Option<i64>,
+    /// The session's source-reading rule, for the loaders this session
+    /// makes for itself (`load_callstack`, `location_jump`, `jump_to_call`).
+    /// See [`crate::source_access`].
+    source_access: crate::source_access::SourceAccessHandle,
+}
+
+/// The event-log row of a recorded event: its position (`rrEventId`), its tick
+/// and source location, and whether a write is to standard output.
+///
+/// `ct/event-load` (through `MaterializedReplaySession::load_events`) and
+/// `ct/load-terminal` (through the handler's direct scan of the trace's
+/// events) both build their rows here, so the terminal's writes are the event
+/// log's writes whichever request came first
+/// (codetracer-specs `spec/Architecture/CodeTracer-DAP-Extensions.md`,
+/// `ct/load-terminal`).
+pub fn program_event_of_record(reader: &dyn TraceReader, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
+    // I/O can be recorded at a reload annotation. Keep the event at its
+    // execution tick without inventing a source location for that tick.
+    let (path, line) = if let Some(step_record) = reader.step(event_record.step_id) {
+        (
+            reader
+                .workdir()
+                .join(reader.path(step_record.path_id).unwrap_or(""))
+                .display()
+                .to_string(),
+            step_record.line.0,
+        )
+    } else {
+        (NO_PATH.to_string(), NO_POSITION)
+    };
+
+    ProgramEvent {
+        kind: event_record.kind,
+        semantic_kind: String::new(),
+        content: event_record.content.clone(),
+        bytes: event_record.content.len(),
+        rr_event_id: index,
+        direct_location_rr_ticks: event_record.step_id.0,
+        metadata: event_record.metadata.to_string(),
+        // `Write` is standard output and `WriteStderr` standard error
+        // (`spec/Trace-Files/MCR-Event-Log-Stream.md` §2.3). A write to
+        // standard error is terminal output, but not standard output.
+        stdout: event_record.kind != EventLogKind::WriteStderr,
+        event_index: index,
+        tracepoint_result_index: NO_INDEX,
+        high_level_path: path,
+        high_level_line: line,
+        base64_encoded: false,
+        max_rr_ticks: reader.last_step_id().map_or(0, |id| id.0),
+        source_generation: 0,
+        source_digest: String::new(),
+    }
 }
 
 impl MaterializedReplaySession {
@@ -1670,17 +1707,20 @@ impl MaterializedReplaySession {
         // `step_matches_any_tracepoint` is O(1) keyed by `path_id`.
         let mut tracepoint_list: Vec<HashMap<(usize, Option<i64>), DapTracepoint>> = Default::default();
         tracepoint_list.resize_with(reader.path_count(), HashMap::new);
+        let initial_step_id = reader.first_step_id().unwrap_or(StepId(0));
         MaterializedReplaySession {
             reader,
             local_types: Vec::new(),
-            step_id: StepId(0),
+            step_id: initial_step_id,
             call_key: CallKey(0),
             breakpoint_list,
             breakpoint_next_id: 0,
             tracepoint_list,
             tracepoint_next_id: 0,
+            watchpoint_list: Vec::new(),
             pending_tracepoint_hits: Vec::new(),
             breakpoint_suppression: None,
+            source_access: crate::source_access::SourceAccessHandle::default(),
         }
     }
 
@@ -1918,80 +1958,10 @@ impl MaterializedReplaySession {
         }
     }
 
-    #[allow(clippy::expect_used)] // step_id != NO_INDEX guard ensures the id is valid
-    fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
-        let step_id_int = event_record.step_id.0;
-        let (path, line) = if step_id_int != NO_INDEX {
-            let step_record = self
-                .reader
-                .step(event_record.step_id)
-                .expect("to_program_event: invalid step_id");
-            (
-                self.reader
-                    .workdir()
-                    .join(self.reader.path(step_record.path_id).unwrap_or(""))
-                    .display()
-                    .to_string(),
-                step_record.line.0,
-            )
-        } else {
-            (NO_PATH.to_string(), NO_POSITION)
-        };
-
-        let default_step = DbStep {
-            step_id: StepId(0),
-            path_id: PathId(0),
-            line: Line(0),
-            column: None,
-            call_key: CallKey(0),
-            global_call_key: CallKey(0),
-        };
-        let last_step_id = if self.reader.step_count() > 0 {
-            self.reader
-                .step(StepId((self.reader.step_count() - 1) as i64))
-                .unwrap_or(&default_step)
-                .step_id
-        } else {
-            default_step.step_id
-        };
-
-        ProgramEvent {
-            kind: event_record.kind,
-            semantic_kind: String::new(),
-            content: event_record.content.clone(),
-            bytes: event_record.content.len(),
-            rr_event_id: index,
-            direct_location_rr_ticks: step_id_int,
-            metadata: event_record.metadata.to_string(),
-            stdout: true,
-            event_index: index,
-            tracepoint_result_index: NO_INDEX,
-            high_level_path: path,
-            high_level_line: line,
-            base64_encoded: false,
-            max_rr_ticks: last_step_id.0,
-            source_generation: 0,
-            source_digest: String::new(),
-        }
-    }
-
     fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
-        // taking note of db.lines limits: returning a valid step id always
-        if self.reader.step_count() == 0 {
-            return step_index;
-        }
-        if forward {
-            if step_index < self.reader.step_count() - 1 {
-                step_index + 1
-            } else {
-                step_index
-            }
-        } else if step_index > 0 {
-            step_index - 1
-        } else {
-            // auto-returning the same 0 if stepping backwards from 0
-            step_index
-        }
+        self.reader
+            .adjacent_step_id(StepId(step_index as i64), forward)
+            .map_or(step_index, |id| id.0 as usize)
     }
 
     fn step_in(&mut self, forward: bool) -> Result<bool, Box<dyn Error>> {
@@ -2069,6 +2039,29 @@ impl MaterializedReplaySession {
         self.pending_tracepoint_hits.clear();
         let breakpoint_active = !self.breakpoint_list.is_empty();
         let tracepoint_active = self.tracepoint_list.iter().any(|per_path| !per_path.is_empty());
+        let watchpoint_active = !self.watchpoint_list.is_empty();
+
+        // Value-change watchpoints: seed each watched variable's
+        // baseline from the step we are STANDING ON, so the first
+        // change reported is a change relative to what the user can
+        // currently see.
+        //
+        // `scan_steps_from` skips the start step (`.skip(1)`), so
+        // without this seed the first scanned step would have no
+        // predecessor to compare against and either fire spuriously or
+        // be silently skipped.  A variable NOT recorded at the current
+        // step gets no baseline entry; the first step that does record
+        // it establishes one WITHOUT firing — appearing for the first
+        // time is not a value change, and reporting it as one would
+        // stop on entry to every function that declares the name.
+        let mut watched_baseline: HashMap<VariableId, ValueRecord> = HashMap::new();
+        if watchpoint_active {
+            for var in self.reader.variables_at(self.step_id).unwrap_or(&[]) {
+                if self.watchpoint_list.contains(&var.variable_id) {
+                    watched_baseline.insert(var.variable_id, var.value.clone());
+                }
+            }
+        }
 
         // M0/3 — walk the steps after (or before) the current one WITHOUT
         // materializing them.
@@ -2102,14 +2095,23 @@ impl MaterializedReplaySession {
             if tracepoint_active && let Some(h) = self.step_matches_any_tracepoint(step) {
                 pending.push(h);
             }
-            if breakpoint_active {
-                if self.step_matches_any_breakpoint(step) {
-                    hit = Some(step.step_id);
-                    return false;
-                }
+            if breakpoint_active && self.step_matches_any_breakpoint(step) {
+                hit = Some(step.step_id);
+                return false;
+            }
+            // Watchpoints are checked AFTER breakpoints so that a step
+            // satisfying both reports as the breakpoint stop — the
+            // explicit, user-placed stop wins over the derived one.
+            // Either way execution parks on the same step, so the
+            // choice only affects which reason is reported.
+            if watchpoint_active && self.step_changes_any_watched_value(step, &mut watched_baseline) {
+                hit = Some(step.step_id);
+                return false;
+            }
+            if breakpoint_active || watchpoint_active {
                 true
             } else {
-                // Neither list is active: there is nothing to look for, so
+                // No list is active: there is nothing to look for, so
                 // Continue runs to the boundary without inspecting steps.
                 tracepoint_active
             }
@@ -2121,22 +2123,15 @@ impl MaterializedReplaySession {
             return Ok(true);
         }
 
-        // If the continue step doesn't find a valid breakpoint.
-        let step_count = self.reader.step_count();
-        if forward {
-            self.step_id_jump(
-                self.reader
-                    .step(StepId((step_count - 1) as i64))
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            );
+        // An execution boundary can itself be an annotation. Park on the
+        // first/last recorded SOURCE step rather than a numeric slot boundary.
+        let boundary = if forward {
+            self.reader.last_step_id()
         } else {
-            self.step_id_jump(
-                self.reader
-                    .step(StepId(0))
-                    .expect("unexpected 0 steps in trace for step_continue")
-                    .step_id,
-            )
+            self.reader.first_step_id()
+        };
+        if let Some(id) = boundary {
+            self.step_id_jump(id);
         }
         // false: hasn't hit a breakpoint
         Ok(false)
@@ -2215,6 +2210,57 @@ impl MaterializedReplaySession {
     ///   * a `(line, Some(c))` entry is column-aware — fires only when
     ///     the step's recorded `column == Some(c)`.
     ///
+    /// Does `step` change the recorded value of any watched variable?
+    ///
+    /// This is the whole of the value-change watchpoint.  A live
+    /// debugger would trap on a write to an address; a recording has
+    /// no CPU, but it does have what each variable held at each step,
+    /// and "the value is now different from what it was" is what a
+    /// write is observable as in that data.
+    ///
+    /// `baseline` carries the last value seen for each watched
+    /// variable and is updated in place as the scan walks forward.
+    /// Two rules make the result honest:
+    ///
+    ///   * A variable appearing for the FIRST time (no baseline entry)
+    ///     establishes its baseline WITHOUT firing.  Coming into scope
+    ///     is not a value change; firing on it would stop on entry to
+    ///     every call that declares the name, which is noise the user
+    ///     cannot distinguish from a real write.
+    ///
+    ///   * A step that does not record the variable at all leaves the
+    ///     baseline untouched.  The variable is out of scope there,
+    ///     not changed to nothing — dropping the baseline would make
+    ///     the next step that records it fire spuriously on re-entry.
+    ///
+    /// Comparison is `ValueRecord`'s structural `PartialEq`, so a
+    /// compound value that is rebuilt with identical contents does not
+    /// count as a change.  That is the behaviour a user watching a
+    /// value wants; a user watching an *address* would want the
+    /// opposite, and this backend cannot offer that — see
+    /// `ct_data_breakpoints::DataBreakpointRefusal` for what the
+    /// recording genuinely cannot answer.
+    fn step_changes_any_watched_value(&self, step: &DbStep, baseline: &mut HashMap<VariableId, ValueRecord>) -> bool {
+        let mut changed = false;
+        for var in self.reader.variables_at(step.step_id).unwrap_or(&[]) {
+            if !self.watchpoint_list.contains(&var.variable_id) {
+                continue;
+            }
+            match baseline.get(&var.variable_id) {
+                Some(previous) if *previous != var.value => {
+                    baseline.insert(var.variable_id, var.value.clone());
+                    changed = true;
+                }
+                Some(_) => {}
+                None => {
+                    // First sighting: establish the baseline silently.
+                    baseline.insert(var.variable_id, var.value.clone());
+                }
+            }
+        }
+        changed
+    }
+
     /// When BOTH a line-only slot AND a column-aware slot would match
     /// the same step, the column-aware slot wins — it carries more
     /// specific information, so its `log_message` is the more
@@ -2388,7 +2434,8 @@ impl MaterializedReplaySession {
     /// meant "one of the versions, chosen by the map's insertion order". The
     /// callers below each state which they want.
     fn load_path_ids(&self, path: &str) -> Vec<PathId> {
-        self.reader.fuzzy_path_ids_for(path)
+        self.reader
+            .fuzzy_path_ids_for_under(path, self.source_access.get().host_reads)
     }
 
     /// The NEWEST version `path` resolves to — the file's current content.
@@ -2416,22 +2463,122 @@ impl MaterializedReplaySession {
     /// `start`"), when the program's own first step lies in a call nested
     /// inside it (Python's module frame, JavaScript's `<module>`).
     ///
-    /// A root whose next step is its OWN is not a wrapper: several recorders
-    /// (Fuel, Cardano, …) merge the program's entry function into
-    /// `<toplevel>`, so the root's steps ARE the program's body and its first
-    /// nested call is a helper the body calls later. Skipping such a root
-    /// would open the recording inside that helper, past the body's opening
-    /// lines.
+    /// ## The rule
+    ///
+    /// Walking forward from the root's entry step, the root is a wrapper when
+    /// the first step that belongs to ANOTHER call is reached before the root
+    /// has executed anything of its own — when every root step on the way is
+    /// only positioning:
+    ///
+    /// * an exec record with no source position (`line < 1`; source lines
+    ///   are 1-based), or
+    /// * a step at the entry step's own `(path, line)`, when that is also the
+    ///   definition `(path, line)` of the call that then opens.
+    ///
+    /// Positionless exec records need the first bullet because they DO
+    /// occupy step ids: the CTFS execution stream indexes every record, not
+    /// only steps, and the other streams are indexed by it
+    /// (`ct_reader_step_count` is the exec-record count,
+    /// `ct_reader_logical_step_count` the step-record count). The CTFS reader
+    /// surfaces each such record as a `DbStep` in the frame that was active,
+    /// without a source position (measured: a `ThreadStart` right after the
+    /// entry step reads back as `line 0, column None` in `<toplevel>`). The
+    /// JavaScript recorder emits exactly that `ThreadStart`: its
+    /// async-context tracker announces the main thread when recording is
+    /// enabled.
+    ///
+    /// The second bullet exists because a real JavaScript recording does not
+    /// go from the entry step straight into `<module>`: the recorder emits a
+    /// step at the CALLEE's definition position, in the caller's frame, right
+    /// before every `Call` (codetracer-js-recorder `recorder_native`, "Anchor
+    /// the call entry on the function's DEFINITION line"), and it hands
+    /// `start` the position of that first step. So the anchor before
+    /// `<module>` repeats the entry position, 1:1, which is also where
+    /// `<module>` is defined. A rule that looked only at the step right after
+    /// the entry step found a root step there (the thread record, and behind
+    /// it the anchor), called the root a body carrier, and the recording
+    /// opened on `<toplevel>`. From there the first step over, by line or by
+    /// statement, stepped over the whole module (codetracer-pm issue
+    /// `2026-09-26-js-statement-and-formatted-view-stepping-fails-on-real-recordings`).
+    ///
+    /// ## What is not a wrapper
+    ///
+    /// Any other root step is the root executing its own body, so the root is
+    /// not a wrapper. Several recorders merge the program's entry function
+    /// into `<toplevel>` (Fuel, Cardano, EVM's absorbed first internal call),
+    /// so the root's steps ARE the program's body and its first nested call
+    /// is a helper the body calls. Skipping such a root would open the
+    /// recording inside that helper, past the body's opening lines. Both
+    /// halves of the second bullet guard that: the body may start on the
+    /// entry line and call a helper defined elsewhere, and the EVM recorder
+    /// defines each external call's function at the CALLER's line, so a body
+    /// that ran a single line before an external call stands at the
+    /// definition position of the call that opens. A root with no nested
+    /// call at all (root-only recordings) is the entry by definition.
+    ///
+    /// The rule is stated in `codetracer-trace-format-spec`
+    /// `recorded-entry-identity.md`, "Legacy entry selection", which replay
+    /// preserves for recordings without an `entry.dat` member.
+    ///
+    /// ## Cost
+    ///
+    /// The walk is bounded: it stops at the first step of another call, at
+    /// the first root step away from the entry position, or after
+    /// [`MAX_ROOT_ANCHOR_STEPS`] root steps. So it visits a handful of steps
+    /// through `scan_steps_from` and never builds the step table (M0/3).
     fn is_wrapping_toplevel_root(&self, call: &DbCall) -> bool {
-        call.key == CallKey(0)
-            && self
+        /// More positioning steps than any recorder emits before the
+        /// program's frame opens (the JavaScript recorder emits two: the
+        /// thread record and the anchor). A root still positioning after this
+        /// many steps is executing a body, and is not a wrapper.
+        const MAX_ROOT_ANCHOR_STEPS: usize = 8;
+
+        if call.key != CallKey(0)
+            || self
                 .reader
                 .function(call.function_id)
-                .is_some_and(|function| function.name == TOP_LEVEL_FUNCTION_NAME)
-            && self
-                .reader
-                .step(StepId(call.step_id.0 + 1))
-                .is_some_and(|next| next.call_key != call.key)
+                .is_none_or(|function| function.name != TOP_LEVEL_FUNCTION_NAME)
+        {
+            return false;
+        }
+        let Some(entry) = self.reader.step(call.step_id) else {
+            return false;
+        };
+        let entry_position = (entry.path_id, entry.line);
+
+        // Whether a root step repeated the entry position. Such a step is an
+        // anchor only if the call that opens next is defined there, which is
+        // known at the first step outside the root, so it is judged there.
+        let mut anchored = false;
+        let mut root_steps = 0usize;
+        let mut wraps = false;
+        self.reader.scan_steps_from(call.step_id, true, &mut |step: &DbStep| {
+            if step.call_key != call.key {
+                let opened_definition = self
+                    .reader
+                    .call(step.call_key)
+                    .and_then(|opened| self.reader.function(opened.function_id))
+                    .map(|function| (function.path_id, function.line));
+                wraps = !anchored || opened_definition == Some(entry_position);
+                return false;
+            }
+            root_steps += 1;
+            if root_steps > MAX_ROOT_ANCHOR_STEPS {
+                return false;
+            }
+            if step.line.0 < 1 {
+                // A positionless exec record (a thread record, …): it
+                // executes nothing of the root's.
+                return true;
+            }
+            if (step.path_id, step.line) != entry_position {
+                // The root is executing its own body: stop early.
+                return false;
+            }
+            anchored = true;
+            true
+        });
+        wraps
     }
 
     /// The program's entry call: the first call in user source that is not
@@ -2461,8 +2608,15 @@ impl MaterializedReplaySession {
     }
 
     fn first_executable_step_for_call(&self, call: &DbCall) -> StepId {
+        let source_entry = self
+            .reader
+            .step(call.step_id)
+            .map(|step| step.step_id)
+            .or_else(|| self.reader.adjacent_step_id(call.step_id, true))
+            .or_else(|| self.reader.first_step_id())
+            .unwrap_or(StepId(0));
         let Some(function) = self.reader.function(call.function_id) else {
-            return call.step_id;
+            return source_entry;
         };
         let function_path = self.reader.path(function.path_id).unwrap_or("");
         let function_line = function.line.0;
@@ -2507,13 +2661,13 @@ impl MaterializedReplaySession {
         }
 
         if function_line <= 0 {
-            return call.step_id;
+            return source_entry;
         }
 
         find_first(&|step: &DbStep| {
             step.call_key == call.key && step.path_id == function.path_id && step.line.0 >= function_line
         })
-        .unwrap_or(call.step_id)
+        .unwrap_or(source_entry)
     }
 }
 
@@ -2522,8 +2676,8 @@ impl ReplaySession for MaterializedReplaySession {
         info!("load_location: db replay");
         // Event-only traces (e.g. Stylus) have no steps — return a default location
         // so the DAP server can still initialize and serve event data.
-        if self.reader.step_count() == 0 {
-            info!("  no steps in trace, returning default location");
+        if self.reader.first_step_id().is_none() {
+            info!("  no source steps in trace, returning default location");
             return Ok(Location::default());
         }
         let call_key = self.reader.call_key_for_step(self.step_id).unwrap_or(CallKey(0));
@@ -2554,10 +2708,11 @@ impl ReplaySession for MaterializedReplaySession {
             let entry_step = self
                 .first_user_call()
                 .map(|call| self.first_executable_step_for_call(call))
+                .or_else(|| self.reader.first_step_id())
                 .unwrap_or(StepId(0));
             self.step_id_jump(entry_step);
-        } else if self.reader.step_count() > 0 {
-            self.step_id_jump(StepId(0));
+        } else if let Some(first) = self.reader.first_step_id() {
+            self.step_id_jump(first);
         }
         Ok(())
     }
@@ -2568,7 +2723,7 @@ impl ReplaySession for MaterializedReplaySession {
         let mut contents: String = "".to_string();
 
         for (i, event_record) in self.reader.events().iter().enumerate() {
-            let mut event = self.to_program_event(event_record, i);
+            let mut event = program_event_of_record(self.reader.as_ref(), event_record, i);
             event.content = event_record.content.to_string();
             events.push(event.clone());
             if i < 20 {
@@ -2784,7 +2939,7 @@ impl ReplaySession for MaterializedReplaySession {
                 .step(step_id)
                 .ok_or_else(|| format!("load_callstack: invalid step_id {:?}", step_id))?;
             let mut call_key = current_step.call_key;
-            let mut expr_loader = ExprLoader::new(CoreTrace::default());
+            let mut expr_loader = ExprLoader::with_source_access(CoreTrace::default(), self.source_access.clone());
 
             while call_key != NO_KEY {
                 let call_record = self
@@ -2820,17 +2975,35 @@ impl ReplaySession for MaterializedReplaySession {
             .expect("load_history: invalid step_id")
             .call_key;
 
+        // THE HISTORY IS THE CURRENT CALL'S, so only the call's own steps are
+        // read: from its first step until the call returns — the first step
+        // that belongs to neither the call nor a call it made. This used to
+        // walk every step of the recording to find them.
+        let (first_step, call_depth) = match self.reader.call(current_call_key) {
+            Some(call) => (call.step_id.0.max(0) as usize, call.depth),
+            None => (0, 0),
+        };
         let step_count = self.reader.step_count();
-        for step_idx in 0..step_count {
+        // The last value kept, serialised: a step is an entry of the history
+        // only when the value DIFFERS from the previous entry's.
+        let mut last_kept: Option<String> = None;
+        for step_idx in first_step..step_count {
             let sid = StepId(step_idx as i64);
-            let step = *self.reader.step(sid).expect("load_history: step out of range");
-            // for now limit to current call: seems most correct
-            // TODO: hopefully a more reliable value history for global search
-            info!(
-                "step call key {:?} current call key {:?}",
-                step.call_key, current_call_key
-            );
-            if step.call_key == current_call_key {
+            let Some(step) = self.reader.step(sid).copied() else {
+                continue;
+            };
+            if step.call_key != current_call_key {
+                let inside = self
+                    .reader
+                    .call(step.call_key)
+                    .map(|c| c.depth > call_depth)
+                    .unwrap_or(false);
+                if inside {
+                    continue;
+                }
+                break;
+            }
+            {
                 let var_list = self.reader.variables_at(sid).unwrap_or(&[]);
                 if let Some(var) = var_list
                     .iter()
@@ -2854,24 +3027,19 @@ impl ReplaySession for MaterializedReplaySession {
                     // anything about the recorded program's timeline.
                     let time_seconds = crate::wall_clock::unix_seconds();
                     let value_with_record = self.to_value_record_with_type(&var.value);
-                    if history_results.len() > 1 {
-                        if true {
-                            // TODO: partial eq or directly other way? history_results[history_results.len() - 1].value != ct_value {
-                            history_results.push(HistoryResultWithRecord {
-                                location: step_location.clone(),
-                                value: value_with_record,
-                                time: time_seconds,
-                                description: self.id_to_name(var.variable_id).to_string(),
-                            });
-                        }
-                    } else {
-                        history_results.push(HistoryResultWithRecord {
-                            location: step_location.clone(),
-                            value: value_with_record,
-                            time: time_seconds,
-                            description: self.id_to_name(var.variable_id).to_string(),
-                        });
+                    // ONLY WHEN THE VALUE CHANGED: a step that leaves the
+                    // variable as it was is not an entry of its history.
+                    let serialised = serde_json::to_string(&value_with_record).unwrap_or_default();
+                    if last_kept.as_deref() == Some(serialised.as_str()) {
+                        continue;
                     }
+                    last_kept = Some(serialised);
+                    history_results.push(HistoryResultWithRecord {
+                        location: step_location.clone(),
+                        value: value_with_record,
+                        time: time_seconds,
+                        description: self.id_to_name(var.variable_id).to_string(),
+                    });
                 }
             }
         }
@@ -2880,13 +3048,16 @@ impl ReplaySession for MaterializedReplaySession {
     }
 
     fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        if self.reader.step(step_id).is_none() {
+            return Err(format!("execution index {} is not a source step", step_id.0).into());
+        }
         self.step_id = step_id;
         Ok(true)
     }
 
     fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
         self.jump_to(StepId(location.rr_ticks.0))?;
-        let mut expr_loader = ExprLoader::new(CoreTrace::default());
+        let mut expr_loader = ExprLoader::with_source_access(CoreTrace::default(), self.source_access.clone());
         let location = self.load_location(&mut expr_loader)?;
         self.step_id = StepId(location.rr_ticks.0);
         Ok(())
@@ -3055,6 +3226,50 @@ impl ReplaySession for MaterializedReplaySession {
         Ok(true)
     }
 
+    /// The materialised session is the one backend that DOES keep a
+    /// per-step value table — `variables_at(step)` is exactly that —
+    /// so it is the one backend that can answer a value-change
+    /// watchpoint.
+    fn has_per_step_values(&self) -> bool {
+        true
+    }
+
+    fn knows_variable(&self, name: &str) -> bool {
+        self.reader.variable_id_for(name).is_some()
+    }
+
+    /// Install the watchpoint set, replacing any previous one (DAP
+    /// `setDataBreakpoints` replace semantics).
+    ///
+    /// Names are resolved to `VariableId`s here, once, rather than
+    /// compared as strings during the Continue scan: `variable_id_for`
+    /// walks the interning table, and doing that per step per
+    /// watchpoint would make Continue quadratic in the trace length.
+    ///
+    /// A name that fails to resolve is a caller error, not a user
+    /// error — `ct_data_breakpoints::verdict` has already rejected
+    /// unknown names with `VariableNotInTrace` before anything reaches
+    /// here — so it is reported rather than skipped.  Skipping is how
+    /// a watchpoint comes to be registered, reported `verified`, and
+    /// never fire.
+    fn set_watchpoints(&mut self, names: Vec<String>) -> Result<(), Box<dyn Error>> {
+        let mut resolved = Vec::with_capacity(names.len());
+        for name in &names {
+            match self.reader.variable_id_for(name) {
+                Some(id) => resolved.push(id),
+                None => {
+                    return Err(format!(
+                        "watchpoint on `{name}` was admitted but its variable id could not be resolved; \
+                         the admission rules and the trace's name table disagree"
+                    )
+                    .into());
+                }
+            }
+        }
+        self.watchpoint_list = resolved;
+        Ok(())
+    }
+
     /// M10 — drain and return the buffered tracepoint hits collected
     /// during the last `step(Action::Continue, ...)` traversal.  The
     /// caller (the DAP handler) emits one `output` event per hit and
@@ -3077,7 +3292,7 @@ impl ReplaySession for MaterializedReplaySession {
             .ok_or_else(|| format!("jump_to_call: invalid call_key {:?}", call_key))?
             .step_id;
         self.jump_to(first_call_step_id)?;
-        let mut expr_loader = ExprLoader::new(CoreTrace::default());
+        let mut expr_loader = ExprLoader::with_source_access(CoreTrace::default(), self.source_access.clone());
         self.load_location(&mut expr_loader)
     }
 
@@ -3109,6 +3324,10 @@ impl ReplaySession for MaterializedReplaySession {
         _lang: Lang,
     ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         Err("tracepoint call expressions are not supported for db traces".into())
+    }
+
+    fn set_source_access(&mut self, source_access: crate::source_access::SourceAccessHandle) {
+        self.source_access = source_access;
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
@@ -3310,12 +3529,15 @@ impl MaterializedReplaySession {
                 }
                 // Spec §5.3.1 step 3: verify per-path source digest. We
                 // only check digests for paths whose origin was the
-                // filesystem (bundled paths are immune per spec).
+                // filesystem (bundled paths are immune per spec). The
+                // token is client data, so its paths are read under the
+                // session's source rule: with host reads off, only the
+                // recording's own copy, never the named host file.
                 for digest in &token.source_digests {
                     if digest.origin == SourceOriginKind::Filesystem {
-                        let current = match std::fs::read(&digest.path) {
-                            Ok(bytes) => sha256_hex(&bytes),
-                            Err(_) => continue,
+                        let current = match expr_loader.token_digest_bytes(Path::new(&digest.path)) {
+                            Some(bytes) => sha256_hex(&bytes),
+                            None => continue,
                         };
                         if current != digest.sha256_hex {
                             return Err(OriginError::new(
@@ -3555,7 +3777,7 @@ impl MaterializedReplaySession {
                 }
             };
             let path_str = self.reader.path(step_record.path_id).unwrap_or("").to_string();
-            let probe_path = source_probe_path(self.reader.workdir(), &path_str);
+            let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
             // Spec §6.1.0 monotonicity: `last_change_step` is the step at
             // which the post-write value first becomes observable in
             // `Db.variables`. For recorders that snapshot variables
@@ -3665,7 +3887,13 @@ impl MaterializedReplaySession {
             // token. Bundled paths get the bundled digest; filesystem
             // paths get the on-disk digest.
             if !path_str.is_empty() && source_origin != SourceOrigin::Unavailable {
-                track_source_digest(&mut source_digests, &probe_path, source_origin, meta_dat_sources_root);
+                track_source_digest(
+                    &mut source_digests,
+                    &probe_path,
+                    source_origin,
+                    meta_dat_sources_root,
+                    expr_loader,
+                );
             }
 
             if let Some(record) =
@@ -4280,7 +4508,7 @@ impl MaterializedReplaySession {
             return None;
         }
         let path_str = self.reader.path(step.path_id)?.to_string();
-        let probe_path = source_probe_path(self.reader.workdir(), &path_str);
+        let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
         let row = step.line.0.max(0) as usize;
         let (line_text, origin) = expr_loader.get_source_line_v2(
             &probe_path,
@@ -4309,11 +4537,12 @@ impl MaterializedReplaySession {
         while step_id >= 0 {
             let sid = StepId(step_id);
             let Some(step) = self.reader.step(sid).copied() else {
-                break;
+                step_id -= 1;
+                continue;
             };
             if step.call_key == caller_frame {
                 let path_str = self.reader.path(step.path_id)?.to_string();
-                let probe_path = source_probe_path(self.reader.workdir(), &path_str);
+                let probe_path = expr_loader.source_probe_path(self.reader.workdir(), &path_str);
                 let row = step.line.0.max(0) as usize;
                 let (line_text, origin) = expr_loader.get_source_line_v2(
                     &probe_path,
@@ -4483,7 +4712,7 @@ impl MaterializedReplaySession {
             if classifier_lang_for_path(path_str) != Some(ClassifierLang::Ruby) {
                 return None;
             }
-            let probe_path = source_probe_path(self.reader.workdir(), path_str);
+            let probe_path = expr_loader.source_probe_path(self.reader.workdir(), path_str);
             let row = step.line.0.max(0) as usize;
             let (line_text, origin) = expr_loader.get_source_line_v2(
                 &probe_path,
@@ -4757,23 +4986,20 @@ fn track_source_digest(
     probe_path: &Path,
     origin: SourceOrigin,
     meta_dat_sources_root: Option<&Path>,
+    expr_loader: &ExprLoader,
 ) {
     let path_str = probe_path.to_string_lossy().to_string();
     if digests.iter().any(|d| d.path == path_str) {
         return;
     }
-    let (origin_kind, digest_path) = match origin {
-        SourceOrigin::BundledMetaData => match meta_dat_sources_root {
-            Some(root) => (
-                SourceOriginKind::BundledMetaData,
-                root.join(probe_path.strip_prefix("/").unwrap_or(probe_path)),
-            ),
-            None => (SourceOriginKind::BundledMetaData, probe_path.to_path_buf()),
-        },
-        SourceOrigin::Filesystem => (SourceOriginKind::Filesystem, probe_path.to_path_buf()),
-        SourceOrigin::Unavailable => (SourceOriginKind::Unavailable, probe_path.to_path_buf()),
+    let origin_kind = match origin {
+        SourceOrigin::BundledMetaData => SourceOriginKind::BundledMetaData,
+        SourceOrigin::Filesystem => SourceOriginKind::Filesystem,
+        SourceOrigin::Unavailable => SourceOriginKind::Unavailable,
     };
-    if let Ok(bytes) = std::fs::read(&digest_path) {
+    // The loader decides which bytes stand for the line: with host reads
+    // off it never reads the recorded path on this host, not even to hash it.
+    if let Some(bytes) = expr_loader.source_digest_bytes(probe_path, origin, meta_dat_sources_root) {
         digests.push(SourceDigest {
             path: path_str,
             origin: origin_kind,
@@ -5654,8 +5880,10 @@ mod jump_destination_tests {
             StepId(7)
         );
 
-        // `isonim_calltrace_view`'s search result — `{rrTicks}` and nothing
-        // else.  The minimum a jump payload may be, and it must still pass.
+        // `{rrTicks}` and nothing else — what `isonim_calltrace_view`'s search
+        // result sent until codetracer#860 (it now sends `doubleClickEntry`'s
+        // full payload, through the same `calltraceJumpArgs`).  The minimum a
+        // jump payload may be, and it must still pass.
         assert_eq!(
             destination_of_guarded_dispatch("ct/calltrace-jump", &json!({ "rrTicks": 14 }), 1),
             StepId(14),

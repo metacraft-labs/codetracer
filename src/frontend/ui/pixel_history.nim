@@ -10,12 +10,11 @@ import
 import std/options
 import isonim/core/signals
 import isonim/web/dom_api as dom_api
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 
 var pixelHistoryVMInstance: PixelHistoryVM
-var pixelHistoryComponentRef: PixelHistoryComponent
-var isoNimPixelHistoryMounted*: bool = false
-
-proc refreshMountedPixelHistoryPanel()
 
 proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   if not pixelHistoryVMInstance.isNil:
@@ -24,9 +23,6 @@ proc initPixelHistoryVM(store: ReplayDataStore = nil) =
   pixelHistoryVMInstance = createPixelHistoryVM(
     createInactiveVisualReplayClient(""),
     store)
-  pixelHistoryVMInstance.onHistoryLoaded =
-    proc(entryCount: int; error: string; loading: bool) =
-      refreshMountedPixelHistoryPanel()
   pixelHistoryVMInstance.onEntrySelected =
     proc(entry: VisualReplayPixelHistoryEntry) =
       if pixelHistoryVMInstance.selectedPixel.val.isSome:
@@ -48,58 +44,16 @@ proc loadPixelHistoryFromFrameViewer*(x, y, frame: int) =
   if not pixelHistoryVMInstance.isNil:
     pixelHistoryVMInstance.loadPixelHistory(x, y, frame)
 
-proc tryMountIsoNimPixelHistoryPanel*(component: PixelHistoryComponent = nil) =
-  if not component.isNil and pixelHistoryComponentRef.isNil:
-    pixelHistoryComponentRef = component
-  if pixelHistoryVMInstance.isNil:
+# The panel host mounts the pane into the container GoldenLayout creates
+# (`ui/panel_host`); its view follows the ViewModel reactively, so nothing
+# here re-mounts it when a history loads.
+setPanelRenderer(Content.PixelHistory,
+  proc(r: WebRenderer; host: dom_api.Element;
+       session: SessionViewModel): dom_api.Element =
     initPixelHistoryVM()
-  if isoNimPixelHistoryMounted or pixelHistoryVMInstance.isNil:
-    return
-  if pixelHistoryComponentRef.isNil:
-    return
-
-  let key = cstring("pixelHistoryComponent-" & $pixelHistoryComponentRef.id)
-  var retryCount = 0
-  proc doMount() =
-    if isoNimPixelHistoryMounted:
-      return
-    retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimPixelHistoryPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimPixelHistoryMounted = true
-    try:
-      mountIsoNimPixelHistory(container, pixelHistoryVMInstance)
-    except:
-      cerror "tryMountIsoNimPixelHistoryPanel: mount EXCEPTION: " &
-        getCurrentExceptionMsg()
-
-  doMount()
-
-proc refreshMountedPixelHistoryPanel() =
-  if not isoNimPixelHistoryMounted or pixelHistoryComponentRef.isNil or
-      pixelHistoryVMInstance.isNil:
-    return
-  let key = cstring("pixelHistoryComponent-" & $pixelHistoryComponentRef.id)
-  let container = dom_api.getElementById(dom_api.document, key)
-  if dom_api.isNodeNil(dom_api.Node(container)):
-    return
-
-  let containerNode = dom_api.Node(container)
-  while not dom_api.isNodeNil(containerNode.firstChild):
-    discard dom_api.removeChild(containerNode, containerNode.firstChild)
-  mountIsoNimPixelHistory(container, pixelHistoryVMInstance)
+    renderPixelHistoryPanel[WebRenderer, dom_api.Element](
+      r, pixelHistoryVMInstance))
 
 method register*(self: PixelHistoryComponent, api: MediatorWithSubscribers) =
   self.api = api
   initPixelHistoryVM()
-  tryMountIsoNimPixelHistoryPanel(self)

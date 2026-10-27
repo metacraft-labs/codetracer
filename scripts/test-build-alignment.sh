@@ -20,7 +20,12 @@
 # hold recording stubs for every external command they reach for — `tup`,
 # `webpack`, `livereload`, `repro`, `runquotad`, `nix`, `uname`, and the
 # in-repo helper scripts. Each stub appends `name<TAB>cwd<TAB>argv` to a trace
-# file and exits 0. The assertions are then made against the TRACES: what ran,
+# file and exits 0. Tup's init stub also creates the local database that the
+# real command creates, so the ancestor-project guard remains exercised.
+# The sourced freshness helper records the stamp call without hashing a build
+# that recording stubs deliberately do not produce. These stubs isolate build
+# orchestration from compilation, daemons, and tool provisioning.
+# The assertions are then made against the TRACES: what ran,
 # with which arguments, in which order. Nothing is asserted by grepping source,
 # so a refactor that preserves behaviour keeps passing and a behaviour change
 # that preserves the source text still fails.
@@ -78,9 +83,9 @@ fail() {
 # ---------------------------------------------------------------------------
 
 # Every external command the two scripts invoke, replaced by a stub that
-# records the call. `uname` and `runquotad` need behaviour beyond recording and
+# records the call. `tup`, `uname` and `runquotad` need behaviour beyond recording and
 # are written separately below.
-STUB_COMMANDS=(tup repro nix xcrun node npm npx)
+STUB_COMMANDS=(repro nix xcrun node npm npx)
 # In-repo helper scripts that do real work we neither want nor need here. They
 # are still exercised as CALLS: each records into the trace, so the assertions
 # can require that `build.sh` reaches all of them.
@@ -121,6 +126,28 @@ make_sandbox() {
 	for name in "${STUB_HELPER_SCRIPTS[@]}"; do
 		write_recording_stub "$sandbox/scripts/$name" "${name%.sh}"
 	done
+
+	# A successful init must leave its database in the command's cwd. Do not
+	# pre-create it: each fresh checkout must exercise build-once's bootstrap.
+	cat >"$sandbox/bin/tup" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\t%s\t%s\n' 'tup' "$PWD" "$*" >>"$CT_ALIGN_TRACE"
+if [ "${1:-}" = "init" ]; then
+	mkdir -p .tup
+	: >.tup/db
+fi
+EOF
+	chmod +x "$sandbox/bin/tup"
+
+	# This helper is sourced, so it must provide the function build-once calls
+	# rather than be an executable stub. Its output depends on real build files.
+	mkdir -p "$sandbox/ci/lib"
+	cat >"$sandbox/ci/lib/build-freshness.sh" <<'EOF'
+bf_electron_write_stamp() {
+	printf '%s\t%s\t%s\n' 'bf_electron_write_stamp' "$PWD" "$*" >>"$CT_ALIGN_TRACE"
+}
+EOF
 
 	# `uname -s` drives the host branch in build-once.sh; overriding it on PATH
 	# is what lets one Linux machine exercise the Darwin and Windows branches.
@@ -227,7 +254,7 @@ run_script() {
 
 # ---------------------------------------------------------------------------
 # Trace helpers. Comparisons use `name<TAB>argv`; the cwd column is recorded
-# for debugging but deliberately not asserted on.
+# for debugging, and asserted for Tup's local-database bootstrap.
 # ---------------------------------------------------------------------------
 
 # `name<TAB>argv`, with the per-run volatile tokens folded away so two runs of
@@ -246,7 +273,17 @@ run_script() {
 # for as long as the socket path has had its current shape. Leave it unanchored
 # so the next relocation cannot silently do it again.
 normalized() {
-	cut -f1,3 <"$1" | sed -E 's#(codetracer-reprobuild-)[0-9]+#\1<pid>#g'
+	# The stamp helper receives absolute repo paths, which differ between the
+	# independent sandboxes. Fold only its own cwd to a common root token;
+	# paths outside that root still compare literally and reveal a wrong call.
+	awk -F'\t' '
+		$1 == "bf_electron_write_stamp" {
+			while ((pos = index($3, $2)) > 0) {
+				$3 = substr($3, 1, pos - 1) "<repo>" substr($3, pos + length($2))
+			}
+		}
+		{ print $1 "\t" $3 }
+	' "$1" | sed -E 's#(codetracer-reprobuild-)[0-9]+#\1<pid>#g'
 }
 names() { cut -f1 <"$1"; }
 
@@ -267,6 +304,32 @@ count_records() {
 
 argv_of() {
 	awk -F'\t' -v name="$2" '$1 == name { print $3 }' "$1"
+}
+
+# A fresh sandbox must exercise the local-database bootstrap, not inherit a
+# project from an ancestor or merely record init without creating its result.
+# Check both build passes as well: init alone must not stand in for a build.
+assert_local_tup_database() {
+	local trace="$1" sandbox="$2" label="$3"
+	if [ -f "$sandbox/src/.tup/db" ] && awk -F'\t' -v src="$sandbox/src" '
+		$1 == "tup" {
+			if ($2 != src) { invalid = 1 }
+			if ($3 == "init --force") {
+				if (builds) { invalid = 1 }
+				inits++
+			} else if ($3 ~ /^build-/) {
+				if (inits != 1) { invalid = 1 }
+				builds++
+			}
+		}
+		END { exit !(inits == 1 && builds == 2 && !invalid) }
+	' "$trace"; then
+		pass "$label initialises src/.tup/db before both Tup build passes"
+	else
+		fail "$label initialises src/.tup/db before both Tup build passes" \
+			"expected one 'tup init --force' followed by two variant passes in $sandbox/src, with a local database
+$(awk -F'\t' '$1 == "tup" { print }' "$trace")"
+	fi
 }
 
 # Assert that every record of $1 appears in $2 in the same relative order.
@@ -362,6 +425,11 @@ run_scenario() {
 	build_status="$(run_script build.sh "$build_trace" \
 		"$WORK_ROOT/$label-build" "$uname_s" "$port" \
 		${scenario_env[@]+"${scenario_env[@]}"})"
+
+	if [ "$expected_branch" = "tup" ]; then
+		assert_local_tup_database "$once_trace" "$WORK_ROOT/$label-once" "build-once.sh"
+		assert_local_tup_database "$build_trace" "$WORK_ROOT/$label-build" "build.sh"
+	fi
 
 	if [ "$once_status" != "0" ]; then
 		fail "build-once.sh exits 0" "exit status $once_status

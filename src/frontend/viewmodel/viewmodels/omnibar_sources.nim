@@ -8,8 +8,8 @@
 ##
 ##   * FILES: every file of the recording's source tree, as the Files pane
 ##     lists it (`FilesystemVM.rootEntry`, the desktop's replay Files pane);
-##   * SYMBOLS: every distinct function of the call-trace section the store
-##     holds (`store.calltrace.lines`), located at its call's file and line;
+##   * SYMBOLS: every function the recording called (`store.symbols`, the
+##     engine's `ct/load-symbols`), located where it is defined;
 ##   * COMMANDS: every enabled action item of the menu, labelled by its menu
 ##     path, with the chord the active keymap binds — choosing one runs the
 ##     menu item, so the omnibar and the menu are two ways into one command
@@ -21,10 +21,12 @@ import isonim/core/signals
 
 import ../store/[replay_data_store, types]
 import ./[filesystem_vm, layout_settings, menu_vm, omnibar_vm]
+import ../keymap/keymap_selection
 
 export layout_settings
 from ./event_log_vm import EventLogColumn, eventLogColumnTitle,
   parseEventLogColumn
+from ./table_overflow import ColumnStepCells
 
 export omnibar_vm
 
@@ -43,24 +45,19 @@ proc filesOf*(fs: FilesystemVM): seq[OmnibarEntry] =
   walk(fs.rootEntry.val, result, seen)
 
 proc symbolsOf*(store: ReplayDataStore): seq[OmnibarEntry] =
+  ## Every function the recording called — the engine's list, not the
+  ## call-trace section the store happens to hold, so a function outside the
+  ## pane's window is found too.
   if store.isNil:
     return
-  var seen = initHashSet[string]()
-  for line in store.calltrace.lines.val:
-    let name = if line.displayName.len > 0: line.displayName else: line.name
-    if name.len == 0 or name in seen:
-      continue
-    seen.incl name
+  for sym in store.symbols.val:
     let where =
-      if line.location.file.len > 0:
-        line.location.file & ":" & $line.location.line
+      if sym.path.len > 0: sym.path.split('/')[^1] & ":" & $sym.line
       else: ""
-    # CHOOSING A SYMBOL GOES TO ITS CALL: the target is the call's tick, so
-    # every front-end navigates the same way (in time, to the first call the
-    # held section shows), whatever each can do with a file location.
-    result.add OmnibarEntry(kind: omSymbol, label: name,
-                            detail: where.split('/')[^1],
-                            target: $line.rrTicks)
+    # CHOOSING A SYMBOL GOES TO ITS FIRST CALL: the target is that call's
+    # tick, so every front-end navigates the same way, in time.
+    result.add OmnibarEntry(kind: omSymbol, label: sym.name, detail: where,
+                            target: $sym.firstCallTicks)
 
 proc commandsOf*(menu: MenuVM): seq[OmnibarEntry] =
   if menu.isNil:
@@ -117,26 +114,100 @@ proc parseEventLogColumnCommand*(target: string):
     return (false, "", EventLogColumn.low)
   (true, rest[0], col)
 
-proc layoutSettingCommands*(): seq[OmnibarEntry]
+const
+  OperationCommandPrefix* = "operation:"
+    ## PLAT-70 Part B: a palette entry that runs a catalogued OPERATION —
+    ## `operation:list.show-detail`, `operation:table.resize-column(+2)` — so
+    ## the palette reaches what no base binds a chord to (Input-Routing IR-2).
+  ShowDetailLabel* = "Show Detail"
+  WidenColumnLabel* = "Widen Column"
+  NarrowColumnLabel* = "Narrow Column"
+  ColumnWidthVerb* = "column-width"
+    ## Horizontal-Overflow.md §5.2: `:column-width <title> <cells>`, beside
+    ## the `:column-*` verbs.
+
+proc tableCommands*(): seq[OmnibarEntry] =
+  ## THE TABLE PANES' PALETTE ENTRIES (Horizontal-Overflow.md §5.2, §5.3):
+  ## **Show Detail** (`list.show-detail`) and **Widen Column** /
+  ## **Narrow Column** (`table.resize-column`) for the focused column.
+  result.add OmnibarEntry(kind: omCommand, label: ShowDetailLabel,
+                          target: OperationCommandPrefix & "list.show-detail")
+  result.add OmnibarEntry(kind: omCommand, label: WidenColumnLabel,
+                          target: OperationCommandPrefix &
+                                  "table.resize-column(+" & $ColumnStepCells &
+                                  ")")
+  result.add OmnibarEntry(kind: omCommand, label: NarrowColumnLabel,
+                          target: OperationCommandPrefix &
+                                  "table.resize-column(-" & $ColumnStepCells &
+                                  ")")
+
+proc parseOperationCommand*(target: string): tuple[ok: bool; operation: string] =
+  ## `operation:<name>[(<arg>)]` -> the operation text; `ok` false otherwise.
+  if not target.startsWith(OperationCommandPrefix):
+    return (false, "")
+  (true, target[OperationCommandPrefix.len .. ^1])
+
+proc parseColumnWidthLine*(words: openArray[string]):
+    tuple[ok: bool; column: EventLogColumn; cells: int; message: string] =
+  ## `column-width <title> <cells>` (the verb first) -> its parts, or why not.
+  if words.len != 3 or words[0] != ColumnWidthVerb:
+    return (false, EventLogColumn.low, 0,
+            "usage: :" & ColumnWidthVerb & " <column> <cells>")
+  let (found, col) = parseEventLogColumn(words[1])
+  if not found:
+    return (false, EventLogColumn.low, 0, "no event log column `" & words[1] & "`")
+  var cells = 0
+  try:
+    cells = parseInt(words[2])
+  except ValueError:
+    return (false, col, 0, "`" & words[2] & "` is not a number of cells")
+  (true, col, cells, "")
+
+proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry]
+proc baseKeymapCommands*(): seq[OmnibarEntry]
   ## Forward-declared; defined at the end of this module.
 
 proc omnibarIndexOf*(fs: FilesystemVM; store: ReplayDataStore;
-                     menu: MenuVM): seq[OmnibarEntry] =
+                     menu: MenuVM;
+                     terminalSettings = true): seq[OmnibarEntry] =
   ## The whole index, in a fixed order (files, symbols, commands — the
   ## menu's, then the event log's column commands).
   result = filesOf(fs)
   result.add symbolsOf(store)
   result.add commandsOf(menu)
   result.add eventLogColumnCommands()
-  result.add layoutSettingCommands()
+  result.add tableCommands()
+  result.add layoutSettingCommands(terminalSettings)
+  result.add baseKeymapCommands()
 
-proc layoutSettingCommands*(): seq[OmnibarEntry] =
-  ## PLAT-51: the two layout preferences as omnibox commands, on and off —
+proc baseKeymapCommands*(): seq[OmnibarEntry] =
+  ## PLAT-68: **Preferences: Select Base Keymap**, one entry per base, on every
+  ## front-end's palette — `:keymap <name>` without the prompt.
+  for m in BaseKeymap:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                            label: SelectBaseKeymapLabel & " › " & $m,
+                            detail: ":keymap " & $m,
+                            target: baseKeymapCommandTarget(m))
+
+proc layoutSettingCommands*(terminalSettings = true): seq[OmnibarEntry] =
+  ## PLAT-51: the layout preferences as omnibox commands, on and off —
   ## `:set focus-highlight …` and `:set live-resize …` without the prompt, on
   ## both native front-ends (`layout_settings`).
+  ## PLAT-70 Part H: a setting that takes a value (`scrollbar-thickness`)
+  ## has one entry per value, as the base keymaps have.
+  ## PLAT-71: the terminal's own settings (`isTerminalSetting`) only where
+  ## `terminalSettings` — the window front-end draws with real fonts.
   for which in LayoutSetting:
-    for on in [true, false]:
+    if which.isTerminalSetting and not terminalSettings:
+      continue
+    for value in settingValues(which):
       result.add OmnibarEntry(kind: OmnibarMode.omCommand,
-                              label: settingCommandLabel(which, on),
-                              detail: ":set " & describe(which, on),
-                              target: settingCommandTarget(which, on))
+                              label: settingCommandLabel(which, value),
+                              detail: ":set " & describe(which, value),
+                              target: settingCommandTarget(which, value))
+  # PLAT-70 (Horizontal-Overflow.md §4.6): the markers' toggle, by the
+  # specification's name.
+  result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+                          label: ToggleOverflowMarkersLabel,
+                          detail: ":set " & $lsOverflowMarkers & " on|off",
+                          target: settingToggleTarget(lsOverflowMarkers))

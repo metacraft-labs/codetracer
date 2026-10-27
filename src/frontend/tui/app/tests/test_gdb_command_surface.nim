@@ -92,7 +92,7 @@ import ../views/command_line
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 493
+const ExpectedAssertions = 507
 
 var countedAssertions = 0
 
@@ -112,15 +112,17 @@ const
   SpecSectionHeading = "### 4.3 GDB-Compatible Command Surface"
   SpecRelativePath = specDocumentRef("Front-Ends/CodeTracer-TUI.md")
 
-  ExpectedSpecCommands = 16
-    ## §4.3's command count, counted from the document on 2026-09-06. Asserted
+  ExpectedSpecCommands = 17
+    ## §4.3's command count, counted from the document on 2026-09-06 (16) and
+    ## again on 2026-10-24, when `:watches <hide|show>` was added (17). Asserted
     ## so that a parser which stopped early — or a block that lost a line — is
     ## red here rather than quietly checking less.
 
   ExpectedAliases = 11
-    ## How many of the sixteen §4.3 publishes an `(alias: …)` for. Counted
-    ## from the document on 2026-09-06: the five without one are `tracepoint`,
-    ## `goto`, `info threads`, `info registers` and `theme`.
+    ## How many of the seventeen §4.3 publishes an `(alias: …)` for. Counted
+    ## from the document on 2026-09-06: the six without one are `tracepoint`,
+    ## `goto`, `info threads`, `info registers`, `theme` and (2026-10-24)
+    ## `watches`.
 
   # The ViewModel action procs that MOVE A DEBUGGER, and every file each may be
   # called from — `|`-joined, in the sorted order the walk reports. This is
@@ -160,7 +162,36 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 101
+  ExpectedAppModules = 119
+    ## 2026-10-24 (PLAT-53): 118 → 119, `views/test_results_pane.nim`.
+    ## 2026-10-24 (PLAT-71): 112 → 118. `theme/terminal_profile.nim` (the
+    ## profile's vocabulary and parsers), `theme/terminal_settings.nim` (the
+    ## settings as ranks), `theme/terminal_report.nim` (the report and the
+    ## glyph test card), `views/glyph_table.nim` (the one glyph table),
+    ## `views/terminal_info.nim` (`:terminal-info`) and
+    ## `tests/test_plat71_terminal_profile.nim`.
+    ## 2026-10-24: 111 → 112, re-counting PLAT-70 Part I, which added
+    ## `views/table_hscroll.nim` (a table pane's sideways view and bar)
+    ## without re-counting.
+    ## 2026-10-23 (PLAT-70 Part H): 109 → 111. `views/scrollbar_styles.nim`
+    ## (every scrollbar glyph in one table, and the one bar painter) and
+    ## `views/scrollbar_frame.nim` (what a frame's bars are drawn with, and
+    ## where they were drawn).
+    ## 2026-10-23: 107 → 109, re-counting `6ef051354` (HSF-E1, --pane-server),
+    ## which added two files here without re-counting: `pane_protocol.nim`
+    ## (the pane server's protocol as values; its transport is
+    ## `host/pane_server.nim`, outside this walk) and its pure suite
+    ## `tests/test_pane_protocol.nim`.
+    ## 2026-10-15 (PLAT-57): 106 → 107. `views/search_results_pane.nim`, the
+    ## Find in Files pane's painter and hit-test.
+    ## 2026-10-12 (PLAT-68 Phase B review): 105 → 106. `tests/editor_ownership.nim`
+    ## (which keys a buffer takes, asked of the router): the query moved out of
+    ## `runtime.nim`, where nothing in the product called it any more.
+    ## 2026-10-12 (PLAT-68 Phase B): 101 → 105. `input/operation_dispatch.nim`
+    ## (the operation ↔ `KeyAction` table the router's answers are dispatched
+    ## by), `input/key_check.nim` (`:keys check`), `clipboard_read.nim` (the
+    ## OSC 52 paste conversation) and `tests/navigation_table.nim` (§4.2 read
+    ## off the shipped navigation rows for the modal suites).
     ## 2026-10-08 (PLAT-51 part B): 100 → 101. `views/welcome_view.nim`, the
     ## Welcome Screen a new tab opens.
     ## 2026-10-06 (PLAT-51): 101 → 100. The Timeline pane is removed:
@@ -264,7 +295,33 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 255
+  ExpectedStyleLiterals = 293
+    ## 2026-10-24 (PLAT-53): 285 → 293, measured — the Test Results pane's
+    ## eight (`views/test_results_pane.nim`: the headline, the ▶ live and
+    ## dimmed, the controls, a name, the muted cells, the error and success
+    ## colours).
+    ## 2026-10-24 (PLAT-71): +8 — `views/terminal_info.nim`'s three (title,
+    ## keys, live line) and `theme/terminal_report.nim`'s five (the card's
+    ## colour swatch and its four attribute samples).
+    ## 2026-10-23 (PLAT-70 Part H): 270 → 277, measured — the bar painter's
+    ## three styles in `views/scrollbar_styles.nim` (the track, the thumb and
+    ## the mark, each a ROLE carrying the fade), so the theme registry has no
+    ## colour to supply; and the four the table panes' painters added with
+    ## PLAT-70 Part B, which landed without moving this count.
+    ## 2026-10-23: 267 → 270, measured, re-counting `6ef051354` (HSF-E1). The
+    ## three are FIXTURES, not paint: `tests/test_pane_protocol.nim` builds
+    ## one row of three spans (`srChromeMuted`, `srValueModified` and the
+    ## default style) to assert that span offsets are UTF-8 bytes and that a
+    ## span carries its semantic role. They are roles already, so there is no
+    ## colour for the theme registry to supply.
+    ## 2026-10-16 (PLAT-70 Part A): 266 → 267, measured. The `‹` / `›`
+    ## overflow markers' style (`views/scrubber_track.OverflowMarkerStyle`,
+    ## the muted chrome role).
+    ## 2026-10-15 (PLAT-57): 256 → 266, measured. Find in Files' field,
+    ## toggles, summary, file headers, line numbers, text and match
+    ## (`views/search_results_pane.nim`, a new styled file).
+    ## 2026-10-12 (PLAT-68 Phase B): 255 → 256, measured. The program menu's
+    ## underlined access key (`views/top_bar.nim`, already a styled file).
     ## 2026-10-08 (PLAT-51 part B): 239 → 255, measured. The Welcome Screen's
     ## styles (`views/welcome_view.nim`), and the focused strip's in
     ## `views/shell.nim`.
@@ -361,7 +418,13 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 34
+  ExpectedStyledFiles = 40
+    ## 2026-10-24 (PLAT-53): +1, `views/test_results_pane.nim`.
+    ## 2026-10-24 (PLAT-71): +2, `views/terminal_info.nim` and
+    ## `theme/terminal_report.nim`.
+    ## 2026-10-23 (PLAT-70 Part H): +1, `views/scrollbar_styles.nim`.
+    ## 2026-10-23: +1, `tests/test_pane_protocol.nim` (see above).
+    ## 2026-10-15 (PLAT-57): +1, `views/search_results_pane.nim`.
     ## 2026-10-08 (PLAT-51 part B): +1, `views/welcome_view.nim`.
     ## 2026-10-03 (PLAT-50): +1, `views/context_menu.nim`.
     ## 2026-09-30 (PLAT-48): +1, `views/top_bar.nim`.
@@ -734,7 +797,7 @@ suite "CTUI-10: §4.3's command surface is the published one":
     declared.sort(proc(a, b: CommandKind): int = cmp($a, $b))
     checkpoint("commands §4.2 binds no key to: " & $unbound)
     ck unbound == declared
-    ck unbound.len == 6
+    ck unbound.len == 7
     for kind in CommandOnlyKinds:
       let (isBound, action) = keyActionFor(kind)
       ck not isBound
@@ -941,7 +1004,7 @@ suite "CTUI-10: §4.3's command surface is the published one":
       ck out2.dispatch.status == drRejected
       ck out2.message == bare.message
     checkpoint("commands with a required argument: " & $required)
-    ck required == 7
+    ck required == 8   # `:watches <hide|show>` (2026-10-24) is the eighth
     # THE POSITIVE TWIN: the ten with no placeholder accept a bare line.
     var bareOk = 0
     for row in published:

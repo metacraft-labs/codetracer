@@ -47,7 +47,7 @@ import std/[json, os, strutils, tables]
 import codetracer_embed
 import headless_session
 from backend/stdio_backend import sendDapRequestNoResponse, drainEvents,
-  waitForEvent
+  waitForEvent, isClosed
 
 # QUALIFIED, and the qualification is load-bearing: `EventLogRow` is declared
 # TWICE in this module's scope — `viewmodel/store/types.EventLogRow` is the
@@ -61,16 +61,23 @@ import ../../viewmodel/viewmodels/inline_value_timeline
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/calltrace_vm    # CALLTRACE_BUFFER, the desktop's pre-fetch
+import ../../viewmodel/pane_viewport   # HSF-V2: the pane's cells as a Viewport
 import viewmodels/scratchpad_vm   # PLAT-50: the scratchpad pane
+import viewmodels/search_results_vm   # PLAT-57: Find in Files
+from ../../viewmodel/host/find_in_files import FindInFilesScope, pump
+from std/unicode import runeLen
 import ../../viewmodel/host/terminal_output_source   # PLAT-52
 import ../app/call_stack_binding
 import ../app/frame_viewer_binding
 import ../app/runtime
+import ../app/views/search_results_pane   # PLAT-57
+from ../app/edit_binding import EditBuffer, moveCaretTo, caretLine, caretColumn   # the read-only document a result opens in
 import ../app/source_binding
 import ../app/timeline_binding
 import ../app/variables_binding
 import ../app/syntax/highlighter   # lexerContexts: the window's entry state
 import ./native_host
+import ./session_driver
 
 export native_host
 
@@ -79,7 +86,9 @@ const
     ## How many lines beyond the viewport `SourceVM` holds. CTUI-5's own
     ## number, kept so the shipped front-end fetches the window its Tier-1
     ## suites measured.
-  EventLogPageSize* = 64
+  EndedSessionNote* =
+    "the debugging session has ended; open a recording to debug again"
+    ## M76: what an entry point answers once *Stop* ended the session.
   CalltraceLevels* = 400
     ## `stackTrace`'s `levels`. The same number CTUI-6's suites ask for, so a
     ## deep recursion is as visible here as it is there.
@@ -129,12 +138,38 @@ type
       ## `SourceVM` with each window, so a window that opens inside a
       ## docstring is coloured as the desktop colours it.
     valueGate*: InlineValueGate
+    followedStop*: tuple[tick: uint64; path: string; line: int]
+      ## M73 (#840): the stop whose execution line the source window last
+      ## FOLLOWED (`serveSourceWindow`). A refresh at the same stop — a
+      ## breakpoint set, a search run, a resize settled — serves the window
+      ## where the user scrolled it instead of snapping it back to the
+      ## pointer: following the pointer is what a STOP does (Monaco reveals
+      ## the line on `ct/complete-move`, not on every repaint).
+    followOwed*: bool
+      ## The pane's height changed (`setViewportHeight`): the next refresh
+      ## follows the pointer even at the same stop, as every refresh did
+      ## before M73, so a shrunken pane does not leave it below the last row.
     tracepointsRun*: int
       ## PLAT-50: how many tracepoints `:tracepoint` swept (each its own id).
       ## PLAT-29. The inline values are drawn only when the locals they come
       ## from are about the stop the debugger is at — reconciled against the
       ## store's stop timeline (`viewmodels/inline_value_timeline`). Counts
       ## every draw; the store's `stops.report` counts every arrival.
+    stopped: bool
+      ## M76: *Stop* ended this session (`stop`) — its `replay-server` is
+      ## gone and nothing here may ask it anything. Every entry point the
+      ## host loop calls answers without touching the engine once this is
+      ## set; the tab it was shown in survives as an edit tab.
+    closed: bool
+      ## `close` has run; a second call is a no-op.
+
+proc ended*(s: TuiSession): bool =
+  ## M76: whether the session's replay has ended — by this host's *Stop*
+  ## (`stop`), or by any other caller of the session's `DebugControlsVM`
+  ## Stop (`invokeToolbarAction("stop")`, which `native_host` installs), whose
+  ## closed channel is read here so no entry point writes to it afterwards.
+  not s.isNil and (s.stopped or s.session.isNil or s.session.backend.isNil or
+                   s.session.backend.isClosed)
 
 proc openTuiSession*(traceFolder: string; viewportHeight: int;
                      bound: DapReadBound = DapReadBound(interruptFd: -1)
@@ -152,47 +187,98 @@ proc openTuiSession*(traceFolder: string; viewportHeight: int;
   ## `host/native_host.openLocalTrace`. It is carried rather than built here
   ## because the fd it watches is the DRIVER's input fd, and this module owns
   ## no terminal.
+  ##
+  ## Raises `EngineStalledAfterOpenError` (a `DapStalledError`) when the engine
+  ## completes the handshake and then goes quiet on the session's first
+  ## request; a stall in the handshake itself is a plain `DapStalledError`.
   let sess = openLocalTrace(traceFolder, bound)
-  let store = sess.session.store
-  let src = createSourceVM(store, sess.session.editorVM)
-  if not sess.session.editorVM.isNil:
-    sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
-  src.setViewport(height = max(1, viewportHeight), overscan = SourceOverscan)
-  var nav = new(OriginNavigator)
-  nav[] = initOriginNavigator()
-  TuiSession(
-    session: sess,
-    source: src,
-    calltrace: createCalltraceVM(store),
-    state: createStateVM(store),
-    timeline: createTimelineVM(store),
-    events: createEventLogVM(store),
-    controls: createDebugControlsVM(store),
-    origin: createOriginChainVM(store),
-    provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
-    lexerContexts: newLexerContextCache(),
-    valueTimeline: initValueTimeline(),
-    entryFile: sess.getCurrentFile(),
-    bounds: TimelineBounds(),
-    callBoundaries: @[],
-    mutations: @[],
-    maxRRTicks: 0'u64,
-    originNav: nav,
-    valueGate: InlineValueGate())
+  # A STALL FROM HERE ON IS A STALL AFTER THE OPEN. `openLocalTrace` reached
+  # the first stop (and raises `EngineStalledAfterOpenError` itself for the
+  # requests it sends after it), so the engine read the recording; an engine
+  # that goes quiet on what this builds — the flow overlay switched on below
+  # — is reported in the same after-open terms, with its child closed here.
+  try:
+    let store = sess.session.store
+    let src = createSourceVM(store, sess.session.editorVM)
+    if not sess.session.editorVM.isNil:
+      sess.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
+    src.setOverscan(SourceOverscan)
+    src.setViewport(src.viewport.withRows(max(1, viewportHeight)))
+    var nav = new(OriginNavigator)
+    nav[] = initOriginNavigator()
+    # THE PANES READ THE SESSION'S VIEWMODELS — the ones
+    # `initializePanelViewModels` built when the session attached — not a
+    # second set over the same store (Shared-DOM-Front-Ends D1). A second
+    # `StateVM` was what the inline values were drawn from while the stop
+    # loader wrote the origin summaries into the session's. The origin chain is
+    # not a panel VM; the session holds the one the host attaches.
+    let panels = sess.session
+    if panels.originChainVM.isNil:
+      panels.attachOriginChainVM(createOriginChainVM(store))
+    result = TuiSession(
+      session: sess,
+      source: src,
+      calltrace: panels.calltraceVM,
+      state: panels.stateVM,
+      timeline: panels.timelineVM,
+      events: panels.eventLogVM,
+      controls: panels.debugControlsVM,
+      origin: panels.originChainVM,
+      provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
+      lexerContexts: newLexerContextCache(),
+      valueTimeline: initValueTimeline(),
+      entryFile: sess.getCurrentFile(),
+      bounds: TimelineBounds(),
+      callBoundaries: @[],
+      mutations: @[],
+      maxRRTicks: 0'u64,
+      originNav: nav,
+      valueGate: InlineValueGate())
+  except DapStalledError as e:
+    sess.close()
+    raise newException(EngineStalledAfterOpenError, e.msg, e)
 
 proc close*(s: TuiSession) =
-  ## Tear the session down. Ordered VM-first because each `dispose` drops a
-  ## reactive root that still reads the store.
-  if s.isNil:
+  ## Tear the session down. The source window is this host's; the panel
+  ## ViewModels are the session's, and `session.close` disposes them with it.
+  ##
+  ## Idempotent: *Stop* closes a session that the loop's teardown closes
+  ## again on the way out.
+  if s.isNil or s.closed:
     return
-  s.origin.dispose()
-  s.controls.dispose()
-  s.events.dispose()
-  s.timeline.dispose()
-  s.state.dispose()
-  s.calltrace.dispose()
+  s.closed = true
   s.source.dispose()
   s.session.close()
+
+proc stop*(s: TuiSession; rt: TuiRuntime): NativeStopOutcome =
+  ## M76: THE TERMINAL'S STOP, the host half (Debugger-Controls.md § "Ending
+  ## a session from inside it"). The runtime already put the workspace in
+  ## Edit mode (requirement 1, `runtime.stopDebugging`); this ends the replay
+  ## — the SDK session disposed, the `replay-server` child terminated
+  ## (`native_host.stopThroughControls`: the session's `DebugControlsVM`
+  ## Stop, shared with GPUI; requirement 2) —
+  ## and makes the runtime forget the session, so the tab that showed it is
+  ## an edit tab like one that never ran (requirement 3): no recording name,
+  ## no engine behind the dispatcher, empty debugger panes. Opening a
+  ## recording, or `Ctrl+F5` onto the empty debugger, is the ordinary route
+  ## from there.
+  if s.isNil:
+    return NativeStopOutcome(pid: -1, message: "there is no debugging session")
+  if s.stopped:
+    return NativeStopOutcome(pid: s.session.replayPid(),
+                             message: "the debugging session had already ended")
+  s.stopped = true
+  if not s.closed:
+    s.closed = true
+    s.source.dispose()
+  result = s.session.stopThroughControls()
+  rt.forgetSession()
+  # Requirement 1 for every route here — the menu and the chord made the
+  # switch already (`runtime.stopDebugging`); a caller of the ViewModel's
+  # Stop did not.
+  rt.enterProductMode(pmEdit)
+  rt.app.notification = "stopped the debugging session" &
+    " — the tab is in Edit mode; open a recording to debug again"
 
 proc setViewportHeight*(s: TuiSession; height: int) =
   ## Tell `SourceVM` how many lines the source PANE actually has.
@@ -204,7 +290,11 @@ proc setViewportHeight*(s: TuiSession; height: int) =
   ## line 55 and the pane was showing 23-51. The height therefore comes from the
   ## PROJECTION, once the shell has been laid out, and is re-set on every
   ## resize.
-  s.source.setViewport(height = max(1, height), overscan = SourceOverscan)
+  if s.ended:
+    return
+  s.source.setOverscan(SourceOverscan)
+  s.source.setViewport(s.source.viewport.withRows(max(1, height)))
+  s.followOwed = true
 
 proc pumpMove*(s: TuiSession) =
   ## Consume the `stopped` + `ct/complete-move` pair a navigation command
@@ -215,15 +305,14 @@ proc pumpMove*(s: TuiSession) =
   ## terminal it was restoring on a command the engine merely declined. The
   ## caller sees an unchanged position instead, which is what the screen would
   ## show anyway.
-  try:
-    s.session.consumeNextCompleteMove()
-  except CatchableError:
-    discard
+  if s.ended:
+    return
+  discard s.session.settleMove()
 
-proc serveSourceWindow(s: TuiSession) =
-  ## Follow the execution pointer and serve every line the window then lacks,
-  ## through the real provider.
-  for request in s.source.followAndRequest():
+proc serveSourceRequests(s: TuiSession; requests: seq[SourceLineRequest]) =
+  ## Serve `requests` — what `SourceVM` said its window lacks — through the
+  ## real provider.
+  for request in requests:
     var captured = SourceFetch(status: sfsProviderUnavailable,
                                detail: "the provider callback never ran")
     # SEEDED WITH A STATUS THAT CANNOT BE MISTAKEN FOR SUCCESS, and drained:
@@ -242,6 +331,70 @@ proc serveSourceWindow(s: TuiSession) =
       else: @[]
     discard s.session.session.store.applySourceFetch(s.source, captured,
                                                       contexts)
+
+proc serveSourceWindow(s: TuiSession; tick: uint64) =
+  ## At a NEW stop (or after the pane's height changed), follow the execution
+  ## pointer (`followAndRequest`: not at all while it is visible, centred when
+  ## it is not); at the stop the window already followed, keep the window
+  ## where it is. Then serve every line it lacks.
+  ##
+  ## M73 (#840): until M73 every refresh followed, which was harmless while
+  ## nothing else could move the window. Now the user can, and a refresh that
+  ## is not a move (a breakpoint toggled on a line the user scrolled to)
+  ## snapped the window back to the pointer.
+  let stop = (tick: tick, path: s.source.path.val,
+              line: s.source.executionLine.val)
+  if s.followOwed or stop != s.followedStop:
+    s.followedStop = stop
+    s.followOwed = false
+    s.serveSourceRequests(s.source.followAndRequest())
+  else:
+    s.serveSourceRequests(s.source.requestMissing())
+
+proc scrollSource*(s: TuiSession; rt: TuiRuntime; scroll: SourceScroll) =
+  ## M73 (#840): what the user asked the source pane's window to do
+  ## (`runtime.SourceScroll`), done to `SourceVM` — `scrollBy` / `scrollTo`,
+  ## `centreOnExecutionPointer`, and the caret written into `EditorVM` and
+  ## followed by `followCursor` — then the lines the window lacks served the
+  ## way a stop's are (`requestMissing`, as `followAndRequest` ends), and the
+  ## pane's model given the new window (`withSourceWindow`). The execution
+  ## pointer is never touched.
+  ##
+  ## A FILE SHOWN WHOLE (PLAT-50's `viewedFile`: one opened from the Files
+  ## pane or a Find in Files result) is not `SourceVM`'s: its model holds every
+  ## line, so the same rules move its `viewportTop` directly.
+  if scroll.kind == sskNone:
+    return
+  let rows = max(1, s.source.viewportHeight.val)
+  if rt.app.viewedFile.len > 0:
+    let m = rt.app.source
+    rt.app.source.viewportTop =
+      case scroll.kind
+      of sskNone: m.viewportTop
+      of sskBy: clampTop(m.viewportTop + scroll.delta, rows, m.totalLineCount)
+      of sskTo: clampTop(scroll.top, rows, m.totalLineCount)
+      of sskCentreOnPointer:
+        topCentring(m.viewportTop, m.executionLine, rows, m.totalLineCount)
+      of sskFollowCaret:
+        topFollowingCursor(m.viewportTop, scroll.line, rows, m.totalLineCount)
+    return
+  # M76: after *Stop* the session's `SourceVM` is disposed and no engine
+  # serves the lines it would request.
+  if s.ended:
+    return
+  case scroll.kind
+  of sskNone: discard
+  of sskBy: s.source.scrollBy(scroll.delta)
+  of sskTo: s.source.scrollTo(scroll.top)
+  of sskCentreOnPointer: s.source.centreOnExecutionPointer()
+  of sskFollowCaret:
+    let editor = s.session.session.editorVM
+    if editor.isNil:
+      return
+    editor.setCursor(scroll.line, scroll.column)
+    s.source.followCursor()
+  s.serveSourceRequests(s.source.requestMissing())
+  rt.app.source = rt.app.source.withSourceWindow(s.source)
 
 proc stackBody(s: TuiSession): JsonNode =
   let response = s.session.sendRawDapRequest("stackTrace", %*{
@@ -267,21 +420,34 @@ func eventRowOf(row: store_types.EventLogRow): EventRow =
     category: categoryFor(row.kindId, row.stdout),
     kindId: row.kindId)
 
+proc eventLogBodyRows(rt: TuiRuntime): int =
+  ## HSF-V2: the rows the Event Log pane shows on the current screen (its
+  ## layout rectangle, `paneBodyRows`), at least one.
+  max(1, rt.paneBodyRows(paneEventLog))
+
+proc eventLogPageRows(rt: TuiRuntime): int =
+  ## HSF-V2: how many events one page of the pane holds — the window the
+  ## shared policy asks for a pane of that height (`viewport.listWindow`:
+  ## the rows shown and the lead below them), never a fixed number
+  ## (UI-Data-Loading-Guidelines AP 6; it was 64).
+  listWindow(Viewport(rows: rt.eventLogBodyRows)).count
+
 proc loadedEventRows(s: TuiSession; offset, limit: int;
-                     order = RecordedEventOrder;
-                     atRRTicks: int64 = -1): seq[EventRow] =
-  ## Ask the backend for a window and read the answer OUT OF THE STORE.
-  ##
-  ## `requestAndLoadEventLog` decodes into `store.eventLog.rows` — see its
-  ## header — so the request is issued for its effect and the rows are read
-  ## from the one place they live. This used to convert the returned sequence
-  ## itself, which made the terminal one of three independent decoders of the
-  ## same payload.
-  discard s.session.requestAndLoadEventLog(start = offset, count = limit,
-                                           order = order, atRRTicks = atRRTicks)
+                     order = RecordedEventOrder): seq[EventRow] =
+  ## The rows `[offset, offset + limit)` of the log in `order`, read OUT OF
+  ## THE STORE after the pane's window is reported to the session's
+  ## `EventLogVM` (`showEventLogWindow`, HSF-D6): the ViewModel asks for the
+  ## window, naming the stop so the answer also says which row is "now", and
+  ## the store holds the answer — the one place the rows live.
+  s.session.showEventLogWindow(offset, limit, order)
   result = @[]
-  for row in s.session.session.store.eventLog.rows.val:
-    result.add eventRowOf(row)
+  let ev = s.session.session.store.eventLog
+  let first = ev.loadedStart.val
+  let held = ev.rows.val
+  for i in offset ..< offset + limit:
+    let at = i - first
+    if at >= 0 and at < held.len:
+      result.add eventRowOf(held[at])
 
 proc fileTreeModelOf*(vm: FilesystemVM): FileTreeModel =
   ## The Files pane's rows for a replay: the `FilesystemVM`'s tree, root
@@ -314,6 +480,15 @@ proc learnExtent*(s: TuiSession) =
   ## change: `ct/event-load`'s `maxRRTicks` is a property of the recording, and
   ## re-asking for it after every step would put a whole-log request inside the
   ## step latency CTUI-14 measures.
+  ##
+  ## Raises `EngineStalledAfterOpenError` when the engine answers none of
+  ## these requests for a whole budget: ONE budget, then the caller reports
+  ## the stall in §8b's after-open terms. Until this raised, each request
+  ## swallowed its own stall as a pane that did not load, so a silent engine
+  ## cost one budget per request and was then reported, if at all, as a
+  ## recording with empty panes.
+  if s.ended:
+    return
   # THE SHARED PRODUCERS (`native_host.loadRecordingPanes`) — the event log's
   # first window and the call trace, asked by the same call the GPUI front-end
   # makes, so neither front-end can be fed while the other is starved. Both
@@ -324,14 +499,17 @@ proc learnExtent*(s: TuiSession) =
   # `getCalltraceLines()` was empty on every real run, and `callBoundaries` was
   # silently `@[]` — "empty because nothing asked" and "empty because the
   # request failed" produced the same value. `PaneLoad` now says which.
-  let loaded = s.session.loadRecordingPanes()
+  let loaded =
+    try:
+      s.session.loadRecordingPanes(raiseOnStall = true)
+    except DapStalledError as e:
+      raise newException(EngineStalledAfterOpenError, e.msg, e)
   # PLAT-52: the recorded program's terminal output — the Terminal Output
   # pane's lines and screen model (`terminal_output_source`, which GPUI asks
   # through too). A refusal leaves the pane in its loading state.
-  try:
-    discard s.session.loadTerminalOutput()
-  except CatchableError:
-    discard
+  # Its lines are asked for when the pane first reports what it shows
+  # (`refreshTerminalOutput`): the window, not every write (Q3).
+  s.session.openTerminalOutput()
   s.files = fileTreeModelOf(s.session.session.fileTreeVM)
   s.callTraceAsked = true
   var rows: seq[EventRow] = @[]
@@ -392,43 +570,51 @@ proc callTraceModelOf(s: TuiSession; rt: TuiRuntime): CallTraceModel =
                               firstIndex = store.calltrace.startLineIndex.val,
                               total = int(store.calltrace.totalCallsCount.val),
                               scrollTop = rt.app.callTrace.scrollTop,
-                              follow = not rt.app.callTraceScrolled)
-  # PLAT-51: where the debugger is in the WHOLE trace (the engine's), for the
-  # scrubber's mark.
-  result.currentIndex = int(store.calltrace.currentLineIndex.val)
+                              follow = not rt.app.callTraceScrolled,
+                              # PLAT-51: where the debugger is in the WHOLE
+                              # trace (the engine's): the scrubber's mark, and
+                              # the check on a section's unprovable answer.
+                              currentIndex =
+                                int(store.calltrace.currentLineIndex.val))
 
 proc pageCallTrace*(s: TuiSession; rt: TuiRuntime) =
-  ## PLAT-47: **the call trace, a section at a time.** Build the pane's model
-  ## from the section the store holds and, when the rows the pane shows are
-  ## not all in it, load the section around them — the rows on screen plus
-  ## `CallTraceBuffer` either side, through `ct/load-calltrace-section`, the
-  ## request the desktop's `CalltraceVM` pages with — and build it again.
+  ## PLAT-47: **the call trace, a section at a time.** HSF-V2: the pane
+  ## REPORTS what it shows — its body's rows, the row it is scrolled to, and
+  ## the depth levels that fit across it (`pane_viewport.cellPaneViewport`) —
+  ## and `CalltraceVM` asks for the window that viewport needs
+  ## (`ct/load-calltrace-section`, the window policy every front-end shares),
+  ## then the pane is built from the section the store holds.
   ##
   ## So there is no cap on the trace: the store holds one section, the title
   ## counts the whole trace (`totalCallsCount`), and scrolling past the
-  ## section loads the next. A row the store does not hold is drawn as
+  ## section asks for the next. A row the store does not hold is drawn as
   ## loading, never as the end of the trace.
+  if s.ended:
+    return
   var model = s.callTraceModelOf(rt)
   rt.app.callTrace = model
-  if model.total == 0 or s.calltrace.isNil:
+  if s.calltrace.isNil:
+    return
+  if model.total == 0 and s.callTraceAsked:
+    # The recording has no calls (`learnExtent` asked, the engine counted
+    # none): the pane shows the call stack instead and has nothing to page
+    # to, so it reports no window and the ViewModel asks for none.
+    s.calltrace.setViewport(Viewport())
     return
   let body = rt.paneBodyRows(paneCalltrace)
   if body <= 0:
     return
   let top = model.visibleTop(body)
-  let first = model.firstIndex.int
-  let last = top + min(body, model.total - top)
-  if top >= first and last <= first + model.rows.len:
+  let held = (model.firstIndex.int, model.rows.len)
+  s.calltrace.setViewport(cellPaneViewport(
+    body, rt.paneBodyCols(paneCalltrace), top,
+    colsPerLevel = CallRowIndentCells))
+  s.session.settle()
+  let store = s.session.session.store
+  if (store.calltrace.startLineIndex.val.int, store.calltrace.lines.val.len) ==
+     held and model.total > 0:
     return
-  let start = max(0, top - CallTraceBuffer)
   inc rt.app.listScrubFetches
-  try:
-    s.session.requestAndLoadCalltrace(
-      startIndex = start.int64, height = body + 2 * CallTraceBuffer,
-      depth = RecordingCalltraceDepth)
-  except CatchableError:
-    # The rows stay drawn as loading; the next scroll asks again.
-    return
   rt.app.callTrace = s.callTraceModelOf(rt)
   if not rt.app.callTraceScrolled:
     return
@@ -465,25 +651,206 @@ proc terminalOutputModelOf*(vm: TerminalOutputVM; ticks: uint64;
                                    # the debugger live: it is still held
                                    # across the refresh each move makes.
                                    previewing: prior.previewing,
-                                   scrubSent: prior.scrubSent)
+                                   scrubSent: prior.scrubSent,
+                                   # PLAT-70: the horizontal view and the
+                                   # widest line measured so far are the
+                                   # pane's own, carried too.
+                                   hview: prior.hview, widths: prior.widths,
+                                   overflowMarkers: prior.overflowMarkers)
   if vm.isNil:
     return
   result.loading = vm.initialLoad.val
   result.lines = vm.lines.val
+  result.windowed = vm.windowed
+  result.linesStart = vm.linesStart.val
+  result.total = vm.lineCount
   result.screen = vm.screen
   result.offered = vm.screenOffered.val
   result.view = vm.view.val
   result.currentTicks = ticks
-  result.currentLine = lineOfTick(result.lines, ticks)
+  result.currentLine =
+    if result.windowed: vm.currentLine() else: lineOfTick(result.lines, ticks)
   if not vm.screen.isNil:
     result.shownWrite = vm.screen.writeAtTick(ticks)
+  # The output's identity is its ViewModel: another session's (a tab
+  # switch) is another output, and is measured from nothing.
+  result.measureContent(cast[int](vm))
+
+proc terminalLinesRefetch(s: TuiSession):
+    proc(m: TerminalOutputPaneModel; rows: int): TerminalOutputPaneModel =
+  ## The pane's `refetch`: report the rows the line view shows from `m`'s
+  ## position and adopt the window the engine answers. A following view's
+  ## position depends on the current line, which the first answer names, so
+  ## it is reported again until it holds still (twice at most in practice).
+  let sess = s
+  result = proc(m: TerminalOutputPaneModel; rows: int): TerminalOutputPaneModel =
+    let vm = sess.session.session.terminalOutputVM
+    result = m
+    if vm.isNil or rows <= 0:
+      return
+    var reported = -1
+    for _ in 0 ..< 3:
+      let top = result.visibleTop(rows)
+      if top == reported:
+        break
+      reported = top
+      vm.showTerminalLines(Viewport(rows: rows, firstRow: top))
+      result = terminalOutputModelOf(vm, sess.session.getCurrentRRTicks(),
+                                     result)
+      result.refetch = m.refetch
+      result.writeOf = m.writeOf
 
 proc refreshTerminalOutput*(s: TuiSession; rt: TuiRuntime) =
+  if s.ended:
+    return
   rt.app.terminalOutput = terminalOutputModelOf(
     s.session.session.terminalOutputVM, s.session.getCurrentRRTicks(),
     rt.app.terminalOutput)
+  rt.app.terminalOutput.refetch = s.terminalLinesRefetch()
+  let vm = s.session.session.terminalOutputVM
+  if not vm.isNil:
+    rt.app.terminalOutput.writeOf = proc(write: int): TerminalOutputEvent =
+      vm.eventOf(write)
+  # The line view holds the lines the pane shows at this position.
+  rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
 
-proc showViewedFile(s: TuiSession; rt: TuiRuntime)
+proc showViewedFile(s: TuiSession; rt: TuiRuntime; force = false)
+
+# ---------------------------------------------------------------------------
+# PLAT-57: Find in Files
+# ---------------------------------------------------------------------------
+
+proc searchModelOf*(vm: SearchResultsVM;
+                    prior: SearchResultsPaneModel): SearchResultsPaneModel =
+  ## The session's `SearchResultsVM` as the pane's value: the field, the
+  ## toggles, where the search is, and the groups flattened into rows — every
+  ## caption, count and highlight split the ViewModel's own. The reading
+  ## position (`scrollTop`) is the pane's, kept while the query is.
+  result = SearchResultsPaneModel(loaded: not vm.isNil, selected: -1)
+  if vm.isNil:
+    return
+  result.query = vm.query.val
+  let o = vm.options.val
+  for which in SearchOption:
+    result.options.add SearchPaneOption(
+      operation: SearchOptionOperations[which],
+      label: SearchOptionLabels[which], on: o.isOn(which))
+  result.summary = vm.summaryText()
+  result.empty = vm.emptyText(NativeSearchPrompt)
+  result.selected = vm.selected.val
+  for d in vm.displayRows():
+    result.rows.add SearchPaneRow(
+      kind: (if d.kind == sdFile: spFile else: spMatch), path: d.path,
+      caption: d.caption, count: d.count, index: d.index, line: d.line,
+      before: d.before, hit: d.hit, after: d.after)
+  result.scrollTop = if prior.query == result.query: prior.scrollTop else: 0
+
+proc refreshSearch*(s: TuiSession; rt: TuiRuntime) =
+  rt.app.search = searchModelOf(s.session.session.searchResultsVM,
+                                rt.app.search)
+
+proc wireFindInFiles*(s: TuiSession) =
+  ## The session's Find in Files searches go to the shared runner, over this
+  ## recording's scope (`native_host.recordingSearchScope`).
+  let folder = s.session.tracePath
+  wireFindInFiles(s.session.session.searchResultsVM,
+                  proc(): FindInFilesScope = recordingSearchScope(folder))
+
+proc findInFiles*(s: TuiSession; rt: TuiRuntime; query: string): string =
+  ## `:grep <query>`: the session's search (`SearchResultsVM.search`, which
+  ## hands it to the runner). "" when it started, else why not.
+  if s.ended:
+    return EndedSessionNote
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil:
+    return "this session has no Find in Files"
+  vm.search(query)
+  s.refreshSearch(rt)
+  ""
+
+proc pumpFindInFiles*(s: TuiSession; rt: TuiRuntime): bool =
+  ## Advance the search in flight (the loop calls this on its idle tick);
+  ## whether the pane's value changed.
+  if s.ended:
+    return false
+  discard nativeFindInFiles.pump()
+  let before = rt.app.search
+  s.refreshSearch(rt)
+  rt.app.search != before
+
+proc showSearchResult*(s: TuiSession; rt: TuiRuntime; index: int): string =
+  ## PLAT-57 (K35, `search.next-result`): result `index` selected and its file
+  ## shown in the editor at its line, the match selected and the caret on it
+  ## — read from the recording, as a file opened from the Files pane is; the
+  ## recording position does not move (Editor-Pane.md: a Find-in-Files row
+  ## click deliberately does not). "" when it opened, else why not.
+  if s.ended:
+    return EndedSessionNote
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil:
+    return "there are no search results"
+  let rows = vm.results.val
+  if index < 0 or index >= rows.len:
+    return "there is no such search result"
+  vm.selectResult(index)
+  let row = rows[index]
+  rt.app.viewedFile = row.path
+  s.showViewedFile(rt, force = true)
+  if rt.app.viewedFile.len == 0:
+    s.refreshSearch(rt)
+    return rt.app.notification
+  let paneRows = max(1, rt.sourcePaneRows())
+  rt.app.source.viewportTop = max(1, row.line - paneRows div 3)
+  let column = if row.matchStart > 0 and row.matchStart <= row.text.len:
+                 row.text[0 ..< row.matchStart].runeLen
+               else: 0
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == row.path:
+    buf.moveCaretTo(row.line - 1, column)
+    if row.matchLength > 0:
+      let width = row.text[row.matchStart ..<
+                           min(row.text.len,
+                               row.matchStart + row.matchLength)].runeLen
+      buf.doc.extendSelectionTo(row.line - 1, column + width)
+    rt.app.caret = (buf.path, buf.caretLine, buf.caretColumn + 1)
+  else:
+    rt.app.caret = (row.path, row.line, column + 1)
+  s.refreshSearch(rt)
+  # The list keeps the selected row in view.
+  let at = rt.app.search.rowOfResult(index)
+  if at >= 0:
+    let under = rt.paneBodyRows(paneSearch)
+    rt.app.search.scrollTop = rt.app.search.revealRow(at, max(1, under - 3))
+  rt.app.notification = "opened " & row.path & ":" & $row.line
+  ""
+
+proc toggleSearchOption*(s: TuiSession; rt: TuiRuntime;
+                         operation: string): string =
+  ## One of Find in Files' toggles flipped by its operation
+  ## (`search.toggle-case`, `-whole-word`, `-regex`) — a press on it, or its
+  ## key in the field — and a search that ran runs again with it (the
+  ## ViewModel's rule). The words the status line shows.
+  if s.ended:
+    return EndedSessionNote
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil:
+    return "this session has no Find in Files"
+  let (known, which) = searchOptionOf(operation)
+  if not known:
+    return "`" & operation & "` is no Find in Files option"
+  vm.toggleOption(which)
+  s.refreshSearch(rt)
+  SearchOptionTitles[which] & (if vm.options.val.isOn(which): " on" else: " off")
+
+proc stepSearchResult*(s: TuiSession; rt: TuiRuntime; delta: int): string =
+  ## `search.next-result` / `search.previous-result`: the next / previous
+  ## result, wrapping (`SearchResultsVM.stepResult`), shown.
+  if s.ended:
+    return EndedSessionNote
+  let vm = s.session.session.searchResultsVM
+  if vm.isNil or vm.results.val.len == 0:
+    return "there are no search results"
+  s.showSearchResult(rt, vm.stepResult(delta))
 
 proc refreshOrigins(s: TuiSession; rt: TuiRuntime) =
   ## PLAT-51: the origin chains open in the Variables pane, read at THIS stop
@@ -499,29 +866,36 @@ proc refreshOrigins(s: TuiSession; rt: TuiRuntime) =
 
 proc refresh*(s: TuiSession; rt: TuiRuntime)
 
+proc showTracepointHits(s: TuiSession; rt: TuiRuntime;
+                        hits: seq[TracepointSweepHit]; title: string) =
+  ## A sweep's hits over the body, as the desktop's tracepoint editor lists
+  ## them under the line — one `:tracepoint`'s, or the program menu's "Run
+  ## All Tracepoints" (M76). The values of the hits the overlay shows are read
+  ## as it scrolls (Q4).
+  let sess = s.session
+  var held = hits
+  let text = sess.tracepointHitsText(held, 0)
+  rt.app.content = ContentOverlay(
+    refill: proc(top: int): string = sess.tracepointHitsText(held, top),
+    open: true,
+    title: title,
+    text: (if text.len > 0: text else: "the line never ran"))
+  if hits.len == 0:
+    rt.app.content.refill = nil
+
 proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
                         request: TracepointRequest): int =
   ## PLAT-50: one tracepoint swept over the recording; its hits shown, the
   ## panes refreshed (the point list and the gutter carry it). Answers how
   ## many hits.
   inc s.tracepointsRun
-  let hits = s.session.runTracepoints(@[TracepointSweepSpec(
+  var hits = s.session.runTracepoints(@[TracepointSweepSpec(
     tracepointId: s.tracepointsRun - 1, path: request.path,
     line: request.line, expression: request.expression)])
-  var text = ""
-  for h in hits:
-    var parts: seq[string] = @[]
-    for (name, value) in h.values:
-      parts.add name & " = " & value
-    text.add "tick " & $h.rrTicks & "  " &
-             (if h.errorMessage.len > 0: h.errorMessage
-              else: parts.join(", ")) & "\n"
-  rt.app.content = ContentOverlay(
-    open: true,
-    title: "tracepoint `" & request.expression & "` at " &
-           request.path.extractFilename & ":" & $request.line & " — " &
-           $hits.len & " hit(s)",
-    text: (if text.len > 0: text else: "the line never ran"))
+  s.showTracepointHits(rt, hits,
+    "tracepoint `" & request.expression & "` at " &
+    request.path.extractFilename & ":" & $request.line & " — " &
+    $hits.len & " hit(s)")
   s.refresh(rt)
   hits.len
 
@@ -533,9 +907,11 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## open and after each pumped move), which is what makes "the panes agree with
   ## each other" a property of the code rather than of the caller remembering
   ## the order.
+  if s.ended:
+    return
   let tick = s.session.getCurrentRRTicks()
 
-  serveSourceWindow(s)
+  serveSourceWindow(s, tick)
   # The flow overlay reads the SAME facts GPUI's `editorSurfaceFor` reads —
   # `FlowVM.styledLines`, through `notTakenLinesOf` — and honours the same
   # `EditorVM.showFlowOverlay` toggle.
@@ -579,11 +955,17 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   let notTaken =
     if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
     else: notTakenLinesOf(flowVM.styledLines.val)
+  # THE FLOW'S VALUES ON EVERY LINE IT REACHED — the one rule GPUI's editor
+  # draws too (`editor_surface.flowValuesByLine`), with the overlay.
+  let flowValues = flowValuesByLine(
+    flowVM, s.source.path.val, int(tick),
+    not editorVM.isNil and editorVM.showFlowOverlay.val)
   rt.app.source = sourcePaneModelFor(
     s.source, s.session.session.store.degraded.sourceAvailability.val,
     points = s.points,
     notTakenLines = notTaken,
-    inlineValues = values)
+    inlineValues = values,
+    lineValues = flowValues)
   # PLAT-50: A FILE OPENED FROM THE FILES PANE stays in the editor until the
   # debugger moves (`applyOutcome` clears `viewedFile` on every move).
   if rt.app.viewedFile.len > 0:
@@ -591,11 +973,24 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
 
   # PLAT-40. The Points pane reads the same points the gutter just drew.
   rt.app.points = pointListPaneModelFor(s.points)
+  # PLAT-57: Find in Files, this session's.
+  s.refreshSearch(rt)
 
   let locals = s.session.getLocals()
   s.valueTimeline.observeStop(tick, locals)
+  # M71 (#838): the pane's reading position is the reader's too — a click on
+  # a history entry moves the debugger, and the reader stays where they were
+  # in the history (the painter clamps it to the new stop's rows).
+  # HSF-V2: the Variables pane REPORTS what it shows (its layout rectangle's
+  # rows and columns, scrolled to the reader's row); the stop loader sizes the
+  # locals it asks for at the next stop from it.
+  if not s.state.isNil:
+    s.state.setViewport(cellPaneViewport(
+      rt.paneBodyRows(paneState), rt.paneBodyCols(paneState),
+      rt.app.variables.scrollTop))
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
-                                       tickLabel = "tick " & $tick)
+                                       tickLabel = "tick " & $tick,
+                                       scrollTop = rt.app.variables.scrollTop)
   # PLAT-51: the pane's open histories and origins, its watches and the
   # name column's width — the user's, carried across stops.
   rt.app.variables.histories = rt.app.openHistories
@@ -630,15 +1025,14 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
       try:
         # PLAT-51: naming the stop's tick, so the answer also says which row
         # of the whole log is "now" — the scrubber's mark.
-        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order,
-                                    atRRTicks = int64(tick))
+        rows = sess.loadedEventRows(offset, limit, runtime.app.eventLog.order)
       except CatchableError:
         discard
       let ev = sess.session.session.store.eventLog
       EventPage(rows: rows, atEnd: rows.len < limit,
                 total: (if ev.totalReported.val: ev.recordsTotal.val
                         else: -1)),
-    currentTick = tick, pageSize = EventLogPageSize)
+    currentTick = tick, pageSize = rt.eventLogPageRows)
   if keptColumns.order.len > 0:
     rt.app.eventLog.columns = keptColumns
   rt.app.eventLog.order = keptOrder
@@ -651,12 +1045,12 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # is held — so a caller that wants rows asks for them. A caller that forgets
   # gets `elrPending` rows, which is exactly what the first run of this loop
   # showed: five `…` lines under a `TRACEPOINTS loading` title.
-  rt.app.eventLog.ensureWindow(0, EventLogPageSize)
+  rt.app.eventLog.ensureWindow(0, rt.eventLogBodyRows)
   rt.app.eventLog.current = s.session.session.store.eventLog.currentIndex.val
   if keptScroll > 0:
     rt.app.eventLog.scrollTop = event_log.clampScrollTop(
-      keptScroll, rt.app.eventLog.knownTotal, EventLogPageSize)
-    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop, EventLogPageSize)
+      keptScroll, rt.app.eventLog.knownTotal, rt.eventLogBodyRows)
+    rt.app.eventLog.ensureWindow(rt.app.eventLog.scrollTop, rt.eventLogBodyRows)
   rt.app.eventLog.selected = keptSelected
 
   # PLAT-48: the top bar reads the transport ViewModel for which controls
@@ -696,7 +1090,26 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     selectedVariable: "",
     functions: @[])
 
-proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
+proc recordedSourceText*(s: TuiSession; path: string):
+    tuple[ok: bool, text, message: string] =
+  ## PLAT-68: a file of the RECORDING, whole — the source provider's
+  ## generation 0, what the Debug-mode editor shows — for the read-only
+  ## document its keys act on (`runtime.debugBuffer`). The same fetch
+  ## `showViewedFile` makes for a clicked file.
+  var fetched = SourceFetch(status: sfsProviderUnavailable,
+                            detail: "the provider callback never ran")
+  s.provider.fetch(SourceLineRequest(path: path, sourceGeneration: 0,
+                                     sourceDigest: "", firstLine: 1,
+                                     lastLine: high(int32)),
+                   proc(f: SourceFetch) = fetched = f)
+  drainSourceCallbacks()
+  let lines = if fetched.fileLines.len > 0: fetched.fileLines
+              else: fetched.lines
+  if lines.len == 0:
+    return (false, "", "could not read " & path & ": " & fetched.detail)
+  (true, lines.join("\n") & "\n", "")
+
+proc showViewedFile(s: TuiSession; rt: TuiRuntime; force = false) =
   ## PLAT-50 (K17): the editor shows `rt.app.viewedFile` — a file the user
   ## clicked in the Files pane — read whole from the recording through the
   ## same source provider the stop's file comes from (generation 0, the
@@ -707,9 +1120,14 @@ proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
   ## debugger next moves, as the desktop's editor then switches back to the
   ## location's file.
   let path = rt.app.viewedFile
-  if path == s.source.path.val:
+  # The stop's own file is the editor's already — unless a caller FORCES the
+  # whole file (a Find in Files result, PLAT-57, shown at a line the stop's
+  # window may not hold), with the execution pointer where it is.
+  let stopFile = path == s.source.path.val
+  if stopFile and not force:
     rt.app.viewedFile = ""
     return
+  let executionLine = if stopFile: s.source.executionLine.val else: 0
   var fetched = SourceFetch(status: sfsProviderUnavailable,
                             detail: "the provider callback never ran")
   s.provider.fetch(SourceLineRequest(path: path, sourceGeneration: 0,
@@ -733,7 +1151,7 @@ proc showViewedFile(s: TuiSession; rt: TuiRuntime) =
     heldLines = lines,
     totalLineCount = lines.len,
     viewportTop = top,
-    executionLine = 0,
+    executionLine = executionLine,
     marks = marksForFile(s.points, path),
     columnMarks = columnMarksForFile(s.points, path))
   rt.app.fileTree.openPath = path
@@ -746,35 +1164,13 @@ proc setFlowOverlay*(s: TuiSession; shown: bool) =
 
 proc toggleCallChildren*(s: TuiSession; rt: TuiRuntime; index: int64) =
   ## PLAT-49 part B: expand or collapse the children of the call at trace
-  ## `index` — the desktop's toggle (`CalltraceVM.toggleExpandCallChildren`:
-  ## `ct/expand-calls` or `ct/collapse-calls` for the call's key, then the
-  ## section again) — and redraw the pane from the reloaded section.
-  let store = s.session.session.store
-  let at = index - store.calltrace.startLineIndex.val
-  let lines = store.calltrace.lines.val
-  if at < 0 or at >= lines.len.int64:
+  ## `index` (`session_driver.toggleCallChildren`, the desktop's toggle) and
+  ## redraw the pane from the section the pane shows, read again.
+  if s.ended:
     return
-  let line = lines[at.int]
-  if not line.hasChildren:
-    return
-  let command = if line.isExpanded: "ct/collapse-calls" else: "ct/expand-calls"
-  try:
-    # FIRE AND FORGET, as the desktop's `backend.send` is: the engine sends
-    # no response to `ct/expand-calls` / `ct/collapse-calls` (measured — a
-    # blocking `sendDapRequest` never returned), only the changed section
-    # the next load reads.
-    s.session.backend.sendDapRequestNoResponse(command, %*{
-      "callKey": line.callKey, "nonExpandedKind": 1, "count": 0})
-    discard s.session.backend.drainEvents()
-    let body = rt.paneBodyRows(paneCalltrace)
-    let start = max(0, rt.app.callTrace.visibleTop(max(1, body)) -
-                       CallTraceBuffer)
-    s.session.requestAndLoadCalltrace(
-      startIndex = start.int64, height = max(1, body) + 2 * CallTraceBuffer,
-      depth = RecordingCalltraceDepth)
-  except CatchableError as e:
-    rt.app.notification = "could not " &
-      (if line.isExpanded: "collapse" else: "expand") & " the call: " & e.msg
+  let why = s.session.toggleCallChildren(index)
+  if why.len > 0:
+    rt.app.notification = why
     return
   rt.app.callTrace = s.callTraceModelOf(rt)
 
@@ -801,6 +1197,8 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
   of pcNone: discard
   of pcVcsDiff, pcVcsCommit:
     discard   # the VCS source's (`vcs_source.applyClick`)
+  of pcTestsRun, pcTestsRefresh, pcTestsOpen:
+    discard   # the Test Results source's (`test_results_source.applyClick`)
   of pcFrameSeek:
     # PLAT-51: the frame viewer's own scrubber (CodeTracer-TUI-Graphics.md
     # §4, Visual-Replay.md's Scrub Slider): the frame under the pointer,
@@ -844,7 +1242,7 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     # K26: the engine orders the log (`ct/event-load`'s `sortKey`); the pane
     # pages through it in that order from the top.
     rt.app.eventLog.reorder(c.order)
-    rt.app.eventLog.ensureWindow(0, EventLogPageSize)
+    rt.app.eventLog.ensureWindow(0, rt.eventLogBodyRows)
     rt.app.notification =
       if c.order == RecordedEventOrder: "event log in recorded order"
       else: "event log ordered by " & eventLogColumnTitle(c.order.column) &
@@ -893,21 +1291,26 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.refreshOrigins(rt)
   of pcWatch:
     # PLAT-51: a watch added, removed or edited (the desktop's watch field
-    # and row controls); the engine evaluates watches inside the next
-    # locals load, so the pane re-reads the stop.
-    # BOTH StateVMs: the session's (whose list `ct/load-locals` sends, so
-    # the engine evaluates the watch) and the pane's own (`s.state`, which
-    # the Variables pane is read from).
-    for vm in [session.session.stateVM, s.state]:
-      if vm.isNil:
-        continue
+    # and row controls), on the session's StateVM: the Variables pane reads
+    # it, and the stop loader sends its list with `ct/load-locals`, so the
+    # engine evaluates the watch in the next locals load and the pane
+    # re-reads the stop.
+    let vm = s.state
+    if not vm.isNil:
       case c.behaviour
       of "remove": vm.removeWatch(c.path)
       of "edit": vm.editWatch(c.path, c.text)
       else: vm.addWatch(c.text)
-      if vm == s.state and s.state == session.session.stateVM:
-        break
     s.refresh(rt)
+  of pcSearchResult:
+    # PLAT-57 (K35): the result opens at its line; the debugger stays.
+    let why = s.showSearchResult(rt, int(c.index))
+    if why.len > 0:
+      rt.app.notification = why
+  of pcSearchOption:
+    # PLAT-57: a toggle flips (and a search that ran runs again with it —
+    # the ViewModel's rule).
+    rt.app.notification = s.toggleSearchOption(rt, c.text)
   of pcOpenFile:
     # K17: the desktop's `FilesystemVM.openFile`.
     rt.app.viewedFile = c.path
@@ -920,9 +1323,12 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     if not vm.isNil:
       vm.toggleExpanded(c.path)
       let open = rt.app.fileTree.openPath
+      let top = rt.app.fileTree.scrollTop
       s.files = fileTreeModelOf(vm)
       rt.app.fileTree = s.files
       rt.app.fileTree.openPath = open
+      # M71 (#838): a folder opened or closed keeps the reader's place.
+      rt.app.fileTree.scrollTop = top
   of pcToggleBreakpoint:
     # K10: the desktop's gutter click (`lineActionClick` → `toggleBreakpoint`).
     if not s.toggleBreakpoint(c.path, c.line):
@@ -957,16 +1363,24 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.noteWhere(rt)
   of pcDeleteBreakpoints:
     # K13's "Delete breakpoints in file" / "Delete ALL breakpoints".
-    var paths: seq[string] = @[]
-    for r in session.session.store.pointList.rows.val:
-      if r.kind == PointKindBreakpoint and r.path notin paths and
-         (c.path.len == 0 or r.path == c.path):
-        paths.add r.path
-    for p in paths:
-      discard session.clearBreakpoints(p)
+    discard session.clearAllBreakpoints(c.path)
     rt.app.notification = "deleted the breakpoints " &
       (if c.path.len == 0: "in every file" else: "in " & c.path)
     s.refresh(rt)
+  of pcPointMenu:
+    # M76 (codetracer#843): the program menu's breakpoint and tracepoint
+    # items, at the editor caret's line — the performer GPUI's menu calls
+    # too (`session_driver.performPointMenuOp`).
+    let op = pointMenuOpOf(c.text)
+    var nextId = s.tracepointsRun
+    let done = session.performPointMenuOp(op, c.path, c.line, nextId)
+    s.tracepointsRun = nextId
+    if op == pmoRunAllTracepoints and done.performed:
+      s.showTracepointHits(rt, done.swept,
+        "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
+        " hit(s)")
+    s.refresh(rt)
+    rt.app.notification = done.message
   of pcSeek:
     # K30: the timeline's click (`TimelineVM.seek` → `ct/timeline-seek`,
     # the handler `ct/goto-ticks` reaches).
@@ -979,47 +1393,50 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     s.refresh(rt)
     s.noteWhere(rt)
 
-const OriginWaitMs = 20_000
-  ## How long `o` waits for the engine's origin chain.
-
 proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
-  ## What the host does with one token's outcome, in ONE place so the shipped
-  ## loop (`main.nim`) and the suites that drive the host run the same rule: a
-  ## navigation is pumped and then refreshed; a change to what the session
-  ## holds without a move (a breakpoint) is refreshed and NOT pumped — a pump
-  ## there would wait on a `stopped` event no engine sends.
+  ## What the host does with one token's outcome. The session-level half —
+  ## settling a move, going to a call, toggling its children, waiting for an
+  ## origin chain — is `session_driver`'s, shared with GPUI and the pane
+  ## server; this proc adds the terminal's half: the notification line, the
+  ## viewed file and the panes rebuilt from the session. A change to what the
+  ## session holds without a move (a breakpoint) is refreshed and NOT pumped —
+  ## a pump there would wait on a `stopped` event no engine sends.
+  ##
+  ## M76: *Stop* (`outcome.stopsSession`) ends the session here (`stop`).
+  ## Once it has, nothing below may reach the engine: a request that would
+  ## need it is answered on the status line instead.
+  if outcome.stopsSession:
+    discard s.stop(rt)
+    return
+  # M73 (#840): the user moved the source window (the wheel over the editor,
+  # its scroll keys, its vertical bar, or a caret that left the screen).
+  # Never a move, so nothing else here is owed for it.
+  if outcome.sourceScroll.kind != sskNone:
+    s.scrollSource(rt, outcome.sourceScroll)
+  if s.ended:
+    if outcome.paneClick.kind != pcNone or outcome.jumpsToCall or
+       outcome.togglesCall or outcome.awaitsOrigin or outcome.awaitsMove or
+       outcome.refreshesSession:
+      rt.app.notification = EndedSessionNote
+    return
   if outcome.paneClick.kind != pcNone:
     s.applyPaneClick(rt, outcome.paneClick)
   elif outcome.jumpsToCall:
     # PLAT-49 part B: a click on a call-trace row goes to that call, as the
-    # desktop's click does (`CalltraceVM.doubleClickEntry`'s
-    # `ct/calltrace-jump`); `calltraceJump` waits for the move itself.
-    let store = s.session.session.store
-    let at = outcome.callIndex - store.calltrace.startLineIndex.val
-    let lines = store.calltrace.lines.val
-    if at >= 0 and at < lines.len.int64:
-      try:
-        s.session.calltraceJumpByLine(lines[at.int])
-      except CatchableError as e:
-        rt.app.notification = "could not go to the call: " & e.msg
-      rt.app.viewedFile = ""
-      s.refresh(rt)
-      s.noteWhere(rt)
+    # desktop's click does.
+    let why = s.session.jumpToCall(outcome.callIndex)
+    if why.len > 0:
+      rt.app.notification = why
+    rt.app.viewedFile = ""
+    s.refresh(rt)
+    s.noteWhere(rt)
   elif outcome.togglesCall:
     s.toggleCallChildren(rt, outcome.callIndex)
   elif outcome.awaitsOrigin:
     # PLAT-50: the chain `o` / `:origin` asked for — its event taken into
     # the Origin ViewModel, then the action run again to walk it. Bounded:
     # an engine that never answers leaves the note saying it is querying.
-    var event: JsonNode = nil
-    let saved = s.session.backend.bound
-    if saved.timeoutMs == 0 or saved.timeoutMs > OriginWaitMs:
-      s.session.backend.bound.timeoutMs = OriginWaitMs
-    try:
-      event = s.session.backend.waitForEvent(OriginEventName)
-    except CatchableError:
-      discard
-    s.session.backend.bound = saved
+    let event = s.session.awaitOriginEvent()
     if event.isNil or applyOriginEvents(s.origin, @[event]) == 0:
       rt.app.notification = "no origin arrived for the query"
       return
@@ -1034,6 +1451,10 @@ proc applyOutcome*(s: TuiSession; rt: TuiRuntime; outcome: RuntimeOutcome) =
     s.refresh(rt)
   elif outcome.pagesCallTrace:
     s.pageCallTrace(rt)
+  # THE LINE VIEW HOLDS WHAT THE PANE SHOWS after whatever this token did to
+  # the layout — a tab switch that reveals it, a resize, a maximise. A no-op
+  # while the window it shows is held (Viewport-Driven-Loading Q3).
+  rt.app.terminalOutput.ensureShown(rt.terminalOutputRows())
 
 proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## Take the ESCAPE HATCH off the DAP channel now that the session is open,
@@ -1052,11 +1473,38 @@ proc disarmHandshakeInterrupt*(s: TuiSession) =
   ## The clock stays because a mid-session stall would otherwise hang the loop
   ## with no input running at all — the very shape CTUI-14 exists to remove.
   ## When it fires the channel is declared dead, every later read fails fast,
-  ## and the user keeps a terminal that answers `q`.
+  ## and the user keeps a terminal that answers `q`. It stays on ORDINARY
+  ## requests: the operations that are silent by design until they finish (a
+  ## tracepoint sweep, a step or `continue`) are a slow engine, not a stopped
+  ## one, and `allowSlowOperations` exempts them.
   if s.isNil or s.session.isNil or s.session.backend.isNil:
     return
   s.session.backend.bound.interruptFd = -1
   s.session.backend.bound.onInterrupt = nil
+
+proc allowSlowOperations*(s: TuiSession) =
+  ## Let the engine operations that are silent BY DESIGN take as long as they
+  ## take, now that somebody is watching this session.
+  ##
+  ## The clock stays on every ordinary request (`disarmHandshakeInterrupt`
+  ## says why), so a mid-session stall on one still fails by name and the
+  ## terminal still answers `q`. But some operations send nothing until they
+  ## are finished: a tracepoint sweep sends nothing until the whole recording
+  ## is swept, and a step or `continue` is answered only once the move lands.
+  ## Over a large recording either can be silent for longer than any budget,
+  ## and that engine is SLOW, not stopped. Under the clock such a sweep was
+  ## reported as a failure, and its answer — which still arrived — was then
+  ## read as the answer to the next sweep. So those reads are untimed here
+  ## (`DapReadBound.untimedOperations`); an engine that exits still ends them.
+  ##
+  ## Called on the INTERACTIVE paths only — the tty session, each session a
+  ## "+" opens, the editor's pane server — and not by `--headless`, which
+  ## nobody watches: there a silent operation stays a stall, and the channel
+  ## is then declared dead so its late answer is never misread
+  ## (codetracer-pm `spec/CLI/ct/ui-selection.md` §8b).
+  if s.isNil or s.session.isNil or s.session.backend.isNil:
+    return
+  s.session.backend.bound.untimedOperations = true
 
 proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
   ## §6.2's `--goto=<tick>`, applied ONCE before the first debugger frame.
@@ -1072,6 +1520,8 @@ proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
   ## Returns the dispatcher's own detail line, which `main.nim` puts on the
   ## status bar: a clamp against the recording's bounds is reported there
   ## ("goto to tick 900 (clamped from 99999)") rather than silently obeyed.
+  if s.ended:
+    return EndedSessionNote
   let outcome = dispatchAction(rt.dispatcher, rt.context, kaSeekToTick, $tick)
   if outcome.status == drDone:
     s.pumpMove()
@@ -1079,14 +1529,30 @@ proc seekToStartupTick*(s: TuiSession; rt: TuiRuntime; tick: int64): string =
   outcome.detail
 
 proc header*(s: TuiSession; rt: TuiRuntime) =
-  ## Put the trace's NAME where §3.1's header row reads it. Separate from
-  ## `refresh` because it never changes and `refresh` runs on every step.
+  ## Point the runtime at this session — the one shown: the trace's NAME
+  ## where §3.1's header row reads it, and (PLAT-68) the reader the Debug-mode
+  ## editor opens its read-only documents with, from THIS recording. Separate
+  ## from `refresh` because neither changes and `refresh` runs on every step.
+  if s.ended:
+    return
   let name = extractFilename(s.session.tracePath.strip(chars = {'/'}))
   rt.app.title = name
   rt.app.traceName = name
+  rt.editServices.readSource = proc(path: string): EditReadResult =
+    let read = s.recordedSourceText(path)
+    EditReadResult(ok: read.ok, text: read.text, message: read.message)
+  # M76: the session's `DebugControlsVM` Stop (installed by `native_host`)
+  # does this terminal's half too — Edit mode, the runtime forgetting the
+  # session — whichever caller reaches it, so a Stop from anywhere leaves
+  # no part of the front end pointing at the ended engine. `stop` is
+  # re-entrant-safe: it marks the session stopped before it ends the replay.
+  let sess = s
+  s.session.installNativeStop(proc() = discard sess.stop(rt))
 
 proc describe*(s: TuiSession): string =
   ## For a diagnostic: where the engine is and what the recording's extent is.
+  if s.ended:
+    return EndedSessionNote
   s.session.getCurrentFile() & ":" & $s.session.getCurrentLine() &
     "  tick " & $s.session.getCurrentRRTicks() &
     "  extent " & (if s.bounds.known: $s.bounds.minTick & ".." & $s.bounds.maxTick

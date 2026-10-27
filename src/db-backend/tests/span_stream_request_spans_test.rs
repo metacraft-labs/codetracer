@@ -491,6 +491,7 @@ fn load_request_spans_pagination_and_filters() {
                     from_span_id: Some(from),
                     limit: Some(page_size),
                     filters: Some(filters.clone()),
+                    start: None,
                 });
                 assert_eq!(page.total, reference.len(), "{name}/{page_size}: total on every page");
                 assert!(

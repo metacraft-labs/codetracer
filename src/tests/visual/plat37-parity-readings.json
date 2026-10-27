@@ -1,0 +1,1229 @@
+{
+ "_comment": [
+  "PLAT-37 / PLAT-35 — THE FIRST GPUI-vs-ELECTRON PARITY READING TAKEN IN ONE",
+  "CAPTURE SESSION. **NOT against one build — see `provenance.buildSkew`.**",
+  "",
+  "THE HEADLINE THIS FILE FIRST CARRIED WAS WRONG, AND THE CORRECTION IS THE",
+  "MOST IMPORTANT THING IN IT. `Cross-Renderer-Visual-Alignment.md` 2.2 rule 4",
+  "requires a tier-4 review to be 'against the same build'. The earlier passes",
+  "failed that because the Electron set was captured 2026-10-02 and the GPUI",
+  "set 2026-10-07 — two capture DATES. This pass fixed the capture dates (both",
+  "sets are within 11 minutes of each other on 2026-10-12, one checkout, one",
+  "recording, one engine named through REPLAY_SERVER_BIN) and then claimed rule",
+  "4 was satisfied. It is not. Aligning WHEN THE PIXELS WERE TAKEN is not the",
+  "same as aligning WHAT WAS RUNNING, and the review that caught this found the",
+  "GPUI arm running a binary 127 commits behind the Electron arm.",
+  "",
+  "So the rule-4 defect was not removed, it was MOVED ONE LEVEL DOWN: from the",
+  "capture date to the build date, where nothing was looking. Every GPUI-side",
+  "finding below is therefore a reading of codetracer as it stood on",
+  "2026-10-07, compared against Electron as it stood on 2026-10-12. Findings",
+  "are tagged `buildSkewContaminated` accordingly, and one (PARITY-S2) is",
+  "withdrawn outright because the skew fully explains it.",
+  "",
+  "THIS FILE IS NOT A GATE AND IS NOT THE TIER-4 LEDGER. It records what was",
+  "measured. `src/tests/visual/tier4-gpui-readings.json` is PLAT-35's and",
+  "carries its own integrity suite; nothing here was written to it. NOTHING",
+  "GATES THIS FILE EITHER — see `provenance.buildSkew.whatWouldHaveCaughtIt`.",
+  "",
+  "GEOMETRY FIRST, PIXELS SECOND. Three of the six scenarios are at the",
+  "`wide` viewport, where Electron honours 1920x1080 exactly and GPUI is",
+  "clamped by AppKit to 1728x1084. Those three have NO pixel comparison at",
+  "all — not a lenient one, none — because comparing two different extents",
+  "is a number about resampling rather than about the product. They are",
+  "still compared STRUCTURALLY, which needs no common extent.",
+  "",
+  "WHAT EACH NUMBER CAME FROM, so no reader has to guess which instrument",
+  "made a claim:",
+  "  * `stoppedLine.gpui`      — the PLAT-39 screen oracle's readGutterDigits",
+  "                              over the GPUI window capture (Apple Vision OCR).",
+  "  * `stoppedLine.electron`  — the SAME oracle over the Electron capture.",
+  "                              `null` means the oracle REFUSED the frame",
+  "                              (grammar-mismatch), not that the line is absent;",
+  "                              `electronRouteLine` carries the product's own",
+  "                              answer for the same frame.",
+  "  * `electronRouteLine`     — window.data.services.debugger.location, read by",
+  "                              the lane's Playwright driver after each operation.",
+  "                              NOT OCR, so it is an independent instrument.",
+  "  * `flip`                  — NVIDIA FLIP via codetracer-image-diff's flip(),",
+  "                              over ffmpeg-decoded RGBA. No second differ was",
+  "                              written (30/30a); magick/compare are absent here.",
+  "  * `structural` findings   — read off the point-extent PNGs by disposable",
+  "                              sub-agents, one per frame pair, each capped at",
+  "                              250 words. Locations are POINTS in the content",
+  "                              area and are approximate to a few points.",
+  "2026-10-13, RE-REVIEW: three statements in this file are WRONG and are corrected in place by sibling `*Correction` fields that keep the wrong text beside them — provenance.buildSkew.positiveControl (the @lpkTimeline leg), PARITY-S10 (both halves) and PARITY-G1 (\"Electron's fit inside their pane\"). None of the three is a build-skew casualty: each was wrong about the frames in front of the reader. The `buildSkewContaminated` flags are DELIBERATELY LEFT SET — they are true statements about this pass and are the evidence that the contamination happened. The re-measured, freshness-gated pass is a SEPARATE file, plat37-parity-readings-2026-10-13.json; this one is not updated to describe it, because a dated record rewritten to say something else stops being a record."
+ ],
+ "schemaVersion": 1,
+ "lane": [
+  "ci/test/plat37-macos-window-capture.sh",
+  "ci/test/plat37-macos-electron-capture.sh"
+ ],
+ "standing": "HOST-CONDITIONAL EVIDENCE — neither lane is a gate; both need a live macOS GUI session and a Screen Recording grant.",
+ "measuredAt": "2026-10-12T21:58..22:11+03:00",
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 build 25F84",
+  "displays": 1,
+  "displayPoints": "1728x1117",
+  "pointPixelScale": 2.0
+ },
+ "provenance": {
+  "codetracer": "8f284d063 (agents)",
+  "codetracerUncommitted": [
+   "nix/shells/main.nix",
+   "src/frontend/tui/tests/fixtures/fixture_provider.nim"
+  ],
+  "whyUncommittedIsStated": "AGENTS.md: say what you measured it against — and a sha alone would have been a lie here. Neither file is in the capture or the replay path: the first governs how the dev shell builds .python-recorder-venv, the second how the TUI fixture provider decides to re-record. Both bear on how the RECORDING was produced, not on how either lane reads it.",
+  "isonimGpui": "a76a77df0 (agents) — the revision flake.lock pins",
+  "guiAssert": "3058e0c03 (agents)",
+  "codetracerTraceFormat": "c8e57b1f2",
+  "codetracerTraceFormatNim": "808ffdb45",
+  "codetracerImageDiff": "ee9fb397b (agents)",
+  "repro": "0.2.5, locally built from reprobuild 84d1e4a77",
+  "engine": {
+   "path": "src/db-backend/target/debug/replay-server",
+   "mtime": "2026-10-12T20:29:29+03:00",
+   "why": "the CARGO target, which is what findReplayServer reaches; src/build-debug-repro/bin is not in its candidate list at all. Exported as REPLAY_SERVER_BIN to BOTH lanes so the choice is recorded rather than inherited.",
+   "symbols": {
+    "is_wrapping_toplevel_root": 12,
+    "first_user_call": 16,
+    "run_to_entry": 12,
+    "no_such_symbol_zzz_negativeControl": 0
+   }
+  },
+  "electronBundle": {
+   "bin/ct": "2026-10-12T17:48:03Z",
+   "ui.js": "2026-10-12T16:43:31Z"
+  },
+  "gpuiShim": {
+   "path": "isonim-gpui/rust/target/plat37/libgpui_nim_shim.windowed.dylib",
+   "bytes": 66282184,
+   "fontKitProbe": {
+    "font_kit": 1,
+    "textless-refusal": 0
+   }
+  },
+  "recording": {
+   "path": "test-logs/tui-fixtures/calc-2f0db4f45192",
+   "recordedAt": "2026-10-12T21:55+03:00",
+   "ctfsContainerVersionByte": 5,
+   "previousContainerVersionByte": 4,
+   "recorderIdentity": "py-f1f2ea4f371abf6a9794cab1"
+  },
+  "gpuiBinary": {
+   "path": "build/bin/codetracer-gpui",
+   "mtime": "2026-10-07T17:51 +0300 (nimcache json 17:48)",
+   "why": "the binary `ci/test/plat37-macos-window-capture.sh` runs. The lane sets BIN=${root}/build/bin/codetracer-gpui and only checks `[ -x ]` (line 187); it never builds it and never compares it against HEAD.",
+   "note": "THIS IS THE GPUI ARM'S ACTUAL EXECUTABLE AND IT WAS MISSING FROM THE FIRST VERSION OF THIS FILE, which recorded only the Rust shim. A provenance table that omits the binary under test cannot show a build skew, which is why this one did not."
+  },
+  "buildSkew": {
+   "gpuiArm": "codetracer @ build/bin/codetracer-gpui, built 2026-10-07T17:51",
+   "electronArm": "codetracer @ bin/ct 2026-10-12T17:48:03Z, ui.js 2026-10-12T16:43:31Z",
+   "commitsBetween": 127,
+   "measuredHow": [
+    "`git log --oneline --since='2026-10-07 17:48' 8f284d063 | wc -l` -> 127.",
+    "The Timeline panel was removed by `740d76be2`, 2026-10-08T02:19:56 +0300 — 8.5 hours AFTER the GPUI binary was built.",
+    "Four of the 127 touch the GPUI window/host code itself: 740d76be2, 1fdcc0c5c (welcome tab, focus highlight, drop zones, LIVE RESIZE), 5dea7f072 and ac6e304a5 (keymaps)."
+   ],
+   "positiveControl": "the stale binary still carries symbols the current tree does not: `grep -a` finds `@Timeline` (a pane-name-table entry beside `@Flow`), `@lpkTimeline` (a PaneKind spelling that no longer exists) and the mangled Nim symbol `_renderTimeline__appZleaves_` — a proc in `gpui/app/leaves.nim`, a file that at 8f284d063 contains no `Timeline` at all. Negative control: the nonsense literal `ZZZ_no_such_literal_ZZZ` -> 0. At 8f284d063, `PaneKind` has no `paneTimeline`, `RetiredPaneSpellings == [\"timeline\"]`, `shared_default_layout.generated.json` contains the string zero times, and `test_shared_default_layout.nim`'s `paneTimelineIsGone()` asserts it.",
+   "consequence": "Every GPUI-side finding describes codetracer at 2026-10-07, not at 8f284d063. The Electron-side and instrument findings (PARITY-S8, PARITY-S12, PARITY-I1, PARITY-O1) are unaffected: that arm was built the same day it was captured.",
+   "whatWouldHaveCaughtIt": "Nothing in the tree compares the GPUI binary's mtime against the newest commit touching `src/frontend/gpui/` or `src/frontend/headless_app/`. The capture lane's `[ -x ${BIN} ]` is an EXISTENCE check, which is the same defect shape as `issues/2026-10-07-gpui-plan-lane-runs-against-an-unchecked-replay-server-and-blames-the-product.md` records for `replay-server` — a different binary and a different lane, same family. Filed as its own issue; see `reviewFindings`.",
+   "whyRule4DidNotCatchIt": "`Cross-Renderer-Visual-Alignment.md` §2.2 rule 4 DOES exist and IS enforced — but on `tier4-review.json`, and it binds the REVIEW's `againstUiBundleMtime` to the CAPTURE's provenance. It therefore asks 'did the reviewer look at the build that was photographed', not 'was the build that was photographed the one we are drawing conclusions about'. Both would have read 2026-10-07 here and rule 4 would have passed. The unasserted edge is capture-build against SOURCE.",
+   "positiveControlCorrection": "CORRECTED ON RE-REVIEW 2026-10-13, against codetracer df80efc8d with a REBUILT and FRESHNESS-GATED GPUI binary. The wrong text is kept above rather than overwritten: this file is the record of the 2026-10-12 contaminated pass, and an error silently repaired is an error the next reader cannot learn from. The re-measured readings live in plat37-parity-readings-2026-10-13.json. THE `@lpkTimeline` LEG OF THIS CONTROL IS WRONG AND MUST NOT BE COUNTED. It is described above as 'a PaneKind spelling that no longer exists'. It is not a PaneKind spelling at all: it is `LogicalPanelKind.lpkTimeline` in src/frontend/viewmodel/collab/types.nim, the COLLAB panel enum, present at df80efc8d. Measured 2026-10-13 with `grep -ac`: `@lpkTimeline` -> 1 in the REBUILT build/bin/codetracer-gpui and `lpkTimeline` -> 1 in src/build-debug-repro/ui.js. It is present on BOTH sides and in BOTH builds, so it cannot discriminate between them and is not evidence of staleness. The OTHER TWO legs hold and are what the control rests on: `@Timeline` read 2 in the stale binary and reads 0 in the rebuilt one, and `_renderTimeline__appZleaves_` likewise. Gated: positive control `Call Trace` -> 1, negative control `ZZQQnonsense_literal_XYZZY` -> 0."
+  }
+ },
+ "instrumentControls": [
+  "GPUI lane controls 1-3 passed: host/grant/display still; a capture aimed at a non-existent owner REFUSED with attestation matched 0 and no G1 claim; the grader's rendersText assertion made to fail on a synthesised flat frame.",
+  "Electron lane controls 1-3 passed identically.",
+  "The GPUI windowed shim was probed in BOTH polarities for the font-kit literal (font_kit=1, 'no text will be rendered'=0), so the textless-window failure mode is excluded.",
+  "FLIP driver controlled before use: identical 64x64 buffers -> mean 0.0 on every statistic; a 16x16 white block in the same frame -> mean 0.0719 with the hot tiles exactly over the block. Both arms live.",
+  "Engine symbol probe carries a negative control (a nonsense symbol -> 0), which AGENTS.md's own 320c37ed recipe lacks.",
+  "REVIEW, 2026-10-12: the FLIP driver's controls were RE-RUN independently rather than taken on report. Identical 64x64 buffers -> every statistic exactly 0.0. A 16x16 white block injected into one of them -> nonzero with the hot tiles exactly over the block and its spatial-filter spill. A deliberate width/height mismatch -> `flipdiff` exits 3 with 'buffer size mismatch' and computes nothing, so the 'never resample' claim is enforced in code and not merely asserted in a comment. The implementer's specific 0.0719 constant could not be reproduced (the control's own inputs were not retained) and is recorded as unverifiable; the control's PURPOSE — a live, localising positive arm — was reproduced.",
+  "REVIEW: `nim check` on the modified `fixture_provider.nim` exits 0, gated on a positive control (an undefined symbol appended to the same file makes it exit 1 and name the symbol); the file was restored by byte copy and its sha256 asserted identical.",
+  "REVIEW: the recorder-identity probe was re-run. The venv interpreter yields `py-f1f2ea4f371abf6a9794cab1`, byte-identical to `provenance.recording.recorderIdentity` — a reproducible positive arm. `/usr/bin/python3` yields exit 1 (ModuleNotFoundError) and therefore the empty identity the asymmetric rule needs, both with and without `-I`.",
+  "REVIEW: `_ct_venv_matches_pin` was exercised standalone with four arms — current pin -> match (so re-entry is idempotent and does NOT rebuild); the 2026-09-29 env -> mismatch (the case the version-only check could not see, both being 3.12); the 2026-08-18 cached-rc env -> mismatch; unset `CODETRACER_PYTHON_CMD` -> mismatch (unchanged from the previous behaviour)."
+ ],
+ "scenarios": [
+  {
+   "view": "shell",
+   "scenario": "entry-shell",
+   "viewport": "wide",
+   "operations": [],
+   "capturedAt": {
+    "gpui": "2026-10-12T21:59:15",
+    "electron": "2026-10-12T22:09:05"
+   },
+   "extentDevicePx": {
+    "gpui": "3456x2168",
+    "electron": "3840x2160",
+    "gpuiAfterTitleBarCrop58": "3456x2110"
+   },
+   "pixelComparable": false,
+   "stoppedLine": {
+    "pin": 1,
+    "gpui": 1,
+    "electron": null,
+    "electronRoute": 0,
+    "agree": false
+   },
+   "paneCount": {
+    "gpui": 5,
+    "electron": 7
+   },
+   "panes": {
+    "gpui": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog"
+    ],
+    "electron": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog",
+     "other",
+     "other"
+    ]
+   },
+   "recognizedStrings": {
+    "gpui": 119,
+    "electron": 158
+   },
+   "distinctGrayLevels": {
+    "gpui": 256,
+    "electron": 256
+   },
+   "verdict": {
+    "gpui": "OK",
+    "electron": "OK"
+   },
+   "flip": {
+    "notComparable": "extents differ in BOTH dimensions after the title-bar crop (3456x2110 vs 3840x2160); no pixel comparison was attempted — see finding PARITY-G1"
+   },
+   "electronRoute": {
+    "finalLine": 0,
+    "rrTicks": 0,
+    "busyAtSample": true,
+    "trajectory": [
+     "entry=0@0"
+    ]
+   }
+  },
+  {
+   "view": "editor",
+   "scenario": "stepped-editor",
+   "viewport": "wide",
+   "operations": [
+    {
+     "kind": "stepIn",
+     "times": 5
+    }
+   ],
+   "capturedAt": {
+    "gpui": "2026-10-12T21:59:59",
+    "electron": "2026-10-12T22:09:23"
+   },
+   "extentDevicePx": {
+    "gpui": "3456x2168",
+    "electron": "3840x2160",
+    "gpuiAfterTitleBarCrop58": "3456x2110"
+   },
+   "pixelComparable": false,
+   "stoppedLine": {
+    "pin": 44,
+    "gpui": 44,
+    "electron": 44,
+    "electronRoute": 44,
+    "agree": true
+   },
+   "paneCount": {
+    "gpui": 5,
+    "electron": 7
+   },
+   "panes": {
+    "gpui": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog"
+    ],
+    "electron": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog",
+     "other",
+     "other"
+    ]
+   },
+   "recognizedStrings": {
+    "gpui": 148,
+    "electron": 177
+   },
+   "distinctGrayLevels": {
+    "gpui": 256,
+    "electron": 256
+   },
+   "verdict": {
+    "gpui": "OK",
+    "electron": "OK"
+   },
+   "flip": {
+    "notComparable": "extents differ in BOTH dimensions after the title-bar crop (3456x2110 vs 3840x2160); no pixel comparison was attempted — see finding PARITY-G1"
+   },
+   "electronRoute": {
+    "finalLine": 44,
+    "rrTicks": 6,
+    "busyAtSample": false,
+    "trajectory": [
+     "entry=1@1",
+     "stepIn=2@2",
+     "stepIn=29@3",
+     "stepIn=34@4",
+     "stepIn=39@5",
+     "stepIn=44@6"
+    ]
+   }
+  },
+  {
+   "view": "state",
+   "scenario": "advanced-state",
+   "viewport": "laptop",
+   "operations": [
+    {
+     "kind": "stepIn",
+     "times": 5
+    },
+    {
+     "kind": "next",
+     "times": 3
+    }
+   ],
+   "capturedAt": {
+    "gpui": "2026-10-12T22:00:50",
+    "electron": "2026-10-12T22:09:42"
+   },
+   "extentDevicePx": {
+    "gpui": "2880x1858",
+    "electron": "2880x1800",
+    "gpuiAfterTitleBarCrop58": "2880x1800"
+   },
+   "pixelComparable": true,
+   "stoppedLine": {
+    "pin": 56,
+    "gpui": 56,
+    "electron": null,
+    "electronRoute": 56,
+    "agree": true
+   },
+   "paneCount": {
+    "gpui": 5,
+    "electron": 7
+   },
+   "panes": {
+    "gpui": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog"
+    ],
+    "electron": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog",
+     "other",
+     "other"
+    ]
+   },
+   "recognizedStrings": {
+    "gpui": 134,
+    "electron": 164
+   },
+   "distinctGrayLevels": {
+    "gpui": 256,
+    "electron": 256
+   },
+   "verdict": {
+    "gpui": "OK",
+    "electron": "OK"
+   },
+   "flip": {
+    "mean": 0.1724,
+    "p90": 0.6843,
+    "p99": 0.9806,
+    "max": 0.9924,
+    "fracOver0_10": 0.3688,
+    "fracOver0_25": 0.2216,
+    "fracOver0_50": 0.1371,
+    "worstTiles": [
+     {
+      "xywh": [
+       1080,
+       0,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.721
+     },
+     {
+      "xywh": [
+       1440,
+       0,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.692
+     },
+     {
+      "xywh": [
+       1440,
+       900,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.645
+     }
+    ],
+    "calmestTiles": [
+     {
+      "xywh": [
+       0,
+       900,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     },
+     {
+      "xywh": [
+       0,
+       1200,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     },
+     {
+      "xywh": [
+       2520,
+       1200,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     }
+    ]
+   },
+   "electronRoute": {
+    "finalLine": 56,
+    "rrTicks": 9,
+    "busyAtSample": false,
+    "trajectory": [
+     "entry=1@1",
+     "stepIn=2@2",
+     "stepIn=29@3",
+     "stepIn=34@4",
+     "stepIn=39@5",
+     "stepIn=44@6",
+     "next=54@7",
+     "next=55@8",
+     "next=56@9"
+    ]
+   }
+  },
+  {
+   "view": "calltrace",
+   "scenario": "returned-calltrace",
+   "viewport": "laptop",
+   "operations": [
+    {
+     "kind": "stepIn",
+     "times": 21
+    },
+    {
+     "kind": "stepOut",
+     "times": 1
+    }
+   ],
+   "capturedAt": {
+    "gpui": "2026-10-12T22:02:00",
+    "electron": "2026-10-12T22:10:00"
+   },
+   "extentDevicePx": {
+    "gpui": "2880x1858",
+    "electron": "2880x1800",
+    "gpuiAfterTitleBarCrop58": "2880x1800"
+   },
+   "pixelComparable": true,
+   "stoppedLine": {
+    "pin": 110,
+    "gpui": 110,
+    "electron": 110,
+    "electronRoute": 110,
+    "agree": true
+   },
+   "paneCount": {
+    "gpui": 5,
+    "electron": 7
+   },
+   "panes": {
+    "gpui": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog"
+    ],
+    "electron": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog",
+     "other",
+     "other"
+    ]
+   },
+   "recognizedStrings": {
+    "gpui": 135,
+    "electron": 170
+   },
+   "distinctGrayLevels": {
+    "gpui": 256,
+    "electron": 256
+   },
+   "verdict": {
+    "gpui": "OK",
+    "electron": "OK"
+   },
+   "flip": {
+    "mean": 0.1718,
+    "p90": 0.6756,
+    "p99": 0.9804,
+    "max": 0.9924,
+    "fracOver0_10": 0.3702,
+    "fracOver0_25": 0.2233,
+    "fracOver0_50": 0.1354,
+    "worstTiles": [
+     {
+      "xywh": [
+       1080,
+       0,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.731
+     },
+     {
+      "xywh": [
+       1440,
+       0,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.686
+     },
+     {
+      "xywh": [
+       1440,
+       900,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.645
+     }
+    ],
+    "calmestTiles": [
+     {
+      "xywh": [
+       0,
+       900,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     },
+     {
+      "xywh": [
+       0,
+       1200,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     },
+     {
+      "xywh": [
+       2520,
+       1200,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     }
+    ]
+   },
+   "electronRoute": {
+    "finalLine": 110,
+    "rrTicks": 37,
+    "busyAtSample": false,
+    "trajectory": [
+     "entry=1@1",
+     "stepIn=2@2",
+     "stepIn=29@3",
+     "stepIn=34@4",
+     "stepIn=39@5",
+     "stepIn=44@6",
+     "stepIn=54@7",
+     "stepIn=55@8",
+     "stepIn=56@9",
+     "stepIn=57@10",
+     "stepIn=53@11",
+     "stepIn=61@12",
+     "stepIn=72@13",
+     "stepIn=90@14",
+     "stepIn=99@15",
+     "stepIn=116@16",
+     "stepIn=99@17",
+     "stepIn=107@18",
+     "stepIn=108@19",
+     "stepIn=109@20",
+     "stepIn=72@21",
+     "stepIn=79@22",
+     "stepOut=110@37"
+    ]
+   }
+  },
+  {
+   "view": "eventLog",
+   "scenario": "continued-event-log",
+   "viewport": "wide",
+   "operations": [
+    {
+     "kind": "continueForward",
+     "times": 1
+    }
+   ],
+   "capturedAt": {
+    "gpui": "2026-10-12T22:02:36",
+    "electron": "2026-10-12T22:10:20"
+   },
+   "extentDevicePx": {
+    "gpui": "3456x2168",
+    "electron": "3840x2160",
+    "gpuiAfterTitleBarCrop58": "3456x2110"
+   },
+   "pixelComparable": false,
+   "stoppedLine": {
+    "pin": 113,
+    "gpui": 113,
+    "electron": 113,
+    "electronRoute": 113,
+    "agree": true
+   },
+   "paneCount": {
+    "gpui": 5,
+    "electron": 7
+   },
+   "panes": {
+    "gpui": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog"
+    ],
+    "electron": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog",
+     "other",
+     "other"
+    ]
+   },
+   "recognizedStrings": {
+    "gpui": 149,
+    "electron": 189
+   },
+   "distinctGrayLevels": {
+    "gpui": 256,
+    "electron": 256
+   },
+   "verdict": {
+    "gpui": "OK",
+    "electron": "OK"
+   },
+   "flip": {
+    "notComparable": "extents differ in BOTH dimensions after the title-bar crop (3456x2110 vs 3840x2160); no pixel comparison was attempted — see finding PARITY-G1"
+   },
+   "electronRoute": {
+    "finalLine": 113,
+    "rrTicks": 171,
+    "busyAtSample": false,
+    "trajectory": [
+     "entry=1@1",
+     "continueForward=113@171"
+    ]
+   }
+  },
+  {
+   "view": "editorWithMark",
+   "scenario": "breakpoint-editor",
+   "viewport": "laptop",
+   "operations": [
+    {
+     "kind": "stepIn",
+     "times": 5
+    },
+    {
+     "kind": "setBreakpoint",
+     "line": 1
+    }
+   ],
+   "capturedAt": {
+    "gpui": "2026-10-12T22:03:19",
+    "electron": "2026-10-12T22:10:37"
+   },
+   "extentDevicePx": {
+    "gpui": "2880x1858",
+    "electron": "2880x1800",
+    "gpuiAfterTitleBarCrop58": "2880x1800"
+   },
+   "pixelComparable": true,
+   "stoppedLine": {
+    "pin": 44,
+    "gpui": 44,
+    "electron": 44,
+    "electronRoute": 44,
+    "agree": true
+   },
+   "paneCount": {
+    "gpui": 5,
+    "electron": 7
+   },
+   "panes": {
+    "gpui": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog"
+    ],
+    "electron": [
+     "fileTree",
+     "editor",
+     "state",
+     "calltrace",
+     "eventLog",
+     "other",
+     "other"
+    ]
+   },
+   "recognizedStrings": {
+    "gpui": 135,
+    "electron": 165
+   },
+   "distinctGrayLevels": {
+    "gpui": 256,
+    "electron": 256
+   },
+   "verdict": {
+    "gpui": "OK",
+    "electron": "OK"
+   },
+   "flip": {
+    "mean": 0.1692,
+    "p90": 0.6724,
+    "p99": 0.9807,
+    "max": 0.9924,
+    "fracOver0_10": 0.3639,
+    "fracOver0_25": 0.2174,
+    "fracOver0_50": 0.1336,
+    "worstTiles": [
+     {
+      "xywh": [
+       1080,
+       0,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.74
+     },
+     {
+      "xywh": [
+       1440,
+       0,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.692
+     },
+     {
+      "xywh": [
+       1080,
+       900,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.676
+     }
+    ],
+    "calmestTiles": [
+     {
+      "xywh": [
+       0,
+       900,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     },
+     {
+      "xywh": [
+       0,
+       1200,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     },
+     {
+      "xywh": [
+       2520,
+       1200,
+       360,
+       300
+      ],
+      "fracOver0_10": 0.056
+     }
+    ]
+   },
+   "electronRoute": {
+    "finalLine": 44,
+    "rrTicks": 6,
+    "busyAtSample": false,
+    "trajectory": [
+     "entry=1@1",
+     "stepIn=2@2",
+     "stepIn=29@3",
+     "stepIn=34@4",
+     "stepIn=39@5",
+     "stepIn=44@6",
+     "setBreakpoint@28"
+    ]
+   }
+  }
+ ],
+ "corpusVerdict": {
+  "summary": "ALL SIX scenarios reach their pinned stop on BOTH front-ends, except entry-shell's Electron ROUTE SAMPLE (see PARITY-I1), whose FRAME is correct. The pins were right and were not moved.",
+  "pinsChanged": false,
+  "scenariosJsonChanged": false,
+  "settles": "codetracer-specs/issues/2026-10-12-scenarios-json-cut-stepped-editor-to-five-step-ins-but-its-pinned-stop-still-describes-six.md",
+  "stepCountRuling": "FIVE stepIns is CORRECT. With an engine carrying 5ba7e8408 the recording opens at tick 1 (<__main__> line 1) rather than tick 0 (the <toplevel> root's synthetic entry), so the five-step trajectory is 1,2,29,34,39,44 and lands on 44. Electron's own location API records entry=1@1 ... stepIn=44@6, and advanced-state's next-chain is 44@6 -> 54@7 -> 55@8 -> 56@9, waypoint for waypoint the chain corpus-pins.json already recorded. The stale engine's trajectory began entry=1@0 and stopped at 39.",
+  "reviewVerification": "VERIFIED ON REVIEW, independently of the GPUI arm and therefore UNAFFECTED by the build skew, because the stopped line is decided by the engine and the corpus and not by the renderer. From the Electron lane's own route artefacts (the product's location API, current build): stepped-editor `entry=1@1 2@2 29@3 34@4 39@5 44@6`, final 44; advanced-state `44@6 next=54@7 55@8 56@9`, final 56, matching corpus-pins' recorded chain `44 -> 54 -> 55 -> 56` waypoint for waypoint; continued-event-log `113@171`; returned-calltrace `stepOut=110@37`. FIVE STEP-INS IS CORRECT and the pins are correct. That the 127-commit-stale GPUI arm reached the same lines is, if anything, a stronger control than a matched build would have been: two renderers of different vintage, two instruments, one engine, same answers.",
+  "residual": "ONE THING THE SETTLEMENT OVERSTATED. 'corpus-pins.json is unchanged and was always right' is true of the PINS and false of their prose. `stepped-editor._why` still opens 'Six step-ins.' and `breakpoint-editor._why` 'Six step-ins, then a gutter mark.' — which is precisely the mismatch the issue was opened about. The rest of that same sentence, 'ticks 1..6 visit lines 1, 2, 29, 34, 39, 44', is exactly right and describes six TICKS reached by five STEPS. So the fix is a two-word prose correction, not a pin change; it is named here rather than made, because corpus-pins.json is PLAT-39's and was not in this pass's scope."
+ },
+ "findings": [
+  {
+   "id": "PARITY-G1",
+   "severity": "P1",
+   "kind": "geometry",
+   "views": [
+    "shell",
+    "editor",
+    "eventLog"
+   ],
+   "viewport": "wide",
+   "finding": "GPUI cannot reach the `wide` viewport on this display, so three of the six scenarios have NO common extent and cannot be pixel-compared at all.",
+   "measurement": "Electron asked 1920x1080 points and got 1920x1080 (`honouredInCss: true`, deviation {0,0}), captured 3840x2160 device px. GPUI asked the same and got a 1728x1084-point frame (`viewportHonoured: false`, `viewportDeviationPoints` {-192,-25}), captured 3456x2168 device px. After cropping GPUI's 58-device-px title bar the two are 3456x2110 vs 3840x2160 — different in BOTH dimensions.",
+   "instrument": "CGWindowListCopyWindowInfo attestation read by ci/test/plat37_macos_window_capture.nim before any pixel was taken, in both lanes; extents re-read from the PNGs with ffprobe.",
+   "consequence": "Measured, not inferred: at `wide` the GPUI Call Trace rows are SLICED BY THE WINDOW EDGE at x=1728 — e.g. `evaluate #3(expression=\"2 + 3\") =>` stops mid-text — while Electron's fit inside their pane. The clamp is content loss, not only a smaller picture.",
+   "owner": "filed as codetracer-specs/issues/2026-10-12-gpui-clamps-a-window-to-the-visible-frame-because-it-never-overrides-constrainframerect-and-electron-does-not.md — AppKit's default constrainFrameRect:toScreen:, which build_window_class never overrides.",
+   "gpuiSide": true,
+   "pixelComparisonAttempted": false,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI.",
+   "contentLossVerified": "CONFIRMED ON REVIEW by an independent reader, and it is the part of G1 that matters: at `wide` GPUI's Call Trace pane runs from x~1398 to x=1728, the window's right edge, and its rows are cut mid-character by that edge with NO ellipsis — e.g. `evaluate #3(expression=\"2 + 3\") =>`, `apply_op #4(symbol=\"+\", left=2,`, `evaluate #14(expression=\"100 / 5 -`. Electron's fit inside their pane. This upgrades the clamp from a capture inconvenience to USER-VISIBLE CONTENT LOSS: the user cannot read the call arguments. NOTE the contrast with PARITY-S7, where GPUI elides an over-long STATE value with an ellipsis — so GPUI has the affordance and the Call Trace pane does not use it at this width.",
+   "specGrounding": "`spec/Testing/Cross-Renderer-Visual-Alignment.md` §2.2 rule 3: \"a score below 4 blocks … content clipped mid-glyph is content loss. So it is an assertion, not a note.\" The Call Trace rows at `wide` are clipped mid-glyph by the window edge with no ellipsis, so the spec already classifies this as content loss and as blocking. That settles the question this finding was raised to ask — whether the clamp is merely a smaller picture — against the clamp.",
+   "consequenceCorrection": "CORRECTED ON RE-REVIEW 2026-10-13, against codetracer df80efc8d with a REBUILT and FRESHNESS-GATED GPUI binary. The wrong text is kept above rather than overwritten: this file is the record of the 2026-10-12 contaminated pass, and an error silently repaired is an error the next reader cannot learn from. The re-measured readings live in plat37-parity-readings-2026-10-13.json. THE CLAUSE \"Electron's fit inside their pane\" IS FALSE, in both the `consequence` and the `contentLossVerified` fields above. Re-measured 2026-10-13 on the gated `wide` frames by two disposable readers, one per renderer, neither shown the other's answer: ELECTRON CLIPS ITS CALL TRACE ROWS MID-GLYPH TOO, with no ellipsis — e.g. `apply_op #4 (symbol=\"+\", left=2, r`, `evaluate #14 (expression=\"100 / 5 -`, `apply_op #15 (symbol=\"/\", left=100`. GPUI's rows clip the same way. THE DIFFERENCE IS NOT THE ELLIPSIS, IT IS WHERE AND AGAINST WHAT: Electron clips at a PANE BORDER carrying a vertical scrollbar with the AGENT ACTIVITY panel beyond it, so the content is reachable; GPUI's text runs to the WINDOW EDGE with no border, no scrollbar and nothing beyond, so it is not. The clamp half of G1 therefore STANDS and is the whole of it; the renderer-contrast half does not. CONSEQUENCE FOR THE PLANNED FIX, and this is why it matters more than its severity: the Step-4 fix queued against this was to give GPUI's `renderCallTrace` the `text-overflow: ellipsis` affordance that `stateCell` has. That fix WAS NOT MADE, deliberately. It would have made GPUI the only renderer that elides a Call Trace row — widening the divergence while closing a parity finding against a green assertion. The source asymmetry is real (`renderCallTrace` sets overflow:hidden and flex-shrink:0 with no `text-overflow` and no `min-width:0`; `stateCell` sets all four) but it is not what this finding measured.",
+   "contentLossVerifiedCorrection": "SUPERSEDED — see consequenceCorrection. The independent reader who 'CONFIRMED ON REVIEW' this field confirmed the GPUI half, which holds, and carried the Electron half over without re-reading an Electron frame. That is the failure mode this correction exists to name: a re-run that re-captures without re-READING preserves every reading error it inherited."
+  },
+  {
+   "id": "PARITY-G2",
+   "severity": "P3",
+   "kind": "geometry",
+   "views": [
+    "all"
+   ],
+   "finding": "GPUI's window carries a 29-point macOS title bar that Electron's frameless window does not, so the GPUI frame is 29 points taller than its content for the same request.",
+   "measurement": "GPUI laptop: windowFramePoints 1440x929, windowContentHeightPoints 1055-... i.e. frame minus content = 29 points = 58 device px at scale 2.0. Cropping exactly 58 device px off the top of all three laptop GPUI frames makes them 2880x1800 — byte-for-byte the extent of the Electron frames.",
+   "instrument": "the lanes' own capture.json; crop applied with ffmpeg, never a resample.",
+   "ruling": "This is the ONLY normalisation applied anywhere in this pass. Electron is never cropped: its attested frame equals getContentSize().",
+   "gpuiSide": true,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-P1",
+   "severity": "P1",
+   "kind": "pixel",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark"
+   ],
+   "viewport": "laptop",
+   "finding": "At the one viewport where the two CAN be compared, roughly 37% of every frame differs perceptibly, and the three scenarios differ from each other by less than 1 point of that — so what dominates the difference is the CHROME AND LAYOUT, not the scenario content.",
+   "measurement": {
+    "state": {
+     "mean": 0.1724,
+     "fracOver0_10": 0.3688,
+     "fracOver0_50": 0.1371
+    },
+    "calltrace": {
+     "mean": 0.1718,
+     "fracOver0_10": 0.3702,
+     "fracOver0_50": 0.1354
+    },
+    "editorWithMark": {
+     "mean": 0.1692,
+     "fracOver0_10": 0.3639,
+     "fracOver0_50": 0.1336
+    },
+    "note": "p50 is ~0.0001 in all three while p90 is ~0.68: the distribution is bimodal — most pixels agree closely, a large minority disagree almost completely. That is the signature of displaced structure, not of a shading or gamma difference."
+   },
+   "instrument": "NVIDIA FLIP through codetracer-image-diff ee9fb397b (`flip()`, `renderFlipPng()`), over ffmpeg-decoded RGBA at 2880x1800. No second differ was written.",
+   "localisation": "FLIP's own per-pixel error aggregated over an 8x6 grid. Worst tile in all three is device-px (1080,0,360,300) at 72-74% — the top of the editor/State boundary, where GPUI's editor ends at x=652 points and Electron's State pane begins at x=580. Calmest tiles are 5.6%, all in the lower-left and lower-right background.",
+   "errorMaps": [
+    "build/plat37-parity/state.flip.png",
+    "build/plat37-parity/calltrace.flip.png",
+    "build/plat37-parity/editorWithMark.flip.png"
+   ],
+   "gpuiSide": null,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI.",
+   "localisationVerified": "RE-DERIVED ON REVIEW from `flip-results.jsonl` rather than taken on report. Ranked by `fracOver0_10` the worst tile is device-px (1080,0,360,300) in ALL THREE scenarios, at 72.08 / 73.05 / 74.03 % — the quoted '72-74%' — and the calmest is 5.56% in all three, in the lower-left and lower-right background. The tile is points x 540-720, y 0-150, which does straddle GPUI's editor/State boundary (652/660) and Electron's (580). NOTE FOR ANY FUTURE READER: ranked by tile MEAN instead, the worst tile is a different one — (2160,300) — so the statistic the ranking uses has to be named or the localisation is not reproducible. It is `fracOver0_10`.",
+   "comparabilityVerified": "The frames were re-measured directly: the three `laptop` GPUI PNGs are 2880x1858 and crop to exactly 2880x1800, which is the Electron PNGs' extent to the pixel; Electron is never cropped. The three `wide` pairs are 3456x2168 (crop 3456x2110) vs 3840x2160 and were not compared — and could not have been: `flipdiff` exits 3 on any size mismatch, verified by deliberately feeding it one. So the 37% is over genuinely comparable buffers. Both arms were driven by the SAME capture probe — `SCScreenshotManager/SCContentFilter(desktopIndependentWindow:)` over a real on-screen window attested by `CGWindowListCopyWindowInfo` before any pixel was taken — so the geometry difference is the product's and not the instrument's.",
+   "reviewRuling": "THE 37% IS REAL AND CORRECTLY COMPUTED, AND IT IS NOT A PARITY FIGURE. Do not track it as one. Three reasons, in order of force: (1) the three scenarios agree to within 0.63 points (36.39-37.02%), so the metric is nearly BLIND to scenario content — it is measuring the chrome, not the product's answers; (2) the bimodality (p50 0.00005-0.00017 against p90 0.67-0.68) says most pixels agree almost exactly while a large minority disagree almost completely, which is displaced structure, not shading; (3) it is dominated by at least TWO independent structural differences, not one global offset — PARITY-S3's 60-80pt column displacement AND PARITY-S1's two extra Electron panes — so it cannot be corrected by a single translation and cannot be attributed to a single cause. Its legitimate uses are as a BASELINE for this pair of builds and as corroboration of S1/S3. It is meaningless across runs whose layout differs, and this run's GPUI arm is 127 commits stale, so the number should not be carried forward at all."
+  },
+  {
+   "id": "PARITY-S1",
+   "severity": "P1",
+   "kind": "structural",
+   "views": [
+    "all six"
+   ],
+   "finding": "Electron draws TESTS and CONSTRAINTS as full PANES; GPUI has Tests only as a TAB inside the left Files group and has no Constraints surface at all.",
+   "measurement": "Pane census from the screen oracle, identical in all six scenarios: GPUI 5 panes (fileTree, editor, state, calltrace, eventLog), Electron 7 (the same five plus two the oracle labels `other`). Read off the frames: Electron's right column x1165-1440 holds TESTS (y40-455, 'no tests found') and CONSTRAINTS (y455-870, 'unavailable'); GPUI has a Tests tab at x167,y69.",
+   "instrument": "screen oracle paneCount in both arms (5 vs 7 in 6 of 6 scenarios), corroborated by the frame readings.",
+   "relatedPin": "corpus-pins.json records this asymmetry already as electronPanes (8 entries) vs gpuiPanes (4) — the oracle's 7-vs-5 is the same divergence counted by a different grouping, and it did not move.",
+   "gpuiSide": true,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI.",
+   "verified": "Electron side CONFIRMED ON REVIEW by an independent reader: TESTS (y~38-455, 'no tests found' / 'No tests found in this project.') and CONSTRAINTS (y~455-870, 'unavailable' / 'No circuit has been compiled for this project yet.') in the right column x~1170-1440 of both laptop frames. The GPUI side is build-skew contaminated; note also that at 8f284d063 `PaneKind` DOES carry `paneTestResults` and `paneConstraints` and `gpuiPaneName` names both, while `shared_default_layout.generated.json` places testResults and NOT constraints — so part of this may be a LAYOUT-PLACEMENT difference rather than a missing surface, which this pass did not separate."
+  },
+  {
+   "id": "PARITY-S2",
+   "severity": "WITHDRAWN",
+   "kind": "instrument-artefact",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark",
+    "editor"
+   ],
+   "finding": "WITHDRAWN ON REVIEW — NOT A PRODUCT DIFFERENCE. Originally filed as 'GPUI's bottom strip carries a Timeline tab; Electron's does not', with Electron implied to be the deficient side. The opposite is true of the product, and neither side is deficient: the Timeline panel was REMOVED FROM EVERY FRONT-END by PLAT-51, and the GPUI binary that was captured predates that removal.",
+   "measurement": "Frame readings stand and were re-confirmed by a second reader: GPUI bottom tabs are `Event Log` / `Timeline` / `Terminal Output` in all four GPUI frames read (both viewports); Electron's are `EVENT LOG` / `TERMINAL OUTPUT` with no Timeline. But at codetracer 8f284d063 the Timeline does not exist: `PaneKind` has no `paneTimeline` (removed by `740d76be2`, 2026-10-08T02:19:56), `RetiredPaneSpellings == [\"timeline\"]`, `shared_default_layout.generated.json` contains the string zero times, `src/frontend/gpui/**` outside tests contains it zero times, and `test_shared_default_layout.nim`'s `paneTimelineIsGone()` asserts no PaneKind spells it. The captured `build/bin/codetracer-gpui` is dated 2026-10-07T17:51 — 8.5 hours BEFORE that commit — and still carries `@Timeline`, `@lpkTimeline` and `_renderTimeline__appZleaves_`.",
+   "instrument": "three independent lines, agreeing: binary mtime vs commit date; `grep -a` symbol probe of the binary against the current sources (with a nonsense-literal negative control); and two disposable frame readers.",
+   "gpuiSide": null,
+   "ruling": "INSTRUMENT ARTEFACT of the stale GPUI binary. Electron is CORRECT to have no Timeline tab. There is no PLAT-51 regression: the assertion in `test_shared_default_layout.nim` holds at 8f284d063 and was never contradicted — the frame that appeared to contradict it was drawn by code that predates it. Nothing to fix in either renderer; the thing to fix is the lane that ran a stale binary.",
+   "owner": "the capture lane, not the product — see provenance.buildSkew and reviewFindings.",
+   "buildSkewContaminated": true,
+   "measurementCorrection": "CORRECTED ON RE-REVIEW 2026-10-13, against codetracer df80efc8d with a REBUILT and FRESHNESS-GATED GPUI binary. The wrong text is kept above rather than overwritten: this file is the record of the 2026-10-12 contaminated pass, and an error silently repaired is an error the next reader cannot learn from. The re-measured readings live in plat37-parity-readings-2026-10-13.json. The `@lpkTimeline` clause of this measurement carries the same error as provenance.buildSkew.positiveControl — see the correction there. The WITHDRAWAL ITSELF STANDS and is now confirmed against the artefact rather than only against the sources: the rebuilt binary at df80efc8d answers `@Timeline` -> 0 (the stale one answered 2), so the Timeline tab is gone from the GPUI build too and Electron was always correct to lack it."
+  },
+  {
+   "id": "PARITY-S3",
+   "severity": "P2",
+   "kind": "structural",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark"
+   ],
+   "viewport": "laptop",
+   "finding": "Every column boundary is in a different place, by 60-80 points, at the same viewport.",
+   "measurement": "GPUI: sidebar 0-292, editor 300-652, State 660-1040, CallTrace 1048-1430. Electron: FILES 0-218, editor 218-580, STATE 580-875, CALLTRACE 875-1165. GPUI's bottom strip starts at y~464-478; Electron's at y~450-455.",
+   "instrument": "frame reading; approximate to a few points.",
+   "whyItMatters": "This is what PARITY-P1's 37% is mostly made of, and it is why the per-tile map's worst cell sits exactly on the editor/State boundary.",
+   "gpuiSide": null,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-S4",
+   "severity": "P1",
+   "kind": "structural",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark",
+    "editor"
+   ],
+   "finding": "Electron draws inline value annotations on several editor rows; GPUI draws at most one, and none at all in two of the four scenarios read.",
+   "measurement": "advanced-state: Electron annotates lines 54-57 (`add <functio`, `sub <functio`, `mul <functio`, `div <functio`); GPUI shows a single inline hint on line 56. returned-calltrace: Electron shows `return nil ION…`, `results`, `EXPRESSIONS a[\"2` plus a loop stepper `< iteration 0 from 5 >` at y~627; GPUI shows none of these.",
+   "instrument": "frame reading, three scenarios agreeing.",
+   "relatedPin": "this is the surface PLAT35-VG9 / PLAT35-PD3 (the intermittent inline-value set) is about; nothing here contradicts those, and no gap was retired on this reading.",
+   "gpuiSide": true,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-S5",
+   "severity": "P2",
+   "kind": "structural",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark",
+    "editor"
+   ],
+   "finding": "The two editors show a different number of source rows for the same stop, because their row pitch differs — Electron is the tighter of the two and therefore shows more.",
+   "measurement": "Row pitch read off the frames: GPUI ~25.8-26 points, Electron ~24.3-25. Visible ranges, same stop: breakpoint-editor GPUI 31-58 / Electron 27-60; returned-calltrace GPUI 89-116 / Electron 87-117; advanced-state GPUI 43-70 / Electron 40-72; stepped-editor GPUI 28-61 / Electron 24-63.",
+   "instrument": "frame reading at point resolution — these are APPROXIMATE and differ by 1-2 lines from corpus-pins.json's own editorRows pins, which were taken by a different instrument. The DIRECTION and the SIZE of the gap are the claim here, not the exact first/last.",
+   "relatedPin": "corpus-pins.json pins these per scenario (e.g. breakpoint-editor gpui rows=26;first=32;last=57 vs electron rows=38;first=25;last=62) and carries PLAT-47 part B's explanation for the GPUI side. Not re-pinned here.",
+   "gpuiSide": true,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-S6",
+   "severity": "P1",
+   "kind": "corpus",
+   "views": [
+    "editorWithMark"
+   ],
+   "viewport": "laptop",
+   "finding": "The breakpoint lands on a DIFFERENT ABSOLUTE SOURCE LINE in the two renderers — GPUI line 32, Electron line 28 — and both are obeying the corpus correctly.",
+   "measurement": "GPUI: filled pink/red dot at x~328,y~161 on line 32, first drawn row 31. Electron: smaller red dot at x~288,y~95 on line 28, first drawn row 27. scenarios.json's breakpoint-editor sets `line: 1`, which its own prose defines as RELATIVE TO THE FIRST DRAWN ROW. 31+1=32 and 27+1=28, so each renderer resolved the rule correctly and the results disagree because PARITY-S5's row windows disagree. CONFIRMED ON REVIEW by two instruments per side: the GPUI grader's own OCR sample for this frame reads `\"31\", \"\\u2022\", \"32\", \"33\"` — the bullet between gutter 31 and 32 — and a disposable reader independently read the dot on gutter row 32 with first row 31; on the Electron side a disposable reader read the dot on gutter row 28 with first row 27, and the lane's own route records `setBreakpoint@28`.",
+   "instrument": "frame reading.",
+   "ruling": "CONFIRMED, and it is a SCENARIO-SPELLING DEFECT — not a defect in either renderer. Both drivers resolved the documented rule correctly and disagreed because their row windows disagree.",
+   "gpuiSide": null,
+   "definitionSource": "MEASURED FROM SOURCE, not inferred. `src/tests/visual/scenarios.json`, `breakpoint-editor._why`: \"`line` is relative to the first drawn row and is resolved by each driver against the recording's own source, never against a literal.\" The same file's `_comment` says `setBreakpoint@<row>` \"is an offset into the editor's FIRST DRAWN ROW, which after five stepIns is 31\" — and 31 is the GPUI window's first drawn row. Electron's is 27. So scenarios.json's own prose silently assumes one renderer, in a file whose first line is 'IT NAMES NO RENDERER'.",
+   "whatItInvalidates": "NARROWER THAN FIRST STATED, and the narrowing was measured rather than assumed. It does NOT invalidate 'every setBreakpoint@N reading in this campaign's history'. `src/tests/visual/plat40-scenario.json` carries `setBreakpoint@35` -> `breakpointLine: 36` and is SAFE BY CONSTRUCTION: its own `_comment` records that it chose a stop where 'the window's first drawn row is line 1' on both front-ends, and that 'the record asserts the two agree rather than trusting this file'. That is exactly the right handling of this hazard. What IS affected is `scenarios.json`'s `breakpoint-editor` itself — a `setBreakpoint` at a stop whose first drawn rows are 31 and 27 — and its prose's bare '31'.",
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The MECHANISM is skew-independent: a renderer-relative line in a renderer-neutral corpus disagrees whenever the row windows disagree, whatever the build. The ABSOLUTE values 32 and 31 are from the 2026-10-07 GPUI binary and may move on a rebuild; 28 and 27 are current."
+  },
+  {
+   "id": "PARITY-S7",
+   "severity": "P2",
+   "kind": "structural",
+   "views": [
+    "state",
+    "editor"
+   ],
+   "finding": "The two front-ends truncate an over-long state value differently: GPUI elides with an ellipsis, Electron clips hard at the pane edge.",
+   "measurement": "GPUI: `@[(\"__name__\", \"builtins\"), (\"__d…`, `\"calc — the small, fast, determin…`, `\"/Users/zahary/m/fix-pxor-issue…`. Electron: the same values cut at the pane boundary with no marker.",
+   "instrument": "frame reading, two scenarios agreeing.",
+   "relatedLedger": "tier4-gpui-readings.json PLAT35-F7 (elided, rest unreachable) and PLAT35-F3 (amputated, user cannot tell) describe exactly this pair from the GPUI side; this reading confirms both still reproduce and adds that the ELECTRON side is the amputating one at this viewport.",
+   "gpuiSide": false,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-S8",
+   "severity": "P2",
+   "kind": "structural",
+   "views": [
+    "all six"
+   ],
+   "finding": "Electron carries browser-shell controls in its toolbar that GPUI has no counterpart for: back and forward arrows (x~27, x~62), reload, a `</>` button and a stop square (x~470-565).",
+   "measurement": "present in all four frame pairs read; absent from every GPUI frame, whose toolbar ends at the indent icon around x~313.",
+   "instrument": "frame reading.",
+   "gpuiSide": false,
+   "buildSkewContaminated": false,
+   "buildSkewNote": "Electron-side or instrument-side. That arm was built the day it was captured, so the skew does not reach this finding."
+  },
+  {
+   "id": "PARITY-S9",
+   "severity": "P3",
+   "kind": "structural",
+   "views": [
+    "all six"
+   ],
+   "finding": "Pane affordances and labelling differ systematically.",
+   "measurement": "Electron tab labels are UPPERCASE (FILES, STATE, CALLTRACE, EVENT LOG) and each tab carries pin+close icons; GPUI labels are Title Case (Files, State, Call Trace, Event Log) with a single collapse glyph per pane. Electron spells it CALLTRACE, GPUI Call Trace. Electron's file tree has folder/file icons and disclosure chevrons; GPUI's is a flat list with neither. Electron's call-trace expanders are boxed -/+ with connector guide lines; GPUI's are triangles with no guides. Electron adds a Search box to CallTrace and Find event / Columns+ to Event Log; GPUI has neither.",
+   "instrument": "frame reading, four pairs agreeing.",
+   "gpuiSide": null,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-S10",
+   "severity": "P2",
+   "kind": "structural",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark",
+    "editor"
+   ],
+   "finding": "The current-execution row is marked differently: GPUI draws a grey triangle and highlights the FULL ROW WIDTH including the gutter; Electron draws an orange triangle and highlights only the code text.",
+   "measurement": "breakpoint-editor: GPUI grey marker at x317,y473 with full-width row highlight; Electron orange marker at x225,y481 with the highlight box spanning only x330-570. returned-calltrace agrees (GPUI grey, Electron orange).",
+   "instrument": "frame reading, two pairs agreeing.",
+   "gpuiSide": null,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI.",
+   "findingCorrection": "CORRECTED ON RE-REVIEW 2026-10-13, against codetracer df80efc8d with a REBUILT and FRESHNESS-GATED GPUI binary. The wrong text is kept above rather than overwritten: this file is the record of the 2026-10-12 contaminated pass, and an error silently repaired is an error the next reader cannot learn from. The re-measured readings live in plat37-parity-readings-2026-10-13.json. THIS FINDING IS WRONG IN BOTH HALVES, AND IT IS NOT A BUILD-SKEW CASUALTY — it is a frame-reading error. The code-column-only band landed in `58939dbe1` (2026-09-23, 'one editor row per line, the execution line banded, a readable gutter'), two weeks BEFORE the 2026-10-07 binary, so the captured stale binary already drew what is drawn today. Re-measured 2026-10-13 on the gated frames by THREE independent instruments: (1) the screen oracle reports the SAME `highlightedLineNumber` on both sides — 110/110 for calltrace, 44/44 for editorWithMark; (2) a disposable reader that PIXEL-SAMPLED the PNGs and (3) a second disposable reader on tighter crops both report that in BOTH renderers the line-number digits sit OUTSIDE the band (the band begins to their right) and the marker triangle is AMBER/ORANGE on BOTH sides. So: GPUI does NOT band the gutter, Electron's marker is NOT the only orange one, and the grey-vs-orange contrast above does not exist. Corroborated from source: `ExecutionRowBand` in src/frontend/gpui/app/leaves.nim is documented as drawn 'across the CODE COLUMN to the editor's right edge and NOT under the line numbers (PLAT-47 B1)', deliberately matching Monaco — i.e. matching Electron — and its token value #404040 is exactly the RGB(64,64,64) the pixel-sampling reader measured on both sides. S10 is therefore DOWNGRADED to substantially-reproducing parity. ONE RESIDUAL IS UNRESOLVED AND IS RECORDED AS A READER CONFLICT RATHER THAN DECIDED: the band's RIGHT extent. Reader (2) reports Electron's band running to the pane edge while GPUI's stops after the text; reader (3), on a narrower crop that may not reach the pane edge, reports both stopping after the text. The source predicts a full-width code column on the GPUI side (`flex-grow: 1`, 'grown to the pane's right edge'), which agrees with neither reader about GPUI. Not ruled."
+  },
+  {
+   "id": "PARITY-S11",
+   "severity": "P3",
+   "kind": "structural",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark",
+    "editor"
+   ],
+   "finding": "The Event Log differs in columns and controls: GPUI has a distinct `kind` column and a static `Rows 1 to 6 of 6` caption; Electron folds the kind into the output text as a `stdout:` prefix and makes the row number an editable field.",
+   "instrument": "frame reading, three pairs agreeing.",
+   "gpuiSide": null,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "The GPUI side of this finding was read from a binary built 2026-10-07, 127 commits behind the Electron arm (see provenance.buildSkew). The difference is REAL between the two binaries that were captured; whether it is still real at 8f284d063 is NOT established by this pass and must be re-measured against a rebuilt GPUI."
+  },
+  {
+   "id": "PARITY-S12",
+   "severity": "P3",
+   "kind": "structural",
+   "views": [
+    "state",
+    "calltrace",
+    "editorWithMark"
+   ],
+   "finding": "The status bar differs in content and in form. GPUI: `Python | UTF-8` … `main.py:56 tick 9`. Electron: pill-shaped buttons, an absolute path, and a `No certificates` item prefixed by a stray count (`20No certificates …/calc/main.py:56#9`).",
+   "measurement": "the run-together `20No certificates` / `48No certificates` / `14No certificates` string appears in three independent Electron frames, with a different leading number each time — so it is a layout/formatting defect on the Electron side rather than an OCR artefact of one frame.",
+   "instrument": "frame reading, three pairs; the varying prefix is what rules out a per-frame OCR slip.",
+   "gpuiSide": false,
+   "buildSkewContaminated": false,
+   "buildSkewNote": "Electron-side or instrument-side. That arm was built the day it was captured, so the skew does not reach this finding.",
+   "verified": "CONFIRMED ON REVIEW by an independent reader: `48No certificates` in the calltrace frame and `14No certificates` in the editorWithMark frame — a different leading number in each, which is what rules out a per-frame OCR slip and makes it an Electron-side formatting defect."
+  },
+  {
+   "id": "PARITY-I1",
+   "severity": "P2",
+   "kind": "instrumentation",
+   "views": [
+    "shell"
+   ],
+   "finding": "The Electron lane samples entry-shell's location BEFORE the session has settled, so its recorded route disagrees with its own captured frame.",
+   "measurement": "electron shell.route.json: `entry=0@0`, line 0, path \"\", `busy: true`. Its pin is 1 and the earlier Electron run reported 1. The FRAME is right: the grader's OCR of that same capture read the gutter cell as `\"1 #!/usr/bin/en\"`, i.e. line 1 is drawn. GPUI reads 1.",
+   "cause": "entry-shell is the only scenario with no operations, so nothing forces a settle before the sample.",
+   "ruling": "A lane-instrumentation defect, not a renderer divergence and not a corpus error. DO NOT move electronStoppedLine for entry-shell. Worth its own issue.",
+   "gpuiSide": false,
+   "buildSkewContaminated": false,
+   "buildSkewNote": "Electron-side or instrument-side. That arm was built the day it was captured, so the skew does not reach this finding.",
+   "verified": "CONFIRMED ON REVIEW from the lane's own artefacts. `shell.route.json` records trajectory `['entry=0@0']`, finalState `{line: 0, path: '', rrTicks: 0, busy: true}`. Every other scenario's finalState has `busy: false` and a resolved path. `entry-shell` is the only scenario with an empty `drivenOperations`, and the lane's settle is driven per-operation, so with zero operations nothing forces one — `editorSettledBetweenOperations: true` is VACUOUSLY true there and is exactly the kind of assertion a broken state also satisfies. The frame is right: the grader read the gutter cell as `\"1 #!/usr/bin/en\"`. `electronStoppedLine` was correctly NOT moved; its pin of 1 is right and the sample is wrong.",
+   "owner": "filed as its own issue on review — codetracer-specs/issues/2026-10-12-the-electron-capture-lanes-entry-shell-samples-the-debugger-location-before-the-session-settles.md"
+  },
+  {
+   "id": "PARITY-O1",
+   "severity": "P3",
+   "kind": "instrumentation",
+   "views": [
+    "shell",
+    "state"
+   ],
+   "finding": "The screen oracle could not read the stopped line from 2 of the 6 ELECTRON frames, and from 0 of the 6 GPUI frames.",
+   "measurement": "Electron shell: `grammar-mismatch`, gutter cell read as `\"1 #!/usr/bin/en\"`. Electron state: `grammar-mismatch`, read as `\"def mul\"`. Both are OCR cell-segmentation failures — the gutter digits were merged with the code text — not missing content.",
+   "consequence": "For those two cells the comparison rests on the Electron ROUTE reading alone, which is a different instrument from the GPUI side's OCR. Stated rather than smoothed over: state's route says 56 and its pin is 56, so the cell agrees, but it agrees by a single instrument.",
+   "instrument": "the oracle's own `reason`/`detail` fields.",
+   "gpuiSide": false,
+   "buildSkewContaminated": false,
+   "buildSkewNote": "Electron-side or instrument-side. That arm was built the day it was captured, so the skew does not reach this finding."
+  },
+  {
+   "id": "PARITY-S13",
+   "severity": "P2",
+   "kind": "structural",
+   "viewport": "wide vs laptop",
+   "views": [
+    "shell",
+    "editor",
+    "eventLog",
+    "state",
+    "calltrace",
+    "editorWithMark"
+   ],
+   "finding": "GPUI draws a bottom status bar at the `laptop` viewport and NOT at the clamped `wide` viewport. This closes the reader conflict the first pass recorded under `uncertain`: both readers were right, about different viewports.",
+   "measurement": "laptop (two frames, one reader): `Python | UTF-8`, `BUILD`, `PROBLEMS`, `FIND IN FILES`, `REQUESTS`, and at the right `main.py:110 tick 37` / `main.py:44 tick 6`. wide (one frame, a different reader): no status bar — the bottom strip is the Event Log content ending at `Rows 1 to 6 of 6`, then empty panel down to the window edge. Electron has a status bar at both.",
+   "instrument": "two disposable frame readers who were asked the same question about different viewports and did not see each other's answers.",
+   "consequence": "Recorded as measured, NOT diagnosed. It is consistent with the AppKit clamp of PARITY-G1 pushing the strip past the window's bottom edge, but this pass did not establish that and no cause is claimed here.",
+   "owner": "unassigned — needs a rebuilt GPUI before it is worth filing.",
+   "gpuiSide": true,
+   "pixelComparisonAttempted": false,
+   "buildSkewContaminated": true,
+   "buildSkewNote": "GPUI-side, read from the 2026-10-07 binary; `1fdcc0c5c` (live resize) landed after it and bears directly on window-height-dependent layout."
+  }
+ ],
+ "notComparable": {
+  "scenarios": [
+   "entry-shell",
+   "stepped-editor",
+   "continued-event-log"
+  ],
+  "viewport": "wide",
+  "why": "GPUI 3456x2110 after the title-bar crop vs Electron 3840x2160 — different in both dimensions. See PARITY-G1. They were compared STRUCTURALLY; no pixel statistic was computed for them and none should be quoted."
+ },
+ "uncertain": [
+  "RESOLVED ON REVIEW, and promoted to PARITY-S13 rather than dropped: the conflict over whether GPUI has a bottom status bar was a VIEWPORT difference, not a reader error. It is present at `laptop` and absent at the clamped `wide`. Recording it as `uncertain` rather than picking the more plausible reader was the right call and is what made it cheap to settle.",
+  "PARITY-S5's first/last line numbers are read off point-extent PNGs and differ by 1-2 from corpus-pins.json's own editorRows pins. The gap's direction and magnitude are the claim; the exact endpoints are not.",
+  "PARITY-P1's 37% is a correctly computed statistic over genuinely comparable buffers, but it is NOT a parity KPI — see `findings[PARITY-P1].reviewRuling`."
+ ],
+ "artifacts": {
+  "flipErrorMaps": "build/plat37-parity/*.flip.png (magma-mapped, written by codetracer-image-diff's renderFlipPng)",
+  "flipRaw": "build/plat37-parity/flip-results.jsonl",
+  "flipDriver": "build/plat37-parity/flipdiff.nim + compare.sh — the throwaway CLI over flip(); it computes nothing of its own.",
+  "gpuiLane": "build/plat37-macos/ (7 captures, 7 grades, manifest.json)",
+  "electronLane": "build/plat37-macos-electron/ (6 captures, 6 grades, 6 route.json, manifest.json)",
+  "note": "build/ is gitignored. These are reproducible from the two lanes plus compare.sh; nothing here is a committed artefact."
+ },
+ "placementRuling": {
+  "question": "should these 17 (now 18) readings live here, or be merged into PLAT-35's tier-4 ledger?",
+  "ruling": "KEEP THEM SEPARATE. The separation is right and merging would be a mistake.",
+  "why": [
+   "`tier4-gpui-readings.json` is PLAT-35's GPUI-ONLY ledger and is GATED by its own integrity suite. This file is a CROSS-RENDERER record with a different schema, a different subject and a different standing ('HOST-CONDITIONAL EVIDENCE — neither lane is a gate').",
+   "Merging would put an ungated, host-conditional record inside a gate, so a reading nobody can reproduce without a macOS GUI session and a Screen Recording grant would start deciding whether a suite is green.",
+   "It would also make the tier-4 ledger's cardinality and integrity assertions answer to a second corpus with different members — the same 'corpus that grew to fit its instrument' hazard `ci/test/plat37-window-frame.sh` already states as a rule."
+  ],
+  "whatGatesThisFile": "NOTHING, and that is the live gap. It is a JSON under `src/tests/visual/` that no suite reads. The minimum worth adding — and the check that would have caught this pass's own defect — is a provenance-freshness assertion: fail if `build/bin/codetracer-gpui`'s mtime predates the newest commit touching `src/frontend/gpui/` or `src/frontend/headless_app/`. A schema/cardinality assertion of the kind `scenarios.json` carries would be worth having too, but it is the freshness check that has already paid for itself once. Worth noting that the mechanism already exists one file over: `test_cross_renderer_visual_alignment.nim` refuses `tier4-review.json` four ways, including a build-provenance equality. This file is outside all four, which is the direct consequence of keeping it separate and is the price of that (correct) decision — so the freshness check has to be added here rather than inherited."
+ },
+ "reviewFindings": {
+  "reviewedAt": "2026-10-12",
+  "reviewer": "adversarial review pass, independent of the implementer",
+  "measuredAgainst": "codetracer 8f284d063 (agents), codetracer-specs 9894e18b0 (latest), GuiAssert 3058e0c03, isonim-gpui a76a77df0, isonim-tui c6e2e03e3; both repos fetched and found level with origin (0 ahead, 0 behind) at review time.",
+  "rejected": [
+   "PARITY-S2 — withdrawn entirely; a stale-binary artefact, see the finding.",
+   "The file's own headline claim of a reading 'AGAINST ONE BUILD' — measurably false, and rewritten.",
+   "'every setBreakpoint@N reading in this campaign's history has been renderer-relative' — too broad; PLAT-40's is safe by construction and says so."
+  ],
+  "upheld": [
+   "PARITY-S6's mechanism and its ruling that this is a scenario-spelling defect — the definition was read from scenarios.json's own prose and the dots were confirmed by two instruments per side.",
+   "PARITY-G1's content-loss claim at `wide` — confirmed by an independent reader; this is the strongest GPUI-side finding in the file.",
+   "The five-step-in ruling and the pins — confirmed from the Electron route artefacts, and skew-independent.",
+   "PARITY-I1, PARITY-O1, PARITY-S8, PARITY-S12 — Electron-side or instrument-side, uncontaminated, and S12 and S1's Electron half re-confirmed by an independent reader.",
+   "The two durable fixes (`nix/shells/main.nix`, `fixture_provider.nim`) — each exercised with live positive AND negative arms; see instrumentControls."
+  ],
+  "handlingOfConflicts": "The one genuine reader conflict this pass recorded under `uncertain` was handled correctly — recorded, not resolved by preference — and review settled it by measurement into PARITY-S13. No other conflict was found silently collapsed."
+ }
+}

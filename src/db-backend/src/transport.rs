@@ -29,8 +29,82 @@ mod io_transport {
             self.write_all(json.as_bytes())
                 .map_err(|e| serde_json::Error::custom(e.to_string()))?;
             self.flush().map_err(|e| serde_json::Error::custom(e.to_string()))?;
-            log::info!("DAP -> {:?}", msg);
+            log::info!("DAP -> {}", sent_message_summary(msg, &json));
             Ok(())
+        }
+    }
+
+    /// How much of a sent message's JSON the log line carries.
+    const LOGGED_JSON_PREFIX_BYTES: usize = 512;
+
+    /// A bounded description of a message just sent: what it is, its size,
+    /// and the start of its JSON.
+    ///
+    /// The log line used to be the message's full `Debug` form. Every message
+    /// goes through the one sending thread, so formatting a large one — a
+    /// `ct/updated-flow` and the `ct/load-flow` response for a loop-heavy
+    /// function hold every step the flow walked — delayed every message queued
+    /// behind it, the next move's `ct/complete-move` included: ~0.7 s per move
+    /// on the program of codetracer-pm
+    /// `issues/2026-10-06-a-stop-inside-a-loop-heavy-python-function-takes-thirty-seconds.md`.
+    /// The replay server logs `info!` unconditionally, so the cost has to be
+    /// bounded here rather than filtered.
+    fn sent_message_summary(msg: &DapMessage, json: &str) -> String {
+        let what = match msg {
+            DapMessage::Request(request) => format!("request {} seq {}", request.command, request.base.seq),
+            DapMessage::Response(response) => format!(
+                "response {} to {} success {}",
+                response.command, response.request_seq, response.success
+            ),
+            DapMessage::Event(event) => format!("event {} seq {}", event.event, event.base.seq),
+        };
+        let mut prefix_end = json.len().min(LOGGED_JSON_PREFIX_BYTES);
+        while !json.is_char_boundary(prefix_end) {
+            prefix_end -= 1;
+        }
+        let ellipsis = if prefix_end < json.len() { "…" } else { "" };
+        format!("{what} ({} bytes): {}{ellipsis}", json.len(), &json[..prefix_end])
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::expect_used)]
+    mod tests {
+        use super::sent_message_summary;
+        use crate::dap::{DapMessage, Event, ProtocolMessage};
+
+        fn event(body: serde_json::Value) -> DapMessage {
+            DapMessage::Event(Event {
+                base: ProtocolMessage {
+                    seq: 7,
+                    type_: "event".to_string(),
+                },
+                event: "ct/updated-flow".to_string(),
+                body,
+            })
+        }
+
+        #[test]
+        fn a_large_message_is_logged_as_a_bounded_line() {
+            let msg = event(serde_json::json!({ "steps": "é".repeat(100_000) }));
+            let json = crate::dap::to_json(&msg).expect("the event serializes");
+            let line = sent_message_summary(&msg, &json);
+            assert!(line.starts_with(&format!("event ct/updated-flow seq 7 ({} bytes): ", json.len())));
+            assert!(line.ends_with('…'));
+            assert!(
+                line.len() < 1024,
+                "the line must not grow with the message: {} bytes",
+                line.len()
+            );
+        }
+
+        #[test]
+        fn a_small_message_is_logged_whole() {
+            let msg = event(serde_json::json!({}));
+            let json = crate::dap::to_json(&msg).expect("the event serializes");
+            assert_eq!(
+                sent_message_summary(&msg, &json),
+                format!("event ct/updated-flow seq 7 ({} bytes): {json}", json.len())
+            );
         }
     }
 }

@@ -45,7 +45,7 @@ type
       ## On its close button.
 
 const
-  ScratchpadCloseGlyph* = "✕"
+  ScratchpadCloseGlyph* = canonical(grClose)
     ## The desktop's `close-element` button (`ScratchpadVM.removeValue`).
   ScratchpadCloseCells* = 2
     ## The button and the space after it.
@@ -80,7 +80,7 @@ proc paintScratchpad*(g: var StyledGrid; area: CellArea;
   for i, r in model.rows:
     let y = body + i
     if y >= area.row + area.height: break
-    g.paint(y, area.col, ScratchpadCloseGlyph & " ", ScratchpadCloseStyle)
+    g.paint(y, area.col, g.glyphText(grClose) & " ", ScratchpadCloseStyle)
     let room = area.width - ScratchpadCloseCells
     if room <= 0: continue
     let name = truncateToCells(r.expression & ": ", room)

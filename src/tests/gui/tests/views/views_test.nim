@@ -200,13 +200,15 @@ suite "DebugControlsViewState":
 
       dispose()
 
-  test "toolbar step dispatch prefers legacy DAP bridge":
+  test "toolbar step dispatch uses the host's step command":
+    # The host's route is handed in at construction (`DebugCommands`), as the
+    # desktop hands in its DAP step route; the click reaches it alone.
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
-      let vm = createDebugControlsVM(store)
       var bridgedAction = ""
-      vm.onDapStep = proc(action: cstring) =
-        bridgedAction = $action
+      var commands = defaultDebugCommands(store)
+      commands.step = proc(actionId: string) = bridgedAction = actionId
+      let vm = createDebugControlsVM(store, commands)
 
       vm.invokeToolbarStep("next")
       drain()
@@ -216,7 +218,7 @@ suite "DebugControlsViewState":
 
       dispose()
 
-  test "toolbar step dispatch falls back to backend with threadId":
+  test "toolbar step dispatch through the default commands reaches the backend with threadId":
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let store = createReplayDataStore(mock.toBackendService())
@@ -237,7 +239,7 @@ suite "DebugControlsViewState":
 
 suite "StateViewState basic":
 
-  test "shows locals tab by default":
+  test "starts empty and not loading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
@@ -246,36 +248,26 @@ suite "StateViewState basic":
       drain()
 
       let vs = getStateViewState(vm)
-      check vs.activeTab == "Locals"
-      check vs.watchInputVisible == false
       check vs.isLoading == false
       check vs.variables.len == 0
 
       dispose()
 
-  test "shows globals tab when selected":
+  test "a watch row is marked as a watch, and not valid without an answer":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
-
-      vm.selectTab(stGlobals)
-
-      let vs = getStateViewState(vm)
-      check vs.activeTab == "Globals"
-      check vs.watchInputVisible == false
-
-      dispose()
-
-  test "shows watches tab with watch input visible":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-
-      vm.selectTab(stWatches)
+      drain()
+      store.updateLocals(@[makeVariable("x", "42", "int")])
+      vm.addWatch("nope")
+      drain()
 
       let vs = getStateViewState(vm)
-      check vs.activeTab == "Watches"
-      check vs.watchInputVisible == true
+      check vs.variables.len == 2
+      check not vs.variables[0].isWatch
+      check vs.variables[1].isWatch
+      check vs.variables[1].watchInvalid
+      check not vs.variables[1].watchPending
 
       dispose()
 
@@ -322,7 +314,7 @@ suite "StateViewState variables":
 
       dispose()
 
-  test "globals show on globals tab":
+  test "globals show after the locals":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
@@ -331,7 +323,6 @@ suite "StateViewState variables":
         Variable(name: "gCounter", value: "7", typeName: "int",
                  hasChildren: false, children: @[]),
       ]
-      vm.selectTab(stGlobals)
 
       let vs = getStateViewState(vm)
       check vs.variables.len == 1

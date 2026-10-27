@@ -40,6 +40,7 @@ use db_backend::dap_types::{StackTraceArguments, StackTraceResponseBody};
 use db_backend::db::{Db, DbCall, DbStep, EndOfProgram};
 use db_backend::in_memory_trace_reader::InMemoryTraceReader;
 use db_backend::recreator_session::RecreatorArgs;
+use db_backend::source_access::{HostSourceReads, SourceAccess};
 use db_backend::sourcemap_cache::translation_enabled;
 use db_backend::task::TraceKind;
 use db_backend::trace_reader::TraceReader;
@@ -234,6 +235,40 @@ fn p3_replay_server_resolves_lodash_to_original() {
             assert_eq!(path, &recorded_min_path);
         }
     }
+}
+
+/// A session launched with host reads off (`hostSourceReads: false`) does
+/// not look for a sibling `<path>.map` on the replay host: the map is a host
+/// file beside a recorded path, and it can carry `sourcesContent`.  The same
+/// trace in a session with host reads on loads it (the control, as in
+/// `p3_replay_server_resolves_lodash_to_original`).
+#[test]
+fn p3_a_session_without_host_reads_loads_no_sibling_source_map() {
+    assert!(
+        translation_enabled(),
+        "CT_SOURCEMAP_TRANSLATION is off, so this test cannot tell the gate from the kill switch"
+    );
+    let (reader, fixture, _) = build_trace_into_fixture();
+    let mut refused = Handler::construct_with_reader_and_source_access(
+        TraceKind::Materialized,
+        RecreatorArgs::default(),
+        reader,
+        false,
+        SourceAccess {
+            host_reads: HostSourceReads::Refused,
+            ..SourceAccess::default()
+        },
+    );
+    refused.load_sourcemaps(&fixture);
+    assert!(
+        refused.sourcemap_cache.is_empty(),
+        "a session without host reads loaded a sibling source map from the host"
+    );
+
+    let (reader, fixture, _) = build_trace_into_fixture();
+    let mut allowed = Handler::construct_with_reader(TraceKind::Materialized, RecreatorArgs::default(), reader, false);
+    allowed.load_sourcemaps(&fixture);
+    assert_eq!(allowed.sourcemap_cache.len(), 1);
 }
 
 #[test]

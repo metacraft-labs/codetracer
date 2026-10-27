@@ -1,0 +1,134 @@
+{
+ "_comment": [
+  "PLAT-70 Part B \u2014 the GPUI window's table panes: a cut cell hovered,",
+  "a fitting cell hovered, the `\u2026` pressed twice, a column separator",
+  "dragged. Produced by `ci/test/plat70b-gpui-window.sh` then",
+  "`python3 ci/test/plat70b_gpui_window.py record`; asserted by",
+  "src/frontend/gpui/tests/test_plat70b_gpui_window.nim."
+ ],
+ "frame": [
+  1920,
+  1080
+ ],
+ "steps": {
+  "base": true,
+  "hover": true,
+  "fits-hover": true,
+  "detail": true,
+  "closed": true,
+  "drag": true
+ },
+ "eventLogBody": [
+  869,
+  575,
+  1047,
+  473
+ ],
+ "eventLogRect": [
+  869,
+  543,
+  1047,
+  505
+ ],
+ "editorBody": [
+  389,
+  66,
+  476,
+  982
+ ],
+ "aims": {
+  "row0Y": 650,
+  "columns": [
+   {
+    "column": "tick",
+    "x": 869,
+    "w": 104,
+    "headerY": 613
+   },
+   {
+    "column": "#",
+    "x": 973,
+    "w": 49,
+    "headerY": 613
+   },
+   {
+    "column": "kind",
+    "x": 1022,
+    "w": 23,
+    "headerY": 613
+   },
+   {
+    "column": "output",
+    "x": 1045,
+    "w": 863,
+    "headerY": 613
+   }
+  ],
+  "cell": [
+   1045,
+   1908
+  ],
+  "ellipsis": [
+   1892,
+   1902
+  ],
+  "rows": [
+   638,
+   666
+  ],
+  "grip": [
+   1019,
+   625
+  ]
+ },
+ "dragPx": 40,
+ "changed": {
+  "hover": [
+   1045,
+   666,
+   774,
+   96
+  ],
+  "fits-hover": null,
+  "detail": [
+   1059,
+   674,
+   803,
+   94
+  ],
+  "closed": [
+   869,
+   543,
+   1047,
+   505
+  ],
+  "drag": [
+   992,
+   620,
+   898,
+   41
+  ]
+ },
+ "ellipsisInk": 24,
+ "reportedByWindow": {
+  "f10Tries": [
+   1,
+   2,
+   1
+  ],
+  "tick": "gesture control next tick=4",
+  "hover": "gesture cell hover eventLog output cell=1045..1908 row=638..666 ellipsis=1892..1902",
+  "tooltip": "gesture cell tooltip 4 line(s)",
+  "fitsTooltip": false,
+  "detail": "gesture detail open eventLog 0 output",
+  "rowClick": "gesture pane click event left to the table gesture",
+  "tickAfterDetail": "gesture control next tick=4",
+  "closed": "gesture detail closed eventLog 0 output",
+  "separator": "gesture column separator #",
+  "drag": "gesture event log column # 11 cells",
+  "headerPress": "gesture pane click header left to the table gesture",
+  "orderedBy": "",
+  "remembered": "event-log.#=11\n",
+  "dragCells": 11
+ }
+}

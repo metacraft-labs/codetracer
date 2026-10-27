@@ -692,18 +692,22 @@ jobs:
             # 2026-09-25 flake.lock roll moved it off 3b6196ef; its pin still
             # carries src/io_mon/depfile.nim).  The two nim-shm-* repos are
             # not flake inputs and keep the main lane's pins.
-            io-mon=0c312f261ecbbad3931132aed4ba31167b2de202
+            # Re-aligned to flake.lock on 2026-10-22 after the flake.lock roll in
+            # 0a422dd91 (io-mon's new pin still carries src/io_mon/depfile.nim).
+            # runquota is locked as a `follows` of reprobuild's `runquota-src`;
+            # the pin below is that node's rev.
+            io-mon=6fccd929cb09da0bfc0844b93ced9ffb1ac0f74f
             nim-shm-queue=5a8e43b52fa202859658692c9f8432967f3971ea
             nim-shm-gset=360bfc15cadab1ff583e6d1cbc20b389d5d6825f
-            nim-stackable-hooks=512586916384f27614c2b28f6c256d33d451daa5
+            nim-stackable-hooks=059c549306621e2f769adf75630b0b7f29018dca
             # Not in the workspace lock -- pinned to flake.lock's revs. See
             # "THE FLAKE-INPUT THREE" above before changing any of these.
             # isonim-tui is in codetracer's repro.lock since 6850efc5e, but the
             # recorder repos' lock records these edges also resolve do not
             # carry it, so it keeps the SHA shape.
-            isonim=7268743981766f0d9c6d70d8d2ddbf70b8bd2c82
-            isonim-tui=874eee12b51297879f825ae03ed3d456d6cd263a
-            runquota=b561f9306ff89f2b82ab38edf21dbc7d9890d106
+            isonim=3b3d356c17d65ae385350fe70e7235e5527c70c0
+            isonim-tui=029cc0cf21ec32a1628e7870a41359956cf29f32
+            runquota=f9f1118cd33a27051c6fea683348f343df91e96f
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot

@@ -31,6 +31,8 @@
 //! `return` — never `panic!`. A recorder that runs and *fails*, by
 //! contrast, is a hard error. Genuine M8 bugs surface as failures.
 
+#[path = "support/mcp_harness.rs"]
+mod mcp_harness;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -149,6 +151,13 @@ impl McpClient {
             .stderr(Stdio::null());
         if let Some(socket) = socket {
             command.env("CODETRACER_DAEMON_SOCK", socket);
+            // These tests read the test's own recordings, whose sources are
+            // the fixture files on this host with no copy in the recording,
+            // and assert on the source lines the chain carries: the setting
+            // a developer reading their own recordings uses.  Without it the
+            // backend reads no listed host file and every hop's source text
+            // is empty (mcp_host_source_reads_test.rs).
+            command.arg("--allow-host-source-reads");
         }
         let mut child = command
             .spawn()
@@ -343,42 +352,23 @@ fn test_mcp_resolve_variable_step_tool_registered() {
 // called the classifier directly would have proved nothing.
 // ---------------------------------------------------------------------------
 
-/// Locate a built `replay-server`, mirroring the probe in
-/// `real_recording_integration.rs`.
+/// Locate a built `replay-server` through the MCP harness's one lookup
+/// (`mcp_harness::locate_replay_server`: `CODETRACER_REPLAY_SERVER_CMD`,
+/// beside the server, the db-backend build), which refuses one older than
+/// the files it is built from: a replay server older than a launch argument
+/// the daemon sends refuses that launch.  `None` only when none is built;
+/// a stale one, or a named path that is not a file, fails the test.
 fn find_replay_server() -> Option<PathBuf> {
-    let mut target_dir = std::env::current_exe().ok()?;
-    target_dir.pop();
-    if target_dir.ends_with("deps") {
-        target_dir.pop();
+    let explicit = std::env::var_os("CODETRACER_REPLAY_SERVER_CMD").map(PathBuf::from);
+    match mcp_harness::locate_replay_server(
+        explicit,
+        &mcp_harness::server_binary(),
+        &mcp_harness::db_backend_dir(),
+    ) {
+        Ok(path) => Some(path),
+        Err(mcp_harness::ReplayServerRefusal::NotBuilt(_)) => None,
+        Err(refusal) => panic!("{refusal}"),
     }
-    for name in ["replay-server", "db-backend"] {
-        let candidate = target_dir.join(format!("{}{}", name, std::env::consts::EXE_SUFFIX));
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let exe = std::env::consts::EXE_SUFFIX;
-    for relative in [
-        format!("../db-backend/target/debug/replay-server{exe}"),
-        format!("../db-backend/target/release/replay-server{exe}"),
-        format!("../build-debug/bin/replay-server{exe}"),
-    ] {
-        let path = manifest_dir.join(&relative);
-        if path.exists() {
-            return Some(path.canonicalize().unwrap_or(path));
-        }
-    }
-
-    if let Ok(from_env) = std::env::var("CODETRACER_REPLAY_SERVER_CMD") {
-        let path = PathBuf::from(from_env);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
 }
 
 /// The Python interpreter to drive the recorder with.
@@ -515,6 +505,17 @@ impl Drop for TestDaemon {
 /// Start a daemon whose socket lives under `root`, backed by a real
 /// `replay-server`.  Returns `None` (with a `SKIPPED:` line) when no
 /// `replay-server` has been built.
+///
+/// The daemon is given this checkout's `python-api` as
+/// `CODETRACER_PYTHON_API_PATH`, so `exec_script` imports the package from
+/// the tree under test whatever the build profile and target directory.
+/// Left to its own lookup, a release daemon whose `CARGO_TARGET_DIR` is
+/// outside the checkout (`just test-rust` on the CI runners) has no place to
+/// look: the compiled-checkout fallback exists only in debug builds.  These
+/// tests are about the origin tools, not that lookup, which
+/// `real_recording_integration`'s
+/// `test_real_custom_mcp_exec_script_relative_trace_path` and the
+/// `script_executor` unit tests cover.
 fn start_daemon(binary: &Path, root: &Path) -> Option<TestDaemon> {
     let replay_server = match find_replay_server() {
         Some(p) => p,
@@ -530,9 +531,12 @@ fn start_daemon(binary: &Path, root: &Path) -> Option<TestDaemon> {
     let socket = root.join("daemon.sock");
     let _ = std::fs::remove_file(&socket);
 
+    let python_api = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../python-api");
+
     let child = Command::new(binary)
         .args(["daemon", "start"])
         .env("CODETRACER_DAEMON_SOCKET", &socket)
+        .env("CODETRACER_PYTHON_API_PATH", &python_api)
         .env("CODETRACER_REPLAY_SERVER_CMD", &replay_server)
         .env("TMPDIR", root)
         .stdin(Stdio::null())
@@ -998,9 +1002,8 @@ const PRINT_C_STEP: &str = "9";
 /// A recorded trace plus a live daemon, for driving the `ct trace
 /// origin` *client* (as opposed to the MCP server).
 struct CliOriginHarness {
-    _daemon: TestDaemon,
+    daemon: TestDaemon,
     binary: PathBuf,
-    root: PathBuf,
     trace_path: String,
 }
 
@@ -1008,11 +1011,10 @@ impl CliOriginHarness {
     /// Run `ct trace origin <trace> --variable c --step 9 --format <format>`
     /// against this harness's daemon and return its stdout.
     ///
-    /// `CODETRACER_TMP_PATH` is what the CLI client resolves its daemon
-    /// socket from (`paths::Paths::default`), and it is the same
-    /// `<root>/daemon.sock` that `start_daemon` created — so the client
-    /// joins the harness daemon instead of auto-starting a stray one
-    /// against the user's real socket.
+    /// The client is given the harness daemon's `CODETRACER_DAEMON_SOCKET`,
+    /// which it resolves exactly as the daemon does
+    /// (`DaemonConfig::daemon_paths`), so it joins that daemon instead of
+    /// auto-starting a stray one against the user's real socket.
     fn run_origin(&self, format: &str) -> String {
         let output = Command::new(&self.binary)
             .args([
@@ -1026,7 +1028,7 @@ impl CliOriginHarness {
                 "--format",
                 format,
             ])
-            .env("CODETRACER_TMP_PATH", &self.root)
+            .env("CODETRACER_DAEMON_SOCKET", &self.daemon.socket)
             .stdin(Stdio::null())
             .output()
             .unwrap_or_else(|e| panic!("cannot run `ct trace origin --format {format}`: {e}"));
@@ -1060,9 +1062,8 @@ fn cli_origin_harness(scenario: &str) -> Option<CliOriginHarness> {
     let daemon = start_daemon(&binary, &root)?;
 
     Some(CliOriginHarness {
-        _daemon: daemon,
+        daemon,
         binary,
-        root,
         trace_path: trace_dir.to_string_lossy().to_string(),
     })
 }

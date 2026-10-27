@@ -141,6 +141,7 @@ type
     cmdInfoThreads = "info threads"
     cmdInfoRegisters = "info registers"
     cmdTheme = "theme"
+    cmdWatches = "watches"
     cmdQuit = "quit"
 
   ArgumentNeed* = enum
@@ -357,13 +358,16 @@ const
     CommandSpec(kind: cmdTheme, name: "theme", alias: "",
                 argument: "<dark|light>", need: anRequired,
                 summary: "Switch UI theme dynamically"),
+    CommandSpec(kind: cmdWatches, name: "watches", alias: "",
+                argument: "<hide|show>", need: anRequired,
+                summary: "Hide or show watches added in another process"),
     CommandSpec(kind: cmdQuit, name: "quit", alias: "q", argument: "",
                 need: anNone, summary: "Exit CodeTracer TUI"),
   ]
 
   CommandOnlyKinds*: seq[CommandKind] = @[
     cmdTracepoint, cmdFrame, cmdPrint, cmdInfoThreads, cmdInfoRegisters,
-    cmdTheme,
+    cmdTheme, cmdWatches,
   ]
     ## The §4.3 commands §4.2 binds no key to. Named as a list rather than
     ## derived from `keyActionFor`'s `else` branch, so a seventh cannot appear
@@ -408,7 +412,7 @@ proc keyActionFor*(kind: CommandKind): (bool, KeyAction) =
   of cmdOrigin: (true, kaValueOrigin)
   of cmdQuit: (true, kaQuit)
   of cmdTracepoint, cmdFrame, cmdPrint, cmdInfoThreads, cmdInfoRegisters,
-     cmdTheme:
+     cmdTheme, cmdWatches:
     (false, kaNone)
 
 proc lookupCommand*(word: string): (bool, CommandKind, bool) =
@@ -674,6 +678,22 @@ proc dispatchAction*(d: Dispatcher; ctx: CommandContext; action: KeyAction;
     rejected(action, "nothing to dispatch")
 
   # ---- §4.2 Omniscient Stepping -----------------------------------------
+  of kaHistoryBack, kaHistoryForward:
+    # The desktop's history back / forward, through the one history every
+    # front-end shares (`DebugControlsVM`); the host settles the move.
+    if d.controls.isNil:
+      return unavailable(action, "no DebugControlsVM is wired, so the " &
+                         "history cannot reach the engine")
+    let direction = if action == kaHistoryBack: hdOlder else: hdNewer
+    let possible =
+      if direction == hdOlder: d.controls.canGoBack.val
+      else: d.controls.canGoForward.val
+    if not possible:
+      return unavailable(action, if direction == hdOlder:
+                                   "no earlier position in the history"
+                                 else: "no later position in the history")
+    d.controls.moveInHistory(direction)
+    done(action, if direction == hdOlder: "history back" else: "history forward")
   of kaStepOver: stepWith(d, action, true, "step over")
   of kaReverseStepOver: stepWith(d, action, false, "reverse step over")
   of kaStepInto: stepWith(d, action, true, "step into")
@@ -862,6 +882,22 @@ proc dispatchPrint(d: Dispatcher; expression: string): DispatchResult =
   done(kaNone, "watching `" & expression &
        "` — its value appears with the next locals load")
 
+proc dispatchWatches(d: Dispatcher; argument: string): DispatchResult =
+  ## `:watches hide|show` — the Variables pane's "Hide watches from other
+  ## processes" (Variable-State-Pane.md § Decisions, 2026-10-24): a watch added
+  ## while another process was active is left out while this one is shown.
+  if d.state.isNil:
+    return unavailable(kaNone, "no StateVM is wired")
+  case argument
+  of "hide":
+    d.state.setHideOtherProcessWatches(true)
+    done(kaNone, "watches added in other processes are hidden")
+  of "show":
+    d.state.setHideOtherProcessWatches(false)
+    done(kaNone, "watches from every process are shown")
+  else:
+    rejected(kaNone, "`:watches` takes `hide` or `show`, not `" & argument & "`")
+
 proc dispatchInfoThreads(d: Dispatcher;
                          outcome: var CommandOutcome): DispatchResult =
   if d.services.threads.isNil:
@@ -931,6 +967,7 @@ proc runCommand*(d: Dispatcher; ctx: CommandContext;
       of cmdInfoThreads: dispatchInfoThreads(d, result)
       of cmdInfoRegisters: dispatchInfoRegisters(d, result)
       of cmdTheme: dispatchTheme(d, argument)
+      of cmdWatches: dispatchWatches(d, argument)
       else:
         rejected(kaNone, "`" & $kind & "` is in CommandOnlyKinds but has no " &
                  "arm here — that is a defect in this file, not in the input")

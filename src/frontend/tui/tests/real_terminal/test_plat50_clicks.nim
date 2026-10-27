@@ -31,10 +31,16 @@ import nim_libvterm
 import ../fixtures/fixture_provider
 import ./lifecycle_support
 import ../../app/theme/colour_math
+from viewmodels/product_mode import editorTabLabel
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 107
+const ExpectedAssertions = 116
+  ## K19: 108 -> 116 — a Files node opens the Files pane's menu (its four
+  ## rows, the reason on three, a disabled entry inert, Edit opening the
+  ## file) where the case asserted no menu (6).
+  ## 107 -> 108: the Files click case pins the derived tab label
+  ## (`editorTabLabel`, folder/name since 2026-10-17) before using it.
   ## PLAT-51: 112 -> 107 — the two Timeline-track cases (K30, K45) went with
   ## the pane; value history and origin open in the pane, read under the row.
 
@@ -186,7 +192,7 @@ proc press(sess: var TuiTestSession; row, col: int; code = 0) =
   sess.mouse(code, row, col, release = true)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -250,13 +256,18 @@ suite "PLAT-50 on a real terminal: Files (K17, K18, K19)":
     var sess = open("multi_root")
     let (rh, ch) = sess.waitFor("helpers.py", below = Rows - 1)
     ck rh > 1
+    # The editor's tab is the opened file's folder and name, as every
+    # front-end draws it (`product_mode.editorTabLabel`): `shared/helpers.py`.
+    let helpersTab = " " & editorTabLabel(
+      "test-programs" / "multi_root" / "shared" / "helpers.py", false) & " "
+    ck helpersTab == " shared/helpers.py "
     # The editor opens on the runner; helpers.py is a file of the tree.
-    ck not sess.snap().text(1).contains(" helpers.py ")
+    ck not sess.snap().text(1).contains(helpersTab)
     sess.press(rh, ch + 2)
     discard sess.waitFor("def add(left, right):")
     let s = sess.snap()
     # The editor's tab names the opened file, and the status line says so.
-    ck s.text(1).contains(" helpers.py ")
+    ck s.text(1).contains(helpersTab)
     ck sess.rowText(StatusRow).contains("opened ")
     # A folder: `shared` collapses (its files go, its twisty turns) and
     # expands again.
@@ -270,18 +281,37 @@ suite "PLAT-50 on a real terminal: Files (K17, K18, K19)":
     ck sess.snap().findRow("extra.py")[0] > rs
     sess.quit()
 
-  test "a right-click on a node opens no menu (the desktop has none)":
-    var sess = open()
-    let (rm, cm) = sess.waitFor("    main.py", below = Rows - 1)
-    ck cm < 20
-    sess.press(rm, cm + 5, RightButton)
-    # Give a menu the time it would take to appear, then look for its frame
-    # and the four entries the desktop used to offer.
-    sleep(600)
+  test "a right-click on a node opens the Files pane's menu; Edit opens the file":
+    # K19 (Filesystem-Pane.md § "Context menu"): the desktop's four entries,
+    # in its order. A recording's sources are read-only, so Create, Rename
+    # and Delete are disabled with that reason, drawn beside them; Edit
+    # opens the file.
+    var sess = open("multi_root")
+    let (rh, ch) = sess.waitFor("helpers.py", below = Rows - 1)
+    ck ch < 40
+    sess.press(rh, ch + 2, RightButton)
+    let (rc, cc) = sess.waitFor("Create", fromCol = ch)
     let s = sess.snap()
-    for label in ["Create", "Rename", "Delete", "Edit"]:
-      ck s.findRow(label)[0] < 0
-    ck s.findRow("┌")[0] < 0
+    ck rc > rh - 1
+    ck s.text(rc + 1).contains("Rename")
+    ck s.text(rc + 2).contains("Delete")
+    ck s.text(rc + 3).contains("Edit")
+    for r in rc .. rc + 2:
+      ck s.text(r).contains("A recording's sources are read-only")
+    ck not s.text(rc + 3).contains("read-only")
+    # A disabled entry does nothing: the menu stays and the status line
+    # says why.
+    sess.press(rc, cc + 1)
+    sleep(300)
+    ck sess.snap().text(rc + 3).contains("Edit")
+    ck sess.rowText(StatusRow).contains("A recording's sources are read-only")
+    # Edit opens the file, as a click on its row does.
+    let ce = sess.snap().text(rc + 3).cellFind("Edit")
+    ck ce >= 0
+    sess.press(rc + 3, ce + 1)
+    discard sess.waitFor("def add(left, right):")
+    ck sess.snap().text(1).contains(" shared/helpers.py ")
+    ck sess.rowText(StatusRow).contains("opened ")
     sess.quit()
 
 suite "PLAT-50 on a real terminal: the editor (K10-K13)":
@@ -468,12 +498,12 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
   test "a click on a value expands it; a right click offers history and origin":
     var sess = open()
     sess.send(":goto 114\r")
-    let (rx, cx) = sess.waitFor("▶ EXPRESSION")
+    let (rx, cx) = sess.waitFor("▶ EXPRESSI")
     sess.press(rx, cx + 4)
-    discard sess.waitFor("▼ EXPRESSION")
+    discard sess.waitFor("▼ EXPRESSI")
     ck sess.snap().findRow("[0]", fromCol = cx)[0] == rx + 1
     sess.press(rx, cx + 4)
-    discard sess.waitFor("▶ EXPRESSION")
+    discard sess.waitFor("▶ EXPRESSI")
     sess.press(rx, cx + 4, RightButton)
     let (rh, ch) = sess.waitFor("Toggle value history")
     let s = sess.snap()
@@ -517,7 +547,18 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
     sess.press(ro2, co2 + 2)
     let (rg, _) = sess.waitFor("⇠ tick ")
     ck rg > rx
-    ck sess.snap().text(rg).contains(" <- ")
+    # The hop's arrow, on the hop's own row after its `⇠ tick` and inside the
+    # Variables pane (up to the divider after it). No trailing space: with the
+    # history open the pane overflows, its last column is the scrollbar (M71,
+    # Scrollbar-Scrubbers.md §4), and on this 41-cell pane the arrow ends in
+    # the last text cell.
+    let hopRow = sess.snap().text(rg)
+    let hopAt = hopRow.find("⇠ tick ")
+    let hopSeg =
+      if hopAt < 0: ""
+      else: hopRow[hopAt + "⇠ tick ".len .. ^1].split("▏")[0]
+    checkpoint("origin hop: " & hopSeg)
+    ck hopSeg.contains(" <-")
     # And `:origin` — the walk, which froze the terminal before: it answers.
     sess.send(":origin EXPRESSIONS\r")
     discard sess.waitFor("EXPRESSIONS computed from", timeoutMs = 30000)
@@ -529,9 +570,9 @@ suite "PLAT-50 on a real terminal: Variables and the timeline (K27, K28, K30)":
   test "`o` on the selected variable asks for its origin and answers":
     var sess = open()
     sess.send(":goto 114\r")
-    let (rx, cx) = sess.waitFor("▶ EXPRESSION")
+    let (rx, cx) = sess.waitFor("▶ EXPRESSI")
     sess.press(rx, cx + 4)                    # selects (and expands) it
-    discard sess.waitFor("▼ EXPRESSION")
+    discard sess.waitFor("▼ EXPRESSI")
     sess.send("o")
     # The walk's first hop, as `:origin` answers it: no freeze on the query.
     discard sess.waitFor("EXPRESSIONS computed from", timeoutMs = 30000)
@@ -561,11 +602,13 @@ suite "PLAT-50 on a real terminal: the call-trace click's status (F2)":
     sess.quit()
 
 proc stepToAdd(sess: var TuiTestSession) =
-  ## Into `add`'s body (line 31, `left: 2, right: 3` beside it).
+  ## Into `add`'s body (line 31, `left: 2, right: 3` beside it — the flow's
+  ## values, which carry the step's `return` after them and are drawn on
+  ## `def add(` above as well, as GPUI's window draws them).
   sess.send(":goto 32\r")
   discard sess.waitFor(" ▸  def add(")
   sess.send("n")
-  discard sess.waitFor("/* left: 2, right: 3 */")
+  discard sess.waitFor(" ▸      return left + right  /* left: 2, right: 3")
 
 proc osc52(sess: var TuiTestSession): seq[string] =
   ## Every text the terminal was asked to put on its clipboard (OSC 52).

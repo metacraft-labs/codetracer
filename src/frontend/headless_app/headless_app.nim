@@ -344,7 +344,9 @@ proc paneViewModel*(slot: HeadlessSessionSlot; kind: PaneKind): ViewModel =
   of paneEventLog: ViewModel(s.eventLogVM)
   of paneDebugControls: ViewModel(s.debugControlsVM)
   of paneFlow: ViewModel(s.flowVM)
-  of paneSearch: ViewModel(s.searchVM)
+  # PLAT-57: the Find in Files pane — the desktop's FIND IN FILES, over the
+  # shared `SearchResultsVM` (the omnibar's `SearchVM` is not a pane).
+  of paneSearch: ViewModel(s.searchResultsVM)
   of panePointList: ViewModel(s.pointListVM)
   of paneScratchpad: ViewModel(s.scratchpadVM)
   of paneShell: ViewModel(s.shellVM)

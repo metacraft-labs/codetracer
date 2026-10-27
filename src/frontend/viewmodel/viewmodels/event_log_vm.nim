@@ -56,17 +56,21 @@
 ##   echo vm.totalPages.val       # derived from store data
 
 import std/[json, options, strutils, tables, unicode]
+import ./action_sink
 
-import isonim/core/[signals, computation, owner]
+import isonim/core/[signals, computation, owner, batch]
 import isonim/core/async_compat
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../store/[replay_data_store, types]
+import ../viewport
+export viewport
+import ./table_overflow
+import ./table_fit
+from ../keymap/operation_catalogue import parseColumnResize
 
 const
-  ## Default number of rows per page in the event log panel.
-  DEFAULT_PAGE_SIZE* = 50
   ## Default `format` hint applied when a marker omits the field
   ## (spec §5.2). Read by `formatShowValue` to truncate values with a
   ## middle ellipsis for compact display.
@@ -130,7 +134,8 @@ type
     total*: int
 
   MarkerFilterBar* = object
-    ## §5.4 filter-bar state derived from `searchQuery`.
+    ## §5.4 filter-bar state, parsed from the filter input
+    ## (`setFilterInput`); `freeText` is what goes to `searchQuery`.
     ## `boundaryFilter` and `unmatchedOnly` correspond to the two
     ## shorthands; `freeText` is the residual after shorthand
     ## extraction.
@@ -197,6 +202,15 @@ type
     order*: seq[EventLogColumn]
       ## EVERY column, in display order; hidden ones keep their place.
     hidden*: set[EventLogColumn]
+    widths*: array[EventLogColumn, int]
+      ## PLAT-70 Part B (Horizontal-Overflow.md §5.2): the width the user gave
+      ## each column, in CELLS (`table_overflow.ColumnCellPx` pixels each on
+      ## GPUI and the desktop); 0 is the front-end's own default. The model
+      ## owns it, so a width dragged on one front-end is the width on the
+      ## others (HO-9).
+    focused*: EventLogColumn
+      ## The column **Widen Column** / **Narrow Column** act on: the last one
+      ## whose separator was dragged or that was resized by name.
 
 const
   DesktopEventLogColumnOrder* = [elcTick, elcIndex, elcLocation, elcKind,
@@ -280,6 +294,124 @@ func moveColumn*(c: var EventLogColumns; col: EventLogColumn;
       inc k
   true
 
+const EventLogTableName* = EventLogTablePane
+  ## The event log's name in the remembered widths
+  ## (`table_overflow.encodeColumnWidths`).
+
+func columnWidthOr*(c: EventLogColumns; col: EventLogColumn;
+                    default: int): int =
+  ## `col`'s width in cells: the one the user set, else `default` (the
+  ## front-end's own).
+  if c.widths[col] > 0: c.widths[col] else: default
+
+func setColumnWidth*(c: var EventLogColumns; col: EventLogColumn;
+                     cells: int): bool =
+  ## §5.2: `col` is `cells` wide, never narrower than `MinColumnCells`.
+  ## False when that is its width already.
+  let w = clampColumnCells(cells)
+  c.focused = col
+  if c.widths[col] == w:
+    return false
+  c.widths[col] = w
+  true
+
+func resizeColumn*(c: var EventLogColumns; col: EventLogColumn;
+                   delta, current: int): bool =
+  ## §5.2's `table.resize-column(column, delta)`: `col`, which is drawn
+  ## `current` cells wide, by `delta` cells.
+  c.setColumnWidth(col, c.columnWidthOr(col, current) + delta)
+
+func columnWidthEntries*(c: EventLogColumns): seq[ColumnWidthEntry] =
+  ## The widths the user set, for the remembered document.
+  for col in EventLogColumn:
+    if c.widths[col] > 0:
+      result.add (table: EventLogTableName, column: $col,
+                  cells: c.widths[col])
+
+func parseEventLogColumn*(name: string): (bool, EventLogColumn)
+
+func withColumnWidths*(c: EventLogColumns;
+                       entries: openArray[ColumnWidthEntry]): EventLogColumns =
+  ## `c` with the event log's remembered widths applied (other tables' and
+  ## unknown columns' entries are skipped).
+  result = c
+  for e in entries:
+    if e.table != EventLogTableName:
+      continue
+    let (ok, col) = parseEventLogColumn(e.column)
+    if ok:
+      result.widths[col] = clampColumnCells(e.cells)
+
+func columnResizeTarget*(c: EventLogColumns; arg: string):
+    tuple[ok: bool; col: EventLogColumn; delta: int; message: string] =
+  ## `table.resize-column([column,]delta)`'s target (§5.2): the named column,
+  ## else the focused one, and by how many cells — or why not, for the
+  ## front-end's status line.
+  let parsed = parseColumnResize(arg)
+  if not parsed.ok:
+    return (false, c.focused, 0, "table.resize-column takes [column,]cells")
+  var col = c.focused
+  if parsed.column.len > 0:
+    let (found, named) = parseEventLogColumn(parsed.column)
+    if not found:
+      return (false, col, 0, "no event log column '" & parsed.column & "'")
+    col = named
+  (true, col, parsed.delta, "")
+
+const
+  EventLogTickCells* = 8
+    ## PLAT-70 Part I (Horizontal-Overflow.md §5.5.3): the tick column's
+    ## default width — its preferred width is at least this.
+  EventLogIndexCells* = 4
+  EventLogKindCells* = 4
+  EventLogLocationMinCells* = 10
+  EventLogOutputMinCells* = 12
+
+func eventLogDefaultCells*(): array[EventLogColumn, int] =
+  ## The terminal's default field widths, in cells: what a column's
+  ## preferred width is at least (a number column) or exactly (the kind).
+  result[elcTick] = EventLogTickCells
+  result[elcIndex] = EventLogIndexCells
+  result[elcKind] = EventLogKindCells
+  result[elcLocation] = 0
+  result[elcOutput] = 0
+
+func eventLogFitColumns*(c: EventLogColumns;
+                         widest, defaults: array[EventLogColumn, int];
+                         unit = 1; userUnit = unit): seq[FitColumn] =
+  ## §5.5.3: the Event Log's visible columns, in display order, declared for
+  ## `table_fit.fitTable` in the caller's units — `widest` is each column's
+  ## widest cell over the rows shown and `defaults` its default field width
+  ## (both in the caller's units), `unit` the caller's units per cell (the
+  ## minimums are in cells) and `userUnit` its units per cell of a width the
+  ## user set (`EventLogColumns.widths`, §5.2).
+  ##
+  ##   tick, `#` — never cut; preferred: the widest number, at least the
+  ##               default;
+  ##   kind      — never cut; the default;
+  ##   location  — at least 10 cells; preferred: the widest location;
+  ##   output    — at least 12 cells; preferred: the widest output; the one
+  ##               flex column (the slack).
+  for col in c.visibleColumns:
+    var f = FitColumn(name: $col)
+    case col
+    of elcTick, elcIndex:
+      f.neverCut = true
+      f.preferredUnits = max(defaults[col], widest[col])
+    of elcKind:
+      f.neverCut = true
+      f.preferredUnits = defaults[col]
+    of elcLocation:
+      f.minUnits = EventLogLocationMinCells * unit
+      f.preferredUnits = max(widest[col], 1)
+    of elcOutput:
+      f.minUnits = EventLogOutputMinCells * unit
+      f.preferredUnits = max(widest[col], 1)
+      f.flex = 1
+    if c.widths[col] > 0:
+      f.userUnits = c.widths[col] * userUnit
+    result.add f
+
 func parseEventLogColumn*(name: string): (bool, EventLogColumn) =
   ## A column by its title or its enum name, case-insensitively — what a
   ## typed command names (`:column-hide location`).
@@ -297,25 +429,47 @@ type
     ##
     ## Mutable signals:
     ##   selectedRow      — index of the selected row, or none
-    ##   currentPage      — zero-based page index
-    ##   pageSize         — number of rows per page
+    ##   viewport         — what the view was given (`setViewport`)
+    ##   currentPage      — zero-based page index, `firstRow div rows`
+    ##   pageSize         — the viewport's rows (0 until measured)
     ##   searchQuery      — current search/filter text
     ##   sortColumn       — column index to sort by
     ##   sortAscending    — whether sort is ascending
     ##
     ## Derived memos:
-    ##   totalPages       — total pages based on event count and page size
+    ##   totalPages       — total pages of the log, or of the search's matches
+    ##   visibleRows      — the held rows the viewport shows
     ##   isLoading        — whether a request is in flight
     ##
     ## The store reference is kept for the auto-load effect and
     ## for navigation actions (double-click jump).
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
     selectedRow*: Signal[Option[int]]
+    viewport*: Signal[Viewport]
+      ## What the view was given (`setViewport`); `currentPage` and
+      ## `pageSize` are derived from it for the pager and collaboration.
+    viewportGate: ViewportGate
+    followsStop*: bool
+      ## Whether each window request names the current stop (`atRRTicks`), so
+      ## the answer also says which row is "now" (`store.eventLog
+      ## .currentIndex`, the list scrubber's mark), and a move asks again
+      ## (HSF-D6). The terminal and GPUI set it (`followStop`); the desktop's
+      ## DataTables table does not, because a reload it did not ask for races
+      ## its own draws (see the window effect below).
     currentPage*: Signal[int]
     pageSize*: Signal[int]
     searchQuery*: Signal[string]
+    selectedKinds*: Signal[seq[bool]]
+      ## The kind filter: one flag per `EventLogKind`, by ordinal (the
+      ## desktop's Filter drop-down) — empty when every kind shows, which is
+      ## the unfiltered log. Sent as `ct/event-load`'s `selectedKinds`, so the
+      ## engine cuts the window, `total` and `indexAtTick` from the selected
+      ## kinds only.
     sortColumn*: Signal[int]
     sortAscending*: Signal[bool]
     columns*: Signal[EventLogColumns]
@@ -327,6 +481,12 @@ type
       ## "[+ Columns]" control, a checkbox per column (show / hide) with its
       ## move left / right. The desktop draws it from here; the terminal's
       ## `:columns` lists the same rows.
+    tableMetrics*: Signal[tuple[cells: int; charPx: float]]
+      ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the columns' viewport
+      ## a pixel front-end measured — its width in characters of the table's
+      ## font, and that character's width — so the desktop lays its columns
+      ## out by the shared solver in the same cells as the terminal. (0, 0)
+      ## until measured; the terminal and GPUI lay out without it.
 
     # -- Event log data — THE STORE'S OWN SIGNALS --
     #
@@ -382,6 +542,21 @@ type
     visibleMarkerRows*: Memo[seq[MarkerEventRow]]
       ## §5.4 filter result. Computed reactively from `markerRows` +
       ## `filterBar` + `counterpartCache`.
+    visibleRows*: Memo[seq[EventLogRow]]
+      ## The held rows the viewport shows (`viewport.firstRow` onwards,
+      ## `viewport.rows` of them); every held row while unmeasured.
+    rowHeightPx*: Signal[float]
+      ## A row's measured advance in CSS pixels, from the desktop's rendered
+      ## rows (`setRowHeightPx`): the list's scroll height is the log's size
+      ## times it, and the held window sits `loadedStart` rows down.
+    reloadToken*: Signal[int]
+      ## Bumped by `reload`: the log changed under an unchanged request (a
+      ## tracepoint run added or removed trace-log rows), so the window is
+      ## asked for again.
+    liveStops: seq[EventLogRow]
+      ## The live session's debugger stops this ViewModel added
+      ## (`appendLiveDebuggerStop`), in order. The engine's windows do not
+      ## carry them, so each window answer is followed by them again.
 
     # -- Host bridge --
     onSwitchProcessProc*: proc(recordingId: string)
@@ -400,6 +575,9 @@ type
 
 proc selectRow*(vm: EventLogVM; row: Option[int]) =
   ## Set the currently selected row. Pass `none(int)` to clear.
+  if vm.actionSink.forwards("eventLog", "selectRow",
+      %*{"row": sinkArg(row)}):
+    return
   vm.selectedRow.val = row
 
 proc appendLiveDebuggerStop*(vm: EventLogVM; row: EventLogRow) =
@@ -413,16 +591,64 @@ proc appendLiveDebuggerStop*(vm: EventLogVM; row: EventLogRow) =
   ## The append itself is `ReplayDataStore.appendLiveEventRow` — the dedup rule
   ## and the index assignment belong beside the rows, not on one of the
   ## ViewModels that reads them, so a host with no `EventLogVM` (a VS Code
-  ## surface, BlockTracer) can add a live stop too.
-  discard vm.store.appendLiveEventRow(row)
+  ## surface, BlockTracer) can add a live stop too. The ViewModel keeps the
+  ## stop as well, to put it back after each window the engine answers.
+  if vm.store.appendLiveEventRow(row):
+    vm.liveStops.add row
+
+func liveDebuggerStopRow*(dbg: DebuggerState; earlierStops: int): EventLogRow =
+  ## The `debugger-stop` row of a live session's stop at `dbg`. Its identity
+  ## is the stop's tick; a stop at tick 0 (every position of a db-backend
+  ## trace) is told apart from the next by a synthetic id past any tick.
+  let path = dbg.location.file
+  let line = dbg.location.line
+  let id =
+    if dbg.rrTicks > 0'u64: dbg.rrTicks
+    else: 1_000_000_000'u64 + uint64(earlierStops)
+  EventLogRow(
+    eventId: id,
+    kindId: 10, # `EventLogKind.Open`, which the desktop always gave a stop.
+    kind: "debugger-stop",
+    file: path,
+    line: line,
+    value: "debugger stop at " & path & ":" & $line,
+    rrTicks: id,
+    maxRRTicks: id,
+    sourceGeneration: dbg.location.sourceGeneration,
+    sourceDigest: dbg.location.sourceDigest)
+
+proc setRowHeightPx*(vm: EventLogVM; h: float) =
+  ## The measured row advance (`rowHeightPx`), kept when it changes by less
+  ## than a hundredth of a pixel so an unchanged layout re-runs nothing.
+  if h > 0.0 and abs(h - vm.rowHeightPx.val) > 0.01:
+    vm.rowHeightPx.val = h
+
+proc reload*(vm: EventLogVM) =
+  ## Ask for the current window again: the log changed although the request
+  ## did not (a tracepoint run's trace-log rows came or went).
+  vm.reloadToken.val = vm.reloadToken.val + 1
+
+proc resetLog*(vm: EventLogVM) =
+  ## A new recording: drop the previous one's rows, counts and live stops,
+  ## and ask for the new log's window.
+  vm.liveStops = @[]
+  vm.store.clearEventLog()
+  vm.reload()
 
 proc doubleClickRow*(vm: EventLogVM; row: int) =
   ## Navigate to the source location of the event at `row`.
   ## Looks up the event in the VM's event rows and sends a
   ## ProgramEvent-shaped navigation command via the backend.
+  if vm.actionSink.forwards("eventLog", "doubleClickRow",
+      %*{"row": row}):
+    return
   let rows = vm.eventRows.val
   if row >= 0 and row < rows.len:
     let event = rows[row]
+    # An event the producer gave no position is not a place to go: jumping to
+    # its placeholder tick 0 would move the session to the start of the trace.
+    if event.noPosition:
+      return
     let rrTicks =
       if event.rrTicks != 0'u64: event.rrTicks
       else: event.eventId
@@ -450,23 +676,47 @@ proc doubleClickRow*(vm: EventLogVM; row: int) =
     }
     vm.store.requestHistoricalNavigation("ct/event-jump", args)
 
+proc setViewport*(vm: EventLogVM; v: Viewport) =
+  ## The size and scroll position the view was given — the ONE way a view
+  ## tells this ViewModel what it shows (Viewport-Driven-Loading V1). Reports
+  ## are debounced on the store's `viewportScheduler`; the auto-load effect
+  ## then asks for the window `viewport.listWindow` derives.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "eventLog", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
+  vm.viewportGate.submit(v)
+
+proc followStop*(vm: EventLogVM; follow = true) =
+  ## Name the current stop in each window request, and ask again on a move
+  ## (`followsStop`).
+  vm.followsStop = follow
+
 proc nextPage*(vm: EventLogVM) =
-  ## Advance to the next page, clamped to totalPages - 1.
+  ## Show the next screenful of rows, clamped to the last page.
+  if vm.actionSink.forwards("eventLog", "nextPage", %*{}):
+    return
+  let v = vm.viewport.val
   let maxPage = vm.totalPages.val - 1
   let next = vm.currentPage.val + 1
-  if maxPage >= 0 and next <= maxPage:
-    vm.currentPage.val = next
+  if v.rows > 0 and maxPage >= 0 and next <= maxPage:
+    vm.setViewport(v.scrolledTo(next * v.rows))
 
 proc prevPage*(vm: EventLogVM) =
-  ## Go back one page, clamped to 0.
+  ## Show the previous screenful of rows, clamped to the first page.
+  if vm.actionSink.forwards("eventLog", "prevPage", %*{}):
+    return
+  let v = vm.viewport.val
   let prev = vm.currentPage.val - 1
-  if prev >= 0:
-    vm.currentPage.val = prev
+  if v.rows > 0 and prev >= 0:
+    vm.setViewport(v.scrolledTo(prev * v.rows))
 
 proc sort*(vm: EventLogVM; column: int) =
   ## Sort by the given column. If already sorting by this column,
   ## toggle the direction. Otherwise, set the column and default
   ## to ascending.
+  if vm.actionSink.forwards("eventLog", "sort", %*{"column": column}):
+    return
   if vm.sortColumn.val == column:
     vm.sortAscending.val = not vm.sortAscending.val
   else:
@@ -486,12 +736,17 @@ proc sortBy*(vm: EventLogVM; order: EventLogOrder) =
   ## PLAT-50: order the log by `order` (the header click's answer,
   ## `clickedHeader`) — the column's index among those shown, and the
   ## direction.
+  if vm.actionSink.forwards("eventLog", "sortBy",
+      %*{"order": sinkArg(order)}):
+    return
   let shown = vm.columns.val.visibleColumns
   let at = shown.find(order.column)
   vm.sortColumn.val = max(0, at)
   vm.sortAscending.val = order.ascending
 
 proc toggleColumnsMenu*(vm: EventLogVM) =
+  if vm.actionSink.forwards("eventLog", "toggleColumnsMenu", %*{}):
+    return
   vm.columnsMenuOpen.val = not vm.columnsMenuOpen.val
 
 proc showColumn*(vm: EventLogVM; col: EventLogColumn): bool =
@@ -514,17 +769,111 @@ proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
   result = c.moveColumn(col, delta)
   if result: vm.columns.val = c
 
-proc setSearchQuery*(vm: EventLogVM; query: string) =
-  ## Update the search query. Resets to page 0 since the result
-  ## set changes.
-  vm.searchQuery.val = query
-  vm.currentPage.val = 0
+proc setColumnWidth*(vm: EventLogVM; col: EventLogColumn;
+                     cells: int): bool =
+  ## PLAT-70 Part B: `col` is `cells` wide (§5.2) — a drag on a separator,
+  ## `:column-width`, the desktop's `colResize`.
+  var c = vm.columns.val
+  result = c.setColumnWidth(col, cells)
+  vm.columns.val = c
 
-proc setPageSize*(vm: EventLogVM; size: int) =
-  ## Update the page size. Resets to page 0 to avoid stale offsets.
-  if size > 0:
-    vm.pageSize.val = size
-    vm.currentPage.val = 0
+proc setTableMetrics*(vm: EventLogVM; cells: int; charPx: float) =
+  ## PLAT-70 Part I: the columns' viewport a pixel front-end measured.
+  let m = (cells: max(0, cells), charPx: max(0.0, charPx))
+  if vm.tableMetrics.val != m:
+    vm.tableMetrics.val = m
+
+proc resizeColumn*(vm: EventLogVM; col: EventLogColumn;
+                   delta, current: int): bool =
+  ## PLAT-70 Part B: `table.resize-column(column, delta)`.
+  var c = vm.columns.val
+  result = c.resizeColumn(col, delta, current)
+  vm.columns.val = c
+
+proc setSearchQuery*(vm: EventLogVM; query: string) =
+  ## Search the log: the engine returns only the matching events
+  ## (`ct/event-load`'s `search`), and the pane shows them from the top.
+  if vm.actionSink.forwards("eventLog", "setSearchQuery",
+      %*{"query": query}):
+    return
+  batch(proc() =
+    vm.searchQuery.val = query
+    vm.setViewport(vm.viewport.val.scrolledTo(0)))
+
+proc normalizedKinds(kinds: seq[bool]): seq[bool] =
+  ## Every kind selected is no filter at all: kept as the empty selection, so
+  ## the unfiltered log has one spelling and asks the engine nothing extra.
+  for selected in kinds:
+    if not selected:
+      return kinds
+  @[]
+
+proc setSelectedKinds*(vm: EventLogVM; kinds: seq[bool]) =
+  ## Filter the log by kind (one flag per `EventLogKind` ordinal; empty or
+  ## all-true for every kind): the engine returns only the selected kinds'
+  ## events, and the pane shows them from the top, as a search does.
+  if vm.actionSink.forwards("eventLog", "setSelectedKinds",
+      %*{"kinds": kinds}):
+    return
+  let normalized = normalizedKinds(kinds)
+  if normalized == vm.selectedKinds.val:
+    return
+  batch(proc() =
+    vm.selectedKinds.val = normalized
+    vm.setViewport(vm.viewport.val.scrolledTo(0)))
+
+proc isFiltered*(vm: EventLogVM): bool =
+  ## Whether the list the pane pages through is narrower than the log: a
+  ## search or a kind filter is in effect.
+  vm.searchQuery.val.len > 0 or vm.selectedKinds.val.len > 0
+
+proc listTotal*(vm: EventLogVM): int =
+  ## The size of the list the pane pages through: the filtered count under a
+  ## search or a kind filter, the whole log's otherwise.
+  if vm.isFiltered: vm.store.eventLog.recordsFiltered.val
+  else: vm.store.eventLog.recordsTotal.val
+
+func eventLogText*(r: EventLogRow): string =
+  ## The event's text as an Event Log shows it: a write is prefixed with the
+  ## stream it went to — `stdout: 2 + 3 = 5` — and every other event is its
+  ## content, without its line terminator (a cell holding the `\n` of a
+  ## `print` draws a blank line under every event in a medium that honours
+  ## it).
+  let content = r.value.strip(leading = false, chars = {'\n', '\r'})
+  if r.kind == "stdout": "stdout: " & content
+  else: content
+
+const EventLogKindSource =
+  staticRead("../../../common/common_types/codetracer_features/events.nim")
+
+proc declaredEventLogKinds(src: string): seq[string] {.compileTime.} =
+  ## The member names of `EventLogKind`, in ordinal order, read from its
+  ## declaration (the ViewModel layer cannot import the enum: its module
+  ## needs the legacy front-end's `langstring`). Anchored on the declaration,
+  ## as `timeline_vm.ErrorEventKindId`'s check is.
+  let at = src.find("EventLogKind* {.pure.} = enum")
+  doAssert at >= 0, "EventLogKind is no longer declared where event_log_vm reads it"
+  for line in src[at .. ^1].splitLines:
+    let t = line.strip
+    if t.startsWith("EventLogKind*") or t.len == 0 or t.startsWith("#"):
+      continue
+    if '*' in t or '=' in t:
+      break
+    result.add t.split({',', ' '})[0]
+
+const EventLogKindNames* = declaredEventLogKinds(EventLogKindSource)
+  ## `EventLogKind`'s names by ordinal (`kindId`).
+
+func eventLogKindName*(r: EventLogRow): string =
+  ## The row's kind as one word: its semantic kind when the producer gave one
+  ## (`debugger-stop`), else the recorded kind's name (`Write`, `ReadFile`).
+  ## What the desktop's rows carry as `data-event-kind`.
+  if r.kind.len > 0 and r.kind notin ["stdout", "event"]:
+    r.kind
+  elif r.kindId >= 0 and r.kindId < EventLogKindNames.len:
+    EventLogKindNames[r.kindId]
+  else:
+    $r.kindId
 
 # ---------------------------------------------------------------------------
 # M25b — Marker-row metadata + counterpart cache helpers
@@ -791,23 +1140,42 @@ proc parseFilterBar*(raw: string): MarkerFilterBar =
 
 proc setFilterInput*(vm: EventLogVM; raw: string) =
   ## Update the filter input. Recognises the §5.4 shorthands.
-  vm.filterBar.val = parseFilterBar(raw)
-  vm.searchQuery.val = raw
-  vm.currentPage.val = 0
+  ##
+  ## The free text left after the shorthands is the log's search
+  ## (`ct/event-load`'s `search`). The shorthands are not: `boundary:<id>`
+  ## and `unmatched` select marker rows by their boundary and their
+  ## counterpart set (Correlation-Markers §5.4), which `visibleMarkerRows`
+  ## reads from the marker cache. Sent as text, the engine would match them
+  ## against event content and path, find nothing, and empty the pane.
+  ##
+  ## As `setSearchQuery` does, the pane shows the search's results from the
+  ## top: the engine cuts the window from the matching events, and the old
+  ## scroll offset may lie past their end. The scroll goes through the
+  ## viewport, not `currentPage`, which is derived from it and moves no window.
+  if vm.actionSink.forwards("eventLog", "setFilterInput",
+      %*{"raw": raw}):
+    return
+  let bar = parseFilterBar(raw)
+  batch(proc() =
+    vm.filterBar.val = bar
+    vm.searchQuery.val = bar.freeText
+    vm.setViewport(vm.viewport.val.scrolledTo(0)))
 
 proc rowMatchesFilter*(row: MarkerEventRow; filter: MarkerFilterBar; isUnmatched: bool): bool =
   ## Predicate used by the `visibleMarkerRows` memo. Encapsulated as
   ## a free proc so the unit tests can pin the matching rules without
   ## touching VM state.
+  ##
+  ## Only the §5.4 shorthands are applied here. The free text is the log's
+  ## ONE text filter and the engine applies it (`ct/event-load`'s `search`,
+  ## which matches a marker's boundary, key and shown value as well as its
+  ## event's content), so the marker rows of an answer already match it.
+  ## Matching it again here, on fewer fields, dropped markers the search had
+  ## found by their event's content.
   if filter.boundaryFilter.len > 0 and row.boundaryId != filter.boundaryFilter:
     return false
   if filter.unmatchedOnly and not isUnmatched:
     return false
-  if filter.freeText.len > 0:
-    let needle = filter.freeText.toLowerAscii
-    let haystack = (row.boundaryId & " " & row.keyValue & " " & row.showValue).toLowerAscii
-    if not haystack.contains(needle):
-      return false
   true
 
 proc setLoadingBanner*(vm: EventLogVM; banner: MarkerLoadingBanner) =
@@ -878,6 +1246,9 @@ proc dismissToast*(vm: EventLogVM; workspaceId: string) =
   ## workspace doesn't re-trigger it. The dismissal log is held on
   ## the VM here; production wiring persists it through the
   ## preferences-store bridge per spec §7.
+  if vm.actionSink.forwards("eventLog", "dismissToast",
+      %*{"workspaceId": workspaceId}):
+    return
   if workspaceId notin vm.dismissedWorkspaces.val:
     var dismissed = vm.dismissedWorkspaces.val
     dismissed.add(workspaceId)
@@ -917,7 +1288,7 @@ proc jumpToCounterpart*(vm: EventLogVM; row: MarkerEventRow) =
   # replay-server, not inferred — the jump moved nothing.
   #
   # It looked correct because of a coincidence of routing. `dap.nim` stamps a
-  # `threadId` onto outgoing requests only when `activeSessionThreadId != 0`,
+  # `threadId` onto outgoing requests only when the session's `DapApi.routingThreadId != 0`,
   # i.e. only after a MULTI-process session has rotated — which the
   # `onSwitchProcessProc` call just above does when the counterpart lives in a
   # sibling recording. So the cross-recording path was accidentally
@@ -977,17 +1348,30 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
   ## Sets up:
   ## 1. Mutable signals with sensible defaults
   ## 2. Derived memos for `totalPages` and `isLoading`
-  ## 3. An auto-load effect that requests event log data when
-  ##    page, sort, search, or debugger position changes
+  ## 3. An auto-load effect that requests the viewport's window of the
+  ##    log when the viewport, the sort or the search changes
   withViewModel proc(dispose: proc()): EventLogVM =
     let selectedRow = createSignal(none(int))
+    let viewport = createSignal(Viewport())
     let currentPage = createSignal(0)
-    let pageSize = createSignal(DEFAULT_PAGE_SIZE)
+    let pageSize = createSignal(0)
+    let viewportGate = newViewportGate(
+      proc(): ViewportScheduler = store.viewportScheduler,
+      proc(v: Viewport) =
+        batch(proc() =
+          viewport.val = v
+          pageSize.val = max(0, v.rows)
+          currentPage.val =
+            if v.rows > 0: max(0, v.firstRow) div v.rows else: 0))
     let searchQuery = createSignal("")
+    let selectedKinds = createSignal(newSeq[bool]())
+    let rowHeightPx = createSignal(24.0)
+    let reloadToken = createSignal(0)
     let sortColumn = createSignal(0)
     let sortAscending = createSignal(true)
     let columns = createSignal(defaultEventLogColumns())
     let columnsMenuOpen = createSignal(false)
+    let tableMetrics = createSignal((cells: 0, charPx: 0.0))
 
     # Event-log state, READ OFF THE STORE rather than created here. See the
     # field declarations above for why these are aliases and not copies.
@@ -1004,9 +1388,16 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let toastState = createSignal(MarkerToastState(kind: mtHidden, discoveredCount: 0, workspaceId: ""))
     let dismissedWorkspaces = createSignal(newSeq[string]())
 
-    # Derived: total pages from event count and page size.
+    # Derived: total pages from the event count and page size. Under a search
+    # the pages are cut from the MATCHING events (`ct/event-load`'s `total` is
+    # then the number of matches, which the store keeps in `recordsFiltered`),
+    # so counting the whole log would offer pages past the last match, each of
+    # them empty. The kind filter narrows the list the same way.
     let totalPages = createMemo[int] proc(): int =
-      let total = totalEventCount.val
+      let total =
+        if searchQuery.val.len > 0 or selectedKinds.val.len > 0:
+          store.eventLog.recordsFiltered.val
+        else: totalEventCount.val
       let ps = pageSize.val
       if ps <= 0:
         return 0
@@ -1015,6 +1406,19 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
       loadingState.val == lsLoading
+
+    # Derived: the rows the viewport shows, cut from the held window (which
+    # carries `TrailRows` above and `LeadRows` below them).
+    let loadedStart = store.eventLog.loadedStart
+    let visibleRows = createMemo[seq[EventLogRow]] proc(): seq[EventLogRow] =
+      let v = viewport.val
+      let rows = eventRows.val
+      if v.rows <= 0:
+        return rows
+      let first = max(0, v.firstRow) - loadedStart.val
+      let lo = clamp(first, 0, rows.len)
+      let hi = clamp(first + v.rows, 0, rows.len)
+      if lo >= hi: @[] else: rows[lo ..< hi]
 
     # M25b — §5.4 visible-rows derivation. Reactive on markerRows +
     # filterBar + counterpartCache (the `unmatched` shorthand needs
@@ -1039,13 +1443,20 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     let vm = EventLogVM(
       store: store,
       selectedRow: selectedRow,
+      viewport: viewport,
+      viewportGate: viewportGate,
+      visibleRows: visibleRows,
       currentPage: currentPage,
       pageSize: pageSize,
       searchQuery: searchQuery,
+      selectedKinds: selectedKinds,
+      rowHeightPx: rowHeightPx,
+      reloadToken: reloadToken,
       sortColumn: sortColumn,
       sortAscending: sortAscending,
       columns: columns,
       columnsMenuOpen: columnsMenuOpen,
+      tableMetrics: tableMetrics,
       eventRows: eventRows,
       totalEventCount: totalEventCount,
       loadingState: loadingState,
@@ -1108,74 +1519,103 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
     # rows at all.  That is the pane vanishing, and it explains why only
     # *some* jumps do it: it takes a lost race, not merely a jump.
     #
-    # Keying on (page, pageSize, searchQuery, sortColumn, sortAscending)
-    # alone means a move now issues no request, so there is no race to lose.
+    # Keying on the window, the search and the sort alone means a move
+    # issues no request, so there is no race to lose.
     # Nothing is given up by dropping ``rrTicks``: the backend's ``event_load``
-    # reads only ``start``/``count`` and never looked at it. Growth in a live
+    # cuts its window from ``start``/``count``, the sort and the search, and a
+    # position (``atRRTicks``) only locates "now" in that list. Growth in a live
     # session is not this effect's job either — ``event_log.nim``'s
     # CtCompleteMove subscriber emits ``CtEventLoad`` for a first load or a
     # source revision, which is where a genuinely growing event set is picked
     # up.
-    var lastPage = -1
-    var lastPageSize = -1
-    var lastQuery = ""
-    var lastCol = -1
-    var lastAsc = false
-    var hasFired = false
+    # THE WINDOW IS THE VIEWPORT'S (Viewport-Driven-Loading V2): `start` /
+    # `count` from `listWindow` — the Electron GUI's 10 above / 20 below,
+    # every windowed list's policy (Q1) — with the sort and the search, the
+    # only arguments `ct/event-load` reads. An unmeasured pane asks nothing.
+    # The request key is every one of those arguments (Pattern 5).
+    var lastKey = ""
     createEffect proc() =
-      let page = currentPage.val
-      let ps = pageSize.val
+      let v = viewport.val
       let query = searchQuery.val
+      let kinds = selectedKinds.val
+      let token = reloadToken.val
       let col = sortColumn.val
       let asc = sortAscending.val
-      let debuggerState = store.debugger.val
-      let location = debuggerState.location
-      let hasDebuggerPosition =
-        debuggerState.rrTicks > 0'u64 or location.file.len > 0 or
-        location.line != 0
-      if hasDebuggerPosition or not hasFired:
-        if hasFired and page == lastPage and
-            ps == lastPageSize and query == lastQuery and
-            col == lastCol and asc == lastAsc:
+      let shown = vm.columns.val.visibleColumns
+      let w = listWindow(v)
+      if w.count <= 0:
+        return
+      var args = %*{
+        "start": w.start,
+        "count": w.count,
+        "sortAscending": asc,
+      }
+      # PLAT-50: the engine orders by a column NAME (`sortKey`); the
+      # column index alone was never read, so a sorted pane got the
+      # recorded order back.
+      if col >= 0 and col < shown.len:
+        args["sortKey"] = %($shown[col])
+      if query.len > 0:
+        args["search"] = %query
+      if kinds.len > 0:
+        args["selectedKinds"] = %kinds
+      # The stop, for a pane that follows it: read only then, so a move
+      # re-asks only there.
+      let atTicks =
+        if vm.followsStop: int64(store.debugger.val.rrTicks) else: -1'i64
+      if atTicks >= 0:
+        args["atRRTicks"] = %atTicks
+      let key = $args & "#" & $token
+      if key == lastKey:
+        return
+      lastKey = key
+      let future = store.backend.send("ct/event-load", args)
+      let vmRef = vm
+      let storeRef = store
+      let start = w.start
+      let searched = query.len > 0 or kinds.len > 0
+      onComplete(future,
+        proc(response: JsonNode) =
+          # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
+          # `events` and `markers`; the rows go through the store rather
+          # than into `vm.eventRows` directly, so this effect is one
+          # producer among several rather than a second decoder.
+          # `applyEventLogResponse` leaves the store alone when the payload
+          # has no `events` key, so a marker-only answer cannot empty the log.
+          storeRef.applyEventLogResponse(response, start, searched = searched)
+          # The live session's stops, which no engine window carries, after
+          # the window that replaced them.
+          for stop in vmRef.liveStops:
+            discard storeRef.appendLiveEventRow(stop)
+          if atTicks >= 0 and responseSucceeded(response):
+            storeRef.eventLog.currentIndex.val =
+              responseBody(response).getOrDefault("indexAtTick").getInt(-1)
+          vmRef.applyMarkerRowsResponse(response),
+        proc(message: string) =
+          discard)
+
+    # A LIVE SESSION'S STOPS ARE EVENTS OF ITS LOG: each stop the debugger
+    # makes in a live recording is a `debugger-stop` row, visible at once
+    # (the recorded events of the live head arrive later, if at all). A
+    # mirror leaves this to its primary, whose rows it receives.
+    createEffect proc() =
+      let dbg = store.debugger.val
+      let mode = store.session.val.debugSessionMode
+      if not vm.actionSink.isNil or
+          mode notin {liveMcr, liveMaterialized, historicalFromLive}:
+        return
+      let path = dbg.location.file
+      let line = dbg.location.line
+      if path.len == 0 or line <= 0:
+        return
+      let stop = liveDebuggerStopRow(dbg, vm.liveStops.len)
+      if vm.liveStops.len > 0:
+        let last = vm.liveStops[^1]
+        if last.rrTicks == stop.rrTicks and last.file == stop.file and
+            last.line == stop.line and
+            last.sourceGeneration == stop.sourceGeneration and
+            last.sourceDigest == stop.sourceDigest:
           return
-        lastPage = page
-        lastPageSize = ps
-        lastQuery = query
-        lastCol = col
-        lastAsc = asc
-        hasFired = true
-        var args = %*{
-          "page": page,
-          "pageSize": ps,
-          "searchQuery": query,
-          "sortColumn": col,
-          "sortAscending": asc,
-        }
-        # PLAT-50: the engine orders by a column NAME (`sortKey`); the
-        # column index alone was never read, so a sorted pane got the
-        # recorded order back.
-        let shown = vm.columns.val.visibleColumns
-        if col >= 0 and col < shown.len:
-          args["sortKey"] = %($shown[col])
-        let future = store.backend.send("ct/event-load", args)
-        let vmRef = vm
-        let storeRef = store
-        onComplete(future,
-          proc(response: JsonNode) =
-            # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
-            # `events` and `markers`; this effect used to read only the second
-            # and the first was dropped on the floor, which is why
-            # `eventRows` had no producer at all and *"no events have been
-            # loaded"* was the CORRECT output of every front-end.
-            #
-            # The rows go through the store rather than into `vm.eventRows`
-            # directly, so this effect is one producer among several rather
-            # than a second decoder. `applyEventLogResponse` leaves the store
-            # alone when the payload has no `events` key, so a marker-only
-            # answer cannot empty the log.
-            storeRef.applyEventLogResponse(response)
-            vmRef.applyMarkerRowsResponse(response),
-          proc(message: string) =
-            discard)
+      untrack proc() = vm.appendLiveDebuggerStop(stop)
 
     vm

@@ -172,6 +172,48 @@ proc resolved*[T](value: PlatformOutcome[T]): PlatformFuture[PlatformOutcome[T]]
   ## the exact defect `vm-unit-js` was created to catch.
   newCompletedFuture(value)
 
+proc settledLater*[T](start: proc(settle: proc(value: PlatformOutcome[T]))):
+    PlatformFuture[PlatformOutcome[T]] =
+  ## A facade future for work that answers through a callback: `start` is
+  ## called at once and calls `settle` exactly once — later (a child process
+  ## closing, a reply arriving), or before it returns.
+  ##
+  ## Written once here, for the reason `resolved` is: the backend spelling of
+  ## "a future completed later" — a `newPromise` on JS, an `asyncdispatch`
+  ## `newFuture` + `complete` natively — stays out of the facades. And for the
+  ## reason `resolved` is spelled the way it is: when `settle` runs before
+  ## `start` returns, the answer comes back through `resolved`, so a caller
+  ## that drains synchronously (`awaitSync`, the headless suites) still sees
+  ## it. Only an answer that genuinely arrives later makes a pending future.
+  ##
+  ## A second `settle` is ignored. An exception raised by `start` propagates
+  ## to the caller, which is where the facade's own guard (`jsGuard` on the
+  ## Electron instantiation) turns it into an outcome.
+  var delivered = false
+  var settledInline = false
+  var inlineValue: PlatformOutcome[T]
+  var deliver: proc(value: PlatformOutcome[T]) = nil
+  start(proc(value: PlatformOutcome[T]) =
+    if delivered:
+      return
+    delivered = true
+    if deliver.isNil:
+      settledInline = true
+      inlineValue = value
+    else:
+      deliver(value))
+  if settledInline:
+    return resolved(inlineValue)
+  when defined(js):
+    # The executor runs synchronously, so `deliver` is in place before any
+    # callback could call `settle`.
+    result = newPromise(proc(resolve: proc(value: PlatformOutcome[T])) =
+      deliver = resolve)
+  else:
+    let promise = newFuture[PlatformOutcome[T]]("settledLater")
+    deliver = proc(value: PlatformOutcome[T]) = promise.complete(value)
+    result = promise
+
 proc resolvedOk*[T](value: T): PlatformFuture[PlatformOutcome[T]] =
   resolved(succeeded(value))
 
@@ -346,13 +388,24 @@ proc foldOutcome*[A](items: seq[A];
   ## over OPFS would interleave `createWritable` calls on sibling paths whose
   ## ordering the atomic-replace argument depends on. There is no throughput
   ## case here worth that.
-  var accumulated = resolvedOk()
-  var capturedStep = step
-  for item in items:
-    let current = item
-    accumulated = thenOutcome(accumulated,
+  ##
+  ## Each link is built by `stepAfter`, never by a closure written in the loop
+  ## body. A Nim closure captures a loop-body local by reference, in ONE
+  ## environment shared by every iteration (see the manual's "Creating
+  ## closures in loops": https://nim-lang.org/docs/manual.html#closures-creating-closures-in-loops),
+  ## on the C and the JS backend alike. Written inline, every link built while
+  ## its predecessor was still pending ran with the LAST item: over OPFS, which
+  ## answers later, a three-entry directory was walked as entries 1, 3, 3.
+  ## That is codetracer#809's archive, which lacked `Prover.toml` and
+  ## `src/tests.nr`. A proc call gives each link an environment of its own.
+  proc stepAfter(previous: PlatformFuture[PlatformOutcome[Nothing]];
+                 item: A): PlatformFuture[PlatformOutcome[Nothing]] =
+    thenOutcome(previous,
       proc(ignored: Nothing): PlatformFuture[PlatformOutcome[Nothing]] =
-        capturedStep(current))
+        step(item))
+  var accumulated = resolvedOk()
+  for item in items:
+    accumulated = stepAfter(accumulated, item)
   accumulated
 
 proc awaitSync*[T](future: PlatformFuture[PlatformOutcome[T]]

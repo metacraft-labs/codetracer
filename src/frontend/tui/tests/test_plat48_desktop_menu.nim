@@ -70,17 +70,20 @@ suite "PLAT-48: the desktop's menu is the shared Menu ViewModel's":
         shared.add tree.children[i].label
       ck desk == shared
 
-    test "the Debug folder's chords are the desktop keymap's":
+    test "the Debug folder's chords are the ones the router runs":
+      # PLAT-68: one chord per item, the router's (`chordFor`), in its
+      # spelling — no longer the YAML table's `F8 F2` / `SHIFT+F10`.
       let sc = a["debugShortcuts"]
       ck sc["Step Over"].getStr == "F10"
       ck sc["Step In"].getStr == "F11"
       ck sc["Step Out"].getStr == "F12"
-      ck sc["Reverse Step Over"].getStr == "SHIFT+F10"
-      ck sc["Continue"].getStr == "F8 F2"
+      ck sc["Reverse Step Over"].getStr == "Shift+F10"
+      ck sc["Continue"].getStr == "F8"
 
     test "Step Over from the menu moved the debugger, and closed the menu":
       ck a["openedByClick"].getBool
-      # …and the desktop's own `aMenu` chord (CTRL+M) opens the same menu.
+      # …and the keyboard opens the same menu: `Alt` pressed and released
+      # alone, the default binding (CUA-Keymap.md §3.8).
       ck a["openedByKey"].getBool
       ck a["stepOver"]["after"].getInt != a["stepOver"]["before"].getInt
       ck a["stepOver"]["closed"].getBool

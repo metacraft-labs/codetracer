@@ -3,7 +3,7 @@ import
   kdom, dom,
   types, lang,
   lib / [ logging, monaco_lib, jslib ],
-  ui / auto_hide
+  ui / [auto_hide, editor_focus]
 
 import viewmodel / viewmodels / editor_gutter_lanes
 from viewmodel / viewmodels / menu_vm import newMenuVM
@@ -13,7 +13,6 @@ proc jsHasKey(obj: JsObject; key: cstring): bool {.importjs: "#.hasOwnProperty(#
 const
   VALUE_COMPONENT_NAME_WIDTH*: float = 40.0
   VALUE_COMPONENT_VALUE_WIDTH*: float = 55.0
-  SVG_NAMESPACE            = cstring"http://www.w3.org/2000/svg"
 
 const CODE_FONT_FAMILY* = cstring"SpaceMono, monospace"
   ## The face for every code surface in the app: the editors, the trace and
@@ -56,14 +55,6 @@ proc monacoLineDecorationsWidth*(fontSize: int): int =
   ## reach — this one cannot be imported by a headless suite, because
   ## `utils.nim` reaches `kdom`.
   editor_gutter_lanes.lineDecorationsWidthPx(fontSize)
-
-proc renderLineElement*(x1, y1, x2, y2: float): dom.Element =
-  result = dom.createElementNS(dom.document, SVG_NAMESPACE, cstring"line")
-  result.setAttribute(cstring"x1", cstring($x1))
-  result.setAttribute(cstring"y1", cstring($y1))
-  result.setAttribute(cstring"x2", cstring($x2))
-  result.setAttribute(cstring"y2", cstring($y2))
-  result.setAttribute(cstring"stroke-width", cstring"0.5")
 
 proc lineCountForGutter*(content: cstring): int =
   ## Count logical lines for gutter sizing from Monaco-facing cstring content.
@@ -161,50 +152,128 @@ proc makeEditorViewDetailed*(
   ## `openNewEditorView`, which exists to ASK a host for the source and would
   ## send a `tab-load` for a path no filesystem has.
 
+const WindowUniqueIdContents* = {Content.EditorView, Content.UnifiedDiff}
+  ## The panes whose ids must be unique across EVERY tab of the window, not
+  ## only within the tab that opens them (issue #835).
+  ##
+  ## Each tab is a `ReplaySession` with its own `ui.componentMapping`, but all
+  ## tabs share one document: a hidden tab keeps its `session-container-<n>`
+  ## mounted so switching back is instant (`ui/session_switch.nim`). These two
+  ## panes are found by a document-global id derived from the component id —
+  ## `editorComponent-<id>` (`ui/layout.nim`'s editor registration, and
+  ## selectors elsewhere that reach an editor's DOM) and
+  ## `unifiedDiffComponent-<id>` (`ui/unified_diff.nim`).
+  ## `getElementById` returns the FIRST match in document order, which is the
+  ## earlier tab's. So a second tab's editor 0 mounted into the replay tab's
+  ## `editorComponent-0`: Monaco refused a second editor on that host
+  ## ("Element already has context attribute: editor, code-editor, tab") and
+  ## the new tab's own host stayed blank.
+  ##
+  ## Only these two, deliberately. They are the panes a tab opens any number
+  ## of at runtime, so their ids come from `generateId`. The singleton chrome
+  ## (Build, BuildErrors, Menu, WelcomeScreen, CommandPalette, Shell, …) is
+  ## looked up by id 0 in every tab — `buildComponent(0)`, `shellComponent(0)`,
+  ## `componentMapping[Content.Build][0]` in `ui/layout.nim` — and mounts into
+  ## fixed, non-id hosts, so making those window-unique would break each of
+  ## those lookups in every tab after the first.
+
+proc componentIdUsedInWindow(data: Data, content: Content, id: int): bool =
+  ## Whether `id` is taken for `content` — in the active tab always, and in
+  ## any other tab of the window as well for `WindowUniqueIdContents`.
+  if data.ui.componentMapping[content].hasKey(id):
+    return true
+  if content notin WindowUniqueIdContents:
+    return false
+  for session in data.sessions:
+    if session.isNil or session.ui.isNil:
+      continue
+    let mapping = session.ui.componentMapping[content]
+    # A session whose maps were never initialised has no components to clash
+    # with; `closeSession` guards the same way.
+    if not mapping.isNil and mapping.hasKey(id):
+      return true
+  false
+
 proc generateId*(data: Data, content: Content): int =
-  if data.ui.componentMapping[content].len > 0:
-    var id = 0
-    while true:
-      if not data.ui.componentMapping[content].hasKey(id):
-        return id
-      id += 1
-  else:
-    return 0
+  ## The lowest id that is free for `content`: within the active tab for most
+  ## panes, and across the whole window for `WindowUniqueIdContents`.
+  result = 0
+  while data.componentIdUsedInWindow(content, result):
+    result += 1
 
-proc makeEventLogComponent*(data: Data, id: int, inExtension: bool = false): EventLogComponent =
-  var dropDownsInit: array[EventDropDownBox,bool]
-  dropDownsInit.fill(false);
+proc claimWindowUniqueLayoutIds*(data: Data, root: JsObject) =
+  ## Re-number, IN PLACE, every `WindowUniqueIdContents` pane in a GoldenLayout
+  ## config tree whose id another tab of the window already uses — before the
+  ## tree is turned into components and loaded.
+  ##
+  ## `generateId` covers the panes a tab opens at runtime. This covers the
+  ## ones that arrive with a layout: a restored edit layout carries one
+  ## `editorComponent` node per tab that was open, with the ids it was saved
+  ## with, and a "+" tab inherits the layout of the tab it was opened from
+  ## (`session_switch.createNewSession`). Those ids collide exactly the way a
+  ## generated one used to.
+  ##
+  ## Only a clash with ANOTHER tab is re-numbered. An id this tab already owns
+  ## is kept, because `renderer.createUIComponents` can run twice for the same
+  ## tab and must find its own components again rather than mint copies. The
+  ## mutation is what makes it stick: `componentState.id` is what
+  ## `createUIComponents` builds the component from, and what GoldenLayout
+  ## hands back to the `editorComponent` registration that builds the host id.
+  if root.isNil or root.isUndefined:
+    return
 
-  var selectedKinds: array[EventLogKind,bool]
-  selectedKinds.fill(true)
+  # Every node first, so a fresh id is never one a LATER node already holds.
+  var states: seq[JsObject] = @[]
+  proc collect(node: JsObject) =
+    if node.isNil or node.isUndefined:
+      return
+    if node["type"].to(cstring) == cstring"component":
+      let state = node["componentState"]
+      if state.isNil or state.isUndefined or state["content"].isUndefined or
+          state["id"].isUndefined:
+        return
+      let raw = state["content"].to(int)
+      if raw >= ord(low(Content)) and raw <= ord(high(Content)) and
+          Content(raw) in WindowUniqueIdContents:
+        states.add(state)
+    elif not node["content"].isNil and not node["content"].isUndefined:
+      for _, child in node["content"]:
+        collect(child)
+  collect(root)
 
-  if inExtension and data.sessions.len > 0:
-    data.services.eventLog.updatedContent = true
+  proc usedByAnotherTab(content: Content, id: int): bool =
+    for index, session in data.sessions:
+      if index == data.activeSessionIndex or session.isNil or session.ui.isNil:
+        continue
+      let mapping = session.ui.componentMapping[content]
+      if not mapping.isNil and mapping.hasKey(id):
+        return true
+    false
 
+  var held: seq[(Content, int)] = @[]
+  for state in states:
+    held.add((Content(state["content"].to(int)), state["id"].to(int)))
+
+  var claimed: seq[(Content, int)] = @[]
+  for state in states:
+    let content = Content(state["content"].to(int))
+    let id = state["id"].to(int)
+    if not usedByAnotherTab(content, id) and (content, id) notin claimed:
+      claimed.add((content, id))
+      continue
+    var fresh = 0
+    while data.componentIdUsedInWindow(content, fresh) or
+        (content, fresh) in claimed or (content, fresh) in held:
+      fresh += 1
+    state["id"] = fresh
+    claimed.add((content, fresh))
+
+proc makeEventLogComponent*(data: Data, id: int): EventLogComponent =
   result = EventLogComponent(
     id: id,
     service: data.services.eventLog,
-    traceService: data.services.trace,
-    kinds: JsAssoc[EventLogKind, bool]{},
-    kindsEnabled: JsAssoc[EventLogKind, bool]{},
-    columns: JsAssoc[EventOptionalColumn, bool]{},
-    tags: JsAssoc[EventTag, bool]{},
-    traceRenderedLength: 0,
-    dropDowns: dropDownsInit,
-    dropdownOutsideHandlerInstalled: false,
-    selectedKinds: selectedKinds,
-    denseTable: DataTableComponent(rowHeight: 35, autoScroll: true),
-    detailedTable: DataTableComponent(rowHeight: 35, autoScroll: true),
-    traceSessionID: -1,
-    traceUpdateId: -1,
-    lastJumpFireTime: 0,
-    inExtension: inExtension,
-    drawId: 0,
-    started: false,
-    liveDebugRows: @[],
-    usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.EventLog)
 
 proc makeShellComponent*(data: Data, id: int): ShellComponent =
@@ -222,7 +291,7 @@ proc makeShellComponent*(data: Data, id: int): ShellComponent =
       "default_dark": ShellTheme( background: "#1e1f26", foreground: "#8e8f92"),
     }
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Shell)
 
 proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
@@ -235,10 +304,10 @@ proc makeWelcomeScreenComponent*(data: Data): WelcomeScreenComponent =
     isUploading: JsAssoc[cstring, bool]{}
   )
   data.ui.welcomeScreen = result
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.WelcomeScreen)
 
-proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateComponent =
+proc makeStateComponent*(data: Data, id: int): StateComponent =
   result = StateComponent(
     id: id,
     locals: data.services.debugger.locals,
@@ -249,10 +318,9 @@ proc makeStateComponent*(data: Data, id: int, inExtension: bool = false): StateC
     minNameWidth: 30,
     maxNameWidth: 85,
     totalValueWidth: 95,
-    inExtension: inExtension,
     valueHistory: JsAssoc[cstring, ValueHistory]{},
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.State)
 
 proc makeBuildComponent*(data: Data): BuildComponent =
@@ -260,7 +328,7 @@ proc makeBuildComponent*(data: Data): BuildComponent =
     id: data.generateId(Content.Build),
     service: data.services.debugger,
     expanded: false)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Build)
 
 proc makeErrorsComponent*(data: Data): ErrorsComponent =
@@ -271,7 +339,7 @@ proc makeErrorsComponent*(data: Data): ErrorsComponent =
     errors: @[],
     filter: FilterAll,
     groupByFile: false)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.BuildErrors)
 
 
@@ -304,7 +372,7 @@ proc makeStatusComponent*(
       operationCount: 0,
     ))
   data.ui.status = result
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Status)
 
 
@@ -312,12 +380,12 @@ proc makeSearchResultsComponent*(data: Data): SearchResultsComponent =
   result = SearchResultsComponent(
     service: data.services.search)
   data.ui.searchResults = result
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.SearchResults)
 
 proc makeTestResultsComponent*(data: Data, id: int): TestResultsComponent =
   result = TestResultsComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.TestResults)
 
 proc makePointListComponent*(data: Data, id: int): PointListComponent =
@@ -327,7 +395,7 @@ proc makePointListComponent*(data: Data, id: int): PointListComponent =
 
 proc makeConstraintsComponent*(data: Data, id: int): ConstraintsComponent =
   result = ConstraintsComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Constraints)
 
 proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
@@ -338,7 +406,7 @@ proc makeTraceLogComponent*(data: Data, id: int): TraceLogComponent =
     table: DataTableComponent(rowHeight: 35, autoScroll: true),
     traceSessionID: -1,
     traceUpdateId: -1)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.TraceLog)
 
 
@@ -481,9 +549,6 @@ proc tabLoad*(self: EditorService, location: types.Location, editorView: EditorV
   if tabInfo.lastSyncedSource.isNil:
     tabInfo.lastSyncedSource = tabInfo.source
 
-  if not self.data.services.debugger.breakpointTable.hasKey(location.path):
-    self.data.services.debugger.breakpointTable[location.path] = JsAssoc[int, UIBreakpoint]{}
-
   if not location.isExpanded:
     self.open[name] = tabInfo
     # self.data.ui.editors[name].tabInfo = tabInfo
@@ -546,10 +611,10 @@ proc makeEditorViewComponent*(
     result.topLevelEditor = result
   # else: nil # will be assigned after
   data.ui.editors[editorName] = result
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.EditorView)
 
-proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): CalltraceComponent =
+proc makeCalltraceComponent*(data: Data, id: int): CalltraceComponent =
   result = CalltraceComponent(
     id: id,
     searchResults: @[],
@@ -566,11 +631,8 @@ proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): Ca
     forceCollapse: false,
     depthStart: 0,
     coordinates: @[],
-    startPositionX: -1,
-    startPositionY: -1,
     width: "300",
     callValuePosition: JsAssoc[cstring, float]{},
-    inExtension: inExtension,
     config: Config(calltrace: true), #TODO: For now hardcoded
     usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
     asyncFlowMode: afmReal,
@@ -578,10 +640,10 @@ proc makeCalltraceComponent*(data: Data, id: int, inExtension: bool = false): Ca
     asyncThreads: @[],
     continuationsByCallKey: JsAssoc[cstring, ContinuationLinkInfo]{},
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Calltrace)
 
-proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false): AgentActivityComponent =
+proc makeAgentActivityComponent*(data: Data, id: int): AgentActivityComponent =
   result = AgentActivityComponent(
     id: id,
     shell: ShellComponent(
@@ -598,7 +660,6 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
         "default_dark": ShellTheme( background: "#1e1f26", foreground: "#8e8f92"),
       }
     ),
-    inExtension: inExtension,
     expandControl: @[],
     # messages: JsAssoc[cstring, AgentMessage]{},
     messageOrder: @[],
@@ -616,29 +677,21 @@ proc makeAgentActivityComponent*(data: Data, id: int, inExtension: bool = false)
     acpInitFailed: false,
     activeAgentMessageId: cstring""
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.AgentActivity)
-
-proc makeDebugComponent*(data: Data): DebugComponent =
-  result = DebugComponent(
-    id: data.generateId(Content.Debug),
-    message: LogMessage(message: "", level: MsgInfo, time: -1),
-    service: data.services.debugger)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
-    data.registerComponent(result, Content.Debug)
 
 proc makeFilesystemComponent*(data: Data, id: int): FilesystemComponent =
   result = FilesystemComponent(
     id: id,
     service: data.services.editor,
     forceRedraw: true,)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Filesystem)
 
 proc makeVerificationComponent*(data: Data, id: int): VerificationComponent =
   ## VN-M5. See `VerificationComponent`: a carrier, with no state of its own.
   result = VerificationComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Verification)
 
 proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
@@ -652,12 +705,20 @@ proc makeUnifiedDiffComponent*(data: Data, id: int): UnifiedDiffComponent =
     initialized: false,
     editorInitialized: false,
     lineLabels: @[])
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.UnifiedDiff)
+
+proc fileClickOpensFullFile(data: Data): bool =
+  ## The configuration's `vcs.fileClickOpensFullFile` (VCS-Panel.md,
+  ## "Configuration"); false when the config file has no `vcs:` entry.
+  not data.config.isNil and not data.config.vcs.isNil and
+    data.config.vcs.fileClickOpensFullFile
 
 proc makeVCSComponent*(data: Data, id: int): VCSComponent =
   result = VCSComponent(
     id: id,
+    # The View mode toggle starts where the configuration puts it.
+    openFileMode: data.fileClickOpensFullFile(),
     currentBranch: cstring"",
     branches: @[],
     commits: @[],
@@ -668,22 +729,20 @@ proc makeVCSComponent*(data: Data, id: int): VCSComponent =
     initialized: false,
     isGitRepo: false,
     errorMessage: cstring"")
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.VCS)
 
-proc makeScratchpadComponent*(data: Data, id: int, inExtension: bool = false): ScratchpadComponent =
+proc makeScratchpadComponent*(data: Data, id: int): ScratchpadComponent =
   result = ScratchpadComponent(
     id: id,
     service: data.services.debugger,
-    inExtension: inExtension,
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Scratchpad)
 
-proc makeRequestPanelComponent*(data: Data, id: int, inExtension: bool = false): RequestPanelComponent =
+proc makeRequestPanelComponent*(data: Data, id: int): RequestPanelComponent =
   result = RequestPanelComponent(
     id: id,
-    inExtension: inExtension,
     panelState: RequestPanelState(
       requests: @[],
       selectedIndex: -1,
@@ -692,7 +751,7 @@ proc makeRequestPanelComponent*(data: Data, id: int, inExtension: bool = false):
       searchText: cstring"",
     ),
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.RequestPanel)
 
 func setId*(c: ChartComponent, id: int) =
@@ -708,20 +767,19 @@ proc makeChartComponent*(data:Data): ChartComponent =
     pieLabels: @[],
     pieValues: @[])
 
-proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): FlowComponent =
+proc makeFlowComponent*(data: Data, position: int): FlowComponent =
   FlowComponent(
     # api: self.api,
     # id: self.id,
     flow: nil,
     # tab: self.tabInfo,
     # location: location,
-    inExtension: inExtension,
     multilineZones: JsAssoc[int, MultilineZone]{},
     flowDom: JsAssoc[int, kdom.Node]{},
     shouldRecalcFlow: false,
     flowLoops: JsAssoc[int, FlowLoop]{},
     flowLines: JsAssoc[int, FlowLine]{},
-    activeStep: FlowStep(rrTicks: -1),
+    activeStep: FlowLayoutStep(rrTicks: -1),
     selectedLine: -1,
     selectedLineInGroup: -1,
     selectedStepCount: -1,
@@ -731,7 +789,6 @@ proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): F
     loopLineSteps: JsAssoc[int, int]{},
     inlineDecorations: JsAssoc[int, InlineDecorations]{},
     # editorUI: self,
-    # scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
     # editor: self.service,
     # service: self.data.services.flow,
     # data: self.data,
@@ -761,7 +818,7 @@ proc makeFlowComponent*(data: Data, position: int, inExtension: bool = false): F
     pendingRenderTimerId: -1
   )
 
-proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: cstring = "", line: int = 0, inExtension: bool = false, traceId: int = 0): TraceComponent = # editorUI: EditorViewComponent, name: cstring,
+proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: cstring = "", line: int = 0): TraceComponent = # editorUI: EditorViewComponent, name: cstring,
   # let offset =
   #   if editorUI.lang == LangAsm:
   #     editorUI.tabInfo.instructions.instructions[line - 1].offset
@@ -769,9 +826,8 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: 
   #     NO_OFFSET
   # let traceId = 0 # data.services.trace.tracePID
 
-  let id = if inExtension: traceId else: data.services.trace.tracePID
-  if not inExtension:
-    data.services.trace.tracePID += 1
+  let id = data.services.trace.tracePID
+  data.services.trace.tracePID += 1
 
   result = TraceComponent(
     id: id,
@@ -795,16 +851,12 @@ proc makeTraceComponent*(data: Data, editorUI: EditorViewComponent = nil, name: 
     service: data.services.trace,
     editorWidth: 50,
     traceHeight: 210,
-    inExtension: inExtension,
     dataTable: DataTableComponent(rowHeight: 30, inputFieldChange: false))
 
-  if not inExtension:
-    result.chart.setId(data.ui.idMap["chart"])
-    data.ui.idMap["chart"] = data.ui.idMap["chart"] + 1
-    data.ui.editors[name].traces[line] = result
-  else:
-    result.chart.setId(id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  result.chart.setId(data.ui.idMap["chart"])
+  data.ui.idMap["chart"] = data.ui.idMap["chart"] + 1
+  data.ui.editors[name].traces[line] = result
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Trace)
 
 proc makeMenuComponent*(data: Data): MenuComponent =
@@ -816,13 +868,12 @@ proc makeMenuComponent*(data: Data): MenuComponent =
     activePathOffsets: JsAssoc[int,int]{},
     prepared: @[],
     nameMap: JsAssoc[cstring, ClientAction]{},
-    debug: data.debugComponent,
     service: data.services.editor,
     iconWidth: 24,
     mainMenuWidth: 18,
     folderArrowCharWidth: 2)
   data.ui.menu = result
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Menu)
 
 proc makeReplComponent*(data: Data, id: int): ReplComponent =
@@ -830,7 +881,7 @@ proc makeReplComponent*(data: Data, id: int): ReplComponent =
     id: id,
     service: data.services.debugger,
     history: @[])
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.Repl)
 
 proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponent =
@@ -839,10 +890,10 @@ proc makeCalltraceEditorComponent*(data: Data, id: int): CalltraceEditorComponen
     loading: JsAssoc[cstring, bool]{},
     service: data.services.editor,
     calltrace: data.services.calltrace)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.CalltraceEditor)
 
-proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false): TerminalOutputComponent =
+proc makeTerminalOutputComponent*(data: Data, id: int): TerminalOutputComponent =
   result = TerminalOutputComponent(
     id: id,
     cachedLines: JsAssoc[int, seq[TerminalEvent]]{},
@@ -850,10 +901,9 @@ proc makeTerminalOutputComponent*(data: Data, id: int, inExtension: bool = false
     lineEventIndices: JsAssoc[int, int]{},
     service: data.services.eventLog,
     initialUpdate: true,
-    inExtension: inExtension,
     usesMaterializedTracesTrace: true, #TODO: For now hardcoded needs to be set dynamically to the component
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.TerminalOutput)
 
 proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
@@ -870,47 +920,20 @@ proc makeCommandPaletteComponent*(data: Data): CommandPaletteComponent =
     inputValue: cstring(""),
     inputPlaceholder: cstring(""))
   data.ui.commandPalette = result
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.CommandPalette)
 
 proc makeNoSourceComponent*(data: Data, id: int, noInfoMessage: cstring): NoSourceComponent =
   result = NoSourceComponent(
     id: id,
     message: noInfoMessage)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.NoInfo)
 
 proc makeLowLevelCodeComponent*(data: Data, id: int): LowLevelCodeComponent =
-  let location = data.services.debugger.location
-  let name = location.path
+  result = LowLevelCodeComponent(id: id)
 
-  result = LowLevelCodeComponent(
-    id: id,
-    viewZones: JsAssoc[int, int]{},
-    multilineZones: JsAssoc[int, MultilineZone]{},
-    viewDom: JsAssoc[int, kdom.Node]{},
-    instructionsMapping: JsAssoc[int, int]{},
-    path: name,
-    editor: EditorViewComponent(
-      id: data.generateId(Content.EditorView),
-      path: name,
-      data: data,
-      lang: LangAsm,
-      name: name,
-      editorView: ViewLowLevelCode,
-      tokens: JsAssoc[int, JsAssoc[cstring, int]]{},
-      decorations: @[],
-      whitespace: Whitespace(character: WhitespaceSpaces, width: 2),
-      encoding: cstring"UTF-8",
-      lastMouseMoveLine: -1,
-      traces: JsAssoc[int, TraceComponent]{},
-      expanded: JsAssoc[int, EditorViewComponent]{},
-      service: data.services.editor,
-      viewZones: JsAssoc[int, int]{}
-    )
-  )
-
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.LowLevelCode)
 
 proc openLowLevelCode*(data: Data) =
@@ -928,7 +951,7 @@ proc makeStepListComponent*(data: Data, id: int): StepListComponent =
     # totalStepsCount: 0,
     # lastScrollFireTime: 0,
     service: data.services.flow)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.StepList)
 
 proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent =
@@ -967,7 +990,7 @@ proc makeAgentWorkspaceComponent*(data: Data, id: int): AgentWorkspaceComponent 
     notifications: @[],
     coverageOverlayEnabled: true
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.AgentWorkspace)
 
 proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressComponent =
@@ -988,12 +1011,11 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
       agentWorkspacePath: cstring"",
       agentSessionId: cstring""
     ),
-    containerId: cstring"",
     animationFrame: 0,
     expanded: false,
     lastUpdateMs: 0
   )
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.CaptionBarProgress)
 
 ## ``makeFrameViewerComponent`` was retired in M3 — Content.FrameViewer is no
@@ -1004,17 +1026,17 @@ proc makeCaptionBarProgressComponent*(data: Data, id: int): CaptionBarProgressCo
 
 proc makePixelHistoryComponent*(data: Data, id: int): PixelHistoryComponent =
   result = PixelHistoryComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.PixelHistory)
 
 proc makeShaderDebugComponent*(data: Data, id: int): ShaderDebugComponent =
   result = ShaderDebugComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.ShaderDebug)
 
 proc makeVideoPlayerComponent*(data: Data, id: int): VideoPlayerComponent =
   result = VideoPlayerComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.VideoPlayer)
 
 proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDeepReviewComponent =
@@ -1026,7 +1048,7 @@ proc makeAgentActivityDeepReviewComponent*(data: Data, id: int): AgentActivityDe
   ## still constructs and renders an empty pane instead of raising out of
   ## ``makeComponent``.
   result = AgentActivityDeepReviewComponent(id: id)
-  when defined(ctRenderer) or (defined(ctInExtension) and not defined(ctInCentralExtensionContext)):
+  when defined(ctRenderer):
     data.registerComponent(result, Content.AgentActivityDeepReview)
 
 when defined(ctRenderer):
@@ -1049,7 +1071,9 @@ when defined(ctRenderer):
 proc makeComponent*(data: Data, content: Content, id: int, path: cstring = "", noInfoMessage: cstring = ""): Component =
   case content:
   # singletons
-  of Content.Debug:           data.makeDebugComponent()
+  # The debugger toolbar is not a component: its state is the session's
+  # `DebugControlsVM` and the menu shell renders it (`ui/debug_toolbar`).
+  of Content.Debug:           nil
   of Content.Build:           data.makeBuildComponent()
   of Content.BuildErrors:     data.makeErrorsComponent()
   of Content.Status:          data.makeStatusComponent(
@@ -1105,7 +1129,6 @@ when defined(ctRenderer):
   data.services.flow.data = data
   data.services.eventLog.debugger = data.services.debugger
   data.services.search.data = data
-  data.keyPlugins[Content.EditorView] = JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]{}
 
   block:
     let emptyCache = JsAssoc[cstring, JsAssoc[cstring, Future[JsObject]]]{}
@@ -1524,6 +1547,11 @@ proc openNoSourceView*(data: Data, name: cstring, noInfoMessage: cstring) =
   data.services.editor.active = name
 
 
+var editorSourceInstalled*: proc(editor: EditorViewComponent)
+  ## Set by `ui/editor`: finish the mount of an editor whose pane was built
+  ## before its source arrived (`resumeEditorMount`). A hook, because this
+  ## module sits below `ui/editor` and cannot import it.
+
 proc makeEditorView*(
     data: Data,
     name: cstring,
@@ -1590,7 +1618,10 @@ const NO_COLUMN* = 0
 
 proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
   ## Move the caret to ``line`` (and ``col`` when given), scroll it into view
-  ## and focus the editor.
+  ## and focus the editor — unless the user is typing in a text field outside
+  ## it, which keeps the keyboard (`ui/editor_focus`). This runs on its own
+  ## schedule (the first stop's editor tab calls it from a timer once Monaco
+  ## exists), so it must not take keystrokes meant for, say, the watch box.
   ##
   ## The column is threaded through for build-error navigation: a diagnostic
   ## carries a column and landing on the start of the line instead of on the
@@ -1598,9 +1629,57 @@ proc focusLine(editor: EditorViewComponent, line: int, col: int = NO_COLUMN) =
   ## line the error is on". Monaco columns are 1-based, which is also how the
   ## compilers this feature reads report them, so the value passes straight
   ## through.
-  editor.monacoEditor.revealLineInCenter(line)
-  editor.monacoEditor.setPosition(MonacoPosition(lineNumber: line, column: col))
-  editor.monacoEditor.focus()
+  revealLineAndFocus(editor.monacoEditor.toJs, line, col)
+
+proc sleepMs*(ms: int): Future[void] {.importjs: "new Promise(resolve => setTimeout(resolve, #))".}
+
+proc waitForLayoutGround*(data: Data): Future[bool] {.async.} =
+  ## Wait until GoldenLayout has a ground item with something in it, and SAY
+  ## WHETHER IT DID.
+  ##
+  ## ## Why it lives here and not in `ui_js.nim`
+  ##
+  ## It was private to `ui_js.nim`, so only the edit-mode and DeepReview paths
+  ## there could wait for the layout; `openNewEditorView` below could not, and
+  ## it is the path a replay's FIRST editor tab takes. That tab is opened by
+  ## the first `ct/complete-move`, and nothing orders that move after the
+  ## layout: `tryInitLayout` waits for `document.readyState == "complete"`
+  ## (`ui_js.onReady`), while the backend's first move only waits for the
+  ## replay to start. On a loaded host the move won. Measured on aarch64-darwin
+  ## at `326657ab9`, five launches out of five: `TIME complete move 20484`,
+  ## then `tabs: cannot place EditorView (…/main.py): no GoldenLayout ground
+  ## item`, then `initLayout` 4 ms later — and the replay had no editor at all,
+  ## because `openLayoutTab` logs and returns and nothing asks again.
+  ##
+  ## ## Why this returns a value now
+  ##
+  ## It used to return `void` after at most 50 × 20 ms, and a caller could not
+  ## tell "the layout is ready" from "one second elapsed". `onNoTrace`'s
+  ## `openTab` ran either way, and against a layout that had not arrived it
+  ## reached `utils.openNewLayoutContainer`'s `data.ui.layout.groundItem` —
+  ## measured on the first load of a freshly deployed `ide.codetracer.com/noir`
+  ## as an uncaught `TypeError: Cannot read properties of null (reading
+  ## 'groundItem')`, with the editor pane simply absent from a screen whose
+  ## other four panes were correct. Three later loads of the same URL were
+  ## clean, which is the signature of a budget rather than a bug in the layout.
+  ##
+  ## ## Why the budget is five seconds and not one
+  ##
+  ## One second is a guess about how long GoldenLayout takes to mount a tree,
+  ## and on a warm cache it is a generous one. A COLD one is a different
+  ## machine: the first visitor after a deploy fetches a 13 MB third-party
+  ## bundle and a 14 MB renderer before any of this runs, and the browser is
+  ## still parsing them. Five seconds is still a bound — this cannot hang —
+  ## but it is a bound on a slow first load rather than on a fast repeat one.
+  ##
+  ## Timing out is now a REPORTED failure rather than a silent fall-through;
+  ## see the call site.
+  for _ in 0 ..< 250:
+    if not data.ui.layout.isNil and not data.ui.layout.groundItem.isNil and
+        data.ui.layout.groundItem.contentItems.len > 0:
+      return true
+    await sleepMs(20)
+  return false
 
 proc openNewEditorView*(
     data: Data,
@@ -1645,6 +1724,13 @@ proc openNewEditorView*(
       return
     cdebug "editor: openNewEditorView location: " & $location
     var tabInfo = await data.services.editor.tabLoad(location, editorView, lang)
+    # THE PANE NEEDS A LAYOUT TO GO IN. The source can arrive before
+    # GoldenLayout has mounted (see `waitForLayoutGround`), and placing the tab
+    # then fails once, for good. Waiting here is bounded and costs nothing when
+    # the layout is already up; a timeout still falls through to the placement
+    # below, which reports the failure by name.
+    if not await data.waitForLayoutGround():
+      cwarn "editor: GoldenLayout was not ready within 5s for " & $editorName
     tabInfo.lang = if lang != LangAsm: toLangFromFilename(location.path) else: lang
     # try:
     #   cdebug "editor: tabInfo received " & $(tabInfo[])
@@ -1661,9 +1747,9 @@ proc openNewEditorView*(
     # config carries one `editorComponent` node per tab the visitor had open, so
     # the walk registers an `EditorViewComponent` in `data.ui.editors` for each
     # — with a `layoutItem`, and with NO `tabInfo`, because nothing on that path
-    # asks for the file's source. `renderTopLevelEditorDirect`'s mount poll
-    # waits on `not self.tabInfo.isNil`, never gets it, and gives up: the tab is
-    # in the strip, the container is on screen, and it never fills.
+    # asks for the file's source. Its mount (`renderTopLevelEditorDirect`)
+    # waits for the source, and the pane fills only when it is installed
+    # below (`editorSourceInstalled`).
     #
     # Reaching here for such a pane used to raise out of `makeEditorViewComponent`
     # ("editor <name> exists"), which is an unhandled rejection inside this async
@@ -1682,6 +1768,9 @@ proc openNewEditorView*(
       data.services.editor.open[editorName] = tabInfo
       restored.tabInfo = tabInfo
       data.services.editor.active = editorName
+      # The pane was mounted before its source arrived; finish the mount.
+      if not editorSourceInstalled.isNil:
+        editorSourceInstalled(restored)
       data.redraw()
     else:
       data.makeEditorViewDetailed(

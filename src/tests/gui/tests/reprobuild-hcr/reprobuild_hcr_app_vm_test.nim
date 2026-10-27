@@ -11,6 +11,7 @@ import vm_test_helpers
 import isonim/core/[computation, owner, signals]
 import backend/mock_backend
 import app/app_vm
+import session_vm
 import store/[replay_data_store, types]
 import viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm]
 
@@ -102,7 +103,7 @@ proc configureLiveSession(app: AppViewModel; rrTicks: uint64) =
     status: dsIdle,
     threadId: 1'u32,
   )
-  app.session.calltraceVM.setViewportHeight(20)
+  app.session.calltraceVM.setViewport(app.session.calltraceVM.viewport.val.withRows(20))
   drain()
 
 proc publishStop(app: AppViewModel; marker: string; generation: int;
@@ -159,11 +160,17 @@ suite "Reprobuild HCR AppViewModel":
   test "live debugging, old/new code stepping, history restore and jump-to-live":
     createRoot proc(teardown: proc()) =
       let mock = newMockBackendService(autoRespond = true)
-      let app = createAppViewModel(mock.toBackendService())
-      let vm = app.session.debugControlsVM
+      # The host's step route goes into the session's `debugCommands` before
+      # the panel ViewModels are built, as the desktop installs its DAP step
+      # route. Live steps must bypass it; historical replay must take it.
+      let app = createAppViewModel(mock.toBackendService(),
+                                   initializePanels = false)
       var bridgedAction = ""
-      vm.onDapStep = proc(action: cstring) =
-        bridgedAction = $action
+      var commands = defaultDebugCommands(app.session.store)
+      commands.step = proc(actionId: string) = bridgedAction = actionId
+      app.session.debugCommands = commands
+      app.session.initializePanelViewModels()
+      let vm = app.session.debugControlsVM
 
       app.configureLiveSession(100'u64)
       app.publishStop(Gen0Breakpoint, 0, 41, 100'u64)
@@ -191,6 +198,7 @@ suite "Reprobuild HCR AppViewModel":
       drain()
       let newLiveSteps = mock.commandsNamed(LiveMcrStepCommand)
       check newLiveSteps.len == 1
+      check bridgedAction == ""
       if newLiveSteps.len == 1:
         check newLiveSteps[0].args["threadId"].getInt == 1
       app.publishStop(Gen1StepNext, 1, 63, 310'u64)

@@ -15,14 +15,13 @@
 ## ---------------------------------------------------------------------------
 
 import
-  ui_imports, auto_hide, ../[types, communication]
+  ui_imports, auto_hide, session_viewmodels, ../[types, communication]
 
 import std/json
 # `Signal.val` is a template, so reading an `ErrorsVM` signal here needs the
 # module in scope even though the type arrives through `errors_vm` — the same
 # reason `ui/build.nim` imports it.
 import isonim/core/signals
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   BuildProblemLine, BuildLineSeverity, ProblemFilterTag,
@@ -33,66 +32,32 @@ from ../viewmodel/viewmodels/errors_vm import
   ErrorNavOutcome, enoEmpty, enoMoved, enoWrapped,
   gotoNextError, gotoPreviousError, highlightFirstError
 from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_errors_view import mountIsoNimErrors
 
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by the build, terminal-output and event-log
-# migrations.
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other. The pane's view
+# is mounted by the panel host (`ui/panel_host`).
 var errorsVMInstance*: ErrorsVM
-var errorsVMStore: ReplayDataStore
 var errorsComponentRef: ErrorsComponent
-var isoNimErrorsMounted*: bool = false
 
-proc tryMountIsoNimErrorsPanel*()
 proc installErrorsVMCallbacks*(vm: ErrorsVM)
+proc syncLegacyErrorsIntoVM*(self: ErrorsComponent)
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initErrorsVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``ErrorsVM`` using an externally-provided
-  ## ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``).  If a stub-backed instance already exists
-  ## (created by ``initErrorsVM`` before the real backend was available)
-  ## it is replaced so the panel uses the real backend.
-  if errorsVMInstance != nil:
-    clog "ErrorsVM: replacing existing instance with shared-store version"
-    isoNimErrorsMounted = false
-  errorsVMStore = store
-  errorsVMInstance = createErrorsVM(store)
+proc initErrorsVMFromSession*(vm: ErrorsVM) =
+  ## Hand the pane the session's `ErrorsVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ## Problems the shown tab's component already holds are replayed into it
+  ## once, when the ViewModel is first handed over.
+  errorsVMInstance = vm
   installErrorsVMCallbacks(errorsVMInstance)
-  clog "ErrorsVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimErrorsPanel()
-
-proc initErrorsVM*() =
-  ## Lazily create the parallel ``ErrorsVM`` backed by a stub
-  ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initErrorsVMWithStore``.
-  if errorsVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  errorsVMStore = createReplayDataStore(stubBackend)
-  errorsVMInstance = createErrorsVM(errorsVMStore)
-  installErrorsVMCallbacks(errorsVMInstance)
-  clog "ErrorsVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimErrorsPanel()
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.BuildErrors)
+    if not component.isNil:
+      syncLegacyErrorsIntoVM(ErrorsComponent(component))
 
 proc revealProblemsPanel*() =
   ## Bring the Problems pane on screen **without focusing it**.
@@ -111,14 +76,9 @@ proc revealProblemsPanel*() =
   if not autoHideState.isNil:
     let panel = autoHideState.findPanelByContent(Content.BuildErrors)
     if not panel.isNil:
+      # Revealing a panel the auto-hide layer rebuilt mounts it through the
+      # panel host (`onPanelShown` -> `mountPaneForState`).
       revealOverlay(panel)
-  # And MOUNT it, for the reason `web_noir_build.ensureBuildPaneVisible` gives
-  # for the BUILD pane: `tryMountIsoNimErrorsPanel` retries for ~2 s after the
-  # VM is created and then gives up, which is long expired by the time anyone
-  # presses a key. It is idempotent, so this costs nothing when the pane was
-  # already mounted and is the difference between painted rows and an empty
-  # container when it was not.
-  tryMountIsoNimErrorsPanel()
 
 proc installErrorsVMCallbacks*(vm: ErrorsVM) =
   ## Wire the Problems pane to the editor.
@@ -194,11 +154,22 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
   ## reflects every problem already accumulated by the build pipeline.
   ## Per-row updates go through ``appendProblem`` directly (called from
   ## ``build.nim``); this proc covers the bulk-replace scenario.
-  if errorsVMInstance.isNil or self.isNil or self.data.isNil:
+  if self.isNil or self.data.isNil:
     return
-  let buildComp = self.data.buildComponent(0)
+  # THIS TAB'S ViewModel, mirroring this tab's Build component's record.
+  let ownVM = ownPaneVM(self, errorsVMInstance, errorsVM)
+  if ownVM.isNil:
+    return
+  let ownTab = data.sessionOfComponent(self)
+  let buildComp =
+    if ownTab.isNil or ownTab.ui.isNil or
+       ownTab.ui.componentMapping[Content.Build].isNil or
+       not ownTab.ui.componentMapping[Content.Build].hasKey(0):
+      self.data.buildComponent(0)
+    else:
+      BuildComponent(ownTab.ui.componentMapping[Content.Build][0])
   if buildComp.isNil:
-    errorsVMInstance.setProblems(@[])
+    ownVM.setProblems(@[])
     return
 
   # AN EMPTY LEGACY RECORD DOES NOT MEAN "NO PROBLEMS".
@@ -209,15 +180,14 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
   # the VMs directly and never touches the legacy record — so on the web arm
   # this list is permanently empty.
   #
-  # It is called on every panel mount, and `tryMountIsoNimErrorsPanel` calls it
-  # again right after mounting. Without this guard, revealing the Problems pane
+  # It is called when the session's ViewModel is installed. Without this guard, revealing the Problems pane
   # after a failed browser build ERASED the diagnostics that build had just
   # produced: measured as a pane that reported "no errors" while the compiler's
   # rows were sitting in the VM a moment earlier.
   if buildComp.build.problems.len == 0 and
-     errorsVMInstance.problems.val.len > 0:
-    errorsVMInstance.setFilter(problemFilterToVM(self.filter))
-    errorsVMInstance.setGroupByFile(self.groupByFile)
+     ownVM.problems.val.len > 0:
+    ownVM.setFilter(problemFilterToVM(self.filter))
+    ownVM.setGroupByFile(self.groupByFile)
     return
 
   var rows: seq[BuildProblemLine] = @[]
@@ -228,58 +198,22 @@ proc syncLegacyErrorsIntoVM*(self: ErrorsComponent) =
       line: prob.line,
       col: prob.col,
       message: safeStr(prob.message)))
-  errorsVMInstance.setProblems(rows)
-  errorsVMInstance.setFilter(problemFilterToVM(self.filter))
-  errorsVMInstance.setGroupByFile(self.groupByFile)
+  ownVM.setProblems(rows)
+  ownVM.setFilter(problemFilterToVM(self.filter))
+  ownVM.setGroupByFile(self.groupByFile)
 
-proc tryMountIsoNimErrorsPanel*() =
-  ## Mount the IsoNim errors view into the GoldenLayout-managed (or
-  ## standalone auto-hide) container.  The container's id is
-  ## ``errorsComponent-{id}``; the errors panel is a singleton (id
-  ## always 0) but we still resolve through the registered component's
-  ## id field for symmetry with the other IsoNim mounts.
-  ##
-  ## Safe to call multiple times -- mounts only once.  Retries until the
-  ## DOM container appears (capped at 200 attempts, ~2 s) since
-  ## GoldenLayout creates the host slightly after the layout state
-  ## changes.
-  if isoNimErrorsMounted or errorsVMInstance.isNil:
+proc syncErrorsAppendProblemInto*(vm: ErrorsVM; problem: BuildProblemLine) =
+  ## Push a single problem row into `vm` — the ErrorsVM of the tab whose
+  ## build produced it (`ui/build.nim`), shown or not.
+  if vm.isNil:
     return
-  if errorsComponentRef.isNil:
+  vm.appendProblem(problem)
+
+proc syncErrorsClearInto*(vm: ErrorsVM) =
+  ## Reset `vm`'s problem list as its tab's next build starts.
+  if vm.isNil:
     return
-
-  let key = cstring("errorsComponent-" & $errorsComponentRef.id)
-  var retryCount = 0
-  proc doMount() =
-    if isoNimErrorsMounted:
-      return
-    retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimErrorsPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    # Replace any prior content (the layout bridge may have planted a
-    # stub element before the IsoNim mount fires).
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimErrorsMounted = true
-    try:
-      mountIsoNimErrors(container, errorsVMInstance)
-    except:
-      cerror "tryMountIsoNimErrorsPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
-
-    # Re-sync any data the legacy ``build`` record already carries so
-    # the freshly-mounted view reflects the latest problems list.
-    if not errorsComponentRef.isNil:
-      syncLegacyErrorsIntoVM(errorsComponentRef)
-
-  doMount()
+  vm.clearProblems()
 
 proc syncErrorsAppendProblem*(problem: BuildProblemLine) =
   ## Push a single problem row into the ``ErrorsVM``.  Called from
@@ -299,17 +233,12 @@ proc syncErrorsClear*() =
     return
   errorsVMInstance.clearProblems()
 
-# ErrorsComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths; all real
-# DOM construction happens in ``viewmodel/views/isonim_errors_view.nim``.
+# ErrorsComponent.render() removed: the pane's view
+# (``viewmodel/views/isonim_errors_view.nim``) is mounted by the panel host.
 
 method register*(self: ErrorsComponent, api: MediatorWithSubscribers) =
-  ## Register the ErrorsComponent with the mediator.  Bring up the
-  ## IsoNim ErrorsVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## Register the ErrorsComponent with the mediator. Its handlers feed the
+  ## session's `ErrorsVM` once `initErrorsVMFromSession` has installed it.
   self.api = api
-  initErrorsVM()
   if errorsComponentRef.isNil:
     errorsComponentRef = self
-    tryMountIsoNimErrorsPanel()

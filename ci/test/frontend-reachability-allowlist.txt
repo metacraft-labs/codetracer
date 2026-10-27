@@ -32,6 +32,32 @@
 #     * "The test covers it." That is the defect, not the exemption. A tested
 #       capability nothing reaches is exactly what this guard is for.
 #
-# The list starts empty on purpose. The first run reports 1180 findings across
-# buckets A and B; adding entries before those are triaged would be recording
-# the backlog rather than clearing it.
+# The list started empty on purpose. The first run reported 1180 findings
+# across buckets A and B; adding entries before those are triaged would be
+# recording the backlog rather than clearing it.
+#
+# THE FIRST ENTRIES, 2026-10-22: three IPC handlers that landed after the
+# ceiling was last set (2fc6c5764) and are reached by string. Older handlers of
+# the same shape are still counted in the backlog; they are not listed here
+# because triaging them is a pass of its own, not a side effect of this one.
+#
+# HOW AN `on<Name>` IPC HANDLER IS REACHED. `configureIpcMain` in
+# `src/frontend/index/ipc_utils.nim` lists message names as string literals
+# inside `indexIpcHandlers("CODETRACER::")`. That macro
+# (`src/frontend/index/base_handlers.nim`) builds the handler's identifier with
+# `("on-" & message).toCamelCase` and registers it with
+# `ipc.on("CODETRACER::" & message, handler)`. So `"keybindings-import"` reaches
+# `onKeybindingsImport` at compile time, and no source line ever spells the
+# handler's name. An entry is correct only while its message string is in that
+# list: delete the entry together with the string.
+
+onKeybindingsImport   # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "keybindings-import" (CODETRACER::keybindings-import, the renderer's one-time stepping-preset merge, PLAT-68)
+onKeybindingsRequest  # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "keybindings-request" (CODETRACER::keybindings-request, the renderer asking for keybindings.json)
+onRunTestSuite        # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "run-test-suite" (CODETRACER::run-test-suite, the Test Results pane's header run button)
+onFileTreeCreate      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "file-tree-create" (CODETRACER::file-tree-create, the Files pane's context-menu Create in edit mode)
+onFileTreeRename      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "file-tree-rename" (CODETRACER::file-tree-rename, the Files pane's context-menu Rename in edit mode)
+onFileTreeDelete      # IPC handler: `indexIpcHandlers` in index/ipc_utils.nim builds it from the string "file-tree-delete" (CODETRACER::file-tree-delete, the Files pane's context-menu Delete in edit mode)
+onFileTreeOperationDone  # renderer IPC handler: `uiIpcHandlers` in ui_js.nim's `configureIPC` builds it from the string "file-tree-operation-done" (CODETRACER::file-tree-operation-done, the index process's answer to a Files-pane Create, Rename or Delete)
+onTableColumnsRequest  # IPC handler resolved by string: ipc_utils registers "table-columns-request" and dispatches to on<CamelCase>
+onTableColumnsSave  # IPC handler resolved by string: ipc_utils registers "table-columns-save" and dispatches to on<CamelCase>
+testResultsFit  # reached by the Test Results panes of the terminal (tui/app/views/test_results_pane.nim columnsFor) and GPUI (gpui/test_results_leaf.nim testsLayout): product modules whose test_* basename the name scan classifies as tests

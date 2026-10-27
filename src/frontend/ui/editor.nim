@@ -1,16 +1,23 @@
 import
   std/[ cstrutils, jsre, options ],
-  ui_imports, trace, debug, menu, flow, value, no_source, shortcuts, kdom,
+  ui_imports, trace, debug_toolbar, menu, flow, value, no_source, kdom, panel_host,
+  session_viewmodels,
+  ../viewmodel/session_vm,
   shortcut_labels,
   trace_macro, trace_static,
-  column_click_resolver,
+  column_click_resolver, editor_scope,
   editor_decoration_layers, trace_redraw_policy,
   flow_line_styles, review_flow_adapter, review_flow_selection,
   ../[ renderer, communication, event_helpers, lsp_router ],
   ../../common/[ ct_event, review_source_paths ]
 
 from welcome_screen import resetView
-from event_log import findTRNode
+
+proc findTRNode(node: js): js =
+  ## The table row `node` is in (or is).
+  return if node.tagName.to(cstring) == cstring("TR"):
+    node else: findTRNode(node.parentNode)
+
 # The generated-code operation's open path, reached from the context menu
 # below. Imported for exactly these three symbols; `generated_code` imports
 # `ui_imports` and the viewmodels and nothing from here, so there is no cycle.
@@ -20,54 +27,132 @@ from ../viewmodel/viewmodels/generated_code_operation import
 from dom import createElement
 from mode_layouts import isEditingMode
 from ../viewmodel/viewmodels/diff_document import editorLanguageForPath
+from ../viewmodel/viewmodels/run_control_ownership import rollbackRunSpinner
 
 # ---------------------------------------------------------------------------
-# ViewModel layer — wired in parallel with the legacy event-bus code.
-# The EditorVM receives the same data but does not affect rendering yet.
+# ViewModel layer (Shared-DOM-Front-Ends D7.4 (a)). The editor's debugging
+# state is the session's: the execution line, the gutter marks and the values
+# come from the shared editor surface (`editor_points.webEditorSurface`), the
+# breakpoints from the session store's one producer (`sdk/breakpoints`), and
+# Monaco's line styles are re-applied by an effect over the surface's inputs
+# (`watchEditorPoints`). The text is Monaco's own buffer; whether web editing
+# goes through the shared editing core is PLAT-67's question. The inline flow
+# is still drawn by `ui/flow.nim`'s FlowComponent (D7.4 (b) is open).
 # ---------------------------------------------------------------------------
-import std/json
+import std/[json, tables]
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/editor_vm import
   EditorVM, createEditorVM
+import ./editor_points
+# The shared flow line-styling rule over the flow model's window.
+from ../viewmodel/viewmodels/flow_vm import flowStyledLinesOf
+from isonim/core/owner import createRoot
+from isonim/core/computation import createEffect
+from isonim/core/batch import untrack
+from isonim/core/signals import val
 when defined(js):
   import isonim/web/web_renderer
   from isonim/web/dom_api import nil
   from ../viewmodel/views/isonim_editor_view import renderEditorPanel
+  # The generic view expands the DSL here.
+  import isonim/core/computation
+  import isonim/dsl/components
 # The IsoNim editor view owns direct editor containers for top-level and
 # expansion editors; Monaco still manages the container's internal DOM.
 
-# Module-level EditorVM instance. Created once and fed data whenever
-# the legacy event-bus handlers fire. Rendering still reads from legacy
-# data so behaviour is unchanged.
+# Module-level EditorVM instance: the session's (`initEditorVMFromSession`),
+# or a stub-backed one before the session exists.
 var editorVMInstance: EditorVM
 var editorVMStore: ReplayDataStore
 
-# Track which editor instances have been IsoNim-mounted by their id.
-# Once an editor's container is created by IsoNim, its legacy renderer entry is removed.
-var isoNimEditorMountedIds = JsAssoc[int, bool]{}
+when defined(js):
+  var pendingEditorHosts = JsAssoc[int, dom_api.Element]{}
+    ## Editors whose host GoldenLayout's factory handed over before their
+    ## source was installed (a restored layout's tab): `resumeEditorMount`
+    ## finishes each mount when `utils.openTab` installs the source.
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
-proc initEditorVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel EditorVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+proc applyColumnBreakpointDecorations*(self: EditorViewComponent)
+proc applyEventualStylesLines*(self: EditorViewComponent)
+
+var disposePointWatch: proc()
+var drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
+  ## The mark each open editor's gutter last drew per line (`EditorMark`'s
+  ## ordinal), so a change to the store's rows redraws only the lines whose
+  ## mark changed.
+
+proc watchEditorPoints(store: ReplayDataStore) =
+  ## Redraw the gutter lines and the column marks of every open editor when
+  ## the session store's point rows change — the answer to a breakpoint
+  ## request arrives after the click, so the gutter follows the store rather
+  ## than the click.
+  if not disposePointWatch.isNil:
+    disposePointWatch()
+    disposePointWatch = nil
+  drawnMarks = JsAssoc[cstring, JsAssoc[int, int]]{}
+  createRoot proc(dispose: proc()) =
+    disposePointWatch = dispose
+    createEffect proc() =
+      let rows = store.pointList.rows.val
+      if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+        return
+      for path, editor in data.ui.editors:
+        if editor.isNil or editor.monacoEditor.isNil:
+          continue
+        var now = JsAssoc[int, int]{}
+        for r in rows:
+          if cstring(r.path) == path and r.line >= 1:
+            now[r.line] = ord(gutterMarkFor($path, r.line))
+        let before =
+          if drawnMarks.hasKey(path): drawnMarks[path] else: JsAssoc[int, int]{}
+        for line, mark in now:
+          if not before.hasKey(line) or before[line] != mark:
+            editor.refreshEditorLine(line)
+        for line, mark in before:
+          if not now.hasKey(line):
+            editor.refreshEditorLine(line)
+        drawnMarks[path] = now
+        editor.applyColumnBreakpointDecorations()
+
+    # MONACO FOLLOWS THE EDITOR SURFACE (Shared-DOM-Front-Ends D7.4 (a)): the
+    # execution line, the flow's line styles and the marks are re-applied
+    # whenever an input of the surface changes — the stop, the position, the
+    # flow's styled lines — rather than when this component hears a move.
+    createEffect proc() =
+      discard store.stop.val
+      discard store.debugger.val
+      if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+        return
+      for path, editor in data.ui.editors:
+        if not editor.isNil and not editor.monacoEditor.isNil:
+          editor.applyEventualStylesLines()
+
+proc initEditorVMFromSession*(vm: EditorVM) =
+  ## Hand the pane the session's `EditorVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initEditorVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if editorVMInstance != nil:
     clog "EditorVM: replacing existing instance with shared-store version"
   editorVMStore = store
-  editorVMInstance = createEditorVM(store)
+  editorVMInstance = vm
+  # The gutter and the editor's breakpoint actions read and write the
+  # session store's points (`editor_points`, `sdk/breakpoints`).
+  setEditorPointStore(store)
+  watchEditorPoints(store)
   clog "EditorVM: parallel ViewModel instance created (shared store)"
 
 proc initEditorVM() =
   ## Lazily create the parallel EditorVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initEditorVMWithStore`.
+  ## via `initEditorVMFromSession`.
   if editorVMInstance != nil:
     return
 
@@ -90,15 +175,25 @@ proc initEditorVM() =
   editorVMInstance = createEditorVM(editorVMStore)
   clog "EditorVM: parallel ViewModel instance created (stub backend)"
 
-proc syncEditorDebuggerPosition(rrTicks: int, path: cstring, line: int;
+proc ownPaneStore(self: EditorViewComponent): ReplayDataStore =
+  ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, editorVMInstance, editorVM)
+  if vm.isNil: nil else: vm.store
+
+proc syncEditorDebuggerPosition(store: ReplayDataStore;
+                                rrTicks: int, path: cstring, line: int;
                                 sourceGeneration: int = 0;
                                 sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the EditorVM's activeFileName memo sees the updated location.
-  if editorVMStore.isNil:
+  ##
+  ## `store` is the store of the tab whose component received the move —
+  ## that tab's, shown or not (`ownPaneStore`), never the shown tab's for
+  ## another tab's move.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  editorVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
@@ -108,18 +203,6 @@ include system/timers
 
 type langstring = cstring
 
-# `MONACO_SHORTCUTS_WHITELIST` — the chords this editor delegates into Monaco
-# — now lives in `ui/shortcut_labels.nim`, next to `debugToolbarActions`, and
-# is re-exported from there by the import above.
-#
-# It moved because it is DATA about the shipped binding table and nothing in it
-# is about Monaco's API, while `ui/editor.nim` cannot be imported by a test:
-# `nim js` pulls the whole Karax/Monaco tree in. `shortcut_labels.nim` is a
-# documented leaf (`import ../types` only) that a node suite already compiles,
-# so `src/frontend/tests/shortcut_bindings_test.nim` can assert the property
-# the list exists to provide — that a debugger chord still works with the
-# caret in the editor. That assertion is what was missing when `SHIFT+F5`
-# (Stop) was absent from this list while being bound in the YAML.
 const EDITOR_GUTTER_PADDING = 2 #px
 
 proc getLineFunctionName(self: EditorViewComponent, line: int): cstring
@@ -133,70 +216,44 @@ proc styleLines(
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int)
 proc editorLineJump(self: EditorViewComponent, line: int, behaviour: JumpBehaviour)
 proc sourceCallJump(self: EditorViewComponent, path: cstring, line: int, targetToken: cstring, behaviour: JumpBehaviour)
-proc initMonacoForEditor(self: EditorViewComponent, selector: cstring)
+proc initMonacoForEditor(self: EditorViewComponent, host: JsObject)
 proc editorAfterRedraw(self: EditorViewComponent)
 proc scheduleInitialFlowLoad(self: EditorViewComponent)
-proc tryMountIsoNimEditorPanel*(self: EditorViewComponent)
-proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring)
+proc takeOverEditorRendering(self: EditorViewComponent)
 proc renderExpandedEditorDirect(self: EditorViewComponent)
 
 proc insideLocation(x: float, y: float, location: HTMLBoundingRect): bool =
   x >= location.left and x <= location.right and y >= location.top and y <= location.bottom
+
+proc nameAt(self: EditorViewComponent; line, column: int): string =
+  ## The word Monaco finds at `line:column` of this editor's text, or "".
+  if self.monacoEditor.isNil or line <= 0 or column <= 0:
+    return ""
+  let model = self.monacoEditor.getModel()
+  if model.isNil:
+    return ""
+  let word = model.toJs.getWordAtPosition(js{lineNumber: line, column: column})
+  if word.isNil or jsUndefined == word:
+    return ""
+  $word.word.to(cstring)
 
 proc clearViewZones*(self: EditorViewComponent) =
   self.monacoEditor.changeViewZones do (view: js):
     for viewZone in self.viewZones:
       view.removeZone(viewZone)
 
-# NOT EXPORTED, AND THE MISSING `*` IS THE POINT. The only caller is the
-# `ALT+KeyE` entry of the `commands` table sixty lines below, in this module —
-# no other file has ever referenced this name. The `*` was an export nobody
-# outside could use, which is the shape `ci/test/frontend-reachability.sh`
-# counts and which `ci/lint/nim.sh` records the precedent for:
-# `layout.mountComponentContainer` carried the same meaningless `*`, and "the
-# fix was to drop the `*` ... and not to raise this number".
-#
-# It stayed uncounted only because nothing outside the module mentioned the
-# NAME either. `shortcut_bindings_test.nim` now does — the chord-collision
-# report names the action each claimant runs, and this is ALT+E's Monaco side —
-# which is exactly the transition that precedent describes: a test mentioning
-# the name moves an export from the uncounted "only its own module reaches it"
-# bucket into the counted "tested, and no product module reaches it" one. The
-# export was always empty; the test only made it visible.
-proc toggleMacroExpansion(self: EditorViewComponent) =
+# EXPORTED for the key router: `editor.toggle-macro-expansion` (a palette
+# operation with no default chord, rebindable in `keybindings.json`) reaches it
+# through `key_router.toggleMacroExpansionHook`, installed by `ui_js`. It used
+# to be the Monaco `commands` table's `ALT+KeyE`, which ran it instead of
+# focusing the Event Log whenever the caret was in the editor.
+proc toggleMacroExpansion*(self: EditorViewComponent) =
   if self.lastMouseMoveLine != -1:
     if self.expanded.hasKey(self.lastMouseMoveLine):
       self.expanded[self.lastMouseMoveLine].isExpanded = not self.expanded[self.lastMouseMoveLine].isExpanded
       self.data.redraw()
     else:
       expand(self.path, self.lastMouseMoveLine)
-
-proc loadKeyPlugins*(self: Component) =
-  cdebug "load key plugins"
-  for keys, plugin in self.data.keyPlugins[Content.EditorView]:
-    var shMonaco = shortcut($keys)
-    if shMonaco == -1:
-      cwarn "cant create shorctut for key plugin " & $keys
-    else:
-      self.toJs.monacoEditor.addCommand(shMonaco, proc =
-        let position = self.toJs.monacoEditor.getPosition()
-        let wordInfo = self.toJs.monacoEditor.getModel().getWordAtPosition(position)
-
-        let path = if not self.toJs.path.isNil: cast[cstring](self.toJs.path) else: cast[cstring](self.toJs.lowLevelTab.path)
-        let line = cast[int](position.lineNumber)
-        let column = cast[int](position.column)
-        let word = if not wordInfo.isNil: cast[cstring](wordInfo.word) else: cstring""
-        let startColumn = if not wordInfo.isNil: cast[int](wordInfo.startColumn) else: -1
-        let endColumn = if not wordInfo.isNil: cast[int](wordInfo.endColumn) else: -1
-        let context = KeyPluginContext(
-          path: path,
-          line: line,
-          column: column,
-          startColumn: startColumn,
-          endColumn: endColumn,
-          word: if not word.isNil: word else: cstring"",
-          data: self.data)
-        discard plugin(context), cstring"")
 
 func getLine(editor: MonacoEditor): int =
   editor.getPosition().lineNumber
@@ -224,107 +281,45 @@ func loadCallName(lineText: cstring, column: int): cstring =
   var finish = i - 1
   lineText.slice(start, finish + 1)
 
-var commands = JsAssoc[cstring, (proc(editor: MonacoEditor, e: EditorViewComponent): void)]{ ## commands for each monaco editor instance # app-global
-  # TODO improve or retire other modes
-  # cstring"ALT+P":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.flow.switchFlowUI(FlowParallel),
-  cstring"ALT+KeyI":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.flow.switchFlowUI(FlowInline),
-  # cstring"ALT+M":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.flow.switchFlowUI(FlowMultiline),
-  cstring"ALT+KeyE":      proc(editor: MonacoEditor, e: EditorViewComponent) = e.toggleMacroExpansion(),
+proc runEditorJump*(self: EditorViewComponent; operation: string): bool =
+  ## PLAT-68: the three debugger jumps aimed at the caret, as the router
+  ## resolves them (they used to be entries of Monaco's `commands` table):
+  ## `debugger.smart-jump` (`Ctrl+F8`), `debugger.run-to-cursor` (`Ctrl+F10`,
+  ## Visual Studio's) and `debugger.source-call-jump` (`Ctrl+F11`, into the
+  ## call named at the caret). Answers whether `operation` was one of them.
+  let editor = self.monacoEditor
+  if editor.isNil or not editor.hasTextFocus():
+    return false
+  case operation
+  of "debugger.smart-jump":
+    self.editorLineJump(editor.getLine(), SmartJump)
+  of "debugger.run-to-cursor":
+    self.editorLineJump(editor.getLine(), ForwardJump)
+  of "debugger.source-call-jump":
+    let position = editor.getPosition()
+    let targetToken = editor.toJs.getModel().getWordAtPosition(position)
+    if not targetToken.isNil:
+      self.sourceCallJump(self.name, position.lineNumber,
+        if not targetToken.word.isNil: cast[cstring](targetToken.word)
+        else: cstring"", SmartJump)
+  else:
+    return false
+  true
 
-  cstring"ALT+KeyT":      proc(editor: MonacoEditor, e: EditorViewComponent) =
-    runTracepoints(data),
-
-
-  cstring"CTRL+Enter": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    runTracepoints(data),
-
-  cstring"CTRL+KeyS":      proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if not data.functions.update.isNil:
-      data.functions.update(data, false)
-    else:
-      data.saveFiles(data.services.editor.active),
-
-  cstring"CTRL+F5":     proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if not data.functions.toggleMode.isNil:
-      data.functions.toggleMode(data),
-
-  # `CTRL+KeyE` STOOD HERE, AND IT IS WHY ONE KEY RAN TWO DIFFERENT ACTIONS.
-  #
-  # Its doc comment said "mirror the Mousetrap shortcut so toggling works while
-  # Monaco has focus". The Mousetrap shortcut it mirrored — `ui_js.nim`'s
-  # `Mousetrap.bind("ctrl+e")` — was itself overwritten by the config loop that
-  # runs after it, so what this entry actually did was make `CTRL+E` mean
-  # something the global layer did not: measured on the assembled bundle,
-  # `CTRL+E` dispatched `switchEdit` outside the editor and toggled read-only
-  # inside it.
-  #
-  # THIS TABLE IS THE THIRD CLAIMANT AND THE INVISIBLE ONE. `conflictList` sees
-  # collisions between two YAML entries; `hardBoundChords` enumerates the
-  # `Mousetrap.bind` literals. Neither can see a chord claimed HERE, so a
-  # Monaco command that contradicts the config produces no warning anywhere.
-  #
-  # `CTRL+E` is now `aToggleReadOnly` in `default_config.yaml` and a member of
-  # `MONACO_SHORTCUTS_WHITELIST`, so the SECOND loop in `delegateShortcuts`
-  # registers the Monaco command from the config — same proc, one action, and
-  # the chord is rebindable and printable.
-
-  cstring"CTRL+F8": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if editor.hasTextFocus():
-      let line = editor.getLine()
-      e.editorLineJump(line, SmartJump),
-
-  # RUN TO CURSOR. `CTRL+F10` is Visual Studio's binding for it, and the whole
-  # F10 family is already the Step Over family here — `F10` step over,
-  # `SHIFT+F10` its reverse, `ALT+F10` step over statement — so the chord sits
-  # where a user looks for it and where nothing else is.
-  #
-  # THIS TABLE IS NOT THE YAML PATH. `commands` is delegated into Monaco
-  # directly by `delegateShortcuts` below, so entries here need no
-  # `MONACO_SHORTCUTS_WHITELIST` membership — that list gates the SECOND loop,
-  # the one that mirrors config-declared chords. `CTRL+F8`, the Smart jump,
-  # has always been bound this way; this is its forward sibling.
-  #
-  # The slot previously held a commented-out `co-next` (concurrent step over)
-  # sketch that had been dead since it was written.
-  cstring"CTRL+F10": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if editor.hasTextFocus():
-      let line = editor.getLine()
-      e.editorLineJump(line, ForwardJump),
-
-  cstring"CTRL+F11": proc(editor: MonacoEditor, e: EditorViewComponent) =
-    if editor.hasTextFocus():
-      let position = editor.getPosition()
-      let targetToken = editor.toJs.getModel().getWordAtPosition(position)
-
-      if not targetToken.isNil:
-        e.sourceCallJump(e.name, position.lineNumber, if not targetToken.word.isNil: cast[cstring](targetToken.word) else: cstring"", SmartJump)
-}
-
-for i in 1 .. 9:
-  capture [i]:
-    commands[cstring("CTRL+Digit" & $i)] = proc(editor: MonacoEditor, e: EditorViewComponent) =
-      discard data.ui.activeFocus.onCtrlNumber(i)
-
-proc delegateShortcuts*(self: EditorViewComponent, editor: MonacoEditor) =
-  cdebug "create context key"
-  console.log("SETTING READONLY")
+proc markEditorScope*(self: EditorViewComponent, editor: MonacoEditor) =
+  ## PLAT-68: the Monaco instance is the EDITOR element of the scope path
+  ## (`ui/key_router.desktopScopePath` reads it off the DOM focus chain), so
+  ## its keys resolve through the one router — Monaco's own `commands` table
+  ## and the config chords mirrored into it are gone, and every chord runs
+  ## once. Monaco's `readOnly` context key stays for its own contributions.
   self.readOnly = editor.toJs.createContextKey(cstring"readOnly", self.data.ui.readOnly)
-  for sh, command in commands:
-    cdebug "editor: delegate shortcut " & sh
-    self.delegateShortcut(sh, command, editor)
-
-  for action, shortcuts in data.config.shortcutMap.actionShortcuts:
-    for shortcut in shortcuts:
-      let editorShortcut = shortcut.editor
-      if editorShortcut notin MONACO_SHORTCUTS_WHITELIST:
-        cdebug "editor: ignoring, because not in monaco shortcuts whitelist: " & $editorShortcut
-        continue
-      cdebug "editor: delegate config monaco shortcut " & $editorShortcut
-      capture action, editorShortcut:
-        let command = proc(editor: MonacoEditor, e: EditorViewComponent) =
-          cdebug "editor: shortcuts: monaco handle " & $editorShortcut & " " & $action
-          data.actions[action](nil)
-        self.delegateShortcut(editorShortcut, command, editor)
+  # The editor element is the editor VIEW — the `.code-editor` container the
+  # click focuses (it is focusable, and a press on the read-only text lands
+  # its focus there), with Monaco inside it.
+  let node = editorScopeElement(editor)
+  if not node.isNil and not node.isUndefined:
+    discard node.setAttribute(cstring"data-scope-kind", cstring"editor")
+    discard node.setAttribute(cstring"data-scope-id", cstring("editor:" & $self.path))
 
 proc closeEditorTab*(data: Data, id: cstring) =
   cdebug "tabs: closeEditorTab " & $id
@@ -356,9 +351,9 @@ proc closeEditorTab*(data: Data, id: cstring) =
   # remove editor renderer instance (may already be absent if IsoNim-mounted)
   renderer.removeLegacyRendererInstanceByKey(id)
 
-  # Clean up the IsoNim mount tracking for this editor.
-  if isoNimEditorMountedIds.hasKey(editorId):
-    discard jsDelete(isoNimEditorMountedIds[editorId])
+  when defined(js):
+    if pendingEditorHosts.hasKey(editorId):
+      discard jsDelete(pendingEditorHosts[editorId])
 
   # add editor to closed tabs registry
   let header = EditorViewTabArgs(name: id, editorView: editor.editorView)
@@ -526,18 +521,13 @@ proc applyColumnBreakpointDecorations*(self: EditorViewComponent) =
   ## ``editorLineNumber`` in ``ui/trace.nim``.
   if self.monacoEditor.isNil:
     return
-  let debuggerService = self.data.services.debugger
-  if debuggerService.isNil:
-    self.columnBreakpointDecorations = self.monacoEditor.deltaDecorations(
-      self.columnBreakpointDecorations, @[])
-    return
-  let path = self.path
   var newDecorations: seq[DeltaDecoration] = @[]
-  if debuggerService.breakpointTable.hasKey(path):
+  # The session store's armed column breakpoints (`editor_points`).
+  let anchored = anchoredBreakpointsIn($self.path)
+  if anchored.len > 0:
     let textModel = self.monacoEditor.getModel()
-    for line, b in debuggerService.breakpointTable[path]:
-      if b.column <= 0 or not b.enabled:
-        continue
+    for b in anchored:
+      let line = b.line
       var column = b.column
       var endColumn = column + 1
       # Clamp to the actual line length so the marker never extends
@@ -569,12 +559,11 @@ proc setColumnBreakpoint*(
     tabInfo: TabInfo;
     line: int;
     column: int) =
-  ## M6 — invoke the column-aware breakpoint path on the underlying
-  ## ``DebuggerService`` and refresh the editor row so the gutter dot
-  ## and the new column-anchored decoration both render.
-  self.data.services.debugger.addColumnBreakpoint(tabInfo.name, line, column)
-  self.applyColumnBreakpointDecorations()
-  self.refreshEditorLine(line)
+  ## M6 — a breakpoint anchored at the column, through the session's one
+  ## breakpoint producer (`sdk/breakpoints`). The gutter dot and the
+  ## column-anchored decoration follow the store's rows
+  ## (`watchEditorPoints`).
+  setAnchoredBreakpoint(editorPointStore(), $tabInfo.name, line, column)
 
 
 proc lineActionClickAt*(
@@ -607,8 +596,7 @@ proc lineActionClickAt*(
   of ColumnAwareClick:
     self.setColumnBreakpoint(tabInfo, resolution.line, resolution.column)
   of GutterClick:
-    self.data.services.debugger.toggleBreakpoint(tabInfo.name, resolution.line)
-    self.refreshEditorLine(resolution.line)
+    toggleBreakpoint(editorPointStore(), $tabInfo.name, resolution.line)
 
 
 proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
@@ -621,8 +609,7 @@ proc lineActionClick(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
 
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    self.data.services.debugger.toggleBreakpoint(tabInfo.name, lineNumber)
-    self.refreshEditorLine(lineNumber)
+    toggleBreakpoint(editorPointStore(), $tabInfo.name, lineNumber)
 
 proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js) =
   # PLAT-50: THE PARENT'S DATASET IS READ AFTER MOVING TO IT, as
@@ -640,12 +627,55 @@ proc lineActionContextMenu(self: EditorViewComponent, tabInfo: TabInfo, line: js
     dataset = element.dataset
   if not dataset.line.isNil:
     let lineNumber = cast[cstring](dataset.line).parseJSInt()
-    let path = tabInfo.name
-    if self.data.services.debugger.isEnabled(path, lineNumber):
-      self.data.services.debugger.disable(path, lineNumber)
-    else:
-      self.data.services.debugger.enable(path, lineNumber)
-    self.refreshEditorLine(lineNumber)
+    let path = $tabInfo.name
+    let held = breakpointOn(path, lineNumber)
+    # An empty slot does nothing (`isGutterToggleTarget`): no row, no request.
+    if held.isSome:
+      discard setBreakpointEnabled(editorPointStore(), path, lineNumber,
+                                   not held.get.enabled)
+
+proc isGutterToggleTarget(target: js): bool =
+  ## Whether a right click on `target` is the gutter's enable / disable toggle
+  ## (`Editor-Pane.md`, "On the gutter", gesture 8, the glyph column's right
+  ## click): an element with a class starting with `gutter-breakpoint`, which
+  ## is the breakpoint's marker (`gutter-breakpoint-enabled` / `-disabled` /
+  ## `-error`, drawn by `trace.editorLineNumber`). An exact
+  ## `gutter-breakpoint` matched no element the gutter draws (PLAT-50).
+  ##
+  ## AND THE EMPTY SLOT, `gutter-no-breakpoint`. On a line with no breakpoint
+  ## `trace.editorLineNumber` draws this placeholder where the marker would
+  ## be (it is what shows the faint dot on hover), so it IS that line's glyph
+  ## column, and gesture 8 governs it too: "On a line without a breakpoint it
+  ## does nothing." Before it was matched here, a right click on it reached
+  ## Monaco's `onContextMenu` as an ordinary margin press and opened the
+  ## editor's menu (`gutter_right_click_menu.spec.ts`, step 6).
+  ##
+  ## Matching it gives "does nothing" from the two listeners as they are:
+  ## Monaco's menu stands down, and the container listener's
+  ## `lineActionContextMenu` changes nothing: with no breakpoint on the line
+  ## the store holds no row for it, so nothing is planned and nothing is sent.
+  ## The class is drawn only by `trace.editorLineNumber`, in the gutter, so no
+  ## surface where the menu should open carries it.
+  ##
+  ## NOT THE LINE NUMBER. `gutter-line` is the element holding the line's
+  ## number, and a right click on the line numbers opens the editor's menu for
+  ## that line (the same section, after its table). It used to toggle here as
+  ## well, so one press both toggled and opened a menu built before the
+  ## toggle: the defect this predicate exists to stop. The menu carries the
+  ## breakpoint entries, so nothing the toggle offered is lost there.
+  ##
+  ## ONE TEST FOR BOTH LISTENERS. The container's `contextmenu` listener
+  ## toggles on exactly these targets, and Monaco's `onContextMenu` must stand
+  ## down on exactly the same ones (see there). Two copies of the class test
+  ## could drift apart, and a target one of them matched and the other did
+  ## not would bring the stale menu back, or a press with no answer at all.
+  if target.isNil or target.classList.isNil:
+    return false
+  for element in cast[seq[cstring]](target.classList):
+    if cstrutils.startsWith(element, cstring"gutter-breakpoint") or
+        element == cstring"gutter-no-breakpoint":
+      return true
+  false
 
 method clear*(self: EditorViewComponent) =
   self.flow.clear()
@@ -659,11 +689,10 @@ func has(tab: TabInfo, instruction: Instruction, i: int, offset: int): bool =
     result = offset >= instruction.offset
 
 method position*(self: EditorViewComponent): int =
-  if self.data.services.debugger.frameInfo.hasSelected and
-    self.data.services.debugger.frameInfo.offset != NO_OFFSET:
-
+  let offset = editorStop().frameOffset
+  if offset >= 0 and offset != NO_OFFSET:
     for i, instruction in self.tabInfo.instructions.instructions:
-      if self.tabInfo.has(instruction, i, self.data.services.debugger.frameInfo.offset):
+      if self.tabInfo.has(instruction, i, offset):
         return i + 1
 
   return NO_OFFSET
@@ -672,39 +701,39 @@ proc colorLines(self: EditorViewComponent): seq[MonacoLineStyle] =
   var lines: seq[MonacoLineStyle] = @[]
   var tabInfo = self.tabInfo
 
+  # THE EXECUTION LINE IS THE SESSION'S (Shared-DOM-Front-Ends D7.4 (a)):
+  # the source view's is the editor surface's — the line the terminal and
+  # GPUI mark for the same position — and the C source, instruction and
+  # call views place it from the stop's whole location (`editorStop`).
+  let stop = editorStop()
   case self.editorView:
-  of ViewSource, ViewTargetSource:
-    var debuggerLine = NO_LINE
-    var debuggerPath = cstring""
-    if self.editorView == ViewSource:
-      debuggerLine = self.data.services.debugger.location.line
-      debuggerPath = self.data.services.debugger.location.path
+  of ViewSource:
+    if stop.isExpanded:
+      if stop.line > 0 and cstring(stop.path) == tabInfo.name:
+        # e.g. 2 - 1 + 1 -> 2. 2 - 2 + 1 -> 1
+        let line = stop.line - stop.expansionFirstLine + 1
+        lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
     else:
-      debuggerLine = self.data.services.debugger.cLocation.line
-      debuggerPath = self.data.services.debugger.cLocation.path
+      let line = webEditorSurface($tabInfo.name, 1, 0, nil).executionLine
+      if line > 0:
+        lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
 
-    if debuggerLine != NO_LINE and debuggerPath == tabInfo.name:
-      let line = if not self.data.services.debugger.location.isExpanded:
-        debuggerLine
-      else:
-        self.data.services.debugger.location.line - self.data.services.debugger.location.expansionFirstLine + 1 # e.g. 2 - 1 + 1 -> 2. 2 - 2 + 1 -> 1
-      lines.add(MonacoLineStyle(line: line, class: cstring(fmt"on on-{line}")))
+  of ViewTargetSource:
+    if stop.cLine > 0 and cstring(stop.cPath) == tabInfo.name:
+      lines.add(MonacoLineStyle(line: stop.cLine, class: cstring(fmt"on on-{stop.cLine}")))
 
   of ViewInstructions:
-    cdebug "editor: asmName " & self.data.services.debugger.location.asmName
-    cdebug "editor: instructions name " & self.name
-    if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo} and self.data.services.debugger.location.asmName == self.name or
-       self.data.trace.lang == LangNim and self.data.services.debugger.cLocation.asmName == self.name:
+    if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo} and cstring(stop.asmName) == self.name or
+       self.data.trace.lang == LangNim and cstring(stop.cAsmName) == self.name:
       var position = self.position()
       if position != NO_POSITION:
         lines.add(MonacoLineStyle(line: position, class: cstring(fmt"on on-{position}")))
 
   of ViewCalltrace:
-      let currentLocation = self.data.services.debugger.location
-      let currentLocationName = currentLocation.path & cstring":" & currentLocation.functionName & cstring"-" & currentLocation.key
+      let currentLocationName = cstring(stop.path & ":" & stop.functionName & "-" & stop.key)
       if currentLocationName == self.name:
-        if currentLocation.line != NO_LINE and currentLocation.line in currentLocation.functionFirst .. currentLocation.functionLast:
-          lines.add(MonacoLineStyle(line: currentLocation.line - currentLocation.functionFirst + 1, class: cstring"on"))
+        if stop.line > 0 and stop.line in stop.functionFirst .. stop.functionLast:
+          lines.add(MonacoLineStyle(line: stop.line - stop.functionFirst + 1, class: cstring"on"))
 
   else:
     discard
@@ -722,13 +751,13 @@ proc flowStyleLines(self: EditorViewComponent, conditionFlowLines: seq[MonacoLin
   var lines: seq[MonacoLineStyle] = @[]
   var flow = self.flow
 
-  if not flow.isNil and not flow.flow.isNil and not self.flowUpdate.isNil:
+  if not flow.isNil and not flow.flow.isNil:
     # The per-line decision lives in `ui/flow_line_styles.nim` so it can be
     # unit-tested headlessly, and so the guard it carries is shared with every
     # other reader of `branchesTaken`. Before RV-5 this loop indexed
     # `branchesTaken[0][0]` with no bounds check — a latent `IndexDefect` that
     # aborted the whole of `applyEventualStylesLines`.
-    for styled in flowStyledLines(flow.flow, self.flowUpdate.finished):
+    for styled in flowStyledLinesOf(flow.flow[], flow.flow.finished):
       if isLineStyleSet(conditionFlowLines, styled.position):
         lines.add(MonacoLineStyle(
           line: styled.position,
@@ -847,9 +876,14 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   if not flow.isNil and not flow.flow.isNil and
      loopId >= 0 and loopId < flow.flow.branchesTaken.len and
      loopIteration >= 0 and loopIteration < flow.flow.branchesTaken[loopId].len:
+    # The flow model keeps a branch's state as `BranchState`'s ordinal.
     let branchTable = flow.flow.branchesTaken[loopId][loopIteration].table
-    if not branchTable.isNil:
-      for position, typ in branchTable:
+    if branchTable.len > 0:
+      for position, state in branchTable:
+        let typ =
+          if state >= ord(low(BranchState)) and state <= ord(high(BranchState)):
+            BranchState(state)
+          else: Unknown
         if (position >= flow.flow.location.functionFirst and position <= flow.flow.location.functionLast) or
           (flow.flow.location.functionFirst == -1 and flow.flow.location.functionLast == -1):
           case typ:
@@ -895,8 +929,8 @@ proc conditionToLine(self: EditorViewComponent, loopId: int, loopIteration: int)
   lines
 
 proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
-  let currentPosition = self.data.services.debugger.location.highLevelLine
-  let currentRRTicks = self.data.services.debugger.location.rrTicks
+  let currentPosition = editorStop().highLevelLine
+  let currentRRTicks = int(editorStop().rrTicks)
   let flow = self.flow
   var lines: seq[MonacoLineStyle] = @[]
 
@@ -929,12 +963,12 @@ proc conditionStyleLines(self: EditorViewComponent): seq[MonacoLineStyle] =
     if currentStepCount != NO_STEP_COUNT:
       for flowLoop in flow.flowLoops:
         var currentLoopStep = flowLoop.loopStep
-        if currentLoopStep.loop >= 0 and currentLoopStep.loop < flow.flow.loops.len:
-          var loop = flow.flow.loops[currentLoopStep.loop]
+        if currentLoopStep.loopIndex >= 0 and currentLoopStep.loopIndex < flow.flow.loops.len:
+          var loop = flow.flow.loops[currentLoopStep.loopIndex]
           var closestStep = self.flow.getClosestIterationStepCount(loop, currentLoopStep.stepCount)
           if closestStep >= 0 and closestStep < flow.flow.steps.len:
             var step = flow.flow.steps[closestStep]
-            lines.add(self.conditionToLine(step.loop, step.iteration))
+            lines.add(self.conditionToLine(step.loopIndex, step.iteration))
 
   lines
 
@@ -1162,9 +1196,6 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
     discard self.onCompleteMove(response)
   )
-  api.subscribe(CtUpdatedFlow, proc(kind: CtEventKind, response: FlowUpdate, sub: Subscriber) =
-    discard self.onUpdatedFlow(response)
-  )
   # Value Origin Tracking (M4) — keep the editor's `activeOriginHopLines`
   # in sync with the active chain so `originHopStyleLines` returns
   # non-empty when a chain is live (spec §8.1 editor decorations).
@@ -1174,8 +1205,6 @@ method register*(self: EditorViewComponent, api: MediatorWithSubscribers) =
   api.emit(InternalLastCompleteMove, EmptyArg())
   self.scheduleInitialFlowLoad()
 
-proc registerEditorViewComponent*(component: EditorViewComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
 
 proc sourceLineJump(self: EditorViewComponent, path: cstring, line: int, behaviour: JumpBehaviour) =
   self.api.emit(
@@ -1248,7 +1277,7 @@ proc getTokenFromPosition(self: EditorViewComponent, position: js): cstring =
 
     result = if not currentWord.word.isNil: cast[cstring](currentWord.word) else: cstring""
 
-    let lang = fromPath(self.data.services.debugger.location.path)
+    let lang = fromPath(cstring(editorStop().path))
 
     if lang == LangRust:
       let xidRegex = newRegExp(r"^\w$")
@@ -1544,6 +1573,33 @@ proc clipboardItems(self: EditorViewComponent;
       result.add ContextMenuItem(name: "Paste", hint: "",
         handler: proc(e: Event) = monacoClipboardPaste(self.monacoEditor.toJs))
 
+proc generatedTargetHandler(path: cstring; line: int; targetId: string;
+    openTarget: proc(path: cstring; line: int; targetId: string)): proc(e: Event) =
+  # Factory parameters belong to this target, even after the menu loop ends.
+  result = proc(e: Event) = openTarget(path, line, targetId)
+
+proc generatedCodeMenuItems*(commands: seq[TargetCommand]; path: cstring; line: int;
+    openTarget: proc(path: cstring; line: int; targetId: string)): seq[ContextMenuItem] =
+  ## Build the target entries with the same cursor position used by the editor.
+  for command in commands:
+    if command.availability == gaDisabled:
+      result.add ContextMenuItem(
+        name: commandLabel(command.target),
+        hint: "",
+        handler: proc(e: Event) = discard,
+        disabled: true,
+        disabledReason: command.reason)
+    elif command.availability == gaEnabled:
+      result.add ContextMenuItem(
+        name: commandLabel(command.target),
+        hint: "shows what the line under the cursor compiled to",
+        # THE CURSOR IS THE ARGUMENT. GCL-D10: the operation takes a
+        # position, not a project — a listing opened over a whole project
+        # has no anchor to place the reader at, and its entry names are
+        # the compiler's rather than the developer's.
+        handler: generatedTargetHandler(path, line, command.target.id, openTarget))
+
+
 # Fill contextMenu with ContextMenuItem variables and return it to be used in the context menu
 proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuItem] =
   # Editor context menu items
@@ -1665,27 +1721,9 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # because there is nothing to explain. A target that exists and cannot be
     # produced is the disabled case, and it carries the build proposal's own
     # sentence (GCL-D17).
-    for command in generatedCodeCommandsAt(path):
-      let targetId = command.target.id
-      let capturedPath = path
-      let capturedLine = line
-      if command.availability == gaDisabled:
-        contextMenu &= ContextMenuItem(
-          name: commandLabel(command.target),
-          hint: "",
-          handler: proc(e: Event) = discard,
-          disabled: true,
-          disabledReason: command.reason)
-      elif command.availability == gaEnabled:
-        contextMenu &= ContextMenuItem(
-          name: commandLabel(command.target),
-          hint: "shows what the line under the cursor compiled to",
-          handler: proc(e: Event) =
-            # THE CURSOR IS THE ARGUMENT. GCL-D10: the operation takes a
-            # position, not a project — a listing opened over a whole project
-            # has no anchor to place the reader at, and its entry names are
-            # the compiler's rather than the developer's.
-            showGeneratedCode(self.data, capturedPath, capturedLine, targetId))
+    contextMenu.add generatedCodeMenuItems(generatedCodeCommandsAt(path), path, line,
+      proc(targetPath: cstring; targetLine: int; targetId: string) =
+        showGeneratedCode(self.data, targetPath, targetLine, targetId))
 
     try:
       targetToken = self.getTokenFromPosition(ev.target.position)
@@ -1787,30 +1825,28 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # beside it.
     #
     # Delete/Add Breakpoint Menu Item
-    if data.services.debugger.hasBreakpoint(path, line):
+    let held = breakpointOn($path, line)
+    if held.isSome:
       toggleBreakpoint = ContextMenuItem(
         name: "Delete breakpoint",
         hint: "<click on the red dot>",
         handler: proc(e: Event) =
-          self.data.services.debugger.deleteBreakpoint(path, line)
-          self.refreshEditorLine(line)
+          discard deleteBreakpoint(editorPointStore(), $path, line)
       )
       # Enable/Disable Breakpoint
-      if data.services.debugger.isEnabled(path, line):
+      if held.get.enabled:
         toggleBreakpointState = ContextMenuItem(
           name: "Disable breakpoint",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.disable(path, line)
-            self.refreshEditorLine(line)
+            discard setBreakpointEnabled(editorPointStore(), $path, line, false)
         )
       else:
         toggleBreakpointState = ContextMenuItem(
           name: "Enable breakpoint",
           hint: "",
           handler: proc(e: Event) =
-            data.services.debugger.enable(path, line)
-            self.refreshEditorLine(line)
+            discard setBreakpointEnabled(editorPointStore(), $path, line, true)
         )
 
       contextMenu &= toggleBreakpointState
@@ -1821,47 +1857,31 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
         name: "Add breakpoint",
         hint: "<click line number gutter>",
         handler: proc(e: Event) =
-          data.services.debugger.addBreakpoint(path, line)
-          self.refreshEditorLine(line)
+          toggleBreakpoint(editorPointStore(), $path, line)
       )
 
     contextMenu &= toggleBreakpoint
 
-    # Delete Breakpoints in file
-    #
-    # "IN FILE" IS NOW TRUE OF BOTH HALVES OF THIS ENTRY.  It used to be true
-    # of neither: the row appeared whenever the PROJECT held a breakpoint, and
-    # its handler walked every breakpoint in the project passing `path` — this
-    # file's path — to `deleteBreakpoint`, so a breakpoint at line 40 of
-    # another file deleted whatever this file had at line 40 and left the other
-    # one standing.  It also called `pointList.breakpoints.delete(i, i)` while
-    # walking indices taken from a copy of that same seq, so after the first
-    # removal every index was off by one.
-    let breakpointsInFile = data.pointList.breakpoints.filterIt(it.path == path)
-    if breakpointsInFile.len > 0:
+    # Delete Breakpoints in file: offered when THIS file holds one, and it
+    # deletes this file's breakpoints only.
+    if breakpointsInFile($path).len > 0:
       deleteBreakpoints = ContextMenuItem(
         name: "Delete breakpoints in file",
         hint: "",
+        # One `setBreakpoints` with none for this file (`clearBreakpoints`).
         handler: proc(e: Event) =
-          # `deleteBreakpoint` maintains `pointList.breakpoints` itself, so the
-          # lines are collected FIRST and this loop never mutates what it reads.
-          for b in data.pointList.breakpoints.filterIt(it.path == path):
-            data.services.debugger.deleteBreakpoint(path, b.line)
-            self.refreshEditorLine(b.line)
+          clearBreakpoints(editorPointStore(), $path)
       )
 
       contextMenu &= deleteBreakpoints
 
     # Delete ALL Breakpoints in project
-    if data.pointList.breakpoints.len > 0:
+    if anyBreakpoints():
       deleteAllBreakpoints = ContextMenuItem(
         name: "Delete ALL breakpoints",
         hint: "",
-        # `deleteAllBreakpoints` empties `pointList.breakpoints` itself now, so
-        # the assignment that used to be here was masking the index corruption
-        # inside it rather than finishing its work.
         handler: proc(e: Event) =
-          data.services.debugger.deleteAllBreakpoints(self)
+          clearBreakpoints(editorPointStore())
       )
 
       contextMenu &= deleteAllBreakpoints
@@ -1869,8 +1889,8 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
     # TRACEPOINTS AND THE SCRATCHPAD ARE DEBUG-ONLY, and unlike breakpoints
     # they are not project state.  A tracepoint is an expression evaluated
     # against a recorded trace (`toggleTrace` -> `updateExpansion`), and
-    # "Add value to scratchpad" reads `services.debugger.locals`, which is the
-    # frame the session is stopped in.  Neither has any referent before a
+    # "Add value to scratchpad" values the name at the stop the session is
+    # in (`editor_points.valueInScope`).  Neither has any referent before a
     # recording exists, so neither is offered — a disabled "Add tracepoint"
     # would be a row about debugging in a menu that is meant to be about
     # editing.
@@ -1915,34 +1935,17 @@ proc createContextMenuItems(self: EditorViewComponent, ev: js): seq[ContextMenuI
 
       contextMenu &= addDeleteTracepoint
 
-      # Add expression to Scratchpad
-      let key = &"{self.path}:{self.lastMouseMoveLine}"
-
-      if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-        for item in data.services.debugger.expressionMap[key]:
-          let startCol = cast[int](item.startCol)
-          var endCol = cast[int](item.endCol)
-          var expression: cstring
-          case item.kind:
-          of TkField:
-            expression = item.base
-
-          of TkIndex:
-            expression = item.collection
-            endCol -= 2
-
-          else:
-            expression = item.expression
-
-          if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-            for local in data.services.debugger.locals:
-              if local.expression == expression:
-                let baseValue = local.value
-                addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
-                  self.api.openValueInScratchpad(ValueWithExpression(expression: expression, value: baseValue))
-                  self.data.redraw())
-                contextMenu &= addToScratchpad
-            break
+      # Add the clicked name's value to the Scratchpad: the name under the
+      # pointer, valued at the stop by the session (`valueInScope`).
+      let clickedName = self.nameAt(self.lastMouseMoveLine, self.lastMouseClickCol)
+      let clickedValue = valueInScope(clickedName)
+      if clickedValue.isSome:
+        let name = clickedName
+        let valueText = clickedValue.get
+        addToScratchpad = ContextMenuItem(name: "Add value to scratchpad", hint: "", handler: proc(e: Event) =
+          discard editor_points.addToScratchpad(name, valueText)
+          self.data.redraw())
+        contextMenu &= addToScratchpad
   else:
     # NO MODE GATE HERE, and it is not an oversight.  This arm is reached only
     # when the right-click landed inside a tracepoint's results table
@@ -2156,89 +2159,47 @@ proc getSourceLineDomIndex(self:EditorViewComponent, position: int): int =
 
   return result
 
-proc legacyValueViewZoneDom(self: EditorViewComponent, value: ValueComponent): Node =
-  ## DOM entrypoint for inline Monaco value view zones.
-  ##
-  ## The value module owns the remaining value-tree DOM materialization.  Editor
-  ## only supplies the legacy root-left style required by Monaco view zones.
-  value.renderValueDomWithLeft(&"{self.currentTooltip[0] * 9}px")
+proc valueTooltipDom(name, valueText: string; column: int): Node =
+  ## The value of a clicked name, as a row under its line: `name = value`,
+  ## indented to the name's column.
+  let row = document.createElement(cstring"div")
+  row.class = cstring"ct-editor-value-tooltip"
+  row.style.paddingLeft = cstring(&"{max(0, column - 1) * 9}px")
+  let nameSpan = document.createElement(cstring"span")
+  nameSpan.class = cstring"value-name"
+  nameSpan.textContent = cstring(name & " = ")
+  let valueSpan = document.createElement(cstring"span")
+  valueSpan.class = cstring"value-expanded-text"
+  valueSpan.textContent = cstring(valueText)
+  row.appendChild(nameSpan)
+  row.appendChild(valueSpan)
+  cast[Node](row)
 
-proc addLegacyValueViewZone(self: EditorViewComponent, value: ValueComponent, line: int) =
+proc renderValueTooltip(self: EditorViewComponent) =
+  ## Editor-Pane.md gesture 5: a plain click on a name shows its value at
+  ## the stop, in a row under the clicked line. The name is the word Monaco
+  ## finds at the click; its value is the session's (`valueInScope`), the
+  ## values every front-end shows. A click on anything with no value in
+  ## scope shows nothing.
+  if self.monacoEditor.isNil:
+    return
+  self.currentTooltip = (0, 0, 0)
+  if not self.viewZones.isNil:
+    self.clearViewZones()
+  let name = self.nameAt(self.lastMouseClickLine, self.lastMouseClickCol)
+  let value = valueInScope(name)
+  if value.isNone:
+    return
+  let line = self.lastMouseClickLine
+  self.currentTooltip = (self.lastMouseClickCol, self.lastMouseClickCol, line)
   let viewZone = js{
     afterLineNumber: line,
-    heightInPx: 0,
-    domNode: self.legacyValueViewZoneDom(value)
+    heightInLines: 1,
+    domNode: valueTooltipDom(name, value.get, self.lastMouseClickCol)
   }
-
   self.monacoEditor.changeViewZones do (view: js):
     var zoneId = cast[int](view.addZone(viewZone))
     self.viewZones[line] = zoneId
-
-proc renderValueView(self: EditorViewComponent, value: ValueComponent, line: int) =
-  self.addLegacyValueViewZone(value, line)
-
-proc customRedraw(self: ValueComponent) =
-  let editor = data.ui.editors[data.services.debugger.location.path]
-  var line = editor.lastMouseClickLine
-
-  editor.clearViewZones()
-  editor.addLegacyValueViewZone(self, line)
-
-proc renderValueTooltip(self: EditorViewComponent) {.async.} =
-  let key = &"{self.path}:{self.lastMouseClickLine}"
-
-  self.currentTooltip = (0, 0, 0)
-
-  if not data.services.debugger.expressionMap.isNil and data.services.debugger.expressionMap.hasKey(key):
-    self.clearViewZones()
-    if self.data.services.debugger.showInlineValues:
-      for item in data.services.debugger.expressionMap[key]:
-        let startCol = cast[int](item.startCol)
-        var endCol = cast[int](item.endCol)
-        var expression: cstring
-        case item.kind:
-        of TkField:
-          expression = item.expression
-
-        of TkIndex:
-          expression = item.collection
-          endCol -= 2
-
-        else:
-          expression = item.expression
-
-        if startCol <= self.lastMouseClickCol and self.lastMouseClickCol <= endCol:
-          var baseValue: Value
-
-          for local in self.data.services.debugger.locals:
-            if local.expression == expression:
-              baseValue = local.value
-              break
-
-          if baseValue.isNil:
-            baseValue = await self.data.services.debugger.evaluateExpression(self.data.services.debugger.location.rrTicks, item.expression)
-
-          if not baseValue.isNil:
-            let value = ValueComponent(
-              expanded: JsAssoc[cstring, bool]{expression: false},
-              charts: JsAssoc[cstring, ChartComponent]{},
-              showInLine: JsAssoc[cstring, bool]{},
-              baseExpression: expression,
-              baseValue: baseValue,
-              stateID: -1,
-              nameWidth: VALUE_COMPONENT_NAME_WIDTH,
-              valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
-              data: data,
-              customRedraw: customRedraw
-            )
-            self.currentTooltip = (startCol, endCol, self.lastMouseClickLine)
-            if not self.viewZones.isNil:
-              self.clearViewZones()
-            self.renderValueView(value, self.lastMouseClickLine)
-            break
-
-  elif not self.monacoEditor.isNil:
-    self.clearViewZones()
 
 const DELAY: int64 = 400 # milliseconds
 
@@ -2263,7 +2224,12 @@ proc sourceOrCallJump(self: EditorViewComponent, position: js) =
 
   self.lastScrollFireTime = currentTime
 
-proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Location) =
+proc adoptFlowWindows*(self: EditorViewComponent,
+                       windows: seq[FlowLayoutWindow])
+
+proc loadFlow*(self: EditorViewComponent, location: types.Location) =
+  ## Give this editor a fresh inline-flow component for the stop at
+  ## `location`.
   # # possible to test/debug diff flow TEMP HACK:
   # if flowMode != FlowMode.Diff:
   #  return
@@ -2306,7 +2272,7 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     shouldRecalcFlow: false,
     flowLoops: JsAssoc[int, FlowLoop]{},
     flowLines: JsAssoc[int, FlowLine]{},
-    activeStep: FlowStep(rrTicks: -1),
+    activeStep: FlowLayoutStep(rrTicks: -1),
     selectedLine: -1,
     selectedLineInGroup: -1,
     selectedStepCount: -1,
@@ -2314,7 +2280,6 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
     loopLineSteps: JsAssoc[int, int]{},
     inlineDecorations: JsAssoc[int, InlineDecorations]{},
     editorUI: self,
-    scratchpadUI: if self.data.ui.componentMapping[Content.Scratchpad].len > 0: self.data.scratchpadComponent(0) else: nil,
     editor: self.service,
     service: self.data.services.flow,
     data: self.data,
@@ -2348,12 +2313,21 @@ proc loadFlow*(self: EditorViewComponent, flowMode: FlowMode, location: types.Lo
   )
   self.flow.valueMode = BeforeValueMode
 
-  let taskId = genTaskId(LoadFlow)
-  self.api.emit(CtLoadFlow, CtLoadFlowArguments(flowMode: flowMode, location: location))
-  cdebug "start load-flow", taskId
+  # The window itself is loaded per stop by the session's stop loader
+  # (`spFlow`) and reaches this component through `watchSessionFlowWindows`.
+  # If the session already holds the window of this stop — the loader's
+  # answer arrived before the editor built this component — it is drawn now.
+  let windows = sessionFlowWindows()
+  if windows.len > 0 and windows[0].rrTicks == location.rrTicks:
+    self.adoptFlowWindows(windows)
 
 proc createMonacoEditor*(selector: cstring, options: MonacoEditorOptions): MonacoEditor =
   result = monaco.editor.create(jq(selector), options)
+
+proc createMonacoEditorIn(host: JsObject; options: MonacoEditorOptions): MonacoEditor
+  {.importjs: "monaco.editor.create(#, #)".}
+  ## Monaco on `host` itself: the element need not be in the document yet —
+  ## with `automaticLayout` the editor sizes itself once it is laid out.
 
 proc updateMonacoGutterWidth(editor: MonacoEditor, fontSize: int) =
   let options = cast[MonacoEditorOptions](editor.getOptions())
@@ -2380,7 +2354,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
 
   zoneDom.appendChild(editorDom)
 
-  var lang = fromPath(self.data.services.debugger.location.path)
+  var lang = fromPath(cstring(editorStop().path))
   let theme = monacoThemeName(self.data.config.theme)
   if not self.diffEditors.hasKey(lineNumber):
     discard setTimeout(proc () =
@@ -2389,7 +2363,7 @@ proc drawDiffViewZones(self: EditorViewComponent, source: cstring, id: int, line
         MonacoEditorOptions(
           value: source,
           language: cstring(editorLanguageForPath(
-            $self.data.services.debugger.location.path, lang.toCLang())),
+            editorStop().path, lang.toCLang())),
           readOnly: true,
           theme: theme,
           automaticLayout: true,
@@ -2827,12 +2801,10 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
 
   let refusal = editorTestRunHook(self.name, selector, attrLine)
   if refusal.len > 0:
-    # UNWIND WHAT THIS CLICK ARMED. When nothing was running, that is the whole
-    # of it — `settle` rather than `restoreTestButton` because the list must be
-    # emptied too, and emptying it is what `restoreTestButton` alone does not
-    # do. When a run WAS in flight, its slot and its place in the list are put
-    # back instead, so the refusal costs the user a sentence and not the
-    # progress they were already watching.
+    # Unwind only this click. Another editor can still own an accepted run,
+    # so a refusal must never call the global settle. Restore this editor
+    # and remove only the membership this click added; preserve any earlier
+    # slot and spinner instead.
     if hadRunningSlot:
       trace.gutterRunningTest[self.name] = previousSlot
       self.updateLineNumbersOnly()
@@ -2840,7 +2812,8 @@ proc runTestFromGutter(self: EditorViewComponent; attrLine: int) =
       trace.gutterRunningTest.del(self.name)
       self.updateLineNumbersOnly()
     else:
-      settleEditorTestRun()
+      self.restoreTestButton(cstring"Run test")
+      rollbackRunSpinner(spinningTestEditors, self, wasSpinning)
     self.api.errorMessage($refusal)
     return
 
@@ -2894,17 +2867,62 @@ proc makeTestAction(self: EditorViewComponent, line: int, isPythonTest: bool = f
       return
 
     if not editorTestRunHook.isNil:
-      # A HOST TOOK IT, or said why it could not. Either way the button never
-      # starts animating over a message that went nowhere.
-      let refusal = editorTestRunHook(self.name, selector, line)
-      if refusal.len > 0:
-        self.api.errorMessage($refusal)
-        return
+      # ARM THE SPINNER BEFORE THE DISPATCH, for exactly the reason
+      # `runTestFromGutter` does — see the long note there. This arm carried
+      # the PRE-FIX ordering: it called the hook first and armed afterwards,
+      # so a dispatch refused SYNCHRONOUSLY INSIDE the hook settled while
+      # `spinningTestEditors` was still empty and `activeTestId` still unset,
+      # swept nothing, and then these lines armed an animation no second
+      # settle would ever arrive to clear. `loadAnimation`'s 400-frame cap was
+      # the only thing that ended it: two minutes of "Running..." under a
+      # `"<selector>" started` message, over a run that was declined before
+      # the click finished.
+      #
+      # The gutter was repaired; this widget is still painted whenever an
+      # editor has a `#[test]` or a Python test and no catalog entry for that
+      # line, and `editorTestRunHook` is installed globally, so the defect was
+      # live on the surviving arm.
+      #
+      # WHAT WAS THERE BEFORE IS REMEMBERED so the unwind puts back exactly
+      # what this click displaced: the commonest refusal is `already-running`,
+      # where a real run owns the spinner and a blanket settle would visibly
+      # "finish" it.
+      let wasSpinning = spinningTestEditors.find(self) >= 0
+      let previousTestId = self.activeTestId
       capture testId:
         self.activeTestId = testId
-        self.redrawActiveTestButton()
-      if spinningTestEditors.find(self) < 0:
+        # The accepted run already owns its animation when this is the same
+        # button. Re-arming it would create a second timer chain.
+        if not wasSpinning or previousTestId != testId:
+          self.redrawActiveTestButton()
+      if not wasSpinning:
         spinningTestEditors.add(self)
+
+      let refusal = editorTestRunHook(self.name, selector, line)
+      if refusal.len > 0:
+        # UNWIND WHAT THIS CLICK ARMED, and no more.
+        if wasSpinning:
+          if self.activeTestId != previousTestId:
+            # Undo only the newly clicked node. restoreTestButton would also
+            # clear the gutter owned by the accepted run in this editor.
+            let declinedButton = cast[Element](jq("#" & self.activeTestId))
+            if not declinedButton.isNil:
+              declinedButton.classList.remove(cstring"active-test-button")
+              declinedButton.textContent = cstring"Run test"
+          # Its existing timer resumes once this synchronous click returns.
+          self.activeTestId = previousTestId
+        else:
+          self.restoreTestButton(cstring"Run test")
+          rollbackRunSpinner(spinningTestEditors, self, wasSpinning)
+        self.api.errorMessage($refusal)
+        return
+
+      # ALREADY SETTLED, INSIDE THE CALL. The dispatch was refused or answered
+      # synchronously and the settle has already emptied the list. Nothing is
+      # running, so "started" is not claimed and no animation is left behind.
+      if spinningTestEditors.find(self) < 0:
+        return
+
       self.api.infoMessage(&"\"{selector}\" started")
       return
 
@@ -2926,7 +2944,7 @@ proc makeFlowLine(self: EditorViewComponent, position: int): FlowLine =
     ),
     number: position,
     variablesPositions: JsAssoc[cstring, int]{},
-    sortedVariables: JsAssoc[cstring, Value]{},
+    sortedVariables: JsAssoc[cstring, FlowValueText]{},
     decorationsIds: @[],
     decorationsDoms: JsAssoc[cstring, Node]{},
     stepLoopCells: JsAssoc[int, JsAssoc[int, Node]]{},
@@ -3062,7 +3080,7 @@ proc loadPendingFlowIfReady(self: EditorViewComponent): bool =
       self.tabInfo.location
   if flowLocation.line <= 0:
     return false
-  self.loadFlow(FlowMode.Call, flowLocation)
+  self.loadFlow(flowLocation)
   self.shouldLoadFlow = false
   self.hasPendingFlowLocation = false
   true
@@ -3160,9 +3178,17 @@ proc eventFlowLocationForEditor(
   ))
 
 proc initialDebuggerFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
-  if self.data.isNil or self.data.services.isNil or self.data.services.debugger.isNil:
+  ## The stop the session is at, as the flow's first location.
+  let stop = editorStop()
+  if stop.path.len == 0:
     return
-  self.usableInitialFlowLocation(self.data.services.debugger.location)
+  self.usableInitialFlowLocation(types.Location(
+    path: cstring(stop.path), line: stop.line,
+    highLevelPath: cstring(stop.path), highLevelLine: stop.highLevelLine,
+    functionName: cstring(stop.functionName), key: cstring(stop.key),
+    functionFirst: stop.functionFirst, functionLast: stop.functionLast,
+    rrTicks: int(stop.rrTicks), isExpanded: stop.isExpanded,
+    expansionFirstLine: stop.expansionFirstLine))
 
 proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   if self.service.isNil:
@@ -3181,26 +3207,25 @@ proc initialCachedMoveFlowLocation(self: EditorViewComponent): tuple[found: bool
     if location.found:
       return location
 
-proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
-  if self.data.isNil or self.data.ui.isNil:
-    return
-  if self.data.ui.componentMapping[Content.Calltrace].len == 0:
-    return
+from isonim/core/signals import val
 
-  for _, component in self.data.ui.componentMapping[Content.Calltrace]:
-    let calltrace = CalltraceComponent(component)
-    if calltrace.isNil:
-      continue
-    for callLine in calltrace.callLines:
-      if callLine.isNil or callLine.content.isNil:
-        continue
-      if callLine.content.kind != CallLineContentKind.Call or callLine.content.call.isNil:
-        continue
-      let location = callLine.content.call.location
-      let usableLocation = self.usableInitialFlowLocation(location)
-      if usableLocation.found:
-        if usableLocation.location.rrTicks > 0:
-          return usableLocation
+proc initialCalltraceFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
+  ## The first call of the section the session's store holds whose location
+  ## the flow can use (the call-trace pane renders the same lines).
+  let session = panelSession()
+  if session.isNil or session.store.isNil:
+    return
+  for line in session.store.calltrace.lines.val:
+    let location = types.Location(
+      path: cstring(line.location.file), line: line.location.line,
+      highLevelPath: cstring(line.location.file),
+      highLevelLine: line.location.line,
+      rrTicks: int(line.rrTicks),
+      sourceGeneration: line.location.sourceGeneration,
+      sourceDigest: cstring(line.location.sourceDigest))
+    let usableLocation = self.usableInitialFlowLocation(location)
+    if usableLocation.found and usableLocation.location.rrTicks > 0:
+      return usableLocation
 
 proc initialEventLogFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   if self.data.isNil:
@@ -3212,15 +3237,20 @@ proc initialEventLogFlowLocation(self: EditorViewComponent): tuple[found: bool, 
       if location.found:
         return location
 
-  if not self.data.ui.isNil:
-    for _, component in self.data.ui.componentMapping[Content.EventLog]:
-      let eventLog = EventLogComponent(component)
-      if eventLog.isNil:
-        continue
-      for event in eventLog.programEvents:
-        let location = self.eventFlowLocationForEditor(event)
-        if location.found:
-          return location
+  # The rows the Event Log holds: the session's store, which its pane renders.
+  let session = panelSession()
+  if not session.isNil and not session.store.isNil:
+    for row in session.store.eventLog.rows.val:
+      let event = ProgramEvent(
+        highLevelPath: cstring(row.file),
+        highLevelLine: row.line,
+        rrEventId: int(row.eventId),
+        directLocationRRTicks: int(row.rrTicks),
+        sourceGeneration: row.sourceGeneration,
+        sourceDigest: cstring(row.sourceDigest))
+      let location = self.eventFlowLocationForEditor(event)
+      if location.found:
+        return location
 
 proc initialFlowLocation(self: EditorViewComponent): tuple[found: bool, location: types.Location] =
   let tabLocation = self.usableInitialFlowLocation(self.tabInfo.location)
@@ -3257,7 +3287,7 @@ proc loadInitialFlowIfReady(self: EditorViewComponent): bool =
   if not initialLocation.found:
     return false
 
-  self.loadFlow(FlowMode.Call, initialLocation.location)
+  self.loadFlow(initialLocation.location)
   true
 
 proc scheduleInitialFlowLoad(self: EditorViewComponent) =
@@ -3312,8 +3342,8 @@ proc scheduleInitialFlowLoad(self: EditorViewComponent) =
 # IsoNim primary rendering — Monaco init and after-redraw extracted procs
 # ---------------------------------------------------------------------------
 
-proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
-  ## Initialise Monaco Editor inside the container identified by `selector`.
+proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
+  ## Initialise Monaco Editor inside `host`.
   ## Shared by the top-level and expanded direct IsoNim editor mount paths.
   ## Runs only once — guarded by `tabInfo.monacoEditor.isNil`.
   var tabInfo = self.tabInfo
@@ -3353,8 +3383,8 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
 
     cdebug lang
 
-    tabInfo.monacoEditor = createMonacoEditor(
-      selector,
+    tabInfo.monacoEditor = createMonacoEditorIn(
+      host,
       MonacoEditorOptions(
         value: tabInfo.source,
         language: cstring(editorLanguageForPath($path, lang.toCLang())),
@@ -3395,10 +3425,7 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
       if self.monacoEditor notin self.data.ui.monacoEditors:
         self.data.ui.monacoEditors.add(self.monacoEditor)
       registerLspEditor(self)
-      try:
-        self.delegateShortcuts(self.monacoEditor)
-      except:
-        cerror "delegateShortcuts " & getCurrentExceptionMsg()
+      self.markEditorScope(self.monacoEditor)
     if not editorReady:
       return
 
@@ -3517,8 +3544,8 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     # over ours.
     #
     # AND THE GUTTER WAS NOT THE EXCEPTION IT LOOKED LIKE.  The listener below
-    # (`:2674`) does call `preventDefault`, but only for a target whose class
-    # list contains `gutter-line` or `gutter-breakpoint` — so on the rest of the
+    # does call `preventDefault`, but only for a breakpoint marker
+    # (`isGutterToggleTarget`; it then took `gutter-line` too) — so on the rest of the
     # margin (Monaco's own `.line-numbers`, `.margin`) nothing suppressed
     # anything and the gutter showed two menus as well.  Measured against an
     # assembled bundle before this change: right-clicking `div.gutter` gave
@@ -3540,6 +3567,31 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     # nothing and prevent nothing, and the browser's default action for an
     # unprevented `contextmenu` is its own menu.
     if cast[bool](ev.event.toJs.shiftKey):
+      return
+    # THE GUTTER'S TOGGLE OPENS NO MENU (`Editor-Pane.md`, "On the gutter",
+    # gesture 8: a right click in the glyph column toggles the breakpoint's
+    # enabled state, and "No menu appears").
+    #
+    # This listener sits on Monaco's own DOM node, a descendant of the editor
+    # container, so for one press it runs BEFORE the container's `contextmenu`
+    # listener below — the one that does the toggle. Building a menu here
+    # therefore read the breakpoint's state from before the toggle: a right
+    # click on an enabled marker showed "Disable breakpoint" for the
+    # breakpoint the same press then disabled, and that stale menu stayed
+    # open, so the next right click on the text read it instead of a fresh
+    # one (codetracer-pm issue 2026-10-04-desktop-editor-menu-offers-disable-
+    # for-a-just-disabled-breakpoint). On those targets this handler builds
+    # nothing, shows nothing and prevents nothing; the container listener
+    # calls `preventDefault` itself, so no browser menu appears either.
+    #
+    # Placed after the Shift test, which this change leaves as it was. On these
+    # targets Shift never reached the browser's menu: the container listener
+    # prevents the default whatever the modifiers, before and after this test.
+    #
+    # `ev.event` is Monaco's `StandardMouseEvent`, whose `target` is the DOM
+    # element under the press — the same element the container listener's
+    # `ev.target` names.
+    if isGutterToggleTarget(ev.event.target):
       return
     ev.event.preventDefault()
     let contextMenu = createContextMenuItems(self, ev)
@@ -3591,19 +3643,10 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
     if not editorStatusCursorHook.isNil:
       editorStatusCursorHook(self.name, line, col))
 
-  console.log("DELEGATING SHORTCUTS")
+  # PLAT-68: the instance is a scope element of the one router's path.
+  self.markEditorScope(self.monacoEditor)
 
-  try:
-    self.delegateShortcuts(self.monacoEditor)
-  except:
-    cerror "delegateShorcuts " & getCurrentExceptionMsg()
-
-  try:
-    self.loadKeyPlugins()
-  except:
-    cerror "loadKeyPlugins " & getCurrentExceptionMsg()
-
-  document.querySelector(selector).addEventListener(cstring"click", proc(ev: Event) =
+  cast[Element](host).addEventListener(cstring"click", proc(ev: Event) =
     ev.stopPropagation()
     # THE RUN SLOT IS ROUTED FIRST, and the order is the whole of the guard.
     # `gutter-runtest` contains "gutter", so the sweep at the bottom of this
@@ -3627,17 +3670,18 @@ proc initMonacoForEditor(self: EditorViewComponent, selector: cstring) =
         self.lineActionClick(tabInfo, ev.target.toJs)
   )
 
-  document.querySelector(selector).addEventListener(cstring"contextmenu", proc(ev: Event) =
-    for element in cast[seq[cstring]](ev.toJs.target.classList):
-      # PLAT-50: the breakpoint's MARKER is `gutter-breakpoint-enabled` /
-      # `-disabled` (`trace.editorLineNumber`); an exact `gutter-breakpoint`
-      # matched no element the gutter draws.
-      if element == cstring"gutter-line" or
-         cstrutils.startsWith(element, cstring"gutter-breakpoint"):
-        ev.preventDefault()
-        ev.stopPropagation()
-        self.lineActionContextMenu(tabInfo, ev.target.toJs)
-        return
+  cast[Element](host).addEventListener(cstring"contextmenu", proc(ev: Event) =
+    # The gutter's right-click toggle. Monaco's `onContextMenu` above has
+    # already seen this press and, for these same targets, stood down without
+    # a menu (`isGutterToggleTarget`), so the toggle here is the whole answer.
+    # On the empty slot of a line with no breakpoint that answer is nothing
+    # at all: `lineActionContextMenu` finds no breakpoint to enable (see
+    # `isGutterToggleTarget`), and the `preventDefault` keeps the browser's
+    # menu away too.
+    if isGutterToggleTarget(ev.target.toJs):
+      ev.preventDefault()
+      ev.stopPropagation()
+      self.lineActionContextMenu(tabInfo, ev.target.toJs)
   )
 
   discard self.loadInitialFlowIfReady()
@@ -3800,7 +3844,7 @@ proc monacoEditorSetEditable*(editor: MonacoEditor;
   ## leaving debug mode calls `setEditorsEditable` again — with the same
   ## zero-valued fields — which is why it "never recovers".
 
-proc reattachMonacoIfDetached*(self: EditorViewComponent; selector: cstring) =
+proc reattachMonacoIfDetached*(self: EditorViewComponent; host: JsObject) =
   ## Carry a live Monaco instance into the container a layout rebuild just
   ## made for it.
   ##
@@ -3830,17 +3874,16 @@ proc reattachMonacoIfDetached*(self: EditorViewComponent; selector: cstring) =
     return
   if monacoEditorIsAttached(self.tabInfo.monacoEditor):
     return
-  let host = jq(selector)
   if host.isNil:
     return
-  monacoEditorAdoptInto(self.tabInfo.monacoEditor, host.toJs)
+  monacoEditorAdoptInto(self.tabInfo.monacoEditor, host)
   self.monacoEditor = self.tabInfo.monacoEditor
   # The transition that destroyed the pane may also have changed the mode, and
   # this instance was constructed for the previous one.
   monacoEditorSetReadOnly(
     self.monacoEditor,
     self.data.ui.readOnly or self.data.isReviewDatasetSession())
-  cdebug "editor: re-attached monaco for " & $self.name & " into " & $selector
+  cdebug "editor: re-attached monaco for " & $self.name
 
 proc editorAfterRedraw(self: EditorViewComponent) =
   ## Per-redraw work for the editor: flow rendering, line styles, test
@@ -3864,12 +3907,14 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     if not self.loadPendingFlowIfReady():
       discard self.loadInitialFlowIfReady()
 
+    # The diff's view zones are this editor's; the diff FLOW is the session's
+    # (`FlowVM.diffSession`, loaded once by the stop loader), and its answer
+    # reaches the flow overlay through the `ct/updated-flow` subscription.
     if not self.data.startOptions.diff.isNil and
       self.diffViewZones.len() == 0 and
       self.diffAddedLines.len() == 0:
         self.clearDiffViewZones()
         self.makeDiffViewZones()
-        self.loadFlow(FlowMode.Diff, types.Location())
 
     self.addTestActions()
     self.applyEventualStylesLines()
@@ -3882,7 +3927,7 @@ proc editorAfterRedraw(self: EditorViewComponent) =
     cerror "afterRedraw redrawFlow" & getCurrentExceptionMsg()
 
   if self.data.ui.activeFocus == self:
-    discard self.renderValueTooltip()
+    self.renderValueTooltip()
 
   # Tracepoint results (#566): this used to unconditionally call
   # `refreshTraceViewZoneDom()` for every expanded tracepoint, on every
@@ -3953,42 +3998,23 @@ proc refreshFlowAfterActivation*(self: EditorViewComponent) =
   self.applyEventualStylesLines()
   self.applyColumnBreakpointDecorations()
 
-proc tryMountIsoNimEditorPanel*(self: EditorViewComponent) =
-  ## Mark the IsoNim editor view as the primary renderer once Monaco
-  ## has initialized inside the direct editor host.
-  ##
-  ## Called after Monaco has been initialised by the direct IsoNim editor
-  ## mount path.
-  ##
-  ## Safe to call multiple times per editor — mounts only once per id.
-  let editorId = self.id
-  if isoNimEditorMountedIds.hasKey(editorId):
+proc takeOverEditorRendering(self: EditorViewComponent) =
+  ## Make the IsoNim editor view this editor's renderer, once Monaco runs in
+  ## the host GoldenLayout's factory handed over: the legacy renderer entry is
+  ## removed, so `redrawAll()` neither diffs over the Monaco-managed DOM nor
+  ## runs this editor's after-redraw work (`onCompleteMove` runs it directly
+  ## for an editor `renderedByIsoNim`).
+  if self.renderedByIsoNim:
     return
-
-  # Ensure the EditorVM is available before taking ownership.
   initEditorVM()
-  if editorVMInstance.isNil:
+  if editorVMInstance.isNil or self.tabInfo.isNil or
+     self.tabInfo.monacoEditor.isNil:
     return
-
-  let tabInfo = self.tabInfo
-  if tabInfo.isNil:
-    return
-
-  # Only mount after Monaco has been created — we need the container
-  # to already be in the DOM with Monaco attached.
-  if tabInfo.monacoEditor.isNil:
-    return
-
-  # Remove the legacy renderer instance so redrawAll() skips this component.
   # Editor tabs use the file path (self.name) as the renderer key.
-  # This prevents legacy VDOM diffing from corrupting the IsoNim/Monaco
-  # managed DOM on subsequent redraw cycles.
   if not self.name.isNil:
     renderer.removeLegacyRendererInstanceByKey(self.name)
-
-  isoNimEditorMountedIds[editorId] = true
-
-  clog "IsoNim editor: mounted as primary renderer for editorComponent-" & cstring($editorId)
+  self.renderedByIsoNim = true
+  clog "IsoNim editor: rendering editorComponent-" & cstring($self.id)
 
 proc editorSourceReady(self: EditorViewComponent): bool =
   not self.service.open.hasKey(self.name) or self.service.open[self.name].received
@@ -4021,7 +4047,7 @@ when defined(js):
       return host
 
     let r = WebRenderer()
-    let panel = renderEditorPanel(
+    let panel = renderEditorPanel[WebRenderer, dom_api.Element](
       r,
       editorVMInstance,
       self.id,
@@ -4037,95 +4063,66 @@ when defined(js):
     dom_api.setAttribute(panel, cstring"data-isonim-editor-host", cstring"true")
     panel
 
-  proc renderTopLevelEditorDirect*(self: EditorViewComponent; containerId: cstring) =
-    ## Mount the top-level editor GoldenLayout surface directly through IsoNim.
+  proc finishEditorMount(self: EditorViewComponent; panel: dom_api.Element) =
+    ## Create (or carry across) the editor's Monaco instance in `panel`, now
+    ## that its source is installed.
+    if self.tabInfo.monacoEditor.isNil:
+      self.initMonacoForEditor(panel.toJs)
+    else:
+      # The instance exists but the container is new: a layout rebuild
+      # replaced the pane under it. `initMonacoForEditor` would decline, so
+      # the editor is carried across instead of being left detached.
+      self.reattachMonacoIfDetached(panel.toJs)
+    if not self.tabInfo.monacoEditor.isNil:
+      self.takeOverEditorRendering()
+      self.editorAfterRedraw()
+
+  proc renderTopLevelEditorDirect*(self: EditorViewComponent;
+                                   host: dom_api.Element) =
+    ## Mount the editor into `host`, the container GoldenLayout's
+    ## `editorComponent` factory has just built (Shared-DOM-Front-Ends D4:
+    ## whoever creates a pane's container mounts the pane, synchronously).
     ##
-    ## GoldenLayout creates a temporary ``component-container`` with the stable
-    ## ``editorComponent-{id}`` id.  This proc replaces that placeholder with
-    ## the IsoNim editor host using the same id, then initializes Monaco once
-    ## source data is available.  Loading tabs keep the shell mounted and retry
-    ## until the legacy editor service marks the source as received.
+    ## The IsoNim editor view replaces the placeholder under the same
+    ## `editorComponent-{id}` id. Monaco is created in it at once when the
+    ## file's source is installed — the usual case, since a tab is opened
+    ## after its source is. A restored layout's tab can be built before its
+    ## source arrives; that mount is finished by `resumeEditorMount`, which
+    ## `utils.openTab` calls when it installs the source.
     self.ensureEditorLspStarted()
+    if pendingEditorHosts.hasKey(self.id):
+      discard jsDelete(pendingEditorHosts[self.id])
 
-    let componentId = self.id
-    var retryCount = 0
-    var afterInitScheduled = false
-    var layoutListenerInstalled = false
-    var layoutListener: proc(ev: Event)
+    if self.editorView == ViewNoSource and not self.noInfo.isNil:
+      self.noInfo.renderNoSourceShellDirect(host)
+      discard self.afterInit()
+      return
 
-    if isoNimEditorMountedIds.hasKey(componentId):
-      discard jsDelete(isoNimEditorMountedIds[componentId])
+    let panel = self.replaceWithIsoNimEditorPanel(host)
+    if dom_api.isNodeNil(dom_api.Node(panel)):
+      cerror "editor: no host to mount editorComponent-" & cstring($self.id) &
+        " into"
+      return
+    discard self.afterInit()
 
-    proc doMount() =
-      retryCount += 1
+    if self.tabInfo.isNil or not self.editorSourceReady():
+      pendingEditorHosts[self.id] = panel
+      return
+    self.finishEditorMount(panel)
 
-      # Query the container ID dynamically from layoutItem/contentItem metadata if available
-      var targetContainerId = containerId
-      if not self.layoutItem.isNil and not self.layoutItem.componentState.isNil:
-        let stateId = self.layoutItem.componentState.id
-        if stateId > 0:
-          targetContainerId = cstring("editorComponent-" & $stateId)
+  proc resumeEditorMount*(self: EditorViewComponent) =
+    ## Finish a mount `renderTopLevelEditorDirect` left waiting for the
+    ## editor's source, now that it is installed. Nothing when none waits.
+    if self.isNil or not pendingEditorHosts.hasKey(self.id):
+      return
+    if self.tabInfo.isNil or not self.editorSourceReady():
+      return
+    let panel = pendingEditorHosts[self.id]
+    discard jsDelete(pendingEditorHosts[self.id])
+    self.finishEditorMount(panel)
 
-      var host = dom_api.getElementById(dom_api.document, targetContainerId)
-      if dom_api.isNodeNil(dom_api.Node(host)):
-        if not layoutListenerInstalled:
-          layoutListenerInstalled = true
-          domwindow.addEventListener(cstring"ct:layoutUpdated", layoutListener)
-        if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 20)
-        return
-
-      if self.editorView == ViewNoSource and not self.noInfo.isNil:
-        self.noInfo.renderNoSourceShellDirect(host)
-        if not afterInitScheduled:
-          afterInitScheduled = true
-          discard self.afterInit()
-        if layoutListenerInstalled:
-          domwindow.removeEventListener(cstring"ct:layoutUpdated", layoutListener)
-        return
-
-      let panel = self.replaceWithIsoNimEditorPanel(host)
-      if dom_api.isNodeNil(dom_api.Node(panel)):
-        if not layoutListenerInstalled:
-          layoutListenerInstalled = true
-          domwindow.addEventListener(cstring"ct:layoutUpdated", layoutListener)
-        if retryCount <= 200:
-          discard setTimeout(proc() = doMount(), 20)
-        return
-
-      # Successfully replaced the host with the panel, we can remove the layout listener now.
-      if layoutListenerInstalled:
-        domwindow.removeEventListener(cstring"ct:layoutUpdated", layoutListener)
-
-      if not afterInitScheduled:
-        afterInitScheduled = true
-        discard self.afterInit()
-
-      let sourceReady = self.editorSourceReady()
-      if self.tabInfo.isNil or not sourceReady:
-        if retryCount <= 1200:
-          discard setTimeout(proc() = doMount(), 25)
-        return
-
-      let selector = cstring("#editorComponent-" & $componentId)
-      if self.tabInfo.monacoEditor.isNil:
-        self.initMonacoForEditor(selector)
-      else:
-        # The instance exists but the container is new: a layout rebuild
-        # replaced the pane under it. `initMonacoForEditor` would decline, so
-        # the editor is carried across instead of being left detached.
-        self.reattachMonacoIfDetached(selector)
-
-      if not self.tabInfo.monacoEditor.isNil:
-        self.tryMountIsoNimEditorPanel()
-        self.editorAfterRedraw()
-
-    # Define the layout updated listener callback
-    layoutListener = proc(ev: Event) =
-      if not isoNimEditorMountedIds.hasKey(componentId):
-        doMount()
-
-    doMount()
+  editorSourceInstalled = proc(editor: EditorViewComponent) =
+    editor.resumeEditorMount()
 
 proc renderExpandedEditorDirect(self: EditorViewComponent) =
   ## Refresh a Monaco macro-expansion editor without registering a Karax
@@ -4146,7 +4143,7 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
 
   if dom_api.getAttribute(host, cstring"data-isonim-editor-host") != cstring"true":
     let r = WebRenderer()
-    let panel = renderEditorPanel(
+    let panel = renderEditorPanel[WebRenderer, dom_api.Element](
       r,
       editorVMInstance,
       self.id,
@@ -4165,7 +4162,7 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
     host = panel
 
   if self.tabInfo.monacoEditor.isNil:
-    self.initMonacoForEditor(hostId)
+    self.initMonacoForEditor(host.toJs)
 
   self.editorAfterRedraw()
 
@@ -4336,7 +4333,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
 
   # Feed the same position into the parallel ViewModel store.
   initEditorVM()
-  syncEditorDebuggerPosition(
+  syncEditorDebuggerPosition(self.ownPaneStore(),
     response.location.rrTicks,
     response.location.path,
     response.location.line,
@@ -4360,13 +4357,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       case view:
       of ViewInstructions:
         if self.data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
-          self.data.openInstructions(self.data.services.debugger.location.asmName)
+          self.data.openInstructions(response.location.asmName)
         elif self.data.trace.lang == LangNim:
-          self.data.openInstructions(self.data.services.debugger.cLocation.asmName)
+          self.data.openInstructions(response.cLocation.asmName)
 
       of ViewTargetSource:
         if self.data.trace.lang == LangNim:
-          self.data.openTargetSource(self.data.services.debugger.cLocation.path)
+          self.data.openTargetSource(response.cLocation.path)
 
       else:
         discard
@@ -4383,7 +4380,6 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
      sameSourceRevisionPath(response.location.highLevelPath, sourceFilePath))
 
   if moveTargetsEditor:
-    self.data.services.debugger.stableBusy = false
     if not response.location.isExpanded:
       self.service.active = canonicalSourceRevisionPath(response.location.path)
     else:
@@ -4392,7 +4388,7 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     self.service.currentLine = response.location.line
 
     if not self.flow.isNil:
-      self.flow.activeStep = FlowStep(rrTicks: -1)
+      self.flow.activeStep = FlowLayoutStep(rrTicks: -1)
 
     # When the debugger position changes within an already-open editor,
     # a stale FlowComponent may still be present from the previous
@@ -4476,16 +4472,16 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
                 newTicks >= minTicks and newTicks <= maxTicks
               else:
                 # DB trace (rrTicks=0): use source-line range
-                var minPos = self.flow.flow.steps[0].position
+                var minPos = self.flow.flow.steps[0].line
                 var maxPos = minPos
                 for step in self.flow.flow.steps:
-                  if step.position < minPos: minPos = step.position
-                  if step.position > maxPos: maxPos = step.position
+                  if step.line < minPos: minPos = step.line
+                  if step.line > maxPos: maxPos = step.line
                 response.location.line >= minPos and response.location.line <= maxPos
         if canReuseFlow:
           discard  # FlowComponent.onCompleteMove (below) handles in-place update
         else:
-          self.loadFlow(FlowMode.Call, response.location)
+          self.loadFlow(response.location)
         self.shouldLoadFlow = false
         self.hasPendingFlowLocation = false
 
@@ -4495,16 +4491,13 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
       self.flow.redrawFlow()
       self.adjustEditorWidth()
 
-  if self.data.trace.lang != LangRubyDb:
-    discard data.services.debugger.loadParsedExprs(self.service.currentLine, response.cLocation.path)
-
   if not self.flow.isNil:
     discard self.flow.onCompleteMove(response)
 
   # For IsoNim-mounted editors, run the after-redraw work directly
   # since the legacy renderer entry has been removed and redrawAll() will not
   # reach this component's afterRedraws callbacks.
-  if isoNimEditorMountedIds.hasKey(self.id):
+  if self.renderedByIsoNim:
     self.editorAfterRedraw()
 
   self.data.redraw()
@@ -4545,19 +4538,43 @@ method onEnter*(self: EditorViewComponent) {.async.} =
     self.traces[line].monacoEditor.insertTextAtCurrentPosition("\n")
 
     discard setTimeout(proc() =
-      self.traces[line].monacoEditor.toJs.getDomNode().querySelector("textarea").focus(),
+      # Monaco's `focus()` puts the caret in the instance's input; the
+      # first `textarea` under its DOM node is a read-only IME helper.
+      self.traces[line].monacoEditor.focus(),
       1
     )
     data.ui.activeFocus = self.traces[line]
 
-method onUpdatedFlow*(self: EditorViewComponent, update: FlowUpdate) {.async.} =
-  if not self.flow.isNil:
-    await self.flow.onUpdatedFlow(update)
+proc adoptFlowWindows*(self: EditorViewComponent,
+                       windows: seq[FlowLayoutWindow]) =
+  ## Hand the session's flow window to this editor's inline flow, if it has
+  ## one and the window is its file's (`FlowComponent.adoptWindows`).
+  if not self.flow.isNil and self.flow.adoptWindows(windows):
     self.adjustEditorWidth()
     # #594: this is the moment the conditional-branch data actually becomes
     # paintable. `onCompleteMove` ran `editorAfterRedraw` synchronously back
     # when `self.flow.flow` was still nil, so the flow decoration layer was
-    # merely RETAINED there; nothing in `FlowComponent.onUpdatedFlow` applies
+    # merely RETAINED there; nothing in `FlowComponent.adoptWindows` applies
     # line styles. Without this call the colours only ever reappeared by
     # accident, on a later move that happened not to trigger a flow reload.
     self.applyEventualStylesLines()
+
+var disposeFlowWindowsWatch: proc()
+  ## The current `watchSessionFlowWindows` root, so a new session's watch
+  ## replaces the previous session's instead of running beside it.
+
+proc watchSessionFlowWindows*(data: Data) =
+  ## Every editor's inline flow follows the session's flow window
+  ## (`FlowVM.layoutWindows`), which the session's stop loader loads per stop
+  ## (`spFlow`). Called when the session's `FlowVM` is handed to the renderer
+  ## (`flow.initFlowVMFromSession`), again for each new session.
+  if not disposeFlowWindowsWatch.isNil:
+    disposeFlowWindowsWatch()
+    disposeFlowWindowsWatch = nil
+  createRoot proc(dispose: proc()) =
+    disposeFlowWindowsWatch = dispose
+    createEffect proc() =
+      let windows = sessionFlowWindows()   # the one read that subscribes
+      untrack proc() =
+        for _, editor in data.ui.editors:
+          editor.adoptFlowWindows(windows)

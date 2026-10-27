@@ -17,7 +17,7 @@ export CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING=false
 # shellcheck source=ci/lib/codetracer-home.sh
 source "$REPO_ROOT/ci/lib/codetracer-home.sh"
 ct_export_scratch_codetracer_home windows-headless
-filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" "$REPO_ROOT/ci/test/headless-not-provided.windows.txt")"
+filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" "$REPO_ROOT/ci/test/headless-not-provided.windows.txt" "$REPO_ROOT/src/db-backend/tests")"
 
 cd "$REPO_ROOT/src/db-backend"
 cargo nextest run --release --test '*' -E "test(~dap) and ($filter)"

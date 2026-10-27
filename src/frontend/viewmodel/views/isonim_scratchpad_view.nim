@@ -15,7 +15,7 @@
 ## values.  True expandable children and history charts still require
 ## the original backend ``Value`` tree and remain outside this VM shape.
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
+## One generic view (`renderScratchpadPanel[R, N]`) produces the outer
 ## structure mirroring the legacy ``componentContainerClass(
 ## "active-state")`` layout::
 ##
@@ -40,16 +40,19 @@
 
 import std/sets
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../store/types
 import ../viewmodels/scratchpad_vm
 import ../viewmodels/origin_chain_types
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 # Re-export so callers can `import isonim_scratchpad_view` and reach
 # the helpers exercised by the headless tests.
@@ -340,11 +343,11 @@ proc diffHeading*(left, right: ScratchpadChainEntry): string =
   left.chain.queryVariable & " ↔ " & right.chain.queryVariable
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel, under any renderer (Shared-DOM-Front-Ends D3)
 # ---------------------------------------------------------------------------
 
-proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
-                   row: ScratchpadRowView; index: int): MockNode =
+proc renderRow[R, N](r: R; vm: ScratchpadVM; row: ScratchpadRowView;
+                     index: int): N =
   ## Render a single scratchpad row.  The close button maps onto
   ## ``vm.removeValue``; the value body keeps the collapsed legacy
   ## ``ValueComponent`` class surface around the flattened preview.
@@ -381,8 +384,8 @@ proc renderRowMock(r: MockRenderer; vm: ScratchpadVM;
                       text row.typeName
   itemRow
 
-proc renderChainDiffMock(r: MockRenderer; left, right: ScratchpadChainEntry;
-                         pairIndex: int): MockNode =
+proc renderChainDiff[R, N](r: R; left, right: ScratchpadChainEntry;
+                           pairIndex: int): N =
   ## Render one side-by-side diff between ``left`` and ``right``.
   ## ``pairIndex`` is recorded as the ``data-pair-index`` attribute so
   ## the headless tests can identify the i-th diff block deterministically.
@@ -408,8 +411,8 @@ proc renderChainDiffMock(r: MockRenderer; left, right: ScratchpadChainEntry;
               text rows[idx].rightHop
   card
 
-proc renderChainRowMock(r: MockRenderer; vm: ScratchpadVM;
-                        entry: ScratchpadChainEntry; index: int): MockNode =
+proc renderChainRow[R, N](r: R; vm: ScratchpadVM;
+                          entry: ScratchpadChainEntry; index: int): N =
   ## Folded chain card.  Layout (spec §8.1):
   ##   div.scratchpad-chain-view
   ##     button.scratchpad-chain-close
@@ -439,20 +442,21 @@ proc renderChainRowMock(r: MockRenderer; vm: ScratchpadVM;
             text "last: " & last.targetExpr & " = " & last.sourceExpr
   card
 
-proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
-  ## Render the Scratchpad panel for the Mock renderer.
+proc renderScratchpadPanel*[R, N](r: R; vm: ScratchpadVM): N =
+  ## The Scratchpad panel, under any renderer; mounted on the desktop by
+  ## `ui/panel_host`. The view takes no id: the host it is mounted into
+  ## carries `scratchpadComponent-<n>`, and an id names one element.
   ##
   ## The static shell (outer container + value-components-container +
   ## empty-overlay) is built once via the DSL.  A single outer
   ## ``createRenderEffect`` rebuilds the row list whenever ``entries``
   ## changes and also toggles the empty-state placeholder.
-  var listContainer: MockNode
-  var chainListContainer: MockNode
-  var diffContainer: MockNode
-  var emptyContainer: MockNode
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute
+  var listContainer, chainListContainer, diffContainer, emptyContainer: N
 
   let panel = ui(r):
-    tdiv(class = ScratchpadContainerClass, id = "scratchpadComponent-0"):
+    tdiv(class = ScratchpadContainerClass):
       tdiv(ref = listContainer, class = "value-components-container"):
         discard
       tdiv(ref = chainListContainer, class = "chain-components-container"):
@@ -467,11 +471,11 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
     let chains = vm.chainEntries.val
     r.clearChildren(listContainer)
     for i, row in rowViews:
-      let itemRow = renderRowMock(r, vm, row, i)
+      let itemRow = renderRow[R, N](r, vm, row, i)
       r.appendChild(listContainer, itemRow)
     r.clearChildren(chainListContainer)
     for i, entry in chains:
-      let card = renderChainRowMock(r, vm, entry, i)
+      let card = renderChainRow[R, N](r, vm, entry, i)
       r.appendChild(chainListContainer, card)
 
     # M4 deliverable §3.5 + Gap 5: render side-by-side diffs between
@@ -481,7 +485,7 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
     r.clearChildren(diffContainer)
     if chains.len >= 2:
       for i in 0 ..< chains.len - 1:
-        let diff = renderChainDiffMock(r, chains[i], chains[i + 1], i)
+        let diff = renderChainDiff[R, N](r, chains[i], chains[i + 1], i)
         r.appendChild(diffContainer, diff)
 
     # Toggle the empty-overlay via a class instead of remove/insert so
@@ -495,221 +499,3 @@ proc renderScratchpadPanel*(r: MockRenderer; vm: ScratchpadVM): MockNode =
       r.setAttribute(emptyContainer, "class", "empty-overlay hidden")
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with optional class + id
-    ## attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc appendWebText(node: isonim_dom.Element; textValue: string) =
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(node), t)
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderRowWeb(vm: ScratchpadVM; row: ScratchpadRowView;
-                    index: int): isonim_dom.Element =
-    ## Build a scratchpad row in the real DOM.  Same shape as the Mock
-    ## variant; click handler is wired imperatively via
-    ## ``addEventListener``.
-    let elementRow = createWebElement("div", rowClass(row))
-
-    if row.depth == 0:
-      let closeBtn = createWebElement("button", CloseButtonClass,
-                                      "close-element")
-      let onClick = onCloseClick(vm, row.entryIndex)
-      isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
-                                  proc(ev: isonim_dom.Event) = onClick())
-      isonim_dom.appendChild(isonim_dom.Node(elementRow), isonim_dom.Node(closeBtn))
-
-    let valueRoot = createWebElement("div", valueExpandedClass(row))
-    if row.depth > 0:
-      isonim_dom.setAttribute(valueRoot, cstring"style", cstring("padding-left: " & rowPaddingLeft(row, 16)))
-
-    let parent = createWebElement("div", atomOrCompoundClass(row))
-    let nameContainer = createWebElement("div", "value-name-container")
-    if row.hasChildren:
-      let expandBtn = createWebElement("span", "value-expand-button")
-      let caret = createWebElement("div", caretClass(row))
-      let onToggle = onToggleExpand(vm, row.path)
-      isonim_dom.addEventListener(isonim_dom.Node(expandBtn), cstring"click",
-                                  proc(ev: isonim_dom.Event) = onToggle())
-      isonim_dom.appendChild(isonim_dom.Node(expandBtn), isonim_dom.Node(caret))
-      isonim_dom.appendChild(isonim_dom.Node(nameContainer), isonim_dom.Node(expandBtn))
-
-    let nameSpan = createWebElement("span", "value-name")
-    appendWebText(nameSpan, row.expression & (if row.depth == 0: ": " else: ""))
-    isonim_dom.appendChild(isonim_dom.Node(nameContainer),
-                           isonim_dom.Node(nameSpan))
-    isonim_dom.appendChild(isonim_dom.Node(parent),
-                           isonim_dom.Node(nameContainer))
-
-    let valueLine = createWebElement("div")
-    let valueView = createWebElement("span", "value-view")
-    let valueAtom = createWebElement("div", valueAtomClass(row, index))
-    if row.isError:
-      appendWebText(valueAtom, cellText(row))
-    else:
-      let valueText = createWebElement("span", "value-expanded-text")
-      appendWebText(valueText, cellText(row))
-      isonim_dom.appendChild(isonim_dom.Node(valueAtom),
-                             isonim_dom.Node(valueText))
-      if row.typeName.len > 0:
-        let typeSpan = createWebElement("span", "value-type")
-        appendWebText(typeSpan, row.typeName)
-        isonim_dom.appendChild(isonim_dom.Node(valueAtom),
-                               isonim_dom.Node(typeSpan))
-
-    isonim_dom.appendChild(isonim_dom.Node(valueView),
-                           isonim_dom.Node(valueAtom))
-    isonim_dom.appendChild(isonim_dom.Node(valueLine),
-                           isonim_dom.Node(valueView))
-    isonim_dom.appendChild(isonim_dom.Node(parent),
-                           isonim_dom.Node(valueLine))
-    isonim_dom.appendChild(isonim_dom.Node(valueRoot),
-                           isonim_dom.Node(parent))
-    isonim_dom.appendChild(isonim_dom.Node(elementRow), isonim_dom.Node(valueRoot))
-    elementRow
-
-  proc renderChainDiffWeb(left, right: ScratchpadChainEntry;
-                          pairIndex: int): isonim_dom.Element =
-    ## Web-DOM counterpart of ``renderChainDiffMock``.  Same shape.
-    let rows = chainDiffRows(left, right)
-    let card = createWebElement("div", ScratchpadChainDiffClass)
-    isonim_dom.setAttribute(card, cstring"data-pair-index",
-                            cstring($pairIndex))
-    let heading = createWebElement("div", "scratchpad-chain-diff-heading")
-    appendWebText(heading, diffHeading(left, right))
-    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(heading))
-
-    let table = createWebElement("div", "scratchpad-chain-diff-table")
-    let leftCol = createWebElement("div", ScratchpadChainDiffColumnLeftClass)
-    let rightCol = createWebElement("div", ScratchpadChainDiffColumnRightClass)
-    for row in rows:
-      let leftRow = createWebElement("div", diffRowClass(row))
-      appendWebText(leftRow, row.leftHop)
-      isonim_dom.appendChild(isonim_dom.Node(leftCol),
-                             isonim_dom.Node(leftRow))
-      let rightRow = createWebElement("div", diffRowClass(row))
-      appendWebText(rightRow, row.rightHop)
-      isonim_dom.appendChild(isonim_dom.Node(rightCol),
-                             isonim_dom.Node(rightRow))
-    isonim_dom.appendChild(isonim_dom.Node(table), isonim_dom.Node(leftCol))
-    isonim_dom.appendChild(isonim_dom.Node(table), isonim_dom.Node(rightCol))
-    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(table))
-    card
-
-  proc renderChainRowWeb(vm: ScratchpadVM; entry: ScratchpadChainEntry;
-                         index: int): isonim_dom.Element =
-    ## DOM version of `renderChainRowMock`.  Same shape; close handler
-    ## wired via `addEventListener`.
-    let card = createWebElement("div", ScratchpadChainRowClass)
-
-    let closeBtn = createWebElement("button", ScratchpadChainCloseClass,
-                                    "chain-close-element")
-    let onClick = onRemoveChainClick(vm, index)
-    isonim_dom.addEventListener(isonim_dom.Node(closeBtn), cstring"click",
-                                proc(ev: isonim_dom.Event) = onClick())
-    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(closeBtn))
-
-    let term = createWebElement("div", ScratchpadChainTerminatorClass)
-    let icon = createWebElement("span", chainTerminatorIconClass(entry))
-    isonim_dom.appendChild(isonim_dom.Node(term), isonim_dom.Node(icon))
-    let label = createWebElement("span", "scratchpad-chain-label")
-    appendWebText(label, chainCardLabel(entry))
-    isonim_dom.appendChild(isonim_dom.Node(term), isonim_dom.Node(label))
-    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(term))
-
-    let summary = createWebElement("div", ScratchpadChainHopSummaryClass)
-    if entry.chain.hops.len > 0:
-      let first = entry.chain.hops[0]
-      let firstSpan = createWebElement("span", "scratchpad-chain-hop")
-      appendWebText(firstSpan,
-        "first: " & first.targetExpr & " = " & first.sourceExpr)
-      isonim_dom.appendChild(isonim_dom.Node(summary),
-                             isonim_dom.Node(firstSpan))
-    if entry.chain.hops.len > 1:
-      let last = entry.chain.hops[^1]
-      let lastSpan = createWebElement("span", "scratchpad-chain-hop")
-      appendWebText(lastSpan,
-        "last: " & last.targetExpr & " = " & last.sourceExpr)
-      isonim_dom.appendChild(isonim_dom.Node(summary),
-                             isonim_dom.Node(lastSpan))
-    isonim_dom.appendChild(isonim_dom.Node(card), isonim_dom.Node(summary))
-    card
-
-  proc renderScratchpadPanel*(r: WebRenderer;
-                              vm: ScratchpadVM): isonim_dom.Element =
-    ## Render the Scratchpad panel for the real DOM.  Same dispatch
-    ## shape as the Mock variant — outer wrapper plus a render-effect
-    ## that rebuilds the list and toggles the empty-state placeholder.
-    var listContainer: isonim_dom.Element
-    var chainListContainer: isonim_dom.Element
-    var diffContainer: isonim_dom.Element
-    var emptyContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = ScratchpadContainerClass, id = "scratchpadComponent-0"):
-        tdiv(ref = listContainer, class = "value-components-container"):
-          discard
-        tdiv(ref = chainListContainer, class = "chain-components-container"):
-          discard
-        tdiv(ref = diffContainer, class = "chain-diffs-container"):
-          discard
-        tdiv(ref = emptyContainer, class = "empty-overlay"):
-          text ScratchpadEmptyStateText
-
-    createRenderEffect proc() =
-      let rowViews = getScratchpadRowViews(vm)
-      let chains = vm.chainEntries.val
-      clearWebChildren(listContainer)
-      for i, row in rowViews:
-        let itemRow = renderRowWeb(vm, row, i)
-        isonim_dom.appendChild(isonim_dom.Node(listContainer),
-                               isonim_dom.Node(itemRow))
-      clearWebChildren(chainListContainer)
-      for i, entry in chains:
-        let card = renderChainRowWeb(vm, entry, i)
-        isonim_dom.appendChild(isonim_dom.Node(chainListContainer),
-                               isonim_dom.Node(card))
-
-      clearWebChildren(diffContainer)
-      if chains.len >= 2:
-        for i in 0 ..< chains.len - 1:
-          let diff = renderChainDiffWeb(chains[i], chains[i + 1], i)
-          isonim_dom.appendChild(isonim_dom.Node(diffContainer),
-                                 isonim_dom.Node(diff))
-
-      if rowViews.len == 0 and chains.len == 0:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"empty-overlay")
-      else:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"empty-overlay hidden")
-
-    panel
-
-  proc mountIsoNimScratchpadPanel*(container: isonim_dom.Element;
-                                   vm: ScratchpadVM) =
-    ## Mount the IsoNim Scratchpad panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderScratchpadPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container),
-                           isonim_dom.Node(panel))

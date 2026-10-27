@@ -12,9 +12,15 @@
 ##
 ## The container element is managed by the caller (created once, appended to
 ## document.body, positioned via kdom style properties after each mount).
+##
+## ONE generic view (Shared-DOM-Front-Ends D3), ``renderFilterDropdownPanel[R,
+## N]``: the headless tests render it under ``MockRenderer``, the desktop
+## under ``WebRenderer``. The tabs and rows are plain values — the caller
+## remounts the panel when they change — so its loops run once per render by
+## design.
 
-import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -52,6 +58,9 @@ type
     ## The caller is responsible for flipping the state and calling mount again.
     onToggleEnabled*: proc()
 
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
+
 const
   FilterDropdownContainerId* = "dropdown-container-id"
   FilterDropdownListId* = "category-image-list"
@@ -73,28 +82,35 @@ proc invokeToggleEnabled(cb: FilterDropdownCallbacks) =
   if not cb.onToggleEnabled.isNil: cb.onToggleEnabled()
 
 # ---------------------------------------------------------------------------
-# Sub-element renderers — MockRenderer
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderTab(r: MockRenderer; tab: FilterTabRecord; index: int;
-               cb: FilterDropdownCallbacks): MockNode =
+proc tabClickHandler(cb: FilterDropdownCallbacks; index: int): proc() =
+  result = proc() = cb.invokeTabClick(index)
+
+proc tagToggleHandler(cb: FilterDropdownCallbacks; ti: int): proc() =
+  result = proc() = cb.invokeTagToggle(ti)
+
+proc kindToggleHandler(cb: FilterDropdownCallbacks; ti, ki: int): proc() =
+  result = proc() = cb.invokeKindToggle(ti, ki)
+
+proc renderTab[R, N](r: R; tab: FilterTabRecord; index: int;
+                     cb: FilterDropdownCallbacks): N =
   ui(r):
     button(class = "ct-tab",
            `data-selected` = (if tab.isSelected: "true" else: ""),
-           onclick = proc() = cb.invokeTabClick(index)):
+           onclick = tabClickHandler(cb, index)):
       text tab.label
 
-proc renderKindCheckbox(r: MockRenderer; kind: FilterKindRecord;
-                        tagIndex, kindIndex: int;
-                        cb: FilterDropdownCallbacks): MockNode =
-  let ti = tagIndex
-  let ki = kindIndex
+proc renderKindCheckbox[R, N](r: R; kind: FilterKindRecord;
+                              tagIndex, kindIndex: int;
+                              cb: FilterDropdownCallbacks): N =
   ui(r):
     label(class = "ct-checkmark-field"):
       input(class = "ct-checkmark-input",
             `type` = "checkbox",
             value = $kindIndex,
-            onchange = proc() = cb.invokeKindToggle(ti, ki))
+            onchange = kindToggleHandler(cb, tagIndex, kindIndex))
       span(class = "ct-checkmark",
            `data-state` = kind.checkState,
            `aria-hidden` = "true"):
@@ -102,43 +118,44 @@ proc renderKindCheckbox(r: MockRenderer; kind: FilterKindRecord;
       span(class = "ct-checkmark-label"):
         text kind.label
 
-proc renderTagRow(r: MockRenderer; row: FilterTagRow; tagIndex: int;
-                  cb: FilterDropdownCallbacks): MockNode =
-  let ti = tagIndex
-  ui(r):
+proc renderTagRow[R, N](r: R; row: FilterTagRow; tagIndex: int;
+                        cb: FilterDropdownCallbacks): N =
+  var kindsHost: N
+  result = ui(r):
     li(class = "dropdown-list-row"):
       label(class = "ct-checkmark-field"):
         input(class = "ct-checkmark-input",
               `type` = "checkbox",
               value = $tagIndex,
-              onchange = proc() = cb.invokeTagToggle(ti))
+              onchange = tagToggleHandler(cb, tagIndex))
         span(class = "ct-checkmark",
              `data-state` = row.checkState,
              `aria-hidden` = "true"):
           discard
         span(class = "ct-checkmark-label"):
           text row.label
-      tdiv(class = "dropdown-kind-items"):
-        for ki, kind in row.kinds:
-          renderKindCheckbox(r, kind, tagIndex, ki, cb)
+      tdiv(ref = kindsHost, class = "dropdown-kind-items"):
+        discard
+  for ki, kind in row.kinds:
+    r.appendChild(kindsHost,
+                  renderKindCheckbox[R, N](r, kind, tagIndex, ki, cb))
 
-proc renderFilterDropdownPanel*(r: MockRenderer;
-                                tabs: seq[FilterTabRecord];
-                                rows: seq[FilterTagRow];
-                                filtersEnabled: bool = true;
-                                cb: FilterDropdownCallbacks =
-                                  FilterDropdownCallbacks()): MockNode =
-  ## Render the full dropdown DOM tree (tab row + tag/kind grid).
-  ## Returns the outer .dropdown-container element; children can be moved
-  ## into a stable host via mountFilterDropdownInto.
+proc renderFilterDropdownPanel*[R, N](r: R;
+                                      tabs: seq[FilterTabRecord];
+                                      rows: seq[FilterTagRow];
+                                      filtersEnabled: bool = true;
+                                      cb: FilterDropdownCallbacks =
+                                        FilterDropdownCallbacks()): N =
+  ## Render the full dropdown DOM tree (tab row + tag/kind grid). Returns the
+  ## outer .dropdown-container element; the browser moves its children into
+  ## a stable host (``mountFilterDropdownInto``).
   let checkedAttr = if filtersEnabled: "true" else: "false"
   let toggleLabel = if filtersEnabled: "On" else: "Off"
-  ui(r):
+  var tabsHost, enabledWrapper, listHost: N
+  result = ui(r):
     tdiv(class = "dropdown-container"):
-      tdiv(class = "toggle-buttons"):
-        for i, tab in tabs:
-          renderTab(r, tab, i, cb)
-        tdiv(class = "toggle-enabled-wrapper"):
+      tdiv(ref = tabsHost, class = "toggle-buttons"):
+        tdiv(ref = enabledWrapper, class = "toggle-enabled-wrapper"):
           span(class = "ct-toggle-label"):
             text toggleLabel
           span(class = "ct-toggle",
@@ -149,92 +166,15 @@ proc renderFilterDropdownPanel*(r: MockRenderer;
             input(class = "ct-toggle-input", `type` = "checkbox", role = "switch")
             span(class = "ct-toggle-thumb"):
               discard
-      ul(class = "dropdown-list", id = FilterDropdownListId):
-        for i, row in rows:
-          renderTagRow(r, row, i, cb)
-
-# ---------------------------------------------------------------------------
-# Sub-element renderers — WebRenderer
-# ---------------------------------------------------------------------------
+      ul(ref = listHost, class = "dropdown-list", id = FilterDropdownListId):
+        discard
+  # The tabs come before the on/off toggle.
+  for i, tab in tabs:
+    r.insertBefore(tabsHost, renderTab[R, N](r, tab, i, cb), enabledWrapper)
+  for i, row in rows:
+    r.appendChild(listHost, renderTagRow[R, N](r, row, i, cb))
 
 when defined(js):
-  proc renderTab(r: WebRenderer; tab: FilterTabRecord; index: int;
-                 cb: FilterDropdownCallbacks): isonim_dom.Element =
-    ui(r):
-      button(class = "ct-tab",
-             `data-selected` = (if tab.isSelected: "true" else: ""),
-             onclick = proc() = cb.invokeTabClick(index)):
-        text tab.label
-
-  proc renderKindCheckbox(r: WebRenderer; kind: FilterKindRecord;
-                          tagIndex, kindIndex: int;
-                          cb: FilterDropdownCallbacks): isonim_dom.Element =
-    let ti = tagIndex
-    let ki = kindIndex
-    ui(r):
-      label(class = "ct-checkmark-field"):
-        input(class = "ct-checkmark-input",
-              `type` = "checkbox",
-              value = $kindIndex,
-              onchange = proc() = cb.invokeKindToggle(ti, ki))
-        span(class = "ct-checkmark",
-             `data-state` = kind.checkState,
-             `aria-hidden` = "true"):
-          discard
-        span(class = "ct-checkmark-label"):
-          text kind.label
-
-  proc renderTagRow(r: WebRenderer; row: FilterTagRow; tagIndex: int;
-                    cb: FilterDropdownCallbacks): isonim_dom.Element =
-    let ti = tagIndex
-    ui(r):
-      li(class = "dropdown-list-row"):
-        label(class = "ct-checkmark-field"):
-          input(class = "ct-checkmark-input",
-                `type` = "checkbox",
-                value = $tagIndex,
-                onchange = proc() = cb.invokeTagToggle(ti))
-          span(class = "ct-checkmark",
-               `data-state` = row.checkState,
-               `aria-hidden` = "true"):
-            discard
-          span(class = "ct-checkmark-label"):
-            text row.label
-        tdiv(class = "dropdown-kind-items"):
-          for ki, kind in row.kinds:
-            renderKindCheckbox(r, kind, tagIndex, ki, cb)
-
-  proc renderFilterDropdownPanel*(r: WebRenderer;
-                                  tabs: seq[FilterTabRecord];
-                                  rows: seq[FilterTagRow];
-                                  filtersEnabled: bool = true;
-                                  cb: FilterDropdownCallbacks =
-                                    FilterDropdownCallbacks()): isonim_dom.Element =
-    ## Render the full dropdown DOM tree (tab row + tag/kind grid).
-    ## Returns the outer .dropdown-container element; children are moved
-    ## into the stable host container by mountFilterDropdownInto.
-    let checkedAttr = if filtersEnabled: "true" else: "false"
-    let toggleLabel = if filtersEnabled: "On" else: "Off"
-    ui(r):
-      tdiv(class = "dropdown-container"):
-        tdiv(class = "toggle-buttons"):
-          for i, tab in tabs:
-            renderTab(r, tab, i, cb)
-          tdiv(class = "toggle-enabled-wrapper"):
-            span(class = "ct-toggle-label"):
-              text toggleLabel
-            span(class = "ct-toggle",
-                 `data-checked` = checkedAttr,
-                 `data-size`    = "sm",
-                 `aria-hidden`  = "true",
-                 onclick        = proc() = cb.invokeToggleEnabled()):
-              input(class = "ct-toggle-input", `type` = "checkbox", role = "switch")
-              span(class = "ct-toggle-thumb"):
-                discard
-        ul(class = "dropdown-list", id = FilterDropdownListId):
-          for i, row in rows:
-            renderTagRow(r, row, i, cb)
-
   proc mountFilterDropdownInto*(container: isonim_dom.Element;
                                 tabs: seq[FilterTabRecord];
                                 rows: seq[FilterTagRow];
@@ -254,7 +194,8 @@ when defined(js):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
     let r = WebRenderer()
-    let panel = renderFilterDropdownPanel(r, tabs, rows, filtersEnabled, cb)
+    let panel = renderFilterDropdownPanel[WebRenderer, isonim_dom.Element](
+      r, tabs, rows, filtersEnabled, cb)
     let panelNode = isonim_dom.Node(panel)
     # Move the rendered children (toggle-buttons div, dropdown-list ul)
     # into the stable container so the container's id and event listeners

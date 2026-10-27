@@ -11,11 +11,11 @@ use std::sync::mpsc::Sender;
 
 use codetracer_trace_types::{CallKey, EventLogKind, Line, NO_KEY, PathId, StepId, TypeKind, VariableId};
 
-use crate::calltrace::Calltrace;
+use crate::calltrace::{Calltrace, CalltraceShape};
 use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::dap::{self, DapClient, DapMessage};
-use crate::db::{Db, DbCall, DbRecordEvent, MaterializedReplaySession};
+use crate::db::{Db, DbCall, MaterializedReplaySession, program_event_of_record};
 use crate::event_db::{EventDb, SingleTableId};
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
@@ -26,6 +26,7 @@ use crate::mixed_altitude::{Altitude, AltitudeState, active_altitude, is_vm_cros
 use crate::program_search_tool::ProgramSearchTool;
 use crate::recreator_session::{RecreatorArgs, RecreatorReplaySession};
 use crate::replay::ReplaySession;
+use crate::source_access::{SourceAccess, SourceAccessHandle};
 use crate::sourcemap_cache::{SourcemapCache, TranslatedLocation, translation_enabled};
 use crate::trace_reader::TraceReader;
 // use crate::response::{};
@@ -51,15 +52,43 @@ use crate::task::{
     CalltraceLoadArgs, CalltraceNonExpandedKind, CollapseCallsArgs, CoreTrace, CtLoadFlowArguments, DapTracepoint,
     DbEventKind, FlowMode, FlowUpdate, FrameInfo, FunctionLocation, GoToTicksArguments, HistoryUpdate, Instruction,
     Instructions, JumpBehaviour, LoadHistoryArg, LoadStepLinesArg, LoadStepLinesUpdate, LocalStepJump, Location,
-    MoveState, NO_ADDRESS, NO_INDEX, NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent,
+    MoveState, NO_ADDRESS, NO_PATH, NO_POSITION, NO_STEP_ID, Notification, NotificationKind, ProgramEvent,
     RRGDBStopSignal, RRTicks, RegisterEventsArg, RunTracepointsArg, SourceCallJumpTarget, SourceLocation, StepArg,
     Stop, StopType, Task, TraceUpdate, TracepointId, TracepointResults, TracepointResultsAggregate, UpdateTableArgs,
     Variable,
 };
+use crate::terminal_lines::CachedTerminalLines;
 use crate::tracepoint_interpreter::TracepointInterpreter;
 use crate::value::{Type, Value, to_ct_value};
+use crate::value_budget;
 
 const TRACEPOINT_RESULTS_LIMIT_BEFORE_UPDATE: usize = 5;
+
+/// The geid a launched session opens at, when set: the environment variable
+/// `ct host` exports from a manifest's `replay_start.geid` and the replay
+/// agent sets on the hosted replay (codetracer-pm `spec/CLI/ct/host.md`, "The
+/// start position"). Read by [`Handler::run_to_launch_position`].
+pub const START_GEID_ENV: &str = "CODETRACER_START_GEID";
+
+/// The start geid an environment value names: `Ok(None)` when it is unset or
+/// blank, the geid when it is an unsigned integer, and an error naming the
+/// variable and the value otherwise. Whether the geid is a position the
+/// replay can reach is the replay's to answer (a native replay refuses geid 0
+/// as it refuses any other geid it cannot stop after), not the parser's: a
+/// correlation coordinate for a materialized trace may be 0, and such a
+/// replay does not seek to it at all.
+pub fn start_geid_from(value: Option<&str>) -> Result<Option<u64>, String> {
+    let Some(text) = value.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(None);
+    };
+    match text.parse::<u64>() {
+        Ok(geid) => Ok(Some(geid)),
+        Err(_) => Err(format!(
+            "the session's start position {START_GEID_ENV}={text:?} is not an unsigned integer geid; \
+             the session is at the recording's entry instead"
+        )),
+    }
+}
 
 /// Resolve the personal-overrides path for origin patterns per spec §7.4.
 ///
@@ -107,6 +136,24 @@ struct RecordingHeadResponse {
     head: u64,
 }
 
+/// Adapts whichever replay engine is in play to the two questions the
+/// shared data-breakpoint admission rules ask of a backend.
+///
+/// The rules live in `ct-data-breakpoints`, a leaf crate the daemon's
+/// mock DAP backend links against too.  Keeping the backend-dependent
+/// surface down to these two questions is what makes "the mock and the
+/// real backend agree" a checkable property rather than a hope.
+pub struct ReplayVocabulary<'a>(pub &'a dyn crate::replay::ReplaySession);
+
+impl ct_data_breakpoints::TraceVocabulary for ReplayVocabulary<'_> {
+    fn has_per_step_values(&self) -> bool {
+        self.0.has_per_step_values()
+    }
+    fn knows_variable(&self, name: &str) -> bool {
+        self.0.knows_variable(name)
+    }
+}
+
 #[derive(Debug)]
 pub struct Handler {
     /// Abstracted read-only access to trace data.
@@ -151,8 +198,6 @@ pub struct Handler {
     pub trace_kind: TraceKind,
     pub replay: Box<dyn ReplaySession>,
     pub ct_rr_args: RecreatorArgs,
-    pub load_flow_index: usize,
-    pub tracepoint_rr_worker_index: usize,
 
     pub initialized: bool,
 
@@ -163,16 +208,33 @@ pub struct Handler {
     /// only called once.  This avoids the >30s timeout that occurs when
     /// every `ct/py-events` request re-reads all events from disk.
     cached_events: Option<Vec<ProgramEvent>>,
+    /// `cached_events` ordered by tick, each with the largest recorded index
+    /// at or before it — what answers "the last event at or before this tick"
+    /// (`ct/event-load`'s `indexAtTick`) by binary search instead of a scan of
+    /// the whole log on every move. Built on first use, dropped with the
+    /// cache it indexes.
+    event_tick_index: Option<Vec<(i64, usize)>>,
+    /// The last `ct/load-locals` answer before the budget cut it, and the tick
+    /// it is about: `ct/load-value-elements` slices from it, so "Load More"
+    /// re-reads nothing from the trace.
+    full_locals: Option<(i64, Vec<Variable>)>,
 
     /// Cached list of terminal-output (Write) events, populated lazily by
     /// `load_terminal()`.
     ///
-    /// When `load_terminal()` is called before `ensure_events_loaded()`,
-    /// this cache is filled by scanning `reader.events()` for Write
-    /// records only -- much faster than loading all events into memory first.
+    /// Recreator sessions obtain events from the replay worker; their reader
+    /// does not contain the recorded event log. Materialized sessions can scan
+    /// `reader.events()` directly without loading other event types.
     /// When `cached_events` is already populated, Write events are extracted
-    /// from it instead.
+    /// from it instead. Both routes build the rows with
+    /// `program_event_of_record`, so they agree. Every (re)load of
+    /// `cached_events` drops this cache.
     cached_terminal_events: Option<Vec<ProgramEvent>>,
+
+    /// The terminal output split into lines (`ct/load-terminal-lines`), with
+    /// each write's text and tick; built from `cached_terminal_events` and
+    /// dropped with it.
+    cached_terminal_lines: Option<CachedTerminalLines>,
 
     /// Macro sourcemaps loaded from the trace directory.
     /// Used for resolving macro expansion locations (ALT+E shortcut).
@@ -316,6 +378,13 @@ pub struct Handler {
     /// on-disk source files exactly as before.
     pub bundled_sources_root: Option<std::path::PathBuf>,
 
+    /// Where this session may read source text from (see
+    /// [`crate::source_access`]): the host-read setting from the `launch`
+    /// argument `hostSourceReads`, and the roots of the recording's own
+    /// copies. Shared with every source loader of the session: the handler's,
+    /// the flow preloader's and the replay session's own.
+    pub source_access: SourceAccessHandle,
+
     /// IS-M2 — the container's **VM crossing spans**, cached once at trace open.
     ///
     /// Loaded by [`Handler::load_crossing_spans`] (filtered to
@@ -417,6 +486,18 @@ pub struct PairIndexCounterpart {
 //   receives sender as arg
 //   sender.
 
+/// What `ct/event-load`'s `search` matches of a marker row, lower-cased: its
+/// boundary, key and shown value — the fields the Event Log shows for it.
+/// Each is matched on its own, so a query cannot match across two of them.
+fn marker_search_text(row: &MarkerEventRow) -> String {
+    let mut text = format!("{}\n{}", row.boundary_id, row.key_value);
+    if let Some(show) = &row.show_value {
+        text.push('\n');
+        text.push_str(show);
+    }
+    text.to_lowercase()
+}
+
 fn decode_event_log_marker_payload(
     event: &ProgramEvent,
     marker_id: usize,
@@ -490,6 +571,25 @@ impl Handler {
         reader: Arc<dyn TraceReader>,
         indirect_send: bool,
     ) -> Handler {
+        Self::construct_with_reader_and_source_access(
+            trace_kind,
+            ct_rr_args,
+            reader,
+            indirect_send,
+            SourceAccess::default(),
+        )
+    }
+
+    /// [`Self::construct_with_reader`] for a session with a source-reading
+    /// rule (see [`crate::source_access`]). The rule is in force before the
+    /// handler reads any source, construction included.
+    pub fn construct_with_reader_and_source_access(
+        trace_kind: TraceKind,
+        ct_rr_args: RecreatorArgs,
+        reader: Arc<dyn TraceReader>,
+        indirect_send: bool,
+        source_access: SourceAccess,
+    ) -> Handler {
         let replay: Box<dyn ReplaySession> = if trace_kind == TraceKind::Materialized {
             Box::new(MaterializedReplaySession::new(Arc::clone(&reader)))
         } else {
@@ -497,9 +597,19 @@ impl Handler {
             // Emulator-kind handlers must go through
             // `construct_with_replay`, where the caller supplies the
             // pre-built `EmulatorReplaySession`.
-            Box::new(RecreatorReplaySession::new(&ct_rr_args.name, 0, ct_rr_args.clone()))
+            Box::new(RecreatorReplaySession::with_reserved_index(
+                &ct_rr_args.name,
+                ct_rr_args.clone(),
+            ))
         };
-        Self::construct_with_replay(trace_kind, ct_rr_args, reader, replay, indirect_send)
+        Self::construct_with_replay_and_source_access(
+            trace_kind,
+            ct_rr_args,
+            reader,
+            replay,
+            indirect_send,
+            source_access,
+        )
     }
 
     /// Build a `Handler` from a pre-constructed [`TraceReader`] AND a
@@ -525,15 +635,45 @@ impl Handler {
         replay: Box<dyn ReplaySession>,
         indirect_send: bool,
     ) -> Handler {
+        Self::construct_with_replay_and_source_access(
+            trace_kind,
+            ct_rr_args,
+            reader,
+            replay,
+            indirect_send,
+            SourceAccess::default(),
+        )
+    }
+
+    /// [`Self::construct_with_replay`] for a session with a source-reading
+    /// rule. Every source loader the handler holds, and the ones `replay`
+    /// makes for itself, share one [`SourceAccessHandle`] holding it, made
+    /// here before the first source read (`StepLinesLoader::new` reads every
+    /// stepped file).
+    pub fn construct_with_replay_and_source_access(
+        trace_kind: TraceKind,
+        ct_rr_args: RecreatorArgs,
+        reader: Arc<dyn TraceReader>,
+        mut replay: Box<dyn ReplaySession>,
+        indirect_send: bool,
+        source_access: SourceAccess,
+    ) -> Handler {
+        let source_access = SourceAccessHandle::new(source_access);
+        replay.set_source_access(source_access.clone());
+        let mut flow_preloader = FlowPreloader::new();
+        flow_preloader.set_source_access(source_access.clone());
+        let mut sourcemap_cache = SourcemapCache::new();
+        sourcemap_cache.set_host_reads(source_access.get().host_reads);
         let calltrace = Calltrace::new(&*reader);
         let trace = CoreTrace::default();
-        let mut expr_loader = ExprLoader::new(trace.clone());
+        let mut expr_loader = ExprLoader::with_source_access(trace.clone(), source_access.clone());
         let step_lines_loader = StepLinesLoader::new(&*reader, &mut expr_loader);
-        // let sender = sender::Sender::new();
+        // A materialized trace can begin with reload annotations.
+        let initial_step_id = reader.first_step_id().unwrap_or(StepId(0));
         let mut handler = Handler {
             trace_kind,
             reader,
-            step_id: StepId(0),
+            step_id: initial_step_id,
             last_location: Location {
                 key: format!("{}", NO_KEY.0),
                 ..Location::default()
@@ -541,26 +681,27 @@ impl Handler {
             indirect_send,
             // sender,
             event_db: EventDb::new(),
-            flow_preloader: FlowPreloader::new(),
+            flow_preloader,
             expr_loader,
             trace,
             calltrace,
             step_lines_loader,
             dap_client: DapClient::default(),
-            previous_step_id: StepId(0),
+            previous_step_id: initial_step_id,
             breakpoints: HashMap::new(),
             tracepoints: HashMap::new(),
             replay,
             ct_rr_args,
-            load_flow_index: 0,
-            tracepoint_rr_worker_index: 0,
             resulting_dap_messages: vec![],
             raw_diff_index: None,
             initialized: false,
             cached_events: None,
+            event_tick_index: None,
+            full_locals: None,
             cached_terminal_events: None,
+            cached_terminal_lines: None,
             macro_sourcemaps: MacroSourceMapCollection::default(),
-            sourcemap_cache: SourcemapCache::new(),
+            sourcemap_cache,
             sourcemap_cache_dir: None,
             origin_summary_cache: HashMap::new(),
             origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
@@ -572,6 +713,7 @@ impl Handler {
             trace_folder: None,
             request_span_tail: None,
             bundled_sources_root: None,
+            source_access,
             crossing_spans: Vec::new(),
             altitude_state: AltitudeState::default(),
         };
@@ -603,7 +745,12 @@ impl Handler {
 
     fn load_location(&self, step_id: StepId) -> Location {
         let step_id_int = step_id.0;
-        let step_record = self.reader.step(step_id).expect("load_location: invalid step_id");
+        let Some(step_record) = self.reader.step(step_id) else {
+            return Location {
+                rr_ticks: RRTicks(step_id_int),
+                ..Location::default()
+            };
+        };
         let path = format!(
             "{}",
             self.reader
@@ -736,14 +883,14 @@ impl Handler {
                     //   upper if the event is in the range of the move
                     //   this internal one: for which kinds do we produce dap events
                     #[allow(clippy::collapsible_if)]
-                    if event.kind == EventLogKind::Write {
+                    if let Some(category) = terminal_output_category(event.kind) {
                         let step = *self
                             .reader
                             .step(event.step_id)
                             .expect("prepare_output_events: invalid step_id");
                         info!("generate output event");
                         let raw_output_event = self.dap_client.output_event(
-                            "stdout",
+                            category,
                             self.reader.path(step.path_id).unwrap_or(""),
                             step.line.0 as usize,
                             &event.content,
@@ -788,6 +935,61 @@ impl Handler {
         };
         self.last_location = location.clone();
         result
+    }
+
+    /// Tell the client when a step, next or continue ended at a boundary of
+    /// the recording: "End of record reached" when it arrived at the end,
+    /// "Beginning of record reached" at the start, and "Limit of record at
+    /// the end/beginning already reached!" when it started there and could
+    /// not move.  The daemon reports the end ones as `endOfTrace` on
+    /// `ct/py-navigate`, where the Python API raises `StopIteration`
+    /// (codetracer-pm `spec/Planned-Features/CodeTracer-MCP-Server.md`,
+    /// "Navigation at the end of a recording").
+    ///
+    /// A materialized trace knows its first and last steps.  A recreated
+    /// (rr) replay knows only whether the position it reports is the end:
+    /// [`Location::end_of_trace`], read by `complete_move` into
+    /// `last_location`.  `was_at_end` is that flag from before the move, and
+    /// `location_reloaded` says whether the move reloaded the position;
+    /// without it `last_location` is the one from before the move.
+    fn notify_record_limits(
+        &mut self,
+        original_step_id: StepId,
+        was_at_end: bool,
+        location_reloaded: bool,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::Materialized {
+            if original_step_id == self.step_id {
+                let location = if Some(self.step_id) == self.reader.first_step_id() {
+                    "beginning"
+                } else {
+                    "end"
+                };
+                self.send_notification(
+                    NotificationKind::Warning,
+                    &format!("Limit of record at the {location} already reached!"),
+                    false,
+                    sender,
+                )?;
+            } else if Some(self.step_id) == self.reader.first_step_id() {
+                self.send_notification(NotificationKind::Info, "Beginning of record reached", false, sender)?;
+            } else if Some(self.step_id) == self.reader.last_step_id() {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender)?;
+            }
+        } else if location_reloaded && self.last_location.end_of_trace {
+            if was_at_end {
+                self.send_notification(
+                    NotificationKind::Warning,
+                    "Limit of record at the end already reached!",
+                    false,
+                    sender,
+                )?;
+            } else {
+                self.send_notification(NotificationKind::Info, "End of record reached", false, sender)?;
+            }
+        }
+        Ok(())
     }
 
     fn complete_move(&mut self, is_main: bool, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
@@ -1039,8 +1241,81 @@ impl Handler {
         } else {
             self.replay.run_to_entry()?;
         }
-        self.step_id = StepId(0); // TODO: use only db replay step_id or another workaround?
+        self.step_id = self.replay.current_step_id();
         self.complete_move(true, sender)?;
+        Ok(())
+    }
+
+    /// Position a freshly launched session: where a launch opens.
+    ///
+    /// * A launch carrying a `restoreLocation` (a subsystem restart) goes back
+    ///   to that location, exactly as [`Handler::run_to_entry`] always did.
+    /// * Otherwise, when the process was started with a start geid
+    ///   ([`START_GEID_ENV`], which `ct host` exports from a manifest's
+    ///   `replay_start` and the replay agent sets for the queued replay), the
+    ///   session opens at that geid: the replay runs to its entry, then seeks
+    ///   through the same path as `ct/seek-to-geid`, and the one stop the
+    ///   client sees is the one at the geid.
+    /// * A start geid the replay cannot reach, or a malformed value, leaves
+    ///   the session at the entry and says so in an error notification naming
+    ///   the variable, its value and the replay's reason. The recording stays
+    ///   usable; only the start position is lost.
+    /// * A replay with no geid positions (a materialized trace's,
+    ///   [`ReplaySession::serves_geid_positions`]) opens at the entry and
+    ///   does not seek: the geid a dive-in carries for such a recording is a
+    ///   correlation coordinate, not a position of its replay, so there is
+    ///   nothing to refuse and no notification.
+    ///
+    /// Only the launch reads the start geid. `restart` and `ct/run-to-entry`
+    /// keep meaning "the entry".
+    ///
+    /// Spec: codetracer-pm `spec/CLI/ct/host.md`, "The start position".
+    pub fn run_to_launch_position(
+        &mut self,
+        restore_location: Option<Location>,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let restoring = restore_location
+            .as_ref()
+            .is_some_and(|location| location.path != NO_PATH && location.line != NO_POSITION);
+        let start = if restoring {
+            Ok(None)
+        } else {
+            start_geid_from(std::env::var(START_GEID_ENV).ok().as_deref())
+        };
+        let geid = match start {
+            Ok(Some(geid)) if self.replay.serves_geid_positions() => geid,
+            Ok(Some(geid)) => {
+                info!(
+                    "launch: {START_GEID_ENV}={geid} is not a position of this replay (it serves no geid \
+                     positions); opening at the entry"
+                );
+                return self.run_to_entry(dap::Request::default(), restore_location, sender);
+            }
+            Ok(None) => return self.run_to_entry(dap::Request::default(), restore_location, sender),
+            Err(message) => {
+                self.run_to_entry(dap::Request::default(), None, sender.clone())?;
+                error!("{message}");
+                return self.send_notification(NotificationKind::Error, &message, false, sender);
+            }
+        };
+        info!("launch: opening the session at its start geid {geid} ({START_GEID_ENV})");
+        self.replay.run_to_entry()?;
+        self.step_id = self.replay.current_step_id();
+        let refusal = match self.replay.seek_to_geid(geid) {
+            Ok(true) => None,
+            Ok(false) => Some("the replay did not reach it".to_string()),
+            Err(e) => Some(e.to_string()),
+        };
+        self.complete_move(true, sender.clone())?;
+        if let Some(reason) = refusal {
+            let message = format!(
+                "the session's start position {START_GEID_ENV}={geid} could not be reached: {reason}; \
+                 the session is at the recording's entry instead"
+            );
+            error!("{message}");
+            self.send_notification(NotificationKind::Error, &message, false, sender)?;
+        }
         Ok(())
     }
 
@@ -1053,6 +1328,9 @@ impl Handler {
         // if self.trace_kind == TraceKind::Recreator {
         // let locals: Vec<Variable> = vec![];
         // warn!("load_locals not implemented for rr yet");
+        let rr_ticks = args.rr_ticks;
+        let count_budget = args.count_budget;
+        let min_count_limit = args.min_count_limit;
         let locals_with_records = self.replay.load_locals(args)?;
         // Per spec §3.2.3, locals on the active frame use *Eager*
         // origin summaries on the materialized backend. The cache
@@ -1101,6 +1379,13 @@ impl Handler {
                 origin_summary,
             });
         }
+        // THE BUDGET, APPLIED (`value_budget`): the full answer is kept for
+        // `ct/load-value-elements`, the client gets each collection's share.
+        self.full_locals = Some((rr_ticks, locals.clone()));
+        {
+            let mut values: Vec<&mut Value> = locals.iter_mut().map(|l| &mut l.value).collect();
+            value_budget::apply_count_budget(&mut values, count_budget, min_count_limit);
+        }
         self.respond_dap(req, task::CtLoadLocalsResponseBody { locals }, sender)?;
         Ok(())
         // }
@@ -1129,6 +1414,10 @@ impl Handler {
         _req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
     ) -> Result<(), Box<dyn Error>> {
+        // Shape the tree for this stop BEFORE applying the collapse, so the
+        // read that follows it does not re-shape and drop it
+        // (`Calltrace::reshape_if_stop_changed`).
+        self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             self.calltrace.change_expand_state(CallKey(num_key), false);
         } else {
@@ -1144,6 +1433,8 @@ impl Handler {
         _req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
     ) -> Result<(), Box<dyn Error>> {
+        // As in `collapse_calls`: shape for this stop first, then expand.
+        self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         let kind = collapse_calls_args.non_expanded_kind;
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
             if kind == CalltraceNonExpandedKind::CallstackInternal {
@@ -1162,20 +1453,39 @@ impl Handler {
     }
 
     fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
-        let call_key = self
-            .reader
-            .call_key_for_step(self.step_id)
-            .expect("load_local_calltrace: invalid step_id");
-        self.calltrace.optimize_collapse = args.optimize_collapse;
-        if call_key != self.calltrace.start_call_key {
-            // When not auto-collapsing (e.g. Python API bridge), pass the
-            // requested depth so calls are expanded up to that level.
-            // The GUI uses auto_collapsing=true and handles expand/collapse
-            // interactively, so it does not need this.
-            let max_depth = if args.auto_collapsing { None } else { Some(args.depth) };
-            self.calltrace
-                .jump_to_with_depth(self.step_id, args.auto_collapsing, max_depth, &*self.reader);
+        // A recording with no steps has no calls either: its call tree is
+        // empty. Such recordings are legitimate — a JS boundary recording
+        // assembled by `ct-jsbound` opens with no steps, because the readers
+        // skip the container members they do not know — so this is an
+        // answer, not an error.
+        //
+        // This used to `expect()` the current step's call. On a trace with no
+        // steps that panicked the replay-server's task thread, which sends no
+        // DAP response and services no later request, so the client waited
+        // for `ct/load-calltrace-section` until its own timeout.
+        // `first_step_id`, not `step_count() == 0`: reload annotations occupy
+        // execution IDs without being steps, so a count can be non-zero on a
+        // recording with no step at all.
+        if self.reader.first_step_id().is_none() {
+            return Ok(Vec::new());
         }
+        if self.reader.call_key_for_step(self.step_id).is_none() {
+            return Err(format!(
+                "load_local_calltrace: execution index {} is not a source step (the trace has {} execution IDs)",
+                self.step_id.0,
+                self.reader.step_count()
+            )
+            .into());
+        }
+        self.calltrace.optimize_collapse = args.optimize_collapse;
+        // Remember how this client shapes the listing — smart collapse
+        // (desktop, `auto_collapsing = true`) or every call expanded up to
+        // `depth` (terminal, GPUI, Python API bridge) — so a collapse or an
+        // expansion that reaches a new stop before any read there can shape
+        // the tree first. Then shape it for this stop if no request has yet.
+        self.calltrace
+            .set_shape(CalltraceShape::of_load(args.auto_collapsing, args.depth));
+        self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         self.calltrace.load_lines(
             args.start_call_line_index,
             args.height,
@@ -1239,12 +1549,13 @@ impl Handler {
         Ok(())
     }
 
-    pub fn load_flow(
-        &mut self,
-        req: dap::Request,
-        arg: CtLoadFlowArguments,
-        sender: Sender<DapMessage>,
-    ) -> Result<(), Box<dyn Error>> {
+    /// The replay session a `ct/load-flow` walks, separate from the
+    /// handler's own replay so the flow walk does not move the position the
+    /// user sees. A recreator trace gets a new `flow` worker whose index is
+    /// reserved process-wide (`RecreatorReplaySession::with_reserved_index`),
+    /// so it never shares a socket with this handler's own worker or another
+    /// flow's. `command` names the request in the emulator refusal.
+    pub fn new_flow_replay(&self, command: &str) -> Result<Box<dyn ReplaySession>, Box<dyn Error>> {
         // `TraceKind` has THREE variants, and this condition used to have
         // two arms: `== Materialized`, everything else into the rr branch.
         // That silently routed `TraceKind::Emulator` — the in-process MCR
@@ -1260,27 +1571,42 @@ impl Handler {
         // rather than `!= Materialized`. This matches them, and names the
         // remaining case instead of letting it fail as a worker-transport
         // error that says nothing about flow or about emulator traces.
-        let mut flow_replay: Box<dyn ReplaySession> = match self.trace_kind {
-            TraceKind::Materialized => Box::new(MaterializedReplaySession::new(Arc::clone(&self.reader))),
-            TraceKind::Recreator => Box::new(RecreatorReplaySession::new(
-                "flow",
-                self.load_flow_index,
-                self.ct_rr_args.clone(),
-            )),
+        Ok(match self.trace_kind {
+            TraceKind::Materialized => {
+                let mut replay = MaterializedReplaySession::new(Arc::clone(&self.reader));
+                replay.set_source_access(self.source_access.clone());
+                Box::new(replay)
+            }
+            // A flow is one walk from one replay position, so its worker's
+            // death ends the flow (reported by `CallFlowPreloader::load_flow`)
+            // instead of being papered over by a fresh worker at the start of
+            // the recording.
+            TraceKind::Recreator => Box::new(
+                RecreatorReplaySession::with_reserved_index("flow", self.ct_rr_args.clone())
+                    .without_respawn_after_worker_death(),
+            ),
             TraceKind::Emulator => {
                 return Err(format!(
                     "`{}`: flow is not supported on emulator traces yet. The emulator replays \
                      in-process, so it cannot be driven by the rr replay worker this command \
-                     builds for recreator traces (`EmulatorReplaySession::jump_to_call` is \
-                     still unimplemented). Refusing by name rather than failing later as a \
-                     worker-transport error.",
-                    req.command,
+                     builds for recreator traces, and the emulator cannot widen a flow to the \
+                     entry of a call (`EmulatorReplaySession::jump_to_call` reaches only the \
+                     step a row names: no call-entry index is recorded). Refusing by name \
+                     rather than failing later as a worker-transport error.",
+                    command,
                 )
                 .into());
             }
-        };
-        self.load_flow_index += 1;
+        })
+    }
 
+    pub fn load_flow(
+        &mut self,
+        req: dap::Request,
+        arg: CtLoadFlowArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut flow_replay = self.new_flow_replay(&req.command)?;
         // TODO: eventually cleanup or manage in a more optimal way flow replays: caching
         // if possible for example
 
@@ -1290,6 +1616,12 @@ impl Handler {
             // a location with function_first == 0. The Db has authoritative
             // boundary data from the trace's Call/Function records.
             let mut location = arg.location;
+            // The flow's `jump_to_call` widens a location to the entry of the
+            // call that contains it. A location carrying a call-stack
+            // frame's `replay_position` asks the worker for a call-trace
+            // row's jump instead (`calltrace_jump`), so it is dropped here
+            // whatever the client sent.
+            location.replay_position.clear();
             if self.trace_kind == TraceKind::Materialized
                 && location.function_first <= 0
                 && location.function_last <= 0
@@ -1297,7 +1629,11 @@ impl Handler {
             {
                 let step_id = StepId(location.rr_ticks.0);
                 if (step_id.0 as usize) < self.reader.step_count() {
-                    let call_key = self.reader.step(step_id).expect("step not found").call_key;
+                    let call_key = self
+                        .reader
+                        .step(step_id)
+                        .ok_or("flow location is not a source step")?
+                        .call_key;
                     let enriched = self
                         .reader
                         .load_location(step_id, call_key, &mut self.flow_preloader.expr_loader);
@@ -1358,6 +1694,9 @@ impl Handler {
         };
         let patterns_fingerprint_snapshot = self.patterns_fingerprint_cached();
         let mut flow_update = flow_update;
+        // The update names the query it answers, so a client holding a call
+        // flow and a diff flow can tell the two apart on the one event.
+        flow_update.mode = arg.flow_mode;
         if self.trace_kind == TraceKind::Materialized {
             for view in flow_update.view_updates.iter_mut() {
                 for step in view.steps.iter_mut() {
@@ -1448,35 +1787,15 @@ impl Handler {
     }
 
     fn on_step_id_limit(&self, step_index: usize, forward: bool) -> bool {
-        if self.reader.step_count() == 0 {
-            return true;
-        }
-        if forward {
-            // moving forward
-            step_index >= self.reader.step_count() - 1 // we're on the last one
-        } else {
-            // moving backwards
-            step_index == 0
-        }
+        self.reader
+            .adjacent_step_id(StepId(step_index as i64), forward)
+            .is_none()
     }
 
     fn single_step_line(&self, step_index: usize, forward: bool) -> usize {
-        // taking note of db.lines limits: returning a valid step id always
-        if self.reader.step_count() == 0 {
-            return step_index;
-        }
-        if forward {
-            if step_index < self.reader.step_count() - 1 {
-                step_index + 1
-            } else {
-                step_index
-            }
-        } else if step_index > 0 {
-            step_index - 1
-        } else {
-            // auto-returning the same 0 if stepping backwards from 0
-            step_index
-        }
+        self.reader
+            .adjacent_step_id(StepId(step_index as i64), forward)
+            .map_or(step_index, |id| id.0 as usize)
     }
 
     pub fn next(&mut self, forward: bool) -> Result<(), Box<dyn Error>> {
@@ -1588,6 +1907,7 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let original_step_id = self.step_id;
+        let was_at_end = self.last_location.end_of_trace;
         let use_statement = matches!(
             granularity.as_deref(),
             Some(g) if g.eq_ignore_ascii_case("statement")
@@ -1615,26 +1935,7 @@ impl Handler {
         // ct/complete-move event the GUI listens on).
         self.complete_move(false, sender.clone())?;
 
-        if self.trace_kind == TraceKind::Materialized {
-            if original_step_id == self.step_id {
-                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
-                self.send_notification(
-                    NotificationKind::Warning,
-                    &format!("Limit of record at the {location} already reached!"),
-                    false,
-                    sender.clone(),
-                )?;
-            } else if self.step_id == StepId(0) {
-                self.send_notification(
-                    NotificationKind::Info,
-                    "Beginning of record reached",
-                    false,
-                    sender.clone(),
-                )?;
-            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
-                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
-            }
-        }
+        self.notify_record_limits(original_step_id, was_at_end, true, sender.clone())?;
 
         self.respond_dap(request, 0, sender)?;
         Ok(())
@@ -1904,7 +2205,6 @@ impl Handler {
         };
 
         let start_step_id = self.step_id;
-        let step_count = self.reader.step_count();
         let mut last_step_id = start_step_id;
         let mut count: usize = 0;
         loop {
@@ -1920,17 +2220,7 @@ impl Handler {
             // and avoids redundant ``self.replay.step(...)`` driver
             // calls that would advance ``self.step_id`` on every
             // iteration.
-            let last_index = if last_step_id.0 < 0 {
-                0usize
-            } else {
-                last_step_id.0 as usize
-            };
-            let next_index = if step_count == 0 || last_index >= step_count - 1 {
-                last_index
-            } else {
-                last_index + 1
-            };
-            let candidate = StepId(next_index as i64);
+            let candidate = self.reader.adjacent_step_id(last_step_id, true).unwrap_or(last_step_id);
             if candidate == last_step_id {
                 break;
             }
@@ -2116,6 +2406,7 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let original_step_id = self.step_id;
+        let was_at_end = self.last_location.end_of_trace;
         // M8 — Formatted-view step-IN / step-OUT.  Mirrors the M3
         // forward-direction dispatch shape.  Reverse-direction
         // formatted-view step-in / step-out (``ct/reverseStepIn`` /
@@ -2144,26 +2435,7 @@ impl Handler {
         // Surface the post-step location (mirrors M3 / M7's contract).
         self.complete_move(false, sender.clone())?;
 
-        if self.trace_kind == TraceKind::Materialized {
-            if original_step_id == self.step_id {
-                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
-                self.send_notification(
-                    NotificationKind::Warning,
-                    &format!("Limit of record at the {location} already reached!"),
-                    false,
-                    sender.clone(),
-                )?;
-            } else if self.step_id == StepId(0) {
-                self.send_notification(
-                    NotificationKind::Info,
-                    "Beginning of record reached",
-                    false,
-                    sender.clone(),
-                )?;
-            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
-                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
-            }
-        }
+        self.notify_record_limits(original_step_id, was_at_end, true, sender.clone())?;
 
         self.respond_dap(request, 0, sender)?;
         Ok(())
@@ -2212,6 +2484,7 @@ impl Handler {
         // for now not supporting repeat/skip_internal: TODO
         // TODO: reverse
         let original_step_id = self.step_id;
+        let was_at_end = self.last_location.end_of_trace;
         // let original_step = self.db.steps[original_step_id];
         // let original_depth = self.db.calls[original_step.call_key].depth;
         match arg.action {
@@ -2227,26 +2500,7 @@ impl Handler {
             self.complete_move(false, sender.clone())?;
         }
 
-        if self.trace_kind == TraceKind::Materialized {
-            if original_step_id == self.step_id {
-                let location = if self.step_id == StepId(0) { "beginning" } else { "end" };
-                self.send_notification(
-                    NotificationKind::Warning,
-                    &format!("Limit of record at the {location} already reached!"),
-                    false,
-                    sender.clone(),
-                )?;
-            } else if self.step_id == StepId(0) {
-                self.send_notification(
-                    NotificationKind::Info,
-                    "Beginning of record reached",
-                    false,
-                    sender.clone(),
-                )?;
-            } else if self.step_id.0 as usize == self.reader.step_count() - 1 {
-                self.send_notification(NotificationKind::Info, "End of record reached", false, sender.clone())?;
-            }
-        }
+        self.notify_record_limits(original_step_id, was_at_end, arg.complete, sender.clone())?;
         // } else if arg.action == Action::Next {
         //     let new_step = self.db.steps[self.step_id];
         //     let new_depth = self.db.calls[new_step.call_key].depth;
@@ -2336,6 +2590,9 @@ impl Handler {
     /// majority of recordings, which have no spans at all.
     pub fn set_trace_folder(&mut self, trace_dir: &Path) {
         self.trace_folder = Some(trace_dir.to_path_buf());
+        // The trace folder's `files/` holds the recording's copies of its
+        // sources; every loader of the session reads them from here on.
+        self.source_access.set_files_root(Some(trace_dir.join("files")));
     }
 
     /// IS-M2 — load and cache the container's **VM crossing spans** at trace open.
@@ -2577,6 +2834,15 @@ impl Handler {
             self.event_db.replace_record_events(&events_data.events);
 
             self.cached_events = Some(events_data.events);
+            self.event_tick_index = None;
+            // The marker projection is OF these events; a reloaded list
+            // (a live session's growing log) needs it rebuilt.
+            self.cached_marker_rows = None;
+            // So is the terminal: its writes are this list's writes, and a
+            // live session's terminal must show the output the reloaded log
+            // gained since the terminal was last built.
+            self.cached_terminal_events = None;
+            self.cached_terminal_lines = None;
         }
         Ok(())
     }
@@ -2608,13 +2874,52 @@ impl Handler {
             .max(0) as usize;
 
         self.ensure_events_loaded()?;
+        // Before the events are borrowed below: the search reads a marker's
+        // fields, and the page's marker rows are cut from this projection.
+        self.ensure_marker_rows();
 
-        // Safety: `ensure_events_loaded` guarantees `cached_events` is Some.
-        let all_events = match self.cached_events.as_ref() {
-            Some(events) => events,
-            None => {
-                return Err("internal error: cached_events is None after population".into());
+        // THE EVENT LOG'S EVENTS, as `ct/update-table` serves them: the
+        // event database's global table — the recorded events plus the
+        // trace-log events of each enabled tracepoint, in step order
+        // (`EventDb::refresh_global`). Without a tracepoint run that table
+        // IS the recorded events, and the cached list is read as it is.
+        //
+        // Each merged event's place in the RECORDED log (`recorded_of`): a
+        // recorded event's index in `cached_events` (its index in the
+        // event database's recorded table, `SingleTableId(0)`), none for a
+        // trace-log event. The correlation markers are keyed by it.
+        let merged: Option<(Vec<ProgramEvent>, Vec<Option<usize>>)> = {
+            let cached_len = self.cached_events.as_ref().map_or(0, Vec::len);
+            let table = &self.event_db.global_table;
+            if table.len() != cached_len || table.iter().any(|(_, table_id, _)| table_id.0 != 0) {
+                Some(
+                    table
+                        .iter()
+                        .map(|(_, table_id, event_index)| {
+                            let event = self.event_db.get_program_event(table_id, event_index).clone();
+                            (event, (table_id.0 == 0).then_some(event_index.0))
+                        })
+                        .unzip(),
+                )
+            } else {
+                None
             }
+        };
+        let recorded_of = |i: usize| -> Option<usize> {
+            match &merged {
+                Some((_, recorded)) => recorded[i],
+                None => Some(i),
+            }
+        };
+        // Safety: `ensure_events_loaded` guarantees `cached_events` is Some.
+        let all_events: &[ProgramEvent] = match &merged {
+            Some((events, _)) => events,
+            None => match self.cached_events.as_ref() {
+                Some(events) => events,
+                None => {
+                    return Err("internal error: cached_events is None after population".into());
+                }
+            },
         };
 
         // The order the event log's header click asked for (`sortKey`, a
@@ -2638,17 +2943,69 @@ impl Handler {
 
         // Determine the slice to return: the requested window of the
         // ordered list, or (legacy, `count` 0) its first 20 events.
-        let positions = match order {
+        let positions: Vec<usize> = match order {
             Some(order) => crate::event_db::ordered_event_positions(all_events.len(), |i| &all_events[i], order),
             None => (0..all_events.len()).collect(),
         };
+        // The pane's search (`search`): only the events whose content or
+        // source path contains it, case-insensitively — what the GUI's
+        // DataTables global search matched — or, for a correlation marker,
+        // whose boundary, key or shown value does: what the pane shows for
+        // it. It is the Event Log's ONE free-text filter (Correlation-Markers
+        // §5.4), so the marker rows are not filtered by the text a second
+        // time on the client. The window, `total` and `indexAtTick` are all
+        // cut from the MATCHING list, so a pane that pages through a search
+        // pages through its results.
+        let search = req
+            .arguments
+            .get("search")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_lowercase)
+            .filter(|q| !q.is_empty());
+        let positions: Vec<usize> = match search {
+            Some(query) => {
+                let marker_text: HashMap<usize, String> = self
+                    .cached_marker_rows
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|row| (row.event_index, marker_search_text(row)))
+                    .collect();
+                positions
+                    .into_iter()
+                    .filter(|&i| {
+                        let event = &all_events[i];
+                        event.content.to_lowercase().contains(&query)
+                            || event.high_level_path.to_lowercase().contains(&query)
+                            || recorded_of(i)
+                                .and_then(|r| marker_text.get(&r))
+                                .is_some_and(|text| text.contains(&query))
+                    })
+                    .collect()
+            }
+            None => positions,
+        };
+        // The pane's kind selection (`selectedKinds`, one flag per
+        // `EventLogKind`, in any shape `ct/update-table` accepts): only the
+        // events of a selected kind. Absent, every kind.
+        let selected_kinds = match req.arguments.get("selectedKinds") {
+            Some(value) if !value.is_null() => Some(task::selected_kinds_from_json(value)?),
+            _ => None,
+        };
+        let positions: Vec<usize> = match selected_kinds {
+            Some(flags) => positions
+                .into_iter()
+                .filter(|&i| flags[all_events[i].kind as usize])
+                .collect(),
+            None => positions,
+        };
         let (skip, take) = if count > 0 { (start, count) } else { (0, 20) };
-        // The WHOLE log's size, which a list pane's scrollbar scrubber spans
-        // (Scrollbar-Scrubbers.md §2: "the ENTIRE recording's population ...
-        // not the loaded window"). Until now the answer carried only the
-        // window, and a native pane learned the total only by reading a page
-        // that came back short.
+        // `total` is the size of the list the pane pages through — the search
+        // and the kind selection applied — which its scrollbar scrubber spans
+        // (Scrollbar-Scrubbers.md §2); `unfilteredTotal` is the whole log's,
+        // what the desktop footer reports as "filtered from N".
         let total = positions.len();
+        let unfiltered_total = all_events.len();
         // The row of the CURRENT recording position in this order, when the
         // caller names the position (`atRRTicks`): the last event at or before
         // that tick (Scrollbar-Scrubbers.md §3.5, the track's current-position
@@ -2656,12 +3013,19 @@ impl Handler {
         // the recording, not of the position.
         let index_at_tick: i64 = match req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64) {
             Some(at) => {
-                let mut best: Option<usize> = None;
-                for (i, event) in all_events.iter().enumerate() {
-                    if event.direct_location_rr_ticks <= at {
-                        best = Some(i);
+                // The cached recorded list keeps its tick index; a merged
+                // list (a tracepoint run's events among them) is indexed for
+                // this request.
+                let best = if merged.is_some() {
+                    last_event_at_or_before(&event_tick_index_of(all_events), at)
+                } else {
+                    if self.event_tick_index.is_none() {
+                        self.event_tick_index = Some(event_tick_index_of(all_events));
                     }
-                }
+                    self.event_tick_index
+                        .as_ref()
+                        .and_then(|index| last_event_at_or_before(index, at))
+                };
                 match best {
                     Some(event_index) => positions
                         .iter()
@@ -2687,6 +3051,7 @@ impl Handler {
                 req,
                 serde_json::json!({
                     "total": total,
+                    "unfilteredTotal": unfiltered_total,
                     "indexAtTick": index_at_tick,
                 }),
                 sender,
@@ -2695,14 +3060,16 @@ impl Handler {
         }
         // Each event carries its place in the RECORDED log (`eventIndex`),
         // whatever order the window was cut in, so a sorted pane still
-        // numbers an event as the recording does.
-        let page_events: Vec<ProgramEvent> = positions
+        // numbers an event as the recording does. A trace-log event has no
+        // such place and carries its place in the merged log.
+        let page_positions: Vec<usize> = positions.iter().skip(skip).take(take).copied().collect();
+        let page_recorded: Vec<Option<usize>> = page_positions.iter().map(|&i| recorded_of(i)).collect();
+        let page_events: Vec<ProgramEvent> = page_positions
             .iter()
-            .skip(skip)
-            .take(take)
-            .map(|&i| {
+            .zip(&page_recorded)
+            .map(|(&i, recorded)| {
                 let mut event = all_events[i].clone();
-                event.event_index = i;
+                event.event_index = recorded.unwrap_or(i);
                 event
             })
             .collect();
@@ -2727,11 +3094,11 @@ impl Handler {
         // contract — verified by the M25b DAP test
         // `test_dap_event_log_marker_response_serves_from_cache_post_load`).
         //
-        // We index the cached projection by the *absolute* event index
-        // (the row's offset into `cached_events`) so that the page-
-        // local `event_index` field on each `MarkerEventRow` lines up
-        // with the consumer's row indices.
-        let marker_rows = self.collect_marker_rows_for_page(&page_events, start, count);
+        // The cached projection is indexed by the *absolute* event index
+        // (the row's offset into `cached_events`); each page event carries
+        // that index as `event_index`, and the marker row is re-numbered by
+        // the event's row in the page, which the consumer joins on.
+        let marker_rows = self.collect_marker_rows_for_page(&page_recorded);
 
         // Include event data in the DAP response body so that
         // `session.customRequest("ct/event-load")` resolves with the data
@@ -2743,6 +3110,7 @@ impl Handler {
                 "content": page_contents,
                 "markers": marker_rows,
                 "total": total,
+                "unfilteredTotal": unfiltered_total,
                 "indexAtTick": index_at_tick,
             }),
             sender,
@@ -2751,74 +3119,82 @@ impl Handler {
         Ok(())
     }
 
-    /// M25b — Build the marker-row projection for the events served by
-    /// a single `ct/event-load` page. Honours the §3.2.1
-    /// one-time-evaluation contract: the projection over the full
-    /// `cached_events` slice is computed on the first call and cached;
-    /// repeat calls reuse the cached slice (filtered to the page) and
-    /// do NOT re-decode `ProgramEvent.metadata`. The
-    /// `marker_decode_calls` counter advances only on the first build.
-    fn collect_marker_rows_for_page(
-        &mut self,
-        page_events: &[ProgramEvent],
-        start: usize,
-        count: usize,
-    ) -> Vec<MarkerEventRow> {
-        if self.cached_marker_rows.is_none() {
-            let all_events = match self.cached_events.as_ref() {
-                Some(events) => events,
-                None => return Vec::new(),
-            };
-            let mut rows: Vec<MarkerEventRow> = Vec::new();
-            for (absolute_index, event) in all_events.iter().enumerate() {
-                self.marker_decode_calls
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some(payload) = decode_event_log_marker_payload(event, absolute_index) else {
-                    continue;
-                };
-                rows.push(MarkerEventRow {
-                    event_index: absolute_index,
-                    marker_id: payload.marker_id,
-                    boundary_id: payload.boundary_id,
-                    direction: payload.direction.as_str().to_string(),
-                    key_text: payload.key_text,
-                    key_value: payload.key_value,
-                    show_text: payload.show_text,
-                    show_value: payload.show_value,
-                    description: payload.description,
-                    format: payload.format,
-                    source_path: event.high_level_path.clone(),
-                    source_line: event.high_level_line.max(0) as usize,
-                    step_id: event.direct_location_rr_ticks,
-                });
-            }
-            self.cached_marker_rows = Some(rows);
+    /// M25b — Build the marker-row projection over the full
+    /// `cached_events` slice, once. Honours the §3.2.1
+    /// one-time-evaluation contract: repeat `ct/event-load` calls reuse
+    /// the cached projection and do NOT re-decode `ProgramEvent.metadata`;
+    /// the `marker_decode_calls` counter advances only on a build. The
+    /// cache is dropped with the events it projects
+    /// (`ensure_events_loaded`).
+    fn ensure_marker_rows(&mut self) {
+        if self.cached_marker_rows.is_some() {
+            return;
         }
-        // Filter the cached projection to the page window. When the
-        // call uses the legacy "first 20" fallback the lower / upper
-        // bounds wrap the page's first/last absolute event index.
-        let (lower, upper) = if count > 0 {
-            (start, start.saturating_add(page_events.len()))
-        } else {
-            // Legacy fallback — pages slice `[0..min(20, len)]`.
-            (0usize, page_events.len())
+        let all_events = match self.cached_events.as_ref() {
+            Some(events) => events,
+            None => return,
         };
-        self.cached_marker_rows
-            .as_ref()
-            .map(|all| {
-                all.iter()
-                    .filter(|row| row.event_index >= lower && row.event_index < upper)
-                    .map(|row| {
-                        let mut adjusted = row.clone();
-                        // Re-base `event_index` to be page-local so the
-                        // frontend's join against the `events: [...]`
-                        // array is correct.
-                        adjusted.event_index = row.event_index.saturating_sub(lower);
-                        adjusted
-                    })
-                    .collect()
-            })
+        let mut rows: Vec<MarkerEventRow> = Vec::new();
+        for (absolute_index, event) in all_events.iter().enumerate() {
+            self.marker_decode_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(payload) = decode_event_log_marker_payload(event, absolute_index) else {
+                continue;
+            };
+            rows.push(MarkerEventRow {
+                event_index: absolute_index,
+                marker_id: payload.marker_id,
+                boundary_id: payload.boundary_id,
+                direction: payload.direction.as_str().to_string(),
+                key_text: payload.key_text,
+                key_value: payload.key_value,
+                show_text: payload.show_text,
+                show_value: payload.show_value,
+                description: payload.description,
+                format: payload.format,
+                source_path: event.high_level_path.clone(),
+                source_line: event.high_level_line.max(0) as usize,
+                step_id: event.direct_location_rr_ticks,
+            });
+        }
+        self.cached_marker_rows = Some(rows);
+    }
+
+    /// M25b — The marker rows of the events served by one `ct/event-load`
+    /// page, from the projection `ensure_marker_rows` built.
+    ///
+    /// A page is not a contiguous run of recorded events once it is cut
+    /// from a sorted or searched list, so a marker belongs to the page when
+    /// its event does — matched by each page row's index in the recorded
+    /// log (`page_recorded`; none for a trace-log row, which has no marker)
+    /// — and is re-numbered by that event's row in
+    /// the page, which is what the frontend joins against the
+    /// `events: [...]` array on.
+    fn collect_marker_rows_for_page(&mut self, page_recorded: &[Option<usize>]) -> Vec<MarkerEventRow> {
+        self.ensure_marker_rows();
+        // Each page row's recorded index; a trace-log row has none, and no
+        // marker.
+        let row_in_page: HashMap<usize, usize> = page_recorded
+            .iter()
+            .enumerate()
+            .filter_map(|(row, recorded)| recorded.map(|r| (r, row)))
+            .collect();
+        let mut rows: Vec<MarkerEventRow> = self
+            .cached_marker_rows
+            .as_deref()
             .unwrap_or_default()
+            .iter()
+            .filter_map(|row| {
+                row_in_page.get(&row.event_index).map(|&page_row| {
+                    let mut adjusted = row.clone();
+                    adjusted.event_index = page_row;
+                    adjusted
+                })
+            })
+            .collect();
+        // In the page's order, as the events are.
+        rows.sort_by_key(|row| row.event_index);
+        rows
     }
 
     /// M25b — `ct/pairIndexLookup` handler. Returns the counterparts
@@ -2878,8 +3254,14 @@ impl Handler {
     /// the M25b marker-row cache so subsequent `event_load` calls
     /// re-derive against the freshly-installed events.
     pub fn set_cached_events_for_tests(&mut self, events: Vec<ProgramEvent>) {
+        // As `ensure_events_loaded` does: the event database's recorded table
+        // is the same list, so the event log's global table is it too.
+        self.event_db.replace_record_events(&events);
         self.cached_events = Some(events);
+        self.event_tick_index = None;
         self.cached_marker_rows = None;
+        self.cached_terminal_events = None;
+        self.cached_terminal_lines = None;
         self.marker_decode_calls.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -2945,17 +3327,93 @@ impl Handler {
         location: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        if self.trace_kind == TraceKind::Materialized {
-            let step_id = StepId(location.rr_ticks.0); // using this field
-            // for compat with rr/gdb core support
-            self.replay.jump_to(step_id)?;
-            self.step_id = self.replay.current_step_id();
-        } else {
-            // TODO: eventually calltrace in the future
-            // for now support only callstack-mode
-            self.replay.callstack_jump(location.callstack_depth)?;
-            let _ = self.replay.load_location(&mut self.expr_loader)?;
-            self.step_id = self.replay.current_step_id();
+        // A call-trace row names a FRAME (Click-Navigation.md §2.1/§2.2), and
+        // the jump must land in that frame wherever the session is now.
+        match self.trace_kind {
+            TraceKind::Materialized => {
+                // A materialized row's `rr_ticks` is its call's entry step,
+                // which identifies the call by itself.
+                let step_id = StepId(location.rr_ticks.0); // using this field
+                // for compat with rr/gdb core support
+                self.replay.jump_to(step_id)?;
+                self.step_id = self.replay.current_step_id();
+            }
+            TraceKind::Recreator => {
+                // A native row is a frame of the call stack the replay worker
+                // served at the moment the row was loaded (the recreator
+                // branch of `load_calltrace_section`): `rr_ticks` is that
+                // moment (rr ticks, or the MCR geid) and `callstack_depth`
+                // the frame's depth in that stack.
+                //
+                // This used to be `callstack_jump(depth)` alone, which moves
+                // along the CURRENT stack. A row loaded at another moment —
+                // the call trace the pane held before the session moved —
+                // names a call that need not be on the current stack, and
+                // the session then stayed where it was or went to whatever
+                // frame of the current stack had that depth (codetracer-pm
+                // issue
+                // `2026-10-21-native-calltrace-jump-moves-only-along-the-current-stack.md`).
+                // The row's moment is not `rr_ticks`: every stop between two
+                // MCR events shares one geid, and branch-free code shares one
+                // rr tick count, so two calls of one function at one depth can
+                // have rows that agree on every coordinate. The worker stamps
+                // each frame with the exact stop (`replay_position`), the
+                // client sends it back, and `jump_to_call` on such a location
+                // moves to the row's frame — along the current stack when the
+                // stop is the current one, otherwise by returning to that stop
+                // first — or refuses (codetracer-native-backend,
+                // `frame_position.rs`).
+                //
+                // A row without one (a client or a worker that predates it)
+                // names no stop, and serving it would land in whichever stop
+                // shares its coordinate: it is refused, by name, rather than
+                // guessed (Click-Navigation.md §2.2, §3.3).
+                if location.replay_position.is_empty() {
+                    return Err(format!(
+                        "ct/calltrace-jump: the call-trace row of {}:{} (depth {}) names no replay \
+                         position, so the stop it was loaded at cannot be found again; reload the \
+                         call trace (the row came from a replay worker or client that does not \
+                         send one)",
+                        location.path, location.line, location.callstack_depth
+                    )
+                    .into());
+                }
+                if let Err(refusal) = self.replay.jump_to_call(&location) {
+                    // The worker may have run the replay while finding out
+                    // that it cannot serve the row (it returns to where it
+                    // was when it can, and says so). Report where the
+                    // session is, then the refusal, so the client never shows
+                    // a position the session has left. A failure to report
+                    // it is added to the refusal, never put in its place.
+                    let reported = self
+                        .replay
+                        .load_location(&mut self.expr_loader)
+                        .map(|_| ())
+                        .and_then(|()| {
+                            self.step_id = self.replay.current_step_id();
+                            self.complete_move(false, sender.clone())
+                        });
+                    return Err(match reported {
+                        Ok(()) => refusal,
+                        Err(report) => {
+                            format!("{refusal}; and where the session is now could not be reported: {report}").into()
+                        }
+                    });
+                }
+                let _ = self.replay.load_location(&mut self.expr_loader)?;
+                self.step_id = self.replay.current_step_id();
+            }
+            TraceKind::Emulator => {
+                // An emulator row's `rr_ticks` is an emulator step number and
+                // its depth counts from the innermost frame
+                // (`EmulatorReplaySession::load_callstack`). `jump_to_call`
+                // re-executes to that step for the innermost frame and
+                // refuses an outer one, which forward-only replay cannot
+                // reach.
+                let _ = self.replay.jump_to_call(&location)?;
+                let _ = self.replay.load_location(&mut self.expr_loader)?;
+                self.step_id = self.replay.current_step_id();
+            }
         }
         self.complete_move(false, sender.clone())?;
 
@@ -2983,6 +3441,68 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/load-value-elements`: the next slice of a collection the locals
+    /// budget cut short ("Load More", UI-Data-Loading-Guidelines Pattern 3),
+    /// out of the untruncated answer kept for the stop.
+    pub fn load_value_elements(
+        &mut self,
+        req: dap::Request,
+        args: task::LoadValueElementsArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let Some((ticks, locals)) = self.full_locals.as_ref() else {
+            return Err("ct/load-value-elements: no ct/load-locals answer to continue".into());
+        };
+        if *ticks != args.rr_ticks {
+            return Err(format!(
+                "ct/load-value-elements: asked about tick {} but the locals are about tick {}",
+                args.rr_ticks, ticks
+            )
+            .into());
+        }
+        let Some(local) = locals.iter().find(|l| l.expression == args.expression) else {
+            return Err(format!("ct/load-value-elements: no local named {:?}", args.expression).into());
+        };
+        let slice = value_budget::elements_slice(&local.value, &args.path, args.start_index, args.count)
+            .map_err(|e| format!("ct/load-value-elements: {e:?}"))?;
+        self.respond_dap(
+            req,
+            task::LoadValueElementsResponseBody {
+                elements: slice.elements,
+                start_index: slice.start_index,
+                total: slice.total,
+                more: slice.more,
+            },
+            sender,
+        )?;
+        Ok(())
+    }
+
+    /// `ct/load-symbols`: every function the recording called, once, with
+    /// the tick of its first call — the omnibar's symbol index. It used to be
+    /// derived from whatever call-trace section the client happened to hold,
+    /// so a function outside that window could not be found.
+    pub fn load_symbols(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        let mut first_call: HashMap<usize, i64> = HashMap::new();
+        for db_call in self.reader.calls_iter() {
+            first_call.entry(db_call.function_id.0).or_insert(db_call.step_id.0);
+        }
+        let mut symbols: Vec<task::SymbolEntry> = Vec::new();
+        for (id, function) in self.reader.functions_iter() {
+            if let Some(&ticks) = first_call.get(&id.0) {
+                symbols.push(task::SymbolEntry {
+                    name: function.name.clone(),
+                    path: self.reader.path(function.path_id).unwrap_or("").to_string(),
+                    line: function.line.0,
+                    first_call_ticks: ticks,
+                });
+            }
+        }
+        symbols.sort_by(|a, b| a.name.cmp(&b.name).then(a.first_call_ticks.cmp(&b.first_call_ticks)));
+        self.respond_dap(req, task::LoadSymbolsResponseBody { symbols }, sender)?;
+        Ok(())
+    }
+
     pub fn calltrace_search(
         &mut self,
         req: dap::Request,
@@ -2999,10 +3519,16 @@ impl Handler {
             }
         }
 
+        // Count every match, but build a `Call` only for the ones answered:
+        // the search's `limit` is the requesting pane's window.
+        let mut total = 0usize;
         for db_call in self.reader.calls_iter() {
             if list.contains(&db_call.function_id.0) {
-                // expanded children count not relevant here
-                calls.push(self.reader.to_call(db_call, &mut self.expr_loader));
+                total += 1;
+                if arg.limit == 0 || calls.len() < arg.limit {
+                    // expanded children count not relevant here
+                    calls.push(self.reader.to_call(db_call, &mut self.expr_loader));
+                }
             }
         }
 
@@ -3021,7 +3547,7 @@ impl Handler {
         // confirms the handler returns ``success=true`` with the
         // correct calls.  Wrapping in an object brings this response
         // into the same shape every other ``ct/*`` custom command uses.
-        self.respond_dap(req, CallSearchResponseBody { calls }, sender)?;
+        self.respond_dap(req, CallSearchResponseBody { calls, total }, sender)?;
         Ok(())
     }
 
@@ -3036,14 +3562,23 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::Recreator {
-            self.replay = Box::new(RecreatorReplaySession::new(
+            self.replay = Box::new(RecreatorReplaySession::with_reserved_index(
                 "tracepoint",
-                self.tracepoint_rr_worker_index,
                 self.ct_rr_args.clone(),
             ));
-            self.tracepoint_rr_worker_index += 1;
         };
-        let (history_results_with_records, address) = self.replay.load_history(&load_history_arg)?;
+        let (all_history, address) = self.replay.load_history(&load_history_arg)?;
+        // THE WINDOW the pane asked for (`start` / `count`), cut before the
+        // per-entry origin summaries are built, so only the entries shown pay
+        // for one. `count` 0 is every entry from `start` (the older callers).
+        let total = all_history.len();
+        let window_start = load_history_arg.start.min(total);
+        let window_end = if load_history_arg.count == 0 {
+            total
+        } else {
+            (window_start + load_history_arg.count).min(total)
+        };
+        let history_results_with_records = &all_history[window_start..window_end];
         // Per spec §3.2.3 (and the M2 deliverable expanding
         // `ct/load-history` with per-entry origin summaries), each
         // historic value carries its own `OriginSummary`. On a
@@ -3133,7 +3668,9 @@ impl Handler {
             });
         }
 
-        let history_update = HistoryUpdate::new(load_history_arg.expression.clone(), address, &history_results);
+        let mut history_update = HistoryUpdate::new(load_history_arg.expression.clone(), address, &history_results);
+        history_update.total = total;
+        history_update.start = window_start;
         let raw_event = self.dap_client.updated_history_event(history_update.clone())?;
 
         sender.send(raw_event)?;
@@ -3496,6 +4033,11 @@ impl Handler {
         }
         // Fall back to the recorded workdir's `meta_dat/sources/` for traces
         // that ship on-disk-relative bundled sources (and legacy layouts).
+        // That directory is on THIS host, under a working directory the
+        // recording names, so a session with host reads off never uses it.
+        if !self.source_access.get().host_reads_allowed() {
+            return None;
+        }
         let candidate = self.reader.workdir().join("meta_dat").join("sources");
         if candidate.is_dir() { Some(candidate) } else { None }
     }
@@ -3645,7 +4187,7 @@ impl Handler {
                 warn!("bundled-sources: cannot create {}: {e}", parent.display());
                 continue;
             }
-            if let Err(e) = std::fs::write(&dest, &sv.content) {
+            if let Err(e) = publish_bundled_source(&dest, &sv.content) {
                 warn!("bundled-sources: cannot write {}: {e}", dest.display());
                 continue;
             }
@@ -3658,6 +4200,7 @@ impl Handler {
                 ct_path.display(),
                 root.display()
             );
+            self.source_access.set_bundled_root(Some(root.clone()));
             self.bundled_sources_root = Some(root);
         }
     }
@@ -3758,6 +4301,7 @@ impl Handler {
                 "bundled-sources(vfs): extracted {extracted} bundled source(s) from {container_key} to {}",
                 root.display()
             );
+            self.source_access.set_bundled_root(Some(root.clone()));
             self.bundled_sources_root = Some(root);
         }
         extracted
@@ -3962,19 +4506,25 @@ impl Handler {
         }
         let requested = PathBuf::from(&path);
         // Absent means yes, so a generic DAP client keeps today's behaviour.
-        let allow_working_tree = args.allow_working_tree.unwrap_or(true);
+        // A session launched with host reads off never reads the working
+        // tree, whatever the client asks (see `crate::source_access`).
+        let host_reads_allowed = self.source_access.get().host_reads_allowed();
+        let allow_working_tree = args.allow_working_tree.unwrap_or(true) && host_reads_allowed;
 
+        // Both payload roots are read through `source_access::read_beneath`:
+        // the same candidates `resolve_bundled_source` walks, each opened
+        // beneath its root without following a symlink below it, so a link
+        // planted in the bundle or in `files/` cannot be served as
+        // `sourceOrigin: "payload"`.
         let mut resolved: Option<(String, crate::dap_ext::SourceOriginKind)> = None;
         if let Some(root) = self.meta_dat_sources_root()
-            && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&root, &requested)
-            && let Some(text) = crate::expr_loader::source_text(&bundled)
+            && let Some(text) = crate::source_access::read_beneath(&root, &requested)
         {
             resolved = Some((text, crate::dap_ext::SourceOriginKind::Payload));
         }
         if resolved.is_none()
             && let Some(trace_folder) = self.trace_folder.clone()
-            && let Some(bundled) = crate::expr_loader::resolve_bundled_source(&trace_folder.join("files"), &requested)
-            && let Some(text) = crate::expr_loader::source_text(&bundled)
+            && let Some(text) = crate::source_access::read_beneath(&trace_folder.join("files"), &requested)
         {
             resolved = Some((text, crate::dap_ext::SourceOriginKind::Payload));
         }
@@ -4012,6 +4562,11 @@ impl Handler {
             None => {
                 let message = if allow_working_tree {
                     format!("no source available for {path}")
+                } else if !host_reads_allowed {
+                    format!(
+                        "no recorded source available for {path}: {}",
+                        crate::source_access::HOST_READS_REFUSED
+                    )
                 } else {
                     format!("no recorded source available for {path}, and the working tree was not consulted")
                 };
@@ -4298,7 +4853,8 @@ impl Handler {
     /// Every `PathId` the fuzzy ladder resolves `path` to, oldest version
     /// first. GDH-M7: see `MaterializedReplaySession::load_path_ids`.
     fn load_path_ids(&self, path: &str) -> Vec<PathId> {
-        self.reader.fuzzy_path_ids_for(path)
+        self.reader
+            .fuzzy_path_ids_for_under(path, self.source_access.get().host_reads)
     }
 
     /// The step on `line` that a jump with `behaviour` should land on.
@@ -4609,6 +5165,157 @@ impl Handler {
             )?;
             Err(err.into())
         }
+    }
+
+    // ── Data breakpoints (watchpoints) ──────────────────────────────
+    //
+    // See `ct_data_breakpoints` for what a data breakpoint means over a
+    // recording, and for why the admission rules live in a crate shared
+    // with the daemon's mock DAP backend rather than here.
+    //
+    // Short version: `setDataBreakpoints` had NO arm in this backend's
+    // dispatch for the whole life of the watchpoint feature.  It fell
+    // through to `dap_command_to_step_action` and came back as the
+    // free-text `command setDataBreakpoints not supported here`.  The
+    // only implementation anywhere in the tree was the daemon's mock,
+    // which answered `verified: true` unconditionally — a test double
+    // more capable than the component it stood in for, which is why no
+    // test could see that watchpoints had never worked.
+
+    /// A `TraceVocabulary` view of whatever replay engine this handler
+    /// is driving.  The admission rules ask a backend exactly two
+    /// questions; everything else about a verdict is a property of the
+    /// request and is therefore identical for every backend, which is
+    /// what lets the mock and the real thing be held to one standard.
+    fn data_breakpoint_vocabulary(&self) -> ReplayVocabulary<'_> {
+        ReplayVocabulary(self.replay.as_ref())
+    }
+
+    /// Decode one DAP `DataBreakpoint` into the shared request shape.
+    fn decode_data_breakpoint(entry: &dap_types::DataBreakpoint) -> ct_data_breakpoints::DataBreakpointRequest {
+        ct_data_breakpoints::DataBreakpointRequest {
+            data_id: entry.data_id.clone(),
+            access_type: entry.access_type.clone(),
+            // Empty-string normalisation, the same back-compat hazard
+            // `SourceBreakpoint.condition` has: a frontend that cannot
+            // elide the key ships `""` to mean "no condition", and
+            // treating that as a condition would refuse every
+            // watchpoint such a client sets.
+            condition: entry.condition.clone().filter(|c| !c.is_empty()),
+            hit_condition: entry.hit_condition.clone().filter(|c| !c.is_empty()),
+        }
+    }
+
+    /// DAP `dataBreakpointInfo` — the handshake a client uses to ask
+    /// "can I watch this?" before setting anything.
+    ///
+    /// Answering it is what makes the feature discoverable: a
+    /// conforming DAP client greys out its "break on value change"
+    /// affordance unless this returns a non-null `dataId`.  A backend
+    /// that never answers it has a feature no client will ever offer.
+    ///
+    /// Per the DAP spec a refusal here is `dataId: null` plus a
+    /// human-readable `description` — NOT an error response.  We add
+    /// `refusalCode` from the closed set beside it, mirroring the
+    /// `originErrorCode` convention, so a caller branches on an
+    /// integer instead of parsing English.
+    pub fn data_breakpoint_info(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::DataBreakpointInfoArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let probe = ct_data_breakpoints::DataBreakpointRequest::new(args.name.clone());
+        let body = match ct_data_breakpoints::verdict(&probe, &self.data_breakpoint_vocabulary()) {
+            Ok(watched) => serde_json::json!({
+                "dataId": watched.name,
+                "description": format!("stop when the value of `{}` changes", watched.name),
+                // `write` and ONLY `write`.  A recording samples what
+                // each variable held at each step; it does not record
+                // reads, which leave no trace in the data.  Advertising
+                // `read` here would put an affordance in front of the
+                // user that can only ever refuse.
+                "accessTypes": ["write"],
+                // A `dataId` here is a variable NAME, which stays
+                // meaningful across sessions over the same recording.
+                "canPersist": true,
+            }),
+            Err(refusal) => serde_json::json!({
+                "dataId": serde_json::Value::Null,
+                "description": refusal.description(),
+                "refusalCode": refusal.as_u32(),
+                "refusal": refusal.token(),
+            }),
+        };
+        self.respond_dap(request, body, sender)
+    }
+
+    /// DAP `setDataBreakpoints` — install the watchpoint set.
+    ///
+    /// Replace semantics, like `setBreakpoints`: this request defines
+    /// the complete set, and an empty `breakpoints` array clears it.
+    ///
+    /// Every entry is answered INDIVIDUALLY with its own `verified`
+    /// flag and, when refused, its own closed-set `refusalCode`.  The
+    /// request as a whole still succeeds — a refusable entry is not a
+    /// malformed request, and collapsing the two would put the daemon
+    /// back to reading a single free-text string for a set of
+    /// watchpoints that may have differing verdicts.
+    ///
+    /// Only admitted entries are installed.  Refusing on the wire and
+    /// watching anyway would be the same class of dishonesty as
+    /// accepting and doing nothing.
+    pub fn set_data_breakpoints(
+        &mut self,
+        request: dap::Request,
+        args: dap_types::SetDataBreakpointsArguments,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut admitted: Vec<String> = Vec::new();
+        let mut results: Vec<serde_json::Value> = Vec::with_capacity(args.breakpoints.len());
+
+        for entry in &args.breakpoints {
+            let decoded = Self::decode_data_breakpoint(entry);
+            match ct_data_breakpoints::verdict(&decoded, &self.data_breakpoint_vocabulary()) {
+                Ok(watched) => {
+                    // 1-based, assigned by position, so the daemon can
+                    // pair each verdict back with the watchpoint id
+                    // that asked for it.  `python_bridge`'s
+                    // `format_add_watchpoint_response` indexes into
+                    // this array by request position.
+                    let id = admitted.len() as i64 + 1;
+                    admitted.push(watched.name.clone());
+                    results.push(serde_json::json!({
+                        "id": id,
+                        "verified": true,
+                        "dataId": watched.name,
+                    }));
+                }
+                Err(refusal) => {
+                    results.push(serde_json::json!({
+                        "verified": false,
+                        "message": refusal.description(),
+                        "refusalCode": refusal.as_u32(),
+                        "refusal": refusal.token(),
+                        "dataId": entry.data_id,
+                    }));
+                }
+            }
+        }
+
+        // Install last, so a backend-level failure cannot leave the
+        // client holding verdicts for a set that was never applied.
+        if let Err(e) = self.replay.set_watchpoints(admitted) {
+            // The engine refused a set the admission rules admitted.
+            // That is a disagreement between this handler and the
+            // engine, not a user error, and it must NOT be reported as
+            // a per-entry refusal — the closed set has no variant for
+            // it because it should not happen.
+            error!("set_watchpoints refused an admitted set: {e}");
+            return Err(e);
+        }
+
+        self.respond_dap(request, serde_json::json!({ "breakpoints": results }), sender)
     }
 
     pub fn set_breakpoints(
@@ -4958,7 +5665,7 @@ impl Handler {
         if !self.breakpoints.is_empty() {
             return;
         }
-        if let Some(first_step) = self.reader.step(StepId(0)) {
+        if let Some(first_step) = self.reader.first_step_id().and_then(|id| self.reader.step(id)) {
             let path = self.reader.path(first_step.path_id).unwrap_or("").to_string();
             // M1: the sentinel cache entry mirrors the legacy line-only
             // slot — column `None` matches every step on the line.
@@ -5044,6 +5751,18 @@ impl Handler {
                     return Ok(());
                 }
 
+                // Go to the start BEFORE the tracepoint breakpoints exist.  On
+                // a recreator replay the start is the entry, reached with
+                // `run_to_entry`, which clears the breakpoints it used to get
+                // there with `DeleteBreakpoints`, and that query removes every
+                // breakpoint of the session.  Added first, the tracepoint
+                // breakpoints were removed with them and the Continue below
+                // ran to the end: measured on an MCR recording served by
+                // `ct-mcr debugserver` (zero tracepoint results, the
+                // run-to-entry's `DeleteBreakpoints` sending `z0` for each
+                // tracepoint site).
+                self.go_to_tracepoint_run_start()?;
+
                 for (path, line_map) in tracepoint_locations.iter() {
                     if line_map.is_empty() {
                         continue;
@@ -5074,8 +5793,6 @@ impl Handler {
                 if tracepoint_breakpoints.is_empty() {
                     return Ok(());
                 }
-
-                self.replay.jump_to(StepId(0))?;
 
                 // Whether we need a Continue to reach the next breakpoint,
                 // or have already landed on a new location via a Next step.
@@ -5126,6 +5843,11 @@ impl Handler {
                             results.push(stop);
 
                             visit_index += 1;
+                            if args.stop_after > 0 && results.len() as i64 >= args.stop_after {
+                                // The caller's limit: no further hit is asked for.
+                                *visit_entry = visit_index;
+                                return Ok(());
+                            }
                         }
 
                         *visit_entry = visit_index;
@@ -5181,7 +5903,17 @@ impl Handler {
             }
         }
 
-        if let Err(err) = self.replay.jump_to(original_step_id)
+        // A recreator replay is returned to its entry. The replay is the
+        // tracepoint session `run_tracepoints` opened for this run, so no
+        // position the user navigated to is lost, and `run_to_entry` is
+        // answered by every worker kind where a tick seek is not (see
+        // `go_to_tracepoint_run_start`).
+        let restore = if self.trace_kind == TraceKind::Recreator {
+            self.replay.run_to_entry()
+        } else {
+            self.replay.jump_to(original_step_id).map(|_| ())
+        };
+        if let Err(err) = restore
             && cleanup_error.is_none()
         {
             cleanup_error = Some(err);
@@ -5272,6 +6004,23 @@ impl Handler {
         interpreter.evaluate(tracepoint_index, step_id, &mut *self.replay, lang)
     }
 
+    /// Move the replay to where a tracepoint run starts: the first step of
+    /// a materialized trace, the entry of a recreator replay.
+    ///
+    /// A recreator replay's `jump_to` seeks to an rr tick count and is
+    /// refused by workers whose positions are not ticks (MCR, Delve, GDB,
+    /// TTD), so the run reaches the beginning by `run_to_entry`, which every
+    /// worker answers.
+    fn go_to_tracepoint_run_start(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::Recreator {
+            self.replay.run_to_entry()
+        } else {
+            self.replay
+                .jump_to(self.reader.first_step_id().unwrap_or(StepId(0)))
+                .map(|_| ())
+        }
+    }
+
     pub fn run_tracepoints(
         &mut self,
         req: dap::Request,
@@ -5279,12 +6028,10 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         if self.trace_kind == TraceKind::Recreator {
-            self.replay = Box::new(RecreatorReplaySession::new(
+            self.replay = Box::new(RecreatorReplaySession::with_reserved_index(
                 "tracepoint",
-                self.tracepoint_rr_worker_index,
                 self.ct_rr_args.clone(),
             ));
-            self.tracepoint_rr_worker_index += 1;
         };
         info!("run_tracepoints trace_kind {:?}", self.trace_kind);
 
@@ -5316,6 +6063,19 @@ impl Handler {
 
         // Emit the aggregate results event so the daemon's Python bridge
         // can build a single `ct/py-run-tracepoints` response.
+        // The hits' locals stay in the event store (`ct/update-table` serves
+        // them by window); the event carries them only when asked (Q4).
+        let results = if args.with_locals {
+            results
+        } else {
+            results
+                .into_iter()
+                .map(|mut stop| {
+                    stop.locals.clear();
+                    stop
+                })
+                .collect()
+        };
         let aggregate = TracepointResultsAggregate {
             session_id: args.session.id,
             results,
@@ -5561,7 +6321,14 @@ impl Handler {
             let trace_event = self.dap_client.tracepoint_locals_event(trace_values)?;
             sender.send(trace_event)?;
         }
-        let table_body = task::CtUpdatedTableResponseBody { table_update };
+        let trace_locals = trace_values_option
+            .as_ref()
+            .map(|values| serde_json::to_value(&values.locals))
+            .transpose()?;
+        let table_body = task::CtUpdatedTableResponseBody {
+            table_update,
+            trace_locals,
+        };
         let raw_event = self.dap_client.updated_table_event(&table_body)?;
         sender.send(raw_event)?;
         // Include table data in the response body for customRequest().
@@ -5628,7 +6395,9 @@ impl Handler {
                 let interesting_steps = self.load_steps_for_call(call_key);
                 for (line, step_id) in interesting_steps.iter() {
                     if step_id.0 != NO_STEP_ID {
-                        let current_step = *self.reader.step(*step_id).expect("load_asm_function: invalid step_id");
+                        let Some(current_step) = self.reader.step(*step_id).copied() else {
+                            continue;
+                        };
                         if let Some(asm_instructions) = self.reader.instructions_at(*step_id) {
                             if asm_instructions.is_empty() {
                                 instructions.push(Instruction::empty(
@@ -5706,6 +6475,15 @@ impl Handler {
     pub fn load_sourcemaps(&mut self, trace_dir: &Path) {
         if !translation_enabled() {
             info!("sourcemap_cache: translation disabled via CT_SOURCEMAP_TRANSLATION");
+            return;
+        }
+        // The maps found here are files on THIS host beside each recorded
+        // path (`<path>.map`, a `sourceMappingURL`), and a map can carry
+        // `sourcesContent`. A session with host reads off does not look for
+        // them; recorder-baked views (`srcviews.dat`) are the recording's
+        // own and still load.
+        if !self.source_access.get().host_reads_allowed() {
+            info!("sourcemap_cache: host source reads are off; sibling source maps are not looked up");
             return;
         }
         self.sourcemap_cache_dir = Some(trace_dir.to_path_buf());
@@ -6035,6 +6813,12 @@ impl Handler {
             info!("catalog_autoload: skipped via CT_CATALOG_AUTOLOAD_DISABLED");
             return;
         }
+        // The scan reads every recorded path on this host to fingerprint it,
+        // so a session with host reads off does not run it.
+        if !self.source_access.get().host_reads_allowed() {
+            info!("catalog_autoload: host source reads are off; recorded paths are not scanned");
+            return;
+        }
         // If the trace already has a sibling renames.toml, the user's
         // explicit list wins — don't even consult the catalog.
         let sibling = trace_dir.join("renames.toml");
@@ -6136,8 +6920,8 @@ impl Handler {
 
     /// Loads terminal output (stdout/stderr Write events) from the trace.
     ///
-    /// Uses a dedicated fast path that only loads Write events from the
-    /// database, avoiding the overhead of `ensure_events_loaded()` which
+    /// Materialized traces use a dedicated fast path that only loads terminal
+    /// events from the database, avoiding `ensure_events_loaded()` which
     /// loads ALL events into memory. On large traces with thousands of
     /// non-terminal events this makes a significant difference and prevents
     /// timeouts when `terminal_output()` is called as the first operation.
@@ -6149,7 +6933,7 @@ impl Handler {
     /// pagination (forwarded by the daemon from the Python API).
     pub fn load_terminal(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
         // Ensure terminal events are cached.
-        self.ensure_terminal_events_loaded();
+        self.ensure_terminal_events_loaded()?;
 
         // Safety: `ensure_terminal_events_loaded` guarantees the cache is Some.
         let write_events = match self.cached_terminal_events.as_ref() {
@@ -6191,23 +6975,67 @@ impl Handler {
         Ok(())
     }
 
+    /// Answers a window of the terminal output's LINES with their total
+    /// (Viewport-Driven-Loading, Decided Q3): the line view asks for the lines
+    /// it shows instead of every write. Arguments: `start`, `count` (lines),
+    /// and optionally `atRRTicks`, for which the answer names the line of the
+    /// current position (`currentLine`, -1 before the first write). `count` 0
+    /// answers no lines — the totals and the current line only.
+    pub fn load_terminal_lines(&mut self, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+        let arg_usize = |name: &str| {
+            req.arguments
+                .get(name)
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+                .max(0) as usize
+        };
+        let start = arg_usize("start");
+        let count = arg_usize("count");
+        let at_ticks = req.arguments.get("atRRTicks").and_then(serde_json::Value::as_i64);
+        // Always ask: a live session's reload drops the cached lines.
+        self.ensure_terminal_events_loaded()?;
+        if self.cached_terminal_lines.is_none() {
+            let events = self.cached_terminal_events.as_deref().unwrap_or(&[]);
+            self.cached_terminal_lines = Some(CachedTerminalLines::of(events));
+        }
+        let Some(cached) = self.cached_terminal_lines.as_ref() else {
+            return Err("internal error: cached_terminal_lines is None after population".into());
+        };
+        let answer = cached.window(start, count, at_ticks);
+        self.respond_dap(req, &answer, sender)?;
+        Ok(())
+    }
+
     /// Populate the terminal-events cache if it is not already filled.
     ///
     /// When the full event cache (`cached_events`) has already been loaded
     /// (e.g. by a prior `ct/event-load` call), the Write events are
-    /// extracted from it.  Otherwise the database's event records are
-    /// scanned directly for `EventLogKind::Write` entries, which is much
-    /// faster than loading every event type into memory first.
-    fn ensure_terminal_events_loaded(&mut self) {
+    /// extracted from it. Recreator sessions must ask their worker for the
+    /// recorded events: their reader is an empty projection, not the producer.
+    /// Other sessions retain the direct reader scan for stdout and stderr.
+    ///
+    /// A live recreator session's event log grows, so `ensure_events_loaded`
+    /// reloads it on every call and drops the terminal caches built from the
+    /// previous list; the terminal is then rebuilt from the reloaded one.
+    fn ensure_terminal_events_loaded(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.trace_kind == TraceKind::Recreator {
+            // Use the same events and recorded positions as ct/event-load,
+            // including registration in event_db for subsequent event jumps.
+            // Do not cache an empty terminal when the worker failed to load.
+            // A replayed (not live) recording loads once; later calls are
+            // no-ops that keep the cached terminal.
+            self.ensure_events_loaded()?;
+        }
+
         if self.cached_terminal_events.is_some() {
-            return;
+            return Ok(());
         }
 
         let write_events: Vec<ProgramEvent> = if let Some(ref all_events) = self.cached_events {
             // Full cache already populated -- extract Write events from it.
             all_events
                 .iter()
-                .filter(|e| e.kind == EventLogKind::Write)
+                .filter(|e| terminal_output_category(e.kind).is_some())
                 .cloned()
                 .collect()
         } else {
@@ -6217,12 +7045,13 @@ impl Handler {
                 .events()
                 .iter()
                 .enumerate()
-                .filter(|(_, record)| record.kind == EventLogKind::Write)
-                .map(|(i, record)| self.to_program_event(record, i))
+                .filter(|(_, record)| terminal_output_category(record.kind).is_some())
+                .map(|(i, record)| program_event_of_record(self.reader.as_ref(), record, i))
                 .collect()
         };
 
         self.cached_terminal_events = Some(write_events);
+        Ok(())
     }
 
     fn send_notification(
@@ -6237,52 +7066,6 @@ impl Handler {
         info!("send notification {:?}", raw_event);
         sender.send(raw_event)?;
         Ok(())
-    }
-
-    fn to_program_event(&self, event_record: &DbRecordEvent, index: usize) -> ProgramEvent {
-        let step_id_int = event_record.step_id.0;
-        let (path, line) = if step_id_int != NO_INDEX {
-            let step_record = self
-                .reader
-                .step(event_record.step_id)
-                .expect("to_program_event: invalid step_id");
-            (
-                self.reader
-                    .workdir()
-                    .join(self.reader.path(step_record.path_id).unwrap_or(""))
-                    .display()
-                    .to_string(),
-                step_record.line.0,
-            )
-        } else {
-            (NO_PATH.to_string(), NO_POSITION)
-        };
-
-        ProgramEvent {
-            kind: event_record.kind,
-            semantic_kind: String::new(),
-            content: event_record.content.clone(),
-            bytes: event_record.content.len(),
-            rr_event_id: index,
-            direct_location_rr_ticks: step_id_int,
-            metadata: event_record.metadata.to_string(),
-            stdout: true,
-            event_index: index,
-            tracepoint_result_index: NO_INDEX,
-            high_level_path: path,
-            high_level_line: line,
-            base64_encoded: false,
-            max_rr_ticks: if self.reader.step_count() > 0 {
-                self.reader
-                    .step(StepId((self.reader.step_count() - 1) as i64))
-                    .map(|s| s.step_id.0)
-                    .unwrap_or(0)
-            } else {
-                0
-            },
-            source_generation: 0,
-            source_digest: String::new(),
-        }
     }
 
     fn serialize<T: Serialize>(&self, value: &T) -> Result<String, Box<dyn Error>> {
@@ -6399,77 +7182,70 @@ impl Handler {
 
         (recorded_path.to_string(), recorded_line, recorded_column)
     }
+
+    /// The DAP threads this trace contributes, as `(thread id, name)` pairs.
+    ///
+    /// This is the one projection of a trace's process list onto DAP
+    /// threads. [`Handler::threads`] answers a single-trace `threads`
+    /// request with it, and the session layer
+    /// ([`crate::session_handler::SessionHandler::thread_list`]) builds the
+    /// session-wide list from every trace's descriptors, so the two surfaces
+    /// cannot drift apart.
+    ///
+    /// For multi-process recordings (fork / exec) the recorded processes are
+    /// enumerated through [`ReplaySession::list_processes`] — for an rr trace
+    /// that is the worker's `GetProcessInfo` query, i.e. `rr ps` — and every
+    /// process becomes one DAP thread. DAP has no first-class "process"
+    /// concept, so DAP clients use the thread list as the process selector
+    /// for multi-process debugging.
+    ///
+    /// The process the replay worker is replaying is thread
+    /// [`REPLAYED_THREAD_ID`] (1): it is the thread `stopped` events name and
+    /// the one `stackTrace` answers for, so clients that hard-code thread 1
+    /// keep working. Every other recorded process is thread `pid` — stable
+    /// across requests, since pids are unique within a trace and rr preserves
+    /// them, and within the session's 24-bit inner id budget for every Linux
+    /// pid. [`thread_descriptors_from_processes`] has the full mapping,
+    /// including the fallback for a worker that does not mark the replayed
+    /// process and the remap of a non-replayed pid 1.
+    ///
+    /// Traces without process metadata (in-process backends, single-process
+    /// recordings, an empty `rr ps`, or a worker error) keep the historical
+    /// single thread `(1, "<thread 1>")`.
+    pub fn collect_thread_descriptors(&mut self) -> Vec<(u32, String)> {
+        thread_descriptors_from_processes(self.replay.list_processes())
+    }
+
     pub fn threads(&mut self, request: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
-        // For multi-process recordings (fork / exec), enumerate the recorded
-        // processes via `ReplaySession::list_processes` and surface one DAP
-        // `Thread` per process. The DAP spec has no first-class "process"
-        // concept, so VS Code-style clients use the threads list as the
-        // process selector for multi-process debugging.
-        //
-        // The thread id mapping is `pid as i64`. PIDs are unique within a
-        // trace (rr preserves them across replay), so this is a stable
-        // identifier across repeated `threads` requests in a session.
-        //
-        // For traces without process metadata (in-process backends, single-
-        // process recordings, or worker errors) `list_processes` returns a
-        // synthetic single entry — we map it to the historical
-        // `Thread { id: 1, name: "<thread 1>" }` to preserve behaviour for
-        // existing single-process traces.
-        let threads = match self.replay.list_processes() {
-            Ok(processes) if !processes.is_empty() => processes
-                .into_iter()
-                .map(|info| {
-                    // pid==0 is the synthetic single-process fallback; keep
-                    // the legacy id and label so we don't break clients that
-                    // hard-coded "<thread 1>".
-                    if info.pid == 0 {
-                        dap_types::Thread {
-                            id: 1,
-                            name: "<thread 1>".to_string(),
-                        }
-                    } else {
-                        // Strip the leading binary path from the recorded
-                        // command for a more readable label. `rr ps` records
-                        // commands like `/full/path/m12_orchestrator` for the
-                        // root and `m12_child_cpp 10` for forked exec'd
-                        // children — we keep the latter form and shorten the
-                        // former to just the basename.
-                        let label = if let Some(first) = info.command.split_whitespace().next() {
-                            let basename = first.rsplit('/').next().unwrap_or(first);
-                            format!("{} (pid {})", basename, info.pid)
-                        } else {
-                            format!("pid {}", info.pid)
-                        };
-                        dap_types::Thread {
-                            id: info.pid as i64,
-                            name: label,
-                        }
-                    }
-                })
-                .collect(),
-            Ok(_) => vec![dap_types::Thread {
-                id: 1,
-                name: "<thread 1>".to_string(),
-            }],
-            Err(e) => {
-                warn!("threads: list_processes failed, falling back to single-thread: {e}");
-                vec![dap_types::Thread {
-                    id: 1,
-                    name: "<thread 1>".to_string(),
-                }]
-            }
-        };
+        let threads = self
+            .collect_thread_descriptors()
+            .into_iter()
+            .map(|(id, name)| dap_types::Thread {
+                id: i64::from(id),
+                name,
+            })
+            .collect();
         self.respond_dap(request, dap_types::ThreadsResponseBody { threads }, sender)?;
         Ok(())
     }
 
+    /// Answer DAP `stackTrace`.
+    ///
+    /// Only the replayed process has a stack: the frames are read from the
+    /// replay's current position, so they are answered for
+    /// [`REPLAYED_THREAD_ID`]. Any other thread — another recorded process of
+    /// a multi-process trace, which this replay is not executing — gets an
+    /// empty frame list. The request's `threadId` may be a session-composed
+    /// id (`session_handler::compose_thread_id`); its inner part names the
+    /// thread of this trace.
     pub fn stack_trace(
         &mut self,
         request: dap::Request,
         args: dap_types::StackTraceArguments,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let stack_frames: Vec<dap_types::StackFrame> = if args.thread_id == 1 {
+        let (_, inner_thread_id) = crate::session_handler::decompose_thread_id(args.thread_id);
+        let stack_frames: Vec<dap_types::StackFrame> = if inner_thread_id == REPLAYED_THREAD_ID {
             // Both the Recreator (out-of-process RR worker) and the
             // Emulator (in-process MCR) backends surface the callstack via
             // the `ReplaySession` trait rather than through a
@@ -6854,6 +7630,33 @@ impl Handler {
     }
 }
 
+/// The events ordered by tick, each paired with the largest recorded index
+/// among the events at or before its tick: `last_event_at_or_before` answers
+/// from it by binary search. Recorded order is not guaranteed to be tick
+/// order, so the running maximum is what keeps the answer "the LAST event (in
+/// recorded order) at or before the tick".
+pub fn event_tick_index_of(events: &[ProgramEvent]) -> Vec<(i64, usize)> {
+    let mut by_tick: Vec<(i64, usize)> = events
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.direct_location_rr_ticks, i))
+        .collect();
+    by_tick.sort();
+    let mut latest = 0usize;
+    for (k, entry) in by_tick.iter_mut().enumerate() {
+        latest = if k == 0 { entry.1 } else { latest.max(entry.1) };
+        entry.1 = latest;
+    }
+    by_tick
+}
+
+/// The last event (in recorded order) at or before `at`, from
+/// `event_tick_index_of`'s index; `None` when every event is after it.
+pub fn last_event_at_or_before(index: &[(i64, usize)], at: i64) -> Option<usize> {
+    let upto = index.partition_point(|&(tick, _)| tick <= at);
+    if upto == 0 { None } else { Some(index[upto - 1].1) }
+}
+
 // ---------------------------------------------------------------------------
 // Value Origin Tracking — small free helpers shared by the eager/placeholder
 // summary builders. Kept outside `impl Handler` so they can be reused from
@@ -6944,6 +7747,59 @@ pub(crate) fn placeholder_unknown_summary() -> task::OriginSummary {
 ///
 /// Returns `None` when nothing matching the CTFS magic is found; the
 /// caller treats that as "no srcviews, fall through".
+/// The DAP output category of an event that is terminal output: the
+/// program's stdout (`Write`) or stderr (`WriteStderr`). Every other kind is
+/// not terminal output.
+fn terminal_output_category(kind: EventLogKind) -> Option<&'static str> {
+    match kind {
+        EventLogKind::Write => Some("stdout"),
+        EventLogKind::WriteStderr => Some("stderr"),
+        _ => None,
+    }
+}
+
+/// Distinguishes the staging files of concurrent [`publish_bundled_source`]
+/// calls within one process; the process id distinguishes processes.
+static BUNDLED_SOURCE_STAGING_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Put `content` at `dest` so that a concurrent reader of `dest` sees either
+/// the previous complete file or the new complete file, never a truncated one.
+///
+/// The bundled-sources directory is SHARED: its path is a hash of the
+/// container path under `std::env::temp_dir()`, so every session that opens
+/// the same `.ct` — two handlers in one process, a GUI and an MCP session,
+/// parallel tests over one committed fixture — extracts to the same files.
+/// `std::fs::write` truncates before it writes, so a session reading the
+/// source while another re-extracts it read an empty file, and the
+/// value-origin classifier reported the source unavailable
+/// (`origin_gdscript_dap_test` failed about 1 run in 30 with parallel tests).
+///
+/// A file that already holds exactly `content` is left alone, so the common
+/// re-open writes nothing. Otherwise the bytes are staged in a sibling file
+/// and moved into place with `rename`, which replaces the destination in one
+/// step (POSIX `rename(2)`; `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` on
+/// Windows, per <https://doc.rust-lang.org/std/fs/fn.rename.html>).
+fn publish_bundled_source(dest: &Path, content: &[u8]) -> std::io::Result<()> {
+    if std::fs::read(dest).is_ok_and(|existing| existing == content) {
+        return Ok(());
+    }
+    let file_name = dest
+        .file_name()
+        .ok_or_else(|| std::io::Error::other(format!("{} names no file", dest.display())))?;
+    let seq = BUNDLED_SOURCE_STAGING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut staging_name = std::ffi::OsString::from(".");
+    staging_name.push(file_name);
+    staging_name.push(format!(".{}.{seq}.staging", std::process::id()));
+    let staging = dest.with_file_name(staging_name);
+    let published = std::fs::write(&staging, content).and_then(|()| std::fs::rename(&staging, dest));
+    if published.is_err() {
+        // Best effort: a staging file left behind is never read (it is not a
+        // name the read side derives), but it should not accumulate either.
+        let _ = std::fs::remove_file(&staging);
+    }
+    published
+}
+
 fn find_ct_container(trace_dir: &Path) -> Option<std::path::PathBuf> {
     // Direct `.ct` file → use as-is.
     if trace_dir.is_file() {
@@ -7035,6 +7891,148 @@ fn sanitize_view_name(name: &str) -> String {
     }
 }
 
+/// DAP thread id of the process the replay worker is replaying — the thread
+/// every `stopped` event names and the only thread `stackTrace` returns
+/// frames for. It is also the id of the single thread a trace without process
+/// metadata contributes, so clients that hard-code thread 1 keep working.
+pub const REPLAYED_THREAD_ID: u32 = 1;
+
+/// Name of the single DAP thread a trace without process metadata
+/// contributes; see [`REPLAYED_THREAD_ID`].
+pub const SINGLE_PROCESS_THREAD_NAME: &str = "<thread 1>";
+
+/// DAP thread id given to a recorded process whose pid is 1 when it is *not*
+/// the replayed process, because id 1 belongs to the replayed one. It is the
+/// largest inner thread id a session can carry
+/// ([`crate::session_handler::INNER_THREAD_MASK`]); no Linux pid reaches it,
+/// since `pid_max` is at most 2^22
+/// (<https://man7.org/linux/man-pages/man5/proc_sys_kernel.5.html>), so the
+/// remap cannot collide with another recorded pid.
+pub const NON_REPLAYED_PID_1_THREAD_ID: u32 = (1 << crate::session_handler::TRACE_SLOT_SHIFT) - 1;
+
+/// Project a trace's process list onto `(DAP thread id, name)` pairs — the
+/// pure half of [`Handler::collect_thread_descriptors`].
+///
+/// - The replayed process — the row the worker marks `replayed`, or, for a
+///   worker that marks none, the root process (the first row whose parent is
+///   not in the recording) — is thread [`REPLAYED_THREAD_ID`].
+/// - Every other recorded process is thread `pid`, except pid 1, which is
+///   remapped to [`NON_REPLAYED_PID_1_THREAD_ID`].
+/// - Names come from [`process_thread_label`].
+/// - A list holding only the synthetic `pid == 0` entry
+///   [`ReplaySession::list_processes`] returns without process metadata, an
+///   empty list, or a query error yields the single legacy thread
+///   `(1, "<thread 1>")`, so a trace never contributes zero threads.
+///
+/// If a worker marks more than one row, the first is used and the conflict
+/// is logged; the reply cannot be trusted to name more than one replayed
+/// process, and DAP has a single stopped thread.
+pub fn thread_descriptors_from_processes(
+    processes: Result<Vec<crate::task::ProcessInfo>, Box<dyn Error>>,
+) -> Vec<(u32, String)> {
+    let single_process = || vec![(REPLAYED_THREAD_ID, SINGLE_PROCESS_THREAD_NAME.to_string())];
+    let processes = match processes {
+        Ok(processes) if !processes.is_empty() && processes.iter().any(|info| info.pid != 0) => processes,
+        Ok(_) => return single_process(),
+        Err(e) => {
+            warn!("threads: list_processes failed, falling back to single-thread: {e}");
+            return single_process();
+        }
+    };
+    let replayed = replayed_process_index(&processes);
+    processes
+        .iter()
+        .enumerate()
+        .map(|(index, info)| {
+            let id = if index == replayed {
+                REPLAYED_THREAD_ID
+            } else if info.pid == REPLAYED_THREAD_ID {
+                NON_REPLAYED_PID_1_THREAD_ID
+            } else {
+                info.pid
+            };
+            (id, process_thread_label(info, &processes))
+        })
+        .collect()
+}
+
+/// Index of the replayed process in a non-empty process list; see
+/// [`thread_descriptors_from_processes`].
+fn replayed_process_index(processes: &[crate::task::ProcessInfo]) -> usize {
+    let mut marked = processes
+        .iter()
+        .enumerate()
+        .filter(|(_, info)| info.replayed)
+        .map(|(index, _)| index);
+    if let Some(first) = marked.next() {
+        let extra: Vec<u32> = marked.map(|index| processes[index].pid).collect();
+        if !extra.is_empty() {
+            warn!(
+                "threads: the worker marked more than one process as replayed; using pid {} and ignoring {extra:?}",
+                processes[first].pid
+            );
+        }
+        return first;
+    }
+    // A worker that predates the `replayed` field: rr, Delve and the MCR
+    // worker all follow the recording's root process unless targeted.
+    processes
+        .iter()
+        .position(|info| !processes.iter().any(|parent| parent.pid == info.ppid))
+        .unwrap_or(0)
+}
+
+/// Human-readable label for a recorded process's DAP thread.
+///
+/// - An exec'd or root process: the basename of its executable and its pid,
+///   e.g. `m12_orchestrator (pid 4071167)`. `rr ps` records the root as
+///   `/full/path/m12_orchestrator` and exec'd children as `m12_child_cpp 10`.
+/// - A child forked without `exec`, which `rr ps` records as
+///   `(forked without exec)`: the executable of the process it was forked
+///   from (followed up through forked ancestors), its pid and its parent's,
+///   e.g. `m2_parent (pid 4071216, forked from 4071167)`. When no ancestor
+///   with an executable is in the recording, the executable part reads
+///   `process`.
+pub fn process_thread_label(info: &crate::task::ProcessInfo, processes: &[crate::task::ProcessInfo]) -> String {
+    if is_forked_without_exec(info) {
+        let executable = forked_process_executable(info, processes).unwrap_or_else(|| "process".to_string());
+        return format!("{executable} (pid {}, forked from {})", info.pid, info.ppid);
+    }
+    match executable_basename(&info.command) {
+        Some(executable) => format!("{executable} (pid {})", info.pid),
+        None => format!("pid {}", info.pid),
+    }
+}
+
+/// rr's `ps` spelling of a child that forked without exec'ing.
+fn is_forked_without_exec(info: &crate::task::ProcessInfo) -> bool {
+    info.command.trim_start().starts_with("(forked")
+}
+
+/// The basename of a command line's executable, if it names one.
+fn executable_basename(command: &str) -> Option<String> {
+    let first = command.split_whitespace().next()?;
+    Some(first.rsplit('/').next().unwrap_or(first).to_string())
+}
+
+/// The executable a forked-without-exec process runs: that of its nearest
+/// ancestor that is not itself a bare fork. The walk is bounded by the list
+/// length so a malformed (cyclic) parent chain cannot loop.
+fn forked_process_executable(
+    info: &crate::task::ProcessInfo,
+    processes: &[crate::task::ProcessInfo],
+) -> Option<String> {
+    let mut current = info;
+    for _ in 0..processes.len() {
+        let parent = processes.iter().find(|candidate| candidate.pid == current.ppid)?;
+        if !is_forked_without_exec(parent) {
+            return executable_basename(&parent.command);
+        }
+        current = parent;
+    }
+    None
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
@@ -7061,6 +8059,133 @@ mod tests {
     use codetracer_trace_writer::trace_writer::TraceWriter;
 
     use task::{TaskKind, TraceSession, Tracepoint, TracepointMode};
+
+    /// The `(name, index)` that names a recreator session's worker socket.
+    fn worker_identity_of(replay: &mut Box<dyn ReplaySession>) -> (String, usize) {
+        let session = replay
+            .as_any_mut()
+            .downcast_ref::<RecreatorReplaySession>()
+            .expect("a recreator handler's replay is a RecreatorReplaySession");
+        let (name, index) = session.worker_identity();
+        (name.to_string(), index)
+    }
+
+    /// Re-extracting a bundled source while another session reads it must
+    /// never expose a partial file: the bundled-sources directory is shared by
+    /// every session over one container. Writers alternate two different
+    /// contents so every publish really replaces the file (an identical
+    /// content is skipped), and a reader checks each read is one of the two in
+    /// full. With `std::fs::write` in place of `publish_bundled_source` the
+    /// readers see the truncated, empty file.
+    #[test]
+    fn publishing_a_bundled_source_never_exposes_a_partial_file() {
+        let dir = env::temp_dir().join(format!("ct-publish-bundled-source-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("gf_values.gd");
+        let a = vec![b'a'; 64 * 1024];
+        let b = vec![b'b'; 48 * 1024];
+        publish_bundled_source(&dest, &a).unwrap();
+
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writers: Vec<_> = (0..2)
+            .map(|w| {
+                let (dest, a, b, stop) = (dest.clone(), a.clone(), b.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    let mut i = w;
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        publish_bundled_source(&dest, if i % 2 == 0 { &b } else { &a }).unwrap();
+                        i += 1;
+                    }
+                })
+            })
+            .collect();
+        let mut partial = 0usize;
+        for _ in 0..2000 {
+            let seen = std::fs::read(&dest).unwrap();
+            if seen != a && seen != b {
+                partial += 1;
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for w in writers {
+            w.join().unwrap();
+        }
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "gf_values.gd")
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(partial, 0, "a reader saw a partially written bundled source");
+        assert!(leftovers.is_empty(), "staging files were left behind: {leftovers:?}");
+    }
+
+    /// The `flow` task thread's handler names its own replay `flow`, the name
+    /// every `ct/load-flow` worker carries. Before indices were reserved
+    /// process-wide, both took index 0 and two workers bound one socket; the
+    /// first flow of every rr trace then waited out the replay-query timeout.
+    /// Every worker identity a handler creates — its own replay and each flow
+    /// replay — must be distinct.
+    #[test]
+    fn flow_workers_never_reuse_the_handlers_own_worker_identity() {
+        let mut handler = Handler::new(
+            TraceKind::Recreator,
+            RecreatorArgs {
+                name: "flow".to_string(),
+                ..RecreatorArgs::default()
+            },
+            Box::new(Db::new(&PathBuf::from(""))),
+        );
+        let mut identities = vec![worker_identity_of(&mut handler.replay)];
+        for _ in 0..3 {
+            let mut flow_replay = handler.new_flow_replay("ct/load-flow").expect("flow replay");
+            identities.push(worker_identity_of(&mut flow_replay));
+        }
+        let mut distinct = identities.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            identities.len(),
+            "duplicate replay worker identities: {identities:?}"
+        );
+        assert!(identities.iter().all(|(name, _)| name == "flow"));
+    }
+
+    /// The start geid a launch opens at: unset and blank mean none; an
+    /// unsigned integer is the geid; anything else is refused with a message naming the
+    /// variable and the value it was given.
+    #[test]
+    fn start_geid_is_an_unsigned_integer_or_absent() {
+        assert_eq!(start_geid_from(None), Ok(None));
+        assert_eq!(start_geid_from(Some("")), Ok(None));
+        assert_eq!(start_geid_from(Some("  ")), Ok(None));
+        assert_eq!(start_geid_from(Some("4990")), Ok(Some(4990)));
+        assert_eq!(start_geid_from(Some(" 4990\n")), Ok(Some(4990)));
+        // 0 is well formed; whether it is a position is the replay's answer.
+        assert_eq!(start_geid_from(Some("0")), Ok(Some(0)));
+        for bad in ["-3", "49x", "1e3", "18446744073709551616"] {
+            let refusal = start_geid_from(Some(bad)).expect_err(bad);
+            assert!(
+                refusal.contains(START_GEID_ENV) && refusal.contains(&format!("{bad:?}")),
+                "the refusal names the variable and the value: {refusal}"
+            );
+        }
+    }
+
+    /// Terminal output is the program's stdout and stderr, each under its
+    /// own DAP output category; no other kind is terminal output.
+    #[test]
+    fn terminal_output_is_stdout_and_stderr_only() {
+        for kind in EventLogKind::ALL {
+            let expected = match kind {
+                EventLogKind::Write => Some("stdout"),
+                EventLogKind::WriteStderr => Some("stderr"),
+                _ => None,
+            };
+            assert_eq!(terminal_output_category(kind), expected, "{}", kind.name());
+        }
+    }
 
     #[test]
     fn test_struct_handling() {
@@ -7319,6 +8444,206 @@ mod tests {
         let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
         assert_eq!(body.dap.content, "recorded\n");
         assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// A session launched with host reads off (`hostSourceReads: false`)
+    /// never reads the working tree, whatever `allowWorkingTree` the request
+    /// carries, and its refusal says why; the recording's own copy is still
+    /// served, and a symlink planted in the payload is not followed.
+    #[test]
+    #[cfg(unix)]
+    fn source_never_reads_the_working_tree_in_a_session_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("hsr-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let recorded = root.join("worktree").join("recorded.src");
+        std::fs::create_dir_all(recorded.parent().expect("has a parent"))?;
+        std::fs::write(&recorded, "host copy\n")?;
+        let payload = crate::expr_loader::bundled_source_path(&root.join("files"), &recorded, 0);
+        std::fs::create_dir_all(payload.parent().expect("has a parent"))?;
+        std::fs::write(&payload, "recorded\n")?;
+        let foreign = root.join("worktree").join("listed_host_file.py");
+        std::fs::write(&foreign, "print('host only')\n")?;
+        // A payload entry that is a symlink to the host file.
+        let planted = crate::expr_loader::bundled_source_path(&root.join("files"), &root.join("planted.py"), 0);
+        std::os::unix::fs::symlink(&foreign, &planted)?;
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(setup_db()));
+        let mut handler = Handler::construct_with_reader_and_source_access(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            reader,
+            false,
+            SourceAccess {
+                host_reads: crate::source_access::HostSourceReads::Refused,
+                ..SourceAccess::default()
+            },
+        );
+        handler.set_trace_folder(&root);
+
+        for (seq, allow) in [(1, None), (2, Some(true)), (3, Some(false))] {
+            let response = request_source(&mut handler, seq, &foreign.to_string_lossy(), allow)?;
+            assert!(
+                !response.success,
+                "allowWorkingTree {allow:?} read the host: {response:?}"
+            );
+            assert!(
+                response
+                    .message
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("host source reads are off"),
+                "the refusal does not say why: {response:?}"
+            );
+        }
+        let response = request_source(&mut handler, 4, &root.join("planted.py").to_string_lossy(), Some(true))?;
+        assert!(!response.success, "a symlink in the payload was followed: {response:?}");
+
+        let response = request_source(&mut handler, 5, &recorded.to_string_lossy(), None)?;
+        assert!(response.success);
+        let body: crate::dap_ext::SourceResponseBodyExt = serde_json::from_value(response.body)?;
+        assert_eq!(body.dap.content, "recorded\n");
+        assert_eq!(body.source_origin, Some(crate::dap_ext::SourceOriginKind::Payload));
+
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// With host reads off, resolving a requested path to the recording's
+    /// path ids never resolves anything on this host: an absolute recorded
+    /// path that is a symlink to the requested file is matched (stage 5,
+    /// reverse canonicalization) only when host reads are on.
+    #[test]
+    #[cfg(unix)]
+    fn path_matching_does_not_resolve_host_paths_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("hsr-paths-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("real"))?;
+        let real = root.join("real").join("module.py");
+        std::fs::write(&real, "x = 1\n")?;
+        let link = root.join("link.py");
+        std::os::unix::fs::symlink(&real, &link)?;
+
+        let trace = vec![
+            TraceLowLevelEvent::Path(link.clone()),
+            TraceLowLevelEvent::Function(FunctionRecord {
+                path_id: PathId(0),
+                line: Line(1),
+                name: "<top-level>".to_string(),
+            }),
+            TraceLowLevelEvent::Call(CallRecord {
+                function_id: FunctionId(0),
+                args: vec![],
+            }),
+            TraceLowLevelEvent::Step(StepRecord {
+                path_id: PathId(0),
+                line: Line(1),
+            }),
+        ];
+        let mut db = Db::new(&root.join("workdir"));
+        TraceProcessor::new(&mut db).postprocess(&trace)?;
+        let reader = InMemoryTraceReader::new(db);
+        let requested = real.to_string_lossy().to_string();
+        assert_eq!(
+            reader.fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Allowed),
+            vec![PathId(0)],
+            "the control: with host reads the symlinked recorded path is matched"
+        );
+        assert!(
+            reader
+                .fuzzy_path_ids_for_under(&requested, crate::source_access::HostSourceReads::Refused)
+                .is_empty(),
+            "without host reads a host symlink was resolved to match a path"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    /// A continuation token is client data: its `filesystem` digests name
+    /// paths the client chose. In a session with host reads off, checking
+    /// one never reads the named host file, so the answer reveals neither
+    /// its digest nor whether it exists; with host reads on (the control) the
+    /// same token is checked against the host file, as before.
+    #[test]
+    fn a_continuation_token_does_not_read_a_host_file_without_host_reads() -> Result<(), Box<dyn Error>> {
+        let root = env::temp_dir().join(format!("hsr-token-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root)?;
+        let host = root.join("id_ed25519");
+        std::fs::write(&host, "host-only key material\n")?;
+
+        let token_for = |handler: &Handler| -> Result<String, Box<dyn Error>> {
+            Ok(crate::origin_query::OriginContinuationToken {
+                v: crate::origin_query::OriginContinuationToken::CURRENT_VERSION,
+                query_variable: "x".to_string(),
+                query_step_id: 0,
+                current_step: 0,
+                current_frame: 0,
+                current_var_name: "x".to_string(),
+                hops_emitted: 0,
+                max_hops: 4,
+                patterns_fingerprint: handler.load_origin_patterns().fingerprint().hex.clone(),
+                source_digests: vec![crate::origin_query::SourceDigest {
+                    path: host.to_string_lossy().to_string(),
+                    origin: crate::origin_query::SourceOriginKind::Filesystem,
+                    sha256_hex: "0".repeat(64),
+                }],
+                issued_at: 0,
+            }
+            .encode()?)
+        };
+        let args_for = |token: String| task::CtOriginChainArguments {
+            variable_name: "x".to_string(),
+            variable_path: Vec::new(),
+            frame_id: -1,
+            step_id: 0,
+            thread_id: 0,
+            max_hops: 4,
+            lazy: false,
+            continuation_token: Some(token),
+            session_id: String::new(),
+            classify_source: true,
+        };
+        let current_digest = |result: &Result<task::OriginChain, crate::origin_query::OriginError>| {
+            result
+                .as_ref()
+                .err()
+                .and_then(|e| e.detail.as_ref())
+                .and_then(|d| d.get("currentDigest"))
+                .cloned()
+        };
+
+        let reader: Arc<dyn TraceReader> = Arc::new(InMemoryTraceReader::new(setup_db()));
+        let mut refused = Handler::construct_with_reader_and_source_access(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            reader,
+            false,
+            SourceAccess {
+                host_reads: crate::source_access::HostSourceReads::Refused,
+                ..SourceAccess::default()
+            },
+        );
+        let token = token_for(&refused)?;
+        let result = refused.compute_origin_chain(&args_for(token));
+        assert_eq!(
+            current_digest(&result),
+            None,
+            "a session without host reads hashed the host file a token named: {result:?}"
+        );
+
+        let mut allowed = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(setup_db()));
+        let token = token_for(&allowed)?;
+        let result = allowed.compute_origin_chain(&args_for(token));
+        assert_eq!(
+            current_digest(&result),
+            Some(serde_json::json!(crate::origin_query::sha256_hex(
+                b"host-only key material\n"
+            ))),
+            "the control did not check the token against the host file: {result:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         Ok(())
@@ -7602,6 +8927,53 @@ mod tests {
         handler.event_load(dap::Request::default(), sender.clone())?;
         handler.run_tracepoints(dap::Request::default(), make_tracepoints_args(2, 0), sender)?;
         assert_eq!(handler.event_db.single_tables[1].events.len(), size);
+        Ok(())
+    }
+
+    /// The sweep's answer (`ct/tracepoint-results`) carries each hit's tick
+    /// and location; its locals only when asked (Viewport-Driven-Loading Q4).
+    /// The event store keeps them either way, for `ct/update-table`'s window.
+    /// `stopAfter` ends the sweep after that many hits.
+    #[test]
+    fn a_sweep_answers_hits_and_carries_locals_only_when_asked() -> Result<(), Box<dyn Error>> {
+        fn sweep(with_locals: bool, stop_after: i64) -> Result<(Vec<serde_json::Value>, usize), Box<dyn Error>> {
+            let db: Db = setup_db_loop(100);
+            let (sender, receiver) = mpsc::channel();
+            let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+            handler.event_load(dap::Request::default(), sender.clone())?;
+            let mut args = make_tracepoints_args(2, 0);
+            args.with_locals = with_locals;
+            args.stop_after = stop_after;
+            handler.run_tracepoints(dap::Request::default(), args, sender)?;
+            let mut results = vec![];
+            for message in receiver.try_iter() {
+                if let DapMessage::Event(event) = message
+                    && event.event == "ct/tracepoint-results"
+                {
+                    results = event.body["results"].as_array().cloned().unwrap_or_default();
+                }
+            }
+            Ok((results, handler.event_db.single_tables[1].events.len()))
+        }
+
+        let (hits, stored) = sweep(false, 0)?;
+        assert_eq!(hits.len(), 100);
+        assert_eq!(stored, 100);
+        assert!(
+            hits.iter()
+                .all(|h| h["locals"].as_array().is_some_and(|l| l.is_empty()))
+        );
+        assert!(hits.iter().all(|h| h["rrTicks"].as_i64().is_some() && h["line"] == 2));
+
+        let (hits, _) = sweep(true, 0)?;
+        assert!(
+            hits.iter()
+                .all(|h| h["locals"].as_array().is_some_and(|l| !l.is_empty()))
+        );
+
+        let (hits, stored) = sweep(true, 5)?;
+        assert_eq!(hits.len(), 5);
+        assert_eq!(stored, 5);
         Ok(())
     }
 
@@ -7984,6 +9356,275 @@ mod tests {
         // assert_eq!(call_b.location.function_name, "b".to_string());
         // assert_eq!(call_b.location.key, "3".to_string());
 
+        Ok(())
+    }
+
+    /// The `ct/load-calltrace-section` arguments the Python bridge sends
+    /// (backend-manager `handle_py_calltrace`): no location, no collapsing.
+    fn python_bridge_calltrace_args() -> CalltraceLoadArgs {
+        CalltraceLoadArgs {
+            location: Location::default(),
+            start_call_line_index: GlobalCallLineIndex(0),
+            depth: 10,
+            height: 20,
+            raw_ignore_patterns: "".to_string(),
+            auto_collapsing: false,
+            optimize_collapse: false,
+            render_call_line_index: 0,
+        }
+    }
+
+    /// A recording with no steps (a JS boundary recording opens as one) has
+    /// an empty call tree, and `ct/load-calltrace-section` says so.
+    ///
+    /// It used to panic in `load_local_calltrace` (`expect()` on the current
+    /// step's call), which on the replay-server killed the task thread
+    /// without a response: `trace.calltrace()` never returned.
+    #[test]
+    fn calltrace_section_of_a_trace_with_no_steps_is_empty() -> Result<(), Box<dyn Error>> {
+        let db = Db::new(&PathBuf::from("/test/workdir"));
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        assert!(handler.reader.first_step_id().is_none(), "the fixture has no steps");
+        let (sender, receiver) = mpsc::channel();
+
+        handler.load_calltrace_section(dap::Request::default(), python_bridge_calltrace_args(), sender)?;
+
+        let mut responses = Vec::new();
+        let mut updates = Vec::new();
+        while let Ok(message) = receiver.try_recv() {
+            match message {
+                DapMessage::Response(r) => responses.push(r),
+                DapMessage::Event(e) if e.event == "ct/updated-calltrace" => updates.push(e.body),
+                _ => {}
+            }
+        }
+        assert_eq!(responses.len(), 1, "exactly one response: {responses:?}");
+        assert!(responses[0].success, "{:?}", responses[0]);
+        for body in updates.iter().chain(std::iter::once(&responses[0].body)) {
+            assert_eq!(body["callLines"], serde_json::json!([]), "{body}");
+            assert_eq!(body["totalCallsCount"], 0, "{body}");
+        }
+        assert_eq!(updates.len(), 1, "one ct/updated-calltrace event");
+        Ok(())
+    }
+
+    /// On a trace that has steps, a current position that is not one of them
+    /// is refused with an error (a DAP error response), never a panic.
+    #[test]
+    fn calltrace_at_a_position_that_is_not_a_step_is_an_error() {
+        let db = setup_db_with_calls();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.step_id = StepId(handler.reader.step_count() as i64 + 10);
+
+        let error = handler
+            .load_local_calltrace(python_bridge_calltrace_args())
+            .expect_err("a position past the last step is refused");
+        assert!(
+            error.to_string().contains("is not a source step"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A collapse or an expansion at a position that is not a step leaves
+    /// the tree alone, as the section read there refuses: it re-shapes the
+    /// tree for its stop first (`Calltrace::reshape_if_stop_changed`), and
+    /// the desktop's smart collapse has no call to shape around there. It
+    /// must not panic the task thread.
+    #[test]
+    fn collapse_at_a_position_that_is_not_a_step_leaves_the_tree_alone() -> Result<(), Box<dyn Error>> {
+        let mut handler: Handler = Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_with_calls()),
+        );
+        // A read at a real stop, with the desktop's shape, so the next
+        // request has a shape to re-shape with.
+        let args = local_calltrace_args(&mut handler, true);
+        let before = listed_calls(&handler.load_local_calltrace(args)?);
+        assert!(!before.is_empty(), "control: the read at a real stop lists calls");
+
+        handler.step_id = StepId(handler.reader.step_count() as i64 + 10);
+        collapse(&mut handler, CallKey(0))?;
+        handler.expand_calls(
+            dap::Request::default(),
+            CollapseCallsArgs {
+                call_key: "0".to_string(),
+                non_expanded_kind: CalltraceNonExpandedKind::Children,
+                count: 0,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// The first step recorded inside the call to `function_name` in
+    /// `setup_db_with_calls`'s trace, with that call's key.
+    fn first_step_in_call_to(handler: &Handler, function_name: &str) -> (StepId, CallKey) {
+        for step in 0..handler.reader.step_count() as i64 {
+            let Some(key) = handler.reader.call_key_for_step(StepId(step)) else {
+                continue;
+            };
+            let Some(call) = handler.reader.call(key) else {
+                continue;
+            };
+            let name = handler
+                .reader
+                .function(call.function_id)
+                .map(|f| f.name.clone())
+                .unwrap_or_default();
+            if name == function_name {
+                return (StepId(step), key);
+            }
+        }
+        panic!("the fixture records no step inside `{function_name}`");
+    }
+
+    fn local_calltrace_args(handler: &mut Handler, auto_collapsing: bool) -> CalltraceLoadArgs {
+        CalltraceLoadArgs {
+            location: handler
+                .reader
+                .load_location(handler.step_id, CallKey(-1), &mut handler.expr_loader),
+            start_call_line_index: GlobalCallLineIndex(0),
+            depth: 10,
+            height: 10,
+            raw_ignore_patterns: "".to_string(),
+            auto_collapsing,
+            optimize_collapse: true,
+            render_call_line_index: 0,
+        }
+    }
+
+    /// Move the session to `step` as a real move does: the replay and
+    /// `self.step_id` follow it, then `complete_move` reports the stop.
+    fn move_to(handler: &mut Handler, step: StepId) -> Result<(), Box<dyn Error>> {
+        let (sender, _receiver) = mpsc::channel();
+        seek_to(handler, step.0)?;
+        handler.complete_move(false, sender)?;
+        Ok(())
+    }
+
+    /// `ct/collapse-calls` for `key`, as the front ends send it.
+    fn collapse(handler: &mut Handler, key: CallKey) -> Result<(), Box<dyn Error>> {
+        handler.collapse_calls(
+            dap::Request::default(),
+            CollapseCallsArgs {
+                call_key: key.0.to_string(),
+                non_expanded_kind: CalltraceNonExpandedKind::Children,
+                count: 0,
+            },
+        )
+    }
+
+    /// The keys of the `Call` lines a section lists, each with whether that
+    /// call hides its children.
+    fn listed_calls(lines: &[CallLine]) -> Vec<(String, bool)> {
+        lines
+            .iter()
+            .filter(|line| line.content.kind == CallLineContentKind::Call)
+            .map(|line| (line.content.call.key.clone(), line.content.hidden_children))
+            .collect()
+    }
+
+    /// A collapse made after a move survives the section read that follows
+    /// it (codetracer-pm issue 2026-10-21 "on the native front ends, a
+    /// call-trace collapse made after a move is undone by the next section
+    /// read").
+    ///
+    /// The terminal and GPUI do not re-read a section they already hold after
+    /// a move, so the first calltrace request at the new stop can be the
+    /// collapse itself, with the read right behind it. The tree has to be
+    /// re-shaped for the new stop BEFORE that collapse is applied: re-shaping
+    /// on the read expands every call again and drops it. Both shapes are
+    /// covered — the native front ends' (`auto_collapsing = false`) and the
+    /// desktop's smart collapse (`auto_collapsing = true`).
+    #[test]
+    fn test_collapse_after_a_move_survives_the_next_section_read() -> Result<(), Box<dyn Error>> {
+        for auto_collapsing in [false, true] {
+            let mut handler = Handler::new(
+                TraceKind::Materialized,
+                RecreatorArgs::default(),
+                Box::new(setup_db_with_calls()),
+            );
+            let (in_a, a_key) = first_step_in_call_to(&handler, "a");
+            let (in_b, b_key) = first_step_in_call_to(&handler, "b");
+            let start_key = handler
+                .reader
+                .call(b_key)
+                .map(|c| c.parent_key)
+                .expect("b has a parent");
+            assert_ne!(a_key, b_key);
+
+            // The pane is read once at a stop in `a` ...
+            move_to(&mut handler, in_a)?;
+            let args = local_calltrace_args(&mut handler, auto_collapsing);
+            let before = listed_calls(&handler.load_local_calltrace(args)?);
+            eprintln!("auto_collapsing={auto_collapsing} at a: {before:?}");
+            assert!(
+                before.contains(&(start_key.0.to_string(), false)),
+                "control: `start` lists its children before the collapse: {before:?}"
+            );
+
+            // ... then the debugger moves into `b`, and the first calltrace
+            // request at the new stop is the collapse of b's parent.
+            move_to(&mut handler, in_b)?;
+            collapse(&mut handler, start_key)?;
+            let args = local_calltrace_args(&mut handler, auto_collapsing);
+            let after = listed_calls(&handler.load_local_calltrace(args)?);
+            eprintln!("auto_collapsing={auto_collapsing} after the collapse at b: {after:?}");
+
+            assert!(
+                after.contains(&(start_key.0.to_string(), true)),
+                "auto_collapsing={auto_collapsing}: the collapsed `start` must hide its children: {after:?}"
+            );
+            for hidden in [a_key, b_key] {
+                assert!(
+                    !after.iter().any(|(key, _)| *key == hidden.0.to_string()),
+                    "auto_collapsing={auto_collapsing}: call {hidden:?} must be hidden under the \
+                     collapsed `start`: {after:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The other half of the contract: a move to a different call still
+    /// re-shapes the tree (Call-Trace-Pane.md § Smart Collapsing: "when the
+    /// user jumps to a different location"), so a collapse made at an earlier
+    /// stop does not outlive the move. With `auto_collapsing = false` the
+    /// re-shape expands every call up to the requested depth.
+    #[test]
+    fn test_a_move_to_another_call_reshapes_the_tree() -> Result<(), Box<dyn Error>> {
+        let mut handler = Handler::new(
+            TraceKind::Materialized,
+            RecreatorArgs::default(),
+            Box::new(setup_db_with_calls()),
+        );
+        let (in_a, _) = first_step_in_call_to(&handler, "a");
+        let (in_b, b_key) = first_step_in_call_to(&handler, "b");
+        let start_key = handler
+            .reader
+            .call(b_key)
+            .map(|c| c.parent_key)
+            .expect("b has a parent");
+
+        move_to(&mut handler, in_a)?;
+        let args = local_calltrace_args(&mut handler, false);
+        let _ = handler.load_local_calltrace(args)?;
+        collapse(&mut handler, start_key)?;
+        let args = local_calltrace_args(&mut handler, false);
+        let collapsed = listed_calls(&handler.load_local_calltrace(args)?);
+        assert!(
+            collapsed.contains(&(start_key.0.to_string(), true)),
+            "control: the collapse takes effect at its own stop: {collapsed:?}"
+        );
+
+        move_to(&mut handler, in_b)?;
+        let args = local_calltrace_args(&mut handler, false);
+        let reshaped = listed_calls(&handler.load_local_calltrace(args)?);
+        assert!(
+            reshaped.contains(&(start_key.0.to_string(), false))
+                && reshaped.iter().any(|(key, _)| *key == b_key.0.to_string()),
+            "a move into `b` re-expands its parent: {reshaped:?}"
+        );
         Ok(())
     }
 
@@ -8381,6 +10022,7 @@ mod tests {
                 id: 0,
             },
             stop_after: 0,
+            with_locals: true,
         }
     }
 
@@ -8414,6 +10056,7 @@ mod tests {
                 id: 0,
             },
             stop_after: 0,
+            with_locals: true,
         }
     }
 
@@ -8451,6 +10094,7 @@ mod tests {
                 id: 0,
             },
             stop_after: 0,
+            with_locals: true,
         }
     }
 }

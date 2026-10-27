@@ -814,7 +814,7 @@ MUTATIONS: list[Mutation] = [
         "          presenters = withVisualisers(spec.visualisers))",
         "          presenters = BuiltinPresenters)",
         T_RENDERS, NIM_TUI,
-        'spec.formattedValue(40) == "(10, 20)"',
+        'spec.valueCell(40).text == "(10, 20)"',
         "the terminal's variables pane stops passing the tier, so a project's "
         "visualiser renders on the desktop and not in the terminal — which "
         "makes `--ui` a product choice, the exact risk PLAT-12's own risk "
@@ -833,7 +833,7 @@ MUTATIONS: list[Mutation] = [
         "      memberCount: row.node.memberCount, presented: row.node.presented,\n"
         "      visualisers: @[],",
         T_RENDERS, NIM_TUI,
-        'spec.formattedValue(40) == "(10, 20)"',
+        'spec.valueCell(40).text == "(10, 20)"',
         "the pane holds the tier and never hands it to the row, so every row "
         "renders by the built-in table while the pane's TITLE — which builds "
         "its own spec — reports the visualiser. A pane that names a presenter "

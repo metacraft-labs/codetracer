@@ -520,6 +520,35 @@ CONTROL_HEADER = """\
 # along with the bytes.
 #
 # ===========================================================================
+# RE-RECORD, 2026-10-20 (the no-window refusal), on `a92806308` (agents)
+# with that change uncommitted. ALL 12 ARMS GRADED, M11 INCLUDED.
+# ===========================================================================
+#   WHAT MOVED  test_gpui_window_frame.nim (the exit-code case asserts the
+#               featureless arm's rc 3 and refusal line; ExpectedAssertions
+#               708 -> 731), plat37_vision.nim (the `refusal` field), and
+#               plat37-measurements.json, RE-RECORDED by
+#               `bash ci/test/plat37-window-frame.sh` + `just plat37-measure`
+#               on nixos-ci-bare-002 (Linux 6.18.55, sway 1.11).
+#   GRADED      M1..M12, 12 of 12 KILLED (11 on the first pass; M9 was
+#               MIS-ATTRIBUTED because its `because` names a suite line that
+#               the edit moved, 1052 -> 1083, and was re-derived with
+#               --derive --only M9, then graded KILLED).
+#   ALSO MOVED  chrome.nim's row, which this change does not touch: the
+#               control was ALREADY STALE at `a92806308` (1a5beb575 edited
+#               chrome.nim on 2026-10-17 without re-recording), so the harness
+#               refused there with rc 3. The arms over it (M8, M10) are in the
+#               12 graded above.
+#   CARRIED     the `sway-gles2` configuration row: this host exposes no
+#               /dev/dri, so wlroots cannot create a GLES2 renderer ("no DRM
+#               FD available") and the re-recorded row had no frame. That one
+#               row is carried verbatim from the record at `a92806308` and
+#               named in the record's `provenance.carriedRows`; it probes the
+#               windowed binary with WAYLAND_DISPLAY set, a path this change
+#               does not alter. No arm is aimed at that row. A host with a DRM
+#               node has to re-take it. The digest below is of the record WITH
+#               the carried row, and M1..M12 were re-graded against it.
+#
+# ===========================================================================
 # PLATFORM-SCOPED RE-RECORD, 2026-10-02 (PLAT-35, RE-GRADED ON `6fa0bdd89`).
 # ONE ARM IS OWED A GRADE.
 # ===========================================================================
@@ -529,7 +558,12 @@ CONTROL_HEADER = """\
 #   GRADED, here, against these bytes:  M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M12
 #                                       — 11 of 11 KILLED, each verdict
 #                                       reported per arm, not as a total.
-#   NOT GRADED, and OWED:               M11.
+#   M11, GRADED 2026-10-16 against a LIVE capture (`ci/test/plat37-window-
+#   frame.sh` on Linux: headless sway 1.11, grim, wayland-info; windowed
+#   6 of 6 scenarios captured, featureless 6 of 6 timed out, as DIFF-6
+#   says): KILLED, its derived `because` matched and its behaviour-preserving
+#   control left the killer case OK. The notes below are why it was owed
+#   until then.
 #
 #   HARNESS   run-plat37-window-mutations.py
 #   BASE      6fa0bdd89 (origin/agents). **RE-GRADED FROM SCRATCH ON THIS

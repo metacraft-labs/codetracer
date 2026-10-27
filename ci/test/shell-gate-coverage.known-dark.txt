@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 48
+# RECORDED-DARK-CEILING: 47
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -72,8 +72,7 @@
 # `actions/checkout`, when it is not yet on the runner's disk.
 #
 # This file means the opposite: these ARE
-# gates, they SHOULD run, and today nothing runs them. (One entry — the
-# `ci/lib/` library at the bottom — is neither, and says so on its own line.)
+# gates, they SHOULD run, and today nothing runs them.
 #
 # ENTRIES ARE REPO-RELATIVE PATHS, NOT BASENAMES, since 2026-09-04: the guard's
 # scan was widened from `ci/test/ -maxdepth 1` to every `*.sh` under `ci/` and
@@ -180,11 +179,6 @@ ci/test/cli-record-smoke.sh
 
 # `just test-python-recorder`.
 ci/test/python-recorder-smoke.sh
-
-# `just test-shortcut-shadow-spec-agreement` — the permitted-shadow table in
-# `GUI/Keyboard-Shortcuts-System.md` against the one in the product. Pure text
-# comparison, no toolchain, and still in no lane.
-ci/test/shortcut-shadow-spec-agreement.sh
 
 # `just test-wasm-worker-session` — a wasm-worker session alive in a real tab
 # over the assembled publish tree.
@@ -399,31 +393,11 @@ ci/test/noir-wasm-worker/transpile_route.mjs
 # have a driver to wire. Their only mentions are PROSE, which is the trap this
 # guard's `refs_in` exists to refuse.
 
-# `ci/test/chord_stopcallback_probe.mjs` STOOD HERE AND ITS LINE IS GONE, and
-# the entry that stood here was WRONG IN THE DIRECTION THAT MATTERS. It read
-# "referenced by NOTHING AT ALL, not even a comment" — because the scan reads
-# `ci/` and `scripts/`, and the reference was in production source.
-# `src/frontend/ui/shortcuts.nim` names `ci/test/chord-and-pane-uniqueness.sh`
-# as "the gate" and this probe as one of the two "probes it drives", in the
-# present tense. That gate drove only `chord_double_fire_probe.mjs`. The claim
-# was not merely unbacked; it was false, in the file whose behaviour it
-# describes.
-#
-# It matters more than a stale sentence, because the same comment RECORDS THIS
-# PROBE'S READING and rests a decision on it: Monaco moved to the EditContext
-# API so the override "has expired" for the editor, and five untagged inputs
-# (`#fixed-search-include`, `#fixed-search-exclude`, `textarea.ime-text-area`,
-# `#fif-input`, `.request-filter-search`) are what stop it being deleted. Those
-# numbers were measured once, by hand, and nothing re-measured them.
-#
-# Part 3 of `chord-and-pane-uniqueness.sh` now does, and it DERIVES the expected
-# selectors from that comment rather than copying them, so the comment is the
-# single declaration and a product that drifts from it reddens here. Measured
-# before landing: 8 new assertions, all green, reproducing the recorded reading
-# exactly — `hasNativeEditContext: true`, `hasTextareaInputArea: false`,
-# `defaultWouldStop: false` for the focused element, five covered inputs and two
-# already tagged. Its instrument arm (a selector no page can carry) is required
-# to be reported MISSING, so the set comparison cannot be vacuous.
+# `ci/test/chord_stopcallback_probe.mjs` STOOD HERE, and then the probe itself
+# went: it measured what Mousetrap's global `stopCallback` override still
+# bought, and PLAT-68 removed Mousetrap's binding table and the override with
+# it (one capture-phase key router, `src/frontend/ui/key_router.nim`). Part 3
+# of `chord-and-pane-uniqueness.sh`, which drove it, went in the same change.
 
 # `ci/test/low_level_code_row_click_probe.mjs` STOOD HERE AND ITS LINE IS GONE.
 # It was named ONLY in a comment, at `ci/test/web-bundle-assets.sh:323`, which
@@ -735,14 +709,12 @@ ci/test/plat35-gpui-capture.sh
 # every workflow here: none of them can be wired to a job that would find its
 # input, so each is BLOCKED, not unwired, and names what would make it green.
 # Each blocker is a codetracer-specs issue of 2026-10-05.
-
-# Needs a reachable Incus daemon with a managed bridge, and `ct host`'s image
-# published into it (`ci/publish-host-image.sh`). No runner class provides an
-# Incus daemon to a job (the nested class gives Docker and KVM, not Incus).
-# Green when a job runs on a runner with Incus: wire `bash
-# ci/test/host-image-serves-in-a-container.sh` there and delete this line.
-# Issue: 2026-10-05-ct-host-container-gate-has-no-incus-runner.
-ci/test/host-image-serves-in-a-container.sh
+#
+# The Incus one has since lifted (2026-10-21, ceiling 46 -> 45): every
+# ephemeral Linux runner now has /dev/kvm, which is enough to boot an Incus
+# host, so `ct-host-container-gate` in codetracer.yml runs
+# `host-image-serves-in-a-container.sh` inside a NixOS VM
+# (`ci/test/host-image-serves-in-incus-vm.sh`) and its line is gone.
 
 # Need a running local Zitadel issuer (isonim-platform's local stack, its dev
 # CA trusted) that no CI job provisions; the gate exits 2 with the remedy when
@@ -753,11 +725,37 @@ ci/test/host-image-serves-in-a-container.sh
 ci/test/identity-live-device-grant.sh
 ci/test/identity-device-approve.mjs
 
-# A library: its only consumers are the WebAssembly boundary-recording fixture
-# checks (`src/db-backend/tests/fixtures/wasm-*/verify.sh`, run by `just
-# verify-wasm-recordings`), which need the wazero replayer built from the
-# `codetracer-wasm-recorder` sibling. No workflow clones or builds that
-# sibling. Green when a job does and runs `just verify-wasm-recordings`; the
-# both-directions rule then deletes this line.
-# Issue: 2026-10-05-wasm-recording-fixture-checks-have-no-wazero-in-ci.
-ci/lib/recording-dump.sh
+# =============================================================================
+# PLAT-37 ON macOS — BLOCKED ON A HOST NO CI LANE HAS, 2026-10-22, CEILING 45 -> 47
+# =============================================================================
+# THE MISSING CAPABILITY: **a live macOS GUI session whose window server
+# grants `kTCCServiceScreenCapture` to `com.metacraft-labs.guiassert.capture`.**
+# Both gates open a real window (`codetracer-gpui`, or the Electron front-end
+# through `ct`), attest it with `CGWindowListCopyWindowInfo` and capture that
+# window's own surface through ScreenCaptureKit. ScreenCaptureKit refuses
+# without the TCC grant, and a TCC grant is given interactively, per host,
+# through System Settings; it cannot be provisioned by a workflow step.
+#
+# Checked against every job in `codetracer.yml`: the macOS jobs
+# (`reprobuild-macos-smoke`, `origin-dap-macos{,-nightly}`, `dmg-build`,
+# `dmg-lib-check`, the macOS legs of `test-non-gui` and `test-ui-tests`) run on
+# `aarch64-darwin`, none of them captures a window, and none of their hosts is
+# recorded as holding the grant. The Linux window lanes (`gpui-window-captures`,
+# headless sway) cannot stand in: these gates exist precisely to measure the
+# macOS window server, which a wlroots capture does not reach.
+#
+# The scripts' own headers say the same thing from the other side:
+# `plat37-macos-window-capture.sh` is "HOST-CONDITIONAL EVIDENCE, NEVER A
+# REQUIRED GATE" ("do not wire this into a required check"), and every record
+# it writes carries `standing: HOST-CONDITIONAL EVIDENCE`. So this is BLOCKED,
+# not UNWIRED: the recipe side exists (both run from a workstation with
+# `bash ci/test/plat37-macos-*.sh`), and what is missing is a runner.
+#
+# WHAT WOULD MAKE THEM GREEN: a self-hosted macOS runner with a logged-in GUI
+# session and the ScreenCapture grant held by GuiAssert's capture helper, and
+# a non-required (`continue-on-error`) job on it calling a `just` recipe for
+# each script. Then both lines go and the ceiling drops by two.
+#
+# Issue: codetracer-pm issues/2026-10-17-plat37-macos-capture-gates-are-reachable-from-no-ci-lane.md
+ci/test/plat37-macos-window-capture.sh
+ci/test/plat37-macos-electron-capture.sh

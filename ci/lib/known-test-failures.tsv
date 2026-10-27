@@ -93,6 +93,11 @@
 #        rows stay, with the same signature — the mock raises on the command
 #        NAME, before any payload is looked at.
 #
+#     2026-10-19: ONE CASE LEFT. The "falls back to default panel height"
+#     case is retired: under the viewport contract an unmeasured step list
+#     asks for nothing (the binding applies the fallback), so that case now
+#     asserts that no request is sent, and passes.
+#
 #     2. "AN ENGINE COMMAND FOR IT" OVERPRICED THE FIX, in the same direction
 #        this file already caught itself once with the WelcomeScreenVM "four
 #        new seams" estimate. It reads as new construction. It is not:
@@ -124,7 +129,5 @@
 # ---------------------------------------------------------------------------
 
 vm-native	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor emits ct/load-step-lines with location + count	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
-vm-native	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor falls back to default panel height when unset	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
 
 vm-js	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor emits ct/load-step-lines with location + count	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.
-vm-js	src/tests/gui/tests/views/isonim_views_test.nim	loadStepLinesFor falls back to default panel height when unset	MockBackendService: 'ct/load-step-lines' is not a valid DAP command.

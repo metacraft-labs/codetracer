@@ -740,3 +740,65 @@ suite "VCSVM":
       check not vm.hunkCopyFeedback.val
 
       dispose()
+
+suite "VCSVM whole-commit document (the owner's 2026-10-23 decision on #753)":
+  ## VCS-Panel.md, "Changed Files" and "Whole-Commit Document": a file under an
+  ## expanded commit opens the commit's whole-commit document and scrolls it to
+  ## the file, unless the View mode toggle (started from
+  ## `vcs.fileClickOpensFullFile`) says to open the file itself.
+
+  test "a file under a commit targets the commit's document, with its path":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      let first = vm.openActionFor(0, "src/main.nim", "commit:abc123", "M")
+      let second = vm.openActionFor(1, "lib/util.nim", "commit:abc123", "A")
+      check first.kind == voaDiffTab
+      check first.target == "commit:abc123"
+      check first.path == "src/main.nim"
+      check second.path == "lib/util.nim"
+      # Both files of one commit are one document: the second click focuses
+      # the tab the first one opened instead of stacking another.
+      check first.documentKey == second.documentKey
+      check first.documentKey == "diff:commit:abc123"
+      dispose()
+
+  test "with the toggle on Open File the click opens the file":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setViewMode(vmOpenFile)
+      let action = vm.openActionFor(0, "src/main.nim", "commit:abc123", "M")
+      check action.kind == voaSourceFile
+      check action.path == "src/main.nim"
+      # A deleted file has nothing to open, so it still shows the diff.
+      check vm.openActionFor(1, "old.nim", "commit:abc123", "D").kind ==
+        voaDiffTab
+      dispose()
+
+  test "a scroll request names the file and is new every time":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      check vm.documentScroll.val.path == ""
+      vm.requestDocumentScroll("src/main.nim")
+      let firstSerial = vm.documentScroll.val.serial
+      check vm.documentScroll.val.path == "src/main.nim"
+      # Asking for the same file again, after the reader scrolled away, is
+      # still a change the view sees.
+      var seen = 0
+      createEffect proc() =
+        discard vm.documentScroll.val
+        inc seen
+      let before = seen
+      vm.requestDocumentScroll("src/main.nim")
+      check vm.documentScroll.val.serial == firstSerial + 1
+      check seen == before + 1
+      dispose()
+
+  test "several files make a document, one file a single-file tab":
+    createRoot proc(dispose: proc()) =
+      let vm = createVCSVM()
+      vm.setUnifiedDiff(true, @[VCSDiffFileRow(fileIndex: 0, path: "a.nim")])
+      check not vm.isDiffDocument()
+      vm.setUnifiedDiff(true, @[VCSDiffFileRow(fileIndex: 0, path: "a.nim"),
+                                VCSDiffFileRow(fileIndex: 1, path: "b.nim")])
+      check vm.isDiffDocument()
+      dispose()

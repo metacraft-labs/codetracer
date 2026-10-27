@@ -17,14 +17,17 @@
 ##     stops — its mid-line chips are the flow overlay's, a different feature.
 ##
 ## The host now passes `inlineValuesOf` (the producer GPUI uses) at the
-## terminal's row budget. This suite drives the terminal host through the
-## production `openTuiSession` / `refresh` to the SAME three stops the GPUI
-## record names — the scenario operations, read from `scenarios.json` — and
-## asserts the terminal's execution line carries values for EXACTLY the names
-## GPUI's row carried, and draws them; and at a stop whose line names nothing
-## in scope, that nothing is drawn. Names, not text: the two media present a
-## value at their own row budget, so `05 07 2a…` on one and a narrower form on
-## the other are one value, twice.
+## terminal's row budget for the execution line, and — since 2026-10-17, when
+## GPUI began drawing the desktop's inline values, the FLOW's — the flow's
+## values per line (`editor_surface.flowValuesByLine`, the one rule both
+## native editors call). This suite drives the terminal host through the
+## production `openTuiSession` / `refresh` to the stops the GPUI record names
+## — the scenario operations, read from `scenarios.json` — and asserts that on
+## EVERY line both media show, the terminal carries values for EXACTLY the
+## names GPUI's row carried, and draws them; and that a line GPUI drew no value
+## on carries none. Names, not text: the two media present a value at their
+## own row budget, so `05 07 2a…` on one and a narrower form on the other are
+## one value, twice.
 ##
 ## No mocks: a real replay-server, the real `calc` recording, the production
 ## host, and a committed record of the shipped GPUI binary.
@@ -52,9 +55,11 @@ const
   Rows = 48
   ValueScenarios = ["advanced-state", "returned-calltrace",
                     "continued-event-log"]
-  QuietScenario = "stepped-editor"
-    ## A stop whose execution line names nothing in scope — the GPUI record
-    ## carries no value on it.
+  ModuleScenario = "stepped-editor"
+    ## A stop at a `def` line at module level: its line names nothing in
+    ## scope, and the flow's values — the module's globals on the `def` lines
+    ## the run reached, the dict entries' functions — are what both media
+    ## draw (it was the "quiet" stop until the values became the flow's).
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 
@@ -64,18 +69,24 @@ proc caps(): TerminalCapabilities =
                     lang = "en_US.UTF-8"),
     initCapabilityFlags())
 
-proc gpuiExecRow(sid: string): JsonNode =
+proc gpuiRows(sid: string): JsonNode =
   let rec = parseJson(readFile(repo / "src/tests/visual/plat42-surfaces.json"))
-  for r in rec["scenarios"][sid]["rows"]:
+  rec["scenarios"][sid]["rows"]
+
+proc gpuiExecRow(sid: string): JsonNode =
+  for r in gpuiRows(sid):
     if r["pointer"].getStr == "eptExecution":
       return r
   nil
 
 proc gpuiNames(row: JsonNode): seq[string] =
   ## `data-ct-values` is `name=value|name=value`.
+  ## A `<stdout>` value's text may hold a line break, so a part that does
+  ## not start a `name=` pair continues the one before it.
   for part in row["values"].getStr.split('|'):
-    if part.len > 0:
-      result.add part.split('=', maxsplit = 1)[0]
+    let eq = part.find('=')
+    if part.len > 0 and eq > 0 and '\n' notin part[0 ..< eq]:
+      result.add part[0 ..< eq]
 
 proc lineOfRow(row: JsonNode): int =
   gutterLineOf(row["text"].getStr)
@@ -104,14 +115,17 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
     # through PLAT-29's stop reconciliation since 2026-09-23.
     ck "inlineValuesOf(s.state, tuiRowBudget(" in src
     ck "s.valueGate.installable(" in src
-    ck "inlineValues = values)" in src
+    ck "inlineValues = values," in src
+    # …and the flow's values per line, from the rule GPUI's surface calls.
+    ck "flowValuesByLine(" in src
+    ck "lineValues = flowValues)" in src
     # …and it loads the locals BEFORE building the source model.
     ck src.find("s.session.requestAndLoadLocals()") <
        src.find("rt.app.source = sourcePaneModelFor(")
 
   let resolution = resolveFixture("calc")
-  for sid in @ValueScenarios & @[QuietScenario]:
-    test "at " & sid & ": the terminal draws exactly the names GPUI drew":
+  for sid in @ValueScenarios & @[ModuleScenario]:
+    test "at " & sid & ": the terminal draws exactly the names GPUI drew, on every line":
       if resolution.outcome == foMissingPrereq:
         let message = missingPrereqMessage(resolution.spec, resolution.detail)
         echo "  ", message
@@ -120,7 +134,6 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
       else:
         let gpuiRow = gpuiExecRow(sid)
         ck not gpuiRow.isNil
-        let want = gpuiNames(gpuiRow)
         let rt = newTuiRuntime(newTuiApp(), caps(), Cols, Rows)
         let s = openTuiSession(resolution.tracePath, viewportHeight = Rows - 6)
         defer: s.close()
@@ -130,22 +143,33 @@ suite "PLAT-42: PG3 re-measured — one producer, two native editors":
         let model = rt.app.source
         # The same stop on both media.
         ck model.executionLine == lineOfRow(gpuiRow)
-        let lineText = model.heldTextAt(model.executionLine)
-        var got: seq[string] = @[]
-        for a in annotationsForLine(lineText, model.values):
-          got.add a.name
-        checkpoint(sid & " terminal=" & $got & " gpui=" & $want)
-        ck got == want
-        # …and the terminal DRAWS them on the execution line — or draws
-        # nothing there when there is nothing.
         let screen = sourcePaneScreen(model, Cols, Rows)
-        let row = 1 + model.executionLine - model.viewportTop
-        let painted = rowText(screen.rows[row])
-        checkpoint(painted)
-        if want.len > 0:
-          ck ("/* " & want[0] & ": ") in painted
-        else:
-          ck "/* " notin painted
+        var compared, valued = 0
+        for row in gpuiRows(sid):
+          let line = lineOfRow(row)
+          if line < model.viewportTop or line >= model.viewportTop + Rows - 1 or
+             not model.holdsLine(line):
+            continue
+          let want = gpuiNames(row)
+          var got: seq[string] = @[]
+          for a in model.annotationsAt(line, model.heldTextAt(line)):
+            got.add a.name
+          checkpoint(sid & " line " & $line & " terminal=" & $got &
+                     " gpui=" & $want)
+          ck got == want
+          inc compared
+          # …and the terminal DRAWS them on that line — or draws nothing
+          # there when there is nothing.
+          let painted = rowText(screen.rows[1 + line - model.viewportTop])
+          if want.len > 0:
+            inc valued
+            checkpoint(painted)
+            ck ("/* " & want[0] & ": ") in painted
+          else:
+            ck "/* " notin painted
+        # Not vacuous: the stop's lines were compared, and some carry values.
+        ck compared > 0
+        ck valued > 0
 
 suite "PLAT-28: REAL inline values, placed by the inlay model":
   ## PLAT-28's real-stack box: *"A real recording, stepped, with inline values
@@ -176,7 +200,7 @@ suite "PLAT-28: REAL inline values, placed by the inlay model":
       let model = rt.app.source
       let lineText = model.heldTextAt(model.executionLine)
       var vs: seq[EditorValue] = @[]
-      for a in annotationsForLine(lineText, model.values):
+      for a in model.annotationsAt(model.executionLine, lineText):
         vs.add EditorValue(name: a.name, value: a.value)
       checkpoint("line " & $model.executionLine & ": " & lineText & " " & $vs)
       ck vs.len > 0

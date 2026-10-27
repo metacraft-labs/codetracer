@@ -10,7 +10,10 @@
 ##    at the desktop's `.future` (white, half opacity); a native SCROLLBAR
 ##    SCRUBBER on the right over EVERY line of the output
 ##    (Scrollbar-Scrubbers.md §4: a filled thumb rect, a tick for the current
-##    position);
+##    position); and, while its widest line is wider than the pane, the
+##    overflow-only HORIZONTAL BAR along its bottom (PLAT-70,
+##    Horizontal-Overflow.md §4: 12 px, the scrubber model on the column axis,
+##    a 12 x 12 corner that belongs to neither track);
 ##  * the SCREEN view, offered when the output drives a screen — the shared
 ##    emulator's cell grid as text runs, SCALED to the pane (never re-wrapped:
 ##    the font shrinks or grows so the recorded 80x24 fits), with its built-in
@@ -27,7 +30,7 @@
 ## (`data-ct-terminal-*`): the view, the first row and row count, the total,
 ## each fragment's write, tense and attributes, the thumb's pixels.
 
-import std/[math, strutils, unicode]
+import std/[math, options, strutils, unicode]
 
 import isonim_gpui/renderer
 
@@ -40,7 +43,7 @@ import ../styles/generated/design_tokens
 
 type
   GTerminalDrag* = enum
-    gtdNone, gtdLineThumb, gtdScreen
+    gtdNone, gtdLineThumb, gtdScreen, gtdHBarThumb
 
   GTerminalPane* = object
     ## The window's own state for the pane: where the reader scrolled, and a
@@ -53,6 +56,12 @@ type
       ## its own.
     scrubSent*: int
       ## The write a held screen scrubber last moved the debugger to.
+    hview*: HorizontalView
+      ## PLAT-70: the line view's horizontal view.
+    widths*: ContentWidth
+      ## The widest line measured so far of THIS output (§4.1).
+    markers*: bool
+      ## `view.overflow-markers` (§4.6; off by default in GPUI, OQ-H1).
 
   TerminalLayout* = object
     body*: PxRect
@@ -67,6 +76,13 @@ type
       ## The line view's scrubber track (zero width in the screen view).
     screenTrack*, marks*: PxRect
       ## The screen's scrubber and its marks (zero in the line view).
+    hbar*: PxRect
+      ## PLAT-70: the line view's horizontal bar (zero height while the
+      ## lines fit, and in the screen view, OQ-H3).
+    corner*: PxRect
+      ## The square where the two tracks meet — neither's (HO-7).
+    view*: HorizontalView
+      ## The horizontal view at this pane's text width.
     scale*: float
       ## The screen view's scale.
 
@@ -111,7 +127,12 @@ proc screenShown*(vm: TerminalOutputVM): bool =
   not vm.isNil and vm.screenOffered.val and vm.view.val == tvScreen and
     not vm.screen.isNil
 
-proc terminalLayout*(body: PxRect; vm: TerminalOutputVM): TerminalLayout =
+proc textColumnsOf*(w: int): int =
+  ## How many whole columns of the monospaced face fit in `w` pixels.
+  max(0, int(floor(float(w) / EditorColumnPx)))
+
+proc terminalLayout*(body: PxRect; vm: TerminalOutputVM;
+                     st = GTerminalPane()): TerminalLayout =
   ## The pane's parts, in window pixels, inside `body` (its padding off).
   result.body = body
   let inner = PxRect(x: body.x + ChromePaddingPx, y: body.y + ChromePaddingPx,
@@ -145,7 +166,21 @@ proc terminalLayout*(body: PxRect; vm: TerminalOutputVM): TerminalLayout =
   else:
     result.content = PxRect(x: inner.x, y: top,
                             w: max(0, inner.w - TerminalTrackPx), h: rest)
-    result.rows = max(0, rest div TerminalRowPx)
+    # PLAT-70: the overflow-only horizontal bar takes the bottom 12 px while
+    # the widest line is wider than the text columns, and the vertical track
+    # stops above the corner square.
+    result.view = st.hview
+    result.view.setViewport(textColumnsOf(result.content.w))
+    var linesH = rest
+    if result.view.overflows and rest >= TerminalRowPx + TerminalTrackPx:
+      linesH = rest - TerminalTrackPx
+      result.hbar = PxRect(x: inner.x, y: top + linesH,
+                           w: result.content.w, h: TerminalTrackPx)
+      result.corner = PxRect(x: inner.x + inner.w - TerminalTrackPx,
+                             y: top + linesH, w: TerminalTrackPx,
+                             h: TerminalTrackPx)
+      result.content.h = linesH
+    result.rows = max(0, linesH div TerminalRowPx)
     result.track = PxRect(x: inner.x + inner.w - TerminalTrackPx, y: top,
                           w: TerminalTrackPx,
                           h: result.rows * TerminalRowPx)
@@ -153,7 +188,7 @@ proc terminalLayout*(body: PxRect; vm: TerminalOutputVM): TerminalLayout =
 proc visibleTop*(vm: TerminalOutputVM; st: GTerminalPane; rows: int): int =
   ## The first line shown: the reader's position, or — following — the
   ## current line at the bottom (the top before the first write).
-  let total = vm.lines.val.len
+  let total = vm.lineCount
   let maxTop = max(0, total - rows)
   if st.follow:
     let current = vm.currentLine()
@@ -164,7 +199,7 @@ proc visibleTop*(vm: TerminalOutputVM; st: GTerminalPane; rows: int): int =
 proc scrubberFor*(vm: TerminalOutputVM; st: GTerminalPane;
                   rows: int): ScrubberModel =
   ## The line view's scrubber: the WHOLE output.
-  scrubberModel(vm.lines.val.len, vm.visibleTop(st, rows), rows,
+  scrubberModel(vm.lineCount, vm.visibleTop(st, rows), rows,
                 vm.currentLine())
 
 proc screenThumbX*(vm: TerminalOutputVM; track: PxRect): int =
@@ -174,6 +209,15 @@ proc screenThumbX*(vm: TerminalOutputVM; track: PxRect): int =
   if n <= 1 or w < 0: track.x
   else: track.x + int(round(fractionOfWrite(n, w) *
                             float(max(0, track.w - TerminalTrackPx))))
+
+proc measureContent*(st: var GTerminalPane; vm: TerminalOutputVM) =
+  ## PLAT-70 (§4.1): the line view's content width — the widest line
+  ## measured so far of THIS output (its ViewModel's identity) over every
+  ## window of it the pane has held; never a function of the pane.
+  if vm.isNil:
+    return
+  st.hview.setContent(st.widths.measureWindow(cast[int](vm), vm.lines.val,
+    proc(line: TerminalLine): int = lineText(line).runeLen))
 
 proc styleRun(r: GpuiRenderer; el: GpuiElement; a: TermAttrs;
               future: bool; scale = 1.0) =
@@ -257,33 +301,57 @@ proc drawToggle(r: GpuiRenderer; pane: GpuiElement; lay: TerminalLayout;
        else: "write " & $(w + 1) & " / " & $n & " · tick " &
              $vm.events.val[w].rrTicks) &
       (if vm.scrubPreview.val >= 0: " · scrubbing" else: "")
-    else: $vm.lines.val.len & " lines"))
+    else: $vm.lineCount & " lines"))
   r.appendChild(row, info)
   r.appendChild(pane, row)
 
 proc drawLines(r: GpuiRenderer; pane: GpuiElement; lay: TerminalLayout;
                vm: TerminalOutputVM; st: GTerminalPane) =
-  let lines = vm.lines.val
+  let total = vm.lineCount
   let top = vm.visibleTop(st, lay.rows)
   let current = vm.currentRRTicks.val
   r.setAttribute(pane, "data-ct-terminal-top", $top)
   r.setAttribute(pane, "data-ct-terminal-rows", $lay.rows)
-  r.setAttribute(pane, "data-ct-terminal-total", $lines.len)
+  r.setAttribute(pane, "data-ct-terminal-total", $total)
+  let left = lay.view.leftCol
+  let cols = lay.view.viewportCols
+  r.setAttribute(pane, "data-ct-terminal-left", $left)
   for i in 0 ..< lay.rows:
     let li = top + i
-    if li >= lines.len: break
+    if li >= total: break
     let row = rowElement(r, TerminalRowPx)
     r.setAttribute(row, TerminalLineAttribute, $li)
     r.setStyle(row, "width", $lay.content.w & "px")
-    for f in lines[li].fragments:
+    # A line outside the held window is drawn when its window arrives.
+    let line = vm.heldLine(li)
+    if line.isNone:
+      r.appendChild(pane, row)
+      continue
+    # PLAT-70: the columns `[left, left + cols)` of the line, the overflow
+    # markers (when on) replacing its first and last shown character.
+    let width = lineText(line.get).runeLen
+    let marks = if st.markers: overflowMarkers(width, lay.view)
+                else: (precedes: false, extends: false)
+    var c = 0
+    for f in line.get.fragments:
       if f.text.len == 0: continue
-      let span = r.createElement("span")
-      r.setAttribute(span, TerminalWriteAttribute, $f.eventIndex)
-      let tense: TerminalTense = fragmentTense(current, f.rrTicks)
-      r.setAttribute(span, TerminalTenseAttribute, $tense)
-      styleRun(r, span, f.style, tense == ttFuture)
-      r.appendChild(span, r.createTextNode(f.text))
-      r.appendChild(row, span)
+      let w = f.text.runeLen
+      let a = max(left, c)
+      let b = min(left + cols, c + w)
+      if b > a:
+        var text = f.text.runeSubstr(a - c, b - a)
+        if marks.precedes and a == left:
+          text = "‹" & text.runeSubstr(1)
+        if marks.extends and b == left + cols:
+          text = text.runeSubstr(0, text.runeLen - 1) & "›"
+        let span = r.createElement("span")
+        r.setAttribute(span, TerminalWriteAttribute, $f.eventIndex)
+        let tense: TerminalTense = fragmentTense(current, f.rrTicks)
+        r.setAttribute(span, TerminalTenseAttribute, $tense)
+        styleRun(r, span, f.style, tense == ttFuture)
+        r.appendChild(span, r.createTextNode(text))
+        r.appendChild(row, span)
+      c += w
     r.appendChild(pane, row)
   # The scrollbar SCRUBBER over every line.
   if lay.track.h > 0:
@@ -314,6 +382,32 @@ proc drawLines(r: GpuiRenderer; pane: GpuiElement; lay: TerminalLayout;
       r.setAttribute(mark, TerminalMarkAttribute, "current")
       r.setAttribute(mark, "data-ct-mark-line", $sm.current)
       r.appendChild(pane, mark)
+  # PLAT-70: THE HORIZONTAL BAR, the vertical scrubber's drawing on the
+  # other axis (`barModel.thumbSpan` over the track's pixels, Monaco's 20 px
+  # minimum), and the corner square that belongs to neither track.
+  if lay.hbar.h > 0:
+    let bar = lay.view.barModel
+    let span = bar.thumbSpan(lay.hbar.w, TerminalMinThumbPx)
+    let track = absoluteBox(r, lay.hbar, lay.body, "")
+    r.setAttribute(track, TerminalTrackAttribute, "hbar")
+    r.setAttribute(track, "data-ct-thumb-left", $span.start)
+    r.setAttribute(track, "data-ct-thumb-px", $span.length)
+    r.setAttribute(track, "data-ct-hbar", "content=" & $lay.view.contentCols &
+                   ";viewport=" & $lay.view.viewportCols & ";left=" &
+                   $lay.view.leftCol)
+    r.setStyle(track, "display", "flex")
+    r.setStyle(track, "padding-left", $span.start & "px")
+    let thumb = r.createElement("div")
+    r.setStyle(thumb, "width", $span.length & "px")
+    r.setStyle(thumb, "height", $TerminalTrackPx & "px")
+    r.setStyle(thumb, "flex-shrink", "0")
+    r.setStyle(thumb, "background", TerminalThumbColour)
+    r.setStyle(thumb, "rounded", "3px")
+    r.appendChild(track, thumb)
+    r.appendChild(pane, track)
+    let corner = absoluteBox(r, lay.corner, lay.body, "")
+    r.setAttribute(corner, "data-ct-terminal-corner", "true")
+    r.appendChild(pane, corner)
 
 proc drawScreen(r: GpuiRenderer; pane: GpuiElement; lay: TerminalLayout;
                 vm: TerminalOutputVM) =
@@ -372,11 +466,11 @@ proc drawTerminalOutput*(r: GpuiRenderer; pane: GpuiElement;
   r.setStyle(pane, "position", "relative")
   r.setStyle(pane, "display", "flex")
   r.setStyle(pane, "flex-direction", "column")
-  let lay = terminalLayout(body, vm)
+  let lay = terminalLayout(body, vm, st)
   r.setAttribute(pane, TerminalAttribute,
                  (if vm.screenShown: $tvScreen else: $tvLines))
   drawToggle(r, pane, lay, vm)
-  if vm.lines.val.len == 0 and not vm.screenShown:
+  if vm.lineCount == 0 and not vm.screenShown:
     let note = r.createElement("div")
     r.setStyle(note, "color", TerminalFutureColour)
     r.setStyle(note, "opacity", "0.6")
@@ -398,7 +492,7 @@ proc drawTerminalOutput*(r: GpuiRenderer; pane: GpuiElement;
 type
   GTerminalHitKind* = enum
     ghNone, ghViewLines, ghViewScreen, ghWrite, ghLineTrack, ghLineThumb,
-    ghScreenTrack, ghScreen
+    ghScreenTrack, ghScreen, ghHBarTrack, ghHBarThumb, ghCorner
 
   GTerminalHit* = object
     kind*: GTerminalHitKind
@@ -423,7 +517,7 @@ proc terminalHitAt*(vm: TerminalOutputVM; st: GTerminalPane; body: PxRect;
   result = GTerminalHit(kind: ghNone, write: -1)
   if vm.isNil or not body.contains(x, y):
     return
-  let lay = terminalLayout(body, vm)
+  let lay = terminalLayout(body, vm, st)
   if lay.linesButton.contains(x, y):
     return GTerminalHit(kind: ghViewLines, write: -1)
   if lay.screenButton.contains(x, y):
@@ -436,6 +530,18 @@ proc terminalHitAt*(vm: TerminalOutputVM; st: GTerminalPane; body: PxRect;
     if lay.content.contains(x, y):
       return GTerminalHit(kind: ghScreen, write: -1)
     return
+  if lay.corner.contains(x, y):
+    # PLAT-70 (HO-7): the square between the two tracks — no gesture.
+    return GTerminalHit(kind: ghCorner, write: -1)
+  if lay.hbar.contains(x, y):
+    # PLAT-70 (§4.2): the horizontal bar, the fraction along its track.
+    let span = lay.view.barModel.thumbSpan(lay.hbar.w, TerminalMinThumbPx)
+    let local = x - lay.hbar.x
+    let f = trackFractionAt(local, lay.hbar.w)
+    return GTerminalHit(kind: (if local >= span.start and
+                                  local < span.start + span.length:
+                                 ghHBarThumb else: ghHBarTrack),
+                        write: -1, fraction: f)
   if lay.track.contains(x, y):
     let sm = vm.scrubberFor(st, lay.rows)
     let span = sm.thumbSpan(lay.track.h, TerminalMinThumbPx)
@@ -447,12 +553,13 @@ proc terminalHitAt*(vm: TerminalOutputVM; st: GTerminalPane; body: PxRect;
   if not lay.content.contains(x, y):
     return
   let li = vm.visibleTop(st, lay.rows) + (y - lay.content.y) div TerminalRowPx
-  let lines = vm.lines.val
-  if li < 0 or li >= lines.len:
+  let line = vm.heldLine(li)
+  if line.isNone:
     return
-  let column = int(float(x - lay.content.x) / EditorColumnPx)
-  let fi = lineFragmentAt(lines[li], column)
+  let column = int(float(x - lay.content.x) / EditorColumnPx) +
+               lay.view.leftCol
+  let fi = lineFragmentAt(line.get, column)
   if fi < 0:
     return
   result = GTerminalHit(kind: ghWrite,
-                        write: lines[li].fragments[fi].eventIndex)
+                        write: line.get.fragments[fi].eventIndex)

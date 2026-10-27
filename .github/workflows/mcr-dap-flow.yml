@@ -1,8 +1,11 @@
 name: MCR DAP Flow
 
 # Cross-repo CI for the MCR-backend DAP flow tests
-# (src/db-backend/tests/*_mcr_streaming_flow_test.rs).  Drives
-# ct-native-replay + ct-mcr against pinned sibling SHAs of
+# (src/db-backend/tests/*_mcr_streaming_flow_test.rs) and for the
+# backend-manager tests that record with ct-mcr (the entries
+# ci/test/non-gui-not-provided.linux.txt names for this job, which
+# `test-non-gui` excludes by name and this job selects from the same
+# list).  Drives ct-native-replay + ct-mcr against pinned sibling SHAs of
 # codetracer-native-recorder and codetracer-native-backend using real
 # clones, real recorder/replay builds, real db-backend and real DAP.
 #
@@ -20,7 +23,10 @@ on:
     branches-ignore: [agents]
     paths:
       - 'src/db-backend/**'
+      - 'src/backend-manager/**'
       - 'libs/ct-dap-client/**'
+      - 'ci/test/non-gui-not-provided.linux.txt'
+      - 'ci/lib/not-provided-filter.sh'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
       - '.github/workflows/mcr-dap-flow.yml'
@@ -31,24 +37,35 @@ on:
     branches: [dev, stable]
     paths:
       - 'src/db-backend/**'
+      - 'src/backend-manager/**'
       - 'libs/ct-dap-client/**'
+      - 'ci/test/non-gui-not-provided.linux.txt'
+      - 'ci/lib/not-provided-filter.sh'
       - 'scripts/detect-siblings.sh'
       - 'justfile'
       - '.github/workflows/mcr-dap-flow.yml'
   workflow_dispatch:
     inputs:
       native_recorder_ref:
-        description: 'codetracer-native-recorder ref (default: dev)'
+        description: 'codetracer-native-recorder ref (default: the commit flake.lock locks)'
         required: false
         default: ''
       native_backend_ref:
-        description: 'codetracer-native-backend ref (default: dev)'
+        description: 'codetracer-native-backend ref (default: the commit flake.lock locks)'
         required: false
         default: ''
 
 permissions:
   contents: read
   id-token: write
+
+# Cancel superseded PR runs only: a new push to a PR makes its previous run
+# moot, and stale runs otherwise hold scarce self-hosted runners. Every other
+# event (mainline push, merge_group, tag, dispatch, schedule) gets a group
+# unique to its run_id, so it is never cancelled and never cancels anything.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   mcr-dap-flow:
@@ -109,10 +126,13 @@ jobs:
         # bare entry resolves through the per-commit workspace lock in the
         # shared manifests repo, which has published nothing for this repo
         # since 2026-08-02 -- the outage documented at the top of
-        # codetracer.yml and alarmed on by the `workspace-lock-freshness`
-        # job. Every job that left it bare died in this step. When lock
-        # publication resumes, dropping the `=dev` suffixes restores
-        # per-commit pinning here along with everywhere else.
+        # codetracer.yml. Every job that left it bare died in this step.
+        # Since reprobuild-specs Unified-Locking-And-Hooks.md §14 a bare
+        # entry resolves from this commit's own committed repro.lock
+        # instead (no manifests repo), and the `workspace-lock-freshness`
+        # job checks that that lock pins every bare-declared sibling; once
+        # this sibling is pinned there, dropping the `=dev` suffix restores
+        # per-commit pinning here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
@@ -138,17 +158,23 @@ jobs:
           #   `gfx_stream/ctfs_visual` from it, and the build stops with
           #   "cannot open file: gfx_stream/ctfs_visual" without it. Bare:
           #   clone-siblings resolves it from this commit's repro.lock.
+          # codetracer-native-backend: an `/agents` input in flake.nix, so the
+          #   fallback is the commit flake.lock and repro.lock lock, not `dev`
+          #   (a branch the Nix lane does not build); refresh it with the lock.
+          # codetracer-native-recorder: likewise the commit the locks name, so
+          #   ct-mcr accepts the `replay-worker --parent-pid` that this
+          #   native-backend passes (see setup-db-backend-siblings/action.yml).
           siblings: |
-            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || 'dev' }}
-            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'dev' }}
+            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '8fffbbc643bb1cb5acf015c6707c7312375fe911' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'a1d58c85865d236d6ed914e321f851036745166e' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
             # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
             # sibling cloned at `dev` fails to compile. Full account and the refresh
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
-            codetracer-trace-format=3fada0b03c3d1a0cbc7c35f278aa639028d702c5
-            codetracer-trace-format-nim=051efd22b00ec3b88676fb07755a65c5a4ca8fde
+            codetracer-trace-format=327d41aaa69520ce5a1ccc5daea6e73397757dfa
+            codetracer-trace-format-nim=a3f76fad6613be080d156d5135ea2adaad245aa9
             codetracer-visual-replay
 
       - name: Run MCR DAP flow tests
@@ -163,6 +189,12 @@ jobs:
         # Graceful skipping OFF: codetracer's dev shell carries every compiler
         # these tests use (gnatmake, ldc2, gfortran, go, fpc, gcc/clang, nim,
         # rustc), so a missing one is a failure here, not a skip that passes.
+        #
+        # The recipe then runs the backend-manager tests the non-gui list
+        # assigns to this job (selected with `not-provided-filter.sh --lane
+        # mcr-dap-flow`). Like the db-backend MCR tests, they record with
+        # `ct-mcr record`, which refuses a host without CPUID faulting, and
+        # they fail rather than skip on a missing prerequisite.
         env:
           CODETRACER_ALLOW_GRACEFUL_TEST_SKIPPING: "false"
         run: |

@@ -44,9 +44,11 @@
 ## colour on the resolved tier.
 
 import ../../../styles/generated/design_tokens
+import ../../../styles/contrast_floors
+import ./colour_math
 import ./editor_theme
 
-export design_tokens
+export design_tokens, contrast_floors
 
 type
   DistinctionGroup* = enum
@@ -83,6 +85,12 @@ type
       ## (Terminal-Output-Pane.md §3): the track, the thumb, the thumb's ground
       ## where an eighth block is drawn reversed, and the current-position
       ## mark.
+    dgScrollbar = "scrollbar"
+      ## PLAT-70 Part H (Scrollbar-Scrubbers.md §7.3): a scrollbar's track
+      ## (at rest, revealed) and thumb (line and solid at rest, under the
+      ## pointer, held). Its own group: the position sliders keep
+      ## `dgScrubber`'s look, and a slider and a scrollbar are never read as
+      ## states of one thing.
 
   SemanticRole* = enum
     ## Every distinction this front-end's screen carries. `srNone` is the zero
@@ -293,6 +301,22 @@ type
     srScrubberMark = "scrubber-mark"
       ## The current recording position on the track, in the execution
       ## pointer's colour.
+    # PLAT-70 Part H (Scrollbar-Scrubbers.md §7.3): a SCROLLBAR's parts
+    # (`dgScrollbar`) — every vertical and horizontal bar of every pane.
+    srScrollbarTrack = "scrollbar-track"
+      ## The `scrollbar-track on` line at rest.
+    srScrollbarTrackRevealed = "scrollbar-track-revealed"
+      ## The track while the pointer is on it or the thumb is held — drawn
+      ## even with `scrollbar-track off`.
+    srScrollbarThumb = "scrollbar-thumb"
+      ## A `hairline` or `thin` thumb at rest.
+    srScrollbarThumbSolid = "scrollbar-thumb-solid"
+      ## A `thick` or `full` thumb at rest — a dimmer token than a line
+      ## thumb's, since it covers more of its cell.
+    srScrollbarThumbHover = "scrollbar-thumb-hover"
+      ## The thumb under the pointer (it can be grabbed).
+    srScrollbarThumbHeld = "scrollbar-thumb-held"
+      ## The thumb held, in the accent.
 
   DividerChoice* = enum
     ## PLAT-50 (the user, 2026-10-02, undecided between the two): the colour a
@@ -450,8 +474,15 @@ const
     srTabBarFocused: fgbg(dgTab, dtColorsUiTextPrimaryBodySubtle,
                           dtColorsUiBorderSecondary,
                           mono = {raUnderline, raItalic}),
+    # PLAT-68 (the user: the focused strip's selected and unselected tabs
+    # shared one ground): the ACTIVE tab of the focused strip is lifted off
+    # the focus colour onto ui/surface/primary/default — the window's ground,
+    # 1.51:1 against ui/border/secondary in Dark and 1.83:1 in Light, over the
+    # tab-contrast floor (`TabGroundContrastFloor`) — while the strip and its
+    # other tabs keep the focus colour, so the focused strip stays distinct
+    # from every unfocused one.
     srTabActiveFocused: fgbg(dgTab, dtColorsUiTextPrimaryHeadings,
-                             dtColorsUiBorderSecondary, attrs = {raBold},
+                             dtColorsUiSurfacePrimaryDefault, attrs = {raBold},
                              mono = {raBold, raReverse, raUnderline}),
     # PLAT-49 part B: a session tab off the bar's card (#262626 / #dbd6cc) by
     # one subtle step — ui/surface/primary/default (#1b1b1b / #f8f6f2) —
@@ -759,9 +790,11 @@ const
     srHeat5: fgOnly(dgHeat, dtColorsEditorSyntaxPrimary, attrs = {raBold},
                     mono = {raBold, raReverse}),
 
-    # PLAT-52. The track is a divider line; the thumb the scrollbar thumb's
-    # colour (the desktop's `::-webkit-scrollbar-thumb` reads the subtle
-    # caption tone); the mark the execution pointer's (the gutter's) colour.
+    # PLAT-52: the scrubbers' parts. Since PLAT-70 Part H the position
+    # sliders (the terminal screen's scrubber, the frame viewer's) are their
+    # only users but the mark: a SCROLLBAR draws with the `srScrollbar*`
+    # roles below. The track is a divider line; the thumb the subtle caption
+    # tone; the mark the execution pointer's (the gutter's) colour.
     srScrubberTrack: fgOnly(dgScrubber, dtColorsUiDividerSecondary,
                             mono = {raItalic}),
     srScrubberThumb: fgOnly(dgScrubber, dtColorsUiTextPrimaryCaptionSubtle,
@@ -770,7 +803,26 @@ const
                                   dtColorsUiTextPrimaryCaptionSubtle,
                                   mono = {raReverse, raItalic}),
     srScrubberMark: fgOnly(dgScrubber, dtColorsEditorActionSecondary,
-                           attrs = {raBold}, mono = {raBold, raUnderline})]
+                           attrs = {raBold}, mono = {raBold, raUnderline}),
+    # PLAT-70 Part H (Scrollbar-Scrubbers.md §7.3): a scrollbar is
+    # foreground over the pane's own ground. The track at rest is the
+    # faintest border; revealed (the pointer on it, the thumb held) the
+    # primary border. A line thumb (`hairline`, `thin`) rests at the subtle
+    # caption tone, a solid one (`thick`, `full`) at the divider tone; under
+    # the pointer the caption tone; held, the accent. The mark is
+    # `srScrubberMark`.
+    srScrollbarTrack: fgOnly(dgScrollbar, dtColorsUiBorderSecondary,
+                             mono = {raItalic}),
+    srScrollbarTrackRevealed: fgOnly(dgScrollbar, dtColorsUiBorderPrimary,
+                                     mono = {raItalic, raUnderline}),
+    srScrollbarThumb: fgOnly(dgScrollbar, dtColorsUiTextPrimaryCaptionSubtle,
+                             mono = {raReverse}),
+    srScrollbarThumbSolid: fgOnly(dgScrollbar, dtColorsUiDividerSecondary,
+                                  mono = {raReverse, raItalic}),
+    srScrollbarThumbHover: fgOnly(dgScrollbar, dtColorsUiTextPrimaryCaption,
+                                  mono = {raReverse, raBold}),
+    srScrollbarThumbHeld: fgOnly(dgScrollbar, dtColorsEditorActionPrimary,
+                                 mono = {raReverse, raUnderline})]
 
 func spec*(role: SemanticRole): RoleSpec {.inline.} =
   RoleSpecs[role]
@@ -793,3 +845,16 @@ func dividerLineRole*(choice: DividerChoice): SemanticRole =
   case choice
   of dcStrip: srDividerStrip
   of dcSubtle: srBorderPane
+
+# PLAT-68, ENFORCED AT BUILD: on the focused strip the selected tab's ground
+# and the other tabs' stand apart by at least the tab-contrast floor, in both
+# modes — a token change that brings them together fails the build here
+# rather than reaching a screen where the selected tab cannot be found.
+static:
+  for mode in DesignMode:
+    doAssert contrastRatio(
+        parseHexColour(tokenHex(spec(srTabActiveFocused).bg, mode)),
+        parseHexColour(tokenHex(spec(srTabBarFocused).bg, mode))) >=
+      TabGroundContrastFloor,
+      "the focused strip's selected tab is below the tab-contrast floor in " &
+      $mode & " mode"

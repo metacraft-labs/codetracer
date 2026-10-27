@@ -19,8 +19,10 @@ import {
   codetracerInstallDir,
   codetracerPath,
 } from "../lib/fixtures";
+import { codetracerCiDevShellCommand } from "../lib/codetracer-ci-dev-shell";
 import * as helpers from "../lib/language-smoke-test-helpers";
 import { getFreeTcpPort } from "../lib/port-allocator";
+import { ctHostPageUrl, withCtHostSessionSecret } from "../lib/ct-host-session";
 import { retry } from "../lib/retry-helpers";
 import { LayoutPage } from "../page-objects/layout-page";
 
@@ -188,6 +190,9 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_PREFIX;
   delete env.WAYLAND_DISPLAY;
   delete env.XDG_SESSION_TYPE;
+  // The session secret every `ct host` started here is given
+  // (../lib/ct-host-session.ts).
+  withCtHostSessionSecret(env);
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
   env.CODETRACER_ELECTRON_ARGS = [
@@ -349,19 +354,18 @@ async function startStorageHarness(
   inputPath: string,
 ): Promise<{ process: childProcess.ChildProcess; ready: StorageHarnessReady; output: string[] }> {
   const output: string[] = [];
+  const harnessProcessCommand = codetracerCiDevShellCommand(codetracerCiDir, [
+    "dotnet",
+    "run",
+    "--project",
+    storageHarnessProject,
+    "--",
+    "storage-server-materialized-manifest",
+    inputPath,
+  ]);
   const harnessProcess = childProcess.spawn(
-    "direnv",
-    [
-      "exec",
-      codetracerCiDir,
-      "dotnet",
-      "run",
-      "--project",
-      storageHarnessProject,
-      "--",
-      "storage-server-materialized-manifest",
-      inputPath,
-    ],
+    harnessProcessCommand.command,
+    harnessProcessCommand.args,
     {
       cwd: codetracerCiDir,
       env: makeCleanEnv(),
@@ -401,7 +405,7 @@ async function connectToHost(
   let connected = false;
   for (let attempt = 1; attempt <= maxConnectAttempts && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: gotoTimeoutMs,
       });
       connected = true;

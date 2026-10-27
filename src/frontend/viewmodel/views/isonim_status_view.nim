@@ -2,11 +2,15 @@
 ##
 ## State derivation and legacy side effects stay in ``ui/status.nim``; this
 ## module owns the DOM structure for the shared ``#status`` host and exposes a
-## MockRenderer/WebRenderer-compatible surface for focused structure tests.
+## generic view (`renderStatusShell[R, N]`) rendered under every renderer.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic proc expands the DSL at its caller.
+export signals, computation, components
 
 when defined(js):
   import jsffi
@@ -156,6 +160,25 @@ proc invokeAction(
   if not callbacks.onNotificationAction.isNil:
     callbacks.onNotificationAction(notificationIndex, actionIndex)
 
+proc dismissHandler(callbacks: StatusShellCallbacks;
+                    notificationIndex: int): proc() =
+  ## The click handler of one notification's dismiss button.
+  ##
+  ## A FACTORY, as is `actionHandler` below: the notifications and their
+  ## action buttons are built in `for` loops, and Nim closures capture by
+  ## reference -- a `let` in a loop body is ONE variable for the whole loop.
+  ## The inline closures these replace made every dismiss button dismiss the
+  ## LAST notification, and every action button fire the last notification's
+  ## last action (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures).
+  result = proc() = callbacks.invokeDismiss(notificationIndex)
+
+proc actionHandler(callbacks: StatusShellCallbacks;
+                   notificationIndex, actionIndex: int): proc() =
+  ## The click handler of one notification action button; per button for
+  ## the reason `dismissHandler` gives.
+  result = proc() = callbacks.invokeAction(notificationIndex, actionIndex)
+
 proc invokeCopyLocation(callbacks: StatusShellCallbacks) =
   if not callbacks.onCopyLocation.isNil:
     callbacks.onCopyLocation()
@@ -258,10 +281,13 @@ proc statusStructureSignature*(model: StatusShellModel): string =
     for notification in model.notificationHistory:
       result.add("\x1e" & notificationSignature(notification))
 
-template renderStatusShellImpl(
-    r: untyped;
+proc renderStatusShell*[R, N](
+    r: R;
     model: StatusShellModel;
-    callbacks: StatusShellCallbacks): untyped =
+    callbacks: StatusShellCallbacks = StatusShellCallbacks()): N =
+  ## The status bar shell, for every renderer. `model` is a value: the host
+  ## redraws on a structural change and patches values in place otherwise
+  ## (`renderStatusInto`), so the loops below run once per render.
   ui(r):
     tdiv(id = "status", class = StatusRootClass):
       tdiv(
@@ -281,8 +307,7 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeDismiss(notificationIndex)):
+                    onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
               let currentActionIndex = actionIndex
@@ -290,8 +315,8 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-action-button action-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                    onclick = actionHandler(callbacks, notificationIndex,
+                                           currentActionIndex)):
                   text action.label
 
       if model.hasOperationNotification:
@@ -308,8 +333,7 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-button dismiss-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeDismiss(notificationIndex)):
+                    onclick = dismissHandler(callbacks, notificationIndex)):
                   discard
             for actionIndex, action in notification.actions:
               let currentActionIndex = actionIndex
@@ -317,8 +341,8 @@ template renderStatusShellImpl(
                 tdiv(
                     class = "notification-action-button action-notification-button " &
                       notification.kindClass,
-                    onclick = proc() =
-                      callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                    onclick = actionHandler(callbacks, notificationIndex,
+                                           currentActionIndex)):
                   text action.label
 
       tdiv(id = StatusBaseId):
@@ -447,8 +471,7 @@ template renderStatusShellImpl(
                   tdiv(
                       class = "notification-button dismiss-notification-button " &
                         notification.kindClass,
-                      onclick = proc() =
-                        callbacks.invokeDismiss(notificationIndex)):
+                      onclick = dismissHandler(callbacks, notificationIndex)):
                     discard
               for actionIndex, action in notification.actions:
                 let currentActionIndex = actionIndex
@@ -456,8 +479,8 @@ template renderStatusShellImpl(
                   tdiv(
                       class = "notification-action-button action-notification-button " &
                         notification.kindClass,
-                      onclick = proc() =
-                        callbacks.invokeAction(notificationIndex, currentActionIndex)):
+                      onclick = actionHandler(callbacks, notificationIndex,
+                                             currentActionIndex)):
                     text action.label
 
       if model.showBugReport:
@@ -483,12 +506,6 @@ template renderStatusShellImpl(
                   onclick = proc() =
                     callbacks.invokeSendBugReport("", "")):
                 text "Send report"
-
-proc renderStatusShell*(
-    r: MockRenderer;
-    model: StatusShellModel;
-    callbacks: StatusShellCallbacks = StatusShellCallbacks()): MockNode =
-  renderStatusShellImpl(r, model, callbacks)
 
 when defined(js):
   proc inputValue(node: isonim_dom.Element): cstring {.importjs: "(#.value || '')".}
@@ -522,13 +539,6 @@ when defined(js):
         proc(ev: isonim_dom.Event) =
           if ev.isCtrlEnter():
             sendBugReportFromDom(callbacks))
-
-  proc renderStatusShell*(
-      r: WebRenderer;
-      model: StatusShellModel;
-      callbacks: StatusShellCallbacks = StatusShellCallbacks()):
-        isonim_dom.Element =
-    renderStatusShellImpl(r, model, callbacks)
 
   proc querySelectorIn(
       root: isonim_dom.Element;
@@ -658,7 +668,8 @@ when defined(js):
     while not isonim_dom.isNodeNil(containerNode.firstChild):
       discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
 
-    let shell = renderStatusShell(r, model, callbacks)
+    let shell = renderStatusShell[WebRenderer, isonim_dom.Element](
+      r, model, callbacks)
     let shellNode = isonim_dom.Node(shell)
     while not isonim_dom.isNodeNil(shellNode.firstChild):
       discard isonim_dom.appendChild(containerNode, shellNode.firstChild)

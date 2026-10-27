@@ -462,7 +462,7 @@ test.describe("Auto-hide panes", () => {
       });
     });
 
-    // Pin STATE (Content=4) to the left using __ctPinPanel.
+    // Pin VARIABLES (Content=4) to the left using __ctPinPanel.
     const leftPinResult = await ctPage.evaluate(() => {
       const d = (window as any).data;
       const s = d.sessions[d.activeSessionIndex];
@@ -470,7 +470,7 @@ test.describe("Auto-hide panes", () => {
       if (!comp) return "no-component";
       if (!comp.layoutItem) return "no-layoutItem";
       if (!(window as any).__ctPinPanel) return "no-pin-helper";
-      const title = comp.layoutItem?.tab?.titleElement?.textContent?.trim() ?? "STATE";
+      const title = comp.layoutItem?.tab?.titleElement?.textContent?.trim() ?? "VARIABLES";
       try {
         (window as any).__ctPinPanel(comp.layoutItem, 0);  // 0 = Left
         return "pinned:" + title;
@@ -479,7 +479,7 @@ test.describe("Auto-hide panes", () => {
       }
     }) as string;
     console.log("Left pin result:", leftPinResult);
-    const leftTitle = leftPinResult.startsWith("pinned:") ? leftPinResult.slice(7) : "STATE";
+    const leftTitle = leftPinResult.startsWith("pinned:") ? leftPinResult.slice(7) : "VARIABLES";
 
     await layoutUpdatedPromisePin2;
 
@@ -1001,7 +1001,8 @@ test.describe("Independent sidebar presentation", () => {
     await modes(ctPage, true, false);
     expect(electronApp).not.toBeNull();
     await electronApp!.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed() && w.isVisible())!;
+      const win = BrowserWindow.getAllWindows()
+        .find((w: { isDestroyed(): boolean; isVisible(): boolean }) => !w.isDestroyed() && w.isVisible())!;
       win.setSize(1400, 900);
       win.maximize();
       win.unmaximize();

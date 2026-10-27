@@ -19,11 +19,15 @@ import ui_imports
 # the host only through this file.
 from ../platform_host import
   ctPlatform, ctAwaitSync, can, canAll, capFilesystemRead, capProcessSpawn,
-  capProcessArbitraryPrograms, capVcsWrite, ProcessSpec, Platform,
+  capProcessArbitraryPrograms, capVcsRead, capVcsWrite, ProcessSpec, Platform,
   PlatformOutcome, PlatformFutureT, ProcessRunResult, Nothing, process, fs, vcs,
-  succeededExit, onComplete, pkTimeout, `$`
+  succeededExit, onComplete, pkTimeout, pkFailed, noIndexLockGitArgs, `$`,
+  VcsStatus, resolvedErr, drainPlatformCallbacks
 
 import std/tables
+
+import ../viewmodel/viewmodels/no_project_folder
+export no_project_folder.NoProjectFolderText
 
 const gitTimeoutMs = 5000
 
@@ -131,9 +135,15 @@ proc runGit(args: seq[cstring]; cwd: cstring): tuple[output: string, ok: bool] =
   ## anything" are the two separate questions this call needs answered yes.
   if not ctPlatform().canAll({capProcessSpawn, capProcessArbitraryPrograms}):
     return ("", false)
-  var argv: seq[string] = @[]
+  # Every call starts with the shared `NoIndexLockGitOptions`: the VCS
+  # panel re-reads the repository through here every few seconds, and a
+  # refresh must never write the user's index nor take its lock
+  # (`platform/vcs`, VCS-Panel.md "Reading the repository never takes the
+  # index lock").
+  var plain: seq[string] = @[]
   for arg in args:
-    argv.add $arg
+    plain.add $arg
+  let argv = noIndexLockGitArgs(plain)
   let key = memoKey("run", args, cwd)
   if gitInFlight.hasKey(key):
     # A call for this exact question is already out. Issuing a second one here
@@ -175,6 +185,262 @@ proc gitExec*(args: seq[cstring], cwd: cstring): cstring =
   if not ok:
     return cstring""
   output.strip().cstring
+
+# ---------------------------------------------------------------------------
+# GIT WITHOUT THE WAIT: `gitExec`'s answer, delivered later.
+#
+# `gitExec` stays synchronous for the callers that read the repository
+# straight after a user acted on it. The VCS panel's reload does not need its
+# answers inline, and on the desktop waiting for them froze the window once
+# for every git process (codetracer-pm issue
+# `2026-10-23-vcs-reload-after-a-detected-change-runs-git-synchronously`), so
+# it reads through these two instead. The same argv, the same
+# `noIndexLockGitArgs`, the same capability guard and the same answer —
+# trimmed stdout, or "" for any failure — as `gitExec`; only the delivery
+# differs. They go through `ProcessFacade.runLater`, which on the desktop
+# launches git with `child_process.spawn`, rather than `run`, which there is
+# `execFileSync`.
+# ---------------------------------------------------------------------------
+
+proc gitReadLater*(args: seq[cstring]; cwd: cstring; done: proc(output: cstring)) =
+  ## Run one git command in `cwd` and call `done` exactly once with what
+  ## `gitExec` would have returned for it.
+  ##
+  ## `done` runs on a later turn of the event loop, and the caller's thread is
+  ## not held meanwhile. It runs before this returns only when the platform
+  ## answered at once — it cannot run programs, or refused — so a caller must
+  ## not depend on either order.
+  var answered = false
+  proc answer(output: cstring) =
+    if not answered:
+      answered = true
+      done(output)
+  # `runGit`'s guard, for `runGit`'s reasons.
+  if not ctPlatform().canAll({capProcessSpawn, capProcessArbitraryPrograms}):
+    answer(cstring"")
+    return
+  var plain: seq[string] = @[]
+  for arg in args:
+    plain.add $arg
+  let future =
+    try:
+      ctPlatform().process.runLater(ProcessSpec(
+        command: "git",
+        args: noIndexLockGitArgs(plain),
+        workingDir: (if cwd.isNil: "" else: $cwd),
+        timeoutMs: gitTimeoutMs))
+    except:
+      resolvedErr[ProcessRunResult](pkFailed, "process.runLater raised",
+                                    getCurrentExceptionMsg())
+  future.onComplete(
+    proc(settled: PlatformOutcome[ProcessRunResult]) =
+      if settled.ok and settled.value.exit.succeededExit:
+        answer(settled.value.stdout.strip().cstring)
+      else:
+        answer(cstring""),
+    proc(message: string) = answer(cstring""))
+  # An answer the platform already had is delivered through nim-everywhere's
+  # queue; see the same call in `readRefreshSnapshot`.
+  drainPlatformCallbacks()
+
+proc gitReadAllLater*(calls: seq[seq[cstring]]; cwd: cstring;
+                      done: proc(outputs: seq[cstring])) =
+  ## Run every command of `calls` in `cwd` through `gitReadLater`, all of
+  ## them issued before any is waited on, and call `done` once — when the
+  ## LAST has answered — with their outputs in the order of `calls`. Never
+  ## with some of them: a caller that applies the answers together cannot
+  ## see half of them. No calls answers `@[]` at once.
+  if calls.len == 0:
+    done(@[])
+    return
+  var outputs = newSeq[cstring](calls.len)
+  # Counted down from the full number BEFORE the first is issued, so an
+  # answer delivered while the rest are still being issued cannot finish the
+  # join early.
+  var waiting = calls.len
+  # One proc per call, not a closure built in the loop body: Nim makes one
+  # closure environment per routine, not per iteration, so every answer
+  # would land in the LAST slot (.agents/codebase-insights.txt, "Every
+  # closure built in a `for` body shares ONE binding").
+  proc issue(slot: int) =
+    gitReadLater(calls[slot], cwd, proc(output: cstring) =
+      outputs[slot] = output
+      dec waiting
+      if waiting == 0:
+        done(outputs))
+  for slot in 0 ..< calls.len:
+    issue(slot)
+
+# ---------------------------------------------------------------------------
+# THE PANEL'S CHANGE CHECK, which never waits for git.
+#
+# The VCS panel decides whether anything changed — every 5 s and on window
+# focus — by comparing a snapshot of the working tree's status and the last
+# 30 commit ids with the previous one. Read through `gitExec`, both reads
+# waited for git on the renderer's main thread (`execFileSync`), 150-185 ms
+# per tick, during which input, hover styles and redraw stopped (codetracer-pm
+# issue
+# `2026-10-21-vcs-auto-refresh-runs-git-synchronously-on-the-renderer-main-thread`).
+# VCS-Panel.md, "An auto-refresh never stalls the window", is what the two
+# procs below implement:
+#
+#   * `readRefreshSnapshot` issues the two reads through the VCS facade's
+#     `status` and `log` together and answers once, when BOTH have — on the
+#     desktop the facade launches git asynchronously, on the container the
+#     answers come over the socket. A failed read is an empty part, as it was
+#     when `gitExec` answered "" for one. This is also the first of the
+#     panel's git calls mapped onto `VcsFacade` operations, the work
+#     `runGit`'s comment names.
+#   * `requestRefreshCheck` holds the panel to one check at a time, turns any
+#     number of triggers during it into exactly one more, and discards an
+#     answer read for a working directory the panel no longer shows.
+# ---------------------------------------------------------------------------
+
+type
+  FacadeCommit = platform_host.VcsCommit
+    ## The VCS facade's commit, by a name of its own: Nim identifiers are
+    ## style-insensitive, so `VcsCommit` and the panel's `types.VCSCommit`
+    ## are the same name, and every unqualified use is ambiguous here.
+
+const
+  RefreshSnapshotCommits* = 30
+    ## How many of the newest commit ids a change check compares: a commit,
+    ## an amend, a reset or a checkout changes at least the first.
+  RefreshSnapshotSeparator = "---\n"
+  EmptyRefreshSnapshot* = RefreshSnapshotSeparator
+    ## The snapshot of a check whose two reads both failed — or that could
+    ## not read at all — the same string every time, so a panel that cannot
+    ## read the repository does not reload on every tick.
+
+proc refreshSnapshotOf*(status: PlatformOutcome[VcsStatus];
+                        log: PlatformOutcome[seq[FacadeCommit]]): string =
+  ## The one string a change check compares: the status part (branch,
+  ## upstream, detached, then one line per changed path with its index and
+  ## working-tree state and, for a rename or copy, its previous path), the
+  ## separator, then the commit ids newest first.
+  ##
+  ## Deterministic for equal answers — fields in a fixed order, the changes
+  ## in git's own order — so "unchanged" compares equal. A failed read
+  ## contributes an empty part. Ahead/behind counts are left out on purpose:
+  ## the panel shows neither, so a fetch alone must not reload it.
+  if status.ok:
+    let s = status.value
+    result.add "branch " & s.branch & "\n"
+    result.add "upstream " & s.upstream & "\n"
+    result.add "detached " & $s.detached & "\n"
+    for change in s.changes:
+      result.add $change.indexStatus & " " & $change.workingTreeStatus & " " &
+                 change.path
+      if change.previousPath.len > 0:
+        result.add "\t" & change.previousPath
+      result.add "\n"
+  result.add RefreshSnapshotSeparator
+  if log.ok:
+    for commit in log.value:
+      result.add commit.id & "\n"
+
+proc readRefreshSnapshot*(cwd: cstring; done: proc(snapshot: string)) =
+  ## Read the working tree's status and the last `RefreshSnapshotCommits`
+  ## commit ids of the repository at `cwd` — empty meaning the platform's
+  ## default, as everywhere in this module — and call `done` once with
+  ## `refreshSnapshotOf` of the two answers.
+  ##
+  ## The two reads are issued together and joined: `done` runs when the
+  ## second has answered, never with half a snapshot. On the desktop and the
+  ## container that is on a later turn of the event loop, and the caller's
+  ## thread is never held meanwhile. `done` runs BEFORE this returns only
+  ## when the platform answered at once — it cannot read a repository at all
+  ## (`EmptyRefreshSnapshot`), or refused both reads — so a caller must not
+  ## depend on either order.
+  ##
+  ## FAILURES ARE VALUES: a read that fails, a future that rejects and a
+  ## facade that raises all make an empty part, never an exception here.
+  if not ctPlatform().can(capVcsRead):
+    # The capability, not the facade's per-call refusal, for the reason
+    # `runGit` names its two: a platform that cannot read a repository says
+    # so once, in its profile.
+    done(EmptyRefreshSnapshot)
+    return
+  let repository = if cwd.isNil: "" else: $cwd
+  let platform = ctPlatform()
+  var status = PlatformOutcome[VcsStatus](ok: false)
+  var log = PlatformOutcome[seq[FacadeCommit]](ok: false)
+  var waiting = 2
+  proc arrived() =
+    dec waiting
+    if waiting == 0:
+      done(refreshSnapshotOf(status, log))
+  # Both issued before either is waited on: on the desktop the two git
+  # processes run side by side.
+  let statusFuture =
+    try: platform.vcs.status(repository)
+    except: resolvedErr[VcsStatus](pkFailed, "vcs.status raised",
+                                   getCurrentExceptionMsg())
+  let logFuture =
+    try: platform.vcs.log(repository, RefreshSnapshotCommits, "")
+    except: resolvedErr[seq[FacadeCommit]](pkFailed, "vcs.log raised",
+                                        getCurrentExceptionMsg())
+  statusFuture.onComplete(
+    proc(outcome: PlatformOutcome[VcsStatus]) =
+      status = outcome
+      arrived(),
+    proc(message: string) = arrived())
+  logFuture.onComplete(
+    proc(outcome: PlatformOutcome[seq[FacadeCommit]]) =
+      log = outcome
+      arrived(),
+    proc(message: string) = arrived())
+  # An answer the platform already had (a refusal, an already-settled
+  # future) is delivered through nim-everywhere's queue, not V8's; draining
+  # it here is what keeps such an answer from waiting for some unrelated
+  # drain. A real asynchronous answer is untouched by it.
+  drainPlatformCallbacks()
+
+proc requestRefreshCheck*(check: VcsRefreshCheck;
+                          workingDirectory: proc(): cstring;
+                          folderless: proc(): bool;
+                          done: proc(snapshot: string; current: bool)) =
+  ## Start a change check through `readRefreshSnapshot`, or — when one is in
+  ## flight — make sure exactly one more follows it.
+  ##
+  ## `workingDirectory` is read when the check is issued and again when it
+  ## answers; `done` gets `current = false` when the two differ or when
+  ## `folderless()` has become true meanwhile, and the caller then discards
+  ## the snapshot: it describes a repository the panel no longer shows. Both
+  ## are procs rather than values for that reason.
+  ##
+  ## A trigger during a check is not dropped, because the repository may
+  ## have moved after the check started; it is not repeated either, because
+  ## one check that starts after the trigger answers for all of them
+  ## (VCS-Panel.md, "An auto-refresh never stalls the window").
+  ##
+  ## A check that would start while `folderless()` is true runs no git at
+  ## all and answers `EmptyRefreshSnapshot` with `current = false` before
+  ## this returns: such a session has no repository, and an empty working
+  ## directory would read the launch directory's (VCS-Panel.md, "A session
+  ## with no project folder"). The caller's own guard covers the triggers it
+  ## sees; this one covers the follow-up queued while a check was in flight,
+  ## which starts from here and not from the caller.
+  if check.inFlight:
+    check.followUp = true
+    return
+  if folderless():
+    done(EmptyRefreshSnapshot, false)
+    return
+  check.inFlight = true
+  let issuedIn = workingDirectory()
+  let issuedFor = if issuedIn.isNil: "" else: $issuedIn
+  readRefreshSnapshot(issuedIn, proc(snapshot: string) =
+    check.inFlight = false
+    try:
+      let nowIn = workingDirectory()
+      let now = if nowIn.isNil: "" else: $nowIn
+      done(snapshot, now == issuedFor and not folderless())
+    finally:
+      # Even when `done` raised: the queued trigger still gets its check.
+      if check.followUp:
+        check.followUp = false
+        requestRefreshCheck(check, workingDirectory, folderless, done))
 
 proc fsReadTextFile*(path: cstring): cstring =
   ## A file's text, or "" when it cannot be read.
@@ -305,9 +571,18 @@ proc gitWorkingDirectory*(data: Data): cstring =
   ## right place to run a user's git command, which is a fact about how the app
   ## was launched, not about the project.
   ##
-  ## **On the desktop the observable behaviour is unchanged**, and that is
-  ## checked rather than assumed: every consumer passes this value into a git
-  ## command's `cwd` and none of them branches on its emptiness or displays it,
+  ## **A session with NO project folder never reaches git through this.** For
+  ## the New File session the folder is empty for a different reason — there
+  ## is no project, not "use the default" — and running git in the default
+  ## directory drew the launch directory's repository in the VCS panel. Every
+  ## consumer that shows a repository's content therefore asks
+  ## `sessionHasNoProjectFolder` first and shows the absence instead
+  ## (`ui/vcs.refreshVCSData`, `ui/agent_activity`'s branch sync);
+  ## `certificate_indicator` already reads "" as "no workspace".
+  ##
+  ## **For every other session the desktop behaviour is unchanged**, and that
+  ## is checked rather than assumed: those consumers pass this value into a
+  ## git command's `cwd` without displaying it,
   ## `runGit` turns it into `ProcessSpec.workingDir`, and both desktop
   ## instantiations resolve an empty one to the process's own directory —
   ## `osproc.startProcess` by definition, and node's `execFileSync` through
@@ -321,6 +596,26 @@ proc gitWorkingDirectory*(data: Data): cstring =
   if not folder.isNil and folder.len > 0:
     return folder
   cstring""
+
+proc startOptionsHaveNoProjectFolder*(options: StartOptions): bool =
+  ## Do these start options describe a session with NO project folder
+  ## (Welcome screen → New File)? `no_project_folder.isFolderlessEditSession`
+  ## is the rule.
+  let folder = options.folder
+  isFolderlessEditSession(options.edit, if folder.isNil: "" else: $folder)
+
+proc sessionHasNoProjectFolder*(data: Data): bool =
+  ## Does the ACTIVE session have no project folder? A pane that belongs to
+  ## one particular tab should ask about its own session's start options
+  ## (`startOptionsHaveNoProjectFolder`) instead: `data.startOptions` is the
+  ## active tab's, and a background tab's timer runs while another is shown.
+  ##
+  ## Ask it BEFORE `gitWorkingDirectory` wherever the answer is shown to the
+  ## user: an empty working directory means "the platform's default" to git,
+  ## which for such a session is a repository the session does not have.
+  if data.isNil:
+    return false
+  startOptionsHaveNoProjectFolder(data.startOptions)
 
 proc gitRepositoryRoot*(data: Data): cstring =
   ## Absolute path of the git work tree root.

@@ -57,10 +57,18 @@ coverage it does not provide.
    non-finding is not proof of reachability.
 
 2. **It is not transitive.**  A symbol called only from another unreached
-   symbol in a THIRD module counts as reached.  The cross-module rule closes
-   the same-module case, which is where the observed instances lived, and not
-   the general one.  A fixed-point over the mention graph is the obvious next
-   increment; it is deliberately not attempted here rather than half-done.
+   symbol in a DIFFERENT module counts as reached.  The cross-module rule
+   closes the same-module case, which is where the observed instances lived,
+   and not the general one.  A fixed-point over the mention graph is the
+   obvious next increment; it is deliberately not attempted here rather than
+   half-done.
+
+   The ratchet suite's fixture carries exactly this case — ``alpha.
+   reachedByBeta`` is called only by ``beta.betaEntry``, itself unreached —
+   and until 2026-10-22 its comment expected ``reachedByBeta`` to be REPORTED.
+   It was, but only because the call sat on a one-line declaration and every
+   identifier on a declaration line was skipped (see ``mentions_in``).  The
+   rule is cross-module, not transitive, and the fixture now says so.
 
 3. **It cannot see reachability that is not a name.**  ``setBreakpoints`` sent
    zero times, a settings toggle that could never open its dialog, and a row
@@ -157,6 +165,8 @@ USAGE
     ci/test/frontend-reachability-guard.py --enforce       # exit 1 on findings
     ci/test/frontend-reachability-guard.py --max 400       # ratchet
     ci/test/frontend-reachability-guard.py --json out.json # machine-readable
+    ci/test/frontend-reachability-guard.py --repo-root T --allowlist A
+                                     # a synthetic tree T with its own list A
 """
 
 from __future__ import annotations
@@ -396,13 +406,48 @@ IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 IMPORT_OPEN_RE = re.compile(r"^\s*(?:import|export|from)\b")
 
 
-def mentions_in(text: str, skip_lines: set[int]) -> set[str]:
-    """Every identifier mentioned in ``text``, minus the lines that are not uses.
+def mentions_in(text: str, skip_lines: dict[int, set[str]]) -> set[str]:
+    """Every identifier mentioned in ``text``, minus the mentions that are not uses.
 
     Three exclusions, and each one was a measured false negative rather than a
     precaution:
 
-    * **Declaration lines**, so a symbol does not count as reaching itself.
+    * **The name a declaration line declares, and nothing else on it**, so a
+      symbol does not count as reaching itself.  ``skip_lines`` maps a line
+      number to the ``nim_key`` of every name declared ON that line; those
+      names are dropped from that line and every other identifier on it is
+      counted.
+
+      THIS WAS THE WHOLE LINE UNTIL 2026-10-22, and the whole line was wrong.
+      Dropping every identifier on a declaration line dropped everything a
+      one-line declaration USES along with the name it declares: the
+      parameter and return types of a one-line signature, a const's
+      initializer, and the entire body of a one-line routine.  So
+      ``CallRowPitch* = CallRowToggleEmRatio * float(CodeFontPx)`` in
+      ``gpui/app/leaves.nim`` did not count as reaching ``CodeFontPx`` in
+      ``gpui/chrome.nim`` (a genuine cross-module read), and
+      ``proc noirTestArgs*(): seq[string] = @[noirTestSubcommand]`` did not
+      count as reaching ``noirTestSubcommand``.  Measured at ``d46def9e3``
+      as a diff of two runs, one per rule: 1298 findings under the old rule,
+      1209 under this one — 89 false findings removed (64 types, 21 values,
+      4 routines) and none added.  Of the 89, 13 now have a reader in another
+      module (``CodeFontPx``), and 76 are read only on their own module's
+      one-line declarations (``noirTestSubcommand``), so they moved to bucket
+      C, "only its own module reaches it" — where the wrapped spelling of the
+      same declaration already put them, and which is not counted by default.
+
+      It was also INCONSISTENT, which is how it went unnoticed: the same
+      signature wrapped over two lines had its continuation line counted, so
+      whether a parameter type was "reached" depended on where a formatter
+      broke the line.  Excluding only the declared name makes the two
+      spellings one answer.
+
+      What this deliberately still excludes: a name on its OWN declaration
+      line, even when that line also uses it (``proc f*(x: int): int = f(x -
+      1)`` does not reach ``f``).  A self-reference is not a reader, whichever
+      line it sits on.  A self-reference on a body line below the signature
+      counts, exactly as it did before; it can only ever make the declaring
+      module a reader, which the cross-module rule in ``main`` discards.
 
     * **Comments and doc comments.**  ``BuildLocationScanner`` is named
       fourteen times in its own module's prose.  Counting prose would have
@@ -475,12 +520,14 @@ def mentions_in(text: str, skip_lines: set[int]) -> set[str]:
 
         if stripped_raw.startswith("#"):
             continue
-        if lineno in skip_lines:
-            continue
+        # The names THIS line declares; empty for every non-declaration line.
+        own = skip_lines.get(lineno, set())
         # Drop a `##` doc body trailing real code.
         line = re.split(r"##", line, maxsplit=1)[0]
         for ident in IDENT_RE.findall(line):
-            found.add(nim_key(ident))
+            key = nim_key(ident)
+            if key not in own:
+                found.add(key)
     return found
 
 
@@ -555,11 +602,14 @@ def collect(repo_root: Path) -> tuple[list[Decl], dict[str, set[str]], set[str]]
             product_files.append((rel, text))
 
     decls: list[Decl] = []
-    decl_lines: dict[str, set[int]] = defaultdict(set)
+    # path -> line -> the names declared ON that line. Per line and per name,
+    # not a set of lines: see the first exclusion in `mentions_in` for the 89
+    # false findings that skipping whole lines produced.
+    decl_lines: dict[str, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
     for rel, text in product_files:
         for decl in declarations_in(rel, text):
             decls.append(decl)
-            decl_lines[str(rel)].add(decl.line)
+            decl_lines[str(rel)][decl.line].add(nim_key(decl.name))
 
     # WHICH MODULES mention a name, not merely whether any does. The
     # distinction is the whole accuracy of this guard; see `main`.
@@ -570,7 +620,7 @@ def collect(repo_root: Path) -> tuple[list[Decl], dict[str, set[str]], set[str]]
 
     tested: set[str] = set()
     for rel, text in test_files:
-        tested |= mentions_in(text, set())
+        tested |= mentions_in(text, {})
 
     return decls, mentioned_by, tested
 
@@ -591,10 +641,34 @@ def main() -> int:
                              "(bucket C: large, low-yield, off by default)")
     parser.add_argument("--repo-root", type=Path,
                         default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--allowlist", type=Path, default=None,
+                        help="allow-list to read instead of the repository's "
+                             "(a contract suite's synthetic tree needs its own)")
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
-    allow_path = Path(__file__).resolve().parent / "frontend-reachability-allowlist.txt"
+    # WHICH ALLOW-LIST, AND WHY IT IS AN OPTION (added 2026-10-22). This was
+    # always the repository's file, whatever `--repo-root` named. So the moment
+    # the list gained its first entry, `reachability-ratchet-test.sh`'s
+    # synthetic tree reported that entry as STALE (it names no symbol in the
+    # fixture) and the contract suite exited 2 on every arm — a suite that
+    # could only stay green while the allow-list stayed empty, which
+    # `.agents/codebase-insights.txt` had recorded as advice not to use it.
+    # A tree's allow-list belongs to that tree, so a suite passes its own.
+    #
+    # An EXPLICIT path that does not exist is an error rather than an empty
+    # list: a typo there would otherwise run the guard with no allow-list and
+    # report the difference as findings, or — the worse direction — a suite
+    # would believe it was isolated when it was not. The default path keeps
+    # its old behaviour (absent means empty).
+    if args.allowlist is not None:
+        allow_path = args.allowlist
+        if not allow_path.is_file():
+            print(f"frontend reachability guard: --allowlist {allow_path} is not a file",
+                  file=sys.stderr)
+            return 2
+    else:
+        allow_path = Path(__file__).resolve().parent / "frontend-reachability-allowlist.txt"
     allow = load_allowlist(allow_path)
 
     decls, mentioned_by, tested = collect(repo_root)

@@ -71,8 +71,16 @@ type
     ## caller that cannot supply provenance cannot truncate — a save path that
     ## has not been taught to answer this question must not be able to delete a
     ## user's file by omission.
+    ##
+    ## `untitled` says the buffer HAS NO STORED COPY: it is a New File buffer
+    ## whose save goes to a save-as chooser and creates the file (issue #792:
+    ## *"New file → shows "#untitled0". Try save empty → ERROR"*). Emptiness
+    ## cannot destroy what does not exist, so such a buffer is written however
+    ## little it can prove. It defaults to `false` — a stored file — so a
+    ## caller that has not been taught to say otherwise keeps the guard.
     contentLength*: int
     editsSinceLoad*: int
+    untitled*: bool
 
   TruncationVerdict* = enum
     ## Whether a save may proceed.
@@ -225,6 +233,13 @@ func classifyWrite*(provenance: BufferProvenance): TruncationVerdict =
     # `truncation_guard_test.nim` does. Nothing in the product defines it.
     return tvWrite
   if provenance.contentLength > 0:
+    return tvWrite
+  if provenance.untitled:
+    # NOTHING STORED, SO NOTHING TO DESTROY. A New File buffer is constructed
+    # empty and unedited — the same provenance as the wipe — but its save
+    # creates a file where the user chooses rather than overwriting one, so
+    # the refusal's premise ("Your stored copy is unchanged") does not hold
+    # (issue #792).
     return tvWrite
   if provenance.editsSinceLoad > UneditedModelVersion:
     # The buffer was modified after it was created. Whatever else happened, a

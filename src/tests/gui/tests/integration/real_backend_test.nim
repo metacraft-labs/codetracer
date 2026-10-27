@@ -37,7 +37,8 @@
 ##   - Variables: test, dummy (both TestStruct), first (usize)
 ##
 ## Prerequisites:
-## - replay-server must be built: ``src/build-debug/bin/replay-server``
+## - replay-server built, anywhere ``src/common/replay_server_path.nim``
+##   searches (``REPLAY_SERVER_BIN`` overrides)
 ## - The Wasm test trace must exist: ``src/db-backend/trace/``
 ## - For Python/Noir tests: ``ct`` binary must be built and recorders installed
 ##
@@ -48,6 +49,7 @@
 import std/[json, os, unittest, strutils]
 import isonim/core/[signals, computation]
 import headless_session
+import ../../../../common/replay_server_path   # the one search order
 import store/[replay_data_store, types]
 
 # ---------------------------------------------------------------------------
@@ -55,30 +57,12 @@ import store/[replay_data_store, types]
 # ---------------------------------------------------------------------------
 
 proc findReplayServer(): string =
-  ## Locate the replay-server binary relative to this source file.
-  ## Falls back to the REPLAY_SERVER_BIN environment variable.
-  let envBin = getEnv("REPLAY_SERVER_BIN", "")
-  if envBin.len > 0 and fileExists(envBin):
-    return envBin
-
-  # Walk up from the test file to the repo root and look in build-debug.
-  let thisFile = currentSourcePath()
-  # SIX `parentDir`s, not five: this file lives at
-  # src/tests/gui/tests/integration/, so five levels up lands on
-  # `<repo>/src` and every path built from it gained a doubled `src/`
-  # (`.../src/src/build-debug/...`). The file's own header still names
-  # its old home under src/frontend/viewmodel/tests/ — it was moved one
-  # level deeper and the arithmetic was never updated, which no one saw
-  # because no lane compiled or ran this file.
-  let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
-  let candidate = repoRoot / "src" / "build-debug" / "bin" / "replay-server"
-  if fileExists(candidate):
-    return candidate
-
-  raise newException(IOError,
-    "Could not find replay-server binary. Set REPLAY_SERVER_BIN or " &
-    "build it with 'cargo build' in src/db-backend/. " &
-    "Tried: " & candidate)
+  ## The engine `src/common/replay_server_path` resolves -- the one search
+  ## order the native front-ends use too -- or an `IOError` naming every path
+  ## searched, because this suite cannot run without one.
+  result = locateReplayServer()
+  if result.len == 0:
+    raise newException(IOError, missingReplayServerMessage())
 
 proc findTestTrace(): string =
   ## Locate the built-in test trace (src/db-backend/trace/).
@@ -335,7 +319,7 @@ suite "Real backend: locals inspection":
     check session.session.store.locals.locals.val.len > 0
 
     # The StateVM's currentVariables memo should reflect the same data
-    # (since the default tab is stLocals).
+    # (the locals lead the one list).
     check session.session.stateVM.currentVariables.val.len > 0
 
 # ---------------------------------------------------------------------------

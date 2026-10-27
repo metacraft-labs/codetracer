@@ -121,6 +121,11 @@ build outputs, which you build once:
 | the `ct` binary (GUI/CLI) | `just build-once` — produces `src/build-debug/bin/ct` |
 | `wazero-snapshots` (live streaming only) | `just build-snapshots` in `../codetracer-wasm-recorder` |
 
+`bash scripts/provision-cross-process-recording.sh` (from the repository
+root) builds three of the tools in that table — the JS recorder, `ct-instrument`
+and `session-manager` — and prints the `session-manager` path to pass as
+`CODETRACER_RECORD_WEB_BIN`; `just test-frontend-units` runs it for you.
+
 `regenerate.sh` and `stream-snapshots-demo.sh` both check all of these up
 front and exit `75` with the list of what is missing, rather than emitting
 a placeholder recording.
@@ -426,7 +431,7 @@ Useful overrides:
 | `DEMO_BACKEND_TIMEOUT_MS` | backend idle timeout before it gives up (default `120000`) |
 | `CT_INSTRUMENT_BIN` | explicit path to `ct-instrument` |
 | `CODETRACER_RECORD_WEB_BIN` | explicit path to `session-manager` |
-| `CODETRACER_JS_RECORDER_PATH` | explicit path to the `codetracer-js-recorder` checkout |
+| `CODETRACER_JS_RECORDER_PATH` | explicit path to the recorder CLI file, `<repo>/packages/cli/dist/index.js` |
 | `CODETRACER_WASM_INSTRUMENTER_PATH` | explicit path to the `codetracer-wasm-instrumenter` checkout |
 
 ### What re-recording changes

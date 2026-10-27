@@ -42,8 +42,11 @@ const
     ## Every `flow_vm.FlowMode` view granularity maps here; they differ in
     ## how the panel lays the returned steps out, not in what it asks for.
   FlowModeWireDiff* = "diff"
-    ## Engine `FlowMode::Diff` — the raw-diff-index query, reached from the
-    ## legacy Karax editor.
+    ## Engine `FlowMode::Diff` — the raw-diff-index query: the flow of a
+    ## recording's changed lines, asked for once per diff session by the
+    ## SDK's stop loader (`StopPane.spDiffFlow`). The engine stamps the mode
+    ## it answered on the update (`FlowUpdate.mode`), which is how
+    ## `FlowVM` keeps the answer apart from the call window.
 
   FlowModeWireNames* = [FlowModeWireCall, FlowModeWireDiff]
     ## In engine-enum declaration order, so `FlowModeWireNames[ord(mode)]`

@@ -1,14 +1,8 @@
 .future
-  color: white
+  // Lines after the current point, dimmed by the opacity below: white on the
+  // dark terminal, body text on the light one (`by-mode`, defaults.styl).
+  color: by-mode(white, colors-ui-text-primary-body)
   opacity: 0.5
-
-.line-before, .line-before-or-on
-  color: colors-ui-text-primary-body
-  opacity: 1.0
-
-.line-after
-  color: TERMINAL_LESS_VISIBLE_COLOR
-  opacity: 0.7
 
 .terminal
   color: colors-ui-text-primary-body
@@ -18,6 +12,15 @@
 
   .terminal-line
     cursor: pointer
+    // A BLANK line is a line: one line tall, as every other. The line is a
+    // flex row of its fragments, and a blank one has none, so it collapsed
+    // to no height — while the line view sizes the lines it does not hold
+    // and its scrubber's rows as whole lines. A window holding a blank line
+    // was then a line shorter than its place, and a press at the scrubber's
+    // end stopped one line short of the output's last line once the window
+    // moved on (measured on `terminal_colours`: a 3072 px scroll range for
+    // 129 lines of 24 px, 3096 px).
+    min-height: 1lh
     padding-left: 0.5em
     color: colors-ui-text-primary-body
     // font-weight: bold
@@ -30,9 +33,25 @@
     color: colors-ui-text-primary-body
     height: 100% // it seems to help with scroll on overflow
 
+// The line view holds a WINDOW of the output's lines; the lines it does not
+// hold are these two spacers, sized by `views/isonim_terminal_output_view`
+// (`decorateTerminalOutput`), so the scroll range spans every line. Spacers,
+// not padding: a padded box cannot shrink below its padding, and the line
+// view then outgrew its panel.
+.isonim-terminal-output > pre
+  &::before,
+  &::after
+    content: ""
+    display: block
+  &::before
+    height: var(--ct-terminal-lines-above, 0px)
+  &::after
+    height: var(--ct-terminal-lines-below, 0px)
+
 .terminal-output, .terminal-input
   background-color: transparent
-  color: #ABABAB
+  // Caption text in the light theme (`by-mode`, defaults.styl).
+  color: by-mode(#ABABAB, colors-ui-text-primary-caption)
   word-wrap: break-all
   white-space: pre-line
   cursor: pointer

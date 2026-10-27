@@ -13,7 +13,8 @@
 ##
 ## Git data is fetched with structured `git` argv calls via Node.js
 ## `child_process` (available in Electron's renderer process with
-## nodeIntegration enabled) — see ``ui/git_cli.nim``.
+## nodeIntegration enabled) — see ``ui/git_cli.nim``.  A reload of the panel
+## reads without waiting for git — see ``ui/vcs_reload.nim``.
 ##
 ## The panel is never itself a diff.  Clicking a changed file resolves through
 ## ``VCSVM.openActionFor`` to either a source tab or a unified-diff editor tab
@@ -21,29 +22,28 @@
 ## VCS-Panel.md, "Unified Diff View (Editor Integration)".
 
 import
-  ui_imports
+  ui_imports, session_viewmodels
 
 import git_cli
 import agent_activity
-# A MOUNT LATCH THAT DIES WITH ITS CONTAINER.
-import isonim_panel_mount
+from unified_diff import requestDocumentScroll
+from ../viewmodel/viewmodels/diff_target import isWholeCommitTarget
 import ../viewmodel/viewmodels/vcs_vm
-from ../viewmodel/platform/vcs import parsePorcelainV2
+import vcs_reload
 import ../viewmodel/viewmodels/review_entry
 from ../viewmodel/viewmodels/review_session import
   ReviewSession, reviewSessionFrom
 
-when defined(js):
-  from isonim/web/dom_api as isonim_dom_api import nil
-  from ../viewmodel/views/isonim_vcs_view import
-    mountIsoNimVCSPanel, VCSCallbacks
+from isonim/web/dom_api as isonim_dom_api import nil
+import isonim/web/web_renderer
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
+import ../viewmodel/views/isonim_vcs_view
 
 var vcsVMInstances*: JsAssoc[int, VCSVM] = JsAssoc[int, VCSVM]{}
 var vcsComponentRefs: JsAssoc[int, VCSComponent] = JsAssoc[int, VCSComponent]{}
-var isoNimVCSMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
 
 proc syncLegacyVCSIntoVM*(self: VCSComponent)
-proc tryMountIsoNimVCSPanel*(componentId: int)
 
 # ---------------------------------------------------------------------------
 # File watching constants (Task #68)
@@ -57,41 +57,9 @@ const
     ## Minimum interval between successive refreshes.
 
 # ---------------------------------------------------------------------------
-# Data loading helpers
-# ---------------------------------------------------------------------------
-
-proc loadCurrentBranch(self: VCSComponent, cwd: cstring) =
-  self.currentBranch = gitExec(@[cstring"branch", cstring"--show-current"], cwd)
-  if self.currentBranch.len == 0:
-    # Detached HEAD -- show abbreviated hash instead.
-    self.currentBranch = gitExec(@[cstring"rev-parse", cstring"--short", cstring"HEAD"], cwd)
-
-proc loadWorkingTree(self: VCSComponent, cwd: cstring) =
-  ## The working tree's changed files, read by the SAME `parsePorcelainV2`
-  ## the native front-ends' VCS facade reads with, so the three VCS panes
-  ## cannot disagree about a file's state (PLAT-47 deliverable 4).
-  let raw = gitExec(@[cstring"status", cstring"--porcelain=v2",
-                      cstring"--branch"], cwd)
-  self.workingTreeChanges = @[]
-  for row in workingTreeRowsOf(parsePorcelainV2($raw)):
-    self.workingTreeChanges.add VCSChangedFile(
-      status: cstring(row.status), filename: cstring(row.path))
-
-proc loadBranches(self: VCSComponent, cwd: cstring) =
-  let raw = gitExec(@[cstring"branch", cstring"--format=%(refname:short)"], cwd)
-  self.branches = @[]
-  if raw.len > 0:
-    for line in ($raw).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len > 0:
-        self.branches.add(cstring(trimmed))
-
-# ---------------------------------------------------------------------------
 # Commit graph lane-tracking algorithm
 # ---------------------------------------------------------------------------
 
-const commitPageSize = 50
-  ## Number of commits fetched per page for the infinite-scroll commit graph.
 
 const branchPalette = [
   "#818CF8", "#FB923C", "#4ADE80",
@@ -246,156 +214,124 @@ proc computeGraphRows(commits: seq[VCSCommit]): seq[GraphRow] =
       lanes.setLen(lanes.len - 1)
 
 proc loadCommits(self: VCSComponent; cwd: cstring; skip = 0) =
-  ## Fetch ``commitPageSize`` commits starting at ``skip``, parsing parent
-  ## hashes so the commit-graph algorithm can assign branch lanes.
-  ##
-  ## Format: ``<fullHash> <parent1> [<parent2> …>]\x1e<shortHash>\x1e<subject>\x1e<relDate>\x1e<absDate>\x1e<author>``
-  ## The ``%P`` token is a space-separated list of full parent hashes;
-  ## it is empty for root commits.  ``%cs`` produces the committer date in
-  ## short YYYY-MM-DD format (requires git ≥ 2.29).
-  const sep = "\x1e"
-  let prettyFmt = "%H %P" & sep & "%h" & sep & "%s" & sep & "%cr" & sep & "%cs" & sep & "%an"
-  let skipStr = "--skip=" & $skip
-  let countStr = "-" & $commitPageSize
-  let raw = gitExec(
-    @[cstring"log",
-      cstring("--pretty=format:" & prettyFmt),
-      cstring(skipStr),
-      cstring(countStr)],
-    cwd)
-
-  if skip == 0:
-    self.commits = @[]
-
-  # Rows appended by THIS call, so the caller can tell a full page from the
-  # last, short one. `commitOffset` used to advance by a flat `commitPageSize`
-  # whether or not any commit came back, which left the infinite-scroll
-  # sentinel with no way to know it had reached the end — see
-  # `allCommitsLoaded` in `VCSComponent`.
-  var appended = 0
-
-  if raw.len > 0:
-    for line in ($raw).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len == 0:
-        continue
-      let parts = trimmed.split(sep)
-      if parts.len < 1:
-        continue
-      # First field: "<fullHash> [<parent1> <parent2> …]"
-      let hashAndParents = parts[0].strip().split(" ")
-      let fullH = if hashAndParents.len > 0: hashAndParents[0] else: ""
-      var parents: seq[cstring] = @[]
-      for pIdx in 1 ..< hashAndParents.len:
-        let p = hashAndParents[pIdx].strip()
-        if p.len > 0:
-          parents.add(cstring(p))
-      let shortH    = if parts.len > 1: parts[1].strip() else: fullH[0..min(6, fullH.high)]
-      let subject   = if parts.len > 2: parts[2] else: ""
-      let relDate   = if parts.len > 3: parts[3] else: ""
-      let absDate   = if parts.len > 4: parts[4] else: ""
-      let authorStr = if parts.len > 5: parts[5] else: ""
-      self.commits.add(VCSCommit(
-        hash: cstring(shortH),
-        message: cstring(subject),
-        relativeTime: cstring(relDate),
-        date: cstring(absDate),
-        fullHash: cstring(fullH),
-        author: cstring(authorStr),
-        parents: parents,
-      ))
-      appended += 1
-
-  self.commitOffset = skip + appended
-  self.allCommitsLoaded = appended < commitPageSize
-
-proc loadChangedFiles(self: VCSComponent, cwd: cstring, commitHash: cstring) =
-  ## Load the files changed in a specific commit with diff --stat style info.
-  ## Uses `git diff-tree` which works for any commit without needing a parent
-  ## check (root commits are handled with --root).
-  let raw = gitExec(
-    @[cstring"diff-tree", cstring"--no-commit-id", cstring"-r", cstring"--numstat", commitHash], cwd)
-  self.changedFiles = @[]
-  if raw.len > 0:
-    for line in ($raw).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len == 0:
-        continue
-      # Format: <added>\t<deleted>\t<filename>
-      let parts = trimmed.split("\t")
-      if parts.len >= 3:
-        var added = 0
-        var deleted = 0
-        try:
-          added = parseInt(parts[0].strip())
-        except ValueError:
-          discard
-        try:
-          deleted = parseInt(parts[1].strip())
-        except ValueError:
-          discard
-        # Determine status from the change pattern.
-        let status = if added > 0 and deleted == 0: cstring"A"
-                     elif added == 0 and deleted > 0: cstring"D"
-                     else: cstring"M"
-        self.changedFiles.add(VCSChangedFile(
-          status: status,
-          filename: cstring(parts[2]),
-          additions: added,
-          deletions: deleted))
-
-  # If no numstat output, fall back to --name-status.
-  if self.changedFiles.len == 0:
-    let raw2 = gitExec(
-      @[cstring"diff-tree", cstring"--no-commit-id", cstring"-r", cstring"--name-status", commitHash], cwd)
-    if raw2.len > 0:
-      for line in ($raw2).splitLines():
-        let trimmed = line.strip()
-        if trimmed.len == 0:
-          continue
-        let parts = trimmed.split("\t")
-        if parts.len >= 2:
-          self.changedFiles.add(VCSChangedFile(
-            status: cstring(parts[0]),
-            filename: cstring(parts[1]),
-            additions: 0,
-            deletions: 0))
+  ## Fetch the page of commits starting at ``skip`` synchronously and put it
+  ## in the panel — `loadMoreCommits`' read, which answers the user's scroll.
+  ## A reload reads the first page without waiting (`ui/vcs_reload`).
+  self.applyCommitPage(commitPageNow(cwd, skip), skip)
 
 proc loadChangedFilesForIndex*(self: VCSComponent; cwd: cstring;
                                commitIndex: int) =
   ## Load changed files for the commit at ``commitIndex`` and store the result
   ## in ``commitFilesCache``.  A no-op if the index is out of range.
+  ##
+  ## Synchronous: it answers the user expanding a commit. A reload reads the
+  ## expanded commits' files without waiting (`vcs_reload.readPanelReload`).
   if commitIndex < 0 or commitIndex >= self.commits.len:
     return
   if self.commitFilesCache.isNil:
     self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-  let hash = self.commits[commitIndex].hash
-  self.loadChangedFiles(cwd, hash)
+  self.changedFiles = commitFilesNow(cwd, self.commits[commitIndex].hash)
   self.commitFilesCache[commitIndex] = self.changedFiles
 
 proc getWorkingDirectory(self: VCSComponent): cstring =
   gitWorkingDirectory(self.data)
 
-proc refreshVCSData*(self: VCSComponent) =
-  ## Reload all VCS data from git.
-  let cwd = self.getWorkingDirectory()
-  if not isGitRepository(cwd):
-    self.isGitRepo = false
-    self.errorMessage = cstring"Not a git repository"
-    return
+proc owningSession(self: VCSComponent): ReplaySession =
+  ## The window tab this panel belongs to, or nil when it is in none yet.
+  ##
+  ## Every tab builds its own `VCSComponent` (`session.ui.componentMapping`),
+  ## but `self.data.startOptions` always reads the ACTIVE tab's — and this
+  ## panel's refresh timer keeps running while another tab is shown. A replay
+  ## tab's panel must not decide it has no project folder because a New File
+  ## tab happens to be in front.
+  if self.isNil or self.data.isNil:
+    return nil
+  self.data.sessionOfComponent(Component(self))
 
-  self.isGitRepo = true
-  self.errorMessage = cstring""
-  self.loadCurrentBranch(cwd)
-  self.loadWorkingTree(cwd)
-  self.loadBranches(cwd)
-  self.loadCommits(cwd)
+proc hasNoProjectFolder(self: VCSComponent): bool =
+  ## Does this panel's OWN session have no project folder (New File)?
+  let session = self.owningSession()
+  if session.isNil:
+    sessionHasNoProjectFolder(self.data)
+  else:
+    startOptionsHaveNoProjectFolder(session.startOptions)
 
-  # Reload files for all currently expanded commits after a refresh.
-  # Indices that are now out-of-range are silently skipped.
+proc showNoProjectFolder(self: VCSComponent) =
+  ## The session has no project folder (Welcome screen → New File): drop
+  ## every repository-derived value, so `syncLegacyVCSIntoVM` hands the
+  ## ViewModel the "No project folder is open." absence and nothing else.
+  ## The ViewModel side of the same state is `VCSVM.setNoProjectFolder`.
+  self.isGitRepo = false
+  self.errorMessage = cstring(NoProjectFolderText)
+  self.currentBranch = cstring""
+  self.branches = @[]
+  self.commits = @[]
+  self.changedFiles = @[]
+  self.workingTreeChanges = @[]
+  self.selectedCommitIndices = @[]
+  self.lastClickedCommitIndex = -1
   self.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-  for idx in self.selectedCommitIndices:
-    self.loadChangedFilesForIndex(cwd, idx)
+  self.branchDropdownOpen = false
+
+proc startFileWatching(self: VCSComponent)
+
+proc refreshVCSData*(self: VCSComponent) =
+  ## Reload all VCS data from git, WITHOUT WAITING FOR IT (VCS-Panel.md, "An
+  ## auto-refresh never stalls the window"; codetracer-pm issue
+  ## `2026-10-23-vcs-reload-after-a-detected-change-runs-git-synchronously`).
+  ##
+  ## The reads are issued and this returns; the panel keeps showing what it
+  ## showed until all of them have answered, and then takes the new state in
+  ## one step (`vcs_reload.applyPanelState`) and redraws. A reload requested
+  ## while one is reading follows it: the one in flight is applied, then read
+  ## again. An answer read for a working directory or a set of expanded
+  ## commits the panel no longer shows is discarded and read again
+  ## (`vcs_reload.requestPanelReload`).
+  ##
+  ## Every reload goes this way: the auto-refresh's after a check found a
+  ## change, the first load, the refresh control and the one after a branch
+  ## checkout. None of their callers reads the panel's git state between the
+  ## call and the next render — each only pushes the panel into its
+  ## ViewModel, which the reload does again when it applies.
+  # NO PROJECT FOLDER, NO GIT. A New File session's folder is empty, and an
+  # empty working directory reaches git as "the platform's default" — the
+  # process's own directory — so the panel drew the history of whatever
+  # repository CodeTracer was launched from (codetracer-pm issue 2026-10-21).
+  # `Welcome-Screen.md` §"New file, and what it creates" settles what this
+  # session shows instead: the same absence as Test Results and Constraints.
+  # Shown at once: it needs no git.
+  if self.hasNoProjectFolder():
+    self.watchAfterReload = false
+    self.showNoProjectFolder()
+    return
+  if self.reload.isNil:
+    self.reload = VcsPanelReload()
+  requestPanelReload(self.reload,
+    proc(): VcsReloadTarget =
+      let cwd = self.getWorkingDirectory()
+      VcsReloadTarget(workingDirectory: (if cwd.isNil: "" else: $cwd),
+                      expanded: self.selectedCommitIndices),
+    proc(): bool = self.hasNoProjectFolder(),
+    proc(reads: VcsReloadReads) =
+      self.applyPanelState(panelStateOf(reads))
+      if self.watchAfterReload:
+        # The first load has landed: watch the repository it found, as the
+        # synchronous first load did right after it returned.
+        self.watchAfterReload = false
+        if self.isGitRepo:
+          self.startFileWatching()
+      self.syncLegacyVCSIntoVM()
+      data.redraw())
+
+proc adoptExternalState*(self: VCSComponent) =
+  ## For a caller that writes the panel's state itself instead of reading it
+  ## from git (`agentic_session_launcher.syncVcs`): the reload in flight, if
+  ## any, is given up (`vcs_reload.releaseInFlight`), and the auto-refresh
+  ## the first load would have started does not start, so nothing read from
+  ## git replaces the state the caller writes. A panel the caller initialised
+  ## before its first load never loads or watches either.
+  self.reload.releaseInFlight()
+  self.watchAfterReload = false
 
 proc commitRows(self: VCSComponent): seq[VCSCommitRow]
 
@@ -415,7 +351,7 @@ proc loadMoreCommits*(self: VCSComponent) =
   if not self.isGitRepo:
     return
   self.loadingMore = true
-  let vm = if vcsVMInstances.hasKey(self.id): vcsVMInstances[self.id] else: nil
+  let vm = if vcsVMInstances.hasKey(data.tabScopedId(self)): vcsVMInstances[data.tabScopedId(self)] else: nil
   if not vm.isNil:
     vm.setLoadingMore(true)
   let cwd = self.getWorkingDirectory()
@@ -445,32 +381,76 @@ proc resetAndRefreshVCS*(self: VCSComponent) =
 
 proc scheduleRefresh(self: VCSComponent)
 
-proc debouncedRefreshGitData(self: VCSComponent) =
-  ## Perform a git refresh if the debounce window is not active. After the
-  ## refresh, start a 1-second debounce window during which further refresh
-  ## requests are ignored.
-  if self.debounceActive:
-    return
-
-  let cwd = self.getWorkingDirectory()
-  # Build a lightweight snapshot of volatile git state to detect changes.
-  let statusRaw = gitExec(@[cstring"status", cstring"--porcelain"], cwd)
-  let logRaw = gitExec(
-    @[cstring"log", cstring"--pretty=format:%H", cstring"-30"], cwd)
-  let snapshot = cstring($statusRaw & "\n---\n" & $logRaw)
-
-  if snapshot != self.lastStatusSnapshot:
-    self.lastStatusSnapshot = snapshot
-    self.refreshVCSData()
-    data.redraw()
-
-  # Activate debounce window.
+proc openDebounceWindow(self: VCSComponent) =
+  ## Start (or restart) the 1-second window during which further refresh
+  ## triggers are ignored.
+  if self.debounceTimerId != -1:
+    # A window still open from an earlier check would otherwise close this
+    # one early when its own timer fires.
+    windowClearTimeout(self.debounceTimerId)
   self.debounceActive = true
   self.debounceTimerId = windowSetTimeout(
     proc() =
       self.debounceActive = false
       self.debounceTimerId = -1,
     debounceMs)
+
+proc requestSnapshotCheck(self: VCSComponent) =
+  ## Compare the repository with the last snapshot WITHOUT waiting for git
+  ## (VCS-Panel.md, "An auto-refresh never stalls the window"; codetracer-pm
+  ## issue
+  ## `2026-10-21-vcs-auto-refresh-runs-git-synchronously-on-the-renderer-main-thread`).
+  ##
+  ## `git_cli.requestRefreshCheck` issues the status and log reads together
+  ## and answers when both have; until then the panel keeps showing what it
+  ## showed. A trigger during the check queues exactly one more. The answer
+  ## is dropped when the panel's working directory changed while it was
+  ## read, or the session became folderless — it describes a repository the
+  ## panel no longer shows; the next tick reads the right one.
+  ##
+  ## The first answer after `startFileWatching` is the baseline: recorded,
+  ## not compared, because the panel was just loaded from the same state.
+  if self.refreshCheck.isNil:
+    self.refreshCheck = VcsRefreshCheck()
+  requestRefreshCheck(self.refreshCheck,
+    proc(): cstring = self.getWorkingDirectory(),
+    proc(): bool = self.hasNoProjectFolder(),
+    proc(snapshot: string; current: bool) =
+      if current:
+        if self.lastStatusSnapshot.isNil:
+          self.lastStatusSnapshot = cstring(snapshot)
+        elif cstring(snapshot) != self.lastStatusSnapshot:
+          self.lastStatusSnapshot = cstring(snapshot)
+          # Does not wait either: the reload applies and redraws when its
+          # reads have answered (`refreshVCSData`).
+          self.refreshVCSData()
+      # THE DEBOUNCE WINDOW OPENS WHEN A CHECK ANSWERS, as it did when the
+      # reads were synchronous and "after the read" was the same moment as
+      # "after the trigger". Opening it at the trigger instead would make it
+      # swallow a focus event that arrives while the check is in flight —
+      # the one trigger the spec says must not be dropped. A trigger during
+      # the window is still ignored: the check that just answered is at most
+      # a second old.
+      self.openDebounceWindow())
+
+proc debouncedRefreshGitData(self: VCSComponent) =
+  ## Check the repository for changes unless the debounce window is open;
+  ## the window opens when the check answers (`requestSnapshotCheck`).
+  if self.debounceActive:
+    return
+
+  # A session with no project folder has no repository to watch: running the
+  # snapshot below would read the launch directory's. If this panel still
+  # shows a repository (it watched one before the session became folderless),
+  # replace it with the absence once.
+  if self.hasNoProjectFolder():
+    if self.isGitRepo:
+      self.lastStatusSnapshot = cstring""
+      self.refreshVCSData()
+      data.redraw()
+    return
+
+  self.requestSnapshotCheck()
 
 proc scheduleRefresh(self: VCSComponent) =
   ## Schedule the next periodic auto-refresh tick. Cancels any existing
@@ -488,16 +468,17 @@ proc startFileWatching(self: VCSComponent) =
   ## Begin periodic auto-refresh and subscribe to window focus events.
   ## Called once after the initial git data load.
 
-  # Store initial snapshot so the first tick can detect changes.
-  let cwd = self.getWorkingDirectory()
-  let statusRaw = gitExec(@[cstring"status", cstring"--porcelain"], cwd)
-  let logRaw = gitExec(@[cstring"log", cstring"--pretty=format:%H", cstring"-30"], cwd)
-  self.lastStatusSnapshot = cstring($statusRaw & "\n---\n" & $logRaw)
-
   # Initialize timer IDs.
   self.refreshTimerId = -1
   self.debounceTimerId = -1
   self.debounceActive = false
+
+  # The baseline the first tick compares with, read the way every tick
+  # reads (`requestSnapshotCheck`), so the two are the same format and an
+  # unchanged repository does not reload on the first tick. Nil until it
+  # answers: whichever check answers first records the baseline.
+  self.lastStatusSnapshot = nil
+  self.requestSnapshotCheck()
 
   # Start the periodic refresh cycle.
   self.scheduleRefresh()
@@ -513,10 +494,10 @@ proc startFileWatching(self: VCSComponent) =
 proc ensureVCSVM(self: VCSComponent): VCSVM =
   if self.isNil:
     return nil
-  if vcsVMInstances.hasKey(self.id):
-    return vcsVMInstances[self.id]
+  if vcsVMInstances.hasKey(data.tabScopedId(self)):
+    return vcsVMInstances[data.tabScopedId(self)]
   result = createVCSVM()
-  vcsVMInstances[self.id] = result
+  vcsVMInstances[data.tabScopedId(self)] = result
 
 proc isDeepReviewMode(self: VCSComponent): bool =
   ## Return true when the VCS panel should show DeepReview changeset data
@@ -543,9 +524,11 @@ proc safeStr(s: cstring): string =
 proc ensureVCSDataLoaded(self: VCSComponent) =
   if not self.initialized:
     self.initialized = true
+    # The load answers later; auto-refresh starts when it is applied, if it
+    # found a repository (`refreshVCSData`). Set before the call: a
+    # folderless session clears it again, and watches nothing.
+    self.watchAfterReload = true
     self.refreshVCSData()
-    if self.isGitRepo:
-      self.startFileWatching()
 
 proc reviewDataset(self: VCSComponent): ReviewDataset =
   ## The review this panel is showing, as the ViewModel layer's dataset.
@@ -596,7 +579,7 @@ proc commitRows(self: VCSComponent): seq[VCSCommitRow] =
 proc syncLegacyVCSIntoVM*(self: VCSComponent) =
   if self.isNil:
     return
-  vcsComponentRefs[self.id] = self
+  vcsComponentRefs[data.tabScopedId(self)] = self
   let vm = ensureVCSVM(self)
   if vm.isNil:
     return
@@ -712,6 +695,11 @@ proc dispatchOpenAction(self: VCSComponent; action: VCSOpenAction) =
     discard
   of voaDiffTab:
     self.openUnifiedDiffTab(action.target)
+    # A file under an expanded commit opens the commit's whole-commit
+    # document; bring the file's section to the top (VCS-Panel.md, "Changed
+    # Files").
+    if isWholeCommitTarget(action.target) and action.path.len > 0:
+      requestDocumentScroll(self.data, action.target, action.path)
   of voaSourceFile:
     # VCS-005: open the file itself.  git hands us a repository-relative path
     # and the editor needs an absolute one, otherwise the tab load is issued
@@ -961,117 +949,112 @@ proc startReviewForTraceDiff*(data: Data; diff: Diff; title: string;
   data.startOptions.deepReview = data.deepReviewData
   startDeepReviewNavigation(data)
 
-proc tryMountIsoNimVCSPanel*(componentId: int) =
-  when defined(js):
-    # THE LATCH IS ASKED OF THE CONTAINER, NOT OF THE ID, and so it is asked
-    # further down, once `container` has been resolved.
-    #
-    # This pane was the airtight case: `isoNimVCSMountedIds` was written in one
-    # place and deleted in NO place in the whole tree — `VCSComponent` has
-    # neither a `register` nor an `unregister` method — so once VCS had mounted,
-    # every later `tryMount` for that id returned immediately, for the life of
-    # the page. A mode swap destroys the host and builds an empty one with the
-    # same id, and the pane never came back. See `ui/isonim_panel_mount.nim`.
-    if not vcsComponentRefs.hasKey(componentId):
-      return
-    let component = vcsComponentRefs[componentId]
-    let vm = ensureVCSVM(component)
-    if vm.isNil:
-      return
-    var container = document.getElementById(
-      cstring(fmt"vcsComponent-{componentId}"))
-    if container.isNil:
-      container = document.getElementById(cstring(fmt"vCSComponent-{componentId}"))
-    if container.isNil:
-      return
-    if not isoNimPanelNeedsMount(
-        idLatchSaysMounted = isoNimVCSMountedIds.hasKey(componentId) and
-                             isoNimVCSMountedIds[componentId],
-        containerCarriesMark = isoNimPanelContainerIsMounted(
-          cast[isonim_dom_api.Element](container))):
-      return
-    component.syncLegacyVCSIntoVM()
-    let callbacks = VCSCallbacks(
-      onToggleBranchDropdown: proc() =
-        component.branchDropdownOpen = not component.branchDropdownOpen
-        component.syncLegacyVCSIntoVM(),
-      onCheckoutBranch: proc(branch: string) =
-        component.branchDropdownOpen = false
-        component.commitOffset = 0
-        component.allCommitsLoaded = false
-        component.selectedCommitIndices = @[]
-        component.lastClickedCommitIndex = -1
-        component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-        discard gitExec(@[cstring"checkout", cstring(branch)],
-                        component.getWorkingDirectory())
-        component.refreshVCSData()
-        component.syncLegacyVCSIntoVM(),
-      onSelectCommit: proc(index: int) =
+proc vcsCallbacks(component: VCSComponent): VCSCallbacks =
+  ## What the pane's controls do, on `component`'s git data.
+  VCSCallbacks(
+    onToggleBranchDropdown: proc() =
+      component.branchDropdownOpen = not component.branchDropdownOpen
+      component.syncLegacyVCSIntoVM(),
+    onCheckoutBranch: proc(branch: string) =
+      component.branchDropdownOpen = false
+      component.commitOffset = 0
+      component.allCommitsLoaded = false
+      component.selectedCommitIndices = @[]
+      component.lastClickedCommitIndex = -1
+      component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+      discard gitExec(@[cstring"checkout", cstring(branch)],
+                      component.getWorkingDirectory())
+      component.refreshVCSData()
+      component.syncLegacyVCSIntoVM(),
+    onSelectCommit: proc(index: int) =
+      component.selectedCommitIndices = @[index]
+      component.lastClickedCommitIndex = index
+      component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+      component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
+      component.syncLegacyVCSIntoVM(),
+    onSelectFile: proc(index: int; path, target, status: string) =
+      component.handleVCSFileSelection(index, path, target, status),
+    onToggleUnifiedDiff: proc() =
+      component.openFileMode = not component.openFileMode
+      component.syncLegacyVCSIntoVM(),
+    onSetTraceContext: proc(id: int) =
+      component.handleTraceContextSelection(id),
+    onRefresh: proc() =
+      component.refreshVCSData()
+      component.syncLegacyVCSIntoVM(),
+    onOpenFileDiff: proc(target: string) =
+      component.openUnifiedDiffTab(target),
+    onOpenCommit: proc(index: int; target: string) =
+      ## A plain click on a commit: expand it (exclusively, as a plain click
+      ## always has) and open its whole-commit diff — VCS-Panel.md, "Commit
+      ## History". A click on an expanded commit keeps it expanded.
+      if index notin component.selectedCommitIndices:
         component.selectedCommitIndices = @[index]
-        component.lastClickedCommitIndex = index
         component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-        component.loadChangedFilesForIndex(component.getWorkingDirectory(), index)
-        component.syncLegacyVCSIntoVM(),
-      onSelectFile: proc(index: int; path, target, status: string) =
-        component.handleVCSFileSelection(index, path, target, status),
-      onToggleUnifiedDiff: proc() =
-        component.openFileMode = not component.openFileMode
-        component.syncLegacyVCSIntoVM(),
-      onSetTraceContext: proc(id: int) =
-        component.handleTraceContextSelection(id),
-      onRefresh: proc() =
-        component.refreshVCSData()
-        component.syncLegacyVCSIntoVM(),
-      onOpenFileDiff: proc(target: string) =
-        component.openUnifiedDiffTab(target),
-      onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
-        ## Multi-select accordion toggle.
-        ## • ctrl+click  — toggle this commit in/out of the expanded set.
-        ## • shift+click — expand the range from lastClickedCommitIndex to index.
-        ## • plain click — exclusive expand, or collapse if already sole selection.
-        let cwd = component.getWorkingDirectory()
-        if ctrl:
-          # Toggle individual commit without affecting others.
-          var newSel = component.selectedCommitIndices
-          let pos = newSel.find(index)
-          if pos >= 0:
-            newSel.delete(pos)
-            # Cache entry is left intact; it is simply no longer visible since
-            # the index is absent from selectedCommitIndices.
-          else:
-            newSel.add(index)
-            component.loadChangedFilesForIndex(cwd, index)
-          component.selectedCommitIndices = newSel
-          component.lastClickedCommitIndex = index
-        elif shift and component.lastClickedCommitIndex >= 0:
-          # Range-select from anchor to current index (inclusive).
-          let lo = min(component.lastClickedCommitIndex, index)
-          let hi = max(component.lastClickedCommitIndex, index)
-          var newSel = component.selectedCommitIndices
-          for i in lo..hi:
-            if i notin newSel:
-              newSel.add(i)
-              component.loadChangedFilesForIndex(cwd, i)
-          component.selectedCommitIndices = newSel
-          # Do not update anchor on shift+click (matches standard list behaviour).
+        component.loadChangedFilesForIndex(component.getWorkingDirectory(),
+                                           index)
+      component.lastClickedCommitIndex = index
+      component.syncLegacyVCSIntoVM()
+      component.openUnifiedDiffTab(target),
+    onToggleCommitExpand: proc(index: int; ctrl: bool; shift: bool) =
+      ## Multi-select accordion toggle.
+      ## • ctrl+click  — toggle this commit in/out of the expanded set.
+      ## • shift+click — expand the range from lastClickedCommitIndex to index.
+      ## • plain click — exclusive expand, or collapse if already sole selection.
+      let cwd = component.getWorkingDirectory()
+      if ctrl:
+        # Toggle individual commit without affecting others.
+        var newSel = component.selectedCommitIndices
+        let pos = newSel.find(index)
+        if pos >= 0:
+          newSel.delete(pos)
+          # Cache entry is left intact; it is simply no longer visible since
+          # the index is absent from selectedCommitIndices.
         else:
-          # Plain click: exclusive select or collapse when already sole.
-          if component.selectedCommitIndices == @[index]:
-            component.selectedCommitIndices = @[]
-            component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-          else:
-            component.selectedCommitIndices = @[index]
-            component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
-            component.loadChangedFilesForIndex(cwd, index)
-          component.lastClickedCommitIndex = index
-        component.syncLegacyVCSIntoVM(),
-      onLoadMoreCommits: proc() =
-        component.loadMoreCommits()
-        component.syncLegacyVCSIntoVM(),
-    )
-    mountIsoNimVCSPanel(cast[isonim_dom_api.Element](container), vm,
-                        callbacks)
-    markIsoNimPanelContainerMounted(cast[isonim_dom_api.Element](container))
-    isoNimVCSMountedIds[componentId] = true
-  else:
-    discard
+          newSel.add(index)
+          component.loadChangedFilesForIndex(cwd, index)
+        component.selectedCommitIndices = newSel
+        component.lastClickedCommitIndex = index
+      elif shift and component.lastClickedCommitIndex >= 0:
+        # Range-select from anchor to current index (inclusive).
+        let lo = min(component.lastClickedCommitIndex, index)
+        let hi = max(component.lastClickedCommitIndex, index)
+        var newSel = component.selectedCommitIndices
+        for i in lo..hi:
+          if i notin newSel:
+            newSel.add(i)
+            component.loadChangedFilesForIndex(cwd, i)
+        component.selectedCommitIndices = newSel
+        # Do not update anchor on shift+click (matches standard list behaviour).
+      else:
+        # Plain click: exclusive select or collapse when already sole.
+        if component.selectedCommitIndices == @[index]:
+          component.selectedCommitIndices = @[]
+          component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+        else:
+          component.selectedCommitIndices = @[index]
+          component.commitFilesCache = JsAssoc[int, seq[VCSChangedFile]]{}
+          component.loadChangedFilesForIndex(cwd, index)
+        component.lastClickedCommitIndex = index
+      component.syncLegacyVCSIntoVM(),
+    onLoadMoreCommits: proc() =
+      component.loadMoreCommits()
+      component.syncLegacyVCSIntoVM(),
+  )
+
+# The panel host mounts each VCS pane into the container GoldenLayout creates
+# (`ui/panel_host`); the factory has created the pane's component by then.
+setPanelRenderer(Content.VCS,
+  proc(r: WebRenderer; host: isonim_dom_api.Element;
+       session: SessionViewModel): isonim_dom_api.Element =
+    # The pane of the tab whose container holds `host` — each tab's VCS pane
+    # has its own ViewModel (`tabScopedId`).
+    let componentId = panelHostComponentId(host)
+    let component = VCSComponent(
+      data.hostTabComponent(host, Content.VCS, componentId))
+    let vm = if component.isNil: nil else: ensureVCSVM(component)
+    if vm.isNil:
+      return isonim_dom_api.createElement(isonim_dom_api.document, cstring"div")
+    component.syncLegacyVCSIntoVM()
+    renderVCSPanel[WebRenderer, isonim_dom_api.Element](
+      r, vm, component.vcsCallbacks()))

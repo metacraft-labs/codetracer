@@ -72,12 +72,13 @@
 when defined(js):
   {.error: "src/frontend/tui/host is native-only: it owns the tty.".}
 
-import std/[monotimes, os, posix, strutils, times, unicode]
+import std/[monotimes, os, posix, strutils, termios, times, unicode]
 
 import isonim_tui
 import nim_termctl
 
 import ../app/input/modal_state
+import ../../../common/key_names
 import ../app/theme/degradation
 import ../app/views/styled_row
 import ../app/views/frame_overlay
@@ -98,6 +99,9 @@ const
   MaxStringBytes* = 512
     ## An OSC/DCS/APC string longer than this is dropped rather than held: a
     ## reply to this program's queries is a few dozen bytes.
+  MaxClipboardReplyBytes* = 4 * 1024 * 1024
+    ## PLAT-68: …except the answer to the OSC 52 clipboard read
+    ## (`app/clipboard_read`), which is text a user copied.
     ## A CSI longer than this is not a sequence, it is a stuck terminal or a
     ## paste of binary. Dropped rather than accumulated, so one bad byte cannot
     ## make the front-end stop responding to the keyboard for the rest of the
@@ -187,7 +191,9 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       let token = f.pending
       f.reset()
       return (true, token)
-    if f.pending.len > MaxStringBytes:
+    let limit = if f.pending.startsWith("\e]52;"): MaxClipboardReplyBytes
+                else: MaxStringBytes
+    if f.pending.len > limit:
       f.reset()
     return (false, "")
   if f.pending.len == 2:
@@ -210,7 +216,12 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
       # every other one as the character alone (`runtime.handleToken`), which
       # is what this framer delivered before it framed Alt at all — so a `q`
       # after a stray escape still quits.
-      if b > ' ' and b <= '~':
+      #
+      # The same holds for `ESC` + a C0 control byte or DEL: Ctrl+Alt+<letter>
+      # (`ESC 0x01`), Alt+Backspace (`ESC 0x7f`), Alt+Enter (`ESC CR`). Only
+      # `ESC ESC` keeps the old reading — one `Esc` — because a second `ESC`
+      # is the start of whatever comes next, not a modifier on it.
+      if (b >= ' ' and b <= '~') or b == '\x7f' or (b < ' ' and b != Esc):
         let alt = Esc & $b
         f.reset()
         return (true, alt)
@@ -307,7 +318,82 @@ const
     ## their tooltip and key on hover (`runtime.routeTopBarMouse`), and is
     ## otherwise dropped without a repaint.
 
-proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
+# ---------------------------------------------------------------------------
+# Focus reporting (DECSET 1004)
+# ---------------------------------------------------------------------------
+#
+# THE TERMINAL'S EQUIVALENT OF THE DESKTOP'S WINDOW `focus` EVENT. The
+# desktop's VCS panel re-reads the repository every `refreshIntervalMs` AND
+# whenever its window regains focus (`ui/vcs.nim` `startFileWatching`,
+# VCS-Panel.md's auto-refresh), so returning to CodeTracer after committing in
+# another program shows the commit at once. A terminal program learns the same
+# thing only by asking: with DECSET 1004 set, xterm and every terminal that
+# follows it (VTE, kitty, WezTerm, iTerm2, foot, Alacritty, Windows Terminal,
+# and tmux with `focus-events on`) writes `CSI I` when the terminal window
+# gains focus and `CSI O` when it loses it.
+# https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-FocusIn_FocusOut
+#
+# Requested WHENEVER THE TERMINAL IS OURS, not with the mouse: focus says
+# nothing about a pointer, and `--no-mouse` (the user keeping the terminal's
+# own selection) must not also cost them the refresh on return. A terminal
+# that does not implement mode 1004 ignores the request, as it does every
+# private mode it does not know, and simply never sends the reports.
+
+const
+  FocusInToken* = "\e[I"
+    ## `CSI I`: the terminal window gained focus.
+  FocusOutToken* = "\e[O"
+    ## `CSI O`: the terminal window lost focus.
+
+type
+  FocusReport* = enum
+    ## What one framed input token says about the terminal's focus.
+    frNone = "none"
+      ## Not a focus report: a key, a mouse report, a reply.
+    frGained = "gained"
+    frLost = "lost"
+
+func focusReportOf*(token: string): FocusReport =
+  ## Whether `token` — ONE COMPLETE TOKEN as `InputFramer.feed` delivers it —
+  ## is a focus report.
+  ##
+  ## AN EXACT MATCH ON THE WHOLE TOKEN, and that is what keeps a report from
+  ## ever being a key and a key from ever being a report. The framer delivers
+  ## `ESC [ I` as one CSI token (`I` is a CSI final byte), and the keys that
+  ## look like it are different tokens: `Esc` then `I` is either `ESC I` in
+  ## one burst (Alt+Shift+I, framed as two bytes) or a lone `ESC` and then a
+  ## separate `I`. A CSI with parameters (`CSI 1 ; 5 I`) is not a focus report
+  ## either — xterm sends none — and stays whatever the key decoder makes of
+  ## it.
+  ##
+  ## ONE KEY SEQUENCE DOES FRAME AS A REPORT: `Alt+[` (`ESC [` in one burst)
+  ## followed, at any later moment, by `Shift+I` or `Shift+O`. The framer holds
+  ## an unfinished `ESC [` until a final byte arrives (only a LONE `ESC` times
+  ## out, `EscDelayMs`), so the two keys become `ESC [ I`. Before focus
+  ## reporting that token named no key (`keyName` answers "") and the `I` was
+  ## dropped; now it is one focus event, which costs a repository re-read and
+  ## nothing else. Nothing is bound to `Alt+[`, and the swallowed key is the
+  ## framer's existing behaviour, not this decoder's.
+  if token == FocusInToken: frGained
+  elif token == FocusOutToken: frLost
+  else: frNone
+
+template frameNodeIds(body: untyped) =
+  ## A frame's nodes take ids from 1 (`resetNodeIds`, so ids stay bounded
+  ## across a long session) — and the counter is put BACK afterwards, so a
+  ## node a LONG-LIVED tree creates later (the focus tree's editor, overlay
+  ## and field nodes, `input/motions`) never gets an id one of that tree's
+  ## own nodes already holds. PLAT-68 found the collision: the focus moved
+  ## from pane to pane with every key once a frame had reset the counter.
+  let kept = nextTerminalNodeId
+  resetNodeIds()
+  try:
+    body
+  finally:
+    nextTerminalNodeId = kept
+
+proc composite*(rows: seq[StyledRow]; cols, height: int;
+                ambiguous = awNarrow): ScreenBuffer =
   ## One frame's component tree, laid out and composited into a screen buffer.
   ##
   ## The three production types — `TerminalRenderer`, `newHeadlessDriver`,
@@ -320,13 +406,15 @@ proc composite*(rows: seq[StyledRow]; cols, height: int): ScreenBuffer =
   ## records why: the driver's buffer is the diff base, so remounting onto the
   ## old one emits a delta, and this front-end's frame barrier needs a whole
   ## frame. `resetNodeIds` keeps node ids bounded across a long session rather
-  ## than letting them climb with the frame count.
-  resetNodeIds()
-  let renderer = TerminalRenderer()
-  let driver = newHeadlessDriver(cols, height)
-  let comp = newCompositor(cols, height)
-  comp.paint(styledRowsTree(renderer, rows), driver)
-  driver.buffer
+  ## than letting them climb with the frame count (`frameNodeIds`).
+  frameNodeIds:
+    let renderer = TerminalRenderer()
+    let driver = newHeadlessDriver(cols, height)
+    # PLAT-71: the compositor lays the frame out under the SAME width policy
+    # the panes were painted under (Terminal-Adaptation §6.6).
+    let comp = newCompositor(cols, height, ambiguous)
+    comp.paint(styledRowsTree(renderer, rows), driver)
+    result = driver.buffer
 
 proc composite*(rows: seq[StyledRow]; cols, height: int;
                 overlays: seq[FrameOverlay];
@@ -335,17 +423,18 @@ proc composite*(rows: seq[StyledRow]; cols, height: int;
   ## (PLAT-47): a drop tint re-colours cells without replacing a glyph, and
   ## the ghost label is drawn above the tint. With no overlays this is the
   ## same call, byte for byte.
+  let ambiguous = if caps.ambiguousWide: awWide else: awNarrow
   if overlays.len == 0:
-    return composite(rows, cols, height)
-  resetNodeIds()
-  let renderer = TerminalRenderer()
-  let driver = newHeadlessDriver(cols, height)
-  let comp = newCompositor(cols, height)
-  let tree = styledRowsTree(renderer, rows)
-  for node in overlayNodes(renderer, overlays, caps):
-    renderer.appendChild(tree, node)
-  comp.paint(tree, driver)
-  driver.buffer
+    return composite(rows, cols, height, ambiguous)
+  frameNodeIds:
+    let renderer = TerminalRenderer()
+    let driver = newHeadlessDriver(cols, height)
+    let comp = newCompositor(cols, height, ambiguous)
+    let tree = styledRowsTree(renderer, rows)
+    for node in overlayNodes(renderer, overlays, caps):
+      renderer.appendChild(tree, node)
+    comp.paint(tree, driver)
+    result = driver.buffer
 
 proc plainScreen*(buf: ScreenBuffer): string =
   ## A composited screen as PLAIN TEXT: one line per row, trailing blanks
@@ -395,7 +484,7 @@ proc plainFrame*(caps: TerminalCapabilities; rows: seq[StyledRow];
 
 type
   DriverEventKind* = enum
-    ## What the loop woke up for. Four answers rather than one, because
+    ## What the loop woke up for. Five answers rather than one, because
     ## "nothing happened", "the window changed" and "the terminal went away" have
     ## completely different consequences and folding any two of them into a
     ## timeout is how a closed terminal becomes an idle spin.
@@ -403,13 +492,22 @@ type
     dekResize = "resize"
     dekIdle = "idle"
     dekEof = "eof"
+    dekFocus = "focus"
+      ## The terminal window gained or lost focus (DECSET 1004's `CSI I` /
+      ## `CSI O`, see `focusReportOf`). AN EVENT OF ITS OWN AND NOT A TOKEN,
+      ## so a focus report can never reach the keymap, the key journal or an
+      ## open prompt: the loop decides what focus means (the VCS pane's
+      ## re-read on return), and nothing downstream has to know the bytes.
 
   DriverEvent* = object
     kind*: DriverEventKind
     token*: string
       ## One complete input token on `dekToken`: a byte, or a whole escape
       ## sequence. Exactly what `app/input/keymap.keyName` and
-      ## `app/input/mouse.decodeMouse` are written to take.
+      ## `app/input/mouse.decodeMouse` are written to take. On `dekFocus`, the
+      ## report's own bytes, for a trace.
+    focused*: bool
+      ## On `dekFocus`: `true` when the window GAINED focus.
     size*: TerminalSize
       ## The NEW geometry on `dekResize`, read back from `ioctl(TIOCGWINSZ)`.
 
@@ -462,8 +560,21 @@ type
     mouseOwned: bool
     pixelMouseOwned: bool
       ## PLAT-51: `?1016h` was sent (`enablePixelMouse`).
+    graphemeOwned: bool
+      ## PLAT-71: `?2027h` was sent — the terminal recognised grapheme
+      ## clustering and had it off (Terminal-Adaptation §4.3).
     altOwned: bool
     rawOwned: bool
+    keyReporting: KeyReporting
+      ## PLAT-68: the extended key reporting `caps.keyProtocol` negotiated,
+      ## enabled on the alternate screen; `nim-termctl` undoes it on every
+      ## exit path (`stop`, a signal, `atexit`).
+    focusReporting: FocusReporting
+      ## DECSET 1004, asked for by `start` whenever the terminal is ours (see
+      ## "Focus reporting" above). `nim-termctl`'s, like the mouse and key
+      ## modes, so the async-signal-safe restore a SIGTERM or SIGHUP runs
+      ## sends `CSI ? 1004 l` too: a shell left with focus reporting on
+      ## prints `^[[I` / `^[[O` every time the user switches windows.
 
 proc newTerminalDriver*(caps: TerminalCapabilities;
                         inFd: cint = STDIN_FILENO;
@@ -478,15 +589,75 @@ proc newTerminalDriver*(caps: TerminalCapabilities;
                  started: false, mouseOwned: false, altOwned: false,
                  rawOwned: false)
 
+proc eraseByte*(d: TerminalDriver): char =
+  ## The byte this terminal sends for Backspace — termios `VERASE`, as the
+  ## driver saved it before raw mode — which `key_names.keyName` needs to tell
+  ## Backspace from Ctrl+Backspace. xterm's `0x7f` when there is no tty.
+  if d.rawOwned:
+    let b = char(d.rawMode.saved.c_cc[VERASE])
+    if b in {'\x7f', '\b'}: return b
+  '\x7f'
+
+proc applyKeyProtocol(d: TerminalDriver) =
+  ## Bring the terminal's key reporting to `caps.keyProtocol`, on a started
+  ## driver: undo what is on if it differs, then ask for what was negotiated.
+  ## Legacy asks for nothing.
+  if not d.started or not d.altOwned:
+    return
+  let want = case d.caps.keyProtocol
+             of kpKitty: 1
+             of kpModifyOtherKeys: 2
+             of kpLegacy, kpNative: 0
+  let have = if not d.keyReporting.active: 0
+             elif d.keyReporting.mode == krmKitty: 1
+             else: 2
+  if want == have:
+    return
+  if d.keyReporting.active:
+    disableKeyReporting(d.keyReporting)
+  case want
+  of 1: d.keyReporting = enableKeyReporting(krmKitty, d.outFd)
+  of 2: d.keyReporting = enableKeyReporting(krmModifyOtherKeys, d.outFd)
+  else: discard
+
+proc restoreUnion*(d: TerminalDriver): string =
+  ## PLAT-71 (Terminal-Adaptation §4.8 rule 3): the resets of every mode this
+  ## driver set beyond `nim-termctl`'s own — grapheme clustering, synchronized
+  ## output, pixel and any-motion mouse — in the order the spec gives. ONE
+  ## buffer, registered with `nim-termctl`'s async-signal-safe restore
+  ## (`setExtraRestore`) and written by `stop`, so no exit path can miss one.
+  result = ""
+  if d.graphemeOwned:
+    result.add "\x1b[?2027l"
+  if d.started:
+    result.add "\x1b[?2026l"
+  if d.pixelMouseOwned:
+    result.add "\x1b[?1016l"
+  if d.mouseOwned:
+    result.add "\x1b[?1003l"
+
+proc registerRestore(d: TerminalDriver) =
+  discard setExtraRestore(d.restoreUnion())
+
 proc adoptCapabilities*(d: TerminalDriver; caps: TerminalCapabilities) =
   ## PLAT-46. Replace the negotiated capabilities after the start-up query
   ## round answered — a 24-bit terminal behind a conservative `TERM`, or a
   ## light background — and forget what the terminal is showing, so the next
   ## frame is a full one painted in the new colours rather than a diff against
-  ## cells painted in the old.
+  ## cells painted in the old. PLAT-68: and put the terminal's key reporting
+  ## on the protocol the round decided.
   d.caps = caps
   d.emitter.caps = caps
   d.emitter.reset()
+  d.applyKeyProtocol()
+  # PLAT-71: grapheme clustering on, when the terminal recognised DEC 2027
+  # and had it off — matching this front-end's own UAX #29 clustering — and
+  # its reset registered before anything else is drawn.
+  if d.started and caps.graphemeSet and not d.graphemeOwned:
+    writeAll(d.outFd, "\x1b[?2027h")
+    d.graphemeOwned = true
+  if d.started:
+    d.registerRestore()
 
 proc expectReplies*(d: TerminalDriver; on: bool) =
   ## Whether `ESC ]` / `ESC P` / `ESC _` begin a terminal's reply string. On
@@ -501,7 +672,7 @@ proc size*(d: TerminalDriver): TerminalSize =
 
 proc start*(d: TerminalDriver) =
   ## Claim the terminal: SIGWINCH, raw mode, the alternate screen, the cursor,
-  ## and mouse reporting if it was negotiated.
+  ## mouse reporting if it was negotiated, and focus reporting.
   ##
   ## ORDER IS THE SAME AS `isonim_tui`'s own `PosixDriver.start`, and for its
   ## reasons: SIGWINCH first so a resize that arrives during startup is not
@@ -518,10 +689,10 @@ proc start*(d: TerminalDriver) =
   try:
     d.rawMode = enableRawMode(d.inFd)
     d.rawOwned = true
-  except OSError:
+  except TermctlError:
     # NOT A TTY. Reported by leaving `rawOwned` false rather than by raising:
     # `main.nim` has already decided whether it has a screen (`stdoutIsTerminal`)
-    # and a driver that raised here would turn "you piped me into a file" into a
+    # and a driver that raised here would turn redirected input into a
     # stack trace out of termios.
     discard
   d.altScreen = enterAltScreen(d.outFd)
@@ -540,14 +711,19 @@ proc start*(d: TerminalDriver) =
     # controls shows each one's tooltip and key; a report over anything else
     # is dropped without a frame.
     writeAll(d.outFd, MotionTrackingOnBytes)
-  # NOTHING IS SENT FOR THE KITTY KEYBOARD PROTOCOL OR FOR modifyOtherKeys,
-  # on a terminal that advertises either. See
-  # `app/theme/capabilities.TerminalCapabilities.kittyKeyboard`: both change
-  # every key's encoding, `app/input/keymap.keyName` decodes xterm's classic
-  # one, and a driver that switched encodings without a decoder would make
-  # §4.2's function keys unreachable on exactly the terminals users choose for
-  # their key handling.
+  # FOCUS REPORTING, UNCONDITIONALLY ONCE THE SCREEN IS OURS — outside the
+  # mouse branch on purpose (see "Focus reporting" above): the VCS pane's
+  # re-read on return (VCS-Panel.md's auto-refresh, the desktop's window
+  # `focus` listener) does not depend on a pointer, and `--no-mouse` must
+  # not switch it off.
+  d.focusReporting = enableFocusReporting(d.outFd)
   d.started = true
+  d.registerRestore()
+  # PLAT-68: EXTENDED KEY REPORTING IS NOT ASKED FOR HERE. Until the start-up
+  # round has run, `caps.keyProtocol` is the environment's guess; the round
+  # (`terminal_probe.negotiateOnTerminal`) asks the terminal, and its
+  # `adoptCapabilities` turns on what the terminal answered — on the
+  # alternate screen this has just entered, which the Kitty flag stack needs.
 
 const
   PixelMouseOnBytes* = "\x1b[?1016h"
@@ -563,21 +739,35 @@ proc enablePixelMouse*(d: TerminalDriver) =
   if d.mouseOwned and not d.pixelMouseOwned:
     writeAll(d.outFd, PixelMouseOnBytes)
     d.pixelMouseOwned = true
+    d.registerRestore()
 
 proc stop*(d: TerminalDriver) =
   ## Give the terminal back. Idempotent, and safe to call after a failed
   ## `start`.
   ##
   ## The same order `nim-termctl`'s signal handler uses, so a clean exit and a
-  ## SIGTERM leave the terminal in the same state: mouse off, alternate screen
-  ## left, cursor shown, termios restored last.
-  if d.pixelMouseOwned:
-    writeAll(d.outFd, PixelMouseOffBytes)
-    d.pixelMouseOwned = false
+  ## SIGTERM leave the terminal in the same state: key reporting undone, mouse
+  ## off, focus reporting off, alternate screen left, cursor shown, termios
+  ## restored last.
+  if d.keyReporting.active:
+    # Before the alternate screen is left: the Kitty pop must reach the
+    # screen its push was made on.
+    disableKeyReporting(d.keyReporting)
+  # PLAT-71: THE ONE RESTORE BUFFER (`restoreUnion`) — 2027, 2026, 1016,
+  # 1003 — the same bytes a SIGTERM or a crash writes, then forgotten.
+  if d.started:
+    writeAll(d.outFd, d.restoreUnion())
+    discard setExtraRestore("")
+  d.graphemeOwned = false
+  d.pixelMouseOwned = false
   if d.mouseOwned:
-    writeAll(d.outFd, MotionTrackingOffBytes)
     disableMouseCapture(d.mouseCapture)
     d.mouseOwned = false
+  # DECSET 1004 is not per-screen, so its place relative to leaving the
+  # alternate screen is not load-bearing; it sits with the other input
+  # modes, before the screen is given back, so every mode this driver asked
+  # for is undone before the user's shell can see a byte.
+  disableFocusReporting(d.focusReporting)
   if d.altOwned:
     leaveAltScreen(d.altScreen)
     d.altOwned = false
@@ -647,8 +837,11 @@ proc holdFrame*(d: TerminalDriver; alsoPending = false): bool =
   d.coalescer.hold(alsoPending or d.inputPending())
 
 const
-  InterruptTokens*: array[2, string] = ["\x03", "q"]
-    ## The tokens that END A WAIT the user did not ask to be in.
+  InterruptKeys*: array[2, string] = ["Ctrl+c", "q"]
+    ## The KEYS that END A WAIT the user did not ask to be in — compared as
+    ## key names, not bytes (PLAT-68): with the Kitty protocol on, `Ctrl+c`
+    ## arrives as `CSI 99 ; 5 u` and a byte comparison against `0x03` would
+    ## leave the user no way out of a stalled open.
     ##
     ## §4.2's two quit bindings and nothing else. `Ctrl+d` is deliberately
     ## absent: §4.2 binds it to "Half Page Down", and a user who reached for a
@@ -681,10 +874,24 @@ proc absorbInterruptByte*(d: TerminalDriver): bool =
   if not complete:
     return false
   d.buffered.add token
-  token in InterruptTokens
+  keyName(token, d.eraseByte) in InterruptKeys
+
+func tokenEvent*(token: string): DriverEvent =
+  ## One complete framed token as the event the loop receives: `dekFocus` for
+  ## a focus report (`focusReportOf`), `dekToken` for everything else.
+  ##
+  ## THE ONE PLACE A REPORT IS TOLD FROM A KEY, and every token `nextEvent`
+  ## delivers goes through it — the ones read now and the ones
+  ## `absorbInterruptByte` queued while the trace was opening, so a window
+  ## switch made during a slow open is still a focus event and not a stray
+  ## key handed to the keymap afterwards.
+  case focusReportOf(token)
+  of frGained: DriverEvent(kind: dekFocus, token: token, focused: true)
+  of frLost: DriverEvent(kind: dekFocus, token: token, focused: false)
+  of frNone: DriverEvent(kind: dekToken, token: token)
 
 proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
-  ## Block until a token, a resize, a timeout or end-of-input.
+  ## Block until a token, a focus report, a resize, a timeout or end-of-input.
   ##
   ## ONE BYTE PER CALL through the framer, which is what keeps a multi-byte
   ## escape sequence from being split across two of the caller's iterations: a
@@ -698,7 +905,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
   if d.buffered.len > 0:
     let token = d.buffered[0]
     d.buffered.delete(0)
-    return DriverEvent(kind: dekToken, token: token)
+    return tokenEvent(token)
   # A LONE `ESC` IS THE KEY ONCE `EscDelayMs` PASSES WITH NOTHING AFTER IT.
   # The read below waits no longer than the time left, so the key arrives
   # `EscDelayMs` after it was pressed rather than on the next keystroke.
@@ -737,7 +944,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       break
     (complete, token) = d.framer.feed(char(more))
   if complete:
-    return DriverEvent(kind: dekToken, token: token)
+    return tokenEvent(token)
   if d.framer.holdsLoneEsc:
     d.framer.escSinceMs = (getMonoTime() - MonoTime()).inMilliseconds
   DriverEvent(kind: dekIdle)

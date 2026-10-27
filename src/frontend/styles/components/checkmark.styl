@@ -28,19 +28,24 @@
   --ct-checkmark-minus-width: 0.625em
   --ct-checkmark-minus-height: 0.125em
 
+  // The box's fills, outline and mark. The dark values are white washes and
+  // strokes over the dark ground, so in the light theme the box had no
+  // visible outline and a white tick. The dark theme keeps them (no token has
+  // those Dark values; `by-mode`, defaults.styl); the light one takes the
+  // design token of each role.
   --ct-checkmark-bg: transparent
-  --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.03)
-  --ct-checkmark-bg-disabled: rgba(255, 255, 255, 0.08)
+  --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.03), colors-ui-surface-primary-default-hover)
+  --ct-checkmark-bg-disabled: by-mode(rgba(255, 255, 255, 0.08), colors-ui-surface-primary-secondary)
 
-  --ct-checkmark-border: rgba(255, 255, 255, 0.28)
-  --ct-checkmark-border-hover: rgba(255, 255, 255, 0.42)
+  --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.28), colors-ui-border-primary)
+  --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.42), colors-ui-border-primary-hover)
   --ct-checkmark-border-focus: #2f81ff
-  --ct-checkmark-border-error: #f2a0a6
+  --ct-checkmark-border-error: by-mode(#f2a0a6, colors-ui-border-error)
   --ct-checkmark-border-disabled: transparent
 
-  --ct-checkmark-icon: #f5f5f5
-  --ct-checkmark-icon-disabled: rgba(255, 255, 255, 0.38)
-  --ct-checkmark-icon-error: #f7b0b4
+  --ct-checkmark-icon: by-mode(#f5f5f5, colors-ui-icon-primary-default)
+  --ct-checkmark-icon-disabled: by-mode(rgba(255, 255, 255, 0.38), colors-ui-icon-primary-disabled)
+  --ct-checkmark-icon-error: by-mode(#f7b0b4, colors-ui-icon-error-primary)
 
   position: relative
   display: inline-flex

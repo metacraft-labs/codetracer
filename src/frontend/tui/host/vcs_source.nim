@@ -12,13 +12,23 @@
 ## working directory for a replay — the desktop sets `startOptions.folder` to
 ## `process.cwd()` when it opens a recording.
 ##
-## Refreshed at open and then every `VcsRefreshMs`, the desktop's own
-## `refreshIntervalMs`, so an edit made in another terminal shows up here as it
-## does there.
+## Refreshed at open, then every `VcsRefreshMs` (the desktop's own
+## `refreshIntervalMs`) and whenever the terminal window regains focus (the
+## desktop's window `focus` listener; `terminal_driver`'s DECSET 1004 and
+## `dekFocus`, `refreshOnFocus` below), so an edit made in another terminal
+## shows up here as it does there — at once when the user switches back.
+##
+## HOW MUCH HISTORY (Viewport-Driven-Loading V6): every read reports the
+## pane's rows and scroll position as the history list's viewport first, so
+## `git log` is asked for the commits the pane can show plus a lead, not a
+## fixed 50; and the loop calls `followViewport` after every token and
+## resize, which reads again at once when the reader scrolls (or the pane
+## grows) to the end of what was read.
 
 import std/[monotimes, os, times]
 
 import ../../viewmodel/viewmodels/vcs_vm
+import ../../viewmodel/viewport
 import ../../viewmodel/platform/vcs
 import ../../viewmodel/host/native_vcs
 import ../../viewmodel/host/native_vcs_details
@@ -76,13 +86,46 @@ proc newVcsSource*(directory: string;
     src.vm = createVCSVM()
     src.dispose = dispose
 
+proc publish(s: VcsSource; rt: TuiRuntime) =
+  ## Hand the app layer the pane's value. M71 (#838): the reading position
+  ## (`scrollTop`) is the reader's, not the repository's, so a re-read —
+  ## every `VcsRefreshMs`, or a commit opened — keeps it (the painter clamps
+  ## it to whatever the new value lists).
+  let top = rt.app.vcs.scrollTop
+  rt.app.vcs = paneModelOf(s.vm)
+  rt.app.vcs.scrollTop = top
+
+proc reportViewport(s: VcsSource; rt: TuiRuntime): bool =
+  ## Write the history list's viewport — the pane's rows and the commits its
+  ## scroll has passed (`runtime.vcsHistoryWindow`) — into the ViewModel
+  ## (Viewport-Driven-Loading V6), so the next read asks `git log` for the
+  ## commits the pane can show. Answers `setHistoryViewport`'s question:
+  ## whether the list now reaches the last commit the last read got. A pane
+  ## that is not on screen reports nothing and keeps its last viewport.
+  let w = rt.vcsHistoryWindow()
+  if w.rows <= 0:
+    return false
+  s.vm.setHistoryViewport(Viewport(rows: w.rows, firstRow: w.firstRow))
+
 proc refresh*(s: VcsSource; rt: TuiRuntime) =
-  ## Read the repository now and publish the pane's value.
+  ## Read the repository now — as many commits as the pane's history list
+  ## shows — and publish the pane's value.
   if s.isNil:
     return
+  discard s.reportViewport(rt)
   s.vm.refreshFromFacade(s.facade, s.directory)
   s.lastRefresh = getMonoTime()
-  rt.app.vcs = paneModelOf(s.vm)
+  s.publish(rt)
+
+proc refreshChanged(s: VcsSource; rt: TuiRuntime): bool =
+  ## `refresh`, answering whether the pane's value changed — the one body
+  ## both triggers share, so the interval and the focus regain cannot come
+  ## to disagree about what a re-read is or when it earns a frame.
+  if s.isNil:
+    return false
+  let before = rt.app.vcs
+  s.refresh(rt)
+  rt.app.vcs != before
 
 proc tick*(s: VcsSource; rt: TuiRuntime): bool =
   ## Refresh when `VcsRefreshMs` has passed; whether the pane's value changed.
@@ -90,9 +133,40 @@ proc tick*(s: VcsSource; rt: TuiRuntime): bool =
     return false
   if (getMonoTime() - s.lastRefresh).inMilliseconds < VcsRefreshMs:
     return false
-  let before = rt.app.vcs
-  s.refresh(rt)
-  rt.app.vcs != before
+  s.refreshChanged(rt)
+
+proc refreshOnFocus*(s: VcsSource; rt: TuiRuntime; focused: bool): bool =
+  ## The terminal window's focus changed (`terminal_driver.dekFocus`):
+  ## re-read NOW when it was GAINED, whatever the interval says; whether the
+  ## pane's value changed, so the loop paints only then.
+  ##
+  ## The desktop's second trigger (VCS-Panel.md's auto-refresh: "refreshes
+  ## periodically and when the window regains focus"; `ui/vcs.nim`
+  ## `startFileWatching`, `window.addEventListener('focus', …)`). Returning
+  ## to the terminal after committing in another program shows the commit
+  ## at once instead of up to `VcsRefreshMs` later. A LOST focus re-reads
+  ## nothing: nobody is looking, and the desktop's `blur` does nothing
+  ## either. The re-read also restarts the interval (`refresh` stamps
+  ## `lastRefresh`), so the tick does not read the same state again a moment
+  ## later.
+  if not focused:
+    return false
+  s.refreshChanged(rt)
+
+proc followViewport*(s: VcsSource; rt: TuiRuntime): bool =
+  ## The pane may have been resized, revealed or scrolled (any input token, a
+  ## terminal resize): report the history list's viewport, and when the list
+  ## now reaches the last commit the last read got, read the repository
+  ## again AT ONCE — the native Load More (Viewport-Driven-Loading V6): the
+  ## reader who scrolls to the end of what was read sees the next commits on
+  ## that frame, not up to `VcsRefreshMs` later. Answers whether the pane's
+  ## value changed, so the loop paints only then. A viewport short of that
+  ## end only changes what the next periodic read asks for.
+  if s.isNil:
+    return false
+  if s.reportViewport(rt):
+    return s.refreshChanged(rt)
+  false
 
 proc close*(s: VcsSource) =
   if not s.isNil and not s.dispose.isNil:
@@ -122,7 +196,7 @@ proc toggleCommit*(s: VcsSource; rt: TuiRuntime; index: int) =
     s.vm.syncCommitFilesMap([])
     s.vm.setCommitFiles(index, rows)
     s.vm.setCommits(commits, [index], index)
-  rt.app.vcs = paneModelOf(s.vm)
+  s.publish(rt)
 
 proc fileDiff*(s: VcsSource; status, path: string; hash = ""): string =
   ## PLAT-50 (K34): a changed file's diff — the working tree's (`hash` "")

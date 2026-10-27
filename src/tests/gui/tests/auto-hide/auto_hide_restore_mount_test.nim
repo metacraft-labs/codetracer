@@ -31,8 +31,9 @@
 ##   it is satisfied by attaching ANY node, including a bare `<div>` with no id
 ##   that no pane could ever mount into.
 ## * **`document.getElementById(<the label from the stored config>)` resolves.**
-##   That id is the whole contract between the layout and the panes: every
-##   `tryMountIsoNim…Panel` finds its container with exactly that lookup
+##   That id is the whole contract between the layout and a restored pane:
+##   `mountPaneForState` finds its container with that id
+##   (`ui/pane_host_lookup.findPaneHost`, per tab)
 ##   (`ui/layout.nim`'s `mountComponentContainer` is what creates it for a
 ##   GoldenLayout pane).  It is false before the fix, false for a detached
 ##   element, false for an unlabelled one, and true only when a labelled
@@ -97,7 +98,7 @@ when defined(js):
 
   const StateLabel = cstring"stateComponent-0"
     ## The component label `Content.State` mounts into — the id
-    ## `state.tryMountIsoNimStatePanel` resolves its container by, and the id
+    ## `panel_host.ensurePanelMountedById` finds the State pane's container by, and the id
     ## a restored panel's config carries.
 
   proc freshWorld() =
@@ -181,7 +182,7 @@ when defined(js):
       showDockedPanel(panel)
 
       # THE DISCRIMINATING ASSERTION.  `stateComponent-0` is the id
-      # `state.tryMountIsoNimStatePanel` resolves its container by; until it
+      # `panel_host.ensurePanelMountedById` finds the State pane's container by; until it
       # exists in the document there is nothing for any pane to mount into,
       # and before this fix it never came into existence at all.
       check not document.getElementById(StateLabel).isNil
@@ -382,6 +383,128 @@ when defined(js):
       check not document.getElementById(cstring"calltraceComponent-0").isNil
       check document.getElementById(cstring"CALL TRACE").isNil
 
+  # -------------------------------------------------------------------------
+  # #807 — a DEFAULT bottom pane re-pinned to another edge survives a restart.
+  # -------------------------------------------------------------------------
+  #
+  # The four default bottom panes (BUILD, PROBLEMS, SEARCH RESULTS, REQUESTS)
+  # are `standalone`: registered by `addStandaloneAutoHidePanel` from
+  # `ui/layout.nim` on every launch.  `serializeAutoHideState` skipped every
+  # `standalone` panel, so `repinPanelToEdge`'s new edge was never written and
+  # the next launch registered the pane on Bottom again.  `Auto-Hide-Panes.md`
+  # §6.3 persists "which panels are auto-hidden, at which edge, in what order"
+  # with no exception for them, and §6.1 calls "pinned by default" a starting
+  # position, not a category.
+  #
+  # Each case replays a launch with the SHIPPED procs in the order
+  # `initLayout` runs them: register (previous session), act, serialize
+  # through `JSON.stringify` (what reaches `auto_hide_state.json`), drop the
+  # module state, `restoreAutoHideState`, then register again exactly as the
+  # 500 ms loop in `layout.nim` does — with `edge = Bottom`.
+
+  const ProblemsLabel = cstring"errorsComponent-0"
+  const BuildLabel = cstring"buildComponent-0"
+
+  proc registerProblems(live: Element) =
+    addStandaloneAutoHidePanel(
+      cstring"PROBLEMS", Content.BuildErrors, 0, live,
+      componentLabel = ProblemsLabel, edge = AutoHideEdge.Bottom)
+
+  proc registerBuild(live: Element) =
+    addStandaloneAutoHidePanel(
+      cstring"BUILD", Content.Build, 0, live,
+      componentLabel = BuildLabel, edge = AutoHideEdge.Bottom)
+
+  proc relaunch() =
+    ## What a restart does to the module state: write it, lose it, read it.
+    let saved = jsonParse(jsonStringify(serializeAutoHideState()))
+    autoHideState = nil
+    initAutoHideState()
+    restoreAutoHideState(saved)
+
+  suite "#807 a default bottom pane re-pinned to another edge is saved":
+    test "PROBLEMS re-pinned to Left comes back on Left":
+      freshWorld()
+      registerProblems(newStubElement(cstring"problems-before"))
+      let before = autoHideState.findPanelByContent(Content.BuildErrors)
+      # CONTROL: the pane starts where the default puts it, as a standalone
+      # pane — the precondition the defect needs.
+      check before.edge == AutoHideEdge.Bottom
+      check before.standalone
+
+      repinPanelToEdge(before, AutoHideEdge.Left)
+      check before.edge == AutoHideEdge.Left
+
+      # The new edge reaches what is written to disk.  Before the fix the
+      # serialized `panels` array was EMPTY here.
+      let written = jsonParse(jsonStringify(serializeAutoHideState()))
+      check cast[int](written["panels"].length) == 1
+      check written["panels"][0]["content"].to(int) == ord(Content.BuildErrors)
+      check written["panels"][0]["edge"].to(int) == ord(AutoHideEdge.Left)
+
+      relaunch()
+      let fresh = newStubElement(cstring"problems-after")
+      registerProblems(fresh)
+
+      # THE DISCRIMINATING ASSERTION: after the launch-time registration —
+      # which asks for Bottom — the pane is on the edge the user chose.
+      check autoHideState.panels.len == 1
+      let after = autoHideState.findPanelByContent(Content.BuildErrors)
+      check after.edge == AutoHideEdge.Left
+      # And it is a working pane, not a dead restored tab: this launch's live
+      # element, the standalone mark, and a config Unpin can use (#692).
+      check after.standalone
+      check after.liveElement == fresh
+      check configComponentLabel(after.config) == ProblemsLabel
+
+    test "every edge survives, and an untouched default pane stays on Bottom":
+      for target in [AutoHideEdge.Left, AutoHideEdge.Right, AutoHideEdge.Bottom]:
+        freshWorld()
+        registerProblems(newStubElement(cstring"p0"))
+        registerBuild(newStubElement(cstring"b0"))
+        repinPanelToEdge(
+          autoHideState.findPanelByContent(Content.BuildErrors), target)
+        relaunch()
+        registerProblems(newStubElement(cstring"p1"))
+        registerBuild(newStubElement(cstring"b1"))
+        # No duplicate entry for either pane.
+        check autoHideState.panels.len == 2
+        check autoHideState.findPanelByContent(Content.BuildErrors).edge == target
+        check autoHideState.findPanelByContent(Content.Build).edge ==
+          AutoHideEdge.Bottom
+
+    test "the strip order and the overlay size survive with the edge":
+      ## §6.3 saves the ORDER too.  The adoption must keep the restored entry
+      ## where it was rather than append a fresh one after the others.
+      freshWorld()
+      registerBuild(newStubElement(cstring"b0"))
+      registerProblems(newStubElement(cstring"p0"))
+      let problems = autoHideState.findPanelByContent(Content.BuildErrors)
+      problems.overlayWidth = 333
+      repinPanelToEdge(problems, AutoHideEdge.Right)
+      repinPanelToEdge(
+        autoHideState.findPanelByContent(Content.Build), AutoHideEdge.Right)
+      relaunch()
+      # Registered in the OPPOSITE order to the saved one, as a different
+      # `sharedDefaultDocked` order would.
+      registerProblems(newStubElement(cstring"p1"))
+      registerBuild(newStubElement(cstring"b1"))
+      check autoHideState.panels.len == 2
+      check autoHideState.panels[0].content == Content.Build
+      check autoHideState.panels[1].content == Content.BuildErrors
+      check autoHideState.panels[1].overlayWidth == 333
+      check autoHideState.panels[1].edge == AutoHideEdge.Right
+
+    test "a pane already live in this process is not re-registered":
+      ## The skip that stops a second `initLayout` (a new session in the same
+      ## window) from duplicating the pane still holds.
+      freshWorld()
+      let first = newStubElement(cstring"first")
+      registerProblems(first)
+      registerProblems(newStubElement(cstring"second"))
+      check autoHideState.panels.len == 1
+      check autoHideState.panels[0].liveElement == first
+
   suite "independent auto-hide presentation persistence":
     test "empty panel collections round-trip all four mode combinations":
       for left in [false, true]:
@@ -528,7 +651,7 @@ else:
       # The GoldenLayout registration still routes through it...
       let registration = region(
         body, "registerComponent(cstring\"genericUiComponent\")", "\nproc ")
-      check registration.contains("mountPaneForState(state)")
+      check registration.contains("mountPaneForState(state, ")
       # ...and so does the reveal of a panel rebuilt from its config.
       let onShown = region(body, "autoHideState.onPanelShown = proc",
                            "\n  autoHideState.onChanged = proc")
@@ -538,12 +661,14 @@ else:
     test "the mount dispatch still carries its arms":
       ## POSITIVE CONTROL for the case above (§4): "there is exactly one
       ## `mountPaneForState`" and "the registration calls it" are both
-      ## satisfied by an empty proc.  These are three of the panes the factory
-      ## is known to be the only mount site for.
+      ## satisfied by an empty proc.  The panel host's panes are mounted into
+      ## the restored container found in the active tab; the shell and the
+      ## caption-bar progress pane are mounted by their own arms.
       let dispatch = codeOnly(region(source(LayoutPath),
         "proc mountPaneForState", "\nproc "))
-      check dispatch.contains("tryMountIsoNimStatePanel()")
-      check dispatch.contains("tryMountIsoNimCalltrace()")
+      check dispatch.contains("findPaneHost(containerId, data.activeSessionIndex)")
+      check dispatch.contains("ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)")
+      check dispatch.contains("createShell(paneHost)")
       check dispatch.contains("discard component.afterInit()")
 
     test "restoreAutoHideState no longer promises a fallback that does not exist":
@@ -559,3 +684,45 @@ else:
       # The restore still leaves the element nil — a DOM node cannot be
       # persisted — which is exactly why the reveal has to build one.
       check restore.contains("liveElement: nil")
+
+  suite "#807 the launch-time registration adopts a saved default pane (source contract)":
+    ## The JS half above drives `addStandaloneAutoHidePanel`; the 500 ms
+    ## registration loop that calls it is a closure inside `initLayout` and
+    ## cannot run headlessly.  Before #807 that loop DROPPED a restored entry
+    ## for one of the four default panes before registering it on Bottom, so
+    ## the adoption the JS half proves would never have been reached.
+
+    test "the loop does not drop a restored entry before registering it":
+      let body = codeOnly(source(LayoutPath))
+      let loop = region(body, "for panelDef in standaloneAutoHidePanels:",
+                        "let glContainerDiv")
+      # POSITIVE CONTROL: this is the loop's existing-entry check.
+      check loop.contains("findPanelByContent(panelDef.content)")
+      check not loop.contains("filterIt")
+
+    test "a saved layout holding the pane as a tab still drops the entry":
+      ## The one case the restored entry is stale: the saved GoldenLayout
+      ## tree has the pane as a tab, and the branch pins THAT one.  Left in
+      ## place, the restored entry would shadow the pin in
+      ## `findPanelByContent`.
+      let body = codeOnly(source(LayoutPath))
+      let glBranch = region(body, "let glContainerDiv",
+                            "let wrapper = kdom.document.createElement")
+      # POSITIVE CONTROL: this is the branch that pins the GL tab.
+      check glBranch.contains("pinPanel(layout, component.layoutItem")
+      check glBranch.contains("filterIt(it != restoredEntry)")
+      check glBranch.find("filterIt(it != restoredEntry)") <
+        glBranch.find("pinPanel(layout, component.layoutItem")
+
+    test "the registration still goes through addStandaloneAutoHidePanel":
+      let body = codeOnly(source(LayoutPath))
+      let loop = region(body, "for panelDef in standaloneAutoHidePanels:",
+                        ", 500)")
+      check loop.contains("addStandaloneAutoHidePanel(")
+
+    test "serializeAutoHideState no longer skips standalone panels":
+      let body = codeOnly(source(AutoHidePath))
+      let serialize = region(body, "proc serializeAutoHideState*", "\nproc ")
+      # POSITIVE CONTROL: the region is the loop that writes panels.
+      check serialize.contains("panelArray.push(obj)")
+      check not serialize.contains("panel.standalone")

@@ -120,8 +120,10 @@
     //   border-right: 3px solid colors-ui-border-primary
     //   text-align: right !important
 
+    // The active line's number: brighter than its neighbours on the dark
+    // ground; body text on the light one (`by-mode`, defaults.styl).
     .active-line-number
-      color: #c6c6c6 !important
+      color: by-mode(#c6c6c6, colors-ui-text-primary-body) !important
 
     .view-lines
       background-color: colors-ui-surface-input-default

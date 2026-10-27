@@ -64,16 +64,30 @@ export class EventLogPane {
     return m ? parseInt(m[1], 10) || 0 : 0;
   }
 
+  /**
+   * The footer's "to" counter, read from its own element. The footer is
+   * `<span>Rows</span><input/><span>to</span><div>END</div><span>of</span>
+   * <div>COUNT</div>` (`isonim_event_log_view.nim`), whose `textContent` has
+   * no whitespace between the words and the numbers ("Rowsto14of80"), so a
+   * regex over the text cannot find them.
+   */
   async toRow(): Promise<number> {
-    const text = (await this.rowsInfoContainer().textContent()) ?? "";
-    const m = text.match(/(\d*)\sof/);
-    return m ? parseInt(m[1], 10) || 0 : 0;
+    const text =
+      (await this.rowsInfoContainer()
+        .locator(".data-tables-footer-end-row")
+        .first()
+        .textContent()) ?? "";
+    return parseInt(text.trim(), 10) || 0;
   }
 
+  /** The footer's total ("of") counter. See `toRow`. */
   async ofRows(): Promise<number> {
-    const text = (await this.rowsInfoContainer().textContent()) ?? "";
-    const m = text.match(/of\s(\d*)/);
-    return m ? parseInt(m[1], 10) || 0 : 0;
+    const text =
+      (await this.rowsInfoContainer()
+        .locator(".data-tables-footer-rows-count")
+        .first()
+        .textContent()) ?? "";
+    return parseInt(text.trim(), 10) || 0;
   }
 
   private eventElementRoots(): Locator {

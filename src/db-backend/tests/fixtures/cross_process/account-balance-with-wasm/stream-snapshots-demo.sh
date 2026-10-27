@@ -85,13 +85,15 @@ CODETRACER_ROOT="$(cd "$FIXTURE_DIR/../../../../../.." && pwd -P)"
 source "$CODETRACER_ROOT/ci/lib/newest-build.sh"
 WORKSPACE_ROOT="$(cd "$CODETRACER_ROOT/.." && pwd -P)"
 
-JS_RECORDER="${CODETRACER_JS_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-js-recorder}"
+# shellcheck source=scripts/js-recorder-path.sh
+source "$CODETRACER_ROOT/scripts/js-recorder-path.sh"
+JS_RECORDER_CLI="$(js_recorder_cli "$WORKSPACE_ROOT")"
 WASM_INSTRUMENTER="${CODETRACER_WASM_INSTRUMENTER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-instrumenter}"
 WASM_RECORDER="${CODETRACER_WASM_RECORDER_PATH:-$WORKSPACE_ROOT/codetracer-wasm-recorder}"
 # `vite.config.js` resolves the recorder runtimes from these when set,
 # which is what lets the page be built from a scratch directory instead of
 # its fixed depth under the workspace root.
-export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER"
+export CODETRACER_JS_RECORDER_PATH="$JS_RECORDER_CLI"
 export CODETRACER_WASM_INSTRUMENTER_PATH="$WASM_INSTRUMENTER"
 
 BACKEND_PORT="${DEMO_BACKEND_PORT:-8080}"
@@ -365,7 +367,7 @@ wait_for_port "$RECORD_WEB_PORT" "record-web" || exit 1
 
 BACKEND_OUT="$SCRATCH/backend"
 mkdir -p "$BACKEND_OUT"
-setsid env DEMO_BACKEND_PORT="$BACKEND_PORT" node "$JS_RECORDER/packages/cli/dist/index.js" record \
+setsid env DEMO_BACKEND_PORT="$BACKEND_PORT" node "$JS_RECORDER_CLI" record \
 	--out-dir "$BACKEND_OUT" \
 	"$FIXTURE_DIR/backend/server.js" >"$SCRATCH/backend.log" 2>&1 &
 BACKEND_PID=$!

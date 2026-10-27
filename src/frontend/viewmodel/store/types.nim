@@ -117,6 +117,14 @@ type
       ## Live RR traces use this frame depth when jumping from a calltrace row.
       ## Materialized traces can leave it at the default 0 because they jump by
       ## step/tick instead.
+    replayPosition*: string
+      ## A native call-stack row's exact stop, as the replay worker stamped it
+      ## (the backend's `Location.replayPosition`): opaque here, and sent
+      ## back unchanged with the row's `ct/calltrace-jump`
+      ## (`calltrace_vm.calltraceJumpArgs`), so the worker can return to the
+      ## stop the row was loaded at. The tick cannot: every stop between two
+      ## MCR events shares one geid, and branch-free code shares one rr tick
+      ## count (Click-Navigation.md §3.3). Empty for every other row.
 
   # -------------------------------------------------------------------
   # Aggregate state objects — one per logical domain
@@ -159,6 +167,39 @@ type
     rlsStreaming
     rlsComplete
     rlsError
+
+  StopLocation* = object
+    ## The debugger's stop as an editor shows it: the move's whole location
+    ## (the engine's `MoveState.location`), the C-level location a Nim
+    ## recording also stops at (`cLocation`), and the instruction offset of
+    ## the selected frame (`frameInfo`). `DebuggerState` carries the position
+    ## every pane follows; this carries what only an editor needs to place
+    ## the execution line in a source, a C source, a macro expansion, an
+    ## instruction listing or a call's own function body.
+    path*: string
+    line*: int
+    highLevelLine*: int
+    functionName*: string
+    key*: string
+      ## The call the stop is in.
+    functionFirst*: int
+    functionLast*: int
+      ## The first and last line of that call's function.
+    asmName*: string
+      ## The function's name in the instruction listing.
+    isExpanded*: bool
+    expansionFirstLine*: int
+      ## A macro expansion's first line, when the stop is inside one.
+    rrTicks*: uint64
+    cPath*: string
+    cLine*: int
+    cAsmName*: string
+    cFunctionName*: string
+    cKey*: string
+      ## The C-level function and call a Nim recording's stop is in — what
+      ## its low-level code is loaded for (`ReplayDataStore.asmFunction`).
+    frameOffset*: int
+      ## The selected frame's instruction offset, -1 for none.
 
   DebuggerState* = object
     ## Snapshot of the debugger's position in the recording.
@@ -246,6 +287,12 @@ type
       ## each host reimplementing the split (which is how the headless
       ## surface came to ask for no watches at all while the GUI asked for
       ## them and threw the answers away).
+    moreElements*: bool
+      ## The locals budget cut this collection short: `children` holds its
+      ## first elements and the rest are fetched on demand
+      ## (`StateVM.loadMore`, `ct/load-value-elements`).
+    elementsTotal*: int
+      ## With `moreElements`: the collection's full length; 0 otherwise.
 
   EventLogRow* = object
     ## One row in the event-log panel.
@@ -287,6 +334,14 @@ type
     line*: int
     value*: string
     rrTicks*: uint64
+    noPosition*: bool
+      ## The producer reported no position for this event (no
+      ## `directLocationRRTicks`, or a negative one). `rrTicks` is then 0 and
+      ## means nothing: the row is shown as recorded, but it is not a place to
+      ## go, so no front-end may navigate to it. Kept as a fact, the way
+      ## `ReplayDataStore.positionReported` keeps "no answer yet" apart from
+      ## tick 0. False by default, so a row built anywhere else stays a
+      ## navigable one.
     maxRRTicks*: uint64
     sourceGeneration*: int
     sourceDigest*: string
@@ -321,6 +376,12 @@ type
       ## Alt+click (`ui/editor.lineActionClickAt`, Column-Aware Navigation
       ## M6), which the replay stops at only on a step at that column. 0 (the
       ## zero value, every other producer) is a line breakpoint.
+    condition*: string
+      ## A breakpoint's CONDITION (Column-Aware Navigation M9): the engine
+      ## stops only at a step where it holds. "" for an unconditional one.
+    logMessage*: string
+      ## A LOGPOINT's message (M10): passing the line logs it and does not
+      ## stop. "" for a breakpoint that stops.
 
     # -- PLAT-11 -----------------------------------------------------------
     #
@@ -348,6 +409,13 @@ type
     detail*: string
       ## Why, for a point that did not resolve cleanly. What the user needs in
       ## order to fix the definition; empty for `resolved`.
+    expression*: string
+      ## A TRACEPOINT's expression — what a sweep evaluates at every step of
+      ## its line. Kept apart from `label`, which a definition may name
+      ## differently, because the program menu's "Run All Tracepoints" sweeps
+      ## the enabled rows AGAIN and must send what the user typed, not what
+      ## the pane shows (`enabledTracepointSpecs`). "" for a breakpoint, and
+      ## for a row no producer gave one.
 
   TracepointSweepSpec* = object
     ## One tracepoint to run over the whole recording.
@@ -375,7 +443,12 @@ type
     path*: string
     line*: int
     values*: seq[(string, string)]
-      ## The locals the expression named, as ``(name, rendered)``.
+      ## The locals the expression named, as ``(name, rendered)`` — once
+      ## ``valuesLoaded``.
+    valuesLoaded*: bool
+      ## ``values`` was read. A sweep answers each hit's tick and location;
+      ## the locals of the hits a pane shows are read by window
+      ## (Viewport-Driven-Loading, Decided Q4).
     errorMessage*: string
 
   TermColorKind* = enum
@@ -545,27 +618,46 @@ type
   # -------------------------------------------------------------------
   # Search results panel value types
   #
-  # The Search Results panel renders a flat list of file/line/snippet
-  # rows produced by a workspace-wide search (``data.services.search``
-  # in the legacy world).  ``SearchResultLine`` is the simple, platform-
-  # neutral shape the view layer needs without dragging the JS-only
-  # ``SearchResult`` Karax record into the ViewModel layer.
+  # The Find in Files pane renders file/line/snippet rows produced by the
+  # one search runner (``host/find_in_files``), on every front-end.
   # -------------------------------------------------------------------
 
+  RecordedSymbol* = object
+    ## One function the recording called (`ct/load-symbols`): what the
+    ## omnibar's symbol search finds, and the tick of its first call, where
+    ## choosing it goes.
+    name*: string
+    path*: string
+    line*: int
+    firstCallTicks*: int64
+
   SearchResultLine* = object
-    ## One row in the Search Results panel.  Mirrors the legacy
-    ## ``SearchResult`` object in ``frontend/types.nim`` but uses
-    ## ``string`` instead of ``cstring`` so the same value works on
-    ## both the native and JS backends.
+    ## One row of the Find in Files pane: the line ``line`` (1-based) of
+    ## ``path``, whose text is ``text``. Plain ``string`` fields, so the
+    ## same value is built by the runner and drawn by every front-end on
+    ## both backends.
     ##
-    ## ``text`` is the matched line snippet (the panel highlights any
-    ## occurrence of the active query inside it).  ``path`` is the
-    ## absolute / project-relative source path; clicking a row asks
-    ## the backend to navigate to ``path : line`` via
-    ## ``ct/jump-location``.  ``line`` is 1-based.
+    ## ``path`` is the source path as the recording names it (the
+    ## materialised ``files/`` prefix already removed), which is what a
+    ## click opens.
+    ##
+    ## ``matchStart`` / ``matchLength`` are the line's FIRST match, as byte
+    ## offsets into ``text`` — what the runner found, from ``rg --json``'s
+    ## submatches or from the walker's matcher. A row with ``matchLength``
+    ## 0 carries no match position.
     text*: string
     path*: string
     line*: int
+    matchStart*: int
+    matchLength*: int
+
+  TextMatchOptions* = object
+    ## Find in Files' toggles (Find-And-Incremental-Search.md §5.1), the
+    ## pane's state and the runner's input. The zero value is the desktop's
+    ## default: a literal, case-insensitive, any occurrence.
+    caseSensitive*: bool
+    wholeWord*: bool
+    regex*: bool
 
   # -------------------------------------------------------------------
   # No-source panel value types
@@ -698,12 +790,10 @@ type
   # -------------------------------------------------------------------
   # Low Level Code panel — assembly / IR view.
   #
-  # Mirrors the legacy ``Instruction`` / ``Instructions`` records in
-  # ``common_types/language_features/code.nim`` but uses ``string``
-  # instead of ``langstring`` so the same value works on both native
-  # and JS backends without conversion noise.  Used by
-  # ``LowLevelCodeVM`` to drive the IsoNim view that replaces the
-  # legacy Karax ``method render`` on ``LowLevelCodeComponent``.
+  # The engine's ``Instruction`` / ``Instructions`` (``task.rs``), decoded
+  # straight from the ``ct/load-asm-function`` answer by
+  # ``LowLevelCodeVM.instructionListOf`` with ``string`` fields, so the same
+  # value works on the native and JS backends.
   # -------------------------------------------------------------------
 
   LowLevelInstruction* = object
@@ -730,6 +820,24 @@ type
     address*: int
     instructions*: seq[LowLevelInstruction]
     error*: string
+
+  AsmFunctionLocation* = object
+    ## The function whose low-level code the debugger is in, as the move that
+    ## reached the stop reported it — what `ct/load-asm-function` asks for
+    ## (`FunctionLocation` in `src/db-backend/src/task.rs`) and the line the
+    ## listing marks. For a Nim recording the assembly is the generated C's,
+    ## so this is the stop's C-level location (`StopLocation.cPath` …), as
+    ## the desktop's low-level pane chose it.
+    path*: string
+    name*: string
+    key*: string
+      ## The call's key; the engine resolves the listing from it.
+    line*: int
+      ## The line within `path` the debugger is at: the instructions generated
+      ## from it are the active rows.
+    forceReload*: bool
+      ## A Noir recording asks again on every move (the engine's per-move
+      ## listing).
 
   # -------------------------------------------------------------------
   # HTTP Request panel — captured HTTP request inspector.
@@ -805,6 +913,9 @@ type
     isOpen*: bool
     status*: string
     externalTracePath*: string
+    seekUnavailableReason*: string
+      ## Nonempty when the recorder explicitly reports no handler source step.
+      ## Empty for older recordings and requests with a usable handler entry.
 
   # -------------------------------------------------------------------
   # Welcome screen — recent traces, recent folders, start options,
@@ -974,6 +1085,10 @@ type
     line*: int
     functionName*: string
     localsText*: string
+    localsLoaded*: bool
+      ## ``localsText`` was read. A sweep answers each hit's tick and
+      ## location; the pane reads the locals of the rows it shows by window
+      ## (Viewport-Driven-Loading, Decided Q4).
     eventId*: int
     tracepointId*: int
 
@@ -1057,9 +1172,9 @@ type
   # value type works on both ``test-vm-native`` and ``test-vm-js``
   # without ``cstring`` / ``langstring`` conversion noise.
   #
-  # NOTE: rich jstree-style rendering (animated open/close, contextmenu
-  # plugin, search plugin, drag-and-drop) remains a follow-up.  The
-  # value carries enough state for the IsoNim view to render a
+  # NOTE: jstree's animated open/close, search plugin and drag-and-drop
+  # have no IsoNim counterpart yet (the row context menu does: see
+  # ``filesystem_vm.fileTreeMenu``).  The value carries enough state for the IsoNim view to render a
   # collapsible tree with one row per entry, optional devicon class,
   # and a diff-class modifier so the view can apply the legacy
   # ``diff-file-added`` / ``diff-file-changed`` / ``diff-file-deleted``
@@ -1336,6 +1451,16 @@ type
     thinkingEndedAt*: float
     toolName*: string
     createdAt*: float
+    failed*: bool
+      ## #862: the agent refused or aborted this turn — its `session/prompt`
+      ## was answered with an error rather than a stop reason.  This is
+      ## `AgentFailed` ("Task failed with error") in
+      ## `DeepReview/Agentic-Coding-Integration.md` §3.2, painted with §3.3's
+      ## red X.  Only ever set on an agent message.
+    errorMessage*: string
+      ## The agent's reason when `failed`, shown verbatim.  May be empty when
+      ## the agent gave none; the view then says so rather than showing
+      ## nothing.
     duration*: float
       ## Seconds the agent spent generating this response. Set when stopReason
       ## arrives; 0.0 while streaming or for user messages.
@@ -1578,7 +1703,11 @@ proc `==`*(a, b: AgentActivityMessageEntry): bool {.noSideEffect.} =
     a.thinkingEndedAt == b.thinkingEndedAt and
     a.toolName == b.toolName and
     a.toolCallId == b.toolCallId and
-    a.status == b.status
+    a.status == b.status and
+    # The messages signal notifies only on a difference under this `==`, so
+    # a finished turn that turns failed (#862) must compare unequal.
+    a.failed == b.failed and
+    a.errorMessage == b.errorMessage
 
 proc `==`*(a, b: AgentActivityTerminalEntry): bool {.noSideEffect.} =
   a.id == b.id and a.shellId == b.shellId

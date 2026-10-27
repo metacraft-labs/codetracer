@@ -154,8 +154,9 @@ import isonim/viewmodel
 
 import ../../../ct_test/contracts
 import test_run_summary_vm
+import table_fit
 
-export test_run_summary_vm
+export test_run_summary_vm, table_fit
 
 type
   RunTestsProc* = proc(): string
@@ -556,6 +557,11 @@ const
     ## (`Testing/Verification-Harness-Traps.md` §30).
   RunInProgressText* = "A test run is already in progress"
   NeverRecordedText* = "this test has no recording yet"
+  NoShiftRecordAgainText* = "Press ⟳ to record it again first."
+    ## The open title's last clause on a front-end where Shift cannot arm
+    ## `⏵` — the terminal (`Test-Results-Pane.md` §8.4): a terminal reports
+    ## no key release, and a Shift-modified press belongs to the terminal's
+    ## own menu. `⟳` then `⏵` is the same act, so the clause names `⟳`.
   RecordingDiscardedText* = "this test ran, but no recording was kept"
     ## THE STATE THAT IS NOT "NEVER RUN", and the reason it has its own
     ## sentence. A row that ran and whose recording is gone looks identical to
@@ -736,7 +742,8 @@ proc openButtonMark*(vm: TestResultsVM; row: TestResultsRow): string =
   of obmRefreshAndOpen: "⟳⏵"
   of obmRecordAndOpen: "⏺⏵"
 
-proc openButtonTitle*(vm: TestResultsVM; row: TestResultsRow): string =
+proc openButtonTitle*(vm: TestResultsVM; row: TestResultsRow;
+                      shiftReachable = true): string =
   ## What `⏵` will do, or why it will not.
   ##
   ## THE UNSHIFTED SENTENCE NAMES THE MODIFIER. That clause is the only thing
@@ -759,7 +766,9 @@ proc openButtonTitle*(vm: TestResultsVM; row: TestResultsRow): string =
   of obmOpenExisting:
     "Open the recording of " & row.name &
       (if row.recordedAtText.len > 0: " from " & row.recordedAtText else: "") &
-      " — nothing is re-run. Hold Shift to record it again first."
+      " — nothing is re-run. " &
+      (if shiftReachable: "Hold Shift to record it again first."
+       else: NoShiftRecordAgainText)
   of obmRefreshAndOpen:
     "Record " & row.name & " again and open the NEW recording, replacing " &
       (if row.recordedAtText.len > 0: "the one from " & row.recordedAtText
@@ -815,6 +824,137 @@ proc triggerOpen*(vm: TestResultsVM; row: TestResultsRow) =
     let action = vm.recordAndOpenRecording.val
     if not action.isNil:
       action(row.testId, row.selector)
+
+# ---------------------------------------------------------------------------
+# What every front-end draws — the words and marks, in ONE place
+#
+# These lived in the desktop's view (`views/isonim_test_results_view.nim`)
+# until PLAT-53, where only the desktop could read them. The terminal's pane
+# and the GPUI window draw the same marks, locations, durations, ▶ title and
+# empty sentence, so they moved here (`Test-Results-Pane.md` §8.4); the view
+# re-exports them and its DOM is unchanged.
+# ---------------------------------------------------------------------------
+
+const
+  EmptyStateText* = "No tests found in this project."
+    ## The pane's empty state.
+  RunTestsTitle* = "Run the tests (nargo test)"
+    ## The ▶'s title when it can run.
+  RunButtonLabel* = "\u25b6"
+    ## The ▶ itself.
+
+proc stateMark*(state: TestResultsRowState): string =
+  ## The glyph §1a's mock-up uses, extended to the states a real run has.
+  ## `·` for not-run rather than a blank, so every row has a mark column and
+  ## the list does not look ragged.
+  case state
+  of trsNotRun: "·"
+  of trsRunning: "…"
+  of trsPassed: "✓"
+  of trsFailed: "✗"
+  of trsSkipped: "–"
+  of trsErrored: "!"
+  of trsCancelled: "×"
+
+proc rowWhere*(row: TestResultsRow): string =
+  ## `file:line`, `file`, or "" for a row the catalog did not predict.
+  if row.file.len == 0: ""
+  elif row.line > 0: row.file & ":" & $row.line
+  else: row.file
+
+proc rowDuration*(row: TestResultsRow): string =
+  ## Empty until the test has actually run. "0 ms" against a test nobody
+  ## started is a measurement the pane did not make.
+  if row.state == trsNotRun: ""
+  else: formatDurationMs(row.durationMs)
+
+proc runButtonTitle*(vm: TestResultsVM): string =
+  ## WHY the ▶ is disabled, in its title — the three cases are different
+  ## problems with different remedies and a single greyed control that said
+  ## nothing would make all three look like the same dead affordance.
+  ##
+  ## The two fixed sentences are this module's constants: `RunInProgressText`
+  ## is also what the per-row controls say in the same state, and
+  ## `NoRunHostText` is what `desktop_test_host` returns when it is built
+  ## without a dispatch. One string each, one place each.
+  if vm.inFlight.val:
+    RunInProgressText
+  elif vm.runAbsence.val.len > 0:
+    vm.runAbsence.val
+  elif vm.runTests.val.isNil:
+    NoRunHostText
+  else:
+    RunTestsTitle
+
+# ---------------------------------------------------------------------------
+# The native front-ends' list (`Test-Results-Pane.md` §8.4)
+#
+# The desktop's pane is a DOM: a header, a body of rows (each failed row's
+# message under it), the failure block, the absence line, the empty state.
+# The terminal and the GPUI window draw the same parts as ONE list of rows of
+# a fixed pitch below the header, so a press and the drawing go through one
+# layout and one scrollbar covers it all. `displayRows` is that list; each
+# front-end wraps a text row to its own width (`table_overflow.wrapCells`).
+# ---------------------------------------------------------------------------
+
+type
+  TestResultsDisplayKind* = enum
+    tdRow = "row"
+      ## One test (`row` indexes `vm.rows`).
+    tdMessage = "message"
+      ## One line of that test's message, drawn under it in the error colour.
+    tdFailure = "failure"
+      ## One run-level diagnostic of the failure block.
+    tdAbsence = "absence"
+      ## Why a run cannot be started here.
+    tdEmpty = "empty"
+      ## `EmptyStateText`.
+
+  TestResultsDisplayRow* = object
+    kind*: TestResultsDisplayKind
+    row*: int
+      ## tdRow / tdMessage: the index into `vm.rows`; -1 otherwise.
+    text*: string
+      ## tdMessage / tdFailure / tdAbsence / tdEmpty: the line.
+
+proc displayRowsOf*(rows: seq[TestResultsRow]; failure: seq[string];
+                    absence: string): seq[TestResultsDisplayRow] =
+  ## The list, in the desktop's order: each test and its message lines, the
+  ## failure block, the absence, the empty state (only with no rows).
+  for i, row in rows:
+    result.add TestResultsDisplayRow(kind: tdRow, row: i)
+    if row.message.len > 0:
+      for line in row.message.splitLines():
+        result.add TestResultsDisplayRow(kind: tdMessage, row: i, text: line)
+  for line in failure:
+    for part in line.splitLines():
+      result.add TestResultsDisplayRow(kind: tdFailure, row: -1, text: part)
+  if absence.len > 0:
+    result.add TestResultsDisplayRow(kind: tdAbsence, row: -1, text: absence)
+  if rows.len == 0:
+    result.add TestResultsDisplayRow(kind: tdEmpty, row: -1,
+                                     text: EmptyStateText)
+
+proc displayRows*(vm: TestResultsVM): seq[TestResultsDisplayRow] =
+  displayRowsOf(vm.rows.val, vm.runFailure.val, vm.runAbsence.val)
+
+proc displayRowOf*(display: seq[TestResultsDisplayRow]; row: int): int =
+  ## The list row of test `row`, -1 when it is not listed.
+  for i, d in display:
+    if d.kind == tdRow and d.row == row:
+      return i
+  -1
+
+proc rowOfTest*(vm: TestResultsVM; testId: string): int =
+  ## The index in `vm.rows` of `testId`, -1 when none.
+  for i, row in vm.rows.val:
+    if row.testId == testId:
+      return i
+  -1
+
+# The five columns' widths are `table_fit.testResultsFit` (beside the other
+# panes' declarations, so the terminal's painter reaches it through the SDK
+# facade).
 
 proc ingestEvent*(vm: TestResultsVM; event: TestEvent) =
   ## Fold one runner event into the run. The fold is

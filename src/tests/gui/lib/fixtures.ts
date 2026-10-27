@@ -28,6 +28,7 @@ import {
   type ElectronApplication,
 } from "@playwright/test";
 import { _electron, chromium } from "playwright";
+import { ctHostPageUrl, withCtHostSessionSecret } from "./ct-host-session";
 
 import { getFreeTcpPort } from "./port-allocator";
 import { captureFailureDiagnostics } from "./test-diagnostics";
@@ -36,8 +37,7 @@ import { requiresRR } from "./lang-support";
 import { ctUserConfigDir, ctUserDataDir } from "./ct-home";
 import {
   ensureDefaultConfig,
-  ensureDefaultLayout,
-  removeUserLayout,
+  prepareUserLayout,
   resetAutoHideState,
   resetEditLayout,
   restoreUserLayout,
@@ -53,6 +53,8 @@ import {
   LIMIT_CT_HOST_STARTUP_MS,
   timed,
 } from "./performance-limits";
+import { deploymentModeFromEnv, type DeploymentMode } from "./deployment-mode";
+import { assertHomeFitsSocketBound, scratchBase } from "./socket-path-bound";
 
 // ---------------------------------------------------------------------------
 // Platform detection
@@ -78,10 +80,17 @@ const codetracerPrefix =
   process.env.CODETRACER_BUILD_DIR && process.env.CODETRACER_BUILD_DIR.length > 0
     ? process.env.CODETRACER_BUILD_DIR
     : path.join(codetracerInstallDir, "src", "build-debug");
+// Both scratch homes are made under `scratchBase()` — `/tmp` on POSIX, not
+// `os.tmpdir()`. The product binds Unix sockets under `CODETRACER_HOME`
+// (`$CODETRACER_HOME/tmp/session-manager/<pid>/<id>.sock`), a socket address
+// holds 104 bytes on macOS, and a home in macOS's per-user `TMPDIR` (deeper
+// still inside a nix shell) left no room: the session manager refused the
+// socket and every spec drove a product with no replay backend
+// (`lib/socket-path-bound.ts`).
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const guiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME ??
-  fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-gui-xdg-config-"));
+  fs.mkdtempSync(path.join(scratchBase(), "codetracer-gui-xdg-config-"));
 const ownsGuiTestXdgConfigHome =
   process.env.CODETRACER_GUI_TEST_XDG_CONFIG_HOME === undefined;
 process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
@@ -94,9 +103,27 @@ process.env.XDG_CONFIG_HOME = guiTestXdgConfigHome;
 const originalCodetracerHome = process.env.CODETRACER_HOME;
 const guiTestCodetracerHome =
   process.env.CODETRACER_GUI_TEST_CODETRACER_HOME ??
-  fs.mkdtempSync(path.join(os.tmpdir(), "codetracer-gui-home-"));
+  fs.mkdtempSync(path.join(scratchBase(), "codetracer-gui-home-"));
 const ownsGuiTestCodetracerHome =
   process.env.CODETRACER_GUI_TEST_CODETRACER_HOME === undefined;
+// Before anything is launched: a home too deep for the sockets under it
+// fails every spec of this worker here, naming the socket path, its length
+// and the limit, instead of a product that opens empty or never opens. A
+// home supplied through CODETRACER_GUI_TEST_CODETRACER_HOME is held to the
+// same bound.
+assertHomeFitsSocketBound(
+  guiTestCodetracerHome,
+  ownsGuiTestCodetracerHome
+    ? "made by lib/fixtures.ts"
+    : "from CODETRACER_GUI_TEST_CODETRACER_HOME",
+);
+// Outside the OS temp directory now (on macOS `/tmp` is not `os.tmpdir()`), so
+// the home carries the marker that names it a harness's scratch home: a Nim
+// test helper a spec runs keeps it instead of replacing it with a private
+// one (`src/frontend/test_support/state_isolation.nim`).
+if (ownsGuiTestCodetracerHome) {
+  fs.writeFileSync(path.join(guiTestCodetracerHome, ".codetracer-test-home"), "");
+}
 process.env.CODETRACER_HOME = guiTestCodetracerHome;
 
 const ctBinaryName = isWindows ? "ct.exe" : "ct";
@@ -276,14 +303,20 @@ const PORT_RELEASE_DELAY_MS = 500;
 // Types
 // ---------------------------------------------------------------------------
 
-export type DeploymentMode = "electron" | "web";
+// Defined in ./deployment-mode beside the run-wide default it computes;
+// re-exported so specs keep importing it from here.
+export type { DeploymentMode };
 export type LaunchMode = "trace" | "trace-folder" | "welcome" | "edit" | "deepreview";
 
 /**
  * Configurable options set via `test.use({ ... })`.
  */
 interface CodetracerOptions {
-  /** Electron (default) or Web (ct host + chromium). */
+  /**
+   * Electron or Web (ct host + chromium). Defaults to the run-wide mode set
+   * by `CODETRACER_TEST_IN_BROWSER` (Electron when unset); a spec's own
+   * `test.use({ deploymentMode })` overrides that default.
+   */
   deploymentMode: DeploymentMode;
   /** Path to test program — relative to test-programs/ or absolute (for sibling repos). */
   sourcePath: string;
@@ -340,19 +373,30 @@ interface CodetracerOptions {
    */
   preserveEditLayout: boolean;
   /**
-   * PLAT-45: launch with NO saved layout at all — the user's
-   * `default_layout.json` is removed rather than replaced with the bundled
-   * one, so the index process copies `<prefix>/config/default_layout.json`
-   * itself on first run, exactly as it does on a machine that has never run
-   * CodeTracer. This is what makes "the generated default is the one the
-   * desktop loads" a statement about the product's own first-run path.
+   * Launch on the RAW bundled tree: `src/config/default_layout.json` is
+   * copied verbatim into the saved `default_layout.json`, so the desktop
+   * loads it as-is instead of deriving the Debug mode's default from it.
+   *
+   * Without this (the default) the saved layout is REMOVED and the launch
+   * takes the product's own first-run path, exactly as on a machine that has
+   * never run CodeTracer: the index process installs the Debug mode's default
+   * (`index/config.installModeDefault`) — TESTS a tab of the FILES stack, no
+   * CONSTRAINTS — which is what a user opens a recording with.
+   *
+   * No CodeTracer mode draws the bundled tree (`index/mode_default_layout.nim`
+   * calls it "nobody's layout": a standing TEST RESULTS stack over a
+   * CONSTRAINTS stack). Set this only in a spec whose subject is that tree.
+   * Panes the bottom auto-hide strip registers (BUILD, PROBLEMS, FIND IN
+   * FILES) are in neither tree and need no option. Contradicts
+   * `preserveUserLayout`; setting both fails the launch.
+   * See `layout-reset.prepareUserLayout`.
    */
-  noUserLayout: boolean;
+  bundledLayout: boolean;
   /**
    * PLAT-45: leave the user's saved `default_layout.json` exactly as an
-   * earlier test of the same worker left it — neither replaced with the
-   * bundled default nor removed — so a spec can observe the desktop
-   * RESTORING its own last layout on the next start.
+   * earlier test of the same worker left it — neither removed nor replaced
+   * with the bundled tree — so a spec can observe the desktop RESTORING its
+   * own last layout on the next start.
    */
   preserveUserLayout: boolean;
   /**
@@ -374,6 +418,38 @@ interface CodetracerOptions {
    * and the Monaco theme both — exactly as a user's config would select it.
    */
   configTheme: string;
+  /**
+   * Extra environment variables for the launched CodeTracer process (and so
+   * for every child it spawns).
+   *
+   * This is per test, through `test.use`, rather than through `process.env`:
+   * with `--workers=1` every spec file shares one worker process, so a spec
+   * that edited `process.env` would change the launches of the spec files
+   * that run after it. The harness's own isolation variables
+   * (`CODETRACER_HOME`, `XDG_CONFIG_HOME`, …) are applied after these and
+   * cannot be overridden from here.
+   *
+   * #862: `agent-activity/acp_prompt_failure.spec.ts` uses it to put a stub
+   * `codex-acp` first on the app's `PATH`.
+   */
+  launchEnv: Record<string, string>;
+  /**
+   * JavaScript run in every renderer document of an Electron launch BEFORE
+   * the app's own scripts, or "" for none.
+   *
+   * `page.evaluate` in a test comes too late for anything the renderer does
+   * while it starts: by the time `ctPage` is handed over, a `ct review`
+   * launch has already painted the session it loaded. A spec that has to
+   * observe that start-up installs its instrumentation here instead. It is
+   * registered on the app's browser context as soon as `_electron.launch`
+   * returns (`installRendererInitScript`), and applies to every window and
+   * navigation after that. The spec should check that its script really ran
+   * in the page it inspects (for example by a global the script sets).
+   *
+   * Per test, through `test.use`, for the reason `launchEnv` is. Web launches
+   * have no Electron context and ignore it.
+   */
+  rendererInitScript: string;
 }
 
 /**
@@ -706,6 +782,7 @@ function sleep(ms: number): Promise<void> {
  * without evaluating in the page and let us wait for the real editor window.
  */
 async function getEditorWindow(app: ElectronApplication): Promise<Page> {
+  await installRendererInitScript(app);
   await app.firstWindow({ timeout: 45_000 });
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
@@ -733,6 +810,23 @@ async function getEditorWindow(app: ElectronApplication): Promise<Page> {
 
 /** PLAT-45: the running test's `codetracerPrefixOverride`, or "". */
 let activePrefixOverride = "";
+
+/** #862: the running test's `launchEnv` (see that option), or {}. */
+let activeLaunchEnv: Record<string, string> = {};
+
+/** The running test's `rendererInitScript` (see that option), or "". */
+let activeRendererInitScript = "";
+
+/**
+ * Register the running test's `rendererInitScript` on `app`'s browser
+ * context, so it runs at document start in the editor window. Called first
+ * thing in `getEditorWindow`, which every Electron launch reaches straight
+ * after `_electron.launch` returns.
+ */
+async function installRendererInitScript(app: ElectronApplication): Promise<void> {
+  if (activeRendererInitScript.length === 0) return;
+  await app.context().addInitScript({ content: activeRendererInitScript });
+}
 
 /**
  * The `ct` a launch runs. With a `codetracerPrefixOverride` it is the
@@ -762,6 +856,9 @@ function makeCleanEnv(
   for (const [k, v] of Object.entries(process.env)) {
     if (v !== undefined) env[k] = v;
   }
+  // The test's own `launchEnv` goes on first, so every isolation variable set
+  // below still wins over it.
+  Object.assign(env, activeLaunchEnv);
   // M-REC-6: legacy CODETRACER_TRACE_ID is retired; CODETRACER_RECORDING_ID
   // is the new name.  We delete both so neither leaks into the launched
   // process from the test runner's environment.
@@ -785,6 +882,9 @@ function makeCleanEnv(
   }
   env.CODETRACER_IN_UI_TEST = "1";
   env.CODETRACER_TEST = "1";
+  // Every `ct host` these tests start is given the session secret the page
+  // URLs carry (ct-host-session.ts).
+  withCtHostSessionSecret(env);
   // Turn HMR off for ordinary GUI tests.
   //
   // `just build-once` compiles the renderer with `-d:ctHmr`, and
@@ -1557,7 +1657,7 @@ async function launchTraceWeb(
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: GOTO_TIMEOUT_MS,
       });
       connected = true;
@@ -1703,7 +1803,7 @@ async function launchTracePathWeb(tracePath: string): Promise<LaunchResult> {
   let connected = false;
   for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS && !connected; attempt++) {
     try {
-      await page.goto(`http://localhost:${httpPort}`, {
+      await page.goto(ctHostPageUrl(httpPort), {
         timeout: GOTO_TIMEOUT_MS,
       });
       connected = true;
@@ -1899,7 +1999,11 @@ export const test = base.extend<
   CodetracerWorkerFixtures
 >({
   // Options (set via test.use)
-  deploymentMode: ["electron", { option: true }],
+  // Run-wide default from CODETRACER_TEST_IN_BROWSER ("1" = web), read once
+  // when this module loads; an invalid value throws here, failing the run
+  // instead of quietly running Electron. `test.use({ deploymentMode })` in a
+  // spec still overrides it.
+  deploymentMode: [deploymentModeFromEnv(), { option: true }],
   sourcePath: ["", { option: true }],
   launchMode: ["trace" as LaunchMode, { option: true }],
   newTracePolicy: ["window" as "window" | "tab", { option: true }],
@@ -1912,13 +2016,15 @@ export const test = base.extend<
   preserveAutoHideState: [false, { option: true }],
   editLayoutPath: ["", { option: true }],
   preserveEditLayout: [false, { option: true }],
-  noUserLayout: [false, { option: true }],
+  bundledLayout: [false, { option: true }],
   preserveUserLayout: [false, { option: true }],
   // `CODETRACER_TEST_PREFIX` runs EVERY spec against a prepared prefix (e.g.
   // one from `scripts/plat45-desktop-prefix.sh` carrying this checkout's
   // desktop JavaScript) instead of the build's own; a spec's `test.use` wins.
   codetracerPrefixOverride: [process.env.CODETRACER_TEST_PREFIX ?? "", { option: true }],
   configTheme: ["", { option: true }],
+  launchEnv: [{}, { option: true }],
+  rendererInitScript: ["", { option: true }],
 
   // Fixtures
   _workerCleanup: [
@@ -2008,33 +2114,38 @@ export const test = base.extend<
         preserveAutoHideState,
         editLayoutPath: seedEditLayoutFrom,
         preserveEditLayout,
-        noUserLayout,
+        bundledLayout,
         preserveUserLayout,
         codetracerPrefixOverride,
         configTheme,
+        launchEnv,
+        rendererInitScript,
       },
       use,
       testInfo,
     ) => {
       let result: LaunchResult;
       activePrefixOverride = codetracerPrefixOverride;
+      activeLaunchEnv = launchEnv;
+      activeRendererInitScript = rendererInitScript;
 
-      // Ensure each test starts with the bundled default layout in the
-      // worker-local config directory.  Earlier tests in the same worker may
-      // have mutated the saved layout
-      // (e.g. auto-hide pin-to-edge, build/problems panel pop-out, layout
-      // resilience).  Without this reset, that mutated layout persists
-      // via default_layout.json and subsequent tests see a stale layout that
-      // may be missing the components they require (filesystem, state, etc.).
+      // Ensure each test starts from a known saved layout in the worker-local
+      // config directory.  Earlier tests in the same worker may have mutated
+      // it (e.g. auto-hide pin-to-edge, build/problems panel pop-out, layout
+      // resilience); without this reset that layout persists via
+      // default_layout.json and later tests see a stale arrangement.
+      //
+      // By default the saved layout is REMOVED, so the launch takes the
+      // product's own first-run path and opens the Debug mode's default —
+      // what a user sees. `bundledLayout` installs the raw bundled tree
+      // instead, `preserveUserLayout` keeps what an earlier launch saved
+      // (`layout-reset.prepareUserLayout`). Outside the try below on purpose:
+      // a contradictory option pair, or a bundled tree that cannot be
+      // installed, would otherwise only be logged and the spec would run on a
+      // layout it did not ask for.
+      prepareUserLayout({ bundledLayout, preserveUserLayout }, codetracerInstallDir);
       try {
         ensureDefaultConfig(codetracerInstallDir, configTheme);
-        if (preserveUserLayout) {
-          // PLAT-45: the saved arrangement is the subject; leave it.
-        } else if (noUserLayout) {
-          removeUserLayout();
-        } else {
-          ensureDefaultLayout(codetracerInstallDir);
-        }
         // The saved auto-hide state is the other half of the saved
         // arrangement — see `resetAutoHideState`. Without this a test that
         // pins a panel leaves it pinned for every later test in the worker.
@@ -2058,10 +2169,10 @@ export const test = base.extend<
           seedEditLayout(seedEditLayoutFrom);
         }
       } catch (ex) {
-        // Non-fatal: a missing bundled layout file would surface as a
+        // Non-fatal: a missing bundled config file would surface as a
         // launch-time error anyway.  Log and continue so the test still
         // produces a meaningful failure.
-        console.warn(`fixtures: ensureDefaultLayout failed: ${(ex as Error).message}`);
+        console.warn(`fixtures: resetting the saved arrangement failed: ${(ex as Error).message}`);
       }
 
       const needsRR = sourcePath ? requiresRR(sourcePath) : false;
@@ -2213,13 +2324,16 @@ export { expect } from "@playwright/test";
 // Re-export path constants for tests that need them
 export {
   codetracerInstallDir,
+  codetracerPrefix,
   testProgramsPath,
   codetracerPath,
 };
 
 // Export recordTestProgram so multi-trace tests can pre-record additional
-// programs and load them into new sessions via IPC.
-export { recordTestProgram };
+// programs and load them into new sessions via IPC, and traceFolderForId so
+// they can name the folder a recording id was written to (a session manifest
+// references its traces by folder).
+export { recordTestProgram, traceFolderForId };
 
 // Re-export performance timing utilities for use in tests
 export { timed, timedVoid } from "./performance-limits";

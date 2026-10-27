@@ -1,0 +1,14 @@
+# Control digests for run-plat71a-glyphs-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+2ea9b0a433d9232f662675650788c1f87dae5d0574d839b6644e16a31b57ea8c  src/frontend/tui/app/views/glyph_table.nim
+bedc50f5013267c4890cb878467d776f1df926ec37a883440ecc105e375d75f4  src/frontend/tui/app/views/scrollbar_styles.nim
+081fe074aef10fa7d83c7d9b7fff2445f957396631c7bb58839d82834c4f14af  src/frontend/tui/app/views/styled_row.nim
+7d2cefc9f3abb0604251187903f833ddc3b826509838c899970cc9dbc5663d67  src/frontend/tui/app/theme/degradation.nim
+1eeb5f8f80c1800e2a756a9d2118466a46d1dd940faa895aba10aeec04e156b2  src/frontend/tui/app/views/gutter.nim
+0cf18057109aaa42ed5c6824f6f19a86f74cc16109997cfbc656672d4ee66a9d  src/frontend/tui/app/views/call_trace.nim
+a41c3c30b519cd9196d1c2cddb1162e02bc8e6b55ded77938be9710b4b4b373c  src/frontend/tui/app/views/top_bar.nim
+950fa7ea3516f043674fc99f96a190e531ff9e7a0bdc7b3d6d853270379ffccb  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
+b921f0d9bad5c4caed91514491e4f6fa3f4cd0cb80a57f686605a9d1471bbbb9  src/frontend/tui/tests/test_plat71_glyph_table.nim
+23f38f31698dc392772fc930e7c9a7406e99316b7075e8b0b9c2cb6156a4ded3  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim

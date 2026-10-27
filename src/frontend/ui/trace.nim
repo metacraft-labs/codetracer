@@ -1,5 +1,5 @@
 import
-  ui_imports, value, datatable, isonim_panel_mount,
+  ui_imports, value, datatable, session_viewmodels,
   ../[ types, lang, utils, renderer, communication, dap, event_helpers ],
   ../lib/isonim_styles,
   ../../common/ct_event
@@ -12,6 +12,8 @@ import
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+from ./editor_points import gutterMarkFor, EditorMark, emNone, emBreakpoint,
+  emBreakpointDisabled, emTracepoint
 import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/viewmodels/timeline_vm import
@@ -27,20 +29,36 @@ var timelineVMStore: ReplayDataStore
 # ViewModel bridge procs — sync legacy event data into the parallel store.
 # ---------------------------------------------------------------------------
 
-proc initTimelineVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel TimelineVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel).
+var traceResultsListeners: seq[proc()]
+  ## Called whenever the trace service's sessions or their results change —
+  ## a new run, a run's results arriving, a tracepoint toggled or deleted.
+  ## The Trace Log (``ui/trace_log``) keeps the session's ``TraceLogVM`` rows
+  ## current; the Event Log (``ui/event_log``) asks for its window again,
+  ## which the engine merges the trace-log rows into.
+
+proc onTraceResultsChanged*(listener: proc()) =
+  ## Call `listener` whenever the trace results change.
+  traceResultsListeners.add listener
+
+proc traceResultsChanged() =
+  for listener in traceResultsListeners:
+    listener()
+
+proc initTimelineVMFromSession*(vm: TimelineVM) =
+  ## Hand the pane the session's `TimelineVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
   ##
-  ## If a stub-backed instance already exists (created by initTimelineVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
+  ## If a stub-backed instance already exists (created before the session
+  ## was available), it is replaced so the panel uses the real backend.
+  let store = vm.store
   if timelineVMInstance != nil:
     clog "TimelineVM: replacing existing instance with shared-store version"
     # No flag to reset — `timelinePanelIsLive` compares `mountedTimelineVM`
     # against `timelineVMInstance`, so the assignment below IS the
     # invalidation.
   timelineVMStore = store
-  timelineVMInstance = createTimelineVM(store)
+  timelineVMInstance = vm
   clog "TimelineVM: parallel ViewModel instance created (shared store)"
   # No pane mounts it: the Timeline panel is removed (2026-10-05). The VM
   # stays as the shared extent arithmetic the scrubbers and seeks read.
@@ -48,7 +66,7 @@ proc initTimelineVMWithStore*(store: ReplayDataStore) =
 proc initTimelineVM() =
   ## Lazily create the parallel TimelineVM backed by a stub
   ## BackendService.  Fallback when no shared store has been provided
-  ## via `initTimelineVMWithStore`.
+  ## via `initTimelineVMFromSession`.
   if timelineVMInstance != nil:
     return
 
@@ -71,15 +89,25 @@ proc initTimelineVM() =
   timelineVMInstance = createTimelineVM(timelineVMStore)
   clog "TimelineVM: parallel ViewModel instance created (stub backend)"
 
-proc syncTimelineDebuggerPosition(rrTicks: int, path: cstring, line: int;
+proc ownPaneStore(self: TraceComponent): ReplayDataStore =
+  ## The store of the tab that holds `self` (`session_viewmodels.ownPaneVM`).
+  let vm = ownPaneVM(self, timelineVMInstance, timelineVM)
+  if vm.isNil: nil else: vm.store
+
+proc syncTimelineDebuggerPosition(store: ReplayDataStore;
+                                  rrTicks: int, path: cstring, line: int;
                                   sourceGeneration: int = 0;
                                   sourceDigest: cstring = cstring"") =
   ## Mirror the legacy debugger position into the ViewModel store so
   ## the TimelineVM's currentPosition memo sees the updated rrTicks.
-  if timelineVMStore.isNil:
+  ##
+  ## `store` is the store of the tab whose component received the move —
+  ## that tab's, shown or not (`ownPaneStore`), never the shown tab's for
+  ## another tab's move.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  timelineVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
@@ -109,7 +137,6 @@ proc closeTrace*(self: TraceComponent)
 proc resizeTraceHandler*(self: TraceComponent)
 proc refreshTraceTableLayout*(self: TraceComponent)
 proc refreshTraceComponentLayout*(self: TraceComponent)
-proc renderTraceForExtension(self: TraceComponent)
 proc ensureMonacoEditor(self: TraceComponent)
 proc getConfiguration*(editor: MonacoEditor): MonacoEditorConfig
 proc traceBoundingClientRect(node: js): HTMLBoundingRect {.importjs:"#.getBoundingClientRect()".}
@@ -183,50 +210,6 @@ proc layoutMonacoViewZone(editor: MonacoEditor, zoneId: int) {.importjs: """
 """.}
 
 
-
-# THE VS CODE EXTENSION'S ENTRY POINTS USED TO BE HERE, and they are at the
-# BOTTOM of this file now. Moving them was not tidying: `-d:ctInExtension`
-# did not compile at all while they sat here.
-#
-#     src/frontend/ui/trace.nim(1088, 6)
-#     Error: internal error: symbol has no generated name: gutterTestLines
-#
-# Nim's JS backend generates a routine's body LAZILY, at the first place that
-# refers to it — with ONE exception: `jsgen.nim`'s `genStmt` generates an
-# `{.exportc.}` routine EAGERLY, at the `nkProcDef` itself
-# (`{sfExportc, sfCompilerProc} * s.flags == {sfExportc}` -> `genSym`), because
-# nothing inside the program need ever refer to it. Everything that routine
-# reaches is generated then and there, at the line the routine is WRITTEN.
-#
-# A module-level `var` gets its JS name only when its own `nkVarSection` is
-# generated (`genVarStmt` -> `genVarInit` -> `mangleName`). So an `{.exportc.}`
-# routine that transitively reads a `var` declared FURTHER DOWN the file asks
-# for a name that has not been assigned yet, and `genSym` raises the internal
-# error above rather than emitting a forward declaration. It is a compiler
-# limitation, not a `trace.nim` type error; nine lines reproduce it on a
-# stock `nim js` with no other flags:
-#
-#     proc later()
-#     proc entry() {.exportc.} = later()
-#     var g: int = 42
-#     proc later() = echo g
-#
-# The reference here was the one call `makeTracepointComponentForExtension`
-# makes into the rest of the module: `trace.renderTraceForExtension()`. That
-# was MEASURED, not reasoned — deleting only that call is what made the build
-# succeed. It is forward-declared at the top of this file and implemented near
-# the bottom, and by the time code generation runs the whole module has been
-# semantically checked, so `sfForward` is already cleared and the call is
-# generated on the spot instead of being deferred. Its Monaco/gutter graph
-# reaches `gutterTestLinesFor`, and thus `gutterTestLines`, which is declared
-# ~800 lines below where this block used to sit. `gutterTestLines` landed
-# after the block, so the block is what moved.
-#
-# THE RULE THIS FILE NOW KEEPS: an `{.exportc.}` routine goes AFTER everything
-# it can reach — practically, at the end of the module. `ci/test/renderer-
-# extension-build.sh` compiles this configuration so the rule cannot be broken
-# silently again; nothing did before, which is why the VS Code renderer build
-# sat broken on a mainline.
 
 proc calcTraceWidth(self: TraceComponent) =
   let editor = self.editorUI.monacoEditor
@@ -305,17 +288,18 @@ proc traceViewZoneHeight(self: TraceComponent): int =
   self.traceEditorHeight() + self.traceResultsPanelHeight() + TRACE_VIEWZONE_EXTRA_HEIGHT_PX
 
 proc focusTraceEditor(self: TraceComponent) =
+  ## Puts the caret in the tracepoint editor's input, so that typing writes
+  ## the tracepoint (Editor-Pane.md *Editor.TracepointCreation*). Monaco's
+  ## own `focus()` is the whole of it: it focuses the instance's input
+  ## element, as a click on the text does. Do not also focus a `textarea`
+  ## found under the editor's DOM node — the first one there is Monaco's
+  ## read-only IME helper, which takes no typing.
   if self.monacoEditor.isNil:
     return
 
   setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
     if not self.monacoEditor.isNil:
       self.monacoEditor.focus()
-      let domNode = self.monacoEditor.toJs.getDomNode()
-      if not domNode.isNil:
-        let textarea = domNode.querySelector("textarea")
-        if not textarea.isNil:
-          textarea.focus()
   , 1, self)
 
 proc focusTraceEditorAfterLayout(self: TraceComponent, delay: int = 0) =
@@ -591,6 +575,7 @@ proc runTracepoints*(data: Data) {.exportc.} =
     id: data.services.trace.traceSessions.len))
   data.pointList.lastTracepoint = 0
   data.pointList.redrawTracepoints = true
+  traceResultsChanged()
   data.dapApi.sendCtRequest(
     CtRunTracepoints,
     RunTracepointsArg(
@@ -604,6 +589,9 @@ method onUpdatedTrace*(traceComponent: TraceComponent, response: TraceUpdate) {.
   # var traceSession = data.services.trace.traceSessions[response.sessionID]
 
   # for tracepoint in traceSession.tracepoints:
+  if response.refreshEventLog:
+    # A tracepoint toggled or deleted: its trace-log rows left the log.
+    traceResultsChanged()
   if not response.refreshEventLog: # response.updateId <= traceSession.tracepoints[^1].tracepointId and
     let tracepoint = traceComponent.tracepoint # self.findTracepoint(traceSession, response.updateId)
     # let traceComponent =
@@ -638,6 +626,7 @@ method onTracepointResultsAggregate*(
 
   let session = data.services.trace.traceSessions[response.sessionId]
   session.results[response.sessionId] = response.results
+  traceResultsChanged()
 
   if traceComponent.tracepoint.isNil:
     return
@@ -852,8 +841,6 @@ proc enableIcon(self: TraceComponent) =
   if not iconDom.isNil:
     iconDom.innerHtml = "Disable"
 
-  if self.inExtension:
-    self.redrawForExtension()
 
 proc disableIcon(self: TraceComponent) =
   let iconDom =
@@ -862,8 +849,6 @@ proc disableIcon(self: TraceComponent) =
   if not iconDom.isNil:
     iconDom.innerHtml = "Enable"
 
-  if self.inExtension:
-    self.redrawForExtension()
 
 proc showSelectedChart(self: TraceComponent) =
   hideDomElement(self.chartTableDom)
@@ -1164,17 +1149,15 @@ proc editorLineNumber*(self: EditorViewComponent, path: cstring, line: int, isDe
       not isDeleteChunk:
     highlightHtml = cstring"<div class='gutter-highlight-active' onmousedown='event.stopPropagation()'></div>"
 
-  if self.data.services.debugger.hasBreakpoint(path, realLine):
-    let breakpoint = self.data.services.debugger.breakpointTable[path][realLine]
-
-    if breakpoint.enabled:
-      if not breakpoint.error:
-        breakpointHtml = cstring"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
-      else:
-        breakpointHtml = cstring"<div class='gutter-breakpoint-error' onmousedown='event.stopPropagation()'></div>"
-
-    else:
-      breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
+  # The line's mark is the session store's (`editor_points.gutterMarkFor`),
+  # the same `EditorMark` the terminal and GPUI draw for this line.
+  case gutterMarkFor($path, realLine)
+  of emBreakpoint:
+    breakpointHtml = cstring"<div class='gutter-breakpoint-enabled' onmousedown='event.stopPropagation()'></div>"
+  of emBreakpointDisabled:
+    breakpointHtml = cstring"<div class='gutter-breakpoint-disabled' onmousedown='event.stopPropagation()'></div>"
+  of emNone, emTracepoint:
+    discard
 
   var runTestHtml = cstring""
   if not isDeleteChunk and gutterHasTest(path, realLine):
@@ -1556,8 +1539,6 @@ proc traceSourceValue(self: TraceComponent): cstring =
   self.source
 
 proc traceEditorTheme(self: TraceComponent): cstring =
-  if self.inExtension:
-    return cstring"vs-dark"
 
   if not self.editorUI.isNil and not self.editorUI.monacoEditor.isNil:
     return self.editorUI.monacoEditor.getCurrentMonacoTheme()
@@ -1580,13 +1561,6 @@ proc traceEditorHost(self: TraceComponent): Element =
       if not host.isNil and nodeIsConnected(host):
         return cast[Element](host)
     return nil
-
-  if self.extensionRendererId.len > 0:
-    let extensionHost = document.getElementById(self.extensionRendererId)
-    if not extensionHost.isNil:
-      let host = cast[Node](cast[Node](extensionHost).findNodeInElement(cstring(&"#{self.selectorId}")))
-      if not host.isNil and nodeIsConnected(host):
-        return cast[Element](host)
 
   let host = cast[Node](document.getElementById(self.selectorId))
   if not host.isNil and nodeIsConnected(host):
@@ -1660,11 +1634,10 @@ proc mountMonacoEditor(self: TraceComponent): bool =
 
   # add trace monaco editor to the register
   # TODO: Find a better way when using extension
-  if not self.inExtension:
-    self.data.ui.traceMonacoEditors.add(self.monacoEditor)
-    self.monacoEditor.onMouseWheel(proc(e: js) =
-      e.preventDefault()
-    )
+  self.data.ui.traceMonacoEditors.add(self.monacoEditor)
+  self.monacoEditor.onMouseWheel(proc(e: js) =
+    e.preventDefault()
+  )
   # subscribe to trace monaco editor change event
   self.monacoEditor.onDidChangeModelContent(proc (event: JsObject) =
     self.error = nil
@@ -1675,8 +1648,7 @@ proc mountMonacoEditor(self: TraceComponent): bool =
 
     if self.lineCount != lineCount:
       self.lineCount = lineCount
-      if not self.inExtension:
-        self.expandWithEnter(self.traceEditorContentHeight())
+      self.expandWithEnter(self.traceEditorContentHeight())
 
     setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
       if not self.monacoEditor.isNil and not self.monacoEditor.hasTextFocus():
@@ -1929,33 +1901,7 @@ proc finishTraceDomMount(self: TraceComponent) =
   self.expanded = true
   self.focusTraceEditorAfterLayout()
 
-proc renderTraceForExtension(self: TraceComponent) =
-  if self.extensionRendererId.len == 0:
-    return
 
-  let host = document.getElementById(self.extensionRendererId)
-  if host.isNil:
-    return
-
-  if not host.findNodeInElement(cstring(fmt"#trace-{self.id}")).isNil:
-    self.bindTraceDomRefs()
-    self.refreshTraceComponentLayout()
-    return
-
-  host.innerHTML = cstring""
-  let traceNode = self.traceViewZoneBaseDom()
-  traceNode.appendChild(self.renderTraceDom())
-  host.appendChild(traceNode)
-  self.bindTraceDomRefs()
-
-  setTimeoutWithArg(proc(self: TraceComponent) {.cdecl.} =
-    self.ensureMonacoEditor()
-    self.refreshTraceComponentLayout()
-    self.focusTraceEditorAfterLayout()
-  , 0, self)
-
-method redrawForExtension*(self: TraceComponent) =
-  self.renderTraceForExtension()
 
 const TOGGLE_REPEAT_TIME_LIMIT = 100i64
 
@@ -2102,7 +2048,7 @@ proc toggleTrace*(editorUI: EditorViewComponent, name: cstring, line: int) =
 method onCompleteMove*(self: TraceComponent, response: MoveState) {.async.} =
   # Feed the same position into the parallel ViewModel store.
   initTimelineVM()
-  syncTimelineDebuggerPosition(
+  syncTimelineDebuggerPosition(self.ownPaneStore(),
     response.location.rrTicks,
     response.location.path,
     response.location.line,
@@ -2171,75 +2117,48 @@ proc closeTrace*(self: TraceComponent) =
 
   self.data.redraw()
 
-proc registerTracepointComponent*(component: TraceComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
-
-when not defined(ctInExtension):
-  # ---------------------------------------------------------------------------
-  # A REFUSED RUN MUST STOP THE PANE CLAIMING IT IS LOADING
-  #
-  # `runTracepoints` sets `isLoading` before sending `ct/run-tracepoints` and
-  # clears it in exactly two places: `onUpdatedTrace` and
-  # `onTracepointResultsAggregate`. A run the backend REFUSES emits neither —
-  # it answers `success: false` and stops — so `isLoading` stayed true and
-  # `refreshTrace` painted "Loading..." over the results panel forever. The
-  # user saw a spinner for a request that was over before it started.
-  #
-  # ## THIS IS NOT A TIMEOUT, and it must not become one
-  #
-  # A pane that gave up after N seconds would show the same thing whether the
-  # backend refused instantly or is still working — the exact ambiguity this
-  # change removes, at a smaller scale. Nothing here counts time. The arm
-  # fires on the REFUSAL ITSELF, so a slow-but-live run is untouched and keeps
-  # its spinner for as long as it genuinely takes.
-  #
-  # `tracepointError` is reused rather than a new field added: it is already
-  # the pane's channel for "this tracepoint has something to say instead of
-  # results", already rendered by `showErrorMessage` as `.trace-error`, and
-  # already cleared on the next run by `runTracepoints`. A second, parallel
-  # error field would have needed its own clearing rule and would eventually
-  # have disagreed with this one.
-  proc reportTracepointRunFailure(outcome: DapRequestOutcome) =
-    if outcome.command != cstring"ct/run-tracepoints" and
-       outcome.command != cstring"ct/setup-trace-session":
-      return
-    if data.isNil or data.ui.componentMapping[Content.Trace].isNil:
-      return
-    let text = requestFailureText(outcome)
-    for id, component in data.ui.componentMapping[Content.Trace]:
-      let trace = TraceComponent(component)
-      # ONLY THE PANES THAT WERE ACTUALLY WAITING. A tracepoint that was not
-      # part of this run has nothing to correct, and overwriting its results
-      # with someone else's failure would be a new way of lying.
-      if trace.isNil or not trace.isLoading:
-        continue
-      trace.isLoading = false
-      if not trace.tracepoint.isNil:
-        trace.tracepoint.tracepointError = text
-      trace.refreshTrace()
-
-  onCtRequestFailed(reportTracepointRunFailure)
 
 # ---------------------------------------------------------------------------
-# THE VS CODE EXTENSION'S ENTRY POINTS. Last in the module ON PURPOSE — see the
-# long note where this block used to live (just above `calcTraceWidth`). An
-# `{.exportc.}` routine is code-generated by `nim js` at the line it is
-# WRITTEN, together with everything it reaches, so it must be written after
-# everything it reaches. From here that is the whole module.
-# ---------------------------------------------------------------------------
-when defined(ctInExtension):
-  var tracepointComponentMapping* {.exportc.}: JsAssoc[cstring, JsAssoc[int, TraceComponent]] = JsAssoc[cstring, JsAssoc[int, TraceComponent]]{}
-  # var tracepointComponentSeq* {.exportc.}: seq[TraceComponent] = @[]
-  proc makeTracepointComponentForExtension*(id: cstring, line: int, name: cstring, traceId: int): TraceComponent {.exportc.} =
-    # var tracepointComponentForExtension* {.exportc.}: TraceComponent = makeTraceComponent(data, inExtension = true)
-    if not tracepointComponentMapping.hasKey(name):
-      tracepointComponentMapping[name] = JsAssoc[int, TraceComponent]{}
-    if not tracepointComponentMapping[name].hasKey(line):
-      tracepointComponentMapping[name][line] = makeTraceComponent(data, inExtension = true, traceId = traceId)
-    let trace = tracepointComponentMapping[name][line]
-    if trace.extensionRendererId.len == 0:
-      trace.extensionRendererId = id
-      trace.line = line
-      trace.name = name
-      trace.renderTraceForExtension()
-    return trace
+# A REFUSED RUN MUST STOP THE PANE CLAIMING IT IS LOADING
+#
+# `runTracepoints` sets `isLoading` before sending `ct/run-tracepoints` and
+# clears it in exactly two places: `onUpdatedTrace` and
+# `onTracepointResultsAggregate`. A run the backend REFUSES emits neither —
+# it answers `success: false` and stops — so `isLoading` stayed true and
+# `refreshTrace` painted "Loading..." over the results panel forever. The
+# user saw a spinner for a request that was over before it started.
+#
+# ## THIS IS NOT A TIMEOUT, and it must not become one
+#
+# A pane that gave up after N seconds would show the same thing whether the
+# backend refused instantly or is still working — the exact ambiguity this
+# change removes, at a smaller scale. Nothing here counts time. The arm
+# fires on the REFUSAL ITSELF, so a slow-but-live run is untouched and keeps
+# its spinner for as long as it genuinely takes.
+#
+# `tracepointError` is reused rather than a new field added: it is already
+# the pane's channel for "this tracepoint has something to say instead of
+# results", already rendered by `showErrorMessage` as `.trace-error`, and
+# already cleared on the next run by `runTracepoints`. A second, parallel
+# error field would have needed its own clearing rule and would eventually
+# have disagreed with this one.
+proc reportTracepointRunFailure(outcome: DapRequestOutcome) =
+  if outcome.command != cstring"ct/run-tracepoints" and
+     outcome.command != cstring"ct/setup-trace-session":
+    return
+  if data.isNil or data.ui.componentMapping[Content.Trace].isNil:
+    return
+  let text = requestFailureText(outcome)
+  for id, component in data.ui.componentMapping[Content.Trace]:
+    let trace = TraceComponent(component)
+    # ONLY THE PANES THAT WERE ACTUALLY WAITING. A tracepoint that was not
+    # part of this run has nothing to correct, and overwriting its results
+    # with someone else's failure would be a new way of lying.
+    if trace.isNil or not trace.isLoading:
+      continue
+    trace.isLoading = false
+    if not trace.tracepoint.isNil:
+      trace.tracepoint.tracepointError = text
+    trace.refreshTrace()
+
+onCtRequestFailed(reportTracepointRunFailure)

@@ -1,25 +1,19 @@
 import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
-  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, base_handlers, bootstrap_cache, lsp_bridge,
-  review_dataset,
+  electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, host_clients, base_handlers, bootstrap_cache, lsp_bridge,
+  review_dataset, keybindings, table_columns,
   ns9_panes,
   hcr_launch,
+  file_tree_operations,
+  tab_answers,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
   ../[ types, config, trace_metadata ],
-  ../../common/[ ct_logging, paths ]
+  ../../common/[ ct_logging, paths ],
+  ../viewmodel/host/find_in_files
 
 var Object {.importc, nodecl.}: JsObject
-
-proc fsExistsSync(path: cstring): bool {.importjs: "require('fs').existsSync(#)".}
-
-proc jsEmptyArray: JsObject {.importjs: "([])".}
-  ## Return a fresh empty JS array.  Used to satisfy ``nimCopy``'s
-  ## ``.length`` read when the renderer deserializes ``seq[SearchResult]``
-  ## — without this, the ``customFields`` field arrives as ``undefined``
-  ## and the copy crashes with "Cannot read properties of undefined
-  ## (reading 'length')``.
 
 proc nodeEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 
@@ -184,8 +178,8 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
     edit = nodeEnv(cstring"CODETRACER_HCR_EDIT")
 
   proc refuse(status: cstring, message: cstring) =
-    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
-      status: status, surfaceRow: cstring"", message: message, remedy: cstring""}
+    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", answerFor(response, js{
+      status: status, surfaceRow: cstring"", message: message, remedy: cstring""})
 
   if command.len == 0:
     refuse(cstring"not-configured",
@@ -282,112 +276,84 @@ proc onHcrApplyEdit*(sender: js, response: js) {.async.} =
       var detail = $stderr
       if detail.len == 0:
         detail = $stdout
-      mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+      mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", answerFor(response, js{
         status: cstring"command-failed",
         surfaceRow: cstring"",
         message: cstring("the apply-edit command produced no report: " & detail),
-        remedy: cstring""}
+        remedy: cstring""})
       return
-    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", js{
+    # The answer goes to the tab whose live-edit panel asked (`tab_answers`).
+    mainWindow.webContents.send "CODETRACER::hcr-apply-edit-result", answerFor(response, js{
       status: report.status,
       surfaceRow: report.surfaceRow,
       message: report.message,
-      remedy: report.remedy}
+      remedy: report.remedy})
 
-proc onSearchProgram*(sender: js, response: cstring) {.async.} =
-  ## Handle ``CODETRACER::search-program`` from the renderer.
+var findInFilesRuns = newFindInFilesService()
+  ## The main process's Find in Files runner: the run in flight, cancelled
+  ## when the renderer asks for the next one.
+
+proc searchBatchToJs(batch: FindInFilesBatch): JsObject =
+  ## One runner batch as the renderer's `CODETRACER::search-results-updated`
+  ## payload: the run id the renderer drops stale batches by, the rows, and
+  ## whether this is the last batch.
+  var rows: seq[JsObject] = @[]
+  # Iterated by index with an explicit copy, not `for r in batch.rows`.
+  # jsffi's `js{...}` literal expands to an immediately-called anonymous
+  # proc, so it CAPTURES `r` — and a `for x in seq` loop variable is
+  # `lent T`, which cannot be captured:
+  #
+  #   Error: 'r' is of type <lent SearchResultLine> which cannot be captured
+  #   as it would violate memory safety
+  #
+  # The tup build never sees this: `NIM_COMMON_FLAGS` in `src/Tuprules.tup`
+  # passes `-d:nimNoLentIterators`, which makes `items` yield copies. The
+  # Nix derivations (`nix/packages/default.nix`) do not pass it, so only the
+  # packaged build (`nix build .#codetracer`) fails, and it fails on the
+  # dev shell's Nim as well as on the packaged one. That flag divergence is
+  # recorded in `scripts/test-build-alignment.sh`. This loop compiles under
+  # both lanes, so it does not depend on how that divergence is resolved.
+  for rowIndex in 0 ..< batch.rows.len:
+    let r = batch.rows[rowIndex]
+    rows.add js{text: cstring(r.text), path: cstring(r.path), line: r.line,
+                matchStart: r.matchStart, matchLength: r.matchLength}
+  js{id: batch.runId, rows: rows.toJs, done: batch.done,
+     note: cstring(batch.note)}
+
+proc onSearchProgram*(sender: js, request: JsObject) {.async.} =
+  ## Handle ``CODETRACER::search-program`` from the renderer: run Find in
+  ## Files through THE shared runner (``viewmodel/host/find_in_files``) — the
+  ## one the terminal and GPUI run — and stream its batches back, each
+  ## carrying the request's run id.
   ##
-  ## Searches exactly the source folders shown in the Files panel.
-  ## ``sourceFoldersFromTracePaths`` returns the same roots the Files panel
-  ## filesystem tree uses, so the search scope matches what the user sees —
-  ## e.g. only ``ruby_space_ship/`` for a Ruby trace rather than the wider
-  ## ``examples/`` parent directory.
-  ##
-  ## Only folders that actually exist on disk are searched; trace-internal
-  ## paths that map into a materialized ``files/`` tree are resolved to that
-  ## tree as a fallback.
-  let query = $response
-  if query.len == 0:
-    return
-
-  let escapedQuery = query.replace("'", "'\\''")
-
-  var searchRoot = ""
-  # When we search inside the materialized files/ tree, rg returns paths like
-  # <outputFolder>/files/home/user/project/foo.rb.  We strip this prefix so
-  # the renderer receives the original on-disk path and opens the real file
-  # rather than the trace-internal copy.
-  var materialisedFilesPrefix = ""
-
+  ## The scope is the runner's ``findInFilesScope``, fed with this trace's
+  ## facts: an imported recording's materialised ``files/`` store, else the
+  ## source folders the Files panel shows (``sourceFoldersFromTracePaths``);
+  ## with no trace (Edit mode), the folder CodeTracer was started in.
+  let runId = request.id.to(int)
+  let query = $request.query.to(cstring)
+  let options = TextMatchOptions(
+    caseSensitive: request.caseSensitive.to(bool),
+    wholeWord: request.wholeWord.to(bool),
+    regex: request.regex.to(bool))
+  var store = ""
+  var imported = false
+  var folders: seq[string] = @[]
   if not data.trace.isNil:
-    if data.trace.imported:
-      # Imported (recorder) traces materialize source files into the trace
-      # output's files/ subdirectory.  This is exactly what the Files panel
-      # shows, so searching it gives the right scope without touching the
-      # wider project tree or the codetracer repo root.
-      let filesRoot = $nodePath.join(data.trace.outputFolder, cstring"files")
-      if fsExistsSync(cstring(filesRoot)):
-        searchRoot = filesRoot
-        materialisedFilesPrefix = filesRoot
-
-    if searchRoot.len == 0:
-      # Live trace (or imported trace with no materialized files/):
-      # use sourceFoldersFromTracePaths, which returns the same roots the
-      # Files panel filesystem tree uses.
-      let sourceFolders = await sourceFoldersFromTracePaths(data.trace)
-      for f in sourceFolders:
-        let s = $f
-        if s.len > 0 and fsExistsSync(cstring(s)):
-          searchRoot = s
-          break
-
-  if searchRoot.len == 0:
-    infoPrint "onSearchProgram: no search root for query: ", query
-    var emptyBatch: seq[JsObject] = @[]
-    mainWindow.webContents.send "CODETRACER::search-results-updated", emptyBatch.toJs
-    return
-
-  let escapedRoot = searchRoot.replace("'", "'\\''")
-  let rgCmd = cstring(&"rg -n -F -i -H --no-heading -- '{escapedQuery}' '{escapedRoot}'")
-  infoPrint "onSearchProgram: rg query=", query, " root=", searchRoot
-
-  # rg exits with code 1 for no matches — that is not an error.
-  let (stdoutData, _, _) = await childProcessExec(rgCmd)
-
-  let lines = ($stdoutData).splitLines()
-  var batch: seq[JsObject] = @[]
-  for rawLine in lines:
-    if rawLine.len == 0:
-      continue
-    # rg -H --no-heading output:  path:linenum:text
-    # Paths on Linux do not contain colons, so the first two colons delimit.
-    let colonIdx1 = rawLine.find(':')
-    if colonIdx1 < 0:
-      continue
-    let colonIdx2 = rawLine.find(':', colonIdx1 + 1)
-    if colonIdx2 < 0:
-      continue
-    var filePath = rawLine[0 ..< colonIdx1]
-    let lineStr  = rawLine[colonIdx1 + 1 ..< colonIdx2]
-    let lineText = rawLine[colonIdx2 + 1 .. ^1]
-    var lineNum = 0
-    try:
-      lineNum = parseInt(lineStr)
-    except:
-      continue
-    # Strip the materialized files/ prefix so the renderer opens the real
-    # source file (/home/user/project/foo.rb) instead of the trace copy
-    # (<outputFolder>/files/home/user/project/foo.rb).
-    if materialisedFilesPrefix.len > 0 and filePath.startsWith(materialisedFilesPrefix):
-      filePath = filePath[materialisedFilesPrefix.len .. ^1]
-    batch.add(js{text: cstring(lineText), path: cstring(filePath), line: lineNum, customFields: jsEmptyArray()})
-    if batch.len >= 50:
-      mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
-      batch = @[]
-
-  # Always send the final batch, even when empty, so the renderer can
-  # clear the loading shimmer when ripgrep finds no matches.
-  mainWindow.webContents.send "CODETRACER::search-results-updated", batch.toJs
+    imported = data.trace.imported
+    store = $nodePath.join(data.trace.outputFolder, cstring"files")
+    for f in await sourceFoldersFromTracePaths(data.trace):
+      folders.add $f
+  elif not data.startOptions.folder.isNil:
+    folders.add $data.startOptions.folder
+  let scope = findInFilesScope(store, imported, folders)
+  infoPrint "onSearchProgram: query=", query, " roots=", $scope.roots
+  # Each batch goes to the tab whose Find in Files asked (`tab_answers`).
+  let tab = askingTab(request)
+  discard findInFilesRuns.search(runId, query, options, scope,
+    proc(batch: FindInFilesBatch) =
+      mainWindow.webContents.send "CODETRACER::search-results-updated",
+                                  withTab(searchBatchToJs(batch), tab))
 
 # handling incoming messages from frontend:
 #   calls on<actionToCamelCase>
@@ -414,6 +380,11 @@ proc configureIpcMain* =
     "save-untitled"
     "no-reload-file"
     "run-test"
+    # The Test Results pane's header ▶ on the desktop: `ct test run` over the
+    # project, answered with `CODETRACER::test-suite-settled`
+    # (`index/traces.onRunTestSuite`, `GUI/Core-Panes/Test-Results-Pane.md`
+    # §4.3).
+    "run-test-suite"
     "restart-subsystem"
 
     # welcome screen options
@@ -460,6 +431,14 @@ proc configureIpcMain* =
     "acp-pick-files"
 
     "save-config"
+    # PLAT-68: the renderer's stepping preset (`localStorage`), merged once
+    # into `keybindings.json` (`index/keybindings.onKeybindingsImport`).
+    "keybindings-import"
+    "keybindings-request"
+    # PLAT-70 Part B: the table panes' remembered column widths, one
+    # document with the terminal and GPUI (`index/table_columns`).
+    "table-columns-request"
+    "table-columns-save"
     # Auto-hide (pinned panel) state.  It is persisted separately from the
     # GoldenLayout config because pinning a panel REMOVES it from the
     # GoldenLayout tree — see `onSaveAutoHideState` in `index/window.nim`.
@@ -514,6 +493,11 @@ proc configureIpcMain* =
     "restart"
     # update filesystem component
     "load-path-content"
+    # The Files pane's Create, Rename and Delete in edit mode
+    # (`index/file_tree_operations.nim`; Filesystem-Pane.md § "Context menu").
+    "file-tree-create"
+    "file-tree-rename"
+    "file-tree-delete"
     "open-devtools"
     "search-program"
 
@@ -527,6 +511,41 @@ proc loadHelpers(main: js, filename: string): Future[Helpers] {.async.} =
   return res
 
 let runtimePlatform {.importjs: "process.platform", nodecl.}: cstring
+
+proc errorText(error: JsObject): string {.importjs: """
+  (function (e) {
+    if (e === null || e === undefined) { return ''; }
+    return String(e.message !== undefined ? e.message : e);
+  })(#)""".}
+  ## What a Node error says (`message`), or the value itself as text.
+
+proc failStartup(message: string) {.async.} =
+  ## The session this process was started for cannot start: say why and exit
+  ## non-zero, rather than wait for ever or open a window over a session with
+  ## no backend (the session manager is every replay's parent, so without it
+  ## nothing can be shown).
+  ##
+  ## * desktop: the reason on stdout and, outside the test harness, in an
+  ##   error box (an app that disappears without a word is no better than one
+  ##   that never opens); then the app exits 1.
+  ## * `ct host`: every connected page is told the reason
+  ##   (`CODETRACER::connection-disconnected`), and the server exits 1, which
+  ##   `ct host` hands on as its own exit status (`trace/host.nim`), so a
+  ##   supervisor or a test sees a cause rather than a session that never
+  ##   starts.
+  errorPrint "index: cannot start: ", message
+  stopBackendManager()
+  when defined(server):
+    if not serverClients.isNil:
+      serverClients.disconnectAll(cstring"server-error", cstring(message))
+      # An emit is written when the event loop next runs: give the pages'
+      # sockets a moment to carry the reason before the process ends.
+      await asyncSleep(250)
+    nodeProcess.exit(1)
+  else:
+    if not data.startOptions.inTest:
+      electron.dialog.showErrorBox(cstring"CodeTracer cannot start", cstring(message))
+    electron_vars.app.exit(1)
 
 proc ready*(): Future[void] {.async.} =
   infoPrint "index: ready start"
@@ -548,8 +567,21 @@ proc ready*(): Future[void] {.async.} =
     backendManagerProcess = backendManager.value
     infoPrint "index: session-manager started, pid = ", $backendManagerProcess.pid
   else:
-    errorPrint "index: session-manager FAILED to start: ", backendManager.error
-    errorPrint "index: backendManagerExe was: ", backendManagerExe
+    await failStartup(fmt"the session-manager {backendManagerExe} could not be started: " &
+      errorText(backendManager.error))
+    return
+
+  # The session manager listens where the wait below looks only once it has
+  # bound its socket, and it EXITS when it cannot: a socket path longer than
+  # a socket address holds (`sockaddr_un.sun_path`, under a deep
+  # `CODETRACER_HOME`) is refused by name, on its stderr, which this process
+  # shares. The wait used to retry for ever and no window opened, so its exit
+  # ends the wait, with the path waited on and the exit status.
+  var sessionManagerExit = ""
+  backendManagerProcess.toJs.on(cstring"exit", proc(code: JsObject, signal: JsObject) =
+    sessionManagerExit =
+      if not signal.isNil and not signal.isUndefined: "signal " & errorText(signal)
+      else: "code " & errorText(code))
 
   if runtimePlatform == cstring"win32":
     # On Windows, the session-manager uses TCP on localhost.
@@ -568,6 +600,10 @@ proc ready*(): Future[void] {.async.} =
           backendManagerSocket = await startTcpSocket(cstring"127.0.0.1", port)
           if not backendManagerSocket.isNil:
             break
+      if sessionManagerExit.len > 0:
+        await failStartup(fmt"the session-manager {backendManagerExe} exited ({sessionManagerExit}) " &
+          fmt"before it wrote its port file {portFilePath}")
+        return
       socketAttempt += 1
       if socketAttempt mod 5 == 0:
         infoPrint "index: still waiting for session-manager TCP port (attempt ", $socketAttempt, ")"
@@ -584,6 +620,11 @@ proc ready*(): Future[void] {.async.} =
       backendManagerSocket = await startSocket(backendManagerSocketPath)
       if not backendManagerSocket.isNil:
         break
+      if sessionManagerExit.len > 0:
+        await failStartup(fmt"the session-manager {backendManagerExe} exited ({sessionManagerExit}) " &
+          fmt"before its socket {backendManagerSocketPath} appeared " &
+          fmt"({backendManagerSocketPath.len} bytes); its own message is above")
+        return
       socketAttempt += 1
       if socketAttempt mod 5 == 0:
         infoPrint "index: still waiting for session-manager socket (attempt ", $socketAttempt, ")"
@@ -598,14 +639,16 @@ proc ready*(): Future[void] {.async.} =
   var config = await mainWindow.loadConfig(data.startOptions, home=paths.home.cstring, send=true)
   infoPrint "index: config loaded"
   when defined(server):
-    # replay bootstrap state on reconnect (server builds only)
-    ipc.replayBootstrap = proc() =
-      if data.bootstrapMessages.len == 0:
-        debugPrint "ipc replay bootstrap: nothing cached"
-      else:
-        debugPrint cstring(fmt"ipc replay bootstrap: {data.bootstrapMessages.len} messages")
-        replayBootstrap(data.bootstrapMessages, proc(id: cstring, payload: cstring) =
-          ipc.emit(id, payload))
+    # Every client gets a replay of its own (`host_clients`): the first takes
+    # the one this startup opens, the others are started here; a client
+    # stops only its own, and its replays are stopped when it is released.
+    let clients = serverClients
+    clients.startReplay = startReplayProcess
+    clients.stopReplay = stopReplayProcess
+    replayStopAllowed = proc(replayId: int): bool =
+      clients.mayStopReplay(replayId)
+    replayStopped = proc(replayId: int) =
+      clients.forgetStoppedReplay(replayId)
 
   when not defined(server):
     # Skip the install dialog entirely when running in test mode
@@ -618,7 +661,7 @@ proc ready*(): Future[void] {.async.} =
         discard await waitForResponseFromInstall()
 
   debugPrint "index: creating window"
-  mainWindow = createMainWindow()
+  mainWindow = createMainWindow(config)
   registerMainWindow()
   infoPrint "index: main window created"
   sendLspStatusToRenderer()
@@ -656,20 +699,6 @@ proc ready*(): Future[void] {.async.} =
       else:
         value
 
-    proc recordBootstrap(id, key, serialized: cstring) =
-      ## Cache a payload for replay on socket reconnect.
-      ##
-      ## ``key`` differentiates multiple payloads on the same channel
-      ## (used by ``dap-receive-event`` so distinct DAP events do not
-      ## clobber each other in the cache).  For the legacy single-
-      ## payload channels listed in ``bootstrapEvents`` the key is empty.
-      if id in bootstrapEvents:
-        let payload = BootstrapPayload(id: id, key: cstring"", payload: serialized)
-        upsertBootstrap(data.bootstrapMessages, payload)
-      elif id == cstring"CODETRACER::dap-receive-event" and key.len > 0:
-        let payload = BootstrapPayload(id: id, key: key, payload: serialized)
-        upsertBootstrap(data.bootstrapMessages, payload)
-
     proc dapReceiveEventKey(response: js): cstring =
       ## Extract the inner DAP event name from a ``dap-receive-event``
       ## payload, returning an empty string when the event is not one
@@ -691,8 +720,13 @@ proc ready*(): Future[void] {.async.} =
           dapReceiveEventKey(response)
         else:
           cstring""
-      recordBootstrap(id, dapKey, serialized)
-      ipc.emit(id, serialized)
+      # Which client hears it, and what each keeps for its next socket, is
+      # `host_clients.deliver`'s decision (`ipc.route`): the asking client,
+      # the client whose replay spoke, or every client.
+      if not ipc.route.isNil:
+        ipc.route(id, dapKey, serialized)
+      else:
+        ipc.emit(id, serialized)
 
   # bootstrap payloads that may need replay after reconnect
   let layout = await mainWindow.loadLayoutConfig(string(fmt"{userLayoutDir / $config.layout}.json"))
@@ -700,8 +734,8 @@ proc ready*(): Future[void] {.async.} =
   let helpers = await mainWindow.loadHelpers("/data" / "data.yaml")
   data.helpers = helpers
   data.config = config
-  infoPrint "index: layout/helpers loaded, calling data.init"
+  infoPrint "index: layout/helpers loaded, calling init"
 
   # init the UI directly; delayed timer scheduling can be skipped in server mode
-  discard data.init(config, layout, helpers)
-  infoPrint "index: data.init dispatched"
+  discard init(config, layout, helpers)
+  infoPrint "index: init dispatched"

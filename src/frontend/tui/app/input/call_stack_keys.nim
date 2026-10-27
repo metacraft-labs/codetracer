@@ -183,6 +183,9 @@ proc applyMouse*(model: var CallStackModel; screen: CallStackScreen;
     return model.scrollBy(-WheelScrollRows, screen.bodyHeight)
   of mbWheelDown:
     return model.scrollBy(WheelScrollRows, screen.bodyHeight)
+  of mbWheelLeft, mbWheelRight:
+    # A horizontal wheel: the call stack has no horizontal view.
+    return csaNone
   of mbLeft, mbMiddle, mbRight, mbOther:
     discard
   let visibleRow = rowAtScreenRow(screen, event.row)

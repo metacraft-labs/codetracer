@@ -605,6 +605,7 @@ fn the_delta_serialises_to_the_documented_wire_shape() {
             "id",
             "isOpen",
             "responseSize",
+            "seekUnavailableReason",
             "startGeid",
             "status",
             "statusCode",
@@ -612,6 +613,13 @@ fn the_delta_serialises_to_the_documented_wire_shape() {
         ],
         "the row is the frontend's RequestRecord plus the additive RS-M2 fields"
     );
+    // `seekUnavailableReason` is the recorder's explicit refusal to seek
+    // (codetracer-pm spec/GUI/Core-Panes/Request-Panel.md, "Interactions": a
+    // span with no executable handler step refuses the seek and says why). The
+    // key is present on every row so the set above stays fixed; empty means
+    // the row is seekable, which this one is — it carries no
+    // `beam.handler_step_available=false`.
+    assert_eq!(row["seekUnavailableReason"], Value::from(""));
     // `id` is the de-duplication key the client merges on, and `isOpen` is how
     // it knows a completion is still coming. Both must be present on every row.
     assert_eq!(row["id"], Value::from(2u64));

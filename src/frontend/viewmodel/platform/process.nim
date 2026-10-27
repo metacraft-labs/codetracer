@@ -98,6 +98,25 @@ type
 
     run*: proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]]
 
+    runLater*: proc(spec: ProcessSpec): PlatformFuture[PlatformOutcome[ProcessRunResult]]
+      ## `run`, with one more promise: the calling thread is never held while
+      ## the program runs, and the future settles on a later turn of the
+      ## caller's event loop. A refusal may still answer at once.
+      ##
+      ## A separate operation, not a property of `run`, because one
+      ## instantiation's `run` is synchronous ON PURPOSE: the Electron
+      ## renderer's is `execFileSync`, and the renderer's synchronous git
+      ## reader (`ui/git_cli.gitExec`, whose callers read the repository
+      ## straight after a user acts on it) settles it with `ctAwaitSync`.
+      ## Making that `run` asynchronous would change every one of those
+      ## answers; a caller that must not freeze the window asks for this
+      ## instead (VCS-Panel.md, "An auto-refresh never stalls the window").
+      ##
+      ## Where `run` already answers later — the container's, over its
+      ## socket, and the web's, from a worker — this IS `run`. An
+      ## instantiation that cannot keep the promise refuses with
+      ## `pkNotSupported` rather than block.
+
     start*: proc(spec: ProcessSpec;
                  onOutput: proc(chunk: ProcessOutputChunk);
                  onExit: proc(exit: ProcessExit)
@@ -131,6 +150,8 @@ proc unavailableProcess*(profile: PlatformProfile): ProcessFacade =
   ProcessFacade(
     profile: profile,
     run: proc(spec: ProcessSpec): auto =
+      resolvedUnsupported[ProcessRunResult]("running programs"),
+    runLater: proc(spec: ProcessSpec): auto =
       resolvedUnsupported[ProcessRunResult]("running programs"),
     start: proc(spec: ProcessSpec;
                 onOutput: proc(chunk: ProcessOutputChunk);

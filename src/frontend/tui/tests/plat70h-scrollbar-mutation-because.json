@@ -1,0 +1,20 @@
+{
+  "B1": "bad.len == 0",
+  "D1": "d.scrollbars.thickness == btHairline and d.scrollbars.fade and",
+  "F1": "between >= FadeInMs div 16 - 2",
+  "F2": "between >= FadeOutMs div 16 - 2",
+  "F3": "f.level < 0.2",
+  "G1": "m.grabbedTop(at, offset) == m.dragTo(m.thumbStart)",
+  "G2": "abs(thumb1 - (thumb0 + 40)) <= lineShare",
+  "H1": "elsewhere == 0",
+  "J1": "rt.scrollbars.grab.active",
+  "K1": "back.ok and back.settings == s",
+  "P1": "m.thumbStart <= target",
+  "R1": "bar.model.firstVisible == max(0, atEnd - bar.model.pageSize)",
+  "R2": "rt.scrollbars.paging.hold.active",
+  "S1": "classic.with(btThin).body(axVertical) == \"\u2503\"",
+  "S2": "classic.with(btThick).body(axVertical, bsHoverThumb) == \"\u2588\"",
+  "U1": "modern.with(btThin).body(axVertical) == \"\ud83e\udf87\"",
+  "U2": "modern[0].kind == tcThumb and modern[0].glyph == \"\ud83e\udf89\"",
+  "W1": "rising >= 5"
+}

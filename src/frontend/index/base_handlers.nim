@@ -22,7 +22,12 @@ type
     webContents*: FrontendIPCSender
     socket*: WebSocket # from socket.io
     registry*: IpcRegistry
-    replayBootstrap*: proc(): void
+    route*: proc(id: cstring; key: cstring; payload: cstring)
+      ## Where `ct host` sends what the index says (`host_clients.deliver`):
+      ## to the client the index is answering, or to every client. Nil in an
+      ## embedding that serves one socket, which `emit` sends to.
+      ## `key` is the inner DAP event name of a `dap-receive-event`, else "".
+      ## `payload` is already JSON.
     logRecorder*: proc(message: cstring)
 
 proc on*(socket: WebSocket, name: cstring, handler: proc) {.importcpp: "#.on(#, #)".}
@@ -64,7 +69,7 @@ proc initFrontendIPC*(): FrontendIPC =
     webContents: FrontendIPCSender(),
     socket: nil,
     registry: initIpcRegistry(),
-    replayBootstrap: nil,
+    route: nil,
     logRecorder: nil)
 
 proc logEvent(frontend: FrontendIPC, message: cstring) =
@@ -73,14 +78,13 @@ proc logEvent(frontend: FrontendIPC, message: cstring) =
   debugPrint message
 
 proc attachSocket*(frontend: FrontendIPC, socket: WebSocket) =
-  # detach old bindings and rebind to the new socket
+  ## Serve ONE client: bind the handlers to `socket` and send to it, in place
+  ## of any socket attached before.
   if not frontend.socket.isNil:
     frontend.logEvent(cstring"ipc detach socket")
   frontend.registry.attachSocket(socket.toJs)
   frontend.socket = socket
   frontend.logEvent(cstring"ipc attach socket")
-  if not frontend.replayBootstrap.isNil:
-    frontend.replayBootstrap()
 
 proc detachSocket*(frontend: FrontendIPC) =
   if frontend.socket.isNil:
@@ -88,6 +92,20 @@ proc detachSocket*(frontend: FrontendIPC) =
   frontend.logEvent(cstring"ipc detach socket")
   frontend.registry.detachSocket()
   frontend.socket = nil
+
+proc addClientSocket*(frontend: FrontendIPC; socket: WebSocket;
+                      wrap: HandlerWrap) =
+  ## Serve `socket` BESIDE the sockets already served (`ct host`, one per
+  ## client): every handler is bound to it through `wrap`, which runs the
+  ## handler as that client's (`host_clients`). Where an answer goes is
+  ## `route`'s decision, not this socket's.
+  frontend.registry.addSocket(socket.toJs, wrap)
+  frontend.logEvent(cstring"ipc attach client socket")
+
+proc removeClientSocket*(frontend: FrontendIPC; socket: WebSocket) =
+  ## Stop serving `socket`; the other clients' sockets keep their handlers.
+  frontend.registry.removeSocket(socket.toJs)
+  frontend.logEvent(cstring"ipc detach client socket")
 
 proc emit*(frontend: FrontendIPC, id: cstring, payload: cstring) =
   if frontend.socket.isNil:

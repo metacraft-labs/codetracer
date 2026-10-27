@@ -47,7 +47,7 @@ var webStartOptionHandler: proc(key: string)
   ## ISSUE #735 — THE WEB ARM'S START-OPTION DISPATCH, and the reason it is a
   ## registered hook rather than a direct call.
   ##
-  ## `tryMountIsoNimWelcomeScreen` used to hand the view an EMPTY
+  ## `mountWelcomeScreen` used to hand the view an EMPTY
   ## `WelcomeScreenCallbacks()` whenever there was no legacy component, which
   ## on the web is always; the view then fell through to its own `case`, which
   ## has arms for two keys it can serve from the VM alone. M52 recorded that as
@@ -67,14 +67,14 @@ proc setWebWelcomeStartOptionHandler*(handler: proc(key: string)) =
   ## Install (before mounting) the proc that performs a web start-option click.
   ##
   ## Must be called BEFORE `mountWebWelcomeScreen`: the callbacks record is
-  ## built once per mount and `tryMountIsoNimWelcomeScreen` returns early when
+  ## built once per mount and `mountWelcomeScreen` returns early when
   ## the screen is already mounted for the same component, so a handler
   ## installed afterwards would not reach the view until something forced a
   ## remount.
   webStartOptionHandler = handler
 
 proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent)
-proc tryMountIsoNimWelcomeScreen*()
+proc mountWelcomeScreen*()
 proc clearIsoNimWelcomeScreen*()
 proc requestWelcomeScreenRender*(self: WelcomeScreenComponent)
 
@@ -284,7 +284,7 @@ proc syncLegacyWelcomeScreenIntoVM*(self: WelcomeScreenComponent) =
 proc requestWelcomeScreenRender*(self: WelcomeScreenComponent) =
   ## Refresh the direct IsoNim welcome screen mount after legacy state changes.
   self.syncLegacyWelcomeScreenIntoVM()
-  tryMountIsoNimWelcomeScreen()
+  mountWelcomeScreen()
 
 proc showNewRecordView*(self: WelcomeScreenComponent) =
   self.welcomeScreen = false
@@ -372,7 +372,10 @@ proc resetView*(self: WelcomeScreenComponent) =
 
 method onUploadTraceProgress*(self: WelcomeScreenComponent, uploadProgress: UploadProgress) {.async.} =
   let progressBar = document.getElementById(&"progress-bar-{uploadProgress.id}")
-  progressBar.style.backgroundImage = fmt"conic-gradient(#6B6B6B {uploadProgress.progress}% 0%, #2C2C2C {uploadProgress.progress}% 100%)"
+  # The ring's colours come from the stylesheet (`.progress-circle`,
+  # welcome_screen.styl): the light theme defines both custom properties, and
+  # the dark theme, which does not, paints the greys given as fallbacks.
+  progressBar.style.backgroundImage = fmt"conic-gradient(var(--ct-upload-ring-fill, #6B6B6B) {uploadProgress.progress}% 0%, var(--ct-upload-ring-track, #2C2C2C) {uploadProgress.progress}% 100%)"
 
   if uploadProgress.progress == 100:
     self.isUploading[uploadProgress.id] = false
@@ -580,7 +583,7 @@ when defined(js):
     ##
     ## A statically hosted tab has no such process and never will — that is the
     ## point of the deployment. So on the web that event never arrives, nothing
-    ## calls `tryMountIsoNimWelcomeScreen`, and the renderer sits fully loaded
+    ## calls `mountWelcomeScreen`, and the renderer sits fully loaded
     ## with an empty document. `ui.js` was DELIVERED and never STARTED.
     ##
     ## ## Why this does not synthesise the host's message instead
@@ -635,7 +638,7 @@ when defined(js):
     # ISSUE #734. The "WITH A REASON" is new, and so is the fifth row's
     # honesty. This list used to claim "Open folder" was live — the comment
     # here said so too, reasoning from NS2's OPFS project store — and it was
-    # not: `tryMountIsoNimWelcomeScreen` below hands the view an EMPTY
+    # not: `mountWelcomeScreen` below hands the view an EMPTY
     # `WelcomeScreenCallbacks()` on this arm because there is no legacy
     # component to build one from, the view's `case` fallback has no
     # `open-folder` arm, and the desktop implementation is an Electron IPC
@@ -659,10 +662,10 @@ when defined(js):
     welcomeScreenVMInstance.setStartOptionsNote(WebStartOptionsNote)
     welcomeScreenVMInstance.setMode(wsmWelcome)
 
-    tryMountIsoNimWelcomeScreen()
+    mountWelcomeScreen()
     isoNimWelcomeScreenMounted
 
-  proc tryMountIsoNimWelcomeScreen*() =
+  proc mountWelcomeScreen*() =
     if welcomeScreenVMInstance.isNil:
       return
     let container = isonim_dom.getElementById(isonim_dom.document,
@@ -702,5 +705,5 @@ when defined(js):
     welcomeScreenMountedComponentRef = nil
 
 when not defined(js):
-  proc tryMountIsoNimWelcomeScreen*() = discard
+  proc mountWelcomeScreen*() = discard
   proc clearIsoNimWelcomeScreen*() = discard

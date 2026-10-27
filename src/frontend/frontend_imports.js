@@ -73,7 +73,6 @@ window.xtermLib = require('xterm');
 window.fitAddonLib = require('xterm-addon-fit');
 require('datatables.net');
 require('datatables.net-scroller');
-window.Mousetrap = require('mousetrap');
 // window.io = require('socket.io');
 
 console.log(monaco);

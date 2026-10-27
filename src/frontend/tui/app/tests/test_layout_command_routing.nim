@@ -62,6 +62,17 @@
 ## nil" is a fact about a field, and "nothing changed because the two screens
 ## are equal" is a fact about the screens.
 ##
+## ## AND IN EDIT MODE, WHICH ENABLES IT TOO
+##
+## `main.editInteractive` (`ct edit --ui=tui`) enables the binding since
+## codetracer-pm issue 2026-10-21, so that the FILES stack's VCS tab can be
+## chosen. The last three cases are its Tier-1 half: an Edit-mode runtime with
+## no session must be seeded, re-flowed and reset to EDIT mode's default —
+## the binding used to know only Debug's, and enabling it there would have
+## painted Debug's arrangement on the first frame of an editor — and a click
+## and the View menu must reach the VCS and Files tabs through it.
+## `tests/real_terminal/test_plat47_vcs_pane.nim` drives the shipped binary.
+##
 ## ## No mocks
 ##
 ## There is no mock here and none is justified. `TuiRuntime` takes a
@@ -83,6 +94,9 @@
 import std/[algorithm, json, options, strutils, unittest]
 
 import headless_app/layout_model
+# `ProductMode` (`pmEdit`) for the Edit-mode cases, through the facade the
+# modules under test use.
+import codetracer_embed
 
 import ../runtime
 import ../theme/capabilities
@@ -90,13 +104,17 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 470
+const ExpectedAssertions = 576
 # PLAT-48: 421 → 474 — the footer strip checks (one decoration, a strip, per
 # geometry: +40), the footer row before and after `:dock bottom`, and the
 # top strip counted apart from the bottom one.
 # PLAT-51 part B: 475 → 470 — a drop no longer docks (Layout-ViewModel
 # §4.2.2): the strip-count checks after a docking drop went, the root split's
 # shape and the hidden tab's ring checks came.
+# codetracer-pm issue 2026-10-21: 470 → 576 — the three EDIT MODE cases (the
+# bound Edit screen against the unbound one and Debug's at seven sizes, the
+# VCS tab click and View › Filesystem at two, the re-flow, reset and
+# no-document checks).
 
 const
   Geometries = [(cols: 80, rows: 24), (cols: 120, rows: 40),
@@ -124,6 +142,19 @@ proc caps(): TerminalCapabilities =
 
 proc newRuntime(cols, rows: int): TuiRuntime =
   newTuiRuntime(newTuiApp(), caps(), cols, rows)
+
+proc newEditRuntime(cols, rows: int): TuiRuntime =
+  ## A runtime in EDIT mode with no session, which is what
+  ## `main.editInteractive` builds: the product mode is set before the
+  ## runtime exists, so the first frame is Edit mode's arrangement.
+  let app = newTuiApp()
+  app.modes = initModeRegister(pmEdit)
+  newTuiRuntime(app, caps(), cols, rows)
+
+proc visiblePanes(rt: TuiRuntime): seq[PaneKind] =
+  ## The panes the binding's geometry projects — what a click can reach.
+  for r in rt.layoutGeometry().projection.regions:
+    result.add r.pane
 
 proc typeLine(rt: TuiRuntime; line: string): RuntimeOutcome =
   ## `:`, then every character, then `Enter` — through `handleToken`, ONE TOKEN
@@ -363,7 +394,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     let rt = newRuntime(120, 40)
     discard rt.enableLayoutBinding()
     let first = rt.focusedPaneOf()
-    discard rt.handleToken("\t", 0'i64)
+    discard rt.handleToken("\e[17~", 0'i64)   # F6: the next pane (CUA)
     let second = rt.focusedPaneOf()
     checkpoint("Tab moved focus from " & $first & " to " & $second)
     ck second != first
@@ -686,7 +717,7 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
         checkpoint("the ring offers " & $pane & ", which has no rectangle")
     ck offScreen == 0
     # And `Tab` really lands on one of them rather than on the hidden pane.
-    discard rt.handleToken("\t", 0'i64)
+    discard rt.handleToken("\e[17~", 0'i64)   # F6: the next pane (CUA)
     ck rt.focusedPaneOf() != hidden
     ck not rt.layoutGeometry().regionOfPane(rt.focusedPaneOf()).isEmptyArea
 
@@ -817,6 +848,140 @@ suite "PLAT-6: the `:` prompt reaches the layout binding, and only on request":
     let moved = after.app.layoutBinding.layout.apply(
       cmdDock(bottom[0].pane, leLeft))
     ck moved.kind == loApplied and moved.layout.dockedAt(leLeft).len == 2
+
+  # -------------------------------------------------------------------------
+  # EDIT MODE. `main.editInteractive` enables the binding too (codetracer-pm
+  # issue 2026-10-21: without it the FILES stack's VCS tab could not be
+  # chosen). An Edit-mode runtime has no session, and the binding used to
+  # seed, re-flow and reset to DEBUG mode's default whenever there was none —
+  # so enabling it there would have painted Debug's arrangement on the first
+  # frame of `ct edit`. These cases hold the binding to Edit mode's own
+  # default in all three places.
+  # -------------------------------------------------------------------------
+
+  test "EDIT MODE: enabling it changes nothing on screen, and holds Edit's default":
+    var comparisons = 0
+    var mismatches: seq[string] = @[]
+    for size in [(80, 24), (100, 30), (120, 35), (140, 40), (200, 50),
+                 (200, 60), (300, 80)]:
+      let plain = newEditRuntime(size[0], size[1])
+      let bound = newEditRuntime(size[0], size[1])
+      discard bound.enableLayoutBinding()
+      ck bound.layoutBindingEnabled()
+      ck bound.app.layoutBinding.product == pmEdit
+      let a = plain.bodyRows()
+      let b = bound.bodyRows()
+      inc comparisons
+      if a != b:
+        for i in 0 ..< min(a.len, b.len):
+          if a[i] != b[i]:
+            mismatches.add $size[0] & "x" & $size[1] & " row " & $i &
+              ":\n  unbound '" & a[i] & "'\n  bound   '" & b[i] & "'"
+            break
+      ck a == b
+      # The binding holds EDIT mode's panes, and no footer: `dockedForMode`
+      # docks nothing for Edit mode.
+      let tree = bound.app.layoutBinding.layout.tree
+      ck tree.contains(paneVcs)
+      ck tree.contains(paneEditor)
+      ck not tree.contains(paneCalltrace)
+      ck bound.app.layoutBinding.layout.docked.len == 0
+      # THE CONTROL: Debug mode's bound screen at the same size is another
+      # screen, so the equality above is not two runtimes that both drew
+      # Debug's arrangement.
+      let debug = newRuntime(size[0], size[1])
+      discard debug.enableLayoutBinding()
+      ck debug.app.layoutBinding.product == pmDebug
+      ck debug.bodyRows() != b
+    for m in mismatches[0 ..< min(4, mismatches.len)]:
+      checkpoint(m)
+    ck comparisons == 7
+    ck mismatches.len == 0
+
+  test "EDIT MODE: a click on the VCS tab shows it, and View › Filesystem brings Files back":
+    for size in [(140, 40), (200, 50)]:
+      let rt = newEditRuntime(size[0], size[1])
+      discard rt.enableLayoutBinding()
+      var stackRow = -1
+      var stackCol = -1
+      var tabs: seq[string] = @[]
+      var active = -1
+      for r in rt.layoutGeometry().projection.regions:
+        if r.pane == paneFileTree and r.tabs.len >= 2:
+          stackRow = r.area.row
+          stackCol = r.area.col
+          tabs = r.tabs
+          active = r.activeTab
+      checkpoint($size & ": the FILES stack is " & $tabs & ", active " &
+                 $active)
+      let vcsAt = tabs.find("VCS")
+      ck vcsAt >= 0
+      ck paneFileTree in rt.visiblePanes()
+      ck paneVcs notin rt.visiblePanes()
+      # A CLICK on the VCS tab, through `handleToken` — the path a terminal's
+      # bytes take, and the one the edit loop's binding opens.
+      let spans = tabSpans(tabs, active)
+      let col = stackCol + spans[vcsAt].startCol + 1
+      discard rt.handleToken(sgrReport(0, stackRow, col, true), 0'i64)
+      let clicked = rt.handleToken(sgrReport(0, stackRow, col, false), 0'i64)
+      checkpoint("click on VCS -> " & clicked.detail)
+      ck clicked.repaint
+      ck paneVcs in rt.visiblePanes()
+      ck paneFileTree notin rt.visiblePanes()
+      # …and it is what the FRAME draws, not only what the binding holds: the
+      # shell model's tree is the binding's.
+      ck rt.app.shellModel(size[0], size[1]).layout.isVisible(paneVcs)
+      # THE VIEW MENU'S ROUTE (`showPane`), which refused without a binding:
+      # Filesystem activates the Files tab again and focuses it.
+      var outcome = RuntimeOutcome()
+      rt.runMenuAction("aFilesystem", outcome)
+      checkpoint("View > Filesystem -> " & rt.app.notification)
+      ck not rt.app.notification.contains("not rearrangeable")
+      ck paneFileTree in rt.visiblePanes()
+      ck paneVcs notin rt.visiblePanes()
+      ck rt.focusedPaneOf() == paneFileTree
+
+  test "EDIT MODE: a resize and `:reset-layout` return to Edit's default, never Debug's":
+    # A RESIZE ACROSS FOLD DEPTHS re-flows an untouched arrangement; the
+    # re-flowed tree must be Edit mode's at the new size.
+    for (fromSize, toSize) in [((80, 24), (200, 60)), ((200, 60), (80, 24)),
+                               ((140, 40), (300, 80)), ((140, 40), (150, 45))]:
+      let rt = newEditRuntime(fromSize[0], fromSize[1])
+      discard rt.enableLayoutBinding()
+      rt.resize(toSize[0], toSize[1])
+      ck not rt.app.layoutBinding.userModified
+      ck rt.app.layoutBinding.product == pmEdit
+      ck rt.bodyRows() == newEditRuntime(toSize[0], toSize[1]).bodyRows()
+    # `:reset-layout` after a gesture: Edit mode's default again.
+    let rt = newEditRuntime(140, 40)
+    discard rt.enableLayoutBinding()
+    let untouched = rt.bodyRows()
+    # The gesture is the one this mode exists to allow: the VCS tab, clicked.
+    for r in rt.layoutGeometry().projection.regions:
+      if r.pane == paneFileTree and r.tabs.len >= 2:
+        let col = r.area.col +
+                  tabSpans(r.tabs, r.activeTab)[r.tabs.find("VCS")].startCol + 1
+        discard rt.handleToken(sgrReport(0, r.area.row, col, true), 0'i64)
+        discard rt.handleToken(sgrReport(0, r.area.row, col, false), 0'i64)
+        break
+    ck rt.app.layoutBinding.userModified
+    # Both panes draw blank rows without a project, so the change is read
+    # from what the layout projects rather than from the text.
+    ck paneVcs in rt.visiblePanes()
+    # View › Reset Layout, which IS `:reset-layout` (`menuPromptLine`). Chosen
+    # from the menu because `:` is not the prompt key in an Edit-mode buffer
+    # under the CUA base.
+    var reset = RuntimeOutcome()
+    rt.runMenuAction("aResetLayout", reset)
+    checkpoint("View > Reset Layout -> " & rt.app.notification)
+    ck not rt.app.layoutBinding.userModified
+    # Every row but the status row, which now carries the reset's note.
+    ck rt.bodyRows()[0 ..< ^1] == untouched[0 ..< ^1]
+    ck not rt.app.layoutBinding.layout.tree.contains(paneCalltrace)
+    # NO DOCUMENT IS BOUND to an Edit-mode runtime that was not given one, so
+    # neither the gesture nor an exit has anything to write.
+    ck not rt.layoutPersistenceEnabled()
+    ck rt.layoutPersistPlanOf().intent == lpiQuarantine
 
   test "assertion count":
     checkpoint("CHECKS: " & $countedAssertions)

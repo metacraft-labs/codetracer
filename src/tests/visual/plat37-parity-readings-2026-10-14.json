@@ -1,0 +1,125 @@
+{
+ "_comment": [
+  "plat37-parity-readings-2026-10-14.json — the PARITY-S1 re-attribution.",
+  "",
+  "WHAT THIS PASS DID. It did not add a feature to either renderer. It",
+  "established, by measurement, that PARITY-S1's deficient side was",
+  "BACKWARDS: GPUI drew the shared default exactly, and the Electron",
+  "REFERENCE ARM drew a layout the product removed. The 7-against-5 pane",
+  "census was an artefact of one missing line in the Electron capture spec.",
+  "",
+  "WHY A THIRD FILE. Same reason as the second: plat37-parity-readings.json",
+  "records the 2026-10-12 contaminated pass and -2026-10-13 records the",
+  "de-contaminated re-grade. Both stated PARITY-S1 as a GPUI deficiency, and",
+  "both were right about the pixels. A dated record rewritten to say",
+  "something else stops being a record, so the correction is here.",
+  "",
+  "WHAT GATES THIS FILE: still nothing. ci/lib/build-freshness.sh gates the",
+  "INPUTS to a reading; nothing binds this document to the frames it",
+  "describes. That gap is unchanged and is restated rather than left to be",
+  "rediscovered. What IS newly gated is narrower and real: the Electron",
+  "lane now refuses a frame whose pane census disagrees with the shared",
+  "default (see `newAssertion`)."
+ ],
+ "schemaVersion": 1,
+ "supersedes": "plat37-parity-readings-2026-10-13.json — for PARITY-S1 ONLY. Every other finding in that file stands unamended; this pass did not re-measure them.",
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. The two capture lanes need a live macOS GUI session and a kTCCServiceScreenCapture grant. A gate that cannot run is not a gate.",
+ "measuredAt": "2026-10-14",
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 build 25F84",
+  "displays": 1,
+  "displayPoints": "1728x1117",
+  "pointPixelScale": 2.0
+ },
+ "provenance": {
+  "codetracer": "7662d3292 (agents) — the tree the analysis was done against",
+  "codetracerSpecs": "edb0056d (latest)",
+  "framesAnalysed": "the 2026-10-13 gated capture, taken at codetracer df80efc8d and retained on disk. PARITY-S1 is a STRUCTURAL finding about which panes the harness put on screen, so it is readable from those frames; the correction does not depend on re-taking them.",
+  "reproWhichOne": "repro 0.2.5, the local build at reprobuild/build/bin/repro (reprobuild agents f24884244), prepended to PATH. It is the unreleased number, not a stale build."
+ },
+ "regrade": [
+  {
+   "id": "PARITY-S1",
+   "previousVerdict": "REPRODUCES, unchanged by the rebuild. deficientSide: GPUI. severity P1.",
+   "verdict": "WITHDRAWN AS A PRODUCT FINDING — INSTRUMENT ARTEFACT OF THE REFERENCE ARM",
+   "deficientSide": "neither renderer. The harness. GPUI drew the shared default; Electron drew a tree no CodeTracer mode draws.",
+   "whatWasTrue": "The pixels were read correctly, twice. A disposable reader on the gated Electron `state` frame, right column (1:1 crop, device px 2320..2880 x 40..1800): pane header TESTS at y61 with 'no tests found' / 'No tests found in this project.', a divider at y840, pane header CONSTRAINTS at y899 with 'unavailable' / 'No circuit has been compiled for this project yet.'. The oracle's census agreed: paneCount 7 in 6 of 6 Electron frames, 5 in 7 of 7 GPUI frames.",
+   "whatWasWrong": "the attribution. Electron's frames were of the BUNDLED layout tree, not of any layout the product opens with.",
+   "mechanism": {
+    "1": "src/tests/gui/tests/visual/plat37-electron-window-capture.spec.ts set no `noUserLayout`, so the launch fixture took its default branch and called layout-reset.ensureDefaultLayout.",
+    "2": "ensureDefaultLayout does `fs.copyFileSync(bundled, userLayoutPath)` — it copies src/config/default_layout.json VERBATIM into the run's $CODETRACER_HOME/config/default_layout.json.",
+    "3": "index/config.loadLayoutConfig then finds a saved layout and uses it as-is, so index/config.installModeDefault — and with it index/mode_default_layout.modeDefaultLayout — never runs.",
+    "4": "the bundled tree's third top-level column (25%) holds exactly two stacks: testResultsComponent-0 (content 48) and constraintsComponent-0 (content 49). mode_default_layout.nim's own header calls this tree \"nobody's layout\".",
+    "5": "debug mode removes both: frontend.paneHomesForMode(DebugMode) returns @[@[ord(Content.TestResults), ord(Content.Filesystem)]] and frontend.modeDefaultOmittedContentIds(DebugMode) returns @[ord(Content.Constraints)]. The derived tree is what headless_app/layout_model.sharedDefaultLayout is generated from."
+   },
+   "theControl": {
+    "what": "src/tests/visual/answers/plat45-default-arrangement.electron.json — the SAME Electron product captured on the product's own first-run path (noUserLayout: true) by PLAT-45's spec, for a different milestone, on 2026-10-06.",
+    "why it is exact and not merely analogous": "its prefixDefaultSha256 is 57fffb7554a326a4023980fa44ee64fb9ebee962a1cc0576a62f801b6613dc2d, and src/config/default_layout.json and src/build-debug-repro/config/default_layout.json both hash to that same value at 7662d3292. The control's derivation input is the same bytes the plat37 lane will now derive from.",
+    "generated.stacks": "[9,41,48] [2] [4,17] [6,35] [8,24] — five stacks. TEST RESULTS (48) is a BACKGROUND TAB of the FILES stack (active 0). No constraints component appears anywhere in loadedConfig.",
+    "soTheProductDraws": 5
+   },
+   "corroborationOnScreen": {
+    "gpuiLeftTabStrip": "read by a second disposable reader on a 1:1 crop of the gated GPUI `state` frame (device px 0..700 x 100..250): the tabs are `Files` (x~95), `VCS` (x~220), `Tests` (x~310), with Files ACTIVE (lighter rounded background, bold white text). That is stack(activeIndex 0){fileTree, vcs, testResults} — pane for pane the shared default, and pane for pane PLAT-45's Electron first-run stack [9,41,48].",
+    "readerDisagreements": "none. The two readers were shown different crops and were not shown each other's answers."
+   },
+   "whatWouldHaveHappened": "Acting on PARITY-S1 as filed meant giving GPUI a Constraints pane and promoting Tests from a tab to a pane — reproducing in a second renderer a layout the product deliberately removed on 2026-09-27, while closing a P1 'parity' finding. Strictly worse than the Call Trace ellipsis fix that was correctly abandoned, because that one was a line and this one is two panes.",
+   "relatedPinNowSuspect": "corpus-pins.json's electronPanes (8 entries) vs gpuiPanes (4) was cited by PARITY-S1 as independent corroboration. It is not independent: it is read from the same harness. NOT re-measured here.",
+   "fixed": {
+    "spec": "src/tests/gui/tests/visual/plat37-electron-window-capture.spec.ts — `noUserLayout: true` added to the per-scenario test.use, with the mechanism above recorded at the call site.",
+    "lane": "ci/test/plat37-macos-electron-capture.sh — a per-frame pane census against the shared default; see `newAssertion`.",
+    "notFixed": "the fixture DEFAULT, which still installs the bundled tree for every GUI spec that does not opt out. Blast radius is every GUI spec, so it is filed rather than changed: codetracer-specs/issues/2026-10-14-gui-test-fixture-defaults-every-launch-to-the-bundled-layout-the-product-calls-nobodys-layout.md"
+   }
+  }
+ ],
+ "newAssertion": {
+  "where": "ci/test/plat37-macos-electron-capture.sh, the per-view verdict block",
+  "what": "every captured frame's oracle pane set must equal the set the shared default DRAWS — one pane per stack (its activeIndex tab), plus every pane not inside a stack.",
+  "derivedNotWrittenDown": "the expectation is computed by walking src/frontend/headless_app/shared_default_layout.generated.json. A literal `== 5` would be a second copy of that truth, free to go on agreeing with itself after the shared default moved (Verification-Harness-Traps 14).",
+  "aSetNotACount": "paneCount == 5 is satisfied by five WRONG panes, and by an oracle that has started labelling everything `other`. The comparison is over the labelled multiset.",
+  "controls": {
+   "redControl": "run against the SIX retained pre-fix Electron frames (build/plat37-macos-electron/*.grade.json): 6 of 6 FAIL, seen=[calltrace, editor, eventLog, fileTree, other, other, state] against expected=[calltrace, editor, eventLog, fileTree, state]. Failing case names: calltrace, editor, editorWithMark, eventLog, shell, state.",
+   "greenControl": "run against the SEVEN retained GPUI frames (build/plat37-macos/*.grade.json): 7 of 7 AGREE. Case names: calltrace, editor, editorWithMark, eventLog, gutterLanes, shell, state. This arm is also the second independent confirmation that GPUI was never the deficient side.",
+   "vacuityControl": "an oracle that reads nothing answers the empty set; [] == expected is False, so the assertion fails rather than passing vacuously.",
+   "missingOracleControl": "a grader record with no `oracle` key is reported as a problem in its own right, so the census cannot be skipped silently."
+  }
+ },
+ "conflictRecorded": {
+  "between": [
+   "PARITY-S4 (this ledger)",
+   "PLAT35-VG9 (spec/Testing/Cross-Renderer-Visual-Alignment.md)"
+  ],
+  "subject": "inline value annotations",
+  "parityS4Says": "'Electron draws inline value annotations on several editor rows; GPUI draws at most one, and none at all in two of the four scenarios read.' Deficient side: GPUI.",
+  "plat35Vg9Says": "'ONLY THE GPUI ARM DRAWS AN INLINE VALUE ... against an Electron arm answering empty on all six in every run.' Measured over six runs. Deficient side: Electron.",
+  "ruling": "UNRESOLVED, AND RECORDED AS UNRESOLVED. The two findings name OPPOSITE deficient sides for the same surface, read by different instruments (PARITY-S4 by frame reading, PLAT35-VG9 by tools/layout-answers.ts through the layout-questions vocabulary). Neither was re-measured in this pass. PARITY-S4 must NOT be acted on until this is settled: the campaign has already had the deficient side backwards four times, and this is the one finding where two instruments say so out loud.",
+  "alsoRelevant": "view_vocabulary/editor_surface.nim attaches inline values to the EXECUTION LINE ONLY, documented as 'the terminal's rule carried across rather than re-decided', with a stated reason (a value in scope at the stop beside a line that has not run is 'a stale value with extra steps'). That is SHARED code feeding the terminal, GPUI and the web arm, graded three ways by test_cross_renderer_panes.nim. If PARITY-S4's direction is right, the fix is not a GPUI-local one."
+ },
+ "flip": {
+  "status": "NOT RE-MEASURED. THE REBUILD WAS ATTEMPTED IN THE ADVERSARIAL REVIEW PASS AND IS BLOCKED BY A PRE-EXISTING SIBLING BREAKAGE, NOT BY HOST LOAD.",
+  "why": "Re-attempted 2026-10-14 by the reviewer at codetracer 7662d3292 with repro 0.2.5 (reprobuild agents f24884244). Four distinct blockers were met and the first three cleared: (1) a wedged `nix develop` daemon connection -- two clients sat in RemoteStore::buildPaths for 17 and 55 minutes against a daemon that built a trivial derivation instantly; a restart cleared it, so it was a stuck connection and not the queue the previous pass took it for. (2) the dev shell exports REPROBUILD_PACKAGES_ROOT at a reprobuild-packages store path carrying only four interfaces, which the newer engine rejects because `shellcheck` has moved from its bundled stdlib into that catalog; pointing it at the workspace sibling cleared it. (3) repro.lock pinned python3 to 3.0.0 against `isonim` and `nim-agents` declaring `python3 >=3.9`, so the engine refused before the solve; corrected in this pass, same defect and same remedy as 4b237ac16 did for cargo. (4) THE BLOCKER: `nim-acp` has drifted 8 commits past the revision repro.lock pins (d894960d -> b325289), and its `proc `=destroy`(queue: InjectionQueue)` is by-value where codetracer's nim-fork-2.3.1 requires `var T` -- `nim_acp/client.nim(58, 3) Error: signature for '=destroy' must be proc[T: object](x: var T)`. The `ct-binary` action fails, so the Electron bundle cannot be produced. 40 of 45 actions succeeded; 2 failed, 3 blocked. Develop mode routes to the sibling CHECKOUT, not to the pinned revision, so the lock does not protect this.",
+  "baselineItWouldBeComparedTo": "mean fracOver0_10 = 0.3725 over state (0.3736), calltrace (0.3751) and editorWithMark (0.3690), at codetracer df80efc8d. Statistic named: fracOver0_10, the fraction of pixels whose FLIP error exceeds 0.10.",
+  "whatToExpectAndWhyItIsNotAPrediction": "the fix removes a ~25%-wide column from the Electron frame and lets the remaining panes expand, so every column boundary moves and PARITY-S3's 60-80 point disagreement should shrink. Whether fracOver0_10 falls is NOT claimed here: it is exactly the kind of thing this campaign has been wrong about by reasoning, and the number is worth nothing until it is measured on re-captured frames.",
+  "howToTakeIt": "rebuild both arms (`nix develop --command just build-once` and `... just build-gpui`), run ci/test/plat37-macos-window-capture.sh and ci/test/plat37-macos-electron-capture.sh, then build/plat37-parity/compare.sh state calltrace editorWithMark.",
+  "whyNoNumberEvenIfBothArmsBuilt": "A FLIP against the 0.3725 baseline would not be clean even with both arms rebuilt. That baseline was taken at codetracer df80efc8d with isonim-gpui a76a77df, isonim 45673bba and nim-everywhere b4e2b6aa. Today those siblings are 3, 110 and 1 commits ahead respectively, and codetracer is 27 digest-root files ahead. A new figure would mix the layout fix with 110 isonim commits, so the baseline would have to be re-taken too. Additionally the GPUI arm cannot be built at all right now: isonim-gpui/rust/target does not exist, `just build-gpui` only WARNS about the missing shim and produces a binary that fails when it dlopens it, and the only shims on disk are experiment variants (a 'nofontkit' build) that would change text rendering."
+ },
+ "measuredVsInferred": {
+  "measured": [
+   "the bundled tree's TESTS/CONSTRAINTS column and its content ordinals (48, 49)",
+   "paneHomesForMode(DebugMode) and modeDefaultOmittedContentIds(DebugMode)",
+   "ensureDefaultLayout's verbatim copy, and that noUserLayout defaults to false",
+   "the noUserLayout census over tests/visual/*.spec.ts (11 of 16 set it; this lane did not)",
+   "PLAT-45's recorded first-run arrangement: five stacks, no constraints component",
+   "that src/config and src/build-debug-repro/config default_layout.json hash to PLAT-45's recorded prefixDefaultSha256",
+   "the oracle pane census on the retained frames: Electron 7x6, GPUI 5x7",
+   "the two disposable frame readings (Electron right column; GPUI left tab strip)",
+   "the new assertion's red (6/6), green (7/7), vacuity and missing-oracle controls",
+   "that the two files edited in codetracer are OUTSIDE the Electron freshness digest roots, so the red gate is attributable to the sync and not to this change",
+   "re-verified independently in the adversarial review at 7662d3292: all four PARITY-S1 lines, the derived expectation [calltrace, editor, eventLog, fileTree, state], the red (6/6) green (7/7) vacuity missing-oracle and activeIndex-flip controls, an added out-of-range activeIndex control that raises, tsc clean on the real spec with TS2561 on `noUserLayoutt`, shellcheck clean, all five embedded python blocks compiling, and three fresh disposable readers on independently cut 1:1 crops who agreed with the original two"
+  ],
+  "inferred": [
+   "that PLAT35-VG5 ('four panes against eight') is the same artefact. Its spec entry now carries a RE-MEASUREMENT REQUIRED note marked [status:proposed]. Read from the launch path of visual-alignment-capture.spec.ts, which also sets no noUserLayout; NOT measured, and it is read by a different instrument in a lane that was not run.",
+   "that the FLIP figure will improve. Not claimed; see flip.whatToExpectAndWhyItIsNotAPrediction."
+  ]
+ }
+}

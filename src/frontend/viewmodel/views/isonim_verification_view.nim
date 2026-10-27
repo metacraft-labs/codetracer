@@ -34,21 +34,23 @@
 ## * **a run in flight renders**, with its elapsed time and last output line,
 ##   so a long proof attempt is visibly working rather than visibly stuck.
 ##
-## One `template …Impl` materialised per renderer, so the headless Mock tree
-## and the browser DOM are the same tree.
+## One generic tree for every renderer (Shared-DOM-Front-Ends D6), so the
+## headless Mock tree and the browser DOM are the same tree.
 
-import isonim/dsl/ui
-import isonim/core/computation
-import isonim/testing/mock_dom
+import isonim/core/[signals, computation]
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/verification_report
 import ../viewmodels/verification_payload
 import ../viewmodels/verification_vm
 import ../viewmodels/counterexample_session_vm
+import ./isonim_counterexample_view
+
+export signals, computation, components
 
 type
   VerificationPanelHandlers* = object
@@ -98,7 +100,8 @@ proc correctnessNote(model: VerificationPanelModel): string =
     return ""
   "Nothing was proved or disproved about this program."
 
-template renderVerificationPanelImpl(r, mdl, hnd: untyped): untyped =
+proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
+                                      hnd: VerificationPanelHandlers): N =
   ui(r):
     tdiv(class = "ct-verification-panel",
          `data-ct-verification` = "true",
@@ -175,40 +178,36 @@ template renderVerificationPanelImpl(r, mdl, hnd: untyped): untyped =
                   `data-ct-verification-excerpt` = "true"):
                 text row.excerpt
 
-proc renderVerificationPanel*(r: MockRenderer;
-                              model: VerificationPanelModel): MockNode =
-  renderVerificationPanelImpl(r, model, VerificationPanelHandlers())
+proc renderVerificationPanel*[R, N](r: R; model: VerificationPanelModel): N =
+  ## The pure render, from a plain record, with inert controls.
+  renderVerificationPanelTree[R, N](r, model, VerificationPanelHandlers())
 
-proc renderVerificationPanelLive*(r: MockRenderer; vm: VerificationVM;
-                                  session: CounterexampleSessionVM): MockNode =
-  ## `panelModel(vm)` as an *expression*, so the DSL re-evaluates it inside
-  ## each reactive scope and the panel follows the run.
+proc renderVerificationPanelLive*[R, N](r: R; vm: VerificationVM;
+                                        session: CounterexampleSessionVM): N =
+  ## The run as it is now, with the one action wired to `session`. Read once,
+  ## like `renderCounterexampleSessionLive`; `renderVerificationPane` keeps it
+  ## current.
   let m = panelModel(vm)
   let h = verificationHandlersFor(vm, session)
-  renderVerificationPanelImpl(r, m, h)
+  renderVerificationPanelTree[R, N](r, m, h)
 
-when defined(js):
-  proc renderVerificationPanel*(r: WebRenderer;
-                                model: VerificationPanelModel):
-                                isonim_dom.Element =
-    renderVerificationPanelImpl(r, model, VerificationPanelHandlers())
-
-  proc renderVerificationPanelLive*(r: WebRenderer; vm: VerificationVM;
-                                    session: CounterexampleSessionVM):
-                                    isonim_dom.Element =
-    let m = panelModel(vm)
-    let h = verificationHandlersFor(vm, session)
-    renderVerificationPanelImpl(r, m, h)
-
-  proc mountIsoNimVerificationPanel*(container: isonim_dom.Element;
-                                     vm: VerificationVM;
-                                     session: CounterexampleSessionVM) =
-    ## Mount the verification panel as a child of `container`. VN-M3 shipped
-    ## this view with no mount proc at all, which is the whole of why nothing
-    ## in a running window could open it.
-    createEffect proc() =
-      let panel = renderVerificationPanelLive(WebRenderer(), vm, session)
-      let containerNode = isonim_dom.Node(container)
-      while not isonim_dom.isNodeNil(containerNode.firstChild):
-        discard isonim_dom.removeChild(containerNode, containerNode.firstChild)
-      isonim_dom.appendChild(containerNode, isonim_dom.Node(panel))
+proc renderVerificationPane*[R, N](r: R; vm: VerificationVM;
+                                   session: CounterexampleSessionVM): N =
+  ## The Verification pane: the run, then what its counterexample says.
+  ##
+  ## Two hosts in reading order, each rebuilt by its own effect, so a step
+  ## through the counterexample repaints only the counterexample and a run's
+  ## progress repaints only the run. The run's tree is rebuilt whole because
+  ## it branches over the model (see `renderVerificationPanelLive`).
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
+  var runHost: N
+  let pane = ui(r):
+    tdiv(class = "ct-verification-pane"):
+      tdiv(ref = runHost, class = "ct-verification-run-host")
+  createRenderEffect proc() =
+    let panel = renderVerificationPanelLive[R, N](r, vm, session)
+    r.clearChildren(runHost)
+    r.appendChild(runHost, panel)
+  r.appendChild(pane, renderCounterexamplePane[R, N](r, session))
+  pane

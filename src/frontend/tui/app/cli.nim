@@ -58,6 +58,7 @@ import std/strutils
 
 import ./theme/capabilities
 import ./theme/roles
+import ./theme/terminal_settings
 import codetracer_embed   # `layout_settings` (PLAT-51)
 
 export layout_settings
@@ -96,6 +97,15 @@ type
       ## refuses a folder that holds no recording, which is exactly what a project
       ## is — and `--goto` is meaningless for one of them. A shared branch with
       ## a boolean on it would let `--goto 500 --edit .` parse.
+    tckCapabilities
+      ## PLAT-68: `--capabilities`. Negotiate with the terminal exactly as a
+      ## session would — the start-up query round included — and print what
+      ## was decided and why, the key protocol among it
+      ## (Base-Keymaps-And-Layer-Stack.md §7.2), then exit.
+    tckPaneServer
+      ## HSF-E1: `--pane-server`. Serve an editor that hosts CodeTracer's
+      ## panes over stdio (`host/pane_server.nim`, Editor-Hosted-Front-Ends
+      ## §E1). Takes no trace: the editor opens sessions over the protocol.
     tckUsageError
       ## The arguments do not name a command. Carries the message a user reads.
 
@@ -107,8 +117,14 @@ type
     ## `tracePath` and `flags` off either without knowing which mode it got.
     ## `--help` and `--version` are NOT in that branch: a colour depth is not a
     ## property of either, and the type is what says so.
+    keymap*: string
+      ## PLAT-68: `--keymap=<cua|emacs|vim|kakoune>` — the base keymap for THIS
+      ## session only, beating the stored preference and never written to it
+      ## (Base-Keymaps-And-Layer-Stack.md §3.6); "" when absent. Validated here
+      ## by `keymap_selection.selectKeymap`, the one function a name goes
+      ## through.
     case kind*: TuiCommandKind
-    of tckOpenTrace, tckHeadless:
+    of tckOpenTrace, tckHeadless, tckCapabilities:
       tracePath*: string
       flags*: CapabilityFlags
         ## §6.2's five capability overrides, as a value — the four CTUI-11
@@ -130,11 +146,24 @@ type
         ## remembered preference; `soUnset` when absent.
       liveResize*: SettingOverride
         ## PLAT-51: `--live-resize=on|off`, likewise.
+      overflowMarkers*: SettingOverride
+        ## PLAT-70: `--overflow-markers=on|off` (Horizontal-Overflow.md §4.6),
+        ## likewise.
+      layoutFlags*: array[LayoutSetting, string]
+        ## Every layout setting's flag value word for this session — the
+        ## three above and PLAT-70 Part H's scrollbar options
+        ## (`--scrollbar-thickness=thin` …) — "" when absent.
       noFlowOverlay*: bool
         ## `--no-flow-overlay` — the flow overlay hidden for this session.
         ## PLAT-42 built the overlay on both native front-ends and shows it by
         ## default (`FlowOverlayShownByDefault`); this is the GPUI binary's
         ## flag of the same name, so the two can be asked for the same screen.
+      capabilitiesJson*: bool
+        ## PLAT-71: `--capabilities=json` — the report as JSON, every axis
+        ## with its `from` (Terminal-Adaptation §10.1, TA-13).
+      capabilitiesCard*: bool
+        ## PLAT-71: `--card` (with `--capabilities`; what `ct doctor
+        ## terminal` passes) — the glyph test card after the report (§10.3).
       layoutBinding*: bool
         ## `--layout-binding` — accepted, and since PLAT-45 it asks for what
         ## is already the default.
@@ -310,6 +339,10 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
+  --capabilities     negotiate with this terminal as a session would, print
+                     what was decided (colours, mouse, key protocol) and exit
+  --keymap=NAME      the base keymap for this session only: cua (default),
+                     emacs, vim, kakoune; `:keymap NAME` remembers a choice
   -t, --theme=NAME   dark, light (the design system's two colour modes;
                      detected from the terminal's background when absent),
                      plain (no colour)
@@ -332,7 +365,29 @@ options:
   --live-resize=on|off
                      panes reflow while a divider is dragged (default on);
                      off draws a guide and reflows on release
+  --overflow-markers=on|off
+                     mark a text row cut by the pane's left or right edge
+                     with ‹ / › (default on; remembered by :set
+                     overflow-markers)
+  --scrollbar-thickness=NAME  hairline (default), thin, thick or full
+  --scrollbar-fade=on|off     fade out when left alone (default on)
+  --scrollbar-track=on|off    a faint track under each thumb (default off)
+  --scrollbar-click=NAME      a track press: jump (default) or page
+  --modern-unicode=off|on|auto  Legacy Computing glyphs in all chrome
+                     (default off; auto: only where the terminal draws them)
+                     each of these five is remembered by :set <name> <value>
+  --glyphs=NAME      auto (default), ascii, basic or extended chrome glyphs;
+                     --ascii-borders is --glyphs=ascii
+  --ambiguous-width=NAME  auto (measured, default), narrow or wide
+  --colors=NAME      auto (default), truecolor, 256, 16 or mono
+  --no-probe         ask the terminal nothing at start-up (--terminal-probe=off)
+  --reduce-motion=NAME  auto (default: on over a slow link), on or off
+  --capabilities=json   the --capabilities report as JSON
+  --card             with --capabilities: the glyph test card after it
   --headless         render one screen as plain text and exit — for CI
+  --pane-server      serve CodeTracer's panes to an editor over stdio
+                     (JSON-RPC with LSP framing); started by the Neovim and
+                     Emacs plugins
 
 The capability flags always beat the environment probe. With none of them, the
 colour depth comes from COLORTERM / TERM / TERM_PROGRAM, the border set from
@@ -428,6 +483,18 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
     # nothing to show.
     return TuiCommand(kind: tckHelp)
 
+  # HSF-E1: `--pane-server` is the whole command line. The editor that
+  # started it opens recordings over the protocol, and a terminal option
+  # (a theme, a size, a trace) would be one it never reads.
+  for i in first .. high(args):
+    if args[i] == "--pane-server":
+      if high(args) - first > 0:
+        return TuiCommand(
+          kind: tckUsageError,
+          message: "'--pane-server' takes no other argument; the editor " &
+                   "opens recordings over the protocol")
+      return TuiCommand(kind: tckPaneServer)
+
   var tracePath = ""
   var flags = initCapabilityFlags()
   var mode = tckOpenTrace
@@ -438,8 +505,13 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
   var noFlowOverlay = false
   var dividers = dcStrip
   var settingOverrides: array[LayoutSetting, SettingOverride]
+  var layoutFlags: array[LayoutSetting, string]
   var editProject = ""
   var editRequested = false
+  var keymap = ""
+  var capabilitiesRequested = false
+  var capabilitiesJson = false
+  var capabilitiesCard = false
   var i = first
   while i <= high(args):
     let arg = args[i]
@@ -457,6 +529,19 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.asciiBorders = true
     of "--no-mouse":
       flags.noMouse = true
+    of "--capabilities":
+      capabilitiesRequested = true
+    of "--capabilities=json":
+      capabilitiesRequested = true
+      capabilitiesJson = true
+    of "--capabilities=text":
+      capabilitiesRequested = true
+    of "--card":
+      capabilitiesCard = true
+    of "--no-probe":
+      # PLAT-71 (§4.8 rule 4): the escape hatch for a terminal that
+      # misbehaves on a query — the same as `--terminal-probe=off`.
+      layoutFlags[lsTerminalProbe] = "off"
     of "--edit":
       # PLAT-16 / ui-selection.md §6. `ct edit --ui=tui <project>` reaches this
       # binary as `codetracer-tui --edit <project>`.
@@ -505,6 +590,14 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
             if editPath.len > 0:
               editProject = editPath
             break options
+          let (isKeymap, keymapName) = optionValue(arg, "--keymap")
+          if isKeymap:
+            let selection = selectKeymap(keymapName, "--keymap")
+            if not selection.ok:
+              return TuiCommand(kind: tckUsageError,
+                                message: selection.refusal)
+            keymap = keymapName
+            break options
           let (isTheme, themeName) = optionValue(arg, "--theme")
           if isTheme:
             let (ok, theme) = parseTheme(themeName)
@@ -514,12 +607,14 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
             flags.theme = theme
             flags.themePinned = true
             break options
-          # PLAT-51: the two layout preferences, for this session.
+          # PLAT-51: the layout preferences, for this session (PLAT-70
+          # Part H: and the scrollbar options).
           let flag = parseSettingFlag(arg)
           if flag.isFlag:
             if not flag.ok:
               return TuiCommand(kind: tckUsageError, message: flag.message)
             settingOverrides[flag.setting] = flag.value
+            layoutFlags[flag.setting] = flag.word
             break options
           # PLAT-50: the divider colour, the user's open choice.
           let (isDividers, dividersName) = optionValue(arg, "--dividers")
@@ -658,6 +753,57 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       message: "--record-keys and --replay-keys contradict each other;" &
                " a replay would only record its own input back")
 
+  # PLAT-71: THE TERMINAL SETTINGS' FLAGS ARE RANK 2 OF THE PRECEDENCE
+  # (Terminal-Adaptation §5.2), so they go to the capability resolver as well
+  # as to the session's settings: `--glyphs=ascii`, `--modern-unicode=on`,
+  # `--ambiguous-width=wide`, `--colors=16`, `--terminal-probe=off`,
+  # `--reduce-motion=on`.
+  for which in LayoutSetting:
+    if which.isTerminalSetting and layoutFlags[which].len > 0:
+      discard choicesOf(which, layoutFlags[which], flags.choices)
+  # …and their contradictions are refused, not ordered (§5.2).
+  if flags.choices.modernUnicode.isSome and
+     flags.choices.modernUnicode.get == mcOn:
+    if flags.asciiBorders or (flags.choices.glyphs.isSome and
+                              flags.choices.glyphs.get != gcExtended):
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "--modern-unicode=on needs the extended glyphs; it " &
+                 "contradicts " & (if flags.asciiBorders: "--ascii-borders"
+                                   else: "--glyphs=" &
+                                         $flags.choices.glyphs.get))
+  if flags.asciiBorders and flags.choices.glyphs.isSome and
+     flags.choices.glyphs.get != gcAscii:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "--ascii-borders and --glyphs=" & $flags.choices.glyphs.get &
+               " contradict each other; pass one")
+  if flags.choices.colors.isSome:
+    let c = flags.choices.colors.get
+    if (flags.noColor and c != ccMono) or
+       (flags.forceTrueColor and c != ccTrueColor):
+      return TuiCommand(
+        kind: tckUsageError,
+        message: (if flags.noColor: "--no-color" else: "--truecolor") &
+                 " and --colors=" & $c & " contradict each other; pass one")
+  if capabilitiesCard and not capabilitiesRequested:
+    return TuiCommand(
+      kind: tckUsageError,
+      message: "'--card' is the glyph test card of '--capabilities'; " &
+               "pass them together (or run `ct doctor terminal`)")
+
+  # PLAT-68: `--capabilities` reports the terminal and opens nothing.
+  if capabilitiesRequested:
+    if editRequested or tracePath.len > 0 or mode == tckHeadless:
+      return TuiCommand(
+        kind: tckUsageError,
+        message: "'--capabilities' reports what this terminal negotiates and" &
+                 " opens nothing; pass it without a trace, --edit or --headless")
+    return TuiCommand(kind: tckCapabilities, flags: flags, keymap: keymap,
+                      capabilitiesJson: capabilitiesJson,
+                      capabilitiesCard: capabilitiesCard,
+                      layoutFlags: layoutFlags)
+
   # PLAT-16's OWN CONTRADICTIONS, refused rather than ordered, on exactly the
   # rule the three blocks above follow.
   #
@@ -697,7 +843,7 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
         kind: tckUsageError,
         message: "'--edit' needs a project folder to open")
     return TuiCommand(kind: tckEditProject, projectPath: editProject,
-                      editFlags: flags)
+                      editFlags: flags, keymap: keymap)
 
   # A DISPLAY MODE WITH NOTHING TO DISPLAY is a usage error rather than a help
   # screen. `codetracer-tui --headless` with no trace reached `tckHeadless` with
@@ -778,11 +924,15 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
                replayKeys: replayKeys, layoutBinding: layoutBinding,
                noFlowOverlay: noFlowOverlay, dividers: dividers,
                focusHighlight: settingOverrides[lsFocusHighlight],
-               liveResize: settingOverrides[lsLiveResize])
+               liveResize: settingOverrides[lsLiveResize],
+               overflowMarkers: settingOverrides[lsOverflowMarkers],
+               layoutFlags: layoutFlags, keymap: keymap)
   else:
     TuiCommand(kind: tckOpenTrace, tracePath: tracePath, flags: flags,
                gotoTick: gotoTick, recordKeys: recordKeys,
                replayKeys: replayKeys, layoutBinding: layoutBinding,
                noFlowOverlay: noFlowOverlay, dividers: dividers,
                focusHighlight: settingOverrides[lsFocusHighlight],
-               liveResize: settingOverrides[lsLiveResize])
+               liveResize: settingOverrides[lsLiveResize],
+               overflowMarkers: settingOverrides[lsOverflowMarkers],
+               layoutFlags: layoutFlags, keymap: keymap)

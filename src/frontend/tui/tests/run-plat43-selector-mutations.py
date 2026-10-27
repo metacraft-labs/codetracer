@@ -50,11 +50,13 @@ PREFERENCE = "src/frontend/viewmodel/host/keymap_preference.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 BINDING = "src/frontend/tui/app/edit_binding.nim"
 CORE = "src/frontend/viewmodel/editing_core.nim"
+CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
+ROUTER = "src/frontend/viewmodel/keymap/keymap_router.nim"
 
 SUITE_SELECTOR = "src/frontend/tui/tests/test_plat43_keymap_selector.nim"
 SUITE_SOURCES = "src/frontend/tui/tests/test_plat43_selector_sources.nim"
 
-SUBJECTS = [SELECTION, PREFERENCE, RUNTIME, BINDING, CORE]
+SUBJECTS = [SELECTION, PREFERENCE, RUNTIME, BINDING, CORE, CUA, ROUTER]
 SUITES = [SUITE_SELECTOR, SUITE_SOURCES]
 
 
@@ -71,35 +73,47 @@ ARMS = [
     ("S1", SELECTION, "    if name == $m:",
      "    if name.toLowerAscii == $m:", SUITE_SELECTOR,
      "the selector normalises what was typed, so `Vim` selects Vim"),
-    ("S2", SELECTION, "  KeymapSelection(ok: false, model: kmProductDefault,",
-     "  KeymapSelection(ok: true, model: kmProductDefault,", SUITE_SELECTOR,
+    ("S2", SELECTION, "  KeymapSelection(ok: false, model: bkCua,",
+     "  KeymapSelection(ok: true, model: bkCua,", SUITE_SELECTOR,
      "an unknown name silently selects the default"),
     ("S3", SELECTION,
      "    \"'; the accepted values are \" & acceptedKeymapNamesText()",
      "    \"'\"", SUITE_SELECTOR,
      "the refusal stops naming the accepted set"),
-    ("S4", SELECTION, "  selectKeymap(text.strip(), KeymapSourceStored)",
-     "  selectKeymap(text, KeymapSourceStored)", SUITE_SELECTOR,
+    ("S4", SELECTION, "  let name = text.strip()",
+     "  let name = text", SUITE_SELECTOR,
      "a stored preference's own newline makes it unreadable"),
-    ("P1", PREFERENCE, "  if selection.ok:", "  if true:", SUITE_SELECTOR,
+    # P1 RE-AIMED 2026-10-11 (PLAT-68): `loadKeymapPreference` branches on a
+    # migrated `default` first, and the old needle had become a substring of
+    # `sessionKeymap`'s flag branch, which no case refuses — the arm SURVIVED.
+    ("P1", PREFERENCE, "  elif selection.ok:", "  elif true:", SUITE_SELECTOR,
      "a refused stored value is reported as loaded"),
-    ("R1", RUNTIME, "            else: rt.editServices.saveKeymap(selection.model)",
-     "            else: \"\"", SUITE_SELECTOR,
+    ("R1", RUNTIME, "    else: rt.editServices.saveKeymap(selection.model)",
+     "    else: \"\"", SUITE_SELECTOR,
      "`:keymap` stops asking the host to remember the choice"),
-    ("R2", RUNTIME, "  if name in EditorEscapeKeys:", "  if false:",
+    # R2 / R3 RE-AIMED 2026-10-12 (PLAT-68 Phase B): which keys a buffer
+    # takes is the ROUTER's answer now — the layer a key resolves in — so the
+    # arms plant their defects in the data and the router, not in a query.
+    ("R2", CUA,
+     "    BaseRow(chords: \"F6\", operation: \"layout.focus-next-pane\", table: G),",
+     "    BaseRow(chords: \"F6\", operation: \"layout.focus-next-pane\"),",
      SUITE_SELECTOR,
-     "Tab stops being the escape hatch: the product default's indent takes it"),
-    ("R3", RUNTIME, "    rt.app.editSession.activeBuffer().claimsEditKey(name, 0)",
-     "    false", SUITE_SELECTOR,
-     "a model's own non-printable keys stop reaching the buffer"),
+     "F6 stops being the way off the editor: the buffer swallows it"),
+    ("R3", ROUTER,
+     "      if source == lsBase and table == EditorTable and router.base.isModal and\n"
+     "         facts.editor.readOnly:",
+     "      if source == lsBase and table == EditorTable and router.base.isModal and\n"
+     "         true:",
+     SUITE_SELECTOR,
+     "a modal model's own keys stop reaching the buffer"),
     ("E1", BINDING, "    buf.doc.switchModel(model)", "    discard",
      SUITE_SELECTOR, "`:keymap` stops re-keying the OPEN buffer"),
     ("C1", CORE, "  d.state.mode = initialModeFor(model)", "  discard",
      SUITE_SELECTOR,
      "a re-keyed document keeps the old model's mode (insert under Vim)"),
     ("C2", CORE,
-     "               mode: d.state.mode, textEntry: d.state.mode == emInsert)",
-     "               mode: d.state.mode, textEntry: true)", SUITE_SELECTOR,
+     "               textEntry: not isModal(d.model) or d.state.mode == emInsert,",
+     "               textEntry: true,", SUITE_SELECTOR,
      "every printable key is text again, so Vim's `u` types a `u`"),
     ("N1", SELECTION, "  selectableKeymapNames().join(\", \")",
      "  join(selectableKeymapNames(), \", \")", SUITE_SELECTOR,

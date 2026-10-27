@@ -107,7 +107,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   var entries: seq[SignalRegistryEntry] = @[]
 
   entries.addMany("ReplayDataStore",
-    ["session", "debugger", "currentGeid", "timeline", "agentSessions"],
+    ["session", "debugger", "stop", "positionReported", "currentGeid", "timeline",
+     "agentSessions"],
     vscBackendAuthoritative,
     "Top-level replay/debugger and agent-service facts owned by the backend authority.")
   # `currentLineIndex` (PLAT-51) joins the group: it holds the engine's own
@@ -205,6 +206,11 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Calltrace selection is collaborative session intent.",
     requiresStableId = true,
     stableIdNote = "Currently stores a calltrace row index; needs a stable call node id/key.")
+  entries.addEntry("CalltraceVM", "selectedCallKey", vscRendererLocal,
+    "The call this front end keeps its selection on as sections load " &
+    "(`selectCall`). Only the row it resolves to is shared, written to " &
+    "`selectedEntry` through the session; a peer's own selection makes " &
+    "this front end stop following its call (`projectCalltraceViewState`).")
   entries.addEntry("CalltraceVM", "expandedNodes", vscSharedSessionViewState,
     "Calltrace expansion set is collaborative session intent.",
     requiresStableId = true,
@@ -216,16 +222,25 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("CalltraceVM", ["searchQuery", "rawIgnorePatterns"],
     vscSharedSessionViewState,
     "Calltrace filter/search settings are logical shared view state.")
-  entries.addEntry("CalltraceVM", "backendSearchResults",
+  entries.addMany("CalltraceVM", ["backendSearchResults", "backendSearchTotal"],
     vscBackendAuthoritative,
-    "Search result payloads come from backend queries.")
+    "Search result payloads and the whole-trace match count come from " &
+    "the ct/search-calltrace answer.")
+  entries.addEntry("CalltraceVM", "revealScroll", vscRendererLocal,
+    "codetracer#860: the scroll this pane's own search-result activation " &
+    "asks its view for; one reader's pane position, not session intent.")
   entries.addDerived("CalltraceVM",
     ["visibleLines", "hasMoreAbove", "hasMoreBelow", "highlightedMatches",
      "isLoading", "degradedState"])
 
-  entries.addMany("StateVM", ["activeTab", "watchExpressions"],
-    vscSharedSessionViewState,
-    "State pane tab and watch list are shared session view state.")
+  entries.addEntry("StateVM", "watchExpressions", vscSharedSessionViewState,
+    "The watch list is shared session view state, one per session across " &
+    "process switches (Variable-State-Pane.md § Decisions, 2026-10-24).")
+  entries.addEntry("StateVM", "watchOrigins", vscSharedSessionViewState,
+    "The recording each watch was added in travels with the session's watch " &
+    "list (Variable-State-Pane.md § Decisions, 2026-10-24).")
+  entries.addEntry("StateVM", "hideOtherProcessWatches", vscRendererLocal,
+    "\"Hide watches from other processes\" is the reader's own setting.")
   entries.addEntry("StateVM", "expandedPaths", vscSharedSessionViewState,
     "State variable expansion set is shared session view state.",
     requiresStableId = true,
@@ -296,7 +311,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     vscSharedSessionViewState,
     "User-pinned chains, breadcrumb navigation, badge/chain preferences, and side-panel visibility are shared logical view state.")
   entries.addMany("OriginChainVM",
-    ["activeChain", "loading", "inFlightSummary", "lastResolvedSummaries"],
+    ["activeChain", "rowChains", "loading", "inFlightSummary",
+     "lastResolvedSummaries"],
     vscBackendAuthoritative,
     "Resolved chains/summaries and their request-lifecycle loading flags come from ct/originChain + ct/originSummary backend responses.")
   entries.addMany("OriginChainVM",
@@ -309,9 +325,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     requiresStableId = true,
     stableIdNote = "Currently stores a visible row index; should target eventId.")
   entries.addMany("EventLogVM",
-    ["currentPage", "pageSize", "searchQuery", "sortColumn", "sortAscending"],
+    ["currentPage", "pageSize", "searchQuery", "selectedKinds", "sortColumn",
+     "sortAscending"],
     vscSharedSessionViewState,
-    "Event-log query/page/sort settings are logical shared view state.")
+    "Event-log query/kind-filter/page/sort settings are logical shared view state.")
   entries.addMany("EventLogVM", ["eventRows", "totalEventCount",
       "loadingState"],
     vscBackendAuthoritative,
@@ -340,6 +357,10 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # participant's pointer state, as a drop-down is.
   entries.addEntry("EventLogVM", "columns", vscSharedSessionViewState,
     "The shown columns and their order are logical shared view state; the sort column indexes them.")
+  entries.addEntry("EventLogVM", "rowHeightPx", vscRendererLocal,
+    "The rows' measured advance is a per-front-end measurement that must never travel.")
+  entries.addEntry("EventLogVM", "reloadToken", vscRendererLocal,
+    "A nudge to ask this front-end's window again; the rows it brings are the backend's.")
   entries.addEntry("EventLogVM", "columnsMenuOpen", vscRendererLocal,
     "An open column menu is this participant's transient UI, like any open drop-down.")
   entries.addEntry("EventLogVM", "filterBar", vscSharedSessionViewState,
@@ -367,7 +388,9 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   # the VM owns the window instead of a flow sub-store; nothing here is user
   # intent, so a peer must receive them from the backend owner as a set and
   # never merge them.
-  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks", "styledLines"],
+  entries.addMany("FlowVM", ["loops", "focusedLoop", "windowRRTicks", "styledLines",
+                             "layoutWindow", "layoutWindows", "windowReturns", "windowPath",
+                             "windowFunction"],
     vscBackendAuthoritative,
     "The loaded flow window: backend loop array, the loop picked from it, the tick it was loaded for, and its per-line facts.")
   entries.addDerived("FlowVM", ["isLoading", "totalIterations"])
@@ -457,7 +480,7 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("ShellVM", "inputHistory", vscPresenceAwareness,
     "Command history is participant-local awareness, not replayable ViewState.")
 
-  entries.addMany("SearchResultsVM", ["query", "active"],
+  entries.addMany("SearchResultsVM", ["query", "active", "options"],
     vscSharedSessionViewState,
     "Global search results panel query and visibility are shared view state. " &
     "There is no `filter` alongside them any more: the client-side " &
@@ -468,12 +491,18 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Search result rows are backend/search service output.")
   entries.addEntry("SearchResultsVM", "loading", vscBackendAuthoritative,
     "In-flight flag for one search request; set on submit and cleared by the first batch of backend results.")
+  entries.addMany("SearchResultsVM", ["searching", "note"],
+    vscBackendAuthoritative,
+    "Whether the runner is still streaming the latest search, and why it " &
+    "could read nothing: facts the search runner reports.")
+  entries.addEntry("SearchResultsVM", "selected", vscRendererLocal,
+    "The row a participant selected (a click, F4) is their own cursor.")
   entries.addEntry("SearchResultsVM", "recentSearches", vscPresenceAwareness,
     "A participant's own last ten queries, shown in this panel's empty " &
     "state. Same call as ShellVM.inputHistory: what one person typed is " &
     "theirs, not replayable session state, and publishing it would put " &
     "another participant's search history in front of everyone.")
-  entries.addDerived("SearchResultsVM", ["resultCount", "fileCount"])
+  entries.addDerived("SearchResultsVM", ["resultCount", "fileCount", "groups"])
 
   entries.addMany("TestResultsVM", ["catalog", "summary", "projectName"],
     vscBackendAuthoritative,
@@ -540,6 +569,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["events", "lines", "currentRRTicks", "screenVersion"],
     vscBackendAuthoritative,
     "Terminal output (the writes, their lines, the screen model's rebuild count) is backend trace data.")
+  entries.addMany("TerminalOutputVM",
+    ["linesStart", "linesTotal", "windowCurrentLine", "offeredByEngine",
+     "writesTotal"],
+    vscBackendAuthoritative,
+    "The line window the engine answered (Viewport-Driven-Loading Q3): " &
+    "its place, the totals, the current line and whether a screen is offered.")
+  entries.addEntry("TerminalOutputVM", "viewport", vscRendererLocal,
+    "What one viewer's pane shows; each viewer's window is its own.")
   entries.addEntry("TerminalOutputVM", "initialLoad", vscRendererLocal,
     "Initial-load flag controls local render behavior.")
   entries.addEntry("TerminalOutputVM", "view", vscRendererLocal,
@@ -561,9 +598,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     requiresStableId = true,
     stableIdNote = "Offset should be tied to stable instruction/address identity.")
   entries.addMany("LowLevelCodeVM",
-    ["instructions", "address", "errorMessage", "noirProject"],
+    ["instructions", "address", "errorMessage", "noirProject", "activeLine",
+     "activePath", "sourceText", "generatedAtStop"],
     vscBackendAuthoritative,
-    "Instruction data and status are backend-derived facts.")
+    "Instruction data and status, the source line the debugger's move marks, the groups' source text and the stop a generated listing was painted at are backend-derived facts.")
+  # Whether a front-end shows the pane decides whether THIS participant's stop
+  # loader asks for the listing; a follower renders the leader's answers.
+  entries.addEntry("LowLevelCodeVM", "shown", vscRendererLocal,
+    "Whether this front-end has the pane mounted.")
   # NS4 anchoring. `anchors` is the mapping a PRODUCER emitted and `validate`
   # accepted; `anchorDefects` is why the last `setAnchors` was refused. Both
   # are answers about the artefact, identical for every participant looking at
@@ -780,6 +822,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Which detail tab the selected request is being read through — the same " &
     "kind of shared pane intent as StateVM.activeTab, and already a stable " &
     "tab name rather than an index.")
+  entries.addEntry("RequestPanelVM", "navigationMessage", vscRendererLocal,
+    "Feedback from this participant's last request activation is local interaction state.")
   entries.addDerived("RequestPanelVM", ["filteredRequests"])
 
   entries.addMany("ReplVM", ["history", "replEnabled", "materialized",
@@ -879,6 +923,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Filesystem tree/diff contents are local repository facts.")
   entries.addEntry("FilesystemVM", "loadingState", vscBackendAuthoritative,
     "Tree/diff load status belongs to the index-process request that fills `rootEntry`.")
+  entries.addEntry("FilesystemVM", "loadError", vscBackendAuthoritative,
+    "Why the root load failed is the index process's answer to that same request.")
   entries.addEntry("FilesystemVM", "expandedPaths", vscSharedSessionViewState,
     "Filesystem expansion can be shared as logical path state.",
     requiresStableId = true,
@@ -1043,6 +1089,51 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     "Shader step selection can be shared with stable step ids.",
     requiresStableId = true,
     stableIdNote = "Current field is an index; needs stable shader-step id.")
+
+  # VIEWPORTS (Viewport-Driven-Loading V1): what ONE viewer's pane shows.
+  # Each viewer's window is its own; a mirror reports its own through the
+  # `viewport` action (`sync/action_relay.applyViewport`).
+  for vm in ["CalltraceVM", "EventLogVM", "SearchResultsVM", "StateVM",
+             "StepListVM", "TraceLogVM", "RequestPanelVM"]:
+    entries.addEntry(vm, "viewport", vscRendererLocal,
+      "The size and scroll position of this viewer's pane.")
+  entries.addEntry("VCSVM", "historyViewport", vscRendererLocal,
+    "The size and scroll position of this viewer's commit list.")
+  entries.addDerived("EventLogVM", ["visibleRows"])
+  entries.addDerived("SearchResultsVM", ["visibleResults"])
+  entries.addEntry("StateVM", "loadingMore", vscRendererLocal,
+    "Which rows' next elements this viewer is fetching: request bookkeeping.")
+  entries.addMany("RequestPanelVM", ["windowStart", "windowTotal"],
+    vscRendererLocal,
+    "The window of requests this viewer's pane holds and the engine's count.")
+  entries.addEntry("RequestSpansStore", "recordedTotal", vscBackendAuthoritative,
+    "How many requests the recording served.")
+  entries.addEntry("ReplayDataStore", "symbols", vscBackendAuthoritative,
+    "The recording's functions (`ct/load-symbols`) are trace data.")
+  entries.addEntry("ReplayDataStore", "sessionGeneration",
+    vscBackendAuthoritative,
+    "Which debugger session the store holds: a fact of the session, not a view.")
+
+  # THE DIFF FLOW (HSF-D4) is the engine's answer for a diff session.
+  entries.addMany("FlowVM",
+    ["events", "diffSession", "diffLoadingState", "diffStyledLines",
+     "diffSteps"],
+    vscBackendAuthoritative,
+    "The flow's events and the diff session's flow are backend output.")
+
+  # THE TOOLBAR (HSF-D2). The jump history is the session's: every viewer
+  # of one session steps back and forward through the same jumps. Which
+  # history list is open, a pending test run and the edit toolbar a viewer
+  # shows are that viewer's own.
+  entries.addMany("DebugControlsVM", ["history", "historyIndex"],
+    vscSharedSessionViewState,
+    "The session's jump history and the place in it.")
+  entries.addMany("DebugControlsVM",
+    ["historyList", "runTestsPending", "toolbarMode", "editToolbar"],
+    vscRendererLocal,
+    "An open history list, a pending run and the toolbar a viewer shows are local.")
+  entries.addDerived("DebugControlsVM",
+    ["canGoBack", "canGoForward", "historyListEntries", "topbarSurface"])
 
   entries
 

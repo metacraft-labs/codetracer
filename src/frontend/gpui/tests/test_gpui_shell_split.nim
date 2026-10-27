@@ -34,7 +34,7 @@
 ##
 ## Every helper that calls `check` is a `template`.
 
-import std/[os, strutils, unittest]
+import std/[json, os, strutils, unittest]
 
 import isonim_gpui/renderer
 
@@ -166,13 +166,14 @@ suite "PLAT-20: the shell is renderer-free":
         if "gpui" in line.toLowerAscii or "isonim" in line.toLowerAscii or
            "tui" in line.toLowerAscii:
           inc importers
-    ck scanned == 14  # headless_app, layout_model, layout_interaction,
+    ck scanned == 15  # headless_app, layout_model, layout_interaction,
                       # window_set, extent_distribution — PLAT-45's
                       # desktop_panes, arrangement_relation and
                       # generate_default_layout — and PLAT-48's
                       # session_tabs; PLAT-49's auto_hide_hover and
                       # footer_info; PLAT-50's pane_clicks; PLAT-51's
-                      # golden_layout_hit and welcome_tabs
+                      # golden_layout_hit and welcome_tabs; the Files
+                      # menu's file_tree_menu
     ck importers == 0
     # The positive twin over the same reader (§4a): the scanner really is
     # reading import lines, so `importers == 0` is not an empty scan.
@@ -318,9 +319,64 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
     ck named == 1
     expectCount(6)
 
+  test "a pane docked to the TOP edge is a leaf, though the document has no top dock":
+    resetCount()
+    # gpui-kit's `DockPlacement` has no `top`, so `projectDock` writes no
+    # `top_dock` and the window draws that strip itself. Its panes are still
+    # leaves the host must draw — a hover previews one and a click docks it
+    # open, both of which MOVE its element — so `leavesFor` takes them from
+    # the model's strip (codetracer-pm issue 2026-10-08-gpui-pane-docked-at-
+    # start-has-no-element-so-its-label-hover-reveals-nothing.md: a pane
+    # docked there when the window opened had no element at all).
+    var sh = newGpuiShell()
+    let id = WindowId(0)
+    var layout = defaultReplayLayoutValue()
+    for cmd in [cmdDock(paneState, leTop), cmdDock(paneEventLog, leTop),
+                cmdDock(paneCalltrace, leLeft)]:
+      let outcome = layout.apply(cmd)
+      ck outcome.kind == loApplied
+      layout = outcome.layout
+    ck sh.openWindow(id, layout).kind == wsApplied
+    ck not sh.projectionFor(id).state.hasKey("top_dock")
+    let leafSet = sh.leavesFor(id)
+    ck leafSet.refused.len == 0
+    # Every pane of the layout, each once: three in the document, two on the
+    # window's own top strip.
+    ck leafSet.leaves.len == 5
+    var top: seq[GpuiLeaf] = @[]
+    for leaf in leafSet.leaves:
+      if leaf.topStrip: top.add leaf
+      else: ck leaf.paneId notin [$paneState, $paneEventLog]
+    ck top.len == 2
+    if top.len == 2:
+      # In strip order, positioned on the strip.
+      ck top[0].paneId == $paneState and top[1].paneId == $paneEventLog
+      for i, leaf in top:
+        ck leaf.kind == glkBuiltin
+        ck $leaf.builtin == leaf.paneId
+        ck leaf.slot.pane == leaf.paneId
+        ck leaf.slot.tabIndex == i and leaf.slot.tabCount == 2
+        ck leaf.slot.path.len == 0
+        ck leaf.title.len > 0
+    # The left-docked pane is in the document, so it is not a top-strip leaf.
+    var left = 0
+    for leaf in leafSet.leaves:
+      if leaf.paneId == $paneCalltrace:
+        inc left
+        ck leaf.slot.region == dpLeft
+    ck left == 1
+    # The leaves render, the top-strip ones too, and name their slot by the
+    # strip they are on rather than by a region the document never gave them.
+    var r: GpuiRenderer
+    let drawn = renderLeaves(r, leafSet)
+    ck drawn.drawn == 5
+    let plan = leafPlanJson(r, drawn)
+    ck "top/0" in plan and "top/1" in plan
+    expectCount(28)
+
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 45
+const ExpectedAssertions = 73
 
 suite "PLAT-20: the assertion count":
   test "every case in this file ran":

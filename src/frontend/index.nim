@@ -4,10 +4,26 @@ import
   index/[ args, ipc_utils, electron_vars, server_config, config, window ],
   ../common/ct_home
 
+when defined(server):
+  import index/server_lifetime
+
 data.start = now()
 parseArgs()
 
 when not defined(server):
+  # PLAT-69 (C4): ONE APP IDENTITY, shared with the GPUI front-end, and the
+  # one `resources/codetracer.desktop` declares. Electron derives a Linux
+  # window's Wayland `app_id` from its desktop-file name, and the desktop is
+  # started as `electron <prefix>/src/index.js` — a script, not a package
+  # with a `desktopName` — so that name was Electron's own: measured on a
+  # headless sway, the window reported `app_id "electron"`, which no
+  # `.desktop` file of ours names. Set before any window exists, which is
+  # when it is read. (The X11 `WM_CLASS` already follows the app name,
+  # `CodeTracer` — `setName` below — which is the file's `StartupWMClass`.)
+  if electronProcess.platform == cstring"linux" and
+     not electron_vars.app.js.setDesktopName.isUndefined:
+    discard electron_vars.app.js.setDesktopName(cstring"codetracer.desktop")
+
   # Electron's own per-user profile (`userData`: Chromium's caches, local
   # storage, and the single-instance lock taken below) moves with every other
   # per-user location when `CODETRACER_HOME` is set: to
@@ -136,4 +152,7 @@ when not defined(server):
     discard ready()
 else:
   readyVar = functionAsJs(ready)
+  # Before the listeners: a signal that arrives while the server starts must
+  # still stop what it has started (`index/server_lifetime`).
+  installServerLifetime()
   setupServer()

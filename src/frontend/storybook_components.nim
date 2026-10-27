@@ -593,7 +593,7 @@ proc applyEventLog(vm: EventLogVM) =
   vm.selectRow(some(0))
 
 proc applyCalltrace(vm: CalltraceVM) =
-  vm.setViewportHeight(48)
+  vm.setViewport(Viewport(rows: 48))
   vm.selectEntry(some(0'i64))
   vm.setSearchQuery("")
   vm.setBackendSearchResults(@[])
@@ -606,83 +606,6 @@ proc applyEmptyState(store: ReplayDataStore) =
   store.locals.codeStateLine.val = ""
   store.locals.locals.val = @[]
   store.locals.globals.val = @[]
-
-proc htmlEscape(text: string): string =
-  result = text
-  result = result.replace("&", "&amp;")
-  result = result.replace("<", "&lt;")
-  result = result.replace(">", "&gt;")
-  result = result.replace("\"", "&quot;")
-
-proc storyEventPath(row: EventLogRow): string =
-  if row.line in [13, 17, 23, 24, 25, 32]: "main.nr:" & $row.line
-  elif row.line >= 38 and row.line <= 43: "combat.nr:" & $row.line
-  else: "shield.nr:" & $row.line
-
-proc storyEventDenseHtml(rows: seq[EventLogRow]; selected: Option[int]): string =
-  result.add "<div class=\"dt-container dts DTS dt-empty-footer\">"
-  result.add "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">"
-  result.add "<div class=\"dt-scroll\"><div class=\"dt-scroll-head\"><div class=\"dt-scroll-headInner\">"
-  result.add "<table class=\"dataTable\"><thead><tr><th>tick</th><th>#</th><th>location</th><th></th><th>output</th></tr></thead></table>"
-  result.add "</div></div><div class=\"dt-scroll-body\"><table class=\"dataTable\"><tbody>"
-  for i, row in rows:
-    let rowState =
-      if selected.isSome and selected.get == i: "future event-selected"
-      else: "future"
-    let rrTicksPercent = formatFloat(float(row.eventId) / 1000.0, ffDecimal, 3)
-    let rrTicksRemaining = formatFloat(101.0 - (float(row.eventId) / 1000.0),
-                                       ffDecimal, 3)
-    result.add "<tr class=\"" & rowState & "\">"
-    result.add "<td class=\"direct-location-rr-ticks eventLog-cell dt-type-numeric sorting_1\">"
-    result.add "<div class=\"rr-ticks-time-container\"><span class=\"rr-ticks-time\">" & $row.eventId & "</span></div>"
-    result.add "<div class=\"rr-ticks-line-container\"><span class=\"rr-ticks-line event-rr-ticks-line\"></span>"
-    result.add "<span class=\"rr-ticks-empty-remaining\" style=\"width:" &
-               rrTicksRemaining & "%; left:" & rrTicksPercent & "%\"></span></div></td>"
-    result.add "<td class=\"eventLog-index eventLog-cell dt-type-numeric\">" & $i & "</td>"
-    result.add "<td class=\"eventLog-fullpath eventLog-cell\">" & htmlEscape(storyEventPath(row)) & "</td>"
-    result.add "<td class=\"eventLog-event eventLog-cell\">" & htmlEscape(row.kind) & "</td>"
-    result.add "<td class=\"eventLog-text eventLog-cell\">" & htmlEscape(row.value) & "</td>"
-    result.add "</tr>"
-  result.add "</tbody></table></div></div></div></div></div>"
-
-proc storyEventDetailedHtml(): string =
-  "<div class=\"dt-container dt-empty-footer\" style=\"display: none;\">" &
-    "<div class=\"dt-layout-row dt-layout-table\"><div class=\"dt-layout-cell dt-layout-full\">" &
-    "<table class=\"dataTable\"><tbody><tr><td class=\"dt-empty\">No data available in table</td></tr></tbody></table>" &
-    "</div></div></div>"
-
-proc populateStorybookEventLogTables(
-    denseTableId, detailedTableId, denseHtml, detailedHtml: cstring) =
-  {.emit: """
-    const denseTable = document.getElementById(`denseTableId`);
-    if (denseTable) {
-      const denseHost = denseTable.closest('.eventLog-dense-table');
-      if (denseHost) {
-        denseHost.innerHTML = `denseHtml`;
-        const eventLog = denseHost.closest('.eventLog');
-        const rowCount = denseHost.querySelectorAll('tbody tr').length;
-        const footer = eventLog && eventLog.querySelector('.data-tables-footer');
-        if (footer) {
-          footer.className = 'data-tables-footer 1to40';
-          const startInput = footer.querySelector('input');
-          const endRow = footer.querySelector('.data-tables-footer-end-row');
-          const rowsCount = footer.querySelector('.data-tables-footer-rows-count');
-          if (startInput) {
-            const startValue = rowCount > 0 ? '1' : '0';
-            startInput.value = startValue;
-            startInput.setAttribute('value', startValue);
-          }
-          if (endRow) endRow.textContent = String(Math.min(40, rowCount));
-          if (rowsCount) rowsCount.textContent = String(rowCount);
-        }
-      }
-    }
-    const detailedTable = document.getElementById(`detailedTableId`);
-    if (detailedTable) {
-      const detailedHost = detailedTable.closest('.eventLog-detailed-table');
-      if (detailedHost) detailedHost.innerHTML = `detailedHtml`;
-    }
-  """.}
 
 proc applyFilesystem(vm: FilesystemVM) =
   vm.setRoot(storyFilesystem())
@@ -887,28 +810,32 @@ proc mountBuild(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createBuildVM(store)
     vm.applyBuild(fixture)
-    mountIsoNimBuild(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderBuildPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountErrors(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createErrorsVM(store)
     if fixture != "empty": vm.applyErrors()
-    mountIsoNimErrors(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderErrorsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountScratchpad(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createScratchpadVM(store)
     if fixture != "empty": vm.applyScratchpad()
-    mountIsoNimScratchpadPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderScratchpadPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountSearchResults(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createSearchResultsVM(store)
     if fixture != "empty": vm.applySearchResults()
-    mountIsoNimSearchResults(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderSearchResultsPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountEventLog(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -918,22 +845,8 @@ proc mountEventLog(container: isonim_dom.Element; fixture: string): DisposeProc 
       vm.loadingState.val = lsLoading
     else:
       vm.applyEventLog()
-    let denseTableId = "eventLog-story-dense-table-0"
-    let detailedTableId = "eventLog-story-detailed-table-0"
-    let searchInputId = "eventLog-story-search"
-    mountIsoNimEventLogWithDataTables(
-      container,
-      vm,
-      0,
-      denseTableId,
-      detailedTableId,
-      searchInputId,
-      proc() =
-        populateStorybookEventLogTables(
-          cstring(denseTableId),
-          cstring(detailedTableId),
-          cstring(storyEventDenseHtml(vm.eventRows.val, vm.selectedRow.val)),
-          cstring(storyEventDetailedHtml())))
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderEventLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -942,13 +855,18 @@ proc mountCalltrace(container: isonim_dom.Element; fixture: string): DisposeProc
     if fixture != "empty": vm.applyCalltrace()
     if fixture == "search-status-report":
       vm.setSearchQuery("status_report")
-      vm.setBackendSearchResults(@[
-        (name: "status_report", rrTicks: 43, key: "5"),
-        (name: "status_report", rrTicks: 111, key: "10"),
-        (name: "status_report", rrTicks: 179, key: "15"),
-        (name: "status_report", rrTicks: 247, key: "20"),
-      ])
-    mountIsoNimCalltrace(container, vm)
+      # Each match carries its frame's location, as `registerSearchRes`
+      # gives a real one, so a click in the story jumps the way the app does.
+      var matches: seq[CalltraceSearchResult] = @[]
+      for (rrTicks, key) in [(43'u64, "5"), (111'u64, "10"), (179'u64, "15"),
+                             (247'u64, "20")]:
+        matches.add CalltraceSearchResult(
+          name: "status_report", key: key, rrTicks: rrTicks,
+          location: Location(file: "src/main.nr", line: 17, column: 3,
+                             callstackDepth: 1))
+      vm.setBackendSearchResults(matches)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderCalltracePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountState(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -974,7 +892,8 @@ proc mountFilesystem(container: isonim_dom.Element; fixture: string): DisposePro
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createFilesystemVM(store)
     if fixture != "empty": vm.applyFilesystem()
-    mountIsoNimFilesystemPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderFilesystemPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountFlow(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1061,7 +980,7 @@ proc createStoryFrameViewerClient(): VisualReplayClient =
         width: 320,
         height: 180,
       )),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       storyFuture(storyDrawCalls()),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -1150,7 +1069,8 @@ proc mountFrameViewer(container: isonim_dom.Element; fixture: string): DisposePr
     vm.currentFrame.val = 0
     vm.frameImageSrc.val = storyFrameSvg(0)
     vm.drawCalls.val = storyDrawCalls()
-    mountIsoNimFrameViewer(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderFrameViewerPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     if fixture == "geid":
       vm.loadFrameForGeid(220'u64)
       drainCallbacks()
@@ -1166,7 +1086,8 @@ proc mountPixelHistory(container: isonim_dom.Element; fixture: string): DisposeP
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
     vm = createPixelHistoryVM(client)
-    mountIsoNimPixelHistory(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderPixelHistoryPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     if fixture != "empty":
       vm.loadPixelHistory(160, 90, 0)
       drainCallbacks()
@@ -1182,7 +1103,8 @@ proc mountShaderDebug(container: isonim_dom.Element; fixture: string): DisposePr
   createRoot proc(dispose: proc()) =
     rootDisposer = dispose
     vm = createShaderDebugVM(client)
-    mountIsoNimShaderDebug(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderShaderDebugPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     if fixture != "empty":
       vm.loadFromPixel(160, 90, 0, some(220'u64))
       drainCallbacks()
@@ -1195,14 +1117,16 @@ proc mountTraceLog(container: isonim_dom.Element; fixture: string): DisposeProc 
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createTraceLogVM(store)
     if fixture != "empty": vm.applyTraceLog()
-    mountIsoNimTraceLogPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderTraceLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountStepList(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createStepListVM(store)
     if fixture != "empty": vm.applyStepList()
-    mountIsoNimStepList(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderStepListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountNoSource(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1235,14 +1159,16 @@ proc mountRepl(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createReplVM(store)
     if fixture == "materialized": vm.setMaterialized(true) else: vm.applyRepl()
-    mountIsoNimRepl(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderReplPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountRequestPanel(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createRequestPanelVM(store)
     if fixture != "empty": vm.applyRequestPanel()
-    mountIsoNimRequestPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderRequestPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountAgentActivity(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1251,14 +1177,17 @@ proc mountAgentActivity(container: isonim_dom.Element; fixture: string): Dispose
     if fixture != "empty": vm.applyAgentActivity()
     if fixture == "reference": vm.setTerminals(@[])
     if fixture == "loading": vm.setLoading(true)
-    mountIsoNimAgentActivityPanel(container, vm, 101, "storybook-agent-input")
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderAgentActivityPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm, 101,
+        "storybook-agent-input")))
     return proc() = vm.dispose())
 
 proc mountAgentWorkspace(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createAgentWorkspaceVM(store)
     if fixture != "empty": vm.applyAgentWorkspace()
-    mountIsoNimAgentWorkspacePanel(container, vm, 103)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderAgentWorkspacePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm, 103)))
     return proc() = vm.dispose())
 
 proc mountWelcome(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1286,7 +1215,8 @@ proc mountVcs(container: isonim_dom.Element; fixture: string): DisposeProc =
     rootDisposer = dispose
     vm = createVCSVM()
     if fixture != "empty": vm.applyVCS()
-    mountIsoNimVCSPanel(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderVCSPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
   return proc() =
     if vm != nil: vm.dispose()
     if rootDisposer != nil: rootDisposer()
@@ -1345,7 +1275,7 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
         threadId: 1'u32,
       )
       vm = createDebugControlsVM(store)
-      mountIsoNimDebugControls(container, vm)
+      renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(), container, vm)
       discard isonim_dom.appendChild(isonim_dom.Node(container),
                                      isonim_dom.Node(logNode))
       store.requestRecordingHead()
@@ -1358,7 +1288,7 @@ proc mountDebugControls(container: isonim_dom.Element; fixture: string): Dispose
 
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createDebugControlsVM(store)
-    mountIsoNimDebugControls(container, vm)
+    renderTopbar[WebRenderer, isonim_dom.Element](WebRenderer(), container, vm)
     return proc() = vm.dispose())
 
 proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1373,7 +1303,8 @@ proc mountPointList(container: isonim_dom.Element; fixture: string): DisposeProc
                      path: "src/shield.nr", line: 61, enabled: false),
     ])
     vm.selectPoint(some(0))
-    mountIsoNimPointList(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderPointListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1392,7 +1323,8 @@ proc mountSearch(container: isonim_dom.Element; fixture: string): DisposeProc =
                                detail: "file result",
                                shortcut: "file"),
       ])
-    mountIsoNimSearch(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountShell(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1405,7 +1337,8 @@ proc mountShell(container: isonim_dom.Element; fixture: string): DisposeProc =
 proc mountCalltraceEditor(container: isonim_dom.Element; fixture: string): DisposeProc =
   mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
     let vm = createCalltraceEditorVM(store)
-    mountIsoNimCalltraceEditor(container, vm)
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderCalltraceEditorPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
     return proc() = vm.dispose())
 
 proc mountTerminalOutput(container: isonim_dom.Element; fixture: string): DisposeProc =
@@ -1439,7 +1372,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
   let r = WebRenderer()
   case name
   of "session-tabs":
-    appendRendered(container, renderSessionTabsPanel(r, @[
+    appendRendered(container, renderSessionTabsPanel[WebRenderer, isonim_dom.Element](r, @[
       SessionTabRecord(label: "noir-space-ship"),
       SessionTabRecord(label: "sudoku"),
     ], 0))
@@ -1455,7 +1388,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
                      nameWidth: 18),
     ])
     let menuHost = createHost(container, "div", "menu")
-    renderMenuShellInto(r, menuHost, MenuShellModel(
+    renderMenuShellInto[WebRenderer, isonim_dom.Element](r, menuHost, MenuShellModel(
       showNavigation: true, active: true, searchQuery: "",
       rootNodes: @[fileNode, debugNode],
       showWindowMenu: true,
@@ -1479,7 +1412,7 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
       showNotifications: fixture == "history",
     ))
   of "debug-shell":
-    appendRendered(container, renderDebugChromePanel(r, 3))
+    appendRendered(container, renderDebugChromePanel[WebRenderer, isonim_dom.Element](r, 3))
   of "auto-hide-bottom-strip":
     # The fixture renders the *live* bottom-strip view. It used to render
     # `isonim_auto_hide_bottom_tabs_view`, a second bottom-tabs renderer that
@@ -1503,19 +1436,19 @@ proc mountStructure(container: isonim_dom.Element; name, fixture: string): Dispo
       AutoHideBottomStripRecord(title: "Build", active: false),
     ])
   of "auto-hide-collapsed-icons":
-    appendRendered(container, renderAutoHideCollapsedIconsPanel(r, @[
+    appendRendered(container, renderAutoHideCollapsedIconsPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideCollapsedIconRecord(title: "Calltrace", icon: "C"),
-      AutoHideCollapsedIconRecord(title: "State", icon: "S"),
+      AutoHideCollapsedIconRecord(title: "Variables", icon: "V"),
     ]))
   of "auto-hide-overlay-tabs":
-    appendRendered(container, renderAutoHideOverlayTabsPanel(r, @[
+    appendRendered(container, renderAutoHideOverlayTabsPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideOverlayTabRecord(title: "Calltrace", active: true),
-      AutoHideOverlayTabRecord(title: "State", active: false),
+      AutoHideOverlayTabRecord(title: "Variables", active: false),
     ], true, " side-tabs-left"))
   of "auto-hide-side-strip":
-    appendRendered(container, renderAutoHideSideStripPanel(r, @[
+    appendRendered(container, renderAutoHideSideStripPanel[WebRenderer, isonim_dom.Element](r, @[
       AutoHideSideStripRecord(title: "Calltrace"),
-      AutoHideSideStripRecord(title: "State"),
+      AutoHideSideStripRecord(title: "Variables"),
     ], fixture == "collapsed"))
   else:
     let node = r.createElement("div")
@@ -1538,26 +1471,13 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "calltrace":
         let vm = createCalltraceVM(store); vm.applyCalltrace()
-        mountIsoNimCalltrace(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderCalltracePanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "event-log":
         let vm = createEventLogVM(store); vm.applyEventLog()
-        let denseTableId = "eventLog-default-dense-table-0"
-        let detailedTableId = "eventLog-default-detailed-table-0"
-        let searchInputId = "eventLog-default-search"
-        mountIsoNimEventLogWithDataTables(
-          section.content,
-          vm,
-          0,
-          denseTableId,
-          detailedTableId,
-          searchInputId,
-          proc() =
-            populateStorybookEventLogTables(
-              cstring(denseTableId),
-              cstring(detailedTableId),
-              cstring(storyEventDenseHtml(vm.eventRows.val, vm.selectedRow.val)),
-              cstring(storyEventDetailedHtml())))
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderEventLogPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "flow":
         let vm = createFlowVM(store); vm.iterationCount.val = 12; vm.selectIteration(5)
@@ -1565,15 +1485,18 @@ proc mountLayout(container: isonim_dom.Element; name, fixture: string): DisposeP
         disposers.add(proc() = vm.dispose())
       of "search":
         let vm = createSearchVM(store); vm.applySearch()
-        mountIsoNimSearch(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "point-list":
         let vm = createPointListVM(store); vm.selectPoint(some(0))
-        mountIsoNimPointList(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderPointListPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "scratchpad":
         let vm = createScratchpadVM(store); vm.applyScratchpad()
-        mountIsoNimScratchpadPanel(section.content, vm)
+        discard isonim_dom.appendChild(isonim_dom.Node(section.content), isonim_dom.Node(
+          renderScratchpadPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
         disposers.add(proc() = vm.dispose())
       of "shell":
         let vm = createShellVM(store); vm.applyShell()

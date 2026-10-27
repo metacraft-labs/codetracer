@@ -30,8 +30,10 @@
 ## No mocks: the shipped binary, the real shim, the real `replay-server`, a real
 ## recording and real files.
 
+import replay_prerequisite
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tempfiles,
             unittest]
+import ./gpui_child_env
 
 import headless_app/layout_model
 import headless_app/arrangement_relation
@@ -72,8 +74,7 @@ proc runGpui(stateDir, configHome: string; extra: seq[string] = @[]): Run =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = stateDir
   env["CODETRACER_HOME"] = configHome
   let errFile = genTempPath("plat45-gpui-", ".err")
@@ -204,8 +205,9 @@ suite "PLAT-45: the GPUI window and the shared default":
     let cap = gpuiCapability()
     let reports = reportLeaves(sharedDefaultLayout().tree, cap)
     # Four until PLAT-47 part B drew the VCS pane (from the desktop's VCSVM);
-    # three until PLAT-52 drew the Terminal Output pane.
-    ck reports.len == 2
+    # three until PLAT-52 drew the Terminal Output pane; two until PLAT-53
+    # drew Test Results (from the window's TestResultsVM).
+    ck reports.len == 1
     let text = planText(run.plan)
     for r in reports:
       var state = ""

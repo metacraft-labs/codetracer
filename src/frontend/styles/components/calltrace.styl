@@ -244,8 +244,10 @@
       .value-expanded-default
         background-color: colors-ui-surface-base-panel !important
 
+    // A return value's name: orange for the dark ground; the editor's
+    // parameter colour, its orange, on the light one (`by-mode`, defaults.styl).
     &.return-value .value-expanded-name-text
-      color: #e48e59
+      color: by-mode(#e48e59, colors-editor-syntax-parameter)
 
   .value-expanded-name
     color: CALLTRACE_ARGS_COLOR
@@ -461,31 +463,6 @@
     color: CALLTRACE_COLOR_PREVIOUS
     cursor: pointer
 
-  .speed-very-fast
-    color: colors-ui-text-primary-body
-    // background: linear-gradient(to right, #fff, SPEED_VERY_FAST_BG)
-    background-color: SPEED_VERY_FAST_BG
-  //box-shadow: 0.625em 0.3125em 0.3125em SPEED_VERY_FAST_BG
-
-  .speed-fast
-    color: OPPOSITE_COLOR
-    // background: linear-gradient(to right, #fff, SPEED_FAST_BG)
-    background-color: SPEED_FAST_BG
-  // box-shadow: 0.625em 0.3125em 0.3125em SPEED_FAST_BG
-
-  .speed-medium
-    color: OPPOSITE_COLOR
-    // background: linear-gradient(to right, #fff, SPEED_MEDIUM_BG)
-    background-color: SPEED_MEDIUM_BG
-  // box-shadow: 0.625em 0.3125em 0.3125em SPEED_MEDIUM_BG
-
-  .speed-slow
-    color: OPPOSITE_COLOR
-    // background: linear-gradient(to right, #fff, SPEED_SLOW_BG)
-    background-color: SPEED_SLOW_BG
-    opacity: 0.5
-  // box-shadow: 0.625em 0.3125em 0.3125em SPEED_SLOW_BG
-
   .duration
     margin-left: 1.25em
     padding-left: 0.25em
@@ -504,15 +481,6 @@
   // if !IS_EXTENSION
   //   padding-left: 0.25em
   // background-color: colors-ui-surface-base-panel
-
-.full-calltrace
-  background-color: FULL_CALLTRACE_BG_COLOR
-  color: FULL_CALLTRACE_FG_COLOR
-  height: 100%
-  // font-size: 0.875em
-  overflow-x: hidden
-  overflow-y: scroll
-  width: 31.25em
 
 // .local-calltrace
 //   background-color: colors-ui-surface-base-panel
@@ -583,7 +551,7 @@
 
   .step-line-location
     width: auto
-    color: #9cdcfe
+    color: by-mode(#9cdcfe, colors-ui-text-information-primary)
 
   .step-line-source-code
     width: auto
@@ -807,8 +775,13 @@
     padding-right: 0.5em
 
 // TODO: Fix event-selected
+//
+// The selected row's ground is the design system's selection surface,
+// `colors-editor-surface-select` — the token whose Dark value is the #3E3E3B
+// this rule used to spell as a literal. As a literal it stayed dark in the
+// light theme, a dark bar under the light theme's dark text.
 .event-selected
-  background: #3E3E3B !important
+  background: colors-editor-surface-select !important
 
 .code-state-line
   color:colors-ui-text-primary-body

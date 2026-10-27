@@ -1,0 +1,423 @@
+{
+ "_comment": [
+  "PLAT-37 GPUI-vs-Electron parity readings, pass of 2026-10-22.",
+  "THE ONE THING TO READ FIRST: the macOS font-smoothing lever is now LANDED IN CODE,",
+  "in isonim-gpui's shim, and it is worth -6.77% of the three-view mean fracOver0_10.",
+  "The previous pass measured this lever on ONE view through an external `defaults write`",
+  "and then removed it, landing nothing. This pass implements it in-process and measures",
+  "all three comparable views.",
+  "THE FINDING THAT CHANGED THE DESIGN: satisfying gpui's OnceLock is NOT sufficient.",
+  "A route that sets the preference, forces the memo and removes the key again recovers",
+  "only -1.82% of the available -6.77%, although glyph_dilation_for_color reads 0 in BOTH.",
+  "CoreGraphics consults AppleFontSmoothing AGAIN when the glyph is drawn, so the key must",
+  "be present for the process lifetime, not merely when the memo resolves.",
+  "Every number here was measured against codetracer 3fce565eb8 and isonim-gpui 5776cd936f",
+  "plus this pass's uncommitted working-tree change. NO COMMITS AND NO PUSHES WERE MADE."
+ ],
+ "schemaVersion": 1,
+ "standing": "HOST-CONDITIONAL EVIDENCE, NEVER A REQUIRED GATE. One macOS host, one display.",
+ "measuredAt": "2026-10-22 (clock 2026-10-18 EEST)",
+ "measuredThisPass": [
+  "The font-smoothing fix implemented in-process in isonim-gpui and its effect on ALL THREE comparable views, before and after, from ONE binary.",
+  "The Transient-vs-Retained discovery: removing the key after the memo resolves forfeits 73% of the lever.",
+  "The two-polarity probe control: glyph_dilation_for_color(white) = 4 with the platform default, 0 with the policy applied.",
+  "The ownership-marker mechanism that stops a leftover key being mistaken for a user setting.",
+  "The instrument control: this pass's flipdiff reproduces the recorded 2026-10-21 parityP1 for all three views to every digit.",
+  "The BEFORE arm reproduces the recorded 2026-10-21 baseline exactly, so the opt-out restores prior behaviour.",
+  "The tile regression control on all three views (43 better / 5 unchanged / 0 worse each).",
+  "That the user's preference domain is byte-identical before and after the whole pass."
+ ],
+ "supersedes": [
+  "plat37-parity-readings-2026-10-21.json -- its theABofAppleFontSmoothing section is SUPERSEDED: the -6.9% it reported for editorWithMark is REPRODUCED EXACTLY here, but its claim that nothing was landed no longer holds, and its assumption that the in-process route would simply work is WRONG as stated (see theTransientVsRetainedFinding).",
+  "plat37-parity-readings-2026-10-20.json",
+  "plat37-parity-readings-2026-10-19.json",
+  "plat37-parity-readings-2026-10-18b.json",
+  "plat37-parity-readings-2026-10-18.json",
+  "plat37-parity-readings-2026-10-17.json",
+  "plat37-parity-readings-2026-10-16.json",
+  "plat37-parity-readings-2026-10-14.json",
+  "plat37-parity-readings-2026-10-13.json",
+  "plat37-parity-readings.json"
+ ],
+ "subject": {
+  "codetracer": "3fce565eb8d6352c405648ea5d0184780f86aedb (branch agents). This pass changed NO codetracer source; the only codetracer artefact it adds is this readings file.",
+  "isonimGpui": "5776cd936779db60af8d48c7ba2427b8b4c7fefd (branch agents) PLUS an uncommitted working-tree change: the PRESERVED font-weight fusion from the previous pass (render_sync.rs, byte-identical to how it was handed over) and THIS pass's font-smoothing policy (window.rs, gpui_app.rs, gpui_headless.rs, Cargo.toml, Cargo.lock).",
+  "codetracerPm": "e4bbc2e6fd12fe4a78254d8ccf5d1cc1de2b62c5 (latest) at sync time; moved to 373732ca8 during the pass. Not modified.",
+  "reprobuildPm": "d38a84b5bef0681af45c2faea32b59dbdf1f7682 (latest) at sync time; moved to 9963be8bf during the pass. Not modified.",
+  "reprobuild": "18c9229ad3c7a738ad59e4b6d33c062511f0bfe8 (agents), fast-forwarded this pass from f974c2e74a. Not modified.",
+  "gpuiPrePin": "gpui-pre =0.3.5, UNCHANGED. tools/check_gpui_pin.sh exit 0. NO CRATE SOURCE WAS PATCHED -- the fix is entirely in our own shim.",
+  "noCommits": "This pass made no git commits and no pushes, as instructed."
+ },
+ "theFixAsLanded": {
+  "whereItIs": "isonim-gpui/rust/gpui-nim-shim/src/window.rs, as `apply_chromium_font_smoothing_policy` and its reporting wrapper `apply_and_report_font_smoothing_policy`, called from gpui_app.rs (the windowed launch path, before `Application::run`) and from both text-system sites in gpui_headless.rs.",
+  "whyTHATfile": "window.rs already owns this shim's 'match what Chromium does on this desktop' text policy -- `text_antialiasing` and `fontconfig_rgba` are its immediate neighbours, and the macOS reasoning in fontconfig_rgba's doc comment is the same reasoning this function continues. It is renderer code, not harness code: nothing in the parity lane or any test knows it exists.",
+  "whyTHOSEcallSites": "The memo at text_system.rs:233 is process-global and one-shot, so the policy has to run before the first glyph. In the windowed path the platform is now bound to a local so the policy can be applied through the SAME text system the app renders with, without constructing a second platform. Both headless sites get it too, so an off-screen capture matches the window.",
+  "theMECHANISM": "gpui-pre-macos-0.3.5 text_system.rs:222 short-circuits glyph_dilation_for_color on !font_smoothing_allowed_by_user(), which reads AppleFontSmoothing through CFPreferencesCopyAppValue for kCFPreferencesCurrentApplication and treats only an explicit 0 as disabled. The shim sets that key for its own application domain (`codetracer-gpui`) before the first rasterisation.",
+  "itMATCHEScodetracerCSS": "codetracer.css:1515 sets -webkit-font-smoothing: antialiased on body, which is Chromium's instruction NOT to stem-darken. The comment in window.rs cites it by file and line.",
+  "theEnvEscapeHatch": "ISONIM_GPUI_FONT_SMOOTHING = platform | transient | retained, defaulting to retained. `platform` is the before arm of the A/B and the only way to get the dilated rendering back out of the same binary. An unrecognised value takes the default, so a typo cannot silently restore stem darkening (unit test `only_platform_opts_out`).",
+  "whatItDoesNOTdo": "It never overrides an explicit AppleFontSmoothing it did not write. The value is read first, and a foreign one is reported and left exactly as it was."
+ },
+ "theTransientVsRetainedFinding": {
+  "standing": "THE MAIN TECHNICAL RESULT OF THIS PASS, and it contradicts the design the previous pass and the brief both assumed would work.",
+  "whatWasAssumed": "That because the answer is memoised in a OnceLock, it is enough to set the preference, let the memo resolve, and remove the key again -- leaving nothing behind in the user's plist.",
+  "whatWasMEASURED": {
+   "transientThreeViewMean": 0.17949903549382715,
+   "retainedThreeViewMean": 0.17044463734567902,
+   "platformDefaultThreeViewMean": 0.18282497427983538,
+   "transientDelta": -0.0033259387860082312,
+   "retainedDelta": -0.012380336934156355,
+   "inWords": "Removing the key once the memo has resolved recovers only -1.82% of the three-view mean, against -6.77% for keeping it. The transient route forfeits about 73% of the lever."
+  },
+  "whyTHATisTHEproof": "glyph_dilation_for_color(white) reads 0 in BOTH arms, so GPUI's own dilation is switched off in both and gpui never calls set_should_smooth_fonts. The missing 4.95 points therefore cannot be GPUI's dilation. The remaining consumer is CoreGraphics itself, which consults AppleFontSmoothing again when the glyph is actually drawn.",
+  "theCROSSvalidation": "The Retained arm reproduces the previous pass's EXTERNAL `defaults write codetracer-gpui AppleFontSmoothing -int 0` A/B on editorWithMark to every digit: mean 0.07505948, p90 0.26755214, fracOver0_10 0.16467496. Two unrelated mechanisms -- a shell command writing the plist before launch, and CFPreferencesSetAppValue from inside the process -- produce byte-identical statistics.",
+  "theCONSEQUENCEforTHEdesign": "Retained is the default. The key is kept for the process lifetime and dropped by an atexit handler."
+ },
+ "theControlThatProvesItTookEffect": {
+  "_rule": "A probe that reads the preference back proves nothing about the OnceLock. The control is the memoised function's OWN output.",
+  "what": "glyph_dilation_for_color(white) called on the real platform text system, reported on stderr by every process and captured in the lane's per-view <view>.gpui.log.",
+  "whyWHITE": "Luminance 1.0 gives level floor(4*1.0+0.5) = 4, the maximum. A 0 therefore cannot be a colour that merely happens not to dilate.",
+  "theTWOpolarities": {
+   "platformDefault": "all 7 views report glyph_dilation_for_color(white)=4",
+   "policyApplied": "all 7 views report glyph_dilation_for_color(white)=0",
+   "fromONEbinary": "Both arms are the same staged windowed cdylib; only ISONIM_GPUI_FONT_SMOOTHING differs."
+  },
+  "whyUNIFORMITYisOKhere": "A uniform result across rows is normally a broken probe. Here the probe is uniform WITHIN an arm by construction -- it is one process-global memo, asked the same question -- and the thing that must differ is the arm, which it does: 4 against 0. The pixel statistics, which are the independent read, are NOT uniform across views."
+ },
+ "parityP1": {
+  "_rule": "CROP_PX=58 was DERIVED from THIS pass's own capture records -- titleBarPoints 29 x pointPixelScale 2.0, identical across every *.capture.json in BOTH arms -- and not inherited.",
+  "command": "CROP_PX=58 ./compare22.sh {before,after} state calltrace editorWithMark, in build/plat37-parity-2026-10-22",
+  "theElectronBufferIsHELDFIXED": "Both arms were diffed against the SAME byte-fixed Electron buffers, copied from build/plat37-parity-2026-10-21/flip/ and NOT re-captured. sha256: state affcd765098f, calltrace 387d22509b47, editorWithMark 439029b16bff. This is deliberate: PLAT37-ISSUE-K records that the Electron lane is not bit-deterministic on editorWithMark, so re-capturing would put a confound on the reference side of a before/after.",
+  "before": {
+   "state": {
+    "mean": 0.08571545034646988,
+    "p50": 0.0,
+    "p90": 0.33855265378952026,
+    "p99": 0.9662694931030273,
+    "maxError": 0.990104079246521,
+    "fracOver0_10": 0.1825335648148148,
+    "fracOver0_25": 0.12061226851851851,
+    "fracOver0_50": 0.0716460262345679
+   },
+   "calltrace": {
+    "mean": 0.08858368545770645,
+    "p50": 0.0,
+    "p90": 0.3492356240749359,
+    "p99": 0.9676300287246704,
+    "maxError": 0.990104079246521,
+    "fracOver0_10": 0.18897241512345678,
+    "fracOver0_25": 0.12534452160493828,
+    "fracOver0_50": 0.07338136574074074
+   },
+   "editorWithMark": {
+    "mean": 0.08274893462657928,
+    "p50": 0.0,
+    "p90": 0.31934136152267456,
+    "p99": 0.9659109115600586,
+    "maxError": 0.990104079246521,
+    "fracOver0_10": 0.17696894290123458,
+    "fracOver0_25": 0.1157445987654321,
+    "fracOver0_50": 0.06886091820987654
+   }
+  },
+  "after": {
+   "state": {
+    "mean": 0.0774441733956337,
+    "p50": 0.0,
+    "p90": 0.2871113717556,
+    "p99": 0.949139416217804,
+    "maxError": 0.990104079246521,
+    "fracOver0_10": 0.16950327932098766,
+    "fracOver0_25": 0.10788503086419753,
+    "fracOver0_50": 0.0635102237654321
+   },
+   "calltrace": {
+    "mean": 0.08068373799324036,
+    "p50": 0.0,
+    "p90": 0.30667611956596375,
+    "p99": 0.9567926526069641,
+    "maxError": 0.990104079246521,
+    "fracOver0_10": 0.1771556712962963,
+    "fracOver0_25": 0.11347781635802469,
+    "fracOver0_50": 0.0655264274691358
+   },
+   "editorWithMark": {
+    "mean": 0.07505948096513748,
+    "p50": 0.0,
+    "p90": 0.26755213737487793,
+    "p99": 0.9492349624633789,
+    "maxError": 0.990104079246521,
+    "fracOver0_10": 0.16467496141975307,
+    "fracOver0_25": 0.10391319444444444,
+    "fracOver0_50": 0.0612494212962963
+   }
+  },
+  "meanFracOver0_10Before": 0.18282497427983538,
+  "meanFracOver0_10After": 0.17044463734567902,
+  "delta": -0.012380336934156355,
+  "deltaPercent": -6.771688049142989,
+  "perViewFracOver0_10Delta": {
+   "state": -0.013030285493827148,
+   "calltrace": -0.01181674382716047,
+   "editorWithMark": -0.012293981481481503
+  },
+  "theRegressionControl": {
+   "state": {
+    "better": 43,
+    "unchanged": 5,
+    "worse": 0,
+    "tiles": 48
+   },
+   "calltrace": {
+    "better": 43,
+    "unchanged": 5,
+    "worse": 0,
+    "tiles": 48
+   },
+   "editorWithMark": {
+    "better": 43,
+    "unchanged": 5,
+    "worse": 0,
+    "tiles": 48
+   }
+  },
+  "whatTheRegressionControlMeans": "Over flipdiff's fixed 8x6 tile grid, EVERY view is 43 tiles better, 5 unchanged, 0 worse. The 5 unchanged are the identically-zero empty regions. So the fix does not trade one region against another.",
+  "p50andMaxErrorUNCHANGED": "p50 is 0.0 in both arms on all three views (most pixels match exactly) and maxError is 0.990104079246521 in both. Neither is sensitive to a stroke-weight change; they are reported because the brief asked for them, not because they moved.",
+  "notComparable": [
+   "editor",
+   "eventLog",
+   "shell"
+  ],
+  "whyNotComparable": "extent mismatch: the GPUI window is clamped by the display on every 'wide' viewport (gpui 3456x2168 against electron 3840x2160). That is G1, out of scope, unchanged."
+ },
+ "instrumentControls": {
+  "theInstrumentReproducesTheRecordedBaseline": "flipdiff (copied unchanged from the 2026-10-21 pass, built from codetracer-image-diff ee9fb397b) run on the PRESERVED 2026-10-21 flip/ buffer pairs returns the recorded parityP1 to all seventeen digits on all three views: state mean 0.08571545034646988, calltrace 0.08858368545770645, editorWithMark 0.08274893462657928. So the instrument and the buffers are the ones that produced the recorded numbers.",
+  "theBEFOREarmReproducesTheBaseline": "The platform-default arm, freshly captured this pass, returns EXACTLY the recorded 2026-10-21 figures on all three views (fracOver0_10 0.18253356, 0.18897242, 0.17696894). Two independent things follow: the env opt-out genuinely restores the prior rendering, and the GPUI capture reproduced across passes on these three views.",
+  "theRebuildControl": "build-freshness.sh:114-116 excludes the cdylib from the GPUI input digest BY DESIGN, so the gate cannot see a stale shim and the cdylib byte size is the control. Final rebuild: windowed 67,019,320 -> 67,032,120 B, headless 71,260,360 -> 71,273,672 B. Featureless unchanged at 1,642,568 B, which is what the recipe intends.",
+  "theTwoPolarityFontKitProbe": "on the STAGED windowed shim: `font_kit` count 1 (must be >0), `no text will be rendered` count 0 (must be 0). Re-run after every rebuild.",
+  "theUserPreferenceControl": "~/Library/Preferences/codetracer-gpui.plist sha256 ad98c0e5f6ca362c5cef32032db75541eb1f8116f694eeeff144dd0f37aa1cec BEFORE the pass and the SAME sha256 at the end, after 28 app launches that each set and cleared the key.",
+  "rowextentPy": "NOT USED. It is known broken and is not cited anywhere in this file."
+ },
+ "theUserPreferenceQuestion": {
+  "wasAnyUserSettingFound": "NO. `defaults read -g AppleFontSmoothing` reports the pair does not exist, and the per-app domain `codetracer-gpui` carried only NSAutoFillHeuristicControllerEnabled = 0, written 2026-09-29. So nothing of the user's was overridden.",
+  "andItIsRefusedINCODEanyway": "The policy reads the value first and returns RespectedExistingSetting without writing anything if a foreign value is present. That branch is not hypothetical: it is exercised whenever a key is present without the ownership marker.",
+  "theOwnershipMarker": "A companion key IsonimGpuiManagedAppleFontSmoothing marks the value as written by this software. WITHOUT IT THE TWO ARE INDISTINGUISHABLE -- and that is not a theoretical worry: an intermediate build in this pass left AppleFontSmoothing=0 behind, and the next run read it as a deliberate user setting and declined to manage it. With the marker, such a leftover is recognised as ours, reclaimed, and the exit cleanup re-armed.",
+  "theLeftoverLimitation": "KNOWN AND NOT FIXED. The cleanup is an atexit handler, and the parity lane ends each app with `kill` (SIGTERM, plat37-macos-window-capture.sh:534), which runs no atexit handler. So after a lane run both keys remain in the application's own domain. They are recognisably ours, the next launch reclaims them, and the rendering they produce is the rendering we want -- but a killed or crashed process does leave durable state behind. Scoped cleanup is `defaults delete codetracer-gpui AppleFontSmoothing` plus the marker key; NEVER delete the plist, which carries a pre-existing key of the user's.",
+  "whatTheBriefPreferredAndWhyItWasNotPossible": "The brief preferred a route that does not persist to the user's plist, and asked for that to be verified rather than assumed. It was verified, and the honest answer is that it IS possible (set, force the memo, remove -- measured durable, a fresh process sees nothing) but it only buys -1.82% of the -6.77%. Non-persistence and the full lever are mutually exclusive on this API."
+ },
+ "cfPreferencesSemanticsMeasured": {
+  "_rule": "Measured with a standalone CoreFoundation probe compiled by the wrapped nix clang on aarch64-darwin, 2026-10-18, each claim with a control arm.",
+  "inProcessVisibility": "CFPreferencesSetAppValue IS visible to a subsequent CFPreferencesCopyAppValue in the same process WITHOUT CFPreferencesAppSynchronize. Control: an otherwise identical run that does not set reads NULL both times.",
+  "removalIsDurable": "Setting the value to NULL removes the key, and the removal is durable WITHOUT AppSynchronize -- a fresh process reports the domain/key pair does not exist.",
+  "readingThePlistFileIsNOTavalidCheck": "THE TRAP THAT NEARLY MIS-STEERED THIS PASS. Immediately after a removal the .plist FILE on disk still showed the key, for seconds, because cfprefsd had not flushed. Reading the file said 'it persists'; asking a new process said 'it does not'. The authoritative check is a fresh process (or `defaults read`), never plutil on the file."
+ },
+ "buildOutcomes": {
+  "isonimGpuiShims": {
+   "command": "cd isonim-gpui && nix develop --command just plat37-shims",
+   "exit": 0,
+   "finalSizes": {
+    "windowed": 67032120,
+    "headless": 71273672,
+    "featureless": 1642568
+   },
+   "whyREQUIRED": "ci/lib/build-freshness.sh:114-116 excludes the cdylib from the GPUI input digest BY DESIGN, so the gate cannot see a stale shim; it must be rebuilt by hand after any shim change, and this pass's change IS a shim change."
+  },
+  "shimChecks": {
+   "check_bindings.sh": 0,
+   "check_exported_symbols.sh": 0,
+   "check_gpui_pin.sh": "0 (gpui-pre 0.3.5)"
+  },
+  "shimTests": {
+   "command": "cargo test in rust/gpui-nim-shim",
+   "passed": 199,
+   "failed": 0,
+   "note": "198 before this pass plus one new test, `only_platform_opts_out`. The preserved font-weight tests are among the 199 and still pass; render_sync.rs is byte-identical to the file handed over."
+  },
+  "gpuiArm": {
+   "command": "cd codetracer && nix develop --command just build-gpui",
+   "exit": 0,
+   "artefact": "build/bin/codetracer-gpui 5,935,088 B, sha256 1abbdcf94089..., input digest 6eb9702c7593 -- ALL UNCHANGED, because this pass changed no Nim source, only the Rust cdylib."
+  },
+  "electronArm": {
+   "built": false,
+   "whyNOT": "electron-assert passed at the START of the pass -- the previous pass had already rebuilt it and no codetracer source changed here.",
+   "theSTRONGcontrol": "The Electron ARTEFACT sha256 is 770cd93d8e749b99c43647f2daaa9987c7b8d9059a91f3e4a9559d1299fe1193 -- IDENTICAL to the previous pass's, confirming the reference arm did not move.",
+   "builtBy": "the stamp still records 'repro 0.1.3' -- see carriedForwardNotMeasured REPROBUILD-ISSUE-D."
+  }
+ },
+ "freshnessGates": {
+  "_rule": "BOTH gates were run INSIDE `nix develop`, because the digest regenerates the compiler's own dependency closure with whatever nim is on PATH.",
+  "atTheSTARTofThePass": {
+   "gpuiAssert": "exit 0 (inputs 6eb9702c7593, artefact 1abbdcf94089)",
+   "electronAssert": "exit 0 (inputs 7ed12464c619, artefact 770cd93d8e74)"
+  },
+  "atTheEND": {
+   "gpuiAssert": "exit 0 (inputs 6eb9702c7593, artefact 1abbdcf94089)",
+   "electronAssert": "exit 0 (inputs 7ed12464c619, artefact 770cd93d8e74)"
+  }
+ },
+ "laneOutcomes": {
+  "_rule": "Every lane ran inside `nix develop` with REPLAY_SERVER_BIN naming src/build-debug-repro/bin/replay-server.",
+  "gpuiAfterArm": {
+   "command": "nix develop --command env REPLAY_SERVER_BIN=<...> bash ci/test/plat37-macos-window-capture.sh --out build/plat37-parity-2026-10-22/frames-after",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "control": "1 process reported mode=Retained dilation 0; the other 6 reclaimed the marked key and also reported dilation 0."
+  },
+  "gpuiBeforeArm": {
+   "command": "same lane with ISONIM_GPUI_FONT_SMOOTHING=platform --out .../frames-before",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "control": "all 7 reported dilation 4, and the preference domain was verified clean both before and after, so the arm is genuinely the platform default."
+  },
+  "transientArm": {
+   "command": "same lane with ISONIM_GPUI_FONT_SMOOTHING=transient (an intermediate build)",
+   "exit": 0,
+   "captured": 7,
+   "refused": 0,
+   "purpose": "the Transient-vs-Retained measurement; see theTransientVsRetainedFinding."
+  },
+  "electron": {
+   "ranThisPass": false,
+   "why": "The Electron buffers were deliberately NOT re-captured; the 2026-10-21 buffers were reused byte-for-byte as the fixed reference."
+  }
+ },
+ "issuesDraftedThisPass": {
+  "policyConflictDeclared": "DRAFTED HERE AND UNFILED. This pass made no commits and no pushes, as instructed.",
+  "amended": [
+   {
+    "id": "PLAT37-ISSUE-H",
+    "owningRepo": "isonim-pm (and codetracer-pm for the consumer decision)",
+    "title": "GPUI dilates glyph stems on macOS while the Electron front-end asks Chromium not to",
+    "statusChange": "NOW IMPLEMENTED in the isonim-gpui working tree (uncommitted). The issue should be filed as FIXED-PENDING-REVIEW rather than open, and AMENDED on two points below.",
+    "amendmentOne": "Its remedy says the preference 'must be set before the first glyph is rasterised' because of the OnceLock. That is necessary but NOT sufficient: measured this pass, a set-then-remove route satisfies the memo (dilation 0) and still recovers only -1.82% of the -6.77%, because CoreGraphics reads the preference again at draw time. The key must be held for the process lifetime.",
+    "amendmentTwo": "Its measurement was one view. All three comparable views are now measured: fracOver0_10 -7.14% (state), -6.25% (calltrace), -6.95% (editorWithMark); three-view mean -6.77%. The -6.9% it recorded for editorWithMark is reproduced exactly.",
+    "residualToFile": "The landed fix writes two keys into the application's own preference domain and relies on atexit to clear them, which a SIGTERM (as the parity lane sends) defeats. A follow-up should decide whether that is acceptable product behaviour or whether gpui-pre should expose the switch directly, which would remove the need for the preference entirely."
+   }
+  ],
+  "new": [
+   {
+    "id": "PLAT37-ISSUE-M",
+    "owningRepo": "isonim-pm (upstream: gpui-pre)",
+    "title": "gpui-pre offers no API to disable glyph stem dilation, forcing embedders through a user preference",
+    "measured": "glyph_dilation_for_color is the only switch and it is driven solely by a process-global OnceLock over the AppleFontSmoothing user default (gpui-pre-macos-0.3.5 text_system.rs:218-252). There is no setter, no App-level option and no way to scope it to a window. An embedder whose design calls for Chromium-style antialiasing therefore has to write a user preference into its own domain and keep it there, which is durable state no application should need.",
+    "remedy": "Ask upstream for an explicit renderer option (e.g. alongside set_text_rendering_mode) and drop the preference route when it exists.",
+    "severity": "moderate; it is the reason the landed fix is less tidy than it should be."
+   },
+   {
+    "id": "PLAT37-ISSUE-N",
+    "owningRepo": "codetracer-pm",
+    "title": "The PLAT-37 GPUI capture lane SIGTERMs the app, so no process-exit cleanup can run",
+    "measured": "ci/test/plat37-macos-window-capture.sh:534 ends each app with `kill` (SIGTERM) and line 314 uses pkill. Neither runs atexit handlers, so any at-exit cleanup an embedder registers is dead code under this lane. Observed directly: the font-smoothing keys survive every lane run and are only removed by hand.",
+    "remedy": "Send SIGTERM and let the app's own shutdown path run, or send the shim's stop_event_loop route, so the lane exercises the real shutdown rather than bypassing it.",
+    "severity": "minor for parity, moderate for anything that measures shutdown behaviour."
+   }
+  ],
+  "carriedUnchangedFromThePreviousPass": [
+   {
+    "id": "PLAT37-ISSUE-I",
+    "title": "The GPUI editor gutter does not read editor_gutter_lanes.nim",
+    "status": "STILL DRAFTED AND UNFILED. Explicitly out of scope this pass (priced at <=0.0008 of P1). Not re-measured; do not re-draft from scratch."
+   },
+   {
+    "id": "ISONIM-GPUI-ISSUE-J",
+    "title": "font-style is parsed and stored but never applied",
+    "status": "STILL DRAFTED AND UNFILED. Unchanged. It remains the precondition for font-style joining the fusable set, which is why font-style is still deliberately excluded."
+   },
+   {
+    "id": "PLAT37-ISSUE-K",
+    "title": "The Electron capture lane is not bit-deterministic on editorWithMark",
+    "status": "STILL DRAFTED AND UNFILED, and ACTED ON this pass: the Electron buffers were held byte-fixed rather than re-captured precisely because of it."
+   },
+   {
+    "id": "PLAT37-ISSUE-L",
+    "title": "The filed inline-value-chip remedy is not implementable as written",
+    "status": "STILL DRAFTED AND UNFILED. Unchanged, and still amending codetracer-pm/issues/2026-10-17-inline-value-chips-still-round-per-span-so-their-rows-keep-drifting.md. Chip fusion was again NOT attempted this pass, on the previous pass's measurement."
+   }
+  ]
+ },
+ "carriedForwardNotMeasured": [
+  {
+   "id": "PLAT37-ISSUE-B",
+   "status": "still drafted and UNFILED (GPUI top bar 1 pt short, worth ~0.012 of P1)",
+   "measuredThisPass": "no -- out of scope"
+  },
+  {
+   "id": "ISONIM-GPUI-ISSUE-C",
+   "status": "FIXED AND COMMITTED in isonim-gpui 5776cd936.",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "REPROBUILD-ISSUE-D",
+   "status": "RECURRED AGAIN and is expected to.",
+   "measuredThisPass": "yes -- the Electron stamp still records built_by = 'repro 0.1.3' although PATH led this workspace's 0.2.6 build and REPROBUILD_REPRO named it. build-freshness.sh:583 derives that string from a BARE `repro`, and a PATH prepend from the ambient shell does NOT reach a `nix develop --command` build. Not this pass's bug."
+  },
+  {
+   "id": "ISONIM-GPUI-ISSUE-E",
+   "status": "FILED as isonim-gpui/issues/2026-10-17-every-published-gpui-pre-ceils-a-text-elements-width.md. Do not re-draft.",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "ISONIM-GPUI-ISSUE-F",
+   "status": "FILED as isonim-gpui/issues/2026-10-17-letter-spacing-is-parsed-and-reported-but-never-applied.md. Do not re-draft.",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "PLAT37-ISSUE-G",
+   "status": "ANSWERED by measurement in an earlier pass; recommend close",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "PARITY-G1",
+   "status": "OPEN, out of scope, unchanged -- editor/eventLog/shell remain notComparable",
+   "measuredThisPass": "observed again: the GPUI window clamps to 1728x1084 on every wide viewport"
+  },
+  {
+   "id": "corpus-pins platform dependence",
+   "status": "FILED in codetracer-pm; out of scope",
+   "measuredThisPass": "no"
+  },
+  {
+   "id": "nix-blockchain-development pin",
+   "status": "UNTOUCHED, as instructed. flake.lock was not edited by this pass.",
+   "measuredThisPass": "no"
+  }
+ ],
+ "host": {
+  "platform": "aarch64-darwin",
+  "os": "macOS 26.5.2 (Darwin 25.5.0)",
+  "pointPixelScale": 2.0,
+  "displayPoints": "1440x900 honoured for the three comparable views; 1920x1080 clamped to 1728x1084 (G1)",
+  "theEnvironmentWasCHECKEDratherThanTRUSTED": "For the EIGHTH consecutive pass the ambient shell was wrong: PATH led by /nix/store/m5si3k2vccgw6prb245q3r634r5zy0cf-reprobuild-0.2.2/bin with RUNQUOTA_SOCKET, REPROBUILD_REPRO, REPRO_BOOTSTRAP_CC and REPRO_FOREIGN_ENV_BASH all UNSET. All five were set before any work.",
+  "reproOnPath": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro, repro 0.2.6, with REPROBUILD_REPRO pinned to the same file. NOTE: that binary was BUILT from reprobuild f974c2e74a, before this pass fast-forwarded the checkout to 18c9229ad -- so the binary is the older revision and was not rebuilt.",
+  "reproBootstrapCc": "/nix/store/vl936sd1vj8s008akm3gibkgyqk30qhz-clang-wrapper-21.1.8/bin/clang, PROVEN by AGENTS.md's control pair under env -i: the wrapper compiled #include <stdlib.h> and emitted an object (rc 0), the unwrapped /nix/store/rr64nnycczvx7s1b110qmvqrlfcb6lsm-clang-21.1.8/bin/clang failed with 'stdlib.h' file not found (rc 1).",
+  "theControlPairTrapThatFIRED": "The first attempt at that control read $? after an intervening `echo`, which resets it, and so reported the unwrapped clang as exit 0. Re-run capturing the status immediately. This is the same family as the $(basename ...) trap in AGENTS.md.",
+  "reproForeignEnvBash": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9), checked >= 4.",
+  "runquotaSocket": "/tmp/rq-adopt-501/runquota.sock, confirmed a socket with test -S. runquotad was NOT restarted.",
+  "diskFree": "58 GB at the start, 57 GB at the end, never near the 20 GB abort floor."
+ },
+ "theSyncAndItsOneObstacle": {
+  "whatMoved": "codetracer-pm 38fa8e5e5 -> e4bbc2e6f, reprobuild-pm 0cc77b55d -> d38a84b5b, reprobuild f974c2e74 -> 18c9229ad, all fast-forwards. codetracer and isonim-gpui were already at the tips named in the brief and did not move, so the preserved work was never at risk.",
+  "whyREPROsyncCOULDNOTdoIt": "`repro sync --only=...` planned exactly the 5 named repos (so this 0.2.6 build honours --only, i.e. it carries 0ea5816d8) but REFUSED all five: the running runquotad is 0.1.0, predates pool declarations, and denies every lease in the vcs/fetch pool it does not size. 12 retries each, then refusal. Nothing was modified. runquotad was NOT restarted, as instructed.",
+  "theFallbackTaken": "A plain `git fetch --prune` in each WORKING CHECKOUT followed by `git merge --ff-only`, which is the remedy the refusal message itself prints. This does not touch the shared bare clones: the checkouts borrow from them through objects/info/alternates, and a fetch into a borrower writes only to the borrower's own object store. gc.auto=0 was set on every fetch so no automatic gc could run.",
+  "upstreamRecheckedAtTheEnd": {
+   "codetracer": "3fce565eb (unchanged)",
+   "isonimGpui": "5776cd936 (unchanged)",
+   "reprobuild": "18c9229ad (unchanged)",
+   "codetracerPm": "moved again to 373732ca8",
+   "reprobuildPm": "moved again to 9963be8bf"
+  }
+ },
+ "whatIcouldNOTdo": [
+  "Land a route that leaves NOTHING in the application's preference domain. It was implemented and measured, and it costs 73% of the lever (see theTransientVsRetainedFinding). The chosen design keeps the key and clears it at exit.",
+  "Guarantee the keys are cleared after a parity lane run: the lane kills the app with SIGTERM and atexit handlers do not run (PLAT37-ISSUE-N). They were cleared by hand, key-scoped, and the plist sha256 confirms the user's domain is exactly as it was found.",
+  "Run the Electron lane -- deliberately not run, so the reference stayed byte-fixed. The Electron arm's freshness was confirmed by gate and artefact sha256 instead.",
+  "Re-measure editor, eventLog and shell: they remain notComparable on extent (G1, out of scope).",
+  "Commit or push anything, as instructed. Five issues are drafted and unfiled, which conflicts with the standing 'push the issue immediately' policy; the instruction to make no commits was followed and the conflict is declared here.",
+  "Rebuild the local `repro` after fast-forwarding reprobuild to 18c9229ad, so the binary used throughout is from f974c2e74a.",
+  "Verify the headless call sites end to end: they compile and are wired, but the parity lane is the windowed path and no headless capture was taken this pass.",
+  "Address the gutter divergence, chip fusion, G1, S6/S7/S8, the corpus-pins platform dependence or the nix-blockchain-development pin -- all explicitly out of scope."
+ ],
+ "theFlakeLockHookTrap": "flake.lock was NOT edited by this pass. The managed hook reverts a lock edit before the commit object is created, so a dirty nix-blockchain-development node is left exactly as found."
+}

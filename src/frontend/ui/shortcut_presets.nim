@@ -1,71 +1,39 @@
-## Named sets of stepping chords, and the one table every surface reads.
+## Named sets of stepping chords: the shortcuts dialog's catalogue.
 ##
-## ## What this module is, in one sentence
+## ## What this module is, since PLAT-68
 ##
-## A preset is a NAMED SET OF DEFAULTS for the nine debugger commands, applied
-## to `default_config.yaml`'s `bindings:` block before `initShortcutMap` sees
-## it — so a preset is not a second binding mechanism, it is a different set of
-## values entering the existing one.
+## A preset is a NAMED SET OF STEPPING CHORDS for the nine debugger commands,
+## offered by the shortcuts dialog. Choosing one writes its `include` set
+## (`stepping:<id>`, `viewmodel/keymap/binding_sets`) into the user's
+## `keybindings.json`, and the ONE key router every front-end runs resolves it
+## like any other user row — so a preset is not a second binding mechanism.
+## The tables below are the dialog's: its names, its reasons and the
+## per-platform hazards it shows (`hazardOf`), and they are held equal to the
+## include sets by `shortcut_presets_test.nim` ("every preset's chords ARE its
+## keybindings.json include set").
 ##
-## That distinction is the whole design, and it is forced by
-## `codetracer-specs` `GUI/Keyboard-Shortcuts-System.md` § Requirements:
-##
-##     Every binding is customisable through the config. A chord bound in code
-##     and not routed through the YAML is one the user cannot change and cannot
-##     discover, and the config's own listing of it — if any — is then wrong.
-##
-## A preset that installed its own `Mousetrap.bind` calls would be exactly the
-## "hardcoded bind that makes the config a lie" the next bullet of that section
-## forbids. So nothing here binds anything. `applyPreset` rewrites strings in
-## the `InputShortcutMap`; `frontend/config.nim` then builds the `ShortcutMap`
-## from them, and every existing consumer follows for free:
-##
-##   * `ui/shortcuts.nim configureShortcuts` binds what the map contains,
-##   * `ui/editor.nim delegateShortcuts` delegates what the map contains,
-##   * `ui/shortcut_labels.nim renderChord` LABELS what the map contains,
-##   * `ui/menu.nim loadShortcut` and `debug_controls_vm.toolbarTooltip` read
-##     that same label.
+## What this module used to feed — the YAML `bindings:` map that Mousetrap
+## bound and Monaco's `commands` table delegated, and the whitelist a preset
+## chord had to be on to work with the caret in the editor — is gone: the
+## router's capture-phase listener runs ahead of Monaco, so every chord reaches
+## it wherever the caret is. `config.applyShortcutPreset` still writes a preset
+## into that legacy map, which the one-time import and macOS's native menu
+## accelerators read.
 ##
 ## ## WHY THE DISPLAYED TEXT CANNOT DRIFT FROM THE BINDING
 ##
-## Because there is no second place to write it. `renderChord` already derives
-## a tooltip from `config.shortcutMap.actionShortcuts`, and a preset changes
-## precisely that structure. There is no per-preset label table, and adding one
-## would reintroduce the defect `shortcut_labels.nim`'s header was written
-## against — a hardcoded `text "Next (F10)"` that agreed with the config only
-## by coincidence.
-##
-## `Debugger-Controls.md` states the rule this preserves:
-##
-##     A tooltip must render the chord that is currently bound, resolved from
-##     `data.config.shortcutMap`, not a string copied from the config file at
-##     authoring time.
-##
-## ## WHY EVERY PRESET CHORD MUST BE ON THE MONACO WHITELIST
-##
-## `ui/editor.nim` delegates a chord into Monaco only if it appears in
-## `MONACO_SHORTCUTS_WHITELIST`, and with the caret in the editor Monaco
-## `stopPropagation`s before the bubble phase Mousetrap listens on. So a chord
-## off that list is DEAD while the caret is in the editor — which, in an IDE,
-## is where the caret usually is.
-##
-## That is not a hypothetical. `SHIFT+F5` (Stop) was bound in the YAML and
-## missing from the list, so the one command that LEAVES Debug mode was the one
-## command unavailable from the surface a user is looking at when they want to
-## leave it. `CTRL+B` (Build) was the same bug, measured on the deployed site.
-##
-## `shortcut_presets_test.nim` asserts the containment for every chord of every
-## preset. The whitelist is deliberately still a HAND-MAINTAINED list rather
-## than something derived from these tables: a derived list would make that
-## assertion a tautology, and the assertion is the only thing standing between
-## a new preset and a repeat of the `SHIFT+F5` omission.
+## Because no surface writes it: the dialog, the menus and the toolbar's
+## tooltips show the chord the router RUNS (`chord_display.displayedChord`),
+## so a preset — or a user's own row over it — is shown the moment it loads.
 ##
 ## ## WHY BARE LETTERS ARE NOT AVAILABLE HERE, though a sibling product uses them
 ##
 ## BlockTracer's debug route binds `n` / `s` / `f` / `c` unmodified, and is
 ## right to: that surface is read-only and has no text entry. This one is an
 ## EDITOR. A bare letter is text, and a preset that bound one would type into
-## the buffer or step the program depending on focus. Every preset below is
+## the buffer or step the program depending on focus. (The CUA base's own
+## letters step only while the editor is read-only or a list has the focus —
+## a `when` clause no preset row carries; CUA-Keymap.md §4.) Every preset below is
 ## therefore modified or a function key — which is also why none of them can be
 ## hazard-free by being unmodified, and why `hazardOf` exists instead.
 
@@ -422,7 +390,7 @@ proc describeChord*(chord: string; mac: bool): string =
       if i == tokens.len - 1:
         parts.add token
       else:
-        case token
+        case token.toUpperAscii
         of "CTRL": parts.add(if mac: "Cmd" else: "Ctrl")
         of "ALT": parts.add(if mac: "Option" else: "Alt")
         of "SHIFT": parts.add "Shift"

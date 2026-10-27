@@ -15,11 +15,10 @@
  * for every recorded language — see `lib/js-trace-fixture.ts`.
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import { test, expect } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { retry } from "../../lib/retry-helpers";
 import { LayoutPage } from "../../page-objects/layout-page";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
 import {
   BOTTOM_STRIP_TAB_SELECTOR,
   DOCKED_BOTTOM_CONTENT_SELECTOR,
@@ -33,9 +32,6 @@ const fixture = recordChromeTraceFixture("build-panel-e2e");
 test.describe("Build panel tabs as auto-hide bottom tabs", () => {
   test.setTimeout(120_000);
   test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
-
-  test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
-  test.afterAll(() => restoreUserLayout());
 
   test("BUILD tab present in bottom auto-hide strip", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);

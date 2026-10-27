@@ -43,7 +43,7 @@ import {
 // through the real recorders and returns the cache directory they landed
 // in, so the marker rows asserted below are the ones today's browser
 // recorder emits rather than the ones some earlier build emitted.
-const fixtureDir = threeTraceRecordingRoot();
+// Materialize in the sourcePath fixture below, after Playwright collection.
 
 // The HTTP boundary token the fixture's `frontend/app.js` passes to
 // `__ct.markCorrelation` (`const BOUNDARY_HTTP = "account-balance";`),
@@ -58,7 +58,12 @@ const JS_WASM_BOUNDARY_ID = "js-wasm-realm";
 // CodeTracer binary against the materialized multi-trace session and exposes
 // its renderer as `ctPage`; the base Playwright `page` fixture would only
 // create an unrelated blank Chromium tab.
-test.use({ sourcePath: fixtureDir, launchMode: "trace-folder" });
+test.use({
+  sourcePath: async ({}, use) => {
+    await use(threeTraceRecordingRoot());
+  },
+  launchMode: "trace-folder",
+});
 
 /** One row of the §14.8 process tree, addressed by its manifest role. */
 const processEntry = (page: Page, role: string) =>
@@ -70,7 +75,7 @@ const processEntry = (page: Page, role: string) =>
  * Read off the process tree, which renders `aria-selected="true"` on the
  * row bound to `SessionViewModel.activeProcessRecordingId` — the signal
  * that actually routes DAP requests (see `dap.nim`'s
- * `setActiveSessionThreadId`).
+ * `DapApi.setRoutingThreadId`).
  *
  * This replaces a probe of `window.data.activeRecording.role`, a global
  * that exists nowhere in the product. It was written into `window` by an

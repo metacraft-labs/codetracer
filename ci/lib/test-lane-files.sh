@@ -43,6 +43,8 @@
 #   test_lane_backend <id>           # "c" or "js"
 #   test_lane_extra_flags <id>       # extra nim flags (may be empty)
 #   test_lane_description <id>       # one-line human description
+#   test_lane_recipe <id>            # `just` recipe(s) that own the lane's
+#                                    # execution; empty = the runner owns it
 #
 # All paths are repo-relative. Callers must run from the repo root.
 
@@ -117,6 +119,86 @@ _tlf_reject_matching_file() {
 	done
 }
 
+# The standard-library modules that do not compile off the JavaScript target:
+# each opens with `when not defined(js):` followed by a `{.fatal.}` or
+# `{.error.}` pragma ("Module asyncjs is designed to be used with the
+# JavaScript backend", "This module only works on the JavaScript platform").
+# A suite that imports one at top level can only be compiled by `nim js`.
+# `ci/test/vm-unit-js-only-suites-test.sh` holds this list against the active
+# toolchain's stdlib, so a module added there cannot be missing here unnoticed.
+_TLF_JS_ONLY_STDLIB_MODULES='asyncjs|dom|jsbigints|jsconsole|jscore|jsfetch|jsffi|jsformdata|jsheaders|jsre'
+
+# The `grep -E` rule over `_tlf_top_level_imports` output that marks a suite
+# JS-only. Three spellings, each requiring the name to be the stdlib module
+# itself — bare, or `std/` / `js/` prefixed — and not a longer name or a
+# project path that happens to end in it (`../helpers/dom`, `jsffi_compat`):
+#   import std/asyncjs | import asyncjs | import json, std/jsffi as f
+#   import std/[json, asyncjs, options]
+#   from std/asyncjs import ...
+# The delimiters are spelled out rather than written `\b`, which `grep -E`
+# does not guarantee.
+_TLF_JS_ONLY_IMPORT_RE="^import[[:space:]]([^[]*[[:space:],])?((std|js)/)?(${_TLF_JS_ONLY_STDLIB_MODULES})([[:space:],]|\$)"
+_TLF_JS_ONLY_IMPORT_RE+="|^import[[:space:]](.*[[:space:],])?(std|js)/\\[([^]]*[[:space:],])?(${_TLF_JS_ONLY_STDLIB_MODULES})([[:space:],]|]|\$)"
+_TLF_JS_ONLY_IMPORT_RE+="|^from[[:space:]]+((std|js)/)?(${_TLF_JS_ONLY_STDLIB_MODULES})[[:space:]]"
+
+# _tlf_top_level_imports FILE — every column-0 `import` / `from` statement in
+# FILE, one per line, comments stripped and continuation lines joined (a
+# statement continues while a `[` is open or the line ends in a comma, which
+# is how the unit suites wrap long `import ../../sync/[a, b,` lists). Indented
+# imports — `when defined(js):` arms — are deliberately not statements of the
+# file as a whole: the C backend never sees them.
+_tlf_top_level_imports() {
+	awk '
+		function depth(s,   o, c) { o = gsub(/\[/, "[", s); c = gsub(/\]/, "]", s); return o - c }
+		function emit() { gsub(/[[:space:]]+/, " ", stmt); print stmt; open_stmt = 0 }
+		{
+			line = $0
+			sub(/#.*/, "", line)
+			if (open_stmt) {
+				stmt = stmt " " line
+				d += depth(line)
+				if (d <= 0 && stmt !~ /,[[:space:]]*$/) emit()
+				next
+			}
+			if (line ~ /^(import|from)[[:space:]]/) {
+				stmt = line
+				d = depth(line)
+				open_stmt = 1
+				if (d <= 0 && stmt !~ /,[[:space:]]*$/) emit()
+			}
+		}
+		END { if (open_stmt) emit() }
+	' "$1"
+}
+
+# _tlf_js_only_suites MODE — filter stdin (a list of paths). MODE `keep` keeps
+# the suites that import a JS-only stdlib module at top level; `reject` keeps
+# the rest. One predicate for both directions, so the native lane's
+# subtraction and the JS lane's addition are the same set by construction.
+_tlf_js_only_suites() {
+	local mode="$1" f
+	while read -r f; do
+		[ -n "${f}" ] || continue
+		[ -f "${f}" ] || continue
+		if grep -qE -- "${_TLF_JS_ONLY_IMPORT_RE}" <<<"$(_tlf_top_level_imports "${f}")"; then
+			[ "${mode}" = keep ] && printf '%s\n' "${f}"
+		else
+			[ "${mode}" = reject ] && printf '%s\n' "${f}"
+		fi
+	done
+	return 0
+}
+
+# _tlf_vm_unit_candidates — the ViewModel unit suites that belong to neither
+# the recorder-gated lane nor the collab lane, on EITHER backend. `vm-unit` is
+# this minus the JS-only suites, and `vm-unit-js` adds those JS-only suites
+# back; see the notes at both lanes.
+_tlf_vm_unit_candidates() {
+	_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
+		_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
+		_tlf_reject '/test_collab_[a-z0-9_]*\.nim$'
+}
+
 # _tlf_reject PATTERN... — filter stdin, dropping any line matching any of the
 # given `grep -E` patterns. Every call site must say WHY each pattern is there;
 # an unexplained exclusion is the defect this whole file is about.
@@ -134,8 +216,18 @@ _tlf_reject() {
 # The lanes
 # ---------------------------------------------------------------------------
 
-# Every lane id. Order is the order a full local sweep would sensibly run them:
-# cheap pure-Nim units first, toolchain- and sibling-dependent lanes last.
+# Every lane id. Order is cheap pure-Nim units first, toolchain- and
+# sibling-dependent lanes last.
+#
+# THIS IS THE COVERAGE QUESTION'S LIST, NOT A LIST OF RUNNER INVOCATIONS. Every
+# lane here answers "which files does this lane claim?", and
+# `ci/test/test-lane-coverage.sh` reads all of them. Only the lanes whose
+# `test_lane_recipe` is EMPTY can also be run as
+# `bash ci/lib/run-nim-test-lane.sh <id>`; the runner refuses the rest by name,
+# because their execution lives in a `just` recipe that does something the
+# generic loop cannot. A full local sweep therefore runs each lane through its
+# `just` recipe (`just test-lanes` prints the recipe-owned ones' recipes), not
+# through the runner.
 test_lane_ids() {
 	cat <<'EOF'
 common-units
@@ -177,6 +269,8 @@ tui
 tui-real-terminal
 gpui-shell
 ui-selection
+ct-host-admission
+ct-host-manifest
 screen-oracle
 EOF
 }
@@ -222,11 +316,110 @@ test_lane_description() {
 	tui-real-terminal) echo "CodeTracer TUI Tier-2 suites (TermAssert: real pty + libvterm)" ;;
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
+	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
+	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
 		return 1
 		;;
+	esac
+}
+
+# test_lane_recipe ID — the space-separated `just` recipe(s) that OWN this
+# lane's execution, or nothing when `ci/lib/run-nim-test-lane.sh` does.
+#
+# A non-empty answer means the lane's files are listed here for the COVERAGE
+# question only. The runner exits 2 on such a lane and prints the recipe,
+# because running these files through the generic loop is not the lane. Five
+# of them were measured red under the runner for reasons that are artefacts of
+# the runner, not of the product — 3 + 1 + 4 + 10 failures over `frontend-js`,
+# `m16-release-gate`, `bpf` and `book-isonim`, and a mis-scored
+# `vm-recorder-gated`, at codetracer `661744f2c`. The rest are run by their
+# recipe and by nothing else, so the recipe, not the runner, is what the lane
+# means. Each arm says what the recipe does.
+#
+# The marker concedes that these lanes have two definitions — the file list
+# here and the loop in the recipe — which can drift. Some recipes read their
+# set back from `test_lane_files`, and those cannot. For the ones that
+# enumerate their own files, `test-lane-coverage.sh`'s existence check catches
+# a path that no longer exists, but nothing checks that the two lists agree. And
+# `ci/test/recipe-owned-lanes-test.sh` keeps the marker itself honest: every
+# lane is run through the runner by some recipe XOR named here, and every
+# recipe named here exists.
+#
+# The default arm prints nothing, so an unknown id gets whatever the other
+# lookups do with it (`test_lane_description` fails it by name).
+test_lane_recipe() {
+	case "$1" in
+	frontend-js)
+		# Compiles each file with `-d:chronicles_enabled=off -d:ctRenderer
+		# -d:ctInExtension`, and runs several under node with
+		# `globalThis.window = globalThis` aliased first (`types.nim` installs
+		# a `window.data` hook at import). The lane carries neither; under the
+		# runner three files die on `undeclared identifier: 'data'`.
+		echo "test-frontend-js"
+		;;
+	no-sidecar-manifests)
+		# Depends on `vm-test-prereqs` and records with six real recorder
+		# siblings; a sibling that is not checked out is a `MISSING-RECORDER
+		# SKIP:` the suite's own zero-test guard scores.
+		echo "test-no-sidecar-manifests"
+		;;
+	vm-recorder-gated)
+		# Builds the JS recorder sibling and replay-server first, sources
+		# `scripts/detect-siblings.sh`, and classifies an all-`MISSING-RECORDER
+		# SKIP:` file as SKIPPED. The runner scores the same output DID NOT RUN
+		# (9 of its 14 "failures" at `661744f2c`).
+		echo "test-vm-recorder-gated"
+		;;
+	m16-release-gate)
+		# `ci/test/m16-release-gate.sh` runs these in a fixed order, under a
+		# per-file `GLIBC_TUNABLES`, gates two behind CT_M16_HEAVY, and only
+		# COMPILES `ct_test.nim` — it is the `ct-test` CLI later suites use,
+		# not a suite. The runner executes it and scores its usage text.
+		echo "test-m16-release-gate"
+		;;
+	ct-providers)
+		# `ci/test/ct-providers.sh` builds the native/js/ruby recorder siblings
+		# in their own dev shells and needs the C/C++ provider toolchains
+		# (gtest, catch2, cmake, CT_TEST_C{C,XX}) the dev shell supplies.
+		echo "test-ct-providers"
+		;;
+	visual-replay-gate)
+		# `ci/test/visual-replay-gate.sh` checks the codetracer-visual-replay
+		# and native-backend siblings, the private cargo environment and the
+		# Playwright specs, runs the sibling's own suites, and maps each file
+		# to a row of the published gate report.
+		echo "test-visual-replay-gate"
+		;;
+	agentic-headless)
+		# `scripts/test-codetracer-agentic-headless.sh matrix` interleaves
+		# these with Agent Harbor's own contract E2E tests.
+		echo "test-codetracer-agentic-headless-matrix"
+		;;
+	bpf)
+		# Four recipes, one per file: `-d:ssl -d:useOpenssl3 --mm:refc`,
+		# `--passL:-lbpf -lelf -lz` against a built libbpf, BPF objects from
+		# `just build-bpf-programs` and capabilities from `just
+		# developer-setup`. None of that fits a data row.
+		echo "test-bpf"
+		;;
+	book-isonim)
+		# Needs the `isonim-docs` sibling's framework on the path (the book's
+		# nimble requires ../../../isonim-docs) and runs the book's own
+		# Justfile; under the runner every file is a COMPILE ERROR.
+		echo "test-book-isonim"
+		;;
+	screen-oracle)
+		# PLAT-39. `test_plat39_record.nim` is the portable gate
+		# (`plat39-record-gate`); `test_screen_oracle.nim` reads gitignored
+		# captures, needs `--path:../GuiAssert/src` and tesseract, and is
+		# scored against the milestone's case floor by
+		# `ci/test/editor-model-case-floor.sh PLAT-39` (`plat39-case-floor`).
+		echo "plat39-record-gate plat39-case-floor"
+		;;
+	*) ;;
 	esac
 }
 
@@ -348,8 +541,8 @@ test_lane_parity_partner() {
 	# The WASM lane recompiles `vm-unit`'s suites on a third backend on
 	# purpose (PLAT-17: "run the existing suites on the third backend"), so a
 	# suite it shares with `vm-unit` is a parity pair, not a clash. Without
-	# this line every `vm-unit` suite `vm-unit-js` excludes — six of them —
-	# read as claimed by two different backends.
+	# this line every `vm-unit` suite `vm-unit-js` excludes would read as
+	# claimed by two different backends.
 	vm-unit-wasm) echo "vm-unit" ;;
 	*) echo "" ;;
 	esac
@@ -436,6 +629,13 @@ test_lane_extra_flags() {
 		# The Electron renderer's defines (see `renderer-electron`): these
 		# suites drive the renderer's own modules, so they are compiled the way
 		# the renderer is.
+		echo "-d:chronicles_enabled=off -d:ctRenderer"
+		;;
+	renderer-chromium)
+		# The same, for the same reason: `calltrace_guides_chromium_test.nim`
+		# mounts the renderer's call-trace view. Without `-d:ctRenderer` the
+		# shared modules take their main-process arm, which `require`s node's
+		# `os` and `path`, and the page dies on `require is not defined`.
 		echo "-d:chronicles_enabled=off -d:ctRenderer"
 		;;
 	main-process)
@@ -811,7 +1011,66 @@ test_lane_files() {
 		# `locals_answer_identity_test.nim` drives the web renderer's
 		# `ct/load-locals` senders through the real response fan-out: one
 		# request per stop, in the stopped-in file's language.
+		# `origin_chain_wiring_test.nim` holds `ui/state.nim` to installing the
+		# origin badge's chain fetch and the "Pin to scratchpad" bridge into the
+		# Scratchpad pane's ViewModel (codetracer#856).
+		# `later_session_launch_failure_test.nim` holds a replay that cannot
+		# start to saying so in its own tab: the refusal a later tab's session
+		# is sent reaches that tab's status bar, once, ends its busy state, and
+		# is drawn into `#status` only while that tab is the one on screen.
 		echo src/frontend/tests/locals_answer_identity_test.nim
+		echo src/frontend/tests/later_session_launch_failure_test.nim
+		# `debug_toolbar_follows_active_tab_test.nim` holds the window's one
+		# debugger toolbar to driving the tab on screen: its step, Run to
+		# Entry and history jump reach the active tab's views mediator, not
+		# the one that was active when the toolbar's routes were built.
+		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
+		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `session_viewmodels_test.nim` holds each window tab to owning its
+		# ViewModels: the panel host renders a tab's panes over that tab's
+		# session, a hidden tab's move updates its own store only, each tab has
+		# its own Test Results ViewModel, and closing a tab disposes its own.
+		echo src/frontend/tests/session_viewmodels_test.nim
+		# `low_level_code_markup_dom_test.nim`: a source line in the Low Level
+		# Code pane is text in a real DOM, whatever markup it contains (HSF-D3).
+		echo src/frontend/tests/low_level_code_markup_dom_test.nim
+		# `git_cli_index_lock_test.nim`: `ui/git_cli.gitExec`'s `status` and
+		# `diff`, through the Electron process facade, over real repositories
+		# with a stale stat cache, never rewrite the index or leave
+		# `.git/index.lock` (VCS-Panel.md, "Reading the repository never takes
+		# the index lock"). Here because `git_cli` is a renderer module, and
+		# `jsdom-run.mjs` loads the suite with node's `require`, so git can
+		# be spawned. Needs `git` on PATH; writes only under one `mkdtemp`
+		# directory, which it removes.
+		echo src/frontend/tests/git_cli_index_lock_test.nim
+		# `git_cli_refresh_snapshot_test.nim`: the VCS panel's change check
+		# (`ui/git_cli.readRefreshSnapshot`, `requestRefreshCheck`) through
+		# the Electron VCS facade, over real repositories: the answer comes on
+		# a later turn while the event loop runs, it changes exactly when the
+		# repository does, a failed read is an empty part, overlapping
+		# triggers coalesce into one more check, and an answer for a working
+		# directory the panel left is marked stale (VCS-Panel.md, "An
+		# auto-refresh never stalls the window"). Here for the same reason as
+		# the suite above. Needs `git` and `sh` on PATH; writes only under one
+		# `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/git_cli_refresh_snapshot_test.nim
+		# `vcs_panel_reload_test.nim`: the VCS panel's reload
+		# (`ui/vcs_reload.readPanelReload`, `panelStateOf`, `applyPanelState`,
+		# `requestPanelReload`) through the Electron process facade's
+		# `runLater`, over real repositories: the reads answer on a later turn
+		# while the event loop runs, the gathered state equals the synchronous
+		# reload's (clean, modified, staged, untracked, conflicted, detached,
+		# branches, commits, an expanded commit, no commits, not a repository,
+		# git missing), the panel changes in one step when every read has
+		# answered, a superseded reload is applied before the one that follows
+		# it (so a stream of requests cannot starve the panel), stale reloads
+		# are discarded, and a folderless session runs no git (VCS-Panel.md, "An
+		# auto-refresh never stalls the window"). Here for the same reason as
+		# the suite above. Needs `git` and `sh` on PATH; writes only under one
+		# `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/vcs_panel_reload_test.nim
+		echo src/frontend/tests/loop_built_handlers_test.nim
+		echo src/frontend/tests/legacy_remaining_loop_handlers_test.nim
 		;;
 
 	renderer-chromium)
@@ -823,6 +1082,14 @@ test_lane_files() {
 		# measuring what the browser's own elements do on their own (the
 		# evidence behind `mappings.webMapping`'s grades).
 		echo src/frontend/tests/view_vocabulary_chromium_test.nim
+		# The call trace's guide lines against the rows they connect, read
+		# off a real layout before and after a zoom (#849). Geometry needs a
+		# browser that lays out; jsdom answers 0 for every rect.
+		echo src/frontend/tests/calltrace_guides_chromium_test.nim
+		# A programmatic editor focus (`ui/editor_focus`, `utils.focusLine`)
+		# leaves the keyboard in a text field being typed in. Where the
+		# keyboard goes is decided only by a browser.
+		echo src/frontend/tests/editor_focus_chromium_test.nim
 		;;
 
 	main-process)
@@ -858,6 +1125,43 @@ test_lane_files() {
 		echo src/frontend/tests/index_server_binds_loopback_test.nim
 		echo src/frontend/tests/facade_endpoint_verbs_test.nim
 		#
+		# `electron_vcs_content_id_async_test.nim` drives the Electron
+		# renderer's VCS facade (`host/desktop_electron.electronVcs`) over real
+		# git repositories and asserts the status bar's two git reads —
+		# `contentId` and `repositoryRoot` — leave the event loop running
+		# while git does (Status-Bar.md, "A refresh never stalls the
+		# window"), with the synchronous recipe's answers. Here because this
+		# is the lane whose suites run under node: the renderer's own lanes
+		# compile for a browser and cannot spawn git. Needs `git` and `sh` on
+		# PATH; writes only under one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/electron_vcs_content_id_async_test.nim
+		# `electron_vcs_refresh_async_test.nim` drives the same facade's
+		# `status` and `log` — the two reads the VCS pane's auto-refresh makes
+		# every 5 s and on focus — over real repositories (clean, modified,
+		# untracked, staged, unmerged, detached, no commits, not a
+		# repository, git missing) and asserts they leave the event loop
+		# running while git does (VCS-Panel.md, "An auto-refresh never stalls
+		# the window"), with git's own answers and without rewriting the
+		# index. Here for the reason the suite above is. Needs `git` and `sh`
+		# on PATH; writes only under one `mkdtemp` directory, which it
+		# removes.
+		echo src/frontend/tests/electron_vcs_refresh_async_test.nim
+		#
+		# `electron_vcs_index_lock_test.nim` drives the same facade's `status`
+		# and `diff` over real repositories whose index has a stale stat cache,
+		# and asserts the index is never rewritten and no `.git/index.lock` is
+		# left (VCS-Panel.md, "Reading the repository never takes the index
+		# lock"), with a plain `git status` as the control that does rewrite
+		# it. Here for the same reason as the suite above. Needs `git` on
+		# PATH; writes only under one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/electron_vcs_index_lock_test.nim
+		#
+		# `settle_once_test.nim` drives `index/settle_once.nim` — the rule that
+		# `traces.onRunTest` and `onRunTestSuite` answer a test run EXACTLY ONCE —
+		# with real async handlers that reject, throw, or settle and then fail,
+		# on the JS backend where a rejection arrives as a foreign exception.
+		echo src/frontend/tests/settle_once_test.nim
+		#
 		# `index_serves_deployment_cache_classes_test.nim` asks the running
 		# server for two files and compares the `Cache-Control` it sends with
 		# `web_deployment.headerFor(cacheClassFor(url))` — the same pair that
@@ -875,6 +1179,12 @@ test_lane_files() {
 		# passes while they do.
 		echo src/frontend/tests/index_serves_deployment_cache_classes_test.nim
 		#
+		# `index_serves_design_system_fonts_test.nim` requests every face
+		# `styles/generated/fonts.styl` names, at the URL a served page resolves it
+		# to, from the running server: they must all be 200, and a name under the
+		# same mount that is no file a 404.
+		echo src/frontend/tests/index_serves_design_system_fonts_test.nim
+		#
 		# `index_reports_the_port_it_bound_test.nim` starts the real server on
 		# `--port 0` and then CONNECTS to the port the `CODETRACER_HOST_URL=`
 		# line named. The number cannot be compared against the input, because
@@ -883,6 +1193,39 @@ test_lane_files() {
 		# could not satisfy.
 		echo src/frontend/tests/index_serves_one_deployment_descriptor_test.nim
 		echo src/frontend/tests/index_reports_the_port_it_bound_test.nim
+		#
+		# `file_tree_root_load_test.nim` loads the Files pane over a real
+		# temporary directory (GitHub #785, Viewport-Driven-Loading § V5): a
+		# fallback onto a live repository gets the live-filesystem limits,
+		# every tree is listed one level per load (payload folders lazily,
+		# from where the root load read them), and a root load that rejects
+		# still answers `filesystem-loaded` with an `error`. Writes only under one `mkdtemp`
+		# directory, which it removes.
+		echo src/frontend/tests/file_tree_root_load_test.nim
+		#
+		# `file_tree_operations_test.nim` runs the Files pane's Create, Rename
+		# and Delete (`index/file_tree_operations.nim`) over a real temporary
+		# directory: an empty file is created, entries are renamed, an existing
+		# target or a bad name is refused, nothing outside the opened folder is
+		# touched, and Delete on this lane's `-d:server` host (no Electron
+		# shell, so no trash) is refused and deletes nothing. Writes only under
+		# one `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/file_tree_operations_test.nim
+		#
+		# `index_startup_state_test.nim` runs the real `startup.init` (an edit
+		# launch) and `traces.loadTrace` (an imported trace) and asserts the
+		# index process's own state holds what they set: the opened folder, the
+		# save and the completed start options, which a copy of `ServerData`
+		# used to swallow. Writes only under one `mkdtemp` directory, which it
+		# removes.
+		echo src/frontend/tests/index_startup_state_test.nim
+		#
+		# `host_session_guard_test.nim` holds `ct host`'s admission rule to
+		# the cases one end-to-end run cannot reach: a supervisor's secret
+		# (used, removed from the environment, refused when weak without
+		# being quoted), the origins of each kind of bind, and
+		# CODETRACER_HOST_ALLOWED_ORIGINS.
+		echo src/frontend/tests/host_session_guard_test.nim
 		;;
 
 	frontend-native-units)
@@ -948,12 +1291,10 @@ test_lane_files() {
 		# shape.  Its C-backend counterpart is
 		# `src/tests/cli/target_axes_test.nim`, in the `cli-record` lane.
 		#
-		# `shortcut_bindings_test.nim` asserts that the SHIPPED
-		# `default_config.yaml` actually binds the chords it names, and that
-		# nothing landed in `conflictList` — where `initShortcutMap` silently
-		# drops a second claim on a chord. It is JS-only because
-		# `frontend/config.nim` is built on `std/jsffi`'s `JsAssoc`, and it
-		# needs the same `globalThis.window` shim the scratchpad suite does.
+		# `monaco_operations_test.nim` holds the desktop router's editing
+		# table (`ui/monaco_operations`) to the CUA base, row by row, and
+		# resolves the chords the retired Mousetrap / Monaco registries
+		# disagreed about in the desktop's own delivery (PLAT-68).
 		# `debug_toolbar_tooltips_test.nim` is the same shape one level up: the
 		# debug toolbar's tooltips must NAME the chord that is bound rather than
 		# restate it as a literal, so it asserts the shipped table drives all 13
@@ -981,15 +1322,28 @@ test_lane_files() {
 		# has no `pendingResponses` table — and `types.nim`'s `Data` is
 		# `std/jsffi`-based. It is also the ONLY suite in this lane compiled
 		# WITHOUT `-d:ctInExtension`, for that first reason.
+		# ACP notification handling runs the index module with -d:server so
+		# the Electron window can be supplied without a display;
+		# `acp_sessions_per_client_test.nim` does the same to hold `ct host`'s
+		# clients to one ACP session each (`index/served_client` contexts).
+		# `acp_git_visible_changes_test.nim` holds the same module's git change
+		# detection to the files whose content changed, with no index write.
+		# `component_ids_across_sessions_test.nim` (#835) imports `utils.nim`,
+		# whose `generateId` reads every tab's `componentMapping` through the same
+		# JS-only `Data`; it holds editor and diff ids unique across the window.
 		printf '%s\n' \
+			src/frontend/tests/acp_git_visible_changes_test.nim \
+			src/frontend/tests/acp_notification_test.nim \
+			src/frontend/tests/acp_sessions_per_client_test.nim \
+			src/frontend/tests/component_ids_across_sessions_test.nim \
 			src/frontend/tests/component_registry_binding_test.nim \
 			src/frontend/tests/dap_refusal_surfaces_test.nim \
 			src/frontend/tests/debug_toolbar_tooltips_test.nim \
 			src/frontend/tests/frontend_lang_test.nim \
 			src/frontend/tests/ipc_registry_test.nim \
+			src/frontend/tests/monaco_operations_test.nim \
 			src/frontend/tests/run_to_cursor_test.nim \
 			src/frontend/tests/scratchpad_add_dispatch_test.nim \
-			src/frontend/tests/shortcut_bindings_test.nim \
 			src/frontend/tests/shortcut_dialog_test.nim \
 			src/frontend/tests/shortcut_presets_test.nim \
 			src/frontend/tests/stop_command_test.nim \
@@ -1016,13 +1370,6 @@ test_lane_files() {
 		# scored the whole file `DID NOT RUN`. That is the one red in `vm-unit`
 		# on `dev`: a suite in a lane that does not provide what it needs.
 		#
-		# `test_opfs_volume` (NS2) is the one rejection that runs in the JS
-		# lane and NOT here — the mirror image of `test_platform_desktop_native`
-		# below. Its subject, `viewmodel/host/opfs_volume.nim`, is the browser's
-		# origin-private filesystem and is a hard `{.error.}` on the C target,
-		# exactly as the native desktop instantiation is on the JS one. So it is
-		# subtracted here and ADDED to `vm-unit-js`, which is the only lane that
-		# can run it.
 		# `headless_session` joins `recorder_gate` in the subtraction for the
 		# same reason, one dependency further down: importing it means the
 		# suite SPAWNS a real `replay-server`, and this lane's recipe
@@ -1033,10 +1380,39 @@ test_lane_files() {
 		# produced no `[OK]` line and scored `DID NOT RUN`. That is exactly
 		# the shape described above for `test_js_subdir_trace_vm.nim`; naming
 		# the second dependency keeps it from recurring.
-		_tlf_find src/frontend/viewmodel/tests/unit 'test_*.nim' |
-			_tlf_reject_matching_file '^[[:space:]]*import[[:space:]]+((\.\./)*recorder_gate|(\.\./)*headless_session)([[:space:],]|$)' |
-			_tlf_reject '/test_collab_[a-z0-9_]*\.nim$' \
-				'/test_opfs_volume\.nim$'
+		# (Both subtractions live in `_tlf_vm_unit_candidates`, which
+		# `vm-unit-js` shares.)
+		#
+		# The JAVASCRIPT-ONLY suites are subtracted by dependency too, for the
+		# same reason and after the same defect. A suite that imports a stdlib
+		# module which is a `{.fatal.}` off the JS target (`std/asyncjs`,
+		# `std/jsffi`, `std/dom`, ...: `_TLF_JS_ONLY_STDLIB_MODULES`) cannot be
+		# compiled by this lane's C backend at all. They used to be rejected by
+		# filename, one line per suite (`test_opfs_volume`, `test_vscode_host`),
+		# and `test_hosted_primary_over_socket.nim`, which imports
+		# `std/[asyncjs, json, jsffi, options]`, was added without a line: this
+		# lane compiled it and reported `COMPILE ERROR ... Module asyncjs is
+		# designed to be used with the JavaScript backend` on every run
+		# (codetracer-pm issue 2026-10-20, "The native `vm-unit` lane collects
+		# `test_hosted_primary_over_socket.nim`"). Matching the import routes
+		# the next such suite to `vm-unit-js` without anyone naming it. Only a
+		# column-0 import counts: a `when defined(js):` arm is code the C
+		# backend never compiles, and several native suites have one. The
+		# suites this subtracts today, each because what it drives exists only
+		# on the JS target:
+		#   `test_opfs_volume` (NS2) — `viewmodel/host/opfs_volume.nim`, the
+		#       browser's origin-private filesystem. The mirror image of
+		#       `test_platform_desktop_native`, which `vm-unit-js` rejects.
+		#   `test_vscode_host` (HSF-X2) — `entries/vscode_host`, the VS Code
+		#       extension host's side: a debug session's `customRequest` and a
+		#       webview's `postMessage` are JavaScript functions.
+		#   `test_hosted_primary_over_socket` — a server-owned session
+		#       (`sync/hosted_primary`) and its mirrors over a real socket.io
+		#       WebSocket, server and client in one Node process.
+		# `ci/test/vm-unit-js-only-suites-test.sh` asserts that no suite in this
+		# lane imports a JS-only module, and proves the discovery on synthetic
+		# suites nobody listed.
+		_tlf_vm_unit_candidates | _tlf_js_only_suites reject
 		;;
 
 	vm-unit-js)
@@ -1078,8 +1454,20 @@ test_lane_files() {
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
 				'/test_every_status_surface_has_an_entry_point\.nim$' \
+				'/test_view_census\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
-				'/test_vcs_content_id\.nim$'
+				'/test_vcs_content_id\.nim$' \
+				'/test_native_file_tree_operations\.nim$'
+		# `test_native_file_tree_operations` (K19) creates, renames and moves
+		# to a trash REAL files in a temporary directory: its subject,
+		# `host/native_file_tree.nim`, is the native front-ends' disk half and
+		# refuses to compile on this backend (the desktop's is the index
+		# process, `main-process`'s `file_tree_operations_test.nim`). Rejected
+		# rather than guarded for the vacuous-pass reason below; its
+		# backend-independent half, `test_files_node_menu`, runs here.
+		# `test_view_census` (HSF-D6) is a source scan of the same shape as the
+		# two below: it walks `src/frontend` with `std/os`, which the JS target
+		# lacks, and with the walk elided it would pass having read nothing.
 		# `test_vcs_content_id` (SB-2a) is `test_vcs_working_tree`'s twin: its
 		# claim is the NATIVE facade computing W, H and S against real
 		# repositories it builds with the system git (`std/osproc`), which a
@@ -1265,16 +1653,25 @@ test_lane_files() {
 		# limitation, and rejecting the four would have been recording the
 		# harness's habit as a fact about the product.
 		#
-		# And ONE file this lane has that `vm-unit` does not. `test_opfs_volume`
-		# (NS2) drives `viewmodel/host/opfs_volume.nim` — the browser's
+		# And the files this lane has that `vm-unit` does not: the JavaScript-
+		# only suites, which `vm-unit` subtracts by dependency (see the note
+		# there) and this lane adds back by the SAME predicate,
+		# `_tlf_js_only_suites`, over the same candidates. So the two lanes
+		# cannot disagree about which suites are JS-only, and a new one is
+		# discovered here rather than named. (This used to be two hard-coded
+		# `printf` lines, the mirror of `vm-unit`'s two filename rejections.)
+		# The one with the longest history is `test_opfs_volume` (NS2): it
+		# drives `viewmodel/host/opfs_volume.nim` — the browser's
 		# origin-private filesystem — against a fake `navigator.storage`
 		# installed into the global object, so every `{.importjs.}` body in that
-		# module runs unmodified under node. Its subject is a hard `{.error.}`
-		# on the C target, so it is subtracted from `vm-unit` above and added
-		# here rather than being derived. This is the only lane that can run it,
-		# and the only place in the tree where the WEB instantiation's
+		# module runs unmodified under node. This is the only lane that can run
+		# it, and the only place in the tree where the WEB instantiation's
 		# browser-facing half is exercised at all.
-		printf '%s\n' src/frontend/viewmodel/tests/unit/test_opfs_volume.nim
+		#
+		# The two halves are disjoint by construction (`vm-unit` holds no
+		# JS-only suite), so nothing is listed twice. Each half is sorted; the
+		# concatenation is not, as it was not before.
+		_tlf_vm_unit_candidates | _tlf_js_only_suites keep
 		;;
 
 	vm-unit-wasm)
@@ -1328,7 +1725,12 @@ test_lane_files() {
 				'/test_vcs_working_tree\.nim$' \
 				'/test_vcs_content_id\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
-				'/test_project_action_runner\.nim$'
+				'/test_project_action_runner\.nim$' \
+				'/test_native_file_tree_operations\.nim$'
+		# TEN entries since K19: `test_native_file_tree_operations` creates,
+		# renames and trashes REAL files in a temporary directory through
+		# `std/posix` (`host/native_file_tree`, a native front-end's disk
+		# half), the same reason it is rejected from `vm-unit-js` above.
 		# NINE entries since SB-2a: `test_vcs_content_id` runs the system git
 		# through `std/osproc` exactly as `test_vcs_working_tree` below does,
 		# so it dies on the same `posix_spawnp` link line.
@@ -1407,9 +1809,11 @@ test_lane_files() {
 		#       `test_project_actions.nim`, both of which run here.
 		#
 		# NOT EXCLUDED, and each was checked rather than assumed:
-		#   `test_opfs_volume` is already absent, inherited from `vm-unit`:
-		#       its subject is a hard `{.error.}` on the C target and wasm
-		#       IS the C target, so no edit here can be forgotten.
+		#   The JavaScript-only suites (`test_opfs_volume`, `test_vscode_host`,
+		#       `test_hosted_primary_over_socket`) are already absent,
+		#       inherited from `vm-unit`, which subtracts every suite importing
+		#       a stdlib module that is fatal off the JS target. wasm IS the C
+		#       target, so no edit here can be forgotten.
 		#   `test_plugin_surfaces` (PLAT-9) writes a real executable, puts
 		#       its directory on the real `PATH` and asserts a contributed
 		#       surface stops being degraded. It needs a FILESYSTEM and a
@@ -1753,6 +2157,31 @@ test_lane_files() {
 		# failure would read as a broken test rather than as a missing build.
 		# `just test-ui-selection` names all four.
 		_tlf_find src/tests/ui_selection 'test_*.nim'
+		;;
+
+	ct-host-admission)
+		# `ct host`'s admission rule (CLI/ct/host.md, "Admission") and its
+		# per-client session isolation ("Sessions are isolated") and its lifetime
+		# ("Corner Cases": it ends what it started however it ends), against
+		# the real `ct host` and the node index it starts. Like `ui-selection`
+		# it needs a built `src/build-debug/bin/ct` (or CODETRACER_CT_BIN),
+		# `node` and socket.io-client, which is why it is a lane of its own
+		# rather than part of `ct-trace-units`, whose recipe builds neither.
+		# `just test-ct-host-admission` builds them. The import refusal suite
+		# (`ct host` naming a container it cannot read, CLI/ct/host.md and
+		# ctfs-container.md) is here for the same reason: it is about the real
+		# binary's exit and output, which only a built `ct` can show.
+		_tlf_find src/tests/ct_host 'test_*.nim'
+		;;
+
+	ct-host-manifest)
+		# `ct host --manifest` choosing the slice of a recording manifest it
+		# imports (CLI/ct/host.md, "The start position"), against the real
+		# `ct host` and the node index it starts. Its own directory and lane for
+		# the reason `ct-host-admission` has one: it needs a built
+		# `src/build-debug/bin/ct` (or CODETRACER_CT_BIN), `node` and
+		# socket.io-client. `just test-ct-host-manifest` builds them.
+		_tlf_find src/tests/ct_host_manifest 'test_*.nim'
 		;;
 
 	tui-real-terminal)

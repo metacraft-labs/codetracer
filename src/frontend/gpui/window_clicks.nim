@@ -65,8 +65,6 @@ type
     gcpTab = "tab"
     gcpPoint = "point"
       ## A point-list row (`pointList`'s option).
-    gcpStateTab = "statetab"
-      ## The Variables pane's Locals / Globals / Watches tab.
     gcpEventHeader = "header"
       ## An event-log column's header (`th`).
     gcpCallArg = "arg"
@@ -88,9 +86,8 @@ type
       ## PLAT-51: a value-history row under its variable; the key is its tick.
     gcpAddWatch = "addwatch"
       ## PLAT-51: the Watches tab's "Add watch expression…" row.
-    gcpStateSeparator = "separator"
-      ## PLAT-51: the name / value column rule — a press starts the column
-      ## resize drag.
+    gcpCallSearch = "callsearch"
+      ## The call trace's search field (`CallSearchAttribute`).
 
   GClickButton* = enum
     gbLeft = "left"
@@ -197,7 +194,6 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
     elif id == "state.root": ctx = "state"
     elif id == "fileTree": ctx = "fileTree"
     elif id == "pointList": ctx = "pointList"
-    elif id == "state.tabs": ctx = "stateTabs"
     elif id == "scratchpad": ctx = "scratchpad"
     elif id == "vcs.workingTree.files": ctx = "vcsFiles"
     elif id == "vcs.commits.list": ctx = "vcsCommits"
@@ -230,14 +226,13 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
                          index: parseInt(getAttribute(r.parentNode(el),
                                                       "data-row-index")))
         except ValueError: discard
-      elif ctx in ["pointList", "stateTabs", "vcsFiles", "vcsCommits"] and
+      elif ctx in ["pointList", "vcsFiles", "vcsCommits"] and
            getAttribute(el, "data-option-index").len > 0:
         let option = getAttribute(el, "data-option-id")
         try:
           let i = parseInt(getAttribute(el, "data-option-index"))
           c = case ctx
               of "pointList": GPaneClick(part: gcpPoint, index: i)
-              of "stateTabs": GPaneClick(part: gcpStateTab, index: i)
               of "vcsFiles": GPaneClick(part: gcpVcsFile, key: option)
               else:
                 if option.startsWith("commitfile-"):
@@ -277,9 +272,8 @@ proc wireWindowClicks*(r: GpuiRenderer; root: GpuiElement;
                        key: getAttribute(el, StateHistoryEntryAttribute))
       elif getAttribute(el, StateAddWatchAttribute).len > 0:
         c = GPaneClick(part: gcpAddWatch, key: "watch")
-      elif getAttribute(el, StateSeparatorAttribute).len > 0 and
-           getAttribute(r.parentNode(el), StateHeaderAttribute).len == 0:
-        c = GPaneClick(part: gcpStateSeparator, key: "separator")
+      elif getAttribute(el, CallSearchAttribute).len > 0:
+        c = GPaneClick(part: gcpCallSearch, key: "calls")
       elif getAttribute(el, TabPaneAttribute).len > 0:
         c = GPaneClick(part: gcpTab, key: getAttribute(el, TabPaneAttribute))
       elif getAttribute(el, TextRoleAttribute) == $trGutterLineNumber or
@@ -318,7 +312,7 @@ proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;
     of gcpEventRow: getAttribute(el, "data-row-index") == key
     of gcpCallRow: getAttribute(el, CallRowAttribute) == key
     of gcpTab: getAttribute(el, TabPaneAttribute) == key
-    of gcpPosition, gcpAddWatch, gcpStateSeparator: true
+    of gcpPosition, gcpAddWatch, gcpCallSearch: true
     of gcpStateControl, gcpHistoryEntry:
       getAttribute(el, StateControlAttribute) == key or
         getAttribute(el, StateHistoryEntryAttribute) == key
@@ -328,7 +322,7 @@ proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;
     of gcpValue:
       let row = r.parentNode(r.parentNode(el))
       not row.isNil and getAttribute(row, EditorRowAttribute) == key
-    of gcpPoint, gcpStateTab:
+    of gcpPoint:
       getAttribute(el, "data-option-index") == key
     of gcpVcsFile, gcpVcsCommit:
       getAttribute(el, "data-option-id") == key or

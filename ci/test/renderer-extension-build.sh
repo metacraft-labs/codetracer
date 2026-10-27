@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 #
-# renderer-extension-build.sh — the DEVELOPER renderer build produces a bundle.
+# renderer-extension-build.sh — the DEVELOPER renderer build produces a bundle,
+# and the VS Code extension's two bundles are what they claim to be.
+#
+# SINCE HSF-X2 (Shared-DOM-Front-Ends D5) THE EXTENSION DOES NOT LOAD THE
+# RENDERER. Its panels are `entries/vscode_panel.nim` (one panel's view over a
+# mirror of the host's session) and its host is `entries/vscode_host.nim`; the
+# `-d:ctInExtension` arm of `ui_js` and of `ui/*.nim` is gone. Step 1 now
+# asserts the developer recipes do NOT pass that define, and step 3 builds the
+# extension's bundles and asserts the panel bundle carries none of the
+# renderer: no `ui_js`, no `Data`, no Monaco, no jQuery.
+#
+# The history below is why the developer recipes are gated at all.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -164,18 +175,23 @@ for recipe in build-ui-js build-ui-js-hmr; do
 	# was renamed away yields an empty body, and every `grep -q` below would
 	# then report a clean absence rather than a missing subject.
 	if [ -n "${body}" ]; then
-		ok "${recipe}: found the recipe in justfile ($(printf '%s\n' "${body}" | grep -c . ) non-blank lines)"
+		ok "${recipe}: found the recipe in justfile ($(printf '%s\n' "${body}" | grep -c .) non-blank lines)"
 	else
 		bad "${recipe}: NOT FOUND in justfile — this gate has no subject"
 		continue
 	fi
-	for flag in "-d:ctInExtension" "src/frontend/ui_js.nim"; do
-		if grep -qF -- "${flag}" <<<"${body}"; then
-			ok "${recipe}: still passes ${flag}"
-		else
-			bad "${recipe}: no longer passes ${flag} — either restore it, or delete this gate and say why the configuration stopped existing"
-		fi
-	done
+	if grep -qF -- "src/frontend/ui_js.nim" <<<"${body}"; then
+		ok "${recipe}: still compiles src/frontend/ui_js.nim"
+	else
+		bad "${recipe}: no longer compiles src/frontend/ui_js.nim — this gate has no subject"
+	fi
+	# The extension arm is gone (HSF-X2): the define now selects nothing in
+	# `ui_js`, and a recipe passing it builds a configuration no one ships.
+	if grep -qF -- "-d:ctInExtension" <<<"${body}"; then
+		bad "${recipe}: passes -d:ctInExtension — the extension no longer loads the renderer (vscode_panel / vscode_host instead)"
+	else
+		ok "${recipe}: does not pass -d:ctInExtension"
+	fi
 	# The negative. `--hotCodeReloading:on` compiles fine and then emits 112
 	# duplicated top-level function names into this bundle; the recipe comment
 	# above `build-ui-js` carries the measurement. Caught here as well as by the
@@ -196,12 +212,9 @@ echo "Step 2: each recipe produces a bundle, and the bundle is real"
 # the bundle, and each vanishes under a DIFFERENT wrong build — which is what
 # makes them evidence rather than decoration:
 #
-#   makeTracepointComponentForExtension  `{.exportc.}` in ui/trace.nim, and the
-#                                        very routine whose eager code
-#                                        generation used to abort this build.
-#                                        Absent without -d:ctInExtension.
-#   newDapVsCodeApi                      `{.exportc.}` in dap.nim's extension
-#                                        arm. Absent without -d:ctInExtension.
+#   lastAgentPrompt                      a field of the renderer's `Data`; the
+#                                        positive control for step 3, which
+#                                        asserts the panel bundle lacks it.
 #   resolvePendingDapResponse            called unconditionally by ui_js.nim's
 #                                        onDapReceiveResponse; the identifier
 #                                        that was undeclared in this arm.
@@ -220,8 +233,7 @@ echo "Step 2: each recipe produces a bundle, and the bundle is real"
 #
 # `{.exportc.}` names survive verbatim; the rest are Nim-mangled prefixes.
 markers=(
-	makeTracepointComponentForExtension
-	newDapVsCodeApi
+	lastAgentPrompt
 	resolvePendingDapResponse
 	__ui95js_
 	__uiZtrace_
@@ -307,13 +319,119 @@ check_bundle build-ui-js-hmr "${work_dir}/ui-hmr.js"
 echo
 
 # ---------------------------------------------------------------------------
+echo "Step 3: the VS Code extension's bundles (vscode_panel.js, vscode_host.js, ct_vscode.js)"
+echo "    A panel webview loads vscode_panel.js alone: one panel's view over a"
+echo "    mirror of the host's session. The renderer must not be in it."
+# ---------------------------------------------------------------------------
+check_extension_bundle() {
+	local recipe="$1" out="$2" log rc size
+	rm -f "${out}"
+	log="$("${JUST:-just}" "${recipe}" "${out}" 2>&1)"
+	rc=$?
+	if [ ! -f "${out}" ] || [ "${rc}" -ne 0 ]; then
+		bad "${recipe}: NO ARTEFACT (recipe exit ${rc})"
+		printf '%s\n' "${log}" | grep -E 'Error:' | head -3 | sed 's/^/      /'
+		return 1
+	fi
+	size="$(wc -c <"${out}" | tr -d ' ')"
+	# Real bundles are megabytes; the floor only refuses an empty file, which
+	# would satisfy every absence below vacuously.
+	if [ "${size}" -gt 100000 ]; then
+		ok "${recipe}: artefact is non-trivial (${size} bytes)"
+	else
+		bad "${recipe}: artefact is only ${size} bytes — every absence below would be vacuous"
+		return 1
+	fi
+	if node --check "${out}" >/dev/null 2>&1; then
+		ok "${recipe}: node parses the artefact as JavaScript"
+	else
+		bad "${recipe}: node --check REJECTED the artefact"
+	fi
+	return 0
+}
+
+# What must NOT be in the panel bundle, each by a name only it emits:
+#   ui_js / types.nim   the renderer's entry module and its `Data` (Nim names
+#                       a module's routines with its path: `__ui95js_`, and
+#                       `types.nim`'s with `__types_`… under `frontend/`)
+#   lastAgentPrompt     fields of the renderer's `Data`, so its type info
+#   traceMonacoEditors
+#   monaco / jquery     the editor and DOM libraries the renderer drives
+if check_extension_bundle build-vscode-panel "${work_dir}/vscode_panel.js"; then
+	panel="${work_dir}/vscode_panel.js"
+	for absent in "ui_js.nim" "frontend/renderer.nim" "frontend/types.nim" "__ui95js_"; do
+		if grep -qaF -- "${absent}" "${panel}"; then
+			bad "vscode_panel.js: carries ${absent} — the renderer leaked into the panel bundle"
+		else
+			ok "vscode_panel.js: does not carry ${absent}"
+		fi
+	done
+	for absent in monaco jquery jQuery; do
+		if grep -qaw -- "${absent}" "${panel}"; then
+			bad "vscode_panel.js: mentions ${absent} — a renderer library leaked into the panel bundle"
+		else
+			ok "vscode_panel.js: does not mention ${absent}"
+		fi
+	done
+	# `Data`'s type info is numbered (`NTI<digits>`), so it is found by two of
+	# its fields, which no other type declares; both are in `ui.js` (measured).
+	if grep -qawE 'lastAgentPrompt|traceMonacoEditors' "${panel}"; then
+		bad "vscode_panel.js: carries the renderer's Data type (lastAgentPrompt / traceMonacoEditors)"
+	else
+		ok "vscode_panel.js: does not carry the renderer's Data type"
+	fi
+	# And it IS the panel: the entry's own module and the mirror it builds.
+	for present in "vscode_panel.nim" "mirror_session.nim"; do
+		if grep -qaF -- "${present}" "${panel}"; then
+			ok "vscode_panel.js: carries ${present}"
+		else
+			bad "vscode_panel.js: ${present} is ABSENT — this is not the panel bundle"
+		fi
+	done
+fi
+echo
+
+if check_extension_bundle build-vscode-host "${work_dir}/vscode_host.js"; then
+	host="${work_dir}/vscode_host.js"
+	# The host is loaded with `require` by the extension; what it exports is
+	# what `src/sessionHost.ts` calls.
+	exports="$(node -e 'const m = require(process.argv[1]); console.log(Object.keys(m).sort().join(" "))' "${host}" 2>&1)"
+	for name in ctHostCreate ctHostOpenSession ctHostDeliverEvent ctHostAttachWebview ctHostDeliverFromWebview ctHostDispose; do
+		if grep -qw -- "${name}" <<<"${exports}"; then
+			ok "vscode_host.js: exports ${name}"
+		else
+			bad "vscode_host.js: does not export ${name} (exports: ${exports})"
+		fi
+	done
+	if grep -qaF -- "ui_js.nim" "${host}"; then
+		bad "vscode_host.js: carries ui_js.nim — the host runs the session, not the renderer"
+	else
+		ok "vscode_host.js: does not carry ui_js.nim"
+	fi
+fi
+echo
+
+# The extension host's middleware runs in Node: loading it must not reach for
+# `window` (codetracer-pm issue 2026-10-04-extension-central-node-bootstrap-…:
+# the UI graph behind `ui/status` registered browser hooks at import).
+if check_extension_bundle build-vscode-middleware "${work_dir}/ct_vscode.js"; then
+	loaded="$(node -e 'const m = require(process.argv[1]); console.log(Object.keys(m).sort().join(" "))' "${work_dir}/ct_vscode.js" 2>&1)"
+	if grep -qw -- "newDapVsCodeApi" <<<"${loaded}"; then
+		ok "ct_vscode.js: loads under node and exports newDapVsCodeApi"
+	else
+		bad "ct_vscode.js: does not load under node: $(printf '%s\n' "${loaded}" | grep -m1 -E 'Error' || printf '%s' "${loaded}" | tail -c 200)"
+	fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
 echo "${checks} check(s), ${failures} failure(s)"
 if [ "${checks}" -eq 0 ]; then
 	echo "RESULT: FAILED — the gate asserted nothing at all"
 	exit 1
 fi
 if [ "${failures}" -eq 0 ]; then
-	echo "RESULT: OK — the developer renderer build produces a real bundle on both recipes"
+	echo "RESULT: OK — the developer renderer recipes and the VS Code extension bundles are what they claim to be"
 	exit 0
 fi
 echo "RESULT: FAILED — ${failures} check(s)"

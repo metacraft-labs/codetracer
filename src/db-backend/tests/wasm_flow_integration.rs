@@ -52,7 +52,7 @@ fn create_wasm_flow_config() -> FlowTestConfig {
         // println! is a macro — the Rust grammar should filter it out.
         // calculate_sum is a function call in main(), should not appear as a variable.
         excluded_identifiers: vec!["println".to_string(), "calculate_sum".to_string()],
-        expected_values,
+        expected_values: expected_values.into(),
     }
 }
 
@@ -75,20 +75,15 @@ fn test_wasm_flow_integration() {
         return;
     }
 
-    // Check wasm32-wasip1 target is available
-    let target_check = std::process::Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output();
-    if let Ok(output) = target_check {
-        let targets = String::from_utf8_lossy(&output.stdout);
-        if !targets.contains("wasm32-wasip1") {
-            test_harness::skip_or_fail_missing_prerequisite(
-                "test_wasm_flow_integration",
-                "the wasm32-wasip1 Rust target is not installed",
-                "run `rustup target add wasm32-wasip1`",
-            );
-            return;
-        }
+    // Ask the toolchain cargo builds with, not rustup (see
+    // `test_harness::rust_target_available`).
+    if !test_harness::rust_target_available("wasm32-wasip1") {
+        test_harness::skip_or_fail_missing_prerequisite(
+            "test_wasm_flow_integration",
+            "the wasm32-wasip1 Rust target is not installed in the toolchain cargo uses",
+            "use the codetracer dev shell, whose Rust carries it, or `rustup target add wasm32-wasip1` for a rustup toolchain",
+        );
+        return;
     }
 
     let config = create_wasm_flow_config();

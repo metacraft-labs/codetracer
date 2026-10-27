@@ -41,9 +41,10 @@
 ## and expressing it as a budget is what let the same rule become available to
 ## every other surface without any of them reimplementing it.
 
-import std/unicode
+import std/[strutils, unicode]
 
 import isonim_tui  # `displayWidth` — the terminal's own idea of a glyph's width
+from codetracer_embed import FittedCell
 
 import ../views/styled_row
 import ../../../../common/value_presentation
@@ -67,7 +68,13 @@ const
   DefaultValueStyle* = CellStyle(role: srValueDefault)
 
 const TerminalAmbiguousWidth* = awNarrow
-  ## The ambiguous-width policy this front-end measures under, FIXED.
+  ## The ambiguous-width policy `terminalMeasure` measures under. PLAT-71:
+  ## no longer the only one — a terminal measured to draw East Asian Width
+  ## `A` wide is measured by `terminalMeasureWide` (`measureFor`), and the
+  ## policy is still a FUNCTION OF ITS INPUT, never a thread-local.
+  ##
+  ## (Before PLAT-71: the ambiguous-width policy this front-end measured
+  ## under, FIXED.)
   ##
   ## `isonim_tui`'s `displayWidth(s)` reads a thread-local
   ## (`text/width.ambiguousWidth`, settable at runtime by
@@ -92,6 +99,28 @@ func terminalMeasure*(s: string): int {.gcsafe, raises: [].} =
   ## and it must be pure, or a front-end could make every presentation impure
   ## through the one hole in the pipeline.
   displayWidth(s, TerminalAmbiguousWidth)
+
+func terminalMeasureWide*(s: string): int {.gcsafe, raises: [].} =
+  ## `terminalMeasure` on a terminal that draws East Asian Width `A` two
+  ## cells wide (Terminal-Adaptation §6.6).
+  displayWidth(s, awWide)
+
+func measureFor*(ambiguous: AmbiguousWidth): PresentationMeasure =
+  ## The presenter's measure under a terminal's width policy.
+  if ambiguous == awWide: terminalMeasureWide else: terminalMeasure
+
+func measureOf*(g: StyledGrid): PresentationMeasure =
+  ## The measure a pane painting into `g` hands the presenter.
+  measureFor(g.ambiguous)
+
+func markCut*(f: FittedCell; glyphs: GlyphProfile): string =
+  ## A fitted cell's text with its truncation marker as the profile draws it
+  ## (Terminal-Adaptation §6.3: `~` on the ASCII tier). Only the MARKER the
+  ## fit added is replaced — never a `…` that is part of the value.
+  let marker = glyphs.glyph(grTruncation)
+  if f.truncated and marker != Ellipsis and f.text.endsWith(Ellipsis):
+    f.text[0 ..< f.text.len - Ellipsis.len] & marker
+  else: f.text
 
 func valueStyle*(class: PresentationClass): CellStyle =
   ## The colour a value of this class is drawn in.

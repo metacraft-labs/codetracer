@@ -8,12 +8,12 @@
 //! prints, and the `CODETRACER_RECORDING_ID` the program itself saw in its
 //! environment (the recorder exports it before launch).  A reader that
 //! starts `meta.dat`'s body anywhere but byte 12 (`flags_ext` is always
-//! present at version 6, `internal-files.md` §"Extended flags") reads the
+//! present at version 7, `internal-files.md` §"Extended flags") reads the
 //! id's length from the wrong byte and fails here; so does a reader that
 //! does not accept a bare `.ct` path.
 //!
 //! No mocks: a real recorder, a real compiler and a real container.  The
-//! byte-layout cases (every version refused but 6, unknown `flags_ext`
+//! byte-layout cases (every version refused but 7, unknown `flags_ext`
 //! bits, short headers) are the unit tests in `src/meta_dat.rs`, built
 //! from the spec's layout.
 //!
@@ -170,12 +170,12 @@ fn a_native_recording_and_each_of_its_slices_name_the_recording() {
         meta.source_files
     );
 
-    // Its meta.dat, parsed directly: version 6, the flag word and the
+    // Its meta.dat, parsed directly: version 7, the flag word and the
     // extended word that precede the id.
     let bytes = std::fs::read(&trace).expect("read container");
     let raw = meta_dat::read_meta_dat_from_ctfs(&bytes).expect("meta.dat member");
     let parsed = meta_dat::parse_meta_dat(&raw).expect("parse meta.dat");
-    assert_eq!(parsed.version, 6);
+    assert_eq!(parsed.version, meta_dat::META_DAT_VERSION);
     assert_eq!(parsed.recording_id, printed);
     assert!(
         parsed.mcr.is_some(),

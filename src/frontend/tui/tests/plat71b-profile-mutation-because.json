@@ -1,0 +1,16 @@
+{
+  "B1": "q.contains(\"\\e[1;1H\\e[2K\")",
+  "B10": "not r78.synchronizedOutput and r78.syncFrom == csProbe",
+  "B11": "not p.cprOpen",
+  "B12": "r45.tier == tierBasic and r45.tierNote.contains(\"[terminal\")",
+  "B13": "not linux.contains(XtversionQuery)",
+  "B14": "caps.tier == tierExtended and caps.bordersFrom == csProbe",
+  "B2": "ambiguous.len == 0",
+  "B3": "not r5a.ambiguousWide and r5a.ambiguousFrom == csSetting",
+  "B4": "r56.colors == cdAnsi256 and r56.colorsFrom == csSetting",
+  "B5": "not caps.modernUnicode",
+  "B6": "not live.ambiguousWide and live.ambiguousFrom == csProbe",
+  "B7": "restored.contains(\"\\e[?2027l\")",
+  "B8": "j >= 0 and k > j",
+  "B9": "q.endsWith(Da1Query)"
+}

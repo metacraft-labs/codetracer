@@ -12,9 +12,17 @@
 ## intentionally renders a minimal, dependency-free collapsible tree —
 ## one ``filesystem-entry`` row per node, an explicit twisty for
 ## folders, and the diff-files-list / deep-review compact rows below
-## the tree.  The rich jstree affordances (animated open/close,
-## contextmenu, search) remain a follow-up captured in the VM
-## doc-comment.
+## the tree.  jstree's animated open/close and its search plugin have no
+## counterpart yet.
+##
+## A right-click on a row opens the shared CodeTracer context menu
+## (`context_menu_bridge.showContextMenu`, `#context-menu-container`) with
+## the entries `FilesystemVM.fileTreeMenu` decides (codetracer-pm
+## `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Context menu"), and the
+## browser's own menu is suppressed. The diff-list rows have no menu. While
+## Create or Rename is open, the tree also draws the inline name field
+## (`FilesystemVM.nameEdit`): as the first child of Create's folder, or in
+## place of the renamed row's label.
 ##
 ## Both renderer overloads (Mock and Web) produce the same outer
 ## structure mirroring the legacy
@@ -30,7 +38,12 @@
 ##           span.filesystem-entry-label                 (basename)
 ##           div.filesystem-entry-children               (recursive)
 ##       div.filesystem-empty-overlay[.hidden]
-##           text "No filesystem loaded yet."
+##           text "No filesystem loaded yet.", or "No project folder is
+##           open." for a session with no project folder (New File)
+##       div.filesystem-loading-overlay[.hidden]   (while lsLoading)
+##           text "Loading..."
+##       div.filesystem-error-overlay[.hidden]     (while lsError)
+##           text FilesystemLoadFailedText, then the reason
 ##     div.diff-files-list                          (when hasDiff)
 ##       div.diff-file-path[.path-even|.path-odd]
 ##                                       (one per FilesystemDiffEntry)
@@ -46,15 +59,27 @@
 import std/[strutils, tables]
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import kdom except Location
+  from ./context_menu_bridge import showContextMenu
+  from ../../context_menu_item import ContextMenuItem
+
+# The headless tests render through `MockRenderer`; its event type is what
+# the Mock arm of the row's right-click and the name field's keys receive.
+import isonim/testing/mock_dom
 
 import ../store/types
 import ../viewmodels/filesystem_vm
+import ../viewmodels/no_project_folder
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 const FilesystemContainerClass* = "component-container filesystem-container"
   ## Verbatim string the legacy ``componentContainerClass(
@@ -72,6 +97,25 @@ const FilesystemEmptyStateText* = "No filesystem loaded yet."
   ## builder share one source of truth.  Name-spaced (vs. the
   ## ``EmptyStateText`` in trace_log_view) so importing both modules
   ## from the test suite does not collide.
+
+const FilesystemNoProjectFolderText* = NoProjectFolderText
+  ## The empty state of a session with NO project folder (Welcome screen →
+  ## New File; ``FilesystemVM.showNoProjectFolder``).  `Welcome-Screen.md`
+  ## §"New file, and what it creates" calls it "an empty project": no tree,
+  ## no loading indicator, and this sentence — the one the Test Results and
+  ## Constraints panes show for the same session — where the generic empty
+  ## state would say "No filesystem loaded yet." and so promise a tree that
+  ## is not coming.
+
+proc emptyStateText*(vm: FilesystemVM): string =
+  ## The sentence the empty-state overlay shows for ``vm``'s state.
+  if vm.noProjectFolder.val: FilesystemNoProjectFolderText
+  else: FilesystemEmptyStateText
+
+const FilesystemLoadFailedText* = "The file tree could not be loaded: "
+  ## Lead-in of the error overlay shown when a root load failed
+  ## (``FilesystemVM.loadError`` follows it).  A load ends on a tree, the
+  ## empty state or this — never on a permanent "Loading..." (GitHub #785).
 
 const FilesystemTreeContainerClass* = "filesystem-tree"
   ## CSS class on the tree's outer wrapper.  Kept distinct from the
@@ -185,66 +229,291 @@ proc jstreeIconClass*(entry: FilesystemEntryNode): string =
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
-proc renderMockEntry(r: MockRenderer; vm: FilesystemVM;
-                     entry: FilesystemEntryNode): MockNode =
-  ## Render a single tree node + its visible children.  Recurses only
-  ## when the node is an expanded folder so collapsed subtrees are not
-  ## materialised — matches the jstree behaviour at the DOM-shape
-  ## level.
+when defined(js):
+  proc fsPreventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc fsStopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
+  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
+  proc eventKey(ev: isonim_dom.Event): cstring {.importcpp: "(#.key || '')".}
+  proc fieldValue(e: isonim_dom.Element): cstring {.importcpp: "(#.value || '')".}
+  proc setFieldValue(e: isonim_dom.Element; v: cstring) {.importcpp: "#.value = #".}
+  proc focusFieldSoon(e: isonim_dom.Element) {.importjs: """
+    (function (e) {
+      setTimeout(function () {
+        if (e.isConnected) {
+          e.focus();
+          var n = e.value.length;
+          try { e.setSelectionRange(n, n); } catch (_) {}
+        }
+      }, 0);
+    })(#)""".}
+    ## Focus the name field once the row holding it is in the document (the
+    ## render effect builds a row before attaching it), caret at the end.
+  proc cancelIfStillShown(e: isonim_dom.Element; cancel: proc()) {.importjs: """
+    (function (e, cancel) {
+      setTimeout(function () { if (e.isConnected) { cancel(); } }, 0);
+    })(#, #)""".}
+    ## Leaving the field cancels it — but a field the tree REBUILT (a lazy
+    ## load or a refused name re-renders it) is replaced, not left: Chromium
+    ## may report a blur for the removed element, and by the next task it is
+    ## no longer connected, so only a field the user really left cancels.
+
+  proc toContextMenuItem(entry: FileTreeMenuEntry): ContextMenuItem =
+    ## The shared menu's item for one ViewModel entry: a disabled entry
+    ## keeps its row and shows its reason as the sublabel.
+    let run = entry.run
+    ContextMenuItem(
+      name: cstring(entry.label),
+      hint: cstring"",
+      disabled: entry.disabled,
+      disabledReason: cstring(entry.disabledReason),
+      handler: proc(ev: kdom.Event) =
+        if not run.isNil:
+          run())
+
+  proc showFileTreeMenu(vm: FilesystemVM; path: string; ev: isonim_dom.Event) =
+    var items: seq[ContextMenuItem] = @[]
+    for entry in vm.openFileTreeMenu(path):
+      items.add toContextMenuItem(entry)
+    showContextMenu(items, ev.eventClientX(), ev.eventClientY())
+
+# This module's own names for the two event calls. Generic code that called
+# `preventDefault` would leave it an open symbol (kdom and mock_dom both
+# declare one), and the instantiating module also sees `isonim_state_view`'s,
+# so the call would be ambiguous there.
+template isDomElement(N: typedesc): bool =
+  ## Whether `N` is the browser DOM's element: the web arm of a binding. The
+  ## Mock arm must stay reachable on the JS backend too, where the headless
+  ## suites also run (`vm-js`).
+  when defined(js): N is isonim_dom.Element else: false
+
+proc fsPreventDefault(ev: MockEvent) = ev.preventDefault()
+proc fsStopPropagation(ev: MockEvent) = ev.stopPropagation()
+
+proc bindRowContextMenu[R, N](r: R; vm: FilesystemVM; row: N; path: string) =
+  ## A right-click anywhere on the row (its whole-row band, icon or label)
+  ## opens that row's menu. The browser's own menu is suppressed, and the
+  ## event stops at the row so an enclosing folder's row does not open its
+  ## menu on top. A factory, so each row's closure owns its own `path`.
+  mixin addEventListener
+  when isDomElement(N):
+    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"contextmenu",
+      proc(ev: isonim_dom.Event) =
+        ev.fsPreventDefault()
+        ev.fsStopPropagation()
+        showFileTreeMenu(vm, path, ev))
+  elif N is MockNode:
+    r.addEventListener(row, "contextmenu", proc(ev: MockEvent) =
+      ev.fsPreventDefault()
+      ev.fsStopPropagation()
+      discard vm.openFileTreeMenu(path))
+
+proc renderNameField[R, N](r: R; vm: FilesystemVM;
+                           edit: FileTreeNameEdit): N =
+  ## The inline name field of Create and Rename: an input holding
+  ## `vm.nameEditDraft` and, after a refused name, the reason beside it.
+  ## Enter commits, Escape or leaving the field cancels. Its keys stop at
+  ## the field, so the tree and the window's shortcuts do not see the
+  ## letters typed into a name.
+  mixin createElement, setAttribute, appendChild, createTextNode,
+        addEventListener, setInputValue, inputValue
+  let field = r.createElement("span")
+  r.setAttribute(field, "class", "filesystem-name-field")
+  let input = r.createElement("input")
+  r.setAttribute(input, "class", "filesystem-name-input")
+  r.setAttribute(input, "type", "text")
+  r.setAttribute(input, "spellcheck", "false")
+  r.setAttribute(input, "aria-label",
+    if edit.kind == fneCreate: "New file name" else: "New name")
+  r.appendChild(field, input)
+  if edit.error.len > 0:
+    let reason = r.createElement("span")
+    r.setAttribute(reason, "class", "filesystem-name-error")
+    r.setAttribute(reason, "role", "alert")
+    r.appendChild(reason, r.createTextNode(edit.error))
+    r.appendChild(field, reason)
+  when isDomElement(N):
+    setFieldValue(input, cstring(vm.nameEditDraft))
+    let inputNode = isonim_dom.Node(input)
+    isonim_dom.addEventListener(inputNode, cstring"keydown",
+      proc(ev: isonim_dom.Event) =
+        ev.fsStopPropagation()
+        let key = $ev.eventKey()
+        if key == "Enter":
+          ev.fsPreventDefault()
+          discard vm.commitNameEdit($fieldValue(input))
+        elif key == "Escape":
+          ev.fsPreventDefault()
+          vm.cancelNameEdit())
+    isonim_dom.addEventListener(inputNode, cstring"input",
+      proc(ev: isonim_dom.Event) =
+        vm.nameEditDraft = $fieldValue(input))
+    isonim_dom.addEventListener(inputNode, cstring"blur",
+      proc(ev: isonim_dom.Event) =
+        cancelIfStillShown(input, proc() =
+          if vm.nameEdit.val.kind != fneNone:
+            vm.cancelNameEdit()))
+    for eventName in [cstring"click", cstring"dblclick", cstring"mousedown",
+                      cstring"contextmenu"]:
+      # The field sits inside the row: a click in it is not a click on the
+      # row, and a right-click in it edits text rather than opening the
+      # row's menu.
+      isonim_dom.addEventListener(inputNode, eventName,
+        proc(ev: isonim_dom.Event) = ev.fsStopPropagation())
+    focusFieldSoon(input)
+  elif N is MockNode:
+    r.setInputValue(input, vm.nameEditDraft)
+    r.addEventListener(input, "keydown", proc(ev: MockEvent) =
+      ev.fsStopPropagation()
+      if ev.key == "Enter":
+        discard vm.commitNameEdit(r.inputValue(input))
+      elif ev.key == "Escape":
+        vm.cancelNameEdit())
+    r.addEventListener(input, "input", proc() =
+      vm.nameEditDraft = r.inputValue(input))
+    # The mock has no focus moves of its own: a "blur" fired by a test is
+    # the user leaving the field.
+    r.addEventListener(input, "blur", proc() =
+      if vm.nameEdit.val.kind != fneNone:
+        vm.cancelNameEdit())
+  field
+
+proc renderCreateFieldNode[R, N](r: R; vm: FilesystemVM;
+                                 edit: FileTreeNameEdit; level: int): N =
+  ## Create's field as a tree node: the first child of the target folder.
+  mixin createElement, setAttribute, appendChild
+  let node = r.createElement("li")
+  r.setAttribute(node, "class",
+                 "jstree-node jstree-leaf filesystem-name-field-node")
+  r.setAttribute(node, "role", "treeitem")
+  r.setAttribute(node, "aria-level", $level)
+  r.appendChild(node, renderNameField[R, N](r, vm, edit))
+  node
+
+proc entryAction(vm: FilesystemVM; path: string; isFolder: bool): proc() =
+  ## A row's activation: a folder toggles, a file opens. A factory, so each
+  ## row's closure owns its own path (see `diffOpenHandler`).
+  result = proc() =
+    if isFolder: vm.toggleExpanded(path) else: vm.openFile(path)
+
+proc folderToggle(vm: FilesystemVM; path: string; isFolder: bool): proc() =
+  ## The twisty: a folder toggles; a file's twisty does nothing.
+  result = proc() =
+    if isFolder: vm.toggleExpanded(path)
+
+proc renderEntry[R, N](r: R; vm: FilesystemVM; entry: FilesystemEntryNode;
+                       level: int; isLast: bool): N =
+  ## One tree node in the legacy jstree markup (the visual reference is the
+  ## browser's final plugin DOM: wholerow, ocl twisty, anchor, theme icon),
+  ## and, for an expanded folder, its children. Collapsed subtrees are not
+  ## built.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild, removeChild, addEventListener, insertBefore
   let expandedFlag = vm.isExpanded(entry.path)
-  let path = entry.path
+  let nodeId = jstreeNodeId(entry)
+  let isFolder = entry.isFolder
+  let activate = entryAction(vm, entry.path, isFolder)
+  var anchor, children: N
   let row = ui(r):
-    tdiv(class = rowClass(entry, expandedFlag),
-         id = (if entry.id.len > 0: "j" & entry.id else: ""),
-         onclick = proc() =
-           if entry.isFolder:
-             vm.toggleExpanded(path)
-           else:
-             vm.openFile(path)):
-      span(class = "filesystem-entry-twisty"):
-        text twistyText(entry, expandedFlag)
-      tdiv(class = iconClass(entry)):
+    li(class = jstreeNodeClass(entry, expandedFlag, isLast), id = nodeId,
+       role = "treeitem", `aria-selected` = "false",
+       `aria-level` = $level,
+       `aria-labelledby` = (if nodeId.len > 0: nodeId & "_anchor" else: ""),
+       `aria-expanded` = (if not isFolder: "" elif expandedFlag: "true"
+                          else: "false")):
+      tdiv(class = "jstree-wholerow", unselectable = "on",
+           role = "presentation"):
+        text "\xC2\xA0"
+      i(class = "jstree-icon jstree-ocl", role = "presentation",
+        onclick = folderToggle(vm, entry.path, isFolder)):
         discard
-      span(class = "filesystem-entry-label"):
+      a(ref = anchor, class = "jstree-anchor",
+        id = (if nodeId.len > 0: nodeId & "_anchor" else: ""),
+        href = "#", tabindex = "-1"):
+        i(class = jstreeIconClass(entry), role = "presentation"):
+          discard
         text entry.text
-      tdiv(class = "filesystem-entry-children"):
+      ul(ref = children, class = "jstree-children", role = "group"):
         discard
-  if entry.isFolder and expandedFlag:
-    let children = entry.children
-    var lastChildContainer: MockNode = nil
-    for child in row.children:
-      if child.kind == mnkElement and
-         child.attributes.getOrDefault("class", "") == "filesystem-entry-children":
-        lastChildContainer = child
-        break
-    if lastChildContainer != nil:
-      for child in children:
-        let childNode = renderMockEntry(r, vm, child)
-        r.appendChild(lastChildContainer, childNode)
+  # The anchor's click activates the row. In a browser the click must also
+  # not follow the `#` link nor reach the tree beneath, which needs the event.
+  when defined(js):
+    when N is isonim_dom.Element:
+      isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
+        proc(ev: isonim_dom.Event) =
+          ev.fsPreventDefault()
+          ev.fsStopPropagation()
+          activate())
+    else:
+      r.addEventListener(anchor, "click", activate)
+  else:
+    r.addEventListener(anchor, "click", activate)
+  bindRowContextMenu[R, N](r, vm, row, entry.path)
+  # The name field, when Create or Rename is open on this row. Reading
+  # `nameEdit` here makes the panel's render effect follow it.
+  let edit = vm.nameEdit.val
+  if edit.kind == fneRename and entry.path.len > 0 and edit.path == entry.path:
+    # Rename: the field replaces the row's label.
+    r.insertBefore(row, renderNameField[R, N](r, vm, edit), anchor)
+    r.removeChild(row, anchor)
+  if isFolder and expandedFlag:
+    if edit.kind == fneCreate and entry.path.len > 0 and
+        edit.folder == entry.path:
+      # Create: the field is the folder's first child.
+      r.appendChild(children,
+                    renderCreateFieldNode[R, N](r, vm, edit, level + 1))
+    for i in 0 ..< entry.children.len:
+      r.appendChild(children, renderEntry[R, N](r, vm, entry.children[i],
+                                                level + 1,
+                                                i == entry.children.high))
+  else:
+    r.removeChild(row, children)
   row
 
-proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
-  ## Render the Filesystem panel for the Mock renderer.
+proc diffOpenHandler(vm: FilesystemVM; path: string): proc() =
+  ## The click handler of one diff-list row: open `path`.
+  ##
+  ## A FACTORY, because the diff rows are built in a `for` loop and Nim
+  ## closures capture by reference: a `let` in the loop body is ONE variable
+  ## for the whole loop, so an inline `proc() = vm.openFile(p)` made every
+  ## row open the LAST changed file (codetracer#860 sweep;
+  ## https://nim-lang.org/docs/manual.html#procedures-closures). `path` is
+  ## this call's own parameter, so each row's closure owns its value.
+  result = proc() = vm.openFile(path)
+
+proc renderFilesystemPanel*[R, N](r: R; vm: FilesystemVM): N =
+  ## The Filesystem panel, under any renderer (Shared-DOM-Front-Ends D3),
+  ## mounted on the desktop by `ui/panel_host`, in the legacy jstree markup.
   ##
   ## The static shell (outer container + filesystem wrapper +
   ## tree + empty-overlay + diff-files-list) is
   ## built once via the DSL.  A single outer ``createRenderEffect``
   ## rebuilds the dynamic content whenever any source signal changes.
-  var treeContainer: MockNode
-  var emptyContainer: MockNode
-  var loadingContainer: MockNode
-  var filesystemContainer: MockNode
-  var diffContainer: MockNode
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
+  var treeContainer, emptyContainer, loadingContainer, errorContainer,
+      filesystemContainer, diffContainer: N
 
   let panel = ui(r):
     tdiv(class = FilesystemContainerClass):
-      tdiv(ref = filesystemContainer, class = "filesystem"):
-        tdiv(ref = treeContainer, class = FilesystemTreeContainerClass):
+      tdiv(ref = filesystemContainer,
+           class = "filesystem jstree jstree-1 jstree-default",
+           role = "tree", `aria-multiselectable` = "true",
+           tabindex = "0", `aria-activedescendant` = "j1_1",
+           `aria-busy` = "false"):
+        ul(ref = treeContainer,
+           class = "jstree-container-ul jstree-children jstree-contextmenu " &
+                   "jstree-wholerow-ul jstree-no-dots " &
+                   FilesystemTreeContainerClass,
+           role = "group"):
           discard
         tdiv(ref = emptyContainer, class = "filesystem-empty-overlay"):
           text FilesystemEmptyStateText
         tdiv(ref = loadingContainer, class = "filesystem-loading-overlay"):
           text "Loading..."
+        tdiv(ref = errorContainer, class = "filesystem-error-overlay hidden",
+             role = "alert"):
+          discard
       tdiv(ref = diffContainer, class = "diff-files-list"):
         discard
 
@@ -252,23 +521,28 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     # -- Tree --
     let isLoading = vm.loadingState.val == lsLoading
     let root = vm.rootEntry.val
-    let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
+    let isFailed = vm.loadingState.val == lsError
+    let showEmpty = not isLoading and not isFailed and isEmptyRoot(root) and
       vm.diffEntries.val.len == 0
     r.clearChildren(treeContainer)
-    if root.text.len > 0 and root.text != "/":
-      let node = renderMockEntry(r, vm, root)
-      r.appendChild(treeContainer, node)
+    if isEmptyRoot(root):
+      discard
+    elif root.text.len > 0 and root.text != "/":
+      r.appendChild(treeContainer, renderEntry[R, N](r, vm, root, 1, true))
     elif root.children.len > 0:
-      for child in root.children:
-        let childNode = renderMockEntry(r, vm, child)
-        r.appendChild(treeContainer, childNode)
+      for i in 0 ..< root.children.len:
+        r.appendChild(treeContainer, renderEntry[R, N](r, vm,
+          root.children[i], 1, i == root.children.high))
     elif root.text.len > 0:
       # Single-node tree (rare but supported — e.g. a recording
       # captured via a single file path).  Render the root itself.
-      let node = renderMockEntry(r, vm, root)
-      r.appendChild(treeContainer, node)
+      r.appendChild(treeContainer, renderEntry[R, N](r, vm, root, 1, true))
 
     # -- Empty-state overlay --
+    # Its sentence depends on WHY the tree is empty (no project folder, or a
+    # load that found nothing), so it is rewritten on every run.
+    r.clearChildren(emptyContainer)
+    r.appendChild(emptyContainer, r.createTextNode(emptyStateText(vm)))
     if showEmpty:
       r.setAttribute(emptyContainer, "class", "filesystem-empty-overlay")
     else:
@@ -282,6 +556,16 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
       r.setAttribute(loadingContainer, "class",
                      "filesystem-loading-overlay hidden")
 
+    # -- Load-failed overlay --
+    r.clearChildren(errorContainer)
+    if isFailed:
+      r.setAttribute(errorContainer, "class", "filesystem-error-overlay")
+      r.appendChild(errorContainer,
+                    r.createTextNode(FilesystemLoadFailedText & vm.loadError.val))
+    else:
+      r.setAttribute(errorContainer, "class",
+                     "filesystem-error-overlay hidden")
+
     let busyVal = if isLoading: "true" else: "false"
     r.setAttribute(filesystemContainer, "aria-busy", busyVal)
 
@@ -293,228 +577,17 @@ proc renderFilesystemPanel*(r: MockRenderer; vm: FilesystemVM): MockNode =
     else:
       r.setAttribute(diffContainer, "class", "diff-files-list")
       for diff in diffs:
-        # Copy the row data into local non-lent vars so the inner closure can
-        # capture them safely. Without the copy the iterator's
-        # ``lent FilesystemDiffEntry`` cannot be captured.
+        # Copy the row data into local non-lent vars: the DSL's attribute
+        # closures cannot capture the iterator's ``lent FilesystemDiffEntry``.
+        # The click goes through `diffOpenHandler`, NOT a closure over
+        # `pathLocal` (one variable for the whole loop) -- see that proc.
         let rowClsLocal = diffEntryClass(diff)
         let rowLabelLocal = diffEntryLabel(diff)
         let pathLocal = diff.path
         let row = ui(r):
           tdiv(class = rowClsLocal,
-               onclick = proc() = vm.openFile(pathLocal)):
+               onclick = diffOpenHandler(vm, pathLocal)):
             text rowLabelLocal
         r.appendChild(diffContainer, row)
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
-  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
-  proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
-  proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
-
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with optional class + id
-    ## attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = "";
-                            elemId: string = ""): isonim_dom.Element =
-    ## Helper: create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass, elemId)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  # PLAT-50: NO RIGHT-CLICK MENU. This view showed Create / Rename / Delete
-  # / Edit, and every handler was empty — four entries that did nothing. In
-  # a replay the tree is the recording's sources, which the user does not
-  # edit, so the menu is gone rather than left offering nothing (the native
-  # front-ends open none either, `headless_app/pane_clicks` row K19).
-
-  proc renderWebEntry(vm: FilesystemVM; entry: FilesystemEntryNode;
-                      level: int; isLast: bool): isonim_dom.Element =
-    ## Build one legacy jstree node in the real DOM.  The WebRenderer mirrors
-    ## the Karax/jstree output because the visual reference is the browser's
-    ## final plugin DOM, including wholerow, ocl, anchor and themeicon nodes.
-    let expandedFlag = vm.isExpanded(entry.path)
-    let nodeId = jstreeNodeId(entry)
-    let row = createWebElement("li", jstreeNodeClass(entry, expandedFlag, isLast),
-                               nodeId)
-    let entryPath = entry.path
-    let isFolder = entry.isFolder
-    isonim_dom.setAttribute(row, cstring"role", cstring"treeitem")
-    isonim_dom.setAttribute(row, cstring"aria-selected", cstring"false")
-    isonim_dom.setAttribute(row, cstring"aria-level", cstring($level))
-    if nodeId.len > 0:
-      isonim_dom.setAttribute(row, cstring"aria-labelledby",
-                              cstring(nodeId & "_anchor"))
-    if isFolder:
-      isonim_dom.setAttribute(row, cstring"aria-expanded",
-                              cstring(if expandedFlag: "true" else: "false"))
-
-    let wholerow = createWebTextElement("div", "\xC2\xA0", "jstree-wholerow")
-    isonim_dom.setAttribute(wholerow, cstring"unselectable", cstring"on")
-    isonim_dom.setAttribute(wholerow, cstring"role", cstring"presentation")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(wholerow))
-
-    let twisty = createWebElement("i", "jstree-icon jstree-ocl")
-    isonim_dom.setAttribute(twisty, cstring"role", cstring"presentation")
-    isonim_dom.addEventListener(isonim_dom.Node(twisty), cstring"click",
-                                proc(ev: isonim_dom.Event) =
-      if isFolder:
-        vm.toggleExpanded(entryPath))
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(twisty))
-
-    let anchor = createWebElement("a", "jstree-anchor",
-                                  (if nodeId.len > 0: nodeId & "_anchor" else: ""))
-    isonim_dom.setAttribute(anchor, cstring"href", cstring"#")
-    isonim_dom.setAttribute(anchor, cstring"tabindex", cstring"-1")
-    isonim_dom.addEventListener(isonim_dom.Node(anchor), cstring"click",
-                                proc(ev: isonim_dom.Event) =
-      ev.preventDefault()
-      ev.stopPropagation()
-      if isFolder:
-        vm.toggleExpanded(entryPath)
-      else:
-        vm.openFile(entryPath))
-    let icon = createWebElement("i", jstreeIconClass(entry))
-    isonim_dom.setAttribute(icon, cstring"role", cstring"presentation")
-    isonim_dom.appendChild(isonim_dom.Node(anchor), isonim_dom.Node(icon))
-    let labelText = isonim_dom.createTextNode(isonim_dom.document,
-                                              cstring(entry.text))
-    isonim_dom.appendChild(isonim_dom.Node(anchor), labelText)
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(anchor))
-
-    if isFolder and expandedFlag:
-      let children = createWebElement("ul", "jstree-children")
-      isonim_dom.setAttribute(children, cstring"role", cstring"group")
-      for i in 0 ..< entry.children.len:
-        let childNode = renderWebEntry(vm, entry.children[i], level + 1,
-                                       i == entry.children.high)
-        isonim_dom.appendChild(isonim_dom.Node(children),
-                               isonim_dom.Node(childNode))
-      isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(children))
-    row
-
-  proc renderFilesystemPanel*(r: WebRenderer;
-                              vm: FilesystemVM): isonim_dom.Element =
-    ## Render the Filesystem panel for the real DOM.  Same dispatch
-    ## shape as the Mock variant — outer wrapper plus a render-effect
-    ## that rebuilds the tree / diff lists and toggles
-    ## the empty-state placeholder.
-    var treeContainer: isonim_dom.Element
-    var emptyContainer: isonim_dom.Element
-    var loadingContainer: isonim_dom.Element
-    var filesystemContainer: isonim_dom.Element
-    var diffContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(id = "filesystemComponent", class = FilesystemContainerClass):
-        tdiv(ref = filesystemContainer,
-             class = "filesystem jstree jstree-1 jstree-default",
-             role = "tree", `aria-multiselectable` = "true",
-             tabindex = "0", `aria-activedescendant` = "j1_1",
-             `aria-busy` = "false"):
-          ul(ref = treeContainer,
-             class = "jstree-container-ul jstree-children jstree-contextmenu " &
-                     "jstree-wholerow-ul jstree-no-dots " &
-                     FilesystemTreeContainerClass,
-             role = "group"):
-             discard
-          tdiv(ref = emptyContainer, class = "filesystem-empty-overlay"):
-            text FilesystemEmptyStateText
-          tdiv(ref = loadingContainer, class = "filesystem-loading-overlay"):
-            text "Loading..."
-        tdiv(ref = diffContainer, class = "diff-files-list"):
-          discard
-
-    createRenderEffect proc() =
-      # -- Tree --
-      let isLoading = vm.loadingState.val == lsLoading
-      let root = vm.rootEntry.val
-      let showEmpty = not isLoading and root.text.len == 0 and root.children.len == 0 and
-        vm.diffEntries.val.len == 0
-      clearWebChildren(treeContainer)
-      if root.text.len > 0 and root.text != "/":
-        let node = renderWebEntry(vm, root, 1, true)
-        isonim_dom.appendChild(isonim_dom.Node(treeContainer),
-                               isonim_dom.Node(node))
-      elif root.children.len > 0:
-        for i in 0 ..< root.children.len:
-          let childNode = renderWebEntry(vm, root.children[i], 1,
-                                         i == root.children.high)
-          isonim_dom.appendChild(isonim_dom.Node(treeContainer),
-                                 isonim_dom.Node(childNode))
-      elif root.text.len > 0:
-        let node = renderWebEntry(vm, root, 1, true)
-        isonim_dom.appendChild(isonim_dom.Node(treeContainer),
-                               isonim_dom.Node(node))
-
-      # -- Empty-state overlay --
-      if showEmpty:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"filesystem-empty-overlay")
-      else:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"filesystem-empty-overlay hidden")
-
-      # -- Loading-state overlay --
-      if isLoading:
-        isonim_dom.setAttribute(loadingContainer, cstring"class",
-                                cstring"filesystem-loading-overlay")
-      else:
-        isonim_dom.setAttribute(loadingContainer, cstring"class",
-                                cstring"filesystem-loading-overlay hidden")
-
-      let busyVal = if isLoading: cstring"true" else: cstring"false"
-      isonim_dom.setAttribute(filesystemContainer, cstring"aria-busy", busyVal)
-
-      # -- Diff list --
-      let diffs = vm.diffEntries.val
-      clearWebChildren(diffContainer)
-      if diffs.len == 0:
-        isonim_dom.setAttribute(diffContainer, cstring"class",
-                                cstring"diff-files-list hidden")
-      else:
-        isonim_dom.setAttribute(diffContainer, cstring"class",
-                                cstring"diff-files-list")
-        for diff in diffs:
-          let row = createWebTextElement("div", diffEntryLabel(diff),
-                                         diffEntryClass(diff))
-          let path = diff.path
-          isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                      proc(ev: isonim_dom.Event) =
-            ev.preventDefault()
-            ev.stopPropagation()
-            vm.openFile(path))
-          isonim_dom.appendChild(isonim_dom.Node(diffContainer),
-                                 isonim_dom.Node(row))
-
-    panel
-
-  proc mountIsoNimFilesystemPanel*(container: isonim_dom.Element;
-                                   vm: FilesystemVM) =
-    ## Mount the IsoNim Filesystem panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderFilesystemPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container),
-                           isonim_dom.Node(panel))

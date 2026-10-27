@@ -87,19 +87,27 @@ proc createIsoNimApp*(session: SessionViewModel): IsoNimApp =
   let shell = renderIsoNimAppShell(r)
   isonim_dom.appendChild(isonim_dom.Node(root), isonim_dom.Node(shell.root))
 
-  # Debug controls are mounted separately into `#isonim-debug-controls`
-  # (defined in index.html) by `tryMountIsoNimDebugControls` in debug.nim.
+  # Debug controls are rendered separately into `#isonim-debug-controls`
+  # by the menu shell (`ui/debug_toolbar.ensureDebugToolbar`).
   # Do NOT mount them here — that would create duplicate elements with the
   # same IDs (e.g. `#next-debug`), breaking Playwright locators.
 
   mountIsoNimStatePanel(shell.sections[0].content, session.stateVM)
-  mountIsoNimCalltrace(shell.sections[1].content, session.calltraceVM)
-  mountIsoNimEventLog(shell.sections[2].content, session.eventLogVM)
+  isonim_dom.appendChild(isonim_dom.Node(shell.sections[1].content),
+    isonim_dom.Node(renderCalltracePanel[WebRenderer, isonim_dom.Element](
+      r, session.calltraceVM)))
+  isonim_dom.appendChild(isonim_dom.Node(shell.sections[2].content),
+    isonim_dom.Node(renderEventLogPanel[WebRenderer, isonim_dom.Element](
+      r, session.eventLogVM)))
   mountIsoNimFlow(shell.sections[3].content, session.flowVM)
   # (PLAT-51: the Timeline panel is removed from every product.)
-  mountIsoNimSearch(shell.sections[4].content, session.searchVM)
-  mountIsoNimPointList(shell.sections[5].content, session.pointListVM)
-  mountIsoNimScratchpadPanel(shell.sections[6].content, session.scratchpadVM)
+  discard isonim_dom.appendChild(isonim_dom.Node(shell.sections[4].content), isonim_dom.Node(
+    renderSearchPanel[WebRenderer, isonim_dom.Element](WebRenderer(), session.searchVM)))
+  isonim_dom.appendChild(isonim_dom.Node(shell.sections[5].content),
+    isonim_dom.Node(renderPointListPanel[WebRenderer, isonim_dom.Element](
+      r, session.pointListVM)))
+  discard isonim_dom.appendChild(isonim_dom.Node(shell.sections[6].content), isonim_dom.Node(
+    renderScratchpadPanel[WebRenderer, isonim_dom.Element](WebRenderer(), session.scratchpadVM)))
   mountIsoNimShell(shell.sections[7].content, session.shellVM)
 
   # Note: Editor is not mounted here because it requires additional

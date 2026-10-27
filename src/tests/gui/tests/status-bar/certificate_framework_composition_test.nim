@@ -261,7 +261,7 @@ proc rendered(model: CertificateIndicatorModel; disclosed: bool): string =
   vm.model = model
   vm.disclosed = disclosed
   let r = MockRenderer()
-  serialize(renderStatusShell(r, baseShell(statusCertificateModel(vm))))
+  serialize(renderStatusShell[MockRenderer, MockNode](r, baseShell(statusCertificateModel(vm))))
 
 # ---------------------------------------------------------------------------
 

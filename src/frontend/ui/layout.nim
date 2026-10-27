@@ -1,14 +1,12 @@
 import
-  asyncjs, strformat, strutils, sequtils, jsffi, algorithm,
-  state, editor, debug, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
+  asyncjs, strformat, strutils, sequtils, jsffi, algorithm, options,
+  state, editor, debug_toolbar, menu, status, command, search_results, shell, session_tabs, build, errors, step_list,
   welcome_screen,
-  # The five panes whose mount was moved into this file's component factory.
-  # `state` was already imported; `calltrace`, `trace`, `event_log` and
-  # `terminal_output` are new here and are imported for exactly one symbol
-  # each — their `tryMountIsoNim…` proc. See the factory arms below.
-  calltrace, trace, event_log, terminal_output,
-  calltrace_editor, repl, low_level_code, request_panel, trace_log, scratchpad, filesystem,
-  test_results, constraints, point_list,
+  # Panes the component factory below creates; their views are mounted by
+  # the panel host (`ui/panel_host`).
+  trace, event_log, terminal_output,
+  calltrace_editor, repl, request_panel, trace_log, scratchpad, filesystem,
+  test_results, constraints,
   frame_viewer, pixel_history, shader_debug, video_player,
   vcs, unified_diff, verification,
   agent_activity, agent_workspace,
@@ -35,8 +33,14 @@ when not defined(ctWeb):
   import panel_transfer
 
 import kdom except Location
+# The panel host (Shared-DOM-Front-Ends D4): the factory below mounts the
+# converted panes into the container it creates, and disposes them with it.
+import ./panel_host
+from ./session_viewmodels import tabScopedKey
+from ./pane_host_lookup import findPaneHost
+from isonim/web/dom_api import nil
 from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
-from ../headless_app/desktop_panes import PaneContent
+from ../headless_app/desktop_panes import PaneContent, paneOfContent
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
@@ -45,44 +49,9 @@ template dispatchLayoutUpdated() =
     window.dispatchEvent(new CustomEvent('ct:layoutUpdated'));
   """.}
 
-type
-  ContextHandler* = proc(tab: js, args: seq[string])
-
-# context handlers for each shortcut
-var contextHandlers*: JsAssoc[cstring, JsAssoc[cstring, ContextHandler]] = JsAssoc[cstring, JsAssoc[cstring, ContextHandler]]{} # app-global
-
 const RESULT_LIMIT = 20
 
 var activeDraggedItem: GoldenContentItem
-
-# FIND
-
-proc historyFind*(tab: js, args: seq[string]) =
-  log "history find"
-
-proc focus: js = # nil?
-  if data.ui.focusHistory.len > 0:
-    return data.ui.focusHistory[^1]
-  else:
-    return nil
-
-proc changeFocus*(panel: js) =
-  if data.ui.focusHistory.len == 0 or panel != data.ui.focusHistory[^1]:
-    data.ui.focusHistory.add(panel)
-
-proc contextBind*(shortcut: string, arg: js, handler: ContextHandler) =
-  var c = contextHandlers[shortcut]
-  if c.isNil:
-
-    c = JsAssoc[cstring, ContextHandler]{}
-    contextHandlers[shortcut] = c
-
-    Mousetrap.`bind`(cstring(shortcut)) do ():
-      var focused = focus()
-      if focused.isNil: return
-
-proc configureFind =
-  discard
 
 var document {.importc.}: js
 
@@ -145,6 +114,12 @@ proc convertTabTitle(content: cstring): cstring =
   # caption can differ from it. `Filesystem` -> `FILES` above is the same move.
   if content == cstring"TestResults":
     return cstring"TESTS"
+  # VARIABLES, NOT "STATE" (Variable-State-Pane.md § Decisions, 2026-10-24:
+  # the pane lists the variables and the watched expressions together, "the
+  # Variables (formerly State panel)"). An override for the same reason as
+  # `FILES` and `TESTS`: `Content.State` is the persisted wire identity.
+  if content == cstring"State":
+    return cstring"VARIABLES"
 
   var title: cstring = ""
   var label = content
@@ -177,9 +152,9 @@ proc eventuallyUpdateTabHistory(editorService: EditorService, tab: EditorViewTab
   editorService.hasSaveHistoryTimeout = true
 
 type
-  ContextMenuOption = object
-    label: cstring
-    action: proc(container: GoldenContainer, state: GoldenItemState)
+  ContextMenuOption* = object
+    label*: cstring
+    action*: proc(container: GoldenContainer, state: GoldenItemState)
 
 # ---------------------------------------------------------------------------
 # M21: "Send to Window" context menu on GL tabs
@@ -233,7 +208,7 @@ let editorSpecificContextMenuOptions: seq[ContextMenuOption] = @[
     action: proc(container: GoldenContainer, state: GoldenItemState) = clipboardCopy(state.label))
 ]
 
-proc createContextMenuFromOptions(
+proc createContextMenuFromOptions*(
   container: GoldenContainer,
   state: GoldenItemState,
   contextMenuOptions: seq[ContextMenuOption]
@@ -243,9 +218,11 @@ proc createContextMenuFromOptions(
     options: JsAssoc[int, cstring] = JsAssoc[int, cstring]{}
     actions: JsAssoc[int, proc()] = JsAssoc[int, proc()]{}
 
-  for i, option in contextMenuOptions:
-    options[i] = option.label
-    actions[i] = proc() {.closure.} = option.action(container, state)
+  for i in 0 ..< contextMenuOptions.len:
+    closureScope:
+      let capturedOption = contextMenuOptions[i]
+      options[i] = capturedOption.label
+      actions[i] = proc() {.closure.} = capturedOption.action(container, state)
 
   return ContextMenu(
     options: options,
@@ -1260,6 +1237,217 @@ proc unpinAllPanels*(data: Data) =
       cwarn "layout: reset could not unpin '" & $panel.title & "': " &
         getCurrentExceptionMsg()
 
+type
+  PinnedNode = ref object
+    ## One container of a side panel `toggleSidePanels` pinned — a row, a
+    ## column or a stack — so the same key rebuilds the side as it was
+    ## rather than one stack per panel (`unpinPanel`'s own placement).
+    kind: cstring
+      ## GoldenLayout's item type: "row", "column" or "stack".
+    size: cstring
+      ## Its GoldenLayout size ("20%"), so the rebuilt container is as large.
+    parent: PinnedNode
+    children: seq[PinnedNode]
+      ## A row's or column's containers, in order.
+    panels: seq[AutoHidePanel]
+      ## A stack's panels, in tab order.
+    active: int
+      ## A stack's active tab.
+    live: GoldenContentItem
+      ## The container rebuilt for it, once its first panel is back.
+
+  PinnedSide = object
+    index: int
+      ## The side's position in the editor's row.
+    root: PinnedNode
+
+var sidePanelsPinned: seq[PinnedSide] = @[]
+  ## What `toggleSidePanels` pinned, to bring back on the next toggle.
+
+var placeRestored: proc(config: JsObject)
+  ## Where the panel being restored goes; read by `placeRestoredPanel`, the
+  ## `unpinPanelTarget` hook (a `nimcall`, so it cannot capture).
+
+proc placeRestoredPanel(layout: GoldenLayout; panel: AutoHidePanel) {.nimcall.} =
+  placeRestored(panel.config)
+
+proc editorRow(layout: GoldenLayout): tuple[row, editorColumn: GoldenContentItem] =
+  ## The ROW the editor's column sits in — the nearest horizontal container
+  ## above the editor pane (found by its scope element, `markPaneScope`): its
+  ## other children are the side panels. Nil when the editor has none.
+  let editorPane = kdom.document.querySelector(
+    cstring"[data-scope-kind='pane'][data-scope-id='editor']")
+  if editorPane.isNil:
+    return
+  proc holdsEditor(item: GoldenContentItem): bool =
+    let el = item.toJs.element
+    not el.isNil and not el.isUndefined and
+      el.contains(editorPane.toJs).to(bool)
+  var chain: seq[GoldenContentItem] = @[]
+  var item = layout.groundItem
+  while not item.isNil and holdsEditor(item):
+    chain.add item
+    var next: GoldenContentItem = nil
+    for c in item.contentItems:
+      if holdsEditor(c): next = c
+    item = next
+  for i in countdown(chain.len - 2, 0):
+    if chain[i].toJs.isRow.to(bool):
+      return (chain[i], chain[i + 1])
+
+proc sizeOf(item: GoldenContentItem): cstring =
+  let size = item.toJs.size
+  let unit = item.toJs.sizeUnit
+  if size.isUndefined or unit.isUndefined:
+    return cstring""
+  cstring($size.to(float) & $unit.to(cstring))
+
+proc childrenOf(item: GoldenContentItem): seq[GoldenContentItem] =
+  ## A COPY of `item`'s children: pinning removes them from GoldenLayout's
+  ## own array (and an emptied container with it) while the walk is on it.
+  for i in 0 ..< item.contentItems.len:
+    result.add item.contentItems[i]
+
+proc pinTree(layout: GoldenLayout; item: GoldenContentItem; edge: AutoHideEdge;
+             parent: PinnedNode): PinnedNode =
+  ## Pin every panel under `item`, recording its containers. Nil when
+  ## nothing under it could be pinned.
+  result = PinnedNode(size: sizeOf(item), parent: parent)
+  if item.isComponent or item.isStack:
+    result.kind = cstring"stack"
+    let comps = if item.isComponent: @[item] else: childrenOf(item)
+    let current = if item.isStack: item.getActiveContentItem() else: nil
+    for c in comps:
+      let before = if autoHideState.isNil: 0 else: autoHideState.panels.len
+      let wasActive = c == current
+      pinPanel(layout, c, edge)
+      if not autoHideState.isNil and autoHideState.panels.len > before:
+        if wasActive: result.active = result.panels.len
+        result.panels.add autoHideState.panels[^1]
+    if result.panels.len == 0:
+      return nil
+  else:
+    result.kind = if item.toJs.isRow.to(bool): cstring"row" else: cstring"column"
+    for c in childrenOf(item):
+      let child = pinTree(layout, c, edge, result)
+      if not child.isNil:
+        result.children.add child
+    if result.children.len == 0:
+      return nil
+
+proc restorePanel(row: GoldenContentItem; at: int; stack: PinnedNode;
+                  panel: AutoHidePanel; layout: GoldenLayout) =
+  ## Put `panel` back into `stack`, rebuilding the containers above it that
+  ## are not back yet: the outermost missing one is added to its rebuilt
+  ## parent (or to `row` at `at`), holding the chain down to the panel.
+  var missing: seq[PinnedNode] = @[]
+  var node = stack
+  while not node.isNil and node.live.isNil:
+    missing.add node
+    node = node.parent
+  let host = if node.isNil: row else: node.live
+  let index = if node.isNil: min(at, row.contentItems.len)
+              else: host.contentItems.len
+  placeRestored = proc(config: JsObject) =
+    if missing.len == 0:
+      discard host.addItem(config.to(js), host.contentItems.len)
+      return
+    var cfg = config
+    for i in 0 ..< missing.len:
+      let wrapped = js{"type": missing[i].kind, "content": toJs(@[cfg])}
+      if missing[i].size.len > 0: wrapped.size = missing[i].size
+      cfg = wrapped
+    discard host.addItem(cfg.to(js), index)
+  unpinPanel(layout, panel)
+  if missing.len > 0 and index < host.contentItems.len:
+    var live = host.contentItems[index]
+    for i in countdown(missing.len - 1, 0):
+      missing[i].live = live
+      if i > 0:
+        if live.contentItems.len == 0: break
+        live = live.contentItems[0]
+
+proc restoreTree(row: GoldenContentItem; at: int; node: PinnedNode;
+                 layout: GoldenLayout) =
+  if node.kind == cstring"stack":
+    for panel in node.panels:
+      if autoHideState.isNil or panel notin autoHideState.panels:
+        continue   # unpinned (or closed) by hand in the meantime
+      restorePanel(row, at, node, panel, layout)
+    let live = node.live
+    if not live.isNil and live.isStack and node.active < live.contentItems.len:
+      live.setActiveContentItem(live.contentItems[node.active])
+  else:
+    for child in node.children:
+      restoreTree(row, at, child, layout)
+
+proc unpinTree(layout: GoldenLayout; node: PinnedNode) =
+  ## The fallback when the editor's row is gone: each panel goes back
+  ## wherever `unpinPanel` puts it rather than stay pinned.
+  for panel in node.panels:
+    if not autoHideState.isNil and panel in autoHideState.panels:
+      unpinPanel(layout, panel)
+  for child in node.children:
+    unpinTree(layout, child)
+
+proc toggleSidePanels*(data: Data) =
+  ## PLAT-68: `layout.toggle-side-panels` — CUA's `Ctrl+B`, VS Code's Toggle
+  ## Side Bar. The sides of the editor's row are pinned to their screen edge
+  ## (`auto_hide.pinPanel`: out of the way, a hover away, every panel's state
+  ## kept), and the same key puts exactly those panels back, where and as they
+  ## were.
+  if data.isNil or data.ui.isNil or data.ui.layout.isNil:
+    return
+  let layout = data.ui.layout
+  let (row, editorColumn) = editorRow(layout)
+  if sidePanelsPinned.len > 0:
+    let pinned = sidePanelsPinned
+    sidePanelsPinned = @[]
+    let previous = unpinPanelTarget
+    try:
+      for side in pinned:
+        if row.isNil:
+          unpinPanelTarget = previous
+          unpinTree(layout, side.root)
+        else:
+          unpinPanelTarget = placeRestoredPanel
+          restoreTree(row, side.index, side.root, layout)
+    finally:
+      unpinPanelTarget = previous
+      placeRestored = nil
+    return
+  if row.isNil:
+    return
+  # Sides are pinned from the last to the first, so each recorded index is
+  # its place in the row once the sides before it are back.
+  let sides = childrenOf(row)
+  var editorAt = -1
+  for i, item in sides:
+    if item == editorColumn: editorAt = i
+  for i in countdown(sides.len - 1, 0):
+    if i == editorAt: continue
+    let root = pinTree(layout, sides[i], (if i < editorAt: Left else: Right), nil)
+    if not root.isNil:
+      sidePanelsPinned.insert(PinnedSide(index: i, root: root), 0)
+
+proc markPaneScope(element: Element; state: GoldenItemState) =
+  ## PLAT-68: a GoldenLayout pane is a PANE element of the scope path
+  ## (`ui/key_router.desktopScopePath` reads the DOM focus chain): its kind,
+  ## in the shared vocabulary's name, and focusable — so a click into its
+  ## body focuses it (the browser focuses the nearest focusable ancestor of
+  ## what was pressed), and its keys are the pane's.
+  let kind =
+    if state.isEditor: "editor"
+    else:
+      let p = paneOfContent(ord(state.content))
+      if p.isSome: $p.get else: ""
+  if kind.len == 0:
+    return
+  element.setAttribute(cstring"data-scope-kind", cstring"pane")
+  element.setAttribute(cstring"data-scope-id", cstring(kind))
+  if element.getAttribute(cstring"tabindex").isNil:
+    element.setAttribute(cstring"tabindex", cstring"-1")
+
 proc closeLayoutTab*(data: Data, content: Content, id: int) =
   ## A TAB WITH NO COMPONENT BEHIND IT IS CLOSED, NOT AN ERROR.
   ##
@@ -1306,7 +1494,8 @@ proc closeLayoutTab*(data: Data, content: Content, id: int) =
   # cached blobs — DR-R5: "Expansion state resets when the tab is closed and
   # does not leak between files."
   if content == Content.UnifiedDiff:
-    unified_diff.forgetUnifiedDiffTab(id)
+    unified_diff.forgetDocumentSections(id)
+    unified_diff.forgetUnifiedDiffTab(tabScopedKey(data.activeSession, id))
 
   # remove component from registry
   discard jsDelete(data.ui.componentMapping[content][id])
@@ -1566,13 +1755,14 @@ proc bindLayoutItemForTab(state: GoldenItemState; container: GoldenContainer) =
     return
   component.layoutItem = cast[GoldenContentItem](container.tab.contentItem)
 
-proc mountPaneForState(state: GoldenItemState) =
-    ## Mount the pane `state` names into the `.component-container` div that
-    ## carries `state.label` as its id, creating the pane's `Component` first
-    ## if nothing has.
+proc mountPaneForState(state: GoldenItemState; host: Element = nil) =
+    ## Mount the pane `state` names into `host` — the `.component-container`
+    ## div the caller built — or, without one, into the container carrying
+    ## `state.label` as its id in the active tab; creating the pane's
+    ## `Component` first if nothing has.
     ##
-    ## EXTRACTED FROM `genericUiComponent`'s registration below, which is
-    ## still its first caller — the deferred body there is now one call.  It
+    ## EXTRACTED FROM `genericUiComponent`'s registration below, which is its
+    ## first caller and passes the container it has just built.  It
     ## has a second caller since issue #691: an auto-hide panel restored from
     ## `auto_hide_state.json` never passes through GoldenLayout at all, so the
     ## factory never ran for it and its pane came back blank.  That path
@@ -1589,12 +1779,11 @@ proc mountPaneForState(state: GoldenItemState) =
     ## `pinPanel` builds that object out of a live item's state and
     ## persistence round-trips it as JSON.
     ##
-    ## THE CONTAINER MUST ALREADY BE IN THE DOCUMENT when this runs; every arm
-    ## below finds its mount point with `getElementById`.  The registration
-    ## guarantees that by building the container first and deferring this by
-    ## 200 ms; the auto-hide path guarantees it by revealing the panel — which
+    ## The registration mounts synchronously into the container it built
+    ## (Shared-DOM-Front-Ends D4); the auto-hide path reveals the panel — which
     ## reparents the rebuilt host into the docked sidebar or the overlay —
-    ## before `onPanelShown` calls this.
+    ## before `onPanelShown` calls this, so the container is found per tab
+    ## (`pane_host_lookup.findPaneHost`).
     # Components that still enter the generic GoldenLayout route mount
     # directly into the GoldenLayout container. Editor tabs are built by the
     # separate `editorComponent` registration and never reach here.
@@ -1640,6 +1829,9 @@ proc mountPaneForState(state: GoldenItemState) =
 
     var containerId: cstring
     containerId = state.label
+    let paneHost =
+      if not host.isNil: host
+      else: cast[Element](findPaneHost(containerId, data.activeSessionIndex))
 
     if not data.ui.componentMapping[state.content].hasKey(state.id):
       discard data.makeComponent(state.content, state.id)
@@ -1650,262 +1842,38 @@ proc mountPaneForState(state: GoldenItemState) =
         cwarn "layout: genericUiComponent has no direct mount for " &
           $state.content & " id " & $state.id
 
-      # THE FIVE PANES THAT HAD NO ARM HERE.
-      #
-      # This proc is the only site that KNOWS the container exists: the
-      # `genericUiComponent` registration below calls
-      # `element.mountComponentContainer(editorLabel)`, which builds
-      # `#<x>Component-<id>`, and defers this dispatch by 200 ms. Every
-      # other pane in `isDirectMountComponent` has been mounted from here
-      # all along. These five mounted from their `register` method or from
-      # their `initXVMWithStore`, and then POLLED for a container that
-      # neither of those moments can guarantee.
-      #
-      # Measured on 25 real Electron desktop session logs (2026-09), on the
-      # modern shared-store path: `#stateComponent-0`,
-      # `#calltraceComponent-0` and `#timelineComponent-0` were absent at
-      # retry #1 in ALL 25 runs. The two that ran long enough to reach a
-      # verdict gave up at retry #200, 10.9 s and 30.4 s of runway in:
-      #
-      #   ERROR | state.nim     | tryMountIsoNimStatePanel: not ready after 200 retries, giving up
-      #   ERROR | calltrace.nim | tryMountIsoNimCalltrace: not ready after 200 retries, giving up
-      #   DEBUG | trace.nim     | IsoNim timeline panel: not ready after 200 retries, giving up
-      #
-      # A 2026-09 TRANSCRIPT, PRE-DATING THE ARMS BELOW. Do not grep the
-      # source for those three strings: the arms below made their claim
-      # false — a give-up ends one poll, because each mount re-enters with a
-      # fresh retry counter — and all three now `cwarn` that they abandoned
-      # THIS poll rather than the pane. The transcript stays because it is
-      # the measurement that put these arms here.
-      #
-      # The other 23 ended mid-poll between retry #20 and #110 with the
-      # container still absent. There is no retry margin to widen: the poll
-      # starts before the thing it polls for can exist, so it is not a race
-      # a faster machine wins. The State, Call Trace and Timeline panes were
-      # blank on the desktop for every one of those sessions.
-      #
-      # `1cb7b9d6` added the `register`-time call in `ui/state.nim` and it
-      # genuinely fixed Noir Studio — but `CalltraceComponent.register` has
-      # ALWAYS made the equivalent call, and calltrace still gave up on the
-      # desktop in both runs above. On the desktop `register` runs at
+      # Polling for the container from a pane's `register` or
+      # `initXVMFromSession` loses: on the desktop `register` runs at
       # component-construction time (`types.createUIComponents` in `onInit`),
-      # which is EARLIER than the container, not later. A second poll window
-      # opened before the container exists is still a poll that loses.
+      # before GoldenLayout builds the container. Measured on 25 Electron
+      # session logs (2026-09): the State, Call Trace and Timeline containers
+      # were absent at the first retry in all 25, and those panes stayed
+      # blank. So every direct-mount pane is mounted from here, where the
+      # container is known to exist.
       #
-      # Called unqualified: the module `state` is shadowed inside this
-      # closure by its own `state: GoldenItemState` parameter, so
-      # `state.tryMountIsoNimStatePanel()` would resolve against the wrong
-      # `state`.
-      if state.content == Content.State:
-        tryMountIsoNimStatePanel()
+      # The panel host's panes: reached here only for a container rebuilt
+      # outside GoldenLayout (an auto-hide panel restored from its saved
+      # state), which the factory never saw.
+      # A pane whose container is not in the active tab has nothing to mount
+      # into here; GoldenLayout's factory mounts it when it builds one.
+      if paneHost.isNil:
+        cwarn "layout: no container " & $containerId & " for " &
+          $state.content & " in the active tab"
+      else:
+        if state.content in PanelHostKinds:
+          ensurePanelMounted(cast[dom_api.Element](paneHost), state.content)
 
-      if state.content == Content.Calltrace:
-        tryMountIsoNimCalltrace()
+        if state.content == Content.Shell:
+          let shellComponent = ShellComponent(component)
+          if shellComponent.shell.isNil:
+            discard shellComponent.createShell(paneHost)
 
-      # EventLog and TerminalOutput are the same shape as Calltrace: both
-      # mount from `register` and nowhere else, and both are in
-      # `isDirectMountComponent`. They are joined here so the invariant
-      # `test_every_mountable_pane_has_a_factory_arm.nim` asserts — every
-      # direct-mount `Content` has an arm — holds without an allowlist of
-      # unexamined exemptions. Their mounts are idempotent and additionally
-      # guarded on their own component ref, so this arm can only help.
-      if state.content == Content.EventLog:
-        tryMountIsoNimEventLogPanel()
-
-      if state.content == Content.TerminalOutput:
-        tryMountIsoNimTerminalOutputPanel()
-
-      if state.content == Content.Shell:
-        let shellComponent = ShellComponent(component)
-        if shellComponent.shell.isNil:
-          discard shellComponent.createShell()
-
-      # Build is now an IsoNim view — its DOM is mounted by
-      # `build.tryMountIsoNimBuildPanel` against the `buildComponent-{id}`
-      # container, and reactive effects keep it in sync. No direct-DOM
-      # redraw hook is needed here.
-      if state.content == Content.Build:
-        # The IsoNim view mounts itself once `buildComponentRef` and
-        # the VM are both available (the registration order between
-        # `register()` and `configureMiddleware` is non-deterministic
-        # under different layouts).  Calling tryMount here is safe and
-        # idempotent — it short-circuits when already mounted.  Also
-        # sync any data the legacy ``build`` record already carries
-        # (e.g. when the GL container appears after a recorded build
-        # already finished).
-        build.syncLegacyBuildIntoVM(BuildComponent(component))
-        build.tryMountIsoNimBuildPanel()
-
-      # BuildErrors is now an IsoNim view -- its DOM is mounted by
-      # ``errors.tryMountIsoNimErrorsPanel`` against the
-      # ``errorsComponent-{id}`` container, and reactive effects keep
-      # it in sync. No direct-DOM redraw hook is
-      # needed here.
-      if state.content == Content.BuildErrors:
-        errors.syncLegacyErrorsIntoVM(ErrorsComponent(component))
-        errors.tryMountIsoNimErrorsPanel()
-
-      # SearchResults is now an IsoNim view -- its DOM is mounted by
-      # ``search_results.tryMountIsoNimSearchResultsPanel`` against
-      # the ``searchResultsComponent-{id}`` container, and reactive
-      # effects keep it in sync. No direct-DOM redraw hook is needed here.
-      if state.content == Content.SearchResults:
-        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(component))
-        search_results.tryMountIsoNimSearchResultsPanel()
-
-      # StepList is now an IsoNim view -- its DOM is mounted by
-      # ``step_list.tryMountIsoNimStepListPanel`` against the
-      # ``stepListComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      if state.content == Content.StepList:
-        step_list.syncLegacyStepListIntoVM(StepListComponent(component))
-        step_list.tryMountIsoNimStepListPanel()
-
-      # CalltraceEditor is now an IsoNim view -- its DOM is mounted
-      # by ``calltrace_editor.tryMountIsoNimCalltraceEditorPanel``
-      # against the GoldenLayout-managed ``<div id="calls">``
-      # container.  The panel is single-instance and the legacy
-      # render produced an empty placeholder, so there is no
-      # legacy state to sync into the VM.
-      if state.content == Content.CalltraceEditor:
-        calltrace_editor.tryMountIsoNimCalltraceEditorPanel()
-
-      # Repl is now an IsoNim view -- its DOM is mounted by
-      # ``repl.tryMountIsoNimReplPanel`` against the
-      # ``replComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      if state.content == Content.Repl:
-        repl.syncLegacyReplIntoVM(ReplComponent(component))
-        repl.syncReplConfigIntoVM()
-        repl.tryMountIsoNimReplPanel()
-
-      # LowLevelCode is now an IsoNim view -- its outer container
-      # is mounted by ``low_level_code.tryMountIsoNimLowLevelCodePanel``
-      # against the ``lowLevelCodeComponent-{id}`` GoldenLayout host,
-      # and reactive effects keep it in sync.  The Monaco-driven
-      # asm buffer still lives inside the editor sub-tree (the
-      # EditorViewComponent owns that DOM); the IsoNim view here
-      # exposes the parity-faithful container shell + a fallback
-      # row list so headless tests can exercise the same data flow
-      # without Monaco.  Closes the no_source asm sub-tree
-      # follow-up tracked from 1.40.
-      if state.content == Content.LowLevelCode:
-        low_level_code.syncLegacyLowLevelCodeIntoVM(
-          LowLevelCodeComponent(component))
-        low_level_code.tryMountIsoNimLowLevelCodePanel()
-
-      # RequestPanel is now an IsoNim view -- its DOM is mounted by
-      # ``request_panel.tryMountIsoNimRequestPanel`` against the
-      # ``requestPanelComponent-{id}`` container, and reactive
-      # effects keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``RequestPanelComponent``
-      # remains as the event-bus carrier (its ``register`` subscribes to
-      # ``CtUpdatedHttpRequests`` — RS-M3) and its mutators feed the VM via
-      # ``syncLegacyRequestPanelIntoVM`` so the IsoNim view tracks
-      # any rows already accumulated when the panel becomes visible.
-      if state.content == Content.RequestPanel:
-        request_panel.syncLegacyRequestPanelIntoVM(
-          RequestPanelComponent(component))
-        request_panel.tryMountIsoNimRequestPanel()
-
-      # TraceLog is now an IsoNim view -- its DOM is mounted by
-      # ``trace_log.tryMountIsoNimTraceLogPanel`` against the
-      # ``traceLogComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``TraceLogComponent`` remains
-      # as the event-bus carrier (its ``register`` method still
-      # subscribes to tracepoint-result events) and
-      # ``syncLegacyTraceLogIntoVM`` mirrors any rows already
-      # accumulated when the panel becomes visible.
-      # TestResults and Constraints are IsoNim views with no legacy half,
-      # so there is nothing to sync -- the mount is the whole hook.
-      if state.content == Content.TestResults:
-        test_results.tryMountIsoNimTestResultsPanel()
-
-      if state.content == Content.Constraints:
-        constraints.tryMountIsoNimConstraintsPanel()
-
-      if state.content == Content.PointList:
-        point_list.tryMountIsoNimPointListPanel()
-
-      if state.content == Content.TraceLog:
-        trace_log.syncLegacyTraceLogIntoVM(TraceLogComponent(component))
-        trace_log.tryMountIsoNimTraceLogPanel()
-
-      # Scratchpad is now an IsoNim view -- its DOM is mounted by
-      # ``scratchpad.tryMountIsoNimScratchpadPanel`` against the
-      # ``scratchpadComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy ``ScratchpadComponent`` remains
-      # as the event-bus carrier (its ``register`` method still
-      # subscribes to ``InternalAddToScratchpad`` /
-      # ``InternalAddToScratchpadFromExpression`` /
-      # ``CtLoadLocalsResponse``) and ``syncLegacyScratchpadIntoVM``
-      # mirrors any rows already accumulated when the panel becomes
-      # visible.  Mission goal #3 §1.70.
-      if state.content == Content.Scratchpad:
-        scratchpad.syncLegacyScratchpadIntoVM(
-          ScratchpadComponent(component))
-        scratchpad.tryMountIsoNimScratchpadPanel()
-
-      # Filesystem is now an IsoNim view -- its DOM is mounted by
-      # ``filesystem.tryMountIsoNimFilesystemPanel`` against the
-      # ``filesystemComponent-{id}`` container, and reactive effects
-      # keep it in sync. No direct-DOM redraw hook is
-      # needed here.  The legacy ``FilesystemComponent`` remains as
-      # the event-bus carrier (its existing event handlers populate
-      # ``data.services.editor.filesystem``) and
-      # ``syncLegacyFilesystemIntoVM`` mirrors any tree already
-      # accumulated when the panel becomes visible.  Mission goal #3
-      # \u00a71.71.  The rich jstree affordances (animated open/close,
-      # contextmenu plugin, search plugin) remain a follow-up.
-      if state.content == Content.Filesystem:
-        filesystem.syncLegacyFilesystemIntoVM(
-          FilesystemComponent(component))
-        filesystem.tryMountIsoNimFilesystemPanel()
-
-      # CommandPalette is now an IsoNim view -- its DOM is mounted by
-      # ``command.tryMountIsoNimCommandPalettePanel`` against the
-      # ``commandPaletteComponent-{id}`` container, and reactive
-      # effects keep it in sync. No direct-DOM redraw hook is needed here.
-      # The legacy
-      # ``CommandPaletteComponent`` remains as the event-bus carrier
-      # (the keyboard / interpreter / agent passthrough) and
-      # ``syncLegacyCommandPaletteIntoVM`` mirrors any state already
-      # accumulated when the panel becomes visible.  Mission goal #3
-      # \u00a71.72.  The rich per-kind row rendering paths
-      # (program-search HTML fragment, symbol-kind suffix, file-path
-      # tail truncation, agent-mode passthrough) remain a follow-up.
-      if state.content == Content.CommandPalette:
-        command.syncLegacyCommandPaletteIntoVM(
-          CommandPaletteComponent(component))
-        command.tryMountIsoNimCommandPalettePanel()
-
-      if state.content == Content.VCS:
-        vcs.syncLegacyVCSIntoVM(VCSComponent(component))
-        vcs.tryMountIsoNimVCSPanel(component.id)
-
-      # A unified diff is an editor-area *document*, not a second VCS panel
-      # (VCS-Panel.md, "Unified Diff View (Editor Integration)"): the sync
-      # parses the target's hunks into the tab's ViewModel and the mount
-      # creates the Monaco instance over them.
-      if state.content == Content.UnifiedDiff:
-        unified_diff.syncIntoVM(UnifiedDiffComponent(component))
-        unified_diff.tryMountUnifiedDiffTab(component.id)
-
-      # VN-M5. The verification panel is an IsoNim view with no legacy
-      # renderer at all, so there is nothing to sync into a VM first: the
-      # `VerificationComponent` carries no state. Its mount puts TWO IsoNim
-      # roots in the container — the run, and the counterexample the run
-      # produced — and the second is empty until a session is opened from
-      # the first.
-      if state.content == Content.Verification:
-        verification.tryMountIsoNimVerificationPanel()
-
-      if state.content == Content.AgentActivity:
-        agent_activity.syncLegacyAgentActivityIntoVM(
-          AgentActivityComponent(component))
-        agent_activity.tryMountIsoNimAgentActivityPanel(component.id)
+        # CaptionBarProgress: rendered by its IsoNim view directly into the
+        # container. Progress and hover mutation paths refresh it explicitly.
+        if state.content == Content.CaptionBarProgress:
+          mountCaptionBarProgress(
+            cast[dom_api.Element](paneHost),
+            CaptionBarProgressComponent(component))
 
       # ``Content.AgentActivityDeepReview`` has no renderer of its own since
       # AA-1 deleted the roll-up.  The id survives as the review's layout
@@ -1914,35 +1882,9 @@ proc mountPaneForState(state: GoldenItemState) =
       # constructs its component and gets an empty pane; there is nothing to
       # mount into it until AA-2/AA-3 render the session's own content.
 
-      if state.content == Content.AgentWorkspace:
-        agent_workspace.syncLegacyAgentWorkspaceIntoVM(
-          AgentWorkspaceComponent(component))
-        agent_workspace.tryMountIsoNimAgentWorkspacePanel(component.id)
-
       # Content.FrameViewer pane dispatch was retired in M3.  The legacy
       # frame_viewer.nim now only owns the FrameViewerVM bootstrap that
       # other panes (Video Player, Pixel History, Shader Debug) share.
-
-      if state.content == Content.PixelHistory:
-        pixel_history.tryMountIsoNimPixelHistoryPanel(
-          PixelHistoryComponent(component))
-
-      if state.content == Content.ShaderDebug:
-        shader_debug.tryMountIsoNimShaderDebugPanel(
-          ShaderDebugComponent(component))
-
-      if state.content == Content.VideoPlayer:
-        video_player.syncVisualReplaySessionIntoPlayerVM()
-        video_player.tryMountIsoNimVideoPlayerPanel(
-          VideoPlayerComponent(component))
-
-      # CaptionBarProgress: render via IsoNim WebRenderer directly
-      # into the GL container. Progress and hover mutation paths refresh
-      # this direct mount explicitly.
-      if state.content == Content.CaptionBarProgress:
-        tryMountCaptionBarProgress(
-          containerId,
-          CaptionBarProgressComponent(component))
 
       discard component.afterInit()
 
@@ -1995,7 +1937,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     clog "initLayout: mounting IsoNim welcome screen"
     if not data.ui.welcomeScreen.isNil:
       data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
-    welcome_screen.tryMountIsoNimWelcomeScreen()
+    welcome_screen.mountWelcomeScreen()
     return
 
   # Determine the GL container element.
@@ -2097,6 +2039,7 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
 
     let componentLabel = cstring(fmt"editorComponent-{state.id}")
     var element = cast[Element](container.getElement())
+    markPaneScope(element, state)
 
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
@@ -2116,6 +2059,9 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       while panel.liveElement.childNodes.len > 0:
         element.appendChild(panel.liveElement.childNodes[0])
       cdebug "[EDITOR_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
+      # The editor is a layout pane again, so it leaves the strip — see
+      # `releaseReparentedPanel` for what skipping this used to do.
+      releaseReparentedPanel(panel)
       dispatchLayoutUpdated()
     else:
       cdebug "[EDITOR_REG] Regular mount (non-reparenting)"
@@ -2236,49 +2182,38 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let isReparentingObj = isReparenting
 
     if not isReparentingObj:
-      var containerId: cstring
-      containerId = cstring(fmt"editorComponent-{state.id}")
-
+      # THE EDITOR IS MOUNTED HERE, NOW, into the container just built
+      # (Shared-DOM-Front-Ends D4) — not after a timer, and not by looking the
+      # container up by id later.
+      #
+      # THE EDITOR THAT ALREADY OWNS THIS PATH, IF THERE IS ONE. `state.label`
+      # is the tab's full path, and `data.ui.editors` is keyed by exactly that.
+      # When a mode transition destroys the editor pane and a later one rebuilds
+      # it, the component holding the loaded source, the tab info and the live
+      # Monaco instance is STILL in `data.ui.editors` — only its GoldenLayout
+      # container went. Building a second, empty `EditorViewComponent` on a
+      # `componentMapping` miss left an editor pane with no editor in it after
+      # Stop (`ci/test/noir-mode-roundtrip.sh`); reusing the live one carries its
+      # Monaco instance into the new container (`reattachMonacoIfDetached`).
       let editorPathForMount = state.label
+      var component: Component
+      if data.ui.editors.hasKey(editorPathForMount):
+        component = data.ui.editors[editorPathForMount]
+      else:
+        if not data.ui.componentMapping[state.content].hasKey(state.id):
+          discard data.makeComponent(state.content, state.id)
+        component = data.ui.componentMapping[state.content][state.id]
 
-      discard windowSetTimeout((proc =
-        # THE EDITOR THAT ALREADY OWNS THIS PATH, IF THERE IS ONE.
-        #
-        # `state.label` is the tab's full path, and `data.ui.editors` is keyed
-        # by exactly that. When a mode transition destroys the editor pane and
-        # a later one rebuilds it, the component holding the loaded source, the
-        # tab info and the live Monaco instance is STILL in `data.ui.editors`
-        # — it is only its GoldenLayout container that went. Reaching for
-        # `componentMapping` first and calling `makeComponent` on a miss builds
-        # a SECOND, empty `EditorViewComponent` with no path and no tab info,
-        # whose `renderTopLevelEditorDirect` then retries 1200 times waiting for
-        # a source that will never arrive, and gives up.
-        #
-        # Measured on the assembled bundle: after Stop the edit layout came
-        # back with its `src/main.nr` tab and an 880x902 `editorComponent-0`
-        # host, and `document.querySelectorAll(".view-line").length` was 0 —
-        # an editor pane with no editor in it. The real instance was still
-        # alive and detached, reporting the replay's `readOnly: true`.
-        # `ci/test/noir-mode-roundtrip.sh` reads that as "the editors are
-        # writable again" failing on every trip.
-        var component: Component
-        if data.ui.editors.hasKey(editorPathForMount):
-          component = data.ui.editors[editorPathForMount]
-        else:
-          if not data.ui.componentMapping[state.content].hasKey(state.id):
-            discard data.makeComponent(state.content, state.id)
-          component = data.ui.componentMapping[state.content][state.id]
-
-        if not component.isNil:
-          EditorViewComponent(component).renderTopLevelEditorDirect(containerId)
-
-        ), 200)
+      if not component.isNil:
+        EditorViewComponent(component).renderTopLevelEditorDirect(
+          cast[dom_api.Element](element.firstChild))
 
   layout.registerComponent(cstring"genericUiComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:
       return
     let editorLabel = state.label
     var element = cast[Element](container.getElement())
+    markPaneScope(element, state)
 
     let panel = if not autoHideState.isNil: autoHideState.findPanelByContentAndId(state.content, state.id) else: nil
     let isReparenting = not panel.isNil and not panel.liveElement.isNil and (data.ui.isReparenting or state.isReparenting)
@@ -2299,16 +2234,31 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         element.appendChild(panel.liveElement.childNodes[0])
       cdebug "[GENERIC_REG] Reparenting completed. element childNodes.len=" & $(element.childNodes.len)
 
-      # Clean up the panel from autoHideState.panels list now that it is reparented
-      if not autoHideState.isNil:
-        autoHideState.panels = autoHideState.panels.filterIt(it != panel)
-        if not autoHideState.onChanged.isNil:
-          autoHideState.onChanged()
+      # The pane is a layout pane again, so it leaves the strip.
+      releaseReparentedPanel(panel)
 
       dispatchLayoutUpdated()
     else:
       cdebug "[GENERIC_REG] Regular mount (non-reparenting)"
       element.mountComponentContainer(editorLabel)
+      # THE PANEL HOST (Shared-DOM-Front-Ends D4): the container exists now,
+      # because it was just built, so the pane is mounted into it now.
+      if state.content in PanelHostKinds:
+        # The pane's component (its key handling, its legacy state) exists
+        # before its view does, as `mountPaneForState` ensured for it.
+        if not data.ui.componentMapping[state.content].hasKey(state.id):
+          discard data.makeComponent(state.content, state.id)
+        discard mountPanel(cast[dom_api.Element](element.firstChild),
+                           state.content)
+      else:
+        # The panes the panel host does not render (the shell's terminal, the
+        # caption bar progress), mounted now into the same container.
+        mountPaneForState(state, cast[Element](element.firstChild))
+
+    # Whatever pane is still inside this container when GoldenLayout destroys
+    # it is disposed with it (a reparented pane has already moved out).
+    container.on(cstring"destroy") do ():
+      disposePanelsIn(cast[dom_api.Element](element))
 
     container.on(cstring"tab") do (tab: GoldenTab):
       # prepare layout to be saved on upcoming stateChanged event
@@ -2364,13 +2314,6 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
           activeDraggedItem = genericContentItem
         )
 
-    let isReparentingObj = isReparenting
-
-    discard windowSetTimeout((proc =
-      if isReparentingObj:
-        return
-      mountPaneForState(state)
-      ), 200)
 
   # Widen the splitter grab zone so it is easier to grab with the mouse.
   # The per-stack minimum width is enforced dynamically by enforceMinStackWidth
@@ -2483,28 +2426,25 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
         build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
-      build.isoNimBuildMounted = false
-      build.tryMountIsoNimBuildPanel()
+      ensurePanelMountedById(convertComponentLabel(panel.content, 0),
+                             Content.Build, data.activeSessionIndex)
       return
     if panel.content == Content.BuildErrors:
       let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
       if not errorsComp.isNil:
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
-      errors.isoNimErrorsMounted = false
-      errors.tryMountIsoNimErrorsPanel()
+      ensurePanelMountedById(convertComponentLabel(panel.content, 0),
+                             Content.BuildErrors, data.activeSessionIndex)
       return
-    if panel.content == Content.SearchResults:
-      let srComp = data.ui.componentMapping[Content.SearchResults][0]
-      if not srComp.isNil:
-        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
-      search_results.isoNimSearchResultsMounted = false
-      search_results.tryMountIsoNimSearchResultsPanel()
+    if panel.content in PanelHostKinds:
+      # The panel host's panes: the mount survives the reparenting, and a
+      # host it has not reached yet is mounted now.
+      ensurePanelMountedById(label, panel.content, data.activeSessionIndex)
       return
     if panel.content == Content.RequestPanel:
-      let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
-      if not reqComp.isNil:
-        request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
-      request_panel.tryMountIsoNimRequestPanel()
+      # The panel host's pane, in the container the reveal just built.
+      ensurePanelMountedById(cstring"requestPanelComponent-0",
+                             Content.RequestPanel, data.activeSessionIndex)
       return
     # A PANEL RESTORED FROM `auto_hide_state.json` HAS NEVER BEEN MOUNTED.
     #
@@ -2628,33 +2568,25 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     let host = kdom.document.getElementById(cstring"auto-hide-standalone-host")
 
     for panelDef in standaloneAutoHidePanels:
-      # Skip if this content is already in the auto-hide state (e.g.
-      # restored from a saved layout or previously pinned by the user).
+      # Skip if this content already has a LIVE pane in the auto-hide state
+      # (registered earlier in this process, or a restored entry the user
+      # revealed before this timer fired).
+      #
+      # A restored entry with no live element is NOT skipped and NOT dropped:
+      # it is what the previous session saved about this pane — its edge, its
+      # place in the strip order, its overlay size — and
+      # `addStandaloneAutoHidePanel` below adopts it.  This used to drop it
+      # and register the pane on Bottom, on the strength of a comment saying
+      # a standalone pane "has no GL config to re-attach from"; M46 (#692)
+      # gave these four a real `standaloneComponentConfig`, and dropping the
+      # entry is what sent a pane re-pinned to Left back to Bottom (#807).
+      var restoredEntry: AutoHidePanel = nil
       if not autoHideState.isNil:
         let existing = autoHideState.findPanelByContent(panelDef.content)
         if not existing.isNil:
           if existing.standalone or not existing.liveElement.isNil:
             continue
-          # A pinned-state entry restored from disk for one of the four
-          # standalone panes, with no live element yet.  Drop it and let the
-          # registration below run instead.
-          #
-          # THE REASON IS SUPPRESSION, NOT THE CONFIG, and it used to be
-          # written the other way round ("unlike a restored GL panel there is
-          # no component config the overlay could build one from").  That
-          # stopped being true twice over: M46 (#692) gave these four a real
-          # `standaloneComponentConfig`, and M47 (#691) taught the reveal path
-          # to build a host from any re-attachable config.  What still holds is
-          # that these panes get a live element from the block below on EVERY
-          # launch, and `findPanelByContent` lets only one entry per content
-          # exist — so a restored entry left in place would win the slot and
-          # the fresh registration would never run.
-          #
-          # The entry is only ever seen when an older build persisted one:
-          # `serializeAutoHideState` skips `standalone` panels.
-          cwarn "auto_hide: replacing a restored entry for standalone pane '" &
-            $panelDef.title & "' with a fresh registration"
-          autoHideState.panels = autoHideState.panels.filterIt(it != existing)
+          restoredEntry = existing
 
       # Check if GL created a container for this component (from a saved
       # layout that still includes it). If so, find the GL content item
@@ -2681,12 +2613,17 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # nodes, the GL one holding the mounted panel and an empty duplicate
         # parked in the offscreen host at x = -9999.
         #
-        # It stays broken after the duplicate is gone, because
-        # `ui/errors.nim`'s `tryMountIsoNimErrorsPanel` resolves its container
-        # with `getElementById` — which returns the FIRST match — and
-        # `mountIsoNimErrors` has no owner and no disposal. Any of the five
-        # sites that reset `isoNimErrorsMounted` could then remount into a
-        # different node and leave the previous subtree live. One id, one node.
+        # One id, one node: a pane is looked up by its id (the auto-hide
+        # reveal, `ensurePanelMountedById`), and a second element carrying it
+        # would make which one is mounted depend on document order.
+        # A saved layout that holds the pane as a GoldenLayout tab is the
+        # newer statement of where it is, so a restored auto-hide entry for
+        # the same content is stale; leaving it would shadow the pin below
+        # in `findPanelByContent`.
+        if not restoredEntry.isNil:
+          cwarn "auto_hide: dropping a restored auto-hide entry for '" &
+            $panelDef.title & "': the saved layout holds it as a tab"
+          autoHideState.panels = autoHideState.panels.filterIt(it != restoredEntry)
         let component = data.ui.componentMapping[panelDef.content][0]
         if not component.isNil and not component.layoutItem.isNil:
           cdebug "auto_hide: pinning GL panel '" & $panelDef.title & "' to bottom auto-hide"
@@ -2726,44 +2663,16 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         host.appendChild(wrapper)
 
       # Every standalone auto-hide panel (Build, BuildErrors,
-      # SearchResults, RequestPanel) is an IsoNim view.  Each mounts itself
-      # against the inner div the next time its ``tryMountIsoNim*``
-      # runs; the reactive root keeps the DOM in sync automatically.
-      if panelDef.content == Content.Build:
-        try:
-          let buildComp = data.ui.componentMapping[Content.Build][0]
-          if not buildComp.isNil:
-            build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
-          build.isoNimBuildMounted = false
-          build.tryMountIsoNimBuildPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimBuildPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
-      elif panelDef.content == Content.BuildErrors:
-        try:
-          let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
-          if not errorsComp.isNil:
-            errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
-          errors.isoNimErrorsMounted = false
-          errors.tryMountIsoNimErrorsPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimErrorsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
-      elif panelDef.content == Content.SearchResults:
-        try:
-          let srComp = data.ui.componentMapping[Content.SearchResults][0]
-          if not srComp.isNil:
-            search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
-          search_results.isoNimSearchResultsMounted = false
-          search_results.tryMountIsoNimSearchResultsPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimSearchResultsPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+      # SearchResults, RequestPanel) is an IsoNim view, mounted by the panel
+      # host into the inner div just built; its reactive root keeps the DOM
+      # in sync.
+      if panelDef.content in PanelHostKinds:
+        # The panel host mounts the pane into the container just built.
+        discard mountPanel(cast[dom_api.Element](innerDiv), panelDef.content)
       elif panelDef.content == Content.RequestPanel:
-        try:
-          let reqComp = data.ui.componentMapping[Content.RequestPanel][0]
-          if not reqComp.isNil:
-            request_panel.syncLegacyRequestPanelIntoVM(RequestPanelComponent(reqComp))
-          request_panel.tryMountIsoNimRequestPanel()
-        except:
-          cerror "auto_hide: tryMountIsoNimRequestPanel(standalone) EXCEPTION: " & getCurrentExceptionMsg()
+        # The panel host's pane, in the standalone host just built.
+        ensurePanelMountedById(cstring"requestPanelComponent-0",
+                               Content.RequestPanel, data.activeSessionIndex)
       addStandaloneAutoHidePanel(
         panelDef.title,
         panelDef.content,
@@ -2774,6 +2683,8 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
         # it cannot be derived from the content — PROBLEMS is
         # `Content.BuildErrors` and mounts into `errorsComponent-0`.
         componentLabel = panelDef.label,
+        # The DEFAULT edge only: a restored entry keeps the edge it was saved
+        # with (#807).
         edge = AutoHideEdge.Bottom)
   , 500)  # 500ms delay lets GL finish its internal layout cycle
 
@@ -2788,11 +2699,11 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
     ## ``build.output`` / ``build.problems`` / search service results)
     ## into the VM and then re-mount.
     if contentId == int(Content.Build):
+      # The view is reactive: replaying the injected legacy state into the
+      # session's ViewModel is the whole re-render.
       let buildComp = data.ui.componentMapping[Content.Build][0]
       if not buildComp.isNil:
         build.syncLegacyBuildIntoVM(BuildComponent(buildComp))
-      build.isoNimBuildMounted = false
-      build.tryMountIsoNimBuildPanel()
       return
     if contentId == int(Content.BuildErrors):
       # ``syncLegacyBuildIntoVM`` already pushed the bulk-replay path
@@ -2804,15 +2715,10 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
       let errorsComp = data.ui.componentMapping[Content.BuildErrors][0]
       if not errorsComp.isNil:
         errors.syncLegacyErrorsIntoVM(ErrorsComponent(errorsComp))
-      errors.isoNimErrorsMounted = false
-      errors.tryMountIsoNimErrorsPanel()
       return
     if contentId == int(Content.SearchResults):
-      let srComp = data.ui.componentMapping[Content.SearchResults][0]
-      if not srComp.isNil:
-        search_results.syncLegacySearchResultsIntoVM(SearchResultsComponent(srComp))
-      search_results.isoNimSearchResultsMounted = false
-      search_results.tryMountIsoNimSearchResultsPanel()
+      ensurePanelMountedById(cstring"searchResultsComponent-0",
+                             Content.SearchResults, data.activeSessionIndex)
       return
 
   # Expose a helper to pin a GL content item to an auto-hide edge.

@@ -27,6 +27,9 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../platform/vcs as platform_vcs
+import ../viewport
+import ./no_project_folder
+export viewport
 
 const
   VCSWorkingTreeTitle* = "Working Tree"
@@ -181,7 +184,35 @@ type
     target*: string ## diff target (`file:<path>`, `commit:<hash>:<path>`, …)
     status*: string ## diff status letter of the row ("M", "A", "D", "R", …)
 
+  VCSDocumentScroll* = object
+    ## A request to bring one file of a whole-commit document into view
+    ## (VCS-Panel.md, "Whole-Commit Document", "Scrolling to a file").
+    path*: string
+      ## The file whose section goes to the top; "" before any request.
+    serial*: int
+      ## Grows with every request, so asking for the same file twice — after
+      ## the reader scrolled away — is a change the view sees.
+
   VCSVM* = ref object of ViewModel
+    historyViewport*: Signal[Viewport]
+      ## What the history list was given: it decides how many commits the
+      ## native refresh reads (`historyCommitCount`). Written by the native
+      ## history views through `setHistoryViewport` — the terminal's
+      ## (`tui/host/vcs_source.reportViewport`) and GPUI's
+      ## (`gpui_host.followGpuiVcsViewport`) — whenever their list's height or
+      ## scroll position changes (Viewport-Driven-Loading V6). Until a view
+      ## has reported, it is unmeasured and a refresh reads
+      ## `VcsHistoryUnmeasured` commits. The desktop's panel pages its history
+      ## itself (`ui/vcs.nim`) and does not write it.
+      ##
+      ## (Its setter had no caller from `0d7cf7926` until the codetracer-pm
+      ## issue 2026-10-22 "the VCS history list's viewport is written by
+      ## nothing", and was deleted in between as an export nothing reached.)
+    historyAsked: int
+      ## How many commits the last native refresh asked `git log` for; 0
+      ## before the first. With `commits.len` it says whether that read was
+      ## cut by the count (more history may follow) or held the whole
+      ## history (`setHistoryViewport`'s answer).
     deepReviewMode*: Signal[bool]
     headerTitle*: Signal[string]
     headerIcon*: Signal[string]
@@ -236,6 +267,10 @@ type
     ## it false so toggling the view mode never replaces its commit history.
     unifiedDiffActive*: Signal[bool]
     diffFiles*: Signal[seq[VCSDiffFileRow]]
+    documentScroll*: Signal[VCSDocumentScroll]
+      ## The file a whole-commit document tab was last asked to show
+      ## (`requestDocumentScroll`). The view keeps that file's section at the
+      ## top; a single-file tab ignores it.
     selectedHunks*: Signal[seq[(int, int)]]
     hunkToolbarVisible*: Signal[bool]
     hunkCopyFeedback*: Signal[bool]
@@ -533,6 +568,30 @@ proc syncCommitFilesMap*(vm: VCSVM;
 proc setWorkingTreeFiles*(vm: VCSVM; files: openArray[VCSFileRow]) =
   vm.workingTreeFiles.val = @files
 
+proc setNoProjectFolder*(vm: VCSVM) =
+  ## The session has NO project folder (Welcome screen → New File), so there
+  ## is no repository to show: the panel shows the "No project folder is
+  ## open." absence — the one the Test Results and Constraints panes show for
+  ## the same session — and nothing else.
+  ##
+  ## Every repository-derived value is cleared rather than left as it was:
+  ## a panel that showed a project before (another tab of the window, or a
+  ## folder this window had open) must not keep its branch, history or
+  ## changes on screen beside a sentence saying there is no project.
+  ##
+  ## Callers must not ask git anything for such a session. An empty working
+  ## directory is not "no repository" to git: every platform reads it as the
+  ## process's own directory, which is how the panel used to draw the
+  ## history of whatever repository the app had been launched from.
+  vm.setDeepReviewMode(false)
+  vm.setHeader("")
+  vm.setGitRepoState(false, NoProjectFolderText)
+  vm.setBranchState("", [], false)
+  vm.setCommits([], [])
+  vm.syncCommitFilesMap([])
+  vm.setWorkingTreeFiles([])
+  vm.changedFiles.val = @[]
+
 func workingTreeStatusLetter*(change: platform_vcs.VcsFileChange): string =
   ## The one letter a file's working-tree state is shown with, as git's short
   ## status and VCS-Panel.md spell them: `M` modified, `A` added, `D`
@@ -577,8 +636,63 @@ proc applyWorkingTreeStatus*(vm: VCSVM; status: platform_vcs.VcsStatus) =
   vm.setBranchState(branch, [branch], false)
   vm.setWorkingTreeFiles(workingTreeRowsOf(status))
 
+const
+  VcsHistoryUnmeasured* = 50
+    ## The commits a history list reads before its pane has reported a size —
+    ## the view binding's fallback (Viewport-Driven-Loading V2). Once it has,
+    ## the count follows the pane (`historyCommitCount`).
+
+func historyCommitCount*(v: Viewport): int =
+  ## How many commits the history reads for a list showing `v`: every row up
+  ## to the last visible one, plus `LeadRows` below it. The log is read from
+  ## the newest commit, so the count grows as the reader scrolls down.
+  if not v.measured: VcsHistoryUnmeasured
+  else: max(0, v.firstRow) + v.rows + LeadRows
+
+proc setHistoryViewport*(vm: VCSVM; v: Viewport): bool =
+  ## The size and scroll position the history list was given
+  ## (Viewport-Driven-Loading V1, V6): `rows` the rows the pane gives the
+  ## list, `firstRow` the commits above the first row it shows. The next
+  ## refresh reads `historyCommitCount(v)` commits.
+  ##
+  ## ANSWERS WHETHER THE LIST NOW REACHES THE END OF WHAT WAS READ — the
+  ## native Load More: the rows `v` shows from `firstRow` on reach the count
+  ## the last refresh asked for, and that refresh got all it asked for (so
+  ## more history may follow). The view then re-reads at once rather than
+  ## leaving the reader at the end of the old read until the periodic
+  ## refresh. `rows` also holds the captions and an opened commit's files,
+  ## so the answer can come a few rows early, never late.
+  ##
+  ## Not "the count `v` calls for grew": that count carries the lead, so it
+  ## grows with every step down the list, and each step would re-run `git`
+  ## synchronously on a native front-end's loop — a wheel turned through the
+  ## history would re-read it per notch. Reaching the end re-reads once per
+  ## lead (`LeadRows` commits) scrolled.
+  ##
+  ## A read that got fewer commits than it asked for held the whole history,
+  ## so nothing more is asked for at its end; a smaller viewport is not
+  ## urgent either — the next periodic refresh reads the smaller count.
+  if vm.isNil:
+    return false
+  vm.historyViewport.val = v
+  vm.historyAsked > 0 and vm.commits.val.len >= vm.historyAsked and
+    max(0, v.firstRow) + v.rows >= vm.historyAsked
+
+func sameHistoryDeeper(previous, rows: openArray[VCSCommitRow]): bool =
+  ## Whether `rows` is the history `previous` was, read to a different depth:
+  ## one of the two lists is a prefix of the other, commit for commit. The
+  ## log is read from the newest commit, so a read that only asked for more
+  ## (or fewer) commits differs from the last one exactly like this.
+  let n = min(previous.len, rows.len)
+  for i in 0 ..< n:
+    if previous[i].fullHash != rows[i].fullHash:
+      return false
+  true
+
 proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
-                        directory: string; commitCount = 50) =
+                        directory: string; commitCount = -1) =
+  ## `commitCount` -1 (the default) reads what the history list's viewport
+  ## calls for (`historyCommitCount`); a caller may name a count instead.
   ## Fill the panel for `directory` through the VCS facade — what a native
   ## front-end (the terminal, GPUI) calls, with the platform's own `git`. The
   ## desktop fills the same ViewModel from `ui/vcs.nim`, which runs the same
@@ -589,6 +703,15 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
   ## synchronous subprocess, so there is nothing to wait for; a facade that
   ## cannot settle here reports "not a repository" rather than a stale list.
   if vm.isNil or facade.isNil:
+    return
+  # NO DIRECTORY IS NO PROJECT FOLDER, and git is not asked. An empty
+  # directory would reach the facade as "the platform's default" — the
+  # process's working directory — and the pane would show that repository
+  # instead of the absence (codetracer-pm issue 2026-10-21, "...its VCS pane
+  # shows the launch directory's repository"). The native hosts already
+  # treat "" this way on refresh (`gpui_host.refreshGpuiVcs`).
+  if directory.len == 0:
+    vm.setNoProjectFolder()
     return
   let isRepo = awaitSync(facade.isRepository(directory))
   if not isRepo.ok or not isRepo.value:
@@ -601,23 +724,36 @@ proc refreshFromFacade*(vm: VCSVM; facade: platform_vcs.VcsFacade;
     vm.setGitRepoState(false, $status.error)
     return
   vm.applyWorkingTreeStatus(status.value)
-  let log = awaitSync(facade.log(directory, commitCount, ""))
+  let wanted =
+    if commitCount > 0: commitCount
+    else: historyCommitCount(vm.historyViewport.val)
+  let log = awaitSync(facade.log(directory, wanted, ""))
   var rows: seq[VCSCommitRow] = @[]
   if log.ok:
+    vm.historyAsked = wanted
     for c in log.value:
       rows.add VCSCommitRow(hash: c.shortId, message: c.subject,
                             author: c.authorName, fullHash: c.id, dotLane: -1)
+  else:
+    # Nothing was read: no claim about how deep the history goes.
+    vm.historyAsked = 0
   # PLAT-50: A REFRESH KEEPS THE OPEN COMMIT while the history is the same
-  # history (the periodic refresh used to close it every few seconds).
+  # history (the periodic refresh used to close it every few seconds) — and
+  # (V6) while it is the same history read deeper or shallower, which is
+  # what a list growing as the reader scrolls, or shrinking with its pane,
+  # produces. An open commit the shallower read no longer lists closes, and
+  # its files go with it.
   let previous = vm.commits.val
-  var same = previous.len == rows.len
-  if same:
-    for i in 0 ..< rows.len:
-      if previous[i].fullHash != rows[i].fullHash:
-        same = false
-        break
-  if same:
-    vm.setCommits(rows, vm.selectedCommitIndices.val, vm.lastClickedIndex.val)
+  if previous.len > 0 and sameHistoryDeeper(previous, rows):
+    if previous.len > rows.len:
+      var kept: seq[(int, seq[VCSFileRow])] = @[]
+      for entry in vm.commitFilesMap.val:
+        if entry[0] < rows.len:
+          kept.add entry
+      vm.syncCommitFilesMap(kept)
+    vm.setCommits(rows, vm.selectedCommitIndices.val,
+                  (if vm.lastClickedIndex.val < rows.len:
+                     vm.lastClickedIndex.val else: -1))
   else:
     vm.setCommits(rows, [])
     vm.syncCommitFilesMap([])
@@ -647,6 +783,21 @@ proc setUnifiedDiff*(vm: VCSVM; active: bool;
                      files: openArray[VCSDiffFileRow]) =
   vm.unifiedDiffActive.val = active
   vm.diffFiles.val = @files
+
+proc isDiffDocument*(vm: VCSVM): bool =
+  ## True when this diff tab shows several files, as a whole-commit document
+  ## of per-file sections (VCS-Panel.md, "Whole-Commit Document"); false for
+  ## a single-file tab, whose target resolved to one file.
+  vm.diffFiles.val.len > 1
+
+proc requestDocumentScroll*(vm: VCSVM; path: string) =
+  ## Ask a whole-commit document to bring `path`'s section to the top: what
+  ## a click on a file under an expanded commit does when the commit's
+  ## document is the click's target. A path the document does not show (a
+  ## file with no hunks) is still recorded; the view scrolls nowhere for it.
+  let previous = vm.documentScroll.val
+  vm.documentScroll.val = VCSDocumentScroll(path: path,
+                                            serial: previous.serial + 1)
 
 proc setHunkState*(vm: VCSVM; selected: openArray[(int, int)];
                    toolbarVisible: bool; copyFeedback: bool) =
@@ -905,6 +1056,7 @@ proc createVCSVM*(): VCSVM =
       selectedHunks.val.len
 
     VCSVM(
+      historyViewport: createSignal(Viewport()),
       deepReviewMode: createSignal(false),
       headerTitle: createSignal(""),
       headerIcon: createSignal("\239\132\166"),
@@ -926,6 +1078,7 @@ proc createVCSVM*(): VCSVM =
       viewMode: createSignal(vmUnifiedDiff),
       unifiedDiffActive: createSignal(false),
       diffFiles: createSignal(newSeq[VCSDiffFileRow]()),
+      documentScroll: createSignal(VCSDocumentScroll()),
       selectedHunks: selectedHunks,
       hunkToolbarVisible: createSignal(false),
       hunkCopyFeedback: createSignal(false),

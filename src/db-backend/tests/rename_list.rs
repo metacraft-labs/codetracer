@@ -411,6 +411,12 @@ fn p5_translation_enabled_kill_switch_independent_of_rename_list() {
     // Defensive: the §P3 translation kill switch and the §P5 rename
     // list kill switch are independent toggles.  This test runs without
     // any env mutation; it just sanity-checks both default to on.
+    //
+    // It READS the two variables, so it takes the same lock as the tests
+    // that set them: `p5_rename_list_kill_switch_disables_loader` holds
+    // `CT_RENAME_LIST=0` for its whole body, and a read on another libtest
+    // thread in that window saw the kill switch on and failed.
+    let _guard = env_mutex().lock().unwrap_or_else(|p| p.into_inner());
     assert!(translation_enabled());
     assert!(rename_list_enabled());
 }

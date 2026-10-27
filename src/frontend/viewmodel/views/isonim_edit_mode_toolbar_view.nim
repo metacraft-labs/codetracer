@@ -14,13 +14,10 @@
 ##
 ## ## Why a second view rather than a branch inside the debug one
 ##
-## `isonim_debug_controls_view.nim` builds ONE static `ui()` block whose only
-## reactivity is per-attribute (`reactiveDisabled`, `reactiveHidden`). The two
-## surfaces do not differ by an attribute — they differ in which elements
-## exist — so a signal cannot restructure one into the other. The mount picks
-## a surface and the transition re-mounts, which is the mechanism
-## `ui/debug.nim` already has (`remountDebugControls`, and the
-## `shouldRemountDebugControls` predicate it goes through).
+## The two surfaces differ in which elements exist, not in an attribute, so
+## the topbar host chooses between two views: `renderTopbar`
+## (`isonim_debug_controls_view.nim`) shows this one or the debugger controls
+## with `show` over `DebugControlsVM.topbarSurface`.
 ##
 ## Keeping the debugger's panel untouched is the other half: the stepping
 ## controls are the product's most-exercised chrome, and this feature has no
@@ -63,7 +60,7 @@
 # `createRenderEffect` for any dynamic attribute, so the symbol has to be in
 # scope at the expansion site or the `ui()` block does not compile.
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -73,6 +70,10 @@ when defined(js):
 import ../viewmodels/edit_mode_toolbar
 import ./edit_toolbar_marks
 export edit_toolbar_marks
+# A generic view is instantiated where it is called, and the `ui` macro's
+# expansion names `createRenderEffect` and the control-flow components there:
+# exported so a caller needs no IsoNim import of its own to render this view.
+export signals, computation, components
 
 const
   EditToolbarSurfaceAttr* = "data-topbar-surface"
@@ -180,103 +181,57 @@ proc buttonTitle*(candidate: ToolbarButton): string =
   else: candidate.label
 
 # ---------------------------------------------------------------------------
-# MockRenderer panel — headless, for `vm-unit` and `vm-unit-js`
+# The panel — one view, generic over the renderer
 # ---------------------------------------------------------------------------
 
-proc renderEditModeToolbarPanel*(r: MockRenderer;
-                                 model: EditToolbarModel;
-                                 invoke: proc(id: string)): MockNode =
-  ## Structure:
-  ##   div.edit-mode-toolbar[data-topbar-surface=edit-commands]
+proc renderEditModeToolbarPanel*[R, N](r: R; model: proc(): EditToolbarModel;
+                                       invoke: proc(id: string)): N =
+  ## The edit-mode topbar, in the classes the debugger strip uses
+  ## (`ct-header`, `separate-bar`) so the topbar keeps one look across a mode
+  ## switch:
+  ##   div.ct-header.edit-mode-toolbar[data-topbar-surface=edit-commands]
   ##     button#<id>.edit-toolbar-button[disabled when not enabled]  <label>
   ##
-  ## A button that carries a mark has NO label child here either. The mock is a
-  ## structural double for the shipped panel, so a label it renders and the web
-  ## panel does not is a structure the tests would be asserting and the product
-  ## would not have. The glyph itself is a DOM operation and stays out of the
-  ## mock; what both share is which buttons are icons and which carry text.
-  let buttons = model.visibleButtons
-
-  ui(r):
-    tdiv(class = "edit-mode-toolbar",
+  ## `model` is read reactively: the platform installs a NEW model whenever
+  ## something that could change it happens (a save that adds a `Nargo.toml`,
+  ## a build finishing), and the buttons follow it in place — keyed by the
+  ## button itself, so an unchanged button keeps its node.
+  ##
+  ## A button that carries a mark has no label: its glyph is attached on the
+  ## web renderer (`edit_toolbar_marks`), and the headless structure has the
+  ## same buttons with the same absence of text.
+  var buttonsHost: N
+  let panel = ui(r):
+    tdiv(class = "ct-header edit-mode-toolbar",
          `data-topbar-surface` = EditToolbarSurfaceValue,
-         `data-button-count` = $buttons.len):
-      for candidate in buttons:
-        # `id` and `label` are captured per iteration: the click handler must
-        # close over THIS button's id, not over the loop variable's last value.
-        let id = candidate.id
-        let label = candidate.label
-        let title = candidate.buttonTitle
-        # Two arms rather than a computed `disabled=` value, because a browser
-        # treats ANY value of `disabled` — including "" and "false" — as
-        # disabled. The attribute has to be absent, not empty.
-        if candidate.enabled:
-          button(class = "edit-toolbar-button", id = id, title = title,
+         `data-button-count` = $model().visibleButtons.len):
+      tdiv(class = "separate-bar"):
+        discard
+      tdiv(ref = buttonsHost, class = "edit-toolbar-buttons"):
+        discard
+  createRenderEffect proc() =
+    r.setAttribute(panel, "data-button-count", $model().visibleButtons.len)
+  forEachKeyed[ToolbarButton, R, N](r, buttonsHost,
+    proc(): seq[ToolbarButton] = model().visibleButtons,
+    proc(item: proc(): ToolbarButton; index: proc(): int): N =
+      let candidate = item()
+      let id = candidate.id
+      let cls = editButtonClass(id)
+      let title = candidate.buttonTitle
+      var btn: N
+      if candidate.enabled:
+        btn = ui(r):
+          button(id = id, class = cls, title = title,
                  onclick = invoker(invoke, id)):
-            if not hasEditMark(id):
-              text label
-        else:
-          button(class = "edit-toolbar-button", id = id, title = title,
-                 disabled = "true"):
-            if not hasEditMark(id):
-              text label
-
-# ---------------------------------------------------------------------------
-# WebRenderer panel — the shipped one
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc renderEditModeToolbarPanel*(r: WebRenderer;
-                                   model: EditToolbarModel;
-                                   invoke: proc(id: string)):
-                                  isonim_dom.Element =
-    ## The same structure the mock renders, in the classes the debug panel
-    ## already uses (`ct-header`, `separate-bar`) so the topbar keeps one look
-    ## across a mode switch rather than announcing the transition with a
-    ## different-shaped bar.
-    let buttons = model.visibleButtons
-
-    let panel = ui(r):
-      tdiv(class = "ct-header edit-mode-toolbar",
-           `data-topbar-surface` = EditToolbarSurfaceValue,
-           `data-button-count` = $buttons.len):
-        tdiv(class = "separate-bar"):
-          discard
-        for candidate in buttons:
-          let id = candidate.id
-          let label = candidate.label
-          let title = candidate.buttonTitle
-          let cls = editButtonClass(id)
-          if candidate.enabled:
-            button(id = id, class = cls, title = title,
-                   onclick = invoker(invoke, id)):
-              if not hasEditMark(id):
-                text label
-          else:
-            button(id = id, class = cls, title = title, disabled = "true"):
-              if not hasEditMark(id):
-                text label
-
-    # The marks, attached from the `EditToolbarMarks` table rather than written
-    # into the button calls above — the same arrangement `attachControlMarks`
-    # uses on the debugger strip, and for the same reason: the `ui()` block is
-    # the one place this bar's structure is readable at a glance.
-    #
-    # A short count logs itself in `attachEditToolbarMarks`: a bar whose marks
-    # failed to attach still renders its buttons and they still click, so
-    # nothing else would notice.
-    discard attachEditToolbarMarks(panel)
-
-    panel
-
-  proc mountIsoNimEditModeToolbar*(container: isonim_dom.Element;
-                                   model: EditToolbarModel;
-                                   invoke: proc(id: string)) =
-    ## Mount the edit-mode topbar as a child of `container`.
-    ##
-    ## The caller clears the host first — `ui/debug.nim`'s `doMount` does, for
-    ## the reason its own comment gives — so this appends rather than replaces.
-    let r = WebRenderer()
-    let panel = renderEditModeToolbarPanel(r, model, invoke)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+            discard
+      else:
+        btn = ui(r):
+          button(id = id, class = cls, title = title, disabled = "true"):
+            discard
+      if not hasEditMark(id):
+        r.appendChild(btn, r.createTextNode(candidate.label))
+      when defined(js):
+        when N is isonim_dom.Element:
+          attachEditMark(btn, id)
+      btn)
+  panel

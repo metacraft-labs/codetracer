@@ -5,8 +5,12 @@
 ## the corresponding side-pinned auto-hide panel.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -57,11 +61,11 @@ proc invokeSelect(callbacks: AutoHideCollapsedIconCallbacks; index: int) =
   if not callbacks.onSelect.isNil:
     callbacks.onSelect(index)
 
-proc renderCollapsedIcon(
-    r: MockRenderer;
+proc renderCollapsedIcon[R, N](
+    r: R;
     icon: AutoHideCollapsedIconRecord;
     index: int;
-    callbacks: AutoHideCollapsedIconCallbacks): MockNode =
+    callbacks: AutoHideCollapsedIconCallbacks): N =
   ui(r):
     button(
         class = AutoHideCollapsedIconClass,
@@ -70,21 +74,6 @@ proc renderCollapsedIcon(
         title = icon.title,
         onclick = proc() = callbacks.invokeSelect(index)):
       text icon.icon
-
-when defined(js):
-  proc renderCollapsedIcon(
-      r: WebRenderer;
-      icon: AutoHideCollapsedIconRecord;
-      index: int;
-      callbacks: AutoHideCollapsedIconCallbacks): isonim_dom.Element =
-    ui(r):
-      button(
-          class = AutoHideCollapsedIconClass,
-          `type` = "button",
-          `aria-label` = icon.title,
-          title = icon.title,
-          onclick = proc() = callbacks.invokeSelect(index)):
-        text icon.icon
 
 proc restoreButtonClass(callbacks: AutoHideCollapsedIconCallbacks): string =
   ## The sidebar toggle: one button, always at the zone's outer end, drawn as
@@ -97,18 +86,11 @@ proc restoreButtonClass(callbacks: AutoHideCollapsedIconCallbacks): string =
 proc hasRestore(callbacks: AutoHideCollapsedIconCallbacks): bool =
   not callbacks.onRestore.isNil
 
-proc renderRestoreButton(r: MockRenderer; callbacks: AutoHideCollapsedIconCallbacks): MockNode =
+proc renderRestoreButton[R, N](r: R; callbacks: AutoHideCollapsedIconCallbacks): N =
   ui(r):
     button(class = restoreButtonClass(callbacks), `type` = "button",
         title = callbacks.restoreLabel, `aria-label` = callbacks.restoreLabel,
         onclick = proc() = callbacks.onRestore())
-
-when defined(js):
-  proc renderRestoreButton(r: WebRenderer; callbacks: AutoHideCollapsedIconCallbacks): isonim_dom.Element =
-    ui(r):
-      button(class = restoreButtonClass(callbacks), `type` = "button",
-          title = callbacks.restoreLabel, `aria-label` = callbacks.restoreLabel,
-          onclick = proc() = callbacks.onRestore())
 
 proc hasTabList(callbacks: AutoHideCollapsedIconCallbacks): bool =
   not callbacks.onTabList.isNil
@@ -130,7 +112,7 @@ proc invokeTabListSelect(callbacks: AutoHideCollapsedIconCallbacks; index: int) 
   if not callbacks.onTabListSelect.isNil:
     callbacks.onTabListSelect(index)
 
-proc renderTabListButton(r: MockRenderer; callbacks: AutoHideCollapsedIconCallbacks): MockNode =
+proc renderTabListButton[R, N](r: R; callbacks: AutoHideCollapsedIconCallbacks): N =
   ui(r):
     button(class = tabListButtonClass(callbacks), `type` = "button",
         title = callbacks.tabListLabel, `aria-label` = callbacks.tabListLabel,
@@ -143,8 +125,12 @@ const TabListCloseLabel = "Close panel"
 proc showsTabListClose(callbacks: AutoHideCollapsedIconCallbacks; index: int): bool =
   index == callbacks.tabListActive and not callbacks.onTabListClose.isNil
 
-proc renderTabListItem(r: MockRenderer; callbacks: AutoHideCollapsedIconCallbacks;
-                       title: string; index: int): MockNode =
+when defined(js):
+  proc stopEvent(ev: isonim_dom.Event) {.importjs:
+    "(function(e){ e.stopPropagation(); e.preventDefault(); })(#)".}
+
+proc renderTabListItem[R, N](r: R; callbacks: AutoHideCollapsedIconCallbacks;
+                             title: string; index: int): N =
   result = ui(r):
     button(class = tabListItemClass(callbacks, index), `type` = "button",
         role = "menuitem", title = title,
@@ -152,100 +138,49 @@ proc renderTabListItem(r: MockRenderer; callbacks: AutoHideCollapsedIconCallback
       span(class = "ct-menu-item-label"):
         text title
   if callbacks.showsTabListClose(index):
+    var closeEl: N
     let close = ui(r):
-      span(class = "auto-hide-tablist-close", role = "button",
+      span(ref = closeEl, class = "auto-hide-tablist-close", role = "button",
           title = TabListCloseLabel, `aria-label` = TabListCloseLabel,
           onclick = proc() = callbacks.onTabListClose())
     r.appendChild(result, close)
+    when defined(js):
+      when N is isonim_dom.Element:
+        # Stopped here: the row's click would reopen the panel the × just
+        # closed.
+        isonim_dom.addEventListener(isonim_dom.Node(closeEl), cstring"click",
+          proc(ev: isonim_dom.Event) = ev.stopEvent())
 
-proc renderTabListMenu(r: MockRenderer; callbacks: AutoHideCollapsedIconCallbacks): MockNode =
+proc renderTabListMenu[R, N](r: R; callbacks: AutoHideCollapsedIconCallbacks): N =
   result = ui(r):
     tdiv(class = tabListMenuClass(callbacks), role = "menu",
         `aria-label` = callbacks.tabListLabel)
   for i, title in callbacks.tabListItems:
-    r.appendChild(result, renderTabListItem(r, callbacks, title, i))
+    r.appendChild(result, renderTabListItem[R, N](r, callbacks, title, i))
 
-when defined(js):
-  proc renderTabListButton(r: WebRenderer; callbacks: AutoHideCollapsedIconCallbacks): isonim_dom.Element =
-    ui(r):
-      button(class = tabListButtonClass(callbacks), `type` = "button",
-          title = callbacks.tabListLabel, `aria-label` = callbacks.tabListLabel,
-          `aria-haspopup` = "menu",
-          `aria-expanded` = (if callbacks.tabListOpen: "true" else: "false"),
-          onclick = proc() = callbacks.onTabList())
-
-  proc stopEvent(ev: isonim_dom.Event) {.importjs:
-    "(function(e){ e.stopPropagation(); e.preventDefault(); })(#)".}
-
-  proc renderTabListItem(r: WebRenderer; callbacks: AutoHideCollapsedIconCallbacks;
-                         title: string; index: int): isonim_dom.Element =
-    result = ui(r):
-      button(class = tabListItemClass(callbacks, index), `type` = "button",
-          role = "menuitem", title = title,
-          onclick = proc() = callbacks.invokeTabListSelect(index)):
-        span(class = "ct-menu-item-label"):
-          text title
-    if callbacks.showsTabListClose(index):
-      var closeEl: isonim_dom.Element
-      let close = ui(r):
-        span(ref = closeEl, class = "auto-hide-tablist-close", role = "button",
-            title = TabListCloseLabel, `aria-label` = TabListCloseLabel)
-      # Its own listener, stopped there: the row's click would reopen the
-      # panel the × just closed.
-      isonim_dom.addEventListener(isonim_dom.Node(closeEl), cstring"click",
-        proc(ev: isonim_dom.Event) =
-          ev.stopEvent()
-          callbacks.onTabListClose())
-      discard isonim_dom.appendChild(isonim_dom.Node(result), isonim_dom.Node(close))
-
-  proc renderTabListMenu(r: WebRenderer; callbacks: AutoHideCollapsedIconCallbacks): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = tabListMenuClass(callbacks), role = "menu",
-          `aria-label` = callbacks.tabListLabel)
-    for i, title in callbacks.tabListItems:
-      r.appendChild(result, renderTabListItem(r, callbacks, title, i))
-
-proc renderAutoHideCollapsedIconsPanel*(
-    r: MockRenderer;
+proc renderAutoHideCollapsedIconsPanel*[R, N](
+    r: R;
     icons: seq[AutoHideCollapsedIconRecord];
     callbacks: AutoHideCollapsedIconCallbacks =
-      AutoHideCollapsedIconCallbacks()): MockNode =
+      AutoHideCollapsedIconCallbacks()): N =
+  ## The collapsed-icon zone, for every renderer. `icons` is a value the
+  ## caller re-derives and redraws (`renderAutoHideCollapsedIconsInto`).
   result = ui(r):
     tdiv(class = collapsedIconZoneClass(icons.len > 0 or callbacks.hasRestore))
   if callbacks.restoreFirst and callbacks.hasRestore:
-    r.appendChild(result, renderRestoreButton(r, callbacks))
+    r.appendChild(result, renderRestoreButton[R, N](r, callbacks))
   if callbacks.restoreFirst and callbacks.hasTabList:
-    r.appendChild(result, renderTabListButton(r, callbacks))
+    r.appendChild(result, renderTabListButton[R, N](r, callbacks))
   for i, icon in icons:
-    r.appendChild(result, renderCollapsedIcon(r, icon, i, callbacks))
+    r.appendChild(result, renderCollapsedIcon[R, N](r, icon, i, callbacks))
   if not callbacks.restoreFirst and callbacks.hasTabList:
-    r.appendChild(result, renderTabListButton(r, callbacks))
+    r.appendChild(result, renderTabListButton[R, N](r, callbacks))
   if not callbacks.restoreFirst and callbacks.hasRestore:
-    r.appendChild(result, renderRestoreButton(r, callbacks))
+    r.appendChild(result, renderRestoreButton[R, N](r, callbacks))
   if callbacks.hasTabList and callbacks.tabListOpen:
-    r.appendChild(result, renderTabListMenu(r, callbacks))
+    r.appendChild(result, renderTabListMenu[R, N](r, callbacks))
 
 when defined(js):
-  proc renderAutoHideCollapsedIconsPanel*(
-      r: WebRenderer;
-      icons: seq[AutoHideCollapsedIconRecord];
-      callbacks: AutoHideCollapsedIconCallbacks =
-        AutoHideCollapsedIconCallbacks()): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = collapsedIconZoneClass(icons.len > 0 or callbacks.hasRestore))
-    if callbacks.restoreFirst and callbacks.hasRestore:
-      r.appendChild(result, renderRestoreButton(r, callbacks))
-    if callbacks.restoreFirst and callbacks.hasTabList:
-      r.appendChild(result, renderTabListButton(r, callbacks))
-    for i, icon in icons:
-      r.appendChild(result, renderCollapsedIcon(r, icon, i, callbacks))
-    if not callbacks.restoreFirst and callbacks.hasTabList:
-      r.appendChild(result, renderTabListButton(r, callbacks))
-    if not callbacks.restoreFirst and callbacks.hasRestore:
-      r.appendChild(result, renderRestoreButton(r, callbacks))
-    if callbacks.hasTabList and callbacks.tabListOpen:
-      r.appendChild(result, renderTabListMenu(r, callbacks))
-
   proc renderAutoHideCollapsedIconsInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -263,7 +198,8 @@ when defined(js):
 
     # This view is refreshed into a status-bar host owned by legacy chrome.
     # Move the DSL-rendered children into that stable host.
-    let panel = renderAutoHideCollapsedIconsPanel(r, icons, callbacks)
+    let panel = renderAutoHideCollapsedIconsPanel[WebRenderer, isonim_dom.Element](
+      r, icons, callbacks)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):
       discard isonim_dom.appendChild(containerNode, panelNode.firstChild)

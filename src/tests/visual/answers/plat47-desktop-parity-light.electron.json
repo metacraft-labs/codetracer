@@ -1,5 +1,5 @@
 {
-  "takenAt": "2026-10-04T19:13:52.388Z",
+  "takenAt": "2026-10-20T14:04:23.903Z",
   "theme": "light",
   "monacoTokens": {
     "path": "calc/main.py",
@@ -1791,7 +1791,7 @@
     {
       "x": 4,
       "y": 34,
-      "w": 335,
+      "w": 377,
       "h": 1334,
       "contents": [
         9,
@@ -1806,9 +1806,9 @@
       ]
     },
     {
-      "x": 343,
+      "x": 385,
       "y": 34,
-      "w": 628,
+      "w": 471,
       "h": 1334,
       "contents": [
         2
@@ -1819,9 +1819,9 @@
       ]
     },
     {
-      "x": 975,
+      "x": 860,
       "y": 34,
-      "w": 459,
+      "w": 516,
       "h": 665,
       "contents": [
         4,
@@ -1834,9 +1834,9 @@
       ]
     },
     {
-      "x": 1438,
+      "x": 1380,
       "y": 34,
-      "w": 458,
+      "w": 516,
       "h": 665,
       "contents": [
         6,
@@ -1849,33 +1849,31 @@
       ]
     },
     {
-      "x": 975,
+      "x": 860,
       "y": 703,
-      "w": 921,
+      "w": 1036,
       "h": 665,
       "contents": [
         8,
-        19,
         24
       ],
       "active": 0,
       "titles": [
         "EVENT LOG",
-        "TIMELINE",
         "TERMINAL OUTPUT"
       ]
     }
   ],
   "editor": {
-    "background": "#282828",
+    "background": "#e6e2db",
     "keyword": "#56a3e8",
     "string": "#0b6ae6",
     "comment": "#eb4f64",
     "number": "",
     "identifier": "#464646",
     "delimiter": "#464646",
-    "lineNumber": "#26505e",
-    "activeLineNumber": "#c8c8c8",
+    "lineNumber": "#85adb7",
+    "activeLineNumber": "#353430",
     "executionLine": "#c5ca88",
     "selection": "#4f5b66"
   },
@@ -1917,15 +1915,15 @@
     "<end of program> #28"
   ],
   "onRect": {
-    "x": 452,
+    "x": 494,
     "y": 70,
-    "w": 5292,
+    "w": 5244,
     "h": 22
   },
   "linesRect": {
-    "x": 452,
+    "x": 494,
     "y": 70,
-    "w": 5292,
+    "w": 5244,
     "h": 2586
   },
   "viewport": {
@@ -1935,10 +1933,10 @@
   "ticks": 1,
   "focus": {
     "outlineCount": 1,
-    "outline": "#565656",
+    "outline": "#aca494",
     "outlineWidth": "1px",
-    "unfocusedEdge": "#1b1b1b",
-    "panel": "#282828"
+    "unfocusedEdge": "#f8f6f2",
+    "panel": "#e6e2db"
   },
   "monacoClasses": "monaco-editor no-user-select showUnused showDeprecated vs"
 }

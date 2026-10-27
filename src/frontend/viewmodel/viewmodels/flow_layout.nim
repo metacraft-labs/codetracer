@@ -77,7 +77,7 @@
 ## the backend has no business making, because they depend on source text and
 ## on what the surface is going to draw.
 
-import std/[algorithm, strutils]
+import std/[algorithm, json, strutils, tables]
 
 import ../../ui/flow_loop_math
 export flow_loop_math
@@ -518,26 +518,39 @@ func sourceIndentLevel*(text: string; tabSize: int = 4): int =
 
 type
   FlowValueText* = object
-    ## One recorded variable at one step, already rendered to text.
+    ## One recorded variable at one step: its text, and the recorded value.
     ##
-    ## Text rather than a structured `Value`, on purpose. `Value`
-    ## (`frontend/types.nim`) is a desktop type whose renderings reach the DOM,
-    ## and `frontend/types.nim` is banned from the SDK's import graph by
-    ## `ci/test/sdk-facade-boundary.sh` because `ReplaySession.savedLayoutConfig`
-    ## is a GoldenLayout config. Layout needs the *width* and the *identity* of a
-    ## value, never its structure — so the caller renders, and this module
-    ## places.
+    ## Layout needs the *width* and the *identity* of a value, never its
+    ## structure, so placement reads `text` (PLAT-2's rendering at the flow
+    ## budget). The structure is carried beside it as the recorded value tree,
+    ## for the readers that need it — a typed tooltip, the scratchpad — not as
+    ## the desktop's `Value` (`frontend/types.nim`, banned from the SDK's
+    ## import graph by `ci/test/sdk-facade-boundary.sh`): a `JsonNode`, which
+    ## both backends hold and which is exactly the wire's value.
     expression*: string
     text*: string
+    value*: JsonNode
+      ## The recorded value tree (`common_types` `Value` on the wire); nil
+      ## when the step recorded none for `expression`.
+    truncated*: bool
+      ## `text` was cut to fit the flow budget (`Presentation.truncated`), so
+      ## a surface offers the whole value some other way.
+
+  FlowLayoutEvent* = object
+    ## An event a step recorded (`FlowEvent`): output the program wrote, an
+    ## error, an EVM event.
+    kind*: int
+      ## `EventLogKind`'s ordinal (`common_types/codetracer_features/events`).
+    text*: string
+    metadata*: string
 
   FlowLayoutStep* = object
     ## One `FlowStep` of the loaded window, with the desktop's `JsAssoc` and
     ## `cstring` replaced by types that compile on both backends.
     ##
-    ## Field-for-field the subset of
-    ## `common/common_types/codetracer_features/flow.nim:FlowStep` that any
-    ## placement decision reads. `events` is absent: a flow event is content, and
-    ## whatever renders it decides its own placement.
+    ## Field-for-field `common/common_types/codetracer_features/flow.nim:FlowStep`
+    ## — the subset placement reads, and the content a surface draws (values
+    ## and events).
     stepCount*: int
     line*: int          ## `FlowStep.position` — a source line number
     loopIndex*: int     ## `FlowStep.loop`; 0 means "outside any real loop"
@@ -546,6 +559,17 @@ type
     exprOrder*: seq[string]
     beforeValues*: seq[FlowValueText]
     afterValues*: seq[FlowValueText]
+      ## The step's variables. The `return` pseudo-expression is not among
+      ## them — placement treats it as no variable — but in the two fields
+      ## below, for the surfaces that draw it.
+    beforeReturn*: FlowValueText
+    afterReturn*: FlowValueText
+      ## The step's `return` value, if it recorded one (`value` nil if not).
+    events*: seq[FlowLayoutEvent]
+    originSummaries*: JsonNode
+      ## Value Origin Tracking's per-variable summaries
+      ## (`FlowStep.origin_summaries`), as the wire carries them; nil when the
+      ## step has none. Content for a surface's origin badges.
 
   FlowLayoutLoop* = object
     ## One `Loop` of the loaded window.
@@ -561,7 +585,27 @@ type
     registeredLine*: int  ## the line the loop control is attached to
     stepCounts*: seq[int]
     rrTicksForIterations*: seq[int]
+    iteration*: int
+      ## How many passes the loop made (`Loop.iteration`).
     iterationSteps*: seq[seq[tuple[line: int, stepCount: int]]]
+
+  FlowBranchExtent* = object
+    ## The lines of a conditional arm, its header excluded (`BranchExtent`).
+    firstLine*: int
+    lastLine*: int
+
+  FlowBranchTable* = object
+    ## One pass's branch states (`BranchesTaken`): header line → state
+    ## (`BranchState`'s ordinal: 0 unknown, 1 taken, 2 not taken), and header
+    ## line → the arm's interior where the engine located it.
+    table*: Table[int, int]
+    extents*: Table[int, FlowBranchExtent]
+
+  FlowWindowSpan* = object
+    ## The function the window is on, as lines (`Location.functionFirst` /
+    ## `functionLast`).
+    functionFirst*: int
+    functionLast*: int
 
   FlowLayoutWindow* = object
     ## Everything a placement decision needs about one loaded flow window.
@@ -575,6 +619,27 @@ type
     loops*: seq[FlowLayoutLoop]
     sourceLines*: seq[string]
     tabSize*: int
+    # -- What the window is, and the per-line facts the flow's line styling
+    #    reads (`common/flow_line_rule`, by these names). --
+    key*: string
+      ## The engine's identity of the window's function call
+      ## (`Location.key`): a new key is a new structure (lines, loops).
+    path*: string
+    highLevelPath*: string
+    functionName*: string
+    rrTicks*: int
+      ## The debugger tick the window was computed for.
+    location*: FlowWindowSpan
+    branchesTaken*: seq[seq[FlowBranchTable]]
+      ## Per loop, per pass: `branchesTaken[0][0]` is the window outside every
+      ## loop.
+    commentLines*: seq[int]
+    relevantStepCount*: seq[int]
+      ## The lines the engine reports as reached (the wire's name).
+    positionStepCounts*: Table[int, seq[int]]
+      ## Source line → the steps that ran it, in order.
+    finished*: bool
+      ## The engine finished computing the window (`FlowUpdate.finished`).
 
 func lineText*(window: FlowLayoutWindow; line: int): string =
   ## The source text of `line`, or `""` when the window does not carry it.

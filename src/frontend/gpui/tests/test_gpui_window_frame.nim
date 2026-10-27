@@ -95,7 +95,41 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 665
+const ExpectedAssertions = 732
+  ## 2026-10-21 (window activation): 731 -> 732, measured — `CHECKS: 732`
+  ## against isonim-gpui `d4325e9` plus its uncommitted `onWindowActivated`.
+  ## The third route: `window.nim` exports one more proc, and it joined
+  ## `LaunchedWindowNames` (it is registered on `launchWindow()`, as
+  ## `onWindowState` is), whose exports the derived-sets case checks one by
+  ## one (+1). The registry subjects stay 8, so the scan's per-file body is
+  ## unchanged.
+  ## 2026-10-20 (no-window refusal): 708 -> 731, measured — `CHECKS: 731`
+  ## over BOTH the HEAD record and the re-recorded one, `CHECKS: 708` for the
+  ## HEAD suite. Two routes: ONE more non-test file under `src/frontend/gpui/`
+  ## (`window_preflight.nim`), `1 + 8 = 9` in the registry scan (+9); and the
+  ## exit-code case now also reads each windowed run's `refusal` (+6), each
+  ## featureless run's refusal line beside its rc (+6) and the featureless
+  ## edit-mode run's rc and refusal (+2).
+  ## 2026-10-17 (desktop-parity redesign): 680 -> 708, by the second and
+  ## third routes above. THREE more non-test files under `src/frontend/gpui/`
+  ## (`design_fonts.nim`, `design_font_metrics.nim`, `devicon_marks.nim`),
+  ## each `1 + 8 = 9` in the registry scan (+27), and `addFontFile` joined
+  ## `LaunchedWindowNames`, whose exports the derived-sets case checks one
+  ## by one (+1). `window.nim` exports 32 procs: 32 - 6 - 18 = 8 subjects.
+  ## PLAT-69: 675 -> 680, RE-DERIVED against `isonim-gpui` `b68f115`, whose
+  ## `window.nim` exports 31 procs (15 at `47ea664`): GWIN added the
+  ## operations on the window `gpui_launch` opens, and this front-end now
+  ## uses them (`window_chrome.nim`). They are not the registry, so they are
+  ## a second declared, checked exclusion (`LaunchedWindowNames`, 18 names),
+  ## which leaves 31 - 6 - 17 = 8 registry subjects. The tally: the scan's
+  ## per-file body is `1 + 8 = 9` over 22 files (`window_chrome.nim` is the
+  ## new one) = 198, where it was `1 + 9 = 10` over 21 = 210 (-12); the
+  ## derived-sets case checks the 17 new exclusions are exports (+17). Net
+  ## +5. Measured: the same suite printed `CHECKS: 1011` against `b68f115`
+  ## before this change — 21 files x (1 + 25) with no second exclusion, the
+  ## red it was on arrival — and `CHECKS: 680` with it.
+  ## PLAT-57: 665 -> 675 — ONE more non-test file under `src/frontend/gpui/`,
+  ## `search_results_leaf.nim` (Find in Files), by the same route.
   ## PLAT-51 part B: 655 -> 665 — ONE more non-test file under
   ## `src/frontend/gpui/`, `welcome_leaf.nim` (the Welcome Screen a new tab
   ## shows), by the second route above (10 assertions in the registry scan).
@@ -881,18 +915,42 @@ suite "PLAT-37: the event loop ends and the lane terminates":
       ck cap > 0
       ck elapsed < 2 * cap
 
-  test "every windowed run exited rc 0":
+  test "every windowed run exited rc 0, and every featureless run REFUSED by name":
+    # `refusal` is read as a PRESENT string, never defaulted: a record from
+    # before the field existed would otherwise read "" — "no refusal" — and
+    # the windowed half below would hold for free (§4).
+    template refusalOf(entry: JsonNode): string =
+      (if entry.isNil or entry{"refusal"}.isNil or
+          entry{"refusal"}.kind != JString: "<absent>"
+       else: entry{"refusal"}.getStr)
     for id in scenarios:
       let entry = runEntry("windowed", id)
       ck not entry.isNil
       ck (not entry.isNil) and entry{"binaryRc"}.getInt(-1) == 0
-    # AND SO DID THE FEATURELESS ARM. This is the half that makes `DIFF-6` a
-    # difference in PIXELS rather than a difference in whether the binary
-    # worked: a featureless run that crashed would produce no frame for a
-    # reason that has nothing to do with the renderer.
+      ck refusalOf(entry) == ""
+    # THE FEATURELESS ARM REFUSES, AND THAT IS STRONGER THAN THE rc 0 THIS
+    # CASE USED TO ASSERT. It is still the half that makes `DIFF-6` a
+    # difference in PIXELS rather than in whether the binary worked — but the
+    # old reading of "worked" was a silent rc 0 from a launch that opened
+    # nothing, which is the defect
+    # `codetracer-pm/issues/2026-10-01-gpui-launch-is-silent-when-no-window-can-open.md`
+    # records. Now the binary asks the shim first and refuses BY KIND with
+    # exit 3 (`window_preflight.ExitNoWindow`), so this asserts both the code
+    # and WHICH refusal: a crash that happened to exit 3, or the no-display
+    # refusal (this arm runs inside sway, which has a display), would be a
+    # featureless run that produced no frame for a reason that has nothing to
+    # do with the renderer. The plan is still written — `--plan-out` runs
+    # before the window path — which the falsifier below asserts separately.
     for id in scenarios:
       let entry = runEntry("featureless", id)
-      ck (not entry.isNil) and entry{"binaryRc"}.getInt(-1) == 0
+      ck (not entry.isNil) and entry{"binaryRc"}.getInt(-1) == 3
+      ck refusalOf(entry).startsWith(
+        "codetracer-gpui: this build of the GPUI shim has no window backend")
+    # And the second product mode, through the same window path.
+    let edit = modeEntry("featureless", "edit-mode")
+    ck (not edit.isNil) and edit{"binaryRc"}.getInt(-1) == 3
+    ck refusalOf(edit).startsWith(
+      "codetracer-gpui: this build of the GPUI shim has no window backend")
 
 # ===========================================================================
 # PLAT35-VG1, RETIRED
@@ -1243,6 +1301,30 @@ const AmbiguousWindowNames = ["state", "size", "width", "height", "show",
   ## rather than silently emptying the exclusion and, with it, shrinking the
   ## scan.
 
+const LaunchedWindowNames = [
+  "launchWindow", "onResize", "onWindowState", "clientDecorated",
+  "tiledEdges", "supportedControls", "isMaximized", "isActive",
+  "buttonLayout", "setTitle", "setAppId", "setMinWindowSize",
+  "setInitialWindowState", "minimize", "toggleMaximize", "toggleFullscreen",
+  "requestClose", "addFontFile", "onWindowActivated"]
+  ## PLAT-69: `window.nim`'s operations on THE WINDOW `gpui_launch` OPENS
+  ## (isonim-gpui GWIN: `launchWindow()` names it, and the rest read or act
+  ## on it, or are the launch options read before `gpui_launch`). They are the
+  ## opposite of what this scan forbids — the registry path that opens
+  ## nothing — and `window_chrome.nim` calls them so the window can be a
+  ## desktop window. `onResize` is the registry's callback API AS GWIN USES
+  ## IT: registered on `launchWindow()`, which `gpui_launch` notifies.
+  ## `addFontFile` (2026-10-17) is a launch option too: the design system's
+  ## font files, handed to the text system `gpui_launch` creates
+  ## (`design_fonts.registerDesignFonts`). `onWindowActivated` (2026-10-21)
+  ## is `onWindowState`'s twin for the inactive-to-active edge, registered on
+  ## `launchWindow()` the same way (`window_chrome.subscribeWindow`), so the
+  ## VCS pane re-reads its repository when the user returns to the window.
+  ##
+  ## Declared and checked as `AmbiguousWindowNames` is: each must still be
+  ## exported, and a proc added upstream lands in the FORBIDDEN set until
+  ## somebody adds it here and says why — the safe direction for a scan.
+
 proc exportedWindowProcs(): seq[string] =
   ## Parse `proc <name>*(` out of the sibling's window module.
   result = @[]
@@ -1385,6 +1467,8 @@ suite "PLAT-37: the front-end reaches the window through gpui_launch":
     # Every declared exclusion is still a real export upstream.
     for name in AmbiguousWindowNames:
       ck name in exported
+    for name in LaunchedWindowNames:
+      ck name in exported
 
   test "no source file CALLS the window registry, comments excluded":
     # **TWO SWITCHES ARE OFF, NOT ONE, AND THIS IS THE SECOND.**
@@ -1396,9 +1480,10 @@ suite "PLAT-37: the front-end reaches the window through gpui_launch":
     # which is what every milestone from PLAT-20 to PLAT-23 was doing.
     var subjects: seq[string] = @[]
     for name in exported:
-      if name in AmbiguousWindowNames: continue
+      if name in AmbiguousWindowNames or name in LaunchedWindowNames: continue
       subjects.add name
-    ck subjects.len == exported.len - AmbiguousWindowNames.len
+    ck subjects.len == exported.len - AmbiguousWindowNames.len -
+                       LaunchedWindowNames.len
     ck subjects.len > 0
     for path in sources:
       let (code, hasBlockComment) = splitCode(readFile(path))

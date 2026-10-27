@@ -418,10 +418,19 @@ proc parseTestEventLine*(line: string): Option[TestEvent] {.noSideEffect.} =
   if stripped.len < 2 or stripped[0] != '{':
     return none(TestEvent)
   var node: JsonNode
+  # BARE `except:`, and the bare form is the fix, not sloppiness. `parseJson`
+  # raises `JsonParsingError` on the C backend but lets V8's raw `SyntaxError`
+  # through on the JS backend, which is not a `CatchableError` — so the typed
+  # arm this used to have caught nothing in the Electron renderer and a line
+  # such as `{not json` escaped this "decline, never fail" recogniser as an
+  # exception. Measured 2026-10-21: `test_desktop_suite_run_gives_verdicts.nim`
+  # failed under `nim js` only, with `Unhandled exception: Expected property
+  # name or '}' in JSON at position 1`. CONTRIBUTING.md, "Code compiled for
+  # both backends"; `noir_nargo.jsonLineOrNil` documents the same trap.
   try:
     {.cast(noSideEffect).}:
       node = parseJson(stripped)
-  except CatchableError:
+  except:
     return none(TestEvent)
   if node.isNil or node.kind != JObject:
     return none(TestEvent)
@@ -432,7 +441,8 @@ proc parseTestEventLine*(line: string): Option[TestEvent] {.noSideEffect.} =
   try:
     {.cast(noSideEffect).}:
       return some(testEventFromJson(node))
-  except CatchableError:
+  except:
+    # Bare for the reason above: a decode fault must decline on both backends.
     return none(TestEvent)
 
 proc parseTestRun*(text: string): Option[TestRunSummary] =

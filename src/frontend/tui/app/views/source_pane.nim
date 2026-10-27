@@ -77,6 +77,9 @@ import ./gutter
 import ./heatmap
 import ./inline_annotations
 import ./styled_row
+import ./scrubber_track
+from codetracer_embed import HorizontalView, setViewport, overflows, barModel,
+  ScrubberModel, scrubberModel
 
 export gutter, heatmap, inline_annotations, styled_row, highlighter, profile
 
@@ -132,6 +135,12 @@ type
       ## read-only editor"): the read-only editor's CARET — the cell drawn in
       ## reverse video, distinct from the execution line's band and from the
       ## inspection cursor's ` ▹ `. Line 0: no caret.
+    selected*: seq[tuple[line, fromColumn, toColumn: int]]
+      ## PLAT-68: the read-only editor's SELECTION (Shift+arrows, Ctrl+A, a
+      ## drag, a find match — its document's selection, Monaco's read-only
+      ## mode): per line, the 1-based cell columns `[fromColumn, toColumn)`
+      ## painted on the selection ground. `toColumn` past the line's end
+      ## covers the line break, as a selection that continues does.
     columnMarks*: seq[(int, int)]
       ## PLAT-50 (K14): the column breakpoints on this file, `(line,
       ## column)` — the cell they are anchored at is marked in the code, as
@@ -139,6 +148,13 @@ type
     values*: seq[Annotation]
       ## What the ViewModel reports at THIS tick. Rebuilt every frame; see
       ## `inline_annotations.nim` on why nothing here is cached.
+    lineValues*: seq[(int, seq[Annotation])]
+      ## The FLOW's values, by line (`editor_surface.flowValuesByLine` — the
+      ## rule GPUI's editor draws): every line of the current function the run
+      ## reached, drawn as they are, beside the code. A line listed here shows
+      ## these instead of `values`; the execution line falls back to `values`
+      ## (filtered by the names its text mentions) when the flow has nothing
+      ## for it. Empty when the flow overlay is hidden.
     heat*: LineHeat
     notTakenLines*: seq[int]
       ## The flow overlay: lines inside a branch arm the recorded run DECLINED,
@@ -151,6 +167,15 @@ type
       ## Page-Descriptions.md §14's row, when there is one. Rendered in the
       ## body rather than invented here: the string comes from the binding,
       ## which reads `EditorVM.degradedState`.
+    hview*: HorizontalView
+      ## PLAT-70 (Horizontal-Overflow.md §4): the read-only editor's
+      ## horizontal view — its document's, after the runtime's caret-follow.
+      ## The code is drawn from `hview.leftCol`; the bar while it overflows.
+    caretViewColumn*: int
+      ## The caret's 0-based view column (`editing_core.caretViewColumn`):
+      ## the bar's mark (§4.2).
+    overflowMarkers*: bool
+      ## `view.overflow-markers` (§4.6).
 
   SourcePaneScreen* = object
     ## One painted pane, plus the counts a test asserts on.
@@ -165,11 +190,43 @@ type
       ## Visible lines the model did not hold. Never rendered blank.
     annotatedLines*: int
       ## Lines that carried an inline annotation.
+    barRow*: int
+      ## PLAT-70: the horizontal bar's row, -1 when the content fits.
+    trackCol*: int
+      ## M73 (#840): the vertical bar's column, -1 when the file fits.
+    trackTop*: int
+    trackRows*: int
+      ## Its first row and its height: the body rows, never the corner cell
+      ## the horizontal bar's row would give it (Scrollbar-Scrubbers.md §6).
+
+  SourceTrack* = object
+    ## M73 (#840): where the pane's VERTICAL bar is painted, and the model it
+    ## is drawn over — what `paintSourcePane` draws and what a press on it is
+    ## hit-tested against, from one computation.
+    shown*: bool
+    col*: int
+    top*: int
+    rows*: int
+    model*: ScrubberModel
+      ## Scrollbar-Scrubbers.md §3 over the FILE: every line of it is the
+      ## population, the window the first visible one, the mark the
+      ## execution line (§3.5's "now", in the pointer's colour).
+
+  SourcePaneLayout* = object
+    ## The cells the pane divides `area` into. ONE function computes all of
+    ## it (`sourcePaneLayout`) because the two bars depend on each other: the
+    ## vertical one takes a column from the code, which can make a line
+    ## overflow and bring the horizontal one, which takes a row from the body.
+    gutterWidth*: int
+    codeWidth*: int
+    bodyRows*: int
+    bar*: tuple[shown: bool; row, left, cols: int; view: HorizontalView]
+    track*: SourceTrack
 
 const
   SourcePaneTitle* = "SOURCE"
-  PaneRule* = "─"
-  SourceLoadingText* = "⋯ loading"
+  PaneRule* = canonical(grDividerH)
+  SourceLoadingText* = canonical(grLoading) & " loading"
     ## What a visible-but-unheld line shows. See this module's header: never a
     ## blank, because a blank is how a source pane lies about a working
     ## debugger.
@@ -251,7 +308,9 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
                           inspectionLine = 0;
                           notTakenLines: seq[int] = @[];
                           entryContext = "";
-                          columnMarks: seq[(int, int)] = @[]): SourcePaneModel =
+                          columnMarks: seq[(int, int)] = @[];
+                          lineValues: seq[(int, seq[Annotation])] = @[]):
+                         SourcePaneModel =
   ## `inspectionLine` is LAST and defaults to 0, so every CTUI-5 call site
   ## builds exactly the model it built before CTUI-6 existed.
   SourcePaneModel(
@@ -262,7 +321,19 @@ proc initSourcePaneModel*(path = ""; revisionLabel = "";
     executionLine: executionLine, inspectionLine: inspectionLine,
     marks: marks, columnMarks: columnMarks, values: values, heat: heat,
     notTakenLines: notTakenLines, gutterMode: gutterMode,
-    degradedMessage: degradedMessage)
+    degradedMessage: degradedMessage, lineValues: lineValues)
+
+proc annotationsAt*(model: SourcePaneModel; line: int;
+                    lineText: string): seq[Annotation] =
+  ## The values drawn beside `line`: the flow's for it when it has any
+  ## (`lineValues`), else — on the execution line only — the names in scope
+  ## its text mentions. ONE answer for every front-end: GPUI's rows carry the
+  ## same (`editor_surface.editorSurfaceFor`).
+  for (l, vs) in model.lineValues:
+    if l == line:
+      return vs
+  if line == model.executionLine and line > 0 and model.values.len > 0:
+    return annotationsForLine(lineText, model.values)
 
 # ---------------------------------------------------------------------------
 # Reading the model
@@ -322,7 +393,8 @@ proc paneGutterWidth*(model: SourcePaneModel): int =
 # Painting
 # ---------------------------------------------------------------------------
 
-proc titleRowSpans*(model: SourcePaneModel; width: int): StyledRow =
+proc titleRowSpans*(model: SourcePaneModel; width: int;
+                    glyphs = DefaultGlyphs): StyledRow =
   ## The title row as styled spans, exactly `width` cells wide.
   ##
   ## Built as a list of (text, style) pairs and then fitted, rather than
@@ -353,7 +425,7 @@ proc titleRowSpans*(model: SourcePaneModel; width: int): StyledRow =
     result.add StyledSpan(text: " ", style: DefaultCellStyle)
     inc used
   if used < width:
-    result.add StyledSpan(text: repeatGlyph(PaneRule, width - used),
+    result.add StyledSpan(text: repeatGlyph(glyphs.glyph(grDividerH), width - used),
                           style: RuleStyle)
 
 proc titleRowText*(model: SourcePaneModel; width: int): string =
@@ -367,7 +439,7 @@ proc paintTitleRow(g: var StyledGrid; row, col, width: int;
   if width <= 0:
     return
   var at = col
-  for span in titleRowSpans(model, width):
+  for span in titleRowSpans(model, width, g.glyphs):
     g.paint(row, at, span.text, span.style)
     at += cellWidthOf(span.text)
 
@@ -385,6 +457,76 @@ proc restyleClamped(g: var StyledGrid; row, col, width, lo, hi: int;
   if stop > start:
     g.restyle(row, start, stop - start, transform)
 
+const
+  MinSourceTrackWidth* = 8
+    ## M73 (#840): the narrowest pane that gives a column to the vertical bar
+    ## — the call trace's `MinTrackedWidth`, for the same reason: below it the
+    ## column is worth more as text.
+
+proc sourcePaneLayout*(model: SourcePaneModel; area: CellArea): SourcePaneLayout =
+  ## Where `paintSourcePane` puts the gutter, the code, PLAT-70's horizontal
+  ## bar and M73's vertical bar in `area` — the one computation the painter,
+  ## the click read-back and the runtime's hit-tests all use.
+  ##
+  ## THE VERTICAL BAR IS OVERFLOW-ONLY, as the horizontal one is
+  ## (Horizontal-Overflow.md §4.7) and as Monaco's `vertical: 'auto'`
+  ## scrollbar is: it takes the pane's rightmost column (Scrollbar-Scrubbers.md
+  ## §4, "inside the pane's own rectangle") only while the file has more lines
+  ## than the body has rows. A file that fits paints exactly the pane it did
+  ## before M73. The order matters: the column is decided first, against the
+  ## rows the horizontal bar leaves at the full code width; the horizontal bar
+  ## is then decided at the narrower width, and where both are shown their
+  ## corner cell is left to neither (§6).
+  let gutW = min(area.width, model.paneGutterWidth())
+  let fullW = max(0, area.width - gutW)
+  var view = model.hview
+  view.setViewport(fullW)
+  let barAtFull = view.overflows and area.height >= 3
+  let rowsAtFull = area.height - 1 - (if barAtFull: 1 else: 0)
+  # §14's absent file draws no row of text, so it has nothing to scroll.
+  let absent = model.provenance == gpAbsent and model.heldLines.len == 0
+  let tracked = not absent and area.width >= MinSourceTrackWidth and
+                fullW >= 2 and rowsAtFull >= 1 and
+                model.totalLineCount > rowsAtFull
+  let codeW = if tracked: fullW - 1 else: fullW
+  view = model.hview
+  view.setViewport(codeW)
+  let barShown = view.overflows and area.height >= 3
+  let bodyRows =
+    if absent: 0
+    else: max(0, area.height - 1 - (if barShown: 1 else: 0))
+  result.gutterWidth = gutW
+  result.codeWidth = codeW
+  result.bodyRows = bodyRows
+  result.bar = (shown: barShown, row: area.row + area.height - 1,
+                left: area.col + gutW, cols: codeW, view: view)
+  if tracked and bodyRows > 0:
+    result.track = SourceTrack(
+      shown: true, col: area.col + area.width - 1, top: area.row + 1,
+      rows: bodyRows,
+      model: scrubberModel(model.totalLineCount, max(0, model.viewportTop - 1),
+                           bodyRows,
+                           (if model.executionLine > 0: model.executionLine - 1
+                            else: -1)))
+
+proc sourceBarOf*(model: SourcePaneModel; area: CellArea):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## PLAT-70: where `paintSourcePane` draws the horizontal bar in `area`, and
+  ## the view it is drawn over — what a press on it is hit-tested against.
+  ## M73: one column narrower while the vertical bar is shown
+  ## (`sourcePaneLayout`).
+  model.sourcePaneLayout(area).bar
+
+proc sourceTrackOf*(model: SourcePaneModel; area: CellArea): SourceTrack =
+  ## M73 (#840): where `paintSourcePane` draws the vertical bar in `area`.
+  model.sourcePaneLayout(area).track
+
+proc sourceCodeWidth*(model: SourcePaneModel; area: CellArea): int =
+  ## The code columns of the pane painted into `area` — the width the
+  ## horizontal view is measured against (PLAT-70), less the vertical bar's
+  ## column while it is shown (M73).
+  model.sourcePaneLayout(area).codeWidth
+
 proc paintSourcePane*(g: var StyledGrid; area: CellArea;
                       model: SourcePaneModel;
                       cache: HighlighterCache = nil): SourcePaneScreen =
@@ -395,12 +537,16 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
   ## which is what the cold-parse benchmark measures.
   result = SourcePaneScreen(rows: @[], area: area, gutterWidth: 0,
                             codeWidth: 0, materializedLines: 0,
-                            loadingLines: 0, annotatedLines: 0)
+                            loadingLines: 0, annotatedLines: 0, barRow: -1,
+                            trackCol: -1, trackTop: -1, trackRows: 0)
   if area.width <= 0 or area.height <= 0:
     return
 
-  let gutW = min(area.width, model.paneGutterWidth())
-  let codeW = max(0, area.width - gutW)
+  # M73: the gutter, the code and both bars from ONE computation, so the
+  # painter, the click read-back and the runtime's hit-tests cannot disagree.
+  let layout = model.sourcePaneLayout(area)
+  let gutW = layout.gutterWidth
+  let codeW = layout.codeWidth
   let numberWidth = gutterNumberWidth(largestGutterNumber(model))
   result.gutterWidth = gutW
   result.codeWidth = codeW
@@ -422,7 +568,14 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       cache.highlight(model.path, 0, "", model.firstHeldLine, model.heldLines,
                       model.entryContext)
 
-  let bodyRows = area.height - 1
+  # PLAT-70: THE HORIZONTAL VIEW, at this pane's code width; the bar takes
+  # the last row only while the content overflows (Horizontal-Overflow §4.7).
+  let bar = layout.bar
+  let view = bar.view
+  let left = view.leftCol
+  # Absent (§14's `savAbsent`): no line of this file will arrive, so no row is
+  # drawn as `⋯ loading` — the degraded message below names the missing file.
+  let bodyRows = layout.bodyRows
   for i in 0 ..< bodyRows:
     let row = area.row + 1 + i
     let line = model.viewportTop + i
@@ -442,11 +595,11 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       provenance = model.provenance,
       isInspectionLine = line == model.inspectionLine and line > 0)
     if model.gutterMode == gutExecutionCounts:
-      spec.numberText = model.heat.heatCountText(line)
+      spec.numberText = model.heat.heatCountText(line, g.glyphs)
       spec.numberStyle = model.heat.heatStyle(line)
 
     var at = area.col
-    for span in gutterRow(spec):
+    for span in gutterRow(spec, g.glyphs):
       if at >= area.col + gutW:
         break
       let room = area.col + gutW - at
@@ -460,19 +613,19 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
     let codeCol = area.col + gutW
     if not model.holdsLine(line):
       inc result.loadingLines
-      let loading = truncateToCells(SourceLoadingText, codeW)
+      let loading = truncateToCells(g.glyphText(grLoading) & " loading", codeW)
       g.paint(row, codeCol, loading, SourceLoadingStyle)
     else:
       inc result.materializedLines
       let raw = model.heldTextAt(line)
-      let text = truncateToCells(raw, codeW)
+      let text = cellSlice(raw, left, left + codeW)
       g.paint(row, codeCol, text, DefaultCellStyle)
       let shown = cellWidthOf(text)
       for span in file.spansForLine(line):
         if span.class == tcPlain:
           continue
-        let lo = codeCol + max(0, span.startCell)
-        let hi = codeCol + min(shown, span.endCell)
+        let lo = codeCol + max(0, span.startCell - left)
+        let hi = codeCol + min(shown, span.endCell - left)
         if hi <= lo:
           continue
         let style = tokenStyle(span.class)
@@ -494,20 +647,24 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       # breakpoint's colour — the desktop's inline `ct-column-breakpoint-
       # marker` on the one character the breakpoint is anchored at.
       for (ml, mc) in model.columnMarks:
-        if ml == line and mc >= 1 and mc <= shown:
-          g.restyle(row, codeCol + mc - 1, 1, proc(s: CellStyle): CellStyle =
+        if ml == line and mc - left >= 1 and mc - left <= shown:
+          g.restyle(row, codeCol + mc - left - 1, 1, proc(s: CellStyle): CellStyle =
             var out2 = s
             out2.role = srGutterBreakpoint
             out2.underline = true
             out2)
-      # The inline annotation, for the EXECUTION line only. §3.3.2 renders the
-      # evaluated values "at the current step", and a value printed beside a
-      # line the debugger is not on is a value from another moment.
-      if line == model.executionLine and model.values.len > 0:
-        let span = annotationSpan(raw, model.values, codeW, shown)
+      # The inline annotation: the flow's values on every line the run
+      # reached in this function (the step's own values, recorded at that
+      # step, so not a value from another moment), and the names in scope on
+      # the execution line where the flow has none (`annotationsAt`).
+      let annotations = model.annotationsAt(line, raw)
+      if annotations.len > 0:
+        let span = shownAnnotationSpan(annotations, codeW, shown, g.glyphs)
         if span.text.len > 0:
           inc result.annotatedLines
           g.paint(row, codeCol + shown + AnnotationGap, span.text, span.style)
+      if model.overflowMarkers:
+        paintOverflowMarkers(g, row, codeCol, cellWidthOf(raw), view)
 
     if line == model.executionLine and line > 0:
       # §3.3.2's "background highlight on current active execution line",
@@ -533,22 +690,70 @@ proc paintSourcePane*(g: var StyledGrid; area: CellArea;
       # its 56-column pane with the full-width band, and
       # `test_plat47_desktop_parity.nim` reads the band back off a real PTY
       # to the pane's last column.
-      g.restyle(row, codeCol, area.col + area.width - codeCol,
+      #
+      # M73: TO THE CODE'S LAST COLUMN, which is the pane's last column
+      # unless the vertical bar holds it — the band never paints over the
+      # track (Scrollbar-Scrubbers.md §4: the track is the pane's rightmost
+      # column, and the desktop's band ends at Monaco's scrollbar too).
+      g.restyle(row, codeCol, codeW,
                 proc(s: CellStyle): CellStyle =
                   s.withBackground(ExecutionLineBackground))
+    # PLAT-68: THE SELECTION, on the design system's selection ground, under
+    # the caret.
+    for sel in model.selected:
+      if sel.line == line and sel.toColumn > sel.fromColumn:
+        let first = max(1, sel.fromColumn - left)
+        let last = min(codeW + 1, sel.toColumn - left)
+        if last > first:
+          g.restyle(row, codeCol + first - 1, last - first,
+                    proc(s: CellStyle): CellStyle =
+                      s.withBackground(srSurfaceSelection))
     # PLAT-51: THE CARET, over everything — its cell reversed (a caret past
     # the line's end sits on the blank cell after it).
-    if line == model.caretLine and line > 0 and model.caretColumn >= 1 and
-       model.caretColumn <= codeW:
-      g.restyle(row, codeCol + model.caretColumn - 1, 1,
+    if line == model.caretLine and line > 0 and
+       model.caretColumn - left >= 1 and model.caretColumn - left <= codeW:
+      g.restyle(row, codeCol + model.caretColumn - left - 1, 1,
                 proc(s: CellStyle): CellStyle =
                   var out2 = s
                   out2.reverse = true
                   out2)
 
+  if layout.track.shown:
+    # M73 (#840): THE VERTICAL BAR — Scrollbar-Scrubbers.md §4's terminal
+    # track down the pane's rightmost column over the body rows, the thumb in
+    # eighths for the window over the WHOLE file, the execution line marked in
+    # the pointer's colour. Painted after the rows so nothing a row draws (the
+    # band, an inline value) can cover it; its corner with the horizontal bar
+    # is left to neither (§6).
+    let t = layout.track
+    paintVerticalScrubber(g, t.col, t.top, t.rows, t.model)
+    result.trackCol = t.col
+    result.trackTop = t.top
+    result.trackRows = t.rows
+
+  if bar.shown and bodyRows > 0:
+    # §4.7: the last row, one cell high, over the code columns.
+    result.barRow = bar.row
+    paintHorizontalBar(g, bar.row, bar.left, bar.cols,
+                       view.barModel(model.caretViewColumn))
+
   if model.degradedMessage.len > 0 and area.height >= 2:
-    g.paint(area.row + 1, area.col,
-            truncateToCells(model.degradedMessage, area.width), DegradedStyle)
+    if bodyRows == 0:
+      # Absent: the rows are free, so the message is WRAPPED over them rather
+      # than cut — its tail is the missing file's name.
+      var rest = model.degradedMessage
+      var row = area.row + 1
+      while rest.len > 0 and row < area.row + area.height:
+        let piece = truncateToCells(rest, area.width)
+        g.paint(row, area.col, piece, DegradedStyle)
+        if piece.len == 0 or piece.len >= rest.len: break
+        rest = rest[piece.len .. ^1]
+        inc row
+    else:
+      # Left of the vertical bar while it is shown (M73).
+      let room = area.width - (if layout.track.shown: 1 else: 0)
+      g.paint(area.row + 1, area.col,
+              truncateToCells(model.degradedMessage, room), DegradedStyle)
 
   for r in area.row ..< area.row + area.height:
     result.rows.add g.rowSpansIn(r, area.col, area.width)
@@ -573,31 +778,41 @@ proc sourceClickTargetAt*(model: SourcePaneModel; area: CellArea;
                           row, col: int): SourceClickTarget =
   ## A press at `(row, col)` on the pane `paintSourcePane` painted into
   ## `area`, read back by the same arithmetic: the line, the gutter or the
-  ## code column, and on the execution line which inline value it is on.
+  ## code column, and on a line with inline values which one it is on.
   result = SourceClickTarget(value: -1)
   if area.width <= 0 or area.height <= 1 or row <= area.row or
      row >= area.row + area.height or col < area.col or
      col >= area.col + area.width:
     return
+  let layout = model.sourcePaneLayout(area)
+  let gutW = layout.gutterWidth
+  let codeW = layout.codeWidth
+  let bar = layout.bar
+  let view = bar.view
+  # PLAT-70: the horizontal bar's row is the bar's, never a line.
+  if bar.shown and row == bar.row:
+    return
+  # M73: and the vertical bar's column is the bar's, never a column of text.
+  if layout.track.shown and col == layout.track.col:
+    return
   let line = model.viewportTop + (row - area.row - 1)
   if line < 1 or (model.totalLineCount > 0 and line > model.totalLineCount):
     return
   result.line = line
-  let gutW = min(area.width, model.paneGutterWidth())
-  let codeW = max(0, area.width - gutW)
   if col < area.col + gutW:
     result.onGutter = true
     return
   let codeCol = area.col + gutW
-  result.column = col - codeCol + 1
+  result.column = col - codeCol + 1 + view.leftCol
   if not model.holdsLine(line):
     return
   let raw = model.heldTextAt(line)
   result.lineText = raw
-  if line == model.executionLine and model.values.len > 0:
-    let shown = cellWidthOf(truncateToCells(raw, codeW))
+  let annotations = model.annotationsAt(line, raw)
+  if annotations.len > 0:
+    let shown = cellWidthOf(cellSlice(raw, view.leftCol, view.leftCol + codeW))
     let start = codeCol + shown + AnnotationGap
-    let targets = annotationTargets(raw, model.values, codeW, shown)
+    let targets = shownAnnotationTargets(annotations, codeW, shown)
     for t in targets:
       result.values.add t.value
     for i, t in targets:

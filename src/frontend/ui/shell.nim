@@ -49,29 +49,27 @@ proc send(self: ShellComponent, raw: cstring) =
   cwarn "shell: TODO send " & $raw
   self.data.ipc.send "CODETRACER::send-to-shell", ShellEvent(kind: ShellRaw, id: self.id, raw: raw)
 
-proc ensureShellContainer(self: ShellComponent): Node =
-  let parentContainerId = cstring(&"shellComponent-{self.id}")
-  var parent = cast[Element](jq(cstring(&"#{parentContainerId}")))
-
+proc ensureShellContainer(self: ShellComponent; host: Element): Node =
+  ## The `.shell-container` inside `host` (the pane's container), created on
+  ## first use. Without a host — the shell-only UI mode, an agent's embedded
+  ## terminal — the `shellComponent-<id>` element is looked up, and created
+  ## under `#ROOT` when there is none.
+  var parent = host
   if parent.isNil:
-    let root = cast[Element](jq("#ROOT"))
-    let shellMainContainer = document.createElement("div")
-    shellMainContainer.id = parentContainerId
-    shellMainContainer.classList.add(cstring("component-container"))
-    root.appendChild(shellMainContainer)
-    parent = shellMainContainer
-
-  let containerSelector = cstring(&"#shellComponent-{self.id} .shell-container")
-  var container = cast[Element](jq(containerSelector))
-
+    let parentContainerId = cstring(&"shellComponent-{self.id}")
+    parent = cast[Element](jq(cstring(&"#{parentContainerId}")))
+    if parent.isNil:
+      let root = cast[Element](jq("#ROOT"))
+      parent = document.createElement("div")
+      parent.id = parentContainerId
+      parent.classList.add(cstring("component-container"))
+      root.appendChild(parent)
+  var container = cast[Element](parent.querySelector(cstring".shell-container"))
   if container.isNil:
-    # create inner container with id
-    let newContainer = document.createElement("div")
-    newContainer.classList.add("shell-container")
-    container = newContainer
+    container = document.createElement("div")
+    container.classList.add("shell-container")
     parent.appendChild(container)
-
-  return container
+  container
 
 proc shellReady(self: ShellComponent): bool =
   ## Defensive helper so callers can check if the xterm instance exists before writing.
@@ -114,9 +112,10 @@ proc resizeTerminal(terminal: Terminal, fitAddon: XtermFitAddon) =
   let proposedDimensions = fitAddon.proposeDimensions()
   terminal.resize(proposedDimensions.cols - 5, proposedDimensions.rows)
 
-proc createShell*(self: ShellComponent): Terminal =
-  # self.createShellLayoutContainer()
-  let container = self.ensureShellContainer()
+proc createShell*(self: ShellComponent; host: Element = nil): Terminal =
+  ## Open the shell's terminal in `host`, the pane's container (see
+  ## `ensureShellContainer` for no host).
+  let container = self.ensureShellContainer(host)
   # create terminal object
   let terminal = createTerminal(
     xtermLib.Terminal,
@@ -236,7 +235,9 @@ proc openShellTab*(data: Data) =
     cast[ShellComponent](
       data.ui.componentMapping[Content.Shell][componentId])
 
-  discard shellComponent.createShell()
+  # GoldenLayout's factory has normally opened the terminal in the new pane.
+  if shellComponent.shell.isNil:
+    discard shellComponent.createShell()
 
 proc eventSummary(event: SessionEvent): string =
   let explanation = case event.kind:

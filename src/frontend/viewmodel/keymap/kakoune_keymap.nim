@@ -79,7 +79,7 @@ const
 
 proc eb(chords: seq[string]; op: string; modes: set[EditingMode];
         args = OpArgs()): EditingBinding =
-  EditingBinding(model: kmKakoune,
+  EditingBinding(model: bkKakoune,
                  scope: BindingScope(modes: modes, products: {}, panes: {epEditor}),
                  chords: chords, operation: op, args: args,
                  spelling: chords.join(" "))
@@ -358,6 +358,38 @@ proc buildKakouneFiled(): seq[FiledDeclaration] =
       "as `toggle-breakpoint`"),
     FiledDeclaration(decl: "jump-to-value-origin", forms: {}, reason:
       "as `toggle-breakpoint`"),
+    # --- PLAT-68: the CUA and Emacs additions (CUA-Keymap.md §7) ----------
+    FiledDeclaration(decl: "toggle-block-comment", forms: {}, reason:
+      "VS Code's `Shift+Alt+A`; Kakoune has no block-comment key"),
+    FiledDeclaration(decl: "select-child-syntax", forms: {}, reason:
+      "needs a parse (§5.1), as `select-parent-syntax`"),
+    FiledDeclaration(decl: "expand-line-selection", forms: {}, reason:
+      "VS Code's `Ctrl+L`; Kakoune composes it with the line object"),
+    FiledDeclaration(decl: "select-all-matches", forms: {}, reason:
+      "VS Code's `Ctrl+Shift+L`; Kakoune reaches it through search, a composition"),
+    FiledDeclaration(decl: "move-last-cursor-to-next-match", forms: {}, reason:
+      "VS Code's `Ctrl+K Ctrl+D`, a multi-cursor refinement Kakoune does not have"),
+    FiledDeclaration(decl: "add-cursor-at-point", forms: {}, reason:
+      "a POINTER gesture (Alt+click, Input-Routing §5.1), not a key in any base"),
+    FiledDeclaration(decl: "clipboard-cut", forms: {}, reason:
+      "Kakoune reaches the system clipboard through the `+` REGISTER and its " &
+      "own operators (`\"+d`), not through VS Code's empty-selection operation"),
+    FiledDeclaration(decl: "clipboard-copy", forms: {}, reason: "as `clipboard-cut`"),
+    FiledDeclaration(decl: "clipboard-paste", forms: {}, reason: "as `clipboard-cut`"),
+    FiledDeclaration(decl: "fold-recursively", forms: {}, reason:
+      "VS Code's `Ctrl+K Ctrl+[`; Kakoune's folds are the `z` family bound here"),
+    FiledDeclaration(decl: "unfold-recursively", forms: {}, reason: "as `fold-recursively`"),
+    FiledDeclaration(decl: "set-mark", forms: {}, reason:
+      "EMACS'S MARK. Base-Keymaps §3.3: no base borrows another's rows, and " &
+      "Kakoune's selection is its own visual mode"),
+    FiledDeclaration(decl: "deactivate-mark", forms: {}, reason: "as `set-mark`, Emacs's mark"),
+    FiledDeclaration(decl: "exchange-point-and-mark", forms: {}, reason: "as `set-mark`, Emacs's mark"),
+    FiledDeclaration(decl: "kill-line", forms: {}, reason:
+      "EMACS'S KILL RING; Kakoune's registers are its own (`\"a`, the unnamed register)"),
+    FiledDeclaration(decl: "kill-region", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "copy-region", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "yank", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "yank-pop", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
   ]
 
 let
@@ -374,5 +406,5 @@ let
 proc kakouneKeymap*(): KeymapDefinition =
   ## **THE KAKOUNE MODEL.** Called by name — see `vimKeymap`'s note on why the
   ## two constructors are two names rather than one with a parameter.
-  KeymapDefinition(model: kmKakoune, keymap: KakouneKeymapTable,
+  KeymapDefinition(model: bkKakoune, keymap: KakouneKeymapTable,
                    filed: KakouneFiledTable)

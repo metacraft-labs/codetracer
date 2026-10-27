@@ -717,32 +717,6 @@
       position:absolute
       width: 100%
 
-  .flow-multiline
-    font-size: 0.9375em
-    background-color: BACKGROUND_NEIGHBOUR_COLOR
-
-    .flow-multiline-previous
-      background-color: #0ff
-
-    .flow-multiline-next
-      background-color: #00f
-
-    .flow-multiline-loop
-      left: 28.125em
-      position: absolute
-      width: 43.75em
-      max-width: 43.75em
-      overflow-x: scroll
-      float: right
-
-    td.multiline-group
-      min-width: 11.25em
-      max-width: 11.25em
-
-      span
-        display: block
-
-
   .zfuture-expression::after
     background-color: #0ff
 
@@ -821,29 +795,6 @@
 
     .asm-code .asm-highlight
       color: red
-
-#breakpoint-list_wrapper, #tracepoint-list_wrapper
-  width: 50%
-  float: left
-  tr
-    height: 1.25em
-
-  .odd
-    background-color: BACKGROUND_NEIGHBOUR_COLOR
-
-  .even
-    background-color: colors-ui-surface-base-panel
-
-  color: colors-ui-text-primary-body
-
-  .dataTables_length
-    display: none
-
-  .dataTables_info
-    display: none
-
-  .dataTables_paginate
-    display: none
 
 .context-menu
   position: fixed
@@ -1232,7 +1183,9 @@ line-number-type()
   color: red
 
 .expand-inline
-  color: #0ff
+  // A link: cyan on the dark ground, the information text token on the light
+  // one (`by-mode`, defaults.styl).
+  color: by-mode(#0ff, colors-ui-text-information-primary)
 
 .expand-trace:hover
   opacity: 1
@@ -1431,11 +1384,14 @@ else
 
 .line-diff-added
   background-color: rgba(63, 185, 80, 0.18)
-  border-left: 0.1875em solid #3fb950
+  // The gutter stripes are graphics that carry the change kind: in the light
+  // theme the success / warning icon tokens, as the dark theme's GitHub-dark
+  // greens and ambers are 2.3:1 there (`by-mode`, defaults.styl).
+  border-left: 0.1875em solid by-mode(#3fb950, colors-ui-icon-success-primary)
 
 .line-diff-modified
   background-color: rgba(210, 153, 34, 0.18)
-  border-left: 0.1875em solid #d29922
+  border-left: 0.1875em solid by-mode(#d29922, colors-ui-icon-warning-primary)
 
 .line-diff-removed
   background-color: rgba(248, 81, 73, 0.18)

@@ -111,6 +111,31 @@ let
     pkgs.liberation_ttf
   ];
   fontsConf = pkgs.makeFontsConf { fontDirectories = fontPackages; };
+
+  # Runs a shellHook body with its STDOUT sent to stderr.
+  #
+  # `nix develop --command <cmd>` writes the hook's stdout and <cmd>'s stdout
+  # to the same stream, so a caller that captures `$(nix develop … --command
+  # …)` reads every progress line the hook printed as part of the command's
+  # answer. That is not hypothetical: "  workspace: detected (…)" and the
+  # tree-sitter-nim helper's "src/parser.c is up to date" were prepended to
+  # CODETRACER_REPO_ROOT_PATH in ci/test/dev-shell-writes-nothing-elsewhere-test.sh
+  # (codetracer-pm issues/2026-10-22-codetracer-dev-shell-hook-writes-
+  # diagnostics-to-stdout.md). A hook has no output of its own -- only
+  # exports and diagnostics -- so the whole body goes to stderr, and the
+  # helpers and sourced scripts it runs (detect-siblings.sh, the git-hook
+  # installer, pip, the tree-sitter helper) are covered without each of them
+  # having to remember a `>&2`.
+  #
+  # A `{ …; }` group, not a subshell: the body's exports, functions and
+  # PATH edits must still land in the shell the user gets. A `$(…)` inside the
+  # body is unaffected -- command substitution gives its command a stdout of
+  # its own.
+  hookOnStderr = body: ''
+    {
+    ${body}
+    } >&2
+  '';
 in
 with pkgs;
 {
@@ -480,13 +505,30 @@ with pkgs;
     # and the key is LOST — silently, with `wtype` exiting 0. Every
     # invocation in this repo's lanes leads with `-s`.
     wtype
+  ]
+  ++ pkgs.lib.optionals stdenv.isDarwin [
+    # `setsid`, and nothing else from util-linux. The `ct host` end-to-end
+    # suites (src/tests/ct_host/ct_host_harness.nim `startHost`, and
+    # src/tests/ct_host_manifest/) start the server as
+    # `/usr/bin/env setsid bash -c ...`, so that stopping its session stops
+    # the node index it starts. Linux hosts ship `setsid` in util-linux;
+    # macOS has none, so on macOS `env` exited 127, `ct host` never ran, and
+    # every case failed with "printed no CODETRACER_HOST_URL". nixpkgs builds
+    # util-linux's `setsid` for darwin (it calls setsid(2), which macOS has).
+    # Only that one binary is exposed: util-linux's `kill`, `getopt`,
+    # `script`, `hexdump`, `column`, ... would otherwise shadow the macOS
+    # tools of the same names for every command run in this shell.
+    (pkgs.runCommand "setsid-${pkgs.util-linux.version}" { } ''
+      mkdir -p "$out/bin"
+      ln -s ${pkgs.util-linux.bin}/bin/setsid "$out/bin/setsid"
+    '')
   ];
 
   # Build-critical environment exports only. Developer convenience
   # (pre-commit install, Python-recorder venv setup, workspace +
   # sibling-repo detection, reprobuild ASP solver paths) lives in
   # main.nix's shellHook.
-  shellHook = ''
+  shellHook = hookOnStderr ''
     # PLAT-37 — THE GPUI RUNTIME LIBRARY PATH, exported under its OWN name
     # rather than prepended to `LD_LIBRARY_PATH`.
     #
@@ -729,10 +771,14 @@ with pkgs;
     # via the `.envrc` override. `scripts/build-once.sh` calls `repro`
     # which reads these.
     export REPROBUILD_SOURCE_ROOT=${inputs.reprobuild}
-    # The package catalog `repro.nim`'s `uses: "sqlite3"` resolves from (see
-    # the `reprobuild-packages` input in flake.nix). When it is set, reprobuild
-    # consults no other location, so this is also the catalog every lane of
-    # this shell agrees on.
+    # The package catalog every `uses:` name in `repro.nim` that reprobuild's
+    # stdlib no longer bundles resolves from — `shellcheck` and `sqlite3` at
+    # codetracer 845e390fb2 (see the `reprobuild-packages` input in flake.nix).
+    # When it is set, reprobuild consults no other location, so this is also
+    # the catalog every lane of this shell agrees on — and a name it lacks
+    # means the recipe does not compile in this shell, whatever a sibling
+    # checkout holds. `scripts/test-reprobuild-catalog-coverage.sh` enforces
+    # that the pinned catalog covers the recipe.
     export REPROBUILD_PACKAGES_ROOT=${inputs.reprobuild-packages}
     export REPROBUILD_USE_SYSTEM_HASH_LIBS=1
     export BLAKE3_PREFIX=${pkgs.libblake3}

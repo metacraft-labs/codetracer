@@ -35,6 +35,7 @@
 ## | Source access       | `SourceVM` (`viewmodels/source_vm`) and `SourceProvider` (`sdk/source_provider`) |
 ## | `BackendService`    | `backend/backend_service`, `backend/mock_backend`, `backend/dap_commands` |
 ## | Session lifecycle   | `DebuggerSession`, `SessionViewModel`, `AppViewModel`                     |
+## | Seek coalescing     | `ScrubQueue` (`sdk/scrub_queue`)                                          |
 ## | `TraceSource`       | `sdk/trace_source`                                                        |
 ## | Clock               | `isonim/core/clock`, `isonim/testing/test_utils` (`withFakeTime`)         |
 ## | Types               | `store/types` — the trace, location, frame, value, event and span models  |
@@ -264,6 +265,25 @@ export terminal_output_vm
 import viewmodels/scrollbar_scrubber
 export scrollbar_scrubber
 
+# PLAT-70: a text pane's horizontal view and its overflow-only bar — the
+# scrubber model on the column axis (Horizontal-Overflow.md §4). Pure; imports
+# only `scrollbar_scrubber`.
+import viewmodels/horizontal_scroll
+export horizontal_scroll
+
+# PLAT-70 Part B: the table panes' cut cells, their full text on hover and
+# under the row, and the columns' widths (Horizontal-Overflow.md §5). Pure;
+# imports only `std/*` and the presenter's vocabulary, already here.
+import viewmodels/table_overflow
+export table_overflow
+
+# PLAT-70 Part I: the table panes' column widths and whether a table pane
+# scrolls sideways — CSS's automatic table layout over each column's minimum
+# and preferred widths (Horizontal-Overflow.md §5.5). Pure; imports only
+# `horizontal_scroll`.
+import viewmodels/table_fit
+export table_fit
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #
@@ -367,6 +387,12 @@ export debugger_session
 import sdk/trace_source
 export trace_source
 
+# The scrubber's seek coalescer (Shared-DOM-Front-Ends D8): at most one seek
+# outstanding, a newer target superseding the waiting one. Pure data, so a host
+# drives it from its own pointer events and transport.
+import sdk/scrub_queue
+export scrub_queue
+
 # ---------------------------------------------------------------------------
 # The plugin surface (PLAT-7, Extensibility-Model.md §2.1, §4.2, §5)
 #
@@ -415,6 +441,17 @@ export plugin_api
 import editing_core
 export editing_core
 
+# THE KEYMAP ROUTER (PLAT-68): the base keymaps, the user's
+# `keybindings.json`, the layer stack and the one resolver every front-end
+# routes keys through (Base-Keymaps-And-Layer-Stack.md §6). Here for the
+# reason the editing core is: a front-end that cannot see it would
+# reimplement it. Pure — the file's text arrives from the host.
+import keymap/keymap_router
+import keymap/keymap_importers
+import keymap/client_actions
+import keymap/navigation_keymap
+export keymap_router, keymap_importers, client_actions, navigation_keymap
+
 # PLAT-8's I/O primitives are DELIBERATELY NOT HERE, and the reason is the
 # whole of §8's argument.
 #
@@ -441,10 +478,14 @@ export editing_core
 # plain Nim over `std/*` and the ViewModels this facade already exports —
 # `filesystem_vm` is `session_vm`'s own import, exported so its type is
 # nameable — so the facade's graph gains no renderer, no I/O and no process.
+#
+# M76 (codetracer#843): `point_menu_ops` too — the Debug menu's Stop and its
+# breakpoint / tracepoint items as one action table, which both native menus
+# read to enable an item and to run it. Pure Nim over `std/*`.
 import viewmodels/[menu_vm, product_menu, omnibar_vm, omnibar_sources,
-                   transport_icons, filesystem_vm]
+                   transport_icons, filesystem_vm, point_menu_ops]
 export menu_vm, product_menu, omnibar_vm, omnibar_sources, transport_icons,
-       filesystem_vm
+       filesystem_vm, point_menu_ops
 
 # PLAT-51 part B: the native front-ends' Welcome Screen of a new tab
 # (`native_welcome`, over the desktop's `WelcomeScreenVM` and a store that

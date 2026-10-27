@@ -184,11 +184,13 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   align-items: center
   flex-shrink: 0
 
+// A <select>: the input surface and body text in the light theme
+// (`by-mode`, defaults.styl, keeps the dark theme's colours exactly).
 .deepreview-trace-select
   font-family: "SpaceGrotesk"
   font-size: 12px
-  color: #cccccc
-  background-color: #3c3c3c
+  color: by-mode(#cccccc, colors-ui-text-primary-body)
+  background-color: by-mode(#3c3c3c, colors-ui-surface-input-default)
   border: 1px solid var(--border-color, #3a3b44)
   border-radius: 3px
   padding: 2px 8px
@@ -198,7 +200,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   appearance: auto
 
   &:hover
-    background-color: #4a4a4a
+    background-color: by-mode(#4a4a4a, colors-ui-surface-input-secondary)
 
   &:focus
     border-color: #007acc
@@ -318,11 +320,13 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 .vcs-commit-header-selected
   background: colors-ui-surface-action-primary
 
+  // In the light theme the action surface is indigo-300, on which white is
+  // 2:1: body and label text there (`by-mode`, defaults.styl).
   .vcs-commit-msg
-    color: #ffffff
+    color: by-mode(#ffffff, colors-ui-text-primary-body)
 
   .vcs-commit-time-col
-    color: rgba(255, 255, 255, 0.7)
+    color: by-mode(rgba(255, 255, 255, 0.7), colors-ui-text-primary-label)
 
   // Active solid dot: white fill, outline matches the row background so the
   // ring sits outside the dot without eating into the white area.
@@ -474,44 +478,19 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   color: colors-ui-text-primary-body-subtle
   flex-shrink: 0
 
-// Whole-commit unified diff button: shown on hover of a commit header row.
-// Hidden by default; appears to the right of the timestamp on row hover.
-.vcs-commit-diff-btn
-  display: none
+// The commit's expand control (VCS-Panel.md, "Commit History"): the header
+// opens the commit's whole-commit diff, and this toggles the commit's file
+// list without opening anything.
+.vcs-commit-toggle
   flex-shrink: 0
-  position: relative
+  width: 1em
+  text-align: center
   cursor: pointer
-  width: 0.6875rem
-  height: 0.8125rem
-  margin-left: 0.375em
-  background-image: url("../../public/resources/shared/vc-open-diff.svg")
-  background-repeat: no-repeat
-  background-size: contain
-  background-position: center
+  color: colors-ui-text-primary-body-subtle
   opacity: 0.7
-  transition: opacity 150ms ease
 
   &:hover
     opacity: 1
-
-  .custom-tooltip
-    right: 0
-    left: unset
-    z-index: 200
-
-    &:after
-      left: unset
-      right: 0.25em
-
-.vcs-commit-diff-btn:hover > .custom-tooltip
-  opacity: 1
-  visibility: visible
-
-.vcs-commit-header:hover .vcs-commit-diff-btn
-  display: block
-
-.vcs-commit-header-selected:hover .vcs-commit-diff-btn
-  display: block
 
 // ---------------------------------------------------------------------------
 // Accordion expanded area: file list rendered inline under the commit header.
@@ -680,7 +659,9 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 .vcs-accordion-status-deleted  { color: colors-ui-text-error-primary }
 .vcs-accordion-status-modified { color: colors-ui-text-warning-primary }
 .vcs-accordion-status-copied   { color: colors-ui-text-primary-active }
-.vcs-accordion-status-renamed  { color: #A78BFA }
+// Renamed: violet, the second categorical series colour, whose Dark value is
+// this violet and whose Light value reads on the light ground.
+.vcs-accordion-status-renamed  { color: colors-ui-chart-series-2 }
 .vcs-accordion-status-other    { color: colors-ui-text-primary-body }
 
 // "Loading more commits…" row at the bottom during a background page fetch.
@@ -712,7 +693,9 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 .vcs-commit-hash
   font-family: "SpaceMono", monospace
   font-size: 0.6875em
-  color: #4ec9b0
+  // VS Code dark's teal; the editor's type colour, its teal, in the light
+  // theme (`by-mode`, defaults.styl).
+  color: by-mode(#4ec9b0, colors-editor-syntax-type)
   flex-shrink: 0
 
 .vcs-commit-message
@@ -769,20 +752,23 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   text-align: center
   flex-shrink: 0
 
+// The status letters were written for the dark ground (1.6-1.9:1 on the
+// light one); the light theme takes the text token of each status
+// (`by-mode`, defaults.styl).
 .vcs-status-added
-  color: #4ec9b0
+  color: by-mode(#4ec9b0, colors-ui-text-success-primary)
 
 .vcs-status-deleted
   color: #f44747
 
 .vcs-status-modified
-  color: #e5c07b
+  color: by-mode(#e5c07b, colors-ui-text-warning-primary)
 
 .vcs-status-other
   color: #888
 
 .vcs-status-untracked
-  color: #4ec9b0
+  color: by-mode(#4ec9b0, colors-ui-text-success-primary)
 
 // PLAT-47: the working tree's changed files, above the commit history.
 .vcs-working-tree
@@ -810,7 +796,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   gap: 0.25em
 
 .vcs-stat-added
-  color: #4ec9b0
+  color: by-mode(#4ec9b0, colors-ui-text-success-primary)
 
 .vcs-stat-deleted
   color: #f44747
@@ -848,13 +834,15 @@ VCS_BRANCH_PICKER_INSET = 0.25em
     background: colors-ui-surface-primary-secondary-hover
 
 .hunk-selected
-  border-left: 0.1875em solid #569cd6
+  // The selection's stripe and marker: the focus border and information text
+  // tokens in the light theme (`by-mode`, defaults.styl).
+  border-left: 0.1875em solid by-mode(#569cd6, colors-ui-border-focus)
   background: rgba(86, 156, 214, 0.08)
 
 .hunk-selection-indicator
   display: inline-block
   margin-right: 0.375em
-  color: #569cd6
+  color: by-mode(#569cd6, colors-ui-text-information-primary)
   font-size: 0.75em
   font-weight: bold
 

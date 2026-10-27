@@ -6,10 +6,13 @@
 ## Everything through the product's own entry points: `TuiRuntime.handleToken`
 ## with the bytes a terminal sends (`F12` is `ESC [ 24 ~`), `shellScreenOf`
 ## for the frame, `control_icons.controlIconBytes` for the picture escapes.
-## The runtime has no replay session here (the pty suite
+## The PLAT-48 cases have no replay session (the pty suite
 ## `real_terminal/test_plat48_top_bar.nim` has one): a debugger action
 ## dispatched with no session answers "unavailable", which is asserted, not
-## hidden.
+## hidden. The M76 cases at the end (codetracer#843: the Debug menu's Stop
+## and its breakpoint and tracepoint items) DO open one — the real `calc`
+## recording under a real `replay-server` — because what they assert is
+## what an item does to a session, down to the engine process being gone.
 ##
 ## ONE STAND-IN, and why it is not a mock of anything asserted: the session
 ## tab cases open several `HeadlessApp` slots over the SDK's own
@@ -18,22 +21,45 @@
 ## those cases assert — which tabs are drawn, which one is active, what a
 ## click, `g t` / `g T` or `Ctrl+Tab` does to the active slot — is a function
 ## of the real slots and the real key path, never of the transport.
+##
+## M74 (codetracer#841), the File menu, runs over a REAL session (`calc`, a
+## real `replay-server`) and a real project on disk read through the host's
+## own `edit_host` reader. ONE MORE STAND-IN, the host's welcome seam: those
+## cases install a capturing `welcomeHost` closure (as `test_plat51b_parity`
+## does) that records the intent the runtime hands over and performs nothing.
+## What is asserted — which items are enabled in which state, the reason a
+## disabled one gives, the welcome tab and form a choice opens, the buffer a
+## choice makes active — is the runtime's and the shared models' own; the
+## host performing the intent end to end is `real_terminal/test_plat51b_pty`.
 
-import std/[base64, os, strutils, tables, unicode, unittest]
+import std/[base64, os, osproc, posix, strutils, tables, unicode, unittest]
 
 import ../app/runtime
+import ../app/tui_app
+import ../app/edit_binding
 import ../app/views/shell
 import ../app/layout/binding
 import ../app/theme/capabilities
+import ../app/theme/roles
 import ../host/control_icons
+import ../host/edit_host
+import ../host/tui_session
+from backend/stdio_backend import toBackendService
 import ../../../common/terminal_graphics/[raster, path_raster]
 import headless_app/session_tabs
 import headless_app/layout_model
+import headless_app/welcome_tabs
 import codetracer_embed
+import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 318
+const ExpectedAssertions = 514
+  ## 379 (M74, codetracer#841) -> 514 (M76, codetracer#843): +135 — the
+  ## Debug menu's point items and Stop over a real session (+91, of them
+  ## +14 for which open starts its session in a stopped tab), and the
+  ## top bar's Stop control: drawn in every mode and at narrow widths (+24),
+  ## clicked (+15), the ViewModel's Stop ending the replay (+5). Measured.
 
 var countedAssertions = 0
 
@@ -59,8 +85,13 @@ proc caps(): TerminalCapabilities =
     initCapabilityFlags())
 
 proc newRuntime(cols, rows: int): TuiRuntime =
+  ## PLAT-68: under the VIM base — the keys these cases drive (`F12`,
+  ## `Ctrl+o`, `g t`, `n`) are CodeTracer-TUI.md §4.2's, which is the Vim and
+  ## Kakoune bases' navigation layer now (under CUA the menu, the reveal and
+  ## the session tabs are the palette's, `Ctrl+PageDown` and the top bar).
   result = newTuiRuntime(newTuiApp(), caps(), cols, rows)
   discard result.enableLayoutBinding()
+  result.selectBase(bkVim, ksFlag)
   result.refreshMenuForKeymap()
 
 proc row0(rt: TuiRuntime): string = rt.shellScreenOf().rows[0]
@@ -182,14 +213,19 @@ suite "PLAT-48: the menu":
     ck not rt.app.menu.isOpen
 
   test "switching the keymap changes the chord the menu shows":
+    # PLAT-68: the user's `keybindings.json` rows, laid over the base — the
+    # menu shows the chord that RUNS the item now (`chordFor`).
     let rt = newRuntime(200, 50)
-    let keys = getTempDir() / "plat48-keys-" & $getCurrentProcessId()
-    writeFile(keys, "NORMAL n = -\nNORMAL F10 = -\nNORMAL Ctrl+n = step-over\n")
-    discard rt.typeLine("keys " & keys)
-    ck rt.app.menu.shortcutFor("forwardNext") == "Ctrl+n"
-    discard rt.typeLine("keys default")
+    discard rt.applyUserKeymap(parseUserKeymap("""[
+      { "key": "n", "command": "-debugger.step-over" },
+      { "key": "f10", "command": "-debugger.step-over" },
+      { "key": "ctrl+n", "command": "debugger.step-over" }
+    ]"""))
+    rt.refreshMenuForKeymap()
+    ck rt.app.menu.shortcutFor("forwardNext") == "Ctrl+N"
+    discard rt.applyUserKeymap(parseUserKeymap(""))
+    rt.refreshMenuForKeymap()
     ck rt.app.menu.shortcutFor("forwardNext") == "n"
-    removeFile(keys)
 
   test "Enter on an item runs its action; a disabled item does nothing":
     let rt = newRuntime(200, 50)
@@ -202,7 +238,8 @@ suite "PLAT-48: the menu":
     ck not rt.app.menu.isOpen
     # No session: the dispatcher answers, by name, that it cannot step.
     ck outcome.action == kaStepOver
-    # File > Open Trace... is not something the terminal does: disabled.
+    # File > Open Trace... needs a host to open a recording in, and this
+    # runtime has none: disabled (M74's cases below give it one).
     discard rt.handleToken(F12, 0)
     discard rt.handleToken(Right, 0)
     ck rt.app.menu.path == @[1]
@@ -510,6 +547,669 @@ suite "PLAT-48: the graphics rendering's bytes":
     # Nothing moved: nothing is sent again.
     ck controlIconBytes(state, lay, newSeq[bool](TransportControls.len),
                         ink, ink).len == 0
+
+suite "M74 (#841): the File menu follows what the terminal can do":
+  # codetracer#841: every File item but Exit was greyed out, because the
+  # enabled set was a static table fixed at start-up that omitted the tab and
+  # trace actions the terminal performs. These cases drive the File menu
+  # through the bar's own keys (`F12`, `Right`, `Down`, `Enter`) over a REAL
+  # recording (`calc`, a real `replay-server`), with the menu re-read each
+  # time it opens — which is when the state these items depend on is read.
+
+  proc fileItem(rt: TuiRuntime; action: string): MenuItem =
+    ## The File item that runs `action`, as the menu holds it now.
+    rt.app.menu.itemAt(rt.app.menu.pathOfAction(action))
+
+  proc openFileMenu(rt: TuiRuntime) =
+    ## `F12`, then `Right` into File (the first shown folder).
+    if rt.app.menu.isOpen:
+      discard rt.handleToken(Esc, 0)
+      discard rt.handleToken(Esc, 0)
+    discard rt.handleToken(F12, 0)
+    discard rt.handleToken(Right, 0)
+
+  proc chooseFileItem(rt: TuiRuntime; label: string): RuntimeOutcome =
+    ## Open File and press `Enter` on `label`, walked to with `Down`.
+    rt.openFileMenu()
+    for _ in 0 ..< 16:
+      if rt.app.menu.highlightedItem().label == label:
+        break
+      discard rt.handleToken(Down, 0)
+    checkpoint("chose " & rt.app.menu.highlightedItem().label)
+    result = rt.handleToken(Enter, 0)
+    # A disabled item does nothing and leaves the menu open (the Menu
+    # ViewModel's rule); close it, so the case's next key is not the menu's.
+    for _ in 0 ..< 3:
+      if rt.app.menu.isOpen:
+        discard rt.handleToken(Esc, 0)
+
+  proc enabledNow(rt: TuiRuntime; action: string): bool =
+    ## Whether `action`'s item is enabled in the menu as it OPENS now.
+    rt.openFileMenu()
+    result = rt.fileItem(action).enabled
+    discard rt.handleToken(Esc, 0)
+    discard rt.handleToken(Esc, 0)
+
+  let calc = resolveFixture("calc")
+
+  proc open(path: string): (TuiRuntime, TuiSession) =
+    let rt = newRuntime(200, 50)
+    let s = openTuiSession(path, viewportHeight = 42)
+    s.header(rt)
+    s.learnExtent()
+    s.refresh(rt)
+    (rt, s)
+
+  test "the trace and tab items are enabled where a host performs them; New Trace Tab adds a welcome tab":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    # No host to open a recording with: the four trace and tab items are
+    # disabled, and choosing one SAYS why (EMT-D14) rather than nothing.
+    for action in ["aOpenTrace", "aOpenTraceInNewTab", "aRecordNewTrace",
+                   "aNewTraceTab"]:
+      checkpoint(action)
+      ck not rt.enabledNow(action)
+    discard rt.chooseFileItem("New Trace Tab")
+    ck rt.app.notification.startsWith("New Trace Tab: ")
+    ck rt.app.notification.len > "New Trace Tab: ".len
+    ck rt.app.welcomeTabs.tabs.len == 0
+    # The host's welcome flow arrives: the same items, enabled — the state
+    # changed, and the menu follows it the next time it opens.
+    var asked: seq[NativeWelcomeIntent] = @[]
+    rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
+      asked.add intent
+      ""
+    for action in ["aOpenTrace", "aOpenTraceInNewTab", "aRecordNewTrace",
+                   "aNewTraceTab", "aExit"]:
+      checkpoint(action)
+      ck rt.enabledNow(action)
+    # File › New Trace Tab is the strip's "+" (Multi-Window-Tab-Management.md
+    # rule 3): a new tab showing the Welcome Screen, its forms closed.
+    discard rt.chooseFileItem("New Trace Tab")
+    ck not rt.app.menu.isOpen
+    ck rt.app.welcomeTabs.tabs.len == 1
+    ck rt.app.welcomeTabs.welcomeShown
+    let w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfNone
+    ck rt.shellScreenOf().rows.join("\n").contains(NativeWelcomeHeading)
+    ck asked.len == 0
+
+  test "Open Trace…, Open Trace in New Tab… and Record New Trace… reach the welcome flow":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    var asked: seq[NativeWelcomeIntent] = @[]
+    rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
+      asked.add intent
+      ""
+    # From the session tab, Open Trace in New Tab…: a new welcome tab with its
+    # "Open local trace" form open — the terminal's trace dialog.
+    discard rt.chooseFileItem("Open Trace in New Tab...")
+    ck rt.app.welcomeTabs.tabs.len == 1
+    var w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfOpenTrace
+    # The form is the real one: the recording typed and Enter reach the host
+    # as the intent to open it.
+    if not w.isNil:
+      for ch in calc.tracePath:
+        discard rt.handleToken($ch, 0)
+      discard rt.handleToken(Enter, 0)
+    ck asked.len == 1 and asked[0].kind == niOpenTrace and
+       asked[0].path == calc.tracePath
+    # With a welcome tab shown, Open Trace… opens the form IN that tab (it
+    # becomes the session it starts, rule 3); Open Trace in New Tab… does not.
+    discard rt.chooseFileItem("Open Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 1
+    w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfOpenTrace
+    discard rt.handleToken(Esc, 0)
+    ck not w.isNil and w.form == nwfNone
+    # Record New Trace…: the same tab's record form (the desktop shows the
+    # welcome screen's New Recording form).
+    discard rt.chooseFileItem("Record New Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 1
+    w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfRecord
+    discard rt.handleToken(Esc, 0)
+    # Back on the recording's tab, Open Trace… has no welcome tab to use: it
+    # opens one, and its form, rather than replacing the recording
+    # (Multi-Window-Tab-Management.md: a replay opens in a new tab by default;
+    # replacement is never automatic).
+    var o = RuntimeOutcome()
+    rt.showSessionTab(0, o)
+    ck not rt.app.welcomeTabs.welcomeShown
+    discard rt.chooseFileItem("Open Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 2
+    w = rt.app.shownWelcome()
+    ck not w.isNil and w.form == nwfOpenTrace
+    ck asked.len == 1
+
+  test "the file items act on the edit session's buffers, and say why when they cannot":
+    require calc.outcome == foRecorded
+    let (rt, s) = open(calc.tracePath)
+    defer: s.close()
+    # A real project on disk, read through the host's own reader
+    # (`edit_host`), as `main.nim` wires it.
+    let project = getTempDir() / "ct-m74-project-" & $getCurrentProcessId()
+    createDir(project)
+    defer: removeDir(project)
+    writeFile(project / "a.py", "print('a')\n")
+    writeFile(project / "b.py", "print('b')\n")
+    rt.app.projectRoot = project
+    rt.editServices.listFiles = proc(): EditListResult =
+      let listing = listProjectFiles(project)
+      EditListResult(files: listing.files, truncated: listing.truncated)
+    rt.editServices.readFile = proc(relative: string): EditReadResult =
+      try:
+        EditReadResult(ok: true, text: readProjectFile(project, relative))
+      except CatchableError as e:
+        EditReadResult(ok: false, message: e.msg)
+    # In Debug mode the editor shows the file the recording is at: there is
+    # no list of open files to step, and Next File says so.
+    ck not rt.enabledNow("switchTabRight")
+    discard rt.chooseFileItem("Next File")
+    ck rt.app.notification.startsWith("Next File: ")
+    ck rt.app.notification.len > "Next File: ".len
+    # Edit mode (`Ctrl+F5`) arrives at the project's first file: ONE buffer.
+    discard rt.handleToken("\x1b[15;5~", 0)
+    ck rt.app.modes.product == pmEdit
+    require not rt.app.editSession.isNil
+    ck rt.app.editSession.buffers.len == 1
+    ck rt.enabledNow("closeTab")
+    for action in ["switchTabRight", "switchTabLeft", "switchTabHistory",
+                   "reopenTab"]:
+      checkpoint(action)
+      ck not rt.enabledNow(action)
+    discard rt.chooseFileItem("Previous File")
+    ck rt.app.notification.startsWith("Previous File: ")
+    ck rt.app.notification.len > "Previous File: ".len
+    # A second file: the stepping items are enabled — the same menu, a new
+    # state.
+    discard rt.typeLine("e b.py")
+    ck rt.app.editSession.buffers.len == 2
+    let first = rt.app.editSession.activeBuffer().path
+    for action in ["switchTabRight", "switchTabLeft", "switchTabHistory"]:
+      checkpoint(action)
+      ck rt.enabledNow(action)
+    discard rt.chooseFileItem("Next File")
+    ck not rt.app.menu.isOpen
+    ck rt.app.editSession.activeBuffer().path != first
+    discard rt.chooseFileItem("Previous File")
+    ck rt.app.editSession.activeBuffer().path == first
+    discard rt.chooseFileItem("Switch File")
+    ck rt.app.editSession.activeBuffer().path != first
+    # Close Current File closes the shown buffer; Reopen File brings it back.
+    let closing = rt.app.editSession.activeBuffer().path
+    discard rt.chooseFileItem("Close Current File")
+    ck rt.app.editSession.buffers.len == 1
+    ck rt.app.editSession.indexOfPath(closing) < 0
+    ck rt.enabledNow("reopenTab")
+    discard rt.chooseFileItem("Reopen File")
+    ck rt.app.editSession.buffers.len == 2
+    ck rt.app.editSession.activeBuffer().path == closing
+    ck not rt.enabledNow("reopenTab")
+    # A buffer with unsaved changes is not closed — the desktop would ask in
+    # a save dialog, and closing it here would discard the edit: Close
+    # Current File is disabled, and says why.
+    discard rt.handleToken("i", 0)
+    discard rt.handleToken("x", 0)
+    discard rt.handleToken(Esc, 0)
+    ck rt.app.editSession.activeBuffer().isDirty
+    ck not rt.enabledNow("closeTab")
+    discard rt.chooseFileItem("Close Current File")
+    ck rt.app.notification.startsWith("Close Current File: ")
+    ck rt.app.notification.contains("unsaved changes")
+    ck rt.app.editSession.buffers.len == 2
+
+# ---------------------------------------------------------------------------
+# M76 (codetracer#843): the program menu's Stop and its breakpoint and
+# tracepoint items, OVER A REAL SESSION
+# ---------------------------------------------------------------------------
+#
+# The cases above need no engine; these do, because what they assert is what
+# an item DOES to a session: the rows the engine verified
+# (`store.pointList.rows`), the sweep's hits (`tracepointHits`), and — for
+# Stop — that the `replay-server` child is really gone, read off the process
+# table, not off a flag. The real `calc` recording and a real
+# `replay-server`; the tokens go through `handleToken` and `applyOutcome`,
+# the shipped loop's two halves. Nothing is mocked.
+
+let calcFixture = resolveFixture("calc")
+
+const
+  ShiftF5 = "\x1b[15;2~"
+    ## Shift+F5 as xterm sends it (`CSI 15 ; 2 ~`): CUA's `debugger.stop`.
+  AddLine = "return left + right"
+  MulLine = "return left * right"
+    ## Two lines of `calc`'s `main.py` that run, so a tracepoint there has
+    ## hits. Found by their text, asserted before use.
+
+proc sessionRuntime(): TuiRuntime =
+  ## The front-end as `main.nim` builds it for a replay: a layout binding,
+  ## and the Vim base, whose `F12` opens the program menu (the cases
+  ## above). The suite case that presses Shift+F5 switches to CUA itself.
+  result = newRuntime(200, 56)
+
+proc send(s: TuiSession; rt: TuiRuntime; token: string) =
+  ## One token through the shipped loop: the runtime decides, the host acts.
+  let outcome = rt.handleToken(token, 0)
+  s.applyOutcome(rt, outcome)
+
+proc openCalc(): (TuiRuntime, TuiSession) =
+  ## `calc` opened as `main.nim`'s `interactive` opens it, the session put in
+  ## the strip as its one tab.
+  let rt = sessionRuntime()
+  let s = openTuiSession(calcFixture.tracePath, viewportHeight = 48)
+  s.header(rt)
+  s.learnExtent()
+  s.refresh(rt)
+  discard rt.app.shell.openSession(s.session.backend.toBackendService(),
+                                   title = rt.app.traceName,
+                                   layout = rt.app.layoutBinding.layout,
+                                   adopt = s.session.sdk)
+  rt.refreshMenuForKeymap()
+  (rt, s)
+
+proc chooseItem(s: TuiSession; rt: TuiRuntime; folder, label: string): bool =
+  ## Open the program menu (`F12`), walk to `folder` › `label` with the keys
+  ## a user presses, and press Enter on it. Answers whether the item was
+  ## ENABLED where it was chosen. A disabled item leaves the menu open
+  ## (`Enter on an item runs its action; a disabled item does nothing`
+  ## above); it is closed again so the next step starts from the editor.
+  s.send(rt, F12)
+  var steps = 0
+  while rt.app.menu.highlightedItem().label != folder and steps < 16:
+    s.send(rt, Down)
+    inc steps
+  doAssert rt.app.menu.highlightedItem().label == folder, "no folder " & folder
+  s.send(rt, Right)
+  steps = 0
+  while rt.app.menu.highlightedItem().label != label and steps < 60:
+    s.send(rt, Down)
+    inc steps
+  doAssert rt.app.menu.highlightedItem().label == label,
+    "no " & folder & " item " & label
+  result = rt.app.menu.highlightedItem().enabled
+  s.send(rt, Enter)
+  while rt.app.menu.isOpen:
+    s.send(rt, Esc)
+
+proc chooseDebugItem(s: TuiSession; rt: TuiRuntime; label: string): bool =
+  ## Debug › `label` (`chooseItem`).
+  s.chooseItem(rt, "Debug", label)
+
+proc lineOf(path, text: string): int =
+  ## The 1-based line of `path` whose stripped text is `text`, or 0.
+  let lines: seq[string] = readFile(path).splitLines()
+  for i, l in lines:
+    if l.strip() == text:
+      return i + 1
+  0
+
+proc placeCaret(rt: TuiRuntime; line: int) =
+  ## The Debug-mode editor's caret on `line` — where a click on the text
+  ## puts it (PLAT-51 deliverable 6, `test_plat51_parity.nim`), set on the
+  ## editor's own document so the case does not depend on the line being
+  ## scrolled into view.
+  let buf = rt.debugBuffer()
+  doAssert not buf.isNil, "the Debug-mode editor has no document"
+  buf.moveCaretTo(line - 1, 0)
+  rt.app.caret = (buf.path, line, 1)
+
+proc rowsOfKind(s: TuiSession; kind: string): seq[PointListEntry] =
+  for r in s.session.session.store.pointList.rows.val:
+    if r.kind == kind:
+      result.add r
+
+proc rowAt(s: TuiSession; kind: string; line: int): (bool, PointListEntry) =
+  for r in s.rowsOfKind(kind):
+    if r.line == line:
+      return (true, r)
+  (false, PointListEntry())
+
+proc processAlive(pid: int): bool =
+  ## Whether `pid` names a process on this host that has not been reaped —
+  ## `kill(pid, 0)`, which sends nothing (POSIX `kill(2)`:
+  ## https://pubs.opengroup.org/onlinepubs/9799919799/functions/kill.html).
+  ## A zombie still answers 0 here, so a child its parent never reaped
+  ## counts as ALIVE: the backend must be gone, not merely signalled.
+  pid > 0 and posix.kill(Pid(pid), 0) == 0
+
+suite "M76 (#843): the Debug menu's breakpoint items, over a real session":
+
+  test "Delete All Breakpoints is enabled, and removes every breakpoint the user set":
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    let path = s.session.getCurrentFile()
+    let add = lineOf(path, AddLine)
+    let mul = lineOf(path, MulLine)
+    ck add > 0 and mul > 0
+    ck s.toggleBreakpoint(path, add)
+    ck s.toggleBreakpoint(path, mul)
+    s.refresh(rt)
+    ck s.rowsOfKind(PointKindBreakpoint).len == 2
+    ck s.points.len == 2           # the gutter's points, read off the store
+    ck s.chooseDebugItem(rt, "Delete All Breakpoints")
+    checkpoint("after: " & $s.rowsOfKind(PointKindBreakpoint))
+    ck s.rowsOfKind(PointKindBreakpoint).len == 0
+    ck s.points.len == 0
+    ck rt.app.points == pointListPaneModelFor(s.points)
+
+  test "Delete / Enable / Disable Breakpoint act on the caret's line; the All items on every one":
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    let path = s.session.getCurrentFile()
+    let add = lineOf(path, AddLine)
+    let mul = lineOf(path, MulLine)
+    ck add > 0 and mul > 0
+    ck s.toggleBreakpoint(path, add)
+    ck s.toggleBreakpoint(path, mul)
+    s.refresh(rt)
+    rt.placeCaret(add)
+    ck s.chooseDebugItem(rt, "Disable Breakpoint")
+    ck s.rowAt(PointKindBreakpoint, add)[0]
+    ck not s.rowAt(PointKindBreakpoint, add)[1].enabled
+    ck s.rowAt(PointKindBreakpoint, mul)[1].enabled
+    ck s.chooseDebugItem(rt, "Enable Breakpoint")
+    ck s.rowAt(PointKindBreakpoint, add)[1].enabled
+    ck s.chooseDebugItem(rt, "Disable All Breakpoints")
+    ck not s.rowAt(PointKindBreakpoint, add)[1].enabled
+    ck not s.rowAt(PointKindBreakpoint, mul)[1].enabled
+    ck s.chooseDebugItem(rt, "Enable All Breakpoints")
+    ck s.rowAt(PointKindBreakpoint, add)[1].enabled
+    ck s.rowAt(PointKindBreakpoint, mul)[1].enabled
+    ck s.chooseDebugItem(rt, "Delete Breakpoint")
+    ck not s.rowAt(PointKindBreakpoint, add)[0]
+    ck s.rowAt(PointKindBreakpoint, mul)[0]
+
+suite "M76 (#843): the Debug menu's tracepoint items, over a real session":
+
+  test "Add opens the tracepoint editor at the caret; enable, disable, run all and delete act on the rows":
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    let path = s.session.getCurrentFile()
+    let add = lineOf(path, AddLine)
+    let mul = lineOf(path, MulLine)
+    ck add > 0 and mul > 0
+    # "Add a Tracepoint": the editor opens ON THE CARET'S LINE (the
+    # desktop's `addTracepointAtPosition`), and its Enter sweeps.
+    # A tracepoint's expression is a `log(...)` call, as the desktop's
+    # tracepoint editor takes it (`test_event_log_jump.nim`'s sweep).
+    rt.placeCaret(add)
+    ck s.chooseDebugItem(rt, "Add a Tracepoint")
+    ck rt.prompt.open
+    ck rt.prompt.buffer == "tracepoint "
+    ck rt.app.tracepointAt == (path, add)
+    for ch in "log(left)":
+      s.send(rt, $ch)
+    s.send(rt, Enter)
+    ck s.rowAt(PointKindTracepoint, add)[0]
+    rt.app.content = ContentOverlay()
+    rt.placeCaret(mul)
+    ck s.chooseDebugItem(rt, "Add a Tracepoint")
+    ck rt.app.tracepointAt == (path, mul)
+    for ch in "log(right)":
+      s.send(rt, $ch)
+    s.send(rt, Enter)
+    rt.app.content = ContentOverlay()
+    ck s.rowsOfKind(PointKindTracepoint).len == 2
+    # Disable at the caret (the multiply line): only that row.
+    ck s.chooseDebugItem(rt, "Disable Tracepoint")
+    ck not s.rowAt(PointKindTracepoint, mul)[1].enabled
+    ck s.rowAt(PointKindTracepoint, add)[1].enabled
+    # Run All Tracepoints sweeps the ENABLED ones again: the hits are now
+    # the addition line's, and none is the disabled one's.
+    ck s.chooseDebugItem(rt, "Run All Tracepoints")
+    let hits = s.session.session.store.pointList.tracepointHits.val
+    checkpoint("hits after Run All: " & $hits.len)
+    ck hits.len > 0
+    var onAdd = 0
+    var onMul = 0
+    for h in hits:
+      if h.line == add: inc onAdd
+      if h.line == mul: inc onMul
+    ck onAdd == hits.len and onMul == 0
+    ck rt.app.content.open
+    rt.app.content = ContentOverlay()
+    # Enable at the caret, then Disable All / Enable All.
+    ck s.chooseDebugItem(rt, "Enable Tracepoint")
+    ck s.rowAt(PointKindTracepoint, mul)[1].enabled
+    ck s.chooseDebugItem(rt, "Disable All Tracepoints")
+    ck not s.rowAt(PointKindTracepoint, add)[1].enabled
+    ck not s.rowAt(PointKindTracepoint, mul)[1].enabled
+    ck s.chooseDebugItem(rt, "Enable All Tracepoints")
+    ck s.rowAt(PointKindTracepoint, add)[1].enabled
+    ck s.rowAt(PointKindTracepoint, mul)[1].enabled
+    # Delete at the caret: the multiply line's row goes, the other stays.
+    ck s.chooseDebugItem(rt, "Delete Tracepoint")
+    ck not s.rowAt(PointKindTracepoint, mul)[0]
+    ck s.rowAt(PointKindTracepoint, add)[0]
+
+suite "M76 (#843): Stop ends the debugging session":
+
+  test "the menu's Stop is enabled; after it the tab is in Edit mode and its replay-server is gone":
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    let pid = int(s.session.backend.process.processID)
+    ck processAlive(pid)
+    ck rt.app.modes.product == pmDebug
+    ck s.chooseDebugItem(rt, "Stop")
+    # 1. The workspace is in Edit mode.
+    ck rt.app.modes.product == pmEdit
+    # 2. The replay backend for the session is terminated — the process,
+    #    not a flag on it.
+    checkpoint("replay-server pid " & $pid)
+    ck not processAlive(pid)
+    # 3. The tab survives.
+    ck rt.app.shell.tabsOf().len == 1
+    # Nothing that follows reaches the dead engine: the panes are refreshed,
+    # a step is pressed in Edit mode and again after switching back to the
+    # (now empty) debugger — each answered, none raising.
+    s.refresh(rt)
+    s.send(rt, "n")
+    s.send(rt, "\x1b[15;5~")       # Ctrl+F5, the mode toggle
+    ck rt.app.modes.product == pmDebug
+    s.send(rt, "n")
+    ck not processAlive(pid)
+
+  test "after Stop, opening a recording starts a NEW debugging session in the tab":
+    # Requirement 3's other half: "*Run*, or opening a trace, starts a new
+    # debugging session in it by the ordinary route". The route is
+    # `main.nim`'s `recordingOpener` for a stopped tab: a session opened as
+    # every session is, the runtime pointed at it, Debug mode. Written with
+    # the fix — before it there was no Stop to come back from.
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    let first = s.session.replayPid()
+    ck s.chooseDebugItem(rt, "Stop")
+    ck s.ended
+    ck rt.app.traceName == ""
+    ck not rt.hasDebugSession
+    # A second Stop has nothing to end: the menu, re-read as it opens
+    # (M74's state-aware table), draws it disabled, and choosing it says why.
+    ck not s.chooseDebugItem(rt, "Stop")
+    ck rt.app.notification.contains("no debugging session")
+    let s2 = openTuiSession(calcFixture.tracePath, viewportHeight = 48)
+    defer: s2.close()
+    s2.header(rt)
+    s2.learnExtent()
+    s2.refresh(rt)
+    rt.enterProductMode(pmDebug)
+    let second = s2.session.replayPid()
+    ck second != first and processAlive(second)
+    ck not processAlive(first)
+    ck rt.app.traceName.len > 0
+    ck rt.hasDebugSession
+    let before = s2.session.getCurrentRRTicks()
+    s2.send(rt, "n")             # Step Over, the Vim base's
+    ck s2.session.getCurrentRRTicks() != before
+
+  test "after Stop, Open Trace… stands in for the stopped tab; Open Trace in New Tab… does not":
+    # Requirement 3, on the side of what is NOT replaced: Stop never closes a
+    # tab, so only an open chosen ON the stopped tab (Open Trace… / Record New
+    # Trace…) starts its session in that tab — `main.nim`'s `recordingOpener`
+    # replaces the stopped slot only for the welcome tab `stoppedTabWelcome`
+    # names. A request for a new tab gets one, and the stopped tab stays.
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    rt.app.welcomeHost = proc(tab: int; intent: NativeWelcomeIntent): string =
+      ""
+    var o = RuntimeOutcome()
+    # On a LIVE tab, Open Trace… is a new tab and stands in for nothing.
+    ck s.chooseItem(rt, "File", "Open Trace...")
+    ck rt.app.welcomeTabs.welcomeShown
+    ck rt.app.stoppedTabWelcome == -1
+    rt.closeWelcomeTabAt(0, o)
+    ck not rt.app.welcomeTabs.welcomeShown
+    ck s.chooseDebugItem(rt, "Stop")
+    ck s.ended
+    # Open Trace in New Tab… on the stopped tab: a new tab, nothing else.
+    ck s.chooseItem(rt, "File", "Open Trace in New Tab...")
+    ck rt.app.welcomeTabs.tabs.len == 1 and rt.app.welcomeTabs.welcomeShown
+    ck rt.app.stoppedTabWelcome == -1
+    rt.closeWelcomeTabAt(0, o)
+    ck not rt.app.welcomeTabs.welcomeShown
+    # Open Trace… on the stopped tab: its welcome tab stands in for it.
+    ck s.chooseItem(rt, "File", "Open Trace...")
+    ck rt.app.welcomeTabs.tabs.len == 1 and rt.app.welcomeTabs.welcomeShown
+    ck rt.app.stoppedTabWelcome == rt.app.welcomeTabs.tabs[0].serial
+    ck rt.app.shell.tabsOf().len == 1     # the stopped tab is still there
+
+  test "Shift+F5 (CUA's debugger.stop) reaches the same Stop":
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    rt.selectBase(bkCua, ksFlag)
+    rt.refreshMenuForKeymap()
+    let pid = int(s.session.backend.process.processID)
+    ck processAlive(pid)
+    # The menu shows the chord beside the item, as it does for the steps.
+    ck rt.app.menu.shortcutFor("stop") == "Shift+F5"
+    s.send(rt, ShiftF5)
+    ck rt.app.modes.product == pmEdit
+    ck not processAlive(pid)
+
+const
+  StopMarks = [(imNerd, "\u{EAD7}"), (imUnicode, "■"), (imText, " Stop ")]
+    ## Stop's mark per icons mode (Debugger-Controls.md § Control Marks: a
+    ## square), as the row draws it: Codicons' `debug-stop`, a filled square,
+    ## the labelled button. `graphics` draws the square too — the desktop's
+    ## Stop is an image, not one of the marks the terminal rasterises.
+
+proc cellOfText(row, needle: string): int =
+  ## The cell (not byte) column `needle` starts at in `row`, or -1.
+  let at = row.find(needle)
+  if at < 0: -1 else: row[0 ..< at].runeLen
+
+proc roleAt(rt: TuiRuntime; col: int): SemanticRole =
+  ## The style role of row 0's cell `col`.
+  var c = 0
+  for span in rt.shellScreenOf().styledRows[0]:
+    let w = span.text.runeLen
+    if col >= c and col < c + w:
+      return span.style.role
+    c += w
+
+proc lastTransportCol(rt: TuiRuntime): int =
+  result = -1
+  for s in rt.shellScreenOf().topBarLayout.segments:
+    if s.part == tpControl:
+      result = max(result, s.col + s.width - 1)
+
+suite "M76 (#843): the top bar's Stop control":
+
+  test "Stop is drawn at the toolbar's tail, in every icons mode, after the nine transports":
+    for (mode, mark) in StopMarks:
+      let rt = newRuntime(200, 50)
+      rt.app.icons = mode
+      let r = rt.row0()
+      checkpoint($mode & ": " & r)
+      let col = r.cellOfText(mark)
+      ck col > rt.lastTransportCol()
+      ck rt.shellScreenOf().topBarLayout.shownControls.len ==
+         TransportControls.len
+    # Narrow rows: Stop takes only room the transports left — it is never
+    # drawn over another part, and it is after every transport shown.
+    for mode in [imNerd, imUnicode, imText]:
+      for width in [40, 60, 80, 100, 120, 160]:
+        let rt = newRuntime(width, 30)
+        rt.app.icons = mode
+        let lay = rt.shellScreenOf().topBarLayout
+        var lastEnd = -1
+        var overlap = false
+        var stopAfter = true
+        for sg in lay.segments:
+          if sg.col < lastEnd: overlap = true
+          lastEnd = max(lastEnd, sg.col + sg.width)
+          if sg.part == tpStop and sg.col <= rt.lastTransportCol():
+            stopAfter = false
+        checkpoint($mode & " at " & $width & ": " & rt.row0())
+        ck not overlap and stopAfter
+    # With no session it is drawn disabled, as the transports are.
+    let rt = newRuntime(200, 50)
+    let col = rt.row0().cellOfText("■")
+    ck col >= 0 and rt.roleAt(col) == srChromeMuted
+
+  test "a click on Stop ends the session as the menu does; afterwards it is disabled and inert":
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    rt.selectBase(bkCua, ksFlag)
+    rt.refreshMenuForKeymap()
+    let pid = s.session.replayPid()
+    ck processAlive(pid)
+    let col = rt.row0().cellOfText("■")
+    checkpoint("Stop at cell " & $col & ": " & rt.row0())
+    ck col > rt.lastTransportCol()
+    ck rt.roleAt(col) == srChromeText          # enabled: a session is open
+    # The pointer on it: the tooltip names the command and its chord.
+    s.send(rt, "\x1b[<35;" & $(col + 1) & ";1M")
+    checkpoint("tooltip: " & rt.app.hoveredTooltip)
+    ck rt.app.hoveredTooltip.contains("Stop")
+    ck rt.app.hoveredTooltip.contains("Shift+F5")
+    ck rt.visible()[1].contains("Shift+F5")
+    # The click: a real SGR press and release on its cell.
+    s.send(rt, "\x1b[<0;" & $(col + 1) & ";1M")
+    s.send(rt, "\x1b[<0;" & $(col + 1) & ";1m")
+    ck rt.app.modes.product == pmEdit
+    ck not processAlive(pid)
+    ck s.ended
+    # Disabled now, and a second click does nothing but say so.
+    let after = rt.row0().cellOfText("■")
+    ck after >= 0 and rt.roleAt(after) == srChromeMuted
+    s.send(rt, "\x1b[<0;" & $(after + 1) & ";1M")
+    s.send(rt, "\x1b[<0;" & $(after + 1) & ";1m")
+    ck rt.app.modes.product == pmEdit
+    ck rt.app.notification.contains("no debugging session")
+
+  test "the session's DebugControlsVM Stop is the host's: invokeToolbarAction(\"stop\") ends the replay":
+    # `DebugControlsVM.invokeToolbarAction` is "the one route a button, a key
+    # chord and a menu item take": on the native front ends its `stop` must
+    # not be the nil entry `defaultDebugCommands` leaves (`native_host`
+    # installs it), so a caller that reaches it ends the engine.
+    require calcFixture.outcome == foRecorded
+    let (rt, s) = openCalc()
+    defer: s.close()
+    let pid = s.session.replayPid()
+    ck processAlive(pid)
+    ck not s.controls.commands.stop.isNil
+    s.controls.invokeToolbarAction("stop")
+    ck not processAlive(pid)
+    # The terminal's half ran with it: Edit mode, the session forgotten.
+    ck rt.app.modes.product == pmEdit
+    ck rt.app.traceName == ""
+    # The terminal's entry points read the closed channel and stay off it.
+    ck s.ended
+    s.refresh(rt)
+    s.send(rt, "n")
+    ck not processAlive(pid)
 
 suite "PLAT-48 top bar: assertion count":
   test "every assertion ran":

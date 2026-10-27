@@ -97,6 +97,66 @@ type
       ## `srTabBarFocused`.
 
 const
+  CodeFontPx* = 16
+    ## The code font's size, in device pixels, in BOTH front-ends: the
+    ## desktop's `data.ui.fontSize` (`frontend/utils.nim:1039`), which it
+    ## hands Monaco as `fontSize`, and this front-end's own default
+    ## (`leaves.nim`'s `if sizePx != 16` — 16 is the size it does not bother
+    ## to set). One number because the two have to agree for a row to hold
+    ## the same text.
+
+  MonacoGoldenLineHeightRatio* = when defined(macosx): 1.5 else: 1.35
+    ## Monaco's `GOLDEN_LINE_HEIGHT_RATIO`, VERBATIM from the copy this
+    ## product ships
+    ## (`node_modules/monaco-editor/esm/vs/editor/common/config/fontInfo.js:12`,
+    ## `platform.isMacintosh ? 1.5 : 1.35`, commented there "Determined from
+    ## empirical observations").
+    ##
+    ## **IT IS PLATFORM-DEPENDENT, AND THAT IS THE WHOLE POINT.** Parity is
+    ## with the Electron front-end ON THE SAME HOST, and the Electron front-end
+    ## draws a different row pitch on macOS than on Linux because Monaco does.
+
+func monacoLineHeightPx*(fontSizePx: int; lineHeightOption: int = 0): int =
+  ## **Monaco's own line-height rule, transcribed.** The row pitch the desktop
+  ## editor draws for a given font size, so this front-end can DERIVE the
+  ## pitch the reference uses instead of carrying a copy of one platform's
+  ## answer.
+  ##
+  ## The source is `BareFontInfo._create` in the Monaco this product ships,
+  ## `node_modules/monaco-editor/esm/vs/editor/common/config/fontInfo.js:34-45`:
+  ##
+  ## ```js
+  ## if (lineHeight === 0) { lineHeight = GOLDEN_LINE_HEIGHT_RATIO * fontSize; }
+  ## else if (lineHeight < MINIMUM_LINE_HEIGHT) { lineHeight = lineHeight * fontSize; }
+  ## lineHeight = Math.round(lineHeight);
+  ## if (lineHeight < MINIMUM_LINE_HEIGHT) { lineHeight = MINIMUM_LINE_HEIGHT; }
+  ## ```
+  ##
+  ## `lineHeightOption` is Monaco's `editor.lineHeight`, and the desktop
+  ## leaves it at its default: `editor.nim`'s `createMonacoEditor` call passes
+  ## `fontSize` and `fontFamily` and NO `lineHeight`, so the option is
+  ## `EDITOR_FONT_DEFAULTS.lineHeight`, which is 0
+  ## (`editorOptions.js:2917`) — the automatic branch. The other two branches
+  ## are transcribed anyway, because a rule with its cases missing is a rule
+  ## that silently stops being Monaco's the day somebody sets the option.
+  ##
+  ## The editor zoom multiplier is deliberately NOT here: this front-end has
+  ## no zoom control, so transcribing `EditorZoom.getZoomLevel()` would be
+  ## inventing a second answer for a level that is always 0.
+  const MinimumLineHeightPx = 8  ## Monaco's `MINIMUM_LINE_HEIGHT`.
+  var h: float
+  if lineHeightOption == 0:
+    h = MonacoGoldenLineHeightRatio * float(fontSizePx)
+  elif lineHeightOption < MinimumLineHeightPx:
+    # "Values too small to be line heights in pixels are in ems."
+    h = float(lineHeightOption) * float(fontSizePx)
+  else:
+    h = float(lineHeightOption)
+  result = int(round(h))
+  if result < MinimumLineHeightPx:
+    result = MinimumLineHeightPx
+
+const
   WindowChrome*: array[ChromeRole, string] = [
     # PLAT-50 (the user, 2026-10-02: "design tokens only; TUI and GPUI"): the
     # window's own four colours were chosen here (PLAT-37's #12161c /
@@ -149,7 +209,15 @@ const
     ##
     ## HISTORY: introduced 2026-09-22 at 4.5. It has never been lowered.
 
-  WindowFontFamily* = when defined(macosx): "Helvetica Neue" else: "DejaVu Sans"
+  WindowFontFamily* = "Space Grotesk"
+    ## **SINCE 2026-10-17 THE DESIGN SYSTEM'S FACE, ON EVERY PLATFORM**, as in
+    ## the Electron front-end (`styles/components/font_family.styl`): the
+    ## files are registered by `design_fonts.registerDesignFonts` before
+    ## launch. Before that this was the platform's sans, per platform, for
+    ## the reason below — which still holds for any family the text system
+    ## does not have: name a family it can resolve, or text falls back to a
+    ## face with no bold.
+    ##
     ## The window's text face, named rather than left to GPUI's default
     ## (`.SystemUIFont`). Measured 2026-09-29 on the window lane: with the
     ## default alias the text rendered in the fallback sans's Book face and a
@@ -176,7 +244,11 @@ const
     ## these names; `.SystemUIFont` and `SF Mono` are not reliably resolvable
     ## by name, which is the defect this constant exists against.
 
-  MonoFontFamily* = when defined(macosx): "Menlo" else: "DejaVu Sans Mono"
+  MonoFontFamily* = "Space Mono"
+    ## Space Mono since 2026-10-17, as the Electron front-end sets code and
+    ## program data (registered by `design_fonts`). Previously Menlo / DejaVu
+    ## Sans Mono:
+    ##
     ## **The face the editor, the gutter and the inline values are set in.**
     ##
     ## PLAT-35, 2026-10-02, and it is a correction of a sentence this tree
@@ -255,11 +327,41 @@ const
     ## re-graded here, and recording a digest without a re-grade is
     ## `Verification-Harness-Traps` §39.
 
-  ChromeGapPx* = 8
+  EditorLinePx* = monacoLineHeightPx(CodeFontPx)
+    ## One editor line: the row pitch the desktop's Monaco computes for
+    ## `CodeFontPx`, DERIVED rather than copied — 24 px on macOS, 22 px
+    ## elsewhere. The window's row pitch (`window_geometry.GpuiEditorRowPx`)
+    ## and the row's drawn `line-height` (`leaves.renderEditorRow`) are this
+    ## one number.
+    ##
+    ## ## Why this is a derivation and not the constant it replaced
+    ##
+    ## It WAS the literal `22` from 2026-10-17 until this change, recorded as
+    ## "the desktop's Monaco `lineHeight`, measured on the Electron
+    ## front-end". 22 is `round(1.35 * 16)` — Monaco's **Linux** answer. On
+    ## macOS Monaco answers `round(1.5 * 16)` = 24, and the PLAT-37 parity
+    ## lane measured exactly that gap: against codetracer 596cb6e50 on
+    ## aarch64-darwin the OCR-free pitch instrument read GPUI 22.0-22.5 points
+    ## against Electron 23.5-24.5 across six scenario frames, with the Electron
+    ## side at 24.0 or 24.5 in four of the five that hold an editor
+    ## (PARITY-S5). A literal cannot be right on both platforms; the rule can.
+  EditorPadSidePx* = 0
+    ## The editor reaches its pane's left and right edges (the desktop's
+    ## Monaco fills its panel).
+  ChromeGapPx* = 4
+    ## The gap between two panes: the desktop's GoldenLayout splitter
+    ## (`.lm_splitter` 4px, measured on the Electron front-end's computed
+    ## styles, 2026-10-17). 8 px until then.
+  WindowEdgePx* = 4
+    ## The window's own side padding around the arrangement: the desktop's
+    ## layout root sits 4 px in from either edge, directly under the caption
+    ## bar and directly above the status bar (`#ROOT` / `.lm_root`, measured
+    ## 2026-10-17). Until then the window was padded `ChromePaddingPx` on
+    ## every side.
   ChromePaddingPx* = 12
-    ## The window's own padding and the gap between panes, in device pixels.
-    ## They are here rather than in `main.nim` because `paneWidthPx` below has
-    ## to subtract exactly these, and two spellings of one number is §30.
+    ## A pane's own inner padding, in device pixels. Here rather than in
+    ## `main.nim` because the leaves' hit-tests subtract exactly this, and two
+    ## spellings of one number is §30.
 
 func hexChannel(hex: string; index: int): float =
   ## One 8-bit channel of `#rrggbb`, as 0.0 .. 1.0.
@@ -335,8 +437,8 @@ func paneWidthPx*(viewportWidth, paneCount: int): int =
   ## itself. Returns at least 1 so a degenerate viewport produces a visible
   ## sliver rather than a zero-width div the renderer silently drops.
   if paneCount <= 0:
-    return max(1, viewportWidth - 2 * ChromePaddingPx)
-  let usable = viewportWidth - 2 * ChromePaddingPx - (paneCount - 1) * ChromeGapPx
+    return max(1, viewportWidth - 2 * WindowEdgePx)
+  let usable = viewportWidth - 2 * WindowEdgePx - (paneCount - 1) * ChromeGapPx
   max(1, usable div paneCount)
 
 func tabStyle*(active: bool; focused = false): seq[(string, string)] =
@@ -348,14 +450,17 @@ func tabStyle*(active: bool; focused = false): seq[(string, string)] =
   ## ground (`stripStyle`) in the disabled tier. The window's chrome applies
   ## exactly this list (`main.paintWindowChrome`).
   ##
-  ## PLAT-51: on the FOCUSED pane's strip every tab sits on the focus colour
-  ## (the strip's ground there), the active one keeping its foreground and
-  ## weight, the others in `crTabFocusedForeground` (the disabled tier is
-  ## under the contrast floor there).
+  ## PLAT-51: on the FOCUSED pane's strip the other tabs sit on the focus
+  ## colour (the strip's ground there), in `crTabFocusedForeground` (the
+  ## disabled tier is under the contrast floor there). PLAT-68: the ACTIVE
+  ## tab there is lifted off the focus colour onto the window's ground
+  ## (`crTabStripBackground`, ui/surface/primary/default — the terminal's
+  ## `srTabActiveFocused`), keeping its foreground and weight: on one ground
+  ## the selected and the unselected tabs could not be told apart.
   if active:
     @[("color", chromeOf(crTabActiveForeground)), ("font-weight", "bold"),
       ("background-color",
-       chromeOf(if focused: crFocusOutline else: crTabActiveBackground))]
+       chromeOf(if focused: crTabStripBackground else: crTabActiveBackground))]
   else:
     @[("color", chromeOf(if focused: crTabFocusedForeground
                          else: crTabInactiveForeground))]

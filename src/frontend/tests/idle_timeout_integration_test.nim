@@ -1,5 +1,5 @@
 import
-  std/[unittest, os, osproc],
+  std/[unittest, os, osproc, net, monotimes, times],
   ../../common/paths
 
 proc ensureProcessStopped(p: Process) =
@@ -18,6 +18,34 @@ proc waitForExitWithin(p: Process, timeoutMs: int): (bool, int) =
   if p.running:
     return (false, -1)
   (true, waitForExit(p))
+
+# Wait until the host accepts TCP connections on `port`, instead of sleeping a
+# fixed interval and hoping it has bound by then. The cases below used
+# `sleep(300)` / `sleep(400)`; on a loaded host `node server_index.js` takes
+# longer than that to start, the client then spends its budget retrying the
+# connection, and "active connection activity prevents timeout" failed on
+# `check clientExited` (twice in four runs on a heavily loaded 32-core host,
+# 2026-10-23). A bare TCP connect is not a socket.io connection: the host's
+# connection accounting (and its idle timer) only sees completed socket.io
+# handshakes, so probing does not change what the cases measure.
+proc waitForListening(port: int, timeoutMs: int): bool =
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    let probe = newSocket()
+    try:
+      probe.connect("127.0.0.1", Port(port), timeout = 200)
+      return true
+    except OSError, TimeoutError:
+      sleep(50)
+    finally:
+      probe.close()
+  false
+
+# The session secret a supervisor would give `ct host`. Every host and client
+# below inherits it: the host admits a socket only with it
+# (`index/host_session_guard.nim`), so without it the "connected" cases would
+# have no connection to time out.
+putEnv("CODETRACER_HOST_SESSION_SECRET", "idle-timeout-integration-test-session-secret")
 
 suite "ct host idle timeout integration":
   let serverIndex = codetracerExeDir / "server_index.js"
@@ -135,11 +163,11 @@ suite "ct host idle timeout integration":
           options = {poStdErrToStdOut})
 
         # allow the host to start before connecting
-        sleep(300)
+        check waitForListening(5002, 10_000)
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 setTimeout(() => process.exit(0), 4000);
 """
         client = startProcess(
@@ -185,12 +213,12 @@ setTimeout(() => process.exit(0), 4000);
           args = hostArgs,
           options = {poStdErrToStdOut})
 
-        # give the host a moment to bind ports
-        sleep(400)
+        # wait for the host to bind its socket port
+        check waitForListening(5004, 10_000)
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   let sent = 0;
   const interval = setInterval(() => {
@@ -207,7 +235,11 @@ socket.on('connect', () => {
           args = @["-e", clientScript],
           options = {poStdErrToStdOut})
 
-        let (clientExited, _) = waitForExitWithin(client, 2_000)
+        # The client's own script takes ~1.05 s once connected (5 x 150 ms of
+        # activity, then 300 ms); the rest of the budget is `node` start-up and
+        # the handshake, which on a loaded host exceeded the 2 s this used to
+        # allow. The host-side assertion below is unchanged.
+        let (clientExited, _) = waitForExitWithin(client, 10_000)
         check clientExited
 
         # Host should still be alive because activity kept resetting idle timer.
@@ -248,10 +280,12 @@ socket.on('connect', () => {
           args = hostArgs,
           options = {poStdErrToStdOut})
 
+        check waitForListening(5003, 10_000)
+
         # connect first socket and send one activity ping, then exit
         let clientScript1 = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   socket.emit('test-event', { source: 'first' });
   setTimeout(() => process.exit(0), 200);
@@ -269,7 +303,7 @@ socket.on('connect', () => {
 
         let clientScript2 = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   socket.emit('test-event', { source: 'second' });
   setTimeout(() => process.exit(0), 200);
@@ -321,11 +355,11 @@ socket.on('connect', () => {
           options = {poStdErrToStdOut})
 
         # wait for the host to start listening
-        sleep(400)
+        check waitForListening(5005, 10_000)
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true});
+const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   const interval = setInterval(() => socket.emit('test-event', { tick: Date.now() }), 200);
   setTimeout(() => {

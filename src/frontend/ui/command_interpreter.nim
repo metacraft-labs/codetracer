@@ -79,13 +79,18 @@ proc parseQuery*(self: CommandInterpreter, query: cstring): SearchQuery =
   ## construction of each mode's `SearchQuery` (the value is the query past
   ## its first character, as it always was). The desktop has no tick search:
   ## `desktopKindOf` keeps `#…` a file query here.
-  case desktopKindOf(classifyOmnibarQuery($query).mode)
+  let classified = classifyOmnibarQuery($query)
+  case desktopKindOf(classified.mode)
   of omCommand, omRecording:
     # (`desktopKindOf` keeps `:open …` a command here: the desktop's "+"
     # opens a tab on its welcome screen.)
     self.parseCommandQuery(cstring(($query).substr(1)))
   of omProgram:
-    SearchQuery(kind: ProgramQuery, value: cstring(($query).substr(1)))
+    # The PATTERN, which is the shared classification's needle: the rest of
+    # the line after `:grep`, trimmed (Find-And-Incremental-Search.md §5.1).
+    # (It was the query past its first character — `grep foo` for
+    # `:grep foo` — so the desktop searched for the word `grep` too.)
+    SearchQuery(kind: ProgramQuery, value: cstring(classified.needle))
   of omSymbol:
     SearchQuery(kind: SymbolQuery, value: cstring(($query).substr(1)))
   of omAgent:
@@ -253,6 +258,16 @@ proc actOnProgramSearchResult*(self: CommandInterpreter, res: CommandPanelResult
   echo "# TODO most cases"
   discard
 
+proc sourcePathOf(self: CommandInterpreter; file: cstring): cstring =
+  ## The path to open for a result that names a source file (a symbol, a
+  ## search hit). The file index (`files`, filled by
+  ## `ui_js.refreshCommandPaletteFileIndex`) maps each path the trace lists to
+  ## itself; a symbol carries the path its recorder wrote (`symbols.json`),
+  ## which that index need not hold. Indexing the table with such a path
+  ## answered `undefined`, and `openTab` died on it, so choosing a symbol in
+  ## the palette did nothing at all. The result's own path is opened instead.
+  if self.files.hasKey(file): self.files[file] else: file
+
 proc runCommandPanelResult*(self: CommandInterpreter, commandResult: CommandPanelResult) =
   case commandResult.kind:
   of CommandQuery:
@@ -265,10 +280,12 @@ proc runCommandPanelResult*(self: CommandInterpreter, commandResult: CommandPane
     self.actOnProgramSearchResult(commandResult)
 
   of TextSearchQuery:
-    self.data.openTab(self.files[commandResult.file], ViewSource, line=commandResult.line)
+    self.data.openTab(self.sourcePathOf(commandResult.file), ViewSource,
+                      line=commandResult.line)
 
   of SymbolQuery:
-    self.data.openTab(self.files[commandResult.file], ViewSource, line=commandResult.line)
+    self.data.openTab(self.sourcePathOf(commandResult.file), ViewSource,
+                      line=commandResult.line)
 
   of AgentQuery:
     self.data.ui.commandPalette.inAgentMode = true

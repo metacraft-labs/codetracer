@@ -80,7 +80,7 @@ import ./lifecycle_support
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 59
+const ExpectedAssertions = 64
 
 var countedAssertions = 0
 
@@ -181,13 +181,16 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     ck noSurvivingReplayServer()
     sess.close()
 
-  test "`q` and Ctrl+c reach the same clean exit through the same restore":
-    # THE OTHER TWO QUIT KEYS §4.2 binds, so `:quit` above is one path of three
-    # rather than the only one that was ever tried. Both are asserted on the
-    # SAME three observables, because "it exited" is not the claim.
+  test "each base's quit keys reach the same clean exit through the same restore":
+    # THE OTHER QUIT KEYS, so `:quit` above is one path of several rather than
+    # the only one that was ever tried: the CUA base's `Ctrl+Q` (the default,
+    # PLAT-68), and §4.2's `q` and `Ctrl+c` under the Vim base. All are
+    # asserted on the SAME observables, because "it exited" is not the claim.
     var paths = 0
-    for key in ["q", "\x03"]:
-      var sess = tuiSession(@[tracePath], cols = Cols, rows = Rows)
+    for (key, base) in [("\x11", ""), ("q", "--keymap=vim"),
+                        ("\x03", "--keymap=vim")]:
+      let args = (if base.len > 0: @[base] else: @[]) & @[tracePath]
+      var sess = tuiSession(args, cols = Cols, rows = Rows)
       settleOnDebugger(sess, Cols, Rows)
       sess.send(key)
       let status = sess.waitExit(initDuration(seconds = 30))
@@ -203,7 +206,7 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
       sess.close()
       inc paths
     checkpoint("quit paths exercised: " & $paths)
-    ck paths == 2
+    ck paths == 3
     ck noSurvivingReplayServer()
 
   test "THE WEDGE: a stalled handshake ends on the clock, not on the user":
@@ -362,7 +365,10 @@ suite "CTUI-14 Tier 2: the pty lifecycle, and the wedge that used to end it":
     # NOT CLAIMED AT ALL, which is the whole difference from the case above.
     ck counts.enters == 0
     ck counts.leaves == 0
-    ck screen.contains("not a CodeTracer recording")
+    # Read across the screen's row breaks: the message names the folder, so
+    # where it wraps depends on the checkout's path (`/home/…/codetracer`
+    # put the break inside "CodeTracer" on an 80-column screen).
+    ck screen.replace("\n", "").contains("not a CodeTracer recording")
     sess.close()
 
   test "assertion count":

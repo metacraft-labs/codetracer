@@ -17,11 +17,11 @@
 ## ## SAVING IS A HOST INTENT
 ##
 ## The core names `save` as an intent the host performs
-## (`operations.HostIntentKind.hiSave`). Vim and Kakoune bind it to `Ctrl+s`;
-## the product default binds nothing, so an unclaimed `Ctrl+s` is the product
-## default's save. Either way the WRITE is this module's, through the same
-## project writer the terminal's `:w` uses (`tui/host/edit_host
-## .writeProjectFile` — a filesystem helper with no terminal in it).
+## (`operations.HostIntentKind.hiSave`); every base binds it (`Ctrl+S` under
+## CUA, `C-x C-s` under Emacs, `Ctrl+s` under Vim and Kakoune). The WRITE is
+## this module's, through the same project writer the terminal's `:w` uses
+## (`tui/host/edit_host.writeProjectFile` — a filesystem helper with no
+## terminal in it).
 ##
 ## ## READ-ONLY IS STILL REFUSED
 ##
@@ -73,13 +73,18 @@ type
     saved*: bool
 
 const
-  SaveKey* = "Ctrl+s"
   SaveOperation* = "save"
 
+  GpuiDelivery* = KeyDelivery(frontEnd: feGpui, platform: hostPlatform(),
+                              keyProtocol: kpNative)
+    ## Base-Keymaps §4.2's three keys this front-end supplies: GPUI receives
+    ## KEYS, not bytes, so every chord can be typed (`native`).
+
 proc newGpuiEditArm*(root, path, text: string;
-                     model = kmProductDefault): GpuiEditArm =
+                     model = bkCua): GpuiEditArm =
   GpuiEditArm(root: root, path: path,
-              doc: initEditingDocument(path, text, model),
+              doc: initEditingDocument(path, text, model,
+                                       delivery = GpuiDelivery),
               loadedText: text, status: "", viewportTop: 1,
               viewportRows: DefaultViewportRows)
 
@@ -114,8 +119,7 @@ proc applyCanonicalKey*(arm: GpuiEditArm; name: string;
     inc arm.changes
   arm.viewportTop = followedViewportTop(arm.viewportTop, caretLine(arm.doc),
                                         arm.viewportRows)
-  if SaveOperation in applied.operations or
-     (name == SaveKey and applied.outcome == eoIgnored):
+  if SaveOperation in applied.operations:
     result.saved = arm.save()
 
 proc applyGpuiKey*(arm: GpuiEditArm; key: string; modifiers: openArray[string];

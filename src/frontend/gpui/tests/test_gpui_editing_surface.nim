@@ -61,6 +61,7 @@
 ## `ck` counts; `expectCount` fails when a case does not reach the number
 ## written at the end of it. Every number was written LAST, from a run.
 
+import replay_prerequisite
 import std/[algorithm, monotimes, os, osproc, strutils, times, unittest]
 
 import isonim_gpui/renderer
@@ -69,6 +70,7 @@ import isonim_gpui/bindings
 import codetracer_embed
 
 import ../app/leaves
+import ../app/shell
 import ../host/gpui_host
 import ../../view_vocabulary/pane_views
 import ../../../common/view_vocabulary
@@ -522,9 +524,13 @@ suite "PLAT-22: the GPUI editing surface":
         let drawn = getAttribute(root, EditorProvenanceAttribute)
         ck drawn.len > 0
         ck drawn == $s.provenance
-        # §2's Requirement on the DEBUG side, in an element of its own — the
-        # half `exactTextNodes` exists for, and the half no case had.
-        ck exactTextNodes(root, sourceContractFor(pmDebug).statement) == 1
+        # §2's Requirement on the DEBUG side, stated EXACTLY — the half no
+        # case had. Since 2026-10-17 the statement is an attribute of the pane
+        # (`EditorSourceStatementAttribute`), not a caption row: the desktop
+        # draws no such row. An exact equality, so prose that merely QUOTES
+        # the statement cannot satisfy it.
+        ck getAttribute(root, EditorSourceStatementAttribute) ==
+          sourceContractFor(pmDebug).statement
         seen.add drawn
       ck seen.len == 3
       ck seen[0] != seen[1]        # verified vs UNVERIFIED — CTUI-5's own line
@@ -662,7 +668,8 @@ suite "PLAT-22: the GPUI editing surface":
     resetCount()
     let h = openLive(BigViewportLines, big = true)
     try:
-      h.service.vm.setViewport(height = BigViewportLines, overscan = BigOverscan)
+      h.service.vm.setOverscan(BigOverscan)
+      h.service.vm.setViewport(h.service.vm.viewport.withRows(BigViewportLines))
       h.pointAt(1, RecordedBigPath)
       discard h.surfaceOf()
 
@@ -893,13 +900,32 @@ suite "PLAT-22: the GPUI editing surface":
     # statement in the value and drew nothing fails.
     ck contract.statement in textContent(root)
     ck s.notice in textContent(root)
-    # **AND IN AN ELEMENT OF ITS OWN.** The containment check above is
-    # satisfied by the NOTICE, which quotes the statement verbatim, so it was
-    # green over a renderer that had stopped drawing the statement — measured
-    # by an undeclared arm on 2026-09-16 (§4d). Arm E14 is that mutation and
-    # this is the only line that reddens.
-    ck exactTextNodes(root, contract.statement) == 1
-    expectCount(25)
+    # **AND STATED BY THE PANE ITSELF, EXACTLY.** The containment check above
+    # is satisfied by the NOTICE, which quotes the statement verbatim, so it
+    # was green over a renderer that had stopped drawing the statement —
+    # measured by an undeclared arm on 2026-09-16 (§4d). Arm E14 is that
+    # mutation and this is the only line that reddens. Since 2026-10-17 the
+    # statement is the pane's `EditorSourceStatementAttribute` rather than a
+    # caption row (the desktop draws no such row), so the exact check reads
+    # that attribute — which the notice cannot satisfy.
+    ck getAttribute(root, EditorSourceStatementAttribute) == contract.statement
+    # **AND THE LEAF IS DECIDED BY THE SURFACE, NOT BY `leaf.live`** — arm
+    # U2's claim, graded here since 2026-10-17: the redesigned window redraws
+    # the editor's rows itself after the leaf is rendered, so the shipped
+    # binary no longer shows a leaf that took the wrong branch, and only
+    # `renderLeaf` asked directly can. Edit mode builds no ViewModel, so the
+    # editor's leaf is NOT live; it must still draw the surface, never the
+    # not-launched sentence.
+    gpui_reset_tree()
+    resetCallbacks()
+    var lr: GpuiRenderer
+    let (leafNode, reported) = renderLeaf(lr,
+      GpuiLeaf(kind: glkBuiltin, paneId: $paneEditor, builtin: paneEditor,
+               title: "Editor"), s)
+    ck getAttribute(leafNode, StateAttribute) == "live"
+    ck not reported
+    ck editorRowNodes(leafNode).len == 4
+    expectCount(28)
 
   test "THE SHIPPED BINARY draws the editor — Tier 2, through --report-plan":
     resetCount()
@@ -946,8 +972,11 @@ suite "PLAT-22: the GPUI editing surface":
     # The execution pointer reached the plan: PLAT-51 draws the desktop's
     # mark (`highlight_line_arrow.svg`), named on its lane, not a glyph.
     ck "highlight_line_arrow.svg" in output
-    # The state pane rendered its vocabulary tree rather than its name.
-    ck "Locals" in output
+    # The state pane rendered its own content rather than its name. Since the
+    # one-list Variables pane (`9ae2786b7`) that content opens with the watch
+    # input `leaves.nim` draws, at every stop and with or without variables;
+    # the Locals tab this used to look for no longer exists.
+    ck "Enter a watch expression" in output
     expectCount(7)
 
 # ---------------------------------------------------------------------------
@@ -967,7 +996,10 @@ suite "PLAT-22: the GPUI editing surface":
 #
 # 324 -> 335 on 2026-09-23: PLAT-28's two projection cases, seven and four.
 
-const ExpectedAssertions = 335
+# 335 -> 338 on 2026-10-17: the edit-mode case also renders the editor's
+# LEAF, not live, through `renderLeaf` (arm U2's re-aimed killer), three.
+
+const ExpectedAssertions = 338
 
 suite "PLAT-28: the rows ARE a projection, asserted against a direct build":
 

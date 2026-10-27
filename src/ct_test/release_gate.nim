@@ -377,6 +377,17 @@ const
     # models and every region a reader expanded collapses again; and a cleared
     # panel must produce no document at all.
     "src/tests/gui/tests/vcs/vcs_context_expansion_test.nim",
+    # Which git command a unified-diff tab's target asks for
+    # (`viewmodels/diff_target.diffGitPlan`), extracted from the JS-only
+    # `ui/unified_diff.nim` so it can be asserted at all.  Its central case is
+    # VCS-Panel.md, "Which two revisions a file row compares": a DeepReview of
+    # a commit falls back to git for a file with no diff record, and that
+    # fallback must diff the reviewed commit, never `git diff HEAD -- <path>`
+    # (codetracer-pm issue 2026-09-29-changed-files-rows-diff-against-head-
+    # for-a-selected-historical-commit).  Nothing on screen says which two
+    # revisions a diff tab compared, so a regression here would show a
+    # plausible-looking wrong diff and stay green everywhere else.
+    "src/tests/gui/tests/vcs/diff_target_test.nim",
     # AA-1 — the DeepReview roll-up is deleted from the Agent Activity panel,
     # and its layout identity is not.
     #
@@ -927,6 +938,14 @@ const
     # `ct record prog -- a b`: the program may stand before `--` (CLI/ct/record.md,
     # "Program arguments"); the resolver and both forms through the real ct.
     "src/tests/cli/record_child_argv_test.nim",
+    # `ct record main.nim` must produce a recording the replay engine can
+    # OPEN, not merely a container: the `.nim` compile step built `-d:release`
+    # with no DWARF, every recording succeeded, and every replay failed at
+    # launch ("MCR run-to-entry stopped without source location").  The
+    # dispatch e2e above stops at "a CTFS container came out" and stayed green
+    # throughout, so this is the only check of that property; registered so it
+    # cannot quietly stop running.
+    "src/tests/cli/record_nim_debuginfo_e2e_test.nim",
   ]
 
   CliReviewGateTests* = [
@@ -1018,6 +1037,24 @@ const
     "src/tests/cli/lang_enum_contract_test.nim",
     "src/tests/cli/trace_index_migration_test.nim",
     "src/tests/cli/target_axes_test.nim",
+  ]
+
+  CliReplayGateTests* = [
+    # `ct replay`'s replay-engine options (codetracer-specs CLI/ct/replay.md,
+    # "Options").  Same contract and the same runner as the arrays above --
+    # `just test-cli-record` globs the whole of `src/tests/cli` -- kept in its
+    # own array because its subject is the replay command, not recording.
+    #
+    # `--thread-sync-order` and `--os-simulation` reach the native replay
+    # engine only as their environment twins, through processes that have no
+    # argument slot for them, so a hop that stops passing them on drops them
+    # silently: the replay still runs, under the engine's defaults.  The pure
+    # test pins the decision (Rule 3 seeding, refusal by name, nothing
+    # published when nothing is given); the end-to-end test runs the shipped
+    # `ct` and checks what reaches the front-end it launches.  db-backend's own
+    # hop is `src/db-backend/tests/replay_worker_env_forwarding_test.rs`.
+    "src/tests/cli/replay_backend_env_test.nim",
+    "src/tests/cli/replay_backend_env_e2e_test.nim",
   ]
 
   GuiActionGateEntries*: array[5, GuiActionGateEntry] = [

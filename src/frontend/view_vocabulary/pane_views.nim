@@ -83,13 +83,14 @@ import viewmodels/point_list_vm
 # PLAT-41 — the five newly expressed panes' ViewModels.
 import viewmodels/debug_controls_vm
 import viewmodels/flow_vm
-import viewmodels/search_vm
+import viewmodels/search_results_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
 import viewmodels/vcs_vm
 # PLAT-52 — the Terminal Output pane's ViewModel.
 import viewmodels/terminal_output_vm
+import viewmodels/test_results_vm
 
 import headless_app/layout_model
 
@@ -132,7 +133,11 @@ const
                                          # PLAT-52: the recorded program's
                                          # terminal output (its lines, or its
                                          # screen), from `TerminalOutputVM`.
-                                         paneTerminalOutput}
+                                         paneTerminalOutput,
+                                         # PLAT-53: the project's tests and
+                                         # the last run, from the window's
+                                         # `TestResultsVM`.
+                                         paneTestResults}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -148,9 +153,10 @@ const
   PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
                                             # PLAT-45 — the desktop's panes
                                             # (PLAT-47 drew `paneVcs`,
-                                            # PLAT-52 `paneTerminalOutput`).
+                                            # PLAT-52 `paneTerminalOutput`,
+                                            # PLAT-53 `paneTestResults`).
                                             paneAgentActivity,
-                                            paneTestResults, paneConstraints,
+                                            paneConstraints,
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks.
                                             paneProblems, paneRequests}
@@ -199,12 +205,6 @@ func entriesOf*(root: ViewNode): set[ViewKind] =
 # State
 # ---------------------------------------------------------------------------
 
-func stateTabOptions*(): seq[ViewOption] =
-  ## §3.3.4's three roots, derived from `StateTab` rather than written out, so
-  ## a fourth tab cannot arrive without appearing here.
-  for t in StateTab:
-    result.add ViewOption(id: $t, label: ($t)[2 .. ^1])
-
 const VariableLabelSeparator* = ": "
   ## **The vocabulary's spelling of "this name has this value"**, named once so
   ## every medium draws the same row. It was ` = ` until PLAT-40, while the
@@ -237,7 +237,9 @@ proc variableRow(v: store_types.Variable; path: string;
                expanded = path in expanded)
 
 proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
-  ## The state panel: a `Tabs` over the three roots and a `Tree` of variables.
+  ## The Variables pane: ONE `Tree` of the locals, the globals when present
+  ## and the watched expressions — no tabs (Variable-State-Pane.md
+  ## § Decisions, 2026-10-24).
   result.pane = paneState
   if vm.isNil:
     result.report = "the state panel has no ViewModel; the session has not " &
@@ -245,7 +247,6 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
     result.root = viewText("state.report", result.report)
     result.entries = entriesOf(result.root)
     return
-  let tab = vm.activeTab.val
   let expanded = vm.expandedPaths.val
   let vars = vm.currentVariables.val
   var rows: seq[ViewNode] = @[]
@@ -255,10 +256,7 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
   if rows.len == 0:
     result.report = "no variables at this position"
   let tree = viewTreeNode("state.root",
-    (case tab
-     of stLocals: "locals"
-     of stGlobals: "globals"
-     of stWatches: "watches") &
+    "variables" &
     (if result.report.len > 0: " — " & result.report else: ""),
     rows, expanded = true)
   # THE CURSOR IS DERIVED FROM `StateVM.selectedPath`, which is the signal the
@@ -273,12 +271,10 @@ proc statePaneView*(vm: StateVM; budget: Budget): PaneView =
       cursor = i
       break
   tree.cursor = cursor
-  let tabs = viewTabs("state.tabs", stateTabOptions(), selected = ord(tab))
   # NO TITLE OF ITS OWN (PLAT-49, the user, 2026-10-01: no title row inside a
-  # pane). The pane's tab strip says "State", as the desktop's GoldenLayout
-  # header does; a label here drew a second "State" as the pane's first row.
-  result.root = viewCollapsible("state", "", @[tabs, tree],
-                                expanded = true)
+  # pane). The pane's tab strip says "Variables", as the desktop's
+  # GoldenLayout header does.
+  result.root = viewCollapsible("state", "", @[tree], expanded = true)
   result.entries = entriesOf(result.root)
 
 # ---------------------------------------------------------------------------
@@ -363,6 +359,9 @@ proc eventLogCell(r: EventLogRow; col: EventLogColumn): string =
     # blank line under every event in a medium that honours it (PLAT-40
     # measured every row of the native window's event log double-spaced).
     r.value.strip(leading = false, chars = {'\n', '\r'})
+
+# `eventLogText`, the event's text as every Event Log shows it, is
+# `event_log_vm`'s: the desktop's list draws its output column with it too.
 
 proc eventLogPaneView*(vm: EventLogVM): PaneView =
   ## The event log: a `Table`.
@@ -550,36 +549,63 @@ proc flowPaneView*(vm: FlowVM): PaneView =
   result.root = table
   result.entries = entriesOf(result.root)
 
-proc searchPaneView*(vm: SearchVM): PaneView =
-  ## Search: a `Tree` of the query `Input` and a `List` of results.
-  ##
-  ## The query is an `Input` rather than a `Text` because it is the pane's
-  ## editable state — `SearchVM.query` is a `Signal[string]` a reader types
-  ## into — and the vocabulary distinguishes a reading from a control. A result
-  ## is a `ViewOption`, which is (identity, label, availability): the identity
-  ## is what a caller acts on, so a medium does not have to parse the label
-  ## back into a location.
+const
+  SearchQueryId* = "search.query"
+  SearchOptionIdPrefix* = "search.option."
+    ## A toggle's id is this prefix and its name (`case`, `word`, `regex`).
+  SearchResultIdPrefix* = "search.result."
+    ## A match row's id is this prefix and the row's index in
+    ## `SearchResultsVM.results` — what a click opens (K35).
+
+proc searchResultLabel*(row: SearchResultLine): string =
+  ## A match row as one line: its line number, then its text.
+  let p = rowParts(row)
+  $row.line & "  " & p.before & p.hit & p.after
+
+proc searchPaneView*(vm: SearchResultsVM): PaneView =
+  ## FIND IN FILES (PLAT-57): the query, the three toggles, where the search
+  ## is, then one `Collapsible` per file (its caption the desktop's group
+  ## header — `shortResultPath · N matches`) holding a `List` of its match
+  ## rows. A row's identity is its index in `results` (`SearchResultIdPrefix`),
+  ## so a medium never parses a label back into a location.
   result.pane = paneSearch
   if vm.isNil:
     result.report = "search has no ViewModel; the session has not launched"
     result.root = viewText("search.report", result.report)
     result.entries = entriesOf(result.root)
     return
+  let o = vm.options.val
   var children: seq[ViewNode] = @[]
-  children.add viewInput("search.query", vm.query.val)
-  var options: seq[ViewOption] = @[]
-  for i, r in vm.results.val:
-    options.add ViewOption(id: "search.result." & $i,
-                           label: (if r.detail.len > 0: r.label & " — " & r.detail
-                                   else: r.label))
-  let list = viewList("search.results", options)
-  let sel = vm.selectedResult.val
-  if sel.isSome and sel.get >= 0 and sel.get < options.len:
-    list.cursor = sel.get
-  children.add list
-  result.root = viewTreeNode("search", "Search", children)
+  children.add viewInput(SearchQueryId, vm.query.val)
+  for which in SearchOption:
+    children.add viewToggle(SearchOptionIdPrefix & $which,
+                            SearchOptionTitles[which], checked = o.isOn(which))
+  let groups = vm.groups.val
+  let summary = vm.summaryText()
+  children.add viewText("search.summary",
+                        (if summary.len > 0: summary
+                         else: vm.emptyText(NativeSearchPrompt)))
+  let sel = vm.selected.val
+  for gi, g in groups:
+    var options: seq[ViewOption] = @[]
+    var cursor = -1
+    for k, (index, row) in g.rows:
+      options.add ViewOption(id: SearchResultIdPrefix & $index,
+                             label: searchResultLabel(row))
+      if index == sel:
+        cursor = k
+    let list = viewList("search.file." & $gi & ".rows", options,
+                        highlight = max(0, cursor))
+    if cursor < 0:
+      list.highlight = -1
+    children.add viewCollapsible("search.file." & $gi,
+                                 shortResultPath(g.path) & " · " &
+                                   matchCountLabel(g.rows.len),
+                                 @[list], expanded = true)
+  result.root = viewTreeNode("search", "Find in Files", children,
+                             expanded = true)
   result.entries = entriesOf(result.root)
-  if options.len == 0:
+  if groups.len == 0:
     result.report = "no search results"
 
 const ScratchpadCloseGlyph* = "✕"
@@ -653,8 +679,51 @@ proc terminalOutputPaneView*(vm: TerminalOutputVM): PaneView =
                 else: -1
     options.add ViewOption(id: "line-" & $line.lineIndex & "-write-" & $write,
                            label: lineText(line))
+  # THE HELD WINDOW (Viewport-Driven-Loading Q3): the options are the lines
+  # the pane's viewport holds, each id naming its line in the whole output;
+  # the highlight is the current line's place among them.
+  let start = if vm.windowed: vm.linesStart.val else: 0
+  let current = vm.currentLine() - start
   result.root = viewList("terminalOutput", options,
-                         highlight = max(0, vm.currentLine()))
+                         highlight = (if current >= 0 and current < options.len:
+                                        current
+                                      else: max(0, min(options.len - 1,
+                                                       current))))
+  result.entries = entriesOf(result.root)
+
+const TestResultsColumns* = @["", "test", "where", "duration"]
+  ## PLAT-53: the Test Results table's columns — the desktop row's mark,
+  ## name, location and duration (its controls are each medium's).
+
+proc testResultsPaneView*(vm: TestResultsVM): PaneView =
+  ## PLAT-53. THE TEST RESULTS PANE (`Test-Results-Pane.md` §8): the
+  ## headline, then a `Table` of the tests — mark, name, location, duration,
+  ## every cell the ViewModel's words — then the failure block's lines, the
+  ## absence and the empty state as `Text`. The headless replay session owns
+  ## no `TestResultsVM` (the window does: its tests are its project's, §8.2),
+  ## so a front-end attaches the window's, as it attaches its VCS pane's.
+  result.pane = paneTestResults
+  if vm.isNil:
+    result.report = "test results have no ViewModel; no host attached one"
+    result.root = viewText("tests.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  var children = @[viewText("tests.headline", vm.headline.val)]
+  let rows = vm.rows.val
+  var cells: seq[seq[string]] = @[]
+  for row in rows:
+    cells.add @[stateMark(row.state), row.name, rowWhere(row), rowDuration(row)]
+  if rows.len > 0:
+    children.add viewTable("tests.rows", TestResultsColumns, cells)
+  for i, line in vm.runFailure.val:
+    children.add viewText("tests.failure." & $i, line)
+  if vm.runAbsence.val.len > 0:
+    children.add viewText("tests.absence", vm.runAbsence.val)
+  if rows.len == 0:
+    children.add viewText("tests.empty", EmptyStateText)
+    result.report = "no tests found"
+  result.root = viewTreeNode("tests", "Test Results", children,
+                             expanded = true)
   result.entries = entriesOf(result.root)
 
 proc shellPaneView*(vm: ShellVM): PaneView =
@@ -817,7 +886,7 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   # PLAT-41 — five newly expressed.
   of paneDebugControls: debugControlsPaneView(DebugControlsVM(vm))
   of paneFlow: flowPaneView(FlowVM(vm))
-  of paneSearch: searchPaneView(SearchVM(vm))
+  of paneSearch: searchPaneView(SearchResultsVM(vm))
   of paneScratchpad: scratchpadPaneView(ScratchpadVM(vm))
   of paneShell: shellPaneView(ShellVM(vm))
   of paneFileTree: fileTreePaneView(FilesystemVM(vm))
@@ -849,7 +918,9 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneVcs: vcsPaneView(VCSVM(vm))
   # PLAT-52.
   of paneTerminalOutput: terminalOutputPaneView(TerminalOutputVM(vm))
-  of paneAgentActivity, paneTestResults,
+  # PLAT-53.
+  of paneTestResults: testResultsPaneView(TestResultsVM(vm))
+  of paneAgentActivity,
      paneConstraints, paneProblems, paneRequests:
     # **PLAT-45: THE DESKTOP'S PANES, PLACED AND REPORTED — NOT OMITTED.**
     # (PLAT-48 adds the desktop's PROBLEMS and REQUESTS footer panels, which

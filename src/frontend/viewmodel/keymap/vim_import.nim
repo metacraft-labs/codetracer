@@ -463,12 +463,14 @@ const
     "lt": "<", "bar": "|", "bslash": "\\",
   }.toTable
 
-  # The five Vim control spellings that ARE a named key's byte. `key_names`
-  # reads the byte and answers the name, so these are the only spellings a
-  # terminal can ever produce for them.
+  # The Vim control spellings that ARE another key's byte. `key_names` reads
+  # the byte and answers the name, so these are the only spellings a terminal
+  # can ever produce for them. `<C-H>` is `0x08`, which PLAT-68's decoder reads
+  # as `Ctrl+Backspace` (xterm's spelling of it; Backspace is `0x7f`), and
+  # `<C-_>` / `<C-@>` are `0x1f` / `0x00`, `Ctrl+/` / `Ctrl+Space`.
   ControlAliases = {
-    "c-h": "Backspace", "c-i": "Tab", "c-m": "Enter", "c-j": "Enter",
-    "c-[": "Esc",
+    "c-h": "Ctrl+Backspace", "c-i": "Tab", "c-m": "Enter", "c-j": "Enter",
+    "c-[": "Esc", "c-_": "Ctrl+/", "c-@": "Ctrl+Space",
   }.toTable
 
   # The same five, for the §6.4 divergence: two of them (`<C-M>` and `<C-J>`)
@@ -522,24 +524,24 @@ func canonicalKey(token: string; mapleader: string;
   if NamedKeys.hasKey(lower):
     return KeyToken(ok: true, name: NamedKeys[lower], raw: token)
   if ControlAliases.hasKey(lower):
-    # **FIVE CONTROL KEYS ARE THE SAME BYTE AS A NAMED KEY**, and `key_names`
-    # names the byte. `<C-H>` is 0x08 and `keyName("\b")` is `Backspace`; a
-    # chord spelled `Ctrl+h` is one no reader of a terminal can ever produce,
-    # so a binding on it would resolve for nobody. Found by the round-trip
-    # case in `test_editor_vim_import.nim`, which is why that case is there.
+    # **SOME CONTROL KEYS ARE THE SAME BYTE AS ANOTHER KEY**, and `key_names`
+    # names the byte. `<C-H>` is 0x08 and `keyName("\b")` is
+    # `Ctrl+Backspace`; a chord spelled `Ctrl+h` is one no LEGACY terminal can
+    # produce, so a binding on it would resolve for nobody there. Found by the
+    # round-trip case in `test_editor_vim_import.nim`.
     return KeyToken(ok: true, name: ControlAliases[lower], raw: token)
   # Modifier forms: C-, A-, M-, S-, and their combinations.
-  var mods: seq[string] = @[]
+  var mods: KeyModifiers = {}
   var rest = inner
   while rest.len >= 2 and rest[1] == '-' and
         rest[0] in {'C', 'c', 'A', 'a', 'M', 'm', 'S', 's', 'D', 'd'}:
     case rest[0]
-    of 'C', 'c': mods.add "Ctrl"
-    of 'A', 'a', 'M', 'm': mods.add "Alt"
-    of 'S', 's': mods.add "Shift"
+    of 'C', 'c': mods.incl kmodCtrl
+    of 'A', 'a', 'M', 'm': mods.incl kmodAlt
+    of 'S', 's': mods.incl kmodShift
     else: return   ## `<D-…>` is macOS Command; this product has no such name
     rest = rest[2 .. ^1]
-  if mods.len == 0: return
+  if mods == {}: return
   var base = ""
   if NamedKeys.hasKey(rest.toLowerAscii):
     base = NamedKeys[rest.toLowerAscii]
@@ -547,17 +549,15 @@ func canonicalKey(token: string; mapleader: string;
     base = rest
   else:
     return
-  if "Ctrl" in mods and base.len == 1 and base[0] in {'A' .. 'Z'}:
+  if kmodCtrl in mods and base.len == 1 and base[0] in {'A' .. 'Z'}:
     # `<C-X>` and `<C-x>` are the same byte, and `key_names` spells it
     # lowercase. Keeping both spellings would put two names on one key.
     base = base.toLowerAscii
-  if "Shift" in mods and base.len == 1 and base[0] in {'a' .. 'z'} and
-     "Ctrl" notin mods and "Alt" notin mods:
-    return KeyToken(ok: true, name: base.toUpperAscii, raw: token)
-  var name = ""
-  for m in ["Ctrl", "Alt", "Shift"]:
-    if m in mods: name.add(m & "+")
-  result = KeyToken(ok: true, name: name & base, raw: token)
+  # THE ONE SPELLING (`key_names.chordName`): the canonical modifier order,
+  # and Shift folded into a letter when nothing else is held.
+  let name = chordName(mods, base)
+  if name.len == 0: return
+  result = KeyToken(ok: true, name: name, raw: token)
 
 proc chordsOf*(notation: string; mapleader: string; mapleaderResolved: bool):
     (bool, seq[string], string) =
@@ -583,7 +583,7 @@ proc chordsOf*(notation: string; mapleader: string; mapleaderResolved: bool):
 # repository and the importer is a reader of it.
 
 proc importScope(mode: EditingMode): EditingScope =
-  EditingScope(model: kmVim, product: pmEdit, pane: epEditor, mode: mode,
+  EditingScope(model: bkVim, product: pmEdit, pane: epEditor, mode: mode,
                textEntry: isTextEntryMode(mode))
 
 const
@@ -1138,7 +1138,7 @@ proc importVimConfig*(text: string; base = EditingKeymap()): VimImport =
       kept.add b
     # A LATER MAPPING WINS, which is Vim's rule and `.cttui-keys`' too.
     kept.add EditingBinding(
-      model: kmVim,
+      model: bkVim,
       scope: BindingScope(modes: modes, products: {}, panes: familyPanes(family)),
       chords: chords, operation: operation, args: args,
       spelling: chords.join(" "))

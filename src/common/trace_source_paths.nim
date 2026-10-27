@@ -6,6 +6,25 @@ proc normalizeSourcePath(path: string): string =
 proc normalizeForCompare(path: string): string =
   normalizeSourcePath(path).strip(leading = false, trailing = true, chars = {'/'})
 
+proc isSamePath*(a, b: string): bool =
+  ## True when ``a`` and ``b`` name the same path, ignoring the separator
+  ## style and a trailing separator: ``/proj/`` is ``/proj``, and
+  ## ``C:\proj`` is ``C:/proj/``.  An empty path is never the same as
+  ## anything, so the synthetic "source folders" container (path ``""``)
+  ## matches no folder.  ``ct edit <dir>`` names the opened folder with a
+  ## trailing ``/`` while ``path.join`` / ``path.resolve`` drop it, so the
+  ## Files tree's root row and the index process can spell one folder two
+  ## ways.
+  if normalizeSourcePath(a).len == 0 or normalizeSourcePath(b).len == 0:
+    return false
+  let na = normalizeForCompare(a)
+  let nb = normalizeForCompare(b)
+  if na.len == 0 or nb.len == 0:
+    # A filesystem root such as "/" normalizes to "": it is the same path
+    # only as another root.
+    return na.len == 0 and nb.len == 0
+  na == nb
+
 proc isAncestorPathOf*(dir, path: string): bool =
   ## True when ``dir`` is a *strict* ancestor directory of ``path``.
   ##
@@ -44,6 +63,37 @@ proc isAbsoluteTraceSourcePath*(path: string): bool =
   if path.len > 0 and (path[0] == '/' or path[0] == '\\'):
     return true
   path.len >= 3 and path[1] == ':' and (path[2] == '\\' or path[2] == '/')
+
+proc isTreeAncestorOf*(nodePath, target: string): bool =
+  ## True when the Files-pane folder at ``nodePath`` contains ``target``,
+  ## the file the debugger reports — the test reveal-active-file walks the
+  ## tree with (``filesystem_vm.collectActiveFileAncestors``).
+  ##
+  ## An absolute ``nodePath``, or a relative ``target``, keeps
+  ## ``isAncestorPathOf``'s strict-prefix rule.  A RELATIVE ``nodePath``
+  ## against an ABSOLUTE ``target`` is the imported-trace case: the tree is
+  ## rooted in payload folders named relative to ``files/`` (``src``,
+  ## ``src/sub``), while the debugger reports the absolute path the program
+  ## was recorded at (``/home/u/proj/src/sub/deep.nr``).  The two share no
+  ## prefix, so the folder matches when ``"/" & nodePath & "/"`` occurs in
+  ## ``"/" & target`` — on whole segments, so ``src`` does not match
+  ## ``/x/mysrc/a.nr``.  It is a suffix match on the recorded layout and
+  ## cannot tell two ``src`` folders of the target's path apart; the tree
+  ## below the root only ever offers the one the payload holds.
+  ##
+  ## Separators are normalized to ``/``; ``./`` prefixes and trailing
+  ## separators on ``nodePath`` are dropped.  An empty path matches nothing.
+  var node = normalizeSourcePath(nodePath)
+  while node.startsWith("./"):
+    node = node[2 .. ^1]
+  node = node.strip(leading = false, trailing = true, chars = {'/'})
+  let normalizedTarget = normalizeSourcePath(target)
+  if node.len == 0 or normalizedTarget.len == 0:
+    return isAncestorPathOf(nodePath, target)
+  if isAbsoluteTraceSourcePath(node) or
+      not isAbsoluteTraceSourcePath(normalizedTarget):
+    return isAncestorPathOf(nodePath, target)
+  ("/" & normalizedTarget).contains("/" & node & "/")
 
 proc stripTraceSourceRoot*(path: string): string =
   ## Strip an OS root/drive so an absolute source path can be placed below
@@ -176,6 +226,68 @@ proc pathContentRootFor*(
     filesRoot: traceFilesRootFor(traceOutputFolder),
     selfContained: traceImported)
 
+proc payloadPathOf*(filesRoot, readPath: string): string =
+  ## **Where a file-tree node was read in a trace payload**, as a path
+  ## relative to the payload's ``files/`` root (``filesRoot``), with ``/``
+  ## separators.  ``""`` when ``readPath`` is not strictly below
+  ## ``filesRoot`` (the node came from the live disk) or either is empty.
+  ##
+  ## The index process records it on every node it reads from the payload
+  ## (``CodetracerFileData.payloadPath``) so that a later lazy load of that
+  ## node (``load-path-content``) reads from the SAME place.  The displayed
+  ## path is not enough to find it again: a portable payload stores
+  ## ``files/src/main.nr`` while the tree shows it under the absolute
+  ## recorded folder, so ``files/<root-stripped display path>`` names a
+  ## folder that does not exist (see ``index/files.loadFile``'s overlay).
+  ##
+  ## Both arguments must be in the same normal form (``index/files`` passes
+  ## them through ``path.normalize`` / ``path.join``); no ``..`` resolution
+  ## is attempted here.
+  relativePathInsideRoot(readPath, filesRoot)
+
+proc payloadReadPathFor*(filesRoot, payloadPath: string): string =
+  ## **The payload location a lazy file-tree load may read**, for a
+  ## ``payloadPath`` the renderer sent back: ``<filesRoot>/<payloadPath>``,
+  ## or ``""`` when the value must be refused.
+  ##
+  ## The value arrives over IPC from the renderer, so it is checked rather
+  ## than trusted: it may only name something INSIDE the payload.  Refused,
+  ## and answered with ``""`` so the caller falls back to its ordinary
+  ## resolution:
+  ##
+  ## - an empty value, or an empty ``filesRoot`` (no trace payload);
+  ## - an absolute path (``/etc``, ``C:\x``, ``\\server\share``);
+  ## - any ``..`` segment, wherever it sits — even one that would resolve
+  ##   back inside the payload is refused, because nothing the index
+  ##   process produces contains one;
+  ## - a value with a NUL byte, which no filesystem path may carry;
+  ## - anything else whose joined form is not strictly below ``filesRoot``
+  ##   (checked last, with ``isAncestorPathOf``, as a backstop).
+  ##
+  ## ``.`` segments and doubled or trailing separators are dropped.
+  ## Backslashes are treated as separators, as everywhere in this module.
+  let root = normalizeForCompare(filesRoot)
+  if root.len == 0 or payloadPath.len == 0 or '\0' in payloadPath:
+    return ""
+  let normalized = normalizeSourcePath(payloadPath)
+  if isAbsoluteTraceSourcePath(normalized) or
+      (normalized.len >= 2 and normalized[1] == ':'):
+    # The second test also refuses a drive-relative ``C:x``.
+    return ""
+  var segments: seq[string] = @[]
+  for segment in normalized.split('/'):
+    if segment == "..":
+      return ""
+    if segment.len == 0 or segment == ".":
+      continue
+    segments.add segment
+  if segments.len == 0:
+    return ""
+  let joined = root & "/" & segments.join("/")
+  if not isAncestorPathOf(root, joined):
+    return ""
+  joined
+
 proc sourceFolderRootsOf*(tracePaths: openArray[string]): seq[string] =
   ## **The folders a recording's sources live in**, from its `paths.json` —
   ## the ONE rule both the desktop (`index/traces.sourceFoldersFromTracePaths`)
@@ -194,3 +306,119 @@ proc sourceFolderRootsOf*(tracePaths: openArray[string]): seq[string] =
     let root = if slash <= 0: path else: path[0 ..< slash]
     if root notin result:
       result.add root
+
+# ---------------------------------------------------------------------------
+# Root folders of an imported (self-contained) trace's file tree
+# ---------------------------------------------------------------------------
+
+type
+  ImportedTraceTreeInputs* = object
+    ## What the index process knows about an imported trace when it picks
+    ## the roots of the Files pane (`index/traces.sourceFoldersFromTracePaths`).
+    ##
+    ## ``recordedSourceFolders`` — the trace's ``source_folders`` column.
+    ##                             These are folders ON THE RECORDING HOST:
+    ##                             the git root of the recorded program, or
+    ##                             absolute parent folders of its sources.
+    ## ``workdir``               — the recorded working directory.
+    ## ``tracePathsRead``        — whether the ``paths.json`` sidecar next
+    ##                             to the trace was read and parsed.
+    ## ``tracePaths``            — its entries, when it was.
+    ## ``payloadTopLevel``       — the names directly under the trace's
+    ##                             ``files/`` payload.
+    ## ``liveFallback``          — `fallbackLiveSourceFolders` of the trace:
+    ##                             the program or workdir, when they exist
+    ##                             on this machine.
+    recordedSourceFolders*: seq[string]
+    workdir*: string
+    tracePathsRead*: bool
+    tracePaths*: seq[string]
+    payloadTopLevel*: seq[string]
+    liveFallback*: seq[string]
+
+proc addUniqueRoot(roots: var seq[string]; root: string) =
+  if root.len > 0 and root notin roots:
+    roots.add root
+
+proc resolveAgainstWorkdir(workdir: string;
+                           folders: openArray[string]): seq[string] =
+  ## A relative payload root resolved to the live folder it was recorded
+  ## from.  Absolute roots, and every root when there is no workdir, are
+  ## kept as they are.
+  for folder in folders:
+    if folder.len == 0:
+      continue
+    if isAbsoluteTraceSourcePath(folder) or workdir.len == 0:
+      result.addUniqueRoot folder
+    else:
+      result.addUniqueRoot(
+        normalizeForCompare(workdir) & "/" & normalizeSourcePath(folder))
+
+proc importedTraceTreeRoots*(
+    input: ImportedTraceTreeInputs;
+    payloadHasEntries: proc(root: string): bool): seq[string] =
+  ## **The roots of an imported trace's Files pane.**
+  ##
+  ## ``payloadHasEntries(root)`` answers whether ``files/<root>`` exists in
+  ## the trace payload and is a file or a non-empty folder.
+  ##
+  ## An imported trace carries its sources in its payload, so the roots
+  ## are payload folders whenever the payload holds any.  The recorded
+  ## source folders are paths on the RECORDING host; a root that names one
+  ## of them sends the loader to the live disk, which on another machine
+  ## does not exist and on the recording machine is the whole repository
+  ## (GitHub #785: a Noir program inside a git checkout got the checkout's
+  ## root, and the Files pane listed every file in it).  In order:
+  ##
+  ## 1. the workdir, when the payload mirrors it (the root-stripped
+  ##    absolute layout, ``files/home/dev/project/...``) and it lies in a
+  ##    recorded source folder;
+  ## 2. the recorded source folders, when the payload mirrors all of them;
+  ## 3. the folders of the ``paths.json`` entries (`sourceFolderRootsOf`)
+  ##    that hold files in the payload — a root the payload lacks (nargo
+  ##    lists ``std/lib.nr`` but does not copy it) is dropped, not looked
+  ##    up on the live disk;
+  ## 4. without a usable ``paths.json``, the payload's own top-level
+  ##    folders that hold files;
+  ## 5. only when the payload holds nothing at all, the live folders: the
+  ##    ``paths.json`` roots resolved against the workdir, the recorded
+  ##    source folders, or ``liveFallback`` — the loader reads those with
+  ##    the live-filesystem limits (`index/files.loadFile`).
+  var sourceFolders = input.recordedSourceFolders
+
+  if input.workdir.len > 0 and payloadHasEntries(input.workdir):
+    var workdirInsideKnownSource = sourceFolders.len == 0
+    for folder in sourceFolders:
+      if isPathWithinRoot(folder, input.workdir):
+        workdirInsideKnownSource = true
+    if workdirInsideKnownSource:
+      return @[input.workdir]
+
+  if sourceFolders.len > 0:
+    var allInPayload = true
+    for folder in sourceFolders:
+      if not payloadHasEntries(folder):
+        allInPayload = false
+    if allInPayload:
+      return sourceFolders
+
+  let folders =
+    if input.tracePathsRead: sourceFolderRootsOf(input.tracePaths)
+    else: @[]
+  for folder in folders:
+    if payloadHasEntries(folder):
+      result.addUniqueRoot folder
+  if result.len > 0:
+    return
+
+  for name in input.payloadTopLevel:
+    if payloadHasEntries(name):
+      result.addUniqueRoot name
+  if result.len > 0:
+    return
+
+  if folders.len > 0:
+    sourceFolders = resolveAgainstWorkdir(input.workdir, folders)
+  if sourceFolders.len == 0:
+    sourceFolders = input.liveFallback
+  sourceFolders

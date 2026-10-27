@@ -170,9 +170,10 @@ suite "CTUI-14: --headless honours --goto and refuses what it cannot honour":
       ck plainFrame.len > 1000
       # PLAT-47: the calltrace pane lists the recording's call TRACE; PLAT-49:
       # its tab names it, and the lone editor's tab names its file (no pane
-      # carries an upper-cased title row any more).
+      # carries an upper-cased title row any more). The editor's tab is the
+      # file's folder and name, as the desktop's is (`editorTabLabel`).
       ck plainFrame.contains(" Call Trace ")
-      ck plainFrame.contains(" main.py ")
+      ck plainFrame.contains(" calc/main.py ")
       ck not plainFrame.contains("CALL TRACE")
       # PLAT-45: the shared default's event stack opens on the Event Log tab
       # (the timeline is its second tab), so the frame names the event stack.

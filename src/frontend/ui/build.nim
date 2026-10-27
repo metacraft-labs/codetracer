@@ -1,4 +1,6 @@
 import ui_imports, ../[types, communication], build_location_parser, auto_hide, errors
+import session_viewmodels
+from ../viewmodel/viewmodels/errors_vm import ErrorsVM
 import ../lib/ansi_html
 
 # ---------------------------------------------------------------------------
@@ -14,13 +16,12 @@ import ../lib/ansi_html
 # ---------------------------------------------------------------------------
 
 import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   BuildOutputLine, BuildErrorLine, BuildProblemLine, BuildLineSeverity,
   blsNone, blsError, blsWarning, blsInfo
 from ../viewmodel/viewmodels/build_vm import
-  BuildVM, BuildStatus, createBuildVM,
+  BuildVM, BuildStatus,
   setCommand, setRunning, setBuildStartTime, setCode, appendLine,
   appendError, appendProblem, clearOutput, jumpToLine
 from isonim/web/dom_api import nil
@@ -28,18 +29,14 @@ from isonim/web/dom_api import nil
 # module in scope even though the type arrives through `build_vm`. Used by the
 # empty-record guard in `syncLegacyBuildIntoVM`.
 from isonim/core/signals import Signal, val
-from ../viewmodel/views/isonim_build_view import mountIsoNimBuild
 
 export build_location_parser
 
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by the terminal-output, event-log and calltrace
-# migrations.
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other. The pane's view
+# is mounted by the panel host (`ui/panel_host`).
 var buildVMInstance*: BuildVM
-var buildVMStore: ReplayDataStore
 var buildComponentRef: BuildComponent
-var isoNimBuildMounted*: bool = false
 
 var buildDiagnosticScanner: BuildLocationScanner
   ## THE READER THE `nargo` FAMILY NEEDS, and the reason this pane cannot use
@@ -71,10 +68,10 @@ var buildDiagnosticScanner: BuildLocationScanner
   ## That is preserved: the state lives here, in the caller, exactly as the
   ## type prescribes.
   ##
-  ## It is module-level rather than a `BuildComponent` field because this pane
-  ## is a singleton and its producer is serial — `buildVMInstance`,
-  ## `buildVMStore` and `buildComponentRef` above are module-level for the same
-  ## reason. The two hazards the type names are both closed:
+  ## It is module-level rather than a `BuildComponent` field because the
+  ## window's builds are serial: one build runs at a time, its output routed to
+  ## the tab that started it (`ui_js.ipcUiTarget`), whichever tab's pane and
+  ## ViewModel then show it. The two hazards the type names are both closed:
   ##   * a rerun inheriting the previous run's keyword — `onBuildCommand`
   ##     resets it, at the same instant it clears the pane;
   ##   * two concurrent builds colouring each other's rows — `onBuildCommand`
@@ -86,7 +83,7 @@ var buildDiagnosticScanner: BuildLocationScanner
   ## fresh local scanner; sharing this one would let a replay consume the live
   ## build's pending keyword.
 
-proc tryMountIsoNimBuildPanel*()
+proc syncLegacyBuildIntoVM*(self: BuildComponent)
 proc parserSeverityToVM(sev: BuildSeverity): BuildLineSeverity
 proc ansiToHtml(raw: cstring): cstring
 
@@ -110,48 +107,28 @@ proc installBuildVMJumpCallback(vm: BuildVM) =
   vm.onJumpToLine = proc(path: string, line: int) =
     discard data.openLocation(cstring(path), line)
 
-proc initBuildVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``BuildVM`` using an externally-provided
-  ## ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``).  If a stub-backed instance already exists
-  ## (created by ``initBuildVM`` before the real backend was available)
-  ## it is replaced so the panel uses the real backend.
-  if buildVMInstance != nil:
-    clog "BuildVM: replacing existing instance with shared-store version"
-    isoNimBuildMounted = false
-  buildVMStore = store
-  buildVMInstance = createBuildVM(store)
+proc initBuildVMFromSession*(vm: BuildVM) =
+  ## Hand the pane the session's `BuildVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ## Output the shown tab's component already holds is replayed into it
+  ## once, when the ViewModel is first handed over.
+  buildVMInstance = vm
   installBuildVMJumpCallback(buildVMInstance)
-  clog "BuildVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimBuildPanel()
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.Build)
+    if not component.isNil:
+      syncLegacyBuildIntoVM(BuildComponent(component))
 
-proc initBuildVM() =
-  ## Lazily create the parallel ``BuildVM`` backed by a stub
-  ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initBuildVMWithStore``.
-  if buildVMInstance != nil:
-    return
+proc paneVM(self: BuildComponent): BuildVM =
+  ## The BuildVM of the tab that holds `self` — the tab whose build this
+  ## component receives (`ui_js.ipcUiTarget` routes a build's output to the
+  ## tab that started it), shown or not.
+  ownPaneVM(self, buildVMInstance, buildVM)
 
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  buildVMStore = createReplayDataStore(stubBackend)
-  buildVMInstance = createBuildVM(buildVMStore)
-  installBuildVMJumpCallback(buildVMInstance)
-  clog "BuildVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimBuildPanel()
+proc errorsVMOf(self: BuildComponent): ErrorsVM =
+  ## The Problems pane's ViewModel of the same tab.
+  ownPaneVM(self, errors.errorsVMInstance, errorsVM)
 
 proc safeStr(s: cstring): string =
   ## Convert a possibly-null cstring to an empty string.  E2E tests
@@ -171,7 +148,10 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
   ## without going through ``appendBuild``.  Production code paths use
   ## the per-event ``syncBuildOutputAppend`` path; this proc covers the
   ## bulk-replace scenario.
-  if buildVMInstance.isNil or self.isNil:
+  if self.isNil:
+    return
+  let buildVM = self.paneVM()
+  if buildVM.isNil:
     return
 
   # AN EMPTY LEGACY RECORD IS NOT AN INSTRUCTION TO CLEAR, and this guard is
@@ -201,13 +181,13 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
   if self.build.output.len == 0 and self.build.problems.len == 0 and
      safeStr(self.build.command).len == 0 and
      not self.build.running and
-     buildVMInstance.output.val.len > 0:
+     buildVM.output.val.len > 0:
     return
 
-  buildVMInstance.clearOutput()
-  buildVMInstance.setCommand(safeStr(self.build.command))
-  buildVMInstance.setRunning(self.build.running)
-  buildVMInstance.setCode(self.build.code)
+  buildVM.clearOutput()
+  buildVM.setCommand(safeStr(self.build.command))
+  buildVM.setRunning(self.build.running)
+  buildVM.setCode(self.build.code)
   # A FRESH scanner, local to this replay. `self.build.output` is walked whole
   # and from the start, so it is its own transcript; borrowing the live
   # producer's scanner would let a replay eat a pending keyword that belongs to
@@ -234,7 +214,7 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
       # which was already the rendered display string for that line.
       if not raw.isNil:
         htmlText = $ansiToHtml(raw)
-    buildVMInstance.appendLine(BuildOutputLine(
+    buildVM.appendLine(BuildOutputLine(
       htmlText: htmlText,
       isStdout: isStdout,
       severity: sevTag,
@@ -244,7 +224,7 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
     let location = err[0]
     let rawLocation = err[1]
     let other = err[2]
-    buildVMInstance.appendError(BuildErrorLine(
+    buildVM.appendError(BuildErrorLine(
       locationPath: safeStr(location.path),
       locationLine: location.line,
       rawLocation: safeStr(rawLocation),
@@ -252,7 +232,7 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
   # Reset the ErrorsVM problem list ahead of the bulk replay so we
   # don't double-up rows when E2E tests inject the legacy ``build``
   # record multiple times.
-  errors.syncErrorsClear()
+  errors.syncErrorsClearInto(self.errorsVMOf())
   for prob in self.build.problems:
     let sev = case prob.severity
               of ProbError:   blsError
@@ -264,54 +244,10 @@ proc syncLegacyBuildIntoVM*(self: BuildComponent) =
       line: prob.line,
       col: prob.col,
       message: safeStr(prob.message))
-    buildVMInstance.appendProblem(problemRow)
+    buildVM.appendProblem(problemRow)
     # Mirror into the ErrorsVM so the Problems panel reflects the
     # bulk-replay path that ``__ctRenderPanel`` uses for E2E tests.
-    errors.syncErrorsAppendProblem(problemRow)
-
-proc tryMountIsoNimBuildPanel*() =
-  ## Mount the IsoNim build view into the GoldenLayout-managed (or
-  ## standalone auto-hide) container.  The container's id is
-  ## ``buildComponent-{id}``; the build panel is a singleton (id always
-  ## 0) but we still resolve through the registered component's id
-  ## field for symmetry with the other IsoNim mounts.
-  ##
-  ## Safe to call multiple times — mounts only once.  Retries until the
-  ## DOM container appears (capped at 200 attempts, ~2 s) since
-  ## GoldenLayout creates the host slightly after the layout state
-  ## changes.
-  if isoNimBuildMounted or buildVMInstance.isNil:
-    return
-  if buildComponentRef.isNil:
-    return
-
-  let key = cstring("buildComponent-" & $buildComponentRef.id)
-  var retryCount = 0
-  proc doMount() =
-    if isoNimBuildMounted:
-      return
-    retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimBuildPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    # Replace any prior content (the layout bridge may have planted a
-    # stub element before the IsoNim mount fires).
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimBuildMounted = true
-    try:
-      mountIsoNimBuild(container, buildVMInstance)
-    except:
-      cerror "tryMountIsoNimBuildPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
-
-  doMount()
+    errors.syncErrorsAppendProblemInto(self.errorsVMOf(), problemRow)
 
 # ---------------------------------------------------------------------------
 # BP-M6: Auto-hide integration state
@@ -468,9 +404,10 @@ proc syncBuildOutputAppend(self: BuildComponent, htmlText: cstring,
   ## The legacy data structures are still updated by the caller so any
   ## non-IsoNim consumers (Problems panel, etc.) keep working — the VM
   ## sync is purely additive.
-  if buildVMInstance.isNil:
+  let buildVM = self.paneVM()
+  if buildVM.isNil:
     return
-  buildVMInstance.appendLine(BuildOutputLine(
+  buildVM.appendLine(BuildOutputLine(
     htmlText: $htmlText,
     isStdout: isStdout,
     severity: severity,
@@ -497,8 +434,9 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
       self.build.output.add((other, stdout))
       self.syncBuildOutputAppend(other, stdout)
     self.build.errors.add((location, rawLocation, other))
-    if not buildVMInstance.isNil:
-      buildVMInstance.appendError(BuildErrorLine(
+    let ownBuildVM = self.paneVM()
+    if not ownBuildVM.isNil:
+      ownBuildVM.appendError(BuildErrorLine(
         locationPath: $location.path,
         locationLine: location.line,
         rawLocation: $rawLocation,
@@ -525,11 +463,12 @@ template appendBuild(self: BuildComponent, buildLine: string, stdout: bool): unt
         line: parsed.line,
         col: parsed.col,
         message: parsed.message)
-      if not buildVMInstance.isNil:
-        buildVMInstance.appendProblem(problemRow)
+      let ownProblemsBuildVM = self.paneVM()
+      if not ownProblemsBuildVM.isNil:
+        ownProblemsBuildVM.appendProblem(problemRow)
       # Mirror the structured diagnostic into the IsoNim ErrorsVM so
       # the Problems panel renders it without a separate sync pass.
-      errors.syncErrorsAppendProblem(problemRow)
+      errors.syncErrorsAppendProblemInto(self.errorsVMOf(), problemRow)
   else:
     if buildLine.len > 0:
       self.build.output.add((cstring(buildLine), stdout))
@@ -560,17 +499,18 @@ method onBuildCommand*(self: BuildComponent, response: BuildCommand) {.async.} =
   # Mirror the start-of-build state into the IsoNim VM. The legacy
   # ``self.build`` record stays the source of truth for the Karax-driven
   # Problems panel; the VM mirrors only what the IsoNim view needs.
-  if not buildVMInstance.isNil:
-    buildVMInstance.setCommand($response.command)
-    buildVMInstance.setBuildStartTime(self.build.buildStartTime)
-    buildVMInstance.setRunning(true)
+  let buildVM = self.paneVM()
+  if not buildVM.isNil:
+    buildVM.setCommand($response.command)
+    buildVM.setBuildStartTime(self.build.buildStartTime)
+    buildVM.setRunning(true)
     # New builds clear the previous output so failures from one run
     # don't bleed into the next.
-    buildVMInstance.clearOutput()
+    buildVM.clearOutput()
 
   # Mirror the per-build clear into the IsoNim ErrorsVM so the
   # Problems panel resets at the same instant the Build panel does.
-  errors.syncErrorsClear()
+  errors.syncErrorsClearInto(self.errorsVMOf())
 
   self.data.redraw()
 
@@ -596,8 +536,9 @@ method onBuildStderr*(self: BuildComponent, response: BuildOutput) {.async.} =
 method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
   self.build.code = response.code
   self.build.running = false
-  if not buildVMInstance.isNil:
-    buildVMInstance.setCode(response.code)
+  let buildVM = self.paneVM()
+  if not buildVM.isNil:
+    buildVM.setCode(response.code)
   if self.build.code != 0:
     self.focusBuild()
     # Also focus the build errors tab via the component mapping,
@@ -632,16 +573,12 @@ method onBuildCode*(self: BuildComponent, response: BuildCode) {.async.} =
 
 
 # BuildComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths; all real
-# DOM construction happens in ``viewmodel/views/isonim_build_view.nim``.
+# The pane's view (``viewmodel/views/isonim_build_view.nim``) is mounted by
+# the panel host.
 
 method register*(self: BuildComponent, api: MediatorWithSubscribers) =
-  ## Register the BuildComponent with the mediator.  Bring up the
-  ## IsoNim BuildVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if the
-  ## ViewModel layer is enabled.
+  ## Register the BuildComponent with the mediator. Its handlers feed the
+  ## session's `BuildVM` once `initBuildVMFromSession` has installed it.
   self.api = api
-  initBuildVM()
   if buildComponentRef.isNil:
     buildComponentRef = self
-    tryMountIsoNimBuildPanel()

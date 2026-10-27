@@ -2,11 +2,13 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48]
-#   just gpui-window-captures                 # all three
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat70a] [plat70b] [m71]
+#   just gpui-window-captures                 # all eight
 #
 # The GPUI window suites (`test_plat45_three_media.nim`,
-# `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`) assert
+# `test_plat47_gpui_window.nim`, `test_plat48_gpui_window.nim`,
+# `test_plat68_cua_window.nim`, `test_plat70a_gpui_window.nim`,
+# `test_plat70b_gpui_window.nim`, `test_m71_gpui_window.nim`) assert
 # COMMITTED records measured off a real window on a headless sway. A record
 # nobody re-takes stops describing the product the first time the window
 # changes — which is how PLAT-45's and PLAT-47's records came to predate the
@@ -22,13 +24,22 @@
 #      tools (sway, grim, wtype);
 #   2. `build/bin/codetracer-gpui-window`, this checkout's GPUI front-end
 #      pinned to that shim (`-d:gpuiShimPath`);
-#   3. the recordings the drivers open (`calc`, and `call_pages` for PLAT-47),
+#   3. the recordings the drivers open (`calc`, `call_pages` for PLAT-47,
+#      `wide_lines` for PLAT-70a and `multi_root` for M71),
 #      recorded by the terminal lanes' own fixture provider when absent, and
 #      the terminal front-end where a capture drives it (PLAT-45's three
 #      media, PLAT-48's terminal-saved layout);
 #   4. the capture (`ci/test/plat4N-…window…`) on a headless sway, the record
 #      step that measures its frames into `src/tests/visual/…json`, and the
 #      Nim suite that asserts that record.
+#
+# `plat69` is the other shape: GuiAssert scenarios
+# (`ci/test/plat69-window-chrome.sh`) that drive the window through its title
+# bar on GuiAssert's own sway target and assert what the compositor reports
+# live — there is no committed record to re-take. It needs the GuiAssert
+# checkout (`GUI_ASSERT_DIR`, default `../GuiAssert`) and, for the desktop
+# half of `plat69-initial-window`, `just build-once`'s `ct` and Electron
+# bundle. `PLAT69_SCENARIOS` names some of its scenarios (default: all).
 #
 # Prerequisites it does not build are refused BY NAME: the isonim-gpui
 # checkout (`ISONIM_GPUI_DIR`, default `../isonim-gpui`), `nix`, `nim`,
@@ -51,11 +62,11 @@ fail() {
 }
 
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat68 plat69 plat70a plat70b m71)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48)" ;;
+	plat45 | plat47 | plat48 | plat68 | plat69 | plat70a | plat70b | m71) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat68, plat69, plat70a, plat70b, m71)" ;;
 	esac
 done
 
@@ -64,7 +75,14 @@ done
 for tool in nix nim tesseract python3; do
 	command -v "${tool}" >/dev/null 2>&1 || fail "'${tool}' is not on PATH (run inside the dev shell)"
 done
-export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${root}/src/build-debug/bin/replay-server}"
+# The repro output root FIRST, then the tup tree. `src/build-debug` does not
+# exist in a checkout only ever built through `repro`, which is why this used
+# to refuse a replay-server that was in fact built (codetracer-pm
+# `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+_ct_replay_default="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}/bin/replay-server"
+[ -x "${_ct_replay_default}" ] ||
+	_ct_replay_default="${root}/src/build-debug/bin/replay-server"
+export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 [ -x "${REPLAY_SERVER_BIN}" ] || fail "no replay-server at ${REPLAY_SERVER_BIN} (just build-once)"
 
 # ---- 1. the windowed shim and the virtual pointer, in isonim-gpui's shell ---
@@ -88,26 +106,49 @@ nim c --hints:off --warnings:off --mm:orc -d:release \
 	fail "could not build the windowed codetracer-gpui"
 
 # ---- 3. the recordings -------------------------------------------------------
-fixtures=(calc)
-for w in "${which[@]}"; do
-	[ "${w}" = "plat47" ] && fixtures+=(call_pages)
-done
-work="$(mktemp -d "${root}/build/gpui-window-captures.XXXXXX")"
-trap 'rm -rf "${work}"' EXIT
-for fx in "${fixtures[@]}"; do
-	ls -d "test-logs/tui-fixtures/${fx}-"* >/dev/null 2>&1 && continue
-	echo "=== recording the ${fx} fixture"
-	cat >"${work}/record_${fx}.nim" <<NIM
-import fixtures/fixture_provider
-let r = resolveFixture("${fx}")
-if r.outcome != foRecorded:
-  quit("could not record the ${fx} fixture: " & r.detail, 1)
-echo r.tracePath
-NIM
-	nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
-		--nimcache:"${work}/nc-${fx}" -o:"${work}/record_${fx}" \
-		"${work}/record_${fx}.nim" || fail "could not record the ${fx} fixture"
-done
+#
+# Which recordings each capture opens, and their specs, are
+# `window_capture_fixtures.nim`'s: most are not in the provider's declared
+# corpus, so a name alone cannot be resolved (`test_window_capture_fixtures.nim`
+# asserts every capture's recordings resolve). The provider reuses a recording
+# whose program is unchanged, so this is cheap when they already exist.
+echo "=== recording the fixtures ${which[*]} open"
+nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
+	--nimcache:build/nimcache/window-capture-fixtures \
+	-o:build/window-capture-fixtures \
+	src/frontend/tui/tests/fixtures/window_capture_fixtures.nim "${which[@]}" ||
+	fail "could not record the fixtures ${which[*]} open"
+
+# ---- 3b. the no-display refusal, with the binary that CAN open a window -----
+#
+# `codetracer-gpui` linked to the WINDOWED shim, with no `DISPLAY` and no
+# `WAYLAND_DISPLAY`, used to wait forever in silence: GPUI picks its headless
+# platform, which opens no window and so never closes one
+# (`codetracer-pm/issues/2026-10-01-gpui-launch-is-silent-when-no-window-can-open.md`).
+# It must now refuse by kind with exit 3 (`codetracer-pm/spec/CLI/ct/
+# ui-selection.md` §8a). This is the only lane that builds a windowed binary
+# outside a compositor, so the case lives here; the featureless kind is
+# `src/frontend/gpui/tests/test_gpui_window_refusal.nim`'s, in `gpui-shell`.
+# `timeout` keeps the old failure mode a red step rather than a hung job, and
+# the rc is captured directly, never through a pipe.
+echo "=== the windowed binary refuses a launch with no graphical session"
+refusal_err="$(mktemp "${root}/build/gpui-window-refusal.XXXXXX")"
+# Step 3 recorded `calc`, so the glob matches; its first match is the trace.
+refusal_trace=(test-logs/tui-fixtures/calc-*)
+LD_LIBRARY_PATH="${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}:${LD_LIBRARY_PATH:-}" \
+	timeout 120 env -u DISPLAY -u WAYLAND_DISPLAY -u ZED_HEADLESS \
+	build/bin/codetracer-gpui-window --quit-after-ms=5000 \
+	"${refusal_trace[0]}" \
+	>/dev/null 2>"${refusal_err}"
+refusal_rc=$?
+cat "${refusal_err}"
+grep -q '^codetracer-gpui: no graphical session' "${refusal_err}" &&
+	[ "${refusal_rc}" -eq 3 ] || {
+	rm -f "${refusal_err}"
+	fail "the windowed binary with no display exited ${refusal_rc} without the
+      'no graphical session' refusal (expected exit 3 and that line on stderr)"
+}
+rm -f "${refusal_err}"
 
 # ---- 4. capture, measure, assert --------------------------------------------
 export ISONIM_GPUI_DIR="${ISONIM_GPUI}" CODETRACER_WINDOW_BIN_PINS_SHIM=1
@@ -151,6 +192,48 @@ for w in "${which[@]}"; do
 		in_compositor_shell "bash ci/test/plat47-gpui-window.sh" &&
 			python3 ci/test/plat47_gpui_window.py record &&
 			suite gpui-shell src/frontend/gpui/tests/test_plat47_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	plat69)
+		# PLAT-69: the top bar as the window's title bar, on GuiAssert's
+		# sway target; the scenarios assert the compositor's readings live.
+		# shellcheck disable=SC2086  # the scenario names must word-split
+		bash ci/test/plat69-window-chrome.sh ${PLAT69_SCENARIOS:-} ||
+			failed+=("${w}")
+		;;
+	plat68)
+		# PLAT-68: the CUA editing sequence typed by `wtype` into the edit
+		# window; the record is the file on disk and every key's canonical
+		# name as the edit arm decoded it. No recording is opened.
+		in_compositor_shell "CODETRACER_PLAT68_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/plat68-cua-window.sh" &&
+			bash ci/test/plat68-cua-window.sh --record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat68_cua_window.nim ||
+			failed+=("${w}")
+		;;
+	plat70a)
+		# PLAT-70 Part A: the editor and Terminal Output on `wide_lines`,
+		# scrolled sideways by the virtual pointer's `hwheel`, Shift + wheel
+		# and a press on the editor's bar.
+		in_compositor_shell "bash ci/test/plat70a-gpui-window.sh" &&
+			python3 ci/test/plat70a_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat70a_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	m71)
+		# M71 (codetracer#838): the State, Files and VCS panes of
+		# `multi_root`, in a layout where all three overflow, scrolled by the
+		# virtual pointer's wheel and the State bar pressed.
+		in_compositor_shell "bash ci/test/m71-gpui-window.sh" &&
+			python3 ci/test/m71_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_m71_gpui_window.nim ||
+			failed+=("${w}")
+		;;
+	plat70b)
+		# PLAT-70 Part B: the Event Log on `wide_lines` — a cut cell hovered
+		# and a fitting one, its `…` pressed twice, the `#` separator dragged.
+		in_compositor_shell "bash ci/test/plat70b-gpui-window.sh" &&
+			python3 ci/test/plat70b_gpui_window.py record &&
+			suite gpui-shell src/frontend/gpui/tests/test_plat70b_gpui_window.nim ||
 			failed+=("${w}")
 		;;
 	plat45)

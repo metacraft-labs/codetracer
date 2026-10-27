@@ -44,6 +44,8 @@ import ../fixtures/fixture_provider
 import ./lifecycle_support
 import ../../app/theme/colour_math
 from ../../app/views/shell import DividerGlyph
+from ../../../headless_app/auto_hide_hover import HoverPreviewDelayMs,
+  LeaveDismissDelayMs
 import ../../../styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
@@ -86,6 +88,10 @@ proc open(args: seq[string] = @[]): TuiTestSession =
     .envSet("XDG_STATE_HOME", state)
     .envSet("CODETRACER_HOME", state / "ct-home")
     .envSet("CODETRACER_TUI_LAYOUT_DIR", state / "layout")
+    # THIS RUN'S MARK, which the TUI hands down to every engine it spawns:
+    # the "+" case counts engines with `markedReplayServerPids`, and an
+    # unmarked session's engine would be invisible to it.
+    .carryRunMark()
     .spawn()
   settleOnDebugger(result, Cols, Rows)
 
@@ -176,7 +182,7 @@ proc hover(sess: var TuiTestSession; row, col: int) =
   sess.mouse(35, row, col)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -315,8 +321,9 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     # THE DESKTOP'S ORDER: the file info first, then the labels, then the
     # status text (the review's fix; the desktop's status bar measured).
     ck last.startsWith(" Python | UTF-8   BUILD  PROBLEMS  FIND IN FILES  REQUESTS")
-    ck last.contains("NORMAL")
-    ck last.cellFind("NORMAL") > last.cellFind("REQUESTS")
+    # The mode label (since PLAT-68 the CUA base names itself: `CUA [DEBUG]`).
+    ck last.contains("CUA [")
+    ck last.cellFind("CUA [") > last.cellFind("REQUESTS")
     ck not sess.rowText(StatusRow - 1).contains("PROBLEMS")
     let buildCol = last.cellFind("BUILD")
     # The pointer onto BUILD: nothing at once.
@@ -324,7 +331,13 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     sess.hover(StatusRow, buildCol + 1)
     sleep(100)
     let early = sess.snap()
-    ck early.findRow(" BUILD ", below = StatusRow)[0] < 0
+    # "Nothing yet" can only be read off a screen taken BEFORE the delay ran
+    # out: on a loaded host the snapshot itself can arrive after it, and the
+    # overlay is then due. (The delay is still held below: `waited`.)
+    let earlyAt = (getMonoTime() - t0).inMilliseconds
+    checkpoint("early screen read by " & $earlyAt & " ms")
+    ck earlyAt >= HoverPreviewDelayMs or
+       early.findRow(" BUILD ", below = StatusRow)[0] < 0
     # …the overlay after the preview delay: the build pane, over the body.
     let (br, bc) = sess.waitFor(" BUILD ", timeoutMs = 3000, below = StatusRow)
     let waited = (getMonoTime() - t0).inMilliseconds
@@ -333,9 +346,14 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     ck br > StatusRow div 2 and bc == 0
     ck sess.snap().findRow("no build has been run", below = StatusRow)[0] > br
     # Off the label and the overlay: still shown a moment later, then gone.
+    let left = getMonoTime()
     sess.hover(10, 100)
     sleep(60)
-    ck sess.snap().findRow(" BUILD ", below = StatusRow)[0] == br
+    let graceScreen = sess.snap()
+    let graceAt = (getMonoTime() - left).inMilliseconds
+    checkpoint("grace screen read by " & $graceAt & " ms")
+    ck graceAt >= LeaveDismissDelayMs or
+       graceScreen.findRow(" BUILD ", below = StatusRow)[0] == br
     discard sess.waitFor(" BUILD ", present = false, timeoutMs = 3000,
                          below = StatusRow)
     sess.quit()
@@ -346,8 +364,11 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     let buildCol = s0.text(StatusRow).cellFind("BUILD")
     ck buildCol > 0
     # Before: the editor runs to the row above the status line (its left
-    # divider is PLAT-50's `DividerGlyph`).
-    ck s0.text(StatusRow - 1).contains(DividerGlyph & "  47 ")
+    # divider is PLAT-50's `DividerGlyph`). `calc`'s widest line is wider
+    # than the code area, so that row is the editor's horizontal bar
+    # (PLAT-70, Horizontal-Overflow.md §4.7) and the last line drawn is on
+    # the row above it.
+    ck s0.text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     sess.click(StatusRow, buildCol + 1)
     let (br, bc) = sess.waitFor(" BUILD ", timeoutMs = 5000, below = StatusRow)
     ck br > StatusRow div 2 and bc == 0
@@ -356,8 +377,8 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     # the arrangement ends above it — the editor's last rows are gone, not
     # covered (the row above the band is still the editor's, renumbered
     # nothing: it is line `br - 2`'s).
-    ck s1.text(br - 1).contains(DividerGlyph & "  " & $(br - 2) & " ")
-    ck not s1.text(StatusRow - 1).contains(DividerGlyph & "  47 ")
+    ck s1.text(br - 2).contains(DividerGlyph & "  " & $(br - 3) & " ")
+    ck not s1.text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     ck s1.findRow("no build has been run", below = StatusRow)[0] > br
     # The label lit while its pane is open.
     ck s1[StatusRow][buildCol + 1].bgHex ==
@@ -371,7 +392,7 @@ suite "PLAT-49 part B on a real terminal: the footer's auto-hide panels":
     sess.click(StatusRow, buildCol + 1)
     discard sess.waitFor(" BUILD ", present = false, timeoutMs = 5000,
                          below = StatusRow)
-    ck sess.snap().text(StatusRow - 1).contains(DividerGlyph & "  47 ")
+    ck sess.snap().text(StatusRow - 2).contains(DividerGlyph & "  46 ")
     sess.quit()
 
 suite "PLAT-49 part B on a real terminal: GoldenLayout's drop zones":
@@ -447,7 +468,11 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     ck plus > 0
     # One session: no tab drawn, the "+" alone (the desktop's single-session).
     ck not row0.contains(" × ")
-    let before = replayServerPids().len
+    # THIS RUN'S ENGINES ONLY (`markedReplayServerPids`), not every
+    # `replay-server` on the host: another worktree's suite starting or
+    # stopping one between `before` and the checks below would otherwise move
+    # the count by one in either direction, and the case would blame the "+".
+    let before = markedReplayServerPids().len
     # PLAT-51 (Multi-Window-Tab-Management.md rule 3): the "+" opens a tab
     # showing the WELCOME SCREEN; the recordings beside calc are its recent
     # traces, and a click on one opens it in that tab.
@@ -463,7 +488,7 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     discard sess.waitForCall("step #", "(i=0)", timeoutMs = 30000)
     ck sess.rowText(0).contains("calc-")
     ck sess.rowText(0).contains("trace: call_pages")
-    ck replayServerPids().len == before + 1
+    ck markedReplayServerPids().len == before + 1
     # The first tab: calc's panes again.
     let (_, c0) = sess.snap().findRow("calc-2f0")
     ck c0 > 0
@@ -478,9 +503,9 @@ suite "PLAT-49 part B review on a real terminal: the strip's +":
     sess.click(0, at + "call_pages-d6745afd1e2e ".len)
     discard sess.waitFor(" × ", present = false, timeoutMs = 10000, below = 1)
     let deadline = getMonoTime() + initDuration(seconds = 10)
-    while getMonoTime() < deadline and replayServerPids().len > before:
+    while getMonoTime() < deadline and markedReplayServerPids().len > before:
       sleep(100)
-    ck replayServerPids().len == before
+    ck markedReplayServerPids().len == before
     ck sess.rowText(0).cellFind(" + ") > 0
     sess.quit()
 

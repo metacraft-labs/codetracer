@@ -233,9 +233,13 @@
 //
 // One declaration block, two selectors, because a second block is how the two
 // halves of one band drift into two colours.
+//
+// #3a3a3a is `divider/primary`'s Dark value, so the token paints it exactly in
+// the dark theme and the band follows the light one (its Light value) instead
+// of staying the dark theme's grey; the fold band below does the same.
 .ct-diff-line-hunk-header,
 .monaco-diff-editor .modified-in-monaco-diff-editor .margin-view-overlays div.ct-diff-line-hunk-header
-  background-color #3a3a3a
+  background-color colors-ui-divider-primary
   box-shadow inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.14)
 
 // A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
@@ -281,7 +285,10 @@
   // the #282828 editor / #1b1b1b panel / #3a3a3a border palette". A file
   // header is a surface, not an accent.
   background-color rgba(255, 255, 255, 0.045)
-  border-bottom 1px solid rgba(255, 255, 255, 0.10)
+  // A white hairline, invisible on the light ground. White at 10% over the
+  // dark panel is about `border/secondary`'s Dark value, so the light theme
+  // takes that token (`by-mode`, defaults.styl).
+  border-bottom 1px solid by-mode(rgba(255, 255, 255, 0.10), colors-ui-border-secondary)
   white-space nowrap
   overflow hidden
   text-overflow ellipsis
@@ -293,6 +300,16 @@
   font-weight 400
   overflow hidden
   text-overflow ellipsis
+
+// The file name opens the full file (VCS-Panel.md, "Unified Diff View (Editor
+// Integration)"). A link only on hover, so the heading still reads as a
+// heading.
+.unified-diff-file-header-link
+  cursor pointer
+
+  &:hover
+    text-decoration underline
+    color colors-ui-border-action
 
 .unified-diff-file-header-stats
   margin-left auto
@@ -492,8 +509,13 @@
   // otherwise leave the band unpainted — but change the THEME key, not this
   // one, and do not spend a round on the alpha the way a previous reader
   // nearly did.
-  background-color rgba(58, 58, 58, 0.92)
-  color rgba(232, 232, 232, 0.98)
+  //
+  // `codetracerWhite.json` does NOT set that key, so under the light theme
+  // this fallback is what paints: `divider/primary` (whose Dark value is the
+  // #3a3a3a above, so the dark sheets are unchanged), matching the `@@` band,
+  // with body text on it (`by-mode`, defaults.styl, keeps the dark ink).
+  background-color rgba(colors-ui-divider-primary, 0.92)
+  color by-mode(rgba(232, 232, 232, 0.98), colors-ui-text-primary-body)
   cursor pointer
   transition background-color 0.1s ease-out
   // 16px + the two 3px handles is one 22px code row, so the band occupies a
@@ -531,7 +553,7 @@
   // walk past it; at the accent colour it is the thing the eye lands on, and
   // it is where two of them said they would click.
   .codicon
-    color rgba(210, 210, 210, 1) !important
+    color by-mode(rgba(210, 210, 210, 1), colors-ui-icon-primary-default) !important
 
   // The band says what pressing it does.
   //
@@ -592,7 +614,10 @@
     align-self center
     height 12px
     line-height 12px
-    border 1px solid rgba(255, 255, 255, 0.30)
+    // The pill's outline and its hover: white at 30% / 55%, about
+    // `border/primary` / `-hover` on the dark band; those tokens in the
+    // light theme (`by-mode`, defaults.styl).
+    border 1px solid by-mode(rgba(255, 255, 255, 0.30), colors-ui-border-primary)
     // A fill, for the same reason. An outline-only pill on a band that already
     // has two rules is one more line among lines; a filled one is an object on
     // top of them.
@@ -602,15 +627,17 @@
     // Neutral, for the reason on `.ct-diff-line-hunk-header` above: this is
     // chrome on a grey band, and a blue outline made two reviewers inventory it
     // as something from a different product.
-    color rgba(226, 226, 226, 1)
+    color by-mode(rgba(226, 226, 226, 1), colors-ui-text-primary-body)
 
+  // A step further from the editor surface than the band: lighter in the
+  // dark theme, `border/primary` (darker) in the light one.
   &:hover
-    background-color rgba(74, 74, 74, 0.98)
-    color rgba(246, 246, 246, 1)
+    background-color by-mode(rgba(74, 74, 74, 0.98), rgba(colors-ui-border-primary, 0.98))
+    color by-mode(rgba(246, 246, 246, 1), colors-ui-text-primary-body)
 
     &::after
       background-color rgba(255, 255, 255, 0.14)
-      border-color rgba(255, 255, 255, 0.55)
+      border-color by-mode(rgba(255, 255, 255, 0.55), colors-ui-border-primary-hover)
 
 // --- The boundary's context menu (UD-2) ----------------------------------
 //
@@ -628,8 +655,10 @@
   min-width 15em
   padding 0.25em 0
   border-radius 4px
-  background-color #252526
-  border 1px solid rgba(255, 255, 255, 0.12)
+  // A popup: the raised surface and the primary border in the light theme;
+  // the dark theme keeps its colours (`by-mode`, defaults.styl).
+  background-color by-mode(#252526, colors-ui-surface-base-raised)
+  border 1px solid by-mode(rgba(255, 255, 255, 0.12), colors-ui-border-primary)
   box-shadow 0 4px 14px rgba(0, 0, 0, 0.45)
 
 .ct-diff-expand-menu-item
@@ -713,7 +742,33 @@
 // has to be per line, not per side, or every context line in the new revision
 // would read as an addition.
 .ct-diff-linenum-added
-  color #3fb950 !important
+  // The success text token in the light theme (`by-mode`, defaults.styl).
+  color by-mode(#3fb950, colors-ui-text-success-primary) !important
 
 .ct-diff-linenum-removed
   color #f85149 !important
+
+// --- Whole-commit document (VCS-Panel.md, "Whole-Commit Document") --------
+//
+// One scrolling column of per-file sections. Each section is a single-file
+// diff tab whose editor is sized to its content (`ui/unified_diff
+// .fitSectionEditor`), so the column, not the editors, scrolls; the file's
+// heading sticks to the top while its section is in view.
+.unified-diff-document-sections
+  flex 1 1 auto
+  min-height 0
+  overflow-y auto
+
+.unified-diff-document-section
+  .unified-diff-container
+    height auto
+    overflow visible
+
+  .unified-diff-editor
+    flex none
+
+  .unified-diff-file-header-host
+    position sticky
+    top 0
+    z-index 2
+    background-color colors-ui-surface-base-canvas

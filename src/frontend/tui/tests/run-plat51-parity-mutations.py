@@ -49,6 +49,20 @@ PART B (deliverables 8-11, and the future-output issue):
   | the Welcome Screen on a new tab | B10 (the + opens the omnibar), B11 (Record new trace refused), B12 (a recording made outside the state root), W4 (the window's + opens nothing) |
   | the future keeps its colour, dimmed | B8 (future output at full strength), B9 (not the desktop's 0.5 composite) |
 
+M71 (codetracer#838 — the State, Files and VCS panes keep an ordinary
+scrollbar, Scrollbar-Scrubbers.md §2-§4, and the wheel scrolls them,
+CodeTracer-TUI.md §4.4):
+
+  | claim | arms |
+  |---|---|
+  | the terminal's track is drawn only while the rows overflow | M1 (State), M2 (Files), M3 (VCS) — each draws one when the pane is exactly full; M13 (the shipped binary's State pane draws none over a long history) |
+  | the thumb follows `scrollTop` | M4 (State), M5 (Files), M6 (VCS) — each thumb pinned to the top |
+  | the wheel scrolls the pane beneath the pointer, unfocused | M7 (State), M8 (Files), M9 (VCS) — each pane dropped from `routeMouseReport`'s wheel routing |
+  | a track press is the scrollbar's, never the row's, and the debugger stays | M10 (the press also falls through to the row), M11 (the held thumb drags nothing) |
+  | the reader's place survives the VCS pane's re-read | M12 (`vcs_source.publish` drops `scrollTop`) |
+  | GPUI's Files and VCS panes keep the list scrollbar | MG1 (Files draws none), MG2 (VCS draws none), MG3 (VCS draws one while its rows fit), MG4 / MG5 (the wheel over Files / VCS scrolls nothing), MG6 (a track press moves no view) |
+  | GPUI's State bar takes the §3 press and drag | MG7 (a press moves nothing), MG8 (the held thumb drags nothing) |
+
 THREE VERDICTS (Verification-Harness-Traps §1): `killed` (the named case
 reported [FAILED], or the named gate failed), `SURVIVED`, `HARNESS-FAILURE`
 (the needle not unique, the suite did not compile, the mutated binary did not
@@ -94,7 +108,7 @@ LAYOUT = "src/frontend/headless_app/layout_model.nim"
 PMENU = "src/frontend/viewmodel/viewmodels/product_menu.nim"
 SCRUB = "src/frontend/viewmodel/viewmodels/scrollbar_scrubber.nim"
 VCH = "src/frontend/viewmodel/viewmodels/value_changes.nim"
-KEYMAP = "src/frontend/tui/app/input/keymap.nim"
+NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 TSESSION = "src/frontend/tui/host/tui_session.nim"
 TEVENT = "src/frontend/tui/app/views/event_log.nim"
@@ -111,7 +125,9 @@ READER = "src/tests/visual/screen_oracle/terminal_reading.nim"
 GMAIN = "src/frontend/gpui/main.nim"
 GLEAVES = "src/frontend/gpui/app/leaves.nim"
 GLIST = "src/frontend/gpui/list_scrubber.nim"
-DEVLOG = "src/frontend/ui/event_log.nim"
+# The desktop Event Log is one view over its ViewModel since 2026-10-23; its
+# track press goes through the shared list scrubber to the view's `jumpTo`.
+DEVLOG = "src/frontend/viewmodel/views/isonim_event_log_view.nim"
 DCONFIG = "src/frontend/index/config.nim"
 DSTATE = "src/frontend/viewmodel/views/isonim_state_view.nim"
 ENGINE = "src/db-backend/src/dap_handler.rs"
@@ -131,6 +147,11 @@ WELCOMEVM = "src/frontend/viewmodel/viewmodels/welcome_screen_vm.nim"
 GCHROME = "src/frontend/gpui/chrome.nim"
 LPREFS = "src/frontend/viewmodel/host/layout_preferences.nim"
 TMOUSE = "src/frontend/tui/app/input/mouse.nim"
+# M71 (codetracer#838): the in-hand panes' painters and the VCS source.
+TVARS = "src/frontend/tui/app/views/variables.nim"
+TFILES = "src/frontend/tui/app/views/file_tree.nim"
+TVCS = "src/frontend/tui/app/views/vcs_pane.nim"
+TVCSSRC = "src/frontend/tui/host/vcs_source.nim"
 ISONIM_GPUI_DIR = Path(os.environ.get(
     "ISONIM_GPUI_DIR", str(ROOT.parent / "isonim-gpui")))
 if os.environ.get("ISONIM_GPUI_SRC"):
@@ -155,21 +176,26 @@ CAPRES = "src/frontend/tui/app/tests/test_capability_resolution.nim"
 PTYB = "src/frontend/tui/tests/real_terminal/test_plat51b_pty.nim"
 TOUTPTY = "src/frontend/tui/tests/real_terminal/test_plat52_terminal_output_pty.nim"
 GPLANB = "src/frontend/gpui/tests/test_plat51b_gpui_plan.nim"
+# M71 (codetracer#838): GPUI's Files, VCS and State scrollbars, read off the
+# shipped binary's window plan.
+GPLANM71 = "src/frontend/gpui/tests/test_m71_gpui_plan.nim"
 CAPTURE = "scripts/plat51-capture-electron.sh"
 SPEC = "src/tests/gui/tests/visual/plat51-desktop-capture.spec.ts"
 DE_EVENTLOG = CAPTURE + "#scrubber.spans.the.whole.log"
 DE_SAVED = CAPTURE + "#Timeline.tab.is.dropped.on.load"
 DE_CHANGED = CAPTURE + "#carries..value-changed.in.the.accent"
 
-SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, KEYMAP, RUNTIME, TSESSION, TEVENT,
+SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, NAVIGATION, RUNTIME, TSESSION, TEVENT,
             TCALL, TTRACK, TTREE, TGUTTER, TBORDERS, TTOPBAR, TCTX, TFRAME,
             TDRIVER,
             READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE,
             GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TCAPS, TPROBE,
-            TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE]
+            TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE,
+            TVARS, TFILES, TVCS, TVCSSRC]
 SUITES = [LAYU, MODELU, SCRUBT, PARITY, PRODUCERS, FRAMEV, PTY, GPLAN,
           DE_EVENTLOG, DE_SAVED, DE_CHANGED,
-          GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB]
+          GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB,
+          GPLANM71]
 
 
 def suite_file(path: str) -> str:
@@ -204,9 +230,10 @@ SUITE_KIND = {
     PTYB: ("c", "tui-real-terminal"),
     TOUTPTY: ("c", "tui-real-terminal"),
     GPLANB: ("c", "gpui-shell"),
+    GPLANM71: ("c", "gpui-shell"),
 }
 BINARY_SUITES = {PTY, PTYB, TOUTPTY}
-GPUI_BINARY_SUITES = {GPLAN, GPLANB}
+GPUI_BINARY_SUITES = {GPLAN, GPLANB, GPLANM71}
 ENGINE_SUBJECTS = {ENGINE}
 UNISOLATED_SUITES: set = set()
 UNFILTERED_CONTROL: set = {DE_EVENTLOG, DE_SAVED, DE_CHANGED}
@@ -250,7 +277,10 @@ G_CHANGED = "a changed value takes the desktop's accent; nothing at the entry"
 G_HISTORY = "the value history opens under its row; its entries are navigation rows"
 G_CARET = "a click in the code places the caret, apart from the pointer"
 G_MENU = "Shift + right-click opens the same menu, with no hint row"
-G_OMNIBOX = "the omnibox is on the editor's ground and foreground in every state"
+# RENAMED 2026-10-17 with the redesign: the field is on the BAR's ground (the
+# desktop's `.command-input-row`, measured), its results on the editor's.
+G_OMNIBOX = ("the omnibox is on the bar's ground in every state; its results on "
+             "the editor's")
 G_POINTER = "the execution pointer is the desktop's arrow, never ▶"
 # Part B's killer cases.
 H_SURFACE = "the SMALLEST surface under the point wins; x2 / y2 are outside"
@@ -258,7 +288,7 @@ H_MIDDLE = "the user's smaller middle joins, and is carved out of top and bottom
 H_PROXY = "the drag proxy lifts the pane out before anything is measured"
 H_HEADER = "left of a tab's middle before it, right of it after it; past the last, the end"
 X_IDENTICAL = "GoldenLayout's algorithm (no centre): IDENTICAL at every sample"
-B_STRIP = "the focused pane's strip takes the ring's colour; Tab moves strip and ring"
+B_STRIP = "the focused pane's strip takes the ring's colour; F6 moves strip and ring"
 B_TOKEN = "the subtler token, its contrasts, and a strip told apart on every rung"
 B_FLAGS = "the flags parse; a bare flag needs a value"
 B_PREF = "the preference is a file beside the remembered layout, and is read back"
@@ -280,6 +310,27 @@ W_FOCUS = "one strip on the focus colour; a press moves it; the command turns it
 W_LIVE = "held 80 px along, the panes have moved; nothing is written until the release"
 W_DROP = "the carried pane is out of the arrangement; the placeholder; the outer band"
 W_WELCOME = "the + opens it: the desktop's start options in its order, the recent panels"
+# M71's killer cases (codetracer#838).
+N_STATE = "State: an open value history overflows the pane, and the thumb follows scrollTop"
+N_FILES = ("Files: an overflowing tree paints a track whose thumb follows "
+           "scrollTop; one that fits keeps its last column")
+N_VCS = ("VCS: an overflowing pane paints a track whose thumb follows "
+         "scrollTop; one that fits keeps its last column")
+N_WHEEL = "a wheel over each pane scrolls it without focusing it first"
+N_PRESS = ("a press on each pane's track jumps the view; its held thumb drags; "
+           "the debugger stays")
+Y_HISTORY = ("a long value history open in the State pane draws a track whose "
+             "thumb the wheel moves")
+Q_VCS_DRAW = ("more rows than the body holds draw the list scrubber over all of "
+              "them; rows that fit, none")
+Q_VCS_MOVE = ("VCS: the wheel scrolls it; a press at the track's end shows the "
+              "last rows; the thumb drags")
+Q_FILES_DRAW = ("a tree taller than its body is drawn a window at a time, under "
+                "the list scrubber")
+Q_FILES_MOVE = ("Files: the wheel scrolls it; a press at the track's end shows "
+                "the last rows; the thumb drags")
+Q_STATE = ("a press at its track's end reaches the end the wheel does; its "
+           "start the top; the thumb drags")
 D_EVENTLOG = "gate:" + DE_EVENTLOG
 D_SAVED = "gate:" + DE_SAVED
 D_CHANGED = "gate:" + DE_CHANGED
@@ -305,6 +356,10 @@ CASE_SUITE = {
     Z_FOCUS: PTYB, Z_EDGES: PTYB, Z_LIVE: PTYB, Z_PIXEL: PTYB, Z_RECORD: PTYB,
     Z_COMPOSITE: TOUTPTY,
     W_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
+    N_STATE: SCRUBT, N_FILES: SCRUBT, N_VCS: SCRUBT, N_WHEEL: SCRUBT,
+    N_PRESS: SCRUBT, Y_HISTORY: PTY,
+    Q_VCS_DRAW: GPLANM71, Q_VCS_MOVE: GPLANM71, Q_FILES_DRAW: GPLANM71,
+    Q_FILES_MOVE: GPLANM71, Q_STATE: GPLANM71,
 }
 NAMED_CASES = list(CASE_SUITE)
 
@@ -345,9 +400,11 @@ ARMS = [
         "      item(\"Event Log\", \"aEventLog\"),\n",
         "      item(\"Event Log\", \"aEventLog\"),\n      item(\"Timeline\", \"aEventLog\"),\n",
         P_TIMELINE, "the View menu lists a Timeline again"),
-    Arm("K1", KEYMAP,
-        "  r.add b(mmNormal, \"4\", kaSelectEventLog)\n",
-        "  r.add b(mmNormal, \"4\", kaSelectCallStack)\n",
+    # K1 RE-AIMED 2026-10-12 (PLAT-68 Phase B): §4.2's rows are the modal
+    # bases' navigation table (`keymap/navigation_keymap`).
+    Arm("K1", NAVIGATION,
+        "    BaseRow(chords: \"4\", operation: \"layout.focus-pane(event-log)\", table: G, navModes: N),\n",
+        "    BaseRow(chords: \"4\", operation: \"layout.focus-pane(call-trace)\", table: G, navModes: N),\n",
         P_TIMELINE, "`4` selects another pane than the Event Log"),
     # --- the shared models --------------------------------------------------
     Arm("S1", SCRUB,
@@ -367,17 +424,19 @@ ARMS = [
         "  scrubberModel(max(0, model.knownTotal), model.scrollTop, bodyHeight,\n",
         "  scrubberModel(max(0, bodyHeight), model.scrollTop, bodyHeight,\n",
         S_EVENTS, "the event log's track spans the rows on screen, not the log"),
+    # PLAT-70 Part H: every bar's press is `runtime.pressBar`'s; the jump is
+    # its default rule.
     Arm("T2", RUNTIME,
-        "  let top = sm.scrubTo(hit, dragging)\n  let before = rt.app.eventLog.fetchCount\n",
-        "  let top = (if dragging: sm.scrubTo(hit, dragging) else: min(sm.maxFirstVisible, sm.firstVisible + sm.visible))\n  let before = rt.app.eventLog.fetchCount\n",
+        "      rt.applyBarTop(bar, bar.model.clickAt(f), outcome)\n",
+        "      rt.applyBarTop(bar, min(bar.model.maxFirstVisible, bar.model.firstVisible + bar.model.visible), outcome)\n",
         S_EVENTS, "a press on the event log's track pages by one screen"),
     Arm("T3", TCALL,
         "  scrubberModel(m.total, m.visibleTop(bodyRows), bodyRows, m.currentTraceIndex)\n",
         "  scrubberModel(m.rows.len, m.visibleTop(bodyRows), bodyRows, m.currentTraceIndex)\n",
         S_CALLS, "the call trace's track spans the loaded section"),
     Arm("T4", TTRACK,
-        "    g.paint(markRow, col, ThumbFullGlyph, MarkStyle)\n",
-        "    discard markRow\n",
+        "             (if markRow >= 0: markRow - top else: -1))\n",
+        "             -1)\n",
         S_MARK, "the current position is not marked on the track"),
     Arm("T5", TTREE,
         "  elif spec.modified: ChangedValueStyle\n",
@@ -387,24 +446,32 @@ ARMS = [
         "          outcome.requestClick(PaneClickRequest(kind: pcSeek,\n                                                tick: prow.ticks))\n",
         "          rt.note(\"history entry\")\n",
         P_HISTORY, "a click on a history entry goes nowhere"),
+    # The pane and the engine read ONE StateVM, the session's, since the
+    # panes take the session's ViewModels: the watch reaching it is the job.
     Arm("T7", TSESSION,
-        "    for vm in [session.session.stateVM, s.state]:\n",
-        "    for vm in [session.session.stateVM]:\n",
-        P_WATCH, "a watch reaches the engine's StateVM and not the pane's"),
+        "      else: vm.addWatch(c.text)\n",
+        "      else: discard c.text\n",
+        P_WATCH, "an added watch reaches no StateVM: neither the pane nor the engine sees it"),
     Arm("TS1", TSESSION,
         "      session.gotoTick(c.tick)\n",
         "      session.gotoTick(c.tick div 2)\n",
         P_HISTORY, "the host seeks a history entry to half its tick"),
+    # T8 RE-AIMED 2026-10-12 (PLAT-68 Phase B): `Alt+T` and `Ctrl+Enter` are
+    # CUA rows naming `editor.toggle-tracepoint`; the runtime performs it.
     Arm("T8", RUNTIME,
-        "  if name in [\"Alt+t\", \"Ctrl+Enter\"]:\n",
-        "  if false:\n",
+        # RE-AIMED 2026-10-21 (M76): the caret line is `editorCaretLine`, shared
+        # with the program menu's "Add a Tracepoint"; same arm, its one call.
+        "    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())\n",
+        "    discard rt.editorCaretLine()\n",
         P_CARET, "Alt+t and Ctrl+Enter do not open the tracepoint editor"),
     Arm("T14", TDRIVER,
-        "      if b > ' ' and b <= '~':\n        let alt = Esc & $b\n",
+        "      if (b >= ' ' and b <= '~') or b == '\\x7f' or (b < ' ' and b != Esc):\n        let alt = Esc & $b\n",
         "      if false:\n        let alt = Esc & $b\n",
         Y_CARET, "the framer drops Alt's ESC: a real terminal's Alt+T is a bare t"),
+    # T15 RE-AIMED 2026-10-12 (PLAT-68 Phase B): an Alt chord is the key
+    # alone when the router resolves it to nothing.
     Arm("T15", RUNTIME,
-        "     not rt.caretTakesAltChord(rt.lastKey):\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
+        "     rt.probeKey(rt.lastKey).kind == erNothing:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
         "     false:\n    return rt.handleToken(token[1 .. 1], nowMs)\n",
         P_CARET, "an unbound Alt+<char> is swallowed instead of being the character"),
     Arm("T9", RUNTIME,
@@ -428,8 +495,8 @@ ARMS = [
         "(\"▸\", \"-\")",
         Y_ASCII, "the ASCII tier does not draw the mark as >"),
     Arm("P1", RUNTIME,
-        "  if screen.trackCol < 0 or screen.trackRows <= 0:\n    return false\n  let sm = rt.app.eventLog.scrubberOf(screen.trackRows)\n",
-        "  if true:\n    return false\n  let sm = rt.app.eventLog.scrubberOf(screen.trackRows)\n",
+        "    of paneEventLog:\n      let before = rt.app.eventLog.fetchCount\n",
+        "    of paneEventLog:\n      if true: return\n      let before = rt.app.eventLog.fetchCount\n",
         Y_TRACK, "a press on the shipped binary's event-log track is routed nowhere"),
     Arm("R1", READER,
         "    let line = raw.withoutScrubber(pane.width)\n",
@@ -444,9 +511,15 @@ ARMS = [
         "      outcome.repaint = true\n",
         F_DRAG, "the frame scrubber's release settles nowhere"),
     # --- GPUI ------------------------------------------------------------------
+    # RE-AIMED 2026-10-16, PLAT-70 Part A: the editor's horizontal bar is
+    # pressed between the scrubber and the call row; the arm still puts the
+    # call row first.
+    # G1 RE-AIMED 2026-10-21 (PLAT-70 Part B): the table panes' own gestures
+    # (a `…`, a column separator) sit between the bars and the call row now;
+    # the defect is unchanged — the call row answers before the scrubber.
     Arm("G1", GMAIN,
-        "    if pressListScrubber(r, x, y):\n      return\n    if clickCalltrace(r, x, y):\n      return\n",
-        "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n",
+        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n",
+        "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # M73 (#840): and its vertical scrubber.\n    if pressEditorVBar(r, x, y):\n      return\n",
         G_CALLS, "a press on GPUI's call-trace track jumps to the call row under it"),
     Arm("G2", GLIST,
         "               fraction: trackFractionAt(local, track.h))\n",
@@ -456,9 +529,11 @@ ARMS = [
         "      r.setAttribute(lane, PointerMarkAttribute, \"highlight_line_arrow.svg\")\n",
         "      r.setAttribute(lane, PointerMarkAttribute, \"▶\")\n",
         G_POINTER, "GPUI marks the current line with a glyph"),
+    # G4 RE-AIMED 2026-10-17: the redesigned state row draws its value
+    # through `stateText`, choosing the colour inline.
     Arm("G4", GLEAVES,
-        "                                (if changed: StateChangedColour\n",
-        "                                (if false: StateChangedColour\n",
+        "                          if changed: StateChangedColour else: StateValueTextColour)\n",
+        "                          if false: StateChangedColour else: StateValueTextColour)\n",
         G_CHANGED, "GPUI paints a changed value in the plain value colour"),
     Arm("G5", GMAIN,
         "  if path in open:\n    open.excl path\n  else:\n    try:\n      discard gSession.loadValueHistory(path, gpuiRowBudget())\n",
@@ -472,14 +547,16 @@ ARMS = [
         "  gCtxMenu.openAt(menu, y, x)\n",
         "  var hinted = menu\n  hinted.entries.add ContextMenuEntry(label: \"Terminal menu: Shift + right-click\")\n  gCtxMenu.openAt(hinted, y, x)\n",
         G_MENU, "GPUI's menus gain the terminal's hint row"),
+    # G8 RE-AIMED 2026-10-17: the field is on the bar's ground now (it was
+    # the editor's); the defect still puts it on the input surface.
     Arm("G8", GMAIN,
-        "      let b = absBox(r, sg.rect, EditorGround)\n",
+        "      let b = absBox(r, sg.rect, chromeOf(crWindowBackground))\n",
         "      let b = absBox(r, sg.rect, chromeOf(crInputBackground))\n",
         G_OMNIBOX, "GPUI's omnibox field is on the input surface"),
     # --- the desktop, the real Electron app --------------------------------
     Arm("D1", DEVLOG,
-        "        setScrollTopJs(body, float(max(0, min(row, rows))) / float(rows) *\n",
-        "        discard (body, float(max(0, min(row, rows))) / float(rows) *\n",
+        "        scrollBody.setScrollTop(float(max(0, row)) * rowPx()))\n",
+        "        discard row)\n",
         D_EVENTLOG, "the desktop's event-log track press moves nothing"),
     Arm("D2", DCONFIG,
         "  sanitizeLayoutConfig(config, -1, retiredContentIds())\n",
@@ -490,9 +567,17 @@ ARMS = [
         "  if false: \"value-expanded-text value-changed\"\n",
         D_CHANGED, "the desktop draws no changed value"),
     # --- the engine ------------------------------------------------------------
+    # E1 RE-AIMED 2026-10-23: the engine reports the log's size twice — the
+    # list the pane pages through (`total`, the search and the kind selection
+    # applied) and the whole log (`unfilteredTotal`) — in the window's answer
+    # and in an `indexOnly` one, and the store takes the LOG'S size from
+    # `unfilteredTotal` whenever the engine says it
+    # (`replay_data_store.applyEventLogResponse`). So the page response's
+    # `total` no longer reaches a suite (E1 SURVIVED there). The arm now makes
+    # the one `unfiltered_total` both answers report the page's size.
     Arm("E1", ENGINE,
-        "                \"markers\": marker_rows,\n                \"total\": total,\n",
-        "                \"markers\": marker_rows,\n                \"total\": page_events.len(),\n",
+        "        let unfiltered_total = all_events.len();\n",
+        "        let unfiltered_total = positions.len().saturating_sub(skip).min(take);\n",
         S_EVENTS, "the engine reports the page it sent as the log's size"),
 ]
 
@@ -568,8 +653,8 @@ ARMS += [
         "  (r: (fg.r * 3 + bg.r + 2) div 4, g: (fg.g * 3 + bg.g + 2) div 4,\n",
         Z_COMPOSITE, "the future's blend is not the desktop's 0.5 composite"),
     Arm("B10", RUNTIME,
-        "    if not rt.app.welcomeHost.isNil:\n      rt.openWelcomeTab(outcome)\n",
-        "    if false:\n      rt.openWelcomeTab(outcome)\n",
+        "  if not rt.app.welcomeHost.isNil:\n    rt.openWelcomeTab(outcome)\n",
+        "  if false:\n    rt.openWelcomeTab(outcome)\n",
         B_WELCOME, "the strip's + opens the omnibar, not the Welcome Screen"),
     Arm("B11", WELCOMEVM,
         "    {wsoOpenFolder, wsoRecordNewTrace, wsoOpenLocalTrace}\n",
@@ -606,8 +691,10 @@ ARMS += [
         "     chromeOf(if focused: crFocusOutline else: crTabStripBackground))]\n",
         "     chromeOf(crTabStripBackground))]\n",
         W_FOCUS, "the window's focused strip keeps the unfocused ground"),
+    # W2 RE-AIMED 2026-10-17: the press also re-shows a focus outline that
+    # is hidden (`gFocusShown`); the defect still moves no focus.
     Arm("W2", GMAIN,
-        "    if pressedPane.len > 0 and pressedPane != gFocusPane:\n",
+        "    if pressedPane.len > 0 and (pressedPane != gFocusPane or not gFocusShown):\n",
         "    if false:\n",
         W_FOCUS, "a press in the window moves no focus"),
     Arm("W3", GMAIN,
@@ -622,6 +709,94 @@ ARMS += [
         "  var layout = gGestures.previewLayout(committedLayout(),\n",
         "  var layout = committedLayout()\n  discard gGestures.previewLayout(committedLayout(),\n",
         W_LIVE, "the window draws the committed arrangement while a divider is held"),
+
+    # --- M71 (codetracer#838): State, Files and VCS keep an ordinary scrollbar
+    # (Scrollbar-Scrubbers.md §2-§4) and the wheel scrolls them unfocused
+    # (CodeTracer-TUI.md §4.4). The terminal first, then GPUI.
+    Arm("M1", TVARS,
+        "  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells\n",
+        "  let overflow = rows.len >= bodyHeight and area.width > ScrubberTrackCells\n",
+        N_STATE, "a State pane exactly full of rows still draws a scrollbar"),
+    Arm("M2", TFILES,
+        "  let overflow = bodyRows > 0 and model.rowCount > bodyRows and\n",
+        "  let overflow = bodyRows > 0 and model.rowCount >= bodyRows and\n",
+        N_FILES, "a Files tree exactly full of rows still draws a scrollbar"),
+    Arm("M3", TVCS,
+        "  let overflow = lines.len > area.height and area.width > ScrubberTrackCells\n",
+        "  let overflow = lines.len >= area.height and area.width > ScrubberTrackCells\n",
+        N_VCS, "a VCS pane exactly full of rows still draws a scrollbar"),
+    Arm("M4", TVARS,
+        "  scrubberModel(screen.totalRows, screen.top, screen.bodyHeight)\n",
+        "  scrubberModel(screen.totalRows, 0, screen.bodyHeight)\n",
+        N_STATE, "the State thumb sits at the top whatever the pane's scrollTop"),
+    Arm("M5", TFILES,
+        "  scrubberModel(screen.totalRows, screen.top, screen.bodyRows)\n",
+        "  scrubberModel(screen.totalRows, 0, screen.bodyRows)\n",
+        N_FILES, "the Files thumb sits at the top whatever the tree's scrollTop"),
+    Arm("M6", TVCS,
+        "  scrubberModel(screen.totalRows, screen.top, screen.area.height)\n",
+        "  scrubberModel(screen.totalRows, 0, screen.area.height)\n",
+        N_VCS, "the VCS thumb sits at the top whatever the pane's scrollTop"),
+    Arm("M7", RUNTIME,
+        "    if at.found and at.region.pane in InHandPanes and\n       rt.inHandLoaded(at.region.pane):\n",
+        "    if at.found and at.region.pane in InHandPanes - {paneState} and\n       rt.inHandLoaded(at.region.pane):\n",
+        N_WHEEL, "the wheel over the State pane is not routed to it"),
+    Arm("M8", RUNTIME,
+        "    if at.found and at.region.pane in InHandPanes and\n       rt.inHandLoaded(at.region.pane):\n",
+        "    if at.found and at.region.pane in InHandPanes - {paneFileTree} and\n       rt.inHandLoaded(at.region.pane):\n",
+        N_WHEEL, "the wheel over the Files pane is not routed to it"),
+    Arm("M9", RUNTIME,
+        "    if at.found and at.region.pane in InHandPanes and\n       rt.inHandLoaded(at.region.pane):\n",
+        "    if at.found and at.region.pane in InHandPanes - {paneVcs} and\n       rt.inHandLoaded(at.region.pane):\n",
+        N_WHEEL, "the wheel over the VCS pane is not routed to it"),
+    Arm("M10", RUNTIME,
+        "  # Any other button on a bar is the bar's, and does nothing.\n  true\n",
+        "  # Any other button on a bar is the bar's, and does nothing.\n  false\n",
+        N_PRESS, "a press on an in-hand pane's track also acts on the row beside it"),
+    Arm("M11", RUNTIME,
+        "    of InHandPanes:\n      rt.setInHandTop(bar.pane, top)\n",
+        "    of InHandPanes:\n      discard top\n",
+        N_PRESS, "a held in-hand thumb does not drag the view"),
+    Arm("M12", TVCSSRC,
+        "  rt.app.vcs.scrollTop = top\n",
+        "  discard top\n",
+        N_WHEEL, "the VCS pane's periodic re-read resets the reader's place"),
+    Arm("M13", TVARS,
+        "  if overflow:\n    result.trackCol = area.col + width\n    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,\n",
+        "  if false:\n    result.trackCol = area.col + width\n    g.paintVerticalScrubber(result.trackCol, area.row + 1, bodyHeight,\n",
+        Y_HISTORY, "the shipped binary's State pane draws no track over a long history"),
+    Arm("MG1", GMAIN,
+        "  for kind in [paneFileTree, paneVcs]:\n    let sm = inHandScrubber(kind)\n",
+        "  for kind in [paneVcs]:\n    let sm = inHandScrubber(kind)\n",
+        Q_FILES_DRAW, "GPUI's Files pane draws no scrollbar while its tree overflows"),
+    Arm("MG2", GMAIN,
+        "  for kind in [paneFileTree, paneVcs]:\n    let sm = inHandScrubber(kind)\n",
+        "  for kind in [paneFileTree]:\n    let sm = inHandScrubber(kind)\n",
+        Q_VCS_DRAW, "GPUI's VCS pane draws no scrollbar while its rows overflow"),
+    Arm("MG3", GMAIN,
+        "    if sm.visible > 0 and sm.total > sm.visible:\n      result.add (kind, sm)\n",
+        "    if sm.visible > 0 and sm.total > 0:\n      result.add (kind, sm)\n",
+        Q_VCS_DRAW, "GPUI's VCS pane draws a scrollbar while its rows fit"),
+    Arm("MG4", GMAIN,
+        "    elif onPane == $paneFileTree and dy != 0.0:\n",
+        "    elif false and dy != 0.0:\n",
+        Q_FILES_MOVE, "GPUI's wheel over the Files pane scrolls nothing"),
+    Arm("MG5", GMAIN,
+        "    elif onPane == $paneVcs and dy != 0.0:\n",
+        "    elif false and dy != 0.0:\n",
+        Q_VCS_MOVE, "GPUI's wheel over the VCS pane scrolls nothing"),
+    Arm("MG6", GMAIN,
+        "    setInHandTop(kind, sm.scrubTop(hit.fraction, dragging))\n",
+        "    setInHandTop(kind, sm.firstVisible)\n",
+        Q_FILES_MOVE, "GPUI's Files / VCS track press moves no view"),
+    Arm("MG7", GMAIN,
+        "    scrubStateBar(r, y, dragging = onThumb)\n    return true\n",
+        "    discard onThumb\n    return true\n",
+        Q_STATE, "GPUI's State bar takes a press and moves no view"),
+    Arm("MG8", GMAIN,
+        "  if kind == paneState:\n    scrubStateBar(r, y, dragging)\n    return\n",
+        "  if kind == paneState:\n    return\n",
+        Q_STATE, "GPUI's held State thumb does not drag the view"),
 ]
 
 DECLARED_SURVIVORS: list = []
@@ -1243,8 +1418,18 @@ def main() -> int:
             # rebuilds it with its own defect anyway.
             if suite in BINARY_SUITES or suite in GPUI_BINARY_SUITES:
                 _DIRTY.add(suite in BINARY_SUITES and "tui" or "gpui")
+            # THE ENGINE IS THE EXCEPTION: no later arm rebuilds it, and every
+            # suite that opens a recording refuses a replay-server built from
+            # other sources (`replay_prerequisite`'s provenance check), so a
+            # mutant engine left in place turned each later arm on a real
+            # recording into a HARNESS-FAILURE. Rebuild it from the restored
+            # tree at once.
             if any(path in ENGINE_SUBJECTS for path, _f, _r in arm.edits()):
-                _DIRTY.add("engine")
+                _DIRTY.discard("engine")
+                if not build_engine():
+                    print("the restored tree's engine does not build")
+                    rebuild_restored()
+                    return 2
         if res.hung:
             verdict, note = "HUNG", f"no result in {SUITE_TIMEOUT}s"
             problems += 1

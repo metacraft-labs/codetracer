@@ -3,43 +3,36 @@
 ## ---------------------------------------------------------------------------
 ## ViewModel layer — IsoNim is the primary renderer.
 ##
-## The legacy Karax ``method render`` was dropped in favour of an IsoNim
-## view (``viewmodel/views/isonim_search_results_view.nim``) that mounts
-## directly into the GoldenLayout container.  The legacy
-## ``SearchResultsComponent`` retains its identity so existing wiring
-## (auto-hide auto-reveal, search-service routing) keeps working; the
-## panel data is sourced from ``data.services.search.results[SearchFixed]``
-## and mirrored into a ``SearchResultsVM`` whose signals drive the
-## IsoNim view.
+## The pane is the generic view
+## (``viewmodel/views/isonim_search_results_view.nim``) over the session's
+## ``SearchResultsVM`` — the model the terminal and GPUI draw too — mounted by
+## the panel host (``ui/panel_host``) into the container GoldenLayout or the
+## auto-hide strip creates. The ``SearchResultsComponent`` keeps its identity
+## for the layout's and the auto-hide wiring. A search runs in the
+## main process through the one shared runner
+## (``viewmodel/host/find_in_files``); its batches arrive through
+## ``search_service`` and go straight into the ViewModel.
 ## ---------------------------------------------------------------------------
 
 import ui_imports, auto_hide, ../[types, communication]
 
 import std/json
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
-import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import SearchResultLine
 from ../viewmodel/viewmodels/search_results_vm import
-  SearchResultsVM, createSearchResultsVM,
-  setQuery, setResults, appendResults, clearResults,
-  setActive, setLoading, addRecentSearch, jumpToResult,
-  currentQuery, currentResultCount
-from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_search_results_view import
-  mountIsoNimSearchResults
+  SearchResultsVM, search, acceptBatch, stepResult,
+  openResult, toggleOption, searchOptionOf,
+  TextMatchOptions
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
 
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by the build, errors, terminal-output and event-log
-# migrations.
-var searchResultsVMInstance*: SearchResultsVM
-var searchResultsVMStore: ReplayDataStore
-var searchResultsComponentRef: SearchResultsComponent
-var isoNimSearchResultsMounted*: bool = false
-
-proc tryMountIsoNimSearchResultsPanel*()
 proc requestFixedSearchRender*()
 proc installSearchVMCallbacks*(vm: SearchResultsVM)
+
+proc paneVM(): SearchResultsVM =
+  ## The ViewModel the pane renders: the shown session's
+  ## (``ui/panel_host``), or nil before the renderer has one.
+  let session = panelSession()
+  if session.isNil: nil else: session.searchResultsVM
 
 # ---------------------------------------------------------------------------
 # Fixed-search overlay — direct DOM renderer.
@@ -156,275 +149,86 @@ else:
     discard
 
 proc installSearchVMCallbacks*(vm: SearchResultsVM) =
-  ## Wire callbacks on ``vm`` so the Find in Files view can trigger
-  ## searches and navigate to results without importing those services.
+  ## Wire the Find in Files pane's ViewModel to this window:
   ##
-  ## ``onSearch`` responsibility:
-  ## 1. Save previous query+count to recent-searches if it had results.
-  ## 2. Clear existing results and set the new query string.
-  ## 3. Enable the loading shimmer.
-  ## 4. Dispatch ``CODETRACER::search-program`` via the search service.
-  ##
-  ## ``onJumpToResult`` opens the matched file at the given line using
-  ## the same ``data.openLocation`` path the editor uses.
-  vm.onSearch = proc(query: string) =
-    # Save the previous search as a recent entry (if it had results).
-    let prevQuery = vm.currentQuery()
-    let prevCount = vm.currentResultCount()
-    if prevQuery.len > 0 and prevCount > 0:
-      vm.addRecentSearch(prevQuery, prevCount)
-    # Transition to the loading state for the new query.
-    vm.clearResults()
-    vm.setQuery(query)
-    vm.setLoading(true)
-    # Dispatch the search IPC via the legacy service.
-    data.services.search.searchProgram(cstring(query))
+  ## * ``onSearch`` — show the pane (``openLayoutTab``: revealed when it is
+  ##   docked, focused when placed, opened when not — Find-And-Incremental-
+  ##   Search.md §5.1) and hand the run to the main process, where THE shared
+  ##   runner executes it;
+  ## * ``onJumpToResult`` — open the row's file at its line through the same
+  ##   ``data.openLocation`` path the editor uses. The recording position
+  ##   does not move.
+  vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
+    data.openLayoutTab(Content.SearchResults)
+    data.services.search.requestFindInFiles(runId, query,
+                                            options.caseSensitive,
+                                            options.wholeWord, options.regex)
 
-  vm.onJumpToResult = proc(path: string, line: int) =
-    discard data.openLocation(cstring(path), line)
+  vm.onJumpToResult = proc(row: SearchResultLine) =
+    discard data.openLocation(cstring(row.path), row.line)
 
-proc parseRawLocation*(location: cstring): (cstring, int) =
-  let tokens = location.split(cstring":")
+proc initSearchResultsVMFromSession*(vm: SearchResultsVM) =
+  ## Wire the session's ``SearchResultsVM`` to this window. The panel host
+  ## mounts the pane over it (``ui/panel_host``).
+  installSearchVMCallbacks(vm)
 
-  if tokens.len == 2:
-    (tokens[0], parseJsInt(tokens[1]))
-  else:
-    raise newException(ValueError, "expected <path>:<line>")
+proc rowOf(r: SearchResultRow): SearchResultLine =
+  ## A main-process row as the pane's value.
+  SearchResultLine(text: (if r.text.isNil: "" else: $r.text),
+                   path: (if r.path.isNil: "" else: $r.path),
+                   line: r.line, matchStart: r.matchStart,
+                   matchLength: r.matchLength)
 
-# ---------------------------------------------------------------------------
-# VM bootstrap
-# ---------------------------------------------------------------------------
-
-proc initSearchResultsVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel ``SearchResultsVM`` using an externally-provided
-  ## ``ReplayDataStore`` (typically the shared store from
-  ## ``SessionViewModel``).  If a stub-backed instance already exists
-  ## (created by ``initSearchResultsVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
-  if searchResultsVMInstance != nil:
-    clog "SearchResultsVM: replacing existing instance with shared-store version"
-    isoNimSearchResultsMounted = false
-  searchResultsVMStore = store
-  searchResultsVMInstance = createSearchResultsVM(store)
-  installSearchVMCallbacks(searchResultsVMInstance)
-  clog "SearchResultsVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimSearchResultsPanel()
-
-proc initSearchResultsVM*() =
-  ## Lazily create the parallel ``SearchResultsVM`` backed by a stub
-  ## ``BackendService``.  Fallback when no shared store has been
-  ## provided via ``initSearchResultsVMWithStore``.
-  if searchResultsVMInstance != nil:
+proc acceptFindInFilesBatch(batch: SearchResultsBatch) =
+  ## The main process's batch, into the pane — dropped by the ViewModel
+  ## unless it belongs to the latest search.
+  let vm = paneVM()
+  if vm.isNil:
     return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  searchResultsVMStore = createReplayDataStore(stubBackend)
-  searchResultsVMInstance = createSearchResultsVM(searchResultsVMStore)
-  installSearchVMCallbacks(searchResultsVMInstance)
-  clog "SearchResultsVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimSearchResultsPanel()
-
-proc safeStr(s: cstring): string =
-  ## Convert a possibly-null cstring to an empty string.  Mirrors the
-  ## helper in ``ui/build.nim`` / ``ui/errors.nim``: E2E tests can land
-  ## a null cstring in the legacy record, and naive ``$`` would throw
-  ## inside ``cstrToNimstr``.
-  if s.isNil:
-    ""
-  else:
-    $s
-
-proc resultToVMRow(r: SearchResult): SearchResultLine =
-  ## Convert a legacy Karax ``SearchResult`` into the platform-neutral
-  ## row shape consumed by the IsoNim view.  Keeps the ViewModel layer
-  ## free of JS-only types.
-  SearchResultLine(
-    text: safeStr(r.text),
-    path: safeStr(r.path),
-    line: r.line)
-
-proc syncLegacySearchResultsIntoVM*(self: SearchResultsComponent) =
-  ## Mirror the legacy ``self.service.results[SearchFixed]`` list into
-  ## the IsoNim ``SearchResultsVM``.  Used by the layout when the panel
-  ## container becomes visible (or is rebuilt) so the panel reflects
-  ## every result already accumulated by the search service.  Per-row
-  ## updates go through ``syncSearchResultsAppendMatch`` directly;
-  ## this proc covers the bulk-replace scenario the auto-hide /
-  ## ``__ctRenderPanel`` paths use.
-  if searchResultsVMInstance.isNil or self.isNil:
-    return
-  let service = self.service
-  if service.isNil:
-    searchResultsVMInstance.setResults(@[])
-    return
-
   var rows: seq[SearchResultLine] = @[]
-  for r in service.results[SearchFixed]:
-    rows.add(resultToVMRow(r))
+  for r in batch.rows:
+    rows.add rowOf(r)
+  discard vm.acceptBatch(
+    batch.id, rows, batch.done,
+    (if batch.note.isNil: "" else: $batch.note))
 
-  # Use ``setResults`` for the wholesale replace path so re-running
-  # ``__ctRenderPanel`` after E2E tests inject results does not double
-  # up the rows.  ``setResults`` also flips ``active`` to true when the
-  # list is non-empty.
-  searchResultsVMInstance.setResults(rows)
-
-  # Mirror the active-flag and the query string from the legacy records.
-  #
-  # NOTHING IN PRODUCTION READS ``active`` ANY MORE.  It used to drive the
-  # root's ``search-results-active`` / ``search-results-non-active``
-  # modifier, which the Find in Files redesign retired and whose CSS has
-  # since been deleted; the view decides its empty-state overlay from
-  # ``vm.results`` (and ``vm.loading``), not from this flag.  It is kept
-  # because it is the assertable stand-in for that retired modifier — the
-  # view suite checks ``vm.active`` across the pre-search ⇄ results ⇄
-  # cleared transitions — and the legacy component remains its one source
-  # of truth.
-  searchResultsVMInstance.setActive(self.active or
-    (not service.query.isNil and service.query.query.len > 0))
-  if not service.query.isNil:
-    searchResultsVMInstance.setQuery(safeStr(service.query.query))
-
-proc syncSearchResultsAppendMatch*(matchRow: SearchResultLine) =
-  ## Push a single search-result row into the ``SearchResultsVM``.
-  ## Called from the ``onSearchResultsUpdated`` path so streamed
-  ## matches flow through the VM without coupling the search service
-  ## to the VM's type.  A no-op when the VM has not been bootstrapped
-  ## yet (e.g. during early register-time wiring before
-  ## ``configureMiddleware`` runs).
-  if searchResultsVMInstance.isNil:
+proc stepSearchResult*(delta: int) =
+  ## `search.next-result` / `search.previous-result` (`F4` / `Shift+F4`):
+  ## the next / previous result, wrapping, opened at its line.
+  let vm = paneVM()
+  if vm.isNil:
     return
-  searchResultsVMInstance.appendResults(@[matchRow])
+  let i = vm.stepResult(delta)
+  if i >= 0:
+    discard vm.openResult(i)
 
-proc syncSearchResultsAppendBatch*(matches: seq[SearchResultLine]) =
-  ## Bulk variant of ``syncSearchResultsAppendMatch`` — append a batch
-  ## of result rows in a single ``problems.val`` write so the reactive
-  ## body rebuilds only once.  An empty batch is passed through so the
-  ## VM can clear the loading shimmer when ripgrep finds no matches.
-  if searchResultsVMInstance.isNil:
+proc toggleSearchOption*(operation: string) =
+  ## `search.toggle-case` / `-whole-word` / `-regex` (`Alt+C` / `Alt+W` /
+  ## `Alt+R` in the pane's field): the toggle flips, and a search that ran
+  ## runs again with it.
+  let vm = paneVM()
+  if vm.isNil:
     return
-  searchResultsVMInstance.appendResults(matches)
+  let (known, which) = searchOptionOf(operation)
+  if known:
+    vm.toggleOption(which)
 
-proc syncSearchResultsClear*() =
-  ## Reset the SearchResultsVM result list and active flag.  Called
-  ## when a new query begins so the previous run's results don't
-  ## bleed into the next.
-  if searchResultsVMInstance.isNil:
-    return
-  searchResultsVMInstance.clearResults()
-
-proc syncSearchResultsSetQuery*(query: string) =
-  ## Update the active query string on the VM.  Called from the
-  ## ``onSearchResultsUpdated`` IPC handler so the panel header text
-  ## (``"<N> results for \"<query>\""``) tracks the live search.
-  if searchResultsVMInstance.isNil:
-    return
-  searchResultsVMInstance.setQuery(query)
-
-proc tryMountIsoNimSearchResultsPanel*() =
-  ## Mount the IsoNim search results view into the GoldenLayout-managed
-  ## (or standalone auto-hide) container.  The container's id is
-  ## ``searchResultsComponent-{id}``; the panel is a singleton (id
-  ## always 0) but we still resolve through the registered component's
-  ## id field for symmetry with the other IsoNim mounts.
-  ##
-  ## Safe to call multiple times — mounts only once.  Retries until the
-  ## DOM container appears (capped at 200 attempts, ~2 s) since
-  ## GoldenLayout creates the host slightly after the layout state
-  ## changes.
-  if isoNimSearchResultsMounted or searchResultsVMInstance.isNil:
-    return
-  if searchResultsComponentRef.isNil:
-    return
-
-  let key = cstring("searchResultsComponent-" & $searchResultsComponentRef.id)
-  var retryCount = 0
-  proc doMount() =
-    if isoNimSearchResultsMounted:
-      return
-    retryCount += 1
-    let container = dom_api.getElementById(dom_api.document, key)
-    if dom_api.isNodeNil(dom_api.Node(container)):
-      if retryCount > 200:
-        cerror "tryMountIsoNimSearchResultsPanel: not ready after 200 retries, giving up"
-        return
-      discard setTimeout(proc() = doMount(), 10)
-      return
-
-    # Replace any prior content (the layout bridge may have planted a
-    # stub element before the IsoNim mount fires).
-    let containerNode = dom_api.Node(container)
-    while not dom_api.isNodeNil(containerNode.firstChild):
-      discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-    isoNimSearchResultsMounted = true
-    try:
-      mountIsoNimSearchResults(container, searchResultsVMInstance)
-    except:
-      cerror "tryMountIsoNimSearchResultsPanel: mount EXCEPTION: " & getCurrentExceptionMsg()
-
-    # Re-sync any data the legacy service already carries so the
-    # freshly-mounted view reflects the latest result list.
-    if not searchResultsComponentRef.isNil:
-      syncLegacySearchResultsIntoVM(searchResultsComponentRef)
-
-  doMount()
-
-proc autoRevealSearchResultsPanel*() =
-  ## If the search results panel is pinned to an auto-hide edge strip,
-  ## show the overlay so the user can see results. No-op if the panel
-  ## is not in auto-hide state.
-  if autoHideState.isNil:
-    return
-  let panel = autoHideState.findPanelByContent(Content.SearchResults)
-  if not panel.isNil:
-    revealOverlay(panel)
-
-# SearchResultsComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths; all real
-# DOM construction happens in
-# ``viewmodel/views/isonim_search_results_view.nim``.
+proc startFindInFiles(query: string) =
+  ## The omnibar's ``:grep``: the pane's own search.
+  let vm = paneVM()
+  if not vm.isNil:
+    vm.search(query)
 
 method register*(self: SearchResultsComponent, api: MediatorWithSubscribers) =
-  ## Register the SearchResultsComponent with the mediator.  Bring up the
-  ## IsoNim SearchResultsVM lazily so the mount procedure can find it;
-  ## the shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## The pane subscribes to nothing: its rows are the session's
+  ## ``SearchResultsVM``, which the main process's batches fill.
   self.api = api
-  initSearchResultsVM()
-  if searchResultsComponentRef.isNil:
-    searchResultsComponentRef = self
-    tryMountIsoNimSearchResultsPanel()
 
 # ---------------------------------------------------------------------------
-# Wire the ``search_service`` forward hooks.  ``search_service`` cannot
-# import this module directly (cycle: ``ui_imports`` → ``renderer`` →
-# ``search_service`` → ``search_results`` → ``ui_imports``), so it
-# declares ``syncSearchResults*Hook`` proc variables and we install the
-# concrete implementations at module-init time here.
-#
-# TWO of the three are called: ``onSearchResultsUpdated`` in
-# ``search_service.nim`` invokes the append-batch and set-query hooks.
-# ``syncSearchResultsClearHook`` is declared there and assigned below but
-# has NO call site anywhere in the tree — installing it currently wires
-# nothing up. Either give the service a path that clears the VM, or drop
-# the variable; do not read the assignment below as evidence that clearing
-# happens.
+# The ``search_service`` hooks (it cannot import this module; see the note
+# there): the omnibar's ``:grep`` and the main process's batches both reach the
+# pane's ViewModel.
 # ---------------------------------------------------------------------------
 
-syncSearchResultsAppendBatchHook = syncSearchResultsAppendBatch
-syncSearchResultsSetQueryHook = syncSearchResultsSetQuery
-syncSearchResultsClearHook = syncSearchResultsClear
+startFindInFilesHook = startFindInFiles
+acceptFindInFilesBatchHook = acceptFindInFilesBatch

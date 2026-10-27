@@ -242,7 +242,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "the first fill asks for the viewport plus overscan, and nothing else":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     check h.vm.visibleFirstLine.val == 1
     # Overscan cannot reach above line 1, so the first window is
     # 1 .. 20 + 5 = 1 .. 25.
@@ -260,7 +261,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "overscan is honoured on both sides once the viewport is off the top":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     h.vm.scrollTo(100)
     discard h.fillWindow()
@@ -273,11 +275,13 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "changing the overscan changes the window and nothing else":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.checkHeldRangeIs(95, 124)
-    h.vm.setViewport(height = 20, overscan = 12)
+    h.vm.setOverscan(12)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     let requests = h.fillWindow()
     checkRequestsAre(requests, @[(88, 94), (125, 131)])
     h.checkHeldRangeIs(88, 131)
@@ -286,7 +290,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "scrolling down requests exactly the newly visible lines":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.checkHeldRangeIs(95, 124)
@@ -308,7 +313,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     ## end and extends the other, and back.
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     for r in h.vm.requestMissing(): h.serveWithContexts(r)
     for delta in [20, -35, 7]:
@@ -332,7 +338,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "scrolling up requests exactly the newly visible lines":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.vm.scrollBy(-20)
@@ -344,7 +351,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "a scroll beyond the held window requests one contiguous range":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.vm.scrollTo(300)
@@ -356,7 +364,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "a settled window requests nothing at all":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     checkRequestsAre(h.vm.requestMissing(), newSeq[(int, int)]())
     checkRequestsAre(h.vm.requestMissing(), newSeq[(int, int)]())
@@ -364,7 +373,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "the window follows cursorLine, by the smallest scroll that works":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     check h.vm.visibleFirstLine.val == 1
 
@@ -401,7 +411,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     # and asserted to MOVE DIFFERENTLY.
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
 
     h.store.updateDebuggerPosition(rrTicks = 1, file = RecordedPath, line = 250)
@@ -433,10 +444,44 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     h.vm.followExecutionPointer()
     check h.vm.visibleFirstLine.val == 262 - 9
 
+  test "M73: the user's `.` centres the pointer even while it is visible; a user scroll keeps it":
+    # CodeTracer-TUI.md §4.2's `.`: "Reset source scroll so the current
+    # execution pointer is centered". A RESET, so unlike the stop's
+    # `followExecutionPointer` it moves a window in which the pointer is
+    # already visible (Pxor-Bugs M73, codetracer#840).
+    let h = newHarness()
+    defer: h.teardown()
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
+    discard h.fillWindow()
+    h.store.updateDebuggerPosition(rrTicks = 1, file = RecordedPath, line = 250)
+    h.vm.followExecutionPointer()
+    check h.vm.visibleFirstLine.val == 241
+    # The user scrolls until the pointer sits on the window's last row: it is
+    # still visible, so the stop's rule leaves the window there…
+    h.vm.scrollBy(-10)
+    check h.vm.visibleFirstLine.val == 231
+    check h.vm.visibleLastLine.val == 250
+    h.vm.followExecutionPointer()
+    check h.vm.visibleFirstLine.val == 231
+    # …and `.` centres it.
+    h.vm.centreOnExecutionPointer()
+    check h.vm.visibleFirstLine.val == 241
+    check h.store.debugger.val.location.line == 250
+    discard h.fillWindow()
+    h.checkLineIsHeld(250)
+    # The caret written into `EditorVM` and followed — the read-only caret's
+    # route (M73) — scrolls the least amount, and leaves the pointer alone.
+    h.editor.setCursor(275, 1)
+    h.vm.followCursor()
+    check h.vm.visibleFirstLine.val == 275 - 19
+    check h.vm.executionLine.val == 250
+
   test "a line outside the window is a REQUEST, never an empty string":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     h.checkHeldRangeIs(95, 124)
@@ -458,7 +503,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "every visible line is answered, and the answers are all held":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     h.vm.scrollTo(100)
     discard h.fillWindow()
     let reads = h.vm.visibleReads()
@@ -473,7 +519,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
   test "the identity triple travels with every request the VM emits":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     let requests = h.vm.requestMissing()
     check requests.len == 1
     if requests.len == 1:
@@ -491,7 +538,8 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     # IMMEDIATELY — not after the next fetch returns.
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     h.checkLineIsHeld(10)
 
@@ -505,10 +553,35 @@ suite "CTUI-4 — SourceVM holds a window, and says so when asked for the rest":
     if read.kind == srkRequest:
       check read.request.sourceGeneration == 1
 
+  test "moving from a short file to a longer one asks for the longer file's whole window":
+    # The short file's length must not clamp the next file's window. It did:
+    # going from `multi_root`'s 5-line helpers.py to its 6-line extra.py asked
+    # for lines 1-5 only, and line 6 read `⋯ loading` in both native editors
+    # until something else moved the window.
+    let h = newHarness()
+    defer: h.teardown()
+    const ShortPath = "/opt/ctui4/window_fixture/short.src"
+    let short = h.traceDir / "files" / ShortPath[1 .. ^1]
+    writeFile(short, "one\ntwo\nthree\n")
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
+    h.store.updateDebuggerPosition(rrTicks = 1, file = ShortPath, line = 1)
+    discard h.fillWindow()
+    check h.vm.totalLineCount.val == 3
+    check h.vm.heldLines.val == @["one", "two", "three"]
+
+    h.store.updateDebuggerPosition(rrTicks = 2, file = RecordedPath, line = 1)
+    checkRequestsAre(h.fillWindow(), @[(1, 25)])
+    h.checkHeldRangeIs(1, 25)
+    h.checkHeldTextIsCorrect()
+    for line in 1 .. 20:
+      h.checkLineIsHeld(line)
+
   test "fulfilling with the wrong revision is refused, and changes nothing":
     let h = newHarness()
     defer: h.teardown()
-    h.vm.setViewport(height = 20, overscan = 5)
+    h.vm.setOverscan(5)
+    h.vm.setViewport(h.vm.viewport.withRows(20))
     discard h.fillWindow()
     h.checkHeldRangeIs(1, 25)
 
@@ -534,6 +607,14 @@ suite "CTUI-4 — the window arithmetic, as free functions":
     check clampTop(5, 20, 10) == 1
     # An unknown length must not collapse a scroll the caller just made.
     check clampTop(200, 20, 0) == 200
+
+  test "M73: topCentring centres whether or not the line is visible":
+    check topCentring(241, 250, 20, 400) == 241
+    check topCentring(231, 250, 20, 400) == 241
+    check topCentring(100, 250, 20, 400) == 241
+    check topCentring(100, 5, 20, 400) == 1
+    check topCentring(100, 399, 20, 400) == 381
+    check topCentring(100, 0, 20, 400) == 100
 
   test "topFollowingCursor makes the smallest move that works":
     check topFollowingCursor(100, 105, 20, 400) == 100

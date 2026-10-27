@@ -59,43 +59,6 @@
 #eventLog-category-only-recorded-event
   z-index: 2
 
-.eventLog-category-dropdown-button //TODO: think of a way to combine all dropdowns in one style class
-  font-family: "SpaceGrotesk" !important
-  display: flex
-  justify-content: start
-  align-items: center
-  user-select: none
-  border-radius: 6px
-  color: colors-ui-text-primary-body
-  cursor: pointer
-  height: 28px
-  width: 28px
-  margin-bottom: 10px
-  margin-left: 10px
-  background-color: colors-ui-border-action
-  background-image: EVENT_LOG_FA_DOWN_ICON
-  background-position: center
-  background-repeat: no-repeat
-  transform: translate(0px, 2px)
-  position: relative
-  z-index: 1
-  font-weight: bold
-
-  &:focus
-    color: colors-ui-text-primary-body
-    background-color: colors-ui-surface-action-primary !important
-    background-image: EVENT_LOG_FA_UP_ICON !important
-    outline: none !important
-    box-shadow: none !important
-
-  &:focus-visible
-    outline: none !important
-    box-shadow: inset 0 0 0 0.125em colors-ui-border-focus !important
-
-  &:hover
-    background-color: colors-ui-surface-action-primary
-    color: colors-ui-text-primary-body
-
 .hamburger-dropdown-container
   position: relative
   display: flex
@@ -198,9 +161,12 @@
 
     .ct-checkmark
       --ct-checkmark-size: 1rem
-      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+      // A slightly fainter box than the default in the dark theme; in the
+      // light one the default box's tokens (checkmark.styl), as fainter
+      // white would not show there (`by-mode`, defaults.styl).
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
+      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
+      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
     .ct-checkmark-label
       min-width: 0
@@ -245,9 +211,10 @@ table.dataTable tbody tr:not(.active):hover
 
     .ct-checkmark
       --ct-checkmark-size: 1rem
-      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+      // As the filter list's box above.
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
+      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
+      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
 // Right column — kind checkboxes in a wrapping flex row
 .dropdown-kind-items
@@ -266,9 +233,10 @@ table.dataTable tbody tr:not(.active):hover
 
     .ct-checkmark
       --ct-checkmark-size: 1rem
-      --ct-checkmark-border: rgba(255, 255, 255, 0.22)
-      --ct-checkmark-border-hover: rgba(255, 255, 255, 0.34)
-      --ct-checkmark-bg-hover: rgba(255, 255, 255, 0.02)
+      // As the filter list's box above.
+      --ct-checkmark-border: by-mode(rgba(255, 255, 255, 0.22), colors-ui-border-primary)
+      --ct-checkmark-border-hover: by-mode(rgba(255, 255, 255, 0.34), colors-ui-border-primary-hover)
+      --ct-checkmark-bg-hover: by-mode(rgba(255, 255, 255, 0.02), colors-ui-surface-primary-default-hover)
 
 // The filter menu's header row: the "Trace events" / "Recorded events" tabs on
 // the left and the On/Off switch on the right.
@@ -500,7 +468,10 @@ table.dataTable tbody tr:not(.active):hover
     color: EVENT_LOG_BUTTON_UNSELECTED_COLOR
 
   .eventLog-normal-color-button, .eventLog-selected-kind, .eventLog-selected-category
-    color: colors-ui-surface-primary-secondary
+    // A surface token as text: the panel's own colour in the light theme
+    // (#e6e2db, 1.2:1), so there it takes the label text token (`by-mode`,
+    // defaults.styl).
+    color: by-mode(colors-ui-surface-primary-secondary, colors-ui-text-primary-label)
 
   .eventLog-button
     i
@@ -688,6 +659,58 @@ label
     // Combined selector beats .eventLog-cell alone so overflow: visible wins
     .eventLog-cell.direct-location-rr-ticks
       overflow: visible !important
+
+// The list (HSF-D6): the IsoNim view's own scroller, which replaced
+// DataTables' Scroller. The scroll area is as tall as the whole (filtered)
+// list (`listHeight`) and the held window sits `loadedStart` rows down in it
+// (`windowOffset`), so the scrollbar spans the log.
+.eventLog
+  .eventLog-dense-table
+    display: flex
+    flex-direction: column
+    position: relative
+
+  // `flex-basis: 0`: the body takes the table's height whatever it holds.
+  // Sized by its content (`auto`), an empty log measured 0px tall, so the
+  // pane reported no rows, asked for none, and stayed empty.
+  .eventLog-scroll-body
+    flex: 1 1 0
+    min-height: 0
+    overflow-y: auto
+    overflow-x: hidden
+
+  // The empty log's text sits over the list rather than taking its height.
+  > .eventLog-dense-table > .dt-empty
+    position: absolute
+    top: 2em
+    left: 0
+    right: 0
+    pointer-events: none
+
+  .eventLog-scroll-space
+    position: relative
+    min-height: 100%
+
+  .eventLog-rows
+    position: absolute
+    top: 0
+    left: 0
+    right: 0
+    border-collapse: collapse
+
+  .eventLog-row
+    cursor: pointer
+
+    &.event-selected, &.selected
+      background-color: colors-ui-surface-primary-secondary-hover
+
+    &.eventLog-expanded .eventLog-text
+      max-height: 20ch
+      overflow: auto
+      white-space: pre-wrap
+
+  .row-expander-none
+    display: none
 
 .paging-content
   display: flex

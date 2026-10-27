@@ -95,18 +95,62 @@ proc viewportSiblingsHeight(viewport, container: js): float {.importjs: """
   ## the table must leave room for.  Out-of-flow children overlay rather than
   ## take room, so they are not counted.
 
-proc measureRenderedRowHeight(self: DataTableComponent): int =
-  let scrollBody = self.tableScrollBody()
+proc scrollerRowHeight(scroller: js): float {.importjs: "(Number(#.s.heights.row) || 0)".}
+  ## The row height the Scroller is laying the table out with (its
+  ## `s.heights.row`), or 0 while it has none. Every pixel the Scroller
+  ## computes — the virtual body's height, the scroll offset of a row, and
+  ## `page()`, which the footer reports — is that many pixels per row.
 
+proc commonDrawnRowHeight(scrollBody: js): float {.importjs: """
+  (function(body) {
+    const byHeight = new Map();
+    for (const tr of body.querySelectorAll("tbody > tr")) {
+      if (tr.querySelector(".dt-empty, .dataTables_empty")) continue;
+      const h = tr.getBoundingClientRect().height;
+      if (!(h > 0)) continue;
+      const key = Math.round(h * 100);
+      const seen = byHeight.get(key);
+      if (seen) seen.count += 1; else byHeight.set(key, { height: h, count: 1 });
+    }
+    let best = null;
+    for (const g of byHeight.values()) {
+      if (!best || g.count > best.count ||
+          (g.count === best.count && g.height < best.height)) best = g;
+    }
+    return best ? best.height : 0;
+  })(#)""".}
+  ## The height most of the drawn EVENT rows share, or 0 while none is drawn
+  ## (or the table is hidden, when every row measures 0).
+  ##
+  ## A table with no rows yet (before the first `ct/update-table` reply, or a
+  ## search that matched nothing) still draws one row: DataTables' empty-table
+  ## message (`td.dt-empty`). `styles/components/empty_states.styl` stretches
+  ## that row to the whole scroll body so the message centres in the pane, so
+  ## its height is the VIEWPORT's, not a row's. It must never be taken for a
+  ## row: measured 2026-10-22 on `noir_space_ship`, it made the Scroller lay
+  ## 70 rows of 27.6px out as 70 rows of 355px (#850).
+  ##
+  ## The most common height, not the first row's: the Scroller assumes every
+  ## row is one height, and the rows are, except one the user has expanded
+  ## (the output cell's `row-expander`, 73.6px against 27.6px). Taking that
+  ## row's height when it happens to be first drawn would size the whole log
+  ## to it and leave the viewport over rows that are not there. A tie goes to
+  ## the shorter height, since an expanded row is only ever taller.
+
+proc measureRenderedRowHeight(self: DataTableComponent): float =
+  ## The height of the rows the table draws, kept in `self.rowHeight`.
+  ##
+  ## Fractional on purpose: the Scroller multiplies it by the row count to
+  ## size the virtual body and divides scroll offsets by it to name rows, so a
+  ## rounded height drifts by the rounding error times the row count — on a
+  ## 27.64px row rounded to 28, a whole row by the end of a 70-row log. While
+  ## no event row is drawn, the last known height is returned unchanged.
+  let scrollBody = self.tableScrollBody()
   if scrollBody.isNil:
     return self.rowHeight
 
-  let row = cast[Node](scrollBody.findNodeInElement("tbody tr"))
-  if row.isNil:
-    return self.rowHeight
-
-  let measuredHeight = measuredNodeHeight(row)
-  if measuredHeight > 0:
+  let measuredHeight = commonDrawnRowHeight(scrollBody.toJs)
+  if measuredHeight > 0.0:
     self.rowHeight = measuredHeight
 
   result = self.rowHeight
@@ -121,10 +165,10 @@ proc visibleViewportRows(self: DataTableComponent): int =
     viewportHeight = measuredNodeHeight(self.tableScrollBody())
   let rowHeight = self.measureRenderedRowHeight()
 
-  if viewportHeight <= 0 or rowHeight <= 0:
+  if viewportHeight <= 0 or rowHeight <= 0.0:
     return 0
 
-  result = max(1, int(ceil(viewportHeight.float / rowHeight.float)))
+  result = max(1, int(ceil(viewportHeight.float / rowHeight)))
 
 proc syncScrollerMeasurements(self: DataTableComponent) =
   if self.context.isNil:
@@ -135,7 +179,7 @@ proc syncScrollerMeasurements(self: DataTableComponent) =
     return
 
   let rowHeight = self.measureRenderedRowHeight()
-  if rowHeight <= 0:
+  if rowHeight <= 0.0:
     return
 
   # Scroller keeps its own cached row height and viewport height; update both
@@ -242,25 +286,30 @@ proc resizeTableScrollArea*(self: DataTableComponent) =
       discard self.context.columns.adjust()
 
       # Capture the current first-visible row BEFORE syncScrollerMeasurements
-      # updates self.rowHeight to the post-zoom value.  self.rowHeight holds the
-      # cached height from the previous render cycle (the old row height), so
-      # dividing scrollTop by it gives the correct pre-zoom starting row index.
-      # We use this to restore the same starting row after zoom regardless of
+      # gives the Scroller the new row height.  The scroll offset was laid out
+      # in the Scroller's OWN row height, so that is the divisor that names
+      # the row at the top — not `self.rowHeight`, which any footer update
+      # re-measures from the drawn rows and so may already hold the new value
+      # (zoom, or the first real rows after the empty-table message).  We use
+      # this to restore the same starting row after the change regardless of
       # direction (zoom-in makes rows taller; zoom-out makes them shorter).
-      let currentScrollTop = scrollBody.toJs.scrollTop.to(int)
-      let oldRowHeight = self.rowHeight  # cached pre-zoom height (0 on first call)
+      let currentScrollTop = scrollBody.toJs.scrollTop.to(float)
+      let scrollerBefore = tableScrollerInstance(self.context)
+      let oldRowHeight =  # 0 on the first call: no layout to preserve yet
+        if scrollerBefore.isNil or scrollerBefore.toJs == jsUndefined: self.rowHeight
+        else: scrollerRowHeight(scrollerBefore)
 
       self.syncScrollerMeasurements()
 
       # Reposition scrollTop so the same first visible row stays at the top
       # after zoom.  On the very first resize (oldRowHeight = 0, no rows yet)
       # we skip this and let the Scroller start from the top.
-      if self.rowsCount > 0 and oldRowHeight > 0:
+      if self.rowsCount > 0 and oldRowHeight > 0.0:
         let newRowH = self.measureRenderedRowHeight()
-        if newRowH > 0:
-          let startRow = currentScrollTop div oldRowHeight
-          let virtualHeight = self.rowsCount * newRowH
-          let maxScrollTop = max(0, virtualHeight - scrollBodyHeight)
+        if newRowH > 0.0:
+          let startRow = math.floor(currentScrollTop / oldRowHeight)
+          let virtualHeight = float(self.rowsCount) * newRowH
+          let maxScrollTop = max(0.0, virtualHeight - float(scrollBodyHeight))
           # startRow * newRowH preserves the position; clamp so we never
           # overshoot the end of the virtual area (zoom-out near the bottom).
           scrollBody.toJs.scrollTop = min(startRow * newRowH, maxScrollTop)
@@ -308,9 +357,56 @@ proc updateTableFooter*(self: DataTableComponent) =
     rowsCountField.innerHTML = cstring($(self.rowsCount))
 
 
+proc syncScrollerToDrawnRows(self: DataTableComponent) =
+  ## Re-measure the Scroller when the rows it is laying out are not the height
+  ## it holds for them (#850).
+  ##
+  ## The Scroller's row height is written by `syncScrollerMeasurements`, which
+  ## only `resizeTableScrollArea` runs: on a resize, and once on the data path.
+  ## Neither is tied to the moment the table first draws REAL rows. On a trace
+  ## open the table is sized while it still shows its empty-table message, and
+  ## the one data-path resize is keyed to the first `ct/update-table` reply —
+  ## which is commonly the empty one sent before `ct/event-load` has loaded the
+  ## log. The Scroller then keeps a height that is not a row's for the whole
+  ## session, and with it a virtual body, a fetch length and a `page()` (the
+  ## footer) that all describe rows the table does not draw: the reported
+  ## "Rows 19 to 34 of 73" at the bottom of the log.
+  ##
+  ## So whenever event rows are drawn, compare their common height with the
+  ## Scroller's and, when they differ, run the whole resize: it writes the
+  ## measured height and the viewport, keeps the row at the top where it was,
+  ## and re-measures the Scroller (`scroller.measure()`), which re-fetches the
+  ## window with the fetch length the true height implies. Once they agree
+  ## this only reads the drawn rows' boxes and changes nothing, so it does not
+  ## disturb a scroll in progress, and an expanded row does not set it off
+  ## (`commonDrawnRowHeight`).
+  ##
+  ## Scroller's layout arithmetic: `dataTables.scroller.mjs` (`_scrollForce`,
+  ## `measure`, `pixelsToRow`), https://datatables.net/extensions/scroller/
+  if self.context.isNil:
+    return
+
+  let scroller = tableScrollerInstance(self.context)
+  if scroller.isNil or scroller.toJs == jsUndefined:
+    return
+
+  let scrollBody = self.tableScrollBody()
+  if scrollBody.isNil:
+    return
+
+  let drawnHeight = commonDrawnRowHeight(scrollBody.toJs)
+  # Sub-pixel tolerance only: the Scroller is given the measured value
+  # verbatim, so once synced the two are equal.
+  if drawnHeight > 0.0 and abs(drawnHeight - scrollerRowHeight(scroller)) > 0.01:
+    self.resizeTableScrollArea()
+
 proc updateTableRows*(self: DataTableComponent, redraw: bool = true) =
   if self.context.isNil:
     return
+
+  # The footer below is the Scroller's `page()`, which is only true while the
+  # Scroller's row height is the drawn rows'.
+  self.syncScrollerToDrawnRows()
 
   let context = self.context
   let scroller = context.scroller

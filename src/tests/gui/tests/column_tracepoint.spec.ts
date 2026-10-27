@@ -16,7 +16,7 @@
  *      programmatically adding a column-aware tracepoint at
  *      `(line=1, column=N, logMessage="hit b")` via the M10
  *      debugger service plumbs the column AND the message all the
- *      way to `data.services.debugger.breakpointTable[path][line]`.
+ *      way to the session's breakpoint row for `(path, line)` (`ctBreakpointRows`).
  *   2. The frontend's `dapSetBreakpoints` ships the `logMessage` on
  *      the DAP wire so the replay-server registers a column-aware
  *      tracepoint (verified end-to-end by the continue-then-assert
@@ -168,7 +168,7 @@ interface TracepointSnapshot {
 }
 
 /** Read the registered tracepoint entry at `(path, line)` from the
- *  frontend's `breakpointTable` (M10 reuses the same table for the
+ *  session's breakpoint rows (`ctBreakpointRows`) (M10 reuses the same table for the
  *  logpoint surface).  Returns `null` when no entry exists. */
 async function readTracepoint(
   editor: EditorPane,
@@ -177,7 +177,7 @@ async function readTracepoint(
   return editor.page.evaluate(
     ({ path: p, line: l }) => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      const table = w?.data?.services?.debugger?.breakpointTable;
+      const table = (w?.ctBreakpointRows ? w.ctBreakpointRows().reduce((t: any, r: any) => { (t[r.path] ??= {})[r.line] = r; return t; }, {}) : undefined);
       if (!table) return null;
       const aliases = [p];
       if (p.startsWith("/private/var/")) aliases.push(p.slice("/private".length));
@@ -229,7 +229,7 @@ test.describe("M10 — Column-aware tracepoint (DAP logpoint)", () => {
     await addColumnTracepoint(editor, 1, fixture.laterStatementColumn, "hit b");
 
     // The frontend MUST store the bound column AND the logMessage
-    // on the breakpointTable entry — without this surface the M10
+    // on the session's breakpoint row — without this surface the M10
     // GUI affordance is not wired through.
     const tp = await readTracepoint(editor, 1);
     expect(tp, "tracepoint must be registered at line 1").not.toBeNull();

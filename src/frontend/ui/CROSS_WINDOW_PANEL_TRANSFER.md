@@ -15,7 +15,8 @@
 ### User Flow
 
 1. Right-click on any Golden Layout panel tab
-2. "Send to Window" submenu appears listing all open windows (except the current one)
+2. "Send to Window" submenu appears listing all open windows (except the current
+   one)
 3. User selects a target window
 4. The panel's config and component state are serialised
 5. The panel is removed from the source window's GL instance

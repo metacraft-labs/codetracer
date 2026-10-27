@@ -5,6 +5,13 @@
  * can expand macro calls inline and allow stepping through the expanded code.
  * The expansion is triggered with ALT+E on a line containing a macro call.
  *
+ * ALT+E is NOT macro expansion in the shipped keymap: it focuses the Event Log
+ * in every focus context (the CUA keymap; one key, one action wherever the
+ * caret is). Macro expansion is the operation `editor.toggle-macro-expansion`,
+ * with no default chord. This suite binds it to ALT+E through the user's
+ * `keybindings.json` (a user row beats the base's), which is the documented
+ * way to give it a key — so the presses below exercise that path too.
+ *
  * These tests require:
  *   - A Nim test program that uses macros
  *   - The Nim compiler with --sourcemap:on producing macro expansion data
@@ -15,7 +22,11 @@
  * support this yet, tests will skip gracefully.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+
 import { test, expect } from "../../lib/fixtures";
+import { ctUserConfigDir } from "../../lib/ct-home";
 import { LayoutPage } from "../../page-objects/layout-page";
 import { StatusBar } from "../../page-objects/status_bar";
 import { retry } from "../../lib/retry-helpers";
@@ -168,6 +179,18 @@ test.describe("MacroExpansionStepping", () => {
   // with explicit macro usage, but this is the standard Nim RR test program.
   // If it doesn't contain macros, tests will skip gracefully.
   test.use({ sourcePath: "nim_sudoku_solver/main.nim", launchMode: "trace" });
+
+  // Under the worker's scratch `CODETRACER_HOME` (`lib/fixtures.ts`), never
+  // the developer's own configuration.
+  const keybindings = path.join(ctUserConfigDir(), "keybindings.json");
+  test.beforeAll(() => {
+    fs.mkdirSync(path.dirname(keybindings), { recursive: true });
+    fs.writeFileSync(keybindings,
+      '[ { "key": "alt+e", "command": "editor.toggle-macro-expansion" } ]\n');
+  });
+  test.afterAll(() => {
+    try { fs.unlinkSync(keybindings); } catch { /* already gone */ }
+  });
 
   // Nim is an RR-based language: give extra time.
   test.setTimeout(180_000);

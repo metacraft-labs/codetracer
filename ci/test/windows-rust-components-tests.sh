@@ -30,7 +30,7 @@ if [ -z "${CT_NATIVE_REPLAY_PATH:-}" ]; then
 	fi
 fi
 
-filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" "$REPO_ROOT/ci/test/rust-components-not-provided.windows.txt")"
+filter="$(bash "$REPO_ROOT/ci/lib/not-provided-filter.sh" "$REPO_ROOT/ci/test/rust-components-not-provided.windows.txt" "$REPO_ROOT/src/db-backend/tests")"
 
 cd "$REPO_ROOT/src/db-backend"
 # Unit tests (library and binaries) and integration tests, in one nextest run;

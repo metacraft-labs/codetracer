@@ -59,6 +59,7 @@ import isonim_tui
 import ../../app/commands/interpreter
 import ../../app/input/keymap
 import ../../app/input/modal_state
+import ../../app/tests/navigation_table
 import ../../app/layout/profile
 import ../../app/views/command_line
 import ../../app/views/command_palette
@@ -121,7 +122,6 @@ type
     # QUALIFIED: `isonim_tui` re-exports its own M14 `modal` module, which has
     # a `ModalState` of its own. Two different concepts with one name.
     modal*: modal_state.ModalState
-    pending*: keymap.PendingState
     prompt*: CommandLineModel
     searchModel*: SearchModel
     palette*: PaletteModel
@@ -139,7 +139,7 @@ proc paletteEntries(): seq[PaletteEntry] =
     result.add commandEntry(spec.name, spec.summary, spec.argument)
 
 proc initAppState*(): AppState =
-  AppState(modal: initModalState(), pending: initPendingState(),
+  AppState(modal: initModalState(),
            prompt: initCommandLineModel(pkCommand),
            searchModel: initSearchModel(sscSource, sdirForward),
            palette: initPaletteModel(paletteEntries()),
@@ -149,7 +149,9 @@ proc initAppState*(): AppState =
 var current = initAppState()
 var lastCols = 100
 var lastRows = 24
-let km = defaultKeymap()
+var resolver = newNavResolver()
+  ## PLAT-68: the SHIPPED router under the Vim base, holding the pending
+  ## prefix.
 
 proc fieldText*(label, value: string): string =
   label & (if value.len == 0: NoneText else: value)
@@ -157,7 +159,7 @@ proc fieldText*(label, value: string): string =
 proc statusModelFor*(st: AppState; cols, rows: int): StatusBarModel =
   initStatusBarModel(mode = statusMode(st.modal.mode),
                      profile = selectProfile(cols, rows),
-                     notification = pendingIndicator(st.pending))
+                     notification = resolver.router.pendingLabel)
 
 proc promptRowOf*(rows: int): int =
   max(0, rows - CommandLineRowFromBottom)
@@ -247,12 +249,13 @@ proc runLine(st: var AppState; line: string) =
 proc applyToken*(st: var AppState; token: string; cols, rows: int;
                  atMs: int64): bool =
   ## One input token against the state. Returns whether to repaint.
-  let res = km.resolve(st.modal, st.pending, token, atMs)
-  if res.kind == krNone and res.key.len == 0:
+  let key = keyName(token)
+  if key.len == 0:
     return false                                # a mouse report, or noise
-  st.lastKey = res.key
+  let res = resolver.resolve(st.modal, token, atMs)
+  st.lastKey = key
   case res.kind
-  of krText:
+  of "text":
     # A PRINTABLE KEY IN A TEXT-ACCEPTING MODE. `keymap.resolve` decided that,
     # not this app: the shadowing rule is stated once, in one module.
     st.lastAction = kaNone
@@ -270,7 +273,7 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
       discard st.searchModel.updateQuery(SearchCorpus, st.prompt.buffer)
     st.modal.buffer = st.prompt.buffer
     true
-  of krAction:
+  of "action":
     st.lastAction = res.action
     let (raises, ev) = modalEventFor(res.action)
     case res.action
@@ -325,24 +328,9 @@ proc applyToken*(st: var AppState; token: string; cols, rows: int;
       if raises:
         discard applyModalEvent(st.modal, ev)
     true
-  of krPending, krPendingAbandoned, krPendingTimedOut:
-    st.lastAction = kaNone
-    true
-  of krInertInMode:
-    # PLAT-16. A BOUND chord that has no meaning in the current PRODUCT mode.
-    #
-    # UNREACHABLE IN THIS APP AND HANDLED ANYWAY: `keymap.resolve` defaults
-    # `product` to `pmDebug` and this app never passes anything else, so no
-    # token can produce this kind here. It is an arm rather than an `else`
-    # because the exhaustive `case` is what will tell whoever adds a product
-    # mode to this app that there is a screen decision to make —
-    # Mode-Transitions.md §8.1's "inert AND says so" is a thing to DRAW, and an
-    # `else` would have absorbed it silently.
-    st.lastAction = kaNone
-    true
-  of krNone:
-    # A key nothing is bound to. Repainted anyway, so the screen SAYS the key
-    # arrived and was not bound.
+  else:
+    # Pending, abandoned, timed out, inert, or a key nothing is bound to:
+    # repainted anyway, so the screen SAYS the key arrived.
     st.lastAction = kaNone
     true
 

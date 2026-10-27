@@ -260,9 +260,9 @@ fi
 
 # The other direction, which a set difference alone does not cover: the wasm
 # lane must not carry a file the native lane does not. `vm-unit-js` does carry
-# one (`test_opfs_volume`, whose subject is `{.error.}` on the C target), so
-# this is not a property of every derived lane and is worth asserting rather
-# than assuming.
+# some (the JavaScript-only suites, such as `test_opfs_volume`, which import a
+# stdlib module that is fatal on the C target), so this is not a property of
+# every derived lane and is worth asserting rather than assuming.
 wasm_only="$(comm -13 \
 	<(printf '%s\n' "${native_files}" | sort) \
 	<(printf '%s\n' "${wasm_files}" | sort))"

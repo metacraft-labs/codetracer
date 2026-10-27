@@ -119,7 +119,7 @@ suite "CTUI-14 Tier 2: signals during a live session":
     # means and what makes the restore a restore rather than a no-op: the panes
     # are painted and the terminal is in raw mode on the alternate screen.
     let screen = sess.screenContents()
-    ck screen.contains(" main.py ")
+    ck screen.contains(" calc/main.py ")
     ck screen.contains(" Call Trace ")
     let before = altScreenCounts(sess)
     ck before.enters == 1
@@ -187,7 +187,7 @@ suite "CTUI-14 Tier 2: signals during a live session":
       var sess = tuiSession(@[tracePath], cols = Cols, rows = Rows)
       settleOnDebugger(sess, Cols, Rows)
       case ending
-      of "key": sess.send("q")
+      of "key": sess.send("\x11")  # Ctrl+Q, the CUA base's quit
       of "int": sess.sendSignal(SIGINT)
       else: sess.sendSignal(SIGTERM)
       let status = sess.waitExit(initDuration(seconds = 30))

@@ -41,6 +41,8 @@
 
 import std/[algorithm, strutils]
 
+import ../keymap/scope_path
+
 type
   OmnibarMode* = enum
     omFile = "file"
@@ -105,6 +107,18 @@ const
     ## desktop's palette wording, now read from here by the desktop, the
     ## terminal and GPUI alike.
 
+func paletteQueryOf*(operation: string): tuple[ok: bool, query: string] =
+  ## PLAT-68: the query a palette-opening OPERATION opens the omnibar on —
+  ## every front-end's (CUA-Keymap.md §3.8). The omnibar is this product's
+  ## one palette: files and `:commands` from an empty field, symbols from
+  ## `:sym `. `palette.go-to-line` has no omnibar mode and is not one of
+  ## these.
+  case operation
+  of "palette.quick-open-file", "palette.open-commands": (true, "")
+  of "palette.go-to-symbol", "palette.go-to-symbol-in-file":
+    (true, CommandPrefix & "sym ")
+  else: (false, "")
+
 func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
                                                   needle: string] =
   ## The mode a query puts the omnibar in, and the text that is matched.
@@ -132,6 +146,17 @@ func classifyOmnibarQuery*(query: string): tuple[mode: OmnibarMode,
     if digits:
       return (omTick, query[1 .. ^1].strip.replace(",", ""))
   (omFile, query.strip)
+
+
+func paletteFieldOf*(query: string): ScopeElement =
+  ## The palette's field as a scope element: Find in Files' query field while
+  ## the line is `:grep` (the terminal's and GPUI's field for the pane,
+  ## Find-And-Incremental-Search.md §5.2, so its toggle keys hold there),
+  ## else the palette's own field.
+  if classifyOmnibarQuery(query).mode == omProgram:
+    element(ekInput, SearchQueryInput)
+  else:
+    element(ekInput, PaletteQueryInput)
 
 func desktopKindOf*(mode: OmnibarMode): OmnibarMode =
   ## The mode the DESKTOP acts in for a classified query: its palette has no

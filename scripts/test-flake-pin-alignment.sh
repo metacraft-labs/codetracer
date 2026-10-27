@@ -1,23 +1,43 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Flake pin alignment — this repo's `runquota` must be EXACTLY the `runquota`
-# its pinned `reprobuild` was locked against.
+# its `reprobuild` was locked against.
 #
 # ## The defect this exists to catch
 #
-# `flake.nix` pins `reprobuild` to an exact SHA (mirrored from nixos-modules,
-# which is the org's single source of truth) and then overrides FIVE of
-# reprobuild's own inputs so the `repro` this repo ships is built against THIS
-# repo's nixpkgs and THIS repo's siblings. One of those overrides is
+# `flake.nix` used to pin BOTH `reprobuild` and `runquota` to exact SHAs, and
+# then override five of reprobuild's own inputs — one of them
 #
 #     inputs.runquota-src.follows = "runquota";
 #
-# and that is the whole hazard: bumping the `reprobuild` SHA moves the code,
-# while `runquota` stays wherever `flake.lock` last left it. reprobuild is then
+# which was the whole hazard: bumping the `reprobuild` SHA moved the code,
+# while `runquota` stayed wherever its own SHA left it. reprobuild was then
 # compiled against a runquota it was never developed against, and the failure
 # is an ordinary Nim `undeclared identifier` several minutes into a `nix
 # develop` — attributed to reprobuild, in a store path, with nothing naming the
 # pin that actually moved.
+#
+# ## That hazard is now STRUCTURALLY REMOVED, and this check guards the removal
+#
+# `flake.nix` no longer states either revision. `reprobuild` names a BRANCH
+# (`agents` since 2026-10-15; `release/0.2.10` before that — either way a
+# line, never a SHA) and `runquota` is DERIVED from it:
+#
+#     runquota.follows = "reprobuild/runquota-src";
+#
+# so the closure holds exactly ONE runquota node and it is reprobuild's own.
+# Two revisions that could disagree have become one that cannot. This script
+# therefore now checks TWO things, and the first is the important one:
+#
+#   1. STRUCTURE — that root input `runquota` is still a `follows` path onto
+#      `reprobuild`'s `runquota-src`. If someone reintroduces an independent
+#      `runquota` input, the guarantee is gone even on the day the two
+#      revisions happen to match, so that is a failure in its own right.
+#   2. VALUE — that the revision this repo's flake.lock resolves `runquota` to
+#      equals the `runquota-src` revision reprobuild's OWN committed flake.lock
+#      states. This is NOT vacuous under (1): the two numbers come from two
+#      different files, and a hand-edited or half-relocked codetracer
+#      flake.lock can state a runquota-src its reprobuild never locked.
 #
 # That is not hypothetical. Commit c9cb186c ("build(deps): mirror the
 # nixos-modules reprobuild pin (b5b88139)") bumped reprobuild to b5b88139
@@ -138,6 +158,19 @@ command -v python3 >/dev/null 2>&1 || fail \
 # its reprobuild is not compiled against — the precise inversion of what it
 # exists to prevent, delivered with a paste-ready remedy. Resolve the input
 # edge, and the answer cannot be shadowed by a homonym.
+#
+# A root input may ALSO be a `follows` path — a JSON list of segments rather
+# than a node key — and since this repo made `runquota` derived
+# (`runquota.follows = "reprobuild/runquota-src"`) that is the normal case
+# here. The resolver below walks such a path to the node it lands on, so
+# `lock_rev <lock> runquota` answers with the revision the edge resolves to
+# whichever shape the input has. The previous version did NOT: its comment
+# said "a list would be a follows path, which no root input in either lock
+# uses; fall back rather than guess", and the fall-back looked up
+# `nodes["runquota"]`, which does not exist once the edge is a follows path.
+# It therefore answered the empty string and the script died with "flake.lock
+# has no locked rev for input 'runquota'" — correctly refusing to guess, and
+# correctly telling the reader to update this file. This is that update.
 lock_rev() {
 	local out rc
 	# The single quotes are the point: this is a python program, not a shell
@@ -148,13 +181,30 @@ lock_rev() {
 import json, sys
 with open(sys.argv[1]) as handle:
     nodes = json.load(handle)["nodes"]
+
+
+def resolve(start, path):
+    """Walk a nix lock input path from `start`, following `follows` edges.
+
+    A node input is either a node key (str) or a follows path (list of
+    segments resolved from the ROOT). Recursion terminates because every
+    follows path is strictly shorter to resolve than the node it names;
+    a malformed lock with a cycle raises RecursionError, which the caller
+    reports as a parse failure rather than as a verdict about a pin.
+    """
+    current = start
+    for segment in path:
+        edge = nodes[current]["inputs"][segment]
+        current = resolve("root", edge) if isinstance(edge, list) else edge
+    return current
+
+
 name = sys.argv[2]
-edge = nodes.get("root", {}).get("inputs", {}).get(name)
-# A root input maps to a node key (str). A list would be a `follows` path,
-# which no root input in either lock uses; fall back rather than guess.
-key = edge if isinstance(edge, str) else name
-node = nodes.get(key)
-print(node.get("locked", {}).get("rev", "") if node else "")
+if name not in nodes.get("root", {}).get("inputs", {}):
+    print("")
+else:
+    node = nodes.get(resolve("root", [name]))
+    print(node.get("locked", {}).get("rev", "") if node else "")
 ' "$1" "$2" 2>&1)"
 	rc=$?
 	[ "$rc" -eq 0 ] || fail \
@@ -173,6 +223,18 @@ CT_LOCK="$REPO_ROOT/flake.lock"
 # locked rev for input 'runquota'" a few lines later — the exact false
 # accusation the parse diagnostic exists to replace, printed directly beneath
 # it. Proven by ci/test/flake-pin-alignment-test.sh.
+# --- Check 1: RESOLUTION -----------------------------------------------------
+#
+# Resolve both revisions FIRST, before any structural claim. Ordering is a
+# property of the DIAGNOSTICS, not a preference: a lock that cannot be parsed,
+# or that has lost the input entirely, must be reported as exactly that, by the
+# one routine that distinguishes the two — and `ci/test/flake-pin-alignment-
+# test.sh` asserts each of those messages. A structural classifier placed ahead
+# of them answers both cases in its own words and silently retires three of
+# that suite's assertions, including the mutation case that keeps the
+# `|| exit 1` propagation below honest. (It did: 3 of 35 assertions failed
+# until this was reordered, measured 2026-10-15 at codetracer `4e2201692`
+# plus working-tree changes.)
 CT_RUNQUOTA="$(lock_rev "$CT_LOCK" runquota)" || exit 1
 REPROBUILD_REV="$(lock_rev "$CT_LOCK" reprobuild)" || exit 1
 
@@ -181,6 +243,65 @@ REPROBUILD_REV="$(lock_rev "$CT_LOCK" reprobuild)" || exit 1
 # gone — that is a failure to re-examine, not a pass and not a skip.
 [ -n "$CT_RUNQUOTA" ] || fail "flake.lock has no locked rev for input 'runquota'. If the input was renamed or dropped, update this check (scripts/test-flake-pin-alignment.sh) to match."
 [ -n "$REPROBUILD_REV" ] || fail "flake.lock has no locked rev for input 'reprobuild'. If the input was renamed or dropped, update this check (scripts/test-flake-pin-alignment.sh) to match."
+
+# --- Check 2: STRUCTURE ------------------------------------------------------
+#
+# Assert that `runquota` is still derived rather than independently pinned.
+# `nodes.root.inputs.runquota` is a JSON list (a follows path) exactly when
+# flake.nix says `runquota.follows = "..."`; it is a bare string (a node key)
+# when flake.nix declares an input with a url of its own.
+#
+# A failure here is NOT "the revisions disagree" — they may well agree today.
+# It is "the mechanism that makes them unable to disagree has been removed",
+# which is worth catching in its own right.
+#
+# It runs AFTER Check 1 and BEFORE Check 3 deliberately: by here the lock is
+# known to parse and to carry both inputs, so every outcome below is a real
+# statement about the SHAPE of the edge rather than a restatement of a parse
+# or a missing-input failure Check 1 already named.
+# shellcheck disable=SC2016
+RUNQUOTA_EDGE="$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as handle:
+    nodes = json.load(handle)["nodes"]
+edge = nodes.get("root", {}).get("inputs", {}).get("runquota")
+if edge is None:
+    print("ABSENT")
+elif isinstance(edge, list):
+    print("FOLLOWS " + "/".join(edge))
+else:
+    print("OWN-NODE " + edge)
+' "$CT_LOCK" 2>&1)" || fail "could not read '$CT_LOCK' to classify the 'runquota' input edge. This is a parse failure, NOT a statement about any pin. Parser output:
+$RUNQUOTA_EDGE"
+
+case "$RUNQUOTA_EDGE" in
+"FOLLOWS reprobuild/runquota-src")
+	echo "structure: runquota follows reprobuild/runquota-src (derived, cannot diverge)"
+	;;
+"FOLLOWS "*)
+	fail "root input 'runquota' is a follows path, but onto '${RUNQUOTA_EDGE#FOLLOWS }' rather than 'reprobuild/runquota-src'. reprobuild is COMPILED against this source, so it must be reprobuild's own runquota-src and nothing else. Fix flake.nix: \`runquota.follows = \"reprobuild/runquota-src\";\`"
+	;;
+"OWN-NODE "*)
+	# Not fatal by itself — fall through to the value comparison below, which
+	# is the check that was in force while runquota was independently pinned.
+	echo "structure: WARNING — 'runquota' is an independent input node (${RUNQUOTA_EDGE#OWN-NODE }), not a follows path onto reprobuild/runquota-src." >&2
+	echo "structure: the two revisions can drift again; the value comparison below is now the only thing stopping them." >&2
+	;;
+"ABSENT")
+	# Defensive only, and say so: Check 1 resolves `runquota` before this runs
+	# and already fails with "flake.lock has no locked rev for input
+	# 'runquota'" when the root declares no such input, so nothing reaches
+	# here today. It is kept because the two checks read the lock through
+	# different code paths, and a classifier that silently treated "absent"
+	# as "fine" would be the worse failure.
+	fail "flake.lock's root has no input named 'runquota' at all. If the input was renamed or dropped, update this check (scripts/test-flake-pin-alignment.sh) to match."
+	;;
+*)
+	fail "unrecognised classification '$RUNQUOTA_EDGE' for the 'runquota' input edge; update this check."
+	;;
+esac
+
+# --- Check 3: VALUE ----------------------------------------------------------
 
 REPROBUILD_DIR="${CT_REPROBUILD_CHECKOUT:-$WORKSPACE_ROOT/reprobuild}"
 RUNQUOTA_DIR="${CT_RUNQUOTA_CHECKOUT:-$WORKSPACE_ROOT/runquota}"
@@ -236,16 +357,17 @@ FAIL: this repo's 'runquota' pin is ${RELATION} the runquota revision that the
   reprobuild@${REPROBUILD_REV}
                       runquota-src = ${RB_RUNQUOTA}
 
-'inputs.runquota-src.follows = "runquota"' means reprobuild is COMPILED against
-the revision on the first line, while it was written against the second.
+The derived runquota input resolves to the revision on the first line,
+while reprobuild was locked against the second. The lock graph is stale.
 Divergence in EITHER direction surfaces minutes later as an 'undeclared
 identifier' inside reprobuild's own sources — behind it loses types that were
 added, ahead of it loses types that were removed.
 
-Remedy — mirror, do not freshen. In flake.nix set the runquota input url to
+Keep runquota.follows = "reprobuild/runquota-src" in flake.nix. Re-lock the
+parent and its dependency graph together from this checkout:
 
-    github:metacraft-labs/runquota/${RB_RUNQUOTA}
+    nix flake update reprobuild
 
-then 'nix flake update runquota' and confirm with 'nix develop --command true'.
+Then run this check again and confirm with 'nix develop --command true'.
 EOF
 exit 1

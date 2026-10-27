@@ -46,7 +46,7 @@ proc main() =
     entries.add %*{
       "id": s.id,
       "model": $t.model,
-      "modal": t.model != kmProductDefault,
+      "modal": t.model != bkCua,
       "doc": d.text,
       "keys": keys,
       "expected": expected.state.doc,

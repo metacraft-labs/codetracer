@@ -87,14 +87,17 @@
 import std/strutils
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
-  import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/constraints_vm
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 const ConstraintsContainerClass* = "component-container constraints"
 
@@ -163,10 +166,10 @@ proc containerClass*(report: ConstraintReport): string =
     ConstraintsContainerClass
 
 # ---------------------------------------------------------------------------
-# Mock renderer
+# The panel, under any renderer (Shared-DOM-Front-Ends D3)
 # ---------------------------------------------------------------------------
 
-proc renderRowMock(r: MockRenderer; fn: ConstraintFunction): MockNode =
+proc renderRow[R, N](r: R; fn: ConstraintFunction): N =
   let count = $fn.opcodes
   let label = kindLabel(fn.kind)
   ui(r):
@@ -178,7 +181,7 @@ proc renderRowMock(r: MockRenderer; fn: ConstraintFunction): MockNode =
       span(class = "constraints-count"):
         text count
 
-proc renderOpcodeMock(r: MockRenderer; op: ConstraintOpcode): MockNode =
+proc renderOpcode[R, N](r: R; op: ConstraintOpcode): N =
   let index = opcodeIndexText(op)
   let name = op.name
   let args = op.args
@@ -191,7 +194,7 @@ proc renderOpcodeMock(r: MockRenderer; op: ConstraintOpcode): MockNode =
       span(class = "low-level-code-instruction-args"):
         text args
 
-proc renderFunctionMock(r: MockRenderer; fn: ConstraintFunction): MockNode =
+proc renderFunction[R, N](r: R; fn: ConstraintFunction): N =
   ## ONE FUNCTION: its count row, then its opcodes.
   ##
   ## The count row is KEPT and kept FIRST. A listing with a total above it is
@@ -200,25 +203,27 @@ proc renderFunctionMock(r: MockRenderer; fn: ConstraintFunction): MockNode =
   ## the one number in this pane that is known to match `nargo info` on both
   ## halves. It doubles as the listing's heading, which is why the rows sit
   ## under it rather than beside it.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
   let listing = ui(r):
     tdiv(class = "constraints-function"):
       discard
-  r.appendChild(listing, renderRowMock(r, fn))
+  r.appendChild(listing, renderRow[R, N](r, fn))
   if fn.rows.len > 0:
     let body = ui(r):
       tdiv(class = "constraints-opcodes low-level-code-instructions"):
         discard
     for op in fn.rows:
-      r.appendChild(body, renderOpcodeMock(r, op))
+      r.appendChild(body, renderOpcode[R, N](r, op))
     r.appendChild(listing, body)
   listing
 
-proc renderConstraintsPanel*(r: MockRenderer; vm: ConstraintsVM): MockNode =
-  var headlineNode: MockNode
-  var bodyContainer: MockNode
-  var noticeNode: MockNode
-  var provenanceNode: MockNode
-  var absenceNode: MockNode
+proc renderConstraintsPanel*[R, N](r: R; vm: ConstraintsVM): N =
+  ## The Constraints panel, mounted on the desktop by `ui/panel_host`.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
+  var headlineNode, bodyContainer, noticeNode, provenanceNode,
+      absenceNode: N
 
   let panel = ui(r):
     tdiv(class = ConstraintsContainerClass, tabIndex = "2"):
@@ -251,7 +256,7 @@ proc renderConstraintsPanel*(r: MockRenderer; vm: ConstraintsVM): MockNode =
 
     r.clearChildren(bodyContainer)
     for fn in report.functions:
-      r.appendChild(bodyContainer, renderFunctionMock(r, fn))
+      r.appendChild(bodyContainer, renderFunction[R, N](r, fn))
 
     r.clearChildren(provenanceNode)
     if report.provenance.len > 0:
@@ -268,131 +273,3 @@ proc renderConstraintsPanel*(r: MockRenderer; vm: ConstraintsVM): MockNode =
       r.setAttribute(absenceNode, "class", "constraints-absence hidden")
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc webElement(tag, cssClass: string): isonim_dom.Element =
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    n
-
-  proc webTextElement(tag, textValue, cssClass: string): isonim_dom.Element =
-    let n = webElement(tag, cssClass)
-    isonim_dom.appendChild(isonim_dom.Node(n),
-      isonim_dom.createTextNode(isonim_dom.document, cstring(textValue)))
-    n
-
-  proc clearWeb(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc setWebText(node: isonim_dom.Element; value: string) =
-    clearWeb(node)
-    if value.len > 0:
-      isonim_dom.appendChild(isonim_dom.Node(node),
-        isonim_dom.createTextNode(isonim_dom.document, cstring(value)))
-
-  proc renderRowWeb(fn: ConstraintFunction): isonim_dom.Element =
-    let node = webElement("div", rowClass(fn.kind))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", fn.name, "constraints-name")))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", kindLabel(fn.kind),
-                                     "constraints-kind")))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", $fn.opcodes,
-                                     "constraints-count")))
-    node
-
-  proc renderOpcodeWeb(op: ConstraintOpcode): isonim_dom.Element =
-    let node = webElement("div", opcodeRowClass())
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", opcodeIndexText(op),
-                                     "low-level-code-instruction-offset")))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", op.name,
-                                     "low-level-code-instruction-name")))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", op.args,
-                                     "low-level-code-instruction-args")))
-    node
-
-  proc renderFunctionWeb(fn: ConstraintFunction): isonim_dom.Element =
-    ## Mirrors `renderFunctionMock` — see that proc for why the count row is
-    ## kept and kept first.
-    let wrapper = webElement("div", "constraints-function")
-    isonim_dom.appendChild(isonim_dom.Node(wrapper),
-                           isonim_dom.Node(renderRowWeb(fn)))
-    if fn.rows.len > 0:
-      let body = webElement("div",
-                            "constraints-opcodes low-level-code-instructions")
-      for op in fn.rows:
-        isonim_dom.appendChild(isonim_dom.Node(body),
-                               isonim_dom.Node(renderOpcodeWeb(op)))
-      isonim_dom.appendChild(isonim_dom.Node(wrapper), isonim_dom.Node(body))
-    wrapper
-
-  proc renderConstraintsPanel*(r: WebRenderer;
-                               vm: ConstraintsVM): isonim_dom.Element =
-    var headlineNode: isonim_dom.Element
-    var bodyContainer: isonim_dom.Element
-    var noticeNode: isonim_dom.Element
-    var provenanceNode: isonim_dom.Element
-    var absenceNode: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = ConstraintsContainerClass, tabIndex = "2"):
-        tdiv(ref = headlineNode, class = "constraints-headline"):
-          discard
-        tdiv(ref = noticeNode, class = "constraints-listing-notice hidden"):
-          discard
-        tdiv(ref = bodyContainer, class = "constraints-body"):
-          discard
-        tdiv(ref = provenanceNode, class = "constraints-provenance hidden"):
-          discard
-        tdiv(ref = absenceNode, class = "constraints-absence hidden"):
-          discard
-
-    createRenderEffect proc() =
-      let report = vm.report.val
-
-      isonim_dom.setAttribute(panel, cstring"class",
-                              cstring(containerClass(report)))
-
-      setWebText(headlineNode, vm.headline.val)
-
-      let notice = listingNoticeFor(report)
-      setWebText(noticeNode, notice)
-      isonim_dom.setAttribute(noticeNode, cstring"class",
-        cstring(if notice.len > 0: "constraints-listing-notice"
-                else: "constraints-listing-notice hidden"))
-
-      clearWeb(bodyContainer)
-      for fn in report.functions:
-        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
-                               isonim_dom.Node(renderFunctionWeb(fn)))
-
-      setWebText(provenanceNode, report.provenance)
-      isonim_dom.setAttribute(provenanceNode, cstring"class",
-        cstring(if report.provenance.len > 0: "constraints-provenance"
-                else: "constraints-provenance hidden"))
-
-      setWebText(absenceNode, report.absence)
-      isonim_dom.setAttribute(absenceNode, cstring"class",
-        cstring(if report.absence.len > 0: "constraints-absence"
-                else: "constraints-absence hidden"))
-
-    panel
-
-  proc mountIsoNimConstraintsPanel*(container: isonim_dom.Element;
-                                    vm: ConstraintsVM) =
-    let r = WebRenderer()
-    let panel = renderConstraintsPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container),
-                           isonim_dom.Node(panel))

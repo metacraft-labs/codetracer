@@ -128,8 +128,8 @@ class Arm:
 # shared spelling per file is one thing to keep aimed instead of eight. Each
 # ends AT A LINE END, which the needle scan enforces.
 CTL = {
-    LEAVES: ("proc slotPath(slot: DockPaneSlot): string =",
-             "proc slotPath(slot: DockPaneSlot): string =  ## ctl"),
+    LEAVES: ("proc slotPath(leaf: GpuiLeaf): string =",
+             "proc slotPath(leaf: GpuiLeaf): string =  ## ctl"),
     ANSWERS: ("proc lineOf(node: GpuiElement): int =",
               "proc lineOf(node: GpuiElement): int =  ## ctl"),
     VOCAB: ("proc tokenIsPublished*(token: string): bool =",
@@ -143,19 +143,30 @@ ARMS = [
     # ------------------------------------------------------------------
     # THE PANE MUTATION — the milestone's own gate, half one
     # ------------------------------------------------------------------
+    # RE-AIMED 2026-10-17: the redesign gave `renderEditorRow` the fold,
+    # indent-depth and guide-count arguments, so the call gained a line and
+    # the needle occurred zero times. Same loop, same mutation.
     # RE-AIMED 2026-10-03, `PLAT35-F3`. The claim and the mutation are
     # unchanged; the loop they are aimed at gained an argument.
     # `renderEditorRow` now takes the horizontal scroll offset, so the call
     # spans two lines and the old one-line needle occurs ZERO times — which
     # the needle scan caught by name (`M1.find: occurs 0 time(s)`) rather
     # than letting the arm run unaimed.
+    # RE-AIMED 2026-10-18, PLAT-70 Part A: `renderEditorRow` also takes the
+    # view its overflow markers are drawn against; the claim and the
+    # mutation (the row loop draws nothing) are unchanged.
     Arm("M1", LEAVES,
-        "  for i, row in surface.rows:\n"
         "    r.appendChild(parent, renderEditorRow(r, row, runs[i], widest,\n"
         "                                          scroll.leftCols,\n"
         "                                          (if row.line == surface.caretLine:\n"
-        "                                             surface.caretColumn else: 0)))",
-        "  for i, row in surface.rows:\n    discard row",
+        "                                             surface.caretColumn else: 0),\n"
+        "                                          selected, folds[i], depths[i],\n"
+        "                                          guideCounts[i],\n"
+        "                                          markersView =\n"
+        "                                            (if overflowMarkers and\n"
+        "                                                scroll.present: scroll.view\n"
+        "                                             else: HorizontalView())))",
+        "    discard selected",
         SUITE,
         "stepped-editor / editor-row-count",
         CTL[LEAVES][0], CTL[LEAVES][1],
@@ -341,12 +352,8 @@ ARMS = [
     # N1 in particular is the arm-C shape, satisfying "a footer exists and
     # carries a number" while violating the only thing the number is for.
     Arm("N1", LEAVES,
-        "  r.appendChild(parent, eventLogFooterElement(\n"
-        "    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,\n"
-        "    vm.totalEventCount.val))\n",
-        "  r.appendChild(parent, eventLogFooterElement(\n"
-        "    r, vm.store.eventLog.loadedStart.val, vm.eventRows.val.len,\n"
-        "    vm.eventRows.val.len))\n",
+        "  let total = eventLogTotalOf(start, rows.len, vm.totalEventCount.val)\n",
+        "  let total = eventLogTotalOf(start, rows.len, rows.len)\n",
         FOOTER_SUITE,
         "the published total is the ViewModel's, NOT the rows in hand",
         CTL[LEAVES][0], CTL[LEAVES][1],
@@ -377,11 +384,14 @@ ARMS = [
         "field and this breaks the first."),
 
     Arm("N3", LEAVES,
-        '      r.setStyle(cell, "font-weight", "bold")\n',
-        '      r.setStyle(cell, "font-weight", "normal")\n',
+        '  r.setStyle(head, "font-weight", "600")\n',
+        '  r.setStyle(head, "font-weight", "400")\n',
         FOOTER_SUITE,
-        "the header's cells differ from a data row's in COLOUR and in WEIGHT",
+        "the header differs from a data row in WEIGHT, as the desktop's does",
         CTL[LEAVES][0], CTL[LEAVES][1],
+        "(RE-AIMED 2026-10-17 at `renderEventLog`'s header row, which now "
+        "carries the weight itself; the desktop's header differs by weight "
+        "alone, so this arm now restores the whole of the defect.) "
         "THE HEADER KEEPS ITS COLOUR AND LOSES ITS WEIGHT, which is half of "
         "`PLAT35-F12` restored. The finding's words are *'the same weight AND "
         "colour as a data row'*, and the two halves are separable: this arm "
@@ -391,11 +401,16 @@ ARMS = [
         "untouched, so every existence check still passes."),
 
     Arm("N4", LEAVES,
-        "  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimary][dmDark]\n",
-        "  EventLogRuleColour* = DesignTokenHex[dtColorsUiBorderPrimaryHover][dmDark]\n",
+        "  EventSelectedGround = DesignTokenHex[dtColorsEditorSurfaceSelect][dmDark]\n",
+        "  EventSelectedGround = DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark]\n",
         FOOTER_SUITE,
-        "the header carries the rule, in the PUBLISHED token",
+        "NO zebra: only the selected row carries a background",
         CTL[LEAVES][0], CTL[LEAVES][1],
+        "(RE-AIMED 2026-10-17: the header rule this arm targeted was removed "
+        "with the redesign — the desktop draws none — so it now puts the "
+        "SELECTED ROW's ground in the wrong published token, which the zebra "
+        "case catches by comparing against the generated table. The history "
+        "of the rule arm follows.) "
         "THE RULE IS DRAWN IN THE WRONG PUBLISHED TOKEN — the HOVER variant "
         "of the very token it should take, `#818181` instead of `#565656`. "
         "Still a token, still from the generated table, still a plausible "
@@ -414,9 +429,9 @@ ARMS = [
         "a check it does not have."),
 
     Arm("N5", LEAVES,
-        '  r.setAttribute(result, EventLogFooterAttribute, "true")\n',
-        '  r.setAttribute(result, EventLogFooterAttribute, "true")\n'
-        '  r.setAttribute(result, "data-column-index", "0")\n',
+        '  r.setAttribute(foot, EventLogFooterAttribute, "true")\n',
+        '  r.setAttribute(foot, EventLogFooterAttribute, "true")\n'
+        '  r.setAttribute(foot, "data-column-index", "0")\n',
         FOOTER_SUITE,
         "the footer carries NO column index, so a click cannot re-sort the log",
         CTL[LEAVES][0], CTL[LEAVES][1],

@@ -187,7 +187,7 @@ suite "IsoNim Editor Panel - structure":
       let vm = createEditorVM(store)
       let r = MockRenderer()
 
-      let panel = renderEditorPanel(
+      let panel = renderEditorPanel[MockRenderer, MockNode](
         r,
         vm,
         index = 7,
@@ -220,7 +220,7 @@ suite "IsoNim Editor Panel - structure":
       let vm = createEditorVM(store)
       let r = MockRenderer()
 
-      let panel = renderEditorPanel(
+      let panel = renderEditorPanel[MockRenderer, MockNode](
         r,
         vm,
         index = 7,
@@ -240,7 +240,7 @@ suite "IsoNim Editor Panel - structure":
       let vm = createEditorVM(store)
       let r = MockRenderer()
 
-      let panel = renderEditorPanel(
+      let panel = renderEditorPanel[MockRenderer, MockNode](
         r,
         vm,
         index = 8,
@@ -288,7 +288,7 @@ suite "IsoNim Debug Shell — structure":
 
   test "renders static debug host with command palette mount":
     let r = MockRenderer()
-    let panel = renderDebugChromePanel(r, commandPaletteComponentId = 7)
+    let panel = renderDebugChromePanel[MockRenderer, MockNode](r, commandPaletteComponentId = 7)
 
     check panel.attributes["id"] == DebugShellId
     check panel.attributes["class"] == DebugShellClass
@@ -298,7 +298,7 @@ suite "IsoNim Debug Shell — structure":
 
   test "omits command palette mount until the component exists":
     let r = MockRenderer()
-    let panel = renderDebugChromePanel(r, commandPaletteComponentId = -1)
+    let panel = renderDebugChromePanel[MockRenderer, MockNode](r, commandPaletteComponentId = -1)
 
     check panel.attributes["id"] == DebugShellId
     check findByClassOrNil(panel, DebugCommandPaletteHostClass).isNil
@@ -307,7 +307,7 @@ suite "IsoNim Auto-hide Overlay Tabs — structure":
 
   test "hidden state renders only the hidden container":
     let r = MockRenderer()
-    let panel = renderAutoHideOverlayTabsPanel(
+    let panel = renderAutoHideOverlayTabsPanel[MockRenderer, MockNode](
       r,
       tabs = @[],
       visible = false,
@@ -318,7 +318,7 @@ suite "IsoNim Auto-hide Overlay Tabs — structure":
 
   test "left edge renders sibling tabs with active modifier":
     let r = MockRenderer()
-    let panel = renderAutoHideOverlayTabsPanel(
+    let panel = renderAutoHideOverlayTabsPanel[MockRenderer, MockNode](
       r,
       tabs = @[
         AutoHideOverlayTabRecord(title: "FILES", active: true),
@@ -337,7 +337,7 @@ suite "IsoNim Auto-hide Overlay Tabs — structure":
   test "select callback receives tab index":
     let r = MockRenderer()
     var selected = -1
-    let panel = renderAutoHideOverlayTabsPanel(
+    let panel = renderAutoHideOverlayTabsPanel[MockRenderer, MockNode](
       r,
       tabs = @[
         AutoHideOverlayTabRecord(title: "STATE", active: false),
@@ -356,14 +356,14 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
 
   test "empty state renders only the base icon-zone container":
     let r = MockRenderer()
-    let panel = renderAutoHideCollapsedIconsPanel(r, icons = @[])
+    let panel = renderAutoHideCollapsedIconsPanel[MockRenderer, MockNode](r, icons = @[])
 
     check panel.attributes["class"] == AutoHideCollapsedIconZoneClass
     check panel.children.len == 0
 
   test "icons render titles and has-icons modifier":
     let r = MockRenderer()
-    let panel = renderAutoHideCollapsedIconsPanel(
+    let panel = renderAutoHideCollapsedIconsPanel[MockRenderer, MockNode](
       r,
       icons = @[
         AutoHideCollapsedIconRecord(icon: "F", title: "FILES"),
@@ -381,7 +381,7 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
   test "select callback receives icon index":
     let r = MockRenderer()
     var selected = -1
-    let panel = renderAutoHideCollapsedIconsPanel(
+    let panel = renderAutoHideCollapsedIconsPanel[MockRenderer, MockNode](
       r,
       icons = @[
         AutoHideCollapsedIconRecord(icon: "C", title: "CALLTRACE"),
@@ -401,7 +401,7 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
       let callbacks = AutoHideCollapsedIconCallbacks(
         restoreFirst: not right, restoreLabel: label,
         onRestore: proc() = restored = true)
-      let panel = renderAutoHideCollapsedIconsPanel(r,
+      let panel = renderAutoHideCollapsedIconsPanel[MockRenderer, MockNode](r,
         @[AutoHideCollapsedIconRecord(icon: "F", title: "FILES")], callbacks)
       check panel.children.len == 2
       let button = panel.children[if right: 1 else: 0]
@@ -409,10 +409,10 @@ suite "IsoNim Auto-hide Collapsed Icons — structure":
       button.fireEvent("click")
       check restored
       # Expanded sidebar: no panel icons, the toggle alone, in the same place.
-      let expanded = renderAutoHideCollapsedIconsPanel(r, @[], callbacks)
+      let expanded = renderAutoHideCollapsedIconsPanel[MockRenderer, MockNode](r, @[], callbacks)
       check expanded.children.len == 1
       check expanded.children[0].attributes["aria-label"] == label
-      check renderAutoHideCollapsedIconsPanel(r, @[],
+      check renderAutoHideCollapsedIconsPanel[MockRenderer, MockNode](r, @[],
         AutoHideCollapsedIconCallbacks()).children.len == 0
 
 suite "IsoNim Auto-hide Bottom Strip — structure":
@@ -426,7 +426,7 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
 
   test "empty state renders the bottom-strip host without tab children":
     let r = MockRenderer()
-    let panel = renderAutoHideBottomStripPanel(r, tabs = @[])
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](r, tabs = @[])
 
     # No tabs => no `has-tabs` marker, so the status bar's strip host stays
     # collapsed instead of reserving space for nothing.
@@ -435,7 +435,7 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
 
   test "bottom tabs render strip-tab selector contract and titles":
     let r = MockRenderer()
-    let panel = renderAutoHideBottomStripPanel(
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](
       r,
       tabs = @[
         AutoHideBottomStripRecord(title: "BUILD", active: false),
@@ -454,7 +454,7 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
 
   test "active bottom tab carries the active class":
     let r = MockRenderer()
-    let panel = renderAutoHideBottomStripPanel(
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](
       r,
       tabs = @[
         AutoHideBottomStripRecord(title: "BUILD", active: false),
@@ -468,7 +468,7 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
   test "select callback receives bottom tab index":
     let r = MockRenderer()
     var selected = -1
-    let panel = renderAutoHideBottomStripPanel(
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](
       r,
       tabs = @[
         AutoHideBottomStripRecord(title: "BUILD", active: false),
@@ -494,7 +494,7 @@ suite "IsoNim Auto-hide Bottom Strip — structure":
     ]
 
     # Render bottom strip panel
-    let panel = renderAutoHideBottomStripPanel(r, tabs, callbacks)
+    let panel = renderAutoHideBottomStripPanel[MockRenderer, MockNode](r, tabs, callbacks)
     check panel != nil
     check panel.children.len == 2
     check panel.children[0].textContent == "BUILD"
@@ -507,7 +507,7 @@ suite "IsoNim Auto-hide Side Strips — structure":
 
   test "empty expanded strip has no sizing class and no tab children":
     let r = MockRenderer()
-    let panel = renderAutoHideSideStripPanel(
+    let panel = renderAutoHideSideStripPanel[MockRenderer, MockNode](
       r,
       tabs = @[],
       collapsed = false)
@@ -518,7 +518,7 @@ suite "IsoNim Auto-hide Side Strips — structure":
   test "expanded strip renders strip tabs and select callback":
     let r = MockRenderer()
     var selected = -1
-    let panel = renderAutoHideSideStripPanel(
+    let panel = renderAutoHideSideStripPanel[MockRenderer, MockNode](
       r,
       tabs = @[
         AutoHideSideStripRecord(title: "FILES"),
@@ -540,7 +540,7 @@ suite "IsoNim Auto-hide Side Strips — structure":
   test "collapsed strip renders only the collapsed click line":
     let r = MockRenderer()
     var clicked = false
-    let panel = renderAutoHideSideStripPanel(
+    let panel = renderAutoHideSideStripPanel[MockRenderer, MockNode](
       r,
       tabs = @[AutoHideSideStripRecord(title: "FILES")],
       collapsed = true,
@@ -562,13 +562,13 @@ suite "IsoNim Auto-hide Side Strips — structure":
       modeLabel: "Use minimal left sidebar", modeGlyph: "«",
       onToggleMode: proc() = changed = true)
     let tabs = @[AutoHideSideStripRecord(title: "FILES")]
-    let panel = renderAutoHideSideStripPanel(r, tabs, false, callbacks)
+    let panel = renderAutoHideSideStripPanel[MockRenderer, MockNode](r, tabs, false, callbacks)
     check panel.children.len == 2
     check panel.children[1].attributes["aria-label"] == "Use minimal left sidebar"
     panel.children[1].fireEvent("click")
     check changed
-    check renderAutoHideSideStripPanel(r, @[], false, callbacks).children.len == 0
-    let minimal = renderAutoHideSideStripPanel(r, tabs, true, callbacks)
+    check renderAutoHideSideStripPanel[MockRenderer, MockNode](r, @[], false, callbacks).children.len == 0
+    let minimal = renderAutoHideSideStripPanel[MockRenderer, MockNode](r, tabs, true, callbacks)
     check minimal.children.len == 1
     check minimal.children[0].attributes["class"] == AutoHideCollapsedStripLineClass
 
@@ -593,7 +593,7 @@ suite "IsoNim Status Shell — structure":
 
   test "renders status base hosts and right-side location state":
     let r = MockRenderer()
-    let panel = renderStatusShell(r, baseStatusModel())
+    let panel = renderStatusShell[MockRenderer, MockNode](r, baseStatusModel())
 
     check panel.attributes["class"] == StatusRootClass
     check findByClass(panel, CollapsedIconZoneClass).attributes["id"] ==
@@ -623,7 +623,7 @@ suite "IsoNim Status Shell — structure":
           actions: @[StatusNotificationActionRecord(label: "Retry")])
       ],
       base: StatusBaseModel())
-    let panel = renderStatusShell(
+    let panel = renderStatusShell[MockRenderer, MockNode](
       r,
       model,
       StatusShellCallbacks(
@@ -662,7 +662,7 @@ suite "IsoNim Status Shell — structure":
           dismissible: false)
       ],
       base: StatusBaseModel())
-    let panel = renderStatusShell(r, model)
+    let panel = renderStatusShell[MockRenderer, MockNode](r, model)
     let messages = findAllByClass(panel, "notification-message")
 
     check findByClass(panel, "status-notification-header").textContent ==
@@ -718,7 +718,7 @@ suite "IsoNim Menu Shell — structure":
 
   test "hidden menu renders root trigger and window controls only":
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -787,7 +787,7 @@ suite "IsoNim Menu Shell — structure":
 
   test "caption bar hosts survive without navigation menu":
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: false,
@@ -801,7 +801,7 @@ suite "IsoNim Menu Shell — structure":
 
   test "visible menu renders search host, root nodes, and window restore":
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -859,7 +859,7 @@ suite "IsoNim Menu Shell — structure":
     let r = MockRenderer()
     var clickedPath: seq[int] = @[]
     var searchIndex = -1
-    let menuPanel = renderMenuShell(
+    let menuPanel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -881,7 +881,7 @@ suite "IsoNim Menu Shell — structure":
       item.fireEvent("click")
       check clickedPath == @[1]
 
-    let searchPanel = renderMenuShell(
+    let searchPanel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -906,7 +906,7 @@ suite "IsoNim Menu Shell — structure":
 
   test "shell UI model can render menu without window controls":
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -937,7 +937,7 @@ suite "IsoNim Menu Shell — structure":
     ## checks `.menu-enabled` on it.  Only the root menu was covered here, so
     ## the nested branch could lose those hooks unnoticed — as it had.
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -988,7 +988,7 @@ suite "IsoNim Menu Shell — structure":
     ## root menu tree. Earlier tests only covered populated trace sessions, so a
     ## blank New Trace tab could lose the shared chrome without being detected.
     let r = MockRenderer()
-    let panel = renderMenuShell(
+    let panel = renderMenuShell[MockRenderer, MockNode](
       r,
       MenuShellModel(
         showNavigation: true,
@@ -1029,7 +1029,7 @@ suite "IsoNim Session Tabs — structure":
     ## clicking it does.
     var addCount = 0
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[SessionTabRecord(label: "main.py")],
       activeIndex = 0,
@@ -1051,7 +1051,7 @@ suite "IsoNim Session Tabs — structure":
 
   test "multiple sessions mark the active tab and show close buttons":
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),
@@ -1076,7 +1076,7 @@ suite "IsoNim Session Tabs — structure":
       onClose: proc(index: int) = closed.add(index),
       onAdd: proc() = inc addCount)
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),
@@ -1111,7 +1111,7 @@ suite "IsoNim Session Tabs — structure":
     ## bar.  The visual GUI test verifies real overflow geometry; this headless
     ## view test documents the DOM hook the renderer must provide.
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),
@@ -1141,7 +1141,7 @@ suite "IsoNim Session Tabs — structure":
     let callbacks = SessionTabsCallbacks(
       onSelect: proc(index: int) = selected.add(index))
     let r = MockRenderer()
-    let panel = renderSessionTabsPanel(
+    let panel = renderSessionTabsPanel[MockRenderer, MockNode](
       r,
       @[
         SessionTabRecord(label: "Trace 1"),
@@ -1178,7 +1178,7 @@ suite "IsoNim State Panel — structure":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -1188,34 +1188,18 @@ suite "IsoNim State Panel — structure":
 
       dispose()
 
-  test "renders three tab buttons":
+  test "renders no tab strip: one list of variables and watches":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
-      let tabBar = findByClass(panel, "state-tabs")
-      check tabBar != nil
-      check tabBar.tag == "div"
-
-      let localsBtn = findByClass(panel, "tab-locals")
-      let globalsBtn = findByClass(panel, "tab-globals")
-      let watchesBtn = findByClass(panel, "tab-watches")
-
-      check localsBtn != nil
-      check globalsBtn != nil
-      check watchesBtn != nil
-
-      check localsBtn.tag == "button"
-      check globalsBtn.tag == "button"
-      check watchesBtn.tag == "button"
-
-      # Locals tab should have the "active" class by default
-      check "active" in localsBtn.attributes["class"]
-      check "active" notin globalsBtn.attributes["class"]
-      check "active" notin watchesBtn.attributes["class"]
+      check findByClassOrNil(panel, "state-tabs") == nil
+      check findByClassOrNil(panel, "tab-locals") == nil
+      check findByClassOrNil(panel, "tab-watches") == nil
+      check findByClass(panel, "variables-toolbar") != nil
 
       dispose()
 
@@ -1225,7 +1209,7 @@ suite "IsoNim State Panel — structure":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let container = findByClass(panel, "value-components-container")
       check container != nil
@@ -1240,7 +1224,7 @@ suite "IsoNim State Panel — structure":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "loading-indicator")
       check indicator != nil
@@ -1248,96 +1232,113 @@ suite "IsoNim State Panel — structure":
 
       dispose()
 
-  test "renders watch input container (hidden by default)":
+  test "the watch input is in the pane":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let watchContainer = findByClass(panel, "watch-input-container")
       check watchContainer != nil
-      check watchContainer.styles.getOrDefault("display", "none") == "none"
+      check watchContainer.attributes.getOrDefault("id") == "gdb-evaluate"
+      check watchContainer.styles.getOrDefault("display", "") != "none"
 
       dispose()
 
-# ---------------------------------------------------------------------------
-# Tab switching tests
-# ---------------------------------------------------------------------------
-
-suite "IsoNim State Panel — tab switching":
-
-  test "clicking globals tab updates active class":
+  test "the view takes no id: the pane's host has it":
+    # `#stateComponent-0` is the element GoldenLayout creates for the pane;
+    # the view repeating it made two elements with one id
+    # (codetracer-pm issues/2026-10-18-state-pane-renders-the-id-of-its-own-host.md).
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
-      let globalsBtn = findByClass(panel, "tab-globals")
-      check globalsBtn != nil
-      globalsBtn.fireEvent("click")
-
-      check vm.activeTab.val == stGlobals
-
-      # Active class should have moved
-      check "active" in globalsBtn.attributes["class"]
-
-      let localsBtn = findByClass(panel, "tab-locals")
-      check "active" notin localsBtn.attributes["class"]
-
-      dispose()
-
-  test "clicking watches tab shows watch input":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-      let r = MockRenderer()
-
-      let panel = renderStatePanel(r, vm)
-
-      let watchesBtn = findByClass(panel, "tab-watches")
-      check watchesBtn != nil
-      watchesBtn.fireEvent("click")
-
-      check vm.activeTab.val == stWatches
-
-      let watchContainer = findByClass(panel, "watch-input-container")
-      check watchContainer != nil
-      check watchContainer.styles["display"] == "block"
-
-      dispose()
-
-  test "switching back to locals hides watch input":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createStateVM(store)
-      let r = MockRenderer()
-
-      let panel = renderStatePanel(r, vm)
-
-      # Go to watches
-      let watchesBtn = findByClass(panel, "tab-watches")
-      watchesBtn.fireEvent("click")
-
-      let watchContainer = findByClass(panel, "watch-input-container")
-      check watchContainer.styles["display"] == "block"
-
-      # Go back to locals
-      let localsBtn = findByClass(panel, "tab-locals")
-      localsBtn.fireEvent("click")
-
-      check watchContainer.styles["display"] == "none"
+      check not panel.attributes.hasKey("id")
+      check "isonim-state" in panel.attributes["class"]
 
       dispose()
 
 # ---------------------------------------------------------------------------
-# Variable rendering tests
+# Watches in the one list
 # ---------------------------------------------------------------------------
 
-suite "IsoNim State Panel — variables":
+suite "IsoNim State Panel — watches in the list":
+
+  test "a watch typed in the input appears after the variables":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+      drain()
+      store.updateLocals(@[makeVariable("x", "1", "int")])
+
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+      vm.addWatch("x + 1")
+      store.locals.watches.val = @[
+        Variable(name: "x + 1", value: "2", typeName: "int", isWatch: true)]
+
+      let container = findByClass(panel, "value-components-container")
+      let rows = findAllByClass(container, "value-expanded")
+      check rows.len == 2
+      check "x + 1" in rows[1].textContent
+      check "value-watch" in rows[1].attributes["class"]
+      check "watch-invalid" notin rows[1].attributes["class"]
+
+      dispose()
+
+  test "a watch the stop cannot answer stays, marked not valid":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createStateVM(store)
+      let r = MockRenderer()
+      drain()
+
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+      vm.addWatch("gone")
+      drain()
+
+      let container = findByClass(panel, "value-components-container")
+      let rows = findAllByClass(container, "value-expanded")
+      check rows.len == 1
+      check "watch-invalid" in rows[0].attributes["class"]
+      check "not available at this stop" in rows[0].textContent
+
+      dispose()
+
+  test "the hide toggle is offered only when a watch came from another process":
+    createRoot proc(dispose: proc()) =
+      let (storeA, _) = makeStoreWithMock()
+      let (storeB, _) = makeStoreWithMock()
+      let a = createStateVM(storeA, recordingId = "rec-a")
+      let b = createStateVM(storeB, watchOwner = a, recordingId = "rec-b")
+      let r = MockRenderer()
+      drain()
+
+      let panel = renderStatePanel[MockRenderer, MockNode](r, b)
+      let toggle = findByClass(panel, "hide-other-process-watches")
+      check toggle != nil
+      check toggle.styles.getOrDefault("display", "") == "none"
+
+      b.addWatch("mine")
+      check toggle.styles.getOrDefault("display", "") == "none"
+      a.addWatch("theirs")
+      check toggle.styles.getOrDefault("display", "") != "none"
+
+      let container = findByClass(panel, "value-components-container")
+      check findAllByClass(container, "value-expanded").len == 2
+      toggle.fireEvent("click")
+      check b.hideOtherProcessWatches.val
+      check "active" in toggle.attributes["class"]
+      let shown = findAllByClass(container, "value-expanded")
+      check shown.len == 1
+      check "mine" in shown[0].textContent
+
+      dispose()
 
   test "renders local variables":
     createRoot proc(dispose: proc()) =
@@ -1350,7 +1351,7 @@ suite "IsoNim State Panel — variables":
         makeVariable("y", "hello", "string"),
       ])
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "value-components-container")
       check container != nil
 
@@ -1387,7 +1388,7 @@ suite "IsoNim State Panel — variables":
         makeVariable("x", "42", "int"),
       ])
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let button = findById(panel, "value-history")
       check button != nil
       check button.tag == "button"
@@ -1416,7 +1417,7 @@ suite "IsoNim State Panel — variables":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       # Initially no variables — use value-expanded class to find rows
       let container = findByClass(panel, "value-components-container")
@@ -1445,7 +1446,7 @@ suite "IsoNim State Panel — variables":
 
       dispose()
 
-  test "switching to globals shows global variables":
+  test "globals follow the locals in the one list":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
@@ -1459,20 +1460,13 @@ suite "IsoNim State Panel — variables":
                  hasChildren: false, children: @[]),
       ]
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
-      # Initially shows locals
       let container = findByClass(panel, "value-components-container")
-      let localRows = findAllByClass(container, "value-expanded")
-      check localRows.len == 1
-      check "localVar" in localRows[0].textContent
-
-      # Switch to globals
-      vm.selectTab(stGlobals)
-
-      let globalRows = findAllByClass(container, "value-expanded")
-      check globalRows.len == 1
-      check "globalVar" in globalRows[0].textContent
+      let rows = findAllByClass(container, "value-expanded")
+      check rows.len == 2
+      check "localVar" in rows[0].textContent
+      check "globalVar" in rows[1].textContent
 
       dispose()
 
@@ -1491,7 +1485,7 @@ suite "IsoNim State Panel — variables":
           ]),
       ])
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "value-components-container")
 
       # Initially collapsed: only the parent row
@@ -1587,7 +1581,7 @@ suite "IsoNim State Panel — variables":
       vm.originChainLookup = proc(name: string): Option[OriginChain] =
         if name == "x": some(chain) else: none(OriginChain)
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let badge = findByClass(panel, "ct-origin-badge")
       check badge != nil
       check "ct-origin-icon-quotation" in badge.attributes["class"]
@@ -1629,7 +1623,7 @@ suite "IsoNim State Panel — loading":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "loading-indicator")
 
       check indicator.styles["display"] == "none"
@@ -1648,21 +1642,16 @@ suite "IsoNim State Panel — loading":
 
 suite "IsoNim State Panel — text content":
 
-  test "tab buttons have correct text":
+  test "the empty list invites a watch":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createStateVM(store)
       let r = MockRenderer()
+      drain()
 
-      let panel = renderStatePanel(r, vm)
-
-      let localsBtn = findByClass(panel, "tab-locals")
-      let globalsBtn = findByClass(panel, "tab-globals")
-      let watchesBtn = findByClass(panel, "tab-watches")
-
-      check localsBtn.textContent == "Locals"
-      check globalsBtn.textContent == "Globals"
-      check watchesBtn.textContent == "Watches"
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+      let overlay = findByClass(panel, "empty-overlay")
+      check overlay.textContent == stateEmptyText()
 
       dispose()
 
@@ -1672,7 +1661,7 @@ suite "IsoNim State Panel — text content":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "loading-indicator")
 
       check indicator.textContent == "Loading..."
@@ -1685,11 +1674,12 @@ suite "IsoNim State Panel — text content":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let input = findByClass(panel, "watch-input")
 
       check input != nil
-      check input.attributes["placeholder"] == "Add watch expression..."
+      check input.attributes["id"] == "watch-0"
+      check input.attributes["placeholder"] == "Enter a watch expression"
 
       dispose()
 
@@ -1728,7 +1718,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
 
       let line = findCodeStateLine(panel)
       check line != nil
@@ -1742,7 +1732,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let line = findCodeStateLine(panel)
 
       # Initial value: empty string → no-code class is present.
@@ -1760,7 +1750,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let line = findCodeStateLine(panel)
 
       # Simulate the DB-trace move handler in ``state.nim``: it pushes
@@ -1786,7 +1776,7 @@ suite "IsoNim State Panel — code-state-line":
       let vm = createStateVM(store)
       let r = MockRenderer()
 
-      let panel = renderStatePanel(r, vm)
+      let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
       let line = findCodeStateLine(panel)
 
       store.updateCodeStateLine(10, "fn main() {")
@@ -1833,31 +1823,32 @@ suite "IsoNim Calltrace Panel — structure":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "calltrace-component"
+      check "id" notin panel.attributes   # the host carries the pane's id
+      check "isonim-calltrace" in panel.attributes["class"]
 
       dispose()
 
-  test "renders scroll indicators":
+  test "renders the scroll area sized to the whole trace":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
-      let moreAbove = findByClass(panel, "more-above")
-      let moreBelow = findByClass(panel, "more-below")
-
-      check moreAbove != nil
-      check moreBelow != nil
-
-      # Both hidden by default (scroll at 0, no data)
-      check moreAbove.styles.getOrDefault("display", "none") == "none"
-      check moreBelow.styles.getOrDefault("display", "none") == "none"
+      # The shipped panel has no "more above / below" markers: the scrollbar
+      # (a scrubber on the web) shows where the section is in the trace.
+      check findByIdOrNil(panel, "calltraceScroll-0") != nil
+      check findByClassOrNil(panel, "more-above") == nil
+      store.updateCalltraceSection(@[makeTestCallLine(0, "main", depth = 0)],
+                                   startIndex = 0'i64, totalCount = 30'u64)
+      let area = findByClass(panel, "local-calltrace")
+      check area.styles["height"] ==
+        $(int(30.0 * vm.rowHeightPx.val)) & "px"
 
       dispose()
 
@@ -1867,7 +1858,7 @@ suite "IsoNim Calltrace Panel — structure":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       let container = findByClass(panel, "calltrace-lines")
       check container != nil
@@ -1881,11 +1872,11 @@ suite "IsoNim Calltrace Panel — structure":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       let input = findByClass(panel, "calltrace-search-input")
       check input != nil
-      check input.attributes["placeholder"] == "Search calltrace..."
+      check input.attributes["placeholder"] == "Search"
 
       dispose()
 
@@ -1896,7 +1887,7 @@ suite "IsoNim Calltrace Panel — structure":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "calltrace-loading")
       check indicator != nil
@@ -1927,9 +1918,9 @@ suite "IsoNim Calltrace Panel — call lines":
       )
 
       # Set viewport height so lines are visible
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       check container != nil
 
@@ -1971,9 +1962,9 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 1
@@ -2003,16 +1994,17 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 2'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 2
 
-      # depth 0 => "0px", depth 3 => "48px"
-      check rows[0].styles["padding-left"] == "0px"
-      check rows[1].styles["padding-left"] == "48px"
+      # The depth offset is the row's first child, 8px a level:
+      # depth 0 => "0px", depth 3 => "24px".
+      check rows[0].children[0].styles["min-width"] == "0px"
+      check rows[1].children[0].styles["min-width"] == "24px"
 
       dispose()
 
@@ -2031,16 +2023,17 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 2'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
       check vm.selectedEntry.val.isNone
 
-      # Click the second row
-      rows[1].fireEvent("click")
+      # Click the second row's name — the row's click target.
+      check rows.len == 2
+      findById(panel, "local-call-text-1").fireEvent("click")
 
       check vm.selectedEntry.val.isSome
       check vm.selectedEntry.val.get == 1'i64
@@ -2062,9 +2055,9 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 2'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
@@ -2090,15 +2083,16 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
       let beforeCount = mock.receivedCommands.len
 
-      rows[0].fireEvent("dblclick")
+      check rows.len == 1
+      findById(panel, "local-call-text-0").fireEvent("dblclick")
 
       drain()
 
@@ -2113,9 +2107,9 @@ suite "IsoNim Calltrace Panel — call lines":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
 
       # Initially no lines
@@ -2141,7 +2135,7 @@ suite "IsoNim Calltrace Panel — call lines":
       let vm = createCalltraceVM(store)
       let r = MockRenderer()
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
       # Initially no selection
       check vm.selectedEntry.val.isNone
@@ -2181,9 +2175,9 @@ suite "IsoNim Calltrace Panel — call lines":
         totalCount = 3'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
 
@@ -2191,6 +2185,143 @@ suite "IsoNim Calltrace Panel — call lines":
       check findByClassOrNil(rows[0], "collapse-call-img") != nil
       check findByClassOrNil(rows[1], "expand-call-img") != nil
       check findByClassOrNil(rows[2], "dot-call-img") != nil
+
+      dispose()
+
+# ---------------------------------------------------------------------------
+# Calltrace search results (codetracer#860)
+# ---------------------------------------------------------------------------
+#
+# A `.search-result` row names ONE frame, so activating it must land in that
+# frame (Click-Navigation.md §2.1) and the jump must carry the frame's
+# identity, not only its tick (§2.2). The rows are built in a `for` loop, and
+# each row's handler used to read a loop-body `let` — one variable for the
+# whole loop under Nim's by-reference closure capture — so every row jumped
+# to the LAST match. Three results with distinct ticks, paths, lines and
+# depths tell each row's jump apart; a shared capture answers 99 for all.
+
+proc calltraceJumpsSince(mock: MockBackendService; first: int): seq[JsonNode] =
+  ## The `ct/calltrace-jump` payloads the mock received from index `first`
+  ## on, in order. Returns data rather than checking it: a `check` inside a
+  ## plain proc cannot fail the calling test (Verification-Harness-Traps §29).
+  for i in first ..< mock.receivedCommands.len:
+    if mock.receivedCommands[i].command == "ct/calltrace-jump":
+      result.add mock.receivedCommands[i].args
+
+suite "IsoNim Calltrace Panel — search results":
+
+  test "a search result jumps to its own match, not the last one":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      let r = MockRenderer()
+
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
+      vm.setBackendSearchResults(@[
+        CalltraceSearchResult(name: "calculate_damage", key: "2",
+          rrTicks: 27'u64, codeGeneration: 0,
+          location: Location(file: "src/ship.rb", line: 11,
+                             sourceGeneration: 0, callstackDepth: 3)),
+        CalltraceSearchResult(name: "calculate_damage", key: "7",
+          rrTicks: 63'u64, codeGeneration: 2,
+          location: Location(file: "src/shield.rb", line: 40,
+                             sourceGeneration: 2, sourceDigest: "sha256:gen2",
+                             callstackDepth: 5)),
+        CalltraceSearchResult(name: "calculate_damage", key: "12",
+          rrTicks: 99'u64, codeGeneration: 0,
+          location: Location(file: "src/asteroid.rb", line: 77,
+                             sourceGeneration: 0, callstackDepth: 7)),
+      ])
+
+      let container = findByClass(panel, "call-search-results")
+      check container.attributes["class"] == "call-search-results"
+      let rows = findAllByClass(container, "search-result")
+      check rows.len == 3
+      if rows.len == 3:
+        # The labels were always right; only the destinations were shared.
+        check "#2 - stepId(27): calculate_damage" in rows[0].textContent
+        check "#7 - stepId(63): calculate_damage" in rows[1].textContent
+        check "#12 - stepId(99): calculate_damage" in rows[2].textContent
+
+        # The FIRST row: the case the reporter saw land on the last match.
+        let beforeFirst = mock.receivedCommands.len
+        rows[0].fireEvent("mousedown")
+        drain()
+        let firstJumps = mock.calltraceJumpsSince(beforeFirst)
+        check firstJumps.len == 1
+        if firstJumps.len == 1:
+          let jump = firstJumps[0]
+          check jump["rrTicks"].getBiggestInt == 27
+          # §2.2: the frame's identity travels with the tick.
+          check jump["path"].getStr == "src/ship.rb"
+          check jump["line"].getInt == 11
+          check jump["highLevelPath"].getStr == "src/ship.rb"
+          check jump["highLevelLine"].getInt == 11
+          check jump["callstackDepth"].getInt == 3
+
+        # The MIDDLE row, carrying a source revision, so a shared capture of
+        # either neighbour cannot pass for it.
+        let beforeMiddle = mock.receivedCommands.len
+        rows[1].fireEvent("mousedown")
+        drain()
+        let middleJumps = mock.calltraceJumpsSince(beforeMiddle)
+        check middleJumps.len == 1
+        if middleJumps.len == 1:
+          let jump = middleJumps[0]
+          check jump["rrTicks"].getBiggestInt == 63
+          check jump["path"].getStr == "src/shield.rb"
+          check jump["line"].getInt == 40
+          check jump["callstackDepth"].getInt == 5
+          check jump["sourceGeneration"].getInt == 2
+          check jump["sourceDigest"].getStr == "sha256:gen2"
+          check jump["codeGeneration"].getInt == 2
+
+      dispose()
+
+  test "a search result jumps with the payload its calltrace row sends":
+    # The one-payload rule (`calltraceJumpArgs`): a search result and the
+    # calltrace row for the same call must send the same `ct/calltrace-jump`,
+    # or a click on one lands somewhere a click on the other does not.
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createCalltraceVM(store)
+      drain()
+
+      var line = makeTestCallLine(0, "calculate_damage", depth = 2,
+                                  file = "src/shield.rb", line = 40)
+      line.rrTicks = 63'u64
+      line.codeGeneration = 2
+      line.location.sourceGeneration = 2
+      line.location.sourceDigest = "sha256:gen2"
+      line.location.callstackDepth = 5
+      store.updateCalltraceSection(@[line], startIndex = 0'i64,
+                                   totalCount = 1'u64)
+      vm.setBackendSearchResults(@[CalltraceSearchResult(
+        name: line.name, key: "7", rrTicks: line.rrTicks,
+        location: line.location, codeGeneration: line.codeGeneration)])
+
+      let beforeRow = mock.receivedCommands.len
+      vm.doubleClickEntry(0)
+      drain()
+      let rowJumps = mock.calltraceJumpsSince(beforeRow)
+
+      let beforeResult = mock.receivedCommands.len
+      vm.jumpToSearchResult(0)
+      drain()
+      let resultJumps = mock.calltraceJumpsSince(beforeResult)
+
+      check rowJumps.len == 1
+      check resultJumps.len == 1
+      if rowJumps.len == 1 and resultJumps.len == 1:
+        check resultJumps[0] == rowJumps[0]
+
+      # An index outside the list — a click racing a new search — sends
+      # nothing rather than jumping somewhere else.
+      let beforeStale = mock.receivedCommands.len
+      vm.jumpToSearchResult(1)
+      vm.jumpToSearchResult(-1)
+      drain()
+      check mock.calltraceJumpsSince(beforeStale).len == 0
 
       dispose()
 
@@ -2263,9 +2394,9 @@ suite "IsoNim Calltrace Panel — call arguments":
         args = argsTable,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 2
@@ -2317,9 +2448,9 @@ suite "IsoNim Calltrace Panel — call arguments":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 1
@@ -2343,9 +2474,9 @@ suite "IsoNim Calltrace Panel — call arguments":
         totalCount = 1'u64,
       )
 
-      vm.setViewportHeight(10)
+      vm.setViewport(vm.viewport.val.withRows(10))
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let container = findByClass(panel, "calltrace-lines")
       let rows = findAllByClass(container, "calltrace-call-line")
       check rows.len == 1
@@ -2368,6 +2499,66 @@ suite "IsoNim Calltrace Panel — call arguments":
       dispose()
 
 # ---------------------------------------------------------------------------
+# Calltrace guide-line geometry (#849)
+# ---------------------------------------------------------------------------
+#
+# `callGuideSegments` is what the web view's SVG layer draws. These cases pin
+# that it is laid out from the advance and anchor it is given, and nothing
+# else: the bug was a drawer with a 25 px pitch and a 12.5 px centre baked in.
+# Whether the view feeds it the advance the browser actually laid out, and
+# re-feeds it on a zoom, is a layout question and is answered in a real browser
+# by `src/frontend/tests/calltrace_guides_chromium_test.nim`.
+
+suite "IsoNim Calltrace Panel — guide-line geometry":
+
+  test "segments follow the given pitch and anchor exactly":
+    let a = CallGuideAnchor(originX: 13.0, centerY: 15.0)
+    let segs = callGuideSegments([0, 1, 1, 0], 30.0, a)
+    # Row 0: centre to bottom, then connector to row 1's depth.
+    # Rows 1-2: top to bottom, then a connector. Row 3: top to centre.
+    check segs == @[
+      (x1: 13.0, y1: 15.0, x2: 13.0, y2: 30.0),
+      (x1: 13.0, y1: 30.0, x2: 21.0, y2: 30.0),
+      (x1: 21.0, y1: 30.0, x2: 21.0, y2: 60.0),
+      (x1: 21.0, y1: 60.0, x2: 21.0, y2: 60.0),
+      (x1: 21.0, y1: 60.0, x2: 21.0, y2: 90.0),
+      (x1: 21.0, y1: 90.0, x2: 13.0, y2: 90.0),
+      (x1: 13.0, y1: 90.0, x2: 13.0, y2: 105.0),
+    ]
+
+  test "connector k sits at (k+1) * pitch for a sub-pixel pitch, at any row":
+    # The desktop's measured advance. A 25 px drawer is 0.28 px off per row,
+    # more than a whole row by row 100.
+    const pitch = 25.28
+    var depths: seq[int]
+    for i in 0 ..< 120: depths.add(i mod 3)
+    let segs = callGuideSegments(depths, pitch, defaultCallGuideAnchor(pitch))
+    var k = 0
+    for s in segs:
+      if s.y1 == s.y2:
+        check abs(s.y1 - float(k + 1) * pitch) < 1e-9
+        inc k
+    check k == depths.len - 1
+
+  test "the same rows at a new pitch (a zoom) move every segment":
+    let depths = [0, 1, 2, 1]
+    let a16 = CallGuideAnchor(originX: 13.0, centerY: 12.5)
+    let a20 = CallGuideAnchor(originX: 16.25, centerY: 15.625)
+    let at16 = callGuideSegments(depths, 25.0, a16)
+    let at20 = callGuideSegments(depths, 31.25, a20)
+    check at16.len == at20.len
+    for i in 0 ..< at16.len:
+      check at20[i] != at16[i]
+    # The connector into the last row is at the bottom of row 2 at 31.25 px.
+    check at20[^2].y1 == 3.0 * 31.25
+
+  test "fewer than two rows, or no pitch, draw nothing":
+    let a = defaultCallGuideAnchor(25.0)
+    check callGuideSegments(newSeq[int](), 25.0, a).len == 0
+    check callGuideSegments([3], 25.0, a).len == 0
+    check callGuideSegments([0, 1], 0.0, a).len == 0
+
+# ---------------------------------------------------------------------------
 # Calltrace scroll indicator tests
 # ---------------------------------------------------------------------------
 
@@ -2387,18 +2578,15 @@ suite "IsoNim Calltrace Panel — scroll indicators":
         totalCount = 20'u64,
       )
 
-      vm.setViewportHeight(5)
+      vm.setViewport(vm.viewport.val.withRows(5))
 
-      let panel = renderCalltracePanel(r, vm)
-      let moreAbove = findByClass(panel, "more-above")
-
-      # Initially at position 0
-      check moreAbove.styles["display"] == "none"
-
-      # Scroll down
-      vm.scroll(5)
-
-      check moreAbove.styles["display"] == "block"
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
+      # The panel draws no marker for it (the scrollbar shows the position);
+      # the ViewModel's answer is what a host reads.
+      check panel != nil
+      check not vm.hasMoreAbove.val
+      vm.setViewport(vm.viewport.val.scrolledTo(5))
+      check vm.hasMoreAbove.val
 
       dispose()
 
@@ -2418,13 +2606,12 @@ suite "IsoNim Calltrace Panel — scroll indicators":
         totalCount = 20'u64,
       )
 
-      vm.setViewportHeight(3)
+      vm.setViewport(vm.viewport.val.withRows(3))
 
-      let panel = renderCalltracePanel(r, vm)
-      let moreBelow = findByClass(panel, "more-below")
-
-      # At position 0 with 3 visible and 20 total, there should be more below
-      check moreBelow.styles["display"] == "block"
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
+      # At position 0 with 3 visible and 20 total, there is more below.
+      check panel != nil
+      check vm.hasMoreBelow.val
 
       dispose()
 
@@ -2441,7 +2628,7 @@ suite "IsoNim Calltrace Panel — loading":
       drain()  # flush auto-load effect's loading→idle transition
       let r = MockRenderer()
 
-      let panel = renderCalltracePanel(r, vm)
+      let panel = renderCalltracePanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "calltrace-loading")
 
       check indicator.styles["display"] == "none"
@@ -2477,11 +2664,11 @@ suite "IsoNim Debug Controls Panel — structure":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "debug-controls"
+      check "isonim-debug-controls" in panel.attributes["class"]
       check panel.attributes["data-session-mode"] == "liveMcr"
       check panel.attributes["data-recording-head"] == "400"
 
@@ -2493,14 +2680,14 @@ suite "IsoNim Debug Controls Panel — structure":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepFwd = findByClass(panel, "step-forward")
-      let stepBwd = findByClass(panel, "step-backward")
-      let stepIn = findByClass(panel, "step-in")
-      let stepOut = findByClass(panel, "step-out")
-      let continueBtn = findByClass(panel, "continue-btn")
-      let revContinue = findByClass(panel, "reverse-continue")
+      let stepFwd = findById(panel, "next-image")
+      let stepBwd = findById(panel, "reverse-next-image")
+      let stepIn = findById(panel, "step-in-image")
+      let stepOut = findById(panel, "step-out-image")
+      let continueBtn = findById(panel, "continue-image")
+      let revContinue = findById(panel, "reverse-continue-image")
 
       check stepFwd != nil
       check stepBwd != nil
@@ -2524,11 +2711,10 @@ suite "IsoNim Debug Controls Panel — structure":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
-
-      let status = findByClass(panel, "debug-status-text")
-      check status != nil
-      check status.textContent == "Idle"
+      # The shipped toolbar shows no status line (the status bar does); the
+      # VM's text is what every surface reads.
+      discard renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
+      check vm.statusText.val == "Idle"
 
       dispose()
 
@@ -2545,10 +2731,10 @@ suite "IsoNim Debug Controls Panel — button states":
       let r = MockRenderer()
 
       # Debugger starts idle
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepFwd = findByClass(panel, "step-forward")
-      let continueBtn = findByClass(panel, "continue-btn")
+      let stepFwd = findById(panel, "next-image")
+      let continueBtn = findById(panel, "continue-image")
 
       # canStepForward should be true when idle
       check "disabled" notin stepFwd.attributes
@@ -2569,9 +2755,9 @@ suite "IsoNim Debug Controls Panel — button states":
       # ``supportsStepBack`` capability (which can lose a race with session-VM
       # creation) or for rr ticks (which DB traces never populate).  This test
       # asserted the opposite until ``c5be0b990`` deliberately changed it.
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       check stepBwd.attributes.getOrDefault("disabled", "") == ""
 
       dispose()
@@ -2591,9 +2777,9 @@ suite "IsoNim Debug Controls Panel — button states":
       session.debugSessionMode = liveMcr
       store.session.val = session
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       check stepBwd.attributes.getOrDefault("disabled", "") == "true"
 
       dispose()
@@ -2609,9 +2795,9 @@ suite "IsoNim Debug Controls Panel — button states":
       dbg.rrTicks = 100'u64
       store.debugger.val = dbg
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       check "disabled" notin stepBwd.attributes
 
       dispose()
@@ -2627,10 +2813,10 @@ suite "IsoNim Debug Controls Panel — button states":
       let r = MockRenderer()
 
       # debugger at rrTicks=0, minRRTicks=0 but supportsStepBack is true
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
-      let revContinue = findByClass(panel, "reverse-continue")
+      let stepBwd = findById(panel, "reverse-next-image")
+      let revContinue = findById(panel, "reverse-continue-image")
       check "disabled" notin stepBwd.attributes
       check "disabled" notin revContinue.attributes
 
@@ -2642,15 +2828,15 @@ suite "IsoNim Debug Controls Panel — button states":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # Put debugger in stepping state
       var dbg = store.debugger.val
       dbg.status = dsStepping
       store.debugger.val = dbg
 
-      let stepFwd = findByClass(panel, "step-forward")
-      let continueBtn = findByClass(panel, "continue-btn")
+      let stepFwd = findById(panel, "next-image")
+      let continueBtn = findById(panel, "continue-image")
 
       check stepFwd.attributes.getOrDefault("disabled", "") == "true"
       check continueBtn.attributes.getOrDefault("disabled", "") == "true"
@@ -2669,9 +2855,9 @@ suite "IsoNim Debug Controls Panel — actions":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepFwd = findByClass(panel, "step-forward")
+      let stepFwd = findById(panel, "next-image")
       let beforeCount = mock.receivedCommands.len
 
       stepFwd.fireEvent("click")
@@ -2687,9 +2873,9 @@ suite "IsoNim Debug Controls Panel — actions":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       let beforeCount = mock.receivedCommands.len
 
       stepBwd.fireEvent("click")
@@ -2712,9 +2898,9 @@ suite "IsoNim Debug Controls Panel — actions":
       session.debugSessionMode = liveMcr
       store.session.val = session
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let stepBwd = findByClass(panel, "step-backward")
+      let stepBwd = findById(panel, "reverse-next-image")
       let beforeCount = mock.receivedCommands.len
 
       stepBwd.fireEvent("click")
@@ -2732,9 +2918,9 @@ suite "IsoNim Debug Controls Panel — actions":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      let continueBtn = findByClass(panel, "continue-btn")
+      let continueBtn = findById(panel, "continue-image")
       let beforeCount = mock.receivedCommands.len
 
       continueBtn.fireEvent("click")
@@ -2756,23 +2942,21 @@ suite "IsoNim Debug Controls Panel — status text":
       let vm = createDebugControlsVM(store)
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
-      let status = findByClass(panel, "debug-status-text")
-
-      check status.textContent == "Idle"
+      discard renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
+      check vm.statusText.val == "Idle"
 
       # Change debugger status to stepping
       var dbg = store.debugger.val
       dbg.status = dsStepping
       store.debugger.val = dbg
 
-      check status.textContent == "Stepping..."
+      check vm.statusText.val == "Stepping..."
 
       # Change to finished
       dbg.status = dsFinished
       store.debugger.val = dbg
 
-      check status.textContent == "Finished"
+      check vm.statusText.val == "Finished"
 
       dispose()
 
@@ -2793,25 +2977,29 @@ suite "IsoNim Debug Controls Panel — status text":
 # test below that matters has a mutation arm, and each arm reddens its own
 # assertion.
 #
-# `shortcutFor` is the injected lookup `ui/debug.nim` fills from
+# `shortcutFor` is the injected lookup `ui/debug_toolbar.nim` fills from
 # `data.config.shortcutMap`; the tests stand in for that host with a table
 # they control, which is what makes "rebind" expressible here at all.
 
-proc tooltipTextOf(panel: MockNode; buttonClass: string): string =
+proc tooltipTextOf(panel: MockNode; buttonId: string): string =
   ## The text a user would read in one button's tooltip.
   ##
   ## Reads the `.custom-tooltip` child rather than the button, because the
   ## button's own `textContent` also contains its glyph.
-  let button = findByClass(panel, buttonClass)
+  let button = findById(panel, buttonId)
   findByClass(button, "custom-tooltip").textContent
 
+const ToolbarControlCount = 16
+  ## Every control of the shipped toolbar: history back / forward and their
+  ## two lists, the eight steps, run to entry, reset, run tests, stop.
+
 const mockToolbarButtons: array[6, tuple[cls: string; id: string; label: string]] = [
-  (cls: "step-backward",     id: "reverse-next",     label: "Reverse next"),
-  (cls: "step-forward",      id: "next",             label: "Next"),
-  (cls: "step-in",           id: "step-in",          label: "Step in"),
-  (cls: "step-out",          id: "step-out",         label: "Step out"),
-  (cls: "continue-btn",      id: "continue",         label: "Continue"),
-  (cls: "reverse-continue",  id: "reverse-continue", label: "Reverse continue"),
+  (cls: "reverse-next-image",     id: "reverse-next",     label: "Reverse next"),
+  (cls: "next-image",             id: "next",             label: "Next"),
+  (cls: "step-in-image",          id: "step-in",          label: "Step in"),
+  (cls: "step-out-image",         id: "step-out",         label: "Step out"),
+  (cls: "continue-image",         id: "continue",         label: "Continue"),
+  (cls: "reverse-continue-image", id: "reverse-continue", label: "Reverse continue"),
 ]
 
 suite "IsoNim Debug Controls — tooltips read the binding":
@@ -2823,12 +3011,12 @@ suite "IsoNim Debug Controls — tooltips read the binding":
       vm.shortcutFor = proc(actionId: string): string = "CTRL+ALT+9"
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # NON-VACUITY. "every control has a chord" is satisfied by a toolbar
       # with no controls, so the population is sized before it is judged.
       let tooltips = findAllByClass(panel, "custom-tooltip")
-      check tooltips.len == 6
+      check tooltips.len == ToolbarControlCount
       check tooltips.len > 0
       check mockToolbarButtons.len == 6
 
@@ -2850,7 +3038,7 @@ suite "IsoNim Debug Controls — tooltips read the binding":
       vm.shortcutFor = proc(actionId: string): string = "CHORD-FOR-" & actionId
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       var checkedControls = 0
       for entry in mockToolbarButtons:
@@ -2872,12 +3060,12 @@ suite "IsoNim Debug Controls — tooltips read the binding":
         if bindings.hasKey(actionId): bindings[actionId] else: ""
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # BEFORE. Asserted so the mutation below has a measured starting point
       # and cannot pass by having been true all along.
-      check tooltipTextOf(panel, "step-forward") == "Next (F10)"
-      check tooltipTextOf(panel, "step-in") == "Step in (F11)"
+      check tooltipTextOf(panel, "next-image") == "Next (F10)"
+      check tooltipTextOf(panel, "step-in-image") == "Step in (F11)"
 
       # THE MUTATION ARM: rebind, exactly as a user editing the config would.
       bindings["next"] = "CTRL+ALT+7"
@@ -2886,10 +3074,10 @@ suite "IsoNim Debug Controls — tooltips read the binding":
 
       # AFTER, on the SAME panel — no re-render, no remount. A hardcoded
       # label cannot do this, and neither can a lookup read only at mount.
-      check tooltipTextOf(panel, "step-forward") == "Next (CTRL+ALT+7)"
+      check tooltipTextOf(panel, "next-image") == "Next (CTRL+ALT+7)"
       # And the control that was NOT rebound did not move — this is the arm's
       # own control, catching a repaint that simply rewrote everything.
-      check tooltipTextOf(panel, "step-in") == "Step in (F11)"
+      check tooltipTextOf(panel, "step-in-image") == "Step in (F11)"
 
       dispose()
 
@@ -2900,7 +3088,7 @@ suite "IsoNim Debug Controls — tooltips read the binding":
       vm.shortcutFor = proc(actionId: string): string = ""
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
       # `initShortcutMap` is first-writer-wins, so an action whose chord was
       # already claimed silently gets NO chord. Rendering that as "Next ()"
@@ -2920,15 +3108,15 @@ suite "IsoNim Debug Controls — tooltips read the binding":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createDebugControlsVM(store)
-      # `shortcutFor` is nil until `ui/debug.nim` wires it, and the toolbar
+      # `shortcutFor` is nil until `ui/debug_toolbar.nim` wires it, and the toolbar
       # can mount before that happens.
       check vm.shortcutFor.isNil
       let r = MockRenderer()
 
-      let panel = renderDebugControlsPanel(r, vm)
+      let panel = renderDebugControlsPanel[MockRenderer, MockNode](r, vm)
 
-      check tooltipTextOf(panel, "step-forward") == "Next"
-      check findAllByClass(panel, "custom-tooltip").len == 6
+      check tooltipTextOf(panel, "next-image") == "Next"
+      check findAllByClass(panel, "custom-tooltip").len == ToolbarControlCount
 
       dispose()
 
@@ -2939,7 +3127,14 @@ suite "IsoNim Debug Controls — tooltips read the binding":
 
 proc makeTestEvent(eventId: uint64; kind: string; line: int;
                    value: string): EventLogRow =
-  EventLogRow(eventId: eventId, kind: kind, line: line, value: value)
+  EventLogRow(eventId: eventId, kind: kind, line: line, value: value,
+              rrTicks: eventId)
+
+proc renderEventLog(vm: EventLogVM): MockNode =
+  renderEventLogPanel[MockRenderer, MockNode](MockRenderer(), vm)
+
+proc eventRowsOf(panel: MockNode): seq[MockNode] =
+  findAllByClass(panel, "eventLog-row")
 
 # ---------------------------------------------------------------------------
 # Event Log structure tests
@@ -2947,80 +3142,60 @@ proc makeTestEvent(eventId: uint64; kind: string; line: int;
 
 suite "IsoNim Event Log Panel — structure":
 
-  test "renders root with event-log-component class":
+  test "renders the pane's root, toolbar and dense table":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
+      let panel = renderEventLog(vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "event-log-component"
+      check "eventLog" in panel.attributes["class"]
+      check "component-container" in panel.attributes["class"]
+      check findByClass(panel, "eventLog-dense-table") != nil
+      check findByClass(panel, "eventLog-scroll-body") != nil
 
       dispose()
 
-  test "renders search input":
+  test "renders the search field":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let input = findByClass(panel, "event-log-search-input")
+      let input = findByClass(panel, "eventLog-search-field")
       check input != nil
-      check input.attributes["placeholder"] == "Search events..."
+      check input.attributes["placeholder"] == "Find event"
 
       dispose()
 
-  test "renders column headers":
+  test "renders a header cell per shown column, in the ViewModel's order":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
+      let header = findByClass(panel, "eventLog-column-header")
+      check header != nil
+      check header.children.len == vm.columns.val.visibleColumns.len
+      check "TICK" in header.textContent.toUpperAscii
+      check "OUTPUT" in header.textContent.toUpperAscii
 
-      let headerRow = findByClass(panel, "event-log-header-row")
-      check headerRow != nil
-
-      let col0 = findByClass(panel, "column-0")
-      let col1 = findByClass(panel, "column-1")
-      let col2 = findByClass(panel, "column-2")
-      let col3 = findByClass(panel, "column-3")
-
-      check col0 != nil
-      check col1 != nil
-      check col2 != nil
-      check col3 != nil
-
-      check "ID" in col0.textContent
-      check "Kind" in col1.textContent
-      check "Line" in col2.textContent
-      check "Value" in col3.textContent
+      discard vm.toggleColumn(elcLocation)
+      check header.children.len == vm.columns.val.visibleColumns.len
+      check findByClass(header, "eventLog-fullpath") != nil
 
       dispose()
 
-  test "renders pagination controls":
+  test "renders the footer's counters":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let prevBtn = findByClass(panel, "page-prev")
-      let nextBtn = findByClass(panel, "page-next")
-      let indicator = findByClass(panel, "page-indicator")
-
-      check prevBtn != nil
-      check nextBtn != nil
-      check indicator != nil
-
-      check prevBtn.tag == "button"
-      check nextBtn.tag == "button"
+      check findByClass(panel, "data-tables-footer-input") != nil
+      check findByClass(panel, "data-tables-footer-end-row") != nil
+      check findByClass(panel, "data-tables-footer-rows-count") != nil
 
       dispose()
 
@@ -3028,9 +3203,7 @@ suite "IsoNim Event Log Panel — structure":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
+      let panel = renderEventLog(vm)
 
       let indicator = findByClass(panel, "event-log-loading")
       check indicator != nil
@@ -3044,77 +3217,91 @@ suite "IsoNim Event Log Panel — structure":
 
 suite "IsoNim Event Log Panel — rows":
 
-  test "renders event rows":
+  test "renders a row per held event, with its identity and text":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
       vm.eventRows.val = @[
-        makeTestEvent(1, "call", 10, "foo()"),
-        makeTestEvent(2, "return", 15, "42"),
+        makeTestEvent(1, "stdout", 10, "foo()"),
+        makeTestEvent(2, "event", 15, "42"),
       ]
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-      let container = findByClass(panel, "event-log-rows")
-      check container != nil
-
-      let rows = findAllByClass(container, "event-row")
+      let rows = eventRowsOf(panel)
       check rows.len == 2
-
-      check "1" in rows[0].textContent
-      check "call" in rows[0].textContent
-      check "foo()" in rows[0].textContent
-
-      check "2" in rows[1].textContent
-      check "return" in rows[1].textContent
-      check "42" in rows[1].textContent
+      check rows[0].tag == "tr"
+      check rows[0].attributes["data-rr-ticks"] == "1"
+      check rows[1].attributes["data-position"] == "1"
+      check findByClass(rows[0], "eventLog-index").textContent == "1"
+      check findByClass(rows[0], "rr-ticks-time").textContent == "1"
+      check findByClass(rows[0], "eventLog-text").textContent == "stdout: foo()"
+      check findByClass(rows[1], "eventLog-text").textContent == "42"
 
       dispose()
 
-  test "click selects row":
+  test "a window further down the log keeps the rows it still shows":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      var rows: seq[EventLogRow] = @[]
+      for i in 0 ..< 6:
+        rows.add makeTestEvent(uint64(i + 1), "event", i, "e" & $i)
+      store.applyEventLogRows(rows, 0, recordsTotal = 100)
+      let panel = renderEventLog(vm)
+      let before = eventRowsOf(panel)
+      check before.len == 6
 
+      store.applyEventLogRows(rows[2 .. ^1] & @[makeTestEvent(7, "event", 6, "e6"),
+                                                makeTestEvent(8, "event", 7, "e7")],
+                              2, recordsTotal = 100)
+      let after = eventRowsOf(panel)
+      check after.len == 6
+      # The row at position 2 is the same node it was.
+      check after[0] == before[2]
+      check after[0].attributes["data-position"] == "2"
+      check findByClass(after[^1], "eventLog-text").textContent == "e7"
+
+      dispose()
+
+  test "click selects the row":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createEventLogVM(store)
       vm.eventRows.val = @[
-        makeTestEvent(1, "call", 10, "foo()"),
-        makeTestEvent(2, "return", 15, "42"),
+        makeTestEvent(1, "event", 10, "foo()"),
+        makeTestEvent(2, "event", 15, "42"),
       ]
-
-      let panel = renderEventLogPanel(r, vm)
-      let container = findByClass(panel, "event-log-rows")
-      let rows = findAllByClass(container, "event-row")
+      let panel = renderEventLog(vm)
+      let rows = eventRowsOf(panel)
 
       check vm.selectedRow.val.isNone
-
       rows[1].fireEvent("click")
-
       check vm.selectedRow.val.isSome
       check vm.selectedRow.val.get == 1
+      check "selected" in rows[1].attributes["class"]
+      check "selected" notin rows[0].attributes["class"]
 
       dispose()
 
-  test "selected row gets highlighted class":
+  test "a move changes only which rows are past, now and future":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
       vm.eventRows.val = @[
-        makeTestEvent(1, "call", 10, "foo()"),
-        makeTestEvent(2, "return", 15, "42"),
+        makeTestEvent(10, "event", 1, "a"),
+        makeTestEvent(20, "event", 2, "b"),
+        makeTestEvent(30, "event", 3, "c"),
       ]
-
-      let panel = renderEventLogPanel(r, vm)
-      let container = findByClass(panel, "event-log-rows")
-      let rows = findAllByClass(container, "event-row")
-
-      vm.selectRow(some(0))
-
-      check "selected" in rows[0].attributes["class"]
-      check "selected" notin rows[1].attributes["class"]
+      let panel = renderEventLog(vm)
+      let rows = eventRowsOf(panel)
+      store.updateDebuggerPosition(20'u64, "/src/main.py", 2)
+      check "past" in rows[0].attributes["class"]
+      check "active" in rows[1].attributes["class"]
+      check "future" in rows[2].attributes["class"]
+      store.updateDebuggerPosition(30'u64, "/src/main.py", 3)
+      check "past" in rows[1].attributes["class"]
+      check "active" in rows[2].attributes["class"]
+      check eventRowsOf(panel)[0] == rows[0]
 
       dispose()
 
@@ -3124,77 +3311,45 @@ suite "IsoNim Event Log Panel — rows":
 
 suite "IsoNim Event Log Panel — sorting":
 
-  test "click column header toggles sort":
+  test "a header click orders the log by its column, again to reverse it":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      let panel = renderEventLog(vm)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let col1 = findByClass(panel, "column-1")
-      check col1 != nil
-
-      col1.fireEvent("click")
-
-      check vm.sortColumn.val == 1
-      check vm.sortAscending.val == true
-
-      # Click again to toggle direction
-      col1.fireEvent("click")
-
-      check vm.sortColumn.val == 1
-      check vm.sortAscending.val == false
-
-      dispose()
-
-  test "sort indicator shown on active column":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
-
-      # Sort by column 0 (default)
-      let col0 = findByClass(panel, "column-0")
-      check col0 != nil
-      check "sort-active" in col0.attributes["class"]
+      let header = findByClass(panel, "eventLog-column-header")
+      let index = findByClass(header, "eventLog-index")
+      check index != nil
+      index.fireEvent("click")
+      check vm.order().column == elcIndex
+      check vm.order().ascending
+      check "▲" in index.textContent
+      index.fireEvent("click")
+      check vm.order().column == elcIndex
+      check not vm.order().ascending
+      check "▼" in index.textContent
 
       dispose()
 
 # ---------------------------------------------------------------------------
-# Event Log pagination tests
+# Event Log footer tests
 # ---------------------------------------------------------------------------
 
-suite "IsoNim Event Log Panel — pagination":
+suite "IsoNim Event Log Panel — footer":
 
-  test "prev button disabled on first page":
+  test "the footer counts the rows shown and the whole list":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
+      store.applyEventLogRows(@[makeTestEvent(1, "event", 1, "a")], 0,
+                              recordsTotal = 150)
+      let panel = renderEventLog(vm)
+      vm.viewport.val = Viewport(rows: 20, firstRow: 40)
 
-      let panel = renderEventLogPanel(r, vm)
-
-      let prevBtn = findByClass(panel, "page-prev")
-      check prevBtn.attributes.getOrDefault("disabled", "") == "true"
-
-      dispose()
-
-  test "page indicator shows correct text":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      vm.totalEventCount.val = 150
-
-      let panel = renderEventLogPanel(r, vm)
-
-      let indicator = findByClass(panel, "page-indicator")
-      check indicator != nil
-      check "Page 1" in indicator.textContent
+      let footer = findByClass(panel, "data-tables-footer")
+      check "41to60" in footer.attributes["class"]
+      check findByClass(panel, "data-tables-footer-end-row").textContent == "60"
+      check findByClass(panel, "data-tables-footer-rows-count").textContent == "150"
 
       dispose()
 
@@ -3208,16 +3363,12 @@ suite "IsoNim Event Log Panel — loading":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createEventLogVM(store)
-      let r = MockRenderer()
-
-      let panel = renderEventLogPanel(r, vm)
+      let panel = renderEventLog(vm)
       let indicator = findByClass(panel, "event-log-loading")
 
       check indicator.styles["display"] == "none"
-
       vm.loadingState.val = lsLoading
       check indicator.styles["display"] == "block"
-
       vm.loadingState.val = lsIdle
       check indicator.styles["display"] == "none"
 
@@ -3239,11 +3390,11 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "flow-component"
+      check "flow-component" in panel.attributes["class"].split(' ')
 
       dispose()
 
@@ -3253,7 +3404,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let modeBar = findByClass(panel, "flow-mode-selector")
       check modeBar != nil
@@ -3287,7 +3438,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let slider = findByClass(panel, "flow-iteration-slider")
       check slider != nil
@@ -3306,7 +3457,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let display = findByClass(panel, "flow-value-display")
       check display != nil
@@ -3323,7 +3474,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let steps = findByClass(panel, "flow-steps")
       check steps != nil
@@ -3336,7 +3487,7 @@ suite "IsoNim Flow Panel — structure":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "flow-loading")
       check indicator != nil
@@ -3356,7 +3507,7 @@ suite "IsoNim Flow Panel — mode switching":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let lineBtn = findByClass(panel, "mode-line")
       check lineBtn != nil
@@ -3377,7 +3528,7 @@ suite "IsoNim Flow Panel — mode switching":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let funcBtn = findByClass(panel, "mode-function")
       funcBtn.fireEvent("click")
@@ -3399,7 +3550,7 @@ suite "IsoNim Flow Panel — raw values":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let toggleBtn = findByClass(panel, "raw-value-toggle")
       check toggleBtn.textContent == "Raw"
@@ -3426,7 +3577,7 @@ suite "IsoNim Flow Panel — iteration slider":
 
       vm.iterationCount.val = 10
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
 
       let label = findByClass(panel, "iteration-label")
       check label != nil
@@ -3451,7 +3602,7 @@ suite "IsoNim Flow Panel — loading":
       let vm = createFlowVM(store)
       let r = MockRenderer()
 
-      let panel = renderFlowPanel(r, vm)
+      let panel = renderFlowPanel[MockRenderer, MockNode](r, vm)
       let indicator = findByClass(panel, "flow-loading")
 
       check indicator.styles["display"] == "none"
@@ -3513,11 +3664,11 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "search-component"
+      check "search-component" in panel.attributes["class"].split(" ")
 
       dispose()
 
@@ -3527,7 +3678,7 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let modeBar = findByClass(panel, "search-mode-selector")
       check modeBar != nil
@@ -3559,7 +3710,7 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let input = findByClass(panel, "search-query-input")
       check input != nil
@@ -3573,7 +3724,7 @@ suite "IsoNim Search Panel — structure":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let results = findByClass(panel, "search-results")
       check results != nil
@@ -3593,7 +3744,7 @@ suite "IsoNim Search Panel — mode switching":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let fileBtn = findByClass(panel, "mode-file")
       fileBtn.fireEvent("click")
@@ -3612,7 +3763,7 @@ suite "IsoNim Search Panel — mode switching":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let results = findByClass(panel, "search-results")
       check results.styles["display"] == "none"
@@ -3629,7 +3780,7 @@ suite "IsoNim Search Panel — mode switching":
       let vm = createSearchVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchPanel(r, vm)
+      let panel = renderSearchPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "search-selected-indicator")
       check indicator.textContent == ""
@@ -3657,11 +3808,11 @@ suite "IsoNim Point List Panel — structure":
       let vm = createPointListVM(store)
       let r = MockRenderer()
 
-      let panel = renderPointListPanel(r, vm)
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "point-list-component"
+      check "point-list-component" in panel.attributes["class"]
 
       dispose()
 
@@ -3671,7 +3822,7 @@ suite "IsoNim Point List Panel — structure":
       let vm = createPointListVM(store)
       let r = MockRenderer()
 
-      let panel = renderPointListPanel(r, vm)
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
 
       let title = findByClass(panel, "point-list-title")
       check title != nil
@@ -3685,7 +3836,7 @@ suite "IsoNim Point List Panel — structure":
       let vm = createPointListVM(store)
       let r = MockRenderer()
 
-      let panel = renderPointListPanel(r, vm)
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
 
       let container = findByClass(panel, "point-list-items")
       check container != nil
@@ -3698,11 +3849,31 @@ suite "IsoNim Point List Panel — structure":
       let vm = createPointListVM(store)
       let r = MockRenderer()
 
-      let panel = renderPointListPanel(r, vm)
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
 
       let editIndicator = findByClass(panel, "point-edit-indicator")
       check editIndicator != nil
       check editIndicator.styles.getOrDefault("display", "none") == "none"
+
+      dispose()
+
+  test "a point added after the panel renders appears":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createPointListVM(store)
+      let r = MockRenderer()
+
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
+      let empty = findByClass(panel, "point-list-empty")
+      check empty.styles.getOrDefault("display", "") == "block"
+
+      store.pointList.rows.val = @[PointListEntry(kind: PointKindBreakpoint,
+        label: "breakpoint", path: "/src/main.py", line: 3, enabled: true)]
+
+      check findAllByClass(panel, "point-list-row").len == 1
+      check empty.styles.getOrDefault("display", "") == "none"
+      check findByClass(panel, "point-list-location").textContent ==
+        "/src/main.py:3"
 
       dispose()
 
@@ -3718,7 +3889,7 @@ suite "IsoNim Point List Panel — interactions":
       let vm = createPointListVM(store)
       let r = MockRenderer()
 
-      let panel = renderPointListPanel(r, vm)
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "point-selected-indicator")
       check indicator.textContent == ""
@@ -3736,7 +3907,7 @@ suite "IsoNim Point List Panel — interactions":
       let vm = createPointListVM(store)
       let r = MockRenderer()
 
-      let panel = renderPointListPanel(r, vm)
+      let panel = renderPointListPanel[MockRenderer, MockNode](r, vm)
 
       let editIndicator = findByClass(panel, "point-edit-indicator")
       check editIndicator.styles["display"] == "none"
@@ -3796,13 +3967,15 @@ suite "IsoNim Scratchpad Panel — structure":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
       check "component-container" in panel.attributes["class"]
       check "active-state" in panel.attributes["class"]
-      check panel.attributes["id"] == "scratchpadComponent-0"
+      # The host the pane is mounted into carries `scratchpadComponent-<n>`;
+      # an id names one element.
+      check "id" notin panel.attributes
 
       dispose()
 
@@ -3818,7 +3991,7 @@ suite "IsoNim Scratchpad Panel — structure":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
 
       let list = findByClass(panel, "value-components-container")
       check list != nil
@@ -3851,7 +4024,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       let list = findByClass(panel, "value-components-container")
       check list.children.len == 0
 
@@ -3868,7 +4041,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("x", "99"))
 
       let list = findByClass(panel, "value-components-container")
@@ -3888,7 +4061,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("board[1][2]", "X"))
 
       let valueRoot = findByClass(panel, "value-expanded")
@@ -3912,7 +4085,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       let overlay = findByClass(panel, "empty-overlay")
       check "hidden" notin overlay.attributes["class"]
 
@@ -3930,7 +4103,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("$msg", "hello world",
                                       isLiteral = true))
 
@@ -3945,7 +4118,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("crash", "<error: boom>", isError = true))
 
       let list = findByClass(panel, "value-components-container")
@@ -3965,7 +4138,7 @@ suite "IsoNim Scratchpad Panel — row rendering":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("z", "26"))
       vm.addValue(makeScratchpadEntry("a", "1"))
       vm.addValue(makeScratchpadEntry("m", "13"))
@@ -3999,7 +4172,7 @@ suite "IsoNim Scratchpad Panel — interactions":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("a", "1"))
       vm.addValue(makeScratchpadEntry("b", "2"))
       vm.addValue(makeScratchpadEntry("c", "3"))
@@ -4039,7 +4212,7 @@ suite "IsoNim Scratchpad Panel — interactions":
       let vm = createScratchpadVM(store)
       let r = MockRenderer()
 
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       vm.addValue(makeScratchpadEntry("a", "1"))
       vm.addValue(makeScratchpadEntry("b", "2"))
 
@@ -4183,7 +4356,7 @@ suite "IsoNim Scratchpad Panel — vm":
       vm.addValue(entry)
 
       let r = MockRenderer()
-      let panel = renderScratchpadPanel(r, vm)
+      let panel = renderScratchpadPanel[MockRenderer, MockNode](r, vm)
       drain()
 
       # Initially, only the top-level element is in the row views
@@ -4228,11 +4401,11 @@ suite "IsoNim Shell Panel — structure":
       let vm = createShellVM(store)
       let r = MockRenderer()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
-      check panel.attributes["class"] == "shell-component"
+      check panel.attributes["class"] == "shell-component isonim-shell"
 
       dispose()
 
@@ -4242,7 +4415,7 @@ suite "IsoNim Shell Panel — structure":
       let vm = createShellVM(store)
       let r = MockRenderer()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       let output = findByClass(panel, "shell-output")
       check output != nil
@@ -4255,7 +4428,7 @@ suite "IsoNim Shell Panel — structure":
       let vm = createShellVM(store)
       let r = MockRenderer()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       let prompt = findByClass(panel, "shell-prompt")
       check prompt != nil
@@ -4273,7 +4446,7 @@ suite "IsoNim Shell Panel — structure":
       let vm = createShellVM(store)
       let r = MockRenderer()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "shell-history-indicator")
       check indicator != nil
@@ -4293,7 +4466,7 @@ suite "IsoNim Shell Panel — interactions":
       let vm = createShellVM(store)
       let r = MockRenderer()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       let input = findByClass(panel, "shell-input")
 
@@ -4315,7 +4488,7 @@ suite "IsoNim Shell Panel — interactions":
       vm.setInput("cmd2")
       vm.submitInput()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       let indicator = findByClass(panel, "shell-history-indicator")
       check indicator.styles["display"] == "none"
@@ -4333,7 +4506,7 @@ suite "IsoNim Shell Panel — interactions":
       let vm = createShellVM(store)
       let r = MockRenderer()
 
-      let panel = renderShellPanel(r, vm)
+      let panel = renderShellPanel[MockRenderer, MockNode](r, vm)
 
       let scrollInd = findByClass(panel, "shell-scroll-indicator")
       check scrollInd.styles["display"] == "none"
@@ -4387,7 +4560,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -4402,7 +4575,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       let preNode = findByTag(panel, "pre")
       check preNode != nil
@@ -4418,7 +4591,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       let overlay = findByClass(panel, "empty-overlay")
 
       check overlay.styles["display"] == "block"
@@ -4432,7 +4605,7 @@ suite "IsoNim Terminal Output Panel — structure":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setLines(@[])  # marks initialLoad = false but leaves lines empty
 
       let overlay = findByClass(panel, "empty-overlay")
@@ -4453,7 +4626,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[makeTerminalFragment("hello")]),
@@ -4477,7 +4650,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[
@@ -4501,7 +4674,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       # Three fragments at increasing rrTicks; pin the focus to the
       # middle one and expect past / active / future in order.
@@ -4529,7 +4702,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[
@@ -4553,7 +4726,7 @@ suite "IsoNim Terminal Output Panel — line rendering":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[makeTerminalLine(0, @[makeTerminalFragment("x")])])
       check findAllByClass(panel, "terminal-line").len == 1
@@ -4579,7 +4752,7 @@ suite "IsoNim Terminal Output Panel — interactions":
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
 
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLines(@[
         makeTerminalLine(0, @[
@@ -4626,7 +4799,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, _) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[31mred\e[0m <img src=x onerror=alert(1)> " &
                       "\e[1;48;5;4mbold on blue\e[0m\n", 10, 0)])
@@ -4656,7 +4829,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[terminalEvent("first\n", 10, 0),
                      terminalEvent("second\n", 20, 1),
                      terminalEvent("third\n", 30, 2)])
@@ -4675,7 +4848,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, _) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[terminalEvent("hello\n", 10, 0)])
       check panel.attributes["data-terminal-view"] == "lines"
       check findByClass(panel, "terminal-view-toggle").styles["display"] ==
@@ -4689,7 +4862,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, _) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[?1049h\e[2J\e[1;1Hframe one", 10, 0),
         terminalEvent("\e[1;1Hframe two", 20, 1),
@@ -4723,7 +4896,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
         terminalEvent("\e[1;1Hb", 20, 1),
@@ -4781,7 +4954,7 @@ suite "IsoNim Terminal Output Panel — PLAT-52":
       let (store, mock) = makeStoreWithMock()
       let vm = createTerminalOutputVM(store)
       let r = MockRenderer()
-      let panel = renderTerminalOutputPanel(r, vm)
+      let panel = renderTerminalOutputPanel[MockRenderer, MockNode](r, vm)
       vm.setEvents(@[
         terminalEvent("\e[?1049h\e[1;1Ha", 10, 0),
         terminalEvent("\e[1;1Hb", 20, 1)])
@@ -4843,7 +5016,7 @@ suite "IsoNim Build Panel — structure":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -4857,7 +5030,7 @@ suite "IsoNim Build Panel — structure":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "build-header") != nil
       check findByClassOrNil(panel, "build-header-controls") != nil
@@ -4877,7 +5050,7 @@ suite "IsoNim Build Panel — structure":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
       let label = findByClass(panel, "build-command-label")
       check label != nil
       check label.textContent == ""
@@ -4890,7 +5063,7 @@ suite "IsoNim Build Panel — structure":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
       let stopBtn = findByClass(panel, "build-stop-btn")
       check stopBtn != nil
       # The disabled modifier class is present in the idle state.
@@ -4910,7 +5083,7 @@ suite "IsoNim Build Panel — header reactivity":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.setCommand("cargo build")
       vm.setRunning(true)
@@ -4935,7 +5108,7 @@ suite "IsoNim Build Panel — header reactivity":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine("Compiling foo"))
       vm.setCode(0)
@@ -4953,7 +5126,7 @@ suite "IsoNim Build Panel — header reactivity":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine("Compiling foo"))
       vm.setCode(7)
@@ -4977,7 +5150,7 @@ suite "IsoNim Build Panel — line rendering":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine("hello", isStdout = true))
       vm.appendLine(makeBuildLine("world", isStdout = false))
@@ -4999,7 +5172,7 @@ suite "IsoNim Build Panel — line rendering":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine(
         "src/main.nim(42, 5) Error: undeclared identifier",
@@ -5023,7 +5196,7 @@ suite "IsoNim Build Panel — line rendering":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine(
         "src/main.nim(7) Warning: unused import",
@@ -5043,7 +5216,7 @@ suite "IsoNim Build Panel — line rendering":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine("first"))
       vm.appendLine(makeBuildLine("second"))
@@ -5082,7 +5255,7 @@ suite "IsoNim Build Panel — interactions":
       var stopped = 0
       vm.cancelBuildProc = proc() = inc stopped
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       # Stop is a no-op when the panel is idle.  Flip to running and
       # confirm the click actually reaches the host.
@@ -5107,7 +5280,7 @@ suite "IsoNim Build Panel — interactions":
       var stopped = 0
       vm.cancelBuildProc = proc() = inc stopped
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       let stopBtn = findByClass(panel, "build-stop-btn")
       stopBtn.fireEvent("click")
@@ -5123,7 +5296,7 @@ suite "IsoNim Build Panel — interactions":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
 
       vm.appendLine(makeBuildLine("noise"))
       let outputContainer = findByClass(panel, "build-output-container")
@@ -5143,7 +5316,7 @@ suite "IsoNim Build Panel — interactions":
       let vm = createBuildVM(store)
       let r = MockRenderer()
 
-      let panel = renderBuildPanel(r, vm)
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
       let scrollBtn = findByClass(panel, "build-scroll-btn")
 
       # autoScroll defaults to true; the active class is present.
@@ -5188,7 +5361,7 @@ suite "IsoNim Errors Panel — structure":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -5202,7 +5375,7 @@ suite "IsoNim Errors Panel — structure":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "problems-header") != nil
       check findByClassOrNil(panel, "problems-counts") != nil
@@ -5222,7 +5395,7 @@ suite "IsoNim Errors Panel — structure":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       let buttons = findAllByClass(panel, "problems-filter-btn")
       check buttons.len == 4
@@ -5240,7 +5413,7 @@ suite "IsoNim Errors Panel — structure":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
       let buttons = findAllByClass(panel, "problems-filter-btn")
 
       check "active" in buttons[0].attributes["class"]
@@ -5256,7 +5429,7 @@ suite "IsoNim Errors Panel — structure":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
       let empty = findByClass(panel, "problems-empty")
       check empty != nil
       check empty.textContent == "No problems detected."
@@ -5275,7 +5448,7 @@ suite "IsoNim Errors Panel — header reactivity":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError),
@@ -5310,7 +5483,7 @@ suite "IsoNim Errors Panel — header reactivity":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
       let errorBadge = findByClass(panel, "problems-count-error")
       check "0" in errorBadge.textContent
 
@@ -5334,7 +5507,7 @@ suite "IsoNim Errors Panel — row rendering":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "a.nim", line = 10, col = 1, message = "boom"),
@@ -5358,7 +5531,7 @@ suite "IsoNim Errors Panel — row rendering":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "src/main.nim", line = 42, col = 7,
@@ -5385,7 +5558,7 @@ suite "IsoNim Errors Panel — row rendering":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "x.nim", line = 9, col = -1,
@@ -5405,7 +5578,7 @@ suite "IsoNim Errors Panel — row rendering":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError),
@@ -5435,7 +5608,7 @@ suite "IsoNim Errors Panel — filter behaviour":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "a.nim", line = 1),
@@ -5464,7 +5637,7 @@ suite "IsoNim Errors Panel — filter behaviour":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError),
@@ -5488,7 +5661,7 @@ suite "IsoNim Errors Panel — filter behaviour":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError),
@@ -5511,7 +5684,7 @@ suite "IsoNim Errors Panel — filter behaviour":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsWarning),
@@ -5539,7 +5712,7 @@ suite "IsoNim Errors Panel — group-by-file":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "a.nim", line = 1),
@@ -5596,7 +5769,7 @@ suite "IsoNim Errors Panel — interactions":
       vm.onJumpToProblem = proc(path: string; line: int; col: int) =
         opened.add((path, line, col))
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "src/main.nim", line = 17),
@@ -5629,7 +5802,7 @@ suite "IsoNim Errors Panel — interactions":
       vm.onJumpToProblem = proc(path: string; line: int; col: int) =
         opened.add((path, line, col))
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setProblems(@[
         makeProblem(blsError, path = "a.nim", line = 5),
@@ -5661,7 +5834,7 @@ suite "IsoNim Errors Panel — interactions":
       let vm = createErrorsVM(store)
       let r = MockRenderer()
 
-      let panel = renderErrorsPanel(r, vm)
+      let panel = renderErrorsPanel[MockRenderer, MockNode](r, vm)
       vm.setProblems(@[
         makeProblem(blsError, path = "src/main.nim", line = 17),
       ])
@@ -5727,8 +5900,12 @@ suite "IsoNim Errors Panel — interactions":
 
 proc makeResult(path: string = "src/main.nim";
                 line: int = 1;
-                text: string = "match snippet"): SearchResultLine =
-  SearchResultLine(text: text, path: path, line: line)
+                text: string = "match snippet";
+                matchStart = 0; matchLength = 0): SearchResultLine =
+  ## A row as the runner produces it; `matchStart` / `matchLength` are the
+  ## runner's match (0 length: none).
+  SearchResultLine(text: text, path: path, line: line,
+                   matchStart: matchStart, matchLength: matchLength)
 
 # ---------------------------------------------------------------------------
 # Structure
@@ -5742,7 +5919,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -5761,7 +5938,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # "Inactive" is no longer a root class (see the vocabulary note above);
       # it is the body showing the pre-search overlay and nothing else, plus
@@ -5781,7 +5958,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       let bar = findByClass(panel, "fif-search-bar")
       # The panel's input is the SEARCH input (Enter → `vm.onSearch`), which
@@ -5794,6 +5971,15 @@ suite "IsoNim Search Results Panel — structure":
       check input.attributes["placeholder"] == "Search in files..."
       check findByClassOrNil(bar, "fif-input") == input
       check findByClass(bar, "fif-badge").textContent == "Find in Files"
+      # PLAT-57: the two options, VS Code's search view's.
+      check findByClass(bar, "fif-option-case").textContent == "Aa"
+      check findByClass(bar, "fif-option-word").textContent == "ab"
+      check findByClass(bar, "fif-option-regex").textContent == ".*"
+      # The field is Find in Files' query field in the scope path, where the
+      # toggles' keys (`Alt+C` / `Alt+W` / `Alt+R`) hold.
+      let field = findByClass(bar, "fif-input")
+      check field.attributes["data-scope-kind"] == "input"
+      check field.attributes["data-scope-id"] == "search-query"
 
       # The reactive body: every state the render effect rebuilds hangs here.
       check findByClassOrNil(panel, "fif-body") != nil
@@ -5806,7 +5992,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # The panel-wide "No results" badge went away with the header row.
       # What must still hold is that an empty result set produces no count
@@ -5825,7 +6011,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let empty = findByClass(panel, "fif-empty")
       # With no recent searches the overlay is the call-to-action prompt;
       # with recent searches it lists them instead (asserted below).
@@ -5840,7 +6026,7 @@ suite "IsoNim Search Results Panel — structure":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "fif-body")
 
       vm.setLoading(true)
@@ -5869,8 +6055,7 @@ suite "IsoNim Search Results Panel — structure":
 #
 # The pre-redesign panel-wide badge is gone; the count surfaces that
 # survived are the per-file-group `fif-file-count` badge, the number of
-# rendered rows, and `vm.resultCount` (which `ui/search_results.nim` reads
-# back via `currentResultCount` to build the recent-searches entries).
+# rendered rows, and `vm.resultCount`.
 # ---------------------------------------------------------------------------
 
 suite "IsoNim Search Results Panel — count reactivity":
@@ -5881,7 +6066,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[
         makeResult(path = "a.nim", line = 1),
@@ -5905,7 +6090,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # Noun agreement is the property; only the badge carrying it moved.
       # The redesign lost it (the file badge read "1 matches"), so the view
@@ -5930,7 +6115,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       check vm.resultCount.val == 0
       check findAllByClass(panel, "fif-match-row").len == 0
 
@@ -5954,7 +6139,7 @@ suite "IsoNim Search Results Panel — count reactivity":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "fif-body")
       check "fif-empty" in body.children[0].attributes["class"].split(' ')
       check vm.active.val == false
@@ -5983,7 +6168,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[
         makeResult(path = "a.nim", line = 1, text = "let x = 1"),
@@ -6011,7 +6196,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       # "z" before "a" so first-appearance order is distinguishable from
       # sorted order — the property is that groups follow the result stream.
@@ -6043,7 +6228,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[makeResult(path = "main.nim", line = 42,
                                  text = "let foo = 1")])
@@ -6063,7 +6248,7 @@ suite "IsoNim Search Results Panel — row rendering":
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[makeResult(), makeResult(line = 2)])
       check findAllByClass(panel, "fif-match-row").len == 2
@@ -6084,56 +6269,107 @@ suite "IsoNim Search Results Panel — row rendering":
 # Query highlighting
 # ---------------------------------------------------------------------------
 
-suite "IsoNim Search Results Panel — query highlighting":
+suite "IsoNim Search Results Panel — the runner's match highlighted":
 
-  test "matched substring is wrapped in a search-results-highlight span":
+  # PLAT-57: the highlight is the match the RUNNER found (`matchStart` /
+  # `matchLength`, from `rg --json`'s submatches or the walker's matcher) —
+  # the view never searches the line itself, so it cannot disagree with the
+  # runner about case or word boundaries.
+
+  test "the runner's match is wrapped in a search-results-highlight span":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createSearchResultsVM(store)
       let r = MockRenderer()
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
+      vm.setQuery("foo")
+      vm.setResults(@[makeResult(text = "let foo = 1", matchStart = 4,
+                                 matchLength = 3)])
+
+      let highlight = findByClass(panel, "search-results-highlight")
+      check highlight != nil
+      check highlight.textContent == "foo"
+      check findByClass(panel, "fif-match-text").textContent == "let foo = 1"
+
+      dispose()
+
+  test "the highlight keeps the line's casing":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
+
+      vm.setQuery("FOO")
+      vm.setResults(@[makeResult(text = "let foo = 1", matchStart = 4,
+                                 matchLength = 3)])
+
+      check findByClass(panel, "search-results-highlight").textContent == "foo"
+
+      dispose()
+
+  test "a row with no match position is not highlighted, whatever the query":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
+
+      # The query occurs in the text: a view that searched the line itself
+      # would highlight it.
       vm.setQuery("foo")
       vm.setResults(@[makeResult(text = "let foo = 1")])
 
-      let highlight = findByClass(panel, "search-results-highlight")
-      check highlight != nil
-      check highlight.textContent == "foo"
-
-      dispose()
-
-  test "case-insensitive match still highlights with original casing":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createSearchResultsVM(store)
-      let r = MockRenderer()
-
-      let panel = renderSearchResultsPanel(r, vm)
-
-      vm.setQuery("FOO")
-      vm.setResults(@[makeResult(text = "let foo = 1")])
-
-      let highlight = findByClass(panel, "search-results-highlight")
-      check highlight != nil
-      # The highlighted substring carries the source-text casing, not the
-      # query casing — same behaviour as the legacy ``highlightMatch``.
-      check highlight.textContent == "foo"
-
-      dispose()
-
-  test "no highlight span is emitted when the query does not match":
-    createRoot proc(dispose: proc()) =
-      let (store, _) = makeStoreWithMock()
-      let vm = createSearchResultsVM(store)
-      let r = MockRenderer()
-
-      let panel = renderSearchResultsPanel(r, vm)
-
-      vm.setQuery("bar")
-      vm.setResults(@[makeResult(text = "let foo = 1")])
-
       check findByClassOrNil(panel, "search-results-highlight") == nil
+
+      dispose()
+
+suite "IsoNim Search Results Panel — the options":
+
+  # The one stand-in: `onSearch` is the host's runner (Electron's main
+  # process). It is replaced by a closure that RECORDS what the panel asked
+  # for — not a mock of anything asserted here: the subject is what the
+  # panel's toggles do to the ViewModel and which search they ask for.
+
+  test "Aa, ab and .* toggle the options and run the search again":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createSearchResultsVM(store)
+      let r = MockRenderer()
+
+      var asked: seq[(int, string, TextMatchOptions)] = @[]
+      vm.onSearch = proc(runId: int; query: string; options: TextMatchOptions) =
+        asked.add((runId, query, options))
+
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
+      let caseBox = findByClass(panel, "fif-option-case")
+      let wordBox = findByClass(panel, "fif-option-word")
+      check "fif-option-on" notin caseBox.attributes["class"].split(' ')
+
+      # No query: a toggle sets the option and runs nothing.
+      caseBox.fireEvent("click")
+      check vm.options.val.caseSensitive
+      check asked.len == 0
+      check "fif-option-on" in caseBox.attributes["class"].split(' ')
+
+      vm.search("Foo")
+      check asked.len == 1
+      check asked[0][2].caseSensitive and not asked[0][2].wholeWord
+      wordBox.fireEvent("click")
+      check asked.len == 2
+      check asked[1][1] == "Foo" and asked[1][2].wholeWord
+      let regexBox = findByClass(panel, "fif-option-regex")
+      regexBox.fireEvent("click")
+      check asked.len == 3 and asked[2][2].regex and asked[2][2].wholeWord
+      check "fif-option-on" in regexBox.attributes["class"].split(' ')
+      # Each search is a new run: a batch of the first is dropped.
+      check asked[1][0] > asked[0][0]
+      check not vm.acceptBatch(asked[0][0], @[makeResult()], true)
+      check vm.resultCount.val == 0
 
       dispose()
 
@@ -6154,10 +6390,10 @@ suite "IsoNim Search Results Panel — interactions":
       let r = MockRenderer()
 
       var opened: seq[(string, int)] = @[]
-      vm.onJumpToResult = proc(path: string; line: int) =
-        opened.add((path, line))
+      vm.onJumpToResult = proc(row: SearchResultLine) =
+        opened.add((row.path, row.line))
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[makeResult(path = "src/main.nim", line = 17,
                                  text = "let foo = 1")])
@@ -6181,10 +6417,10 @@ suite "IsoNim Search Results Panel — interactions":
       let r = MockRenderer()
 
       var opened: seq[(string, int)] = @[]
-      vm.onJumpToResult = proc(path: string; line: int) =
-        opened.add((path, line))
+      vm.onJumpToResult = proc(row: SearchResultLine) =
+        opened.add((row.path, row.line))
 
-      let panel = renderSearchResultsPanel(r, vm)
+      let panel = renderSearchResultsPanel[MockRenderer, MockNode](r, vm)
 
       vm.setResults(@[
         makeResult(path = "a.nim", line = 5, text = "first"),
@@ -6237,7 +6473,7 @@ suite "IsoNim No-Source Panel — structure":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -6251,7 +6487,7 @@ suite "IsoNim No-Source Panel — structure":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       let header = findByClass(panel, "unknown-location-header")
       check header != nil
@@ -6268,7 +6504,7 @@ suite "IsoNim No-Source Panel — structure":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       let borders = findAllByClass(panel, "unknown-border")
       # Only the location border (no message border, no history blocks).
@@ -6294,7 +6530,7 @@ suite "IsoNim No-Source Panel — content":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setMessage("Source not available for this frame")
 
@@ -6310,7 +6546,7 @@ suite "IsoNim No-Source Panel — content":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setLocation(NoSourceLocationInfo(
         functionName: "main",
@@ -6330,7 +6566,7 @@ suite "IsoNim No-Source Panel — content":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setLocation(NoSourceLocationInfo(
         functionName: "main",
@@ -6350,7 +6586,7 @@ suite "IsoNim No-Source Panel — content":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setLocation(NoSourceLocationInfo(
         functionName: "main",
@@ -6370,7 +6606,7 @@ suite "IsoNim No-Source Panel — content":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setOriginatingAddress("0xdeadbeef")
 
@@ -6386,7 +6622,7 @@ suite "IsoNim No-Source Panel — content":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setStopSignalText("SIGSEGV")
 
@@ -6408,7 +6644,7 @@ suite "IsoNim No-Source Panel — history":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setHistory(NoSourceHistoryInfo(
         hasHistory: true,
@@ -6431,7 +6667,7 @@ suite "IsoNim No-Source Panel — history":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       # First populate.
       vm.setHistory(NoSourceHistoryInfo(
@@ -6454,7 +6690,7 @@ suite "IsoNim No-Source Panel — history":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       # ``hasHistory`` true but no action — the legacy view kept the
       # history block hidden under the same circumstance.
@@ -6495,7 +6731,7 @@ suite "IsoNim No-Source Panel — interactions":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       vm.setHistory(NoSourceHistoryInfo(
         hasHistory: true,
@@ -6539,7 +6775,7 @@ suite "IsoNim No-Source Panel — interactions":
       let vm = createNoSourceVM(store)
       let r = MockRenderer()
 
-      let panel = renderNoSourcePanel(r, vm)
+      let panel = renderNoSourcePanel[MockRenderer, MockNode](r, vm)
 
       mock.clearReceivedCommands()
       vm.jumpBack()
@@ -6628,7 +6864,7 @@ suite "IsoNim Step List Panel — structure":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -6642,7 +6878,7 @@ suite "IsoNim Step List Panel — structure":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "step-list-lines-box") != nil
       check findByClassOrNil(panel, "step-lines") != nil
@@ -6655,7 +6891,7 @@ suite "IsoNim Step List Panel — structure":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       let rows = findAllByClass(panel, "step-line")
       check rows.len == 0
@@ -6674,7 +6910,7 @@ suite "IsoNim Step List Panel — ordering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         makeLineStep(2, "a.nim", 10, 100),
@@ -6698,7 +6934,7 @@ suite "IsoNim Step List Panel — ordering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      discard renderStepListPanel(r, vm)
+      discard renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         makeLineStep(0, "a.nim", 9, 99),
@@ -6741,7 +6977,7 @@ suite "IsoNim Step List Panel — ordering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
       vm.setLineSteps(@[makeLineStep(0, "a.nim", 9, 99)])
       check findAllByClass(panel, "step-line").len == 1
 
@@ -6763,7 +6999,7 @@ suite "IsoNim Step List Panel — row rendering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         StepLine(
@@ -6795,7 +7031,7 @@ suite "IsoNim Step List Panel — row rendering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       var line = makeLineStep(0, "a.nim", 9, 99)
       line.values = @[
@@ -6819,7 +7055,7 @@ suite "IsoNim Step List Panel — row rendering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         makeCallStep(0, "f(x, y)", @[
@@ -6844,7 +7080,7 @@ suite "IsoNim Step List Panel — row rendering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         makeReturnStep(0, "return 42", @[
@@ -6875,7 +7111,7 @@ suite "IsoNim Step List Panel — row rendering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[makeReturnStep(0, "return", @[])])
 
@@ -6890,7 +7126,7 @@ suite "IsoNim Step List Panel — row rendering":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         makeReturnStep(2, "return 1", @[]),
@@ -6921,7 +7157,7 @@ suite "IsoNim Step List Panel — active row":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       vm.setLineSteps(@[
         makeLineStep(-1, "a.nim", 9, 98),
@@ -6992,7 +7228,7 @@ suite "IsoNim Step List Panel — backend requests":
       let (store, mock) = makeStoreWithMock()
       let vm = createStepListVM(store)
 
-      vm.setPanelHeight(20)
+      vm.setViewport(Viewport(rows: 20))
       mock.clearReceivedCommands()
 
       vm.loadStepLinesFor(StepLineLocation(
@@ -7032,31 +7268,21 @@ suite "IsoNim Step List Panel — backend requests":
 
       dispose()
 
-  test "loadStepLinesFor falls back to default panel height when unset":
+  test "an unmeasured step list asks for nothing":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createStepListVM(store)
 
-      # Force the panelHeight signal to 0 so the legacy
-      # offset-not-yet-measured path engages.
-      vm.setPanelHeight(0)
+      # No view has reported a size: the fallback is the view binding's to
+      # apply (`ui/step_list.nim` reports `DEFAULT_STEP_LIST_PANEL_HEIGHT`
+      # when it cannot measure), so the ViewModel itself asks nothing
+      # (Viewport-Driven-Loading V2).
       mock.clearReceivedCommands()
-
       vm.loadStepLinesFor(StepLineLocation(
         path: "a.nim", line: 1, rrTicks: 1))
 
-      let req = mock.findCommand("ct/load-step-lines")
-      check req.isSome
-      let args = req.get.args
-
-      # The default is the conservative row capacity the VM exports, and it
-      # is asserted BY NAME. This used to read `.getInt > 0`, which any
-      # non-zero number satisfies — including a number that had nothing to do
-      # with the fallback. `DEFAULT_STEP_LIST_PANEL_HEIGHT` is exported
-      # precisely so the host and the VM cannot hold two different ideas of
-      # what "unmeasured" means, so that is what to compare against.
-      check args{"forwardCount"}.getInt == DEFAULT_STEP_LIST_PANEL_HEIGHT
-      check args{"backwardCount"}.getInt == DEFAULT_STEP_LIST_PANEL_HEIGHT
+      check mock.findCommand("ct/load-step-lines").isNone
+      check vm.currentLocation.val.path == "a.nim"
 
       dispose()
 
@@ -7088,7 +7314,7 @@ suite "IsoNim Step List Panel — interactions":
       let vm = createStepListVM(store)
       let r = MockRenderer()
 
-      let panel = renderStepListPanel(r, vm)
+      let panel = renderStepListPanel[MockRenderer, MockNode](r, vm)
 
       let target = StepLine(
         kind: slkLine,
@@ -7177,7 +7403,7 @@ suite "IsoNim Calltrace Editor Panel — structure":
       let vm = createCalltraceEditorVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltraceEditorPanel(r, vm)
+      let panel = renderCalltraceEditorPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -7201,7 +7427,7 @@ suite "IsoNim Calltrace Editor Panel — structure":
       let vm = createCalltraceEditorVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltraceEditorPanel(r, vm)
+      let panel = renderCalltraceEditorPanel[MockRenderer, MockNode](r, vm)
 
       # Match the legacy Karax ``method render`` which emitted an
       # empty container.  No headers, no buttons, no nested editors.
@@ -7215,7 +7441,7 @@ suite "IsoNim Calltrace Editor Panel — structure":
       let vm = createCalltraceEditorVM(store)
       let r = MockRenderer()
 
-      let panel = renderCalltraceEditorPanel(r, vm)
+      let panel = renderCalltraceEditorPanel[MockRenderer, MockNode](r, vm)
       let initialChildCount = panel.children.len
 
       # Touching the lifecycle signal must not introduce new DOM
@@ -7265,7 +7491,7 @@ suite "IsoNim Calltrace Editor Panel — lifecycle":
       let vm = createCalltraceEditorVM(store)
       let r = MockRenderer()
 
-      discard renderCalltraceEditorPanel(r, vm)
+      discard renderCalltraceEditorPanel[MockRenderer, MockNode](r, vm)
       vm.markMounted()
       vm.markUnmounted()
       vm.markMounted()
@@ -7325,7 +7551,7 @@ suite "IsoNim REPL Panel — structure":
       let vm = createReplVM(store)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -7342,7 +7568,7 @@ suite "IsoNim REPL Panel — structure":
       let vm = createReplVM(store)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check vm.displayMode.val == rdmReplDisabled
       let msg = findByClass(panel, "repl-disabled-msg")
@@ -7364,7 +7590,7 @@ suite "IsoNim REPL Panel — structure":
       vm.setLangName("noir")
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check vm.displayMode.val == rdmMaterializedDisabled
       let msg = findByClass(panel, "repl-disabled-msg")
@@ -7383,7 +7609,7 @@ suite "IsoNim REPL Panel — structure":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check vm.displayMode.val == rdmReplEnabled
       check findByClassOrNil(panel, "repl-disabled-msg") == nil
@@ -7423,7 +7649,7 @@ suite "IsoNim REPL Panel — display mode reactivity":
       let vm = createReplVM(store)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       # Initially disabled — no form, message visible.
       check findByTagOrNil(panel, "form") == nil
@@ -7445,7 +7671,7 @@ suite "IsoNim REPL Panel — display mode reactivity":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       check findByTagOrNil(panel, "form") != nil
 
@@ -7468,7 +7694,7 @@ suite "IsoNim REPL Panel — display mode reactivity":
       vm.setLangName("noir")
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       var msg = findByClass(panel, "repl-disabled-msg")
       check msg.children[0].text ==
@@ -7500,7 +7726,7 @@ suite "IsoNim REPL Panel — submit input":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       let formEl = findByTag(panel, "form")
       let inputEl = findByTag(panel, "input")
       check formEl != nil
@@ -7538,7 +7764,7 @@ suite "IsoNim REPL Panel — submit input":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       let formEl = findByTag(panel, "form")
 
       # Without setting the value the handler reads "" and short-
@@ -7558,7 +7784,7 @@ suite "IsoNim REPL Panel — submit input":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       vm.submitInput("p y")
 
@@ -7612,7 +7838,7 @@ suite "IsoNim REPL Panel — onDebugOutput":
       vm.setReplEnabled(true)
       let r = MockRenderer()
 
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       vm.submitInput("err")
 
       vm.onDebugOutput(ReplOutput(kind: rokError, output: "boom"))
@@ -7665,7 +7891,7 @@ suite "IsoNim REPL Panel — bounded history":
       vm.setHistory(entries)
 
       let r = MockRenderer()
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       let inputRows = findAllByClass(panel, "repl-input-history")
       let outputRows = findAllByClass(panel, "repl-output-history")
@@ -7696,7 +7922,7 @@ suite "IsoNim REPL Panel — bounded history":
       ])
 
       let r = MockRenderer()
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
 
       let inputRows = findAllByClass(panel, "repl-input-history")
       check inputRows.len == 2
@@ -7722,7 +7948,7 @@ suite "IsoNim REPL Panel — bounded history":
           output: ReplOutput(kind: rokResult, output: "1")),
       ])
       let r = MockRenderer()
-      let panel = renderReplPanel(r, vm)
+      let panel = renderReplPanel[MockRenderer, MockNode](r, vm)
       check findAllByClass(panel, "repl-input-history").len == 1
 
       vm.clearHistory()
@@ -7783,6 +8009,13 @@ suite "IsoNim REPL Panel — vm":
 
 const LowLevelCodePanelClass = "low-level-code"
 
+proc instructionRowsOf(list: MockNode): seq[MockNode] =
+  ## The listing's instruction rows, without the source-line rows that head
+  ## each group (HSF-D3).
+  for c in list.children:
+    if "low-level-code-source-line" notin c.attributes.getOrDefault("class", ""):
+      result.add c
+
 proc makeInstr(name: string; offset: int = 0; args: string = "";
                 other: string = ""; highLevelPath: string = "";
                 highLevelLine: int = 0): LowLevelInstruction =
@@ -7809,7 +8042,7 @@ suite "IsoNim Low Level Code Panel — structure":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       check "component-container" in panel.attributes["class"]
       check LowLevelCodePanelClass in panel.attributes["class"]
@@ -7829,7 +8062,7 @@ suite "IsoNim Low Level Code Panel — structure":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       let listContainer = findByClass(panel, "low-level-code-instructions")
       check listContainer != nil
@@ -7854,7 +8087,7 @@ suite "IsoNim Low Level Code Panel — structure":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       let headerContainer = findByClass(panel, "low-level-code-header")
       check headerContainer != nil
@@ -7880,7 +8113,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       let listContainer = findByClass(panel, "low-level-code-instructions")
       check listContainer.children.len == 0
 
@@ -7900,7 +8133,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("mov", offset = 4, args = "rax, 1", other = "; init"),
       ])
@@ -7920,7 +8153,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("", offset = 0),
       ])
@@ -7938,7 +8171,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
 
       vm.setInstructions(@[
         makeInstr("acir", offset = 7),
@@ -7959,7 +8192,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("call", offset = 0, highLevelPath = "src/main.nim",
                    highLevelLine = 12),
@@ -7967,8 +8200,9 @@ suite "IsoNim Low Level Code Panel — instruction list":
       ])
 
       let listContainer = findByClass(panel, "low-level-code-instructions")
-      let firstRow = listContainer.children[0]
-      let secondRow = listContainer.children[1]
+      let rows = instructionRowsOf(listContainer)
+      let firstRow = rows[0]
+      let secondRow = rows[1]
       check findByClass(firstRow, "low-level-code-instruction-source")
         .textContent == "src/main.nim:12"
       check findByClassOrNil(secondRow, "low-level-code-instruction-source") == nil
@@ -7981,7 +8215,7 @@ suite "IsoNim Low Level Code Panel — instruction list":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
       vm.setActiveOffset(0)
 
@@ -8006,7 +8240,7 @@ suite "IsoNim Low Level Code Panel — active row":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("mov", offset = 0),
         makeInstr("add", offset = 1),
@@ -8034,7 +8268,7 @@ suite "IsoNim Low Level Code Panel — active row":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[ makeInstr("nop", offset = 0) ])
 
       vm.setActiveOffset(0)
@@ -8066,7 +8300,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       check findByClassOrNil(panel, "low-level-code-address") == nil
 
       vm.setAddress(0x1000)
@@ -8082,7 +8316,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setAddress(0xABCD)
       check findByClassOrNil(panel, "low-level-code-address") != nil
 
@@ -8097,7 +8331,7 @@ suite "IsoNim Low Level Code Panel — overlays":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       check findByClassOrNil(panel, "low-level-code-error") == nil
 
       vm.setErrorMessage("function not found")
@@ -8156,7 +8390,7 @@ suite "IsoNim Low Level Code Panel — interactions":
       let vm = createLowLevelCodeVM(store)
       let r = MockRenderer()
 
-      let panel = renderLowLevelCodePanel(r, vm)
+      let panel = renderLowLevelCodePanel[MockRenderer, MockNode](r, vm)
       vm.setInstructions(@[
         makeInstr("mov", offset = 0, highLevelPath = "src/a.nim",
                    highLevelLine = 3),
@@ -8166,7 +8400,7 @@ suite "IsoNim Low Level Code Panel — interactions":
 
       mock.clearReceivedCommands()
       let listContainer = findByClass(panel, "low-level-code-instructions")
-      listContainer.children[1].fireEvent("click")
+      instructionRowsOf(listContainer)[1].fireEvent("click")
 
       check mock.receivedCommands.len == 1
       let sent = mock.receivedCommands[0]
@@ -8292,7 +8526,7 @@ suite "IsoNim Request Panel — structure":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       check "component-container" in panel.attributes["class"]
       check RequestPanelClass in panel.attributes["class"]
@@ -8312,7 +8546,7 @@ suite "IsoNim Request Panel — structure":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "request-panel-filters") != nil
       check findByClassOrNil(panel, "request-table-header") != nil
@@ -8334,7 +8568,7 @@ suite "IsoNim Request Panel — row rendering":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "request-table-body")
       check body.children.len == 0
 
@@ -8351,7 +8585,7 @@ suite "IsoNim Request Panel — row rendering":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("POST", "/api/x", 201, 1500, 2048, 1)
 
       let body = findByClass(panel, "request-table-body")
@@ -8389,7 +8623,7 @@ suite "IsoNim Request Panel — row rendering":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/ok", 200, 0, 0, 0)
       vm.addRequest("GET", "/redirect", 301, 0, 0, 0)
       vm.addRequest("GET", "/missing", 404, 0, 0, 0)
@@ -8415,7 +8649,7 @@ suite "IsoNim Request Panel — selection":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
       vm.addRequest("GET", "/c", 200, 0, 0, 0)
@@ -8441,7 +8675,7 @@ suite "IsoNim Request Panel — selection":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
 
       vm.selectRequest(0)
@@ -8459,7 +8693,7 @@ suite "IsoNim Request Panel — selection":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
 
@@ -8483,7 +8717,7 @@ suite "IsoNim Request Panel — filters":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("POST", "/b", 200, 0, 0, 0)
       vm.addRequest("GET", "/c", 200, 0, 0, 0)
@@ -8509,7 +8743,7 @@ suite "IsoNim Request Panel — filters":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/ok", 200, 0, 0, 0)
       vm.addRequest("GET", "/missing", 404, 0, 0, 0)
       vm.addRequest("GET", "/boom", 500, 0, 0, 0)
@@ -8535,7 +8769,7 @@ suite "IsoNim Request Panel — filters":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/api/Users", 200, 0, 0, 0)
       vm.addRequest("GET", "/api/items", 200, 0, 0, 0)
 
@@ -8590,7 +8824,7 @@ suite "IsoNim Request Panel — clearRequests":
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 0)
       vm.addRequest("GET", "/b", 200, 0, 0, 0)
       vm.selectRequest(0)
@@ -8629,13 +8863,38 @@ suite "IsoNim Request Panel — clearRequests":
 
 suite "IsoNim Request Panel — interactions":
 
+  test "double-click refuses an unavailable handler and explains why":
+    createRoot proc(dispose: proc()) =
+      let (store, mock) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
+      vm.setRequests(@[parseRequestRecord(%*{
+        "id": 1, "httpMethod": "GET", "url": "/excluded",
+        "startGeid": 10,
+        "seekUnavailableReason": "Handler source steps were not recorded."
+      })])
+      mock.clearReceivedCommands()
+      findByClass(panel, "request-table-body").children[0].fireEvent("dblclick")
+      check mock.findCommand("ct/seek-to-geid").isNone
+      let explanation = findByClassOrNil(panel, "request-navigation-status")
+      require explanation != nil
+      check explanation.textContent == "Handler source steps were not recorded."
+      check explanation.attributes["role"] == "status"
+      # A later valid gesture clears feedback about the previous request.
+      vm.addRequest("GET", "/available", 200, 0, 0, 20)
+      findByClass(panel, "request-table-body").children[1].fireEvent("dblclick")
+      check explanation.textContent == ""
+      check mock.findCommand("ct/seek-to-geid").isSome
+      dispose()
+
   test "double-clicking a row dispatches ct/seek-to-geid with startGeid":
     createRoot proc(dispose: proc()) =
       let (store, mock) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
 
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
       vm.addRequest("GET", "/a", 200, 0, 0, 12345)
       vm.addRequest("POST", "/b", 200, 0, 0, 67890)
 
@@ -8741,7 +9000,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       check vm.selectedIndex.val == NO_SELECTED_INDEX
       let host = findByClass(panel, "request-detail-host")
@@ -8755,7 +9014,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
       vm.selectRequest(0)
@@ -8769,7 +9028,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("DELETE", "/api/users/42", 500, 42, 204800, 1)
       vm.selectRequest(0)
@@ -8796,7 +9055,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, mock) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/health", 200, 5, 64, 9999)
       vm.selectRequest(0)
@@ -8816,7 +9075,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/x", 200, 10, 100, 1)
       vm.selectRequest(0)
@@ -8840,7 +9099,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("POST", "/api/jobs", 201, 65, 512, 1)
       vm.selectRequest(0)
@@ -8862,7 +9121,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/x", 200, 0, 0, 1)
       vm.selectRequest(0)
@@ -8878,7 +9137,7 @@ suite "IsoNim Request Panel — detail panel":
       let (store, _) = makeStoreWithMock()
       let vm = createRequestPanelVM(store)
       let r = MockRenderer()
-      let panel = renderRequestPanel(r, vm)
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
 
       vm.addRequest("GET", "/api/users", 200, 10, 100, 1)
       vm.addRequest("DELETE", "/api/items/1", 404, 20, 50, 2)
@@ -8930,7 +9189,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
 
       check "component-container" in panel.attributes["class"]
       check "traceLog" in panel.attributes["class"]
@@ -8950,7 +9209,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
 
       check findByClassOrNil(panel, "trace-log-table-header") != nil
       let body = findByClass(panel, "trace-log-table-body")
@@ -8965,7 +9224,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let header = findByClass(panel, "trace-log-table-header")
       let cols = findAllByClass(header, "trace-col-rr-ticks")
       let locCols = findAllByClass(header, "trace-col-location")
@@ -8988,7 +9247,7 @@ suite "IsoNim Trace Log Panel — structure":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let placeholder = findByClass(panel, "trace-log-empty")
       check placeholder != nil
       check placeholder.textContent == EmptyStateText
@@ -9008,7 +9267,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let body = findByClass(panel, "trace-log-table-body")
       check body.children.len == 0
 
@@ -9025,7 +9284,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(150, path = "src/sub/foo.nim",
                                  line = 42, functionName = "myFn",
                                  locals = "a=1 b=hello"))
@@ -9064,7 +9323,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(500, minRRTicks = 0, maxRRTicks = 1000))
 
       let body = findByClass(panel, "trace-log-table-body")
@@ -9082,7 +9341,7 @@ suite "IsoNim Trace Log Panel — row rendering":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       let placeholder = findByClass(panel, "trace-log-empty")
       check "hidden" notin placeholder.attributes["class"]
 
@@ -9106,7 +9365,7 @@ suite "IsoNim Trace Log Panel — selection":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
       vm.addEntry(makeTraceEntry(200))
       vm.addEntry(makeTraceEntry(300))
@@ -9132,7 +9391,7 @@ suite "IsoNim Trace Log Panel — selection":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
 
       vm.selectEntry(0)
@@ -9170,7 +9429,7 @@ suite "IsoNim Trace Log Panel — clearEntries":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
       vm.addEntry(makeTraceEntry(200))
       vm.selectEntry(1)
@@ -9216,7 +9475,7 @@ suite "IsoNim Trace Log Panel — interactions":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100, eventId = 11))
       vm.addEntry(makeTraceEntry(200, eventId = 22, line = 99,
                                  path = "src/main.nim"))
@@ -9240,7 +9499,7 @@ suite "IsoNim Trace Log Panel — interactions":
       let vm = createTraceLogVM(store)
       let r = MockRenderer()
 
-      let panel = renderTraceLogPanel(r, vm)
+      let panel = renderTraceLogPanel[MockRenderer, MockNode](r, vm)
       vm.addEntry(makeTraceEntry(100))
       vm.addEntry(makeTraceEntry(200))
 
@@ -9391,7 +9650,7 @@ suite "IsoNim Filesystem Panel — structure":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -9413,7 +9672,7 @@ suite "IsoNim Filesystem Panel — structure":
       vm.loadingState.val = lsIdle
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
 
       let tree = findByClass(panel, "filesystem-tree")
       check tree != nil
@@ -9432,7 +9691,7 @@ suite "IsoNim Filesystem Panel — structure":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
 
       let diff = findByClass(panel, "diff-files-list")
       check diff != nil
@@ -9456,7 +9715,7 @@ suite "IsoNim Filesystem Panel — loading state":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       let loadingOverlay = findByClass(panel, "filesystem-loading-overlay")
       let emptyOverlay = findByClass(panel, "filesystem-empty-overlay")
       let filesystemDiv = findByClass(panel, "filesystem")
@@ -9497,7 +9756,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       let tree = findByClass(panel, "filesystem-tree")
       check tree.children.len == 0
 
@@ -9509,75 +9768,74 @@ suite "IsoNim Filesystem Panel — tree rendering":
 
       dispose()
 
-  test "file rows carry filesystem-entry + file class":
+  test "file rows are jstree leaf nodes":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[makeFsEntry("foo.nim")]))
 
-      let row = findByClass(panel, "filesystem-entry")
+      let row = findByClass(panel, "jstree-node")
       check row != nil
-      check "file" in row.attributes["class"]
-      check "folder" notin row.attributes["class"]
+      check "jstree-leaf" in row.attributes["class"]
+      check "jstree-closed" notin row.attributes["class"]
 
-      let label = findByClass(row, "filesystem-entry-label")
+      let label = findByClass(row, "jstree-anchor")
       check label != nil
       check label.textContent == "foo.nim"
 
       dispose()
 
-  test "folder rows carry folder class + a twisty glyph":
+  test "folder rows are closed jstree nodes until expanded":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("src", path = "src", isFolder = true,
                     children = @[makeFsEntry("inner.nim",
                                              path = "src/inner.nim")]),
       ]))
 
-      let row = findByClass(panel, "filesystem-entry")
-      check "folder" in row.attributes["class"]
-      # Collapsed by default — twisty is the closed glyph.
-      let twisty = findByClass(row, "filesystem-entry-twisty")
-      check twisty.textContent == ">"
+      let row = findByClass(panel, "jstree-node")
+      # Collapsed by default: a closed node, with no children built.
+      check "jstree-closed" in row.attributes["class"]
+      check row.attributes.getOrDefault("aria-expanded") == "false"
+      check findAllByClass(row, "jstree-children").len == 0
 
       dispose()
 
-  test "expandPath shows children + toggles the twisty":
+  test "expandPath shows children and opens the node":
     createRoot proc(dispose: proc()) =
       let (store, _) = makeStoreWithMock()
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("src", path = "src", isFolder = true,
                     children = @[makeFsEntry("inner.nim",
                                              path = "src/inner.nim")]),
       ]))
 
-      # Folder collapsed: children container is empty.
-      var children = findByClass(panel, "filesystem-entry-children")
-      check children.children.len == 0
+      # Folder collapsed: only the folder's own label.
+      check findAllByClass(panel, "jstree-anchor").len == 1
 
       vm.expandPath("src")
 
       # After expansion the inner row materialises.
-      let labels = findAllByClass(panel, "filesystem-entry-label")
+      let labels = findAllByClass(panel, "jstree-anchor")
       check labels.len == 2
       check labels[1].textContent == "inner.nim"
 
-      # The twisty flips to open.
-      let folderRow = findByClass(panel, "filesystem-entry")
-      let twisty = findByClass(folderRow, "filesystem-entry-twisty")
-      check twisty.textContent == "v"
+      # The node is open.
+      let folderRow = findByClass(panel, "jstree-node")
+      check "jstree-open" in folderRow.attributes["class"]
+      check folderRow.attributes.getOrDefault("aria-expanded") == "true"
 
       dispose()
 
@@ -9587,20 +9845,21 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("src", path = "src", isFolder = true,
                     children = @[makeFsEntry("inner.nim",
                                              path = "src/inner.nim")]),
       ]))
 
-      let row = findByClass(panel, "filesystem-entry")
+      let row = findByClass(panel, "jstree-anchor")
       check not vm.isExpanded("src")
 
       row.fireEvent("click")
       check vm.isExpanded("src")
 
-      row.fireEvent("click")
+      # The tree is rebuilt on the change: click the new anchor.
+      findByClass(panel, "jstree-anchor").fireEvent("click")
       check not vm.isExpanded("src")
 
       dispose()
@@ -9613,13 +9872,12 @@ suite "IsoNim Filesystem Panel — tree rendering":
       var openedPath = ""
       vm.onOpenFile = proc(path: string) = openedPath = path
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("foo.nim", path = "/trace/files/foo.nim"),
       ]))
 
-      let row = findByClass(panel, "filesystem-entry")
-      row.fireEvent("click")
+      findByClass(panel, "jstree-anchor").fireEvent("click")
       check openedPath == "/trace/files/foo.nim"
 
       dispose()
@@ -9632,7 +9890,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       var openedPaths: seq[string] = @[]
       vm.onOpenFile = proc(path: string) = openedPaths.add(path)
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setDiffEntries(@[
         FilesystemDiffEntry(path: "/trace/files/changed.nim", zebra: false),
       ])
@@ -9649,14 +9907,14 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("added.nim", diffClass = fdcAdded),
         makeFsEntry("changed.nim", diffClass = fdcChanged),
         makeFsEntry("deleted.nim", diffClass = fdcDeleted),
       ]))
 
-      let rows = findAllByClass(panel, "filesystem-entry")
+      let rows = findAllByClass(panel, "jstree-node")
       check rows.len == 3
       check "diff-file-added" in rows[0].attributes["class"]
       check "diff-file-changed" in rows[1].attributes["class"]
@@ -9670,7 +9928,7 @@ suite "IsoNim Filesystem Panel — tree rendering":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       let overlay = findByClass(panel, "filesystem-empty-overlay")
       check "hidden" in overlay.attributes["class"]
 
@@ -9700,7 +9958,7 @@ suite "IsoNim Filesystem Panel — diff + deep-review":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setDiffEntries([
         FilesystemDiffEntry(path: "src/a.nim", zebra: false),
         FilesystemDiffEntry(path: "src/b.nim", zebra: true),
@@ -9866,7 +10124,7 @@ suite "IsoNim Filesystem Panel — vm":
       let vm = createFilesystemVM(store)
       let r = MockRenderer()
 
-      let panel = renderFilesystemPanel(r, vm)
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
       vm.setRoot(makeFsRoot(@[
         makeFsEntry("proj", path = "/proj", isFolder = true, children = @[
           makeFsEntry("src", path = "/proj/src", isFolder = true, children = @[
@@ -9884,7 +10142,7 @@ suite "IsoNim Filesystem Panel — vm":
       ]))
 
       proc labelTexts(): seq[string] =
-        for node in findAllByClass(panel, "filesystem-entry-label"):
+        for node in findAllByClass(panel, "jstree-anchor"):
           result.add(node.textContent)
 
       # Everything below the top level is collapsed, so the file is absent.
@@ -9959,7 +10217,7 @@ suite "IsoNim Command Palette Panel — structure":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -9987,7 +10245,7 @@ suite "IsoNim Command Palette Panel — structure":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
 
       let surface = findByClass(panel, "command-view")
       check surface != nil
@@ -10023,7 +10281,7 @@ suite "IsoNim Command Palette Panel — structure":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       check "hidden" in panel.attributes["class"]
 
       vm.open()
@@ -10046,7 +10304,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       let results = findByClass(panel, "command-results")
       check results.children.len == 0
 
@@ -10065,7 +10323,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("alpha"),
         makeCpEntry("beta"),
@@ -10084,7 +10342,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("cmd", kind = cprkCommand),
         makeCpEntry("file.nim", kind = cprkFile),
@@ -10111,7 +10369,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("a"),
         makeCpEntry("b"),
@@ -10139,7 +10397,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("a"),
         makeCpEntry("b"),
@@ -10162,7 +10420,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("Foo", kind = cprkSymbol, symbolKind = "function"),
         makeCpEntry("plain"),
@@ -10182,7 +10440,7 @@ suite "IsoNim Command Palette Panel — row rendering":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("ok"),
         makeCpEntry("warn", level = cpnlWarning),
@@ -10214,7 +10472,7 @@ suite "IsoNim Command Palette Panel — interactions":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("alpha"),
         makeCpEntry("beta"),
@@ -10240,7 +10498,7 @@ suite "IsoNim Command Palette Panel — interactions":
       var ranIndex = -1
       vm.onResultRun = proc(index: int) = ranIndex = index
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       vm.setResults([
         makeCpEntry("alpha"),
         makeCpEntry("beta"),
@@ -10259,7 +10517,7 @@ suite "IsoNim Command Palette Panel — interactions":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       let empty = findByClass(panel, "command-empty-overlay")
       check "hidden" in empty.attributes["class"]
 
@@ -10279,7 +10537,7 @@ suite "IsoNim Command Palette Panel — interactions":
       let vm = createCommandPaletteVM(store)
       let r = MockRenderer()
 
-      let panel = renderCommandPalettePanel(r, vm)
+      let panel = renderCommandPalettePanel[MockRenderer, MockNode](r, vm)
       let placeholder = findByClass(panel, "command-input-placeholder")
       check placeholder.textContent == ""
 
@@ -10461,7 +10719,7 @@ suite "IsoNim Agent Activity Panel — no DeepReview roll-up (AA-1)":
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
 
-      let panel = renderAgentActivityPanel(r, vm, componentId = 71)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 71)
 
       check findByClassOrNil(panel, "agent-ha-deepreview-host") == nil
       for cls in ["activity-dr-container", "activity-dr-header",
@@ -10530,7 +10788,7 @@ suite "IsoNim Welcome Screen — structure":
         makeWelcomeOption("Record new trace"),
       ])
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
 
       check panel.kind == mnkElement
       check panel.tag == "div"
@@ -10559,7 +10817,7 @@ suite "IsoNim Welcome Screen — structure":
       let vm = createWelcomeScreenVM(store)
       let r = MockRenderer()
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       check findByClassOrNil(panel, "welcome-screen-loading-overlay") == nil
 
       vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000007")
@@ -10579,7 +10837,7 @@ suite "IsoNim Welcome Screen — structure":
       let vm = createWelcomeScreenVM(store)
       let r = MockRenderer()
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       check findByClassOrNil(panel, "welcome-screen") != nil
 
       vm.showNewRecord()
@@ -10612,7 +10870,7 @@ suite "IsoNim Welcome Screen — welcome mode":
                          date = "2026/05/02 12:00:00"),
       ])
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       let trace = findByClass(panel, "recent-trace")
       check trace != nil
 
@@ -10635,7 +10893,7 @@ suite "IsoNim Welcome Screen — welcome mode":
 
       vm.setRecentTraces(@[makeWelcomeTrace(7, "/bin/ruby", @["app.rb"])])
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       let trace = findByClass(panel, "recent-trace")
       var tooltip = findByClass(panel, "recent-trace-tooltip")
       check "visible" notin tooltip.attributes["class"]
@@ -10662,7 +10920,7 @@ suite "IsoNim Welcome Screen — welcome mode":
       let r = MockRenderer()
 
       vm.beginLoadingTrace("01949fcc-7d92-7e9c-aaaa-000000000088")
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
 
       let overlay = findByClass(panel, "welcome-screen-loading-overlay")
       check overlay != nil
@@ -10685,7 +10943,7 @@ suite "IsoNim Welcome Screen — welcome mode":
         makeWelcomeOption("Open online trace", inactive = true),
       ])
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
 
       let folderName = findByClass(panel, "recent-folder-name")
       check folderName != nil
@@ -10703,7 +10961,7 @@ suite "IsoNim Welcome Screen — welcome mode":
       let vm = createWelcomeScreenVM(store)
       let r = MockRenderer()
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       # THE FIRST-TIME BRANCH IS STILL THE SUBJECT, and the assertion had to
       # change subject because the thing it named is gone. It checked for
       # "Welcome to CodeTracer!" — a second welcome, in the empty panel, under
@@ -10744,7 +11002,7 @@ suite "IsoNim Welcome Screen — welcome mode":
         onStartOptionClick: proc(key: string) = clickedOptions.add(key)
       )
 
-      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm, callbacks)
       findByClass(panel, "recent-trace").fireEvent("click")
       findByClass(panel, "recent-folder").fireEvent("click")
       let options = findAllByClass(panel, "start-option")
@@ -10789,7 +11047,7 @@ suite "IsoNim Welcome Screen — forms":
         onToggleDefaultOutputFolder: proc() = inc toggled
       )
 
-      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm, callbacks)
       let inputs = findAllByTag(panel, "input")
       check inputs.len >= 5
 
@@ -10832,7 +11090,7 @@ suite "IsoNim Welcome Screen — forms":
           vm.showWelcome()
       )
 
-      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm, callbacks)
       let input = findByTag(panel, "input")
       r.setAttribute(input, "value", "abc123")
       input.fireEvent("input")
@@ -10889,7 +11147,7 @@ suite "IsoNim Welcome Screen — refused start options (#734)":
       vm.setStartOptions(webWelcomeStartOptions())
       vm.setStartOptionsNote(WebStartOptionsNote)
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       let options = findAllByClass(panel, "start-option")
       check options.len == 6
       # Row 0 is "New file" (issue #735), the one option this arm can perform,
@@ -10916,7 +11174,7 @@ suite "IsoNim Welcome Screen — refused start options (#734)":
       vm.setStartOptions(desktopWelcomeStartOptions(showTraceSharing = true))
       vm.setStartOptionsNote("")
 
-      let panel = renderWelcomeScreenPanel(r, vm)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm)
       let options = findAllByClass(panel, "start-option")
       check options.len == 6
       # Five live, one refused (the shell), and only the refused one speaks.
@@ -10947,7 +11205,7 @@ suite "IsoNim Welcome Screen — refused start options (#734)":
       var clicked: seq[string] = @[]
       let callbacks = WelcomeScreenCallbacks(
         onStartOptionClick: proc(key: string) = clicked.add(key))
-      let panel = renderWelcomeScreenPanel(r, vm, callbacks)
+      let panel = renderWelcomeScreenPanel[MockRenderer, MockNode](r, vm, callbacks)
       for opt in findAllByClass(panel, "start-option"):
         opt.fireEvent("click")
       check clicked == @["new-file"]
@@ -10985,7 +11243,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
 
-      let panel = renderAgentActivityPanel(r, vm, componentId = 7)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 7)
 
       check panel.kind == mnkElement
       check panel.attributes["class"] == AgentActivityContainerClass
@@ -11003,7 +11261,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentActivityVM(store)
       let r = MockRenderer()
-      let panel = renderAgentActivityPanel(r, vm, componentId = 4)
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 4)
 
       vm.setMessages(@[
         makeAgentActivityMessage("u1", "hello", role = aamrUser),
@@ -11029,7 +11287,7 @@ suite "IsoNim Agent Activity Panel — structure":
       var openedTargets: seq[string] = @[]
       let callbacks = AgentActivityCallbacks(
         onOpenFileDiff: proc(target: string) = openedTargets.add(target))
-      let panel = renderAgentActivityPanel(r, vm, componentId = 3,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 3,
                                           callbacks = callbacks)
 
       vm.setMessages(@[
@@ -11067,7 +11325,7 @@ suite "IsoNim Agent Activity Panel — structure":
         onSubmitPrompt: proc() = (inc submitted),
         onStopPrompt: proc() = (inc stopped),
       )
-      let panel = renderAgentActivityPanel(r, vm, componentId = 5,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 5,
                                            callbacks = callbacks)
 
       findByClass(panel, "agent-start-button").fireEvent("click")
@@ -11088,7 +11346,7 @@ suite "IsoNim Agent Activity Panel — structure":
       let callbacks = AgentActivityCallbacks(
         onInputChange: proc(value: string) = (changed = value),
       )
-      let panel = renderAgentActivityPanel(r, vm, componentId = 6,
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 6,
                                            callbacks = callbacks)
       let input = findByTag(panel, "textarea")
 
@@ -11134,7 +11392,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let vm = createAgentWorkspaceVM(store)
       let r = MockRenderer()
 
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 8)
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 8)
 
       check panel.kind == mnkElement
       check panel.attributes["class"] == AgentWorkspaceContainerClass
@@ -11150,7 +11408,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentWorkspaceVM(store)
       let r = MockRenderer()
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 9)
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 9)
 
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
       vm.setSummary(AgentWorkspaceSummary(
@@ -11185,7 +11443,7 @@ suite "IsoNim Agent Workspace Panel — structure":
       let (store, _) = makeStoreWithMock()
       let vm = createAgentWorkspaceVM(store)
       let r = MockRenderer()
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 10)
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 10)
 
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
       vm.setFiles(@[
@@ -11219,7 +11477,7 @@ suite "IsoNim Agent Workspace Panel — interactions":
       let callbacks = AgentWorkspaceCallbacks(
         onSelectFile: proc(index: int) = (selected = index),
       )
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 11,
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 11,
                                             callbacks = callbacks)
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
       vm.setFiles(@[
@@ -11246,7 +11504,7 @@ suite "IsoNim Agent Workspace Panel — interactions":
         onToggleOverlay: proc() = (inc overlayToggles),
         onToggleView: proc() = (inc viewToggles),
       )
-      let panel = renderAgentWorkspacePanel(r, vm, componentId = 12,
+      let panel = renderAgentWorkspacePanel[MockRenderer, MockNode](r, vm, componentId = 12,
                                             callbacks = callbacks)
       vm.setWorkspaceMetadata("/tmp/agent", "session-1")
 
@@ -11320,7 +11578,7 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(false, "Not a git repository")
 
@@ -11336,19 +11594,21 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      var expandedCommit = -1
-      var expandModifiers = (false, false)
-      var selectedFile = ""
+      var openedCommit = (-1, "")
+      var toggled = (-1, false, false)
+      var selectedFile = ("", "")
       var openedDiff = ""
       let callbacks = VCSCallbacks(
+        onOpenCommit: proc(index: int; target: string) =
+          openedCommit = (index, target),
         onToggleCommitExpand: proc(index: int; ctrl, shift: bool) =
-          (expandedCommit = index; expandModifiers = (ctrl, shift)),
+          toggled = (index, ctrl, shift),
         onSelectFile: proc(index: int; path, target, status: string) =
-          (discard index; discard target; selectedFile = path),
+          (discard index; selectedFile = (path, target)),
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11371,18 +11631,20 @@ suite "IsoNim VCS Panel — structure":
       check fileName != nil
       check fileName.textContent == "main.nim"
 
+      # VCS-Panel.md, "Commit History" (the owner's 2026-10-23 decision on
+      # #753): the commit row opens the commit's whole-commit diff, the expand
+      # control only expands, a file under the commit targets that document
+      # with its path (the host scrolls to it), and the file's own button
+      # opens that one file. No separate commit-diff button is left.
       findByClass(panel, "vcs-commit-header").fireEvent("click")
+      findByClass(panel, "vcs-commit-toggle").fireEvent("click")
       findByClass(panel, "vcs-accordion-file").fireEvent("click")
-      # The commit's diffs are opened per file, from the expanded accordion —
-      # not from the commit row.  #753 removed the commit-level button because
-      # the only target it could mint was the pathless `commit:<hash>`, which
-      # DeepReview-GUI.md §4.1 forbids a diff tab from showing.
       check findByClassOrNil(panel, "vcs-commit-diff-btn") == nil
       findByClass(panel, "vcs-file-diff-btn").fireEvent("click")
 
-      check expandedCommit == 0
-      check expandModifiers == (false, false)
-      check selectedFile == "src/main.nim"
+      check openedCommit == (0, "commit:abc123")
+      check toggled == (0, true, false)
+      check selectedFile == ("src/main.nim", "commit:abc123")
       check openedDiff == "commit:abc123:src/main.nim"
 
       dispose()
@@ -11396,7 +11658,7 @@ suite "IsoNim VCS Panel — structure":
         onCheckoutBranch: proc(branch: string) =
           checkedOutBranch = branch
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11430,7 +11692,7 @@ suite "IsoNim VCS Panel — structure":
         onSelectFile: proc(index: int; path, target, status: string) =
           (discard path; discard target; selected = index),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setDeepReviewMode(true)
       vm.setHeader("Review session")
@@ -11464,7 +11726,7 @@ suite "IsoNim VCS Panel — structure":
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
-      let panel = renderVCSPanel(r, vm)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11485,7 +11747,7 @@ suite "IsoNim VCS Panel — structure":
     ## replaced the VCS panel's contents.  The toggle selects what a file click
     ## *does*; the commit history must survive it.
     ##
-    ## `renderDiffToggle` was dead code — `renderVCSPanelImpl` never called it
+    ## `renderDiffToggle` was dead code — `renderVCSPanel` never called it
     ## — and `onToggleUnifiedDiff` was a `discard`, so neither the switch nor
     ## its effect existed.
     createRoot proc(dispose: proc()) =
@@ -11499,7 +11761,7 @@ suite "IsoNim VCS Panel — structure":
             if vm.viewMode.val == vmUnifiedDiff: vmOpenFile
             else: vmUnifiedDiff),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setHeader("main")
@@ -11550,7 +11812,7 @@ suite "IsoNim VCS Panel — structure":
         onOpenFileDiff: proc(target: string) =
           openedDiff = target,
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       # --- normal git mode: accordion rows under an expanded commit ---------
       vm.setGitRepoState(true)
@@ -11591,9 +11853,11 @@ suite "IsoNim VCS Panel — structure":
       dispose()
 
   test "test_vcs_row_click_carries_its_diff_target":
-    ## The row click reports the same target as the row's button, so the host
-    ## can honour the unified-diff view mode without having to re-derive which
-    ## commit an accordion row belonged to.
+    ## The row click reports what it opens in unified-diff mode, so the host
+    ## does not re-derive which commit an accordion row belonged to: the
+    ## commit's whole-commit document, scrolled to the row's path
+    ## (VCS-Panel.md, "Changed Files" — the owner's 2026-10-23 decision on
+    ## #753). The row's own button still opens the one file.
     createRoot proc(dispose: proc()) =
       let vm = createVCSVM()
       let r = MockRenderer()
@@ -11603,7 +11867,7 @@ suite "IsoNim VCS Panel — structure":
         onSelectFile: proc(index: int; path, target, status: string) =
           (discard index; rowPath = path; rowTarget = target),
       )
-      let panel = renderVCSPanel(r, vm, callbacks)
+      let panel = renderVCSPanel[MockRenderer, MockNode](r, vm, callbacks)
 
       vm.setGitRepoState(true)
       vm.setCommits(@[
@@ -11618,7 +11882,7 @@ suite "IsoNim VCS Panel — structure":
       if row != nil:
         row.fireEvent("click")
         check rowPath == "src/main.nim"
-        check rowTarget == "commit:abc123:src/main.nim"
+        check rowTarget == "commit:abc123"
 
       dispose()
 
@@ -11647,7 +11911,7 @@ suite "IsoNim VCS Panel — structure":
       # rather than being written into the Monaco model, where it would render
       # as a line of code with a line number beside it.  `.empty-overlay` is
       # what earns it the shared empty-state treatment.
-      let emptyPanel = isonim_unified_diff_view.renderUnifiedDiffTab(
+      let emptyPanel = isonim_unified_diff_view.renderUnifiedDiffTab[MockRenderer, MockNode](
         r, vm, "unifiedDiffEditor-empty", callbacks)
       let emptyNode = findByClass(emptyPanel, "unified-diff-empty")
       check emptyNode != nil
@@ -11658,7 +11922,7 @@ suite "IsoNim VCS Panel — structure":
         findByClass(emptyPanel, "unified-diff-editor").attributes["class"]
 
       vm.setUnifiedDiff(true, @[makeVcsDiffFile()])
-      let panel = isonim_unified_diff_view.renderUnifiedDiffTab(
+      let panel = isonim_unified_diff_view.renderUnifiedDiffTab[MockRenderer, MockNode](
         r, vm, "unifiedDiffEditor-7", callbacks)
 
       # Once there are files the message steps aside and the editor is shown.
@@ -11770,3 +12034,185 @@ suite "IsoNim App Shell — structure":
   # Real coverage is in
   # `src/tests/gui/tests/editor/editor_decorations_test.nim` (the retention
   # rule) and `src/tests/gui/tests/flow/flow_branch_colors.spec.ts` (end to end).
+
+# ---------------------------------------------------------------------------
+# Handlers built in a loop act on their own item (codetracer#860 sweep)
+# ---------------------------------------------------------------------------
+#
+# The call-trace search results all jumped to the last match because each
+# row's handler, built in a `for` loop, closed over a loop-body `let` — one
+# variable for the whole loop under Nim's by-reference closure capture. The
+# same shape turned up in the views below, and each case here clicks
+# an item that is NOT the last one: with a shared capture it acts on the last
+# item instead. (The pre-existing cases for these views each rendered ONE item,
+# or clicked the last one, which is why they never saw it.)
+
+suite "Handlers built in a loop act on their own item (codetracer#860 sweep)":
+
+  test "build output: a row opens its own location":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createBuildVM(store)
+      let r = MockRenderer()
+      var jumps: seq[(string, int)] = @[]
+      vm.onJumpToLine = proc(path: string; line: int) = jumps.add((path, line))
+
+      let panel = renderBuildPanel[MockRenderer, MockNode](r, vm)
+      vm.appendLine(makeBuildLine("a.nim(3, 1) Error: x", severity = blsError,
+                                  path = "a.nim", line = 3))
+      vm.appendLine(makeBuildLine("b.nim(7, 1) Error: y", severity = blsError,
+                                  path = "b.nim", line = 7))
+
+      let rows = findAllByClass(panel, "build-clickable")
+      check rows.len == 2
+      if rows.len == 2:
+        rows[0].fireEvent("click")
+        check jumps == @[("a.nim", 3)]
+
+      dispose()
+
+  test "filesystem diff list: a row opens its own file":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createFilesystemVM(store)
+      let r = MockRenderer()
+      var openedPaths: seq[string] = @[]
+      vm.onOpenFile = proc(path: string) = openedPaths.add(path)
+
+      let panel = renderFilesystemPanel[MockRenderer, MockNode](r, vm)
+      vm.setDiffEntries(@[
+        FilesystemDiffEntry(path: "/trace/files/first.nim", zebra: false),
+        FilesystemDiffEntry(path: "/trace/files/second.nim", zebra: true),
+      ])
+
+      let rows = findAllByClass(panel, "diff-file-path")
+      check rows.len == 2
+      if rows.len == 2:
+        rows[0].fireEvent("click")
+        check openedPaths == @["/trace/files/first.nim"]
+
+      dispose()
+
+  test "request panel filter picker: an option selects its own value":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createRequestPanelVM(store)
+      let r = MockRenderer()
+
+      let panel = renderRequestPanel[MockRenderer, MockNode](r, vm)
+      # The first picker is the Method one; open it.
+      findByClass(panel, "ct-picker-trigger").fireEvent("click")
+      let options = findAllByClass(findByClass(panel, "ct-picker-dropdown"),
+                                   "ct-menu-item")
+      check options.len == MethodPickerOptions.len
+      if options.len == MethodPickerOptions.len:
+        options[1].fireEvent("click")
+        check vm.filterMethod.val == MethodPickerOptions[1][0]
+
+      dispose()
+
+  test "status notifications: dismiss and action buttons name their own":
+    let r = MockRenderer()
+    var dismissed: seq[int] = @[]
+    var actions: seq[(int, int)] = @[]
+    let model = StatusShellModel(
+      activeNotifications: @[
+        StatusNotificationRecord(index: 5, kindClass: "warning",
+          variantClass: "primary", text: "first", dismissible: true,
+          actions: @[StatusNotificationActionRecord(label: "Retry"),
+                     StatusNotificationActionRecord(label: "Ignore")]),
+        StatusNotificationRecord(index: 6, kindClass: "info",
+          variantClass: "primary", text: "second", dismissible: true,
+          actions: @[StatusNotificationActionRecord(label: "Open"),
+                     StatusNotificationActionRecord(label: "Close")]),
+      ],
+      base: StatusBaseModel())
+    let panel = renderStatusShell[MockRenderer, MockNode](r, model, StatusShellCallbacks(
+      onDismissNotification: proc(index: int) = dismissed.add(index),
+      onNotificationAction: proc(index: int; actionIndex: int) =
+        actions.add((index, actionIndex))))
+
+    let dismissButtons = findAllByClass(panel, "dismiss-notification-button")
+    let actionButtons = findAllByClass(panel, "notification-action-button")
+    check dismissButtons.len == 2
+    check actionButtons.len == 4
+    if dismissButtons.len == 2 and actionButtons.len == 4:
+      dismissButtons[0].fireEvent("click")
+      actionButtons[0].fireEvent("click")
+      actionButtons[2].fireEvent("click")
+      check dismissed == @[5]
+      check actions == @[(5, 0), (6, 0)]
+
+  test "agent activity: a changed-file row opens its own diff":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      var openedTargets: seq[string] = @[]
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 3,
+        callbacks = AgentActivityCallbacks(
+          onOpenFileDiff: proc(target: string) = openedTargets.add(target)))
+
+      vm.setMessages(@[
+        makeAgentActivityMessage("a1", "patch", diffs = @[
+          AgentActivityDiffEntry(id: 9, path: "/repo/a.nim",
+                                 original: "old", modified: "new"),
+          AgentActivityDiffEntry(id: 10, path: "/repo/b.nim",
+                                 original: "old", modified: "new"),
+        ])
+      ])
+
+      let rows = findAllByClass(panel, "agent-diff-file-row")
+      check rows.len == 2
+      if rows.len == 2:
+        rows[0].fireEvent("click")
+        check openedTargets == @["file:a1:9"]
+
+      dispose()
+
+  test "agent activity settings: an option selects its own value":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 4)
+
+      vm.settingsOpen.val = true
+      vm.settingsActiveDropdown.val = "permissions"
+      let options = findAllByClass(
+        findByClass(panel, "agent-settings-dropdown-list"),
+        "agent-settings-dropdown-item")
+      # "Ask before commands", "Allow all", "Deny all": the middle one, so
+      # neither the default nor the last option can pass for it.
+      check options.len == 3
+      if options.len == 3:
+        options[1].fireEvent("click")
+        check vm.settingsPermissions.val == "Allow all"
+
+      dispose()
+
+  test "agent activity attachments: a remove button removes its own item":
+    createRoot proc(dispose: proc()) =
+      let (store, _) = makeStoreWithMock()
+      let vm = createAgentActivityVM(store)
+      let r = MockRenderer()
+      let panel = renderAgentActivityPanel[MockRenderer, MockNode](r, vm, componentId = 5)
+
+      vm.pastedImages.val = @["data:image/png;base64,AAAA",
+                              "data:image/png;base64,BBBB"]
+      vm.contextPaths.val = @["/repo/first.nim", "/repo/second.nim"]
+
+      let thumbs = findAllByClass(panel, "agent-paste-thumb")
+      check thumbs.len == 2
+      if thumbs.len == 2:
+        findByClass(thumbs[0], "agent-paste-remove").fireEvent("click")
+        check vm.pastedImages.val == @["data:image/png;base64,BBBB"]
+
+      # The strip is rebuilt by the removal; look the chips up afresh.
+      let chips = findAllByClass(panel, "agent-context-path-chip")
+      check chips.len == 2
+      if chips.len == 2:
+        findByClass(chips[0], "agent-paste-remove").fireEvent("click")
+        check vm.contextPaths.val == @["/repo/second.nim"]
+
+      dispose()

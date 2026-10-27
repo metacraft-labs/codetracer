@@ -65,6 +65,8 @@ import ./styled_row
 import ./top_bar
 import ./tracepoint_manager
 import ./vcs_pane
+import ./search_results_pane
+import ./test_results_pane
 import ./frame_overlay
 import ./variables
 import ./context_menu
@@ -98,11 +100,30 @@ export scratchpad_pane
 export terminal_output_pane
 
 type
+  CellTooltip* = object
+    ## PLAT-70 Part B: the tooltip's lines (`table_overflow.tooltipView`) and
+    ## the cell it belongs to (its first screen cell): drawn under the cell,
+    ## above it when there is no room below.
+    lines*: seq[string]
+    row*, col*: int
+
   ShellModel* = object
     ## Everything the screen shows, as a value. Constructed by
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
     ## debugger exists.
+    cellTooltip*: CellTooltip
+      ## PLAT-70 Part B: a truncated table cell's full text, shown after the
+      ## pointer rested on it (Horizontal-Overflow.md §5.3); no lines, none.
     header*: HeaderModel
+    scrollbars*: ScrollbarFrame
+      ## PLAT-70 Part H: how this frame's scrollbars are drawn — the
+      ## options, the bar the pointer is on, each pane's fade (handed to the
+      ## pane painters on the grid, `StyledGrid.scrollbars`).
+    glyphs*: GlyphProfile
+      ## PLAT-71: the glyph table column this frame's chrome is drawn from
+      ## (Terminal-Adaptation §6), handed to the painters on the grid.
+    ambiguous*: AmbiguousWidth
+      ## PLAT-71: the width policy for East Asian Width `A` (§6.6).
     fileInfo*: string
       ## The status bar's file info — the current file's language and
       ## encoding (`headless_app/footer_info`), drawn first on the status row
@@ -161,6 +182,13 @@ type
       ## CTUI-8's event log, as a value: the Event Log pane's own rectangle
       ## (the Timeline that shared it is removed, 2026-10-05), its scrollbar a
       ## scrubber over the whole log (PLAT-51).
+    search*: SearchResultsPaneModel
+      ## PLAT-57. FIND IN FILES, as a value: the session's `SearchResultsVM`
+      ## the desktop's panel draws too, read by `tui_session.searchModelOf`.
+      ## Not loaded by default.
+    tests*: TestResultsPaneModel
+      ## PLAT-53. TEST RESULTS, as a value: the window's `TestResultsVM`,
+      ## read by `test_results_source.paneModelOf`. Not loaded by default.
     vcs*: VcsPaneModel
       ## PLAT-47 deliverable 4. The VCS pane, as a value: the shared `VCSVM`
       ## the desktop's VCS panel draws, read by `host/vcs_source.nim`. Not
@@ -262,6 +290,10 @@ type
       ## the focused pane is distinguished by its border's colour and weight,
       ## not only by the glyphs every pane shares. `hasFocus` false (the zero
       ## value) paints every pane with the ordinary border role.
+    editorWritable*: bool
+      ## PLAT-68: Debug mode with the editor's document made writable
+      ## (`Ctrl+E`, `editor.toggle-read-only`): the `editor` rectangle paints
+      ## `edit` — the document the keys now type into — as Edit mode does.
     edit*: EditPaneModel
       ## PLAT-16. Edit mode's Source pane, as a value.
       ##
@@ -326,6 +358,9 @@ type
       ## PLAT-50: where the event-content overlay was painted.
       ## PLAT-48. The open menu's dropdowns, over everything else.
     frameOverlays*: seq[FrameOverlay]
+    bars*: seq[BarSpot]
+      ## PLAT-70 Part H: every scrollbar painted, with its pane — what the
+      ## runtime hit-tests the pointer against.
       ## PLAT-47 deliverable 6: what the compositor draws OVER this frame's
       ## cells — a drag's drop tint and insertion caret (re-colouring, never
       ## replacing, the cells of the region the drop would occupy) and the
@@ -443,6 +478,33 @@ type
     ## `newLayoutHistory` cloning.
     product*: ProductMode
     layouts*: array[ProductMode, LayoutNode]
+    bound*: array[ProductMode, BoundCell]
+      ## THE CELLS A BOUND RUNTIME SWITCHES THROUGH (`switchBound`), one per
+      ## mode, kept apart from `layouts` on purpose. With a layout binding
+      ## enabled the binding is the single authority over the arrangement on
+      ## screen — it is what is drawn AND what a click is hit-tested against —
+      ## so the register holds only the mode that is NOT on screen, and holds
+      ## all of it: the tree, the docked panes, whether it is the user's, and
+      ## the size it was left at. `layouts` is the unbound runtime's register
+      ## (`switchTo`), whose cell for the current mode IS what is drawn; mixing
+      ## the two would let a stored snapshot be drawn over the binding, which is
+      ## the defect codetracer-pm issue 2026-10-21's fix closed: after a round
+      ## trip the frame drew the snapshot and every gesture moved only the
+      ## hit-test.
+
+  BoundCell* = object
+    ## One mode's arrangement as a bound runtime left it.
+    stored*: bool
+      ## False until the mode has been LEFT once in this session; the mode's
+      ## default (`layoutValueForMode`) is then the arrangement to enter.
+    layout*: Layout
+    userModified*: bool
+      ## The binding's own flag for this arrangement (`LayoutBinding.
+      ## userModified`): it is what decides whether a resize re-flows it and
+      ## whether the replay loop's exit writes it or removes the document.
+    profile*: LayoutProfile
+      ## The size it was left at, so entering it at another size applies the
+      ## binding's own re-flow rule (`binding.resize`) rather than a second one.
 
 proc initModeRegister*(product = pmDebug): ModeRegister =
   ModeRegister(product: product)
@@ -490,6 +552,28 @@ proc toggle*(reg: var ModeRegister; leaving: LayoutNode;
   ## is `switchTo` applied to `product_mode.toggled`, never a pair of one-way
   ## commands that can get out of step.
   reg.switchTo(leaving, toggled(reg.product), profile)
+
+proc switchBound*(reg: var ModeRegister; leaving: BoundCell;
+                  target: ProductMode): tuple[changed: bool; entering: BoundCell] =
+  ## The BOUND runtime's switch: `switchTo`'s four requirements, over whole
+  ## arrangements and with the binding as the only thing on screen.
+  ##
+  ## `leaving` is the binding's arrangement as it is now; it is stored in the
+  ## cell for the mode being left (§4 requirement 2). The answer is the
+  ## entering mode's cell, which the caller loads INTO the binding (§4
+  ## requirement 1); `stored = false` there means a first visit, and the
+  ## caller enters the mode's default. Switching to the current mode changes
+  ## nothing and overwrites no cell (§6). `product` and the cell move together
+  ## (§4 requirement 4).
+  ##
+  ## The entering cell is NOT cleared: it is storage, and the next switch out
+  ## of that mode overwrites it with the binding's arrangement before anything
+  ## could read it again. `tui_app.shellModel` never draws a `bound` cell.
+  if target == reg.product:
+    return (false, leaving)
+  reg.bound[reg.product] = leaving
+  reg.product = target
+  (true, reg.bound[target])
 
 proc activeLayout*(reg: ModeRegister): LayoutNode =
   ## The tree this register says is on screen, or `nil` when the current mode
@@ -548,7 +632,7 @@ proc tracepointOverlayArea*(body: CellArea): CellArea =
            width: w, height: h)
 
 const
-  DividerGlyph* = "▏"
+  DividerGlyph* = canonical(grDividerV)
     ## PLAT-50: a pane divider is U+258F LEFT ONE EIGHTH BLOCK — a line at
     ## the divider cell's left edge, its foreground the divider's colour and
     ## its background the fill beside it (the user's direction, 2026-10-02),
@@ -707,19 +791,19 @@ proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
     # (The user, 2026-10-09: the focus ground leaked one cell into the next
     # pane, and the line was drawn in its own ground.)
     if cell in ring and row == focused.row and col < focused.col:
-      g.paint(row, col, DividerGlyph,
+      g.paint(row, col, g.glyphText(grDividerV),
               CellStyle(role: srDividerStrip, surface: srTabBarFocused))
       continue
     let focusSide = cell in ring and row != focused.row
     let stripBeside = (row, col - 1) in strips or (row, col + 1) in strips
     if stripBeside and not focusSide:
-      g.paint(row, col, DividerGlyph,
+      g.paint(row, col, g.glyphText(grDividerV),
               CellStyle(role: srDividerStrip, surface: srTabBar))
       continue
     let role = if focusSide: srBorderFocused else: line
     let ground = if (row, col + 1) in strips: srTabBar
                  else: groundOf(regions, row, col + 1)
-    g.paint(row, col, DividerGlyph, CellStyle(role: role, surface: ground))
+    g.paint(row, col, g.glyphText(grDividerV), CellStyle(role: role, surface: ground))
 
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea; focusedStrip = false;
@@ -733,6 +817,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   let full = region.area
   if full.width <= 0 or full.height <= 0:
     return
+  g.painting = region.pane
   let frame = paneFrame(full, body)
   let flushRight = not frame.rightDivider
   let inner = frame.box.width
@@ -789,7 +874,8 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   # Debug shows the recording's source through `SourceVM`'s window, Edit the
   # working tree through a whole mutable buffer — two models, two painters,
   # and the branch is on `model.product`, never on "is there an edit buffer".
-  if region.pane == paneEditor and model.product == pmEdit:
+  if region.pane == paneEditor and
+     (model.product == pmEdit or model.editorWritable):
     underStrip:
       discard paintEditPane(g, under, model.edit, model.highlighting)
   elif region.pane == paneFileTree and not model.fileTree.isEmpty:
@@ -798,6 +884,14 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
   elif region.pane == paneVcs and model.vcs.loaded:
     belowStrip:
       discard paintVcsPane(g, content, model.vcs)
+  # PLAT-57. FIND IN FILES — its field is content, so below the strip.
+  elif region.pane == paneSearch and model.search.loaded:
+    belowStrip:
+      discard paintSearchResults(g, content, model.search)
+  # PLAT-53. TEST RESULTS — its headline is content, so below the strip.
+  elif region.pane == paneTestResults and model.tests.loaded:
+    belowStrip:
+      discard paintTestResults(g, content, model.tests)
   elif region.pane == paneBuildOutput:
     # NO EMPTINESS GUARD: an idle BUILD pane is a statement — `[idle] build:
     # not started` — and a user who has just pressed `:build` needs to see the
@@ -988,6 +1082,35 @@ proc frameOverlaysOf*(decorations: seq[LayoutDecoration]): seq[FrameOverlay] =
                                 width: d.area.width, height: 1,
                                 text: d.label, style: DragGhostStyle)
 
+
+const CellTooltipStyle* = CellStyle(role: srChromeText, surface: srSurfaceMenu)
+  ## PLAT-70 Part B: the tooltip's text on the menu's card surface.
+
+proc cellTooltipArea*(t: CellTooltip; width, height: int): CellArea =
+  ## Where the tooltip goes: one cell of padding each side of its widest
+  ## line, under the cell (above it when the screen has no room below),
+  ## moved left to stay on the screen.
+  if t.lines.len == 0 or width <= 0 or height <= 0:
+    return CellArea()
+  var w = 0
+  for l in t.lines:
+    w = max(w, cellWidthOf(l))
+  w = min(width, w + 2)
+  let h = min(height, t.lines.len)
+  let below = t.row + 1
+  let row = if below + h <= height - 1: below else: max(0, t.row - h)
+  let col = max(0, min(t.col, width - w))
+  CellArea(row: row, col: col, width: w, height: h)
+
+proc paintCellTooltip*(g: var StyledGrid; t: CellTooltip; width, height: int) =
+  let a = cellTooltipArea(t, width, height)
+  if a.width <= 0 or a.height <= 0:
+    return
+  g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
+  for i in 0 ..< a.height:
+    g.paint(a.row + i, a.col + 1, truncateToCells(t.lines[i], a.width - 2),
+            CellTooltipStyle)
+
 proc shellScreen*(model: ShellModel; width, height: int;
                   policy = DefaultProjectionPolicy): ShellScreen =
   ## The whole frame: `height` rows of exactly `width` cells, plus the geometry
@@ -1022,6 +1145,9 @@ proc shellScreen*(model: ShellModel; width, height: int;
     return
 
   var g = newStyledGrid(width, height)
+  g.scrollbars = model.scrollbars
+  g.glyphs = model.glyphs
+  g.ambiguous = model.ambiguous
   # PLAT-46 deliverable 8: EVERY CELL HAS A SURFACE. The canvas under all of
   # it, the header on a card; each pane fills its own rectangle in `paintPane`
   # and the status line its row below.
@@ -1129,6 +1255,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # menu over everything.
   result.contentArea = contentOverlayArea(model.content, body)
   paintContentOverlay(g, model.content, result.contentArea)
+  paintCellTooltip(g, model.cellTooltip, width, height)
   result.contextMenuArea = contextMenuArea(model.contextMenu, width, height)
   paintContextMenu(g, model.contextMenu, result.contextMenuArea)
 
@@ -1155,15 +1282,15 @@ proc shellScreen*(model: ShellModel; width, height: int;
       g.paint(height - 1, 1, fitCells(model.fileInfo, max(0, min(width - 1,
               lead - 3))))
     if sw > 0:
-      g.paint(height - 1, sc, statusBarText(status, sw))
+      g.paint(height - 1, sc, statusBarText(status, sw, g.glyphs))
       # The two indicators in their own roles: the input mode, then the
       # product mode, exactly where `statusBarText` put them (it never drops
       # them).
-      let modeCells = min(sw, textCells($status.mode))
-      g.paint(height - 1, sc, fitCells($status.mode, modeCells),
+      let modeCells = min(sw, textCells(status.modeText))
+      g.paint(height - 1, sc, fitCells(status.modeText, modeCells),
               modeStyle(status.mode))
       let productText = productIndicator(status.product)
-      let productCol = sc + textCells($status.mode) + 1
+      let productCol = sc + textCells(status.modeText) + 1
       if productCol < width:
         g.paint(height - 1, productCol,
                 fitCells(productText, min(textCells(productText),
@@ -1181,6 +1308,7 @@ proc shellScreen*(model: ShellModel; width, height: int;
   for row in 0 ..< height:
     result.rows.add g.rowText(row)
     result.styledRows.add g.rowSpans(row)
+  result.bars = g.bars
 
 proc shellRows*(model: ShellModel; width, height: int;
                 policy = DefaultProjectionPolicy): seq[string] =

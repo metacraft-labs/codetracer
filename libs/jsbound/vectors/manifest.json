@@ -1,0 +1,783 @@
+{
+  "format": "jsbound shared vectors (JS-Boundary-Recording.md §5)",
+  "vectors": [
+    {
+      "bytes": "minimal.bin",
+      "class": "valid",
+      "description": "Header, Env and End: the shortest complete log",
+      "expected": "minimal.json",
+      "name": "minimal"
+    },
+    {
+      "bytes": "task.bin",
+      "class": "valid",
+      "description": "one Task record at seq 1",
+      "expected": "task.json",
+      "name": "task"
+    },
+    {
+      "bytes": "task_reg.bin",
+      "class": "valid",
+      "description": "one TaskReg record at seq 1",
+      "expected": "task_reg.json",
+      "name": "task_reg"
+    },
+    {
+      "bytes": "clock.bin",
+      "class": "valid",
+      "description": "one Clock record at seq 1",
+      "expected": "clock.json",
+      "name": "clock"
+    },
+    {
+      "bytes": "random.bin",
+      "class": "valid",
+      "description": "one Random record at seq 1",
+      "expected": "random.json",
+      "name": "random"
+    },
+    {
+      "bytes": "net_request.bin",
+      "class": "valid",
+      "description": "one NetRequest record at seq 1",
+      "expected": "net_request.json",
+      "name": "net_request"
+    },
+    {
+      "bytes": "net_response_inline.bin",
+      "class": "valid",
+      "description": "one NetResponse record at seq 1",
+      "expected": "net_response_inline.json",
+      "name": "net_response_inline"
+    },
+    {
+      "bytes": "net_response_ref.bin",
+      "class": "valid",
+      "description": "one NetResponse record at seq 1",
+      "expected": "net_response_ref.json",
+      "name": "net_response_ref"
+    },
+    {
+      "bytes": "ws_message.bin",
+      "class": "valid",
+      "description": "one WsMessage record at seq 1",
+      "expected": "ws_message.json",
+      "name": "ws_message"
+    },
+    {
+      "bytes": "ws_message_event_stream.bin",
+      "class": "valid",
+      "description": "one WsMessage record at seq 1",
+      "expected": "ws_message_event_stream.json",
+      "name": "ws_message_event_stream"
+    },
+    {
+      "bytes": "storage_read.bin",
+      "class": "valid",
+      "description": "one StorageRead record at seq 1",
+      "expected": "storage_read.json",
+      "name": "storage_read"
+    },
+    {
+      "bytes": "layout_read.bin",
+      "class": "valid",
+      "description": "one LayoutRead record at seq 1",
+      "expected": "layout_read.json",
+      "name": "layout_read"
+    },
+    {
+      "bytes": "input.bin",
+      "class": "valid",
+      "description": "one Input record at seq 1",
+      "expected": "input.json",
+      "name": "input"
+    },
+    {
+      "bytes": "dom_effect.bin",
+      "class": "valid",
+      "description": "one DomEffect record at seq 1",
+      "expected": "dom_effect.json",
+      "name": "dom_effect"
+    },
+    {
+      "bytes": "checkpoint.bin",
+      "class": "valid",
+      "description": "one Checkpoint record at seq 1",
+      "expected": "checkpoint.json",
+      "name": "checkpoint"
+    },
+    {
+      "bytes": "refusal.bin",
+      "class": "valid",
+      "description": "one Refusal record at seq 1",
+      "expected": "refusal.json",
+      "name": "refusal"
+    },
+    {
+      "bytes": "navigation.bin",
+      "class": "valid",
+      "description": "one Navigation record at seq 1",
+      "expected": "navigation.json",
+      "name": "navigation"
+    },
+    {
+      "bytes": "error.bin",
+      "class": "valid",
+      "description": "one Error record at seq 1",
+      "expected": "error.json",
+      "name": "error"
+    },
+    {
+      "bytes": "scrubbed.bin",
+      "class": "valid",
+      "description": "one Scrubbed record at seq 1",
+      "expected": "scrubbed.json",
+      "name": "scrubbed"
+    },
+    {
+      "bytes": "mark.bin",
+      "class": "valid",
+      "description": "one Mark record at seq 1",
+      "expected": "mark.json",
+      "name": "mark"
+    },
+    {
+      "bytes": "xhr_event.bin",
+      "class": "valid",
+      "description": "one XhrEvent record at seq 1",
+      "expected": "xhr_event.json",
+      "name": "xhr_event"
+    },
+    {
+      "bytes": "loading.bin",
+      "class": "valid",
+      "description": "one Loading record at seq 1",
+      "expected": "loading.json",
+      "name": "loading"
+    },
+    {
+      "bytes": "doc_task.bin",
+      "class": "valid",
+      "description": "one DocTask record at seq 1",
+      "expected": "doc_task.json",
+      "name": "doc_task"
+    },
+    {
+      "bytes": "platform_value.bin",
+      "class": "valid",
+      "description": "one PlatformValue record at seq 1",
+      "expected": "platform_value.json",
+      "name": "platform_value"
+    },
+    {
+      "bytes": "gap.bin",
+      "class": "valid",
+      "description": "a Gap covering seq 2..4 between seq 1 and seq 5",
+      "expected": "gap.json",
+      "name": "gap"
+    },
+    {
+      "bytes": "end_idle.bin",
+      "class": "valid",
+      "description": "End appended by the assembler on idle finalisation (reason 3)",
+      "expected": "end_idle.json",
+      "name": "end_idle"
+    },
+    {
+      "bytes": "net_response_inline_max.bin",
+      "class": "valid",
+      "description": "an inline body of exactly 1024 bytes, the most jsbound.log inlines",
+      "expected": "net_response_inline_max.json",
+      "name": "net_response_inline_max"
+    },
+    {
+      "bytes": "session.bin",
+      "class": "valid",
+      "description": "every record kind in one stream, with a Gap after the Checkpoint",
+      "expected": "session.json",
+      "name": "session"
+    },
+    {
+      "bytes": "streamed_response.bin",
+      "class": "valid",
+      "description": "a fetch whose body streams: its head (NetResponse outcome 5, no body), two pieces (WsMessage dir 1), the second in a network task of its own, and the end (WsMessage dir 4)",
+      "expected": "streamed_response.json",
+      "name": "streamed_response"
+    },
+    {
+      "bytes": "xhr_events.bin",
+      "class": "valid",
+      "description": "an XMLHttpRequest's ProgressEvents (XhrEvent): loadstart inside send(), the upload object's progress, load and loadend each in a network task, the response's progress events with the values the page reads, the last at DONE, then load and loadend",
+      "expected": "xhr_events.json",
+      "name": "xhr_events"
+    },
+    {
+      "bytes": "document_loading.bin",
+      "class": "valid",
+      "description": "a document that loads while the pointer moves: Loading before each task recorded before load (phase 1 while parsing, with the character data the parser had inserted, 2 once parsed, with none), DocTask for a script that runs (1) and one that ran with no record of its own (4), DOMContentLoaded and load, and a task after load with no Loading",
+      "expected": "document_loading.json",
+      "name": "document_loading"
+    },
+    {
+      "bytes": "resource_events.bin",
+      "class": "valid",
+      "description": "a page that loads resources and media: an image's load while the parser waits (DocTask 5 with its URL), a media element's loadedmetadata (DocTask 5 without one) and the duration it reads (PlatformValue src 7), play() settling in a platform task with its outcome, and a dynamic import whose module reads the clock before the import settles (TaskReg and Task kind 13)",
+      "expected": "resource_events.json",
+      "name": "resource_events"
+    },
+    {
+      "bytes": "platform_state.bin",
+      "class": "valid",
+      "description": "values the platform holds that a page reads: the referrer and a socket's bufferedAmount (PlatformValue src 8), and navigator.storage.estimate() settling in a platform task with the estimate it resolved with (TaskReg and Task kind 13, then PlatformValue src 9)",
+      "expected": "platform_state.json",
+      "name": "platform_state"
+    },
+    {
+      "bytes": "storage_shape_reads.bin",
+      "class": "valid",
+      "description": "StorageRead present 2: the key list, length and key(n) of an area",
+      "expected": "storage_shape_reads.json",
+      "name": "storage_shape_reads"
+    },
+    {
+      "bytes": "clock_event_time_stamp.bin",
+      "class": "valid",
+      "description": "Clock src 5: a read of an event's timeStamp",
+      "expected": "clock_event_time_stamp.json",
+      "name": "clock_event_time_stamp"
+    },
+    {
+      "bytes": "refusal_timer_handler.bin",
+      "class": "valid",
+      "description": "a Refusal of a timer handler that is not a function",
+      "expected": "refusal_timer_handler.json",
+      "name": "refusal_timer_handler"
+    },
+    {
+      "bytes": "enum_greatest.bin",
+      "class": "valid",
+      "description": "every enumerated field at the greatest value of its set",
+      "expected": "enum_greatest.json",
+      "name": "enum_greatest"
+    },
+    {
+      "bytes": "truncated_unterminated.bin",
+      "class": "truncation",
+      "description": "the session vector without its End frame",
+      "expected": "truncated_unterminated.json",
+      "name": "truncated_unterminated"
+    },
+    {
+      "bytes": "truncated_mid_record.bin",
+      "class": "truncation",
+      "description": "the session vector cut 7 bytes into its eleventh frame",
+      "expected": "truncated_mid_record.json",
+      "name": "truncated_mid_record"
+    },
+    {
+      "base": "minimal",
+      "bytes": "bad_magic.bin",
+      "class": "refusal",
+      "description": "the first magic byte is 'X' instead of 'C'",
+      "expected": "bad_magic.json",
+      "name": "bad_magic"
+    },
+    {
+      "base": "minimal",
+      "bytes": "ctbl_version_2.bin",
+      "class": "refusal",
+      "description": "the CTBL version byte is 2",
+      "expected": "ctbl_version_2.json",
+      "name": "ctbl_version_2"
+    },
+    {
+      "base": "minimal",
+      "bytes": "vocab_2.bin",
+      "class": "refusal",
+      "description": "the Header's vocab is 2",
+      "expected": "vocab_2.json",
+      "name": "vocab_2"
+    },
+    {
+      "base": "clock",
+      "bytes": "unknown_tag.bin",
+      "class": "refusal",
+      "description": "the third frame's tag is 0x54, unassigned in the jsbound range",
+      "expected": "unknown_tag.json",
+      "name": "unknown_tag"
+    },
+    {
+      "base": "clock",
+      "bytes": "empty_frame.bin",
+      "class": "refusal",
+      "description": "the third frame declares length 0",
+      "expected": "empty_frame.json",
+      "name": "empty_frame"
+    },
+    {
+      "base": "clock",
+      "bytes": "frame_too_large.bin",
+      "class": "refusal",
+      "description": "the third frame declares 64 MiB + 1 bytes",
+      "expected": "frame_too_large.json",
+      "name": "frame_too_large"
+    },
+    {
+      "base": "clock",
+      "bytes": "field_overrun.bin",
+      "class": "refusal",
+      "description": "the third frame declares one byte fewer than its fields need",
+      "expected": "field_overrun.json",
+      "name": "field_overrun"
+    },
+    {
+      "base": "clock",
+      "bytes": "trailing_field_bytes.bin",
+      "class": "refusal",
+      "description": "the third frame declares one byte more than its fields",
+      "expected": "trailing_field_bytes.json",
+      "name": "trailing_field_bytes"
+    },
+    {
+      "base": "minimal",
+      "bytes": "invalid_utf8.bin",
+      "class": "refusal",
+      "description": "the first byte of the Header's recorder_id is 0xff",
+      "expected": "invalid_utf8.json",
+      "name": "invalid_utf8"
+    },
+    {
+      "base": "net_response_inline",
+      "bytes": "unknown_blob_kind.bin",
+      "class": "refusal",
+      "description": "the NetResponse body's blobref kind is 2",
+      "expected": "unknown_blob_kind.json",
+      "name": "unknown_blob_kind"
+    },
+    {
+      "base": "net_response_inline_max",
+      "bytes": "inline_blob_too_large.bin",
+      "class": "refusal",
+      "description": "the inline body is one byte longer: 1025 bytes",
+      "expected": "inline_blob_too_large.json",
+      "name": "inline_blob_too_large"
+    },
+    {
+      "base": "minimal",
+      "bytes": "header_not_first.bin",
+      "class": "refusal",
+      "description": "the Header and Env frames are swapped",
+      "expected": "header_not_first.json",
+      "name": "header_not_first"
+    },
+    {
+      "base": "clock",
+      "bytes": "env_not_second.bin",
+      "class": "refusal",
+      "description": "the Env and Clock frames are swapped",
+      "expected": "env_not_second.json",
+      "name": "env_not_second"
+    },
+    {
+      "base": "clock",
+      "bytes": "seq_skip_without_gap.bin",
+      "class": "refusal",
+      "description": "the Clock's seq is 2 where the first seq must be 1, with no Gap",
+      "expected": "seq_skip_without_gap.json",
+      "name": "seq_skip_without_gap"
+    },
+    {
+      "base": "gap",
+      "bytes": "gap_mismatch.bin",
+      "class": "refusal",
+      "description": "the Gap's first_seq is 3, leaving seq 2 uncovered",
+      "expected": "gap_mismatch.json",
+      "name": "gap_mismatch"
+    },
+    {
+      "base": "clock",
+      "bytes": "end_seq_mismatch.bin",
+      "class": "refusal",
+      "description": "End.last_seq is 2, but the last seq is 1",
+      "expected": "end_seq_mismatch.json",
+      "name": "end_seq_mismatch"
+    },
+    {
+      "base": "minimal",
+      "bytes": "bytes_after_end.bin",
+      "class": "refusal",
+      "description": "one 0x00 byte after the End frame",
+      "expected": "bytes_after_end.json",
+      "name": "bytes_after_end"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_header_protocol_level_2.bin",
+      "class": "refusal",
+      "description": "Header.protocol_level is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_header_protocol_level_2.json",
+      "name": "enum_header_protocol_level_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_env_color_scheme_3.bin",
+      "class": "refusal",
+      "description": "Env.color_scheme is 3, one past its greatest value (0 to 2)",
+      "expected": "enum_env_color_scheme_3.json",
+      "name": "enum_env_color_scheme_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_env_reduced_motion_2.bin",
+      "class": "refusal",
+      "description": "Env.reduced_motion is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_env_reduced_motion_2.json",
+      "name": "enum_env_reduced_motion_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_kind_14.bin",
+      "class": "refusal",
+      "description": "Task.kind is 14, one past its greatest value (1 to 13)",
+      "expected": "enum_task_kind_14.json",
+      "name": "enum_task_kind_14"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_kind_0.bin",
+      "class": "refusal",
+      "description": "Task.kind is 0, one before its least value (1 to 13)",
+      "expected": "enum_task_kind_0.json",
+      "name": "enum_task_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_reg_kind_14.bin",
+      "class": "refusal",
+      "description": "TaskReg.kind is 14, one past its greatest value (1 to 13)",
+      "expected": "enum_task_reg_kind_14.json",
+      "name": "enum_task_reg_kind_14"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_task_reg_kind_0.bin",
+      "class": "refusal",
+      "description": "TaskReg.kind is 0, one before its least value (1 to 13)",
+      "expected": "enum_task_reg_kind_0.json",
+      "name": "enum_task_reg_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_clock_src_8.bin",
+      "class": "refusal",
+      "description": "Clock.src is 8, one past its greatest value (1 to 7)",
+      "expected": "enum_clock_src_8.json",
+      "name": "enum_clock_src_8"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_clock_src_0.bin",
+      "class": "refusal",
+      "description": "Clock.src is 0, one before its least value (1 to 7)",
+      "expected": "enum_clock_src_0.json",
+      "name": "enum_clock_src_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_random_src_4.bin",
+      "class": "refusal",
+      "description": "Random.src is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_random_src_4.json",
+      "name": "enum_random_src_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_random_src_0.bin",
+      "class": "refusal",
+      "description": "Random.src is 0, one before its least value (1 to 3)",
+      "expected": "enum_random_src_0.json",
+      "name": "enum_random_src_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_request_api_6.bin",
+      "class": "refusal",
+      "description": "NetRequest.api is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_net_request_api_6.json",
+      "name": "enum_net_request_api_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_request_api_0.bin",
+      "class": "refusal",
+      "description": "NetRequest.api is 0, one before its least value (1 to 5)",
+      "expected": "enum_net_request_api_0.json",
+      "name": "enum_net_request_api_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_outcome_6.bin",
+      "class": "refusal",
+      "description": "NetResponse.outcome is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_net_response_outcome_6.json",
+      "name": "enum_net_response_outcome_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_outcome_0.bin",
+      "class": "refusal",
+      "description": "NetResponse.outcome is 0, one before its least value (1 to 5)",
+      "expected": "enum_net_response_outcome_0.json",
+      "name": "enum_net_response_outcome_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_redirected_2.bin",
+      "class": "refusal",
+      "description": "NetResponse.redirected is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_net_response_redirected_2.json",
+      "name": "enum_net_response_redirected_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_net_response_response_type_7.bin",
+      "class": "refusal",
+      "description": "NetResponse.response_type is 7, one past its greatest value (0 to 6)",
+      "expected": "enum_net_response_response_type_7.json",
+      "name": "enum_net_response_response_type_7"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_ws_message_dir_5.bin",
+      "class": "refusal",
+      "description": "WsMessage.dir is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_ws_message_dir_5.json",
+      "name": "enum_ws_message_dir_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_ws_message_dir_0.bin",
+      "class": "refusal",
+      "description": "WsMessage.dir is 0, one before its least value (1 to 4)",
+      "expected": "enum_ws_message_dir_0.json",
+      "name": "enum_ws_message_dir_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_ws_message_frame_3.bin",
+      "class": "refusal",
+      "description": "WsMessage.frame is 3, one past its greatest value (0 to 2)",
+      "expected": "enum_ws_message_frame_3.json",
+      "name": "enum_ws_message_frame_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_storage_read_area_4.bin",
+      "class": "refusal",
+      "description": "StorageRead.area is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_storage_read_area_4.json",
+      "name": "enum_storage_read_area_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_storage_read_area_0.bin",
+      "class": "refusal",
+      "description": "StorageRead.area is 0, one before its least value (1 to 3)",
+      "expected": "enum_storage_read_area_0.json",
+      "name": "enum_storage_read_area_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_storage_read_present_3.bin",
+      "class": "refusal",
+      "description": "StorageRead.present is 3, one past its greatest value (0 to 2)",
+      "expected": "enum_storage_read_present_3.json",
+      "name": "enum_storage_read_present_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_dom_effect_effect_7.bin",
+      "class": "refusal",
+      "description": "DomEffect.effect is 7, one past its greatest value (1 to 6)",
+      "expected": "enum_dom_effect_effect_7.json",
+      "name": "enum_dom_effect_effect_7"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_dom_effect_effect_0.bin",
+      "class": "refusal",
+      "description": "DomEffect.effect is 0, one before its least value (1 to 6)",
+      "expected": "enum_dom_effect_effect_0.json",
+      "name": "enum_dom_effect_effect_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_navigation_kind_6.bin",
+      "class": "refusal",
+      "description": "Navigation.kind is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_navigation_kind_6.json",
+      "name": "enum_navigation_kind_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_navigation_kind_0.bin",
+      "class": "refusal",
+      "description": "Navigation.kind is 0, one before its least value (1 to 5)",
+      "expected": "enum_navigation_kind_0.json",
+      "name": "enum_navigation_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_error_kind_3.bin",
+      "class": "refusal",
+      "description": "Error.kind is 3, one past its greatest value (1 to 2)",
+      "expected": "enum_error_kind_3.json",
+      "name": "enum_error_kind_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_error_kind_0.bin",
+      "class": "refusal",
+      "description": "Error.kind is 0, one before its least value (1 to 2)",
+      "expected": "enum_error_kind_0.json",
+      "name": "enum_error_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_scrubbed_class_5.bin",
+      "class": "refusal",
+      "description": "Scrubbed.class is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_scrubbed_class_5.json",
+      "name": "enum_scrubbed_class_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_scrubbed_class_0.bin",
+      "class": "refusal",
+      "description": "Scrubbed.class is 0, one before its least value (1 to 4)",
+      "expected": "enum_scrubbed_class_0.json",
+      "name": "enum_scrubbed_class_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_gap_reason_4.bin",
+      "class": "refusal",
+      "description": "Gap.reason is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_gap_reason_4.json",
+      "name": "enum_gap_reason_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_gap_reason_0.bin",
+      "class": "refusal",
+      "description": "Gap.reason is 0, one before its least value (1 to 3)",
+      "expected": "enum_gap_reason_0.json",
+      "name": "enum_gap_reason_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_end_reason_5.bin",
+      "class": "refusal",
+      "description": "End.reason is 5, one past its greatest value (1 to 4)",
+      "expected": "enum_end_reason_5.json",
+      "name": "enum_end_reason_5"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_end_reason_0.bin",
+      "class": "refusal",
+      "description": "End.reason is 0, one before its least value (1 to 4)",
+      "expected": "enum_end_reason_0.json",
+      "name": "enum_end_reason_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_target_3.bin",
+      "class": "refusal",
+      "description": "XhrEvent.target is 3, one past its greatest value (1 to 2)",
+      "expected": "enum_xhr_event_target_3.json",
+      "name": "enum_xhr_event_target_3"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_target_0.bin",
+      "class": "refusal",
+      "description": "XhrEvent.target is 0, one before its least value (1 to 2)",
+      "expected": "enum_xhr_event_target_0.json",
+      "name": "enum_xhr_event_target_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_event_8.bin",
+      "class": "refusal",
+      "description": "XhrEvent.event is 8, one past its greatest value (1 to 7)",
+      "expected": "enum_xhr_event_event_8.json",
+      "name": "enum_xhr_event_event_8"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_event_0.bin",
+      "class": "refusal",
+      "description": "XhrEvent.event is 0, one before its least value (1 to 7)",
+      "expected": "enum_xhr_event_event_0.json",
+      "name": "enum_xhr_event_event_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_xhr_event_length_computable_2.bin",
+      "class": "refusal",
+      "description": "XhrEvent.length_computable is 2, one past its greatest value (0 to 1)",
+      "expected": "enum_xhr_event_length_computable_2.json",
+      "name": "enum_xhr_event_length_computable_2"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_loading_phase_4.bin",
+      "class": "refusal",
+      "description": "Loading.phase is 4, one past its greatest value (1 to 3)",
+      "expected": "enum_loading_phase_4.json",
+      "name": "enum_loading_phase_4"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_loading_phase_0.bin",
+      "class": "refusal",
+      "description": "Loading.phase is 0, one before its least value (1 to 3)",
+      "expected": "enum_loading_phase_0.json",
+      "name": "enum_loading_phase_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_doc_task_kind_6.bin",
+      "class": "refusal",
+      "description": "DocTask.kind is 6, one past its greatest value (1 to 5)",
+      "expected": "enum_doc_task_kind_6.json",
+      "name": "enum_doc_task_kind_6"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_doc_task_kind_0.bin",
+      "class": "refusal",
+      "description": "DocTask.kind is 0, one before its least value (1 to 5)",
+      "expected": "enum_doc_task_kind_0.json",
+      "name": "enum_doc_task_kind_0"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_platform_value_src_10.bin",
+      "class": "refusal",
+      "description": "PlatformValue.src is 10, one past its greatest value (1 to 9)",
+      "expected": "enum_platform_value_src_10.json",
+      "name": "enum_platform_value_src_10"
+    },
+    {
+      "base": "enum_greatest",
+      "bytes": "enum_platform_value_src_0.bin",
+      "class": "refusal",
+      "description": "PlatformValue.src is 0, one before its least value (1 to 9)",
+      "expected": "enum_platform_value_src_0.json",
+      "name": "enum_platform_value_src_0"
+    }
+  ],
+  "vocab": 1
+}

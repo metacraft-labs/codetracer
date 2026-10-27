@@ -97,7 +97,7 @@ const
 
 proc eb(chords: seq[string]; op: string; modes: set[EditingMode];
         args = OpArgs()): EditingBinding =
-  EditingBinding(model: kmVim,
+  EditingBinding(model: bkVim,
                  scope: BindingScope(modes: modes, products: {}, panes: {epEditor}),
                  chords: chords, operation: op, args: args,
                  spelling: chords.join(" "))
@@ -422,6 +422,38 @@ const
     FiledDeclaration(decl: "toggle-tracepoint", forms: {}, reason: "as `toggle-breakpoint`"),
     FiledDeclaration(decl: "toggle-flow-overlay", forms: {}, reason: "as `toggle-breakpoint`"),
     FiledDeclaration(decl: "jump-to-value-origin", forms: {}, reason: "as `toggle-breakpoint`"),
+    # --- PLAT-68: the CUA and Emacs additions (CUA-Keymap.md §7) ----------
+    FiledDeclaration(decl: "toggle-block-comment", forms: {}, reason:
+      "VS Code's `Shift+Alt+A`; Vim has no block-comment key"),
+    FiledDeclaration(decl: "select-child-syntax", forms: {}, reason:
+      "needs a parse (§5.1), as `select-parent-syntax`"),
+    FiledDeclaration(decl: "expand-line-selection", forms: {}, reason:
+      "VS Code's `Ctrl+L`; Vim composes it with the line object"),
+    FiledDeclaration(decl: "select-all-matches", forms: {}, reason:
+      "VS Code's `Ctrl+Shift+L`; Vim reaches it through search, a composition"),
+    FiledDeclaration(decl: "move-last-cursor-to-next-match", forms: {}, reason:
+      "VS Code's `Ctrl+K Ctrl+D`, a multi-cursor refinement Vim does not have"),
+    FiledDeclaration(decl: "add-cursor-at-point", forms: {}, reason:
+      "a POINTER gesture (Alt+click, Input-Routing §5.1), not a key in any base"),
+    FiledDeclaration(decl: "clipboard-cut", forms: {}, reason:
+      "Vim reaches the system clipboard through the `+` REGISTER and its " &
+      "own operators (`\"+d`), not through VS Code's empty-selection operation"),
+    FiledDeclaration(decl: "clipboard-copy", forms: {}, reason: "as `clipboard-cut`"),
+    FiledDeclaration(decl: "clipboard-paste", forms: {}, reason: "as `clipboard-cut`"),
+    FiledDeclaration(decl: "fold-recursively", forms: {}, reason:
+      "VS Code's `Ctrl+K Ctrl+[`; Vim's folds are the `z` family bound here"),
+    FiledDeclaration(decl: "unfold-recursively", forms: {}, reason: "as `fold-recursively`"),
+    FiledDeclaration(decl: "set-mark", forms: {}, reason:
+      "EMACS'S MARK. Base-Keymaps §3.3: no base borrows another's rows, and " &
+      "Vim's selection is its own visual mode"),
+    FiledDeclaration(decl: "deactivate-mark", forms: {}, reason: "as `set-mark`, Emacs's mark"),
+    FiledDeclaration(decl: "exchange-point-and-mark", forms: {}, reason: "as `set-mark`, Emacs's mark"),
+    FiledDeclaration(decl: "kill-line", forms: {}, reason:
+      "EMACS'S KILL RING; Vim's registers are its own (`\"a`, the unnamed register)"),
+    FiledDeclaration(decl: "kill-region", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "copy-region", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "yank", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
+    FiledDeclaration(decl: "yank-pop", forms: {}, reason: "as `kill-line`, Emacs's kill ring"),
   ]
 
 let VimKeymapTable = buildVimKeymap()
@@ -430,4 +462,4 @@ proc vimKeymap*(): KeymapDefinition =
   ## **THE VIM MODEL.** Called by name, so a `DIFF-4` arm that made one side
   ## call the other is visible in the source as well as in the answer
   ## (Verification-Harness-Traps §30a).
-  KeymapDefinition(model: kmVim, keymap: VimKeymapTable, filed: VimFiled)
+  KeymapDefinition(model: bkVim, keymap: VimKeymapTable, filed: VimFiled)

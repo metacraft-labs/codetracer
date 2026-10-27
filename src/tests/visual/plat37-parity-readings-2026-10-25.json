@@ -1,0 +1,243 @@
+{
+  "_comment": [
+    "PLAT-37 parity readings, 2026-10-25 pass.",
+    "SUPERSEDES the Task-1 finding of plat37-parity-readings-2026-10-24.json: the GPUI top bar is NOT 2 device pixels short.",
+    "Its composition matches Electron point for point. What is one point too tall is the WINDOW'S CONTENT AREA.",
+    "Every figure here names the commit it was measured against, in the same sentence, per the workspace standard."
+  ],
+  "schemaVersion": 1,
+  "standing": "HOST-CONDITIONAL EVIDENCE. Measured on preserved frames only: NO GPUI re-capture was possible this pass (no live macOS GUI session -- see whatIcouldNOTdo).",
+  "measuredAt": "2026-10-18T01:41:54.563326+00:00",
+  "subject": {
+    "codetracer": "751cbc328 (working tree carries this pass's edit to ci/test/plat37_macos_window_capture.nim; NO COMMIT)",
+    "isonim-gpui": "c0f6747",
+    "reprobuild": "18c9229ad3 (tree clean; binaries rebuilt 2026-10-18 02:46, newer than every tracked .nim source)",
+    "framesMeasured": "GPUI: build/plat37-macos/{state,calltrace,editorWithMark,eventLog,editor,shell}.png, captured 2026-10-17T21:38Z, decoded fresh this pass. ELECTRON: the BYTE-FIXED buffers at build/plat37-parity-2026-10-23/buf/*.electron.rgba, VERIFIED byte-identical to build/plat37-macos-electron/*.png this pass (0 differing RGB pixels). The Electron lane was not re-captured (PLAT37-ISSUE-K).",
+    "workspaceThisPass": "build/plat37-parity-2026-10-25/"
+  },
+  "environment": {
+    "note": "THE BRIEF'S PREDICTED ENVIRONMENT WAS CONFIRMED AGAIN, for the twelfth consecutive pass: PATH led by the Nix reprobuild-0.2.2 with all four variables unset. It was corrected before any measurement.",
+    "PATH_leader": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin",
+    "RUNQUOTA_SOCKET": "/tmp/rq-adopt-501/runquota.sock (test -S passed; runquotad never restarted)",
+    "REPROBUILD_REPRO": "/Users/zahary/m/fix-pxor-issues/reprobuild/build/bin/repro",
+    "REPRO_BOOTSTRAP_CC": "/nix/store/vl936sd1vj8s008akm3gibkgyqk30qhz-clang-wrapper-21.1.8/bin/clang -- PROVEN by AGENTS.md's control pair under env -i, with no command between each probe and its $?: wrapper exit 0, unwrapped clang-21.1.8 exit 1 with \"'stdlib.h' file not found\".",
+    "REPRO_FOREIGN_ENV_BASH": "/nix/store/3zrx6av2d1141igkcn8477cvbfqpcmcf-bash-5.3p9/bin/bash (GNU bash 5.3.9)",
+    "disk": "86 G available (df -h; `df -g` is not GNU coreutils and was not used), far above the ~20 G abort threshold",
+    "statTrap": "GNU coreutils stat is on PATH; `stat -f` was never used.",
+    "reproVerbsInvoked": "NONE, and no commit was made, so the rebuild-and-verify-by-ancestry precondition was not triggered. reprobuild HEAD was nevertheless confirmed to be exactly 18c9229ad.",
+    "appleFontSmoothing": "No key was set in any domain at the start of the pass, verified with a FRESH `defaults read` process (global domain: 'does not exist'). Nothing was written, because no capture was run."
+  },
+  "theHeadline_THE_TOP_BAR_IS_CORRECT_THE_WINDOW_IS_ONE_POINT_TOO_TALL": {
+    "verdict": "PLAT37-ISSUE-U restated. GPUI's top bar is NOT 2 device pixels short. Its composition matches Electron's point for point. The defect is that the GPUI window's CONTENT AREA is 901 logical points when 900 was requested.",
+    "whyThePreviousStatementLooked2pxShort": "compare.sh must crop 58 to make the two extents equal (1858-58 = 1800). That registers the BOTTOM. Because the GPUI content is 1802 device rows, not 1800, the top bar and every top-anchored pane then land 2 device pixels high. The displacement is an instrument consequence of the window being too tall, not a short bar.",
+    "theCompositionMeasured": {
+      "method": "GPUI's OWN reported geometry (CODETRACER_GPUI_GEOMETRY_OUT, which the front-end writes from the same gTopLayout the drawing reads) compared with the device-pixel positions of the corresponding features in the capture.",
+      "gpuiReported": "band [0,0,1440,34]; menu button [4,6,34,26]; omnibar [635,5,380,28]; area [4,34,1432,834]; footer [0,868,1440,32]; window.content [1440,900].",
+      "electronRule": "#menu height CAPTION_BAR_HEIGHT_WORKSPACE = 2.125rem = 34px (shared_widgets.styl:482); padding-top CAPTION_BAR_PADDING_TOP = 0.375rem = 6px with the 28px INPUT_HEIGHT_LG command prompt centred on the 26px content row, so the prompt's top is 6-1 = 5 ('sits 5px from the top', menu_bar.styl:66-69); #root-container top = CAPTION_BAR_HEIGHT = 34; the tab row begins LAYOUT_TAB_TOP = 4 below it, at 38; #status-base = 2rem = 32.",
+      "gpuiSameRule": "TopBarPx 34 == 34; omnibar y 5 == 5; menu button y 6 h 26 == the 26px content row at padding-top 6; TabTopPx 4 so the tab top is 34+4 = 38 == 38; FooterPx 32 == 32. NOTHING IN codetracer's GPUI CONSTANTS IS WRONG, and no constant was changed: adjusting TopBarPx to make the number come out is exactly the move the brief warned against.",
+      "sevenPositionsThatClose": "With the content origin at device row 56 (a 28-point title bar), ALL of the following land exactly where GPUI's model puts them, on state/calltrace/editorWithMark: omnibox top border raw 66 (model 5 pt = +10 px), omnibox bottom border raw 120 (model pt 32), menu-button top border raw 68 (model 6 pt), menu-button bottom raw 118 (model pt 31), tab top raw 132 (model 38 pt), footer top raw 1794 (model 869 pt in a 901-pt root), frame bottom raw 1857. With the origin at 58 instead, the first five are each off by exactly one point and only the last two land.",
+      "independentReplicationAtASecondWindowSize": "On the three clamped 1728x1084-point frames (eventLog, editor, shell), the light title band again ends at raw row 55 and the omnibox top border again sits exactly 10 device rows below it, at raw 66 -- i.e. a 28-point title bar and a content area of 1084-28 = 1056 points. Four scenarios, two window sizes, one answer."
+    },
+    "theConstantThatHidIt": {
+      "what": "ci/test/plat37_macos_window_capture.nim's TitleBarPoints = 29.",
+      "howItWasDerived": "Its own doc comment says so: 'asked for 1440x900, the frame is 1440x929'. It is frame minus requested -- derived by ASSUMING the viewport was honoured.",
+      "whyNothingCaughtIt": "viewportHonoured then recomputes contentHeight = frame - titleBarPoints and compares it with the request, i.e. it asks whether requested + k - k == requested. PLAT37-ISSUE-V. It is a tautology for every unclamped window, so the record could never contradict the constant it is computed from. Every `false` this lane has ever written was decided by the WIDTH term, which is real.",
+      "osGroundTruth": "AppKit's own frameRectForContentRect:styleMask: on this host (macOS 26.5.2, build 25F84) answers 32 points for a standard titled window and 0 for a borderless one (the positive control). 32 matches neither 28 nor 29, which is itself evidence that this window is not a standard titled window and that NO constant should be assumed for it -- it must be reported by the app."
+    }
+  },
+  "measuredWorth": {
+    "instrument": "flipdiff (a thin CLI over codetracer-image-diff's flip()) over 2880x1800 pairs. Every pair is the same extent on both sides and flipdiff HARD-ERRORS on a mismatch, so no height guard was bypassed.",
+    "positiveControl": "Offset 58 reproduces compare.sh's own run on the same frames to all printed digits (state 0.18253356, calltrace 0.18897242, editorWithMark 0.17696894), so the alignment sweep and the harness are the same instrument.",
+    "threeViewMeanFracOver0_10_byAlignment": {
+      "52": 0.23069014,
+      "54": 0.20312442,
+      "55": 0.18596065,
+      "56": 0.1710353,
+      "57": 0.17457735,
+      "58": 0.18282497
+    },
+    "sharpTrueMinimumAt56": "A clean V with its vertex at 56. This is the control against 'lower is always better', and it is NOT circular with the dy estimates below: FLIP measures ink agreement over the whole frame, not the offset being estimated.",
+    "note60": "An offset of 60 was also run and returned 0.18282497, identical to 58, because ffmpeg CLAMPS a crop that would run past the 1858-row source. It is not a data point and is excluded.",
+    "perView_at58_bottomAligned_whatTheHarnessReadsToday": {
+      "state": {
+        "fracOver0_10": 0.18253356,
+        "mean": 0.08571545,
+        "p50": 0.0,
+        "p90": 0.338553,
+        "maxError": 0.990104079246521
+      },
+      "calltrace": {
+        "fracOver0_10": 0.18897242,
+        "mean": 0.08858369,
+        "p50": 0.0,
+        "p90": 0.349236,
+        "maxError": 0.990104079246521
+      },
+      "editorWithMark": {
+        "fracOver0_10": 0.17696894,
+        "mean": 0.08274893,
+        "p50": 0.0,
+        "p90": 0.319341,
+        "maxError": 0.990104079246521
+      },
+      "threeViewMean": 0.18282497
+    },
+    "perView_at56_topAligned_whatAcorrectlySizedWindowWouldApproach": {
+      "state": {
+        "fracOver0_10": 0.16945467,
+        "mean": 0.07505748,
+        "p50": 0.0,
+        "p90": 0.273444,
+        "maxError": 0.9901668429374695
+      },
+      "calltrace": {
+        "fracOver0_10": 0.17820698,
+        "mean": 0.07946003,
+        "p50": 0.0,
+        "p90": 0.291968,
+        "maxError": 0.9901668429374695
+      },
+      "editorWithMark": {
+        "fracOver0_10": 0.16544425,
+        "mean": 0.07327491,
+        "p50": 0.0,
+        "p90": 0.26141,
+        "maxError": 0.9901668429374695
+      },
+      "threeViewMean": 0.1710353
+    },
+    "worthOfFixingTheWindowHeight": 0.01178967,
+    "p50AndMaxErrorRemark": "p50 is 0.0 in every arm, as in every previous pass. maxError is constant WITHIN an alignment and differs ACROSS alignments (0.990104079246521 at 58, 0.9901668429374695 at 56), exactly as the brief records. Neither is a progress signal and neither is cited as one."
+  },
+  "theSettledBaselineIsNotReproducible": {
+    "finding": "PARITY-P1's three-view mean of 0.17044464 CANNOT be reproduced from the frames the 2026-10-24 record names. Those frames (build/plat37-macos/*.png) at CROP_PX 58 read 0.18282497.",
+    "whatReproducesIt": "The preserved GPUI buffers build/plat37-parity-2026-10-23/buf/*.gpui.rgba reproduce it exactly: state 0.16950328, calltrace 0.17715567, editorWithMark 0.16467496, mean 0.17044464.",
+    "butTheyAreNotThoseFrames": "A crop-58 decode of build/plat37-macos/state.png differs from buf/state.gpui.rgba in 187371 RGB pixels (3.6% of the frame), mean absolute channel difference 1.36/255. The difference is NOT geometric: the buffer is closest to offset 58 (meanAbsDiff 1.36) and progressively further at 57, 56, 55, 54, so it is a crop-58 frame from a DIFFERENT capture -- a text-rendering difference, the scale of a font-smoothing change (isonim-gpui c0f6747 is 'fix(shim): match Chromium's text smoothing on macOS').",
+    "theElectronSideIsClean": "buf/*.electron.rgba ARE byte-identical to build/plat37-macos-electron/*.png (0 differing pixels), so the byte-fixed lane is intact and only the GPUI side has the provenance gap.",
+    "consequence": "0.17044464 and 0.18282497 are both crop-58 three-view means of different GPUI captures, and the 0.0124 between them is text rendering, not geometry. Any ledger that mixes them is adding a font-smoothing difference to a geometry difference. Filed below as PLAT37-ISSUE-W."
+  },
+  "taskTwo_itemsRepriced": {
+    "method": "Normalised-SSD minimiser per named region (reads exactly 0 at d=0), swept +-8 px in each axis, against the byte-fixed Electron buffers, at BOTH alignments. The parabolic-NCC refiner (PLAT37-ISSUE-T) and rowextent.py were not used.",
+    "controls": {
+      "identity": "E vs E on pane:editor -> argmin 0, value exactly 0.000000000000.",
+      "planted": "E vs a +3-row roll of E -> argmin exactly +3 under this script's sign convention (d is how far the GPUI sample window moves DOWN to match Electron, so a negative d means GPUI content sits ABOVE Electron's)."
+    },
+    "whatTaskOneAbsorbs": "AT ALIGNMENT 58 four regions read dy = -2 (pane:editor, pane:state, editor:gutter, editor:codeAndChips) and five read dy = 0 (pane:fileTree, pane:calltrace, pane:eventLog, chrome:topBar, chrome:statusBar). AT ALIGNMENT 56 EVERY ONE OF THE NINE READS dy = 0. The entire vertical signal is absorbed by the registration -- i.e. by the window-height defect. Replicated on state and calltrace.",
+    "circularityDeclared": "Moving the alignment from 58 to 56 trivially zeroes a -2 dy, so the dy table is NOT evidence for the alignment. The alignment is established independently -- by the seven model positions, the second window size, and the sharp FLIP minimum, none of which is a dy estimate.",
+    "items": {
+      "eventLog registration (quoted +0.0128, dy -4)": "DOES NOT REPLICATE. pane:eventLog reads dy = 0 at BOTH alignments, not -4. Its NSSD is 0.09064 at 58 and 0.13020 at 56 -- the one region that is better bottom-aligned, which is what a pane area one point too tall predicts for content anchored low in it. No registration fix is available to price.",
+      "state dx -2 (quoted +0.0022)": "THE SHIFT REPLICATES, THE GAIN DOES NOT. The minimiser recovers dx = +2 on pane:state at both alignments and the regional NSSD falls hard (0.28654 -> 0.10176 at 56). But an oracle that translates the whole region 2 px right makes the FRAME WORSE by -0.00438574 (three-view 0.17103530 -> 0.17542104), because translating the region drags the pane's own box and edges with it. Pricing this needs a fix that moves the pane's CONTENT inside a stationary box, which cannot be synthesised from pixels. The +0.0022 is NOT confirmed.",
+      "statusBar (quoted +0.0010)": "NO REGISTRATION DEFECT. chrome:statusBar reads dy = 0 and dx = 0 at both alignments; NSSD 0.44167 at 58 and 0.43511 at 56. Its residual is content, not geometry. The +0.0010 does not correspond to any shift, and the 2026-10-24 caveat that it was measured in the region the wrong crop displaced is now moot -- the status bar is the one region the crop-58 alignment registers CORRECTLY.",
+      "calltrace row pitch (quoted +0.0321, the largest)": "NOT ABSORBED AND NOT RE-PRICED. pane:calltrace reads dy = 0 at both alignments and carries the HIGHEST residual of any pane (NSSD 0.60546 at 58, 0.63314 at 56) -- it gets worse at the better alignment, which is the signature of a pitch or content divergence rather than a shift. The standing caveat that its ink ratio is 0.8341 therefore still governs. A pitch re-measurement needs a re-capture to be worth anything and was not attempted.",
+      "Monaco overview-ruler border (quoted +0.0017)": "NOT RE-MEASURED. It is a 7-row, +2.500 localised jump; pricing it needs a code change and a re-capture, which no GUI session allowed."
+    }
+  },
+  "revisedFloor": {
+    "statedAsAccountingNotMeasurement": "As in every previous pass, this is an accounting of separately measured items, not one measured frame.",
+    "baselineTheHarnessReadsToday": 0.18282497,
+    "afterTheWindowHeightIsFixed": 0.1710353,
+    "remainingItemisedGainsThatSurvivedRepricing": "NONE of the five was confirmed this pass. eventLog does not replicate; state dx has a real shift but no demonstrated frame-level gain; statusBar has no shift at all; calltrace pitch and the Monaco ruler were not re-measurable without a capture.",
+    "thereforeTheFloor": "0.17103530 is the honest floor claimable from measurement right now, revised UP from the 2026-10-24 projection of ~0.1198, which summed five gains that this pass could not confirm.",
+    "whatRemainsIsLargelyTextRendering": "The 0.0124 between the two crop-58 captures of the same scenes is pure text rendering, which is the same order as the whole remaining itemised ledger. That, not geometry, is where the residual now lives."
+  },
+  "changesMadeThisPass": [
+    "ci/test/plat37_macos_window_capture.nim: added `cropPxOf`, the TRACKED DEFINITION of the parity harness's CROP_PX (PLAT37-ISSUE-V), carrying the boundary arithmetic, the refuted 56, and the 2026-10-25 measurement that neither derivation saw. Added `cropPx` to the record.",
+    "ci/test/plat37_macos_window_capture.nim: documented the viewportHonoured height tautology IN THE RECORD, not only in a comment -- new keys `heightTestIsTautological`, `heightTestNote` and `titleBarPointsProvenance`, plus the remedy (compare the front-end's own `topBar.window.content` from CODETRACER_GPUI_GEOMETRY_OUT). All additions; `viewportHonoured` itself is unchanged so no grader flips.",
+    "TitleBarPoints was NOT changed from 29. It is wrong, and the correct value is 28, but changing it moves CROP_PX to 56, which compare.sh's extent guard then refuses -- the window has to be fixed first. The recommendation is recorded, not applied.",
+    "No GPUI or Electron source was changed. No commit, no push. codetracer/flake.lock untouched.",
+    "The edited file TYPE-CHECKS CLEAN: with --path:../GuiAssert/src, nim check reports 0 errors both at HEAD (751cbc328) and with this edit, and nim c exits 0. A BARE nim check reports 384 errors on this file at HEAD as well, for want of that --path; that is not a regression."
+  ],
+  "issuesDraftedThisPass": {
+    "policyConflictDeclared": "DRAFTED HERE AND UNFILED. This pass made no commits and no pushes, as instructed.",
+    "new": [
+      {
+        "id": "PLAT37-ISSUE-W",
+        "owningRepo": "codetracer-pm",
+        "title": "PARITY-P1's baseline 0.17044464 is not reproducible from the frames its record names",
+        "severity": "HIGH, process. A campaign baseline that cannot be regenerated from its stated inputs cannot price anything.",
+        "measured": "See theSettledBaselineIsNotReproducible. 0.18282497 from the named frames at crop 58; 0.17044464 only from buf/*.gpui.rgba, which differ from those frames in 3.6% of pixels.",
+        "remedy": "Record the capture's content digest beside every parity figure, and re-capture both lanes under one declared font-smoothing state before any further pricing.",
+        "status": "DRAFTED HERE AND UNFILED."
+      }
+    ],
+    "amended": [
+      {
+        "id": "PLAT37-ISSUE-U",
+        "disposition": "AMENDED, NOT WITHDRAWN. The defect is real and HIGH, but its title and remedy were wrong. It is NOT 'the top bar is 2 device px short'; it is 'the window's content area is 901 points when 900 was requested'. The codetracer-side constants are all correct and must not be touched. The remedy is in the renderer (isonim-gpui's open_window path) plus TitleBarPoints = 28 in the lane once the window is fixed."
+      },
+      {
+        "id": "PLAT37-ISSUE-V",
+        "disposition": "AMENDED AND PARTLY ADDRESSED IN THE WORKING TREE. CROP_PX now has a tracked definition and the tautology is declared in the record. The remaining half -- an independently reported content height -- is specified but not wired in."
+      },
+      {
+        "id": "PLAT37-ISSUE-Q",
+        "disposition": "AMEND BEFORE FILING: its statusBar sub-item is now refuted outright (dy 0, dx 0 at both alignments)."
+      },
+      {
+        "id": "PLAT37-ISSUE-O",
+        "disposition": "REMAINS WITHDRAWN, and this pass does not reopen it. CROP_PX = 58 is the correct crop for the harness. What O half-saw was real, but its cause is the window height, not the crop."
+      }
+    ],
+    "carriedUnchangedFromPreviousPasses": [
+      {
+        "id": "PLAT37-ISSUE-H",
+        "status": "Unchanged. Landed in isonim-gpui c0f6747."
+      },
+      {
+        "id": "PLAT37-ISSUE-I",
+        "status": "FILED, and every reading from 2026-10-19 on was wrong to say otherwise. The file has existed since codetracer-pm 388d604f6 (2026-10-18) as issues/2026-10-18-the-gpui-editor-gutter-does-not-read-editor-gutter-lanes-nim-so-its-lanes-sit-right-of-electrons.md. Substance unchanged: <=0.0008, out of scope by the brief."
+      },
+      {
+        "id": "ISONIM-GPUI-ISSUE-J",
+        "status": "STILL DRAFTED AND UNFILED. Owned by isonim-pm, NOT checked out here."
+      },
+      {
+        "id": "PLAT37-ISSUE-K",
+        "status": "FILED, and every reading from 2026-10-19 on was wrong to say otherwise. The file has existed since codetracer-pm 388d604f6 (2026-10-18) as issues/2026-10-18-the-plat37-electron-capture-lane-is-not-bit-deterministic-on-editorwithmark.md. Substance unchanged: relied on again, the Electron lane was held byte-fixed and re-verified byte-identical."
+      },
+      {
+        "id": "PLAT37-ISSUE-M",
+        "status": "STILL DRAFTED AND UNFILED. Owned by isonim-pm, NOT checked out here."
+      },
+      {
+        "id": "PLAT37-ISSUE-N",
+        "status": "FILED, and every reading from 2026-10-19 on was wrong to say otherwise. The file has existed since codetracer-pm 388d604f6 (2026-10-18) as issues/2026-10-18-the-plat37-gpui-capture-lane-sigterms-the-app-so-no-process-exit-cleanup-can-run.md. Substance unchanged."
+      },
+      {
+        "id": "PLAT37-ISSUE-P",
+        "status": "STILL DRAFTED AND UNFILED. calltrace row pitch; re-priced only as 'not absorbed', not re-measured."
+      },
+      {
+        "id": "PLAT37-ISSUE-R",
+        "status": "STILL DRAFTED AND UNFILED. Unchanged."
+      },
+      {
+        "id": "PLAT37-ISSUE-S",
+        "status": "STILL DRAFTED AND UNFILED. Unchanged."
+      },
+      {
+        "id": "PLAT37-ISSUE-T",
+        "status": "STILL DRAFTED AND UNFILED. Honoured: only the normalised-SSD minimiser was used."
+      }
+    ],
+    "cannotBeFiledFromThisWorkspace": "ISONIM-GPUI-ISSUE-J, PLAT37-ISSUE-M and the renderer half of PLAT37-ISSUE-U are owned by isonim-pm, which is not a checked-out repo in this workspace (verified absent again this pass).",
+    "ledgerCorrection2026_10_18": "Issues I, K and N were carried as 'STILL DRAFTED AND UNFILED' by every reading from 2026-10-19 onward. That was false the whole time: all three have had real files in codetracer-pm/issues/ since 388d604f6, which is an ancestor of origin/latest. Verified 2026-10-18 by matching each drafted title to a file on disk. The carried-forward status string was copied from pass to pass without being re-checked, which is how a fact can be wrong in seven consecutive records; a carried status is a claim and needs re-testing like any other."
+  },
+  "supersedes": [
+    "plat37-parity-readings-2026-10-24.json's Task-1 finding ('the GPUI top bar is 74 device pixels tall where Electron's is 76'). The 74-vs-76 MEASUREMENT stands; its ATTRIBUTION to the bar does not.",
+    "plat37-parity-readings-2026-10-24.json's threeViewFigures (0.17044464) as the figure for the named frames -- see PLAT37-ISSUE-W."
+  ],
+  "whatIcouldNOTdo": [
+    "RE-CAPTURE THE GPUI LANE. There is no live macOS GUI session reachable from this process: CGWindowListCopyWindowInfo returns no window for ANY owner, including Finder (a positive control), and codetracer-gpui exits after ~4 s without ever registering a window whatever --quit-after-ms says. Everything in this file is therefore measured on the preserved frames. No before/after of a code change was possible, which is why no renderer or constant was changed.",
+    "Verify any fix at the pixels, for the same reason. The composition finding is proved against GPUI's own reported geometry and the existing captures, not against a fixed build.",
+    "Fix the window height. The sizing is in isonim-gpui's gpui_app.rs open_window path (WindowBounds::Windowed(Bounds::centered(...))); isonim-gpui IS checked out, but the governing isonim-pm is not, the change could not be validated without a GUI session, and the renderer is shared with other products. Reported rather than attempted.",
+    "Change TitleBarPoints to the measured 28. It is the right value and it is coupled to CROP_PX, which compare.sh's extent guard pins to 58 until the window is the right size. Recorded as a recommendation.",
+    "Re-measure the calltrace row pitch and the Monaco overview-ruler border. Both need a re-capture to say anything new.",
+    "Exercise the edited record fields end to end. The lane compiles (exit 0) but could not be run, for want of a GUI session."
+  ],
+  "host": {
+    "platform": "aarch64-darwin, Darwin 25.5.0, macOS 26.5.2 build 25F84",
+    "workspace": "/Users/zahary/m/fix-pxor-issues",
+    "diskAvailable": "86 G"
+  }
+}

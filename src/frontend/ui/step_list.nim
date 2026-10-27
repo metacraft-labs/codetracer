@@ -5,8 +5,8 @@
 ## ViewModel layer — IsoNim is the primary renderer.
 ##
 ## The legacy Karax ``method render`` was dropped in favour of an IsoNim
-## view (``viewmodel/views/isonim_step_list_view.nim``) that mounts
-## directly into the GoldenLayout container.  The legacy
+## view (``viewmodel/views/isonim_step_list_view.nim``) that the panel host
+## (``ui/panel_host``) mounts into the GoldenLayout container.  The legacy
 ## ``StepListComponent`` retains its event-bus subscriptions so the
 ## frontend's existing wiring (``CtCompleteMove`` → re-fetch step lines,
 ## ``updated-load-step-lines`` IPC → append-and-sort) keeps feeding
@@ -14,37 +14,31 @@
 ## whose signals drive the IsoNim view.
 ## ---------------------------------------------------------------------------
 
-import ui_imports, value, ../[types, utils, communication]
+import ui_imports, value, session_viewmodels, ../[types, utils, communication]
 
-import std/[algorithm, json]
-from ../viewmodel/backend/backend_service import BackendService, BackendFuture
+import std/algorithm
 import ./presented_value
-import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as vmtypes import
   StepLine, StepLineKind, StepLineLocation, StepLineFlowValue
 from ../viewmodel/viewmodels/step_list_vm import
-  StepListVM, createStepListVM,
+  StepListVM,
   setLineSteps, appendLineSteps, clearLineSteps,
-  setCurrentLocation, setPanelHeight,
+  setCurrentLocation, setViewport, Viewport,
   loadStepLinesFor, jumpToStepLine, DEFAULT_STEP_LIST_PANEL_HEIGHT
-when defined(js):
-  from isonim/web/dom_api import nil
-  from ../viewmodel/views/isonim_step_list_view import mountIsoNimStepList
 
 const STEP_LINE_HEIGHT_PX = 26
 
-# Module-level VM/store/component slots so the IsoNim mount and the
-# legacy event-bus handlers can find each other across calls.  Mirrors
-# the pattern used by terminal_output, search_results and event_log.
+# The session's ViewModel and the registered component, so the legacy
+# event-bus handlers can feed the one and replay the other.
 var stepListVMInstance*: StepListVM
-var stepListVMStore: ReplayDataStore
+  ## The SHOWN tab's StepListVM; a component's handlers feed their own
+  ## tab's (`paneVM`).
 var stepListComponentRef: StepListComponent
-# Track which StepListComponent ids have already mounted their IsoNim
-# view.  The GL container is keyed by ``stepListComponent-{id}`` so each
-# panel instance gets its own mount.
-var isoNimStepListMountedIds {.used.}: JsAssoc[int, bool] = JsAssoc[int, bool]{}
 
-proc tryMountIsoNimStepListPanel*()
+proc paneVM(self: StepListComponent): StepListVM =
+  ## The StepListVM of the tab that holds `self` (`ownPaneVM`).
+  ownPaneVM(self, stepListVMInstance, stepListVM)
+
 
 # ---------------------------------------------------------------------------
 # Legacy → VM translation helpers.
@@ -107,7 +101,7 @@ proc lineStepsToVm(lines: seq[LineStep]): seq[StepLine] =
 # Legacy panel-height helper kept verbatim — the GL container's
 # ``offsetHeight`` cannot be measured from the headless ViewModel layer,
 # so we still consult the live DOM here and forward the result into the
-# VM via ``setPanelHeight``.
+# VM via ``setViewport``.
 # ---------------------------------------------------------------------------
 
 proc panelHeight*(self: StepListComponent): int =
@@ -144,8 +138,9 @@ method onUpdatedLoadStepLines*(self: StepListComponent, stepLinesUpdate: LoadSte
   self.lineSteps = self.lineSteps.concat(stepLinesUpdate.results)
   sort(self.lineSteps, func (x, y: LineStep): int = cmp(x.delta, y.delta))
 
-  if not stepListVMInstance.isNil:
-    stepListVMInstance.appendLineSteps(lineStepsToVm(stepLinesUpdate.results))
+  let vm = self.paneVM()
+  if not vm.isNil:
+    vm.appendLineSteps(lineStepsToVm(stepLinesUpdate.results))
 
 proc loadStepLinesFor*(self: StepListComponent, location: types.Location) =
   ## Issue a fresh load-step-lines request for ``location``.  Resets
@@ -155,11 +150,12 @@ proc loadStepLinesFor*(self: StepListComponent, location: types.Location) =
   let count = self.panelHeight()
   self.service.loadStepLines(location, count)
 
-  if not stepListVMInstance.isNil:
-    stepListVMInstance.setPanelHeight(count)
+  let vm = self.paneVM()
+  if not vm.isNil:
+    vm.setViewport(Viewport(rows: count))
     let vmLoc = locationToVm(location)
-    stepListVMInstance.setCurrentLocation(vmLoc)
-    stepListVMInstance.clearLineSteps()
+    vm.setCurrentLocation(vmLoc)
+    vm.clearLineSteps()
 
 method onCompleteMove*(self: StepListComponent, response: MoveState) {.async.} =
   ## Fires whenever the live debugger position advances.  Re-fetch the
@@ -179,144 +175,48 @@ proc syncLegacyStepListIntoVM*(self: StepListComponent) =
   ## through ``onUpdatedLoadStepLines`` directly; this proc covers the
   ## bulk-replace scenario (e.g. opening the panel after some debugger
   ## navigation already happened).
-  if stepListVMInstance.isNil or self.isNil:
+  if self.isNil:
     return
-  stepListVMInstance.setLineSteps(lineStepsToVm(self.lineSteps))
-  let dbgLoc = data.services.debugger.location
-  stepListVMInstance.setCurrentLocation(locationToVm(dbgLoc))
+  let vm = self.paneVM()
+  if vm.isNil:
+    return
+  vm.setLineSteps(lineStepsToVm(self.lineSteps))
+  # The location of this component's own tab, from that tab's debugger
+  # service.
+  let ownTab = data.sessionOfComponent(self)
+  let dbgLoc =
+    if ownTab.isNil or ownTab.services.isNil: data.services.debugger.location
+    else: ownTab.services.debugger.location
+  vm.setCurrentLocation(locationToVm(dbgLoc))
 
 # ---------------------------------------------------------------------------
 # VM bootstrap
 # ---------------------------------------------------------------------------
 
-proc initStepListVMWithStore*(store: ReplayDataStore) =
-  ## Initialise (or replace) the parallel ``StepListVM`` using an
-  ## externally-provided ``ReplayDataStore`` (typically the shared
-  ## store from ``SessionViewModel``).  Called from
-  ## ``ui_js.configureMiddleware``.  If a stub-backed instance already
-  ## exists (created by ``initStepListVM`` before the real backend was
-  ## available) it is replaced so the panel uses the real backend.
-  if stepListVMInstance != nil:
-    clog "StepListVM: replacing existing instance with shared-store version"
-    isoNimStepListMountedIds = JsAssoc[int, bool]{}
-  stepListVMStore = store
-  stepListVMInstance = createStepListVM(store)
-  clog "StepListVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimStepListPanel()
-
-proc initStepListVM*() =
-  ## Lazy fallback used when no shared store has been provided yet.
-  ## Same shape as ``initTerminalOutputVM`` /
-  ## ``initSearchResultsVM`` — a stub backend so the panel can still
-  ## render before ``configureMiddleware`` runs.
-  if stepListVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  stepListVMStore = createReplayDataStore(stubBackend)
-  stepListVMInstance = createStepListVM(stepListVMStore)
-  clog "StepListVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimStepListPanel()
+proc initStepListVMFromSession*(vm: StepListVM) =
+  ## Hand the pane the session's `StepListVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ##
+  ## The panel host (`ui/panel_host`) mounts the pane over this ViewModel;
+  ## rows the shown tab's component received before now are replayed into
+  ## it once, when the ViewModel is first handed over.
+  stepListVMInstance = vm
+  if firstBinding(vm):
+    let component = data.shownTabComponent(Content.StepList)
+    if not component.isNil:
+      syncLegacyStepListIntoVM(StepListComponent(component))
 
 # ---------------------------------------------------------------------------
-# Mount helper — Web only
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc tryMountIsoNimStepListPanel*() =
-    ## Mount the IsoNim step-list view into the GoldenLayout-managed
-    ## container.  The container's id is ``stepListComponent-{id}``;
-    ## each open Step List panel instance has its own mount.
-    ##
-    ## Safe to call multiple times — mounts only once per component id.
-    ## Retries via ``setTimeout`` until the DOM container appears
-    ## (capped at 200 attempts, ~2 s) since GoldenLayout creates the
-    ## host slightly after the layout state changes.
-    if stepListVMInstance.isNil:
-      return
-    if stepListComponentRef.isNil:
-      return
-    let componentId = stepListComponentRef.id
-    if isoNimStepListMountedIds.hasKey(componentId):
-      return
-
-    let key = cstring("stepListComponent-" & $componentId)
-    var retryCount = 0
-    proc doMount() =
-      if isoNimStepListMountedIds.hasKey(componentId):
-        return
-      retryCount += 1
-      let container = dom_api.getElementById(dom_api.document, key)
-      if dom_api.isNodeNil(dom_api.Node(container)):
-        if retryCount > 200:
-          cerror "tryMountIsoNimStepListPanel: not ready after 200 retries, giving up"
-          return
-        discard setTimeout(proc() = doMount(), 10)
-        return
-
-      # Replace any prior content (Karax may have planted a stub
-      # element before the IsoNim mount fires).
-      let containerNode = dom_api.Node(container)
-      while not dom_api.isNodeNil(containerNode.firstChild):
-        discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-      isoNimStepListMountedIds[componentId] = true
-      try:
-        mountIsoNimStepList(container, stepListVMInstance)
-      except:
-        cerror "tryMountIsoNimStepListPanel: mount EXCEPTION: " &
-          getCurrentExceptionMsg()
-
-      # Re-sync any rows the legacy component already carries so the
-      # freshly-mounted view reflects the latest list.
-      if not stepListComponentRef.isNil:
-        syncLegacyStepListIntoVM(stepListComponentRef)
-
-    doMount()
-else:
-  proc tryMountIsoNimStepListPanel*() =
-    ## Native compilation has no DOM — keep the proc available so
-    ## callers (``initStepListVM*``) compile on every backend.
-    discard
-
-# ---------------------------------------------------------------------------
-# Component registration — IsoNim primary renderer; no Karax method
-# render.  Generic callers are expected to use direct IsoNim mount paths.
+# Component registration. The pane's view is mounted by the panel host.
 # ---------------------------------------------------------------------------
 
 method unregister*(self: StepListComponent) =
-  ## Release the module-global slot and the mounted marker before the base
-  ## implementation drops the event-bus subscriptions.
-  ##
-  ## WITHOUT THIS THE PANE COMES BACK BLANK, PERMANENTLY, AND SILENTLY. Both
-  ## globals are write-once: `register` assigns `stepListComponentRef` only
-  ## `if isNil`, and the mount returns early at its
-  ## `isoNimStepListMountedIds.hasKey` guard. Neither was ever cleared. After a
-  ## teardown `stepListComponentRef` still points at a component whose DOM
-  ## container is gone, and the marker for its id survives into the next
-  ## component handed the same id — GoldenLayout reuses them, and ids restart
-  ## from 0 after a layout reset — whose mount then returns at the guard and
-  ## draws nothing.
-  ##
-  ## It is an ordinary transition, not an exotic one:
-  ## `ui/session_switch.nim:337` unregisters EVERY component of a closing
-  ## session and `ui/layout.nim` unregisters a closed panel. And the failure is
-  ## silent, which is what made it survive — a pane that returns early at a
-  ## guard is indistinguishable from a pane with nothing to show.
+  ## Release the module-global slot before the base implementation drops the
+  ## event-bus subscriptions: `register` assigns `stepListComponentRef` only
+  ## `if isNil`, so a slot left pointing at an unregistered component would
+  ## keep the next one from being fed (`ui/session_switch` unregisters every
+  ## component of a closing session; `ui/layout` a closed panel).
   ##
   ## The VM is deliberately NOT reset: it is a singleton by design and holds
   ## state about the trace rather than about this panel, so dropping it would
@@ -326,16 +226,12 @@ method unregister*(self: StepListComponent) =
   ## `ui/scratchpad.nim`, which is the original.
   if stepListComponentRef == self:
     stepListComponentRef = nil
-  discard jsDelete(isoNimStepListMountedIds[self.id])
   procCall unregister(Component(self))
 
 method register*(self: StepListComponent, api: MediatorWithSubscribers) =
-  ## Register the StepListComponent with the mediator.  Bring up the
-  ## IsoNim StepListVM lazily so the mount procedure can find it; the
-  ## shared-store version is installed by ``configureMiddleware`` if
-  ## the ViewModel layer is enabled.
+  ## Register the StepListComponent with the mediator. Its event handlers
+  ## feed the session's `StepListVM` once `initStepListVMFromSession` has
+  ## installed it.
   self.api = api
-  initStepListVM()
   if stepListComponentRef.isNil:
     stepListComponentRef = self
-    tryMountIsoNimStepListPanel()

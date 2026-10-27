@@ -23,16 +23,17 @@ const
     ## a bit outside it is refused, the same strict-rejection contract the
     ## u16's known-bits mask enforces elsewhere.
 
-  SupportedMetaDatVersion* = 6'u16
+  SupportedMetaDatVersion* = 7'u16
     ## The one ``meta.dat`` schema version this reader accepts
     ## (``codetracer-trace-format-spec/internal-files.md`` §"Metadata
     ## (meta.dat)").
     ##
-    ## Version 6 carries ``flags_ext`` unconditionally and no path list
+    ## Version 7 carries ``flags_ext`` unconditionally and no path list
     ## after ``recorder_id``: a trace's source paths are the records of
-    ## ``paths.dat``.  Versions 3 to 5 wrote a path list where version 6 has
-    ## the flag-gated blocks, so neither can be read as the other, and every
-    ## other version is refused by name.  Versions at or below
+    ## ``paths.dat``.  Versions 3 to 5 wrote a path list where version 7 has
+    ## the flag-gated blocks, so neither can be read as the other.  Version 6
+    ## has version 7's layout but predates the ``events.dat`` kinds 14-23.
+    ## Every other version is refused by name.  Versions at or below
     ## ``LastShiftedGlobalIndexVersion`` are refused with their own reason
     ## too: their step addresses use a packing the current decode reads one
     ## line high, and nothing but the version tells the two apart.
@@ -175,6 +176,12 @@ proc openCtfs(path: string): CtfsReader =
         size: size,
         mapBlock: mapBlock)
     offset += 24
+
+proc hasEntry(reader: CtfsReader, name: string): bool =
+  ## Whether the container has a member called ``name``.  For a member whose
+  ## absence is a normal case rather than damage, so the caller can tell
+  ## "not there" from every way of failing to read it.
+  reader.entries.anyIt(it.name == name)
 
 proc findEntry(reader: CtfsReader, name: string): CtfsEntry =
   for entry in reader.entries:
@@ -339,6 +346,14 @@ proc safePayloadPath*(realPath: string): string =
   rel
 
 proc extractFilemapSources(reader: CtfsReader, outputFolder: string): seq[string] =
+  ## Unpack the portable sources an MCR ``filemap.bin`` maps.  Only MCR
+  ## writes that member; every other recorder names its sources in
+  ## ``paths.dat`` alone, so an absent filemap means "no filemap" and returns
+  ## nothing (``codetracer-pm`` ``spec/Testing/UI-CTFS-Schema6-Source-Materialization.md``).
+  ## A filemap that is present is parsed strictly, and a malformed one still
+  ## raises.
+  if not reader.hasEntry("filemap.bin"):
+    return @[]
   let filemap = reader.readCtfsFile("filemap.bin")
   if filemap.len == 0:
     return @[]
@@ -486,11 +501,22 @@ proc materializeCtfsSources*(ctFilePath, outputFolder: string): bool =
   ## plus a ``files/`` subdirectory.  The CTFS container itself is the
   ## source of truth for both — this proc just unpacks it so the
   ## existing frontend wiring keeps working without a full FFI reader.
-  var reader: CtfsReader
-  try:
-    reader = openCtfs(ctFilePath)
-  except CatchableError:
-    return false
+  ##
+  ## Returns whether a ``paths.json`` sidecar was written.  ``false`` means
+  ## only that the container OPENED and names no sources.
+  ##
+  ## Raises ``ValueError`` (``IOError`` / ``OSError`` for an unreadable file)
+  ## when the container cannot be opened or is refused — an unreadable
+  ## container version, a bad header — carrying ``openCtfs``'s message, which
+  ## names the field it refuses on (``codetracer-trace-format-spec``
+  ## ``ctfs-container.md``: "A reader must name the field it is refusing on").
+  ## That used to be swallowed into ``false``, which no caller could tell
+  ## from "no sources", so the reason never reached the user (codetracer-pm
+  ## issue ``2026-10-04-ct-importer-turns-a-container-refusal-into-false.md``).
+  ## Failures decoding individual members of a container that DID open are
+  ## still reported as ``ct host: warning:`` lines rather than raised: the
+  ## trace stays usable without them.
+  let reader = openCtfs(ctFilePath)
 
   var paths: seq[string] = @[]
   # NOTE: two different files are called ``paths.json`` in this proc. The one

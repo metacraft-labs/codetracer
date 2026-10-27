@@ -13,8 +13,8 @@
 
 import std/[options, tables, math, strutils, sets]
 
-import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/core/[signals, computation, owner, batch]
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -24,8 +24,17 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/agent_activity_vm
+import ../keymap/scope_path   # the prompt's scope element
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 var expandedToolRowIds = initHashSet[string]()
+
+proc isToolRowExpanded(rowId: string): bool =
+  ## Whether the user expanded the tool-call row `rowId`. Not generic, so the
+  ## set's `contains` binds here rather than where a panel is instantiated.
+  rowId in expandedToolRowIds
 
 const AgentActivityContainerClass* = "component-container agent-ha-container"
 const AgentActivityConversationClass* = "agent-com"
@@ -37,6 +46,20 @@ const AgentActivityDiffEditorPrefix* = "diff-editor"
 const AgentActivityTerminalShellPrefix* = "shellComponent-"
 const AgentActivityPlaceholderText* = "Ask anything…"
 const AgentActivityFollowUpPlaceholderText* = "Ask for a change, or type a follow-up…"
+
+const AgentActivityTurnFailedClass* = "agent-turn-failed"
+  ## #862 — an agent turn that ended in an error (`AgentFailed`,
+  ## `DeepReview/Agentic-Coding-Integration.md` §3.2).  Set on the turn's
+  ## wrapper, next to `agent-thought-wrapper`.
+const AgentActivityTurnFailedIconClass* = "agent-turn-failed-icon"
+  ## §3.3: "Red X replaces icon" — drawn in the turn's header where a running
+  ## turn shows its spinner.
+const AgentActivityTurnErrorClass* = "agent-turn-error"
+  ## The agent's reason for the failure.  Rendered outside the collapsible
+  ## thought block, because a finished turn starts collapsed and a reason
+  ## nobody sees is the defect #862 reported.
+const AgentActivityTurnNoReasonText* =
+  "The agent ended the turn with an error but gave no reason."
 
 const AgentActivityTestRunClass* = "agent-test-run"
   ## AA-2 — a `ct test` execution, rendered as a summary of the run *in place
@@ -513,9 +536,10 @@ proc invokeSettingsSelect(callbacks: AgentActivityCallbacks) =
   if callbacks.onSettingsSelect != nil:
     callbacks.onSettingsSelect()
 
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
+proc appendRenderedChild[R, N](r: R; host, child: N) =
   ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
   ## snapshots. The row markup itself stays declarative in helper ui blocks.
+  mixin appendChild
   r.appendChild(host, child)
 
 when defined(js):
@@ -523,7 +547,7 @@ when defined(js):
   proc setInputValue(node: isonim_dom.Element; value: cstring) {.importjs: "#.value = #".}
   proc eventKey(ev: isonim_dom.Event): cstring {.importjs: "(#.key || '')".}
   proc shiftKey(ev: isonim_dom.Event): bool {.importjs: "!!#.shiftKey".}
-  proc preventDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
+  proc preventKeyDefault(ev: isonim_dom.Event) {.importjs: "#.preventDefault()".}
   proc jsSetTimeout(fn: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
   proc clipboardWriteText(text: cstring) {.importjs: "navigator.clipboard.writeText(#)".}
   proc classListAdd(el: isonim_dom.Element; cls: cstring) {.importjs: "#.classList.add(#)".}
@@ -539,10 +563,6 @@ when defined(js):
       if (r.top < 0) { el.classList.add('agent-add-context-dropdown--below'); }
     })(#)
   """.}
-  proc flipDropdownIfNeeded(el: MockNode) = discard
-  proc setIconHtml(el: isonim_dom.Element; html: string) =
-    el.innerHTML = cstring(html)
-  proc setIconHtml(el: MockNode; html: string) = discard
   proc showImageLightbox(src: cstring) {.importjs: """
     (function(src) {
       var ex = document.getElementById('ct-img-lightbox');
@@ -561,20 +581,49 @@ when defined(js):
       document.body.appendChild(ov);
     })(#)
   """.}
-  proc setupClickOutsideHandler(wrapper: isonim_dom.Element; onClose: proc()) {.importjs: """
+  type Disposer = proc() {.closure.}
+    ## Undoes a registration; what `onCleanup` takes.
+
+  # Closes a dropdown when the user clicks anywhere outside `wrapper`.
+  #
+  # Returns the disposer, which the caller hands to `onCleanup` from the
+  # render effect that drew the open dropdown.  A dropdown that closes some
+  # other way (its trigger, one of its items, the panel closing, the effect
+  # re-rendering it) therefore takes its document-level listener with it.
+  # Without that, every opening left one listener behind, bound to a
+  # wrapper that might since have been discarded — and a discarded wrapper
+  # `contains` nothing, so a stale listener fired on clicks INSIDE the
+  # live dropdown too.  Idempotent; safe to call before the deferred
+  # registration has happened.
+  proc setupClickOutsideHandler(wrapper: isonim_dom.Element;
+                                onClose: proc()): Disposer {.importjs: """
     (function(wrapper, onClose) {
-      setTimeout(function() {
-        function handler(e) {
+      // Registration is deferred past the click that opened the dropdown,
+      // or that very click would reach the handler and close it again.
+      var handler = null;
+      var disposed = false;
+      var timer = setTimeout(function() {
+        timer = null;
+        if (disposed) return;
+        handler = function(e) {
           if (!wrapper.contains(e.target)) {
+            dispose();
             onClose();
-            document.removeEventListener('click', handler, true);
           }
-        }
+        };
         document.addEventListener('click', handler, true);
       }, 0);
+      function dispose() {
+        disposed = true;
+        if (timer !== null) { clearTimeout(timer); timer = null; }
+        if (handler !== null) {
+          document.removeEventListener('click', handler, true);
+          handler = null;
+        }
+      }
+      return dispose;
     })(#, #)
   """.}
-  proc setupClickOutsideHandler(wrapper: MockNode; onClose: proc()) = discard
   proc setupBranchSearch(searchInput: isonim_dom.Element;
                           listContainer: isonim_dom.Element) {.importjs: """
     (function(inp, list) {
@@ -589,7 +638,6 @@ when defined(js):
       inp.focus();
     })(#, #)
   """.}
-  proc setupBranchSearch(searchInput: MockNode; listContainer: MockNode) = discard
   proc setupPasteImageHandler(ta: isonim_dom.Element;
                                onLoading: proc(): int;
                                onLoaded: proc(idx: int; dataUrl: cstring)) {.importjs: """
@@ -611,29 +659,23 @@ when defined(js):
       });
     })(#, #, #)
   """.}
-  proc setupPasteImageHandler(ta: MockNode; onLoading: proc(): int;
-                               onLoaded: proc(idx: int; dataUrl: cstring)) = discard
-  proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element)
-    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)""".}
-  proc setupInputHighlight(r: WebRenderer; ta: isonim_dom.Element;
-                           hl: isonim_dom.Element) =
-    setupInputHighlightJs(ta, hl)
-
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    ## Dynamic collection hosts are stable, but their rows are rebuilt from VM
-    ## snapshots. appendChild is the browser interop needed to attach a
-    ## finished IsoNim row node to that host.
-    r.appendChild(host, child)
-
+  proc setupInputHighlightJs(ta: isonim_dom.Element; hl: isonim_dom.Element): JsObject
+    {.importjs: """(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class="agent-inline-code">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)""".}
+  proc callJsFunction(fn: JsObject) {.importjs: "#()".}
   proc readInputValue(node: isonim_dom.Node): string =
     $node.inputValue()
 
-  proc dispatchInputEvent(el: isonim_dom.Element)
-    {.importjs: "#.dispatchEvent(new Event('input'))".}
+  proc resizeInputToContentJs(input: isonim_dom.Element)
+    {.importjs: """(function(el){var f=parseFloat(window.getComputedStyle(el).fontSize);el.style.height='auto';var h=f>0?el.scrollHeight/f:el.scrollHeight;el.style.height=h+'em';el.scrollTop=el.scrollHeight+2;})(#)""".}
 
-  proc setInputElementValue(node: isonim_dom.Element; value: string) =
-    node.setInputValue(cstring(value))
-    node.dispatchInputEvent()
+  proc resizeInputToContent*(input: isonim_dom.Element) =
+    ## Size the prompt textarea to its value: height `auto`, then the content
+    ## height in `em` (so it follows the font size), scrolled to the end.
+    ## The one implementation of the prompt's auto-resize: the host calls it
+    ## on the user's edits (`agent_activity.autoResizeTextarea`), and
+    ## `syncInputValue` on a value the VM wrote, such as a restored
+    ## multi-line draft.
+    resizeInputToContentJs(input)
 
 proc computeDiffStats(original: string; modified: string): (int, int) =
   when defined(js):
@@ -642,47 +684,104 @@ proc computeDiffStats(original: string; modified: string): (int, int) =
   else:
     (0, 0)
 
-proc syncInputValue(r: MockRenderer; input: MockNode; value: string) =
-  r.setAttribute(input, "value", value)
+proc readInputElementValue[R, N](r: R; input: N): string =
+  ## The prompt's current value.
+  when N is MockNode:
+    input.attributes.getOrDefault("value", "")
+  else:
+    when defined(js):
+      readInputValue(isonim_dom.Node(input))
+    else:
+      ""
 
-proc setupInputHighlight(r: MockRenderer; ta: MockNode; hl: MockNode) = discard
+proc writeInputElementValue[R, N](r: R; input: N; value: string) =
+  ## Assigning `.value` fires no `input` event (only user edits do:
+  ## https://html.spec.whatwg.org/multipage/input.html#common-input-element-events),
+  ## which is what keeps `syncInputValue` from echoing into the VM; the mock's
+  ## attribute write behaves the same.
+  mixin setAttribute
+  when N is MockNode:
+    r.setAttribute(input, "value", value)
+  else:
+    when defined(js):
+      input.setInputValue(cstring(value))
 
-when defined(js):
-  proc syncInputValue(r: WebRenderer; input: isonim_dom.Element; value: string) =
-    input.setInputElementValue(value)
+proc resizeInputToContent[R, N](r: R; input: N) =
+  ## Size the prompt to its value in the browser; the mock has no layout.
+  when defined(js):
+    when N is isonim_dom.Element:
+      resizeInputToContent(input)
 
-proc attachInputEvents(r: MockRenderer; input: MockNode; vm: AgentActivityVM;
-                       callbacks: AgentActivityCallbacks) =
-  r.addEventListener(input, "focus", proc() =
-    callbacks.invokeFocus())
-  r.addEventListener(input, "input", proc() =
-    vm.invokeInputChange(callbacks, input.attributes.getOrDefault("value", "")))
-  r.addEventListener(input, "keydown", proc() =
-    callbacks.invokeSubmit())
+proc syncInputValue[R, N](r: R; input: N; value: string;
+                          repaintHighlight: proc()) =
+  ## The VM -> element half of the prompt's two-way binding; the other half
+  ## is the `input` listener in `attachInputEvents`.
+  ##
+  ## This half must NOT look like typing.  It used to finish by dispatching
+  ## a synthetic `input` event (so that the inline-code overlay repainted),
+  ## and that event ran the listener: the VM was written again and the host
+  ## heard `onInputChange`, whose handler republishes the host's whole state
+  ## into the VM -- invalidating the very effect that called this.  On a
+  ## review launch each republish flips `isLoading` and the conversation, so
+  ## the cycle never settled and the renderer died with "Maximum call stack
+  ## size exceeded".  Only the user's edits are input; the two dependents a
+  ## programmatic value needs are updated directly: the textarea is resized
+  ## to the new value, and the inline-code overlay is repainted.
+  ##
+  ## The element is written only when it differs: re-assigning an equal
+  ## value would move the caret to the end while the user is typing in the
+  ## middle, which is what every keystroke's VM round trip would otherwise
+  ## do.  An unchanged value needs no resize either.
+  if r.readInputElementValue(input) != value:
+    r.writeInputElementValue(input, value)
+    r.resizeInputToContent(input)
+  if repaintHighlight != nil:
+    repaintHighlight()
 
-when defined(js):
-  proc attachInputEvents(r: WebRenderer; input: isonim_dom.Element;
-                         vm: AgentActivityVM;
-                         callbacks: AgentActivityCallbacks) =
-    ## Input and keydown need native DOM event fields/value; WebRenderer's
-    ## declarative event adapter intentionally exposes only proc().
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"focus",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeFocus())
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"input",
-      proc(ev: isonim_dom.Event) =
-        vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
-    isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
-      proc(ev: isonim_dom.Event) =
-        if ev.eventKey() == cstring"Enter" and not ev.shiftKey():
-          ev.preventDefault()
-          if not vm.isLoading.val:
-            callbacks.invokeSubmit()
-            vm.setInputValue("")
-            vm.clearPastedImages())
-    setupPasteImageHandler(input,
-      proc(): int = vm.addPastedImageLoading(),
-      proc(idx: int; dataUrl: cstring) = vm.updatePastedImage(idx, $dataUrl))
+proc setupInputHighlight[R, N](r: R; ta, hl: N): proc() =
+  ## Paints the inline-code overlay behind the prompt and keeps it in step
+  ## with the user's typing (its own `input` listener).  Returns the repaint,
+  ## because a value the VIEW writes fires no `input` event (see
+  ## `syncInputValue`) and must repaint the overlay itself. The mock has no
+  ## overlay to paint.
+  when defined(js):
+    when N is isonim_dom.Element:
+      let repaint = setupInputHighlightJs(ta, hl)
+      return proc() = callJsFunction(repaint)
+  nil
+
+proc attachInputEvents[R, N](r: R; input: N; vm: AgentActivityVM;
+                             callbacks: AgentActivityCallbacks) =
+  ## The prompt's focus, input and keydown handling. In the browser input and
+  ## keydown need native DOM event fields (the value, Enter without Shift),
+  ## which WebRenderer's declarative event adapter does not expose.
+  mixin addEventListener
+  when N is MockNode:
+    r.addEventListener(input, "focus", proc() =
+      callbacks.invokeFocus())
+    r.addEventListener(input, "input", proc() =
+      vm.invokeInputChange(callbacks, r.readInputElementValue(input)))
+    r.addEventListener(input, "keydown", proc() =
+      callbacks.invokeSubmit())
+  else:
+    when defined(js):
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"focus",
+        proc(ev: isonim_dom.Event) =
+          callbacks.invokeFocus())
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"input",
+        proc(ev: isonim_dom.Event) =
+          vm.invokeInputChange(callbacks, readInputValue(isonim_dom.Node(input))))
+      isonim_dom.addEventListener(isonim_dom.Node(input), cstring"keydown",
+        proc(ev: isonim_dom.Event) =
+          if ev.eventKey() == cstring"Enter" and not ev.shiftKey():
+            ev.preventKeyDefault()
+            if not vm.isLoading.val:
+              callbacks.invokeSubmit()
+              vm.setInputValue("")
+              vm.clearPastedImages())
+      setupPasteImageHandler(input,
+        proc(): int = vm.addPastedImageLoading(),
+        proc(idx: int; dataUrl: cstring) = vm.updatePastedImage(idx, $dataUrl))
 
 proc makeToolRowClickHandler(rowId: string): proc() =
   ## Captures rowId in a fresh proc scope to avoid Nim JS for-loop closure bug
@@ -697,6 +796,51 @@ proc makeToolRowClickHandler(rowId: string): proc() =
           expandedToolRowIds.excl(sid)
         else:
           expandedToolRowIds.incl(sid)
+
+# Per-item handler factories (codetracer#860 sweep).
+#
+# Every list below -- message images, inline image segments, tool-call groups,
+# changed files, pasted images, context paths -- is built in a `for` loop,
+# and Nim closures capture by reference: a `let` declared in a
+# loop body, or the loop variable itself, is ONE variable for the whole loop
+# (https://nim-lang.org/docs/manual.html#procedures-closures). An inline
+# `proc() = ...` over such a `let` therefore acts on the LAST item whichever
+# item was clicked. Each factory takes the per-item value as its own
+# parameter, so every closure it returns owns that value; the `ui` DSL
+# evaluates an `onX = expr` attribute once, when the item is built.
+
+proc imageLightboxHandler(src: string): proc() =
+  ## Opens the lightbox on THIS image.
+  result = proc() =
+    when defined(js):
+      showImageLightbox(cstring(src))
+    else:
+      discard src
+
+proc toolHistoryToggleHandler(historyId: string): proc() =
+  ## Expands or collapses THIS tool-call group's history.
+  result = proc() =
+    when defined(js):
+      let histEl = jsQuerySelector(cstring("#" & historyId))
+      if not histEl.isNil:
+        classListToggle(histEl, "agent-tc-history-expanded")
+    else:
+      discard historyId
+
+proc openFileDiffHandler(callbacks: AgentActivityCallbacks;
+                         target: string): proc() =
+  ## Opens the diff of THIS changed file.
+  result = proc() =
+    if callbacks.onOpenFileDiff != nil:
+      callbacks.onOpenFileDiff(target)
+
+proc removePastedImageHandler(vm: AgentActivityVM; idx: int): proc() =
+  ## Removes THIS pasted image.
+  result = proc() = vm.removePastedImage(idx)
+
+proc removeContextPathHandler(vm: AgentActivityVM; idx: int): proc() =
+  ## Removes THIS context path.
+  result = proc() = vm.removeContextPath(idx)
 
 proc renderMessage[R](r: R; componentId: int;
                       message: AgentActivityMessageEntry;
@@ -729,9 +873,7 @@ proc renderMessage[R](r: R; componentId: int;
             for imgData in message.images:
               let capturedSrc = imgData
               tdiv(class = "agent-msg-thumb",
-                   onclick = proc() =
-                     when defined(js):
-                       showImageLightbox(cstring(capturedSrc))):
+                   onclick = imageLightboxHandler(capturedSrc)):
                 img(class = "agent-msg-thumb-img", alt = "attachment", src = capturedSrc)
         tdiv(class = AgentActivityMessageContentClass, id = contentId):
           for segLent in parseInlineCode(message.content):
@@ -823,20 +965,51 @@ proc renderMessage[R](r: R; componentId: int;
             finalTextContent = lastParagraph
     # Header label: "Thinking" while waiting, "Thinking Xs" once output starts
     let stillThinking = message.thinkingEndedAt == 0.0 and message.isLoading
+    # #862: a failed turn says so in its header (with §3.3's red X below),
+    # rather than "Thought for Ns", which reads as a turn that finished.
     let durationLabel =
-      if message.duration > 0.0:
+      if message.failed:
+        "Failed"
+      elif message.duration > 0.0:
         thoughtDuration(message.duration)
       elif message.thinkingEndedAt > 0.0:
         thinkingLabel(message.createdAt, message.thinkingEndedAt)
-      else:
+      elif message.isLoading:
         "Thinking"
+      else:
+        # Finished, with no timing to report (every row of a session loaded
+        # into a review): "Thinking" here would be the in-progress
+        # placeholder on a turn that is over, so the header says nothing.
+        ""
+    # Separated from the label only when there is a label to separate from.
+    let canceledSuffix =
+      if durationLabel.len > 0: " (canceled)" else: "(canceled)"
     # Completed messages start collapsed so the conversation stays readable.
     # The user can expand by clicking the header; ongoing messages are always open.
-    let isCollapsed = not message.isLoading
+    #
+    # Collapsing works because a finished streamed turn's last text is
+    # promoted out of the block (`finalTextContent` above).  A message with
+    # no segments has nothing to promote: its flat `content` IS the message,
+    # so collapsing it would hide all of it behind the header.  Every row of
+    # a session loaded into a review is such a message
+    # (`review_session.sessionMessages`); collapsed, a replayed transcript
+    # read as a column of bare headers, where DeepReview-GUI.md §2.1 has the
+    # reviewer read "what the agent actually did".  Such a message stays
+    # open.
+    let showsFlatContent = segGroups.len == 0 and message.content.len > 0
+    let isCollapsed = not message.isLoading and not showsFlatContent
     let chevronClass = if isCollapsed: "agent-chevron agent-chevron-collapsed" else: "agent-chevron"
     let contentClass = if isCollapsed: AgentActivityMessageContentClass & " agent-thought-collapsed" else: AgentActivityMessageContentClass
+    let wrapperClass =
+      if message.failed:
+        "agent-msg-wrapper agent-thought-wrapper " & AgentActivityTurnFailedClass
+      else:
+        "agent-msg-wrapper agent-thought-wrapper"
+    let failureText =
+      if message.errorMessage.len > 0: message.errorMessage
+      else: AgentActivityTurnNoReasonText
     ui(r):
-      tdiv(class = "agent-msg-wrapper agent-thought-wrapper"):
+      tdiv(class = wrapperClass):
         tdiv(class = "agent-thought-header",
              onclick = proc() =
                when defined(js):
@@ -851,15 +1024,29 @@ proc renderMessage[R](r: R; componentId: int;
                    classListToggle(finalMsgEl, "agent-final-message-hidden")):
           tdiv(class = "agent-thought-header-left"):
             span(class = chevronClass, id = chevronId)
-            span(class = "agent-thought-label"):
-              text durationLabel
-              if message.canceled:
-                span: text " (canceled)"
+            # An empty label is left out rather than drawn as an empty
+            # span: `.agent-thought-header-left` spaces its items with a
+            # flex `gap`, which an empty item would still claim.
+            if durationLabel.len > 0 or message.canceled:
+              span(class = "agent-thought-label"):
+                text durationLabel
+                if message.canceled:
+                  span: text canceledSuffix
             # Spinner shown in header only during the pure thinking phase
             if stillThinking and not message.canceled:
               span(class = "ai-status")
+            # §3.3: "Red X replaces icon" — where a running turn shows its
+            # spinner, a failed one shows the X.
+            if message.failed:
+              span(class = AgentActivityTurnFailedIconClass, title = "Failed"):
+                text "\u2715"
           span(class = "agent-thought-timestamp"):
             text wallClockTime(message.createdAt)
+        # Outside the collapsible block below, so the reason is visible while
+        # the finished turn is collapsed.
+        if message.failed:
+          tdiv(class = AgentActivityTurnErrorClass):
+            text failureText
         tdiv(class = contentClass, id = contentId):
           if segGroups.len > 0:
             # Render segments in chronological order.
@@ -918,9 +1105,7 @@ proc renderMessage[R](r: R; componentId: int;
                   elif seg.kind == mskImage:
                     let capturedImgSrc = seg.content
                     tdiv(class = "agent-msg-thumb",
-                         onclick = proc() =
-                           when defined(js):
-                             showImageLightbox(cstring(capturedImgSrc))):
+                         onclick = imageLightboxHandler(capturedImgSrc)):
                       img(class = "agent-msg-thumb-img", alt = seg.lang, src = capturedImgSrc)
                   else:
                     tdiv(class = "agent-code-block"):
@@ -941,7 +1126,7 @@ proc renderMessage[R](r: R; componentId: int;
                           elif tc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
                           else: "agent-tc-dot agent-tc-dot-running"
                         let stableId = "tc-" & tc.toolCallId
-                        let initExpanded = stableId in expandedToolRowIds
+                        let initExpanded = isToolRowExpanded(stableId)
                         let rowClass = if initExpanded: "agent-tc-row agent-tc-row-expanded" else: "agent-tc-row"
                         let histClickHandler = makeToolRowClickHandler(stableId)
                         tdiv(class = rowClass, id = stableId):
@@ -949,11 +1134,7 @@ proc renderMessage[R](r: R; componentId: int;
                           span(class = "agent-tc-name"): text tc.toolName
                           span(class = dotClass)
                     tdiv(class = "agent-tc-toggle",
-                         onclick = proc() =
-                           when defined(js):
-                             let histEl = jsQuerySelector(cstring("#" & grpHistId))
-                             if not histEl.isNil:
-                               classListToggle(histEl, "agent-tc-history-expanded")):
+                         onclick = toolHistoryToggleHandler(grpHistId)):
                       span(class = "agent-tc-toggle-icon")
                       text $grpTools.len & " tools used"
                   let currentTc = grpTools[^1]
@@ -962,7 +1143,7 @@ proc renderMessage[R](r: R; componentId: int;
                     elif currentTc.toolStatus == "failed": "agent-tc-dot agent-tc-dot-failed"
                     else: "agent-tc-dot agent-tc-dot-running"
                   let currentStableId = "tc-" & currentTc.toolCallId
-                  let currentInitExpanded = currentStableId in expandedToolRowIds
+                  let currentInitExpanded = isToolRowExpanded(currentStableId)
                   let currentRowClass = if currentInitExpanded:
                       "agent-tc-row agent-tc-row-current agent-tc-row-expanded"
                     else:
@@ -1044,9 +1225,7 @@ proc renderMessage[R](r: R; componentId: int;
               elif mseg.kind == mskImage:
                 let capturedMsegSrc = mseg.content
                 tdiv(class = "agent-msg-thumb",
-                     onclick = proc() =
-                       when defined(js):
-                         showImageLightbox(cstring(capturedMsegSrc))):
+                     onclick = imageLightboxHandler(capturedMsegSrc)):
                   img(class = "agent-msg-thumb-img", alt = mseg.lang, src = capturedMsegSrc)
               else:
                 tdiv(class = "agent-code-block"):
@@ -1058,9 +1237,7 @@ proc renderMessage[R](r: R; componentId: int;
             for imgData in message.images:
               let capturedSrc = imgData
               tdiv(class = "agent-msg-thumb",
-                   onclick = proc() =
-                     when defined(js):
-                       showImageLightbox(cstring(capturedSrc))):
+                   onclick = imageLightboxHandler(capturedSrc)):
                 img(class = "agent-msg-thumb-img", alt = "agent image", src = capturedSrc)
         # "Agent is working" indicator: visible outside the collapsible block while
         # the agent is still producing output after the thinking phase ended.
@@ -1086,9 +1263,7 @@ proc renderMessage[R](r: R; componentId: int;
               let (added, removed) = computeDiffStats(diff.original, diff.modified)
               let singleTarget = "file:" & msgId & ":" & $diff.id
               tdiv(class = "agent-diff-file-row",
-                   onclick = proc() =
-                     if callbacks.onOpenFileDiff != nil:
-                       callbacks.onOpenFileDiff(singleTarget)):
+                   onclick = openFileDiffHandler(callbacks, singleTarget)):
                 span(class = "agent-diff-file-path"): text diff.path
                 span(class = "agent-diff-stat-added"): text "+" & $added
                 span(class = "agent-diff-stat-removed"): text "-" & $removed
@@ -1395,7 +1570,9 @@ proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
       span(class = "ct-menu-item-label"):
         text label
   when defined(js):
-    setIconHtml(iconRef, icon)
+    when R is WebRenderer:
+        # The icon is the view's own static SVG markup.
+        r.setInnerHtml(iconRef, icon)
   item
 
 proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
@@ -1436,14 +1613,17 @@ proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
           vm.addContextDropdownOpen.val = false
           callbacks.invokeAddTrace()))
     when defined(js):
-      # After items are in the DOM, check if the menu overflows the viewport
-      # top and flip it below the button if needed.
-      jsSetTimeout(proc() = flipDropdownIfNeeded(menuRef), 0)
-      # Register a document-level click handler that closes the dropdown when
-      # the user clicks outside the wrapper. setTimeout(0) defers registration
-      # past the current click event so the opening click doesn't fire it.
-      setupClickOutsideHandler(wrapperRef,
-        proc() = vm.addContextDropdownOpen.val = false)
+      when R is WebRenderer:
+        # After items are in the DOM, check if the menu overflows the viewport
+        # top and flip it below the button if needed.
+        jsSetTimeout(proc() = flipDropdownIfNeeded(menuRef), 0)
+        # Register a document-level click handler that closes the dropdown when
+        # the user clicks outside the wrapper. setTimeout(0) defers registration
+        # past the current click event so the opening click doesn't fire it.
+        # The buttons effect that drew this menu owns the listener: its next run
+        # (the menu closing, or any re-render of the buttons) disposes it.
+        onCleanup(setupClickOutsideHandler(wrapperRef,
+          proc() = vm.addContextDropdownOpen.val = false))
   panel
 
 const AvailableAgentModels = ["Codex GPT5"]
@@ -1493,8 +1673,10 @@ proc renderModelButton[R](r: R; vm: AgentActivityVM;
     for model in AvailableAgentModels:
       r.appendRenderedChild(listRef, renderModelOption(r, vm, model))
     when defined(js):
-      setupClickOutsideHandler(wrapperRef,
-        proc() = vm.modelDropdownOpen.val = false)
+      when R is WebRenderer:
+        # Owned by the buttons effect, like the "+" menu's listener above.
+        onCleanup(setupClickOutsideHandler(wrapperRef,
+          proc() = vm.modelDropdownOpen.val = false))
   panel
 
 const SettingsRuntimeOptions = ["devcontainer", "Local shell", "Micro-VM (Firecracker)", "GPT·o-series", "Docker image"]
@@ -1503,13 +1685,81 @@ const SettingsMemoryOptions = ["2 GB", "4 GB", "8 GB", "16 GB"]
 const SettingsDeliveryModeOptions = ["New branch", "Existing branch", "Current branch"]
 const SettingsPermissionsOptions = ["Ask before commands", "Allow all", "Deny all"]
 
+# ---------------------------------------------------------------------------
+# The settings panel
+#
+# `div.agent-settings-panel` is a scroll container, and a browser keeps a
+# scroll position only for as long as the same element stays mounted (#861).
+# So the panel is built ONCE per opening (see the `settingsOpen` effect in
+# `renderAgentActivityPanelImpl`), and nothing in the code below reads a
+# settings signal outside a render effect scoped to the few nodes that show
+# it:
+#
+# - a trigger's text, the toggle's class and the agent chip are dynamic `ui`
+#   attributes/text, each of which the `ui` macro wraps in its own effect;
+# - a dropdown's open list is drawn by one effect per dropdown, which adds
+#   and removes only the list (`renderSettingsDropdown`).
+#
+# A plain `vm.settingsX.val` read in these helpers' bodies would subscribe
+# whichever effect is running them, and in the panel's case that was the
+# effect that rebuilds the whole panel
+# (`codetracer-specs/Refactoring-Plans/Shared-DOM-Front-Ends.md`, "What the
+# DOM front-ends do instead", item 5).
+# ---------------------------------------------------------------------------
+
+proc settingsToggleClass(on: bool): string =
+  if on: "agent-settings-toggle agent-settings-toggle--on"
+  else: "agent-settings-toggle"
+
+proc settingsAgentChipText(selectedModel: string): string =
+  (if selectedModel.len > 0: selectedModel else: "Claude·Sonnet") & " ×1"
+
+proc shownDeliveryBranch(vm: AgentActivityVM): string =
+  ## The target branch the panel shows: the user's choice, or the checked-out
+  ## branch until they make one.
+  if vm.settingsDeliveryBranch.val.len > 0: vm.settingsDeliveryBranch.val
+  else: vm.currentBranch.val
+
+proc settingsBranchOptions(vm: AgentActivityVM): seq[string] =
+  ## The repository's branches, plus the shown target if it is not among them
+  ## (a branch typed in elsewhere, or one the list has not caught up with).
+  result = vm.branches.val
+  let shown = shownDeliveryBranch(vm)
+  if shown.len > 0 and shown notin result:
+    result.add(shown)
+
+proc staticOptions(options: openArray[string]): proc(): seq[string] =
+  let snapshot = @options
+  result = proc(): seq[string] = snapshot
+
+proc renderSettingsDropdownItem[R](r: R; vm: AgentActivityVM; value: string;
+                                   isActive: bool;
+                                   onSelect: proc(v: string)): auto =
+  ## One row of an open dropdown list.  A proc of its own so that each row's
+  ## handler captures its own `value` (the JS backend shares a loop-local
+  ## `let` between the closures created in a loop; see
+  ## `makeToolRowClickHandler`).
+  let cls = if isActive: "agent-settings-dropdown-item agent-settings-dropdown-item--active"
+            else: "agent-settings-dropdown-item"
+  ui(r):
+    tdiv(class = cls,
+         onclick = proc() =
+           vm.settingsActiveDropdown.val = ""
+           onSelect(value)):
+      text value
+      if isActive:
+        span(class = "agent-settings-check-icon")
+
 proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
-                               currentValue: string;
-                               options: openArray[string];
+                               currentValue: proc(): string;
+                               options: proc(): seq[string];
                                onSelect: proc(v: string)): auto =
+  ## A settings select: a trigger showing `currentValue()` and, while
+  ## `vm.settingsActiveDropdown` names `dropdownId`, the list of `options()`.
+  ##
+  ## Both accessors are read only inside effects scoped to this dropdown, so
+  ## a change updates this dropdown alone and the panel around it stays put.
   var wrapperRef: typeof(r.createElement("div"))
-  var listRef: typeof(r.createElement("div"))
-  let isOpen = vm.settingsActiveDropdown.val == dropdownId
   let panel = ui(r):
     tdiv(ref = wrapperRef, class = "agent-settings-select-wrapper"):
       tdiv(class = "agent-settings-select-trigger",
@@ -1518,51 +1768,44 @@ proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
                vm.settingsActiveDropdown.val = ""
              else:
                vm.settingsActiveDropdown.val = dropdownId):
-        span(class = "agent-settings-select-text"): text currentValue
+        span(class = "agent-settings-select-text"): text currentValue()
         span(class = "agent-settings-select-chevron")
-      if isOpen:
-        tdiv(ref = listRef, class = "agent-settings-dropdown-list")
-  if isOpen:
-    for opt in options:
-      let optVal = opt
-      let isActive = optVal == currentValue
-      let cls = if isActive: "agent-settings-dropdown-item agent-settings-dropdown-item--active"
-                else: "agent-settings-dropdown-item"
-      let item = ui(r):
-        tdiv(class = cls,
-             onclick = proc() =
-               vm.settingsActiveDropdown.val = ""
-               onSelect(optVal)):
-          text optVal
-          if isActive:
-            span(class = "agent-settings-check-icon")
-      r.appendRenderedChild(listRef, item)
+
+  # Narrowed to this dropdown, so opening a different one does not re-run
+  # the list effect below (and churn its click-outside listener) unless this
+  # dropdown's own state actually changes.
+  let isOpen = createMemo(proc(): bool =
+    vm.settingsActiveDropdown.val == dropdownId)
+
+  # The open list, appended after the trigger.  Everything it shows is read
+  # here, so a value that changes while it is open (e.g. "Reset to defaults")
+  # redraws the list, and only the list.  The cleanups run before every
+  # re-run and when the panel closes: the list leaves the wrapper and the
+  # document-level listener goes with it.
+  createRenderEffect proc() =
+    if not isOpen.val:
+      return
+    let current = currentValue()
+    var listRef: typeof(r.createElement("div"))
+    let list = ui(r):
+      tdiv(ref = listRef, class = "agent-settings-dropdown-list")
+    for opt in options():
+      r.appendRenderedChild(listRef,
+        renderSettingsDropdownItem(r, vm, opt, opt == current, onSelect))
+    r.appendRenderedChild(wrapperRef, list)
+    onCleanup(proc() = r.removeChild(wrapperRef, list))
     when defined(js):
-      setupClickOutsideHandler(wrapperRef, proc() =
-        if vm.settingsActiveDropdown.val == dropdownId:
-          vm.settingsActiveDropdown.val = "")
+      when R is WebRenderer:
+        onCleanup(setupClickOutsideHandler(wrapperRef, proc() =
+          if vm.settingsActiveDropdown.val == dropdownId:
+            vm.settingsActiveDropdown.val = ""))
   panel
 
 proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
                             callbacks: AgentActivityCallbacks): auto =
-  let runtime = vm.settingsRuntime.val
-  let cpu = vm.settingsCpu.val
-  let memory = vm.settingsMemory.val
-  let networkOn = vm.settingsNetworkAccess.val
-  let deliveryMode = vm.settingsDeliveryMode.val
-  let deliveryBranch = if vm.settingsDeliveryBranch.val.len > 0: vm.settingsDeliveryBranch.val
-                       else: vm.currentBranch.val
-  let permissions = vm.settingsPermissions.val
-  let agentName = if vm.selectedModel.val.len > 0: vm.selectedModel.val else: "Claude·Sonnet"
-  let toggleClass = if networkOn: "agent-settings-toggle agent-settings-toggle--on"
-                    else: "agent-settings-toggle"
-
-  var branchOptions: seq[string] = @[]
-  for b in vm.branches.val:
-    branchOptions.add(b)
-  if deliveryBranch.len > 0 and deliveryBranch notin branchOptions:
-    branchOptions.add(deliveryBranch)
-
+  ## The settings panel, built once per opening.  Must be called untracked
+  ## (it creates effects and memos, and must not subscribe its caller to
+  ## anything); see the section comment above.
   # Ref vars for containers into which we append dynamic children
   var sEnvRef: typeof(r.createElement("div"))
   var sDelRef: typeof(r.createElement("div"))
@@ -1577,7 +1820,7 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
         tdiv(ref = twocolRef, class = "agent-settings-two-col")
         tdiv(class = "agent-settings-toggle-row"):
           span(class = "agent-settings-label"): text "Network access"
-          tdiv(class = toggleClass,
+          tdiv(class = settingsToggleClass(vm.settingsNetworkAccess.val),
                onclick = proc() =
                  vm.settingsNetworkAccess.val = not vm.settingsNetworkAccess.val):
             tdiv(class = "agent-settings-toggle-thumb")
@@ -1588,7 +1831,8 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
       tdiv(class = "agent-settings-section"):
         span(class = "agent-settings-section-header"): text "AGENTS"
         tdiv(class = "agent-settings-agents-row"):
-          tdiv(class = "agent-settings-agent-chip"): text agentName & " ×1"
+          tdiv(class = "agent-settings-agent-chip"):
+            text settingsAgentChipText(vm.selectedModel.val)
           tdiv(class = "agent-settings-add-chip"): text "+ add"
       tdiv(ref = sPermRef, class = "agent-settings-section agent-settings-section--last"):
         span(class = "agent-settings-section-header"): text "PERMISSIONS"
@@ -1613,31 +1857,39 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
       span(class = "agent-settings-label"): text "Memory"
   discard twoCols
   r.appendRenderedChild(cpuColRef,
-    renderSettingsDropdown(r, vm, "cpu", cpu, SettingsCpuOptions,
+    renderSettingsDropdown(r, vm, "cpu",
+      proc(): string = vm.settingsCpu.val, staticOptions(SettingsCpuOptions),
       proc(v: string) = vm.settingsCpu.val = v))
   r.appendRenderedChild(memColRef,
-    renderSettingsDropdown(r, vm, "memory", memory, SettingsMemoryOptions,
+    renderSettingsDropdown(r, vm, "memory",
+      proc(): string = vm.settingsMemory.val, staticOptions(SettingsMemoryOptions),
       proc(v: string) = vm.settingsMemory.val = v))
   r.appendRenderedChild(twocolRef, cpuColRef)
   r.appendRenderedChild(twocolRef, memColRef)
 
   # Runtime dropdown appended after the "Runtime" label in env section
   r.appendRenderedChild(sEnvRef,
-    renderSettingsDropdown(r, vm, "runtime", runtime, SettingsRuntimeOptions,
+    renderSettingsDropdown(r, vm, "runtime",
+      proc(): string = vm.settingsRuntime.val, staticOptions(SettingsRuntimeOptions),
       proc(v: string) = vm.settingsRuntime.val = v))
 
   # Delivery section dropdowns
   r.appendRenderedChild(sDelRef,
-    renderSettingsDropdown(r, vm, "deliveryMode", deliveryMode, SettingsDeliveryModeOptions,
+    renderSettingsDropdown(r, vm, "deliveryMode",
+      proc(): string = vm.settingsDeliveryMode.val,
+      staticOptions(SettingsDeliveryModeOptions),
       proc(v: string) = vm.settingsDeliveryMode.val = v))
-  let capturedBranches = branchOptions
   r.appendRenderedChild(sDelRef,
-    renderSettingsDropdown(r, vm, "deliveryBranch", deliveryBranch, capturedBranches,
+    renderSettingsDropdown(r, vm, "deliveryBranch",
+      proc(): string = shownDeliveryBranch(vm),
+      proc(): seq[string] = settingsBranchOptions(vm),
       proc(v: string) = vm.settingsDeliveryBranch.val = v))
 
   # Permissions dropdown
   r.appendRenderedChild(sPermRef,
-    renderSettingsDropdown(r, vm, "permissions", permissions, SettingsPermissionsOptions,
+    renderSettingsDropdown(r, vm, "permissions",
+      proc(): string = vm.settingsPermissions.val,
+      staticOptions(SettingsPermissionsOptions),
       proc(v: string) = vm.settingsPermissions.val = v))
 
   fullPanel
@@ -1734,14 +1986,17 @@ proc renderBranchButton[R](r: R; vm: AgentActivityVM;
               text "New branch"
   if isOpen:
     when defined(js):
-      setIconHtml(searchIconRef, BranchSearchIcon)
-      setIconHtml(createIconRef, BranchCreateIcon)
+      when R is WebRenderer:
+        r.setInnerHtml(searchIconRef, BranchSearchIcon)
+        r.setInnerHtml(createIconRef, BranchCreateIcon)
     for branch in vm.branches.val:
       r.appendRenderedChild(listRef, renderBranchOption(r, vm, callbacks, branch))
     when defined(js):
-      setupBranchSearch(searchRef, listRef)
-      setupClickOutsideHandler(wrapperRef,
-        proc() = vm.branchDropdownOpen.val = false)
+      when R is WebRenderer:
+        setupBranchSearch(searchRef, listRef)
+        # Owned by the buttons effect, like the "+" menu's listener above.
+        onCleanup(setupClickOutsideHandler(wrapperRef,
+          proc() = vm.branchDropdownOpen.val = false))
   panel
 
 proc renderIdleState[R](r: R; vm: AgentActivityVM;
@@ -1751,6 +2006,11 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
   let chip1 = "Fix a bug in my code"
   let chip2 = "Explain this codebase"
   let chip3 = "Write tests for function"
+  # A chip fills the prompt FOR the user, so it is input and goes the way
+  # typing does (`invokeInputChange`): the host keeps its own copy of the
+  # prompt and republishes it on every sync, so a value written only into
+  # the VM would be wiped by the next one.  `syncInputValue` fires no
+  # `input` event, so nothing else would tell the host.
   ui(r):
     tdiv(class = "agent-idle-state"):
       tdiv(class = "agent-idle-header"):
@@ -1761,17 +2021,17 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
       tdiv(class = "agent-idle-suggestions"):
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
-                 vm.setInputValue(chip1)
+                 vm.invokeInputChange(callbacks, chip1)
                  callbacks.invokeFocus()):
           text chip1
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
-                 vm.setInputValue(chip2)
+                 vm.invokeInputChange(callbacks, chip2)
                  callbacks.invokeFocus()):
           text chip2
         button(class = "agent-idle-chip", `type` = "button",
                onclick = proc() =
-                 vm.setInputValue(chip3)
+                 vm.invokeInputChange(callbacks, chip3)
                  callbacks.invokeFocus()):
           text chip3
 
@@ -1811,8 +2071,17 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         tdiv(ref = buttons, class = "agent-buttons-container")
       tdiv(ref = settingsPanelHost, class = "agent-settings-host")
 
+  # The prompt is the scope path's `input:agent-prompt` (Base-Keymaps-And-
+  # Layer-Stack.md §5.2: views render the attributes the desktop reads its
+  # path from, §6.2), as Find in Files' field is `input:search-query`.  This
+  # pane is a LIST pane, so without its own element the focus was the pane:
+  # `Enter` resolved to `list.activate`, which the key router ran and stopped
+  # before the keydown handler below could submit.  Both renderers take the
+  # same two attributes, so MockRenderer suites see what Electron gets.
+  r.setAttribute(input, ScopeKindAttribute, $ekInput)
+  r.setAttribute(input, ScopeIdAttribute, AgentPromptInput)
   r.attachInputEvents(input, vm, callbacks)
-  r.setupInputHighlight(input, highlight)
+  let repaintHighlight = r.setupInputHighlight(input, highlight)
 
   createRenderEffect proc() =
     r.clearChildren(imagesStrip)
@@ -1830,7 +2099,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           tdiv(class = "agent-paste-thumb agent-paste-thumb--loading"):
             tdiv(class = "agent-paste-shimmer")
             tdiv(class = "agent-paste-remove",
-                 onclick = proc() = vm.removePastedImage(idx)):
+                 onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.appendRenderedChild(imagesStrip, thumb)
       else:
@@ -1839,11 +2108,9 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
         let thumb = ui(r):
           tdiv(class = "agent-paste-thumb"):
             img(ref = imgEl, class = "agent-paste-img", alt = "attachment",
-                onclick = proc() =
-                  when defined(js):
-                    showImageLightbox(cstring(capturedSrc)))
+                onclick = imageLightboxHandler(capturedSrc))
             tdiv(class = "agent-paste-remove",
-                 onclick = proc() = vm.removePastedImage(idx)):
+                 onclick = removePastedImageHandler(vm, idx)):
               text "×"
         r.setAttribute(imgEl, "src", imgData)
         r.appendRenderedChild(imagesStrip, thumb)
@@ -1855,7 +2122,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
           span(class = "agent-context-path-chip__label"):
             text capturedPath
           tdiv(class = "agent-paste-remove",
-               onclick = proc() = vm.removeContextPath(pathIdx)):
+               onclick = removeContextPathHandler(vm, pathIdx)):
             text "×"
       r.appendRenderedChild(imagesStrip, chip)
 
@@ -1918,7 +2185,7 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
       callbacks.afterDynamicRender()
 
   createRenderEffect proc() =
-    r.syncInputValue(input, vm.inputValue.val)
+    r.syncInputValue(input, vm.inputValue.val, repaintHighlight)
     r.clearChildren(buttons)
     # if not vm.reRecordInProgress.val:
     #   r.appendRenderedChild(buttons, renderNewAgentButton(r, callbacks))
@@ -1933,33 +2200,26 @@ proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     else:
       r.appendRenderedChild(buttons, renderStopButton(r, callbacks))
 
+  # The settings panel: built when it opens, removed when it closes, and
+  # otherwise left alone (#861).  `settingsOpen` is the ONLY signal this
+  # effect tracks.  The panel is built untracked, so the reads its contents
+  # make subscribe their own small effects instead of this one; a tracked read
+  # here would discard the panel (and its scroll position) on every dropdown
+  # and setting change.  The panel's effects are still owned by this effect,
+  # so closing the panel disposes them, with their click-outside listeners.
   createRenderEffect proc() =
+    let open = vm.settingsOpen.val
     r.clearChildren(settingsPanelHost)
-    if vm.settingsOpen.val:
-      r.appendRenderedChild(settingsPanelHost, renderSettingsPanel(r, vm, callbacks))
+    if open:
+      untrack proc() =
+        r.appendRenderedChild(settingsPanelHost,
+                              renderSettingsPanel(r, vm, callbacks))
 
   panel
 
-proc renderAgentActivityPanel*(r: MockRenderer; vm: AgentActivityVM;
+proc renderAgentActivityPanel*[R, N](r: R; vm: AgentActivityVM;
     componentId: int; commandInputId: string = "";
-    callbacks: AgentActivityCallbacks = AgentActivityCallbacks()): MockNode =
+    callbacks: AgentActivityCallbacks = AgentActivityCallbacks()): N =
+  ## The Agent Activity panel, under any renderer (Shared-DOM-Front-Ends D3);
+  ## the panel host (`ui/panel_host`) mounts it.
   renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks)
-
-when defined(js):
-  proc renderAgentActivityPanel*(r: WebRenderer; vm: AgentActivityVM;
-      componentId: int; commandInputId: string = "";
-      callbacks: AgentActivityCallbacks = AgentActivityCallbacks()):
-      isonim_dom.Element =
-    renderAgentActivityPanelImpl(r, vm, componentId, commandInputId, callbacks)
-
-  proc mountIsoNimAgentActivityPanel*(container: isonim_dom.Element;
-                                      vm: AgentActivityVM;
-                                      componentId: int;
-                                      commandInputId: string = "";
-                                      callbacks: AgentActivityCallbacks =
-                                        AgentActivityCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderAgentActivityPanel(r, vm, componentId,
-                                         commandInputId, callbacks)
-    # External mount interop: the AgentActivity component owns this container.
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

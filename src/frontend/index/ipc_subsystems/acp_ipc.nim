@@ -3,7 +3,10 @@ import
   ../../lib/[ jslib ],
   ../../../common/ct_logging,
   ../../../ct/acp/acp,
-  ../../../frontend/index/electron_vars
+  ../../../frontend/index/electron_vars,
+  ../served_client
+
+from ../../viewmodel/platform/vcs import noIndexLockGitArgs
 
 proc getEnv(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
 proc parseArgs(env: cstring): seq[cstring] {.importjs: "((val) => val ? val.split(' ').filter(Boolean) : [])(#)".}
@@ -35,19 +38,69 @@ proc stringify(obj: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc readFileUtf8(path: cstring): Future[cstring] {.importjs: "require('fs').promises.readFile(#, 'utf8')".}
 proc writeFileUtf8(path: cstring, content: cstring): Future[void] {.importjs: "require('fs').promises.writeFile(#, #, 'utf8')".}
 
-# Returns the content of a file at git HEAD (empty string if the file is new/untracked).
-proc gitFileAtHead(absPath: cstring): cstring {.importjs: """
-(() => {
+# Git, for the agent pane's change detection. Every call goes through
+# `gitRead`, which starts its argv with the shared `NoIndexLockGitOptions`
+# (`platform/vcs`): these reads run at the start and end of every prompt, and
+# a read must never write the user's index nor take its lock — a CodeTracer
+# killed while git held `.git/index.lock` left the checkout unusable (VCS-Panel
+# .md, "Reading the repository never takes the index lock").
+proc gitStdoutSync(args: seq[cstring]): JsObject {.importjs: """
+(function(a) {
   try {
-    const cp = require('child_process');
-    const path = require('path');
-    const rel = path.relative(process.cwd(), #);
-    const r = cp.spawnSync('git', ['show', 'HEAD:' + rel],
+    const r = require('child_process').spawnSync('git', a,
       { encoding: 'utf8', timeout: 10000, cwd: process.cwd() });
-    return (!r.error && r.status === 0) ? (r.stdout || '') : '';
-  } catch(e) { return ''; }
-})()
-""".}
+    return (!r.error && r.status === 0) ? (r.stdout || '') : null;
+  } catch (e) { return null; }
+})(#)""".}
+proc resolveFromCwd(p: cstring): cstring {.importjs: "require('path').resolve(process.cwd(), #)".}
+proc relativeToCwd(p: cstring): cstring {.importjs: "require('path').relative(process.cwd(), #)".}
+
+proc gitRead(args: openArray[string]): tuple[ok: bool, output: string] =
+  ## git's stdout for `args`, run in this process's working directory; not
+  ## ok when git could not be run, timed out (10 s) or exited non-zero.
+  var argv: seq[cstring] = @[]
+  for a in noIndexLockGitArgs(args): argv.add cstring(a)
+  let raw = gitStdoutSync(argv)
+  if raw.isNull or raw.isUndefined: (false, "")
+  else: (true, $raw.to(cstring))
+
+proc gitFileAtHead(absPath: cstring): cstring =
+  ## The content of a file at git HEAD (empty if the file is new/untracked).
+  let (ok, output) = gitRead(["show", "HEAD:" & $relativeToCwd(absPath)])
+  if ok: cstring(output) else: cstring""
+
+proc gitVisibleChanges(): seq[cstring] =
+  ## Every file whose content differs from HEAD, plus every untracked file
+  ## that is not ignored, as absolute paths.
+  ##
+  ## `--numstat`, not `--name-only`: with `diff.autoRefreshIndex` off (part of
+  ## the shared options) `--name-only` also lists a file whose mtime alone
+  ## changed, while `--numstat` compares its content and leaves it out, as
+  ## `--name-only` used to when git refreshed the index. `-z` keeps names
+  ## verbatim (no C-style quoting) and spells a rename as an empty name
+  ## followed by the old and the new path; the new one is listed, as
+  ## `--name-only` lists it. https://git-scm.com/docs/git-diff#_other_diff_formats
+  let (diffOk, numstat) = gitRead(["diff", "--numstat", "-z", "HEAD"])
+  if diffOk:
+    let fields = numstat.split('\0')
+    var i = 0
+    while i < fields.len:
+      let parts = fields[i].split('\t', maxsplit = 2)
+      if parts.len == 3 and parts[2].len > 0:
+        result.add resolveFromCwd(cstring(parts[2]))
+        inc i
+      elif parts.len == 3 and i + 2 < fields.len:
+        result.add resolveFromCwd(cstring(fields[i + 2]))
+        i += 3
+      else:
+        inc i
+  let (untrackedOk, untracked) =
+    gitRead(["ls-files", "-z", "--others", "--exclude-standard"])
+  if untrackedOk:
+    for p in untracked.split('\0'):
+      if p.len > 0:
+        result.add resolveFromCwd(cstring(p))
+
 
 
 proc makeClient(onRequestPermission: js, onSessionUpdate: js, onWriteTextFile: js, onReadTextFile: js, onCreateTerminal: js): JsObject {.importjs: "(() => ({ requestPermission: async (params) => await #(params), sessionUpdate: async (params) => await #(params), writeTextFile: async (params) => await #(params), readTextFile: async (params) => await #(params), createTerminal: async (params) => await #(params), extMethod: async () => ({}), extNotification: async () => {} }))()".}
@@ -110,11 +163,54 @@ proc getSessionState(sessionId: cstring; state: var SessionState): bool =
 proc saveSessionState(sessionId: cstring; state: SessionState) =
   sessionsById[sessionId] = state
 
+# WHOSE AGENT SESSION. `ct host` serves several clients from this one index
+# process and this one agent connection (`index/host_clients`; `CLI/ct/host.md`
+# "Sessions are isolated"). A page names its agent session with an id of its
+# own (`agent-session-<component id>`), which every page chooses alike, so the
+# page's id is scoped by the client that sent it (`currentClientKey`). The
+# agent's callbacks arrive on the agent connection, not in a client's request,
+# so each ACP session records the client that opened it and its callbacks run
+# as that client's (`runAsSessionOwner`): what they send reaches that client
+# alone. On the desktop there are no clients: the key is "", the owner nil,
+# and everything behaves as before.
+var acpSessionOwners: Table[cstring, JsObject] = initTable[cstring, JsObject]()
+
+proc scopedClientSession(clientSessionId: cstring): cstring =
+  ## The page's session id, scoped by the client being served.
+  let client = currentClientKey()
+  if client.len == 0: clientSessionId
+  else: client & cstring"/" & clientSessionId
+
 proc acpSessionForClient(clientSessionId: cstring): cstring =
-  if acpSessionIdsByClient.hasKey(clientSessionId):
-    acpSessionIdsByClient[clientSessionId]
+  let key = scopedClientSession(clientSessionId)
+  if acpSessionIdsByClient.hasKey(key):
+    acpSessionIdsByClient[key]
   else:
     cstring""
+
+proc mayUseAcpSession(acpSessionId: cstring): bool =
+  ## Whether the client being served may prompt, stop or cancel
+  ## `acpSessionId`: its own, or one no client owns (the desktop's).
+  let owner = acpSessionOwners.getOrDefault(acpSessionId)
+  owner.isNil or owner == currentClient()
+
+proc callWith(fn: js; arg: JsObject): JsObject {.importjs: "#(#)".}
+
+proc runAsSessionOwner(handler: js): js =
+  ## `handler` (an agent callback taking `{sessionId, …}`), run as the client
+  ## that opened that ACP session, when one did.
+  functionAsJS(proc(params: JsObject): JsObject =
+    let acpSessionId =
+      if not params.isNil and not params.isUndefined and
+         jsHasKey(params, cstring"sessionId"):
+        params[cstring"sessionId"].to(cstring)
+      else:
+        cstring""
+    let owner = acpSessionOwners.getOrDefault(acpSessionId)
+    if owner.isNil:
+      callWith(handler, params)
+    else:
+      callWith(wrapAsClient(owner, handler), params))
 
 proc clientSessionForAcp(acpSessionId: cstring): cstring =
   if clientSessionIdsByAcp.hasKey(acpSessionId):
@@ -241,6 +337,16 @@ let handleRequestPermission = functionAsJS(proc(params: JsObject): Future[JsObje
   }
 )
 
+proc sendToolPermission(connection: ClientSideConnection; params: JsObject) {.async.} =
+  # Own the send's asynchronous failure without suspending session updates:
+  # handleSessionUpdate saves a local SessionState snapshot after dispatch.
+  # Keeping the await in this helper avoids overwriting a later update with
+  # that snapshot when the transport settles.
+  try:
+    await connection.extNotification(cstring"tool_permission", params)
+  except:
+    errorPrint cstring(fmt"[acp_ipc] auto-allow tool permission failed: {getCurrentExceptionMsg()}")
+
 let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
   let acpSessionId =
     if jsHasKey(params, cstring"sessionId"):
@@ -320,7 +426,7 @@ let handleSessionUpdate = functionAsJS(proc(params: JsObject) {.async.} =
                 optionId = opts[0][cstring"optionId"].to(cstring)
 
               if optionId.len > 0:
-                discard acpClient.extNotification(cstring"tool_permission", js{
+                discard sendToolPermission(acpClient, js{
                   "sessionId": acpSessionId,
                   "toolCallId": toolCallId,
                   "outcome": js{
@@ -568,11 +674,11 @@ proc ensureAcpConnection(): Future[void] {.async.} =
     # acpClient = newClientSideConnection(asFactory(makeClient(handleSessionUpdate, handleReadTextFile, handleWriteTextFile, handleCreateTerminal)), acpStream)
 
     acpClient = newClientSideConnection(asFactory(makeClient(
-      handleRequestPermission,
-      handleSessionUpdate,
-      handleWriteTextFile,
-      handleReadTextFile,
-      handleCreateTerminal
+      runAsSessionOwner(handleRequestPermission),
+      runAsSessionOwner(handleSessionUpdate),
+      runAsSessionOwner(handleWriteTextFile),
+      runAsSessionOwner(handleReadTextFile),
+      runAsSessionOwner(handleCreateTerminal)
     )), acpStream)
     let initResp = await acpClient.initialize(initRequest())
 
@@ -613,6 +719,10 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
 
   if sessionId.len == 0:
     errorPrint cstring"[acp_ipc] prompt missing sessionId/clientSessionId"
+    return
+
+  if not mayUseAcpSession(sessionId):
+    errorPrint cstring(fmt"[acp_ipc] prompt refused: sessionId={sessionId} is another client's")
     return
 
   var state: SessionState
@@ -669,24 +779,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   # end-of-prompt comparison can detect bash modifications to ANY of them, not just
   # previously-tracked files.  The baseline set is also used by git detection to
   # identify truly brand-new files (created from scratch during the prompt).
-  promptGitBaseline = @[]
-  {.emit: """
-  (() => {
-    try {
-      const cp = require('child_process');
-      const path = require('path');
-      const cwd = process.cwd();
-      function gitLines(args) {
-        const r = cp.spawnSync('git', args, { encoding: 'utf8', timeout: 10000, cwd });
-        return (!r.error && r.status === 0 && r.stdout)
-          ? r.stdout.trim().split('\n').filter(Boolean) : [];
-      }
-      const paths = [...gitLines(['diff', '--name-only', 'HEAD']),
-                     ...gitLines(['ls-files', '--others', '--exclude-standard'])];
-      for (const p of paths) { `promptGitBaseline`.push(path.resolve(cwd, p)); }
-    } catch(e) {}
-  })();
-  """.}
+  promptGitBaseline = gitVisibleChanges()
   # Read content of git-visible files not yet in lastKnownContent so we have a
   # pre-prompt baseline for every file the agent might touch via bash.
   for gitPath in promptGitBaseline:
@@ -697,8 +790,24 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
       except:
         discard
 
-  let promptResp = await acpClient.prompt(promptRequest(sessionId, text))
-  let stopReason = stopReasonFrom(promptResp)
+  # The agent may answer `session/prompt` with a JSON-RPC error instead of a
+  # result: #862, where Codex refused the turn because the configured model is
+  # not available to the account.  An unhandled rejection here used to end
+  # this proc before the renderer heard anything, so the pane kept "Thinking"
+  # for ever and the session stayed `activePrompt`.  Settling the request turns
+  # the refusal into a value, and the turn then ends through the same path as
+  # a successful one (the touched-file diffs below still apply: the agent may
+  # have edited files before it failed), with the agent's reason attached.
+  let promptOutcome = await settle(acpClient.prompt(promptRequest(sessionId, text)))
+  let promptFailed = not promptOutcome[cstring"ok"].to(bool)
+  let stopReason =
+    if promptFailed: cstring"" else: stopReasonFrom(promptOutcome[cstring"value"])
+  var failureMessage = cstring""
+  if promptFailed:
+    failureMessage = describeAcpError(promptOutcome[cstring"error"])
+    if failureMessage.len == 0:
+      failureMessage = cstring"The agent rejected the prompt without giving a reason."
+    errorPrint cstring(fmt"[acp_ipc] prompt failed clientSessionId={clientSessionId} sessionId={sessionId}: {failureMessage}")
 
   # Compute authoritative diffs for every file the agent touched during this
   # session.  Merge paths from tool_call_update events and writeTextFile calls,
@@ -739,24 +848,7 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
   # Git-based detection: files modified or created during this prompt that
   # weren't caught by primary tracking or lastKnownContent (e.g. brand-new
   # files written for the first time via bash this prompt).
-  var gitCurrentPaths: seq[cstring] = @[]
-  {.emit: """
-  (() => {
-    try {
-      const cp = require('child_process');
-      const path = require('path');
-      const cwd = process.cwd();
-      function gitLines2(args) {
-        const r = cp.spawnSync('git', args, { encoding: 'utf8', timeout: 10000, cwd });
-        return (!r.error && r.status === 0 && r.stdout)
-          ? r.stdout.trim().split('\n').filter(Boolean) : [];
-      }
-      const paths = [...gitLines2(['diff', '--name-only', 'HEAD']),
-                     ...gitLines2(['ls-files', '--others', '--exclude-standard'])];
-      for (const p of paths) { `gitCurrentPaths`.push(path.resolve(cwd, p)); }
-    } catch(e) {}
-  })();
-  """.}
+  let gitCurrentPaths = gitVisibleChanges()
   for gitPath in gitCurrentPaths:
     # Skip files that were already changed before this prompt started.
     var wasInBaseline = false
@@ -833,14 +925,24 @@ proc onAcpPrompt*(sender: js, response: JsObject) {.async.} =
         errorPrint cstring(fmt"[acp_ipc] end-of-session diff failed for {filePath}: {getCurrentExceptionMsg()}")
   promptOriginalCache = initTable[cstring, cstring]()
 
-  mainWindow.webContents.send("CODETRACER::acp-receive-response", js{
+  # The final message of the turn.  A failed turn carries `error` (the agent's
+  # reason, for the pane to show) in place of `stopReason`: it did not stop
+  # for any of ACP's stop reasons, and the renderer treats either key as the
+  # end of the turn (`agent_activity.onAcpReceiveResponse`).
+  let finalResponse = js{
     "sessionId": sessionId,
     "clientSessionId": clientSessionId,
     "id": messageId,
-    "stopReason": stopReason,
     "updates": state.collectedUpdates
-  })
+  }
+  if promptFailed:
+    finalResponse[cstring"error"] = failureMessage
+  else:
+    finalResponse[cstring"stopReason"] = stopReason
+  mainWindow.webContents.send("CODETRACER::acp-receive-response", finalResponse)
 
+  # Reached on success and on failure alike, so a refused turn no longer
+  # leaves the session `activePrompt` with a stale `currentMessageId`.
   state.currentMessageId = cstring""
   state.aggregatedContent = cstring""
   state.collectedUpdates = @[]
@@ -872,8 +974,11 @@ proc onAcpSessionInit*(sender: js, response: JsObject) {.async.} =
       activePrompt: false
     )
     saveSessionState(acpSessionId, state)
-    acpSessionIdsByClient[clientSessionId] = acpSessionId
+    acpSessionIdsByClient[scopedClientSession(clientSessionId)] = acpSessionId
     clientSessionIdsByAcp[acpSessionId] = clientSessionId
+    let owner = currentClient()
+    if not owner.isNil:
+      acpSessionOwners[acpSessionId] = owner
 
     var workspace = cstring""
     if jsHasKey(sessionResp, cstring"_ah") and jsHasKey(sessionResp[cstring"_ah"], cstring"workspaceDir"):
@@ -914,7 +1019,8 @@ proc onAcpStop*(sender: js, response: JsObject) {.async.} =
     else:
       requestedSessionId
 
-  if sessionId.len == 0 or not sessionsById.hasKey(sessionId):
+  if sessionId.len == 0 or not sessionsById.hasKey(sessionId) or
+     not mayUseAcpSession(sessionId):
     discard
     return
 
@@ -958,7 +1064,8 @@ proc onAcpCancelPrompt*(sender: js, response: JsObject) {.async.} =
     else:
       requestedSessionId
 
-  if sessionId.len == 0 or not sessionsById.hasKey(sessionId):
+  if sessionId.len == 0 or not sessionsById.hasKey(sessionId) or
+     not mayUseAcpSession(sessionId):
     discard
     return
 

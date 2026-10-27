@@ -39,14 +39,20 @@
 import std/tables
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The DSL's calls on a `WebRenderer` resolve where the generic view is
+  # instantiated; the overloads must be in scope there.
   import isonim/web/web_renderer
+
+when defined(js):
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/repl_vm
+
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
 # ---------------------------------------------------------------------------
 # Reactive helpers used inside DSL expressions
@@ -65,33 +71,27 @@ const REPL_DISABLED_MESSAGE* = "The Repl Component is disabled with the current 
   ## visual regression keyed on the message keeps working.
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderMaterializedMessageMock(r: MockRenderer; vm: ReplVM): MockNode =
-  ## Build the "REPL not supported" sub-tree.  Wrapper is the same
-  ## ``.repl-msg-wrapper`` shell the legacy view used.
-  let panel = ui(r):
+when defined(js):
+  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
+  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
+  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
+
+proc renderMessage[R, N](r: R; message: string): N =
+  ## The pane's text when the REPL is not available.
+  ui(r):
     tdiv(class = "repl-msg-wrapper"):
       tdiv(class = "repl-disabled-msg"):
-        text materializedMessageText(vm.langName.val)
-  panel
+        text message
 
-proc renderDisabledMessageMock(r: MockRenderer; vm: ReplVM): MockNode =
-  ## Build the "REPL disabled" sub-tree.  Same shell as the
-  ## materialised-disabled branch but with the longer instructional
-  ## copy.  ``vm`` is unused; we keep the parameter for symmetry.
-  let panel = ui(r):
-    tdiv(class = "repl-msg-wrapper"):
-      tdiv(class = "repl-disabled-msg"):
-        text REPL_DISABLED_MESSAGE
-  panel
-
-proc renderHistoryEntriesMock(r: MockRenderer; historyContainer: MockNode;
-                              entries: seq[ReplInteraction]) =
-  ## Append rendered rows for the last ``REPL_HISTORY_VISIBLE_LEN``
-  ## entries in newest-first order — matches the legacy
-  ## ``(history.len-1).countdown(history.len-10)`` loop.
+proc renderHistoryEntries[R, N](r: R; historyContainer: N;
+                                entries: seq[ReplInteraction]) =
+  ## The last `REPL_HISTORY_VISIBLE_LEN` interactions, newest first.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
   let last = entries.len - 1
   let first = max(0, entries.len - REPL_HISTORY_VISIBLE_LEN)
   if last < 0:
@@ -108,15 +108,20 @@ proc renderHistoryEntriesMock(r: MockRenderer; historyContainer: MockNode;
           text interaction.output.output
     r.appendChild(historyContainer, outputRow)
 
-proc renderEnabledMock(r: MockRenderer; vm: ReplVM): MockNode =
-  ## Build the prompt + history sub-tree.  The form wires its submit
-  ## handler imperatively after the DSL expansion so we can read the
-  ## input value from the captured ``inputEl`` before calling
-  ## ``vm.submitInput``.
-  var formEl: MockNode
-  var inputEl: MockNode
-  var historyEl: MockNode
+proc wireHeadlessSubmit[R, N](r: R; vm: ReplVM; formEl, inputEl: N) =
+  ## A headless renderer's submit: the input's "value" attribute, which a
+  ## test sets before firing "submit".
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin addEventListener
+  r.addEventListener(formEl, "submit", proc() =
+    let value = inputEl.attributes.getOrDefault("value", "")
+    if value.len > 0:
+      vm.submitInput(value)
+      inputEl.attributes["value"] = "")
 
+proc renderEnabled[R, N](r: R; vm: ReplVM): N =
+  ## The input form and the history.
+  var formEl, inputEl, historyEl: N
   let panel = ui(r):
     tdiv(id = "repl"):
       form(ref = formEl):
@@ -127,196 +132,51 @@ proc renderEnabledMock(r: MockRenderer; vm: ReplVM): MockNode =
       tdiv(ref = historyEl, id = "repl-history"):
         discard
 
-  # Submit handler.  ``MockNode.fireEvent`` invokes registered
-  # ``proc()`` listeners with no event arg, so we read the input
-  # element's "value" attribute directly here.  Headless tests set
-  # the value via ``r.setAttribute(inputEl, "value", "...")`` before
-  # firing ``"submit"``.
-  let captureInput = inputEl
-  let captureVm = vm
-  r.addEventListener(formEl, "submit", proc() =
-    let value = captureInput.attributes.getOrDefault("value", "")
-    if value.len > 0:
-      captureVm.submitInput(value)
-      captureInput.attributes["value"] = ""
-  )
+  # Submitting the form sends the input. The browser's handler needs the
+  # event, to keep the page from reloading on Enter (the DSL's
+  # `onclick = …` shape has no event argument).
+  when defined(js):
+    when N is isonim_dom.Element:
+      let inputNode = isonim_dom.Node(inputEl)
+      isonim_dom.addEventListener(isonim_dom.Node(formEl), cstring"submit",
+        proc(ev: isonim_dom.Event) =
+          ev.preventDefault()
+          ev.stopPropagation()
+          let expression = inputNode.inputValue()
+          if expression.len > 0:
+            vm.submitInput($expression)
+            inputNode.setInputValue(cstring""))
+    else:
+      wireHeadlessSubmit(r, vm, formEl, inputEl)
+  else:
+    wireHeadlessSubmit(r, vm, formEl, inputEl)
 
-  # History list: rebuilt by the outer render-effect in
-  # ``renderReplPanel`` after this body is appended.  Stash the
-  # container reference on the panel by inserting it as an attribute
-  # the caller can find via ``findByClass`` if needed; for the mock
-  # we rely on the outer effect re-locating ``#repl-history`` via
-  # ``findByClass`` style lookups.
-  renderHistoryEntriesMock(r, historyEl, vm.history.val)
+  renderHistoryEntries[R, N](r, historyEl, vm.history.val)
   panel
 
-proc renderReplPanel*(r: MockRenderer; vm: ReplVM): MockNode =
-  ## Render the REPL panel for the Mock renderer.
-  ##
-  ## The outer wrapper is a single ``.repl-component`` div whose
-  ## children are rebuilt by an ``createRenderEffect`` reading
-  ## ``vm.displayMode``, ``vm.history`` and ``vm.langName``.  Using
-  ## imperative MockRenderer ops inside the effect keeps the dynamic
-  ## branch dispatch straightforward — the DSL cannot ``case`` over a
-  ## runtime mode signal directly.
-  var bodyEl: MockNode
-
+proc renderReplPanel*[R, N](r: R; vm: ReplVM): N =
+  ## The REPL panel, under any renderer (Shared-DOM-Front-Ends D3), mounted
+  ## on the desktop by `ui/panel_host`. Its body follows the display mode,
+  ## the history and the language, rebuilt when any of them changes.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild
+  var bodyEl: N
   let panel = ui(r):
     tdiv(ref = bodyEl, class = "repl-component"):
       discard
 
   createRenderEffect proc() =
     let mode = vm.displayMode.val
-    # Read history + langName so the effect re-runs on those updates
-    # too — the body dispatch may not reach the reactive subtree
-    # consistently otherwise.
     discard vm.history.val
     discard vm.langName.val
     r.clearChildren(bodyEl)
     let child = case mode
       of rdmMaterializedDisabled:
-        renderMaterializedMessageMock(r, vm)
+        renderMessage[R, N](r, materializedMessageText(vm.langName.val))
       of rdmReplEnabled:
-        renderEnabledMock(r, vm)
+        renderEnabled[R, N](r, vm)
       of rdmReplDisabled:
-        renderDisabledMessageMock(r, vm)
+        renderMessage[R, N](r, REPL_DISABLED_MESSAGE)
     r.appendChild(bodyEl, child)
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-  proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
-  proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
-  proc inputValue(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
-  proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
-
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Create a DOM element with optional class + id attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = "";
-                            elemId: string = ""): isonim_dom.Element =
-    ## Create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass, elemId)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderMaterializedMessageWeb(vm: ReplVM): isonim_dom.Element =
-    let wrapper = createWebElement("div", "repl-msg-wrapper")
-    let msg = createWebTextElement("div",
-                                   materializedMessageText(vm.langName.val),
-                                   "repl-disabled-msg")
-    isonim_dom.appendChild(isonim_dom.Node(wrapper), isonim_dom.Node(msg))
-    wrapper
-
-  proc renderDisabledMessageWeb(): isonim_dom.Element =
-    let wrapper = createWebElement("div", "repl-msg-wrapper")
-    let msg = createWebTextElement("div", REPL_DISABLED_MESSAGE,
-                                   "repl-disabled-msg")
-    isonim_dom.appendChild(isonim_dom.Node(wrapper), isonim_dom.Node(msg))
-    wrapper
-
-  proc renderHistoryEntriesWeb(historyContainer: isonim_dom.Element;
-                               entries: seq[ReplInteraction]) =
-    let last = entries.len - 1
-    let first = max(0, entries.len - REPL_HISTORY_VISIBLE_LEN)
-    if last < 0:
-      return
-    for i in countdown(last, first):
-      let interaction = entries[i]
-      let inputRow = createWebTextElement("div",
-                                          inputDisplayText(interaction.input),
-                                          "repl-input-history")
-      isonim_dom.appendChild(isonim_dom.Node(historyContainer),
-                             isonim_dom.Node(inputRow))
-      let outputWrapper = createWebElement("div", "repl-output-history")
-      let pre = createWebTextElement("pre", interaction.output.output,
-                                     outputClass(interaction.output.kind))
-      isonim_dom.appendChild(isonim_dom.Node(outputWrapper),
-                             isonim_dom.Node(pre))
-      isonim_dom.appendChild(isonim_dom.Node(historyContainer),
-                             isonim_dom.Node(outputWrapper))
-
-  proc renderEnabledWeb(vm: ReplVM): isonim_dom.Element =
-    ## Build the prompt + history sub-tree in the real DOM.
-    let panel = createWebElement("div", "", "repl")
-
-    let formEl = isonim_dom.createElement(isonim_dom.document, cstring"form")
-    let inputEl = isonim_dom.createElement(isonim_dom.document, cstring"input")
-    isonim_dom.setAttribute(inputEl, cstring"id", cstring"repl-input")
-    isonim_dom.setAttribute(inputEl, cstring"type", cstring"text")
-    isonim_dom.setAttribute(inputEl, cstring"placeholder",
-                            cstring"Enter command...")
-    isonim_dom.appendChild(isonim_dom.Node(formEl), isonim_dom.Node(inputEl))
-    isonim_dom.appendChild(isonim_dom.Node(panel), isonim_dom.Node(formEl))
-
-    let inputNode = isonim_dom.Node(inputEl)
-    isonim_dom.addEventListener(isonim_dom.Node(formEl), cstring"submit",
-      proc(ev: isonim_dom.Event) =
-        # ``preventDefault`` / ``stopPropagation`` mirror the legacy
-        # Karax form handler so the page does not refresh when the
-        # user presses Enter.  The DSL's ``onclick = ...`` shape
-        # cannot express the event arg, so we wire imperatively.
-        ev.preventDefault()
-        ev.stopPropagation()
-        let expression = inputNode.inputValue()
-        if expression.len > 0:
-          vm.submitInput($expression)
-          inputNode.setInputValue(cstring""))
-
-    let historyEl = createWebElement("div", "", "repl-history")
-    renderHistoryEntriesWeb(historyEl, vm.history.val)
-    isonim_dom.appendChild(isonim_dom.Node(panel), isonim_dom.Node(historyEl))
-
-    panel
-
-  proc renderReplPanel*(r: WebRenderer; vm: ReplVM): isonim_dom.Element =
-    ## Render the panel for the real DOM.  Same dispatch shape as the
-    ## Mock variant — outer wrapper plus a render-effect that
-    ## rebuilds the body whenever the relevant signals change.
-    var bodyEl: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(ref = bodyEl, class = "repl-component"):
-        discard
-
-    createRenderEffect proc() =
-      let mode = vm.displayMode.val
-      discard vm.history.val
-      discard vm.langName.val
-      clearWebChildren(bodyEl)
-      let child = case mode
-        of rdmMaterializedDisabled:
-          renderMaterializedMessageWeb(vm)
-        of rdmReplEnabled:
-          renderEnabledWeb(vm)
-        of rdmReplDisabled:
-          renderDisabledMessageWeb()
-      isonim_dom.appendChild(isonim_dom.Node(bodyEl), isonim_dom.Node(child))
-
-    panel
-
-  proc mountIsoNimRepl*(container: isonim_dom.Element; vm: ReplVM) =
-    ## Mount the IsoNim REPL panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderReplPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))

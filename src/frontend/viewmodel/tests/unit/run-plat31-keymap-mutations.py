@@ -104,13 +104,16 @@ ROOT = HERE.parents[4]            # .../codetracer
 RESOLVER = "src/frontend/viewmodel/keymap/editing_keymap.nim"
 VIM = "src/frontend/viewmodel/keymap/vim_keymap.nim"
 KAK = "src/frontend/viewmodel/keymap/kakoune_keymap.nim"
-PRODUCT = "src/frontend/viewmodel/keymap/product_keymap.nim"
+# PLAT-68 deleted `product_keymap.nim` (the product default, lifted from the
+# fourteen terminal rows) for the CUA base; its one arm, M11, was re-aimed
+# onto the loader's refusal of a chordless line — the same claim: the empty
+# sequence is never a chord in the trie.
 KEYNAMES = "src/common/key_names.nim"
 TASKS = "src/frontend/viewmodel/tests/generators/keymap_task_set.nim"
 LAWS = "src/frontend/viewmodel/tests/unit/test_editor_keymap_laws.nim"
 DIFF = "src/frontend/viewmodel/tests/unit/test_editor_keymap_differential.nim"
 
-TOUCHED = [RESOLVER, VIM, KAK, PRODUCT, KEYNAMES, TASKS, LAWS, DIFF]
+TOUCHED = [RESOLVER, VIM, KAK, KEYNAMES, TASKS, LAWS, DIFF]
 
 CONTROL_HASHES = HERE / "plat31-keymap-mutation-control.sha256"
 
@@ -136,7 +139,7 @@ OUT_CHAR_MODEL = "outcome `character` x model"
 SPACE_BY_NAME = "`Space` — `keyCharacter` and `isPrintableKey` disagree, by name"
 SPACE_CHARACTER = "under text entry, `Space` resolves to the CHARACTER and not the name"
 BOUND_EXACTLY = "AT the bound exactly: the prefix survives"
-CONFLICTS_CLEAN = "the clean keymaps report NOTHING, in every one of the 168 scopes"
+CONFLICTS_CLEAN = "the clean keymaps report NOTHING, in every one of the 112 scopes"
 DUP_VIM_NORMAL = "a planted DUPLICATE is named, in vim/normal"
 PRE_VIM_NORMAL = "a planted PREFIX is named, in vim/normal"
 COVERED_PLUS_FILED = "every model: covered + filed == every operation, with the two sets DISJOINT"
@@ -145,7 +148,7 @@ NO_PRIVATE_OP = "every model: no reachable operation is keymap-PRIVATE"
 LAYER_REACHED = "the layer reaches two operations the binding tables do not always name"
 APPLY_ONE_FIELD = "`applyResolution` assigns exactly ONE EditorState field, and it is `pending`"
 ONE_PREDICATE = "the text-entry predicate is ONE function with two callers (§30a)"
-DEFAULT_THIRTEEN = "the product default lifts thirteen rows and the fourteenth is the character arm"
+DEFAULT_THIRTEEN = "`empty-chords` — a scope and no chord"
 COUNT_IS_STATE = "a count is editor state: a trie entry cannot hold one"
 TASK_CARDINALITY = "the task set is its declared cardinality, and no id appears twice"
 T34_KEYS = "§34 — every row's two KEY sequences are distinct, as an equality"
@@ -202,12 +205,9 @@ ARMS = [
     ),
     Arm(
         "M2", RESOLVER,
-        "  if scope.textEntry and pending.chords.len == 0 and isTextKey(key):\n"
-        '    return EditingResolution(kind: erCharacter, operation: "", args: OpArgs(),\n'
-        "                             character: keyCharacter(key), spelling: key,\n",
-        "  if scope.textEntry and pending.chords.len == 0 and isPrintableKey(key):\n"
-        '    return EditingResolution(kind: erCharacter, operation: "", args: OpArgs(),\n'
-        "                             character: key, spelling: key,\n",
+        # PLAT-68: the text-entry shadow is `resolveLayers`', the one resolver.
+        "  if textEntry and pending.chords.len == 0 and isTextKey(key):\n",
+        "  if textEntry and pending.chords.len == 0 and isPrintableKey(key):\n",
         SPACE_CHARACTER,
         "**THE TEXT-ENTRY SHADOW USES `isPrintableKey`, WHICH IS THE DEFECT "
         "THIS PRODUCT HAS ALREADY SHIPPED ONCE.** `keyName(\" \")` is the "
@@ -221,8 +221,8 @@ ARMS = [
     ),
     Arm(
         "M3", RESOLVER,
-        "  if pending.chords.len > 0 and nowMs - pending.startedMs > EditingPendingTimeoutMs:\n",
-        "  if pending.chords.len > 0 and nowMs - pending.startedMs >= EditingPendingTimeoutMs:\n",
+        "     nowMs - pending.startedMs > timeoutMs:\n",
+        "     nowMs - pending.startedMs >= timeoutMs:\n",
         BOUND_EXACTLY,
         "THE TIMEOUT BOUNDARY MOVES BY ONE MILLISECOND. `>` becomes `>=`, so a "
         "prefix that arrives at EXACTLY the published bound is discarded "
@@ -245,7 +245,7 @@ ARMS = [
         "WINS.** This is §2.4's `move-line-up` defect one layer up: two rows "
         "claim one chord, the table resolves to whichever was inserted last, "
         "and nothing says so. The clean keymaps have no duplicate, so the "
-        "NEGATIVE sweep over all 168 scopes stays green — which is exactly why "
+        "NEGATIVE sweep over all 112 scopes stays green — which is exactly why "
         "the detector has to be asserted on a PLANTED conflict, and why the "
         "planted case also checks that the FIRST row still wins",
     ),
@@ -279,8 +279,8 @@ ARMS = [
     ),
     Arm(
         "M7", RESOLVER,
-        "    (bs.panes == {} or scope.pane in bs.panes)\n",
-        "    (bs.panes == {} or true)\n",
+        "    (bs.panes == {} or scope.pane in bs.panes) and\n",
+        "    (bs.panes == {} or true) and\n",
         OUT_OP_PANE,
         "THE PANE DIMENSION STOPS SCOPING ANYTHING. Every editing chord now "
         "fires while the call-stack pane owns the keyboard — §4.3's second "
@@ -348,16 +348,16 @@ ARMS = [
         "disjointness equality dies with it",
     ),
     Arm(
-        "M11", PRODUCT,
-        "    if row.key == DefaultEditKey: continue   # the `else` arm — see the header\n",
-        "    if false: continue   # the `else` arm — see the header\n",
+        "M11", RESOLVER,
+        "    if fields.len < 2:\n",
+        "    if fields.len < 1:\n",
         DEFAULT_THIRTEEN,
-        "THE FOURTEENTH ROW BECOMES A BINDING. `TuiEditBindings`'s last row has "
-        "the EMPTY key and names `insert-text` — `applyEditKey`'s `else` arm, "
-        "which fires only when the key stands for a character. In the resolver "
-        "that is §4.1's CHARACTER outcome and not a row at all, so binding it "
-        "means the empty string is now a chord in the trie. *'The default does "
-        "not move'* is the claim, and a fourteenth binding is it moving",
+        "THE EMPTY SEQUENCE BECOMES A BINDING. Re-aimed 2026-10-11 (PLAT-68) "
+        "from the retired product default's character row: typing is §4.1's "
+        "CHARACTER outcome and not a row at all, so a binding with no chord "
+        "would put the empty string in the trie. The loader's `empty-chords` "
+        "refusal is what keeps it out; with the check widened, a scope and no "
+        "chord loads instead of being reported",
     ),
     Arm(
         "M12", KEYNAMES,

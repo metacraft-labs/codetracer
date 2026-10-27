@@ -40,10 +40,15 @@ from codetracer.exceptions import (
 )
 
 
+
+_REQUIRED = object()
+"""Marks a parameter a caller must pass explicitly (``run_tracepoints``)."""
+
 def open_trace(
     path: Union[str, Path],
     *,
     daemon_socket: Optional[Union[str, Path]] = None,
+    host_source_reads: bool = False,
 ) -> "Trace":
     """Open a recorded trace for inspection.
 
@@ -54,7 +59,16 @@ def open_trace(
     Parameters:
         path: Filesystem path to the trace directory or file.
         daemon_socket: Optional explicit path to the daemon's Unix socket.
-            When *None*, the default well-known path is used.
+            When *None*, :func:`codetracer.connection.default_daemon_socket_path`
+            decides: the socket the daemon handed to this process, else the
+            one the daemon resolves for itself.
+        host_source_reads: Whether the trace session may read the
+            recording's listed sources from the replay host (its working
+            tree).  Off by default: source text, line text and source-derived
+            names then come only from the copies the recording carries.  A
+            source list is recording content and can name any file on the
+            machine that replays it, so turn this on only for recordings of
+            your own programs.
 
     Returns:
         A :class:`Trace` instance connected to the backend daemon.
@@ -63,7 +77,9 @@ def open_trace(
         TraceNotFoundError: If *path* does not exist or is not a valid trace.
         TraceError: If the daemon is not reachable or returns an error.
     """
-    conn = DaemonConnection(socket_path=daemon_socket)
+    conn = DaemonConnection(
+        socket_path=daemon_socket, host_source_reads=host_source_reads
+    )
     conn.connect()
 
     # Resolve the path if it exists on disk; otherwise pass it as-is
@@ -157,10 +173,13 @@ class Trace:
     def ticks(self) -> int:
         """Current execution timestamp (rr ticks).
 
-        The ticks value is a monotonically increasing counter maintained
-        by the rr replay engine.  It uniquely identifies an execution
-        point and can be passed to :meth:`goto_ticks` to return to this
-        position later.
+        The ticks value is the current thread's rr tick count: a counter
+        of retired conditional branches (approximated in rr's
+        soft-counter mode) that never decreases as execution moves
+        forward.  It does not identify a single stop: consecutive stops
+        with no counted branch between them, often several lines, share
+        one value.  :meth:`goto_ticks` returns to the earliest point that
+        has it.
 
         Returns:
             An integer tick value.
@@ -344,13 +363,67 @@ class Trace:
     def goto_ticks(self, ticks: int) -> Location:
         """Jump to a specific execution point by ticks.
 
+        On an rr recording the replay goes to the first point at which the
+        current thread's tick count equals *ticks*, and :attr:`ticks` then
+        reads *ticks* (one more when the instruction there is itself a
+        counted branch: after the seek the debugger is resynchronised with
+        one instruction step).  Since consecutive stops can share a tick value
+        (see :attr:`ticks`), that point can be lines before the stop the
+        value was read at, and can be in code without source
+        (``location.line == 0``).
+
         Parameters:
             ticks: The target rr tick value.
 
         Returns:
             The new :class:`Location`.
+
+        Raises:
+            NavigationError: When the recording never reaches *ticks*.
         """
         return self._navigate("goto_ticks", ticks=ticks)
+
+    def goto_geid(self, geid: int) -> Location:
+        """Jump to the event with global event id *geid* in a native recording.
+
+        A geid is the recorder's global event id: the ``ct.mcr.geid`` a span
+        marker carries and the ``geid`` parameter of a dive-in link.  The
+        replay stops right after that event (after a span marker, right after
+        the recorder call that wrote it), and :attr:`location`,
+        :meth:`locals`, :meth:`evaluate` and :meth:`stack_trace` describe the
+        program there.  A geid behind the current position replays from the
+        recording's start, so geids can be visited in any order.  The
+        forward steps and :meth:`continue_forward` execute the program from
+        the restored position; the reverse steps (:meth:`step_back`,
+        :meth:`reverse_step_in`, :meth:`reverse_step_out`) raise
+        :class:`NavigationError` naming ``E0C``, as the replay of these
+        recordings does not execute backward.
+
+        It wraps the backend's ``ct/seek-to-geid`` request and is available
+        for native (MCR) recordings only.
+
+        Parameters:
+            geid: The global event id to go to, a positive integer (geid 0
+                names no event).
+
+        Returns:
+            The new :class:`Location`.
+
+        Raises:
+            ValueError: If *geid* is not a positive integer.  Nothing is sent
+                to the daemon.
+            NavigationError: If the replay refuses the geid or cannot seek by
+                geid.  The message carries the replay's reason, for example
+                ``E02`` for a geid beyond the recording, ``E09`` for a geid
+                that names no position the replay can stop after (a lock
+                release, the thread's start).  A recording the replay cannot
+                serve (a multi-threaded one) is refused when it is opened.
+        """
+        # ``bool`` is an ``int`` subclass; ``goto_geid(True)`` is a caller
+        # mistake, not geid 1.
+        if isinstance(geid, bool) or not isinstance(geid, int) or geid < 1:
+            raise ValueError(f"geid must be a positive integer, got {geid!r}")
+        return self._navigate("goto_geid", geid=geid)
 
     # --- Inspection ---
 
@@ -751,27 +824,78 @@ class Trace:
         """Set a watchpoint that triggers when the expression's value changes.
 
         The daemon translates this into a DAP ``setDataBreakpoints``
-        command.  When execution continues, it will stop at the point
-        where the watched expression's value changes.
+        command, and waits for the backend to say whether the watchpoint
+        was accepted.
+
+        A returned ID therefore means the backend accepted the
+        watchpoint, not merely that the request was sent.  (It used to
+        return an ID regardless; the following :meth:`continue_forward`
+        then ran to the end of the trace and raised ``StopIteration``
+        with nothing to explain why.)
+
+        **What a watchpoint means over a recording.** A live debugger
+        implements one with a hardware watch register that traps on a
+        write to an address.  A recording has no CPU — what it has is
+        the value each variable held at each recorded step.  So this is
+        a **value-change watchpoint**: the next
+        :meth:`continue_forward` stops at the first later step at which
+        ``expression``'s recorded value differs from the value it held
+        before.  Coming into scope is not a change, and a step that
+        does not record the variable leaves the watch undisturbed.
+
+        **What cannot be watched.** The backend refuses these, each
+        with a distinct reason carried on the :class:`TraceError`:
+
+        * Anything that is not a plain variable name.  A recording
+          indexes values by variable, not by address or expression, so
+          ``obj.field``, ``arr[0]``, ``*ptr`` and ``counter + 1``
+          cannot be watched.
+        * Reads.  A recording samples what a variable *held*; it does
+          not record that a value was *read*, and a read leaves no
+          trace in the data to recover.  Only value changes (writes)
+          can be answered.
+        * Conditions.  :meth:`add_breakpoint` supports them; the
+          value-change scan does not yet, and honouring the request
+          while ignoring the condition would stop in the wrong place
+          with nothing to say so.
+        * Variables this recording never captured.
+        * Recordings held by a backend with no per-step value table —
+          MCR/emulator and recreator traces.  Materialized recordings
+          (the Python/Ruby/Noir DB backends) are the ones that support
+          watchpoints.
 
         Parameters:
-            expression: The expression to watch (e.g., ``"counter"``).
+            expression: The variable to watch (e.g., ``"counter"``).
+                Must be a plain identifier — see above.
 
         Returns:
             A positive integer watchpoint ID that can be passed to
             :meth:`remove_watchpoint`.
 
         Raises:
-            TraceError: If the daemon reports an error.
+            TraceError: If the daemon reports an error, or if the
+                backend did not accept the watchpoint.  The message
+                carries the backend's own reason.
         """
         response = self._connection.send_request("ct/py-add-watchpoint", {
             "tracePath": self._path,
             "expression": expression,
         })
         if not response.get("success"):
-            raise TraceError(
+            # A refused watchpoint carries a CLOSED-SET reason beside
+            # the prose (see the "What cannot be watched" list above).
+            # Surface it on the exception so a caller can branch on
+            # `err.refusal` instead of matching on English -- "you named
+            # something this recording never captured" and "this kind of
+            # watchpoint is not possible over a recording at all" have
+            # entirely different fixes.
+            body = response.get("body") or {}
+            error = TraceError(
                 response.get("message", "add_watchpoint() failed")
             )
+            error.refusal = body.get("refusal")
+            error.refusal_code = body.get("refusalCode")
+            raise error
         return response.get("body", {}).get("watchpointId", 0)
 
     def remove_watchpoint(self, wp_id: int) -> None:
@@ -848,16 +972,18 @@ class Trace:
                 response.get("message", "remove_tracepoint() failed")
             )
 
-    def run_tracepoints(self, stop_after: int = -1) -> list:
+    def run_tracepoints(self, limit=_REQUIRED, *, stop_after=None) -> list:
         """Execute all active tracepoints across the trace.
 
-        Replays the entire recorded execution (or up to *stop_after*
-        hits), evaluating every active tracepoint at each matching line.
-        Returns a list of result dicts, one per hit.
+        Replays the recorded execution, evaluating every active tracepoint
+        at each matching line, until *limit* hits were collected.
 
         Parameters:
-            stop_after: Maximum number of hits to collect.  ``-1`` means
-                no limit (process the entire trace).
+            limit: Maximum number of hits to collect. REQUIRED, so that a
+                script that wants every hit of a long recording says so:
+                pass ``limit=None`` for every hit.
+            stop_after: The older spelling of *limit* (``-1`` for every
+                hit); accepted when *limit* is not given.
 
         Returns:
             A list of dicts, each with keys:
@@ -871,11 +997,24 @@ class Trace:
               each ``{"name": str, "value": str}``.
 
         Raises:
+            TypeError: If neither *limit* nor *stop_after* is given.
+            ValueError: If *limit* is not a non-negative int or None.
             TraceError: If the daemon reports an error.
         """
+        if limit is _REQUIRED:
+            if stop_after is None:
+                raise TypeError(
+                    "run_tracepoints() needs an explicit limit: "
+                    "run_tracepoints(limit=N), or limit=None for every hit"
+                )
+            limit = None if stop_after < 0 else stop_after
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 0
+        ):
+            raise ValueError("limit must be a non-negative int or None")
         response = self._connection.send_request("ct/py-run-tracepoints", {
             "tracePath": self._path,
-            "stopAfter": stop_after,
+            "limit": -1 if limit is None else limit,
         })
         if not response.get("success"):
             raise TraceError(
@@ -1107,7 +1246,9 @@ class Trace:
         """Read the content of a source file from the trace.
 
         Sends ``ct/py-read-source`` to the daemon, which translates it
-        to ``ct/read-source`` on the backend.
+        to a DAP ``source`` request on the backend.  Unless the trace was
+        opened with ``host_source_reads=True``, only the recording's own
+        copy of the file is read; a file it carries no copy of is refused.
 
         Parameters:
             path: The source file path (as listed in :attr:`source_files`

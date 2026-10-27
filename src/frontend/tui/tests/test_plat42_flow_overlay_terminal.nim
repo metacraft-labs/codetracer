@@ -90,6 +90,9 @@ proc recordedStop(rec: JsonNode): tuple[line: int, code: string] =
       let comment = code.find("/*")
       if comment >= 0: code = code[0 ..< comment]
       result.code = code.strip()
+      # Since 2026-10-17 the row's text runs the inline-value chips onto the
+      # code with no separator; the record carries the code span on its own.
+      if r{"code"}.getStr.len > 0: result.code = r["code"].getStr.strip()
       return
 
 proc codeStylesOf(screen: SourcePaneScreen; model: SourcePaneModel;
@@ -98,9 +101,15 @@ proc codeStylesOf(screen: SourcePaneScreen; model: SourcePaneModel;
   let rowIndex = 1 + line - model.viewportTop   # row 0 is the title
   if rowIndex < 1 or rowIndex >= screen.rows.len:
     return @[]
+  ##
+  ## M73 (#840): the code column ends where the pane's vertical bar begins
+  ## (`SourcePaneScreen.codeWidth`, the pane's last column while the file is
+  ## taller than the pane); the bar's cells are the scrubber's, not the line's.
   var at = 0
   for span in screen.rows[rowIndex]:
-    if at >= screen.gutterWidth and span.text.strip().len > 0:
+    if at >= screen.gutterWidth and
+       at < screen.gutterWidth + screen.codeWidth and
+       span.text.strip().len > 0:
       result.add span.style
     at += cellWidthOf(span.text)
 

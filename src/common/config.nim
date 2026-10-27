@@ -15,6 +15,17 @@ type
     ui*:                                  string
     FlowUI* {.defaultVal: FlowParallel}:  types.FlowUI
 
+  WindowConfigObj* = object
+    ## PLAT-69: the `window:` entry (`window_policy`, which both front-ends
+    ## apply). Every field has a default so a config file written before
+    ## the entry existed — or one that gives only `initial` — still loads:
+    ## the loader is strict, and a missing field would make it reject the
+    ## whole file. Values are validated by `window_policy.parseWindowSetting`,
+    ## not here.
+    initial* {.defaultVal: "maximized".}:  string
+    width* {.defaultVal: 1900.}:           int
+    height* {.defaultVal: 1400.}:          int
+
   TraceSharingConfigObj* = object
     enabled*:               bool
     ## The four keys below named a sharing service that no longer exists.
@@ -27,6 +38,13 @@ type
     getUploadUrlApi* {.defaultVal: "".}:  string
     downloadApi* {.defaultVal: "".}:      string
     deleteApi* {.defaultVal: "".}:        string
+
+  VcsConfigObj* = object
+    ## The `vcs:` block (codetracer-specs GUI/Core-Panes/VCS-Panel.md,
+    ## "Configuration").
+    fileClickOpensFullFile* {.defaultVal: false.}: bool
+      ## A click on a file in the VCS panel opens the full file instead of
+      ## the unified diff; the panel's View mode toggle starts from it.
 
   ConfigObject* = object
     ## The config object is the schema for config yaml files
@@ -64,6 +82,15 @@ type
       path: "",
     ).}:                                                  RRBackendConfig
     skipInstall:                                          bool
+
+    vcs* {.defaultVal: VcsConfigObj(
+      fileClickOpensFullFile: false
+    ).}:                                                  VcsConfigObj
+
+    ## PLAT-69: how the window opens (`window_policy`).
+    window* {.defaultVal: WindowConfigObj(
+      initial: "maximized", width: 1900, height: 1400
+    ).}:                                                  WindowConfigObj
 
     ## Controls whether a second `ct run` / `ct replay` invocation opens
     ## the trace in a new tab within the existing window ("tab") or

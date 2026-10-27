@@ -494,9 +494,12 @@ MUTATIONS: list = [
                         "  result.availability = core.availability\n"
                         "  result.dependency = frameDependencyState(gap)"),
     Mutation(
+        # RE-AIMED 2026-10-17: the Timeline removal (740d76be2) gave the pane
+        # a scrubber row, so the history guard is bounded by `bottom` (the
+        # area less the scrubber) rather than the area's own end.
         "V12", PANE,
-        "  if historyHeight >= 1 and atRow < area.row + area.height:",
-        "  if gap == fdgNone and historyHeight >= 1 and atRow < area.row + area.height:",
+        "  if historyHeight >= 1 and atRow < bottom:",
+        "  if gap == fdgNone and historyHeight >= 1 and atRow < bottom:",
         P_OCTANT, NIM_PANE,
         'screen.historyRows was 0',
         why="§2.6 BROKEN IN ITS OWN SHAPE: the pane stops drawing the REST of "
@@ -505,8 +508,8 @@ MUTATIONS: list = [
             "vanishes when the picture cannot be rendered removes exactly the "
             "information §6.2 says a terminal is best at.",
         control_name="the history guard, with the conjunction's operands swapped",
-        control_find="  if historyHeight >= 1 and atRow < area.row + area.height:",
-        control_replace="  if atRow < area.row + area.height and historyHeight >= 1:"),
+        control_find="  if historyHeight >= 1 and atRow < bottom:",
+        control_replace="  if atRow < bottom and historyHeight >= 1:"),
     Mutation(
         "V13", PANE,
         "  if not model.hasRaster:\n    # PLAT-14 bound 3.",

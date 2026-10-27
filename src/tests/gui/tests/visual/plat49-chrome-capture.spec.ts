@@ -50,7 +50,6 @@ function recording(): string {
 test.use({
   sourcePath: recording(),
   launchMode: "trace-folder",
-  noUserLayout: true,
   codetracerPrefixOverride: process.env.PLAT49_DESKTOP_PREFIX ?? "",
 });
 test.setTimeout(300_000);
@@ -65,7 +64,7 @@ test("PLAT-49: the desktop's root menu, control tooltips and omnibar placeholder
       "(`bash scripts/plat49-capture-electron.sh`).",
     ],
   };
-  await ctPage.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", {
+  await ctPage.waitForFunction(() => typeof (globalThis as any).__ctMenuVM !== "undefined", undefined, {
     timeout: 120_000,
   });
   const box = async (selector: string): Promise<Box> => {

@@ -134,7 +134,7 @@ fi
 # gate should fail in exactly the ways it says it fails.
 if ! printf '%s' "${payload}" | jq -e 'all(.[]; type == "object")' >/dev/null 2>&1; then
 	echo "required-jobs: needs payload has entries that are not objects;" >&2
-	echo "  expected {\"<job-id>\": {\"result\": \"...\"}, ...}" >&2
+	echo '  expected {"<job-id>": {"result": "..."}, ...}' >&2
 	exit 3
 fi
 

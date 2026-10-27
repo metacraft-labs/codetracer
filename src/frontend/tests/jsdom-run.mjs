@@ -8,6 +8,11 @@
 // import time, so it is compiled as the browser module it is and given
 // jsdom's `window`, `document` and `navigator` as its globals.
 //
+// `test-frontend-js` also runs a few `-d:nodejs` suites here. They compile
+// for node but reach IsoNim's `core/nondet`, which reads the page globals
+// below as soon as a `window` exists, so a bare `window = globalThis` alias
+// is not enough for them.
+//
 // Without `-d:nodejs`, `std/unittest` cannot set the process's exit status;
 // a suite run here sets `process.exitCode` itself when a check fails, and the
 // lane runner also counts `[FAILED]` lines.
@@ -46,6 +51,33 @@ try { delete globalThis.navigator; } catch { /* not configurable: ignore */ }
 Object.defineProperty(globalThis, 'navigator', {
   value: dom.window.navigator, writable: true, configurable: true,
 });
+
+// The rest of the page globals a browser module may read AT IMPORT TIME, as
+// bare names. IsoNim's `core/nondet` snapshots the page environment when it
+// initialises in a window (`location.href`, `innerWidth`/`innerHeight`,
+// `devicePixelRatio`, `matchMedia(...)`, `localStorage`), and every suite that
+// reaches it through the renderer's module graph — `ui/session_switch` does,
+// via its menu — dies before its first line without these. They are jsdom's
+// own objects, not stand-ins, with one exception: jsdom does not implement
+// `matchMedia` (https://github.com/jsdom/jsdom/issues/3522), so a page whose
+// media queries match nothing answers it, which is what a headless window
+// with no preferences would report.
+for (const name of ['location', 'localStorage', 'sessionStorage',
+  'innerWidth', 'innerHeight', 'devicePixelRatio']) {
+  if (!(name in globalThis)) {
+    Object.defineProperty(globalThis, name, {
+      get: () => dom.window[name], configurable: true,
+    });
+  }
+}
+if (typeof dom.window.matchMedia !== 'function') {
+  dom.window.matchMedia = (query) => ({
+    matches: false, media: String(query), onchange: null,
+    addListener() {}, removeListener() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+  });
+}
+if (!('matchMedia' in globalThis)) globalThis.matchMedia = dom.window.matchMedia;
 
 globalThis.ctRepoRoot = REPO;
 require(suite);

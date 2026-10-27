@@ -62,7 +62,15 @@ type
   StatusBarModel* = object
     ## Everything the bottom row shows, as a value.
     mode*: UiMode
-      ## The INPUT mode. Six values; see `UiMode`.
+      ## The INPUT mode. Six values; see `UiMode`. It chooses the indicator's
+      ## colour; `label` is its text.
+    label*: string
+      ## PLAT-68: THE INDICATOR'S TEXT — the router's `statusLabel`: a
+      ## pending prefix (`Ctrl+k…`), the newest pushed mode (`FIND`,
+      ## `PALETTE`, `COMMAND`), the modal machine's mode under the Vim and
+      ## Kakoune bases, and under CUA and Emacs — which have no NORMAL mode
+      ## (CodeTracer-TUI.md §4 as amended) — the base's own name. Empty is
+      ## `$mode`, for a model built without a router.
     product*: ProductMode
       ## The PRODUCT mode. Two values, and a SEPARATE FIELD rather than a
       ## seventh `UiMode` member — §1.2's requirement, and the field that makes
@@ -146,7 +154,57 @@ proc promptSigil*(mode: UiMode): string =
   of umSearch: "/"
   else: ""
 
-proc fitNoteCells*(note: string; width: int): string =
+proc notePathParts(note: string): tuple[found: bool;
+                                        before, path, name, after: string] =
+  ## The note's first ABSOLUTE path — a `/` that starts the note or follows a
+  ## space, up to the next space — split as the note around it (`before`,
+  ## `after`) and the path's last component (`name`). `found` is false when
+  ## the note carries none (a relative path is a name the note means, and is
+  ## never shortened).
+  var start = -1
+  var i = 0
+  while i < note.len:
+    if note[i] == '/' and (i == 0 or note[i - 1] == ' '):
+      start = i
+      break
+    inc i
+  if start < 0:
+    return (false, "", "", "", "")
+  var stop = note.find(' ', start)
+  if stop < 0: stop = note.len
+  let path = note[start ..< stop]
+  (true, note[0 ..< start], path, path[path.rfind('/') + 1 .. ^1],
+   note[stop .. ^1])
+
+proc noteMinCells*(note: string): int =
+  ## The fewest cells `note` can be shown in WHOLE by `fitNoteCells`: an
+  ## absolute path's directories given way to `…` (`<before>…/<name><after>`),
+  ## everything else as it is. What a row must leave for the note so the user
+  ## can still read every fact it states — the status row's file info yields
+  ## only to a note that cannot fit even so (`tui_app.shellModel`).
+  let (found, before, path, name, after) = notePathParts(note)
+  if not found or path.rfind('/') <= 0:
+    return textCells(note)
+  min(textCells(note),
+      textCells(before) + textCells(canonical(grTruncation) & "/") +
+        textCells(name) + textCells(after))
+
+const ModeNoteGap* = 4
+  ## The blank cells `statusBarText` always keeps after the mode indicators,
+  ## ahead of the note's own two separating spaces: the note is given at most
+  ## `width - <indicators> - ModeNoteGap` cells, those two spaces included.
+
+proc noteRowCells*(note: string): int =
+  ## What the status text needs BEYOND the mode indicators to show `note` with
+  ## every fact it states: the gap after the indicators (`ModeNoteGap`), the
+  ## note's two separating spaces, and the note at its fewest cells
+  ## (`noteMinCells`). Nothing when there is no note. `tui_app.shellModel`
+  ## keeps the file info only when the row has this much left beside it, so
+  ## the file info never costs the note a fact.
+  if note.len == 0: 0
+  else: ModeNoteGap + 2 + noteMinCells(note)
+
+proc fitNoteCells*(note: string; width: int; glyphs = DefaultGlyphs): string =
   ## The notification in `width` cells: whole when it fits. When it does not
   ## and it carries an ABSOLUTE PATH (`tui_session.describe`'s `<file>:<line>
   ## tick <n>  extent <a>..<b>`, the Edit toggle's `editing <root> — N
@@ -161,22 +219,10 @@ proc fitNoteCells*(note: string; width: int): string =
     return ""
   if textCells(note) <= width:
     return fitCells(note, width)
-  var start = -1
-  var i = 0
-  while i < note.len:
-    if note[i] == '/' and (i == 0 or note[i - 1] == ' '):
-      start = i
-      break
-    inc i
-  if start < 0:
+  let (found, before, path, name, after) = notePathParts(note)
+  if not found:
     return fitCells(note, width)
-  var stop = note.find(' ', start)
-  if stop < 0: stop = note.len
-  let path = note[start ..< stop]
   let slash = path.rfind('/')
-  let before = note[0 ..< start]
-  let name = path[slash + 1 .. ^1]
-  let after = note[stop .. ^1]
   # Keep as much of the directory's END as fits beside the rest.
   let spare = width - textCells(before) - textCells(name) - textCells(after) - 2
   var dir = ""
@@ -190,10 +236,15 @@ proc fitNoteCells*(note: string; width: int): string =
       tail.insert($runesOf[k], 0)
       used += w
     dir = tail.join("")
-  fitCells(before & "…" & (if dir.len > 0: dir & "/" else: "/") & name & after,
-           width)
+  fitCells(before & glyphs.glyph(grTruncation) &
+           (if dir.len > 0: dir & "/" else: "/") & name & after, width)
 
-proc statusBarText*(m: StatusBarModel; width: int): string =
+func modeText*(m: StatusBarModel): string =
+  ## The mode indicator as drawn: the router's label, else the input mode.
+  if m.label.len > 0: m.label else: $m.mode
+
+proc statusBarText*(m: StatusBarModel; width: int;
+                    glyphs = DefaultGlyphs): string =
   ## The bottom row, exactly `width` cells wide.
   ##
   ## The mode indicator is never dropped, and the notification is
@@ -208,7 +259,7 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   # below — "the mode indicator is never dropped" — covers the pair rather than
   # just the input half. A product mode that vanished at 14 columns would leave
   # a user editing a file on a screen that says NORMAL and nothing else.
-  let mode = $m.mode & " " & productIndicator(m.product) &
+  let mode = m.modeText & " " & productIndicator(m.product) &
              (if m.fold.len > 0: " " & m.fold else: "")
   # PLAT-49: the prompt's text when one is open, and nothing otherwise — no
   # key-hint strip.
@@ -221,7 +272,11 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
     return fitCells(mode, width)
 
   var line = mode
-  let note = m.notification
+  # The status line's notes are CodeTracer's own sentences (chrome), and on
+  # the ASCII tier their punctuation is drawn as ASCII (`asciiProse`); a path
+  # inside one keeps every character that is not that punctuation.
+  let note = if glyphs.tier == tierAscii: asciiProse(m.notification)
+             else: m.notification
   # `noteRoom` is the two separating spaces PLUS the message, so anything below
   # three cells cannot carry a message at all and must be zero rather than one
   # or two. At `noteRoom == 1` the tail below would be `(width - 1) + 2` cells
@@ -230,7 +285,7 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
   # exactly the kind of arithmetic a sweep finds and three geometries do not.
   var noteRoom = 0
   if note.len > 0:
-    noteRoom = min(textCells(note) + 2, width - textCells(mode) - 4)
+    noteRoom = min(textCells(note) + 2, width - textCells(mode) - ModeNoteGap)
     if noteRoom < 3:
       noteRoom = 0
   let middleRoom = width - textCells(mode) - 3 - noteRoom
@@ -238,5 +293,5 @@ proc statusBarText*(m: StatusBarModel; width: int): string =
     line.add " | " & fitCells(middle, min(middleRoom, textCells(middle)))
   if noteRoom > 0:
     return fitCells(line, width - noteRoom) & "  " &
-           fitNoteCells(note, noteRoom - 2)
+           fitNoteCells(note, noteRoom - 2, glyphs)
   fitCells(line, width)

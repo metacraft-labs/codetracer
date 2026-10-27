@@ -1,7 +1,7 @@
 ## operations.nim — PLAT-30: THE NAMED OPERATION VOCABULARY.
 ##
-## Owns: the 140 declarations of
-## `codetracer-specs/GUI/Editing-Operations-And-Keymaps.md` §2.2, the 224
+## Owns: the 161 declarations of
+## `codetracer-specs/GUI/Editing-Operations-And-Keymaps.md` §2.2, the 245
 ## operations they generate, and the one function that executes one of them
 ## against an `EditorState`.
 ##
@@ -1212,7 +1212,7 @@ func replaceWith(a, b: int; text: string; head: int): RangeOutcome =
                effects: @[], range: caret(head))
 
 # ===========================================================================
-# OPERATORS — 20 declarations, one form each. THEY CONSUME A SELECTION.
+# OPERATORS — 21 declarations, one form each. THEY CONSUME A SELECTION.
 # ===========================================================================
 
 proc selectedText(st: EditorState): string =
@@ -1462,14 +1462,20 @@ proc cPipeSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
            intents: @[HostIntent(kind: hiPipe, payload: args.command)])
 
 # ===========================================================================
-# COMMANDS — 70 declarations
+# COMMANDS — 90 declarations
 # ===========================================================================
 
 proc cInsertText(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Typed text replaces each range. TYPING ENDS AN ACTIVE REGION: a state in
+  ## `visual` mode — only reachable here under a base that types in it (the
+  ## Emacs mark, `set-mark`) — is in `insert` afterwards, so the next motion
+  ## moves the caret rather than growing a selection from the inserted text.
   if args.text.len == 0: return refused(st, rrMissingArgument)
   let s = args.text
-  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
-    replaceWith(r.rangeFrom, r.rangeTo, s, r.rangeFrom + s.len)))
+  var after = editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
+    replaceWith(r.rangeFrom, r.rangeTo, s, r.rangeFrom + s.len))
+  if after.mode == emVisual: after.mode = emInsert
+  settle(st, after)
 
 proc insertAtCaret(st: EditorState; env: OpEnv; s: string): EditorState =
   editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
@@ -2060,7 +2066,382 @@ proc cJumpToValueOrigin(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
                                  payload: $st.selection.mainRange.head)])
 
 # ===========================================================================
-# THE VOCABULARY — 140 declarations, in §2.2's own order
+# PLAT-68 — the operations the CUA and Emacs bases bind that §2.2 lacked
+# (CUA-Keymap.md §7). Each is an operation over the state like the rest; no
+# keymap or base is named in any body.
+# ===========================================================================
+
+const
+  ClipboardRegister* = "+"
+    ## The system clipboard's register — Vim's `"+` name for the same thing.
+    ## The three `clipboard-*` operations read and write it; the HOST copies
+    ## it to and from the platform clipboard (§5.2: the core performs no I/O).
+
+  KillRingSize* = 8
+    ## How many kills the ring keeps. The ring is the registers
+    ## `kill-0` (newest) … `kill-7`: Editing-Operations §3's registers, not a
+    ## second store.
+
+  KillMarkEnd = "kill-end"
+    ## Where the last `kill-line` left the caret. A second `kill-line` from the
+    ## same place APPENDS to the newest kill, Emacs's repetition rule.
+  YankMarkStart = "yank-start"
+  YankMarkEnd = "yank-end"
+    ## The span the last `yank` / `yank-pop` inserted — marks, so the
+    ## document's own edits map them — which `yank-pop` replaces.
+
+func killRegister(i: int): string = "kill-" & $i
+
+proc lineSpanOf(env: OpEnv; line: int): (int, int) =
+  ## A whole line with its terminator, the unit an empty-selection copy takes.
+  let a = env.lineStartOf(line)
+  let b = if line < env.ctx.store.lineCount - 1: env.lineStartOf(line + 1)
+          else: env.ctx.doc.len
+  (a, b)
+
+proc clipboardText(env: OpEnv; st: EditorState): Register =
+  ## VS Code's `editor.emptySelectionClipboard`: with every range empty, the
+  ## clipboard takes the caret lines whole, LINEWISE; otherwise the selected
+  ## text, newline-joined across ranges.
+  var anySelected = false
+  for r in st.selection:
+    if not r.isEmpty: anySelected = true
+  if anySelected:
+    return Register(text: selectedText(st), kind: rkCharwise)
+  var text = ""
+  var seen: seq[int] = @[]
+  for r in st.selection:
+    let line = env.lineOf(r.head)
+    if line in seen: continue
+    seen.add line
+    let (a, b) = lineSpanOf(env, line)
+    var piece = st.doc[a ..< b]
+    if not piece.endsWith("\n"): piece.add "\n"
+    text.add piece
+  Register(text: text, kind: rkLinewise)
+
+proc cClipboardCopy(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  var after = st
+  after.setRegister(ClipboardRegister, clipboardText(env, st))
+  settle(st, after)
+
+proc cClipboardCut(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Copy, then delete what was copied: the selection, or — with every range
+  ## empty — the caret lines with their terminators.
+  let reg = clipboardText(env, st)
+  var after = st
+  after.setRegister(ClipboardRegister, reg)
+  if reg.kind == rkCharwise:
+    after = editByRange(after, env, proc (r: SelectionRange): RangeOutcome =
+      if r.isEmpty: noEdit(r)
+      else: replaceWith(r.rangeFrom, r.rangeTo, "", r.rangeFrom))
+  else:
+    var edits: seq[Edit] = @[]
+    var seen: seq[int] = @[]
+    for r in st.selection:
+      let line = env.lineOf(r.head)
+      if line in seen: continue
+      seen.add line
+      let (a, b) = lineSpanOf(env, line)
+      if b > a: edits.add Edit(fromPos: a, toPos: b, insert: "")
+    if edits.len > 0:
+      edits.sort(proc (x, y: Edit): int = cmp(x.fromPos, y.fromPos))
+      let cs = changeSet(after.doc.len, edits)
+      after = commitChange(after, cs, some(mapSelection(after.selection, cs)),
+                           nowMs = env.nowMs)
+  settle(st, after)
+
+proc cClipboardPaste(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## A LINEWISE clipboard pasted at a caret goes in ABOVE the caret's line and
+  ## the caret keeps its column — VS Code's rule for a line copied with no
+  ## selection. Anything else replaces each range.
+  let reg = st.registerOf(ClipboardRegister)
+  if reg.text.len == 0: return settle(st, st)
+  var allEmpty = true
+  for r in st.selection:
+    if not r.isEmpty: allEmpty = false
+  if reg.kind == rkLinewise and allEmpty:
+    let text = reg.text
+    return settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
+      let a = env.lineStartOf(env.lineOf(r.head))
+      RangeOutcome(edits: @[Edit(fromPos: a, toPos: a, insert: text)],
+                   effects: @[], range: caret(r.head + text.len))))
+  let text = reg.text
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
+    replaceWith(r.rangeFrom, r.rangeTo, text, r.rangeFrom + text.len)))
+
+proc cSelectChildSyntax(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## The inverse of `select-parent-syntax`: back to the selection the last
+  ## expansion started from. Needs the parse, so it refuses on a stale one
+  ## exactly as its sibling does (§5.1).
+  if st.parse != pfFresh: return refused(st, rrStaleParse)
+  var ranges: seq[SelectionRange] = @[]
+  for r in st.selection:
+    if r.isEmpty or r.rangeTo - r.rangeFrom < 2:
+      ranges.add r
+    else:
+      ranges.add spanRange(r.rangeFrom + 1, r.rangeTo - 1)
+  var after = st
+  after.pushSelectionHistory(env.nowMs)
+  after.selection = editorSelection(ranges, st.selection.primaryIndex)
+  settle(st, after)
+
+proc cExpandLineSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## VS Code's `Ctrl+L`: select the caret's whole line with its terminator; a
+  ## range that already covers whole lines grows by the next one.
+  var ranges: seq[SelectionRange] = @[]
+  for r in st.selection:
+    let first = env.lineOf(r.rangeFrom)
+    let a = env.lineStartOf(first)
+    let lastLine = env.lineOf(max(r.rangeTo - 1, r.rangeFrom))
+    let (_, endOfLast) = lineSpanOf(env, lastLine)
+    let wholeLines = not r.isEmpty and r.rangeFrom == a and
+                     r.rangeTo == endOfLast
+    let b = if wholeLines and lastLine + 1 < env.ctx.store.lineCount:
+              lineSpanOf(env, lastLine + 1)[1]
+            else: endOfLast
+    ranges.add spanRange(a, b)
+  var after = st
+  after.pushSelectionHistory(env.nowMs)
+  after.selection = editorSelection(ranges, st.selection.primaryIndex)
+  settle(st, after)
+
+proc matchNeedle(env: OpEnv; st: EditorState): (string, SelectionRange) =
+  ## What the match commands search for: the primary range's text, or — on an
+  ## empty primary range — the word under the caret, which VS Code selects
+  ## first.
+  let r = st.selection.mainRange
+  if not r.isEmpty:
+    return (st.doc[r.rangeFrom ..< min(r.rangeTo, st.doc.len)], r)
+  let w = oWord(env, st, r, false, OpArgs())
+  let a = w.span.rangeFrom
+  let b = w.span.rangeTo
+  if b <= a: return ("", r)
+  (st.doc[a ..< b], spanRange(a, b))
+
+proc cSelectAllMatches(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  let (needle, _) = matchNeedle(env, st)
+  if needle.len == 0: return refused(st, rrNoPattern)
+  var ranges: seq[SelectionRange] = @[]
+  var primary = 0
+  var i = st.doc.find(needle, 0)
+  while i >= 0:
+    if i <= st.selection.mainRange.rangeFrom: primary = ranges.len
+    ranges.add spanRange(i, i + needle.len)
+    i = st.doc.find(needle, i + max(1, needle.len))
+  if ranges.len == 0: return refused(st, rrNoMatch)
+  var after = st
+  after.pushSelectionHistory(env.nowMs)
+  after.selection = editorSelection(ranges, primary)
+  settle(st, after)
+
+proc cMoveLastCursorToNextMatch(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## VS Code's `Ctrl+K Ctrl+D`: the primary range jumps to the next match of
+  ## its own text — `add-cursor-at-next-match` without keeping the old one.
+  let (needle, from0) = matchNeedle(env, st)
+  if needle.len == 0: return refused(st, rrNoPattern)
+  let i = findFrom(st.doc, needle, from0.rangeTo, true)
+  if i < 0: return refused(st, rrNoMatch)
+  var ranges = st.selection.ranges
+  ranges[st.selection.primaryIndex] = spanRange(i, i + needle.len)
+  var after = st
+  after.pushSelectionHistory(env.nowMs)
+  after.selection = editorSelection(ranges, st.selection.primaryIndex)
+  settle(st, after)
+
+proc cAddCursorAtPoint(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## A caret at a document offset — the pointer's Alt+click, which names a
+  ## position rather than a direction.
+  if args.number < 0 or args.number > st.doc.len:
+    return refused(st, rrOutOfRange)
+  var ranges = st.selection.ranges
+  ranges.add caret(env.ctx.boundaryAtOrBefore(args.number))
+  var after = st
+  after.pushSelectionHistory(env.nowMs)
+  after.selection = editorSelection(ranges, ranges.len - 1)
+  settle(st, after)
+
+proc cToggleBlockComment(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## One decision for the whole selection, like `toggle-comment`: if every
+  ## non-empty range is already wrapped in the block tokens they are removed,
+  ## otherwise every range is wrapped. An empty range gets an empty comment
+  ## with the caret inside it.
+  let o = st.comments.blockOpen
+  let c = st.comments.blockClose
+  if o.len == 0 or c.len == 0: return settle(st, st)
+  var allWrapped = true
+  var any = false
+  for r in st.selection:
+    if r.isEmpty: continue
+    any = true
+    let body = st.doc[r.rangeFrom ..< min(r.rangeTo, st.doc.len)]
+    if not (body.startsWith(o) and body.endsWith(c) and
+            body.len >= o.len + c.len):
+      allWrapped = false
+  if any and allWrapped:
+    return cBlockUncomment(env, st, args)
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
+    if r.isEmpty:
+      RangeOutcome(edits: @[Edit(fromPos: r.head, toPos: r.head,
+                                 insert: o & "  " & c)],
+                   effects: @[], range: caret(r.head + o.len + 1))
+    else:
+      RangeOutcome(
+        edits: @[Edit(fromPos: r.rangeFrom, toPos: r.rangeFrom, insert: o),
+                 Edit(fromPos: r.rangeTo, toPos: r.rangeTo, insert: c)],
+        effects: @[], range: spanRange(r.rangeFrom, r.rangeTo + o.len + c.len))))
+
+proc foldBlockLines(env: OpEnv; st: EditorState): seq[int] =
+  ## The foldable lines of the caret's indentation block: the caret's own
+  ## foldable line and every foldable line nested under it.
+  let foldable = foldableLines(env)
+  let line = env.lineOf(st.selection.mainRange.head)
+  if line notin foldable: return @[]
+  let base = indentWidthOf(env.lineTextOf(line))
+  result = @[line]
+  var l = line + 1
+  while l < env.ctx.store.lineCount:
+    let t = env.lineTextOf(l)
+    if not isBlankLine(t) and indentWidthOf(t) <= base: break
+    if l in foldable: result.add l
+    inc l
+
+proc cFoldRecursively(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  var after = st
+  for l in foldBlockLines(env, st):
+    if not after.isFolded(l): after.folded.toggleIn(l)
+  settle(st, after)
+
+proc cUnfoldRecursively(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  var after = st
+  for l in foldBlockLines(env, st):
+    if after.isFolded(l): after.folded.toggleIn(l)
+  settle(st, after)
+
+# --- The mark and the kill ring (Emacs, Base-Keymaps §3.2) -----------------
+#
+# THE MARK IS THE SELECTION'S ANCHOR, AND "THE MARK IS ACTIVE" IS VISUAL MODE.
+# `set-mark` collapses every range to its head and enters `visual`, so a base
+# that binds the `extend-` forms in visual mode (`editorMode == visual`) grows
+# the region from there; every command that ends the region returns to
+# `insert`. No field was added for it: §3's modal state already has the mode.
+
+proc enterRegionMode(st: EditorState; mode: EditingMode): EditorState =
+  result = st
+  result.mode = mode
+
+proc pushKill(st: var EditorState; text: string; append: bool) =
+  ## The newest kill goes to `kill-0` and the older ones shift down; an
+  ## APPENDING kill extends `kill-0` instead.
+  if append:
+    let cur = st.registerOf(killRegister(0))
+    st.setRegister(killRegister(0),
+                   Register(text: cur.text & text, kind: rkCharwise))
+    return
+  for i in countdown(KillRingSize - 1, 1):
+    st.setRegister(killRegister(i), st.registerOf(killRegister(i - 1)))
+  st.setRegister(killRegister(0), Register(text: text, kind: rkCharwise))
+
+proc cSetMark(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  var ranges: seq[SelectionRange] = @[]
+  for r in st.selection: ranges.add caret(r.head)
+  var after = st.withSelection(ranges, st.selection.primaryIndex)
+  after.pushSelectionHistory(env.nowMs)
+  settle(st, enterRegionMode(after, emVisual))
+
+proc cDeactivateMark(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Emacs's `C-g` on an active region: every range collapses to its head (the
+  ## point) and the mark is no longer active.
+  var ranges: seq[SelectionRange] = @[]
+  for r in st.selection: ranges.add caret(r.head)
+  var after = st.withSelection(ranges, st.selection.primaryIndex)
+  after.pushSelectionHistory(env.nowMs)
+  settle(st, enterRegionMode(after, emInsert))
+
+proc cExchangePointAndMark(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Point and mark swap, and the region is active again — Emacs's `C-x C-x`.
+  var ranges: seq[SelectionRange] = @[]
+  for r in st.selection: ranges.add spanRange(r.head, r.anchor, r.goalColumn)
+  var after = st.withSelection(ranges, st.selection.primaryIndex)
+  after.pushSelectionHistory(env.nowMs)
+  settle(st, enterRegionMode(after, emVisual))
+
+proc cKillRegion(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  var after = st
+  after.pushKill(selectedText(st), append = false)
+  after = editByRange(after, env, proc (r: SelectionRange): RangeOutcome =
+    if r.isEmpty: noEdit(r)
+    else: replaceWith(r.rangeFrom, r.rangeTo, "", r.rangeFrom))
+  settle(st, enterRegionMode(after, emInsert))
+
+proc cCopyRegion(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  var after = st
+  after.pushKill(selectedText(st), append = false)
+  var ranges: seq[SelectionRange] = @[]
+  for r in st.selection: ranges.add caret(r.head)
+  after = after.withSelection(ranges, st.selection.primaryIndex)
+  settle(st, enterRegionMode(after, emInsert))
+
+proc cKillLine(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Delete from the caret to the end of its line into the kill ring — or, at
+  ## the end of a line, the line's terminator. A second `kill-line` from where
+  ## the last one left the caret appends to the same kill.
+  let r = st.selection.mainRange
+  let line = env.lineOf(r.head)
+  let lineEnd = env.lineEndOf(line)
+  let b = if r.head < lineEnd: lineEnd
+          elif line < env.ctx.store.lineCount - 1: env.lineStartOf(line + 1)
+          else: r.head
+  if b <= r.head: return settle(st, st)
+  let append = st.lastChange == @["kill-line"] and
+               st.hasMark(KillMarkEnd) and st.marks[KillMarkEnd] == r.head
+  var after = st
+  after.pushKill(st.doc[r.head ..< b], append)
+  let cs = changeSet(st.doc.len, @[Edit(fromPos: r.head, toPos: b, insert: "")])
+  after = commitChange(after, cs, some(editorSelection(@[caret(r.head)], 0)),
+                       nowMs = env.nowMs)
+  after.marks[KillMarkEnd] = r.head
+  settle(st, enterRegionMode(after, emInsert))
+
+proc insertYank(env: OpEnv; st: EditorState; a, b: int; text: string): EditorState =
+  let cs = changeSet(st.doc.len, @[Edit(fromPos: a, toPos: b, insert: text)])
+  result = commitChange(st, cs, some(editorSelection(@[caret(a + text.len)], 0)),
+                        nowMs = env.nowMs)
+  result.marks[YankMarkStart] = a
+  result.marks[YankMarkEnd] = a + text.len
+  result.mode = emInsert
+
+proc cYank(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  let text = st.registerOf(killRegister(0)).text
+  if text.len == 0: return settle(st, st)
+  let r = st.selection.mainRange
+  settle(st, insertYank(env, st, r.head, r.head, text))
+
+proc cYankPop(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
+  ## Replace what the last `yank` inserted with the next older kill, rotating
+  ## the ring. Only directly after a yank, with the caret where it left it —
+  ## otherwise there is nothing to replace, and it refuses rather than
+  ## inserting.
+  if st.lastChange notin [@["yank"], @["yank-pop"]] or
+     not st.hasMark(YankMarkStart) or not st.hasMark(YankMarkEnd) or
+     st.selection.mainRange.head != st.marks[YankMarkEnd]:
+    return refused(st, rrNothingToRepeat)
+  var after = st
+  let newest = after.registerOf(killRegister(0))
+  var count = 0
+  while count < KillRingSize and
+        after.registerOf(killRegister(count)).text.len > 0:
+    inc count
+  if count < 2: return settle(st, st)
+  for i in 0 ..< count - 1:
+    after.setRegister(killRegister(i), after.registerOf(killRegister(i + 1)))
+  after.setRegister(killRegister(count - 1), newest)
+  let text = after.registerOf(killRegister(0)).text
+  settle(st, insertYank(env, after, st.marks[YankMarkStart],
+                        st.marks[YankMarkEnd], text))
+
+# ===========================================================================
+# THE VOCABULARY — 161 declarations, in §2.2's own order
 # ===========================================================================
 
 func motionDecl(name: string; dd: bool; f: MotionProc;
@@ -2151,6 +2532,7 @@ proc buildVocabulary(): seq[Declaration] =
     operatorDecl("line-uncomment", cLineUncomment),
     operatorDecl("block-comment", cBlockComment),
     operatorDecl("block-uncomment", cBlockUncomment),
+    operatorDecl("toggle-block-comment", cToggleBlockComment),
     operatorDecl("upper-case", cUpperCase),
     operatorDecl("lower-case", cLowerCase),
     operatorDecl("swap-case", cSwapCase),
@@ -2187,6 +2569,8 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("select-all", cSelectAll),
     commandDecl("select-line", cSelectLine),
     commandDecl("select-parent-syntax", cSelectParentSyntax),
+    commandDecl("select-child-syntax", cSelectChildSyntax),
+    commandDecl("expand-line-selection", cExpandLineSelection),
     commandDecl("simplify-selection", cSimplifySelection),
     commandDecl("collapse-to-cursors", cCollapseToCursors),
     commandDecl("flip-selections", cFlipSelections),
@@ -2198,6 +2582,13 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("add-cursor-at-each-line-of-selection", cAddCursorAtEachLine),
     commandDecl("remove-primary-cursor", cRemovePrimaryCursor),
     commandDecl("rotate-primary-cursor", cRotatePrimaryCursor),
+    commandDecl("select-all-matches", cSelectAllMatches),
+    commandDecl("move-last-cursor-to-next-match", cMoveLastCursorToNextMatch),
+    commandDecl("add-cursor-at-point", cAddCursorAtPoint, akNumber),
+
+    commandDecl("clipboard-cut", cClipboardCut),
+    commandDecl("clipboard-copy", cClipboardCopy),
+    commandDecl("clipboard-paste", cClipboardPaste),
 
     commandDecl("undo", cUndo),
     commandDecl("redo", cRedo),
@@ -2239,6 +2630,17 @@ proc buildVocabulary(): seq[Declaration] =
     commandDecl("fold-all", cFoldAll),
     commandDecl("unfold-all", cUnfoldAll),
     commandDecl("toggle-fold", cToggleFold),
+    commandDecl("fold-recursively", cFoldRecursively),
+    commandDecl("unfold-recursively", cUnfoldRecursively),
+
+    commandDecl("set-mark", cSetMark),
+    commandDecl("deactivate-mark", cDeactivateMark),
+    commandDecl("exchange-point-and-mark", cExchangePointAndMark),
+    commandDecl("kill-line", cKillLine),
+    commandDecl("kill-region", cKillRegion),
+    commandDecl("copy-region", cCopyRegion),
+    commandDecl("yank", cYank),
+    commandDecl("yank-pop", cYankPop),
 
     commandDecl("toggle-breakpoint", cToggleBreakpoint),
     commandDecl("toggle-tracepoint", cToggleTracepoint),
@@ -2249,7 +2651,7 @@ proc buildVocabulary(): seq[Declaration] =
 let VocabularyTable = buildVocabulary()
 
 proc vocabulary*(): seq[Declaration] =
-  ## **THE 140, AS DATA.** Every question CTUI-9 says a `case` cannot be asked
+  ## **THE 161, AS DATA.** Every question CTUI-9 says a `case` cannot be asked
   ## is a fold over this.
   VocabularyTable
 
@@ -2267,7 +2669,7 @@ proc buildOperations(): seq[Operation] =
 let OperationTable = buildOperations()
 
 proc operations*(): seq[Operation] =
-  ## **THE 224.** Generated from the 140, never enumerated, so the three forms
+  ## **THE 245.** Generated from the 161, never enumerated, so the three forms
   ## of a motion cannot disagree about where it lands.
   OperationTable
 

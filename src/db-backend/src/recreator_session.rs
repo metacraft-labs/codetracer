@@ -28,9 +28,9 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 #[cfg(windows)]
 use crate::paths::CODETRACER_PATHS;
-use crate::paths::log_path_for;
+use crate::paths::log_path_in;
 #[cfg(unix)]
-use crate::paths::recreator_socket_path;
+use crate::paths::recreator_socket_path_in;
 use crate::query::{
     MaterializeIntervalResponse, ReplayQuery, TtdTracepointEvalMode, TtdTracepointEvalRequest,
     TtdTracepointEvalResponseEnvelope, TtdTracepointFunctionCallRequest, TtdTracepointValueClass,
@@ -149,6 +149,71 @@ impl std::fmt::Display for ReplayWorkerStartError {
 
 impl Error for ReplayWorkerStartError {}
 
+/// A replay worker that went away while a query was in flight: it closed its
+/// connection without answering, or the connection broke under the query.
+///
+/// Returned by [`ReplayWorker::dispatch_replay_query`] instead of a bare
+/// string so that a caller can tell "the worker answered with an error" (the
+/// worker is still there and still positioned) from "the worker is gone" (its
+/// replay position is lost with it). The flow preloader depends on that
+/// difference: a flow whose worker died must be reported as a failure naming
+/// the worker, not completed from a fresh worker that knows nothing of the
+/// position the flow was walking (codetracer-pm issue 2026-10-21 "Rust rr flow
+/// worker segfaults in LLDB, so the flow finds no variables").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayWorkerDied {
+    /// The worker's name (`stable`, `flow`, …), as passed to `replay-worker --name`.
+    pub name: String,
+    /// The worker's index, as passed to `replay-worker --index`.
+    pub index: usize,
+    /// The worker's process id, when the session spawned it.
+    pub pid: Option<u32>,
+    /// The kind of query that was in flight (`JumpToCall`, `Step`, …).
+    pub query: String,
+    /// How the process ended, as far as it could be observed: its exit
+    /// status (`signal: 11 (SIGSEGV) (core dumped)`, `exit status: 3`) or why
+    /// none is known.
+    pub exit: String,
+}
+
+impl std::fmt::Display for ReplayWorkerDied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the `{}` replay worker (index {}", self.name, self.index)?;
+        if let Some(pid) = self.pid {
+            write!(f, ", pid {pid}")?;
+        }
+        write!(f, ") died while answering {}: {}", self.query, self.exit)
+    }
+}
+
+impl Error for ReplayWorkerDied {}
+
+/// How long to wait for a worker that closed its connection to finish
+/// exiting, so its exit status can be reported.
+///
+/// This bounds an unusual case, not the common one. A worker killed by a
+/// signal has normally exited completely by the time its connection reads
+/// EOF: Linux writes the core dump before it closes the dying process's
+/// files, so the socket closes after the core is written and the process can
+/// be reaped at once (measured 2026-10-23 with `systemd-coredump`: EOF 1.2 s
+/// after a SIGSEGV that dumped 250 MB, and `waitpid` succeeded immediately
+/// after it). The wait matters for a worker that closed its end and is still
+/// shutting down, for example tearing down LLDB and its `rr` replay. It is
+/// stopped after the grace period, so a worker that never exits cannot hold
+/// the session. Stopping it earlier would lose its exit status, the evidence
+/// the death report carries.
+const WORKER_EXIT_GRACE: Duration = Duration::from_secs(10);
+
+/// The kind of a serialized replay query, for naming it in a diagnostic
+/// without repeating its payload: `ReplayQuery` is internally tagged
+/// (`#[serde(tag = "kind")]`), so `{"kind":"JumpToCall",…}` → `JumpToCall`.
+fn replay_query_kind(raw_json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(raw_json)
+        .ok()
+        .and_then(|query| query.get("kind")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| "a replay query".to_string())
+}
+
 /// Scan a worker's stderr for the licensing module's machine-readable stop
 /// reason.
 ///
@@ -211,6 +276,9 @@ pub struct RecreatorReplaySession {
     last_c_location: Option<Location>,
     materialization_cache: MaterializationCache,
     materialization_cache_ctfs_path: Option<PathBuf>,
+    /// Whether a query after the worker died may start a replacement. See
+    /// [`RecreatorReplaySession::without_respawn_after_worker_death`].
+    respawn_after_worker_death: bool,
 }
 
 #[derive(Debug)]
@@ -229,6 +297,11 @@ pub struct ReplayWorker {
     /// spawner side when computing the socket path).  Empty before
     /// `start` is called.
     run_id: String,
+    /// The runtime base directory this worker's run directory (its socket
+    /// and log) is under, chosen by `start` so that the socket fits in
+    /// `sun_path` (`paths::worker_runtime_base_dir`) and handed to the
+    /// worker as `$CODETRACER_RUNTIME_DIR`.  Empty before `start`.
+    runtime_dir: PathBuf,
     /// M-REC-11: the trace's UUIDv7 — used by `start` to reserve a
     /// unique-within-this-process `run_id`.  May be empty for callers
     /// that have not yet been migrated; in that case the worker falls
@@ -236,6 +309,9 @@ pub struct ReplayWorker {
     recording_id: String,
     process: Option<Child>,
     stream: Option<WorkerStream>,
+    /// How this worker last died with a query in flight, until a later
+    /// [`ReplayWorker::start`] replaces it. See [`ReplayWorkerDied`].
+    last_death: Option<ReplayWorkerDied>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -254,6 +330,17 @@ pub struct RecreatorArgs {
     /// from this id and passes it to the worker via
     /// `$CODETRACER_RUN_ID`.
     pub recording_id: String,
+}
+
+/// The `CT_COOP_QUERY=1` route of [`ReplayWorker::start`]: the worker is
+/// `ct-mcr replay-worker --coop-query`, taken from `CT_COOP_RECREATOR` (or
+/// the worker executable when unset), with `CT_COOP_PROGRAM` /
+/// `CT_COOP_FUNC` as its `--coop-program` / `--coop-func`.
+#[derive(Debug, Default, Clone)]
+struct CoopQueryArgs {
+    exe: Option<PathBuf>,
+    program: Option<String>,
+    func: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -289,10 +376,69 @@ impl ReplayWorker {
             live_cwd: None,
             live_recording_dir: None,
             run_id: String::new(),
+            runtime_dir: PathBuf::new(),
             recording_id: recording_id.to_string(),
             process: None,
             stream: None,
+            last_death: None,
         }
+    }
+
+    /// The `replay-worker` command `start` runs for this worker: program and
+    /// arguments, before `start` adds its environment and standard streams.
+    /// `coop` is the `CT_COOP_QUERY` route, when it is asked for.
+    fn worker_command(&self, coop: Option<&CoopQueryArgs>) -> Command {
+        let exe_path = coop
+            .and_then(|coop| coop.exe.clone())
+            .unwrap_or_else(|| self.recreator_exe.clone());
+
+        let mut command = Command::new(&exe_path);
+        command
+            .arg("replay-worker")
+            .arg("--name")
+            .arg(&self.name)
+            .arg("--index")
+            .arg(self.index.to_string());
+        // The worker must not outlive this process. db-backend starts it as
+        // a plain child and connects to its socket afterwards; a db-backend
+        // that dies (or is killed) before connecting used to leave the worker
+        // waiting in `accept` forever, with its `ct-mcr debugserver` or
+        // `rr replay` child (codetracer-pm issue
+        // `2026-10-22-orphaned-mcr-replay-worker-waits-in-accept-after-its-replay-server-is-gone.md`).
+        // With `--parent-pid <this process>` the worker, while nothing is
+        // connected, exits once this process is no longer its parent
+        // (codetracer-pm `spec/CLI/ct-native-replay/README.md`,
+        // `replay-worker` § "Lifetime before db-backend connects"). The
+        // `CT_COOP_QUERY` route's `ct-mcr replay-worker` takes the same
+        // option (`spec/CLI/ct-mcr/replay-worker.md`, "Lifetime of the query
+        // server"). POSIX only: the Windows workers do not take it, and
+        // `ct-mcr replay-worker` refuses it there.
+        #[cfg(unix)]
+        command.arg("--parent-pid").arg(std::process::id().to_string());
+        if let Some(coop) = coop {
+            command.arg("--coop-query");
+            if let Some(program) = &coop.program {
+                command.arg("--coop-program").arg(program);
+            }
+            if let Some(func) = &coop.func {
+                command.arg("--coop-func").arg(func);
+            }
+            command.arg(&self.rr_trace_folder);
+        } else if let Some(program) = &self.live_program {
+            command.arg("--live-program").arg(program);
+            if let Some(dir) = &self.live_recording_dir {
+                command.arg("--live-recording-dir").arg(dir);
+            }
+            if let Some(cwd) = &self.live_cwd {
+                command.arg("--live-cwd").arg(cwd);
+            }
+            for arg in &self.live_program_args {
+                command.arg("--live-arg").arg(arg);
+            }
+        } else {
+            command.arg(&self.rr_trace_folder);
+        }
+        command
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
@@ -326,7 +472,25 @@ impl ReplayWorker {
         // Co-locate with the worker's UDS in the per-run directory so the
         // socket and its stderr log share lifecycle (XDG_RUNTIME_DIR on
         // Linux, fallback tmp_path elsewhere — see paths::run_dir_for).
-        let log_path = log_path_for("ct-native-replay", &self.name, self.index, &self.run_id)?;
+        //
+        // The base directory is chosen here, before the worker exists, so
+        // that its socket fits in `sun_path`; both sides then use it (see
+        // `paths::worker_runtime_base_dir`).
+        let runtime_dir = crate::paths::runtime_base_dir()?;
+        #[cfg(unix)]
+        let runtime_dir = crate::paths::worker_runtime_base_dir(
+            runtime_dir,
+            &self.run_id,
+            &crate::paths::recreator_socket_file_name("", &self.name, self.index),
+        )?;
+        self.runtime_dir = runtime_dir;
+        let log_path = log_path_in(
+            &self.runtime_dir,
+            "ct-native-replay",
+            &self.name,
+            self.index,
+            &self.run_id,
+        )?;
         info!("worker stderr log: {}", log_path.display());
         let stderr_file = std::fs::File::create(&log_path)?;
 
@@ -340,52 +504,23 @@ impl ReplayWorker {
         // REAL values read from the held child's registers + memory.  The
         // coop env vars (CT_COOP_PROGRAM / CT_COOP_FUNC / CT_COOP_SOURCE) are
         // inherited by the child automatically.
-        let coop_query = std::env::var("CT_COOP_QUERY").as_deref() == Ok("1");
-        let coop_exe = std::env::var("CT_COOP_RECREATOR").ok();
-        let exe_path: PathBuf = if coop_query {
-            match &coop_exe {
-                Some(p) => PathBuf::from(p),
-                None => self.recreator_exe.clone(),
-            }
-        } else {
-            self.recreator_exe.clone()
-        };
-
-        let mut command = Command::new(&exe_path);
-        command
-            .arg("replay-worker")
-            .arg("--name")
-            .arg(&self.name)
-            .arg("--index")
-            .arg(self.index.to_string());
-        if coop_query {
-            command.arg("--coop-query");
-            if let Ok(program) = std::env::var("CT_COOP_PROGRAM") {
-                command.arg("--coop-program").arg(program);
-            }
-            if let Ok(func) = std::env::var("CT_COOP_FUNC") {
-                command.arg("--coop-func").arg(func);
-            }
-            command.arg(&self.rr_trace_folder);
-        } else if let Some(program) = &self.live_program {
-            command.arg("--live-program").arg(program);
-            if let Some(dir) = &self.live_recording_dir {
-                command.arg("--live-recording-dir").arg(dir);
-            }
-            if let Some(cwd) = &self.live_cwd {
-                command.arg("--live-cwd").arg(cwd);
-            }
-            for arg in &self.live_program_args {
-                command.arg("--live-arg").arg(arg);
-            }
-        } else {
-            command.arg(&self.rr_trace_folder);
-        }
+        let coop = (std::env::var("CT_COOP_QUERY").as_deref() == Ok("1")).then(|| CoopQueryArgs {
+            exe: std::env::var("CT_COOP_RECREATOR").ok().map(PathBuf::from),
+            program: std::env::var("CT_COOP_PROGRAM").ok(),
+            func: std::env::var("CT_COOP_FUNC").ok(),
+        });
+        let mut command = self.worker_command(coop.as_ref());
+        // The directory the worker creates its socket in is the one
+        // `setup_worker_sockets` connects to only if both resolve the same
+        // base directory; name it to the worker rather than rely on that
+        // (see `paths::runtime_base_dir`).
+        let runtime_dir = self.runtime_dir.clone();
         let ct_worker = command
             // M-REC-11: the worker (ct-native-replay) reads
             // $CODETRACER_RUN_ID to compute the socket path; falls
             // back to getppid() only when unset (transitional).
             .env(crate::paths::CODETRACER_RUN_ID_ENV, &self.run_id)
+            .env(crate::paths::CODETRACER_RUNTIME_DIR_ENV, &runtime_dir)
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr_file))
             .spawn()?;
@@ -429,6 +564,9 @@ impl ReplayWorker {
             }));
         }
         self.active = true;
+        // A fresh worker replaces the one that died: the death no longer
+        // describes this worker.
+        self.last_death = None;
         Ok(())
     }
 
@@ -437,7 +575,7 @@ impl ReplayWorker {
         // M-REC-11: use the same run-id that was passed to the child
         // via $CODETRACER_RUN_ID in `start`, so spawner and worker
         // compute the same socket path.
-        let socket_path = recreator_socket_path("", &self.name, self.index, &self.run_id)?;
+        let socket_path = recreator_socket_path_in(&self.runtime_dir, "", &self.name, self.index, &self.run_id)?;
 
         eprintln!("[rr-worker] connecting to socket {}", socket_path.display());
 
@@ -682,8 +820,11 @@ impl ReplayWorker {
         debug!("send to worker {raw_json}\n");
         // `clippy::unused_io_amount` catched we need write_all, not write
         if let Err(e) = stream.write_all(&format!("{raw_json}\n").into_bytes()) {
-            self.abandon_connection();
-            return Err(format!("dispatch_replay_query IO error sending {raw_json}: {e}").into());
+            // The worker's end of the socket is gone (EPIPE / ECONNRESET): it
+            // died after answering the previous query.
+            return Err(Box::new(
+                self.record_death(&raw_json, &format!("sending the query failed ({e})")),
+            ));
         }
 
         let mut res = "".to_string();
@@ -716,12 +857,15 @@ impl ReplayWorker {
         debug!("res: `{res}`");
 
         if res.is_empty() {
-            // EOF — the replay worker crashed or disconnected. Mark the
-            // worker as inactive so that the next query attempt can restart it,
-            // and return a clear error rather than an empty string that would
-            // fail JSON parsing downstream.
-            self.active = false;
-            return Err("ct-native-replay worker disconnected (EOF on response)".into());
+            // EOF — the replay worker crashed or disconnected without
+            // answering. It is marked inactive, so the next query attempt can
+            // restart it (a session may refuse that, see
+            // `RecreatorReplaySession::without_respawn_after_worker_death`),
+            // and the error names the worker and how its process ended rather
+            // than leaving an empty string to fail JSON parsing downstream.
+            return Err(Box::new(
+                self.record_death(&raw_json, "it closed its connection without answering"),
+            ));
         }
 
         if res.starts_with("error:") {
@@ -754,6 +898,36 @@ impl ReplayWorker {
 }
 
 impl ReplayWorker {
+    /// How this worker last died with a query in flight, if it has not been
+    /// restarted since.
+    pub fn last_death(&self) -> Option<&ReplayWorkerDied> {
+        self.last_death.as_ref()
+    }
+
+    /// Record that the worker went away while answering `raw_json`: drop the
+    /// connection, reap the process to learn how it ended, and remember the
+    /// death (see [`ReplayWorkerDied`]). `connection` says what was observed
+    /// on the socket.
+    fn record_death(&mut self, raw_json: &str, connection: &str) -> ReplayWorkerDied {
+        self.stream = None;
+        self.active = false;
+        let pid = self.process.as_ref().map(Child::id);
+        let process_end = match self.process.take() {
+            Some(mut child) => reap_worker(&mut child, WORKER_EXIT_GRACE),
+            None => "the session holds no process handle for it".to_string(),
+        };
+        let death = ReplayWorkerDied {
+            name: self.name.clone(),
+            index: self.index,
+            pid,
+            query: replay_query_kind(raw_json),
+            exit: format!("{connection}; {process_end}"),
+        };
+        error!("{death}");
+        self.last_death = Some(death.clone());
+        death
+    }
+
     /// Close the connection to the worker and stop it. Used when the
     /// connection can no longer be trusted to pair answers with queries.
     fn abandon_connection(&mut self) {
@@ -764,6 +938,37 @@ impl ReplayWorker {
         }
         self.process = None;
         self.active = false;
+    }
+}
+
+/// Wait up to `grace` for a worker that closed its connection to exit, and
+/// describe how it ended: `the process ended with signal: 11 (SIGSEGV) (core
+/// dumped)` (std's `ExitStatus` display). A worker still running after `grace`
+/// is stopped, since nothing can be paired with its answers any more.
+///
+/// The grace is measured through [`crate::wall_clock`], not `Instant`: this
+/// function is not inside a `#[cfg(unix)]` / `#[cfg(windows)]` item, so it is
+/// compiled into the wasm build, where a raw `std::time` read traps
+/// (`tests/wall_clock_sweep_test.rs`).
+fn reap_worker(child: &mut Child, grace: Duration) -> String {
+    let started_ms = crate::wall_clock::monotonic_ms();
+    let grace_ms = u64::try_from(grace.as_millis()).unwrap_or(u64::MAX);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return format!("the process ended with {status}"),
+            Ok(None) if crate::wall_clock::monotonic_ms().saturating_sub(started_ms) < grace_ms => {
+                thread::sleep(Duration::from_millis(20))
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return format!(
+                    "the process was still running {}s after its connection ended, so it was stopped",
+                    grace.as_secs()
+                );
+            }
+            Err(e) => return format!("its exit status could not be read: {e}"),
+        }
     }
 }
 
@@ -819,12 +1024,47 @@ impl RecreatorReplaySession {
             last_c_location: None,
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: default_materialization_cache_ctfs_path(&ct_rr_args.rr_trace_folder),
+            respawn_after_worker_death: true,
         }
+    }
+
+    /// Make the worker's death final for this session: once it died with a
+    /// query in flight, every later query fails with that same
+    /// [`ReplayWorkerDied`] instead of starting a fresh worker.
+    ///
+    /// For sessions whose queries only make sense as a sequence from one
+    /// replay position, such as a flow walk. A replacement worker starts at
+    /// the beginning of the recording, so a walk continued on it would mix a
+    /// position it never reached into its answer: before this existed, a flow
+    /// whose worker died in `JumpToCall` fell back to `RunToEntry` on a
+    /// replacement and returned the first steps of `main` as the flow.
+    pub fn without_respawn_after_worker_death(mut self) -> Self {
+        self.respawn_after_worker_death = false;
+        self
+    }
+
+    /// A session for a new worker named `name`, with an index reserved through
+    /// [`crate::paths::reserve_worker_index`] so no other worker this process
+    /// creates shares its `(name, index)` socket. Production code creates
+    /// sessions through this; [`RecreatorReplaySession::new`] with an explicit
+    /// index is for callers that own the namespace (tests).
+    pub fn with_reserved_index(name: &str, ct_rr_args: RecreatorArgs) -> RecreatorReplaySession {
+        Self::new(name, crate::paths::reserve_worker_index(name), ct_rr_args)
+    }
+
+    /// The `(name, index)` pair that names this session's worker socket.
+    pub fn worker_identity(&self) -> (&str, usize) {
+        (&self.name, self.index)
     }
 
     pub fn ensure_active_stable(&mut self) -> Result<(), Box<dyn Error>> {
         // start stable process if not active, store fields, setup ipc? store in stable
         if !self.stable.active {
+            if !self.respawn_after_worker_death
+                && let Some(death) = self.stable.last_death()
+            {
+                return Err(Box::new(death.clone()));
+            }
             eprintln!("[rr-dispatcher] starting worker for '{}'", self.name);
             let res = self.stable.start();
             if let Err(e) = res {
@@ -1021,12 +1261,24 @@ impl ReplaySession for RecreatorReplaySession {
         Ok(res)
     }
 
-    fn jump_to(&mut self, _step_id: StepId) -> Result<bool, Box<dyn Error>> {
-        // TODO
-        error!("TODO rr jump_to: for now run to entry");
-        self.run_to_entry()?;
-        Ok(true)
-        // todo!()
+    /// Seek the replay to the step id `current_step_id` reported, which for
+    /// an rr recording is the current thread's rr tick count (`trace.ticks`).
+    ///
+    /// The worker answers `SeekToTicks` with rr's `vRun;;t<ticks>` restart:
+    /// the replay stops at the first point at which the thread's tick count
+    /// equals `ticks` (rr `GdbServer::restart_session`, `RESTART_FROM_TICKS`),
+    /// and the worker then resyncs LLDB with one `stepi`, which adds a tick
+    /// only when the instruction there is itself a counted branch.
+    /// Ticks count retired conditional branches, so several consecutive
+    /// stops can share one value, and the seek lands on the earliest of them.
+    /// A tick count the recording never reaches is refused, and the refusal
+    /// is returned as an error with the replay left where it was.
+    fn jump_to(&mut self, step_id: StepId) -> Result<bool, Box<dyn Error>> {
+        self.ensure_active_stable()?;
+        let response = self
+            .stable
+            .dispatch_replay_query(ReplayQuery::SeekToTicks { ticks: step_id.0 })?;
+        parse_bool_or_status_response(&response)
     }
 
     fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
@@ -1126,18 +1378,25 @@ impl ReplaySession for RecreatorReplaySession {
         Ok(())
     }
 
-    #[allow(clippy::expect_used)] // load_location_directly should succeed after ensure_active_stable
     fn current_step_id(&mut self) -> StepId {
         // cache location or step_id and return
         // OR always load from worker
         // TODO: return result or do something else or cache ?
-        match self.ensure_active_stable() {
-            Ok(_) => {
-                let location = self.load_location_directly().expect("access to step_id");
-                StepId(location.rr_ticks.0)
-            }
+        //
+        // A failure to reach the worker or to load its location is reported
+        // as NO_STEP_ID, not a panic. This runs inside request handlers on
+        // the replay-server's `stable` thread: a panic there killed the
+        // thread, so the request being handled was never answered and every
+        // later one queued behind it (the cached-session reset of an rr
+        // replay that had run on to `_exit` hung each next navigation this
+        // way). With NO_STEP_ID the handler goes on to `complete_move`,
+        // whose location load fails with the worker's error, and the request
+        // is answered with it.
+        let location = self.ensure_active_stable().and_then(|_| self.load_location_directly());
+        match location {
+            Ok(location) => StepId(location.rr_ticks.0),
             Err(e) => {
-                error!("current_step_id: can't ensure active worker: error: {e:?}");
+                error!("current_step_id: can't load the worker's location: {e:?}");
                 // hard to change all callsites to handle result for now
                 //   but not sure if NO_STEP_ID is much better: however this is only for rr cases
                 //   so we *should* try to not directly index into db.steps with it even if not NO_STEP_ID?
@@ -1222,6 +1481,14 @@ impl ReplaySession for RecreatorReplaySession {
         parse_bool_or_status_response(&response)
     }
 
+    fn worker_death(&self) -> Option<String> {
+        self.stable.last_death().map(ToString::to_string)
+    }
+
+    fn serves_geid_positions(&self) -> bool {
+        true
+    }
+
     /// Forward `GetProcessInfo` to the replay worker.
     ///
     /// The native-backend worker either shells out to `rr ps` (for RR traces)
@@ -1244,6 +1511,7 @@ impl ReplaySession for RecreatorReplaySession {
                 ppid: 0,
                 exit_code: None,
                 command: "main".to_string(),
+                replayed: true,
             }]);
         }
         Ok(processes)
@@ -1773,9 +2041,11 @@ mod tests {
                 live_cwd: None,
                 live_recording_dir: None,
                 run_id: "test-run".to_string(),
+                runtime_dir: PathBuf::new(),
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
+                last_death: None,
             },
             recreator_exe: PathBuf::new(),
             rr_trace_folder: PathBuf::new(),
@@ -1784,6 +2054,7 @@ mod tests {
             last_c_location: None,
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
+            respawn_after_worker_death: true,
         };
 
         let materialized = session.re_execute_and_materialize(10, 20).unwrap();
@@ -1846,9 +2117,11 @@ mod tests {
                 live_cwd: None,
                 live_recording_dir: None,
                 run_id: "test-run".to_string(),
+                runtime_dir: PathBuf::new(),
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
+                last_death: None,
             },
             recreator_exe: PathBuf::new(),
             rr_trace_folder: PathBuf::new(),
@@ -1857,6 +2130,7 @@ mod tests {
             last_c_location: None,
             materialization_cache: MaterializationCache::new(),
             materialization_cache_ctfs_path: None,
+            respawn_after_worker_death: true,
         };
 
         assert_eq!(
@@ -1873,5 +2147,294 @@ mod tests {
         let db = session.omniscient_db().expect("session exposes live cache");
         assert!(db.is_present());
         assert_eq!(db.last_write_before(0x6000, 8, 13).unwrap().new_value, 77);
+    }
+
+    /// A `ReplayWorker` whose "process" is a real `sh` holding the other end of
+    /// a real socket as its stdin: it reads one query line and then runs
+    /// `then` (for example `kill -KILL $$`).
+    ///
+    /// Not a mock of `ct-native-replay`: what these tests exercise is how the
+    /// session observes a worker going away — EOF on a real socket and a real
+    /// exit status from `waitpid` — and both are the kernel's, whatever the
+    /// process was. Making a real `ct-native-replay` die on cue would need a
+    /// crashing replay, which is what the end-to-end
+    /// `rust_flow_integration` test covers.
+    #[cfg(unix)]
+    fn worker_that_reads_one_query_then(then: &str, name: &str) -> ReplayWorker {
+        use std::os::fd::OwnedFd;
+        let (client, server) = UnixStream::pair().unwrap();
+        // Bounded, so a regression that stops seeing EOF fails instead of hanging.
+        client.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(format!("read -r query; {then}"))
+            .stdin(Stdio::from(OwnedFd::from(server)))
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut worker = ReplayWorker::new(
+            name,
+            1,
+            Path::new("/nonexistent/ct-native-replay"),
+            Path::new("/nonexistent/trace"),
+        );
+        worker.process = Some(child);
+        worker.stream = Some(client);
+        worker.active = true;
+        worker
+    }
+
+    #[cfg(unix)]
+    fn expect_death<'a>(err: &'a (dyn Error + 'static)) -> &'a ReplayWorkerDied {
+        err.downcast_ref::<ReplayWorkerDied>()
+            .unwrap_or_else(|| panic!("expected a ReplayWorkerDied, got: {err}"))
+    }
+
+    /// A worker that dies with a query in flight is reported as a death that
+    /// names it, the query and the signal — not as an anonymous "disconnected",
+    /// which is what let a SIGSEGV in the `flow` worker pass for an empty flow.
+    #[cfg(unix)]
+    #[test]
+    fn a_worker_killed_mid_query_is_reported_as_a_death_naming_it_and_the_signal() {
+        let mut worker = worker_that_reads_one_query_then("kill -KILL $$", "flow");
+        let pid = worker.process.as_ref().unwrap().id();
+
+        let err = worker
+            .dispatch_replay_query(ReplayQuery::RunToEntry)
+            .expect_err("a worker that dies without answering cannot have answered");
+        let death = expect_death(err.as_ref()).clone();
+
+        assert_eq!(death.name, "flow");
+        assert_eq!(death.index, 1);
+        assert_eq!(death.pid, Some(pid));
+        assert_eq!(death.query, "RunToEntry");
+        assert!(
+            death.exit.contains("SIGKILL"),
+            "the exit must name the signal: {}",
+            death.exit
+        );
+        let message = death.to_string();
+        assert!(
+            message.contains("the `flow` replay worker") && message.contains("died while answering RunToEntry"),
+            "got: {message}"
+        );
+        assert!(!worker.active, "a dead worker must not be reported active");
+        assert_eq!(worker.last_death(), Some(&death));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_worker_that_exits_mid_query_is_reported_with_its_exit_status() {
+        let mut worker = worker_that_reads_one_query_then("exit 3", "stable");
+        let err = worker
+            .dispatch_replay_query(ReplayQuery::LoadLocation)
+            .expect_err("a worker that exits without answering cannot have answered");
+        let death = expect_death(err.as_ref());
+        assert_eq!(death.query, "LoadLocation");
+        assert!(
+            death.exit.contains("exit status: 3"),
+            "the exit must carry the status: {}",
+            death.exit
+        );
+    }
+
+    /// A session built `without_respawn_after_worker_death` answers every
+    /// query after the death with that death, instead of starting a fresh
+    /// worker at the beginning of the recording. The worker executable here
+    /// does not exist, so a respawn attempt would fail with a start error
+    /// rather than the death: the assertion distinguishes the two.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_without_respawn_keeps_reporting_its_workers_death() {
+        let mut session = RecreatorReplaySession::new(
+            "flow",
+            1,
+            RecreatorArgs {
+                worker_exe: PathBuf::from("/nonexistent/ct-native-replay"),
+                rr_trace_folder: PathBuf::from("/nonexistent/trace"),
+                ..RecreatorArgs::default()
+            },
+        )
+        .without_respawn_after_worker_death();
+        session.stable = worker_that_reads_one_query_then("kill -KILL $$", "flow");
+
+        let first = session.run_to_entry().expect_err("the worker died answering it");
+        let first = expect_death(first.as_ref()).clone();
+        let later = session
+            .run_to_entry()
+            .expect_err("a dead worker must not be silently replaced");
+        assert_eq!(expect_death(later.as_ref()), &first);
+        assert_eq!(session.worker_death(), Some(first.to_string()));
+    }
+
+    /// The arguments of `command`, as strings.
+    #[cfg(unix)]
+    fn args_of(command: &Command) -> Vec<String> {
+        command.get_args().map(|a| a.to_string_lossy().into_owned()).collect()
+    }
+
+    /// Every route `start` spawns names this process as the worker's parent,
+    /// so a worker db-backend dies before connecting to does not outlive it
+    /// (codetracer-pm issue
+    /// `2026-10-22-orphaned-mcr-replay-worker-waits-in-accept-after-its-replay-server-is-gone.md`).
+    /// The command is inspected rather than run: what the worker does with
+    /// the option is `ct-native-replay`'s and `ct-mcr`'s to test, and both
+    /// do, against their real binaries.
+    #[cfg(unix)]
+    #[test]
+    fn every_worker_route_is_started_with_this_process_as_its_parent_pid() {
+        let own_pid = std::process::id().to_string();
+        let expect_parent_pid = |args: &[String], route: &str| {
+            let at = args
+                .iter()
+                .position(|a| a == "--parent-pid")
+                .unwrap_or_else(|| panic!("{route}: no --parent-pid in {args:?}"));
+            assert_eq!(args.get(at + 1), Some(&own_pid), "{route}: {args:?}");
+        };
+
+        let trace = ReplayWorker::new("stable", 0, Path::new("/x/ct-native-replay"), Path::new("/x/trace.ct"));
+        let command = trace.worker_command(None);
+        assert_eq!(command.get_program(), "/x/ct-native-replay");
+        let args = args_of(&command);
+        expect_parent_pid(&args, "trace");
+        assert_eq!(args.first().map(String::as_str), Some("replay-worker"));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("/x/trace.ct"),
+            "the trace stays last"
+        );
+
+        let mut live = ReplayWorker::new("stable", 1, Path::new("/x/ct-native-replay"), Path::new(""));
+        live.live_program = Some(PathBuf::from("/x/program"));
+        let args = args_of(&live.worker_command(None));
+        expect_parent_pid(&args, "live");
+        assert!(
+            args.windows(2).any(|w| w == ["--live-program", "/x/program"]),
+            "{args:?}"
+        );
+
+        // `ct-mcr replay-worker --coop-query` serves a socket, so it takes
+        // `--parent-pid` too.
+        let coop = CoopQueryArgs {
+            exe: Some(PathBuf::from("/x/ct-mcr")),
+            program: Some("/x/program".to_string()),
+            func: Some("main".to_string()),
+        };
+        let command = trace.worker_command(Some(&coop));
+        assert_eq!(command.get_program(), "/x/ct-mcr");
+        let args = args_of(&command);
+        expect_parent_pid(&args, "coop-query");
+        assert!(args.iter().any(|a| a == "--coop-query"), "{args:?}");
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("/x/trace.ct"),
+            "the trace stays last"
+        );
+    }
+
+    /// A session whose `stable` worker is a real `sh` on the other end of a
+    /// real socket: it reads one query line, writes it to `query_log`, and
+    /// answers `reply` on the same socket, then waits for the session to
+    /// close it.
+    ///
+    /// A scripted worker, justified as `worker_that_reads_one_query_then` is:
+    /// what these tests check is what the session sends for a call and what
+    /// it does with the worker's answer, on the real wire protocol. The
+    /// answers that matter are failures (a refused seek, a location the
+    /// worker cannot load), and a real `ct-native-replay` gives them only
+    /// from a broken replay; the end-to-end rr behaviour is covered by
+    /// backend-manager's real-recording tests (`test_cli_trace_query_rr_goto_ticks`).
+    #[cfg(unix)]
+    fn session_with_worker_answering(reply: &str, query_log: &Path) -> RecreatorReplaySession {
+        use std::os::fd::OwnedFd;
+        let (client, server) = UnixStream::pair().unwrap();
+        // Bounded, so a regression that stops answering fails instead of hanging.
+        client.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(r#"read -r query; printf '%s\n' "$query" > "$1"; printf '%s\n' "$2" >&0; read -r rest"#)
+            .arg("sh")
+            .arg(query_log)
+            .arg(reply)
+            .stdin(Stdio::from(OwnedFd::from(server)))
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut session = RecreatorReplaySession::new(
+            "stable",
+            0,
+            RecreatorArgs {
+                worker_exe: PathBuf::from("/nonexistent/ct-native-replay"),
+                rr_trace_folder: PathBuf::from("/nonexistent/trace"),
+                ..RecreatorArgs::default()
+            },
+        )
+        .without_respawn_after_worker_death();
+        session.stable.process = Some(child);
+        session.stable.stream = Some(client);
+        session.stable.active = true;
+        session
+    }
+
+    #[cfg(unix)]
+    fn query_log_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("recreator-session-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("query.json")
+    }
+
+    /// `jump_to` (`ct/goto-ticks`) seeks the worker to the tick count it was
+    /// given. It used to answer every jump with `RunToEntry`, which put the
+    /// replay at the entry at best and, from a later point, at `_exit`.
+    #[cfg(unix)]
+    #[test]
+    fn an_rr_jump_to_seeks_the_worker_to_the_given_ticks() {
+        let log = query_log_path("jump-to");
+        let mut session = session_with_worker_answering("true", &log);
+
+        assert!(session.jump_to(StepId(46674)).expect("the worker answered the seek"));
+
+        let sent: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).expect("one JSON query");
+        assert_eq!(sent, serde_json::json!({"kind": "SeekToTicks", "ticks": 46674}));
+    }
+
+    /// A seek the worker refuses (rr answers `E01` for a tick count the
+    /// recording never reaches) is an error, not a jump that went elsewhere.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_rr_seek_is_an_error() {
+        let log = query_log_path("refused-seek");
+        let mut session = session_with_worker_answering(
+            "error: run query error: \"rr refused to seek the replay to `t999999999`\"",
+            &log,
+        );
+
+        let err = session
+            .jump_to(StepId(999_999_999))
+            .expect_err("a refused seek must not report success");
+        assert!(err.to_string().contains("rr refused to seek"), "got: {err}");
+
+        // The error is the seek's own refusal: the query the worker refused
+        // was the seek, not a run-to-entry that failed in its place.
+        let sent: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).expect("one JSON query");
+        assert_eq!(sent, serde_json::json!({"kind": "SeekToTicks", "ticks": 999_999_999}));
+    }
+
+    /// A worker that cannot load its location makes `current_step_id` report
+    /// NO_STEP_ID. It used to panic, which killed the replay-server thread
+    /// serving the request, so that request and every later one went
+    /// unanswered.
+    #[cfg(unix)]
+    #[test]
+    fn current_step_id_reports_no_step_id_when_the_worker_cannot_load_its_location() {
+        let log = query_log_path("step-id");
+        let mut session = session_with_worker_answering(
+            "error: run query error: \"can't parse rr `when-ticks`: can't parse response line\"",
+            &log,
+        );
+
+        assert_eq!(session.current_step_id(), StepId(NO_STEP_ID));
     }
 }

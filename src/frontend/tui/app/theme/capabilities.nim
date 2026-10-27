@@ -49,9 +49,15 @@
 
 import std/strutils
 
+import ../../../../common/key_names
 import ../../../../common/terminal_graphics/tiers
 import ./colour_math
 import ./roles
+import ./terminal_profile
+
+export terminal_profile
+
+export key_names.KeyProtocol
 
 export tiers.ImageTier, tiers.tierName, tiers.parseTierName, tiers.tierNames
 export roles.DesignMode
@@ -140,6 +146,16 @@ type
       ## PLAT-46: the terminal ANSWERED a start-up query (DECRQSS / XTGETTCAP
       ## for 24-bit colour, or tmux reported its client's `RGB` feature). A
       ## positive answer is trusted over a conservative `TERM`.
+    csSetting = "setting"
+      ## A CodeTracer setting: `:set` this session, a `[terminal "<glob>"]`
+      ## section, or the global settings (Terminal-Adaptation §5.2 ranks 1,
+      ## 4 and 5). The axis's note says which.
+    csIdentity = "identity"
+      ## The terminal's identity (XTVERSION, DA2, tmux's client) looked up in
+      ## the documented tables (§5.2 rank 8).
+    csCache = "cache"
+      ## The answers this terminal gave last time (§4.7), before this
+      ## session's arrive (§5.2 rank 10).
 
   TerminalEnv* = object
     ## EVERY environment variable capability resolution reads, and nothing
@@ -177,6 +193,21 @@ type
     tmux*: string
       ## `$TMUX`. Non-empty inside tmux, which is where a conservative `TERM`
       ## (`screen`, `tmux-256color`) most often hides a 24-bit outer terminal.
+    termProgramVersion*: string
+      ## `$TERM_PROGRAM_VERSION` (Terminal-Adaptation §4.1).
+    vteVersion*, konsoleVersion*, kittyWindowId*, weztermExecutable*,
+      alacrittyWindowId*, ghosttyResourcesDir*, wtSession*,
+      terminalEmulator*: string
+      ## The terminals' own markers (§4.1): local only, a hint, never proof.
+    sty*, zellij*: string
+      ## `$STY` (screen) and `$ZELLIJ`.
+    sshConnection*, sshTty*: string
+      ## A remote session (§3.4). Marks remote, not slow.
+    ctGlyphs*, ctModernUnicode*, ctAmbiguousWidth*, ctColors*,
+      ctProbe*: string
+      ## The CodeTracer environment overrides (§5.2 rank 3):
+      ## `CODETRACER_TUI_GLYPHS`, `…_MODERN_UNICODE`, `…_AMBIGUOUS_WIDTH`,
+      ## `…_COLORS`, `…_PROBE`.
 
   CapabilityFlags* = object
     ## §6.2's four capability flags, as a value. Parsed by `app/cli.nim`, which
@@ -213,6 +244,10 @@ type
       ## cannot put escape bytes on a screen. See `tiers.parseTierName`, which
       ## makes the same choice for the same reason.
     imageTierPinned*: bool
+    choices*: TerminalChoices
+      ## Terminal-Adaptation §5.3's flags for this run (§5.2 rank 2):
+      ## `--glyphs=`, `--modern-unicode=`, `--ambiguous-width=`, `--colors=`,
+      ## `--no-probe` / `--terminal-probe=`, `--reduce-motion=`.
 
   TerminalCapabilities* = object
     ## The resolved set. ONE value, computed once, before the first paint.
@@ -224,23 +259,25 @@ type
       ## Whether to bracket each frame in DEC 2026 (`CSI ? 2026 h` …
       ## `CSI ? 2026 l`).
     kittyKeyboard*: bool
-      ## Whether the terminal ADVERTISES the Kitty keyboard protocol.
-      ##
-      ## DETECTED AND DELIBERATELY NOT ENABLED, which is a product decision
-      ## rather than an omission and is asserted as one at Tier 2. Pushing a
-      ## Kitty stack frame (`CSI = 1 u`) changes every key's encoding to
-      ## `CSI <unicode> ; <mods> u`, and CTUI-9's `app/input/keymap.keyName`
-      ## decodes xterm's classic encoding — SS3 for F1-F4, `CSI <n> ~` for
-      ## F5-F12, `CSI 1 ; <mod> <final>` for modified arrows. A driver that
-      ## enabled the protocol without a decoder for it would make every
-      ## function key in §4.2 unreachable on precisely the terminals users pick
-      ## for their key handling. The same argument applies to xterm's
-      ## `modifyOtherKeys`, which the driver also never sets.
-      ##
-      ## The field is resolved anyway because the decision has to be
-      ## observable: `tests/real_terminal/test_real_capability_negotiation.nim`
-      ## asserts that a Kitty-advertising terminal is told nothing, which is a
-      ## claim about a choice and not about an absence.
+      ## Whether the environment ADVERTISES the Kitty keyboard protocol
+      ## (`$TERM` / `$TERM_PROGRAM`). A hint for the report only: what is
+      ## ENABLED is `keyProtocol`, and that is decided by asking the terminal
+      ## (Base-Keymaps-And-Layer-Stack.md §7.2 — *"ask, do not guess"*).
+    keyProtocol*: KeyProtocol
+      ## PLAT-68: the extended key reporting this session negotiated — the
+      ## Kitty protocol when the terminal answered `CSI ? u`, else xterm's
+      ## `modifyOtherKeys` on an xterm-compatible terminal, else legacy. It
+      ## was detected and deliberately NOT enabled until the decoder could
+      ## read the encodings (`key_names.keyName` reads both now), and the CUA
+      ## base needs it: `Ctrl+Shift+K`, `Shift+Enter` and `Ctrl+.` have no
+      ## legacy bytes. `host/terminal_driver.adoptCapabilities` enables it and
+      ## `nim-termctl`'s async-signal-safe restore undoes it on every exit
+      ## path. It is the `keyProtocol` context key a binding's `when` reads.
+    keyProtocolFrom*: CapabilitySource
+    tmuxExtendedKeysOff*: bool
+      ## Inside tmux, and tmux's `extended-keys` option is off, so the
+      ## protocol cannot reach this pane. The status line names the remedy
+      ## (`tmuxExtendedKeysRemedy`).
     theme*: UiTheme
       ## Which theme was asked for (or `utDark` when none was) — CTUI-14.
     mode*: DesignMode
@@ -262,6 +299,47 @@ type
     mouseFrom*: CapabilitySource
     syncFrom*: CapabilitySource
     themeFrom*: CapabilitySource
+    # --- Terminal-Adaptation §5.1: the rest of the profile -----------------
+    identity*: TerminalIdentity
+    identityFrom*: CapabilitySource
+    tier*: ChromeTier
+      ## The glyph tier (§6.1). `borders` is its two-valued shadow, kept for
+      ## the callers that only ask "ASCII or not".
+    tierNote*: string
+    modernUnicode*: bool
+      ## Symbols for Legacy Computing in the chrome (§6.7): only on the
+      ## `extended` tier, and never by detection alone (TA-9).
+    modernChoice*: ModernChoice
+    modernUnicodeFrom*: CapabilitySource
+    modernNote*: string
+    widths*: WidthModel
+    widthsFrom*: CapabilitySource
+    ambiguousWide*: bool
+      ## The ambiguous-wide rule is in force (§6.2): a one-cell role may use
+      ## only a glyph that is not East Asian Width `A`.
+    ambiguousFrom*: CapabilitySource
+    ambiguousNote*: string
+    graphemeMode*: bool
+      ## DEC 2027 is on for this session (already, or set by us).
+    graphemeSet*: bool
+      ## …and it was off, so this session sets it and resets it on exit.
+    syncNote*: string
+    rttMs*: int
+      ## The start-up round's round trip, write to DA1 answer; -1 unknown.
+    rttFrom*: CapabilitySource
+    linkConservative*: bool
+      ## `rttMs` over `LinkConservativeMs` (§4.6): animations show their end
+      ## state, hover repaints are coalesced.
+    reduceMotion*: bool
+    reduceMotionFrom*: CapabilitySource
+    probeOff*: bool
+      ## The start-up round was turned off (§4.8 rule 4).
+    probeFrom*: CapabilitySource
+    clipboard*: string
+      ## `osc52`, `osc52 via tmux`, or `in-app only` (§8).
+    clipboardFrom*: CapabilitySource
+    remedies*: seq[string]
+      ## The one-line fixes the report and the status line offer (§10.1).
 
 const
   TrueColorPrograms* = ["iTerm.app", "WezTerm", "ghostty", "Hyper"]
@@ -280,9 +358,14 @@ const
 
   KittyKeyboardTerms* = ["xterm-kitty"]
   KittyKeyboardPrograms* = ["ghostty", "WezTerm"]
-    ## Terminals that advertise the Kitty keyboard protocol. See
-    ## `TerminalCapabilities.kittyKeyboard` for why detecting it is the whole
-    ## of what is done with it.
+    ## Terminals that advertise the Kitty keyboard protocol — the report's
+    ## hint; `keyProtocol` is decided by the terminal's answer.
+
+  ModifyOtherKeysTermPrefixes* = ["xterm", "tmux"]
+    ## `$TERM` prefixes of terminals that implement xterm's `modifyOtherKeys`
+    ## (tmux does, when its `extended-keys` option is on). A terminal that
+    ## does not answers nothing to `CSI > 4 ; 2 m` and keeps the legacy
+    ## encoding, which the decoder reads either way.
 
   DumbTerm* = "dumb"
     ## §6.3's floor: "`TERM=dumb` … uses monochrome styling with bold and
@@ -291,13 +374,24 @@ const
 proc initTerminalEnv*(term = ""; colorterm = ""; termProgram = "";
                       lcAll = ""; lcCtype = ""; lang = "";
                       noColor = ""; isTty = true; colorFgBg = "";
-                      tmux = ""): TerminalEnv =
+                      tmux = ""; termProgramVersion = "";
+                      sshConnection = ""; sty = ""; zellij = "";
+                      vteVersion = ""; kittyWindowId = "";
+                      ctGlyphs = ""; ctModernUnicode = "";
+                      ctAmbiguousWidth = ""; ctColors = "";
+                      ctProbe = ""): TerminalEnv =
   ## A `TerminalEnv` with every field named. Written as a constructor with
   ## defaults so a test that varies one variable says which one it varied
   ## instead of listing eight positional strings.
   TerminalEnv(term: term, colorterm: colorterm, termProgram: termProgram,
               lcAll: lcAll, lcCtype: lcCtype, lang: lang, noColor: noColor,
-              isTty: isTty, colorFgBg: colorFgBg, tmux: tmux)
+              isTty: isTty, colorFgBg: colorFgBg, tmux: tmux,
+              termProgramVersion: termProgramVersion,
+              sshConnection: sshConnection, sty: sty, zellij: zellij,
+              vteVersion: vteVersion, kittyWindowId: kittyWindowId,
+              ctGlyphs: ctGlyphs, ctModernUnicode: ctModernUnicode,
+              ctAmbiguousWidth: ctAmbiguousWidth, ctColors: ctColors,
+              ctProbe: ctProbe)
 
 proc initCapabilityFlags*(forceTrueColor = false; noColor = false;
                           asciiBorders = false; noMouse = false;
@@ -396,66 +490,6 @@ proc noColorRequested*(env: TerminalEnv): bool =
   ## is what a shell leaves behind when a user unsets it badly.
   env.noColor.len > 0
 
-proc resolveColorDepth(env: TerminalEnv;
-                       flags: CapabilityFlags): (ColorDepth, CapabilitySource) =
-  ## §6.3's colour ladder. THE FLAG ARMS COME FIRST, which is the milestone's
-  ## contract: an explicit flag always beats a probe.
-  ##
-  ## `--truecolor` and `--no-color` together are refused by `app/cli.nim` as a
-  ## usage error rather than silently ordered here — the two flags say opposite
-  ## things and any precedence rule would be this module inventing an intent
-  ## the user did not express.
-  if flags.noColor:
-    return (cdMonochrome, csFlag)
-  if flags.theme == utPlain:
-    # `--theme=plain` IS A REQUEST FOR NO COLOUR, and §6.2 lists it beside
-    # `dark`, `light` and `monokai` as if it were one more palette. It is not:
-    # there is no plain palette anywhere in `degradation.nim`, and there must
-    # not be, because the thing a user asks for by that name is a screen that
-    # carries its distinctions in weight and underline. It therefore resolves
-    # the LADDER rather than the tables. `--theme=plain --truecolor` is refused
-    # by `app/cli.nim` as a usage error, for the reason `--truecolor --no-color`
-    # is: any precedence here would be this module inventing an intent.
-    return (cdMonochrome, csFlag)
-  if flags.forceTrueColor:
-    # DELIBERATELY ABOVE the `TERM=dumb` floor. §6.2 calls it "force 24-bit
-    # TrueColor mode (override terminal probing)", and a flag that lost to a
-    # probe would not be an override.
-    return (cdTrueColor, csFlag)
-  if noColorRequested(env):
-    return (cdMonochrome, csEnvironment)
-  if isDumbTerminal(env):
-    return (cdMonochrome, csEnvironment)
-  let colorterm = env.colorterm.toLowerAscii()
-  if colorterm == "truecolor" or colorterm == "24bit":
-    return (cdTrueColor, csEnvironment)
-  if env.termProgram in TrueColorPrograms:
-    return (cdTrueColor, csEnvironment)
-  let term = env.term.toLowerAscii()
-  if term.contains("direct"):
-    # terminfo's `*-direct` entries are the 24-bit ones (`xterm-direct`,
-    # `alacritty-direct`); their `colors` capability is 16777216.
-    return (cdTrueColor, csEnvironment)
-  if term.contains("256color") or term.contains("256"):
-    return (cdAnsi256, csEnvironment)
-  # A terminal that says it is a terminal and claims nothing else. Sixteen
-  # colours is what `TERM=xterm`, `TERM=vt100` and `TERM=linux` all support,
-  # and it is the last rung above monochrome.
-  (cdAnsi16, csDefault)
-
-proc resolveBorders(env: TerminalEnv;
-                    flags: CapabilityFlags): (BorderMode, CapabilitySource) =
-  if flags.asciiBorders:
-    return (bmAscii, csFlag)
-  if isDumbTerminal(env):
-    # Not a locale question but a rendering one: a `TERM=dumb` stream is not
-    # promised to survive a three-byte glyph, and there is no screen at all
-    # when `isTty` is false.
-    return (bmAscii, csEnvironment)
-  if isUtf8Locale(effectiveLocale(env)):
-    return (bmUnicode, csEnvironment)
-  (bmAscii, csDefault)
-
 proc resolveMouse(env: TerminalEnv;
                   flags: CapabilityFlags): (bool, CapabilitySource) =
   if flags.noMouse:
@@ -463,27 +497,6 @@ proc resolveMouse(env: TerminalEnv;
   if isDumbTerminal(env):
     return (false, csEnvironment)
   (true, csDefault)
-
-proc resolveSynchronizedOutput(env: TerminalEnv):
-                              (bool, CapabilitySource) =
-  ## §6.3 names five terminals. There is no flag for this axis in §6.2, so
-  ## there is no flag arm — and the default is OFF rather than "emit it and
-  ## hope", because an unrecognised DECSET is silently ignored by a compliant
-  ## terminal and echoed as text by a non-compliant one.
-  if isDumbTerminal(env):
-    return (false, csEnvironment)
-  if env.termProgram in SynchronizedOutputPrograms:
-    return (true, csEnvironment)
-  if env.term.toLowerAscii() in SynchronizedOutputTerms:
-    return (true, csEnvironment)
-  (false, csDefault)
-
-proc resolveKittyKeyboard(env: TerminalEnv): bool =
-  if isDumbTerminal(env):
-    return false
-  if env.term.toLowerAscii() in KittyKeyboardTerms:
-    return true
-  env.termProgram in KittyKeyboardPrograms
 
 const
   LightBackgroundLuminance* = 0.18
@@ -576,6 +589,32 @@ type
     cellWidthPx*, cellHeightPx*: int
       ## PLAT-51: the terminal's cell in pixels, from `CSI 16 t`
       ## (`CSI 6 ; height ; width t`); 0 when it did not say.
+    kittyKeyboardAnswered*: bool
+      ## PLAT-68: the terminal answered `CSI ? u` (`CSI ? <flags> u`) before
+      ## the DA1 fence — it implements the Kitty keyboard protocol.
+    tmuxExtendedKeys*: string
+      ## tmux's `extended-keys` option (`on`, `off`, `always`); "" unknown.
+    # --- Terminal-Adaptation §4.2's additions to the round -----------------
+    xtversion*: string
+      ## XTVERSION's text (`kitty(0.36.4)`, `tmux 3.4`); "" unanswered.
+    da2Answered*: bool
+    da2Pp*, da2Pv*: int
+    sync2026Answered*, grapheme2027Answered*: bool
+    sync2026*, grapheme2027*: int
+      ## DECRQM's `Ps` for each mode (meaningful when answered).
+    cprExpected*: int
+      ## How many cursor reports the width probe asked for. A `CSI r ; c R`
+      ## is taken as a REPLY only while fewer than this have arrived (§4.3's
+      ## F3 rule); after that it is Ctrl+F3 again.
+    cprAnswers*: seq[int]
+      ## The width each answered probe measured (column − 1), in probe order.
+    rttMeasured*: bool
+    rttMs*: int
+      ## Write to the DA1 answer.
+    tmuxClientTermType*, tmuxClientUtf8*, tmuxVersion*, tmuxPassthrough*,
+      tmuxSetClipboard*, tmuxFocusEvents*, tmuxMouse*: string
+      ## tmux's view of its client and its options, from ONE
+      ## `tmux display -p` (§4.5); "" unknown.
 
 const AutoDetectSelectsLight* = false
   ## **WHETHER BACKGROUND DETECTION MAY CHOOSE LIGHT — it may not.** A product
@@ -606,24 +645,448 @@ proc resolveMode(env: TerminalEnv; flags: CapabilityFlags;
     return (gated(mode), bsColorFgBg, "")
   (dmDark, bsDefault, "")
 
+proc resolveKeyProtocol*(env: TerminalEnv;
+                         probe: TerminalProbe): (KeyProtocol, CapabilitySource) =
+  ## Base-Keymaps-And-Layer-Stack.md §7.2: the Kitty protocol when the
+  ## terminal SAID it implements it; else `modifyOtherKeys` on an
+  ## xterm-compatible terminal; else legacy. `$TERM_PROGRAM`'s Kitty list is
+  ## not consulted — it is a hint for the report, not the decision.
+  if isDumbTerminal(env):
+    return (kpLegacy, csEnvironment)
+  if probe.kittyKeyboardAnswered:
+    return (kpKitty, csProbe)
+  let term = env.term.toLowerAscii()
+  for prefix in ModifyOtherKeysTermPrefixes:
+    if term.startsWith(prefix):
+      return (kpModifyOtherKeys, csEnvironment)
+  (kpLegacy, csDefault)
+
+const
+  LinkConservativeMs* = 40
+    ## Terminal-Adaptation §4.6 (OQ-T11): a start-up round trip above this
+    ## makes the session link-conservative. An assumed threshold, to be
+    ## re-tuned on a real SSH link.
+
+type
+  Ranked[T] = object
+    found: bool
+    value: T
+    source: CapabilitySource
+    note: string
+
+proc envChoices*(env: TerminalEnv): (TerminalChoices, seq[string]) =
+  ## §5.2 rank 3: the `CODETRACER_TUI_*` overrides, parsed. A value that is
+  ## not one of the setting's words is named in the second result, never
+  ## silently ignored.
+  var c = TerminalChoices()
+  var bad: seq[string] = @[]
+  if env.ctGlyphs.len > 0:
+    var v: GlyphsChoice
+    if parseChoice(env.ctGlyphs, v): c.glyphs = some(v)
+    else: bad.add "CODETRACER_TUI_GLYPHS=" & env.ctGlyphs & " is not " &
+                  choiceNames[GlyphsChoice]()
+  if env.ctModernUnicode.len > 0:
+    var v: ModernChoice
+    if parseChoice(env.ctModernUnicode, v): c.modernUnicode = some(v)
+    else: bad.add "CODETRACER_TUI_MODERN_UNICODE=" & env.ctModernUnicode &
+                  " is not " & choiceNames[ModernChoice]()
+  if env.ctAmbiguousWidth.len > 0:
+    var v: AmbiguousChoice
+    if parseChoice(env.ctAmbiguousWidth, v): c.ambiguousWidth = some(v)
+    else: bad.add "CODETRACER_TUI_AMBIGUOUS_WIDTH=" & env.ctAmbiguousWidth &
+                  " is not " & choiceNames[AmbiguousChoice]()
+  if env.ctColors.len > 0:
+    var v: ColorsChoice
+    if parseChoice(env.ctColors, v): c.colors = some(v)
+    else: bad.add "CODETRACER_TUI_COLORS=" & env.ctColors & " is not " &
+                  choiceNames[ColorsChoice]()
+  if env.ctProbe.len > 0:
+    var v: bool
+    if parseOnOffWord(env.ctProbe, v): c.probe = some(v)
+    else: bad.add "CODETRACER_TUI_PROBE=" & env.ctProbe & " is not on or off"
+  (c, bad)
+
+proc flagChoices(flags: CapabilityFlags): TerminalChoices =
+  ## Rank 2, with the older flags folded in: `--ascii-borders` is
+  ## `--glyphs=ascii`, `--no-color` and `--theme=plain` are `--colors=mono`,
+  ## `--truecolor` is `--colors=truecolor` (`app/cli.nim` refuses the
+  ## contradictory pairs).
+  result = flags.choices
+  if flags.asciiBorders and result.glyphs.isNone:
+    result.glyphs = some(gcAscii)
+  if (flags.noColor or flags.theme == utPlain) and result.colors.isNone:
+    result.colors = some(ccMono)
+  if flags.forceTrueColor and result.colors.isNone:
+    result.colors = some(ccTrueColor)
+
+type
+  RankSource = object
+    choices: TerminalChoices
+    source: CapabilitySource
+    note: string
+
+proc explicitRanks(env: TerminalEnv; flags: CapabilityFlags;
+                   prefs: TerminalPrefs; session: TerminalChoices;
+                   identity: TerminalIdentity): seq[RankSource] =
+  ## Ranks 1–5 of §5.2, strongest first.
+  result = @[
+    RankSource(choices: session, source: csSetting, note: ":set"),
+    RankSource(choices: flagChoices(flags), source: csFlag, note: "flag"),
+    RankSource(choices: envChoices(env)[0], source: csEnvironment,
+               note: "CODETRACER_TUI_*")]
+  for scope in prefs.scoped:
+    if identity.known and (globMatch(scope.glob, identity.name) or
+                           globMatch(scope.glob, identity.chainName)):
+      result.add RankSource(choices: scope.choices, source: csSetting,
+                            note: "[terminal \"" & scope.glob & "\"]")
+  result.add RankSource(choices: prefs.global, source: csSetting,
+                        note: "setting")
+
+template firstExplicit(ranks: seq[RankSource]; field: untyped;
+                       T: typedesc; skipAuto: bool): Ranked[T] =
+  var r = Ranked[T]()
+  for rank in ranks:
+    let o = rank.choices.field
+    if o.isSome:
+      when skipAuto:
+        if ord(o.get) == 0:   # `auto` is every enum's first value
+          continue
+      r = Ranked[T](found: true, value: o.get, source: rank.source,
+                    note: rank.note)
+      break
+  r
+
+# ---------------------------------------------------------------------------
+# Identity (§4.4)
+# ---------------------------------------------------------------------------
+
+proc versionOfVteNumber(raw: string): string =
+  if raw.len >= 4 and raw.allCharsInSet(Digits):
+    let n = parseInt(raw)
+    $(n div 10000) & "." & $((n div 100) mod 100) & "." & $(n mod 100)
+  else: raw
+
+proc identityFromEnvironment(env: TerminalEnv): (string, string) =
+  ## The terminal's own markers (§4.1), best first. Local sessions only.
+  let term = env.term.toLowerAscii
+  let program = env.termProgram
+  if env.kittyWindowId.len > 0 or term == "xterm-kitty":
+    return ("kitty", "")
+  if env.ghosttyResourcesDir.len > 0 or program == "ghostty":
+    return ("ghostty", (if program == "ghostty": env.termProgramVersion
+                        else: ""))
+  if env.weztermExecutable.len > 0 or program == "WezTerm":
+    return ("wezterm", (if program == "WezTerm": env.termProgramVersion
+                        else: ""))
+  if program == "iTerm.app":
+    return ("iterm2", env.termProgramVersion)
+  if program == "Apple_Terminal":
+    return ("terminal.app", env.termProgramVersion)
+  if program == "vscode":
+    return ("xterm.js", env.termProgramVersion)
+  if env.vteVersion.len > 0:
+    return ("vte", versionOfVteNumber(env.vteVersion))
+  if env.konsoleVersion.len > 0:
+    return ("konsole", env.konsoleVersion)
+  if env.alacrittyWindowId.len > 0 or term.startsWith("alacritty"):
+    return ("alacritty", "")
+  if env.wtSession.len > 0:
+    return ("windows-terminal", "")
+  if env.terminalEmulator == "JetBrains-JediTerm":
+    return ("jediterm", "")
+  if term.startsWith("foot"):
+    return ("foot", "")
+  if term == "linux":
+    return ("linux", "")
+  ("", "")
+
+proc resolveIdentity*(env: TerminalEnv; probe: TerminalProbe;
+                      cache: Option[CachedProfile]):
+    (TerminalIdentity, CapabilitySource) =
+  ## §4.4: XTVERSION, then DA2, then tmux's view of its client, then the
+  ## environment (local only), then the cache.
+  var id = TerminalIdentity(remote: env.sshConnection.len > 0 or
+                                    env.sshTty.len > 0)
+  var (xName, xVersion) = ("", "")
+  if probe.xtversion.len > 0:
+    (xName, xVersion) = parseXtversionText(probe.xtversion)
+  var (dName, dVersion) = ("", "")
+  if probe.da2Answered:
+    (dName, dVersion) = identityOfDa2(probe.da2Pp, probe.da2Pv)
+  let inTmux = env.tmux.len > 0 or xName == "tmux" or dName == "tmux"
+  let inScreen = not inTmux and (env.sty.len > 0 or dName == "screen" or
+                                 xName == "screen")
+  let inZellij = env.zellij.len > 0
+  if inTmux:
+    let ver = if xName == "tmux" and xVersion.len > 0: xVersion
+              elif probe.tmuxVersion.len > 0: probe.tmuxVersion
+              else: ""
+    id.via = @["tmux" & (if ver.len > 0: " " & ver else: "")]
+    if probe.tmuxClientTermType.len > 0:
+      let (n, v) = parseXtversionText(probe.tmuxClientTermType)
+      id.name = n
+      id.version = v
+      id.source = isTmuxClient
+      id.endToEnd = true
+      return (id, csProbe)
+    # The outer terminal is not known through tmux. `TERM_PROGRAM` names the
+    # tmux itself (3.2+) or is inherited from outside — a hint.
+    id.endToEnd = false
+    id.source = isUnknown
+    return (id, csDefault)
+  if inScreen or inZellij:
+    id.via = @[(if inScreen: "screen" else: "zellij")]
+    id.endToEnd = false
+    id.source = isUnknown
+    return (id, csDefault)
+  if xName.len > 0:
+    id.name = xName
+    id.version = xVersion
+    id.source = isXtversion
+    id.endToEnd = true
+    return (id, csProbe)
+  if dName.len > 0:
+    id.name = dName
+    id.version = dVersion
+    id.source = isDa2
+    id.endToEnd = true
+    return (id, csProbe)
+  if not id.remote:
+    let (n, v) = identityFromEnvironment(env)
+    if n.len > 0:
+      id.name = n
+      id.version = v
+      id.source = isEnvironment
+      id.endToEnd = true
+      return (id, csEnvironment)
+  if cache.isSome and cache.get.identityName.len > 0:
+    id.name = cache.get.identityName
+    id.version = cache.get.identityVersion
+    id.source = isCache
+    id.endToEnd = true
+    return (id, csCache)
+  (id, csDefault)
+
+# ---------------------------------------------------------------------------
+# The widths (§4.3)
+# ---------------------------------------------------------------------------
+
+proc liveWidths(probe: TerminalProbe): array[WidthProbe, int] =
+  result = noWidthAnswers()
+  var i = 0
+  for p in WidthProbe:
+    if i < probe.cprAnswers.len:
+      result[p] = probe.cprAnswers[i]
+    inc i
+
+proc resolveWidths(probe: TerminalProbe; cache: Option[CachedProfile]):
+    (WidthModel, CapabilitySource) =
+  let live = liveWidths(probe)
+  let g = if probe.grapheme2027Answered: probe.grapheme2027 else: -1
+  let model = widthModelOf(live, g)
+  if model.measured:
+    return (model, csProbe)
+  if cache.isSome:
+    let cached = widthModelOf(cache.get.widths, cache.get.grapheme2027)
+    if cached.measured:
+      return (cached, csCache)
+  (model, csDefault)
+
+# ---------------------------------------------------------------------------
+# The axes
+# ---------------------------------------------------------------------------
+
+proc resolveColorDepth(env: TerminalEnv;
+                       explicit: Ranked[ColorsChoice]):
+                      (ColorDepth, CapabilitySource) =
+  ## §6.3's colour ladder (PLAT-46) under §5.2: an explicit choice — ranks
+  ## 1–5, the flags among them — first; then `NO_COLOR` (rank 6), as
+  ## no-color.org asks; then the environment.
+  if explicit.found:
+    let depth = case explicit.value
+      of ccTrueColor: cdTrueColor
+      of cc256: cdAnsi256
+      of cc16: cdAnsi16
+      of ccMono, ccAuto: cdMonochrome
+    return (depth, explicit.source)
+  if noColorRequested(env):
+    return (cdMonochrome, csEnvironment)
+  if isDumbTerminal(env):
+    return (cdMonochrome, csEnvironment)
+  let colorterm = env.colorterm.toLowerAscii()
+  if colorterm == "truecolor" or colorterm == "24bit":
+    return (cdTrueColor, csEnvironment)
+  if env.termProgram in TrueColorPrograms:
+    return (cdTrueColor, csEnvironment)
+  let term = env.term.toLowerAscii()
+  if term.contains("direct"):
+    # terminfo's `*-direct` entries are the 24-bit ones (`xterm-direct`,
+    # `alacritty-direct`); their `colors` capability is 16777216.
+    return (cdTrueColor, csEnvironment)
+  if term.contains("256color") or term.contains("256"):
+    return (cdAnsi256, csEnvironment)
+  # A terminal that says it is a terminal and claims nothing else. Sixteen
+  # colours is what `TERM=xterm`, `TERM=vt100` and `TERM=linux` all support,
+  # and it is the last rung above monochrome.
+  (cdAnsi16, csDefault)
+
+proc resolveTier(env: TerminalEnv; explicit: Ranked[GlyphsChoice];
+                 widths: WidthModel; widthsFrom: CapabilitySource;
+                 identity: TerminalIdentity; probe: TerminalProbe):
+                (ChromeTier, CapabilitySource, string) =
+  ## §6.1's `auto`, under §5.2.
+  if explicit.found:
+    let t = case explicit.value
+      of gcAscii: tierAscii
+      of gcBasic: tierBasic
+      of gcExtended, gcAuto: tierExtended
+    return (t, explicit.source, explicit.note)
+  if isDumbTerminal(env):
+    # Not a locale question but a rendering one: a `TERM=dumb` stream is not
+    # promised to survive a three-byte glyph, and there is no screen at all
+    # when `isTty` is false.
+    return (tierAscii, csEnvironment,
+            (if env.isTty: "TERM=" & (if env.term.len > 0: env.term
+                                      else: "(unset)")
+             else: "not a terminal"))
+  let console = env.term.toLowerAscii == "linux"
+  let ceiling = if console: tierBasic else: tierExtended
+  let consoleNote = if console: ", the Linux console" else: ", not a console"
+  let locale = effectiveLocale(env)
+  let utf8Locale = isUtf8Locale(locale)
+  # Under tmux, a client that is not UTF-8 keeps ASCII whatever the probe
+  # measured inside tmux (OQ-T8's exception).
+  if env.tmux.len > 0 and probe.tmuxClientUtf8 == "0":
+    return (tierAscii, csProbe, "tmux client_utf8=0")
+  if widths.utf8 == knNo:
+    return (tierAscii, widthsFrom, "the terminal decodes Latin-1 (P0=3)")
+  if utf8Locale:
+    return (ceiling, csEnvironment, "auto: UTF-8 (" & locale & ")" &
+            consoleNote)
+  if widths.utf8 == knYes:
+    # OQ-T8: a C locale on a terminal that decodes UTF-8 uses Unicode, and
+    # the report gives the `LANG` remedy.
+    return (ceiling, widthsFrom, "locale " &
+            (if locale.len > 0: locale else: "unset") &
+            ", terminal decodes UTF-8" & consoleNote)
+  (tierAscii, csDefault, "locale " & (if locale.len > 0: locale else: "unset") &
+              " is not UTF-8")
+
+proc resolveAmbiguous(env: TerminalEnv; explicit: Ranked[AmbiguousChoice];
+                      widths: WidthModel; widthsFrom: CapabilitySource):
+                     (bool, CapabilitySource, string) =
+  ## §6.2: is the ambiguous-wide rule in force?
+  if explicit.found:
+    return (explicit.value == acWide, explicit.source,
+            $explicit.value & " (" & explicit.note & ")")
+  if widths.ambiguous == apWide or widths.blockAmbig == apWide:
+    return (true, widthsFrom,
+            "measured wide (P1=" & $widths.answered[wpEllipsis] & ", P2=" &
+            $widths.answered[wpBlock] & ")")
+  if widths.ambiguous == apNarrow:
+    return (false, widthsFrom, "measured narrow (P1=" &
+            $widths.answered[wpEllipsis] & ")")
+  let locale = effectiveLocale(env)
+  if isCjkLocale(locale):
+    # OQ-T3: unmeasured on a CJK desktop, where the wide setting lives.
+    return (true, csEnvironment, "unmeasured, CJK locale " & locale)
+  (false, csDefault, "unmeasured: narrow")
+
+proc resolveModern(explicit: Ranked[ModernChoice]; tier: ChromeTier;
+                   identity: TerminalIdentity; widths: WidthModel):
+                  (bool, ModernChoice, CapabilitySource, string) =
+  ## §6.7. `off` is the default (the user's decision); `on` draws them on
+  ## the `extended` tier; `auto` only where the terminal draws the range
+  ## itself and the identity is known end to end. NOTHING BELOW RANK 5 CAN
+  ## TURN IT ON (TA-9).
+  let choice = if explicit.found: explicit.value else: mcOff
+  let source = if explicit.found: explicit.source else: csDefault
+  let where = if explicit.found: " (" & explicit.note & ")" else: ""
+  case choice
+  of mcOff:
+    let (would, why) = drawsModernGlyphs(identity)
+    (false, mcOff, source, "off" & where &
+       (if would and identity.endToEnd: "; auto would turn it on: " & why
+        else: ""))
+  of mcOn:
+    if tier != tierExtended:
+      (false, mcOn, source, "on" & where & ", but the tier is " & $tier)
+    else:
+      (true, mcOn, source, "on" & where)
+  of mcAuto:
+    if tier != tierExtended:
+      return (false, mcAuto, source, "auto" & where & ": the tier is " & $tier)
+    let (draws, why) = drawsModernGlyphs(identity)
+    if not draws:
+      return (false, mcAuto, source, "auto" & where & ": " & why)
+    if not identity.endToEnd:
+      return (false, mcAuto, source, "auto" & where &
+              ": the terminal is not known through " & identity.via.join(", "))
+    if widths.unicode13 != knYes:
+      return (false, mcAuto, source, "auto" & where &
+              ": U+1FB87 not measured one cell (P3=" &
+              $widths.answered[wpLegacy] & ")")
+    (true, mcAuto, csIdentity, "auto" & where & ": " & why)
+
+proc resolveSync(env: TerminalEnv; probe: TerminalProbe;
+                 identity: TerminalIdentity;
+                 cache: Option[CachedProfile]):
+                (bool, CapabilitySource, string) =
+  ## §8: DECRQM 2026 decides; a NEGATIVE answer (Ps 0 or 4) beats an
+  ## identity list that claims support; with no answer the identity, then the
+  ## environment lists (§6.3), then the cache.
+  if isDumbTerminal(env):
+    return (false, csEnvironment, "no terminal to bracket")
+  if probe.sync2026Answered:
+    let on = probe.sync2026 in {1, 2, 3}
+    return (on, csProbe, "DECRQM 2026=" & $probe.sync2026)
+  if syncByIdentity(identity):
+    return (true, csIdentity, identity.name & " implements DEC 2026")
+  if env.termProgram in SynchronizedOutputPrograms:
+    return (true, csEnvironment, "TERM_PROGRAM=" & env.termProgram)
+  if env.term.toLowerAscii() in SynchronizedOutputTerms:
+    return (true, csEnvironment, "TERM=" & env.term)
+  if cache.isSome and cache.get.sync2026 >= 0:
+    return (cache.get.sync2026 in {1, 2, 3}, csCache,
+            "DECRQM 2026=" & $cache.get.sync2026 & " last time")
+  (false, csDefault, "not answered")
+
+proc resolveKittyKeyboard(env: TerminalEnv): bool =
+  if isDumbTerminal(env):
+    return false
+  if env.term.toLowerAscii() in KittyKeyboardTerms:
+    return true
+  env.termProgram in KittyKeyboardPrograms
+
 proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
-                          probe = TerminalProbe()): TerminalCapabilities =
-  ## THE whole decision, as one pure function.
+                          probe = TerminalProbe();
+                          prefs = TerminalPrefs();
+                          session = TerminalChoices();
+                          cache = none(CachedProfile)): TerminalCapabilities =
+  ## THE whole decision, as one pure function of (environment, flags,
+  ## settings, answers, cache) — Terminal-Adaptation TA-1.
   ##
-  ## Every axis is independent by construction — there is no shared mutable
-  ## state and no ordering between the calls — which is what makes the Tier-1
-  ## sweep a cross product rather than a sequence.
+  ## Every axis follows §5.2: a runtime `:set` (`session`), then a flag, then
+  ## a `CODETRACER_TUI_*` variable, then a `[terminal "<glob>"]` section, then
+  ## the global settings (`prefs`), then `NO_COLOR`, then the terminal's
+  ## answers (`probe`), then its identity, then environment hints, then the
+  ## cache, then the safe default. Each axis records which rank decided it.
   ##
-  ## PLAT-46: `probe` is what the start-up query round observed (the zero value
-  ## — nothing asked — before it has run). A POSITIVE 24-bit answer is trusted
-  ## over a conservative `TERM`; a flag still beats it, and so do `NO_COLOR`
-  ## and `TERM=dumb`, which are requests rather than guesses.
-  var (colors, colorsFrom) = resolveColorDepth(env, flags)
+  ## The cache is consulted only where nothing live answered: it is a
+  ## remembered answer, so it beats a CONSERVATIVE environment guess (a
+  ## `TERM` rung, a C locale) but never a live answer, a positive
+  ## environment claim (`COLORTERM`, a UTF-8 locale) or an explicit choice
+  ## (TA-12).
+  let (identity, identityFrom) = resolveIdentity(env, probe, cache)
+  let ranks = explicitRanks(env, flags, prefs, session, identity)
+  let (widths, widthsFrom) = resolveWidths(probe, cache)
+
+  # Colours.
+  let colorChoice = firstExplicit(ranks, colors, ColorsChoice, true)
+  var (colors, colorsFrom) = resolveColorDepth(env, colorChoice)
   var tmuxWithheld = false
-  let flagDecided = flags.noColor or flags.theme == utPlain or
-                    flags.forceTrueColor
   let envFloored = noColorRequested(env) or isDumbTerminal(env)
-  if not flagDecided and not envFloored and colors < cdTrueColor:
+  if not colorChoice.found and not envFloored and colors < cdTrueColor:
     if probe.truecolor:
       (colors, colorsFrom) = (cdTrueColor, csProbe)
     elif env.tmux.len > 0 and probe.tmuxQueried:
@@ -631,34 +1094,120 @@ proc resolveCapabilities*(env: TerminalEnv; flags: CapabilityFlags;
         (colors, colorsFrom) = (cdTrueColor, csProbe)
       else:
         tmuxWithheld = true
-  let (borders, bordersFrom) = resolveBorders(env, flags)
+    elif not probe.answered and cache.isSome and cache.get.truecolor:
+      (colors, colorsFrom) = (cdTrueColor, csCache)
+
+  # Glyphs.
+  let glyphChoice = firstExplicit(ranks, glyphs, GlyphsChoice, true)
+  let (tier, tierFrom, tierNote) =
+    resolveTier(env, glyphChoice, widths, widthsFrom, identity, probe)
+  let ambiguousChoice = firstExplicit(ranks, ambiguousWidth, AmbiguousChoice,
+                                      true)
+  let (ambiguousWide, ambiguousFrom, ambiguousNote) =
+    resolveAmbiguous(env, ambiguousChoice, widths, widthsFrom)
+  let modernChoice = firstExplicit(ranks, modernUnicode, ModernChoice, false)
+  let (modern, modernValue, modernFrom, modernNote) =
+    resolveModern(modernChoice, tier, identity, widths)
+
   let (mouse, mouseFrom) = resolveMouse(env, flags)
-  let (sync, syncFrom) = resolveSynchronizedOutput(env)
+  let (sync, syncFrom, syncNote) = resolveSync(env, probe, identity, cache)
   let (mode, modeFrom, background) = resolveMode(env, flags, probe)
-  TerminalCapabilities(
-    colors: colors, borders: borders, mouse: mouse, synchronizedOutput: sync,
+  let (keyProtocol, keyProtocolFrom) = resolveKeyProtocol(env, probe)
+
+  # The link (§4.6).
+  var rtt = -1
+  var rttFrom = csDefault
+  if probe.rttMeasured:
+    (rtt, rttFrom) = (probe.rttMs, csProbe)
+  elif cache.isSome and cache.get.rttMs >= 0:
+    (rtt, rttFrom) = (cache.get.rttMs, csCache)
+  let conservative = rtt > LinkConservativeMs
+  let motionChoice = firstExplicit(ranks, reduceMotion, bool, false)
+  var (reduceMotion, reduceMotionFrom) = (false, csDefault)
+  if motionChoice.found:
+    (reduceMotion, reduceMotionFrom) = (motionChoice.value, motionChoice.source)
+  elif conservative:
+    (reduceMotion, reduceMotionFrom) = (true, rttFrom)
+  let probeChoice = firstExplicit(ranks, probe, bool, false)
+
+  # Grapheme clustering (DEC 2027): set it when recognised and off.
+  let graphemeKnown = probe.grapheme2027Answered and not isDumbTerminal(env)
+  let graphemeMode = graphemeKnown and probe.grapheme2027 in {1, 2, 3}
+  let graphemeSet = graphemeKnown and probe.grapheme2027 == 2
+
+  # The clipboard (§8): no query exists.
+  var (clipboard, clipboardFrom) = ("in-app only", csDefault)
+  if env.tmux.len > 0 and probe.tmuxSetClipboard in ["on", "external"]:
+    (clipboard, clipboardFrom) = ("osc52 via tmux", csProbe)
+  elif env.tmux.len == 0 and identity.name in Osc52Writers:
+    (clipboard, clipboardFrom) = ("osc52", csIdentity)
+
+  result = TerminalCapabilities(
+    colors: colors,
+    borders: (if tier == tierAscii: bmAscii else: bmUnicode),
+    mouse: mouse, synchronizedOutput: sync,
     kittyKeyboard: resolveKittyKeyboard(env),
+    keyProtocol: keyProtocol, keyProtocolFrom: keyProtocolFrom,
+    tmuxExtendedKeysOff: env.tmux.len > 0 and keyProtocol != kpLegacy and
+      probe.tmuxExtendedKeys notin ["", "on", "always"],
     theme: flags.theme,
-    colorsFrom: colorsFrom, bordersFrom: bordersFrom, mouseFrom: mouseFrom,
+    colorsFrom: colorsFrom, bordersFrom: tierFrom, mouseFrom: mouseFrom,
     syncFrom: syncFrom,
     themeFrom: (if flags.themePinned: csFlag else: csDefault),
     mode: mode, modeFrom: modeFrom, background: background,
     palette: flags.palette,
     tmuxRgbWithheld: tmuxWithheld,
-    tmuxClientTerm: probe.tmuxClientTerm)
+    tmuxClientTerm: probe.tmuxClientTerm,
+    identity: identity, identityFrom: identityFrom,
+    tier: tier, tierNote: tierNote,
+    modernUnicode: modern, modernChoice: modernValue,
+    modernUnicodeFrom: modernFrom, modernNote: modernNote,
+    widths: widths, widthsFrom: widthsFrom,
+    ambiguousWide: ambiguousWide, ambiguousFrom: ambiguousFrom,
+    ambiguousNote: ambiguousNote,
+    graphemeMode: graphemeMode, graphemeSet: graphemeSet,
+    syncNote: syncNote,
+    rttMs: rtt, rttFrom: rttFrom, linkConservative: conservative,
+    reduceMotion: reduceMotion, reduceMotionFrom: reduceMotionFrom,
+    probeOff: probeChoice.found and not probeChoice.value,
+    probeFrom: (if probeChoice.found: probeChoice.source else: csDefault),
+    clipboard: clipboard, clipboardFrom: clipboardFrom)
 
-proc probeWanted*(env: TerminalEnv; flags: CapabilityFlags): bool =
-  ## Whether the start-up query round has anything to decide.
+  # Remedies (§10.1), most useful first.
+  if tmuxWithheld:
+    let pattern = if probe.tmuxClientTerm.len > 0: probe.tmuxClientTerm & "*"
+                  else: "xterm*"
+    result.remedies.add "tmux withholds 24-bit colour: set -as " &
+      "terminal-features '," & pattern & ":RGB'"
+  if result.tmuxExtendedKeysOff:
+    result.remedies.add "tmux withholds extended keys (Ctrl+Shift+…): " &
+      "set -s extended-keys on"
+  if env.tmux.len > 0 and probe.tmuxMouse in ["off", "0"] and mouse:
+    result.remedies.add "tmux withholds the mouse: set -g mouse on"
+  if tier != tierAscii and not isUtf8Locale(effectiveLocale(env)) and
+     widths.utf8 == knYes:
+    result.remedies.add "locale is " &
+      (if effectiveLocale(env).len > 0: effectiveLocale(env) else: "unset") &
+      " but the terminal decodes UTF-8: set LANG=C.UTF-8"
+  for bad in envChoices(env)[1]:
+    result.remedies.add bad
+
+proc probeWanted*(env: TerminalEnv; flags: CapabilityFlags;
+                  prefs = TerminalPrefs();
+                  session = TerminalChoices()): bool =
+  ## Whether the start-up query round runs at all.
   ##
-  ## Nothing to ask when the colour depth is a flag's AND the mode is too AND
-  ## the mouse is off — PLAT-51: with the mouse on, whether it reports pixels
-  ## (DECRQM 1016) and how big a cell is are asked whatever the colour flags
-  ## say (Layout-ViewModel §4.2.2) — or when there is no terminal to ask.
+  ## Terminal-Adaptation §4.2: the identity questions (XTVERSION, DA2,
+  ## DECRQM 2026 / 2027) and the width probe are asked on EVERY start, so the
+  ## round always has something to decide — except when there is no terminal
+  ## to ask (a dumb terminal echoes queries) or the user turned the round off
+  ## (`--no-probe`, `CODETRACER_TUI_PROBE=off`, `terminal-probe = off`;
+  ## §4.8 rule 4).
   if isDumbTerminal(env):
     return false
-  let depthDecided = flags.noColor or flags.theme == utPlain or
-                     flags.forceTrueColor
-  not (depthDecided and flags.themePinned and flags.noMouse)
+  let ranks = explicitRanks(env, flags, prefs, session, TerminalIdentity())
+  let choice = firstExplicit(ranks, probe, bool, false)
+  not (choice.found and not choice.value)
 
 proc backgroundNote*(caps: TerminalCapabilities): string =
   ## `bg: osc11 #1e1e2e -> dark` — the source of the mode decision, for the
@@ -690,12 +1239,20 @@ proc tmuxRgbRemedy*(caps: TerminalCapabilities): string =
   "tmux withholds 24-bit colour: set -as terminal-features ',"  & pattern &
     ":RGB'"
 
-proc capabilityNote*(caps: TerminalCapabilities): string =
-  ## What the status line says about the start-up negotiation.
+proc tmuxExtendedKeysRemedy*(caps: TerminalCapabilities): string =
+  ## The one-line remedy when tmux keeps extended keys from this pane; ""
+  ## otherwise (Base-Keymaps §7.2 step 6).
+  if not caps.tmuxExtendedKeysOff:
+    return ""
+  "tmux withholds extended keys (Ctrl+Shift+…): set -s extended-keys on"
+
+proc capabilityNote*(caps: TerminalCapabilities; hint = true): string =
+  ## What the status line says about the start-up negotiation: the
+  ## background's source and — unless the user dismissed the hints
+  ## (`:terminal-info dismiss`, §10.2) — the ONE most useful remedy.
   result = backgroundNote(caps)
-  let remedy = tmuxRgbRemedy(caps)
-  if remedy.len > 0:
-    result.add " | " & remedy
+  if hint and caps.remedies.len > 0:
+    result.add " | " & caps.remedies[0]
 
 proc describe*(caps: TerminalCapabilities): string =
   ## One line naming every axis AND the source that decided it. Printed by
@@ -709,8 +1266,14 @@ proc describe*(caps: TerminalCapabilities): string =
   " sync2026=" & (if caps.synchronizedOutput: "on" else: "off") &
   "(" & $caps.syncFrom & ")" &
   " theme=" & $caps.theme & "(" & $caps.themeFrom & ")" &
+  " keys=" & $caps.keyProtocol & "(" & $caps.keyProtocolFrom & ")" &
   " kitty-keyboard=" & (if caps.kittyKeyboard: "advertised" else: "no") &
-  "(never enabled)" &
   " mode=" & (if caps.mode == dmLight: "light" else: "dark") &
   "(" & $caps.modeFrom & ")" &
-  " palette=" & $caps.palette
+  " palette=" & $caps.palette &
+  " glyphs=" & $caps.tier & "(" & $caps.bordersFrom & ")" &
+  " modern-unicode=" & (if caps.modernUnicode: "on" else: "off") &
+  "(" & $caps.modernUnicodeFrom & ")" &
+  " ambiguous=" & (if caps.ambiguousWide: "wide" else: "narrow") &
+  "(" & $caps.ambiguousFrom & ")" &
+  " terminal=" & caps.identity.chainName & "(" & $caps.identityFrom & ")"

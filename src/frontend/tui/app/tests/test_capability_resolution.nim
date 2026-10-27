@@ -55,7 +55,7 @@ import ../views/borders
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 435
+const ExpectedAssertions = 451
 
 const
   LandedThroughMilestone = 14
@@ -497,14 +497,12 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck advertised == 4
     ck compared == ExpectedCaseCount
 
-  test "the Kitty keyboard protocol is DETECTED and never negotiated":
-    # CTUI-11's own decision, asserted as one. Enabling the protocol would
-    # change every key's encoding to `CSI <unicode> ; <mods> u` and
-    # `app/input/keymap.keyName` decodes xterm's classic encoding — so the
-    # capability is resolved, and `host/terminal_driver.start` sends nothing for
-    # it. The second half is asserted from the terminal's side in
-    # `tests/real_terminal/test_real_capability_negotiation.nim`; this is the
-    # first half.
+  test "the Kitty keyboard protocol is DETECTED from the environment":
+    # PLAT-68 REVERSED CTUI-11's "detected and never negotiated": the
+    # environment's guess is still resolved here (it names the terminal in
+    # `describe`), but what the driver ENABLES is decided by asking — `CSI ? u`
+    # and its reply (`resolveKeyProtocol`, asserted by `test_plat68_keymaps_pty.nim` and from the
+    # terminal's side in `test_real_capability_negotiation.nim`).
     let kitty = resolveCapabilities(
       initTerminalEnv(term = "xterm-kitty", lang = "en_US.UTF-8"),
       initCapabilityFlags())
@@ -538,7 +536,8 @@ suite "CTUI-11 Tier 1: capability resolution":
     ck text.contains("borders=ascii(flag)")
     ck text.contains("mouse=on(default)")
     ck text.contains("sync2026=off(default)")
-    ck text.contains("kitty-keyboard=no(never enabled)")
+    ck text.contains("kitty-keyboard=no")
+    ck text.contains("keys=modify-other-keys(environment)")
     # …and the environment-driven spelling differs, so the two sources are
     # genuinely distinguishable in the text rather than both reading "flag".
     let probed = resolveCapabilities(
@@ -848,8 +847,12 @@ suite "CTUI-11 Tier 1: capability resolution":
     # lines: `-h/--help`, `-v/--version` and `-t/--theme` are each written as
     # a pair, PLAT-6 added `--layout-binding` and PLAT-42 `--no-flow-overlay`.
     # PLAT-46 added `--palette`: seventeen. PLAT-51 `--focus-highlight` and
-    # `--live-resize`: nineteen.
-    ck options.len == 19
+    # `--live-resize`: nineteen. PLAT-70 Part H the five scrollbar options:
+    # twenty-four.
+    ck options.len == 24
+    for opt in ["--scrollbar-thickness", "--scrollbar-fade",
+                "--scrollbar-track", "--scrollbar-click", "--modern-unicode"]:
+      ck opt in options
     ck "--focus-highlight" in options
     ck "--live-resize" in options
     ck "--palette" in options
@@ -1130,10 +1133,11 @@ suite "CTUI-11 Tier 1: capability resolution":
     # OUTSIDE tmux, nothing is ever "withheld".
     ck not resolveCapabilities(xterm, initCapabilityFlags(),
       TerminalProbe(attempted: true, tmuxQueried: true)).tmuxRgbWithheld
-    # NOTHING TO ASK when the depth and the mode are both flags and the
-    # mouse is off; with the mouse on (PLAT-51) the pixel-mouse question
-    # (DECRQM 1016, the cell size) is still asked.
-    ck not probeWanted(xterm, initCapabilityFlags(
+    # Terminal-Adaptation §4.2: the identity questions and the width probe
+    # are asked on EVERY start, so even with the depth and the mode both
+    # flags and the mouse off the round still runs (only a dumb terminal, or
+    # the round turned off, asks nothing — `test_plat71_terminal_profile`).
+    ck probeWanted(xterm, initCapabilityFlags(
       forceTrueColor = true, theme = utDark, themePinned = true,
       noMouse = true))
     ck probeWanted(xterm, initCapabilityFlags(

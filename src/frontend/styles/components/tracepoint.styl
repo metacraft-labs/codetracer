@@ -365,11 +365,16 @@
 
   .dropdown-list.active
     .fa
-      color: colors-ui-surface-input-default
+      // A surface token as an icon: the window ground's own colour in the
+      // light theme, so there the icon token (`by-mode`, defaults.styl).
+      color: by-mode(colors-ui-surface-input-default, colors-ui-icon-primary-default)
 
   .run-trace-button
     border-radius: 6px;
-    color: BORDER_COLOR;
+    // The run glyph: white (BORDER_COLOR is DEFAULT, white) on the tertiary
+    // surface, 2.2:1 in the light theme, which takes the icon token
+    // (`by-mode`, defaults.styl).
+    color: by-mode(BORDER_COLOR, colors-ui-icon-primary-default);
     cursor: pointer;
     height: 24px;
     background: colors-ui-surface-primary-tertiary;
@@ -427,7 +432,9 @@
       position: absolute
       border: 1px solid
       border-radius: 10px
-      border-color: darkgrey
+      // A dropdown's outline: the primary border token in the light theme
+      // (`by-mode`, defaults.styl).
+      border-color: by-mode(darkgrey, colors-ui-border-primary)
       padding-top: 0
       padding-left: 5px
       padding-right: 10px
@@ -497,7 +504,8 @@
   position: absolute
   border: 1px solid
   border-radius: 10px
-  border-color: darkgrey
+  // As `.trace-dropdown-menu` above.
+  border-color: by-mode(darkgrey, colors-ui-border-primary)
   padding-top: 0
   padding-left: 5px
   padding-right: 10px
@@ -603,16 +611,6 @@ RESIZING_BORDER_SIZE = 4px
   /*border-style: solid*/
   display: flex
 
-.switch
-  background-color: BACKGROUND_OPPOSITE_COLOR
-  color: white
-  width: 78px
-  float: left
-  cursor: pointer
-
-#trace-switch
-  margin-left: 90px
-
 .select-view-kind
   position: relative
   display: none
@@ -639,7 +637,9 @@ RESIZING_BORDER_SIZE = 4px
     height: 25px
     width: 100px
     background-color: #b8c0cf
-    color: colors-ui-surface-primary-tertiary
+    // A surface token as text: #b5ae9f on this #b8c0cf in the light theme,
+    // 1.2:1, so there body text (`by-mode`, defaults.styl).
+    color: by-mode(colors-ui-surface-primary-tertiary, colors-ui-text-primary-body)
     font-size: 15px
     cursor: pointer
     position: absolute
@@ -648,7 +648,8 @@ RESIZING_BORDER_SIZE = 4px
 
   &:hover
     background-color: #b8c0cf
-    color: colors-ui-surface-primary-tertiary
+    // As `&.active` above.
+    color: by-mode(colors-ui-surface-primary-tertiary, colors-ui-text-primary-body)
 
   ::after
     margin-left: 10px !important

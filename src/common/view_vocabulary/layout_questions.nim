@@ -618,25 +618,43 @@ proc residualHolds*(q: LayoutQuestion; gpui, electron: string): (bool, string) =
   of lqPaneRectangles:
     # PLAT35-VG3 / VG5: the two default layouts differ, so the pane SETS and
     # therefore the splits differ. What must still hold is that each side
-    # placed the editor and gave it the largest rectangle it drew — a layout in
-    # which the source editor is not the dominant pane is not this product on
+    # placed the editor as the pane that DOMINATES the body: no pane is taller
+    # than it, and of the panes that span the body's height as it does, none
+    # has more area — a layout in which the source editor is a short pane, or
+    # a narrower column than the files beside it, is not this product on
     # either front-end.
+    #
+    # IT SAID "THE LARGEST RECTANGLE OF ALL" UNTIL 2026-10-17, and the
+    # published shared default falsifies that. `Layout-System.md`'s "Default
+    # Layout" (and `tools/visual-review-brief.md`'s `shell` block) declare
+    # the columns at 20 / 25 / 55, the editor a full-height quarter and the
+    # event log the full width of the 55% region at about half its height —
+    # so at 1920x1080 the event log is 55 x 43 = 2365 against the editor's
+    # 25 x 91 = 2275, by design. The Electron capture only satisfied the old
+    # clause while its trace launch gave the editor GoldenLayout's `addChild`
+    # third (33%) instead of its declared share (`ui_js.onInit`, repaired
+    # 849d152bb). The editor is still the tallest pane and the largest
+    # full-height column on every arrangement either front-end opens with,
+    # and that is what is asserted now.
     let g = parsePaneRectangles(gpui)
     let e = parsePaneRectangles(electron)
     if g.len == 0 or e.len == 0:
       return (false, "one side placed no pane at all")
     for side in [g, e]:
-      var editorArea = -1
-      var biggest = 0
-      for r in side:
-        let area = r.w * r.h
-        if r.pane == "editor": editorArea = area
-        if area > biggest: biggest = area
-      if editorArea < 0:
+      var editor = -1
+      for i, r in side:
+        if r.pane == "editor": editor = i
+      if editor < 0:
         return (false, "a side placed no `editor` pane")
-      if editorArea < biggest:
-        return (false, "a side gave some other pane more area than the editor")
-    (true, "both placed the editor and gave it the largest rectangle")
+      let ed = side[editor]
+      for r in side:
+        if r.h > ed.h:
+          return (false, "a side drew `" & r.pane & "` taller than the editor")
+        if r.h + PaneRectangleTolerancePp >= ed.h and r.w * r.h > ed.w * ed.h:
+          return (false, "a side gave the full-height `" & r.pane &
+                         "` more area than the editor")
+    (true, "both placed the editor as the tallest pane and the largest " &
+           "full-height column")
   of lqPanesPresent:
     # PLAT35-VG5: the Electron default opens more panes. What must still hold
     # is that the three panes a replay session is ABOUT are on both sides.
@@ -1049,7 +1067,21 @@ proc gapRegister*(): Table[LayoutQuestion, seq[VisualGap]] =
         "EIGHT — `commandPalette, filesystem, editor, state, calltrace, " &
         "eventLog, testResults, constraints` — from GoldenLayout's " &
         "`src/config/default_layout.json`. Only three pane ids are common to " &
-        "both. The same divergence drives the pane-rectangle answers.",
+        "both. The same divergence drives the pane-rectangle answers.\n\n" &
+        "RE-MEASURED 2026-10-17: the Electron EIGHT was the bundled tree, " &
+        "which the capture copied in until it set `noUserLayout` " &
+        "(9268c8ab3). On the product's own first-run layout the Electron " &
+        "arm draws SIX — `commandPalette@0/1,filesystem@0/3,editor@0/1," &
+        "state@0/2,calltrace@0/2,eventLog@0/2` (FILES | VCS | TESTS, no " &
+        "TEST RESULTS / CONSTRAINTS column, no Timeline). The GPUI FOUR was " &
+        "the gate's own arm opening `defaultReplayLayout()`, which no window " &
+        "draws; on the shared default the shipped window opens it reports " &
+        "SIX too — `fileTree@0/3,editor@0/1,state@0/2,calltrace@0/2," &
+        "eventLog@0/2,buildOutput@0/4`. Five ids are common; what still " &
+        "differs is naming (`fileTree` / `filesystem`), the desktop's " &
+        "omnibox (`commandPalette`, top-bar chrome on GPUI) and the footer " &
+        "strip, which GPUI draws as a docked stack and Electron in its " &
+        "status bar.",
       remedy: "one default, read from one place. Either " &
         "`defaultReplayLayout()` becomes the source `default_layout.json` is " &
         "generated from, or the Electron front-end reads the model's default " &

@@ -129,9 +129,11 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    ```
 
    Equivalent through the launcher: `src/build-debug/bin/ct replay --ui=tui <trace>`.
-   A dev build finds `src/build-debug/bin/replay-server` of its own checkout; set
-   `REPLAY_SERVER_BIN=<path>` when the engine lives elsewhere (for example a
-   `src/build-debug-repro/bin/` build, or another worktree's).
+   A dev build finds the `replay-server` of its own checkout, in the order
+   `src/common/replay_server_path.nim` defines (the build's published output
+   root, then `src/build-debug-repro/bin/`, then `src/build-debug/bin/`, then
+   cargo's `target/` trees); set `REPLAY_SERVER_BIN=<path>` when the engine
+   lives elsewhere (for example another worktree's build).
 7. **State.** When launching for the user, do NOT set `CODETRACER_TUI_LAYOUT_DIR`:
    they expect their own remembered layout in `$XDG_STATE_HOME/codetracer/`
    (`~/.local/state/codetracer/tui-layout.json`). When YOU drive the TUI for
@@ -141,10 +143,16 @@ The user-facing reference is README.md, "Running the terminal (TUI) and native
    keeps the trace index, recordings and config out of their profile as well.
 8. **Stopping.** The user quits with `q`; closing the pane also ends it. Each
    running TUI owns one `replay-server` child, which exits with it. The
-   orphan-sensitive pty suites (`test_real_no_orphans`, `test_real_pty_lifecycle`)
-   count every `replay-server` on the host, so they FAIL while the user's TUI pane
-   is open. Check `pgrep -a replay-server` before running them or before calling
-   such a failure a regression, and never kill a replay-server you did not start.
+   orphan-sensitive pty suites (`test_real_no_orphans`, `test_real_pty_lifecycle`,
+   `test_real_signal_handling`, and the engine counts in `test_plat47_vcs_focus_refresh`
+   and `test_plat49_panes`) count only the engines their own sessions started:
+   each session carries a per-run token in its environment
+   (`CODETRACER_TUI_TEST_RUN_TOKEN`, `real_terminal/lifecycle_support.nim`), and
+   the detector matches it in `/proc/<pid>/environ`. The user's open TUI pane and
+   other worktrees' engines therefore neither fail them nor hide a leak, so a
+   survivor they report is this run's. A new pty suite whose engines are checked
+   must spawn through `tuiSession` or call `carryRunMark()` on its builder. Never
+   kill a replay-server you did not start.
 
 GPUI: build the windowed shim in the same isonim-gpui checkout the build compiles
 against (`repro exec . -- bash -c 'cd rust && cargo build --features gpui-backend'`
@@ -152,7 +160,9 @@ inside it), `repro exec . -- just build-gpui`, and launch with
 `repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH
 src/build-debug/bin/ct replay --ui=gpui <trace>'` from a graphical session. With
 no display, use `--report-plan` (same command) to check the build; `--headless`
-is TUI-only and `ct` refuses it with `--ui=gpui`.
+is TUI-only and `ct` refuses it with `--ui=gpui`. A window launch that cannot
+open a window (the featureless shim, or no `DISPLAY` / `WAYLAND_DISPLAY`) exits 3
+and names the cause on stderr. Read that line rather than retrying the launch.
 
 ## Building the db-backend
 
@@ -167,6 +177,29 @@ cargo build
 # inside src/db-backend
 CODETRACER_HOME="$(mktemp -d)" cargo test
 ```
+
+### Sibling recorders and tools are built by the tests that need them
+
+Suites that drive a recorder or tool from a sibling checkout (BEAM, JS and
+Ruby recorders, `ct-native-replay`, `ct-mcr`, `ct-print`, and the `ct-instrument` +
+JS recorder + `session-manager` set the materialised cross-process
+recordings are made with) provision it themselves: when no override names a
+tool, the finder in `tests/test_harness/mod.rs` runs
+`scripts/build-siblings.sh --only <key>` (or
+`scripts/provision-cross-process-recording.sh`) once per test binary, under
+a file lock shared by concurrent test binaries, and uses what it built. A
+current build costs a stamp check; the first run of a fresh workspace spends
+minutes building, with the progress on stderr.
+
+- A sibling that is not checked out, or does not build, FAILS the test with
+  the remedy. It never skips: the prerequisite is supplied, not waived.
+- An override is used as given and never built: the finder's environment
+  variable (`CT_NATIVE_REPLAY_PATH`, `CODETRACER_CT_MCR_CMD`, `CODETRACER_JS_RECORDER_PATH`,
+  `CODETRACER_BEAM_RECORDER_BIN`, `CODETRACER_RUBY_RECORDER_PATH`,
+  `CODETRACER_CT_PRINT`, `CODETRACER_RECORD_WEB_BIN`, …), or a tool on
+  `PATH` that is not the sibling's own build output. `CODETRACER_CT_MCR_CMD`
+  naming the sibling's own `ct_cli` (as the dev shell exports it) is not an
+  override: that build is refreshed like any other.
 
 ### Tests never touch your real CodeTracer state: `CODETRACER_HOME`
 
@@ -211,9 +244,19 @@ Don't disable the lint: try to fix the code instead first!
 just test-e2e
 ```
 
-The Playwright tests live in `tsc-ui-tests/`. They launch the real Electron app via the `ct`
-binary at `src/build-debug/bin/ct`. If you modify frontend Nim code, run `just build-once`
-first to rebuild the frontend before running the tests.
+The Playwright suite is `src/tests/gui/`. Its config is `src/tests/gui/playwright.config.ts`,
+and the specs live under `src/tests/gui/tests/` (the config's `testDir`). Write a new GUI test
+there: `just test-e2e`, `just test-gui` and `just test-gui-prebuilt` all run
+`npx playwright test` from `src/tests/gui/`, so a spec anywhere else is run by no recipe and no
+CI lane. Spec arguments are relative to `src/tests/gui/`, e.g.
+`just test-e2e tests/sudoku/nim-sudoku.spec.ts`.
+
+The tests launch the real Electron app via the `ct` binary at `$CODETRACER_E2E_CT_PATH` when
+that is set (CI points it at the nix build), otherwise at `$CODETRACER_BUILD_DIR/bin/ct` (the
+dev shell sets `CODETRACER_BUILD_DIR` to the platform's build output), falling back to
+`src/build-debug/bin/ct`; see `src/tests/gui/lib/fixtures.ts`. If you modify frontend Nim
+code, run `just build-once` first to rebuild the frontend before running `just test-e2e`;
+`just test-gui` runs it for you as a prerequisite.
 
 ## Running the cross-language ct_test provider tests
 

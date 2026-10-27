@@ -92,8 +92,8 @@ proc typed(buf: EditBuffer; keys: openArray[string]): string =
 
 proc underPlainVim(text: string; keys: openArray[string]): string =
   ## The same keystrokes' answer under the HAND-WRITTEN Vim keymap — a session
-  ## constructed with `kmVim` and never `:source`d.
-  let s = newEditSession(kmVim)
+  ## constructed with `bkVim` and never `:source`d.
+  let s = newEditSession(bkVim)
   discard s.openFile("doc", text)
   s.activeBuffer().typed(keys)
 
@@ -112,9 +112,9 @@ suite "PLAT-36: `:source` installs a translated mapping, and it does what Vim's 
     checkpoint(rt.app.notification)
     ck rt.app.notification == "sourced vimrc: 1 of 1 mapping line(s) translated"
     let buf = rt.app.editSession.activeBuffer()
-    ck buf.doc.model == kmVim
+    ck buf.doc.model == bkVim
     ck not buf.doc.imported.isNil
-    ck rt.keymapModel == kmVim
+    ck rt.keymapModel == bkVim
     let viaImport = buf.typed(["Q"])
     let viaVim = underPlainVim(TextA, ["D"])
     ck viaImport == viaVim
@@ -160,7 +160,7 @@ suite "PLAT-36: the import follows the session":
     rt.runPrompt(":source vimrc")
     let idx = rt.app.editSession.openFile("src/beta.nim", "one\ntwo\n")
     let beta = rt.app.editSession.buffers[idx]
-    ck beta.doc.model == kmVim
+    ck beta.doc.model == bkVim
     ck not beta.doc.imported.isNil
     ck beta.typed(["Q"]) == "\ntwo\n"
 
@@ -170,7 +170,8 @@ suite "PLAT-36: the import follows the session":
     let rt = editingRuntime(root)
     rt.runPrompt(":source vimrc")
     rt.runPrompt(":keymap")
-    ck rt.app.notification.startsWith("keymap vim with vimrc sourced; ")
+    # PLAT-68: and why the base is active (§3.6) — `:source` chose it.
+    ck rt.app.notification.startsWith("keymap vim (command) with vimrc sourced; ")
 
   test "`:keymap vim` afterwards is the SHIPPED keymap, macros and all":
     let root = withRc(MacroRc)
@@ -200,7 +201,7 @@ suite "PLAT-36: `:source` refuses by name":
     ck rt.app.notification == ":source needs a file, e.g. ':source ~/.vimrc'"
     rt.runPrompt(":source nope.vim")
     ck rt.app.notification == "nope.vim: no such file"
-    ck rt.app.editSession.activeBuffer().doc.model == kmProductDefault
+    ck rt.app.editSession.activeBuffer().doc.model == bkCua
     writeFile(root / "huge.vim", "\" x\n".repeat(MaxConfigFileBytes div 4 + 1))
     rt.runPrompt(":source huge.vim")
     checkpoint(rt.app.notification)

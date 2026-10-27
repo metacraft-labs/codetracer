@@ -298,7 +298,7 @@
             #
             # The trace-format hash is that of
             # https://github.com/metacraft-labs/codetracer-trace-format at the
-            # revision noir's Cargo.lock names (1eae589), a public URL. It was
+            # revision noir's Cargo.lock names (c8e57b1), a public URL. It was
             # computed as `nix hash path` of `git archive <rev>`, a method
             # checked against the previous revision's recorded hash. The URL is
             # public. A sandboxed `fetchgit` from github.com can still fail with
@@ -308,8 +308,13 @@
             # add the source with `nix-store --add-fixed --recursive sha256`
             # and the hash above.
             outputHashes = {
-              "codetracer_trace_types-0.19.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
-              "codetracer_trace_writer_nim-0.1.0" = "sha256-ARB3YPYE5VOkbFgCl1x1i5fOIAkiyhtvtrNHg+W5fBE=";
+              "codetracer_ctfs-0.1.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_format_capnp-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_format_cbor_zstd-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_reader-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_types-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_writer-0.19.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
+              "codetracer_trace_writer_nim-0.1.0" = "sha256-YYzJVb0JE6kMcTYrv3KtO0iq7p+UNDtpTuE57XiOa70=";
               "clap-markdown-0.1.3" = "sha256-2vG7x+7T7FrymDvbsR35l4pVzgixxq9paXYNeKenrkQ=";
               "sancov-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
               "sancov-sys-0.1.0" = "sha256-D2q3Xtq64fYKIL0W1bXntyIIXsk6015c0fDHVlam/n4=";
@@ -857,20 +862,170 @@
             };
           };
 
+        # Check-only recorder for backend-manager's real meta.dat round trip.
+        # Build the production CLI and dynamic interposer: the fixture records
+        # a dynamically linked C program and does not need CLR tools.
+        backend-manager-test-recorder-core = pkgs.stdenv.mkDerivation {
+          pname = "backend-manager-test-recorder";
+          version = "0.1.0";
+          src = inputs.codetracer-native-recorder;
+          nativeBuildInputs = [ nim-codetracer ];
+          buildInputs = [
+            pkgs.zstd
+          ]
+          ++ pkgs.lib.optional (
+            pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isx86
+          ) pkgs.libipt;
+          dontConfigure = true;
+          nimPaths = pkgs.lib.concatMapStringsSep " " (path: "--path:${path}") [
+            inputs.nim-results
+            inputs.nim-stew
+            "${inputs.codetracer-trace-format-nim}/src"
+            "${inputs.codetracer-visual-replay}/src"
+            "${inputs.nim-stackable-hooks}/src"
+            inputs.nim-confutils
+            inputs.nim-serialization
+            inputs.nim-faststreams
+          ];
+          buildPhase = ''
+            runHook preBuild
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            export STACKABLE_HOOKS_SRC=${inputs.nim-stackable-hooks}/src
+            export CODETRACER_TRACE_FORMAT_NIM_SRC=${inputs.codetracer-trace-format-nim}/src
+            (
+              cd ct_interpose
+              nim c --parallelBuild:2 $nimPaths --app:lib --noMain --mm:none \
+                --stackTrace:off --lineTrace:off -o:libct_interpose${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} \
+                src/ct_interpose/library_init.nim
+            )
+            (
+              cd ct_cli
+              nim c --parallelBuild:2 $nimPaths -o:ct_cli src/ct_cli.nim
+            )
+            runHook postBuild
+          '';
+          installPhase = ''
+            mkdir -p "$out/bin"
+            cp ct_cli/ct_cli "$out/bin/ct-mcr"
+            cp ct_interpose/libct_interpose${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} "$out/bin/"
+          '';
+        };
+
+        backend-manager-test-static-interposer = backend-manager-test-recorder-core.overrideAttrs (old: {
+          pname = "backend-manager-test-static-interposer";
+          buildPhase = ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            export STACKABLE_HOOKS_SRC=${inputs.nim-stackable-hooks}/src
+            export CODETRACER_TRACE_FORMAT_NIM_SRC=${inputs.codetracer-trace-format-nim}/src
+            for pathFlag in $nimPaths; do
+              printf 'switch("path", "%s")\n' "''${pathFlag#--path:}" >> config.nims
+            done
+            echo 'switch("parallelBuild", "2")' >> config.nims
+            cd ct_interpose
+            # Execute the unchanged production task body directly: Nimble
+            # tries to refresh its package registry even in offline mode.
+            # All dependencies are already supplied by config.nims above.
+            sed -n '/^task buildStatic,/,$p' ct_interpose.nimble \
+              | sed '1c block:' > build_static.nims
+            nim e build_static.nims
+          '';
+          installPhase = ''
+            mkdir -p "$out/lib"
+            cp build/static_shim/libct_interpose_static.so "$out/lib/"
+          '';
+        });
+
+        backend-manager-test-dwarf-paths = pkgs.rustPlatform.buildRustPackage {
+          pname = "backend-manager-test-dwarf-paths";
+          version = "0.1.0";
+          src = "${inputs.codetracer-native-recorder}/ct_dwarf_paths";
+          cargoLock.lockFile = "${inputs.codetracer-native-recorder}/ct_dwarf_paths/Cargo.lock";
+        };
+
+        backend-manager-test-license = pkgs.rustPlatform.buildRustPackage {
+          pname = "backend-manager-test-license";
+          version = "0.1.0";
+          src = pkgs.runCommand "backend-manager-test-license-src" { } ''
+            mkdir -p "$out/codetracer/libs"
+            cp -r ${inputs.codetracer-native-backend} "$out/codetracer-native-backend"
+            cp -r ${inputs.codetracer-trace-format} "$out/codetracer-trace-format"
+            cp -r ${../../libs/ct-dap-client} "$out/codetracer/libs/ct-dap-client"
+            cp -r ${../../libs/ct-lang} "$out/codetracer/libs/ct-lang"
+          '';
+          sourceRoot = "backend-manager-test-license-src/codetracer-native-backend";
+          cargoDeps =
+            (pkgs.callPackage "${pkgs.path}/pkgs/build-support/rust/import-cargo-lock.nix" {
+              fetchgit =
+                args:
+                if
+                  args.url == "https://github.com/metacraft-labs/lldb-sys.rs.git"
+                  && args.rev == inputs.native-license-lldb-sys.rev
+                then
+                  inputs.native-license-lldb-sys
+                else
+                  pkgs.fetchgit args;
+            })
+              {
+                lockFile = "${inputs.codetracer-native-backend}/Cargo.lock";
+                outputHashes."lldb-sys-0.0.31" = inputs.native-license-lldb-sys.narHash;
+              };
+          # This is the production verifier built with its development key,
+          # matching the recorder's development build, without any bypass.
+          buildType = "debug";
+          cargoBuildFlags = [
+            "--package"
+            "ct_license_ffi"
+            "--lib"
+          ];
+          doCheck = false;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [
+            pkgs.lldb
+            pkgs.llvm
+            pkgs.openssl
+          ];
+          LLVM_CONFIG = "${pkgs.llvm.dev}/bin/llvm-config";
+          LLDB_LIB_PATH = "${pkgs.lldb}/lib";
+          LLDB_ADDITIONAL_INCLUDE_DIRS = "${pkgs.lldb.dev}/include";
+          installPhase = ''
+            mkdir -p "$out/lib"
+            cp target/*/debug/libct_license_ffi${pkgs.stdenv.hostPlatform.extensions.sharedLibrary} "$out/lib/"
+          '';
+        };
+
+        backend-manager-test-recorder = pkgs.runCommand "backend-manager-test-recorder" { } ''
+          mkdir -p "$out/bin"
+          cp ${backend-manager-test-recorder-core}/bin/* "$out/bin/"
+          cp ${backend-manager-test-license}/lib/* "$out/bin/"
+          cp ${backend-manager-test-dwarf-paths}/bin/* "$out/bin/"
+          ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            cp ${backend-manager-test-static-interposer}/lib/* "$out/bin/"
+          ''}
+        '';
+
         backend-manager = pkgs.rustPlatform.buildRustPackage {
           name = "backend-manager";
           pname = "backend-manager";
 
-          # NOTE: the source of this derivation is the CRATE plus the
-          # ``codetracer-trace-format`` workspace it reaches by path (its
-          # Cargo.toml says ``../../../codetracer-trace-format``, exactly as
-          # db-backend's does), laid out so that relative path resolves.
-          # Nothing else in the tree is a build input of ``session-manager``,
-          # so the sandbox has no ``scripts/``, no browser and no network --
+          # Include the crate and its local path dependencies:
+          # ``../../libs/ct-home``, ``../../libs/ct-data-breakpoints``,
+          # ``../../libs/ct-open-beneath`` and ``../../../codetracer-trace-format``
+          # (``ci/test/backend-manager-package-inputs.nix`` checks that every
+          # path dependency in the manifests is present).
+          # Preserve their relative layout so Cargo can resolve them.
+          # The script executor security tests also copy the real Python API
+          # from ``../../python-api``. Include that fixture without pulling in
+          # the rest of the checkout: no ``scripts/``, browser or network --
           # see ``checkPhase`` below.
           src = pkgs.runCommand "backend-manager-src" { } ''
-            mkdir -p $out/codetracer/src
+            mkdir -p $out/codetracer/src $out/codetracer/libs
             cp -r ${../../src/backend-manager} $out/codetracer/src/backend-manager
+            cp -r ${../../libs/ct-home} $out/codetracer/libs/ct-home
+            cp -r ${../../libs/ct-data-breakpoints} $out/codetracer/libs/ct-data-breakpoints
+            cp -r ${../../libs/ct-open-beneath} $out/codetracer/libs/ct-open-beneath
+            cp -r ${../../python-api} $out/codetracer/python-api
             cp -r ${inputs.codetracer-trace-format} $out/codetracer-trace-format
           '';
           sourceRoot = "backend-manager-src/codetracer/src/backend-manager";
@@ -880,6 +1035,16 @@
           # ``capnp`` at build time, as it does for db-backend above.
           nativeBuildInputs = [ pkgs.capnproto ];
 
+          # script_executor tests start a real isolated Python interpreter;
+          # the MCP source-confinement test starts the real replay server.
+          nativeCheckInputs = [
+            pkgs.python3
+            db-backend
+            backend-manager-test-recorder
+          ];
+          CODETRACER_REPLAY_SERVER_CMD = "${db-backend}/bin/replay-server";
+          CODETRACER_CT_MCR_CMD = "${backend-manager-test-recorder}/bin/ct-mcr";
+
           cargoLock = {
             lockFile = ../../src/backend-manager/Cargo.lock;
           };
@@ -887,6 +1052,10 @@
           doCheck = true;
           checkPhase = ''
             runHook preCheck
+
+            # Real recorder/verifier children keep their counters and state
+            # inside this build, as the checkout test harnesses do.
+            export CODETRACER_HOME="$(mktemp -d)"
 
             # ``buildRustPackage`` runs the crate's whole test suite here,
             # and since 2026-08-01 one of those tests cannot run in a build
@@ -2179,6 +2348,11 @@
         };
 
         default = codetracer;
+      }
+      # Linux-only: it is a NixOS VM (Incus is a Linux daemon, and the VM
+      # needs /dev/kvm). See the file's header for what it is for.
+      // pkgs.lib.optionalAttrs stdenv.hostPlatform.isLinux {
+        codetracer-incus-vm = import ./incus-vm.nix { inherit pkgs; };
       };
     };
 }

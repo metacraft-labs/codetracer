@@ -126,8 +126,7 @@ import isonim/core/[signals, computation]
 # "SHIFT IS TRACKED ON THE DOCUMENT" in the header, and `paintOpenButton`'s
 # own comment for the failure it fixes.
 from isonim/core/batch import untrack
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
   import isonim/web/web_renderer
@@ -135,30 +134,20 @@ when defined(js):
 
 import ../viewmodels/test_results_vm
 
-const TestResultsContainerClass* = "component-container test-results"
+# The generic view expands the DSL where it is instantiated.
+export signals, computation, components
 
-const EmptyStateText* = "No tests found in this project."
+const TestResultsContainerClass* = "component-container test-results"
 
 proc stateClass*(state: TestResultsRowState): string =
   "test-results-row " & $state
 
-proc stateMark*(state: TestResultsRowState): string =
-  ## The glyph §1a's mock-up uses, extended to the states a real run has.
-  ## `·` for not-run rather than a blank, so every row has a mark column and
-  ## the list does not look ragged.
-  case state
-  of trsNotRun: "·"
-  of trsRunning: "…"
-  of trsPassed: "✓"
-  of trsFailed: "✗"
-  of trsSkipped: "–"
-  of trsErrored: "!"
-  of trsCancelled: "×"
-
-proc rowWhere*(row: TestResultsRow): string =
-  if row.file.len == 0: ""
-  elif row.line > 0: row.file & ":" & $row.line
-  else: row.file
+# `stateMark`, `rowWhere`, `rowDuration`, `runButtonTitle` and
+# `EmptyStateText` are the ViewModel's since PLAT-53 — the terminal's pane and
+# the GPUI window draw the same words (`Test-Results-Pane.md` §8.4) — and are
+# re-exported here, so this view's readers see them where they always did.
+export stateMark, rowWhere, rowDuration, runButtonTitle, EmptyStateText,
+       RunTestsTitle, RunButtonLabel
 
 proc runButtonClass*(vm: TestResultsVM): string =
   ## `disabled` follows `canRun`, so the class a gate reads and the guard the
@@ -166,47 +155,25 @@ proc runButtonClass*(vm: TestResultsVM): string =
   if vm.canRun(): "test-results-run-btn"
   else: "test-results-run-btn disabled"
 
-proc runButtonTitle*(vm: TestResultsVM): string =
-  ## WHY it is disabled, in the tooltip — the three cases are different
-  ## problems with different remedies and a single greyed control that said
-  ## nothing would make all three look like the same dead affordance.
-  ##
-  ## The two fixed sentences are the view-model's constants and not literals
-  ## here: `RunInProgressText` is also what the per-row controls say in the
-  ## same state, and `NoRunHostText` is what `desktop_test_host` returns when
-  ## it is built without a dispatch. One string each, one place each.
-  if vm.inFlight.val:
-    RunInProgressText
-  elif vm.runAbsence.val.len > 0:
-    vm.runAbsence.val
-  elif vm.runTests.val.isNil:
-    NoRunHostText
-  else:
-    "Run the tests (nargo test)"
-
-proc rowDuration*(row: TestResultsRow): string =
-  ## Empty until the test has actually run. "0 ms" against a test nobody
-  ## started is a measurement the pane did not make.
-  if row.state == trsNotRun: ""
-  else: formatDurationMs(row.durationMs)
-
 # ---------------------------------------------------------------------------
 # Mock renderer — headless test DOM
 # ---------------------------------------------------------------------------
 
 type
-  RowActionHandlesMock = object
+  RowActionHandles[N] = object
     ## The two buttons of one row, kept so the shift effect can rewrite them
     ## in place rather than rebuilding the row. `row` is the value they were
     ## built for — the mode depends on `row.recordingId`, so recomputing the
     ## title needs the row and not just the id.
     row: TestResultsRow
-    openButton: MockNode
+    openButton: N
 
-proc applyOpenButtonMock(r: MockRenderer; vm: TestResultsVM;
-                         handle: RowActionHandlesMock) =
+proc applyOpenButton[R, N](r: R; vm: TestResultsVM;
+                          handle: RowActionHandles[N]) =
   ## The open button's four shift-sensitive faces, from ONE call to
   ## `openButtonMode` inside the VM's own accessors.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
   r.setAttribute(handle.openButton, "class", openButtonClass(vm, handle.row))
   r.setAttribute(handle.openButton, "title", openButtonTitle(vm, handle.row))
   r.setAttribute(handle.openButton, "aria-label",
@@ -217,16 +184,15 @@ proc applyOpenButtonMock(r: MockRenderer; vm: TestResultsVM;
   r.appendChild(handle.openButton,
                 r.createTextNode(openButtonMark(vm, handle.row)))
 
-proc renderRowMock(r: MockRenderer; vm: TestResultsVM; row: TestResultsRow;
-                   handle: var RowActionHandlesMock): MockNode =
+proc renderRow[R, N](r: R; vm: TestResultsVM; row: TestResultsRow;
+                     handle: var RowActionHandles[N]): N =
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild, setAttribute
   let mark = stateMark(row.state)
   let where = rowWhere(row)
   let duration = rowDuration(row)
   let message = row.message
-  var refreshButton: MockNode
-  var openButton: MockNode
-  var nameNode: MockNode
-  var whereNode: MockNode
+  var refreshButton, openButton, nameNode, whereNode: N
   let node = ui(r):
     tdiv(class = stateClass(row.state)):
       span(class = "test-results-mark"):
@@ -272,12 +238,12 @@ proc renderRowMock(r: MockRenderer; vm: TestResultsVM; row: TestResultsRow;
   r.setAttribute(refreshButton, "class", refreshButtonClass(vm))
   r.setAttribute(refreshButton, "title", refreshButtonTitle(vm, row))
   r.setAttribute(refreshButton, "aria-label", refreshButtonTitle(vm, row))
-  handle = RowActionHandlesMock(row: row, openButton: openButton)
+  handle = RowActionHandles[N](row: row, openButton: openButton)
   # UNTRACKED. This runs inside the structural effect, and the paint reads
   # `vm.shiftHeld`; a tracked read here makes the structural effect a
   # subscriber and every keypress rebuilds the row. See the header.
   let handleCopy = handle
-  untrack proc() = applyOpenButtonMock(r, vm, handleCopy)
+  untrack proc() = applyOpenButton[R, N](r, vm, handleCopy)
   if message.len > 0:
     let detail = ui(r):
       tdiv(class = "test-results-message"):
@@ -285,7 +251,7 @@ proc renderRowMock(r: MockRenderer; vm: TestResultsVM; row: TestResultsRow;
     r.appendChild(node, detail)
   node
 
-proc renderFailureLineMock(r: MockRenderer; line: string): MockNode =
+proc renderFailureLine[R, N](r: R; line: string): N =
   ## One run-level diagnostic, verbatim. Never truncated: the sentence a
   ## faulted run leaves is the only thing the pane can offer a reader who
   ## wants to know why, and it is the same text the BUILD pane shows in full.
@@ -293,191 +259,7 @@ proc renderFailureLineMock(r: MockRenderer; line: string): MockNode =
     tdiv(class = "test-results-failure-line"):
       text line
 
-proc renderTestResultsPanel*(r: MockRenderer; vm: TestResultsVM): MockNode =
-  var headlineNode: MockNode
-  var bodyContainer: MockNode
-  var failureNode: MockNode
-  var absenceNode: MockNode
-  var emptyContainer: MockNode
-
-  var runButton: MockNode
-  var openHandles: seq[RowActionHandlesMock] = @[]
-
-  let panel = ui(r):
-    tdiv(class = TestResultsContainerClass, tabIndex = "2"):
-      tdiv(class = "test-results-header"):
-        tdiv(ref = headlineNode, class = "test-results-headline"):
-          discard
-        tdiv(ref = runButton, class = "test-results-run-btn",
-             title = "Run the tests (nargo test)",
-             onclick = proc() = vm.startRun()):
-          text "\u25b6"
-      tdiv(ref = bodyContainer, class = "test-results-body"):
-        discard
-      tdiv(ref = failureNode, class = "test-results-failure hidden"):
-        discard
-      tdiv(ref = absenceNode, class = "test-results-absence hidden"):
-        discard
-      tdiv(ref = emptyContainer, class = "test-results-empty hidden"):
-        text EmptyStateText
-
-  createRenderEffect proc() =
-    let rows = vm.rows.val
-    let absence = vm.runAbsence.val
-    let failures = vm.runFailure.val
-
-    r.clearChildren(headlineNode)
-    r.appendChild(headlineNode, r.createTextNode(vm.headline.val))
-
-    r.setAttribute(runButton, "class", runButtonClass(vm))
-    r.setAttribute(runButton, "title", runButtonTitle(vm))
-
-    r.clearChildren(bodyContainer)
-    openHandles = @[]
-    for row in rows:
-      var handle: RowActionHandlesMock
-      let node = renderRowMock(r, vm, row, handle)
-      openHandles.add handle
-      r.appendChild(bodyContainer, node)
-
-    r.clearChildren(failureNode)
-    for line in failures:
-      r.appendChild(failureNode, renderFailureLineMock(r, line))
-    r.setAttribute(failureNode, "class",
-      if failures.len > 0: "test-results-failure"
-      else: "test-results-failure hidden")
-
-    r.clearChildren(absenceNode)
-    if absence.len > 0:
-      r.appendChild(absenceNode, r.createTextNode(absence))
-      r.setAttribute(absenceNode, "class", "test-results-absence")
-    else:
-      r.setAttribute(absenceNode, "class", "test-results-absence hidden")
-
-    if rows.len == 0:
-      r.setAttribute(emptyContainer, "class", "test-results-empty")
-    else:
-      r.setAttribute(emptyContainer, "class", "test-results-empty hidden")
-
-  # THE SHIFT EFFECT. Depends on `vm.shiftHeld` and NOTHING ELSE — `openHandles`
-  # is a plain `var`, so reading it creates no dependency and this effect does
-  # not re-run when the rows do (the structural effect above has already
-  # painted the current mode onto the buttons it just built).
-  createRenderEffect proc() =
-    discard vm.shiftHeld.val
-    for handle in openHandles:
-      applyOpenButtonMock(r, vm, handle)
-
-  panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
 when defined(js):
-
-  proc webElement(tag, cssClass: string): isonim_dom.Element =
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    n
-
-  proc webTextElement(tag, textValue, cssClass: string): isonim_dom.Element =
-    let n = webElement(tag, cssClass)
-    isonim_dom.appendChild(isonim_dom.Node(n),
-      isonim_dom.createTextNode(isonim_dom.document, cstring(textValue)))
-    n
-
-  proc clearWeb(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc setWebText(node: isonim_dom.Element; value: string) =
-    clearWeb(node)
-    if value.len > 0:
-      isonim_dom.appendChild(isonim_dom.Node(node),
-        isonim_dom.createTextNode(isonim_dom.document, cstring(value)))
-
-  type
-    RowActionHandlesWeb = object
-      ## The mock renderer's twin; see `RowActionHandlesMock`.
-      row: TestResultsRow
-      openButton: isonim_dom.Element
-
-  proc applyOpenButtonWeb(vm: TestResultsVM; handle: RowActionHandlesWeb) =
-    isonim_dom.setAttribute(handle.openButton, cstring"class",
-                            cstring(openButtonClass(vm, handle.row)))
-    isonim_dom.setAttribute(handle.openButton, cstring"title",
-                            cstring(openButtonTitle(vm, handle.row)))
-    isonim_dom.setAttribute(handle.openButton, cstring"aria-label",
-                            cstring(openButtonTitle(vm, handle.row)))
-    isonim_dom.setAttribute(handle.openButton, cstring"data-ct-open-mode",
-                            cstring($openButtonMode(vm, handle.row)))
-    setWebText(handle.openButton, openButtonMark(vm, handle.row))
-
-  proc renderRowWeb(vm: TestResultsVM; row: TestResultsRow;
-                    handle: var RowActionHandlesWeb): isonim_dom.Element =
-    let node = webElement("div", stateClass(row.state))
-    isonim_dom.setAttribute(node, cstring"data-ct-test-id",
-                            cstring(row.testId))
-    isonim_dom.setAttribute(node, cstring"data-ct-recording-id",
-                            cstring(row.recordingId))
-    # The mock renderer's twin, and for its reason: a second, independently
-    # produced witness that `⏵` executed nothing.
-    isonim_dom.setAttribute(node, cstring"data-ct-recorded-at",
-                            cstring(row.recordedAtText))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", stateMark(row.state),
-                                     "test-results-mark")))
-    # THE FULL NAME AND THE FULL PATH, ON HOVER — the mock renderer's twin.
-    # Both text columns ellipsis in a ~285px panel that now carries two
-    # controls, and truncation is only acceptable while the whole string is
-    # still recoverable.
-    let nameNode = webTextElement("span", row.name, "test-results-name")
-    isonim_dom.setAttribute(nameNode, cstring"title", cstring(row.selector))
-    isonim_dom.appendChild(isonim_dom.Node(node), isonim_dom.Node(nameNode))
-    let whereNode = webTextElement("span", rowWhere(row), "test-results-where")
-    if rowWhere(row).len > 0:
-      isonim_dom.setAttribute(whereNode, cstring"title", cstring(rowWhere(row)))
-    isonim_dom.appendChild(isonim_dom.Node(node), isonim_dom.Node(whereNode))
-    isonim_dom.appendChild(isonim_dom.Node(node),
-      isonim_dom.Node(webTextElement("span", rowDuration(row),
-                                     "test-results-duration")))
-
-    let actions = webElement("span", "test-results-actions")
-    let refreshButton = webTextElement("span", "⟳", refreshButtonClass(vm))
-    isonim_dom.setAttribute(refreshButton, cstring"title",
-                            cstring(refreshButtonTitle(vm, row)))
-    isonim_dom.setAttribute(refreshButton, cstring"aria-label",
-                            cstring(refreshButtonTitle(vm, row)))
-    # CAPTURED BY VALUE. `row` is an object, so each handler holds the row it
-    # was built for; a handler that re-read the row out of the VM would act on
-    # whatever had arrived since, which on a pane that rebuilds mid-run is a
-    # different test.
-    isonim_dom.addEventListener(isonim_dom.Node(refreshButton), cstring"click",
-      proc(ev: isonim_dom.Event) = vm.triggerRefresh(row))
-    isonim_dom.appendChild(isonim_dom.Node(actions),
-                           isonim_dom.Node(refreshButton))
-
-    let openButton = webElement("span", "test-results-open-btn")
-    isonim_dom.addEventListener(isonim_dom.Node(openButton), cstring"click",
-      proc(ev: isonim_dom.Event) = vm.triggerOpen(row))
-    isonim_dom.appendChild(isonim_dom.Node(actions),
-                           isonim_dom.Node(openButton))
-    isonim_dom.appendChild(isonim_dom.Node(node), isonim_dom.Node(actions))
-
-    handle = RowActionHandlesWeb(row: row, openButton: openButton)
-    # UNTRACKED, for the mock renderer's reason. See the header.
-    let handleCopy = handle
-    untrack proc() = applyOpenButtonWeb(vm, handleCopy)
-
-    if row.message.len > 0:
-      isonim_dom.appendChild(isonim_dom.Node(node),
-        isonim_dom.Node(webTextElement("div", row.message,
-                                       "test-results-message")))
-    node
-
   proc eventShiftKey(ev: isonim_dom.Event): bool
     {.importjs: "(#.shiftKey === true)".}
     ## `isonim/web/dom_api.Event` does not declare `shiftKey`, and this reads it
@@ -505,87 +287,85 @@ when defined(js):
     isonim_dom.addEventListener(docNode, cstring"mouseover",
       proc(ev: isonim_dom.Event) = vm.setShiftHeld(eventShiftKey(ev)))
 
-  proc renderTestResultsPanel*(r: WebRenderer;
-                               vm: TestResultsVM): isonim_dom.Element =
-    var headlineNode: isonim_dom.Element
-    var bodyContainer: isonim_dom.Element
-    var failureNode: isonim_dom.Element
-    var absenceNode: isonim_dom.Element
-    var emptyContainer: isonim_dom.Element
 
-    var runButton: isonim_dom.Element
-    var openHandles: seq[RowActionHandlesWeb] = @[]
+proc renderTestResultsPanel*[R, N](r: R; vm: TestResultsVM): N =
+  ## The Test Results panel, under any renderer (Shared-DOM-Front-Ends D3),
+  ## mounted on the desktop by `ui/panel_host`.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute, createTextNode
+  var headlineNode, bodyContainer, failureNode, absenceNode, emptyContainer,
+      runButton: N
+  var openHandles: seq[RowActionHandles[N]] = @[]
 
-    let panel = ui(r):
-      tdiv(class = TestResultsContainerClass, tabIndex = "2"):
-        tdiv(class = "test-results-header"):
-          tdiv(ref = headlineNode, class = "test-results-headline"):
-            discard
-          tdiv(ref = runButton, class = "test-results-run-btn",
-               title = "Run the tests (nargo test)",
-               onclick = proc() = vm.startRun()):
-            text "\u25b6"
-        tdiv(ref = bodyContainer, class = "test-results-body"):
+  let panel = ui(r):
+    tdiv(class = TestResultsContainerClass, tabIndex = "2"):
+      tdiv(class = "test-results-header"):
+        tdiv(ref = headlineNode, class = "test-results-headline"):
           discard
-        tdiv(ref = failureNode, class = "test-results-failure hidden"):
-          discard
-        tdiv(ref = absenceNode, class = "test-results-absence hidden"):
-          discard
-        tdiv(ref = emptyContainer, class = "test-results-empty hidden"):
-          text EmptyStateText
+        tdiv(ref = runButton, class = "test-results-run-btn",
+             title = RunTestsTitle,
+             onclick = proc() = vm.startRun()):
+          text RunButtonLabel
+      tdiv(ref = bodyContainer, class = "test-results-body"):
+        discard
+      tdiv(ref = failureNode, class = "test-results-failure hidden"):
+        discard
+      tdiv(ref = absenceNode, class = "test-results-absence hidden"):
+        discard
+      tdiv(ref = emptyContainer, class = "test-results-empty hidden"):
+        text EmptyStateText
 
-    createRenderEffect proc() =
-      let rows = vm.rows.val
-      let absence = vm.runAbsence.val
-      let failures = vm.runFailure.val
+  createRenderEffect proc() =
+    let rows = vm.rows.val
+    let absence = vm.runAbsence.val
+    let failures = vm.runFailure.val
 
-      setWebText(headlineNode, vm.headline.val)
-      isonim_dom.setAttribute(runButton, cstring"class",
-                              cstring(runButtonClass(vm)))
-      isonim_dom.setAttribute(runButton, cstring"title",
-                              cstring(runButtonTitle(vm)))
+    r.clearChildren(headlineNode)
+    r.appendChild(headlineNode, r.createTextNode(vm.headline.val))
 
-      clearWeb(bodyContainer)
-      openHandles = @[]
-      for row in rows:
-        var handle: RowActionHandlesWeb
-        let node = renderRowWeb(vm, row, handle)
-        openHandles.add handle
-        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
-                               isonim_dom.Node(node))
+    r.setAttribute(runButton, "class", runButtonClass(vm))
+    r.setAttribute(runButton, "title", runButtonTitle(vm))
 
-      clearWeb(failureNode)
-      for line in failures:
-        isonim_dom.appendChild(isonim_dom.Node(failureNode),
-          isonim_dom.Node(webTextElement("div", line,
-                                         "test-results-failure-line")))
-      isonim_dom.setAttribute(failureNode, cstring"class",
-        cstring(if failures.len > 0: "test-results-failure"
-                else: "test-results-failure hidden"))
+    r.clearChildren(bodyContainer)
+    openHandles = @[]
+    for row in rows:
+      var handle: RowActionHandles[N]
+      let node = renderRow[R, N](r, vm, row, handle)
+      openHandles.add handle
+      r.appendChild(bodyContainer, node)
 
-      setWebText(absenceNode, absence)
-      isonim_dom.setAttribute(absenceNode, cstring"class",
-        cstring(if absence.len > 0: "test-results-absence"
-                else: "test-results-absence hidden"))
+    r.clearChildren(failureNode)
+    for line in failures:
+      r.appendChild(failureNode, renderFailureLine[R, N](r, line))
+    r.setAttribute(failureNode, "class",
+      if failures.len > 0: "test-results-failure"
+      else: "test-results-failure hidden")
 
-      isonim_dom.setAttribute(emptyContainer, cstring"class",
-        cstring(if rows.len == 0: "test-results-empty"
-                else: "test-results-empty hidden"))
+    r.clearChildren(absenceNode)
+    if absence.len > 0:
+      r.appendChild(absenceNode, r.createTextNode(absence))
+      r.setAttribute(absenceNode, "class", "test-results-absence")
+    else:
+      r.setAttribute(absenceNode, "class", "test-results-absence hidden")
 
-    # THE SHIFT EFFECT, in place and without a rebuild. See the header for why
-    # replacing the node would dismiss the tooltip it is meant to update.
-    createRenderEffect proc() =
-      discard vm.shiftHeld.val
-      for handle in openHandles:
-        applyOpenButtonWeb(vm, handle)
+    if rows.len == 0:
+      r.setAttribute(emptyContainer, "class", "test-results-empty")
+    else:
+      r.setAttribute(emptyContainer, "class", "test-results-empty hidden")
 
-    installShiftTracking(vm)
+  # THE SHIFT EFFECT. Depends on `vm.shiftHeld` and NOTHING ELSE — `openHandles`
+  # is a plain `var`, so reading it creates no dependency and this effect does
+  # not re-run when the rows do (the structural effect above has already
+  # painted the current mode onto the buttons it just built).
+  createRenderEffect proc() =
+    discard vm.shiftHeld.val
+    for handle in openHandles:
+      applyOpenButton[R, N](r, vm, handle)
 
-    panel
+  # Shift arms re-recording on the open buttons; in a browser the key state
+  # is tracked on the document (see `installShiftTracking`).
+  when defined(js):
+    when N is isonim_dom.Element:
+      installShiftTracking(vm)
 
-  proc mountIsoNimTestResultsPanel*(container: isonim_dom.Element;
-                                    vm: TestResultsVM) =
-    let r = WebRenderer()
-    let panel = renderTestResultsPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container),
-                           isonim_dom.Node(panel))
+  panel

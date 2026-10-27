@@ -5,8 +5,12 @@
 ## preserving the legacy selector contract used by layout and GUI tests.
 
 import isonim/dsl/ui
-from isonim/core/computation import createRenderEffect
+import isonim/core/[signals, computation]
+import isonim/dsl/components
 import isonim/testing/mock_dom
+
+# The generic procs expand the DSL at their caller.
+export signals, computation, components
 
 when defined(js):
   import isonim/web/web_renderer
@@ -114,138 +118,91 @@ proc invokeContextMenu(callbacks: AutoHideSideStripCallbacks; index: int; x: int
   if not callbacks.onContextMenu.isNil:
     callbacks.onContextMenu(index, x, y)
 
-proc renderSideStripTab(
-    r: MockRenderer;
-    tab: AutoHideSideStripRecord;
-    index: int;
-    callbacks: AutoHideSideStripCallbacks): MockNode =
-  let cls = if tab.active: AutoHideSideStripTabActiveClass
-            else: AutoHideSideStripTabClass
-  result = ui(r):
-    tdiv(
-        class = cls,
-        onclick = proc() = callbacks.invokeSelect(index)):
-      span(class = AutoHideSideStripTabLabelClass):
-        text tab.title
-  if callbacks.showsHide(tab):
-    let hide = ui(r):
-      span(class = AutoHideSideStripTabHideClass, role = "button",
-          title = HideTabLabel, `aria-label` = HideTabLabel,
-          onclick = proc() = callbacks.invokeHide(index))
-    r.appendChild(result, hide)
-
-proc renderCollapsedLine(
-    r: MockRenderer;
-    callbacks: AutoHideSideStripCallbacks): MockNode =
-  ui(r):
-    tdiv(
-        class = AutoHideCollapsedStripLineClass,
-        onclick = proc() = callbacks.invokeCollapsedSelect(),
-        onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
-
 when defined(js):
   proc stopPropagation(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
   proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
   proc eventClientX(ev: isonim_dom.Event): int {.importcpp: "(#.clientX || 0)".}
   proc eventClientY(ev: isonim_dom.Event): int {.importcpp: "(#.clientY || 0)".}
 
-  proc renderSideStripTab(
-      r: WebRenderer;
-      tab: AutoHideSideStripRecord;
-      index: int;
-      callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
-    let cls = if tab.active: AutoHideSideStripTabActiveClass
-              else: AutoHideSideStripTabClass
-    # mouseenter on the tab triggers the 200ms hover-preview timer.
-    var tabEl: isonim_dom.Element
-    result = ui(r):
-      tdiv(ref = tabEl,
-           class = cls,
-           onclick = proc() = callbacks.invokeSelect(index)):
-        span(class = AutoHideSideStripTabLabelClass):
-          text tab.title
-    if callbacks.showsHide(tab):
-      var hideEl: isonim_dom.Element
-      let hide = ui(r):
-        span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button",
-            title = HideTabLabel, `aria-label` = HideTabLabel)
-      # Its own listener, stopped there: the tab's click would reopen the
-      # panel the × just closed.
-      isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+proc renderSideStripTab[R, N](
+    r: R;
+    tab: AutoHideSideStripRecord;
+    index: int;
+    callbacks: AutoHideSideStripCallbacks): N =
+  let cls = if tab.active: AutoHideSideStripTabActiveClass
+            else: AutoHideSideStripTabClass
+  var tabEl: N
+  result = ui(r):
+    tdiv(ref = tabEl,
+         class = cls,
+         onclick = proc() = callbacks.invokeSelect(index)):
+      span(class = AutoHideSideStripTabLabelClass):
+        text tab.title
+  if callbacks.showsHide(tab):
+    var hideEl: N
+    let hide = ui(r):
+      span(ref = hideEl, class = AutoHideSideStripTabHideClass, role = "button",
+          title = HideTabLabel, `aria-label` = HideTabLabel,
+          onclick = proc() = callbacks.invokeHide(index))
+    r.appendChild(result, hide)
+    when defined(js):
+      when N is isonim_dom.Element:
+        # Stopped here: the tab's click would reopen the panel the × just
+        # closed.
+        isonim_dom.addEventListener(isonim_dom.Node(hideEl), cstring"click",
+          proc(ev: isonim_dom.Event) =
+            ev.preventDefault()
+            ev.stopPropagation())
+  when defined(js):
+    when N is isonim_dom.Element:
+      # mouseenter on the tab triggers the 200ms hover-preview timer.
+      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
+        proc(ev: isonim_dom.Event) =
+          callbacks.invokeHoverEnter(index))
+      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
+        proc(ev: isonim_dom.Event) =
+          callbacks.invokeHoverLeave(index))
+      isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
         proc(ev: isonim_dom.Event) =
           ev.preventDefault()
           ev.stopPropagation()
-          callbacks.invokeHide(index))
-      discard isonim_dom.appendChild(isonim_dom.Node(result), isonim_dom.Node(hide))
-    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseenter",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeHoverEnter(index))
-    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"mouseleave",
-      proc(ev: isonim_dom.Event) =
-        callbacks.invokeHoverLeave(index))
-    isonim_dom.addEventListener(isonim_dom.Node(tabEl), cstring"contextmenu",
-      proc(ev: isonim_dom.Event) =
-        ev.preventDefault()
-        ev.stopPropagation()
-        callbacks.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
+          callbacks.invokeContextMenu(index, ev.eventClientX(), ev.eventClientY()))
 
-  proc renderCollapsedLine(
-      r: WebRenderer;
-      callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
-    ui(r):
-      tdiv(
-          class = AutoHideCollapsedStripLineClass,
-          onclick = proc() = callbacks.invokeCollapsedSelect(),
-          onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
+proc renderCollapsedLine[R, N](
+    r: R;
+    callbacks: AutoHideSideStripCallbacks): N =
+  ui(r):
+    tdiv(
+        class = AutoHideCollapsedStripLineClass,
+        onclick = proc() = callbacks.invokeCollapsedSelect(),
+        onmouseenter = proc() = callbacks.invokeCollapsedHoverEnter())
 
-proc renderModeButton(r: MockRenderer; callbacks: AutoHideSideStripCallbacks): MockNode =
+proc renderModeButton[R, N](r: R; callbacks: AutoHideSideStripCallbacks): N =
   ui(r):
     button(class = "auto-hide-mode-button", `type` = "button",
         title = callbacks.modeLabel, `aria-label` = callbacks.modeLabel,
         onclick = proc() = callbacks.onToggleMode()):
       text callbacks.modeGlyph
 
-when defined(js):
-  proc renderModeButton(r: WebRenderer; callbacks: AutoHideSideStripCallbacks): isonim_dom.Element =
-    ui(r):
-      button(class = "auto-hide-mode-button", `type` = "button",
-          title = callbacks.modeLabel, `aria-label` = callbacks.modeLabel,
-          onclick = proc() = callbacks.onToggleMode()):
-        text callbacks.modeGlyph
-
-proc renderAutoHideSideStripPanel*(
-    r: MockRenderer;
+proc renderAutoHideSideStripPanel*[R, N](
+    r: R;
     tabs: seq[AutoHideSideStripRecord];
     collapsed: bool;
     callbacks: AutoHideSideStripCallbacks =
-      AutoHideSideStripCallbacks()): MockNode =
+      AutoHideSideStripCallbacks()): N =
+  ## The side strip, for every renderer. `tabs` is a value the caller
+  ## re-derives and redraws (`renderAutoHideSideStripInto`).
   result = ui(r):
     tdiv(class = sideStripClass(tabs.len > 0, collapsed and tabs.len > 0))
   if collapsed:
-    r.appendChild(result, renderCollapsedLine(r, callbacks))
+    r.appendChild(result, renderCollapsedLine[R, N](r, callbacks))
   else:
     for i, tab in tabs:
-      r.appendChild(result, renderSideStripTab(r, tab, i, callbacks))
+      r.appendChild(result, renderSideStripTab[R, N](r, tab, i, callbacks))
     if tabs.len > 0 and not callbacks.onToggleMode.isNil:
-      r.appendChild(result, renderModeButton(r, callbacks))
+      r.appendChild(result, renderModeButton[R, N](r, callbacks))
 
 when defined(js):
-  proc renderAutoHideSideStripPanel*(
-      r: WebRenderer;
-      tabs: seq[AutoHideSideStripRecord];
-      collapsed: bool;
-      callbacks: AutoHideSideStripCallbacks =
-        AutoHideSideStripCallbacks()): isonim_dom.Element =
-    result = ui(r):
-      tdiv(class = sideStripClass(tabs.len > 0, collapsed and tabs.len > 0))
-    if collapsed:
-      r.appendChild(result, renderCollapsedLine(r, callbacks))
-    else:
-      for i, tab in tabs:
-        r.appendChild(result, renderSideStripTab(r, tab, i, callbacks))
-      if tabs.len > 0 and not callbacks.onToggleMode.isNil:
-        r.appendChild(result, renderModeButton(r, callbacks))
-
   proc renderAutoHideSideStripInto*(
       r: WebRenderer;
       container: isonim_dom.Element;
@@ -270,7 +227,8 @@ when defined(js):
         cls.add(" reveal-closing")
     isonim_dom.setAttribute(container, cstring"class", cstring cls)
 
-    let panel = renderAutoHideSideStripPanel(r, tabs, collapsed, callbacks)
+    let panel = renderAutoHideSideStripPanel[WebRenderer, isonim_dom.Element](
+      r, tabs, collapsed, callbacks)
     let panelNode = isonim_dom.Node(panel)
     while not isonim_dom.isNodeNil(panelNode.firstChild):
       discard isonim_dom.appendChild(containerNode, panelNode.firstChild)

@@ -35,9 +35,11 @@
 # lock` refuses on any dirty sibling (correctly — "a lock recorded over
 # uncommitted changes would not reproduce the tree it claims"), and where
 # `.repro/manifests` is not a git checkout the lock is generated and then
-# silently dropped. `ci/verdict/workspace-lock-freshness.sh` is the alarm for
-# that condition and `.github/workflows/publish-workspace-lock.yml` is the
-# repair; neither is this script's business.
+# silently dropped. The repair belongs to the workspace's pre-push gate, which
+# publishes the record; it is not this script's business. (Since
+# reprobuild-specs Unified-Locking-And-Hooks.md §14 `clone-siblings` reads the
+# commit's own committed `repro.lock` by default rather than that record, and
+# `ci/verdict/workspace-lock-freshness.sh` now checks that lock.)
 #
 # ## Where the SHAs come from: flake.lock, which is already correct
 #

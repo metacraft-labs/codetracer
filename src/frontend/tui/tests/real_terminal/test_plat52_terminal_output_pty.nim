@@ -117,7 +117,7 @@ proc press(sess: var TuiTestSession; row, col: int) =
   sess.mouse(0, row, col, release = true)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -314,10 +314,12 @@ suite "PLAT-52: the Terminal Output pane on a real terminal — the screen":
     var compared = 0
     for step in answers["screen"]["drag"]:
       let target = step["ticks"].getInt
-      # `:goto <tick>` — the command line's seek.
-      sess.send(":")
-      sleep(100)
-      sess.send("goto " & $target)
+      # `:goto <tick>` — the command line's seek, through the palette (`F1`,
+      # the CUA base's; a `:` typed into it is a command line, and a bare `:`
+      # means nothing with the Terminal Output pane focused).
+      sess.send("\eOP")
+      sleep(150)
+      sess.send(":goto " & $target)
       sleep(100)
       sess.send("\r")
       let deadline = getMonoTime() + initDuration(milliseconds = 60000)

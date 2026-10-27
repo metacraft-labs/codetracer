@@ -7,8 +7,9 @@
 ## Karax ``method render`` plus jstree to draw the tree, and a parallel
 ## ``diff-files-list`` div when ``data.startOptions.diff`` was
 ## populated.  Section §1.71 (mission goal #3) replaces the Karax
-## render with an IsoNim view; the rich jstree affordances (animated
-## open/close, contextmenu plugin, search plugin) remain a follow-up.
+## render with an IsoNim view.  The row context menu (Create, Rename,
+## Delete, Edit) is decided here — see "Context menu" below; jstree's
+## animated open/close and search plugin have no counterpart yet.
 ##
 ## Reactive surface:
 ## - ``rootEntry``           — top-level ``FilesystemEntryNode`` (the
@@ -40,6 +41,12 @@
 ##                             ``EditorService.filesystem`` assignment).
 ## - ``clearRoot``           — wipe the tree (used during a session
 ##                             switch / fresh debugging run).
+## - ``failLoad``            — end a root load that failed: ``lsError``
+##                             plus the reason, so the pane never waits
+##                             forever (GitHub #785).
+## - ``showNoProjectFolder``  — the session has no project folder (New
+##                             File): an empty project, not a load to
+##                             wait for.
 ## - ``toggleExpanded``      — toggle a path's expansion state.  No-op
 ##                             when the path is not present in the
 ##                             tree.
@@ -57,6 +64,8 @@
 ## conversion noise.
 
 import std/[sets, sequtils]
+import std/json
+import ./action_sink
 
 import isonim/core/[signals, computation, owner]
 # Selective import: ``isonim/core/batch`` re-exports a ``HashSet`` that
@@ -66,15 +75,104 @@ import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
 import ../../../common/trace_source_paths
+import ../../../common/file_entry_names
+from ./edit_mode_toolbar import ToolbarMode, isEditing
+export ToolbarMode
+export file_entry_names
+
+const
+  ReadOnlySourcesReason* = "A recording's sources are read-only"
+    ## Create, Rename and Delete in a replay session: the tree is the
+    ## recording's source set, and changing it would make the sources
+    ## disagree with the recording.
+  NotOnDiskReason* = "Not a folder on disk"
+    ## Create, Rename and Delete on the synthetic "source folders" container
+    ## (the only row with an empty ``path``).
+  OnlyFilesOpenReason* = "Only a file can be opened in the editor"
+    ## Edit on a folder (and on the container).
+  NoFileOperationsReason* = "This front end cannot change files"
+    ## Create, Rename and Delete where no index process carries them out
+    ## (the web IDE).
+  OpenedFolderRowReason* =
+    "The opened folder cannot be renamed or deleted from the tree"
+    ## Rename and Delete on the opened folder's own row.
+
+type
+  FileTreeHostFacts* = object
+    ## The facts the context menu depends on that the ViewModel cannot see:
+    ## the bridge (``ui/filesystem``) supplies them.
+    layout*: ToolbarMode
+      ## The session's layout (``data.ui.mode``, mirrored).
+    openedFolder*: string
+      ## The folder the session opened in edit mode, whose contents the
+      ## tree shows; ``""`` when the tree is a recording's source set, or
+      ## the session has no folder.
+    hasIndexProcess*: bool
+      ## Whether something answers Create, Rename and Delete. False on a
+      ## front end with no index process (the web IDE).
+    canTrash*: bool
+      ## Whether the index process can move a path to the trash.
+
+type
+  FileTreeAction* = enum
+    ## The Files pane's context-menu entries, in the order the menu lists
+    ## them.
+    ftaCreate = "Create"
+    ftaRename = "Rename"
+    ftaDelete = "Delete"
+    ftaEdit = "Edit"
+
+  FileTreeMenuEntry* = object
+    ## One entry of a row's context menu, renderer-agnostic. The web view
+    ## turns it into a ``ContextMenuItem`` for ``showContextMenu``.
+    action*: FileTreeAction
+    label*: string
+    disabled*: bool
+    disabledReason*: string
+      ## Why the entry cannot act, shown as its sublabel; ``""`` when it is
+      ## enabled.
+    run*: proc() {.closure.}
+      ## What choosing the entry does; ``nil`` when it is disabled.
+
+  FileTreeNameEditKind* = enum
+    fneNone      ## no name field is open
+    fneCreate    ## a new file's name, first in ``folder``
+    fneRename    ## the new name of the entry at ``path``
+
+  FileTreeNameEdit* = object
+    ## The inline name field Create and Rename open in the tree.
+    kind*: FileTreeNameEditKind
+    folder*: string
+      ## The folder the name is in: Create's target folder, or the renamed
+      ## entry's parent.
+    path*: string
+      ## The entry being renamed; ``""`` for Create.
+    name*: string
+      ## The name the field opened with, or the name last refused.
+    error*: string
+      ## Why the last name was refused; ``""`` when none was.
 
 type
   FilesystemVM* = ref object of ViewModel
     ## Reactive state for the Filesystem panel.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
 
     # -- Mutable state --
     rootEntry*: Signal[FilesystemEntryNode]
     loadingState*: Signal[LoadingState]
+    loadError*: Signal[string]
+      ## Why the last root load failed, when ``loadingState`` is ``lsError``;
+      ## ``""`` otherwise.  The view shows it in place of "Loading...".
+    noProjectFolder*: Signal[bool]
+      ## True while the session has NO project folder (Welcome screen → New
+      ## File).  The tree is then empty because there is nothing to list, not
+      ## because a load is outstanding, and the view's empty state says so
+      ## ("No project folder is open.") instead of "No filesystem loaded
+      ## yet.", which reads as a load still to come.  Set only by
+      ## ``showNoProjectFolder``; every other root transition clears it.
     expandedPaths*: Signal[HashSet[string]]
     diffEntries*: Signal[seq[FilesystemDiffEntry]]
     onOpenFile*: proc(path: string)
@@ -84,6 +182,44 @@ type
     onFolderExpanded*: proc(path: string)
       ## Called when a folder is expanded. Used by the legacy bridge to
       ## load subdirectory content partially from the index process.
+
+    # -- Context menu (Filesystem-Pane.md § "Context menu") --
+    hostFacts*: proc(): FileTreeHostFacts
+      ## What the session and the front end are, asked each time a menu
+      ## opens, so a layout switch needs no notification. ``nil`` reads as
+      ## ``FileTreeHostFacts()``: a replay layout, no opened folder, nothing
+      ## to carry the operations out, no trash.
+    onCreateFile*: proc(folder, name: string)
+      ## Ask the index process to create the empty file ``name`` in
+      ## ``folder``.
+    onRenamePath*: proc(path, newName: string)
+      ## Ask the index process to rename the entry at ``path``.
+    onDeletePath*: proc(path: string)
+      ## Ask the index process to move the entry at ``path`` to the trash.
+    lastContextMenu*: seq[FileTreeMenuEntry]
+      ## The menu the last right-click opened, for the headless tests (the
+      ## web view hands the same entries to ``showContextMenu``). A plain
+      ## field, not a signal: nothing reacts to it, and its entries hold
+      ## closures, which a mirror session cannot carry
+      ## (``sync/synced_signals`` skips such a signal, and
+      ## ``test_session_mirroring`` holds that list to the one it has).
+    nameEdit*: Signal[FileTreeNameEdit]
+      ## The open name field, if any.
+    nameEditDraft*: string
+      ## What the open field holds as the user types. Deliberately not a
+      ## signal: typing must not rebuild the tree. The view writes it on
+      ## every input and reads it whenever it rebuilds the field (a lazy
+      ## load re-renders the tree while the field is open), so a rebuild
+      ## keeps the typed text.
+    confirmsDelete*: bool
+      ## Whether Delete asks first (Filesystem-Pane.md § "Delete asks
+      ## first"): the terminal and GPUI set it, and the menu's Delete then
+      ## only names the entry in ``pendingDelete``; ``confirmDelete`` sends
+      ## it. False on the desktop, whose Delete is sent at once.
+    pendingDelete*: string
+      ## The entry Delete is asking about, ``""`` when it asks about none. A
+      ## plain field for ``lastContextMenu``'s reason: nothing reacts to it,
+      ## the front-end that asks reads it.
 
     # -- Derived state --
     isEmpty*: Memo[bool]
@@ -120,6 +256,15 @@ proc emptyEntry*(): FilesystemEntryNode =
     children: @[],
   )
 
+proc isEmptyRoot*(root: FilesystemEntryNode): bool =
+  ## Does ``root`` hold nothing to show?  True for the empty placeholder
+  ## (``emptyEntry``) and for a synthetic container — the "source
+  ## folders" group ``loadFilesystem`` builds, whose ``path`` is empty
+  ## because it is not a folder on disk — that came back with no
+  ## children.  A load that found nothing must end on the empty state,
+  ## not on one bare container row (GitHub #785).
+  root.children.len == 0 and (root.text.len == 0 or root.path.len == 0)
+
 proc collectSmartExpansionPaths(node: FilesystemEntryNode; paths: var HashSet[string]) =
   ## Recursively collect folder paths where node has exactly one child and that
   ## child is also a folder.
@@ -142,10 +287,16 @@ proc collectActiveFileAncestors*(node: FilesystemEntryNode;
   ##   whose ``path`` is empty; it must be descended through but is not
   ##   itself expandable,
   ## - a self-contained trace's tree is rooted at the recorded source
-  ##   folder, not at the filesystem root,
+  ##   folder, not at the filesystem root, and when its roots are payload
+  ##   folders (a Noir recording's `src`) its nodes carry paths RELATIVE to
+  ##   the payload while ``target`` is absolute (`isTreeAncestorOf`),
   ## - folders that are still lazy "Loading..." stubs carry no children
   ##   yet, and the walk must simply stop there (the caller re-runs once
-  ##   the stub is filled).
+  ##   the stub is filled).  That is every folder below a root's own
+  ##   entries until it is expanded: the index process lists one level
+  ##   per load (`index/files.FilesystemLoadDepth`), for a trace payload
+  ##   as for the live disk, so revealing a file N folders below a root
+  ##   takes N round-trips.
   ##
   ## Root-first order matters: expanding an ancestor is what triggers
   ## the lazy load of its children, so parents must be expanded before
@@ -153,7 +304,10 @@ proc collectActiveFileAncestors*(node: FilesystemEntryNode;
   if target.len == 0:
     return
 
-  let isRealAncestor = node.path.len > 0 and isAncestorPathOf(node.path, target)
+  # `isTreeAncestorOf`, not `isAncestorPathOf`: an imported trace's nodes
+  # carry paths relative to its payload (`src`, `src/sub`) while `target`
+  # is the absolute path the debugger reports.
+  let isRealAncestor = node.path.len > 0 and isTreeAncestorOf(node.path, target)
   # A node with an empty path is the synthetic container root — descend
   # into it unconditionally, since its children carry the real paths.
   let isSyntheticContainer = node.path.len == 0
@@ -177,6 +331,8 @@ proc setRoot*(vm: FilesystemVM; root: FilesystemEntryNode) =
   ## tree as a side effect.
   vm.rootEntry.val = root
   vm.loadingState.val = lsIdle
+  vm.loadError.val = ""
+  vm.noProjectFolder.val = false
 
   # Perform smart auto-expansion for single-child folders on load
   var paths = vm.expandedPaths.val
@@ -188,12 +344,57 @@ proc clearRoot*(vm: FilesystemVM) =
   ## call ``isEmpty`` is true so the empty-state placeholder shows.
   vm.rootEntry.val = emptyEntry()
   vm.loadingState.val = lsLoading
+  vm.loadError.val = ""
+  vm.noProjectFolder.val = false
+  # A name field belongs to the tree it was opened in.
+  vm.nameEditDraft = ""
+  vm.nameEdit.val = FileTreeNameEdit()
+
+proc failLoad*(vm: FilesystemVM; reason: string) =
+  ## End a root load that failed.  The index process answers every root
+  ## load on ``CODETRACER::filesystem-loaded``, with the tree or with an
+  ## ``error`` naming the reason it has none; this is the second answer.
+  ## Without it the pane had no state to end in but the ``lsLoading`` it
+  ## starts in, and showed "Loading..." for good (GitHub #785).
+  ##
+  ## The tree is dropped: whatever it held belonged to an earlier load.
+  ## The next ``setRoot`` clears the failure; a ``clearRoot`` (session
+  ## reset) puts the pane back to waiting.
+  vm.rootEntry.val = emptyEntry()
+  vm.loadError.val = if reason.len > 0: reason
+                     else: "The file tree could not be loaded."
+  vm.loadingState.val = lsError
+  vm.noProjectFolder.val = false
+
+proc showNoProjectFolder*(vm: FilesystemVM) =
+  ## The session has no project folder: show an EMPTY PROJECT.
+  ##
+  ## `Welcome-Screen.md` §"New file, and what it creates": *"The session's
+  ## folder is empty, so the Files panel shows an empty project rather than
+  ## a tree"*.  That is a settled answer, not a load in flight — there is no
+  ## folder to walk and nothing will ever answer a root load — so the state
+  ## is ``lsIdle`` with no tree, and ``noProjectFolder`` tells the view to
+  ## name the reason (the same "No project folder is open." the Test
+  ## Results and Constraints panes show) rather than the generic "No
+  ## filesystem loaded yet.", which promises a tree that is not coming.
+  ##
+  ## The tree is dropped: whatever the VM held was from before the session
+  ## became folderless (a root an earlier load left), and none of it is this
+  ## session's project.  The expanded folders are left alone, as
+  ## ``setRoot`` leaves them.
+  vm.rootEntry.val = emptyEntry()
+  vm.loadError.val = ""
+  vm.loadingState.val = lsIdle
+  vm.noProjectFolder.val = true
 
 proc toggleExpanded*(vm: FilesystemVM; path: string) =
   ## Toggle ``path``'s expanded state.  Folders not yet in the
   ## expanded set become expanded; folders already expanded collapse.
   ## File paths are silently allowed (a future click handler may key
   ## on them too).
+  if vm.actionSink.forwards("fileTree", "toggleExpanded",
+      %*{"path": path}):
+    return
   var current = vm.expandedPaths.val
   if path in current:
     current.excl(path)
@@ -205,6 +406,8 @@ proc toggleExpanded*(vm: FilesystemVM; path: string) =
 
 proc expandPath*(vm: FilesystemVM; path: string) =
   ## Mark ``path`` as expanded.  Idempotent.
+  if vm.actionSink.forwards("fileTree", "expandPath", %*{"path": path}):
+    return
   var current = vm.expandedPaths.val
   if path in current:
     return
@@ -215,6 +418,9 @@ proc expandPath*(vm: FilesystemVM; path: string) =
 
 proc collapsePath*(vm: FilesystemVM; path: string) =
   ## Mark ``path`` as collapsed.  Idempotent.
+  if vm.actionSink.forwards("fileTree", "collapsePath",
+      %*{"path": path}):
+    return
   var current = vm.expandedPaths.val
   if path notin current:
     return
@@ -257,6 +463,9 @@ proc expandToFile*(vm: FilesystemVM; filePath: string) =
   ## Deeper ancestors that are still behind a stub become reachable when
   ## the requested content arrives and ``setRoot`` re-runs the effect in
   ## ``createFilesystemVM``.
+  if vm.actionSink.forwards("fileTree", "expandToFile",
+      %*{"filePath": filePath}):
+    return
   if filePath.len == 0:
     return
   var ancestors: seq[string] = @[]
@@ -266,9 +475,361 @@ proc expandToFile*(vm: FilesystemVM; filePath: string) =
 
 proc openFile*(vm: FilesystemVM; path: string) =
   ## Open a file entry through the installed editor bridge.
+  if vm.actionSink.forwards("fileTree", "openFile", %*{"path": path}):
+    return
   if path.len == 0 or vm.onOpenFile.isNil:
     return
   vm.onOpenFile(path)
+
+# ---------------------------------------------------------------------------
+# Context menu
+# ---------------------------------------------------------------------------
+
+#
+# codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Context menu".
+# Right-clicking a row lists Create, Rename, Delete and Edit — always all
+# four, always in that order, so each is in the same place on every row. An
+# entry that cannot act is disabled with its reason, never left out. The
+# decisions live here so every renderer shares them; the view only binds
+# ``contextmenu`` and draws the name field, and the bridge
+# (``ui/filesystem``) carries the requests to the index process.
+
+type TreeLocation = object
+  found: bool
+  entry: FilesystemEntryNode
+  hasParent: bool
+  parent: FilesystemEntryNode
+
+proc locate(node: FilesystemEntryNode; path: string; loc: var TreeLocation) =
+  ## Find the row whose ``path`` is ``path``, and the row it is listed
+  ## under. ``path`` must not be empty: the empty path names the synthetic
+  ## container and the "Loading..." stubs alike.
+  for child in node.children:
+    if loc.found:
+      return
+    if child.path == path:
+      loc = TreeLocation(found: true, entry: child, hasParent: true,
+                         parent: node)
+      return
+    locate(child, path, loc)
+
+proc locateEntry(vm: FilesystemVM; path: string): TreeLocation =
+  if path.len == 0:
+    return
+  let root = vm.rootEntry.val
+  if root.path == path:
+    return TreeLocation(found: true, entry: root)
+  locate(root, path, result)
+
+proc parentDirOf(path: string): string =
+  ## The folder part of ``path``, for an entry whose parent row is not in
+  ## the tree. Both separators count: a Windows tree's paths use ``\``.
+  for i in countdown(path.high, 0):
+    if path[i] == '/' or path[i] == '\\':
+      return (if i == 0: path[0 .. 0] else: path[0 ..< i])
+  ""
+
+proc diskFolderOf(loc: TreeLocation): string =
+  ## The folder on disk the entry at ``loc`` is listed in, or ``""`` when
+  ## its row in the tree is the synthetic container (or nothing): then the
+  ## tree has no folder to put a new file in or to reload.
+  if loc.hasParent:
+    loc.parent.path
+  else:
+    ""
+
+proc factsOf(vm: FilesystemVM): FileTreeHostFacts =
+  if vm.hostFacts.isNil: FileTreeHostFacts() else: vm.hostFacts()
+
+proc treeIsOpenedFolder*(facts: FileTreeHostFacts): bool =
+  ## Edit mode in the spec's sense: an editing layout
+  ## (``edit_mode_toolbar.isEditing`` — Edit, Quick Edit, Interactive Edit)
+  ## whose tree is the opened folder. A replay session switched to the Edit
+  ## layout keeps its recording's tree and is still a replay.
+  facts.layout.isEditing and facts.openedFolder.len > 0
+
+proc menuEntry(action: FileTreeAction; reason: string;
+               run: proc()): FileTreeMenuEntry =
+  FileTreeMenuEntry(action: action, label: $action,
+                    disabled: reason.len > 0, disabledReason: reason,
+                    run: (if reason.len > 0: nil else: run))
+
+proc startCreate*(vm: FilesystemVM; folder: string)
+proc startRename*(vm: FilesystemVM; path: string)
+proc requestDelete*(vm: FilesystemVM; path: string)
+  ## Forward declarations: the menu's entries run them.
+
+proc fileTreeMenu*(vm: FilesystemVM; path: string): seq[FileTreeMenuEntry] =
+  ## The context menu of the row at ``path`` (``""``: the synthetic
+  ## container). Always the four entries in the spec's order.
+  ##
+  ## Where several reasons apply, the first of these is shown: "Not a folder
+  ## on disk" (the spec makes it win over every other); a replay's
+  ## read-only sources; no index process to carry the operation out; the
+  ## opened folder's own row (Rename, Delete); no trash (Delete).
+  let facts = vm.factsOf()
+  let loc = vm.locateEntry(path)
+  let onDisk = loc.found and loc.entry.path.len > 0
+  let isFolder = onDisk and loc.entry.isFolder
+  let createFolder =
+    if isFolder: loc.entry.path
+    elif onDisk: diskFolderOf(loc)
+    else: ""
+  let writeReason =
+    if not onDisk: NotOnDiskReason
+    elif not treeIsOpenedFolder(facts): ReadOnlySourcesReason
+    elif not facts.hasIndexProcess: NoFileOperationsReason
+    else: ""
+  let isOpenedFolderRow =
+    # `ct edit <dir>` names the folder with a trailing separator.
+    onDisk and isSamePath(loc.entry.path, facts.openedFolder)
+  let renameReason =
+    if writeReason.len > 0: writeReason
+    elif isOpenedFolderRow: OpenedFolderRowReason
+    else: ""
+  let createReason =
+    if writeReason.len > 0: writeReason
+    elif createFolder.len == 0: NotOnDiskReason
+    else: ""
+  let deleteReason =
+    if renameReason.len > 0: renameReason
+    elif not facts.canTrash: NoTrashReason
+    else: ""
+  let editReason = if onDisk and not isFolder: "" else: OnlyFilesOpenReason
+  let target = path
+  result = @[
+    menuEntry(ftaCreate, createReason,
+      proc() = vm.startCreate(createFolder)),
+    menuEntry(ftaRename, renameReason,
+      proc() = vm.startRename(target)),
+    menuEntry(ftaDelete, deleteReason,
+      proc() = vm.requestDelete(target)),
+    menuEntry(ftaEdit, editReason,
+      proc() = vm.openFile(target)),
+  ]
+
+proc openFileTreeMenu*(vm: FilesystemVM; path: string): seq[FileTreeMenuEntry] =
+  ## A right-click on the row at ``path``: build its menu and keep it
+  ## in ``lastContextMenu``.
+  result = vm.fileTreeMenu(path)
+  vm.lastContextMenu = result
+
+proc cancelNameEdit*(vm: FilesystemVM) =
+  ## Close the name field without acting: Escape, or leaving the field.
+  vm.nameEditDraft = ""
+  vm.nameEdit.val = FileTreeNameEdit()
+
+proc requestDelete*(vm: FilesystemVM; path: string) =
+  ## The menu's Delete on the row at ``path``. Where Delete asks first
+  ## (``confirmsDelete``) it only records the question, and the front-end
+  ## asks it; otherwise the request is sent.
+  if path.len == 0:
+    return
+  if vm.confirmsDelete:
+    vm.pendingDelete = path
+  elif not vm.onDeletePath.isNil:
+    vm.onDeletePath(path)
+
+proc confirmDelete*(vm: FilesystemVM): bool =
+  ## The user answered yes: send the Delete that was asked about. False when
+  ## nothing was being asked.
+  let path = vm.pendingDelete
+  vm.pendingDelete = ""
+  if path.len == 0:
+    return false
+  if not vm.onDeletePath.isNil:
+    vm.onDeletePath(path)
+  true
+
+proc cancelDelete*(vm: FilesystemVM) =
+  ## The user answered no: nothing is sent.
+  vm.pendingDelete = ""
+
+proc entryNameOf*(path: string): string =
+  ## The last component of ``path`` (either separator), as a row shows it.
+  for i in countdown(path.high, 0):
+    if path[i] == '/' or path[i] == '\\':
+      return path[i + 1 .. ^1]
+  path
+
+proc nameEditPrompt*(edit: FileTreeNameEdit): string =
+  ## What a front-end without an inline field says while the name field is
+  ## open: which folder the new file goes in, or which entry is renamed.
+  case edit.kind
+  of fneCreate: "New file in " & entryNameOf(edit.folder)
+  of fneRename: "Rename " & entryNameOf(edit.path)
+  of fneNone: ""
+
+proc deletePrompt*(path: string): string =
+  ## The question Delete asks (``confirmsDelete``).
+  "Move \"" & entryNameOf(path) & "\" to the trash?"
+
+proc startCreate*(vm: FilesystemVM; folder: string) =
+  ## Open an empty name field as the first child of ``folder`` and expand
+  ## the folder (which loads it, when it is still a "Loading..." stub).
+  if folder.len == 0:
+    return
+  vm.nameEditDraft = ""
+  vm.nameEdit.val = FileTreeNameEdit(kind: fneCreate, folder: folder)
+  vm.expandPath(folder)
+
+proc startRename*(vm: FilesystemVM; path: string) =
+  ## Replace the label of the row at ``path`` with a field holding its
+  ## current name.
+  let loc = vm.locateEntry(path)
+  if not loc.found:
+    return
+  let folder = diskFolderOf(loc)
+  vm.nameEditDraft = loc.entry.text
+  vm.nameEdit.val = FileTreeNameEdit(
+    kind: fneRename,
+    folder: (if folder.len > 0: folder else: parentDirOf(path)),
+    path: path,
+    name: loc.entry.text)
+
+proc nameTaken(vm: FilesystemVM; edit: FileTreeNameEdit; name: string): bool =
+  ## Does an entry named ``name`` already exist in the field's folder, as
+  ## far as the tree knows? The index process checks the disk again when it
+  ## acts, which also catches an entry that appeared after the field opened.
+  ## The "Loading..." placeholders (empty ``path``) are not entries.
+  let loc = vm.locateEntry(edit.folder)
+  if not loc.found:
+    return false
+  for child in loc.entry.children:
+    if child.path.len > 0 and child.text == name and
+        not (edit.kind == fneRename and child.path == edit.path):
+      return true
+  false
+
+proc commitNameEdit*(vm: FilesystemVM; name: string): bool =
+  ## Enter in the name field. A refused name keeps the field open with its
+  ## reason and returns false; an accepted one closes the field, sends the
+  ## request and returns true.
+  ##
+  ## Renaming an entry to the name it already has is not an operation: the
+  ## field closes and nothing is sent.
+  let edit = vm.nameEdit.val
+  if edit.kind == fneNone:
+    return false
+  var reason = fileEntryNameRefusal(name)
+  if reason.len == 0 and vm.nameTaken(edit, name):
+    reason = alreadyExistsRefusal(name)
+  if reason.len > 0:
+    vm.nameEditDraft = name
+    var refused = edit
+    refused.name = name
+    refused.error = reason
+    vm.nameEdit.val = refused
+    return false
+  vm.cancelNameEdit()
+  case edit.kind
+  of fneCreate:
+    if not vm.onCreateFile.isNil:
+      vm.onCreateFile(edit.folder, name)
+  of fneRename:
+    if name != edit.name and not vm.onRenamePath.isNil:
+      vm.onRenamePath(edit.path, name)
+  of fneNone:
+    discard
+  true
+
+# ---------------------------------------------------------------------------
+# A native front-end's opened folder
+# ---------------------------------------------------------------------------
+
+type
+  FileTreeOperationResult* = object
+    ## What one Create, Rename or Delete did, as the host that carried it out
+    ## answers it — the counterpart of the index process's answer
+    ## (`index/file_tree_operations.FileTreeAnswer`) for a front-end that
+    ## acts on the disk itself (`host/native_file_tree`).
+    operation*: FileTreeAction
+    source*: string
+      ## What the request named: the target folder (Create), the entry
+      ## (Rename, Delete).
+    path*: string
+      ## The path the operation changed; ``""`` when it failed.
+    folder*: string
+      ## The folder whose listing changed.
+    error*: string
+      ## Why it failed; ``""`` when it succeeded.
+
+proc joinTreePath*(folder, name: string): string =
+  ## ``name`` inside ``folder``, in the separator ``folder`` is spelled with.
+  if folder.len == 0:
+    return name
+  let sep = if '/' notin folder and '\\' in folder: '\\' else: '/'
+  if folder[^1] == '/' or folder[^1] == '\\': folder & name
+  else: folder & sep & name
+
+proc projectTreeOf*(root: string; files: openArray[string]): FilesystemEntryNode =
+  ## The tree of the opened folder ``root`` from its project-relative file
+  ## paths (a native front-end's project walk, `edit_host.listProjectFiles`):
+  ## the folder's own row, its folders and files below it, every path
+  ## absolute. A native front-end in Edit mode hands it to a
+  ## ``FilesystemVM`` so the Files menu decides on the opened folder exactly
+  ## as it does on the desktop.
+  var rootPath = root
+  while rootPath.len > 1 and (rootPath[^1] == '/' or rootPath[^1] == '\\'):
+    rootPath.setLen(rootPath.len - 1)
+  result = FilesystemEntryNode(text: entryNameOf(rootPath), path: rootPath,
+                               isFolder: true, isExpanded: true)
+  proc childIndex(node: FilesystemEntryNode; name: string): int =
+    for i, c in node.children:
+      if c.isFolder and c.text == name:
+        return i
+    -1
+  proc insert(node: var FilesystemEntryNode; parts: openArray[string];
+              at: int) =
+    let path = joinTreePath(node.path, parts[at])
+    if at == parts.high:
+      node.children.add FilesystemEntryNode(text: parts[at], path: path)
+      return
+    var i = node.childIndex(parts[at])
+    if i < 0:
+      node.children.add FilesystemEntryNode(text: parts[at], path: path,
+                                            isFolder: true)
+      i = node.children.high
+    insert(node.children[i], parts, at + 1)
+  for rel in files:
+    var parts: seq[string] = @[]
+    var current = ""
+    for c in rel:
+      if c == '/' or c == '\\':
+        if current.len > 0: parts.add current
+        current = ""
+      else:
+        current.add c
+    if current.len > 0: parts.add current
+    if parts.len > 0:
+      insert(result, parts, 0)
+
+proc relativeToRoot*(root, path: string): string =
+  ## ``path`` relative to ``root`` (``projectTreeOf``'s paths back to the
+  ## project-relative spelling a native editor opens), or ``""`` when it is
+  ## not below it.
+  var r = root
+  while r.len > 1 and (r[^1] == '/' or r[^1] == '\\'):
+    r.setLen(r.len - 1)
+  if path.len <= r.len + 1 or path[0 ..< r.len] != r or
+     path[r.len] notin {'/', '\\'}:
+    return ""
+  path[r.len + 1 .. ^1]
+
+proc describeFileTreeOperation*(r: FileTreeOperationResult;
+                                root = ""): string =
+  ## The status line's account of an answer — what changed, or why not —
+  ## naming paths relative to the opened folder `root`.
+  proc shown(p: string): string =
+    let rel = relativeToRoot(root, p)
+    if rel.len > 0: rel else: p
+  if r.error.len > 0:
+    return r.error
+  case r.operation
+  of ftaCreate: "created " & shown(r.path)
+  of ftaRename: "renamed " & shown(r.source) & " to " & entryNameOf(r.path)
+  of ftaDelete: "moved " & shown(r.source) & " to the trash"
+  of ftaEdit: "opened " & shown(r.path)
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -286,13 +847,14 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     # compile under Nim's side-effect inference for compound types.
     let rootEntry = createSignal(emptyEntry())
     let loadingState = createSignal(lsLoading)
+    let noProjectFolder = createSignal(false)
+    let loadError = createSignal("")
     let expandedPaths = createSignal(initHashSet[string]())
     let diffEntries = createSignal(newSeq[FilesystemDiffEntry]())
+    let nameEdit = createSignal(FileTreeNameEdit())
 
     let isEmpty = createMemo[bool] proc(): bool =
-      let r = rootEntry.val
-      let rootEmpty = r.text.len == 0 and r.children.len == 0
-      rootEmpty and diffEntries.val.len == 0
+      isEmptyRoot(rootEntry.val) and diffEntries.val.len == 0
 
     let hasDiff = createMemo[bool] proc(): bool =
       diffEntries.val.len > 0
@@ -304,8 +866,11 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
       store: store,
       rootEntry: rootEntry,
       loadingState: loadingState,
+      loadError: loadError,
+      noProjectFolder: noProjectFolder,
       expandedPaths: expandedPaths,
       diffEntries: diffEntries,
+      nameEdit: nameEdit,
       isEmpty: isEmpty,
       hasDiff: hasDiff,
       totalEntryCount: totalEntryCount,
@@ -323,8 +888,11 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     # - the active file only appears after the first DAP stop, and then
     #   changes on every step into another file;
     # - the tree itself is re-published each time a lazily-loaded
-    #   subtree is filled in, which is how ancestors deeper than the
-    #   initial depth limit become expandable at all.
+    #   subtree is filled in.  Every folder below a root arrives as a
+    #   "Loading..." stub (one level per load, `index/files.
+    #   FilesystemLoadDepth`), payload and live trees alike, so this is
+    #   how any ancestor below a root's own entries becomes expandable
+    #   at all: one level per answer.
     #
     # ``expandedPaths`` is deliberately NOT an input (and the expansion
     # write is ``untrack``ed so it cannot become one): a manual collapse
@@ -342,6 +910,10 @@ proc createFilesystemVM*(store: ReplayDataStore): FilesystemVM =
     var lastActiveFile = ""
     var lastDebugger: DebuggerState
     createEffect proc() =
+      # A tree with no replay behind it (a native front-end's Edit mode,
+      # `projectTreeOf`) has no file the debugger is stopped in.
+      if store.isNil:
+        return
       let debuggerState = store.debugger.val
       # Read the tree so it is tracked as a dependency; a lazily filled
       # subtree must re-run this effect.

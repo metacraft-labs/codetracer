@@ -26,10 +26,10 @@ host applies — because one is an instrument on the current build and the other
 is the slice's actual boundary. Verification-Harness-Traps.md §14's remedy for
 the case where there genuinely have to be two is a mechanical equality between
 them, so the probe renders the SAME panel over the SAME state through BOTH and
-requires the same total (7,572 bytes for MOUNT, 823,324 for EXPAND). An arm
-that changes what either side charges for breaks the equality; an arm that
-changes what BOTH charge for would not, which is why the arms below also reach
-the probe's own floors.
+requires the same total (8,278 bytes for MOUNT, 930,814 for EXPAND, measured
+2026-10-23). An arm that changes what either side charges for breaks the
+equality; an arm that changes what BOTH charge for would not, which is why the
+arms below also reach the probe's own floors.
 
 SIX VERDICTS, NOT TWO (§1, §1a, §32a, §33), and the count is SIX because that
 is how many this harness can actually emit — see the note below:
@@ -71,6 +71,20 @@ and `isonim/src/isonim/testing/mock_dom.nim` are in the sibling checkout
 `isonim`, which `config.nims` puts on the Nim path. `TOUCHED`, the digest file
 and `--enumerate-touched` all cross that boundary, and the enumeration runs
 `git status --porcelain -uall` in EACH repo a `TOUCHED` entry lives in.
+
+AND THE PROBE IS BUILT FROM THE ISONIM TREE THE ARMS MUTATE, never from
+whatever the Nim path happens to find. `config.nims` lets `$ISONIM_SRC`
+outrank the sibling (a supported override: a pin worktree, a Nix store
+source), and a `--path:` on the command line cannot outrank it back, so the
+probe is built with `ISONIM_SRC` set to the `src` directory `METER` lives in;
+an ambient value that differs is overridden and a `note:` line says so. With
+it unpinned, arms M1-M4 edited one copy, compiled another, and reported
+`SURVIVED` (codetracer-pm issue 2026-10-21-plat18-marshalling-arms-m1-m4-
+survive-on-agents). The pin is not trusted on its own: a `--genDeps:on` pass
+over the same command line lists what nim compiled, every file the probe
+grades must be in that list, and otherwise the run is a HARNESS-FAILURE that
+names the missing files — never a kill or a survival (§1b: show the subject
+was THERE).
 
 RESTORATION IS CHECKED PER ARM, NOT ONCE AT THE END, and one of the subjects is
 in a sibling repo, so an arm that leaves a file dirty must be named where it
@@ -351,9 +365,9 @@ ARMS = [
         killer="(the wire/meter cross-check)",
         expect="verdict-fails",
         why="A TREE OPERATION LOSES ONE OF ITS TWO HANDLES. `AppendChild` is "
-            "the single commonest operation the pane issues — 12,000 of the "
-            "42,017 on the expand — so undercharging it by four bytes moves "
-            "the headline figure by 48 KB while the stream still applies",
+            "the single commonest operation the pane issues — 13,200 appends on the "
+            "expand — so undercharging it by four bytes moves "
+            "the headline figure by 52,800 bytes while the stream still applies",
         control_name="the two handles are written from a tuple",
         control_find="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  op(boAppendChild):\n    wirePutU32(int(parent))\n    wirePutU32(int(child))\n",
         control_replace="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  let pair = (int(parent), int(child))\n  op(boAppendChild):\n    wirePutU32(pair[0])\n    wirePutU32(pair[1])\n",
@@ -365,19 +379,19 @@ ARMS = [
     Arm(
         id="M9",
         path=VIEW,
-        find="  indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,\n",
-        replace="  if false: indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,\n",
+        find="  indexEach[VariableViewState, R, N](r, rowContainer,\n",
+        replace="  if false: indexEach[VariableViewState, R, N](r, rowContainer,\n",
         grader=G_PROBE,
         killer="(the row-count floor)",
         expect="verdict-fails",
-        why="THE ROWS STOP BEING WIRED to the panel. `renderStatePanelImpl` "
-            "is the extraction PLAT-18 made so the slice draws the SAME "
+        why="THE ROWS STOP BEING WIRED to the panel. `renderStatePanel` "
+            "is the one generic panel so the slice draws the SAME "
             "markup as the product instead of a copy of it; if the "
             "instantiation stops producing rows, every byte count in this "
             "milestone is a measurement of an empty pane",
         control_name="the container is bound before the list is attached",
-        control_find="  indexEach[VariableViewState, RendererT, NodeT](r, rowContainer,\n",
-        control_replace="  let rows = rowContainer\n  indexEach[VariableViewState, RendererT, NodeT](r, rows,\n",
+        control_find="  indexEach[VariableViewState, R, N](r, rowContainer,\n",
+        control_replace="  let rows = rowContainer\n  indexEach[VariableViewState, R, N](r, rows,\n",
     ),
 
     # -------------------------------------------------------------------
@@ -557,23 +571,39 @@ ARMS = [
 # run can discharge — so **run `--collect-because` and diff it whenever a
 # ViewModel's wire shape changes**, and do not read a green `M*` row as
 # evidence the numbers are current unless the run that produced it is recent.
+# REFRESHED AGAIN 2026-10-17 (the Electron-parity redesign's
+# `isonim_state_view` change moved the wire sizes): M1-M7 each still KILLED
+# their target and came back MIS-ATTRIBUTED on the numbers alone; the strings
+# below are that run's transcripts, verbatim.
+# REFRESHED AGAIN 2026-10-23, measured at codetracer 4851ace6c with isonim at
+# its origin/agents 8770786: the wire sizes moved again (MOUNT wire 7834 ->
+# 8278, EXPAND 823361 -> 930814, `payload_bytes` 5493 -> 5738, M5's sample
+# figures 17/461 -> 19/512), so M1-M7 were re-collected and pasted verbatim;
+# M8 and M9 quote row counts and did not move. The M1-M4 SURVIVED of
+# 2026-10-21 was not this drift: an ambient ISONIM_SRC redirected the probe to
+# another isonim copy than the one the arms mutate, which `run_grader` now
+# pins and `probe_provenance_problem` refuses (see the module docstring).
+# RE-COLLECTED 2026-10-23 for the table panes' cells: each state value now
+# carries its table-cell key (`data-ct-cell`, `isonim_state_view`), so the
+# wire sizes M1 - M7 quote moved by those bytes alone.
 BECAUSE: dict = {
     # --- the probe's refusals: COUNTS, quoted verbatim ----------------------
     # Several arms are told apart by WHICH refusals fired together and by the
     # SIZE of the disagreement, so the clauses are ` && `-joined and the
     # numbers are kept. See `derived_because` for why that is the opposite of
     # §17a's usual rule here and why it is right.
-    'M1': 'decode returned 237 byte(s) of 0 && decode returned 3802 byte(s) of 0 && decode returned 382719 byte(s) of 0 && decode returned 5493 byte(s) of 0 && wire/meter disagree on EXPAND: meter 440605 byte(s), wire 823324 && wire/meter disagree on MOUNT: meter 2341 byte(s), wire 7834',
-    'M2': 'frame size disagreed with frameBytesFor 140 time(s) && frame size disagreed with frameBytesFor 15 time(s) && frame size disagreed with frameBytesFor 16 time(s) && frame size disagreed with frameBytesFor 27016 time(s)',
+    'M1': 'decode returned 322 byte(s) of 0 && decode returned 3896 byte(s) of 0 && decode returned 497301 byte(s) of 0 && decode returned 5922 byte(s) of 0 && wire/meter disagree on EXPAND: meter 554698 byte(s), wire 1051999 && wire/meter disagree on MOUNT: meter 2752 byte(s), wire 8674',
+    'M2': 'frame size disagreed with frameBytesFor 166 time(s) && frame size disagreed with frameBytesFor 18 time(s) && frame size disagreed with frameBytesFor 22 time(s) && frame size disagreed with frameBytesFor 34221 time(s)',
     # M3 is M2's set PLUS the cross-check's, and that is what separates them:
     # M2 breaks the size predicate alone, M3 stops measuring the bytes at all.
-    'M3': 'frame size disagreed with frameBytesFor 140 time(s) && frame size disagreed with frameBytesFor 15 time(s) && frame size disagreed with frameBytesFor 16 time(s) && frame size disagreed with frameBytesFor 27016 time(s) && wire/meter disagree on EXPAND: meter 440605 byte(s), wire 823324 && wire/meter disagree on MOUNT: meter 2341 byte(s), wire 7834',
-    'M4': 'decode returned 0 byte(s) of 237 && decode returned 0 byte(s) of 3802 && decode returned 0 byte(s) of 382719 && decode returned 0 byte(s) of 5493',
-    'M5': 'structural figures not stable across samples (16/424 vs 16/425)',
-    # M6 and M7 print the same SENTENCE and different totals: 36,000 bytes is
-    # 9,000 element creations undercharged by four, 48,000 is 12,000 appends.
-    'M6': 'wire/meter disagree on EXPAND: meter 823324 byte(s), wire 787324 && wire/meter disagree on MOUNT: meter 7834 byte(s), wire 7642',
-    'M7': 'wire/meter disagree on EXPAND: meter 823324 byte(s), wire 775324 && wire/meter disagree on MOUNT: meter 7834 byte(s), wire 7574',
+    'M3': 'frame size disagreed with frameBytesFor 166 time(s) && frame size disagreed with frameBytesFor 18 time(s) && frame size disagreed with frameBytesFor 22 time(s) && frame size disagreed with frameBytesFor 34221 time(s) && wire/meter disagree on EXPAND: meter 554698 byte(s), wire 1051999 && wire/meter disagree on MOUNT: meter 2752 byte(s), wire 8674',
+    'M4': 'decode returned 0 byte(s) of 322 && decode returned 0 byte(s) of 3896 && decode returned 0 byte(s) of 497301 && decode returned 0 byte(s) of 5922',
+    'M5': 'structural figures not stable across samples (19/548 vs 19/549)',
+    # M6 and M7 print the same SENTENCE and different totals: on the EXPAND
+    # each undercharges four bytes per operation, so 38,400 bytes is 9,600
+    # element creations and 52,800 is 13,200 appends (2026-10-23 figures).
+    'M6': 'wire/meter disagree on EXPAND: meter 1051999 byte(s), wire 1006395 && wire/meter disagree on MOUNT: meter 8674 byte(s), wire 8446',
+    'M7': 'wire/meter disagree on EXPAND: meter 1051999 byte(s), wire 991991 && wire/meter disagree on MOUNT: meter 8674 byte(s), wire 8370',
     # M8 counts two elements per row; M9 wires no rows at all.
     'M8': 'COLLAPSE drew 4 row(s), expected 2 && EXPAND drew 1204 row(s), expected 602 && MOUNT drew 4 row(s), expected 2 && STEP drew 1204 row(s), expected 602',
     'M9': 'COLLAPSE drew 0 row(s), expected 2 && EXPAND drew 0 row(s), expected 602 && MOUNT drew 0 row(s), expected 2 && STEP drew 0 row(s), expected 602',
@@ -641,6 +671,10 @@ class RunResult:
     ran: bool = True
     built: bool = True
     transcript: str = ""
+    # Non-empty when the grader was NOT built from the tree being mutated
+    # (see `probe_provenance_problem`). It outranks every other field: a run
+    # over other bytes has no verdict about this tree, red or green.
+    provenance_problem: str = ""
 
     @property
     def total(self) -> int:
@@ -811,6 +845,78 @@ def _env(extra: dict) -> dict:
     return e
 
 
+def mutated_isonim_src() -> Path:
+    """The isonim `src` directory the meter arms edit, derived from `METER`.
+
+    Derived rather than written a second time: the probe has to be built from
+    exactly the tree `METER` names, so a second spelling of that path is a
+    second copy that could part from the first (§14).
+    """
+    meter = (ROOT / METER).resolve()
+    for d in meter.parents:
+        if d.name == "src":
+            return d
+    raise RuntimeError(f"{METER} is not under a `src` directory; the probe's "
+                       "ISONIM_SRC cannot be derived from it")
+
+
+def isonim_src_override_note() -> str:
+    """One line saying the ambient `ISONIM_SRC` is overridden, or "".
+
+    The override itself is unconditional (`run_grader`); this only says so,
+    because an override nobody is told about is the next reader's mystery.
+    """
+    ambient = os.environ.get("ISONIM_SRC", "")
+    if not ambient:
+        return ""
+    want = mutated_isonim_src()
+    if Path(ambient).resolve() == want:
+        return ""
+    return (f"note: ISONIM_SRC overridden for the probe: {ambient} -> {want}. "
+            "config.nims lets ISONIM_SRC outrank the sibling isonim, and the "
+            "arms mutate the sibling; a probe built from any other copy grades "
+            "bytes no arm touched.")
+
+
+def probe_graded_sources() -> list[str]:
+    """Every source the probe GRADES, derived from the arm table.
+
+    The subject of every arm the probe grades, plus `MOCK_DOM` — never
+    mutated, but every meter byte the probe counts comes through its hooks,
+    so a probe built from another copy of it measures another meter.
+    """
+    out = []
+    for p in [a.path for a in ARMS if a.grader is G_PROBE] + [MOCK_DOM]:
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def probe_provenance_problem(deps_file: Path) -> str:
+    """"" when the probe was built from every file it grades, else why not.
+
+    The positive half of the `ISONIM_SRC` pin, and the reason the pin is not
+    trusted on its own: `--genDeps:on` makes nim write the absolute path of
+    every module (and `include`d file) it compiled, one per line, and each
+    graded file must be one of them — compared RESOLVED, since the Nim path
+    holds `..` segments. A mutation applied to a file the build never read cannot be killed, and
+    without this its arm reads `SURVIVED`: a hole in the instrument that was
+    really a hole in the harness (§1b — show the subject was THERE).
+    """
+    if not deps_file.is_file():
+        return (f"nim wrote no {deps_file}, so whether the probe was built "
+                "from the tree being mutated cannot be checked")
+    built = {Path(line.strip()).resolve()
+             for line in deps_file.read_text(errors="replace").splitlines()
+             if line.strip()}
+    missing = [p for p in probe_graded_sources()
+               if (ROOT / p).resolve() not in built]
+    if not missing:
+        return ""
+    return ("the probe was not built from the tree being mutated: "
+            f"{', '.join(missing)} absent from {deps_file}")
+
+
 def run_grader(g: Grader) -> RunResult:
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
     SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -821,19 +927,52 @@ def run_grader(g: Grader) -> RunResult:
         return parse_script(proc.stdout + proc.stderr, proc.returncode)
 
     cache = CACHE_ROOT / "probe"
+    deps_cache = CACHE_ROOT / "probe-deps"
     artifact = CACHE_ROOT / "probe.bin"
     # `-d:ctPlat18Slice` is what brings the wire/meter cross-check in, and
     # `--mm:orc` is named rather than defaulted (§12b: a measurement names its
-    # memory manager, and so does the run that grades one).
-    cmd = ["nim", "c", "--hints:off", "--warnings:off", "--mm:orc",
-           "-d:ctPlat18Slice", "--path:src/frontend/viewmodel",
-           f"--nimcache:{cache}", f"-o:{artifact}", g.target]
-    build = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                           errors="replace", env=_env(g.env), timeout=7200)
+    # memory manager, and so does the run that grades one). ONE flag list for
+    # both passes below, so the pass that is checked and the pass that is run
+    # resolve their imports from the same command line.
+    flags = ["--hints:off", "--warnings:off", "--mm:orc", "-d:ctPlat18Slice",
+             "--path:src/frontend/viewmodel"]
+    # ISONIM_SRC IS THE MUTATED TREE'S, whatever the caller's was. It is the
+    # only lever there is: config.nims adds it after the sibling, and is read
+    # after the command line, so a `--path:` here would be outranked by it.
+    env = _env(g.env)
+    env["ISONIM_SRC"] = str(mutated_isonim_src())
+
+    # THE PROVENANCE PASS, before the build that is run. `--genDeps:on` writes
+    # `<nimcache>/<project>.deps`, and it is a pass of its own because the
+    # switch also implies `--compileOnly` and turns on the build-script mode,
+    # whose relative C paths a `--compileOnly:off` cannot link (measured:
+    # gcc cannot find `@psystem.nim.c`). Its own nimcache, so the script
+    # mode's artefacts never meet the real build's; the stale listing is
+    # removed first, so an earlier pass cannot vouch for this one.
+    deps_file = deps_cache / f"{Path(g.target).stem}.deps"
+    deps_file.unlink(missing_ok=True)
+    deps = subprocess.run(["nim", "c", *flags, "--genDeps:on",
+                           f"--nimcache:{deps_cache}", g.target],
+                          cwd=ROOT, capture_output=True, text=True,
+                          errors="replace", env=env, timeout=7200)
+    if deps.returncode != 0:
+        return parse_probe(deps.stdout + deps.stderr, deps.returncode, built=False)
+    problem = probe_provenance_problem(deps_file)
+    if problem:
+        # NOT BUILT, NOT RUN. Whatever it printed would be a verdict about
+        # other bytes.
+        return RunResult(rc=deps.returncode, ran=False, built=True,
+                         transcript=strip_ansi(deps.stdout + deps.stderr),
+                         provenance_problem=problem)
+
+    build = subprocess.run(["nim", "c", *flags, f"--nimcache:{cache}",
+                            f"-o:{artifact}", g.target],
+                           cwd=ROOT, capture_output=True, text=True,
+                           errors="replace", env=env, timeout=7200)
     if build.returncode != 0:
         return parse_probe(build.stdout + build.stderr, build.returncode, built=False)
     proc = subprocess.run([str(artifact)], cwd=ROOT, capture_output=True,
-                          text=True, errors="replace", env=_env(g.env),
+                          text=True, errors="replace", env=env,
                           timeout=7200)
     return parse_probe(proc.stdout + proc.stderr, proc.returncode, built=True)
 
@@ -1047,9 +1186,16 @@ def main(argv: list) -> int:
                 graders.append(a.grader)
         control_runs = {}
         print("\n--- control pre-flight (the unmutated tree) ---", flush=True)
+        note = isonim_src_override_note() if G_PROBE in graders else ""
+        if note:
+            print(note, flush=True)
         for g in graders:
             res = run_grader(g)
             control_runs[id(g)] = res
+            if res.provenance_problem:
+                print(f"CONTROL REFUSED: {g.label}: {res.provenance_problem}. "
+                      "No arm graded by it would be about this tree.")
+                return 2
             if not res.ran:
                 print(f"CONTROL IS NOT GREEN: {g.label} produced no result "
                       "lines at all. Nothing below would mean anything.")
@@ -1095,7 +1241,12 @@ def main(argv: list) -> int:
                         return 2
 
             note = ""
-            if not res.built:
+            if res.provenance_problem:
+                # FIRST, ahead of `built`/`ran`: a probe built from other bytes
+                # is neither a kill nor a survival of THIS arm.
+                verdict, note = "HARNESS-FAILURE", res.provenance_problem
+                problems += 1
+            elif not res.built:
                 verdict, note = "HARNESS-FAILURE", "the target did not build"
                 problems += 1
             elif not res.ran:
@@ -1171,7 +1322,10 @@ def main(argv: list) -> int:
                         print(f"{a.id:<5} CONTROL-HARNESS-FAILURE  {p} did not "
                               "restore to its control bytes")
                         return 2
-            if not res.ran:
+            if res.provenance_problem:
+                print(f"{a.id:<5} CONTROL-HARNESS-FAILURE  {res.provenance_problem}")
+                problems += 1
+            elif not res.ran:
                 print(f"{a.id:<5} CONTROL-DID-NOT-RUN      {a.control_name}")
                 problems += 1
             elif res.failed:

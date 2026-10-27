@@ -32,6 +32,33 @@ import ../../gpui/window_top_bar
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
+proc desktopBindings(): Table[string, string] =
+  ## THE ORACLE: the desktop YAML's `bindings:` table (legacy data since
+  ## PLAT-68 — the one-time import and macOS's native accelerators read it).
+  ## `ClientAction` name → the chord text, spelled as the desktop's menu
+  ## spells it (`renderChord`: upper case, alternatives joined by a space).
+  var inBindings = false
+  for raw in DesktopDefaultConfig.splitLines():
+    if raw.len == 0:
+      continue
+    if not raw[0].isSpaceAscii and raw[0] != '#':
+      inBindings = raw.startsWith("bindings:")
+      continue
+    if not inBindings:
+      continue
+    let line = raw.strip()
+    if line.startsWith("#"):
+      continue
+    let colon = line.find(':')
+    if colon <= 0:
+      continue
+    let action = line[0 ..< colon].strip()
+    var value = line[colon + 1 .. ^1].strip()
+    if value.len >= 2 and value[0] == '"' and value[^1] == '"':
+      value = value[1 .. ^2]
+    if value.len > 0 and action notin result:
+      result[action] = value.toUpperAscii
+
 const ExpectedAssertions = 49
 
 var countedAssertions = 0

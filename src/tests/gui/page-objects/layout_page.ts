@@ -333,7 +333,7 @@ export class LayoutPage extends BasePage {
   async programStateTabs(forceReload = false): Promise<ProgramStateTab[]> {
     if (forceReload || this.programStateTabsCache.length === 0) {
       const roots = await this.page.locator("div[id^='stateComponent-']").all();
-      this.programStateTabsCache = roots.map((r) => new ProgramStateTab(this.page, r, "STATE"));
+      this.programStateTabsCache = roots.map((r) => new ProgramStateTab(this.page, r, "VARIABLES"));
     }
     return this.programStateTabsCache;
   }

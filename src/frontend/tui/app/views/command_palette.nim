@@ -141,7 +141,8 @@ const
   SelectedBackground* = srSurfaceSelection
   EmptyStyle* = CellStyle(role: srChromeMuted, italic: true)
 
-  KindLabels*: array[PaletteEntryKind, string] = [":", "ƒ", "▤"]
+  KindLabels*: array[PaletteEntryKind, string] = [
+    ":", canonical(grPaletteFunction), canonical(grPaletteFile)]
     ## One glyph per kind, so a row says what it will do before it is run.
 
 # ---------------------------------------------------------------------------
@@ -334,9 +335,16 @@ proc topHit*(model: PaletteModel): (bool, PaletteHit) =
 # Painting
 # ---------------------------------------------------------------------------
 
-proc rowLabel*(hit: PaletteHit; width: int): string =
+func kindLabel*(kind: PaletteEntryKind; glyphs = DefaultGlyphs): string =
+  ## The kind's glyph on this profile.
+  case kind
+  of pekCommand: ":"
+  of pekFunction: glyphs.glyph(grPaletteFunction)
+  of pekFile: glyphs.glyph(grPaletteFile)
+
+proc rowLabel*(hit: PaletteHit; width: int; glyphs = DefaultGlyphs): string =
   ## One result row: kind glyph, text, help, fitted to `width`.
-  let head = KindLabels[hit.entry.kind] & " " & hit.entry.text
+  let head = kindLabel(hit.entry.kind, glyphs) & " " & hit.entry.text
   if hit.entry.help.len == 0:
     return fitCells(head, width)
   let gap = width - textCells(head) - textCells(hit.entry.help) - 2
@@ -344,19 +352,21 @@ proc rowLabel*(hit: PaletteHit; width: int): string =
     return fitCells(head, width)
   fitCells(head & repeatGlyph(" ", gap + 2) & hit.entry.help, width)
 
-proc paletteRows*(model: PaletteModel; width, height: int): seq[string] =
+proc paletteRows*(model: PaletteModel; width, height: int;
+                  glyphs = DefaultGlyphs): seq[string] =
   ## The palette as plain rows — the model half of the paint, so a test can
   ## assert what is on screen without a compositor.
   result = @[]
   if width <= 0 or height <= 0 or not model.open:
     return
   result.add fitCells(PaletteTitle & " " &
-                      repeatGlyph("─", max(0, width - textCells(PaletteTitle) -
-                                           1)), width)
+                      repeatGlyph(glyphs.glyph(grDividerH),
+                                  max(0, width - textCells(PaletteTitle) - 1)),
+                      width)
   result.add fitCells(PalettePrompt & model.query, width)
   let room = min(min(height - 2, MaxVisibleHits), model.hits.len)
   for i in 0 ..< room:
-    result.add rowLabel(model.hits[i], width)
+    result.add rowLabel(model.hits[i], width, glyphs)
   if model.hits.len == 0:
     result.add fitCells("  " & NoResultsText, width)
   while result.len < height:
@@ -370,7 +380,7 @@ proc paint*(g: var StyledGrid; model: PaletteModel; top, left,
   ## offsets accented.
   if width <= 0 or height <= 0 or not model.open:
     return
-  let rows = paletteRows(model, width, height)
+  let rows = paletteRows(model, width, height, g.glyphs)
   for i, text in rows:
     let style =
       if i == 0: TitleStyle
@@ -394,7 +404,8 @@ proc paint*(g: var StyledGrid; model: PaletteModel; top, left,
         out2)
     # The matched characters, accented at the columns the row's label puts
     # them at: the kind glyph and one separating space precede the text.
-    let base = left + textCells(KindLabels[model.hits[i].entry.kind]) + 1
+    let base = left + textCells(kindLabel(model.hits[i].entry.kind,
+                                          g.glyphs)) + 1
     for off in model.hits[i].offsets:
       if off < 0 or off > model.hits[i].entry.text.len:
         continue

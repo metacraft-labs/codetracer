@@ -170,6 +170,69 @@ pub trait ReplaySession: std::fmt::Debug {
         Ok(true)
     }
 
+    // ── Data breakpoints (watchpoints) ──────────────────────────────
+    //
+    // A live debugger implements a data breakpoint with a hardware
+    // watch register.  A replay recording has no CPU, so what this
+    // backend offers is a VALUE-CHANGE watchpoint over the per-step
+    // variable value table: `continue` stops at the first later step
+    // at which the named variable's recorded value differs from the
+    // value it held at the previous step that recorded it.
+    //
+    // The admission rules live in the `ct-data-breakpoints` crate,
+    // shared with the daemon's mock DAP backend so the mock cannot
+    // claim a capability this backend refuses.  See that crate's
+    // module docs for why it exists.
+
+    /// Does this backend keep a per-step table of variable values?
+    ///
+    /// `true` only for the materialised replay session.  The
+    /// MCR/emulator and recreator sessions do not — they already
+    /// refuse `load_history` for exactly this reason — so a
+    /// value-change watchpoint has no substrate on them.
+    ///
+    /// The default is `false`: a backend must OPT IN to claiming it
+    /// can answer watchpoints.  Defaulting the other way is how the
+    /// mock came to claim more than the product could do.
+    fn has_per_step_values(&self) -> bool {
+        false
+    }
+
+    /// Is `name` a variable recorded anywhere in this trace?
+    ///
+    /// Default `false` — see `has_per_step_values` on why the default
+    /// declines rather than assumes.
+    fn knows_variable(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
+
+    /// Install the watchpoint set, replacing any previous one.
+    ///
+    /// DAP `setDataBreakpoints` has replace semantics (the same as
+    /// `setBreakpoints`), so an empty `names` clears every watchpoint.
+    ///
+    /// Callers MUST have run each requested entry through
+    /// `ct_data_breakpoints::verdict` first; this method receives only
+    /// the names that were admitted.
+    ///
+    /// The default implementation refuses, so a backend that has not
+    /// wired watchpoints surfaces a typed refusal rather than silently
+    /// accepting and never firing — which is precisely the failure the
+    /// Python API used to present as an unexplained `StopIteration`.
+    fn set_watchpoints(&mut self, names: Vec<String>) -> Result<(), Box<dyn Error>> {
+        if names.is_empty() {
+            // Clearing a set that was never installed is vacuously
+            // fine, and session teardown issues a blanket clear.
+            return Ok(());
+        }
+        Err(format!(
+            "{} (this backend does not implement value-change watchpoints)",
+            ct_data_breakpoints::DataBreakpointRefusal::BackendLacksValueHistory.description()
+        )
+        .into())
+    }
+
     /// M10 — drain the list of tracepoint hits collected during the
     /// last `step(Action::Continue, ...)` traversal.  Each hit
     /// corresponds to a recorded step the runner passed *through* on
@@ -217,6 +280,28 @@ pub trait ReplaySession: std::fmt::Debug {
         self.restore_at(geid, None, None, None)
     }
 
+    /// Whether a geid names a position this replay can seek to: true only
+    /// for a replay that serves [`ReplaySession::seek_to_geid`] (a native
+    /// recording's live replay). A materialized trace's replay has no geid
+    /// positions: the geid a link carries for it is a correlation coordinate,
+    /// not a replay position, so a launch does not seek to it
+    /// (`Handler::run_to_launch_position`).
+    fn serves_geid_positions(&self) -> bool {
+        false
+    }
+
+    /// How this session's out-of-process replay worker died, if it died with
+    /// a query in flight and has not been replaced since.
+    ///
+    /// A consumer that builds one answer from many queries (the flow walk)
+    /// checks this at the end: individual query failures are often treated as
+    /// "stop here" or answered with a fallback, and a death read that way
+    /// produces a short or substituted result that looks like a successful
+    /// one. Default `None`: an in-process replay has no worker to lose.
+    fn worker_death(&self) -> Option<String> {
+        None
+    }
+
     fn current_step_id(&mut self) -> StepId;
 
     /// Enumerate the processes captured in this trace.
@@ -241,6 +326,7 @@ pub trait ReplaySession: std::fmt::Debug {
             ppid: 0,
             exit_code: None,
             command: "main".to_string(),
+            replayed: true,
         }])
     }
 
@@ -295,4 +381,10 @@ pub trait ReplaySession: std::fmt::Debug {
     /// Default impl is a no-op for backends that don't support the
     /// primitive.
     fn data_watch_reset(&mut self) {}
+
+    /// Puts the source loaders this session makes for itself (for a
+    /// callstack, a location jump) under the replay session's
+    /// source-reading rule (see [`crate::source_access`]). Sessions that
+    /// make none ignore it.
+    fn set_source_access(&mut self, _source_access: crate::source_access::SourceAccessHandle) {}
 }

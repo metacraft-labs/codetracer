@@ -24,38 +24,45 @@
 ##
 ## Usage:
 ##   let vm = createStateVM(store)
-##   echo vm.activeTab.val        # stLocals
-##   vm.selectTab(stGlobals)
-##   echo vm.currentVariables.val # globals from the store
+##   vm.addWatch("total")
+##   echo vm.currentVariables.val # locals, globals, then the watches
 
 import std/[json, options, sets, tables, strutils]
+import ./action_sink
 
-import isonim/core/[signals, computation, owner, batch]
+import isonim/core/[signals, computation, owner, batch, async_compat]
 import isonim/viewmodel
 
 import ../backend/backend_service
 import ../collab/[reducer, runtime_role, session_core, types]
 import ../store/[replay_data_store, types as store_types]
+from ../store/stop_timeline import stopIdentityOf
+from ../store/locals_answer import variableFromValue, presentedValueText
+import ../viewport
+export viewport
 import origin_chain_types
 import value_changes
 # NOTE: deliberately does NOT import `common/types`. That module *includes*
 # `common_types`, which is also included by `frontend/types.nim` under
 # different `langstring`/`TableLike` bindings — so every type in it exists
 # twice and the two copies are incompatible. Value-history rows therefore
-# cross into this VM as `ValueHistoryRow` (see below), normalised by the
-# host at `ui/state.nim`.
+# cross into this VM as `ValueHistoryRow` (see below), decoded from the wire
+# JSON by `historyRowsOf` (or, in the VS Code extension, by `ui/state.nim`).
+
+const
+  WatchErrorType* = "watch error"
+    ## The type name of a watch row the stop cannot answer: the engine's own
+    ## refusal (`db-backend/src/watch_expression.rs` `refusal_type`) and the
+    ## placeholder this VM draws for a watch the answer has no row for.
+  WatchPendingType* = "watch pending"
+    ## The type name of a watch row whose value has not arrived yet.
 
 type
-  StateTab* = enum
-    ## The three tabs available in the state panel.
-    stLocals   ## Local variables at the current execution point
-    stGlobals  ## Global / module-level variables
-    stWatches  ## User-defined watch expressions
-
   VariableCategory* = enum
     ## PLAT-49 finding 12. WHICH GROUP A VARIABLE ROW BELONGS TO, as a value
-    ## every front-end reads: the desktop and GPUI show one group at a time
-    ## (`StateTab`), the terminal lists the groups one after another and marks
+    ## every front-end reads: every front-end lists the groups one after
+    ## another in one list (Variable-State-Pane.md § Decisions, 2026-10-24), the
+    ## terminal marks
     ## each ROW with its category (a one-letter tag, colour-coded) instead of
     ## spending a row on a separator per group. Declaration order is the order
     ## the groups are listed in.
@@ -90,30 +97,59 @@ type
       ## Rendered form of ``HistoryResult.value`` (``textRepr``).
 
   StateVM* = ref object of ViewModel
-    ## Reactive state for the State panel.
+    ## Reactive state for the Variables pane (formerly the State pane).
+    ##
+    ## ONE LIST (Variable-State-Pane.md § Decisions, 2026-10-24): the locals,
+    ## the globals when present, then the watched expressions — no tabs.
     ##
     ## Mutable signals:
-    ##   activeTab       — which tab is shown
     ##   expandedPaths   — set of variable paths whose children are visible
     ##   selectedPath    — path under the cursor (empty string = none)
     ##   watchExpressions — list of user-entered watch expressions
     ##
     ## Derived memos:
-    ##   currentVariables — the variable seq for the active tab
+    ##   currentVariables — the pane's one list: locals, globals, watches
     ##   isLoading        — whether a locals request is in flight
     ##
     ## The store reference is kept for the auto-load effect.
+    actionSink*: ActionSink
+      ## Set in a mirror session: user actions go to the primary
+      ## (`action_sink`); nil on a primary.
     store*: ReplayDataStore
     collabCore*: CollaborativeSessionCore
     runtimeRole*: ViewModelRuntimeRole
 
     # -- Mutable state --
-    activeTab*: Signal[StateTab]
     expandedPaths*: Signal[HashSet[string]]
     selectedPath*: Signal[string]
       ## Empty string means "no selection".
     watchExpressions*: Signal[seq[string]]
+      ## THE SESSION'S watch list: every recording's StateVM of a session holds
+      ## this same signal (`session_vm.ensureStateVM`), so a watch survives a
+      ## process switch (Variable-State-Pane.md § Decisions, 2026-10-24).
+    watchOrigins*: Signal[Table[string, string]]
+      ## The recording each watch was added in, by expression (shared like
+      ## `watchExpressions`). Empty for a watch added before any recording was
+      ## known — such a watch belongs to every process.
+    hideOtherProcessWatches*: Signal[bool]
+      ## "Hide watches from other processes": when on, a watch added in another
+      ## recording is left out of `currentVariables` while this one is shown.
+      ## The reader's own setting; off by default.
+    recordingId*: string
+      ## The recording this StateVM shows (`ensureStateVM`); empty in a
+      ## single-recording session.
+    watchOwner*: StateVM
+      ## The VM that edits the session's watch list for this one — the
+      ## session's primary StateVM, set for every other recording's VM, so a
+      ## watch added in any process goes through the one collaboration-backed
+      ## owner. Nil on the owner itself.
     expandedHistories*: Signal[HashSet[string]]
+    viewport*: Signal[Viewport]
+    loadingMore*: Signal[HashSet[string]]
+      ## The row paths whose next elements are being fetched (`loadMore`) —
+      ## what a view shows as busy on that row's "Load More".
+      ## What the state pane was given (`setViewport`): it sizes the value
+      ## budget the stop loader asks for (`localsCountBudgetFor`).
     valueHistory*: Signal[Table[string, seq[ValueHistoryRow]]]
       ## Value history per variable path. Keyed by the dot-separated
       ## variable path (``VariableViewState.path``) — the same key
@@ -203,7 +239,18 @@ type
       ## badge only and waits for the response.
     onShowOriginProc*: proc(expression: string; location: store_types.Location)
       ## Optional bridge invoked by `onShowOrigin` — installed by
-      ## `state.nim` to forward into `OriginChainVM.onShowOrigin`.
+      ## `origin_chain_bridges.wireOriginChainBridges` to forward into
+      ## `OriginChainVM.onShowOrigin`, which sends the request; while it
+      ## is installed `onShowOrigin` sends none of its own.
+    onLoadOriginChainProc*: proc(expression: string;
+                                 location: store_types.Location)
+      ## Optional bridge the origin badge invokes when it expands a row
+      ## whose chain `originChainLookup` does not hold (spec §3.2.1:
+      ## "Clicking the badge (when loaded) expands the row in place to show
+      ## the full hop chain"). It fetches the chain for the in-row block
+      ## WITHOUT opening the side panel, which is the context menu's
+      ## target (§3.1). Installed by
+      ## `origin_chain_bridges.wireOriginChainBridges`.
     onWatchesChangedProc*: proc(expressions: seq[string])
       ## Optional bridge invoked whenever the watch list changes, so the
       ## host can re-issue the locals request that carries them.
@@ -281,22 +328,62 @@ const
 func categoryTag*(c: VariableCategory): string =
   VariableCategoryTags[c]
 
-proc selectTab*(vm: StateVM; tab: StateTab) =
-  ## Switch to a different tab. The `currentVariables` memo updates
-  ## automatically because it depends on `activeTab`.
-  if not vm.collabCore.isNil:
-    discard vm.collabCore.dispatchLocalViewOp(
-      vokSetStateTab,
-      "statePane.activeTab",
-      %*{"tab": $tab},
-    )
+
+func stateEmptyText*(): string =
+  ## What an empty Variables pane says, drawn by every front-end: nothing is
+  ## in scope and nothing is watched yet — and where to type a watch.
+  "No variables at this point of execution. Type an expression above to watch it."
+
+func isInvalidWatch*(row: store_types.Variable): bool =
+  ## A watch row the current stop cannot answer: the engine refused it, or
+  ## the answer had no row for it. Shown as not valid here, never dropped.
+  row.isWatch and row.typeName == WatchErrorType
+
+func isPendingWatch*(row: store_types.Variable): bool =
+  ## A watch row whose value has not arrived yet.
+  row.isWatch and row.typeName == WatchPendingType
+
+proc setHideOtherProcessWatches*(vm: StateVM; hide: bool) =
+  ## Turn "Hide watches from other processes" on or off.
+  if vm.isNil:
     return
-  vm.activeTab.val = tab
+  vm.hideOtherProcessWatches.val = hide
+
+proc watchOrigin*(vm: StateVM; expression: string): string =
+  ## The recording `expression` was added in, or "" when not recorded.
+  if vm.isNil:
+    return ""
+  vm.watchOrigins.val.getOrDefault(expression, "")
+
+proc noteWatchOrigin(vm: StateVM; expression, recordingId: string) =
+  ## Record where a watch was added, unless it already has an origin.
+  if recordingId.len == 0 or expression.len == 0:
+    return
+  let t = vm.watchOrigins.val
+  if t.hasKey(expression):
+    return
+  var fresh = initTable[string, string]()
+  for k, v in t:
+    fresh[k] = v
+  fresh[expression] = recordingId
+  vm.watchOrigins.val = fresh
+
+proc forgetWatchOrigin(vm: StateVM; expression: string) =
+  let t = vm.watchOrigins.val
+  if not t.hasKey(expression):
+    return
+  var fresh = initTable[string, string]()
+  for k, v in t:
+    if k != expression:
+      fresh[k] = v
+  vm.watchOrigins.val = fresh
 
 proc toggleExpand*(vm: StateVM; path: string) =
   ## Toggle whether a variable path is expanded or collapsed.
   ## If the path is currently in the expanded set it is removed;
   ## otherwise it is added.
+  if vm.actionSink.forwards("state", "toggleExpand", %*{"path": path}):
+    return
   if not vm.collabCore.isNil:
     let expanded = not (path in vm.expandedPaths.val)
     let observedAddTags =
@@ -323,6 +410,8 @@ proc toggleExpand*(vm: StateVM; path: string) =
 proc selectPath*(vm: StateVM; path: string) =
   ## Set the currently selected variable path.
   ## Pass an empty string to clear the selection.
+  if vm.actionSink.forwards("state", "selectPath", %*{"path": path}):
+    return
   if not vm.collabCore.isNil:
     discard vm.collabCore.dispatchLocalViewOp(
       vokSetRegister,
@@ -359,8 +448,18 @@ proc addWatch*(vm: StateVM; expression: string) =
   ## the origin chain. The actual `ct/originChain` dispatch is wired
   ## via the host bridge so the `OriginChainVM` observes the same
   ## response and updates its `activeChain` signal.
+  if vm.actionSink.forwards("state", "addWatch",
+      %*{"expression": expression}):
+    return
   if expression.len == 0:
     return
+  # The session's watch list is edited by its owner; the watch remembers the
+  # recording it was added in (Variable-State-Pane.md § Decisions).
+  if not vm.watchOwner.isNil and vm.watchOwner != vm:
+    vm.watchOwner.noteWatchOrigin(expression, vm.recordingId)
+    vm.watchOwner.addWatch(expression)
+    return
+  vm.noteWatchOrigin(expression, vm.recordingId)
   if isOriginWatch(expression) and not vm.onShowOriginProc.isNil and
      not vm.store.isNil:
     let inner = unwrapOriginWatch(expression)
@@ -391,6 +490,13 @@ proc addWatch*(vm: StateVM; expression: string) =
 
 proc removeWatch*(vm: StateVM; expression: string) =
   ## Remove a watch expression by value. No-op if not found.
+  if vm.actionSink.forwards("state", "removeWatch",
+      %*{"expression": expression}):
+    return
+  if not vm.watchOwner.isNil and vm.watchOwner != vm:
+    vm.watchOwner.removeWatch(expression)
+    return
+  vm.forgetWatchOrigin(expression)
   if not vm.collabCore.isNil:
     let watch = vm.collabCore.liveWatchForExpression(expression)
     if watch.isNone:
@@ -419,8 +525,18 @@ proc editWatch*(vm: StateVM; old, expression: string) =
   ## list (Variable-State-Pane.md: watch expressions "add, edit, remove").
   ## No-op when `old` is not a watch; an edit to an expression already
   ## watched removes `old` (the list stays free of duplicates).
+  if vm.actionSink.forwards("state", "editWatch",
+      %*{"old": old, "expression": expression}):
+    return
   if expression.len == 0 or old == expression:
     return
+  if not vm.watchOwner.isNil and vm.watchOwner != vm:
+    vm.watchOwner.editWatch(old, expression)
+    return
+  # An edited watch keeps the process it was added in.
+  let origin = vm.watchOrigin(old)
+  vm.forgetWatchOrigin(old)
+  vm.noteWatchOrigin(expression, origin)
   if not vm.collabCore.isNil:
     vm.removeWatch(old)
     vm.addWatch(expression)
@@ -435,7 +551,131 @@ proc editWatch*(vm: StateVM; old, expression: string) =
     exprs[at] = expression
   vm.watchExpressions.val = exprs
 
+proc setViewport*(vm: StateVM; v: Viewport) =
+  ## The size the state pane was given (Viewport-Driven-Loading V1); the
+  ## stop loader's value budget follows it.
+  # A mirror reports its measured size to the primary and keeps it too.
+  discard vm.actionSink.forwards("viewport", "set", %*{
+    "pane": "state", "rows": v.rows, "depth": v.cols,
+    "firstRow": v.firstRow})
+  vm.viewport.val = v
+
+const
+  LoadMoreCount* = LocalsMinCountLimit
+    ## Elements one "Load More" adds while the state pane has not been
+    ## measured — the locals request's per-collection floor, so a collection
+    ## grows by the same step it was first cut to.
+
+func loadMoreCountFor*(v: Viewport): int =
+  ## Elements one "Load More" adds for a state pane showing `v`
+  ## (Viewport-Driven-Loading V2, "Value children": the expanded node's
+  ## visible region, never a fixed number): the rows the pane shows — the
+  ## most of a node's new children that can be on screen at once — plus the
+  ## `LeadRows` every windowed list fetches past its last visible row.
+  ## `LoadMoreCount` for an unmeasured pane.
+  if not v.measured: LoadMoreCount
+  else: v.rows + LeadRows
+
+proc variableAt(locals: seq[Variable]; path: string;
+                indices: var seq[int]): Option[Variable] =
+  ## The row named by `path` (child names joined with `.`, the local's name
+  ## first — `VariableViewState.path`), and the element indices that reach it
+  ## from the local, for `ct/load-value-elements`'s `path`.
+  let parts = path.split('.')
+  if parts.len == 0:
+    return none(Variable)
+  var current: Variable
+  var found = false
+  for v in locals:
+    if v.name == parts[0]:
+      current = v
+      found = true
+      break
+  if not found:
+    return none(Variable)
+  for part in parts[1 .. ^1]:
+    var at = -1
+    for i, c in current.children:
+      if c.name == part:
+        at = i
+        break
+    if at < 0:
+      return none(Variable)
+    indices.add at
+    current = current.children[at]
+  some(current)
+
+proc appendElements(v: var Variable; path: openArray[int];
+                    added: seq[Variable]; more: bool) =
+  ## Append `added` to the children of the row `path` reaches under `v`.
+  if path.len == 0:
+    v.children.add added
+    v.moreElements = more
+    if not more:
+      v.elementsTotal = 0
+    return
+  appendElements(v.children[path[0]], path[1 .. ^1], added, more)
+
+proc loadMore*(vm: StateVM; path: string) =
+  ## "Load More" (UI-Data-Loading-Guidelines Pattern 3): the next
+  ## `loadMoreCountFor(viewport)` elements of the collection at row `path`,
+  ## which the locals budget cut short (`Variable.moreElements`), appended to
+  ## its children. Asked once at a time per row; an answer about a stop the
+  ## debugger has since left is dropped. A row with nothing more does nothing.
+  if vm.actionSink.forwards("state", "loadMore", %*{"path": path}):
+    return
+  let store = vm.store
+  if store.isNil or path.len == 0 or path in vm.loadingMore.val:
+    return
+  var indices: seq[int] = @[]
+  let row = variableAt(store.locals.locals.val, path, indices)
+  if row.isNone or not row.get.moreElements:
+    return
+  let expression = path.split('.')[0]
+  let start = row.get.children.len
+  let at = stopIdentityOf(store.debugger.val)
+  var busy = vm.loadingMore.val
+  busy.incl path
+  vm.loadingMore.val = busy
+  let theVm = vm
+  proc done() =
+    var b = theVm.loadingMore.val
+    b.excl path
+    theVm.loadingMore.val = b
+  onComplete(store.backend.send("ct/load-value-elements", %*{
+      "expression": expression, "path": indices, "startIndex": start,
+      "count": loadMoreCountFor(vm.viewport.val),
+      "rrTicks": store.debugger.val.rrTicks}),
+    onSuccess = proc(resp: JsonNode) =
+      done()
+      if not responseSucceeded(resp) or
+         stopIdentityOf(store.debugger.val) != at:
+        return
+      let body = responseBody(resp)
+      let first = body{"startIndex"}.getInt(-1)
+      var current: seq[int] = @[]
+      let now = variableAt(store.locals.locals.val, path, current)
+      # The slice continues what the row holds NOW; anything else (a reload
+      # in between) is not appended.
+      if now.isNone or first != now.get.children.len:
+        return
+      var added: seq[Variable] = @[]
+      for i, e in body{"elements"}.getElems:
+        added.add variableFromValue("[" & $(first + i) & "]", e)
+      var locals = store.locals.locals.val
+      for li in 0 ..< locals.len:
+        if locals[li].name == expression:
+          appendElements(locals[li], current, added,
+                         body{"more"}.getBool(false))
+          break
+      store.locals.locals.val = locals,
+    onError = proc(message: string) =
+      done())
+
 proc toggleHistory*(vm: StateVM; expression: string) =
+  if vm.actionSink.forwards("state", "toggleHistory",
+      %*{"expression": expression}):
+    return
   # Build a fresh HashSet to avoid same-reference equality on the JS target.
   # See updateHistory for full explanation.
   var h = initHashSet[string]()
@@ -470,6 +710,41 @@ proc updateHistory*(vm: StateVM; expression: string;
   h[expression] = rows
   vm.valueHistory.val = h
 
+proc historyRowsOf*(body: JsonNode): seq[ValueHistoryRow] =
+  ## Decode the `body` of a `ct/load-history` answer
+  ## (`{"results": [{"location": {"rrTicks"}, "value"}, …]}`) into the rows the
+  ## pane shows, each value presented as the locals rows present theirs.
+  if body.isNil or body.kind != JObject:
+    return
+  for r in body.getOrDefault("results").getElems:
+    let value = r.getOrDefault("value")
+    result.add ValueHistoryRow(
+      locationTicks: r{"location", "rrTicks"}.getBiggestInt(0),
+      valueText: (if value.isNil: "" else: presentedValueText(value)))
+
+proc loadValueHistory*(vm: StateVM; expression: string) =
+  ## Ask the engine for the history of `expression`'s value at the current
+  ## stop (`ct/load-history`) and store the answer under the same key
+  ## (`updateHistory`). A host installs it as `onToggleHistory`, so opening a
+  ## row's history and the new-stop refresh both ask through it. A failed
+  ## request leaves the history unanswered rather than empty: an empty history
+  ## is an answer ("the value never changed") that the engine did not give.
+  if vm.isNil or vm.store.isNil or vm.store.backend.isNil or
+     expression.len == 0:
+    return
+  let dbg = vm.store.debugger.val
+  let fut = vm.store.backend.send("ct/load-history", %*{
+    "expression": expression,
+    "location": {"path": dbg.location.file, "line": dbg.location.line,
+                 "rrTicks": dbg.rrTicks},
+    "isForward": false})
+  let theVm = vm
+  async_compat.onComplete(fut,
+    proc(response: JsonNode) =
+      if responseSucceeded(response):
+        theVm.updateHistory(expression, historyRowsOf(responseBody(response))),
+    proc(message: string) = discard)
+
 # ---------------------------------------------------------------------------
 # Value Origin Tracking (M4) actions — keep adjacent to `toggleHistory`
 # because each variable row exposes both an "open history" and an
@@ -477,20 +752,25 @@ proc updateHistory*(vm: StateVM; expression: string;
 # ---------------------------------------------------------------------------
 
 proc onShowOrigin*(vm: StateVM; expression: string; location: store_types.Location) =
-  ## Dispatch a `ct/originChain` request (spec §5.3) for `expression`
-  ## at `location`. Sends the request directly via `BackendService.send`
-  ## so the call site does not need to import the OriginChainVM, and
-  ## also invokes the optional `onShowOriginProc` bridge that the host
-  ## installs to keep the OriginChainVM in sync.
+  ## "Show value origin" for `expression` at `location`: one gesture puts
+  ## exactly one `ct/originChain` request (spec §5.3) on the wire.
   ##
-  ## The host bridge is invoked AFTER the wire send so that the
-  ## OriginChainVM observes the request fire-and-forget — it tracks
-  ## the response via its own event handler.
-  if not vm.store.isNil and not vm.store.backend.isNil:
-    let args = originChainArgs(expression = expression)
-    discard vm.store.backend.send("ct/originChain", args)
+  ## When the host has installed `onShowOriginProc`
+  ## (`origin_chain_bridges.wireOriginChainBridges`), the request is the
+  ## OriginChainVM's to send: it owns the side panel, the breadcrumb and
+  ## the request tracking that discards a superseded or cancelled answer.
+  ## Sending here as well would make the backend walk the chain twice,
+  ## each walk spending its own budget (§6.1.7), for an answer the VM
+  ## discards. Only without that bridge — a StateVM with no OriginChainVM
+  ## behind it — is the request sent from here.
+  if vm.actionSink.forwards("state", "onShowOrigin",
+      %*{"expression": expression, "location": sinkArg(location)}):
+    return
   if not vm.onShowOriginProc.isNil:
     vm.onShowOriginProc(expression, location)
+  elif not vm.store.isNil and not vm.store.backend.isNil:
+    let args = originChainArgs(expression = expression)
+    discard vm.store.backend.send("ct/originChain", args)
 
 proc toggleOriginExpansion*(vm: StateVM; row: VariableId) =
   ## Toggle the in-row inline chain expansion for `row`. The State
@@ -572,7 +852,9 @@ proc isOriginExpanded*(vm: StateVM; row: VariableId): bool =
 
 proc createStateVM*(store: ReplayDataStore;
                     collabCore: CollaborativeSessionCore = nil;
-                    runtimeRole = vrrStandalone): StateVM =
+                    runtimeRole = vrrStandalone;
+                    watchOwner: StateVM = nil;
+                    recordingId = ""): StateVM =
   ## Create a StateVM inside a reactive root owned by `withViewModel`.
   ## The reactive root is disposed via `vm.dispose()`.
   ##
@@ -581,12 +863,23 @@ proc createStateVM*(store: ReplayDataStore;
   ## 2. Derived memos for `currentVariables` and `isLoading`
   ## 3. Optional bridge callbacks supplied by the legacy component
   withViewModel proc(dispose: proc()): StateVM =
-    let activeTab = createSignal(stLocals)
     let expandedPaths = createSignal(initHashSet[string]())
     let selectedPath = createSignal("")
-    let watchExpressions = createSignal(newSeq[string]())
+    # Another recording's VM of the same session shares the owner's watch
+    # list and origins (Variable-State-Pane.md § Decisions, 2026-10-24).
+    let watchExpressions =
+      if watchOwner.isNil: createSignal(newSeq[string]())
+      else: watchOwner.watchExpressions
+    let watchOrigins =
+      if watchOwner.isNil: createSignal(initTable[string, string]())
+      else: watchOwner.watchOrigins
+    let hideOtherProcessWatches =
+      if watchOwner.isNil: createSignal(false)
+      else: watchOwner.hideOtherProcessWatches
     let expandedHistories = createSignal(initHashSet[string]())
     let valueHistory = createSignal(initTable[string, seq[ValueHistoryRow]]())
+    let viewport = createSignal(Viewport())
+    let loadingMore = createSignal(initHashSet[string]())
     let expandedOrigins = createSignal(initHashSet[VariableId]())
     let breadcrumbStack = createSignal(newSeq[BreadcrumbEntry]())
     let originSummaries = createSignal(initTable[string, OriginSummary]())
@@ -596,24 +889,45 @@ proc createStateVM*(store: ReplayDataStore;
     let valueChanges = createSignal(VariableDiff())
     let originLines = createSignal(initTable[string, seq[string]]())
 
-    # Derived: pick the right variable list based on the active tab.
+    # Derived: THE PANE'S ONE LIST (Variable-State-Pane.md § Decisions,
+    # 2026-10-24): the locals, the globals when the backend reports any, then
+    # one row per watched expression, in the session's watch order.
+    #
+    # A watch's row is the engine's answer for it (watch answers ride the
+    # locals response, split into `store.locals.watches` by `value.isWatch`).
+    # A watch the answer has no row for is still listed — "evaluating…" while
+    # the request is in flight, "not available at this stop" once it settled —
+    # because a watch is never dropped for not evaluating. With "Hide watches
+    # from other processes" on, a watch added in another recording is left out.
     let currentVariables = createMemo[seq[store_types.Variable]] proc(): seq[store_types.Variable] =
-      case activeTab.val
-      of stLocals:
-        store.locals.locals.val
-      of stGlobals:
-        store.locals.globals.val
-      of stWatches:
-        # Watches are evaluated server-side and returned as part of the
-        # locals response, split out of it by `value.isWatch` into
-        # `store.locals.watches`.
-        #
-        # This arm used to be `newSeq[store_types.Variable]()` — a literal
-        # empty list — with a comment promising it would be filled in
-        # "when the backend supports them". It has therefore been unable
-        # to show anything at all, whatever the backend answered, for as
-        # long as the tab has existed.
-        store.locals.watches.val
+      result = store.locals.locals.val
+      for g in store.locals.globals.val:
+        result.add g
+      let answered = store.locals.watches.val
+      let hide = hideOtherProcessWatches.val
+      let origins = watchOrigins.val
+      let loading = store.locals.loadingState.val == lsLoading
+      for expression in watchExpressions.val:
+        let origin = origins.getOrDefault(expression, "")
+        if hide and recordingId.len > 0 and origin.len > 0 and
+           origin != recordingId:
+          continue
+        var found = false
+        for row in answered:
+          if row.name == expression:
+            # A row is a watch because the user typed it, whatever flag the
+            # answer carried.
+            var watchRow = row
+            watchRow.isWatch = true
+            result.add watchRow
+            found = true
+            break
+        if not found:
+          result.add store_types.Variable(
+            name: expression,
+            value: (if loading: "evaluating…" else: "not available at this stop"),
+            typeName: (if loading: WatchPendingType else: WatchErrorType),
+            isWatch: true)
 
     # Derived: loading indicator.
     let isLoading = createMemo[bool] proc(): bool =
@@ -638,12 +952,17 @@ proc createStateVM*(store: ReplayDataStore;
       store: store,
       collabCore: collabCore,
       runtimeRole: runtimeRole,
-      activeTab: activeTab,
       expandedPaths: expandedPaths,
       expandedHistories: expandedHistories,
       valueHistory: valueHistory,
+      viewport: viewport,
+      loadingMore: loadingMore,
       selectedPath: selectedPath,
       watchExpressions: watchExpressions,
+      watchOrigins: watchOrigins,
+      hideOtherProcessWatches: hideOtherProcessWatches,
+      recordingId: recordingId,
+      watchOwner: watchOwner,
       currentVariables: currentVariables,
       isLoading: isLoading,
       codeStateLine: codeStateLine,
@@ -670,6 +989,36 @@ proc createStateVM*(store: ReplayDataStore;
     let stop = createMemo[string] proc(): string =
       stopIdentityOf(store.debugger.val)
 
+    # VALUE ORIGIN (spec §3.2.1): A ROW LEFT EXPANDED ACROSS A MOVE SHOWS ITS
+    # CHAIN AT THE NEW STOP. The in-row block draws only a chain answered at
+    # the current stop (`originChainLookup`), so after a move an expanded row
+    # would otherwise sit open and empty until it was collapsed and expanded
+    # again. The new stop's summaries arrive with its locals, after the move,
+    # so this runs on both: each expanded row that has a loaded summary here
+    # and no chain is asked once (`onLoadOriginChainProc` asks at most once
+    # per row per stop). Placeholder rows are left to their own fill.
+    #
+    # Only where this process may issue backend commands, as the watch effect
+    # below: a collaborator mirrors a session another process owns.
+    # Iterating `expandedOrigins.val` walks a copy, so a request that answers
+    # synchronously cannot disturb the walk.
+    if mayIssueBackendCommands(runtimeRole):
+      createEffect proc() =
+        discard stop.val
+        let summaries = originSummaries.val
+        untrack(proc() =
+          if vm.onLoadOriginChainProc.isNil:
+            return
+          let location = store.debugger.val.location
+          for row in expandedOrigins.val:
+            if not summaries.hasKey(row.name) or
+                summaries[row.name].isPlaceholder:
+              continue
+            if not vm.originChainLookup.isNil and
+                vm.originChainLookup(row.name).isSome:
+              continue
+            vm.onLoadOriginChainProc(row.name, location))
+
     # PLAT-51: THE CHANGED VALUES. Every answer for the locals is observed at
     # the stop it belongs to — an answer is admitted only while the debugger
     # is still at the stop it was requested at (PLAT-29), so the position read
@@ -678,15 +1027,22 @@ proc createStateVM*(store: ReplayDataStore;
     # tick; the real answer REPLACES that snapshot when it lands
     # (`ValueTimeline.observe` replaces a re-observed tick), so the marks
     # settle on the right rows.
-    createEffect proc() =
-      discard stop.val
-      let locals = store.locals.locals.val
-      untrack(proc() =
-        let d = store.debugger.val
-        if d.rrTicks == 0'u64 and locals.len == 0:
-          return
-        vm.changeTimeline.observe(d.rrTicks, snapshotOf(locals))
-        vm.valueChanges.val = vm.changeTimeline.diffAt(d.rrTicks))
+    #
+    # Derived only where the backend's facts originate. A collaborator — a
+    # mirror of a session another process owns — receives `valueChanges` from
+    # its owner with the locals, and deriving it again here would diff against
+    # the stops THIS process happened to see: a batch that merges several moves
+    # shows a mirror one stop where the owner saw three.
+    if ownsBackend(runtimeRole):
+      createEffect proc() =
+        discard stop.val
+        let locals = store.locals.locals.val
+        untrack(proc() =
+          let d = store.debugger.val
+          if d.rrTicks == 0'u64 and locals.len == 0:
+            return
+          vm.changeTimeline.observe(d.rrTicks, snapshotOf(locals))
+          vm.valueChanges.val = vm.changeTimeline.diffAt(d.rrTicks))
 
     createEffect proc() =
       discard stop.val
@@ -716,6 +1072,30 @@ proc createStateVM*(store: ReplayDataStore;
         store.requestLocals(store.debugger.val.rrTicks,
                             watchExpressions = watches))
 
+    # A VALUE HISTORY IS ABOUT THE STOP IT WAS ASKED AT: the engine answers
+    # with the history of the variable in the CALL the debugger is in. A
+    # history cached under the expression alone and kept across moves showed
+    # the previous call's history after a move to another call. So a new stop
+    # drops every cached history, and each one the reader has open is asked
+    # for again, at the new stop (UI-Data-Loading-Guidelines Pattern 5).
+    var historyStop = ""
+    var historyStopSeen = false
+    createEffect proc() =
+      let at = stop.val
+      untrack(proc() =
+        if not historyStopSeen:
+          historyStopSeen = true
+          historyStop = at
+          return
+        if at == historyStop:
+          return
+        historyStop = at
+        if vm.valueHistory.val.len > 0:
+          vm.valueHistory.val = initTable[string, seq[ValueHistoryRow]]()
+        if not vm.onToggleHistory.isNil:
+          for expression in vm.expandedHistories.val:
+            vm.onToggleHistory(expression))
+
     vm
 
 proc isChanged*(vm: StateVM; path: string): bool =
@@ -728,6 +1108,9 @@ proc jumpToHistoryEntry*(vm: StateVM; ticks: int64) =
   ## PLAT-51: a value-history entry is a NAVIGATION ROW (Variable-State-Pane
   ## .md; Click-Navigation.md §2): go to the tick its value was recorded at
   ## (`ct/goto-ticks`, the seek the terminal's and GPUI's history rows send).
+  if vm.actionSink.forwards("state", "jumpToHistoryEntry",
+      %*{"ticks": ticks}):
+    return
   if vm.isNil or vm.store.isNil or ticks < 0:
     return
   vm.store.requestHistoricalNavigation("ct/goto-ticks", %*{"ticks": ticks})

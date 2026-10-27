@@ -1,7 +1,6 @@
 import
   ui_imports,
   value,
-  isonim_panel_mount,
   ../communication,
   ../event_helpers,
   ../../common/ct_event,
@@ -15,36 +14,34 @@ from std / dom import nil # imports dom, without directly its items: you need to
 # ---------------------------------------------------------------------------
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
-from ../dap import trackCtRequests, ctRequestIdOf
+from ../dap import trackCtRequests, ctRequestIdOf, ctRequestSessionId
+import ./session_viewmodels
 import ./presented_value
 import ../viewmodel/store/replay_data_store
 from ../viewmodel/store/types as store_types import nil
 import ../viewmodel/viewmodels/state_vm
 import ../viewmodel/viewmodels/origin_chain_vm
 import ../viewmodel/viewmodels/origin_chain_types
+import ../viewmodel/viewmodels/origin_chain_bridges as origin_chain_bridges
+from ../viewmodel/viewmodels/scratchpad_vm import ScratchpadVM
 import isonim/core/[signals, computation]
 from isonim/web/dom_api import nil
-from ../viewmodel/views/isonim_state_view import
-  mountIsoNimStatePanel
+import ./panel_host
+from ../viewmodel/session_vm import SessionViewModel
+# Horizontal-Overflow.md §5: the State pane's values are table cells.
+from ../viewmodel/views/isonim_state_view import attachStateTableOverflow
+from std/jsffi import JsObject
 import isonim_origin_chain
 import origin_chain_runtime
 
-# Module-level StateVM instance. Created once in `register()` and
-# fed data whenever the legacy event-bus handlers fire.  Rendering
-# still reads from the legacy `self.locals` so behaviour is unchanged.
+# The pane's StateVM: the SHOWN tab's session's (`initStateVMFromSession`,
+# called again on every tab switch). The panel host renders each tab's State
+# pane over its own tab's session (`ui/panel_host`), so these two name only
+# what the window-level bridges (the watch input, the origin side panel) act
+# on; what a session's moves and answers write goes to that session's own
+# store (`syncStoreDebuggerPositionInto`, `wireLocalsAnswers`).
 var stateVMInstance: StateVM
 var stateVMStore: ReplayDataStore
-var stateHistoryBridge: proc(expression: string)
-
-# WAS `var isoNimStateMounted: bool = false`. See `isoNimPanelMountIsLive` in
-# `ui/isonim_panel_mount.nim` for why a boolean could not answer the question
-# it was being asked. These two record WHAT was mounted and WHERE, so the
-# answer can be re-derived from the document instead of remembered.
-var mountedStateVM: StateVM
-  ## The ViewModel whose DOM the live State panel holds, or `nil`.
-var mountedStateHost: dom_api.Element
-  ## The element that DOM was mounted into. Asked `document.contains` rather
-  ## than trusted: `layout.swapLayout` destroys it without telling this module.
 
 when defined(js):
   proc setTimeoutWithArg[T](cb: proc(x: T) {.cdecl.}, delay: int, arg: T) {.importjs: "setTimeout(#, #, #)".}
@@ -64,12 +61,6 @@ var originChainVMInstance: OriginChainVM
 # let TOTAL_VALUE_COMPONENT_WIDTH: float = 95 #%
 
 proc calculateValueWidth(self: StateComponent):float = self.totalValueWidth - self.nameWidth
-proc loadLocals*(self: StateComponent)
-
-var storeSendsLocals = false
-  ## Set by `initStateVMWithStore`: the StateVM's auto-load, over the
-  ## session's real store, is the one `ct/load-locals` sender (`loadLocals`).
-
 func watchInputId(self: StateComponent): cstring =
   cstring(fmt"watch-{self.id}")
 
@@ -91,12 +82,12 @@ proc submitWatchExpression(self: StateComponent) =
 
   self.watchExpressions.add(expression)
 
-  # Sync the new watch expression to the StateVM, whose auto-load re-asks
-  # with it; `loadLocals` asks itself only where that auto-load runs over a
-  # stub store (the VS Code extension).
-  if stateVMInstance != nil:
-    stateVMInstance.addWatch($expression)
-  self.loadLocals()
+  # Sync the new watch expression to the StateVM, whose stop loader re-asks
+  # with it.
+  # The watch belongs to this component's own tab (`ownPaneVM`).
+  let ownVM = ownPaneVM(self, stateVMInstance, stateVM)
+  if ownVM != nil:
+    ownVM.addWatch($expression)
 
   input.toJs.value = cstring""
 
@@ -104,118 +95,22 @@ proc submitWatchExpression(self: StateComponent) =
 method restart*(self: StateComponent) =
   discard
 
-proc tryMountIsoNimStatePanel*()
-
-when defined(ctInExtension):
-  var stateComponentForExtension* {.exportc.}: StateComponent
-
-  proc bindStateExtensionHost(component: StateComponent) =
-    if component.extensionRendererId.len == 0:
-      return
-
-    let host = document.getElementById(component.extensionRendererId)
-    if host.isNil:
-      return
-
-    # Mount the IsoNim state panel into the container the extension webview
-    # provides.  tryMountIsoNimStatePanel is idempotent — it skips the work
-    # if the panel is already mounted and still in the document.
-    tryMountIsoNimStatePanel()
-
-  proc makeStateComponentForExtension*(id: cstring): StateComponent {.exportc.} =
-    if stateComponentForExtension.isNil:
-      if data.sessions.len == 0:
-        return
-      stateComponentForExtension = makeStateComponent(data, 0, inExtension = true)
-    if stateComponentForExtension.extensionRendererId.len == 0:
-      stateComponentForExtension.extensionRendererId = id
-      stateComponentForExtension.bindStateExtensionHost()
-    result = stateComponentForExtension
 
 # ---------------------------------------------------------------------------
 # ViewModel bridge procs — sync legacy event data into the parallel store.
-# Placed before registerLocals / onCompleteMove so they are visible at
+# Placed before onCompleteMove so they are visible at
 # the call sites without forward declarations.
 # ---------------------------------------------------------------------------
 
-type
-  StateMountData = ref object
-    key: cstring
-    retryCount: int
-
-proc statePanelIsLive(): bool =
-  ## Is the State panel mounted RIGHT NOW, into an element still in the
-  ## document, with the ViewModel that is current?
-  isoNimPanelMountIsLive(
-    mountedVMIsCurrent = not mountedStateVM.isNil and
-                         mountedStateVM == stateVMInstance,
-    hostIsInDocument = isoNimPanelHostIsInDocument(mountedStateHost))
-
-proc doMountStatePanel(data: StateMountData) {.cdecl.} =
-  if statePanelIsLive():
-    return
-  data.retryCount += 1
-  let container = dom_api.getElementById(dom_api.document, data.key)
-  if dom_api.isNodeNil(dom_api.Node(container)):
-    if data.retryCount mod 10 == 0:
-      # Legitimate, hence DEBUG.  `tryMountIsoNimStatePanel` is
-      # called before GoldenLayout has necessarily created the panel's
-      # container, so polling for it is the design, not a fault.  Only
-      # exhausting the retry budget below is a failure.
-      cdebug "[PIPELINE] tryMountIsoNimStatePanel: retry #" & $data.retryCount
-    if data.retryCount > 200:
-      # WARN, AND IT ENDS THIS POLL RATHER THAN THE SESSION.
-      #
-      # This said ERROR and called itself "a terminal failure with a
-      # permanently blank panel as its symptom". That is false, and
-      # `ui/layout.nim`'s component factory is what falsifies it: its
-      # `Content.State` arm calls `tryMountIsoNimStatePanel()` 200 ms after
-      # `mountComponentContainer` has built `#stateComponent-0`, which is the
-      # one moment the container is known to exist. That call re-enters with a
-      # FRESH `StateMountData(retryCount: 0)`, so the cap below is per-ATTEMPT
-      # and not per-session, and `statePanelIsLive()` is a mounted guard rather
-      # than a failed one — reaching the cap latches nothing.
-      #
-      # So what has happened here is that an EARLIER, redundant poll lost a
-      # race it was always going to lose: it started before the container
-      # could exist. The pane is mounted moments later by the factory arm, and
-      # a populated State pane above this line is the normal case, not a
-      # contradiction of it.
-      #
-      # The level is deliberate in both directions. It must not go back to
-      # `clog`/DEBUG — that is what hid the Timeline's identical give-up
-      # through 25 sessions. It must not stay at ERROR either: ERROR is for a
-      # capability the user has lost, this fires in healthy sessions, and an
-      # error that is printed on every good run is how a real one gets
-      # scrolled past. `ci/test/noir-replay-in-browser.sh` already records
-      # these give-ups rather than asserting their absence, for exactly this
-      # reason ("asserting no give-up would fail over a working product") —
-      # this line is now spelled the way that gate already reads it.
-      cwarn "[PIPELINE] tryMountIsoNimStatePanel: container absent after 200 " &
-        "retries; abandoning THIS poll — layout.nim's factory arm mounts the " &
-        "pane once its container exists"
-      return
-    setTimeoutWithArg(doMountStatePanel, 10, data)
-    return
-
-  let containerNode = dom_api.Node(container)
-  while not dom_api.isNodeNil(containerNode.firstChild):
-    discard dom_api.removeChild(containerNode, containerNode.firstChild)
-
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: container found, mounting now"
-  mountedStateVM = stateVMInstance
-  mountedStateHost = container
-  mountIsoNimStatePanel(container, stateVMInstance)
-  markIsoNimPanelContainerMounted(container)
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: mount COMPLETE in #stateComponent-0"
-
+proc observePlaceholderBadges(container: dom_api.Element; vm: StateVM) =
+  ## Value Origin Tracking (spec §3.2.3): hand each placeholder badge the pane
+  ## shows to the lazy-fill observer (`origin_chain_runtime`), again whenever
+  ## a new batch of locals — and so of placeholder tokens — arrives. Runs in
+  ## the mount's reactive root.
   let panelContainer = container
   createEffect proc() =
-    # Reading the signal subscribes us so we re-fire whenever a new
-    # batch of locals (and therefore a new batch of placeholder
-    # tokens) arrives.
-    discard stateVMInstance.originSummaries.val
-    # Defer the DOM walk via setTimeoutWithArg
+    discard vm.originSummaries.val
+    # After the rows for the new summaries are drawn.
     setTimeoutWithArg(proc(containerEl: dom_api.Element) {.cdecl.} =
       let nodeList = containerEl.toJs.querySelectorAll(
         cstring"button.ct-origin-badge.ct-origin-badge-placeholder")
@@ -224,30 +119,10 @@ proc doMountStatePanel(data: StateMountData) {.cdecl.} =
         observePlaceholderBadgeJs(nodeList[i])
     , 0, panelContainer)
 
-proc tryMountIsoNimStatePanel*() =
-  ## Mount the IsoNim state panel view into the GoldenLayout-managed
-  ## state component container. The container is created by GoldenLayout
-  ## with the id `stateComponent-0`. The IsoNim view is the primary
-  ## renderer — no Karax renderer is involved.
-  ##
-  ## After mounting:
-  ## - `statePanelIsLive()` answers true until the host leaves the document
-  ##   or the ViewModel is replaced
-  ## - `registerLocals` still feeds data into the store, and IsoNim's
-  ##   reactive effects update the DOM automatically
-  ##
-  ## Safe to call multiple times — mounts only once.
-  cdebug "[PIPELINE] tryMountIsoNimStatePanel: called, panelIsLive=" &
-    $statePanelIsLive() & " vmIsNil=" & $stateVMInstance.isNil
-  if statePanelIsLive() or stateVMInstance.isNil:
-    cdebug "[PIPELINE] tryMountIsoNimStatePanel: skipping (already mounted or VM nil)"
-    return
-
-  let mountData = StateMountData(
-    key: cstring"stateComponent-0",
-    retryCount: 0
-  )
-  doMountStatePanel(mountData)
+setPanelDecorator(Content.State,
+  proc(host: dom_api.Element; session: SessionViewModel) =
+    observePlaceholderBadges(host, session.stateVM)
+    attachStateTableOverflow(cast[JsObject](host), session.stateVM))
 
 # ---------------------------------------------------------------------------
 # Origin Chain side-panel mount (M4 deliverable #9). The panel lives
@@ -345,10 +220,9 @@ proc releaseOriginSidePanelEffect*() =
   ## ``tryMountOriginSidePanel`` installs a fresh one.
   ##
   ## Needed because the effect captures its reactive dependencies from
-  ## whichever ``OriginChainVM`` existed when it first ran. Startup
-  ## creates a stub-backed VM during ``register()`` and then *replaces*
-  ## it with the shared-store VM in ``initStateVMWithStore``; without
-  ## this reset the effect stays subscribed to the discarded stub's
+  ## whichever ``OriginChainVM`` existed when it first ran. A new session
+  ## *replaces* it in ``initStateVMFromSession``; without this reset the
+  ## effect stays subscribed to the discarded VM's
   ## ``sidePanelOpen`` / ``activeChain`` signals, so the real VM's
   ## chain arrives and the panel never re-renders — the side panel is
   ## drawn exactly once, empty, and stays that way for the whole
@@ -356,39 +230,26 @@ proc releaseOriginSidePanelEffect*() =
   when defined(js):
     originSidePanelEffectInstalled = false
 
+var scratchpadForPins: proc(): ScratchpadVM
+  ## Where "Pin to scratchpad" puts a chain: the Scratchpad pane's
+  ## ViewModel, resolved when the pin happens. `ui/scratchpad.nim` imports
+  ## this module, so this module cannot import it back; it installs the
+  ## resolver instead (`installScratchpadForPins`). Resolving at pin time
+  ## rather than at wiring time is what lets the OriginChainVM be built
+  ## before the Scratchpad pane's VM is, and follow that VM when it is
+  ## replaced by the session's.
+
+proc installScratchpadForPins*(resolve: proc(): ScratchpadVM) =
+  scratchpadForPins = resolve
+
 proc wireOriginChainBridges(stateVM: StateVM; originVM: OriginChainVM) =
-  ## Wire the StateVM → OriginChainVM bridges so the State Pane's
-  ## inline origin badge click handler dispatches the same
-  ## ``ct/originChain`` request the side-panel uses (M4 deliverable
-  ## §3.2.1 + §3.2.3). The chain-lookup bridge lets the per-row
-  ## expansion block (M4 deliverable §3.2.2 "expanded chain") render
-  ## as soon as the active chain matches the row's variable name.
-  # Construct the bridge closure by capturing the OriginChainVM via
-  # the surrounding scope.  The ``Location`` type the StateVM's
-  # ``onShowOriginProc`` field uses is
-  # ``viewmodel/store/types.Location``; we reach it through the
-  # StateVM's own field type so the JS backend resolves the symbol
-  # unambiguously.
-  type StateLocation = typeof(stateVM.store.debugger.val.location)
-  proc forwardShowOrigin(expression: string; location: StateLocation) =
-    originVM.onShowOrigin(expression, location)
-  stateVM.onShowOriginProc = forwardShowOrigin
-  stateVM.originChainLookup = proc(name: string): origin_chain_types.Option[OriginChain] =
-    # NB: ``origin_chain_types`` re-exports ``std/options``, which is
-    # how we reach ``Option``/``some``/``none`` here without pulling
-    # ``std/options`` directly (importing it in this file would
-    # introduce a ``data`` ambiguity with the legacy global from
-    # ``frontend/types.nim``).
-    let active = originVM.activeChain.val
-    if active.isSome and active.get.queryVariable == name:
-      active
-    else:
-      origin_chain_types.none(OriginChain)
-  # Sync the OriginChainVM preferences signal into the StateVM mirror
-  # so badge text / icon / function-suffix follow the user's chosen
-  # style.  The OriginChainVM owns the canonical preferences; the
-  # StateVM mirror is read by the row renderer.
-  stateVM.originPreferences.val = originVM.preferences.val
+  ## The production wiring of the origin badge, the side panel and the
+  ## Scratchpad. It lives in the ViewModel layer
+  ## (`origin_chain_bridges.wireOriginChainBridges`) so the headless
+  ## suites drive the same bridges this renderer installs.
+  origin_chain_bridges.wireOriginChainBridges(stateVM, originVM,
+    proc(): ScratchpadVM =
+      if scratchpadForPins.isNil: nil else: scratchpadForPins())
 
 proc activeStateVM*(): StateVM =
   ## M42 §14.8 — expose the module-local `StateVM` so the bootstrap
@@ -400,66 +261,65 @@ proc activeStateVM*(): StateVM =
 proc activeOriginChainVM*(): OriginChainVM =
   ## M29 §14.8 — expose the module-local `OriginChainVM` so the
   ## bootstrap code path (`ui_js.nim`) can attach it to the active
-  ## `SessionViewModel` after `initStateVMWithStore` finishes.
+  ## `SessionViewModel` after `initStateVMFromSession` finishes.
   ## Returns ``nil`` until the VM has been created.
   originChainVMInstance
 
-proc initStateVMWithStore*(store: ReplayDataStore) =
-  ## Initialise the parallel StateVM using an externally-provided
-  ## ReplayDataStore (typically the shared store from SessionViewModel
-  ## which is backed by a real DapApi).
-  ##
-  ## If a stub-backed instance already exists (created by initStateVM
-  ## before the real backend was available), it is replaced so that the
-  ## panel uses the real DapApi instead of the no-op stub.
-  if stateVMInstance != nil:
-    clog "StateVM: replacing existing instance with shared-store version"
-    # No flag to reset. `statePanelIsLive` compares `mountedStateVM` against
-    # `stateVMInstance`, so the assignment below IS the invalidation: the next
-    # `tryMountIsoNimStatePanel` sees a live host holding the old VM's DOM and
-    # remounts. This was the one and only site that cleared `isoNimStateMounted`
-    # and it is the reason the flag could not simply be deleted.
-  stateVMStore = store
-  # THE LANGUAGE the store's `ct/load-locals` names: the stopped-in file's,
-  # resolved exactly as the legacy `StateComponent.loadLocals` resolved it.
-  # Installed before the StateVM exists, because its auto-load runs at once.
+proc installSourceLanguage*(store: ReplayDataStore) =
+  ## THE LANGUAGE the store's `ct/load-locals` names: the stopped-in file's,
+  ## resolved from the file's name (`toLangFromFilename`).
+  ## The host installs it before the session's ViewModels exist, because the
+  ## stop loader may ask at once.
   store.sourceLanguageOf = proc(file: string): string =
     langWireName(toLangFromFilename(cstring(file)))
-  stateVMInstance = createStateVM(store)
-  # From here on the StateVM's auto-load is the ONE sender of
-  # `ct/load-locals` — see `storeSendsLocals` and `loadLocals`. Set only once
-  # that StateVM exists: were `createStateVM` to raise (the caller logs and
-  # carries on), the legacy component must go on asking.
-  storeSendsLocals = true
-  stateVMInstance.onToggleHistory = stateHistoryBridge
-  # WATCHES: re-issue the request whose response this module renders.
-  #
-  # The watch input form calls `StateVM.addWatch`, but the reply the
-  # product actually paints comes from `StateComponent.loadLocals` ->
-  # `CtLoadLocalsResponse` -> `registerLocals`. Without this bridge the
-  # two never met: `loadLocals` read `StateComponent.watchExpressions`,
-  # which only the call-site-less `submitWatchExpression` wrote, so a
-  # typed watch reached no answered request. `loadLocals` now reads the
-  # ViewModel's list (below), and this makes a change to it re-ask.
-  stateVMInstance.onWatchesChangedProc = proc(expressions: seq[string]) =
-    # `componentMapping` is an `array[Content, JsAssoc[int, Component]]`,
-    # so the per-content map can be nil before the State pane mounts and
-    # the id lookup can miss. Both are ordinary during start-up, hence the
-    # guards rather than an assertion.
-    if data.isNil or data.ui.componentMapping[Content.State].isNil:
-      return
-    if not data.ui.componentMapping[Content.State].hasKey(0):
-      return
-    let component = data.stateComponent(0)
-    if component.isNil:
-      return
-    component.loadLocals()
-  # Create the companion OriginChainVM and wire the bridges so the
-  # State Pane row renderer can dispatch ``ct/originChain`` requests
-  # through the same VM the side-panel uses (M4 deliverable §3.2.1 +
-  # §3.2.3).
-  originChainVMInstance = createOriginChainVM(store)
-  wireOriginChainBridges(stateVMInstance, originChainVMInstance)
+
+proc createSessionOriginChainVM*(vm: StateVM;
+                                 scratchpad: ScratchpadVM = nil): OriginChainVM =
+  ## The OriginChainVM of the session whose `StateVM` is `vm`, built once
+  ## when that session's ViewModels are (`ui_js.configureSessionMiddleware`),
+  ## with the bridges that let the State pane's row renderer dispatch
+  ## ``ct/originChain`` requests through the same VM the side panel uses (M4
+  ## deliverable §3.2.1 + §3.2.3). Each tab's session has its own, so a chain
+  ## asked for in one tab is never shown in another.
+  ##
+  ## `scratchpad` is THAT session's Scratchpad ViewModel: a chain pinned from
+  ## this session's side panel lands in this session's Scratchpad. Nil pins
+  ## into the pane's (`installScratchpadForPins`), for a host with one
+  ## session.
+  result = createOriginChainVM(vm.store)
+  if scratchpad.isNil:
+    wireOriginChainBridges(vm, result)
+  else:
+    let target = scratchpad
+    origin_chain_bridges.wireOriginChainBridges(vm, result,
+      proc(): ScratchpadVM = target)
+
+proc initStateVMFromSession*(vm: StateVM; originChain: OriginChainVM = nil) =
+  ## Hand the pane the session's `StateVM` — the one
+  ## `initializePanelViewModels` built on the session's store, so every
+  ## reader of the session sees the same instance (Shared-DOM-Front-Ends D1).
+  ## Called for the shown tab's session on every tab switch.
+  ##
+  ## `originChain` is that session's OriginChainVM
+  ## (`createSessionOriginChainVM`); nil builds one here, for a host that keeps
+  ## a single session.
+  let store = vm.store
+  stateVMStore = store
+  stateVMInstance = vm
+  # The session's stop loader is the ONE sender of `ct/load-locals`.
+  # A row's value history is asked for and applied by the ViewModel
+  # (`ct/load-history` at the current stop), as on every front-end.
+  let theVm = vm
+  stateVMInstance.onToggleHistory = proc(expression: string) =
+    theVm.loadValueHistory(expression)
+  # The watch list needs no bridge here: the stop loader re-asks
+  # `ct/load-locals` when it changes.
+  # The companion OriginChainVM, its bridges wired so the State Pane row
+  # renderer can dispatch ``ct/originChain`` requests through the same VM the
+  # side-panel uses (M4 deliverable §3.2.1 + §3.2.3).
+  originChainVMInstance =
+    if originChain.isNil: createSessionOriginChainVM(vm)
+    else: originChain
   # The VM this replaces may already own the side panel's render
   # effect; drop it so the panel re-binds to the new VM's signals.
   releaseOriginSidePanelEffect()
@@ -469,50 +329,9 @@ proc initStateVMWithStore*(store: ReplayDataStore) =
   # tokens into the same lazy-fill batch (spec §3.2.3).
   setOriginChainVM(originChainVMInstance)
   tryMountOriginSidePanel()
-  cdebug "[PIPELINE] initStateVMWithStore: storeId=" & $store.storeId
-  clog "StateVM: parallel ViewModel instance created (shared store)"
-  tryMountIsoNimStatePanel()
+  cdebug "[PIPELINE] initStateVMFromSession: storeId=" & $store.storeId
+  clog "StateVM: the session's instance installed"
 
-proc initStateVM() =
-  ## Lazily create the parallel StateVM instance backed by a stub
-  ## BackendService.  This fallback is used when no shared store has
-  ## been provided via `initStateVMWithStore` (e.g. in the VS Code
-  ## extension where the SessionViewModel is not yet wired).
-  if stateVMInstance != nil:
-    return
-
-  let stubSend = proc(command: string, args: JsonNode): BackendFuture[JsonNode] =
-    # Return an immediately-resolved future so the store's loading
-    # state transitions correctly but no real I/O happens.
-    when defined(js):
-      result = newPromise proc(resolve: proc(resp: JsonNode)) =
-        resolve(%*{})
-    else:
-      var fut = newFuture[JsonNode]("stub-backend")
-      fut.complete(%*{})
-      result = fut
-
-  let stubBackend = BackendService(
-    sendProc: stubSend,
-    onEventProc: proc(handler: proc(event: JsonNode)) = discard,
-    disconnectProc: proc() = discard,
-  )
-
-  stateVMStore = createReplayDataStore(stubBackend)
-  stateVMInstance = createStateVM(stateVMStore)
-  # Companion OriginChainVM + bridges so the inline badge click
-  # handler can dispatch through the same VM the side-panel uses
-  # (M4 deliverable §3.2.1 + §3.2.3) even on the stub-backend code path.
-  originChainVMInstance = createOriginChainVM(stateVMStore)
-  wireOriginChainBridges(stateVMInstance, originChainVMInstance)
-  setOriginChainVM(originChainVMInstance)
-  # The origin side panel mounts into a floating aside appended to
-  # document.body and expects the full desktop DOM.  Extension webviews
-  # have a minimal, panel-only DOM, so skip this in that context.
-  when not defined(ctInExtension):
-    tryMountOriginSidePanel()
-  clog "StateVM: parallel ViewModel instance created (stub backend)"
-  tryMountIsoNimStatePanel()
 
 proc valueDisplayText*(v: Value): string =
   ## What the State pane's value cell says a recorded value IS.
@@ -614,9 +433,9 @@ proc toVariableChildren*(val: Value): seq[store_types.Variable] =
 proc localsToStoreRows*(legacyLocals: seq[Variable]): seq[store_types.Variable] =
   ## Map one ``ct/load-locals`` response body onto the store's rows.
   ##
-  ## SEPARATED FROM ``syncStoreLocals`` SO A TEST CAN CALL IT. The sync
-  ## proc needs the module-level ``stateVMStore``, which only exists once
-  ## the app has booted, so every probe that wanted to know what the State
+  ## SEPARATED FROM ``syncStoreLocalsInto`` SO A TEST CAN CALL IT. The sync
+  ## proc needs a session's store, which only exists once the app has
+  ## booted, so every probe that wanted to know what the State
   ## pane *displays* had to re-implement this mapping by hand — and a
   ## hand-written copy cannot notice when the real one is wrong. It did not
   ## notice: `ci/test/watch_expressions_browser_probe.nim` read the refusal
@@ -639,9 +458,11 @@ proc localsToStoreRows*(legacyLocals: seq[Variable]): seq[store_types.Variable] 
       isWatch = (not v.value.isNil and v.value.isWatch),
     ))
 
-proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
-  ## Mirror one `ct/load-locals` answer into the ViewModel store so the
-  ## StateVM's currentVariables memo sees the same data.
+proc syncStoreLocalsInto*(store: ReplayDataStore;
+                          response: CtLoadLocalsResponseBody) =
+  ## Mirror one `ct/load-locals` answer into `store` — the store of the
+  ## session whose request it answers — so its StateVM's currentVariables
+  ## memo sees the same data.
   ##
   ## Both RR and Materialized (DB) traces flow through this path;
   ## the only difference is *which* values arrive, not how the sync
@@ -652,7 +473,13 @@ proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
   ## ``valueDisplayText`` helper now mirrors the legacy atom-value
   ## ``$value`` call which dispatches into the
   ## proper field per ``TypeKind``.
-  if stateVMStore.isNil or response.isNil:
+  if store.isNil or response.isNil:
+    return
+  # THE SESSION'S STOP LOADER APPLIES THE ANSWER IT ASKED FOR, through the
+  # shared decoder (`store/locals_answer`), on the request's own future. This
+  # fan-out delivers the same answer a second time; applying it here as well
+  # would write the locals twice per stop.
+  if store.localsLoadedByHost:
     return
   # WATCH ANSWERS TRAVEL IN THE SAME LIST. Each row carries `value.isWatch`
   # (set by the backend — see `db-backend/src/watch_expression.rs`); the
@@ -667,30 +494,36 @@ proc syncStoreLocals*(response: CtLoadLocalsResponseBody) =
   # sender or a second subscriber from pairing an answer with the wrong
   # request. One the debugger has moved past is dropped rather than drawn
   # beside the new stop.
-  if not stateVMStore.applyLocalsAnswer(vmRows,
-                                        $ctRequestIdOf(response.toJs)):
+  if not store.applyLocalsAnswer(vmRows,
+                                 $ctRequestIdOf(response.toJs)):
     cdebug "[PIPELINE] syncStoreLocals: dropped an answer for a stop the " &
       "debugger has left"
     return
   cdebug fmt"[PIPELINE] syncStoreLocals: synced {vmRows.len} row(s) into store"
 
-var localsAnswersWired = false
+var localsRequestsTracked = false
 
-proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers) =
+proc localsStoreForRequest(requestId: cstring): ReplayDataStore =
+  ## The store of the tab whose `DapApi` sent `requestId` (`dap.ctRequestId`
+  ## names each request by its session), or the shown tab's when no open tab
+  ## sent it.
+  let vm = sessionVMOf(
+    data.sessionWithDapSessionId(ctRequestSessionId(requestId)))
+  if not vm.isNil: vm.store else: stateVMStore
+
+proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers;
+                        store: ReplayDataStore) =
   ## Connect the web renderer's `ct/load-locals` traffic to the store's
   ## request ledger — both ends, and the one direct subscription.
   ##
-  ## THE WEB SENDS `ct/load-locals` FROM ONE PLACE PER STOP: the StateVM's
-  ## auto-load effect (`store.requestLocals` -> the real backend's
-  ## `sendCommand` -> `DapApi.asyncSendCtRequest`). `StateComponent.loadLocals`
-  ## (through the mediator and `middleware` to `DapApi.sendCtRequest`) stands
-  ## down once `initStateVMWithStore` has run, and sent a second request per
-  ## move until it did. Every sender reaches `dap.dispatchCtRequest`, and that
+  ## THE WEB SENDS `ct/load-locals` FROM ONE PLACE PER STOP: the session's
+  ## stop loader (`sdk/stop_loader` -> the real backend's `sendCommand` ->
+  ## `DapApi.asyncSendCtRequest`), which also applies the answer, so
+  ## `syncStoreLocalsInto` stands down on such a store. Every sender reaches `dap.dispatchCtRequest`, and that
   ## is where the tracker records each request's stop under its identity —
   ## so the matching holds however many senders there are. The answer reaches
-  ## the store through
-  ## `StateComponent.registerLocals` and, where the mediator delivers it,
-  ## through the direct subscription below; the ledger answers any second
+  ## the store through the direct subscription below, where the mediator
+  ## delivers it; the ledger answers any second
   ## delivery with the first verdict, and the entry is retired once
   ## `dap.deliverDapResponse`'s fan-out is over. (Measured under the real
   ## mediator constructors — `locals_answer_identity_test.nim` — the direct
@@ -699,27 +532,35 @@ proc wireLocalsAnswers*(viewsApi: MediatorWithSubscribers) =
   ## component sends up. It is kept, as it was in `ui_js.nim`, and the
   ## matching does not depend on how many deliveries there are.)
   ##
-  ## Idempotent: `configureMiddleware` can run again for a new trace.
-  if localsAnswersWired:
-    return
-  localsAnswersWired = true
-  trackCtRequests(CtLoadLocals,
-    onSent = proc(requestId: cstring) =
-      if not stateVMStore.isNil:
-        stateVMStore.noteLocalsRequestSent($requestId),
-    onAnswered = proc(requestId: cstring) =
-      if not stateVMStore.isNil:
-        stateVMStore.forgetLocalsRequest($requestId))
+  ##
+  ## PER SESSION: each tab's session calls this once with its own views
+  ## mediator and store (`ui_js.configureSessionMiddleware`), so an answer
+  ## reaches the store of the tab that asked, shown or not. The request
+  ## tracking is the transport's, one for every tab, and finds each
+  ## request's store by the session its identity names.
+  if not localsRequestsTracked:
+    localsRequestsTracked = true
+    trackCtRequests(CtLoadLocals,
+      onSent = proc(requestId: cstring) =
+        let target = localsStoreForRequest(requestId)
+        if not target.isNil:
+          target.noteLocalsRequestSent($requestId),
+      onAnswered = proc(requestId: cstring) =
+        let target = localsStoreForRequest(requestId)
+        if not target.isNil:
+          target.forgetLocalsRequest($requestId))
   # A DIRECT viewsApi subscription, bypassing the component mediator routing,
   # so the store receives the answer even when the State component's own
   # subscription is not wired up yet.
+  let sessionStore = store
   viewsApi.subscribe(CtLoadLocalsResponse,
     proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
       cdebug ("[PIPELINE] viewsApi.CtLoadLocalsResponse: received " &
         $(if response.isNil: 0 else: response.locals.len) & " variables")
-      syncStoreLocals(response))
+      syncStoreLocalsInto(sessionStore, response))
 
-proc lookupSourceLine(path: cstring; line: int): string =
+proc lookupSourceLine(editors: JsAssoc[cstring, EditorViewComponent];
+                      path: cstring; line: int): string =
   ## Look up the source code at `<path>:<line>` from the editor cache.
   ## Mirrors the legacy ``StateComponent.excerpt`` lookup which read
   ## ``data.ui.editors[path].tabInfo.sourceLines[line - 1]``. Returns
@@ -728,14 +569,16 @@ proc lookupSourceLine(path: cstring; line: int): string =
   ##     lines have not yet been populated, or
   ##   * the requested line is outside the source-lines bounds (1-based
   ##     line numbers, so ``line < 1`` or ``line > sourceLines.len``).
-  ## In either case the caller (``syncStoreCodeStateLine``) routes the
+  ## In either case the caller (``syncStoreCodeStateLineInto``) routes the
   ## empty string into the IsoNim view's ``no-code`` fallback so the
   ## ``#code-state-line-{id}`` element is still emitted.
-  if line < 1:
+  ##
+  ## `editors` are one tab's: the tab whose session stopped there.
+  if line < 1 or editors.isNil:
     return ""
-  if not data.ui.editors.hasKey(path):
+  if not editors.hasKey(path):
     return ""
-  let editor = data.ui.editors[path]
+  let editor = editors[path]
   if editor.isNil or editor.tabInfo.isNil:
     return ""
   let lines = editor.tabInfo.sourceLines
@@ -745,22 +588,26 @@ proc lookupSourceLine(path: cstring; line: int): string =
 
 type
   SourceLineRetryData = ref object
+    store: ReplayDataStore
+    editors: JsAssoc[cstring, EditorViewComponent]
     path: cstring
     line: int
     attempts: int
 
 proc retrySourceLine(data: SourceLineRetryData) {.cdecl.} =
-  if stateVMStore.isNil:
+  if data.store.isNil:
     return
   data.attempts += 1
-  let cur = lookupSourceLine(data.path, data.line)
+  let cur = lookupSourceLine(data.editors, data.path, data.line)
   if cur.len > 0:
-    stateVMStore.updateCodeStateLine(data.line, cur)
+    data.store.updateCodeStateLine(data.line, cur)
     return
   if data.attempts < 30:
     setTimeoutWithArg(retrySourceLine, 100, data)
 
-proc syncStoreCodeStateLine*(path: cstring; line: int) =
+proc syncStoreCodeStateLineInto*(store: ReplayDataStore;
+                                 editors: JsAssoc[cstring, EditorViewComponent];
+                                 path: cstring; line: int) =
   ## Mirror the active source line into the ViewModel store so the
   ## IsoNim state view can render the ``#code-state-line-{id}``
   ## element. The lookup uses the in-memory editor cache populated as
@@ -776,10 +623,13 @@ proc syncStoreCodeStateLine*(path: cstring; line: int) =
   ## as the source arrives.  The retries stop once source is found or
   ## after a small budget — the caller will hit this proc again on
   ## the next move event.
-  if stateVMStore.isNil:
+  ##
+  ## `store` and `editors` are ONE session's — the session the move belongs
+  ## to, shown or not: its source line is looked up in its own tab's editors.
+  if store.isNil:
     return
-  let initial = lookupSourceLine(path, line)
-  stateVMStore.updateCodeStateLine(line, initial)
+  let initial = lookupSourceLine(editors, path, line)
+  store.updateCodeStateLine(line, initial)
   if initial.len > 0:
     return
 
@@ -790,143 +640,40 @@ proc syncStoreCodeStateLine*(path: cstring; line: int) =
   # fallback until then. The captured ``path`` / ``line`` are stable
   # for the duration of this scheduled re-check; any subsequent move
   # cancels the relevance of older retries because the next call to
-  # ``syncStoreCodeStateLine`` overwrites the signal anyway.
+  # ``syncStoreCodeStateLineInto`` overwrites the signal anyway.
   let retryData = SourceLineRetryData(
+    store: store,
+    editors: editors,
     path: path,
     line: line,
     attempts: 0
   )
   setTimeoutWithArg(retrySourceLine, 100, retryData)
 
-proc syncStoreDebuggerPosition*(rrTicks: int, path: cstring, line: int;
-                                sourceGeneration: int = 0;
-                                sourceDigest: cstring = cstring"") =
-  ## Mirror the legacy debugger position into the ViewModel store so
-  ## the StateVM's reactive pipeline sees the same rrTicks value.
-  if stateVMStore.isNil:
+proc syncStoreDebuggerPositionInto*(store: ReplayDataStore;
+                                    editors: JsAssoc[cstring, EditorViewComponent];
+                                    rrTicks: int, path: cstring, line: int;
+                                    sourceGeneration: int = 0;
+                                    sourceDigest: cstring = cstring"") =
+  ## Mirror one session's debugger position into that session's store
+  ## (`store`, with `editors` its tab's editors) so its StateVM's reactive
+  ## pipeline sees the same rrTicks value — the session the move belongs to,
+  ## whichever tab is on screen.
+  if store.isNil:
     return
   let ticks = cast[uint64](rrTicks)
-  stateVMStore.updateDebuggerPosition(
+  store.updateDebuggerPosition(
     ticks, $path, line,
     sourceGeneration = sourceGeneration,
     sourceDigest = $sourceDigest)
-  syncStoreCodeStateLine(path, line)
+  syncStoreCodeStateLineInto(store, editors, path, line)
   cdebug fmt"[PIPELINE] syncStoreDebuggerPosition(state): synced debugger rrTicks={ticks}"
-
-proc jsObjectToJson(raw: JsObject): cstring {.importjs: "JSON.stringify(#)".}
-  ## Round-trip a JS object to its JSON serialisation. Used by the
-  ## origin-summary bridge below to feed the per-row ``originSummary``
-  ## payload into the Nim ``parseOriginSummary`` decoder.
-
-proc syncOriginSummaries(response: CtLoadLocalsResponseBody) =
-  ## Value Origin Tracking (M4) — mirror the per-variable
-  ## ``originSummary`` field the backend attaches to every
-  ## ``ct/load-locals`` response (spec §3.2.3) into the StateVM so
-  ## the IsoNim view's inline badge renders correctly. The wire field
-  ## is JSON-encoded (because ``CtLoadLocalsResponseBody.locals`` is
-  ## the JS-only ``Variable`` ref-object that does not yet carry the
-  ## summary as a typed field — extending the ref-object would ripple
-  ## through every consumer), so we walk the raw JS object and decode
-  ## each summary through ``parseOriginSummary``. The fall-back behaviour
-  ## when the field is missing (older backends, non-materialized
-  ## traces) is an empty per-row table — the view then renders no
-  ## badge for that row, matching the legacy contract.
-  if stateVMInstance.isNil:
-    return
-  var summaries: seq[(string, OriginSummary)] = @[]
-  for localVariable in response.locals:
-    let expression = $localVariable.expression
-    let raw = localVariable.toJs[cstring("originSummary")]
-    if raw.isNil or raw.isUndefined:
-      continue
-    let asJson = parseJson($jsObjectToJson(raw))
-    summaries.add((expression, parseOriginSummary(asJson)))
-  stateVMInstance.updateOriginSummaries(summaries)
-
-proc registerLocals*(self: StateComponent, response: CtLoadLocalsResponseBody) {.exportc.} =
-  clog fmt"registerLocals"
-  self.locals = response.locals
-
-  # Feed the same data into the parallel ViewModel store.
-  syncStoreLocals(response)
-  syncOriginSummaries(response)
-  for localVariable in response.locals:
-    let expression = localVariable.expression
-
-    if self.values.hasKey(expression):
-      let value = self.values[expression]
-
-      for _, chart in value.charts:
-        chart.replaceAllValues(expression, localVariable.value.elements)
-
-      # # to not leave history for expressions with older context
-      # value.showInline = JsAssoc[cstring, bool]{}
-      # value.charts = JsAssoc[cstring, ChartComponent]{}
-
-  self.completeMoveIndex += 1
 
 proc redrawDynamically*(self: StateComponent) =
   # IsoNim is the primary renderer. All DOM updates are handled by
   # IsoNim reactive effects when the store signals change (via
-  # syncStoreLocals). No Karax DOM manipulation needed.
+  # syncStoreLocalsInto). No Karax DOM manipulation needed.
   discard
-
-const LOCALS_RR_DEPTH_LIMIT: int = 7
-
-proc activeWatchExpressions(self: StateComponent): seq[cstring] =
-  ## The watch expressions to ask the backend for.
-  ##
-  ## THE VIEWMODEL IS THE SOURCE OF TRUTH, because it is what the watch
-  ## input form writes: `wireWatchInputForm` (`isonim_state_view.nim`)
-  ## calls `StateVM.addWatch`, and the collaboration layer edits the same
-  ## signal. `StateComponent.watchExpressions` is only written by
-  ## `submitWatchExpression`, which has no call sites anywhere in the
-  ## repo — so reading it alone meant this request never carried anything
-  ## a user typed.
-  ##
-  ## The component's own list is still honoured as a fallback so the
-  ## legacy path keeps working on hosts that never build a StateVM.
-  if not stateVMInstance.isNil:
-    result = @[]
-    for expression in stateVMInstance.watchExpressions.val:
-      result.add(cstring(expression))
-  else:
-    result = self.watchExpressions
-
-proc loadLocals*(self: StateComponent) =
-  ## The legacy State component's `ct/load-locals` — the only sender on a
-  ## host whose StateVM runs over a stub store (the VS Code extension, where
-  ## `configureMiddleware` never builds the session's store).
-  ##
-  ## ONE REQUEST PER STOP. Once `initStateVMWithStore` has put the StateVM on
-  ## the session's real store, its auto-load (`state_vm.nim`) asks on every
-  ## stop and every watch-list change, through the same transport, and its
-  ## answer reaches this component through the same fan-out. This component
-  ## asking as well made two requests per move — one naming the file's
-  ## language, the store's naming `c` — so it stands down; the store's
-  ## request names the file's language (`ReplayDataStore.sourceLanguageOf`,
-  ## installed there), the stop's own tick (this component's `rrTicks` is
-  ## never assigned, so it sent 0), the same depth, budget and watches.
-  if storeSendsLocals:
-    return
-  let countBudget = 3000
-  let minCountLimit = 50
-  let arguments = CtLoadLocalsArguments(
-    rrTicks: self.rrTicks,
-    countBudget: countBudget,
-    minCountLimit: minCountLimit,
-    depthLimit: LOCALS_RR_DEPTH_LIMIT,
-    watchExpressions: self.activeWatchExpressions(),
-    # The wire name, not the enum: this object goes through `toJs`, where a
-    # `Lang` would serialise as its ordinal (LRS-1).
-    lang: cstring(langWireName(toLangFromFilename(self.location.path))),
-  )
-  # PLAT-29: the stop this is sent at is recorded by `wireLocalsAnswers`'s
-  # tracker as the request is WRITTEN, under the request's own identity.
-  self.api.emit(CtLoadLocals, arguments)
-
-method onMove(self: StateComponent) {.async.} =
-  self.loadLocals()
 
 proc toValueHistoryRows(results: seq[HistoryResult]): seq[ValueHistoryRow] =
   ## Normalise the ``ct/updated-history`` wire rows into the
@@ -946,83 +693,26 @@ proc toValueHistoryRows(results: seq[HistoryResult]): seq[ValueHistoryRow] =
       valueText: if r.value.isNil: "" else: statePanelValue(r.value).root.text)
 
 method register*(self: StateComponent, api: MediatorWithSubscribers) =
+  ## The pane subscribes to nothing: the panel host mounts the session's
+  ## StateVM (`ui/panel_host`, from GoldenLayout's factory), the session's
+  ## stop loader loads its locals, `ui_js` moves the store's debugger
+  ## position, and the ViewModel asks for value histories.
   self.api = api
-
-  # Initialize the parallel ViewModel instance (no-op if already created).
-  initStateVM()
-
-  # THE MOUNT USED TO BE HERE, AND IT IS NOW IN `ui/layout.nim`'s COMPONENT
-  # FACTORY — the one site that knows `#stateComponent-0` exists, because it
-  # has just created it.
-  #
-  # `1cb7b9d6` added a `tryMountIsoNimStatePanel()` call at this point and it
-  # genuinely fixed the deployed Noir Studio, where `register` runs after
-  # GoldenLayout has built the pane. It cannot fix the Electron desktop, where
-  # `register` runs at component-CONSTRUCTION time — `createUIComponents` in
-  # `types.nim`, from `onInit` — which is EARLIER than the container, not
-  # later. 25 desktop session logs (2026-09) show the container absent at retry
-  # #1 in all 25, and `CalltraceComponent.register` has always made the
-  # equivalent call and still gave up at retry #200 in both runs that reached a
-  # verdict. A second poll window opened ahead of the container is still a poll
-  # that loses.
-  #
-  # THE CALL WAS REMOVED RATHER THAN LEFT AS A HARMLESS SECOND MECHANISM, and
-  # it was measured before it was removed. Three web bundles were assembled
-  # from this tree and driven through Run → replay by
-  # `ci/test/pane_children_probe.mjs`, reading `childElementCount` on
-  # `#stateComponent-0`:
-  #
-  #   pre-fix (with this call, no factory arm)  state: 10 descendants
-  #   fixed   (with this call AND the arm)      state: 10 descendants
-  #   fixed   (arm only, THIS CALL DELETED)     state: 10 descendants
-  #
-  # The factory arm alone mounts the pane, on the surface `1cb7b9d6` was proven
-  # on. Keeping both would have left two callers for one mount and no way to
-  # tell which one was doing the work — the state of affairs that let this
-  # defect survive in the first place.
-
-  let stateComponent = self
-  stateHistoryBridge = proc(expression: string) =
-    if not stateComponent.api.isNil:
-      stateComponent.api.emit(
-        CtLoadHistory,
-        LoadHistoryArg(expression: cstring(expression),
-                       location: stateComponent.location))
-  stateVMInstance.onToggleHistory = stateHistoryBridge
-
-  # api.subscribe(DapStopped, proc(kind: CtEventKind, response: DapStoppedEvent, sub: Subscriber) =
-    # discard self.onMove())
-  api.subscribe(CtCompleteMove, proc(kind: CtEventKind, response: MoveState, sub: Subscriber) =
-    discard self.onCompleteMove(response)
-  )
-  api.subscribe(CtLoadLocalsResponse, proc(kind: CtEventKind, response: CtLoadLocalsResponseBody, sub: Subscriber) =
-    self.registerLocals(response)
-  )
-  api.subscribe(CtUpdatedHistory, proc(kind: CtEventKind, response: HistoryUpdate, sub: Subscriber) =
-    if not stateVMInstance.isNil:
-      stateVMInstance.updateHistory($response.expression,
-                                    toValueHistoryRows(response.results))
-  )
-  api.emit(InternalLastCompleteMove, EmptyArg())
-
-# think if it's possible to directly exportc in this way the method
-proc registerStateComponent*(component: StateComponent, api: MediatorWithSubscribers) {.exportc.} =
-  component.register(api)
-
-# StateComponent.render() removed: IsoNim is the primary renderer.
-# Generic callers are expected to use direct IsoNim mount paths. All
-# real rendering is handled by tryMountIsoNimStatePanel().
-
-when defined(ctInExtension):
-  method redrawForExtension*(self: StateComponent) =
-    self.bindStateExtensionHost()
 
 method onCompleteMove*(self: StateComponent, response: MoveState) {.async.} =
   self.location = response.location
   for _, value in self.values:
     value.location = response.location
 
-  syncStoreDebuggerPosition(
+  # Into the store of the tab that holds this component — the tab whose move
+  # it is, shown or not — from that tab's editors. A component no tab holds
+  # uses the pane's.
+  let session = self.data.sessionOfComponent(self)
+  let vm = sessionVMOf(session)
+  let store = if vm.isNil: stateVMStore else: vm.store
+  let editors =
+    if session.isNil or session.ui.isNil: data.ui.editors
+    else: session.ui.editors
+  syncStoreDebuggerPositionInto(store, editors,
     response.location.rrTicks, response.location.path, response.location.line,
     response.location.sourceGeneration, response.location.sourceDigest)
-  await self.onMove()

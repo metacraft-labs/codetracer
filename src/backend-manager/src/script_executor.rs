@@ -38,6 +38,8 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
+use crate::session::HostSourceReads;
+
 /// Default timeout for script execution in seconds.
 ///
 /// 120 s is generous enough for large Python DB traces (which can be
@@ -524,6 +526,10 @@ pub fn find_python3(path: Option<&std::ffi::OsStr>) -> Result<PathBuf, String> {
 ///   when the package is not importable on its own).
 /// * `timeout_seconds` - Maximum execution time in seconds before the
 ///   subprocess is killed.
+/// * `session_id` - A persistent debugging session to reuse, if any.
+/// * `host_source_reads` - The host-read setting of the client that asked
+///   for the script; the script's trace session is opened with it (see
+///   `crate::session::SessionKey`).
 ///
 /// # Errors
 ///
@@ -538,8 +544,16 @@ pub async fn execute_script(
     python_api: &PythonApiLookup,
     timeout_seconds: u64,
     session_id: Option<&str>,
+    host_source_reads: HostSourceReads,
 ) -> Result<ScriptResult, String> {
-    let wrapper = build_wrapper_script(script, trace_path, socket_path, python_api, session_id);
+    let wrapper = build_wrapper_script_for(
+        script,
+        trace_path,
+        socket_path,
+        python_api,
+        session_id,
+        host_source_reads,
+    );
 
     let python = find_python3(std::env::var_os("PATH").as_deref())?;
     let mut child = Command::new(&python)
@@ -573,6 +587,13 @@ pub async fn execute_script(
         // starts the interpreter, so removing the inherited value only drops
         // what the daemon's environment happened to carry.
         .env_remove("NIX_PYTHONPATH")
+        // The same `sitecustomize` sets `sys.executable` to
+        // `NIX_PYTHONEXECUTABLE` (outside a virtual environment): a relative
+        // value such as `./python3` would make a script that starts
+        // `sys.executable` (`subprocess`, `multiprocessing`) run a `python3`
+        // from the working directory.  The wrapper scripts Nix generates set
+        // it themselves, so only the inherited value is dropped.
+        .env_remove("NIX_PYTHONEXECUTABLE")
         // Prevent the child from inheriting stdin (avoids blocking on tty reads).
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -650,20 +671,28 @@ pub async fn execute_script(
 /// 2. Sets `CODETRACER_DAEMON_SOCK` and `CODETRACER_TRACE_PATH` environment
 ///    variables for any downstream code that needs them.
 /// 3. Opens the trace via `codetracer.open_trace()`, passing the daemon socket
-///    explicitly so the Python API does not need to discover it.
+///    explicitly so the Python API does not need to discover it, and the
+///    requesting client's host-read setting, so the script's trace session
+///    is the one that client would get (`crate::session::SessionKey`).
 /// 4. Executes the user script with `trace` in scope.
 /// 5. Closes the trace in a `finally` block.
-fn build_wrapper_script(
+fn build_wrapper_script_for(
     script: &str,
     trace_path: &str,
     socket_path: &str,
     python_api: &PythonApiLookup,
     session_id: Option<&str>,
+    host_source_reads: HostSourceReads,
 ) -> String {
     // Escape backslashes and quotes in the path strings so they are safe inside
     // Python string literals.  This prevents injection when paths contain
     // special characters (e.g. backslashes on Windows or quotes in file names).
     let sock_escaped = escape_for_python(socket_path);
+    let host_reads_literal = if host_source_reads.is_allowed() {
+        "True"
+    } else {
+        "False"
+    };
     let trace_escaped = escape_for_python(trace_path);
     let indented = indent_script(script);
 
@@ -716,12 +745,31 @@ except ImportError as _ct_import_error:
              + "; looked for its python-api directory in: {searched_escaped}"
              + "; set {PYTHON_API_PATH_ENV} to that directory or install the package"
              + " into the site-packages of " + sys.executable)
-trace = open_trace("{trace_escaped}", daemon_socket="{sock_escaped}")
+trace = open_trace("{trace_escaped}", daemon_socket="{sock_escaped}", host_source_reads={host_reads_literal})
 try:
 {indented}
 finally:
 {finally_block}
 "#
+    )
+}
+
+/// [`build_wrapper_script_for`] with host reads off, the tests' wrapper.
+#[cfg(test)]
+fn build_wrapper_script(
+    script: &str,
+    trace_path: &str,
+    socket_path: &str,
+    python_api: &PythonApiLookup,
+    session_id: Option<&str>,
+) -> String {
+    build_wrapper_script_for(
+        script,
+        trace_path,
+        socket_path,
+        python_api,
+        session_id,
+        HostSourceReads::Refused,
     )
 }
 
@@ -1528,6 +1576,7 @@ mod tests {
             &lookup,
             60,
             None,
+            HostSourceReads::Refused,
         )
         .await
         .expect("python3 spawns");
@@ -1585,8 +1634,20 @@ mod tests {
     /// ordinary way: what the tests then see not running is held back by
     /// `execute_script`, not inert.  The `NIX_PYTHONPATH` control needs a
     /// Nixpkgs interpreter on `PATH`, as the development shell provides.
+    ///
+    /// The directory is returned resolved, because what the script process
+    /// reports about it (`os.getcwd()`, and every path Python derives from
+    /// the working directory) is resolved, and the temp root need not be: on
+    /// macOS `/tmp`, and with it the dev shell's `TMPDIR=/tmp/nix-shell.*`,
+    /// is a symlink to `/private/tmp`.  Against the unresolved path the
+    /// `cwd` check fails, and every `starts_with(&shared)` refusal holds
+    /// whatever the reported path names.
     fn make_planted_shared_dir(root: &Path) -> PathBuf {
-        let shared = root.join("shared");
+        std::fs::create_dir_all(root.join("shared")).expect("create shared dir");
+        let shared = root
+            .join("shared")
+            .canonicalize()
+            .expect("resolve shared dir");
         std::fs::create_dir_all(shared.join("codetracer")).expect("create planted package");
         std::fs::create_dir_all(shared.join("lib")).expect("create planted lib");
         std::fs::create_dir_all(shared.join("bin")).expect("create planted bin");
@@ -1677,7 +1738,7 @@ mod tests {
         std::fs::write(
             stand_in.join("codetracer/__init__.py"),
             "class _Trace:\n    def close(self):\n        pass\n\n\
-             def open_trace(path, daemon_socket=None):\n    return _Trace()\n",
+             def open_trace(path, daemon_socket=None, host_source_reads=False):\n    return _Trace()\n",
         )
         .expect("write stand-in");
         tighten(&stand_in);
@@ -1873,6 +1934,90 @@ mod tests {
         assert!(!stderr.contains(PLANTED), "{stderr}");
         assert_ne!(exit, 0, "{stderr}");
         assert!(stderr.contains("/nonexistent/daemon.sock"), "{stderr}");
+    }
+
+    /// A relative `NIX_PYTHONEXECUTABLE` in the daemon's environment does not
+    /// reach the script: a script that starts `sys.executable` runs the real
+    /// interpreter, not the `python3` planted in the shared working directory
+    /// (`./python3`) or below it (`bin/python3`).
+    ///
+    /// Nixpkgs' `sitecustomize` honours the variable only outside a virtual
+    /// environment, and the `python3` first on the development shell's
+    /// `PATH` belongs to one, which would make both runs vacuous; as in
+    /// `test_exec_script_does_not_use_the_user_site_packages`, the directory
+    /// the interpreter was built for goes first on `PATH` for both.  The
+    /// control: that interpreter started the ordinary way under the same
+    /// variable does run the plant.
+    #[tokio::test]
+    async fn test_exec_script_ignores_a_relative_nix_python_executable() {
+        if std::env::var_os(CWD_PROBE_ENV).is_some() {
+            return cwd_probe().await;
+        }
+        let root = tempfile::tempdir().expect("tempdir");
+        let shared = make_planted_shared_dir(root.path());
+        let stand_in = make_stand_in_api(root.path());
+        let base = std::process::Command::new("python3")
+            .args([
+                "-I",
+                "-c",
+                "import sysconfig; print(sysconfig.get_config_var('BINDIR'))",
+            ])
+            .output()
+            .expect("python3 runs");
+        let base_bin = PathBuf::from(String::from_utf8_lossy(&base.stdout).trim());
+        let python = base_bin.join("python3");
+        assert!(is_executable_file(&python), "{}", python.display());
+        let path = format!(
+            "{}:{}",
+            base_bin.display(),
+            std::env::var("PATH").expect("PATH is set")
+        );
+        let script = "import subprocess\n\
+                      print('executable', sys.executable)\n\
+                      subprocess.run([sys.executable, '-c', 'print(\"child ran\")'], check=True)\n\
+                      print('user script ran')";
+        for (value, tag) in [("./python3", "cwd-python3"), ("bin/python3", "bin-python3")] {
+            let control = std::process::Command::new(&python)
+                .args([
+                    "-c",
+                    "import subprocess, sys; subprocess.run([sys.executable, '-c', 'pass'])",
+                ])
+                .current_dir(&shared)
+                .env("NIX_PYTHONEXECUTABLE", value)
+                .output()
+                .expect("python3 runs");
+            let control = String::from_utf8_lossy(&control.stderr);
+            assert!(
+                control.contains(&format!("{PLANTED} {tag}")),
+                "control: NIX_PYTHONEXECUTABLE={value} did not run the planted {tag} \
+                 for {}: {control}",
+                python.display()
+            );
+
+            let (exit, stdout, stderr) = run_cwd_probe(
+                "test_exec_script_ignores_a_relative_nix_python_executable",
+                &shared,
+                &[
+                    ("CT_TEST_PROBE_API", stand_in.display().to_string()),
+                    ("CT_TEST_PROBE_SCRIPT", script.to_string()),
+                    ("NIX_PYTHONEXECUTABLE", value.to_string()),
+                    ("PATH", path.clone()),
+                ],
+            );
+            assert!(!stderr.contains(PLANTED), "{value}: {stderr}");
+            assert_eq!(exit, 0, "{value}: {stdout} {stderr}");
+            assert!(stdout.contains("child ran"), "{value}: {stdout}");
+            assert!(stdout.contains("user script ran"), "{value}: {stdout}");
+            let executable = stdout
+                .lines()
+                .find_map(|l| l.strip_prefix("executable "))
+                .unwrap_or_else(|| panic!("no executable line: {stdout}"));
+            assert!(Path::new(executable).is_absolute(), "{value}: {executable}");
+            assert!(
+                !Path::new(executable).starts_with(&shared),
+                "{value}: {executable}"
+            );
+        }
     }
 
     /// With no trusted copy found, a `codetracer/` package planted in the

@@ -115,14 +115,16 @@ proc terminalCapability*(): PaneCapability =
      paneScratchpad,
      # PLAT-52: the recorded program's terminal output
      # (`views/terminal_output_pane.nim`).
-     paneTerminalOutput},
+     paneTerminalOutput,
+     # PLAT-57: Find in Files (`views/search_results_pane.nim`).
+     paneSearch,
+     # PLAT-53: Test Results (`views/test_results_pane.nim`).
+     paneTestResults},
     [(paneDebugControls, "the terminal draws the debugger controls in its " &
                          "top bar, not as a pane"),
      (paneFlow, "the terminal draws flow inside the source pane"),
-     (paneSearch, "search results open in the command line, not a pane"),
      (paneShell, "the terminal has no embedded shell view yet"),
      (paneAgentActivity, "the terminal has no agent-activity view yet"),
-     (paneTestResults, "the terminal has no test-results view yet"),
      (paneConstraints, "the terminal has no constraints view yet"),
      (paneProblems, "the terminal has no problems view yet; a build's " &
                     "errors are in the Build pane"),
@@ -369,6 +371,16 @@ proc dockedForMode*(product: ProductMode): seq[DockedPane] =
   case product
   of pmDebug: sharedDefaultLayout().docked
   of pmEdit: @[]
+
+proc layoutValueForMode*(product: ProductMode; profile: LayoutProfile): Layout =
+  ## A mode's DEFAULT as a whole `Layout` — `layoutForMode`'s tree with
+  ## `dockedForMode`'s panes beside it — which is what a LAYOUT BINDING is
+  ## seeded with, re-flowed to and reset to for that mode. For Debug mode it is
+  ## `profileLayoutValue`; for Edit mode it is the arrangement `shellModel`
+  ## draws for an unbound Edit-mode runtime, so a binding enabled there leaves
+  ## the first frame of `ct edit` exactly as it was (codetracer-pm issue
+  ## 2026-10-21: the bare `profileLayoutValue` would have painted Debug's).
+  initLayout(layoutForMode(product, profile), dockedForMode(product))
 
 proc resizeShares*(tree: LayoutNode; product: ProductMode;
                    profile: LayoutProfile) =

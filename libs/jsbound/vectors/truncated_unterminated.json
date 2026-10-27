@@ -1,0 +1,237 @@
+{
+  "records": [
+    {
+      "build_hash": "9c1e4b7a2d5f8e3c6b9a0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a",
+      "capabilities": "[]",
+      "framework": "",
+      "prev_session": "",
+      "protocol_level": 0,
+      "record": "Header",
+      "recorder_id": "codetracer-boundary-shim/0.1.0",
+      "session_id": "5f0c2a9e7b6d4e1f8a3c9b2d1e0f7a6b",
+      "vocab": 1
+    },
+    {
+      "arms": "{\"hero\":\"b\"}",
+      "color_scheme": 1,
+      "dpr": 1.5,
+      "fonts_digest": "a1b2c3d4",
+      "locale": "en-GB",
+      "record": "Env",
+      "reduced_motion": 0,
+      "referrer_origin": "https://search.example",
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "tz": "Europe/Sofia",
+      "ua": "Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0.0.0",
+      "ua_major": 141,
+      "url": "https://shop.example/checkout",
+      "viewport_h": 800,
+      "viewport_w": 1280
+    },
+    {
+      "kind": 1,
+      "record": "Task",
+      "seq": "1",
+      "task_id": "7"
+    },
+    {
+      "delay_ms": 16.5,
+      "kind": 1,
+      "record": "TaskReg",
+      "seq": "2",
+      "task_id": "7"
+    },
+    {
+      "bits": "4790036467422310400",
+      "record": "Clock",
+      "seq": "3",
+      "src": 1
+    },
+    {
+      "bytes": "007f80ff10203040",
+      "record": "Random",
+      "seq": "4",
+      "src": 2
+    },
+    {
+      "api": 1,
+      "body_digest": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+      "method": "POST",
+      "record": "NetRequest",
+      "req_id": "3",
+      "seq": "5",
+      "url": "https://api.shop.example/cart?item=…"
+    },
+    {
+      "body": {
+        "bytes": "7b226f6b223a747275657d",
+        "kind": "inline"
+      },
+      "headers": "[[\"content-type\",\"application/json\"]]",
+      "outcome": 1,
+      "record": "NetResponse",
+      "redirected": 1,
+      "req_id": "3",
+      "response_type": 2,
+      "seq": "6",
+      "status": 200,
+      "status_text": "OK",
+      "url": "https://api.shop.example/cart/v2?item=…"
+    },
+    {
+      "body": {
+        "kind": "ref",
+        "len": "2048",
+        "sha256": "1d1801f753ccd9fa57966c46f360585caf83337a394a5f238d4e4e7d6005788d"
+      },
+      "headers": "[]",
+      "outcome": 1,
+      "record": "NetResponse",
+      "redirected": 0,
+      "req_id": "4",
+      "response_type": 0,
+      "seq": "7",
+      "status": 200,
+      "status_text": "",
+      "url": ""
+    },
+    {
+      "data": {
+        "bytes": "70696e67",
+        "kind": "inline"
+      },
+      "dir": 1,
+      "event": "",
+      "frame": 2,
+      "last_event_id": "",
+      "record": "WsMessage",
+      "req_id": "5",
+      "seq": "8"
+    },
+    {
+      "data": {
+        "bytes": "7b22657572223a392e357d",
+        "kind": "inline"
+      },
+      "dir": 1,
+      "event": "price-tick",
+      "frame": 1,
+      "last_event_id": "17",
+      "record": "WsMessage",
+      "req_id": "6",
+      "seq": "9"
+    },
+    {
+      "area": 1,
+      "key": "cart",
+      "present": 1,
+      "record": "StorageRead",
+      "seq": "10",
+      "value": "[42]"
+    },
+    {
+      "prop": "getBoundingClientRect",
+      "record": "LayoutRead",
+      "seq": "11",
+      "target": "iid:buy-button",
+      "value": "{\"x\":10,\"y\":20,\"width\":120,\"height\":40}"
+    },
+    {
+      "label": "Купи",
+      "props": "{\"button\":0,\"clientX\":70,\"clientY\":40}",
+      "record": "Input",
+      "seq": "12",
+      "target": "iid:buy-button",
+      "task_id": "9",
+      "type": "click"
+    },
+    {
+      "effect": 1,
+      "record": "DomEffect",
+      "seq": "13",
+      "target": "iid:email",
+      "value": "\"ada@example.com\""
+    },
+    {
+      "dom_digest": "",
+      "ordinal": 0,
+      "record": "Checkpoint",
+      "scheme": "isonim-signals/1",
+      "seq": "14",
+      "state_hash": "0f1e2d3c"
+    },
+    {
+      "first_seq": "15",
+      "last_seq": "17",
+      "reason": 1,
+      "record": "Gap"
+    },
+    {
+      "detail": "new Worker('w.js')",
+      "feature": "WebWorker",
+      "record": "Refusal",
+      "seq": "18"
+    },
+    {
+      "kind": 1,
+      "record": "Navigation",
+      "seq": "19",
+      "url": "https://shop.example/checkout/pay"
+    },
+    {
+      "frames": "[{\"url\":\"https://shop.example/app.js\",\"line\":1,\"col\":4242,\"fn\":\"pay\"}]",
+      "kind": 1,
+      "message": "TypeError: cannot read {0} of undefined",
+      "record": "Error",
+      "seq": "20"
+    },
+    {
+      "class": 2,
+      "length": 16,
+      "record": "Scrubbed",
+      "seq": "21",
+      "target": "iid:card"
+    },
+    {
+      "data": "{\"experiment\":\"hero\",\"arm\":\"b\"}",
+      "name": "exposure",
+      "record": "Mark",
+      "seq": "22"
+    },
+    {
+      "event": 2,
+      "length_computable": 1,
+      "loaded": "65536",
+      "record": "XhrEvent",
+      "req_id": "3",
+      "seq": "23",
+      "target": 1,
+      "total": "2097152"
+    },
+    {
+      "elements": 14,
+      "phase": 1,
+      "record": "Loading",
+      "scripts": 2,
+      "seq": "24",
+      "text": 318
+    },
+    {
+      "event": "",
+      "kind": 1,
+      "record": "DocTask",
+      "seq": "25",
+      "src": "https://shop.example/assets/app.js",
+      "target": ""
+    },
+    {
+      "query": "callback",
+      "record": "PlatformValue",
+      "seq": "26",
+      "src": 1,
+      "task_id": "11",
+      "value": "[{\"target\":\"path:#hero\",\"isIntersecting\":true,\"intersectionRatio\":0.5}]"
+    }
+  ],
+  "termination": "TruncatedUnterminated"
+}

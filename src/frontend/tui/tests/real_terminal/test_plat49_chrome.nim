@@ -51,6 +51,10 @@ import ../../app/theme/colour_math
 import ../../../styles/generated/design_tokens
 import ../../../viewmodel/viewmodels/omnibar_vm
 import ../../../viewmodel/viewmodels/transport_icons
+
+const EditorTabText = " calc/main.py "
+  ## The lone editor's tab: the file's folder and name since 2026-10-17
+  ## (`product_mode.editorTabLabel`, as the desktop's tab), not the name alone.
 from ../../../viewmodel/viewmodels/debug_controls_vm import transportLabel
 from ../../../viewmodel/viewmodels/state_vm import VariableCategory,
   categoryTag, vcLocal
@@ -68,7 +72,9 @@ template ck(condition: untyped) =
 const
   Cols = 200
   Rows = 50
-  F12 = "\x1b[24~"
+  AltBacktick = "\x1b`"
+    ## `` Alt+` ``: the program menu's key on a terminal, which never sees
+    ## `Alt` alone (CUA-Keymap.md §3.8).
   CtrlP = "\x10"
   Esc = "\x1b"
   Down = "\x1b[B"
@@ -115,6 +121,20 @@ proc snap(sess: var TuiTestSession; cols = Cols; rows = Rows): Snapshot =
       row.add sess.cellAt(r, c)
     result.add row
 
+proc settle(sess: var TuiTestSession; timeoutMs: int;
+            ready: proc(s: Snapshot): bool): Snapshot =
+  ## The screen once `ready` holds of it, else the last one read after
+  ## `timeoutMs` (the checks on it then fail on what was drawn). A gesture's
+  ## redraw can take longer than any fixed sleep on a loaded host; a check
+  ## that something DID change polls for it rather than reading the screen
+  ## once after a guess.
+  let t0 = getMonoTime()
+  result = sess.snap()
+  while not ready(result) and
+        (getMonoTime() - t0).inMilliseconds < timeoutMs:
+    sleep(50)
+    result = sess.snap()
+
 proc text(s: Snapshot; r: int): string =
   for c in s[r]:
     result.add(if int(c.rune) == 0: " " else: $c.rune)
@@ -152,7 +172,7 @@ proc click(sess: var TuiTestSession; row, col: int) =
   sess.mouse(0, row, col, release = true)
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -171,14 +191,14 @@ proc saysNothingOfDrags(line: string): bool =
 
 suite "PLAT-49 on a real terminal: the menu is one root button with cascades":
 
-  test "row 0 holds one root button; F12 drops the first level; Right cascades":
+  test "row 0 holds one root button; Alt+` drops the first level; Right cascades":
     var sess = open()
     let top = sess.rowText(0)
     # PLAT-50: the button bounded by edge lines (the desktop's `#menu-root`).
     ck top.startsWith("▕≡▏")
     for title in ["File", "Edit", "View", "Build", "Debug", "Help"]:
       ck not top.contains(" " & title & " ")
-    sess.send(F12)
+    sess.send(AltBacktick)
     # Row 1 already says "Files" (the Files stack's strip): wait for the
     # dropdown's SECOND item instead, which nothing else on that row spells.
     # PLAT-50: the dropdown is framed — row 1 is its top edge, its items
@@ -252,7 +272,8 @@ suite "PLAT-49 on a real terminal: a click is a click":
     sess.click(1, vcsAt + 1)
     discard sess.waitRow(1, " VCS ")
     sleep(300)
-    let s2 = sess.snap()
+    let s2 = sess.settle(5000, proc(s: Snapshot): bool =
+      caBold in s[1][vcsAt + 1].attrs)
     ck caBold in s2[1][vcsAt + 1].attrs
     ck sess.status().saysNothingOfDrags()
     # A press on the Files tab moved ONE column (under the threshold), then
@@ -262,7 +283,8 @@ suite "PLAT-49 on a real terminal: a click is a click":
     sess.mouse(32, 1, filesAt + 2)            # motion, button held
     sess.mouse(0, 1, filesAt + 2, release = true)
     sleep(400)
-    let s3 = sess.snap()
+    let s3 = sess.settle(5000, proc(s: Snapshot): bool =
+      caBold in s[1][filesAt + 1].attrs)
     ck caBold in s3[1][filesAt + 1].attrs
     ck s3.text(1).cellFind(" Files ") == filesAt - 1
     ck sess.status().saysNothingOfDrags()
@@ -270,26 +292,23 @@ suite "PLAT-49 on a real terminal: a click is a click":
     # PLAT-51: aimed at the editor's LEFT quarter (GoldenLayout's left
     # segment, a split that tints the pane's left half); its middle third now
     # joins, tinting the strip where the tab would land.
-    let editorAt = strip.cellFind(" main.py ") + 1
+    let editorAt = strip.cellFind(EditorTabText) + 1
     ck editorAt > filesAt
     sess.mouse(0, 1, filesAt + 1)
     for c in [filesAt + 5, filesAt + 20, editorAt + 2]:
       sess.mouse(32, 20, c)
     sleep(400)
-    let s4 = sess.snap()
-    var changed = 0
-    for r in 2 ..< Rows - 2:
-      for c in 30 ..< 110:
-        if hexOfColor(s4[r][c].bg) != hexOfColor(s3[r][c].bg):
-          inc changed
+    proc tinted(s: Snapshot): int =
+      for r in 2 ..< Rows - 2:
+        for c in 30 ..< 110:
+          if hexOfColor(s[r][c].bg) != hexOfColor(s3[r][c].bg):
+            inc result
+    let s4 = sess.settle(5000, proc(s: Snapshot): bool = tinted(s) > 100)
+    let changed = tinted(s4)
     ck changed > 100
     sess.esc()
-    let s5 = sess.snap()
-    var restored = true
-    for r in 2 ..< Rows - 2:
-      for c in 30 ..< 110:
-        if hexOfColor(s5[r][c].bg) != hexOfColor(s3[r][c].bg):
-          restored = false
+    let s5 = sess.settle(5000, proc(s: Snapshot): bool = tinted(s) == 0)
+    let restored = tinted(s5) == 0
     ck restored
     sess.quit()
 
@@ -320,15 +339,17 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     let row1 = s.text(1)
     let filesAt = row1.cellFind(" Files ") + 1
     let vcsAt = row1.cellFind(" VCS ") + 1
-    let editorAt = row1.cellFind(" main.py ") + 1
+    let editorAt = row1.cellFind(EditorTabText) + 1
     ck filesAt > 0 and vcsAt > 0 and editorAt > 0
     # 4. The strip's own ground, distinct from the pane body below it — the
     # focused one on the focus colour.
     ck hexOfColor(s[1][vcsAt + 6].bg) == focusGround
     ck hexOfColor(s[3][vcsAt + 6].bg) == panel
     ck strip != panel and focusGround != strip
-    # The selected tab: its foreground, bold — on the focused strip's ground.
-    ck hexOfColor(s[1][filesAt + 1].bg) == focusGround
+    # The selected tab: its foreground, bold — on its OWN ground, apart from
+    # the focused strip's (PLAT-68: ui/surface/primary/default, by the
+    # contrast floor).
+    ck hexOfColor(s[1][filesAt + 1].bg) == dark(dtColorsUiSurfacePrimaryDefault)
     ck hexOfColor(s[1][filesAt + 1].fg) == activeFg
     ck caBold in s[1][filesAt + 1].attrs
     # An inactive tab of the focused strip: the subdued tier, not bold.
@@ -410,7 +431,7 @@ suite "PLAT-49 on a real terminal: panes, strips and dividers":
     ck caReverse notin s[1][vcsAt + 1].attrs
     # PLAT-51: the Files strip is the FOCUSED one; an unfocused strip's
     # selected tab (the editor's lone tab) is reverse + bold too.
-    let editorAt = row1.cellFind(" main.py ") + 1
+    let editorAt = row1.cellFind(EditorTabText) + 1
     ck editorAt > 0
     ck caReverse in s[1][editorAt + 1].attrs and caBold in s[1][editorAt + 1].attrs
     sess.quit()
@@ -485,9 +506,11 @@ suite "PLAT-49 on a real terminal: tooltips and the omnibar":
     var sess = open(term = "linux")
     sess.send(CtrlP)
     sess.send("ab")
-    discard sess.waitRow(0, "⌕ ab")
+    # PLAT-71 (Terminal-Adaptation §6.1): the Linux console's glyph tier is
+    # `basic`, whose omnibar mark is `/` (`⌕` is outside the WGL4 set).
+    discard sess.waitRow(0, "/ ab")
     let s = sess.snap()
-    let lead = s.text(0).cellFind("⌕ ")
+    let lead = s.text(0).cellFind("/ ab")
     ck not sess.cursorVisible()
     # The insert caret: the cell after the query, underlined.
     ck s[0][lead + 4].underline != usNone

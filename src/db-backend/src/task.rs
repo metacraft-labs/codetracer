@@ -22,8 +22,11 @@ use crate::lang::*;
 use crate::value::{Type, Value, ValueRecordWithType};
 use schemars::JsonSchema;
 
-// IMPORTANT: must keep in sync with `EventLogKind` definition in common_types.nim!
-pub const EVENT_KINDS_COUNT: usize = 14;
+/// One per `EventLogKind`. The Nim `EventLogKind` enum
+/// (`src/common/common_types/codetracer_features/events.nim`) must list the
+/// same kinds in the same order, as the frontend sends this filter indexed
+/// by its ordinals.
+pub const EVENT_KINDS_COUNT: usize = EventLogKind::ALL.len();
 const NO_DEPTH_LIMIT: i64 = -1;
 
 /// args for `ct/load-locals`
@@ -230,22 +233,31 @@ fn deserialize_selected_kinds<'de, D>(deserializer: D) -> Result<[bool; EVENT_KI
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    selected_kinds_from_json(&value).map_err(serde::de::Error::custom)
+}
+
+/// The event log's kind selection (`array[EventLogKind, bool]`, one flag per
+/// kind) from any of the shapes a frontend sends it in: a JSON array, a
+/// Node.js Buffer (`{"type": "Buffer", "data": [...]}`), or an object keyed
+/// by the kind's ordinal (`{"0": true, ...}`), with flags as booleans or as
+/// the numbers Nim 2.2's JS backend writes. Read by `ct/update-table` and
+/// `ct/event-load` alike, so both accept what either was sent.
+pub fn selected_kinds_from_json(value: &serde_json::Value) -> Result<[bool; EVENT_KINDS_COUNT], String> {
     use serde_json::Value;
 
-    let value = Value::deserialize(deserializer)?;
     match value {
         Value::Array(arr) => {
             if arr.len() != EVENT_KINDS_COUNT {
-                return Err(de::Error::custom(format!(
+                return Err(format!(
                     "expected array of length {}, got {}",
                     EVENT_KINDS_COUNT,
                     arr.len()
-                )));
+                ));
             }
             let mut result = [false; EVENT_KINDS_COUNT];
-            for (i, v) in arr.into_iter().enumerate() {
-                result[i] = value_as_truthy(&v);
+            for (i, v) in arr.iter().enumerate() {
+                result[i] = value_as_truthy(v);
             }
             Ok(result)
         }
@@ -265,7 +277,7 @@ where
             }
             // Handle plain object format: {"0": true, "1": true, ...}
             let mut result = [false; EVENT_KINDS_COUNT];
-            for (key, val) in &map {
+            for (key, val) in map {
                 if let Ok(idx) = key.parse::<usize>()
                     && idx < EVENT_KINDS_COUNT
                 {
@@ -274,7 +286,7 @@ where
             }
             Ok(result)
         }
-        _ => Err(de::Error::custom("selectedKinds must be an array or object")),
+        _ => Err("selectedKinds must be an array or object".to_string()),
     }
 }
 
@@ -283,6 +295,13 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct CtUpdatedTableResponseBody {
     pub table_update: TableUpdate,
+    /// A tracepoint table's window: each row's locals, indexed by the row's
+    /// place among the tracepoint's hits (`tableArgs.start` onward; earlier
+    /// places are empty). The same values the `tracepoint-locals` event
+    /// carries, in the answer so a client that asked for a window reads its
+    /// locals off its own request (Viewport-Driven-Loading, Decided Q4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_locals: Option<serde_json::Value>,
 }
 
 /// documentation
@@ -337,9 +356,10 @@ pub struct EmptyArg {}
 
 /// Information about a single process recorded in a multi-process trace.
 ///
-/// This mirrors `ct_native_replay::multiprocess::ProcessInfo` so that the
-/// JSON payload returned by the worker's `GetProcessInfo` query deserializes
-/// without any field renaming.
+/// This mirrors `ct_native_replay::multiprocess::ReplayedProcessInfo` (a
+/// recorded process plus its `replayed` flag) so that the JSON payload
+/// returned by the worker's `GetProcessInfo` query deserializes without any
+/// field renaming.
 ///
 /// Used by the DAP `threads` handler to enumerate threads (one per process)
 /// for multi-process recordings (fork/exec). For non-multiprocess traces the
@@ -355,8 +375,16 @@ pub struct ProcessInfo {
     /// Exit status: `Some(code)` for normal exit, `Some(-signal)` for
     /// signal-terminated processes, `None` if unknown / still running.
     pub exit_code: Option<i32>,
-    /// Command line of the process, including arguments.
+    /// Command line of the process, including arguments. rr reports a child
+    /// forked without `exec` as `(forked without exec)`.
     pub command: String,
+    /// True for the one process the replay worker is replaying, whose stops,
+    /// stack and variables the DAP session shows. Defaulted, so a reply from
+    /// a worker that predates the field still parses; with no row marked,
+    /// the db-backend treats the root process as the replayed one
+    /// (`dap_handler::thread_descriptors_from_processes`).
+    #[serde(default)]
+    pub replayed: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -605,6 +633,27 @@ pub struct Location {
     pub is_expanded: bool,
 
     pub missing_path: bool,
+
+    /// The replay worker's exact identity of the stop a native call-stack
+    /// frame was read at: what `ct-native-replay`'s `LoadCallstack` stamps on
+    /// every frame (codetracer-native-backend `frame_position.rs`), empty
+    /// elsewhere. Opaque to this backend and to the client, which sends it
+    /// back with `ct/calltrace-jump` (`calltrace_vm.nim` `calltraceJumpArgs`)
+    /// so the worker can return to exactly that stop: `rr_ticks` cannot,
+    /// since every stop between two MCR events shares one geid and
+    /// branch-free code shares one rr tick count
+    /// (`Click-Navigation.md` §3.3).
+    pub replay_position: String,
+
+    /// Whether this is the last position of the recording: the replay ran
+    /// to the end of the recorded program and no forward motion can move
+    /// it.  `ct-native-replay` sets it on an rr recording's current
+    /// position (codetracer-native-backend `ct_types.rs`); the step
+    /// handlers turn it into the end-of-record notification that the
+    /// daemon reports as `endOfTrace` (codetracer-pm
+    /// `spec/Planned-Features/CodeTracer-MCP-Server.md`, "Navigation at the
+    /// end of a recording").
+    pub end_of_trace: bool,
 }
 
 /// Response for `LoadLocationWithSourcemap` query from the native replay backend.
@@ -665,6 +714,8 @@ impl Location {
             expansion_last_line: -1,
             is_expanded: false,
             missing_path: false,
+            replay_position: String::new(),
+            end_of_trace: false,
         }
     }
 }
@@ -1244,6 +1295,14 @@ pub struct FlowUpdate {
     pub error_message: String,
     pub finished: bool,
     pub status: FlowUpdateState,
+    /// Which query this update answers (`call` or `diff`). A client that
+    /// asked for both receives both on the same `ct/updated-flow` event, and
+    /// the update itself is the only thing that can say which is which: a
+    /// diff flow covers the changed lines of the whole recording, not the
+    /// debugger's current call. Defaulted so a diff index written before
+    /// this field existed still parses (the handler stamps the mode it served).
+    #[serde(default)]
+    pub mode: FlowMode,
 }
 
 impl FlowUpdate {
@@ -1258,6 +1317,7 @@ impl FlowUpdate {
                 kind: FlowUpdateStateKind::FlowNotLoading,
                 steps: 0,
             },
+            mode: FlowMode::Call,
         }
     }
 
@@ -1272,6 +1332,7 @@ impl FlowUpdate {
                 kind: FlowUpdateStateKind::FlowNotLoading,
                 steps: 0,
             },
+            mode: FlowMode::Call,
         }
     }
 }
@@ -1469,6 +1530,60 @@ pub struct SourceCallJumpTarget {
 #[serde(deny_unknown_fields)]
 pub struct CallSearchArg {
     pub value: String,
+    /// At most this many calls are answered (the requesting pane's window);
+    /// every matching call when absent or 0.
+    #[serde(default)]
+    pub limit: usize,
+}
+
+/// One function of the recording, as the omnibar finds it
+/// (`ct/load-symbols`): its name, where it is defined, and the tick of its
+/// first call — where choosing it goes.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolEntry {
+    pub name: String,
+    pub path: String,
+    pub line: i64,
+    pub first_call_ticks: i64,
+}
+
+/// Arguments of `ct/load-value-elements`: elements `startIndex ..<
+/// startIndex + count` of the collection reached from the local (or watch)
+/// `expression` by `path` (element indices, outermost first), at the stop the
+/// last `ct/load-locals` answered for. `count` 0 means the rest.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadValueElementsArguments {
+    pub expression: String,
+    #[serde(default)]
+    pub path: Vec<usize>,
+    pub start_index: usize,
+    #[serde(default)]
+    pub count: usize,
+    /// The tick the client's locals are about; a request about another stop
+    /// is refused rather than answered from the wrong one.
+    pub rr_ticks: i64,
+}
+
+/// Response body for `ct/load-value-elements`.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadValueElementsResponseBody {
+    pub elements: Vec<crate::value::Value>,
+    pub start_index: usize,
+    pub total: usize,
+    /// More elements follow this slice.
+    pub more: bool,
+}
+
+/// Response body for `ct/load-symbols`: every function the recording called,
+/// once. The population is the program's functions, bounded by the program
+/// rather than by the length of the recording.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadSymbolsResponseBody {
+    pub symbols: Vec<SymbolEntry>,
 }
 
 /// Response body for `ct/search-calltrace`.
@@ -1492,6 +1607,9 @@ pub struct CallSearchArg {
 #[serde(rename_all = "camelCase")]
 pub struct CallSearchResponseBody {
     pub calls: Vec<Call>,
+    /// How many calls matched, of which `calls` is the first `limit`.
+    #[serde(default)]
+    pub total: usize,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1501,6 +1619,14 @@ pub struct LoadHistoryArg {
     pub expression: String,
     pub location: Location,
     pub is_forward: bool,
+    /// The first history entry to answer with (the pane's window); 0 when
+    /// absent.
+    #[serde(default)]
+    pub start: usize,
+    /// How many entries to answer with; every entry from `start` when absent
+    /// or 0 (the older callers, which ask for the whole history).
+    #[serde(default)]
+    pub count: usize,
 }
 
 impl fmt::Display for SourceCallJumpTarget {
@@ -1872,7 +1998,16 @@ pub struct TraceSession {
 #[serde(deny_unknown_fields)]
 pub struct RunTracepointsArg {
     pub session: TraceSession,
+    /// Stop the sweep after this many hits; 0 or negative for every hit.
     pub stop_after: i64,
+    /// Whether the `ct/tracepoint-results` event carries each hit's locals.
+    /// Off by default (Viewport-Driven-Loading, Decided Q4): the sweep's
+    /// answer is each hit's tick and location, which is what a timeline
+    /// draws, and a pane asks for the window of hits it shows, locals
+    /// included, through `ct/update-table` on the tracepoint's event slot.
+    /// The Python API asks for them with its explicit limit.
+    #[serde(default)]
+    pub with_locals: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1922,6 +2057,13 @@ pub struct HistoryUpdate {
     pub address: i64,
     pub results: Vec<HistoryResult>,
     pub finish: bool,
+    /// How many entries the whole history has, of which `results` is the
+    /// requested window (`LoadHistoryArg::start` / `count`).
+    #[serde(default)]
+    pub total: usize,
+    /// Where `results` starts in the whole history.
+    #[serde(default)]
+    pub start: usize,
 }
 
 impl HistoryUpdate {
@@ -1931,6 +2073,8 @@ impl HistoryUpdate {
             address,
             results: results.to_vec(),
             finish: true,
+            total: results.len(),
+            start: 0,
         }
     }
 }
@@ -3440,6 +3584,7 @@ mod tests {
                 id: 1,
             },
             stop_after: -1,
+            with_locals: false,
         };
         let json = serde_json::to_string(&args).expect("serialise");
         assert!(
@@ -3693,5 +3838,34 @@ mod tests {
             json.get("traceId").is_none(),
             "M-REC-4 retired the `traceId` wire-format key on TableUpdate too",
         );
+    }
+
+    /// The event-log filter carries one flag per `EventLogKind`, every kind
+    /// of `trace-events.md` §"EventLogKind (u8 enum)" included, so a kind
+    /// can be selected by its ordinal up to the last one (`ChangeDir`, 23).
+    #[test]
+    fn the_kind_filter_has_one_flag_per_event_log_kind() {
+        assert_eq!(EVENT_KINDS_COUNT, EventLogKind::ALL.len());
+
+        let mut flags = vec![false; 24];
+        flags[EventLogKind::ChangeDir as usize] = true;
+        let text = serde_json::json!({
+            "tableArgs": {
+                "columns": [], "draw": 1, "length": 10, "order": [],
+                "search": {"value": "", "regex": false}, "start": 0
+            },
+            "selectedKinds": flags,
+            "isTrace": false,
+            "eventSlot": 0,
+        });
+        let args: UpdateTableArgs = serde_json::from_value(text).expect("a 24-flag filter decodes");
+        for kind in EventLogKind::ALL {
+            assert_eq!(
+                args.selected_kinds[kind as usize],
+                kind == EventLogKind::ChangeDir,
+                "flag for {}",
+                kind.name()
+            );
+        }
     }
 }

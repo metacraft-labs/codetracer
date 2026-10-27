@@ -43,7 +43,7 @@ test.describe("MCR visual replay real GUI layout", () => {
     await expect(
       ctPage.locator(".lm_tab", { hasText: /\.(py|rb|nr)\b/ }),
     ).toBeVisible();
-    await expect(ctPage.locator(".lm_tab", { hasText: "STATE" })).toBeVisible();
+    await expect(ctPage.locator(".lm_tab", { hasText: "VARIABLES" })).toBeVisible();
     await expect(
       ctPage.locator(".lm_tab", { hasText: "CALLTRACE" }),
     ).toBeVisible();
@@ -249,7 +249,7 @@ test.describe("MCR visual replay player failure", () => {
     await expect(
       ctPage.locator(".lm_tab", { hasText: /main\.(py|nr)/ }),
     ).toBeVisible();
-    await expect(ctPage.locator(".lm_tab", { hasText: "STATE" })).toBeVisible();
+    await expect(ctPage.locator(".lm_tab", { hasText: "VARIABLES" })).toBeVisible();
     await expect(
       ctPage.locator(".lm_tab", { hasText: "CALLTRACE" }),
     ).toBeVisible();

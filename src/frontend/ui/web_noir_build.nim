@@ -112,13 +112,14 @@ import ./build as build_pane
 from ./errors import
   syncErrorsAppendProblem, syncErrorsClear, highlightFirstBuildError
 from ../viewmodel/store/types import BuildProblemLine
-# THE EDIT-MODE TOPBAR. `editModeToolbar` composes the model, `debug` mounts
-# it, and `currentWasmRegistry` is what lets the browser tier resolve
-# `nargo compile` at subcommand granularity instead of refusing every command.
+# THE EDIT-MODE TOPBAR. `editModeToolbar` composes the model,
+# `debug_toolbar.setEditModeToolbar` mounts it, and `currentWasmRegistry` is
+# what lets the browser tier resolve `nargo compile` at subcommand granularity
+# instead of refusing every command.
 from ../viewmodel/viewmodels/edit_mode_toolbar import
   editModeToolbar, EditToolbarModel, ToolbarMode
 from ../viewmodel/platform/web_platform import currentWasmRegistry
-import ./debug
+import ./debug_toolbar
 
 export noir_build_producer
 
@@ -345,7 +346,7 @@ proc paneRowCounts(): string =
   ##
   ## Two numbers rather than one, because they are two different objects and a
   ## disagreement between them is a specific, silent defect:
-  ## `initBuildVMWithStore` REPLACES `build.buildVMInstance` when the shared
+  ## `initBuildVMFromSession` REPLACES `build.buildVMInstance` when the shared
   ## store arrives, and a producer captured before that would write rows into a
   ## view model no mounted view is bound to — a build that ran, succeeded, and
   ## painted nothing. `producerFor` rebuilds the producer to prevent it; this
@@ -439,22 +440,17 @@ proc ensureBuildPaneVisible() =
   ## that carries it as a strip label. A browser gets the second; a user who
   ## has dragged BUILD into the layout gets the first.
   ##
-  ## `tryMountIsoNimBuildPanel` is called again rather than relied upon from
-  ## start-up: it retries for ~2 s after `initBuildVMWithStore` and then gives
-  ## up, which is long expired by the time a user clicks anything. It is
-  ## idempotent (`isoNimBuildMounted` guards it), so calling it here costs
-  ## nothing when the pane was already mounted and is the difference between a
-  ## painted result and an empty container when it was not.
+  ## Either way the pane is mounted by the panel host: GoldenLayout's factory
+  ## for a tab, the auto-hide reveal (`onPanelShown`) for a strip label.
   if not data.isNil and not data.ui.layout.isNil:
     data.openLayoutTab(Content.Build)
   build_pane.autoRevealBuildPanel()
-  build_pane.tryMountIsoNimBuildPanel()
 
 proc producerFor(tmpl: ProjectTemplate): NoirBuildProducer =
   ## One producer per pane, rebuilt if the VM was replaced underneath it OR if
   ## it is holding a different project's paths.
   ##
-  ## `initBuildVMWithStore` replaces `buildVMInstance` when the shared store
+  ## `initBuildVMFromSession` replaces `buildVMInstance` when the shared store
   ## arrives, so a producer captured earlier would be writing into a VM no
   ## view is bound to — a build that ran, succeeded, and painted nothing.
   ##
@@ -493,7 +489,7 @@ proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate)
 
 proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
               phase: NoirBuildPhase; args: seq[string]; stdin: string;
-              label: string)
+              label: string): string
   ## Forward-declared because `onPhaseExit` chains — `nriTestRecord` runs three
   ## phases and each dispatch happens inside the previous one's exit — and the
   ## definition needs `onPhaseExit` for its own callbacks. `startTrace` above
@@ -564,7 +560,10 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
            "ok=true passed=" & $producer.lastTests.passed &
            " failed=" & $producer.lastTests.failed &
            " recording=" & activeRecordSelector)
-    dispatch(producer, tmpl, nbpTestRecord, noirTestArgs(),
+    # Discarded: this runs inside `onPhaseExit`, with no click waiting on an
+    # answer. A refusal here is painted into the build pane by `onRefusal`,
+    # and the `activeInFlight` check that follows every phase settles the run.
+    discard dispatch(producer, tmpl, nbpTestRecord, noirTestArgs(),
              $noirTestRecordRequest(templateVfsEntries(tmpl), tmpl.name,
                                     activeRecordSelector),
              "nargo test --record " & activeRecordSelector)
@@ -582,7 +581,9 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
       # REFRESH VERSUS ENTER, decided here and carried into the trace phase.
       # The recording is produced either way; only the navigation differs.
       producer.replaySuppressOpen = not activeRecordOpenWhenDone
-      dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
+      # Discarded: same phase-exit continuation, and the `if activeInFlight`
+      # below already branches on whether this posted.
+      discard dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
                $noirTraceRequest(producer.artifact, noirTestRecordInputs),
                "nargo trace " & activeRecordSelector)
       if activeInFlight:
@@ -697,8 +698,26 @@ proc onPhaseExit(producer: NoirBuildProducer; tmpl: ProjectTemplate;
 
 proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
               phase: NoirBuildPhase; args: seq[string]; stdin: string;
-              label: string) =
+              label: string): string =
   ## Post one `start` to the worker, through the platform facade.
+  ##
+  ## RETURNS "" WHEN THE COMMAND WAS POSTED, and otherwise the sentence saying
+  ## why it was not.
+  ##
+  ## The return type is the point, and it is a change from `void`. Both
+  ## refusals below paint their sentence into the build pane through
+  ## `onRefusal` and then `return`, leaving `activeInFlight` false — so the
+  ## only way a caller could learn a dispatch had been declined was to read
+  ## that flag afterwards and infer it. `startNoirTestRecording` DID read it,
+  ## settled the run, and then fell off the end returning the implicit "",
+  ## which its own docstring defines as "the run was dispatched". The editor
+  ## read that "" as consent, armed a spinner and posted `"<test>" started`
+  ## over a run that had been declined before the click finished.
+  ##
+  ## A `void` here cannot be misread, because there is nothing to read; it can
+  ## only be assumed. Handing back the sentence forces all seven call sites to
+  ## say what they do with a refusal, and it hands the one caller that has a
+  ## user waiting on an answer the words to give them.
   ##
   ## `ctPlatform().process.start` and not `run`, because a Run has to be
   ## stoppable: `start` yields a `ProcessHandle` and `run` does not, and the ■
@@ -724,10 +743,10 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     # attached `webNoModulesLoaded` as its degradation. That sentence names
     # the deployment rather than the command, which is the true statement
     # here, so it is shown instead of a generic refusal.
-    discard producer.onRefusal(
-      degradedBehaviour(platform.profile, capProcessSpawn))
+    let sentence = degradedBehaviour(platform.profile, capProcessSpawn)
+    discard producer.onRefusal(sentence)
     report($phase & "-refused", "reason=no-spawn")
-    return
+    return sentence
 
   proc onOutput(chunk: ProcessOutputChunk) =
     producer.onOutput(chunk)
@@ -751,12 +770,13 @@ proc dispatch(producer: NoirBuildProducer; tmpl: ProjectTemplate;
     # describes nothing.
     discard producer.onRefusal($started.error)
     report($phase & "-refused", "reason=" & $started.error.kind)
-    return
+    return $started.error
 
   activeHandle = started.value
   activeInFlight = true
   inc lastStartCount
   report($phase & "-started", "handle=" & $activeHandle)
+  return ""
 
 proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate) =
   let inputs = templateInputs(tmpl)
@@ -765,7 +785,9 @@ proc startTrace(producer: NoirBuildProducer; tmpl: ProjectTemplate) =
     discard producer.traceInputsMissing(noirInputsFile)
     report("trace-refused", "reason=no-inputs")
     return
-  dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
+  # Discarded: `startTrace` is `void` and every caller reaches it from a
+  # phase exit, not from a gesture. The refusal is painted in the pane.
+  discard dispatch(producer, tmpl, nbpTrace, noirTraceArgs(),
            $noirTraceRequest(producer.artifact, inputs), "nargo trace")
 
 proc startNoirBuild*(saved: seq[string] = @[]) =
@@ -788,7 +810,10 @@ proc startNoirBuild*(saved: seq[string] = @[]) =
     report("build-refused", "reason=no-build-vm")
     return
   activeIntent = nriBuild
-  dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
+  # Discarded: the Build button's own surface IS the build pane, so a
+  # refusal painted there by `onRefusal` is already in front of the user who
+  # pressed it. Nothing here claims the build started.
+  discard dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmProgram),
            savedFilesLabel("nargo compile", saved))
 
@@ -849,7 +874,9 @@ proc startNoirRun*(saved: seq[string] = @[]) =
     report("run-refused", "reason=no-build-vm")
     return
   activeIntent = nriRun
-  dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
+  # Discarded: same as `startNoirBuild` — the Run button's surface is the
+  # build pane, and the refusal lands there.
+  discard dispatch(producer, tmpl, nbpCompile, noirCompileArgs(),
            $noirVfsRequest(templateVfsEntries(tmpl), tmpl.name, nbmDebug),
            savedFilesLabel("nargo compile --debug", saved))
 
@@ -933,7 +960,10 @@ proc startNoirTests*(saved: seq[string] = @[];
   let label =
     if only.len == 0: "nargo test"
     else: "nargo test --exact " & only.join(" ")
-  dispatch(producer, tmpl, nbpTest, noirTestArgs(),
+  # Discarded: `startNoirTests` is `void` and its surface is the Test Results
+  # pane, which `onRefusal` has already painted. The settle below is what stops
+  # the pane sitting `inFlight` behind a disabled play control.
+  discard dispatch(producer, tmpl, nbpTest, noirTestArgs(),
            $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, only),
            savedFilesLabel(label, saved))
   if not activeInFlight:
@@ -1094,14 +1124,32 @@ proc startNoirTestRecording*(selector: string;
   activeRecordOpenWhenDone = openWhenDone
   if not noirTestRunStarted.isNil:
     noirTestRunStarted()
-  dispatch(producer, tmpl, nbpTest, noirTestArgs(),
+  let refusal = dispatch(producer, tmpl, nbpTest, noirTestArgs(),
            $noirTestRequest(templateVfsEntries(tmpl), tmpl.name, @[selector]),
            "nargo test --exact " & selector)
   if not activeInFlight:
+    # THE DISPATCH WAS DECLINED. This branch used to settle the run and then
+    # fall off the end returning the implicit "" — which this proc's own
+    # docstring defines as "the run was dispatched". The editor took that ""
+    # for consent, armed a spinner and posted `"<selector>" started`, and the
+    # settle above it had already swept a list the editor had not yet joined.
+    # Two minutes of "Running..." over a run declined before the click
+    # finished: the reported defect, produced here.
+    #
+    # The settle still happens — the pane must not sit `inFlight` behind a
+    # disabled play control — but the SENTENCE is handed back now, so the
+    # caller unwinds what it armed and shows the user the reason instead of a
+    # claim that it started.
     if not noirTestRunSink.isNil:
       noirTestRunSink(producer.lastTests, tmpl.name)
     if not noirTestRunSettled.isNil:
       noirTestRunSettled()
+    if refusal.len > 0:
+      return refusal
+    # `dispatch` posted the command and something else cleared `activeInFlight`
+    # before this line — the run is still over, and saying nothing here would
+    # put the "" back.
+    return "the run was not dispatched; the build pane says why"
 
 proc startNoirTest*(selector: string): string =
   ## Run ONE test — the editor's Run-test control, and the Test Results pane's
@@ -1168,8 +1216,9 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
   ## correct capability that nothing reached, which is this campaign's most
   ## common defect and was the user's bug report in its visible form.
   ##
-  ## Composed HERE rather than in `ui/debug.nim` because a model needs three
-  ## things only a platform knows, and `debug.nim` is shared with the desktop:
+  ## Composed HERE rather than in `ui/debug_toolbar.nim` because a model needs
+  ## three things only a platform knows, and the toolbar is shared with the
+  ## desktop:
   ##
   ##   * the PROFILE — `capProcessArbitraryPrograms` vs the browser's
   ##     `capProcessSpawn`, which is what makes Build enabled or refused;
@@ -1185,9 +1234,9 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
   ##
   ## THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN. This proc had exactly one
   ## call site — the one-shot `if wantsTemplate and mounted:` block in `ui_js`
-  ## — and `EditToolbarModel` is a plain `object`, so `debug.editToolbarModel`
+  ## — and `EditToolbarModel` is a plain `object`, so the toolbar's model
   ## held a snapshot composed from the startup listing and the startup mode.
-  ## `debug.setEditModeToolbar`'s own comment made the matching assumption
+  ## `setEditModeToolbar`'s own comment made the matching assumption
   ## ("every change a user makes that could alter it... arrives as a NEW model")
   ## and no new model ever arrived. A visitor who created a `Nargo.toml`
   ## mid-session got a toolbar computed before it existed.
@@ -1208,7 +1257,7 @@ proc installEditModeToolbar*(invoke: proc(id: string)) =
     wasm = currentWasmRegistry())
 
   editToolbarInvoke = invoke
-  debug.setEditModeToolbar(model, invoke)
+  setEditModeToolbar(model, invoke)
   report("edit-toolbar", "buttons=" & $model.buttons.len &
     " kinds=" & $model.kinds.len & " group=" & $model.commandGroupVisible)
 
@@ -1244,8 +1293,8 @@ proc installNoirBuildCommands*() =
   ## Point the BUILD pane's ▶ and ■ at the wasm toolchain.
   ##
   ## Called after `enterTemplateEditMode`, which is when `buildVMInstance`
-  ## exists: `onNoTrace` runs `configureMiddleware()`, and that is what calls
-  ## `initBuildVMWithStore` and installs the DESKTOP `runBuild`
+  ## exists: `onNoTrace` runs `configureSessionMiddleware`, and that is what calls
+  ## `initBuildVMFromSession` and installs the DESKTOP `runBuild`
   ## (`data.update(build=true)`, which sends `CODETRACER::update` to a host
   ## this tab does not have). Overwriting it here rather than branching inside
   ## `ui_js.nim` keeps the desktop's wiring exactly as it was.

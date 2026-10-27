@@ -112,7 +112,8 @@ proc markedLines(screen, fileText: string): seq[int] =
 
 proc quit(sess: var TuiTestSession) =
   sess.key(Esc)
-  sess.key("\t")
+  # F6 off the editor (PLAT-68: under CUA `Tab` indents), then the prompt.
+  sess.key("\x1b[17~")
   sess.key(":q\r")
   discard sess.waitExit(initDuration(seconds = 10))
   sess.close()

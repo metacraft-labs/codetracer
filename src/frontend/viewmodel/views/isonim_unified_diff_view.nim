@@ -18,15 +18,17 @@
 ## rebuilt reactively.
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
-import isonim/testing/mock_dom
+import isonim/dsl/[ui, components]
 
 when defined(js):
+  # The browser instantiation needs the WebRenderer procs in scope.
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
 
 import ../viewmodels/vcs_vm
 import ../viewmodels/diff_document
+
+export signals, computation, components
 
 const
   UnifiedDiffContainerClass* = "component-container unified-diff-container"
@@ -44,6 +46,12 @@ const
   UnifiedDiffFileHeaderStatusClass* = "unified-diff-file-header-status"
   UnifiedDiffFileHeaderPathClass* = "unified-diff-file-header-path"
   UnifiedDiffFileHeaderStatsClass* = "unified-diff-file-header-stats"
+  UnifiedDiffFileHeaderLinkClass* = "unified-diff-file-header-link"
+    ## Added to the heading's path when it opens the full file (every status
+    ## but a deletion, whose file no longer exists).
+  UnifiedDiffDocumentClass* = "unified-diff-document"
+    ## A whole-commit document: one scrolling tab of per-file sections.
+  UnifiedDiffDocumentSectionClass* = "unified-diff-document-section"
 
 type
   UnifiedDiffCallbacks* = object
@@ -53,13 +61,9 @@ type
     onCopySelectedHunks*: proc()
     onStageSelectedHunks*: proc()
     onClearSelectedHunks*: proc()
-
-proc appendRenderedChild(r: MockRenderer; host, child: MockNode) =
-  r.appendChild(host, child)
-
-when defined(js):
-  proc appendRenderedChild(r: WebRenderer; host, child: isonim_dom.Element) =
-    r.appendChild(host, child)
+    onOpenFullFile*: proc(path: string)
+      ## The heading's file name was clicked: open the full file
+      ## (VCS-Panel.md, "Unified Diff View (Editor Integration)").
 
 proc hunkToolbarText*(count: int): string =
   $count & " hunk" & (if count == 1: "" else: "s") & " selected"
@@ -70,9 +74,11 @@ proc copyButtonText*(copied: bool): string =
   ## clipboard gives.
   if copied: "Copied!" else: "Copy as patch"
 
-proc renderHunkToolbar[R](r: R; vm: VCSVM;
-                          callbacks: UnifiedDiffCallbacks): auto =
-  var actions: typeof(r.createElement("div"))
+proc renderHunkToolbar[R, N](r: R; vm: VCSVM;
+                             callbacks: UnifiedDiffCallbacks): N =
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin appendChild
+  var actions: N
   let bar = ui(r):
     tdiv(class = "hunk-toolbar"):
       span(class = "hunk-toolbar-count"):
@@ -93,17 +99,37 @@ proc renderHunkToolbar[R](r: R; vm: VCSVM;
              if callbacks.onStageSelectedHunks != nil:
                callbacks.onStageSelectedHunks()):
         text "Stage hunks"
-    r.appendRenderedChild(actions, stage)
+    r.appendChild(actions, stage)
   let clear = ui(r):
     tdiv(class = "hunk-toolbar-button hunk-toolbar-button-subtle",
          onclick = proc() =
            if callbacks.onClearSelectedHunks != nil:
              callbacks.onClearSelectedHunks()):
       text "Clear"
-  r.appendRenderedChild(actions, clear)
+  r.appendChild(actions, clear)
   bar
 
-proc renderFileHeader[R](r: R; entry: DiffFileEntry): auto =
+proc opensFullFile(entry: DiffFileEntry): bool =
+  ## A deleted file has no full file to open.
+  not isDeletedStatus(entry.status)
+
+proc headerPathClass(entry: DiffFileEntry): string =
+  if entry.opensFullFile:
+    UnifiedDiffFileHeaderPathClass & " " & UnifiedDiffFileHeaderLinkClass
+  else:
+    UnifiedDiffFileHeaderPathClass
+
+proc openFullFileHandler(callbacks: UnifiedDiffCallbacks;
+                         entry: DiffFileEntry): proc() =
+  ## A factory, so each heading's handler captures its own path.
+  let path = entry.path
+  let opens = entry.opensFullFile
+  result = proc() =
+    if opens and callbacks.onOpenFullFile != nil:
+      callbacks.onOpenFullFile(path)
+
+proc renderFileHeader[R, N](r: R; entry: DiffFileEntry;
+                            callbacks: UnifiedDiffCallbacks): N =
   ## DeepReview-GUI.md §4.1: "A file header with path and diff metadata".
   ##
   ## It used to be line 1 of the Monaco model.  UD-2 made the model the file
@@ -116,17 +142,28 @@ proc renderFileHeader[R](r: R; entry: DiffFileEntry): auto =
     tdiv(class = UnifiedDiffFileHeaderClass):
       span(class = UnifiedDiffFileHeaderStatusClass):
         text entry.status
-      span(class = UnifiedDiffFileHeaderPathClass):
+      # VCS-Panel.md: "the path in the heading is a link that opens the full
+      # file" — the way to the full file while a click on a file row opens
+      # the diff (the owner's 2026-10-23 decision).
+      span(class = headerPathClass(entry),
+           title = (if entry.opensFullFile: "Open " & entry.path else: ""),
+           onclick = openFullFileHandler(callbacks, entry)):
         text entry.path
       span(class = UnifiedDiffFileHeaderStatsClass):
         text fileStatsText(entry.additions, entry.deletions)
 
-proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
-                                 callbacks: UnifiedDiffCallbacks): auto =
-  var toolbarHost: typeof(r.createElement("div"))
-  var fileHeaderHost: typeof(r.createElement("div"))
-  var editorHost: typeof(r.createElement("div"))
-  var emptyHost: typeof(r.createElement("div"))
+proc renderUnifiedDiffTab*[R, N](r: R; vm: VCSVM;
+                                  editorHostId = "unifiedDiffEditor-0";
+                                  callbacks = UnifiedDiffCallbacks()): N =
+  ## The tab's chrome and the element Monaco mounts into, for every renderer
+  ## (Shared-DOM-Front-Ends D6). The browser host creates the editor after
+  ## the tab is in the document (`ui/unified_diff`).
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin clearChildren, appendChild, setAttribute
+  var toolbarHost: N
+  var fileHeaderHost: N
+  var editorHost: N
+  var emptyHost: N
 
   let panel = ui(r):
     tdiv(class = UnifiedDiffContainerClass):
@@ -142,12 +179,13 @@ proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
     # review's tab always names exactly one file (§4.1, "Each diff tab shows a
     # single file"); a git target can name several, and each keeps its own row.
     for entry in diffPairFor(vm).files:
-      r.appendRenderedChild(fileHeaderHost, renderFileHeader(r, entry))
+      r.appendChild(fileHeaderHost,
+                    renderFileHeader[R, N](r, entry, callbacks))
 
   createRenderEffect proc() =
     r.clearChildren(toolbarHost)
     if vm.hunkToolbarVisible.val and vm.selectedHunkCount.val > 0:
-      r.appendRenderedChild(toolbarHost, renderHunkToolbar(r, vm, callbacks))
+      r.appendChild(toolbarHost, renderHunkToolbar[R, N](r, vm, callbacks))
 
   # Swap the editor for the empty-state message when there is nothing to diff.
   # Toggled by class rather than by inserting/removing the node, because the
@@ -163,21 +201,56 @@ proc renderUnifiedDiffTabImpl[R](r: R; vm: VCSVM; editorHostId: string;
 
   panel
 
-proc renderUnifiedDiffTab*(r: MockRenderer; vm: VCSVM;
-                           editorHostId = "unifiedDiffEditor-0";
-                           callbacks = UnifiedDiffCallbacks()): MockNode =
-  renderUnifiedDiffTabImpl(r, vm, editorHostId, callbacks)
-
 when defined(js):
-  proc renderUnifiedDiffTab*(r: WebRenderer; vm: VCSVM;
-                             editorHostId: string;
-                             callbacks = UnifiedDiffCallbacks()):
-                             isonim_dom.Element =
-    renderUnifiedDiffTabImpl(r, vm, editorHostId, callbacks)
+  proc scrollSectionToTop(document: isonim_dom.Element; path: cstring)
+    {.importjs: """(function(doc, path) {
+      var sections = doc.querySelectorAll('.unified-diff-document-section');
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i].getAttribute('data-path') === path) {
+          sections[i].scrollIntoView({block: 'start'});
+          return;
+        }
+      }
+    })(#, #)""".}
 
-  proc mountIsoNimUnifiedDiffTab*(container: isonim_dom.Element; vm: VCSVM;
-                                  editorHostId: string;
-                                  callbacks = UnifiedDiffCallbacks()) =
-    let r = WebRenderer()
-    let panel = renderUnifiedDiffTab(r, vm, editorHostId, callbacks)
-    isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
+proc scrollToSection*[N](document: N; path: string) =
+  ## Bring `path`'s section of `document` to the top (browser only; other
+  ## renderers do not scroll). A path with no section scrolls nowhere.
+  when defined(js):
+    when N is isonim_dom.Element:
+      if path.len > 0:
+        scrollSectionToTop(document, cstring(path))
+
+proc renderUnifiedDiffDocument*[R, N](
+    r: R; vm: VCSVM;
+    renderSection: proc(index: int; path: string; host: N)): N =
+  ## A whole-commit document (VCS-Panel.md, "Whole-Commit Document"): one
+  ## section per file of `vm.diffFiles`, in order, each a host carrying the
+  ## file's path that `renderSection` fills with that file's own diff — in
+  ## the browser a single-file diff tab with its own Monaco editor, so every
+  ## file keeps its language, hunk editor and overlay.
+  ##
+  ## The document keeps the section of the file last asked for
+  ## (`vm.documentScroll`) at the top, and names it in
+  ## `data-scrolled-to`, so a headless test can see the request arrive.
+  # Bound where instantiated: on JS this module also sees WebRenderer's.
+  mixin setAttribute
+  var sections: N
+  let document = ui(r):
+    tdiv(class = UnifiedDiffContainerClass & " " & UnifiedDiffDocumentClass):
+      tdiv(ref = sections, class = "unified-diff-document-sections")
+  indexEach[VCSDiffFileRow, R, N](r, sections,
+    proc(): seq[VCSDiffFileRow] = vm.diffFiles.val,
+    proc(item: proc(): VCSDiffFileRow, index: int): N =
+      let path = item().path
+      var host: N
+      let section = ui(r):
+        tdiv(ref = host, class = UnifiedDiffDocumentSectionClass,
+             `data-path` = path)
+      renderSection(index, path, host)
+      section)
+  createRenderEffect proc() =
+    let request = vm.documentScroll.val
+    r.setAttribute(document, "data-scrolled-to", request.path)
+    scrollToSection(document, request.path)
+  document

@@ -47,7 +47,7 @@ use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::trace_reader::TraceReader;
 
 /// `src/db-backend/trace/trace.ct` — a committed container at container
-/// version 5 with `meta.dat` schema version 6, every one of whose 18 members
+/// version 5 with `meta.dat` schema version 7, every one of whose 18 members
 /// is stored in the direct-block form.
 ///
 /// Resolved from `CARGO_MANIFEST_DIR` (which is `src/db-backend`) so the two
@@ -280,24 +280,24 @@ fn every_member_of_the_version_5_fixtures_is_direct_tagged() {
     }
 }
 
-/// `meta.dat` in the version-5 fixtures is at schema version 6 — the OTHER
+/// `meta.dat` in the version-5 fixtures is at schema version 7 — the OTHER
 /// axis, named here so the two cannot be confused again.
 ///
 /// The container version and the schema version moved together in the 2026-10
 /// revision, and this arm is what records that they are nevertheless two
-/// fields: if a container ever appears at version 5 with a schema below 6, or
+/// fields: if a container ever appears at version 5 with a schema below 7, or
 /// at 6 with a container below 5, the reasoning that admitted either version
 /// has to be re-taken rather than assumed.
 #[test]
-fn the_version_5_fixtures_carry_meta_dat_schema_version_6() {
+fn the_version_5_fixtures_carry_meta_dat_schema_version_7() {
     for relative in VERSION_5_FIXTURES {
         let ct = repo_fixture(relative);
         let bytes = fs::read(&ct).expect("read the committed container");
         let ctmd = find_subslice(&bytes, b"CTMD").unwrap_or_else(|| panic!("{relative}: no meta.dat in the container"));
         let schema = u16::from_le_bytes([bytes[ctmd + 4], bytes[ctmd + 5]]);
         assert_eq!(
-            schema, 6,
-            "{relative}: container version 5 and meta.dat schema 6 are the 2026-10 pair; a \
+            schema, 7,
+            "{relative}: container version 5 and meta.dat schema 7 are the 2026-10 pair; a \
              container at 5 carrying schema {schema} is a combination nothing has measured"
         );
     }

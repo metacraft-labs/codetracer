@@ -72,3 +72,32 @@ suite "M-REC-5 — events.nim wire format":
     let parsed = parseJson(serialized).to(TableUpdate)
     check parsed.eventSlot == 3
     check parsed.isTrace == true
+
+suite "EventLogKind — the kinds of trace-events.md, by ordinal":
+
+  # `trace-events.md` §"EventLogKind (u8 enum)", spelled out rather than
+  # derived from the enum: the db-backend sends a kind as its ordinal, and
+  # `selectedKinds` crosses back indexed by it, so a reordering here would
+  # relabel every event the frontend shows.
+  const SpecKinds = [
+    (0, "Write"), (1, "WriteFile"), (2, "WriteOther"), (3, "Read"),
+    (4, "ReadFile"), (5, "ReadOther"), (6, "ReadDir"), (7, "OpenDir"),
+    (8, "CloseDir"), (9, "Socket"), (10, "Open"), (11, "Error"),
+    (12, "TraceLogEvent"), (13, "EvmEvent"), (14, "WriteStderr"),
+    (15, "Exec"), (16, "ReadEnv"), (17, "WriteEnv"), (18, "Stat"),
+    (19, "CreateDir"), (20, "RemoveDir"), (21, "RemoveFile"),
+    (22, "Rename"), (23, "ChangeDir"),
+  ]
+
+  test "every kind has its spec ordinal, and there are no others":
+    check EventLogKind.high.ord + 1 == SpecKinds.len
+    for (ordinal, name) in SpecKinds:
+      check $EventLogKind(ordinal) == name
+
+  test "the kind filter carries one flag per kind":
+    var args = UpdateTableArgs()
+    args.selectedKinds[EventLogKind.ChangeDir] = true
+    let flags = (%args)["selectedKinds"]
+    check flags.len == SpecKinds.len
+    for i in 0 ..< flags.len:
+      check flags[i].getBool == (i == EventLogKind.ChangeDir.ord)

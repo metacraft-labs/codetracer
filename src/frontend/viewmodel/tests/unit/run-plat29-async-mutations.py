@@ -151,11 +151,15 @@ WEB_RUNNER = "src/frontend/tests/jsdom-run.mjs"
 MAIN_DAP = "src/frontend/index/ipc_subsystems/dap.nim"
 T_ROUTING = "src/frontend/tests/dap_session_routing_test.nim"
 STATE_VM = "src/frontend/viewmodel/viewmodels/state_vm.nim"
+# THE ONE PER-STOP SENDER SINCE 2026-10-17: the SDK's stop loader asks for a
+# stop's locals on every host and applies the answer to the stop it was
+# sent at; the web's request-identity wiring above no longer carries them.
+STOPLOADER = "src/frontend/viewmodel/sdk/stop_loader.nim"
 
 TOUCHED = [VERSION, RECONCILE, GENERATOR, LAWS, EX, CLOSURE, GATE, ADMISSION,
            EDSTATE, PRODUCER, FILEIO, VALUES, T_PRODUCER, T_FILES, T_VALUES,
            STOPS, STORE, HEADLESS, CLOSURE_LIB, DAP, STATE_UI, T_WEB,
-           MAIN_DAP, T_ROUTING, STATE_VM]
+           MAIN_DAP, T_ROUTING, STATE_VM, STOPLOADER]
 
 CONTROL_HASHES = HERE / "plat29-async-mutation-control.sha256"
 
@@ -749,13 +753,18 @@ ARMS = [
     ),
 
     # =======================================================================
-    # THE WEB RENDERER'S WIRING (2026-09-24) — the transport and the bridge,
-    # not the ledger: every arm here leaves `replay_data_store.nim` intact.
+    # THE WEB RENDERER'S WIRING (2026-09-24), re-aimed 2026-10-21. Since the
+    # stop loader became the web's one sender (and the session's store makes
+    # `syncStoreLocals` stand down), the job these arms' claims name is done
+    # by the stop loader's stamp, the store's admission and `DapApi`'s
+    # continuation for the session that asked; the request-identity bridge
+    # in `ui/state.nim` is reached by no host with an identity. The claims
+    # are kept; each arm mutates the code that now does the job.
     # =======================================================================
     Arm(
-        "W1", DAP,
-        "          t.onSent(requestId)\n",
-        "          discard requestId\n",
+        "W1", STOPLOADER,
+        "  let requestedAt = store.stopStamp()\n",
+        "  let requestedAt = StopStamp()\n",
         W_WEB,
         "**THE SEND PATH STOPS NAMING THE REQUEST.** Both of the web's "
         "senders still send and every answer still arrives stamped — but no "
@@ -763,9 +772,9 @@ ARMS = [
         "and the pane never shows the locals of the stop the user is at",
     ),
     Arm(
-        "W2", DAP,
-        "      body[CtRequestIdField] = requestId\n",
-        "      discard requestId\n",
+        "W2", STOPLOADER,
+        "      answer.requestedAt = requestedAt\n",
+        "      answer.requestedAt = store.stopStamp()\n",
         W_WEB,
         "**THE ANSWER ARRIVES ANONYMOUS.** Every request is still recorded "
         "at its stop, but the body the subscribers receive no longer says "
@@ -775,9 +784,9 @@ ARMS = [
         "remove",
     ),
     Arm(
-        "W3", STATE_UI,
-        "                                        $ctRequestIdOf(response.toJs)):\n",
-        "                                        \"\"):\n",
+        "W3", STORE,
+        "  if not store.stops.admit(requestedAt):\n    return false\n",
+        "  if false:\n    return false\n",
         W_WEB,
         "**THE BRIDGE DROPS THE IDENTITY IT WAS HANDED.** The transport "
         "names the request and stamps the answer; the State pane's bridge "
@@ -785,10 +794,14 @@ ARMS = [
         "`W2`, one module later, where the old in-order queue used to sit",
     ),
     Arm(
-        "W4", STATE_UI,
-        "        stateVMStore.forgetLocalsRequest($requestId))\n",
-        "        discard requestId)\n",
-        W_WEB,
+        "W4", STORE,
+        "  ## Every subscriber has seen the answer to `requestId`: retire its entry.\n"
+        "  let at = store.findLocalsRequest(requestId)\n"
+        "  if at >= 0:\n    store.pendingLocals.delete(at)\n",
+        "  ## Every subscriber has seen the answer to `requestId`: retire its entry.\n"
+        "  let at = store.findLocalsRequest(requestId)\n"
+        "  if at >= 0:\n    discard at\n",
+        W_INORDER,
         "**AN ANSWERED REQUEST IS NEVER RETIRED.** Nothing is drawn wrong at "
         "first; the ledger grows by one entry per request until its bound "
         "starts evicting the OLDEST — which, on a host that sends faster than "
@@ -796,8 +809,8 @@ ARMS = [
     ),
     Arm(
         "W5", DAP,
-        "      requestId = ctRequestId(responseDap, raw[\"request_seq\"].to(int))\n",
-        "      requestId = ctRequestId(fanOut, raw[\"request_seq\"].to(int))\n",
+        "  resolvePendingDapResponse(responseDap, raw)\n",
+        "  resolvePendingDapResponse(fanOut, raw)\n",
         W_WEB_SESSION,
         "**THE ANSWER IS NAMED BY THE SESSION ON SCREEN, NOT THE ONE THAT "
         "ASKED.** Every session numbers its requests from zero, so another "
@@ -828,21 +841,13 @@ ARMS = [
     ),
     Arm(
         "R2", MAIN_DAP,
-        "      body[\"request_seq\"] = request.seq\n",
-        "      discard request.seq\n",
+        "      body[\"request_seq\"] = request.seq\n      return request.sessionId\n",
+        "      discard request.seq\n      return request.sessionId\n",
         R_SESSIONS,
         "**THE ANSWER KEEPS THE WIRE NUMBER.** Routed to the right session, "
         "but carrying the router's own `seq` rather than the one that session "
         "sent — so the renderer's continuation and its request identity "
         "(`dap.ctRequestId`) match nothing",
-    ),
-    Arm(
-        "L1", STATE_UI,
-        "  if storeSendsLocals:\n    return\n",
-        "  if false:\n    return\n",
-        W_WEB,
-        "**THE LEGACY COMPONENT ASKS AS WELL** — the web's two requests per "
-        "move, the residual as it was",
     ),
     Arm(
         "L2", STORE,
@@ -854,9 +859,9 @@ ARMS = [
         "through the named language's printers",
     ),
     Arm(
-        "L3", STATE_VM,
-        "      stopIdentityOf(store.debugger.val)\n",
-        "      $store.debugger.val\n",
+        "L3", STOPLOADER,
+        "  result = stopIdentityOf(store.debugger.val)\n",
+        "  result = $store.debugger.val\n",
         W_WEB_STATUS,
         "**THE AUTO-LOAD WATCHES THE WHOLE STATE, NOT THE STOP.** Marking "
         "the debugger stepping at the stop it is leaving re-asks about that "
@@ -872,21 +877,29 @@ ARMS = [
         "answer no decoder reads",
     ),
     Arm(
-        "L5", STORE,
-        "  let argsStr = $rrTicks & \"|\" & stopIdentityOf(store.debugger.val) & \"|\" &\n",
-        "  let argsStr = $rrTicks & \"|\" & \"\" & \"|\" &\n",
+        "L5", STOPLOADER,
+        "  result = stopIdentityOf(store.debugger.val)\n",
+        "  result = $store.debugger.val.rrTicks\n",
         W_WEB_REPEAT,
         "**A REQUEST IN FLIGHT ABSORBS ANOTHER STOP AT THE SAME TICK.** The "
         "second stop is never asked about, and the answer in flight names "
         "the stop the debugger left, so it is dropped: the pane shows nothing "
         "current",
     ),
+    # L6 RE-AIMED 2026-10-22: since `d883db0e2` (one per-stop loader for
+    # every front-end) the native host's request is built by the shared
+    # `ReplayDataStore.localsLoadArgs` (L2's subject). What remains the native
+    # host's own is the hook that names a file's language, installed in
+    # `newHeadlessDebugSession`; answering `c` there is the old request.
     Arm(
         "L6", HEADLESS,
-        "    \"lang\": s.session.store.localsLanguage(),\n",
-        "    \"lang\": LoadLocalsDefaultLang,\n",
+        "    store.sourceLanguageOf = proc(file: string): string =\n"
+        "      langWireName(toLangFromFilename(file))\n",
+        "    store.sourceLanguageOf = proc(file: string): string =\n"
+        "      LoadLocalsDefaultLang\n",
         W_NATIVE_WIRE,
-        "**THE NATIVE HOST'S REQUEST SAYS `c`** about every file, as it did",
+        "**THE NATIVE HOST'S REQUEST SAYS `c`** about every file, as it did: "
+        "its language hook answers the default whatever the file",
     ),
     Arm(
         "A6", GATE,
@@ -1064,9 +1077,14 @@ def check_killer_names(problems: int) -> int:
     laws = read_source(LAWS)
     ex = read_source(EX)
     closure = read_source(CLOSURE)
-    everywhere = "\n".join([laws, ex, closure, read_source(T_PRODUCER),
-                            read_source(T_FILES), read_source(T_VALUES),
-                            read_source(T_WEB), read_source(T_ROUTING)])
+    # A name found only in a comment names no case: a suite that folds its
+    # cases into one test can keep their names as comments, and the control
+    # then runs none of them.
+    everywhere = "\n".join(
+        line for text in [laws, ex, closure, read_source(T_PRODUCER),
+                          read_source(T_FILES), read_source(T_VALUES),
+                          read_source(T_WEB), read_source(T_ROUTING)]
+        for line in text.splitlines() if not line.lstrip().startswith("#"))
 
     templates = [
         ('test "LAW-V1 and FUZZ-5 x class " & $(ci + 1):', laws,

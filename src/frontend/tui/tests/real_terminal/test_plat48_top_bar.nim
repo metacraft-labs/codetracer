@@ -4,11 +4,14 @@
 ## behind it, driven by the bytes a terminal sends — keys, and SGR-1006 mouse
 ## reports.
 ##
-##   * MENU — `F12` opens it and so does a click on a folder title; the keys
-##     walk into the Debug folder; every stepping item's shortcut, read back
-##     from the dropdown's cells, is the ACTIVE keymap's first binding for it;
-##     `:keys <file>` rebinds Step Over and the dropdown shows the new chord;
-##     choosing Step Over moves the debugger (the header's tick changes).
+##   * MENU — under the Vim base, whose navigation table keeps `F12` for it
+##     (the CUA base's terminal key is `` Alt+` ``, `test_plat68b_pty`):
+##     `F12` opens it and so does a click on a folder title; the keys walk into
+##     the Debug folder; every stepping item's shortcut, read back from the
+##     dropdown's cells, is the ACTIVE keymap's first binding for it; a
+##     `keybindings.json` row rebinds Step Over (`:keys reload`) and the
+##     dropdown shows the new chord; choosing Step Over moves the debugger
+##     (the header's tick changes).
 ##   * OMNIBAR — `Ctrl+p`, `#42`, `Enter`: the debugger is at tick 42; a
 ##     `:sym` query lists the recording's functions.
 ##   * DEBUGGER CONTROLS — for `unicode`, `nerd` and `text` (at three
@@ -41,7 +44,10 @@ import ../../../viewmodel/viewmodels/transport_icons
 # case checks every row the docked-open pane changed, and a docked band is
 # taller than the overlay the click used to open. PLAT-50: -1 — with no
 # divider row between stacked panes the docked band changes one row fewer.)
-const ExpectedAssertions = 116
+const ExpectedAssertions = 117
+  ## PLAT-70 Part A: 116 -> 117, measured. `calc`'s widest line overflows the
+  ## editor, so its horizontal bar is drawn in the editor's last row; the
+  ## docked band moves that row up, one more changed row for the sweep.
   ## PLAT-51: 109 -> 116, measured. Revealing the docked BUILD pane changes
   ## seven more rows than it did: the list panes' scrollbar scrubbers above it
   ## are redrawn for their shorter tracks, and the "no fill glyph" sweep
@@ -75,11 +81,11 @@ proc stateDir(name: string): string =
   result = getTempDir() / ("plat48-pty-" & $getCurrentProcessId() & "-" & name)
   createDir(result)
 
-proc open(cols, rows: int; state: string; extra: seq[(string, string)] = @[]):
-    TuiTestSession =
+proc open(cols, rows: int; state: string; extra: seq[(string, string)] = @[];
+          args: seq[string] = @[]): TuiTestSession =
   let resolved = resolveFixture("calc")
   doAssert resolved.outcome == foRecorded
-  var b = newTuiTest(tuiBinary(), @[resolved.tracePath])
+  var b = newTuiTest(tuiBinary(), args & @[resolved.tracePath])
     .width(cols).height(rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY",
                "NERD_FONT", "NERDFONT")
@@ -163,8 +169,9 @@ proc typeLine(sess: var TuiTestSession; line: string) =
   sess.send(line)
   sess.send(Enter)
 
-proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+proc quit(sess: var TuiTestSession; vim = false) =
+  ## `Ctrl+Q` is the CUA base's quit; the Vim base's is `q`.
+  sess.send(if vim: "q" else: "\x11")
   discard sess.waitExit(initDuration(seconds = 10))
   sess.terminate()
   sess.close()
@@ -174,7 +181,10 @@ suite "PLAT-48 on a real terminal: the menu":
   test "open by key and by click, walk into Debug, shortcuts are the keymap's, rebind, choose":
     const Cols = 200
     const Rows = 50
-    var sess = open(Cols, Rows, stateDir("menu"))
+    let state = stateDir("menu")
+    let keybindings = state / "keybindings.json"
+    var sess = open(Cols, Rows, state, args = @["--keymap=vim"],
+                    extra = @[("CODETRACER_KEYBINDINGS", keybindings)])
     let top = sess.rowOf(Cols, 0)
     # PLAT-49: one root button; the first level drops below it. PLAT-50: the
     # button is bounded by edge lines, as the desktop's `#menu-root` border.
@@ -194,10 +204,12 @@ suite "PLAT-48 on a real terminal: the menu":
       sess.send(Down)
     sess.send(Right)
     discard sess.waitRow(Cols, debugRow, "Continue")
+    # The router's chord for each (`chordFor`), spelled as the base's data
+    # spells it — §4.2's two-key sequences are `r c` / `r f`.
     let expected = [("Continue", "c"), ("Step Over", "n"), ("Step In", "s"),
-                    ("Step Out", "f"), ("Reverse Continue", "rc"),
+                    ("Step Out", "f"), ("Reverse Continue", "r c"),
                     ("Reverse Step Over", "p"), ("Reverse Step In", "b"),
-                    ("Reverse Step Out", "rf")]
+                    ("Reverse Step Out", "r f")]
     var s = sess.snap(Cols, Rows)
     for (label, chord) in expected:
       var found = false
@@ -206,7 +218,7 @@ suite "PLAT-48 on a real terminal: the menu":
         let at = line.cellFind(" " & label & " ")
         if at >= 0 and line.runeSubStr(at + 1).strip.startsWith(label):
           let rest = line.runeSubStr(at + 1 + label.runeLen).strip
-          if rest.split(' ')[0] == chord:
+          if rest == chord or rest.startsWith(chord & " "):
             found = true
       ck found
     sess.esc()
@@ -218,23 +230,27 @@ suite "PLAT-48 on a real terminal: the menu":
     discard sess.waitRow(Cols, debugRow + 1, "Step Over")
     sess.esc()
     sess.esc()
-    # REBIND: Step Over becomes Ctrl+n; the dropdown says so.
-    let keys = stateDir("menu") / "keys"
-    writeFile(keys, "NORMAL n = -\nNORMAL F10 = -\nNORMAL Ctrl+n = step-over\n")
-    sess.typeLine("keys " & keys)
-    discard sess.waitRow(Cols, Rows - 1, "keys " & keys)
+    # REBIND: Step Over becomes Ctrl+N (its other chords removed) in the
+    # user's `keybindings.json`, re-read on `:keys reload`; the dropdown says so.
+    writeFile(keybindings, """[
+  { "key": "n", "command": "-debugger.step-over" },
+  { "key": "f10", "command": "-debugger.step-over" },
+  { "key": "ctrl+n", "command": "debugger.step-over" }
+]""")
+    sess.typeLine("keys reload")
+    discard sess.waitRow(Cols, Rows - 1, "keybindings")
     sess.click(0, 1)
     discard sess.waitRow(Cols, debugRow, "Debug")
     sess.click(debugRow, 2)
     let row2 = sess.waitRow(Cols, debugRow + 1, "Step Over")
-    ck row2.contains("Ctrl+n")
+    ck row2.contains("Ctrl+N")
     # CHOOSE Step Over: the debugger moves.
     let before = tickOf(sess.rowOf(Cols, 0))
     sess.send(Down)
     sess.send(Enter)
     let after = sess.waitTick(Cols, proc(t: int): bool = t > before)
     ck after > before
-    sess.quit()
+    sess.quit(vim = true)
 
 suite "PLAT-48 on a real terminal: the omnibar":
 

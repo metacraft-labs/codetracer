@@ -1,16 +1,17 @@
 ## viewmodel/host/terminal_output_source.nim — PLAT-52. The Terminal Output
-## pane's PRODUCER for the native hosts (the terminal and the GPUI window).
+## pane's producer for the native hosts (the terminal and the GPUI window).
 ##
-## `ct/load-terminal` answers every write the recorded program made to its
-## terminal (the engine's `Write` events, `dap_handler.load_terminal`); this
-## hands them to the session's `TerminalOutputVM`, which builds the line view
-## and the screen model from them (`viewmodels/terminal_output_model`) — the
-## SAME model the desktop's view draws, fed there by `ui/terminal_output.nim`
-## from the `ct/loaded-terminal` event.
+## THE LINE VIEW ASKS FOR THE LINES IT SHOWS (Viewport-Driven-Loading,
+## Decided Q3): a host reports the pane's rows and first line
+## (`showTerminalLines`), the session's `TerminalOutputVM` asks the engine
+## for that window (`ct/load-terminal-lines`), and the native backend's
+## synchronous answer is applied before the call returns. The screen view's
+## writes are loaded by the ViewModel itself, once that view is shown.
+## `openTerminalOutput` prepares the pane at open without loading anything.
 ##
-## Native-only (it holds a `HeadlessDebugSession`, which spawns the engine),
-## and asked ONCE per recording, at open: the output of a recording does not
-## change.
+## `loadTerminalOutput` hands the ViewModel EVERY write (`ct/load-terminal`):
+## for a consumer that shows no line view and wants the whole output (a
+## script, a test fixture), not for a pane.
 ##
 ## The view the user chose for a recording (lines / screen) is remembered in
 ## the native state root (`native_state.terminalViewsPath`) — the
@@ -36,6 +37,22 @@ proc rememberViews*(vm: TerminalOutputVM; recording: string) =
                      viewMemoryFromJson(readTerminalViews()))
   vm.onViewChosen = proc(memory: Table[string, TerminalView]) =
     discard writeStaged(terminalViewsPath(), viewMemoryToJson(memory))
+
+proc openTerminalOutput*(s: HeadlessDebugSession) =
+  ## Prepare the session's Terminal Output pane at open: the view choice
+  ## remembered for this recording. Its lines are asked for when a host
+  ## first reports what the pane shows.
+  let vm = s.session.terminalOutputVM
+  if not vm.isNil and vm.recordingKey.len == 0:
+    vm.rememberViews(s.tracePath)
+
+proc showTerminalLines*(vm: TerminalOutputVM; v: Viewport) =
+  ## The pane shows `v` (rows, first line): hold that window, asking the
+  ## engine for it when it is not held, and apply the answer now.
+  if vm.isNil:
+    return
+  vm.setViewport(v)
+  pumpCallbacks()
 
 proc loadTerminalOutput*(s: HeadlessDebugSession): int =
   ## Ask the engine for the recorded program's terminal output and hand it to

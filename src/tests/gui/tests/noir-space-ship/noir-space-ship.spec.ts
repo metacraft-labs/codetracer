@@ -15,6 +15,7 @@ import { LayoutPage } from "../../page-objects/layout-page";
 import type { EditorPane } from "../../page-objects/panes/editor/editor-pane";
 import { TraceLogPanel } from "../../page-objects/panes/editor/trace-log-panel";
 import type { FlowValue } from "../../page-objects/panes/editor/flow-value";
+import type { ScratchpadPane } from "../../page-objects/panes/scratchpad/scratchpad-pane";
 import type { CallTracePane } from "../../page-objects/panes/call-trace/call-trace-pane";
 import type { CallTraceEntry } from "../../page-objects/panes/call-trace/call-trace-entry";
 
@@ -188,6 +189,44 @@ async function loopFlowSnapshot(editor: EditorPane): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The first flow value in `editor` that can be added to the scratchpad AND
+ * would add a row to it, or `null` if none shows up within the retry budget.
+ *
+ * The scratchpad keeps one row per expression and drops a sample equal to
+ * the row's last one (`ScratchpadVM.addValue`, in
+ * `src/frontend/viewmodel/viewmodels/scratchpad_vm.nim`). So adding a flow
+ * value whose expression is already pinned leaves the row count unchanged,
+ * and a test that counts rows has to pick an expression `scratchpad` does not
+ * hold yet. In `noir_space_ship` that matters from the first addition on:
+ * `main`'s first call-trace argument, `initial_shield`, is also the first
+ * flow value of `main.nr` and of `shield.nr`.
+ */
+async function findUnpinnedFlowValue(
+  editor: EditorPane,
+  scratchpad: ScratchpadPane,
+  options: { maxAttempts: number; delayMs: number },
+): Promise<FlowValue | null> {
+  const pinned = new Set<string>();
+  for (const entry of await scratchpad.entries(true)) {
+    pinned.add(await entry.expression());
+  }
+  let found: FlowValue | null = null;
+  await retry(async () => {
+    for (const val of await editor.flowValues()) {
+      if (pinned.has(await val.name())) {
+        continue;
+      }
+      if (await val.supportsScratchpad()) {
+        found = val;
+        return true;
+      }
+    }
+    return false;
+  }, options);
+  return found;
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +453,35 @@ test.describe("NoirSpaceShip", () => {
       await iterationTextarea.press("Tab");
       trace("Pressed Tab to trigger blur");
       await sleep(500);
+
+      // The loop body must show the chosen iteration and ONLY it: a line shows
+      // one iteration of a loop at a time (Omniscience-Flow.md, "Advanced Loop
+      // Visualization"). Choosing a new iteration used to append its values
+      // after the previous iteration's instead of replacing them, so the
+      // `remaining_shield` box read below (the first in DOM order) kept
+      // reporting the old iteration. Checked per loop and independently of DOM
+      // order, so a stale iteration anywhere in the body fails here by name.
+      let rendered: Record<string, number[]> = {};
+      try {
+        await retry(
+          async () => {
+            rendered = await editor.renderedLoopIterations();
+            const loops = Object.values(rendered);
+            return (
+              loops.length > 0 &&
+              loops.every((its) => its.length === 1 && its[0] === iteration)
+            );
+          },
+          { maxAttempts: 20, delayMs: 300 },
+        );
+      } catch {
+        // Fall through to the assertions, which say what was rendered instead.
+      }
+      trace(`Rendered loop iterations: ${JSON.stringify(rendered)}`);
+      expect(Object.keys(rendered).length).toBeGreaterThan(0);
+      for (const [loop, iterations] of Object.entries(rendered)) {
+        expect(iterations, `iterations rendered for loop ${loop}`).toEqual([iteration]);
+      }
 
       await retry(
         async () => {
@@ -892,22 +960,13 @@ test.describe("NoirSpaceShip", () => {
     await scratchpad.waitForEntryCount(expectedCount);
     scratchpad.invalidateCache();
 
-    // Flow value addition
+    // Flow value addition: one the scratchpad does not hold yet, so that it
+    // adds a row (see `findUnpinnedFlowValue`).
     let editor = (await layout.editorTabs())[0];
-    let flowValue: FlowValue | null = null;
-    await retry(
-      async () => {
-        const values = await editor.flowValues();
-        for (const val of values) {
-          if (await val.supportsScratchpad()) {
-            flowValue = val;
-            return true;
-          }
-        }
-        return false;
-      },
-      { maxAttempts: 20, delayMs: 200 },
-    );
+    const flowValue = await findUnpinnedFlowValue(editor, scratchpad, {
+      maxAttempts: 20,
+      delayMs: 200,
+    });
 
     expect(flowValue).not.toBeNull();
 
@@ -1022,18 +1081,9 @@ test.describe("NoirSpaceShip", () => {
 
     // Flow value addition from shield.nr
     const shieldEditor = await navigateToShieldEditor(layout);
-    let shieldFlowValue: FlowValue | null = null;
-    await retry(
-      async () => {
-        const values = await shieldEditor.flowValues();
-        for (const val of values) {
-          if (await val.supportsScratchpad()) {
-            shieldFlowValue = val;
-            return true;
-          }
-        }
-        return false;
-      },
+    const shieldFlowValue = await findUnpinnedFlowValue(
+      shieldEditor,
+      (await layout.scratchpadTabs(true))[0],
       { maxAttempts: 20, delayMs: 300 },
     );
 
@@ -1055,19 +1105,13 @@ test.describe("NoirSpaceShip", () => {
     const filesystem = (await layout.filesystemTabs())[0];
     await filesystem.clickTab();
 
-    // The filesystem tree shows only the recording's source folders.  For the
-    // noir_space_ship trace the tree is
-    //   source folders > noir_space_ship > src > main.nr
-    // (no codetracer/test-programs prefix), so the path traversal must mirror
-    // that shape.
-    const node = await filesystem.nodeByPath(
-      "source folders",
-      "noir_space_ship",
-      "src",
-      "main.nr",
-    );
+    // The tree is rooted in the sources the recording carries (`files/src/
+    // main.nr`), not in the folder it was recorded from (GitHub #785), so
+    // for the noir_space_ship trace it is
+    //   source folders > src > main.nr
+    const node = await filesystem.nodeByPath("source folders", "src", "main.nr");
 
-    // The jstree context menu can be slow to appear. Retry the right-click.
+    // The menu can be slow to appear on a loaded host. Retry the right-click.
     let options: string[] = [];
     await retry(
       async () => {
@@ -1112,17 +1156,139 @@ test.describe("NoirSpaceShip", () => {
 
     expect(actualCallOptions).toEqual(expectedCallOptions);
 
-    const args = await callEntry.arguments();
-    const argument = args[0];
+    // Entry 0 is `<toplevel>`, which takes no arguments: the argument menu is
+    // read on the first call that has one (`main` takes four).
+    let argument: Awaited<ReturnType<CallTraceEntry["arguments"]>>[number] | undefined;
+    for (const entry of ctEntries) {
+      argument = (await entry.arguments())[0];
+      if (argument !== undefined) break;
+    }
     expect(argument).toBeDefined();
 
-    const argumentOptions = (await argument.contextMenuEntries())
+    const argumentOptions = (await argument!.contextMenuEntries())
       .slice()
       .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    const expectedArgumentOptions = [...argument.expectedContextMenuEntries]
+    const expectedArgumentOptions = [...argument!.expectedContextMenuEntries]
       .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
     expect(argumentOptions).toEqual(expectedArgumentOptions);
+  });
+
+  test("Escape closes the call trace context menu", async ({ ctPage }) => {
+    // Once open, the context menu takes `Escape` (`context-menu.close`,
+    // CUA-Keymap.md §3.8) — not the call trace under it. The desktop's key
+    // router used to resolve `Escape` to the list's `list.clear-selection`,
+    // run it and stop the event, so the menu never closed.
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    const callTrace = (await layout.callTraceTabs())[0];
+    await callTrace.clickTab();
+    callTrace.invalidateEntries();
+    const callEntry = (await callTrace.getEntries(true))[0];
+    expect(callEntry).toBeDefined();
+
+    const menu = await callEntry.openContextMenu();
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    await ctPage.keyboard.press("Escape");
+
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+    // ONE operation ran, the menu's: what the router resolved, in order
+    // (`ui/key_router.traceOperation`).
+    expect(await ctPage.evaluate(() =>
+      ((globalThis as any).__ctKeyTrace ?? []).slice())).toEqual(["context-menu.close"]);
+  });
+
+  // The rest of the open menu's keys (CUA-Keymap.md §3.8): the arrows,
+  // `Home` / `End` walk its rows (the keyboard row is `.ct-menu-item--active`)
+  // and `Enter` chooses one — not the pane under the menu.
+  const activeMenuRow = (page: Page) => page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(
+      "#context-menu-container .context-menu-item"));
+    return { index: rows.findIndex((r) => r.classList.contains("ct-menu-item--active")),
+             count: rows.length };
+  });
+  const keyTraceOf = (page: Page) => page.evaluate(() =>
+    ((globalThis as any).__ctKeyTrace ?? []).slice());
+
+  test("the arrows, Home and End walk the context menu", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    // The flow-value menu: several rows, so walking and wrapping show.
+    const editor = (await layout.editorTabs())[0];
+    let flowValue: FlowValue | null = null;
+    await retry(
+      async () => {
+        for (const val of await editor.flowValues()) {
+          if (await val.supportsScratchpad()) {
+            flowValue = val;
+            return true;
+          }
+        }
+        return false;
+      },
+      { maxAttempts: 20, delayMs: 200 },
+    );
+    expect(flowValue).not.toBeNull();
+    const menu = await flowValue!.openContextMenu();
+    const { count } = await activeMenuRow(ctPage);
+    expect(count).toBeGreaterThan(1);
+    expect((await activeMenuRow(ctPage)).index).toBe(-1);
+
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    await ctPage.keyboard.press("ArrowDown");
+    expect((await activeMenuRow(ctPage)).index).toBe(0);
+    await ctPage.keyboard.press("ArrowDown");
+    expect((await activeMenuRow(ctPage)).index).toBe(1);
+    await ctPage.keyboard.press("End");
+    expect((await activeMenuRow(ctPage)).index).toBe(count - 1);
+    await ctPage.keyboard.press("ArrowDown");   // wraps to the top
+    expect((await activeMenuRow(ctPage)).index).toBe(0);
+    await ctPage.keyboard.press("ArrowUp");     // and back to the bottom
+    expect((await activeMenuRow(ctPage)).index).toBe(count - 1);
+    await ctPage.keyboard.press("Home");
+    expect((await activeMenuRow(ctPage)).index).toBe(0);
+    expect(await keyTraceOf(ctPage)).toEqual([
+      "context-menu.focus-next", "context-menu.focus-next",
+      "context-menu.focus-last", "context-menu.focus-next",
+      "context-menu.focus-previous", "context-menu.focus-first",
+    ]);
+    await expect(menu.container).toBeVisible();
+
+    await ctPage.keyboard.press("Escape");
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+  });
+
+  test("Enter chooses the context menu's highlighted entry", async ({ ctPage }) => {
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    const callTrace = (await layout.callTraceTabs())[0];
+    await callTrace.clickTab();
+    callTrace.invalidateEntries();
+    const callEntry = (await callTrace.getEntries(true))[0];
+    expect(callEntry).toBeDefined();
+    await callEntry.expandChildren();
+    expect(await callEntry.hasExpandedChildren()).toBe(true);
+
+    const menu = await callEntry.openContextMenu();
+    await ctPage.evaluate(() => { (globalThis as any).__ctKeyTrace = []; });
+    // With no row highlighted, Enter chooses nothing.
+    await ctPage.keyboard.press("Enter");
+    await expect(menu.container).toBeVisible();
+    // "Collapse Call Children", highlighted and chosen from the keyboard.
+    await ctPage.keyboard.press("ArrowDown");
+    await ctPage.keyboard.press("Enter");
+
+    await expect(menu.container).toBeHidden({ timeout: 10_000 });
+    expect(await keyTraceOf(ctPage)).toEqual([
+      "context-menu.accept", "context-menu.focus-next", "context-menu.accept",
+    ]);
+    await retry(async () => !(await callEntry.hasExpandedChildren()),
+                { maxAttempts: 50, delayMs: 200 });
+    expect(await callEntry.hasExpandedChildren()).toBe(false);
+    await callEntry.expandChildren();
   });
 
   test("flow context menu options", async ({ ctPage }) => {
@@ -1318,6 +1484,109 @@ test.describe("NoirSpaceShip", () => {
         );
       }
     }
+  });
+
+  // GitHub #784 (codetracer-pm issue
+  // 2026-10-20-noir-replay-freezes-after-repeated-jumps): "the application
+  // freezes after several jumps or tab switches". Measured at agents
+  // 06c0f829b, the freeze was the RENDERER's main thread: every move and
+  // every tab switch redraws the program menu, and the menu asked the key
+  // router for each item's chord, which re-copied the whole router and
+  // rebuilt every binding trie per candidate row — 13–25 s of blocked main
+  // thread per move on this suite's trace, so the window stopped answering
+  // after a few jumps. The replay-server answered throughout.
+  //
+  // The test drives the reporter's gesture mix (event-log jumps, stepping,
+  // editor tab switches) and observes the main thread with the browser's own
+  // Long Tasks API (https://w3c.github.io/longtasks/): any single task above
+  // the bound is a window that does not paint or take input for that long.
+  // The bound is NOT scaled by `CODETRACER_PERF_LIMIT_SCALE`: that scale
+  // absorbs a loaded host's slow start-up, while a multi-second blocked main
+  // thread is a freeze on any host.
+  test("repeated jumps and tab switches keep the renderer responsive (#784)", async ({ ctPage }) => {
+    test.setTimeout(900_000);
+    const MAX_LONG_TASK_MS = 2_000;
+    const MAX_EVAL_ROUND_TRIP_MS = 1_000;
+    const ITERATIONS = 8;
+
+    const layout = new LayoutPage(ctPage);
+    await layout.waitForAllComponentsLoaded();
+
+    // Observe only what navigation costs: installed after the trace loaded,
+    // without the buffered start-up tasks.
+    await ctPage.evaluate(() => {
+      const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      w.__ct784LongTasks = [];
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          w.__ct784LongTasks.push(Math.round(entry.duration));
+        }
+      }).observe({ type: "longtask", buffered: false });
+    });
+
+    const settle = async (): Promise<void> => {
+      // A move is in flight while the debugger service says so; bounded so a
+      // backend that never answers fails here rather than hanging the test.
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const busy = await ctPage.evaluate(() => {
+          const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          return Boolean(w?.data?.services?.debugger?.stableBusy);
+        });
+        if (!busy) return;
+        await sleep(50);
+      }
+      throw new Error("the debugger stayed busy for 60 s after a navigation action");
+    };
+
+    const actionLog: string[] = [];
+    const act = async (label: string, run: () => Promise<void>): Promise<void> => {
+      const t0 = Date.now();
+      await run();
+      await settle();
+      actionLog.push(`${label}=${Date.now() - t0}ms`);
+    };
+
+    const eventLog = (await layout.eventLogTabs())[0];
+    for (let i = 0; i < ITERATIONS; i++) {
+      await act(`#${i} event-log jump`, async () => {
+        await eventLog.clickTab();
+        const rows = await eventLog.eventElements(true);
+        expect(rows.length).toBeGreaterThan(0);
+        await rows[(i * 7) % rows.length].click();
+      });
+      await act(`#${i} next`, async () => {
+        await layout.nextButton().dispatchEvent("click");
+      });
+      await act(`#${i} step in`, async () => {
+        await layout.stepInButton().dispatchEvent("click");
+      });
+      await act(`#${i} editor tabs`, async () => {
+        for (const editor of await layout.editorTabs(true)) {
+          await editor.clickTab();
+        }
+      });
+    }
+
+    const t0 = Date.now();
+    await ctPage.evaluate(() => 1);
+    const roundTripMs = Date.now() - t0;
+    const longTasks: number[] = await ctPage.evaluate(
+      () => (window as any).__ct784LongTasks ?? [], // eslint-disable-line @typescript-eslint/no-explicit-any
+    );
+    const longest = longTasks.length > 0 ? Math.max(...longTasks) : 0;
+    console.log(
+      `#784: longest main-thread task ${longest}ms over ${longTasks.length} long tasks ` +
+        `[${longTasks.join(", ")}]; round trip ${roundTripMs}ms; ${actionLog.join(", ")}`,
+    );
+    expect(
+      longest,
+      `the renderer's main thread was blocked for ${longest}ms in one task ` +
+        `(long tasks: ${longTasks.join(", ")}; actions: ${actionLog.join(", ")})`,
+    ).toBeLessThan(MAX_LONG_TASK_MS);
+    expect(roundTripMs, "a trivial evaluate after the navigation sequence").toBeLessThan(
+      MAX_EVAL_ROUND_TRIP_MS,
+    );
   });
 
   test("create simple tracepoint", async ({ ctPage }) => {

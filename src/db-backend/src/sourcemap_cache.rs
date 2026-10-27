@@ -107,6 +107,10 @@ pub struct SourcemapCache {
     ///   subprocess on every hot-loop translation call for the same
     ///   pass-through path.
     autoformat_by_path: HashMap<String, Option<Arc<AutoFormatLookup>>>,
+    /// Whether recorded paths may be read on this host to auto-format them
+    /// (see [`crate::source_access`]). With host reads off no recorded path
+    /// is read, so no auto-format view is built.
+    host_reads: crate::source_access::HostSourceReads,
     /// §P5 — user-provided variable rename list.  Loaded once at
     /// trace open from `<recording-dir>/renames.toml` (or from a CLI-
     /// supplied path) and consulted by [`SourcemapCache::resolve_name`]
@@ -259,7 +263,7 @@ impl SourcemapCache {
         cache_dir: Option<&Path>,
     ) -> Option<TranslatedLocation> {
         let idx = self.by_path_id.get(&path_id)?;
-        translate_with_index(idx, line, column, cache_dir, &mut self.materialised)
+        translate_with_index(idx, line, column, cache_dir, &mut self.materialised, self.host_reads)
     }
 
     /// Translate using an absolute path key.  Same contract as
@@ -272,7 +276,7 @@ impl SourcemapCache {
         cache_dir: Option<&Path>,
     ) -> Option<TranslatedLocation> {
         let idx = self.by_path.get(path)?;
-        translate_with_index(idx, line, column, cache_dir, &mut self.materialised)
+        translate_with_index(idx, line, column, cache_dir, &mut self.materialised, self.host_reads)
     }
 
     /// §P4 — lazy auto-format fallback for a recorded path.
@@ -345,6 +349,12 @@ impl SourcemapCache {
         self.autoformat_by_path.clear();
     }
 
+    /// Sets whether recorded paths may be read on this host to build
+    /// auto-format views (the session's source-reading rule).
+    pub fn set_host_reads(&mut self, host_reads: crate::source_access::HostSourceReads) {
+        self.host_reads = host_reads;
+    }
+
     /// Lazy builder shared by [`Self::translate_via_autoformat`].
     /// Returns `Some(lookup)` on a usable auto-format, `None` for the
     /// negative cache.
@@ -353,6 +363,10 @@ impl SourcemapCache {
         recorded_path: &str,
         cache_dir: Option<&Path>,
     ) -> Option<Arc<AutoFormatLookup>> {
+        if !self.host_reads.is_allowed() {
+            debug!("autoformat: host source reads are off; {recorded_path} is not read");
+            return None;
+        }
         let path = Path::new(recorded_path);
         if !path.is_file() {
             debug!("autoformat: recorded path is not a file on disk: {recorded_path}");
@@ -610,6 +624,7 @@ fn translate_with_index(
     column: u32,
     cache_dir: Option<&Path>,
     materialised: &mut HashMap<String, ()>,
+    host_reads: crate::source_access::HostSourceReads,
 ) -> Option<TranslatedLocation> {
     // CTFS column may be 0 when the recorder didn't capture column
     // information.  In that case treat it as "start of line" (col=1)
@@ -618,7 +633,7 @@ fn translate_with_index(
     let line = if line == 0 { 1 } else { line };
     let pos = idx.translate(line, col)?;
 
-    let resolved = resolve_original_path(idx, &pos, cache_dir, materialised);
+    let resolved = resolve_original_path(idx, &pos, cache_dir, materialised, host_reads);
     Some(TranslatedLocation {
         path: resolved,
         line: pos.line,
@@ -635,15 +650,22 @@ fn translate_with_index(
 /// when a `cache_dir` is provided.  When no `cache_dir` is configured
 /// we just return the unresolved string — the consumer can still use
 /// the translated `(line, column)` even without a real file path.
+///
+/// With host reads off (the session's source-reading rule,
+/// [`crate::source_access`]) the resolved path is never stat'ed: the map's
+/// own `sourcesContent` is materialised and preferred, and a path with no
+/// inline content is returned as a name only.
 fn resolve_original_path(
     idx: &SourcemapIndex,
     pos: &OriginalPos,
     cache_dir: Option<&Path>,
     materialised: &mut HashMap<String, ()>,
+    host_reads: crate::source_access::HostSourceReads,
 ) -> String {
-    // First preference: a real on-disk path the sourcemap resolves to.
+    // First preference: a real on-disk path the sourcemap resolves to,
+    // when this session may look at the host.
     if let Some(p) = idx.resolve_source_path(&pos.source) {
-        if p.is_file() {
+        if host_reads.is_allowed() && p.is_file() {
             return p.display().to_string();
         }
         // Path resolves but no file on disk — try the inline content
@@ -850,6 +872,39 @@ mod tests {
         let mut cache = SourcemapCache::new();
         let t = cache.translate(PathId(99), 1, 1, None);
         assert!(t.is_none());
+    }
+
+    /// With host reads off, a map's source that resolves to an existing file
+    /// on this host is not stat'ed or preferred: the map's own
+    /// `sourcesContent` is materialised and named instead. With host reads
+    /// on (the control), the host file is preferred, as before.
+    #[test]
+    fn a_session_without_host_reads_prefers_the_maps_own_content_to_a_host_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("min.js");
+        fs::write(&src, b"console.log('min');\n").unwrap();
+        fs::write(dir.path().join("min.js.map"), TINY_MAP).unwrap();
+        // The file the map's `sources[0]` resolves to exists on the host.
+        let host_original = dir.path().join("orig.js");
+        fs::write(&host_original, b"host copy\n").unwrap();
+        let cache_dir = dir.path().join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let mut allowed = SourcemapCache::new();
+        allowed.try_load(PathId(7), &src);
+        let t = allowed.translate(PathId(7), 1, 1, Some(&cache_dir)).expect("translate");
+        assert_eq!(Path::new(&t.path), host_original.as_path());
+
+        let mut refused = SourcemapCache::new();
+        refused.set_host_reads(crate::source_access::HostSourceReads::Refused);
+        refused.try_load(PathId(7), &src);
+        let t = refused.translate(PathId(7), 1, 1, Some(&cache_dir)).expect("translate");
+        let materialised = cache_dir.join("sourcemap-translate").join("orig.js");
+        assert_eq!(Path::new(&t.path), materialised.as_path());
+        assert_eq!(
+            fs::read_to_string(&materialised).unwrap(),
+            "function alpha(){return beta();}\nfunction beta(){}\n"
+        );
     }
 
     #[test]

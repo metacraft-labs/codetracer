@@ -219,6 +219,15 @@ suite "the desktop instantiation runs real processes":
     check not run.ok
     check run.error.kind == pkNotFound
 
+  test "runLater refuses rather than wait for the child":
+    ## `ProcessFacade.runLater` promises never to hold the caller's thread.
+    ## This instantiation's `run` waits for the child, so `runLater` keeps
+    ## `unavailableProcess`'s refusal instead of standing in for it.
+    let run = awaitOutcome(host.process.runLater(
+      processSpec("echo", @["never-run"])))
+    check not run.ok
+    check run.error.kind == pkNotSupported
+
   test "which finds a real program and refuses an unreal one":
     let found = awaitOutcome(host.process.which("sh"))
     check found.ok

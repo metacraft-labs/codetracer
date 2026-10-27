@@ -32,7 +32,7 @@ import { EditorPane } from "../page-objects/panes/editor/editor-pane";
 
 /**
  * A snapshot of the breakpoint registered at `(path, line)` in the
- * frontend's `data.services.debugger.breakpointTable`.  Mirrors the
+ * session's breakpoint rows (`ctBreakpointRows`).  Mirrors the
  * shape the M1/M6 specs already inline.
  */
 export interface BreakpointSnapshot {
@@ -44,7 +44,7 @@ export interface BreakpointSnapshot {
 
 /**
  * Read the breakpoint at `(path, line)` from the frontend's
- * `breakpointTable`.  Returns `null` when no breakpoint exists at
+ * the session's breakpoint rows.  Returns `null` when no breakpoint exists at
  * that key.  Tolerates `/private/var/...` ↔ `/var/...` path
  * aliasing the way the existing column specs do — macOS tmp paths
  * round-trip through the OS as the `/private/var/...` form even
@@ -57,7 +57,7 @@ export async function readBreakpoint(
   return editor.page.evaluate(
     ({ path: p, line: l }) => {
       const w = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-      const table = w?.data?.services?.debugger?.breakpointTable;
+      const table = (w?.ctBreakpointRows ? w.ctBreakpointRows().reduce((t: any, r: any) => { (t[r.path] ??= {})[r.line] = r; return t; }, {}) : undefined);
       if (!table) return null;
       const aliases = [p];
       if (p.startsWith("/private/var/")) {

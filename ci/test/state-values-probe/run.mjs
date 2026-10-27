@@ -32,7 +32,31 @@ const errors = [];
 const browser = await chromium.launch({ executablePath: process.env.CT_CHROME });
 const page = await browser.newPage({ viewport: { width: 1120, height: 720 } });
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+// Each console error with the resource it is about, when it names one: a
+// stylesheet asset the page does not ship is told apart below by its URL.
+const assetFailures = [];
+page.on('console', (m) => {
+  if (m.type() !== 'error') return;
+  const url = (m.location && m.location().url) || '';
+  const text = 'console: ' + m.text();
+  if (isUnshippedAsset(text, url)) assetFailures.push(text);
+  else errors.push(text);
+});
+
+// THE PAGE IS A FILE, AND SHIPS ONLY ITS STYLESHEET. The shipped styles name
+// images under `public/resources/` (the value-history toggle, since the
+// Variables rows carry one), which this page neither bundles nor can load:
+// a missing file reads ERR_FILE_NOT_FOUND, and a CSS mask image over file://
+// is refused as a cross-origin request (Chromium allows CORS only for
+// http(s), data and its own schemes) and then reported as a bare ERR_FAILED
+// on that image's URL. Those say nothing about the product's behaviour; they
+// are kept in `assetFailures` so a reader can still see them.
+function isUnshippedAsset(text, url) {
+  if (/ERR_FILE_NOT_FOUND/.test(text)) return true;
+  const about = /file:\/\/\S*\/public\/resources\//;
+  return (about.test(url) || about.test(text)) &&
+    (/blocked by CORS policy/.test(text) || /net::ERR_FAILED/.test(text));
+}
 
 // INSTRUMENT CONTROL, per `ci/test/low-level-code-browser.sh`: a sibling gate
 // once blocked a deploy reporting "0 characters on screen" over a DOM that
@@ -114,32 +138,20 @@ report.panelAMounted = await page.evaluate(
 report.panelBMounted = await page.evaluate(
   () => !!document.querySelector('#ct-ordering-pane .state-component'));
 
-// ---- A. the LOCALS tab, holding the recorded locals ----------------------
+// ---- A. the list, holding the recorded locals and the watches ------------
 {
   const r = await readRows('#ct-state-pane');
   report.localsRows = r.rows;
   report.localsRejected = r.rejected;
 }
 
-// ---- A. the WATCHES tab, holding the refused watch ----------------------
+// ---- A. the watches, in the same list -----------------------------------
 //
-// Reached by a click on the product's own tab button. Absence is a result,
-// not a crash: the click is attempted and everything after it runs either
-// way, so an arm that removes the button reports a product reading rather
-// than an instrument failure.
-report.watchesTabClicked = false;
-try {
-  await page.click('#ct-state-pane .tab-watches', { timeout: 4000 });
-  report.watchesTabClicked = true;
-} catch (e) {
-  report.watchesTabError = String((e && e.message) || e).split('\n')[0];
-}
-await page.waitForTimeout(400);
-{
-  const r = await readRows('#ct-state-pane');
-  report.watchRows = r.rows;
-  report.watchRejected = r.rejected;
-}
+// The pane is one list of variables and watches (Variable-State-Pane.md,
+// "Decisions (2026-10-24)"), so the refused watch is read from the same
+// rows; there is no tab to open.
+report.watchRows = report.localsRows;
+report.watchRejected = report.localsRejected;
 report.loadingVisibleA = await loadingVisible('#ct-state-pane');
 
 // ---- B. the pane at the end of the ordering sequence --------------------
@@ -161,7 +173,8 @@ report.ordering = await page.evaluate(() => {
 
 report.paintedChars = await page.evaluate(
   () => document.body.innerText.replace(/\s+/g, ' ').trim().length);
-report.pageErrors = errors.filter((e) => !/ERR_FILE_NOT_FOUND/.test(e));
+report.pageErrors = errors;
+report.assetFailures = assetFailures;
 
 console.log(JSON.stringify(report, null, 2));
 console.log('PROBE_JSON=' + JSON.stringify(report));

@@ -354,8 +354,8 @@ try {
     report.roundTripError = `edit before Run: ${e.message}`;
   }
 
-  // Blur the editor before a chord: Mousetrap's default `stopCallback`
-  // ignores one raised inside a TEXTAREA, and Monaco's input surface is one.
+  // Blur the editor before a chord, so the press starts outside Monaco as it
+  // always has here (the key router resolves it either way).
   try {
     await page.click('#menu', { position: { x: 5, y: 5 }, timeout: 3000 });
   } catch (e) { /* a missing topbar is reported by `mounted` */ }

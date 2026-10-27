@@ -2,8 +2,8 @@
  * Program-agnostic tests that work across any traced program.
  * Uses the noir_space_ship trace as the default test subject.
  *
- * Five tests are skipped due to product gaps (not keyboard issues):
- * - Command palette theme/symbol commands don't produce results
+ * Four tests are skipped due to product gaps (not keyboard issues):
+ * - Command palette theme commands don't produce results
  * - Debugger busy/ready state not shown in operationStatus
  * - Event log rowCount returns 0 for noir traces
  * - Editor shortcuts (Ctrl+F8/F11) may not be wired up
@@ -97,11 +97,7 @@ test.describe("ProgramAgnostic", () => {
     });
   });
 
-  // TODO(skipped): `:sym` command in command palette does not produce matching results.
-  //   Symbol search for "iterate_asteroids" returns no matches.
-  //   Hypothesis: The `:sym` command may not be wired up in the current build, or the noir
-  //   trace does not expose symbol information to the command palette search.
-  test.skip("command palette find symbol uses fuzzy search", async ({ ctPage }) => {
+  test("command palette find symbol uses fuzzy search", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);
     await layout.waitForAllComponentsLoaded();
     await layout.waitForTraceLoaded();

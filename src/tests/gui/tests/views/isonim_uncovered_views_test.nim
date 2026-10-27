@@ -173,7 +173,7 @@ proc makeClient(drawCalls: seq[VisualReplayDrawCall] = @[]):
       newCompletedFuture(VisualReplayFrame(
         imageSrc: "draw-" & $draw, geid: some(uint64(100 + draw)),
         frame: some(0), width: 64, height: 64)),
-    getDrawCallsProc: proc(): VisualReplayFuture[seq[VisualReplayDrawCall]] =
+    getDrawCallsProc: proc(frame: int): VisualReplayFuture[seq[VisualReplayDrawCall]] =
       newCompletedFuture(drawCalls),
     getPixelHistoryProc: proc(x, y, frame: int):
         VisualReplayFuture[seq[VisualReplayPixelHistoryEntry]] =
@@ -193,7 +193,7 @@ suite "IsoNim Toggle — structure":
 
   test "an unchecked medium toggle renders the documented attribute set":
     let r = MockRenderer()
-    let node = renderToggle(r, ToggleRecord(
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(
       label: "Auto-scroll", isChecked: false, isDisabled: false, size: "md"))
 
     check node.attributes["class"] == "ct-toggle-field"
@@ -213,25 +213,25 @@ suite "IsoNim Toggle — structure":
     # that moved state into class names would break every stylesheet rule
     # and pass any test that only looked for the root class.
     let r = MockRenderer()
-    let sw = renderToggle(r, ToggleRecord(
+    let sw = renderToggle[MockRenderer, MockNode](r, ToggleRecord(
       label: "Wrap", isChecked: true, size: "sm")).findByClass("ct-toggle")
     check sw.attributes["data-checked"] == "true"
     check sw.attributes["data-size"] == "sm"
 
   test "an unknown size falls back to md rather than emitting it verbatim":
     let r = MockRenderer()
-    let sw = renderToggle(r, ToggleRecord(label: "X", size: "enormous"))
+    let sw = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X", size: "enormous"))
       .findByClass("ct-toggle")
     check sw.attributes["data-size"] == "md"
 
   test "an empty size is md too":
     let r = MockRenderer()
-    let sw = renderToggle(r, ToggleRecord(label: "X")).findByClass("ct-toggle")
+    let sw = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X")).findByClass("ct-toggle")
     check sw.attributes["data-size"] == "md"
 
   test "disabled sets data-disabled on the field wrapper":
     let r = MockRenderer()
-    let node = renderToggle(r, ToggleRecord(label: "X", isDisabled: true))
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X", isDisabled: true))
     check node.attributes["data-disabled"] == "true"
 
 suite "IsoNim Toggle — events":
@@ -239,7 +239,7 @@ suite "IsoNim Toggle — events":
   test "clicking the switch fires onChange":
     let r = MockRenderer()
     var fired = 0
-    let node = renderToggle(r, ToggleRecord(label: "X"),
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X"),
       ToggleCallbacks(onChange: proc() = inc fired))
     node.findByClass("ct-toggle").fireEvent("click")
     check fired == 1
@@ -248,7 +248,7 @@ suite "IsoNim Toggle — events":
     # Every handler in this view is nil-guarded, and the guard is only
     # observable by exercising it.
     let r = MockRenderer()
-    let node = renderToggle(r, ToggleRecord(label: "X"))
+    let node = renderToggle[MockRenderer, MockNode](r, ToggleRecord(label: "X"))
     node.findByClass("ct-toggle").fireEvent("click")
     check node.findByClass("ct-toggle-label").textContent == "X"
 
@@ -266,7 +266,7 @@ suite "IsoNim Event Log Filter Dropdown — structure":
 
   test "an empty dropdown still renders its container and its list id":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[], @[])
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[])
     check panel.attributes["class"] == "dropdown-container"
     # The list id is a const the production caller positions against; a
     # renamed id is a silent break in `ui/event_log.nim`.
@@ -276,7 +276,7 @@ suite "IsoNim Event Log Filter Dropdown — structure":
 
   test "tabs render in order with the selected one marked":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[
       FilterTabRecord(label: "Trace events", isSelected: false),
       FilterTabRecord(label: "Recorded events", isSelected: true)], @[])
     let tabs = panel.findByClass("toggle-buttons")
@@ -287,7 +287,7 @@ suite "IsoNim Event Log Filter Dropdown — structure":
 
   test "a tag row renders its own checkmark and one per kind":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[], @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[
       tagRow("Write", "indeterminate",
              [("storage", "checked"), ("memory", "unchecked")])])
     check panel.countByClass("dropdown-list-row") == 1
@@ -304,18 +304,18 @@ suite "IsoNim Event Log Filter Dropdown — structure":
     # "checked" / "unchecked" / "indeterminate" are the CSS selector values.
     for state in ["checked", "unchecked", "indeterminate"]:
       let r = MockRenderer()
-      let panel = renderFilterDropdownPanel(r, @[], @[tagRow("T", state, [])])
+      let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[tagRow("T", state, [])])
       checkpoint("state " & state)
       check panel.findByClass("ct-checkmark").attributes["data-state"] == state
 
   test "the enable toggle reflects filtersEnabled in label and data-checked":
     let r = MockRenderer()
-    let on = renderFilterDropdownPanel(r, @[], @[], filtersEnabled = true)
+    let on = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[], filtersEnabled = true)
     check on.findByClass("ct-toggle-label").textContent == "On"
     check on.findByClass("ct-toggle").attributes["data-checked"] == "true"
 
     let r2 = MockRenderer()
-    let off = renderFilterDropdownPanel(r2, @[], @[], filtersEnabled = false)
+    let off = renderFilterDropdownPanel[MockRenderer, MockNode](r2, @[], @[], filtersEnabled = false)
     check off.findByClass("ct-toggle-label").textContent == "Off"
     check off.findByClass("ct-toggle").attributes["data-checked"] == "false"
 
@@ -324,7 +324,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
   test "clicking a tab reports its index":
     let r = MockRenderer()
     var clicked = -1
-    let panel = renderFilterDropdownPanel(r, @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[
       FilterTabRecord(label: "Trace events"),
       FilterTabRecord(label: "Recorded events")], @[],
       cb = FilterDropdownCallbacks(
@@ -335,7 +335,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
   test "toggling a tag reports the row index":
     let r = MockRenderer()
     var toggled = -1
-    let panel = renderFilterDropdownPanel(r, @[], @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[
       tagRow("A", "checked", []), tagRow("B", "unchecked", [])],
       cb = FilterDropdownCallbacks(
         onTagToggle: proc(i: int) = toggled = i))
@@ -350,7 +350,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
     let r = MockRenderer()
     var seenTag = -1
     var seenKind = -1
-    let panel = renderFilterDropdownPanel(r, @[], @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[
       tagRow("A", "checked", [("a0", "checked")]),
       tagRow("B", "checked", [("b0", "checked"), ("b1", "unchecked")])],
       cb = FilterDropdownCallbacks(
@@ -366,7 +366,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
   test "clicking the enable toggle fires onToggleEnabled":
     let r = MockRenderer()
     var fired = 0
-    let panel = renderFilterDropdownPanel(r, @[], @[],
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[], @[],
       cb = FilterDropdownCallbacks(
         onToggleEnabled: proc() = inc fired))
     panel.findByClass("ct-toggle").fireEvent("click")
@@ -374,7 +374,7 @@ suite "IsoNim Event Log Filter Dropdown — events":
 
   test "every handler is nil-safe":
     let r = MockRenderer()
-    let panel = renderFilterDropdownPanel(r, @[
+    let panel = renderFilterDropdownPanel[MockRenderer, MockNode](r, @[
       FilterTabRecord(label: "Trace events")], @[
       tagRow("A", "checked", [("a0", "checked")])])
     panel.findByClass("toggle-buttons").children[0].fireEvent("click")
@@ -394,8 +394,8 @@ suite "IsoNim Frame Viewer — structure":
   test "the panel renders its root and its three regions":
     createRoot proc(dispose: proc()) =
       let vm = createFrameViewerVM(makeClient())
-      let panel = renderFrameViewerPanel(MockRenderer(), vm)
-      check panel.attributes["class"] == "frame-viewer-component"
+      let panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check "frame-viewer-component" in panel.attributes["class"].split(' ')
       check not panel.findByClassOrNil("frame-viewer-toolbar").isNil
       check not panel.findByClassOrNil("frame-viewer-scrubber").isNil
       check not panel.findByClassOrNil("frame-viewer-body").isNil
@@ -409,18 +409,18 @@ suite "IsoNim Frame Viewer — structure":
       let vm = createFrameViewerVM(makeClient())
 
       vm.visualReplayAvailable.val = false
-      var panel = renderFrameViewerPanel(MockRenderer(), vm)
+      var panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check not panel.findByClassOrNil("absent").isNil
       check allText(panel).contains("Visual replay absent")
 
       vm.visualReplayAvailable.val = true
       vm.playerUrl.val = ""
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check not panel.findByClassOrNil("disconnected").isNil
       check allText(panel).contains("Visual replay not connected")
 
       vm.playerUrl.val = "http://player/"
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check not panel.findByClassOrNil("connected").isNil
       check allText(panel).contains("Visual replay connected")
       dispose()
@@ -430,12 +430,12 @@ suite "IsoNim Frame Viewer — structure":
       let vm = createFrameViewerVM(makeClient())
       vm.currentFrame.val = 3
       vm.frameCount.val = 10
-      var panel = renderFrameViewerPanel(MockRenderer(), vm)
+      var panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-frame-label").allText ==
         "Frame 3 / 9"
 
       vm.currentGeid.val = some(77'u64)
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-frame-label").allText ==
         "GEID 77 / 9"
       dispose()
@@ -445,7 +445,7 @@ suite "IsoNim Frame Viewer — structure":
       let vm = createFrameViewerVM(makeClient())
 
       # Nothing loaded: only the empty placeholder shows.
-      var panel = renderFrameViewerPanel(MockRenderer(), vm)
+      var panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-empty").displayOf ==
         "block"
       check panel.findByClass("frame-viewer-loading").displayOf ==
@@ -454,7 +454,7 @@ suite "IsoNim Frame Viewer — structure":
         "none"
 
       vm.loading.val = true
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-loading").displayOf ==
         "block"
       check panel.findByClass("frame-viewer-empty").displayOf ==
@@ -462,7 +462,7 @@ suite "IsoNim Frame Viewer — structure":
 
       vm.loading.val = false
       vm.error.val = "player exited"
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-error").displayOf ==
         "block"
       check panel.findByClass("frame-viewer-error").allText == "player exited"
@@ -471,7 +471,7 @@ suite "IsoNim Frame Viewer — structure":
 
       vm.error.val = ""
       vm.frameImageSrc.val = "data:image/png;base64,AAA"
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-image").displayOf ==
         "block"
       check panel.findByClass("frame-viewer-image").attributes["src"] ==
@@ -483,12 +483,12 @@ suite "IsoNim Frame Viewer — structure":
   test "the scrub range is bounded by frameCount, and by 0 when empty":
     createRoot proc(dispose: proc()) =
       let vm = createFrameViewerVM(makeClient())
-      var panel = renderFrameViewerPanel(MockRenderer(), vm)
+      var panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-frame-range").attributes["max"] ==
         "0"
       vm.frameCount.val = 12
       vm.currentFrame.val = 5
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let range = panel.findByClass("frame-viewer-frame-range")
       check range.attributes["max"] == "11"
       check range.attributes["value"] == "5"
@@ -497,7 +497,7 @@ suite "IsoNim Frame Viewer — structure":
   test "draw calls render, and the selected one carries the class":
     createRoot proc(dispose: proc()) =
       let vm = createFrameViewerVM(makeClient())
-      var panel = renderFrameViewerPanel(MockRenderer(), vm)
+      var panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check not panel.findByClassOrNil("frame-viewer-draw-calls-empty").isNil
 
       vm.drawCalls.val = @[
@@ -506,7 +506,7 @@ suite "IsoNim Frame Viewer — structure":
         VisualReplayDrawCall(index: 1, geid: 11'u64, name: "ship",
                              pipeline: "pbr")]
       vm.selectedDrawCall.val = some(1)
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClassOrNil("frame-viewer-draw-calls-empty").isNil
       check panel.countByClass("frame-viewer-draw-call") == 2
       check panel.countByClass("selected") == 1
@@ -518,11 +518,11 @@ suite "IsoNim Frame Viewer — structure":
   test "the selected pixel readout distinguishes none from some":
     createRoot proc(dispose: proc()) =
       let vm = createFrameViewerVM(makeClient())
-      var panel = renderFrameViewerPanel(MockRenderer(), vm)
+      var panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-selected-pixel").allText ==
         "No pixel selected"
       vm.selectedPixel.val = some(FrameViewerPixel(x: 12, y: 34))
-      panel = renderFrameViewerPanel(MockRenderer(), vm)
+      panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("frame-viewer-selected-pixel").allText ==
         "Pixel 12, 34"
       dispose()
@@ -534,7 +534,7 @@ suite "IsoNim Frame Viewer — events":
       let vm = createFrameViewerVM(makeClient())
       vm.frameCount.val = 10
       vm.currentFrame.val = 4
-      let panel = renderFrameViewerPanel(MockRenderer(), vm)
+      let panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       panel.findByClass("frame-viewer-next-frame").fireEvent("click")
       check vm.currentFrame.val == 5
       panel.findByClass("frame-viewer-prev-frame").fireEvent("click")
@@ -549,10 +549,11 @@ suite "IsoNim Frame Viewer — events":
         VisualReplayDrawCall(index: 2, geid: 12'u64, name: "c", pipeline: "")]
       let vm = createFrameViewerVM(makeClient(calls))
       vm.drawCalls.val = calls
-      let panel = renderFrameViewerPanel(MockRenderer(), vm)
+      let panel = renderFrameViewerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let list = panel.findByClass("frame-viewer-draw-calls")
-      # children[0] is the header div; the buttons follow it.
-      list.children[^1].fireEvent("click")
+      # children[0] is the header div, [1] the empty-hint slot, [2] the
+      # list the buttons are rendered into.
+      list.children[^1].children[^1].fireEvent("click")
       check vm.selectedDrawCall.val == some(2)
       dispose()
 
@@ -576,8 +577,8 @@ suite "IsoNim Pixel History — structure":
   test "with no pixel selected the header says so and the list is empty":
     createRoot proc(dispose: proc()) =
       let vm = createPixelHistoryVM(makeClient())
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
-      check panel.attributes["class"] == "pixel-history-component"
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check "pixel-history-component" in panel.attributes["class"].split(' ')
       check panel.findByClass("pixel-history-title").allText == "Pixel History"
       check panel.findByClass("pixel-history-pixel").allText ==
         "No pixel selected"
@@ -589,7 +590,7 @@ suite "IsoNim Pixel History — structure":
     createRoot proc(dispose: proc()) =
       let vm = createPixelHistoryVM(makeClient())
       vm.selectedPixel.val = some(PixelHistoryPixel(x: 7, y: 9, frame: 3))
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("pixel-history-pixel").allText ==
         "Pixel 7, 9 frame 3"
       dispose()
@@ -598,14 +599,14 @@ suite "IsoNim Pixel History — structure":
     createRoot proc(dispose: proc()) =
       let vm = createPixelHistoryVM(makeClient())
       vm.loading.val = true
-      var panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      var panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("pixel-history-loading").displayOf ==
         "block"
       check panel.findByClassOrNil("pixel-history-empty").isNil
 
       vm.loading.val = false
       vm.error.val = "player gone"
-      panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("pixel-history-error").displayOf ==
         "block"
       check panel.findByClass("pixel-history-error").allText == "player gone"
@@ -618,7 +619,7 @@ suite "IsoNim Pixel History — structure":
       vm.entries.val = @[
         historyEntry(0, 100'u64, true),
         historyEntry(1, 101'u64, false, "depth")]
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.countByClass("pixel-history-entry") == 2
       let list = panel.findByClass("pixel-history-list")
       check list.children[0].attributes["data-geid"] == "100"
@@ -632,7 +633,7 @@ suite "IsoNim Pixel History — structure":
     createRoot proc(dispose: proc()) =
       let vm = createPixelHistoryVM(makeClient())
       vm.entries.val = @[historyEntry(0, 1'u64, false)]
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let text = allText(panel.findByClass("pixel-history-pass"))
       check text == "Failed"
       dispose()
@@ -643,7 +644,7 @@ suite "IsoNim Pixel History — structure":
     createRoot proc(dispose: proc()) =
       let vm = createPixelHistoryVM(makeClient())
       vm.entries.val = @[historyEntry(0, 1'u64, true)]
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let colours = panel.findByClass("pixel-history-colors")
       check colours.children.len == 3
       check panel.countByClass("pixel-history-swatch") == 3
@@ -658,7 +659,7 @@ suite "IsoNim Pixel History — structure":
     createRoot proc(dispose: proc()) =
       let vm = createPixelHistoryVM(makeClient())
       vm.entries.val = @[historyEntry(0, 1'u64, true)]
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let tests = panel.findByClass("pixel-history-tests").allText
       check tests.contains("Depth pass")
       check tests.contains("Stencil off")
@@ -672,7 +673,7 @@ suite "IsoNim Pixel History — structure":
       vm.entries.val = @[
         historyEntry(0, 1'u64, true), historyEntry(1, 2'u64, true)]
       vm.selectedEntry.val = some(1)
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.countByClass("selected") == 1
       let list = panel.findByClass("pixel-history-list")
       check list.children[1].attributes["class"] ==
@@ -686,7 +687,7 @@ suite "IsoNim Pixel History — events":
       let vm = createPixelHistoryVM(makeClient())
       vm.entries.val = @[
         historyEntry(0, 1'u64, true), historyEntry(1, 2'u64, true)]
-      let panel = renderPixelHistoryPanel(MockRenderer(), vm)
+      let panel = renderPixelHistoryPanel[MockRenderer, MockNode](MockRenderer(), vm)
       panel.findByClass("pixel-history-list").children[1].fireEvent("click")
       check vm.selectedEntry.val == some(1)
       dispose()
@@ -718,8 +719,8 @@ suite "IsoNim Shader Debug — structure":
   test "with no context the panel shows the empty prompt and no toolbar":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
-      let panel = renderShaderDebugPanel(MockRenderer(), vm)
-      check panel.attributes["class"] == "shader-debug-component"
+      let panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check "shader-debug-component" in panel.attributes["class"].split(' ')
       check panel.findByClass("shader-debug-title").allText == "Shader Debugger"
       check panel.findByClass("shader-debug-context").allText ==
         "No shader context"
@@ -731,13 +732,13 @@ suite "IsoNim Shader Debug — structure":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
       vm.selectedContext.val = some(VisualReplayShaderDebugRequest(x: 4, y: 5))
-      var panel = renderShaderDebugPanel(MockRenderer(), vm)
+      var panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("shader-debug-context").allText == "Pixel 4, 5"
 
       vm.selectedContext.val = some(VisualReplayShaderDebugRequest(
         x: 4, y: 5, frame: some(2), drawCallIndex: some(6),
         geid: some(99'u64)))
-      panel = renderShaderDebugPanel(MockRenderer(), vm)
+      panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("shader-debug-context").allText ==
         "Pixel 4, 5 frame 2 draw 6 GEID 99"
       dispose()
@@ -746,7 +747,7 @@ suite "IsoNim Shader Debug — structure":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
       vm.debugInfo.val = some(debugInfo())
-      let panel = renderShaderDebugPanel(MockRenderer(), vm)
+      let panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClassOrNil("shader-debug-empty").isNil
       check panel.findByClass("shader-debug-stage").allText == "fragment / main"
       check panel.findByClass("shader-debug-step-label").allText == "Step 1 / 2"
@@ -759,7 +760,7 @@ suite "IsoNim Shader Debug — structure":
       let vm = createShaderDebugVM(makeClient())
       vm.debugInfo.val = some(debugInfo())
       vm.currentStepIndex.val = 1
-      let panel = renderShaderDebugPanel(MockRenderer(), vm)
+      let panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("shader-debug-step-label").allText == "Step 2 / 2"
       dispose()
 
@@ -767,14 +768,14 @@ suite "IsoNim Shader Debug — structure":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
       vm.debugInfo.val = some(debugInfo())
-      var panel = renderShaderDebugPanel(MockRenderer(), vm)
+      var panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.countByClass("current") == 1
       let source = panel.findByClass("shader-debug-source")
       check source.children[0].attributes["class"] ==
         "shader-debug-source-line current"
 
       vm.currentStepIndex.val = 1
-      panel = renderShaderDebugPanel(MockRenderer(), vm)
+      panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.countByClass("current") == 1
       check panel.findByClass("shader-debug-source").children[1]
         .attributes["class"] == "shader-debug-source-line current"
@@ -784,7 +785,7 @@ suite "IsoNim Shader Debug — structure":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
       vm.debugInfo.val = some(debugInfo())
-      let panel = renderShaderDebugPanel(MockRenderer(), vm)
+      let panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let source = panel.findByClass("shader-debug-source")
       check source.children[0].findByClass("shader-debug-line-number")
         .allText == "  1"
@@ -798,7 +799,7 @@ suite "IsoNim Shader Debug — structure":
       vm.debugInfo.val = some(debugInfo())
 
       # Step 0 has a variable and no registers.
-      var panel = renderShaderDebugPanel(MockRenderer(), vm)
+      var panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check not panel.findByClassOrNil("shader-debug-variables-table").isNil
       check panel.findByClassOrNil("shader-debug-registers-table").isNil
       check panel.countByClass("shader-debug-values-empty") == 1
@@ -809,7 +810,7 @@ suite "IsoNim Shader Debug — structure":
 
       # Step 1 is the mirror image.
       vm.currentStepIndex.val = 1
-      panel = renderShaderDebugPanel(MockRenderer(), vm)
+      panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClassOrNil("shader-debug-variables-table").isNil
       check not panel.findByClassOrNil("shader-debug-registers-table").isNil
       check panel.findByClass("shader-debug-value-name").allText == "r0"
@@ -819,7 +820,7 @@ suite "IsoNim Shader Debug — structure":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
       vm.debugInfo.val = some(debugInfo())
-      let panel = renderShaderDebugPanel(MockRenderer(), vm)
+      let panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("shader-debug-instruction-value").allText ==
         "OpLoad"
       dispose()
@@ -830,7 +831,7 @@ suite "IsoNim Shader Debug — events":
     createRoot proc(dispose: proc()) =
       let vm = createShaderDebugVM(makeClient())
       vm.debugInfo.val = some(debugInfo())
-      let panel = renderShaderDebugPanel(MockRenderer(), vm)
+      let panel = renderShaderDebugPanel[MockRenderer, MockNode](MockRenderer(), vm)
 
       panel.findByClass("shader-debug-step-forward").fireEvent("click")
       check vm.currentStepIndex.val == 1
@@ -856,8 +857,8 @@ suite "IsoNim Video Player — structure":
   test "the panel renders its root, stage, transport and scrubber":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
-      check panel.attributes["class"] == "video-player-component"
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check panel.attributes["class"] == "video-player-component isonim-video-player"
       check not panel.findByClassOrNil("video-player-stage").isNil
       check not panel.findByClassOrNil("video-player-transport").isNil
       check not panel.findByClassOrNil("video-player-scrubber").isNil
@@ -868,7 +869,7 @@ suite "IsoNim Video Player — structure":
     # same number; the canvas attributes are the only place the two meet.
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       let canvas = panel.findByClass("video-player-loupe-canvas")
       # `width`/`height` are CSS style properties, so IsoNim's `ui` DSL routes
       # them through `setStyle` rather than `setAttribute`
@@ -883,27 +884,27 @@ suite "IsoNim Video Player — structure":
   test "the play button's glyph follows the play state":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      var panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      var panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-play").allText == "▶"
       vm.playState.val = Playing
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-play").allText == "⏸"
       dispose()
 
   test "the rate badge shows Paused, then a direction arrow and a multiplier":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      var panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      var panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-rate-badge").allText == "Paused"
 
       vm.playState.val = Playing
       vm.direction.val = Forward
       vm.rate.val = Rate4x
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-rate-badge").allText == "▶ 4×"
 
       vm.direction.val = Reverse
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-rate-badge").allText == "◀ 4×"
       dispose()
 
@@ -913,16 +914,16 @@ suite "IsoNim Video Player — structure":
     # screenshot of the button alone.
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      var panel = renderVideoPlayerPanel(MockRenderer(), vm)
-      check panel.attributes["class"] == "video-player-component"
+      var panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check panel.attributes["class"] == "video-player-component isonim-video-player"
       check panel.findByClass("video-player-picker").attributes["class"] ==
         "video-player-button video-player-picker"
       check panel.findByClass("video-player-canvas-overlay")
         .attributes["class"] == "video-player-canvas-overlay"
 
       vm.pickerState.val = PickerActive
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
-      check panel.attributes["class"] == "video-player-component picker-active"
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
+      check panel.attributes["class"] == "video-player-component isonim-video-player picker-active"
       check panel.findByClass("video-player-picker").attributes["class"] ==
         "video-player-button video-player-picker pressed"
       check panel.findByClass("video-player-canvas-overlay")
@@ -933,7 +934,7 @@ suite "IsoNim Video Player — structure":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
       vm.frameVm.error.val = "player exited (2)"
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-transport").attributes["class"] ==
         "video-player-transport disabled"
       check panel.findByClass("video-player-error").displayOf ==
@@ -948,11 +949,11 @@ suite "IsoNim Video Player — structure":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
       vm.bufferingDegraded.val = true
-      var panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      var panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-buffering").displayOf ==
         "none"
       vm.playState.val = Playing
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-buffering").displayOf ==
         "block"
       dispose()
@@ -968,7 +969,7 @@ suite "IsoNim Video Player — structure":
       vm.frameVm.visualReplayAvailable.val = true
       vm.frameVm.playerUrl.val = "http://player/"
       vm.frameVm.frameCount.val = 0
-      var panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      var panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-startup").displayOf ==
         "block"
       check panel.findByClass("video-player-empty").displayOf ==
@@ -977,7 +978,7 @@ suite "IsoNim Video Player — structure":
       # Not available at all: nothing is starting, so the empty placeholder
       # is the right message.
       vm.frameVm.visualReplayAvailable.val = false
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-startup").displayOf ==
         "none"
       check panel.findByClass("video-player-empty").displayOf ==
@@ -993,7 +994,7 @@ suite "IsoNim Video Player — structure":
         VisualReplayDrawCall(index: 0, geid: 1'u64, name: "a", pipeline: ""),
         VisualReplayDrawCall(index: 1, geid: 2'u64, name: "b", pipeline: "")]
       vm.frameVm.selectedDrawCall.val = some(1)
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-frame-label").allText ==
         "Frame 7 / 19"
       check panel.findByClass("video-player-draw-label").allText == "Draw 1 / 1"
@@ -1004,18 +1005,18 @@ suite "IsoNim Video Player — structure":
   test "the magnifier is only visible in picker mode with a position":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      var panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      var panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-loupe").attributes["class"] ==
         "video-player-loupe"
 
       vm.pickerState.val = PickerActive
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-loupe").attributes["class"] ==
         "video-player-loupe"  # active, but nothing to point at yet
 
       vm.magnifier.val = some(MagnifierPosition(
         displayX: 100.0, displayY: 200.0, sourceX: 5, sourceY: 6))
-      panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-loupe").attributes["class"] ==
         "video-player-loupe visible"
       dispose()
@@ -1027,7 +1028,7 @@ suite "IsoNim Video Player — structure":
       vm.magnifier.val = some(MagnifierPosition(
         displayX: 10.0, displayY: 20.0, sourceX: 33, sourceY: 44))
       vm.magnifierCenterColor.val = some(colour(0.5, 0.25, 0.125, 1.0))
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       check panel.findByClass("video-player-loupe-readout").allText ==
         "x=33 y=44  frame 4"
       check panel.findByClass("video-player-loupe-rgba").allText ==
@@ -1039,7 +1040,7 @@ suite "IsoNim Video Player — events":
   test "the play button toggles the play state":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       panel.findByClass("video-player-play").fireEvent("click")
       check vm.playState.val == Playing
       panel.findByClass("video-player-play").fireEvent("click")
@@ -1049,7 +1050,7 @@ suite "IsoNim Video Player — events":
   test "fast forward and rewind drive direction and rate":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       panel.findByClass("video-player-fast-forward").fireEvent("click")
       check vm.playState.val == Playing
       check vm.direction.val == Forward
@@ -1064,7 +1065,7 @@ suite "IsoNim Video Player — events":
   test "the picker button toggles picker mode":
     createRoot proc(dispose: proc()) =
       let vm = makePlayer()
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       panel.findByClass("video-player-picker").fireEvent("click")
       check vm.pickerState.val == PickerActive
       dispose()
@@ -1074,7 +1075,7 @@ suite "IsoNim Video Player — events":
       let vm = makePlayer()
       vm.frameVm.frameCount.val = 10
       vm.frameVm.currentFrame.val = 4
-      let panel = renderVideoPlayerPanel(MockRenderer(), vm)
+      let panel = renderVideoPlayerPanel[MockRenderer, MockNode](MockRenderer(), vm)
       panel.findByClass("video-player-step-frame-forward").fireEvent("click")
       check vm.frameVm.currentFrame.val == 5
       panel.findByClass("video-player-step-frame-back").fireEvent("click")

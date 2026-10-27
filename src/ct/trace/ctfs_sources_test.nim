@@ -1,4 +1,20 @@
-import std/[os, strutils, unittest]
+## Unit tests for ``ctfs_sources``: ct's own CTFS container and ``meta.dat``
+## reader, and the source materialization built on it.
+##
+## Most fixtures are hand-built containers (``writeMinimalCtfs``), because a
+## refusal case needs bytes no correct writer produces.  The suite "the pinned
+## writer's container" instead records through the canonical Nim writer
+## (``codetracer-trace-format-nim``'s ``MultiStreamTraceWriter``, the sibling
+## checkout on ct's Nim path), so the reader is also tested against a container
+## it did not shape itself.  Nothing here is mocked: every case reads a real
+## file through the real reader.
+
+import std/[os, posix, strutils, unittest]
+
+import results
+from codetracer_ctfs/types import nil
+from codetracer_trace_writer/multi_stream_writer import
+  initMultiStreamWriter, registerPath, registerStep, close, closeCtfs
 
 import ctfs_sources
 
@@ -177,7 +193,7 @@ suite "CTFS source materialization":
       # Only the fixed header is needed: `extractInterningTablePaths`
       # reads the flag word at offset 6 and nothing else.
       result.add "CTMD"
-      result.putU16Le(6)
+      result.putU16Le(7)
       result.putU16Le(flags)
       result.putU32Le(0)
 
@@ -269,11 +285,12 @@ const
 proc buildMetaDat(version: uint16, extFlags: uint32 = 0,
                   withPathList = false): string =
   ## A complete ``meta.dat`` body stamped with an explicit version, laid out
-  ## as version 6 (``internal-files.md`` §"Metadata (meta.dat)"):
+  ## as version 7 (``internal-files.md`` §"Metadata (meta.dat)"):
   ## ``flags_ext`` always present, nothing after ``recorder_id``.
   ##
   ## ``withPathList`` appends the path list versions 3 to 5 wrote after
-  ## ``recorder_id``; version 6 has none, and a reader must not look for one.
+  ## ``recorder_id``; versions 6 and 7 have none, and a reader must not look
+  ## for one.
   result.add "CTMD"
   result.putU16Le(version)
   result.putU16Le(0)  # flags — no optional blocks
@@ -308,11 +325,11 @@ proc refusal(ctPath: string): string =
   ""
 
 suite "CTFS meta.dat version gate":
-  test "version 6 is the one accepted":
+  test "version 7 is the one accepted":
     ## Literals, not the constants under test: an assertion written as
     ## `SupportedMetaDatVersion == SupportedMetaDatVersion` is an
     ## equation nothing can fail.
-    check SupportedMetaDatVersion == 6'u16
+    check SupportedMetaDatVersion == 7'u16
     check LastShiftedGlobalIndexVersion == 3'u16
 
   test "a current container is read, its paths from paths.dat":
@@ -321,13 +338,13 @@ suite "CTFS meta.dat version gate":
     createDir(root)
     defer: removeDir(root)
 
-    let parsed = readCtfsMetaDat(writeContainerWithMetaDat(root, "current.ct", 6))
+    let parsed = readCtfsMetaDat(writeContainerWithMetaDat(root, "current.ct", 7))
     check parsed.recordingId == RecordingId
     check parsed.program == Program
     check parsed.workdir == Workdir
     check parsed.paths == SrcPaths
 
-    let reload = readCtfsMetaDat(writeContainerWithMetaDat(root, "reload.ct", 6,
+    let reload = readCtfsMetaDat(writeContainerWithMetaDat(root, "reload.ct", 7,
       extFlags = FlagExtHasSourceReload))
     check reload.program == Program
 
@@ -337,8 +354,8 @@ suite "CTFS meta.dat version gate":
     createDir(root)
     defer: removeDir(root)
 
-    # A version 6 header with no paths.dat names no source path.
-    let bare = writeContainerWithMetaDat(root, "bare.ct", 6, paths = @[])
+    # A version 7 header with no paths.dat names no source path.
+    let bare = writeContainerWithMetaDat(root, "bare.ct", 7, paths = @[])
     check readCtfsMetaDat(bare).paths.len == 0
     let outDir = root / "out"
     createDir(outDir)
@@ -346,7 +363,7 @@ suite "CTFS meta.dat version gate":
     check not fileExists(outDir / "paths.json")
 
     # A path list after recorder_id is not read as one.
-    let listed = writeContainerWithMetaDat(root, "listed.ct", 6,
+    let listed = writeContainerWithMetaDat(root, "listed.ct", 7,
       withPathList = true, paths = @["/only/from/paths.dat.c"])
     check readCtfsMetaDat(listed).paths == @["/only/from/paths.dat.c"]
 
@@ -356,14 +373,18 @@ suite "CTFS meta.dat version gate":
     createDir(root)
     defer: removeDir(root)
 
-    for version in [3'u16, 4, 5, 7]:
+    for version in [3'u16, 4, 5, 8]:
       let message = refusal(writeContainerWithMetaDat(root,
         "v" & $version & ".ct", version, withPathList = true))
       check message.contains("version " & $version)
-      check message.contains("6")
+      check message.contains("version 7")
+    # Version 6 has version 7's layout, and is refused all the same.
+    let v6 = refusal(writeContainerWithMetaDat(root, "v6.ct", 6))
+    check v6.contains("version 6")
+    check v6.contains("version 7")
     # Only the superseded encode is diagnosed as one.
     check refusal(writeContainerWithMetaDat(root, "v3.ct", 3)).contains("one line high")
-    check not refusal(writeContainerWithMetaDat(root, "v7.ct", 7)).contains("one line high")
+    check not refusal(writeContainerWithMetaDat(root, "v6.ct", 6)).contains("one line high")
 
   test "the extended flag word is validated, and the header is 12 bytes":
     let root = getTempDir() / "ctfs-metadat-ext-" & $getCurrentProcessId()
@@ -373,11 +394,11 @@ suite "CTFS meta.dat version gate":
 
     let unknownBit = not KnownExtFlags
     check unknownBit != 0'u32  # or the fixture below is not a fixture
-    check refusal(writeContainerWithMetaDat(root, "badext.ct", 6,
+    check refusal(writeContainerWithMetaDat(root, "badext.ct", 7,
       extFlags = unknownBit)).contains("unknown extended flag")
 
     let short = root / "short.ct"
-    writeMinimalCtfs(short, @[("meta.dat", buildMetaDat(6)[0 ..< 11])])
+    writeMinimalCtfs(short, @[("meta.dat", buildMetaDat(7)[0 ..< 11])])
     check refusal(short).len > 0
 
 suite "CTFS container version 5":
@@ -387,7 +408,7 @@ suite "CTFS container version 5":
     createDir(root)
     defer: removeDir(root)
 
-    let ct = writeContainerWithMetaDat(root, "c.ct", 6)
+    let ct = writeContainerWithMetaDat(root, "c.ct", 7)
     for version in [3, 4, 7]:
       var data = readFile(ct)
       data[5] = char(version)
@@ -396,6 +417,45 @@ suite "CTFS container version 5":
       let message = refusal(patched)
       check message.contains("version " & $version)
       check message.contains("5")
+
+  test "the source materialiser raises the refusal instead of answering false":
+    ## ``materializeCtfsSources`` is the IMPORT path's reader, and the
+    ## refusal above must reach its callers with the field it names
+    ## (``ctfs-container.md``: "A reader must name the field it is refusing
+    ## on").  It used to catch ``openCtfs``'s exception and answer ``false``,
+    ## which its callers cannot tell from "this container names no sources"
+    ## (codetracer-pm issue
+    ## ``2026-10-04-ct-importer-turns-a-container-refusal-into-false.md``).
+    let root = getTempDir() / "ctfs-container-materialize-" &
+      $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    let ct = writeContainerWithMetaDat(root, "c.ct", 7)
+    for version in [3, 4]:
+      var data = readFile(ct)
+      data[5] = char(version)
+      let patched = root / ("c" & $version & ".ct")
+      writeFile(patched, data)
+      let outDir = root / ("out" & $version)
+      createDir(outDir)
+      var message = ""
+      try:
+        discard materializeCtfsSources(patched, outDir)
+      except ValueError as e:
+        message = e.msg
+      check message.contains(
+        "CTFS container version " & $version & " is not readable")
+      check message.contains("Re-record the trace")
+      # Nothing was unpacked from a container that was refused.
+      check not fileExists(outDir / "paths.json")
+
+    # The control: the same container at its own version still opens, so
+    # the raise above is the version byte's doing and not the fixture's.
+    let okOut = root / "out-ok"
+    createDir(okOut)
+    check materializeCtfsSources(ct, okOut)
 
   test "members are read in each form":
     let root = getTempDir() / "ctfs-container-forms-" & $getCurrentProcessId()
@@ -408,20 +468,20 @@ suite "CTFS container version 5":
     var many: seq[string] = @[]
     for i in 0 ..< 40:
       many.add "/workspace/project/src/a_rather_long_module_name_" & $i & ".c"
-    let ct = writeContainerWithMetaDat(root, "forms.ct", 6, paths = many)
+    let ct = writeContainerWithMetaDat(root, "forms.ct", 7, paths = many)
     check readCtfsMetaDat(ct).paths == many
 
     # A member written mapped while its size is still one block -- the state
     # a live reader can observe mid-transition -- is read through its mapping.
     let transition = root / "transition.ct"
-    writeMinimalCtfs(transition, @[("meta.dat", buildMetaDat(6))])
+    writeMinimalCtfs(transition, @[("meta.dat", buildMetaDat(7))])
     var data = readFile(transition)
     let blk = data.len div TestBlockSize
     data.setLen(data.len + TestBlockSize)
     for i in blk * TestBlockSize ..< data.len: data[i] = '\0'
     data.putPtr(blk, 0, 1)
     writeFile(transition, data)
-    patchEntry(transition, 0, uint64(buildMetaDat(6).len), uint64(blk))
+    patchEntry(transition, 0, uint64(buildMetaDat(7).len), uint64(blk))
     check readCtfsMetaDat(transition).program == Program
 
   test "a null or oversized member is refused, not read":
@@ -430,8 +490,8 @@ suite "CTFS container version 5":
     createDir(root)
     defer: removeDir(root)
 
-    let ct = writeContainerWithMetaDat(root, "n.ct", 6, paths = @[])
-    let size = uint64(buildMetaDat(6).len)
+    let ct = writeContainerWithMetaDat(root, "n.ct", 7, paths = @[])
+    let size = uint64(buildMetaDat(7).len)
     for (s, m, what) in [(size, 0'u64, "null"), (size, CtfsDirect, "null"),
                          (5000'u64, CtfsDirect or 1, "one block")]:
       patchEntry(ct, 0, s, m)
@@ -452,7 +512,7 @@ suite "CTFS container version 5":
 
     # Version 6 is version 5's body behind a 24-byte header: rebuild a v5
     # container with the entry array moved 8 bytes along.
-    let v5 = writeContainerWithMetaDat(root, "v5.ct", 6)
+    let v5 = writeContainerWithMetaDat(root, "v5.ct", 7)
     proc toV6(profile, compression, reserved: int): string =
       let data = readFile(v5)
       result = data[0 ..< 16] & char(profile) & char(compression) &
@@ -471,3 +531,145 @@ suite "CTFS container version 5":
       let path = root / "bad.ct"
       writeFile(path, bad)
       check refusal(path).contains(what)
+
+# ---------------------------------------------------------------------------
+# A container written by the pinned writer
+# ---------------------------------------------------------------------------
+
+proc captureStdout(body: proc ()): string =
+  ## Everything ``body`` writes to file descriptor 1, which is where the
+  ## ``ct host: warning: ...`` lines from ``materializeCtfsSources`` go
+  ## (``echo``).  The descriptor itself is redirected, not Nim's ``stdout``
+  ## object, so output from any layer that writes fd 1 is caught; stdout is
+  ## flushed on both sides so nothing buffered before or during the call lands
+  ## on the wrong side of the redirect.
+  let capturePath = getTempDir() / "ctfs-sources-stdout-" &
+    $getCurrentProcessId() & ".txt"
+  flushFile(stdout)
+  let saved = dup(1)
+  doAssert saved >= 0, "dup(1) failed"
+  let fd = posix.open(capturePath.cstring, O_WRONLY or O_CREAT or O_TRUNC,
+    0o600.Mode)
+  doAssert fd >= 0, "cannot open " & capturePath
+  doAssert dup2(fd, 1) >= 0, "dup2 onto fd 1 failed"
+  discard posix.close(fd)
+  try:
+    body()
+  finally:
+    flushFile(stdout)
+    doAssert dup2(saved, 1) >= 0, "restoring fd 1 failed"
+    discard posix.close(saved)
+  result = readFile(capturePath)
+  removeFile(capturePath)
+
+suite "the pinned writer's container":
+  ## The container ``codetracer-trace-format-nim``'s ``MultiStreamTraceWriter``
+  ## writes for an ordinary recording: one source path, a few steps, and no
+  ## ``filemap.bin`` -- only MCR writes one.  The issue
+  ## ``codetracer-pm/issues/2026-10-03-ct-and-backend-manager-still-refuse-the-container-the-pinned-writer-produces.md``
+  ## is what a reader tested only on its own fixtures looks like: it refused
+  ## the container the writer actually produced, and then, once it read it,
+  ## warned on every import that ``filemap.bin`` was missing.
+  const
+    WriterRecordingId = "0192f4a0-0000-7000-8000-000000000001"
+    SourceText = "x = 1\ny = x + 1\nprint(y)\n"
+
+  proc recordWithWriter(root: string): (string, string) =
+    ## Records ``main.py`` through the writer's file-backed path, the one
+    ## recorders use: the container streams to disk and ``closeCtfs`` writes
+    ## its final root block.  Returns the ``.ct`` path and the source path.
+    let ctPath = root / "trace.ct"
+    let src = root / "main.py"
+    writeFile(src, SourceText)
+    var w = initMultiStreamWriter(ctPath, src,
+      recordingId = WriterRecordingId).get()
+    let pathId = w.registerPath(src).get()
+    for line in 1'u64 .. 3'u64:
+      w.registerStep(pathId, line, []).get()
+    w.close().get()
+    w.closeCtfs().get()
+    (ctPath, src)
+
+  test "is read, and materializes without a warning":
+    let root = getTempDir() / "ctfs-pinned-writer-" & $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    let (ctPath, src) = recordWithWriter(root)
+    # The writer's own constant, so the check follows the pin rather than a
+    # literal; the literal check says the pin still writes a version this
+    # reader claims to read.
+    let containerVersion = readFile(ctPath)[5].ord
+    check containerVersion == int(types.CtfsVersion)
+    check containerVersion in [SupportedCtfsVersion, CtfsVersionV6]
+
+    let meta = readCtfsMetaDat(ctPath)
+    check meta.recordingId == WriterRecordingId
+    check meta.program == src
+    check meta.paths == @[src]
+
+    let outDir = root / "out"
+    createDir(outDir)
+    var materialized = false
+    let output = captureStdout(proc () =
+      materialized = materializeCtfsSources(ctPath, outDir))
+    check materialized
+    check readFile(outDir / "paths.json").contains("\"" & src & "\"")
+    # An absent filemap.bin is the normal case for every non-MCR recording
+    # (``UI-CTFS-Schema6-Source-Materialization.md``), not a failure.
+    check output == ""
+
+  test "a filemap.bin that is present but malformed is still reported":
+    ## The control for the case above: the absent member is quiet because it
+    ## is absent, not because filemap errors stopped being reported.  The
+    ## writer's container is copied with one free entry slot turned into a
+    ## one-block ``filemap.bin`` whose bytes are not a filemap.
+    let root = getTempDir() / "ctfs-pinned-writer-badmap-" &
+      $getCurrentProcessId()
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+
+    let (ctPath, src) = recordWithWriter(root)
+    var data = readFile(ctPath)
+    let blockSize = int(data[8].ord) or (int(data[9].ord) shl 8) or
+      (int(data[10].ord) shl 16) or (int(data[11].ord) shl 24)
+    let entryStart = if data[5].ord == CtfsVersionV6: 24 else: 16
+    # ``MaxEntries`` at offset 12; ``0`` fills the rest of block 0
+    # (``ctfs-container.md`` §1).
+    var maxEntries = int(data[12].ord) or (int(data[13].ord) shl 8) or
+      (int(data[14].ord) shl 16) or (int(data[15].ord) shl 24)
+    if maxEntries == 0:
+      maxEntries = (blockSize - entryStart) div 24
+    var slot = -1
+    for i in 0 ..< maxEntries:
+      let offset = entryStart + i * 24
+      if data[offset ..< offset + 24] == repeat('\0', 24):
+        slot = i
+        break
+    check slot >= 0  # or the fixture below is not a fixture
+    const Garbage = "this is not a filemap"
+    let blk = data.len div blockSize
+    data.setLen(data.len + blockSize)
+    for i in blk * blockSize ..< data.len: data[i] = '\0'
+    for i, c in Garbage: data[blk * blockSize + i] = c
+    var entry = ""
+    entry.putU64Le(uint64(Garbage.len))
+    entry.putU64Le(CtfsDirect or uint64(blk))
+    entry.putU64Le(base40Encode("filemap.bin"))
+    for i, c in entry: data[entryStart + slot * 24 + i] = c
+    let badPath = root / "badmap.ct"
+    writeFile(badPath, data)
+
+    let outDir = root / "out"
+    createDir(outDir)
+    var materialized = false
+    let output = captureStdout(proc () =
+      materialized = materializeCtfsSources(badPath, outDir))
+    # paths.dat still answers; the malformed filemap is reported beside it.
+    check materialized
+    check readFile(outDir / "paths.json").contains("\"" & src & "\"")
+    check output.contains(
+      "ct host: warning: failed to extract CTFS portable sources: " &
+      "invalid CTFS filemap")

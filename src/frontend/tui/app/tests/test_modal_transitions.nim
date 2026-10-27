@@ -42,6 +42,8 @@
 import std/[monotimes, strutils, times, unittest]
 
 import ../input/keymap
+import ./navigation_table
+import codetracer_embed
 import ../input/modal_state
 import ../layout/profile
 import ../views/status_bar
@@ -49,7 +51,7 @@ import ../views/status_bar
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 134
+const ExpectedAssertions = 135
 
 var countedAssertions = 0
 
@@ -307,140 +309,143 @@ suite "CTUI-9: the modal state machine decides every event":
     ck checkedContexts == ContextCount
 
   test "§4.2's one collision — `n` — is resolved by mode":
-    let km = defaultKeymap()
-    var pending = initPendingState()
+    # Through the SHIPPED router, under the Vim base — the base §4.2 is the
+    # navigation table of (PLAT-68).
+    var km = newNavResolver()
     # NORMAL: `n` is "Step Over (Forward)".
     var normal = initModalState(mmNormal)
-    let inNormal = km.resolve(normal, pending, "n", 0)
+    let inNormal = km.resolve(normal, "n", 0)
     checkpoint("NORMAL n -> " & $inNormal.kind & " " & $inNormal.action)
-    ck inNormal.kind == krAction
+    ck inNormal.kind == "action"
     ck inNormal.action == kaStepOver
     ck inNormal.spelling == "n"
-    ck pending.chords.len == 0
+    ck km.router.pending.chords.len == 0
     # SEARCH while the prompt is open: `n` is the letter n.
     var typing = initModalState(mmSearch)
     typing.phase = spTyping
-    let whileTyping = km.resolve(typing, pending, "n", 0)
+    let whileTyping = km.resolve(typing, "n", 0)
     checkpoint("SEARCH/typing n -> " & $whileTyping.kind)
-    ck whileTyping.kind == krText
+    ck whileTyping.kind == "text"
     ck whileTyping.action == kaNone
     # SEARCH after the commit: `n` is "Next Search Match".
     var browsing = initModalState(mmSearch)
     browsing.phase = spBrowsing
-    let whileBrowsing = km.resolve(browsing, pending, "n", 0)
+    let whileBrowsing = km.resolve(browsing, "n", 0)
     checkpoint("SEARCH/browsing n -> " & $whileBrowsing.kind & " " &
                $whileBrowsing.action)
-    ck whileBrowsing.kind == krAction
+    ck whileBrowsing.kind == "action"
     ck whileBrowsing.action == kaNextMatch
     # `N` the same way, so the pair is resolved rather than only its first half.
-    ck km.resolve(typing, pending, "N", 0).kind == krText
-    ck km.resolve(browsing, pending, "N", 0).action == kaPrevMatch
+    ck km.resolve(typing, "N", 0).kind == "text"
+    ck km.resolve(browsing, "N", 0).action == kaPrevMatch
     # And the NON-printable bindings are NOT shadowed by the prompt, which is
     # what keeps an open prompt escapable.
-    ck km.resolve(typing, pending, "\x1b", 0).action == kaReturnToNormal
-    ck km.resolve(typing, pending, "\r", 0).action == kaCommitPrompt
-    ck km.resolve(typing, pending, "\x7f", 0).action == kaPromptBackspace
+    ck km.resolve(typing, "\x1b", 0).action == kaReturnToNormal
+    ck km.resolve(typing, "\r", 0).action == kaCommitPrompt
+    ck km.resolve(typing, "\x7f", 0).action == kaPromptBackspace
     # …and the same three keys in NORMAL mean their §4.2 actions instead.
-    ck km.resolve(normal, pending, "\r", 0).action == kaExpandNode
-    ck km.resolve(normal, pending, "\x7f", 0).action == kaCollapseNode
-    ck km.resolve(normal, pending, "\x1b", 0).action == kaReturnToNormal
+    ck km.resolve(normal, "\r", 0).action == kaExpandNode
+    ck km.resolve(normal, "\x7f", 0).action == kaCollapseNode
+    ck km.resolve(normal, "\x1b", 0).action == kaReturnToNormal
 
   test "a pending prefix is visible, bounded, and abandoned rather than guessed":
-    let km = defaultKeymap()
+    let table = navigationKeymap()
+    var km = newNavResolver()
     # The prefixes are DERIVED from the table, not listed beside it.
-    let prefixes = km.prefixChords(mmNormal)
+    let prefixes = table.prefixChords(mmNormal)
     checkpoint("NORMAL prefixes: " & prefixes.join(", "))
-    ck prefixes.len == 3
-    for p in ["g", "r", "Ctrl+w"]:
+    # `z` since PLAT-70: over the output panes it starts `z h` / `z l` /
+    # `z H` / `z L` (Horizontal-Overflow.md §4.4).
+    ck prefixes.len == 4
+    for p in ["g", "r", "Ctrl+w", "z"]:
       checkpoint("prefix present: " & p)
       ck p in prefixes
     # …and a mode with no multi-chord binding has none, which is the negative
     # twin: "three prefixes" is satisfied by a function that returns three of
     # anything.
-    ck km.prefixChords(mmCommand).len == 0
-    ck km.prefixChords(mmSearch).len == 0
-    ck km.prefixChords(mmInspect).len == 0
+    ck table.prefixChords(mmCommand).len == 0
+    ck table.prefixChords(mmSearch).len == 0
+    ck table.prefixChords(mmInspect).len == 0
 
     var state = initModalState(mmNormal)
-    var pending = initPendingState()
     # `g` alone is PENDING and says so on screen.
-    let first = km.resolve(state, pending, "g", 100)
-    ck first.kind == krPending
-    ck first.pending == "g-"
-    ck pendingIndicator(pending) == "g-"
-    ck pending.chords == @["g"]
+    let first = km.resolve(state, "g", 100)
+    ck first.kind == "pending"
+    ck first.pending == "g…"
+    ck km.router.pendingLabel == "g…"
+    ck km.router.pending.chords == @["g"]
     # `g` `g` completes, and the indicator goes away.
-    let second = km.resolve(state, pending, "g", 200)
+    let second = km.resolve(state, "g", 200)
     checkpoint("g g -> " & $second.kind & " " & $second.action)
-    ck second.kind == krAction
+    ck second.kind == "action"
     ck second.action == kaJumpToStart
     ck second.spelling == "g g"
-    ck pendingIndicator(pending) == ""
+    ck km.router.pendingLabel == ""
     # `G` alone is a DIFFERENT action, so the prefix does not swallow it.
-    ck km.resolve(state, pending, "G", 300).action == kaJumpToEnd
+    ck km.resolve(state, "G", 300).action == kaJumpToEnd
     # `r` `f` and `r` `c`, the two §4.2 spells as one token each.
-    ck km.resolve(state, pending, "r", 400).kind == krPending
-    ck pendingIndicator(pending) == "r-"
-    ck km.resolve(state, pending, "f", 401).action == kaReverseStepOut
-    ck km.resolve(state, pending, "r", 500).kind == krPending
-    ck km.resolve(state, pending, "c", 501).action == kaReverseContinue
+    ck km.resolve(state, "r", 400).kind == "pending"
+    ck km.router.pendingLabel == "r…"
+    ck km.resolve(state, "f", 401).action == kaReverseStepOut
+    ck km.resolve(state, "r", 500).kind == "pending"
+    ck km.resolve(state, "c", 501).action == kaReverseContinue
     # `Ctrl+w` `l`, whose indicator names the modifier so a user can see what
     # the terminal delivered.
-    ck km.resolve(state, pending, "\x17", 600).kind == krPending
-    ck pendingIndicator(pending) == "Ctrl+w-"
-    ck km.resolve(state, pending, "l", 601).action == kaFocusRight
-    ck pendingIndicator(pending) == ""
+    ck km.resolve(state, "\x17", 600).kind == "pending"
+    ck km.router.pendingLabel == "Ctrl+w…"
+    ck km.resolve(state, "l", 601).action == kaFocusRight
+    ck km.router.pendingLabel == ""
 
     # THE BOUNDED TIMEOUT, at both sides of the boundary. Exactly
-    # `PendingTimeoutMs` later the prefix still stands; one millisecond more and
+    # `EditingPendingTimeoutMs` later the prefix still stands; one millisecond more and
     # it does not.
-    ck km.resolve(state, pending, "g", 1000).kind == krPending
-    let justInTime = km.resolve(state, pending, "g", 1000 + PendingTimeoutMs)
-    checkpoint("at +" & $PendingTimeoutMs & " -> " & $justInTime.kind)
-    ck justInTime.kind == krAction
+    ck km.resolve(state, "g", 1000).kind == "pending"
+    let justInTime = km.resolve(state, "g", 1000 + EditingPendingTimeoutMs)
+    checkpoint("at +" & $EditingPendingTimeoutMs & " -> " & $justInTime.kind)
+    ck justInTime.kind == "action"
     ck justInTime.action == kaJumpToStart
-    ck km.resolve(state, pending, "g", 2000).kind == krPending
-    let tooLate = km.resolve(state, pending, "g", 2000 + PendingTimeoutMs + 1)
-    checkpoint("at +" & $(PendingTimeoutMs + 1) & " -> " & $tooLate.kind &
+    ck km.resolve(state, "g", 2000).kind == "pending"
+    let tooLate = km.resolve(state, "g", 2000 + EditingPendingTimeoutMs + 1)
+    checkpoint("at +" & $(EditingPendingTimeoutMs + 1) & " -> " & $tooLate.kind &
                " " & $tooLate.action)
     # The late `g` is read on its OWN terms: it starts a fresh prefix rather
     # than completing the expired one.
-    ck tooLate.kind == krPending
+    ck tooLate.kind == "pending"
     ck tooLate.action == kaNone
-    ck pending.chords == @["g"]
-    pending.clear()
+    ck km.router.pending.chords == @["g"]
+    km.router.cancelPending()
 
     # AN ABANDONED PREFIX DOES NOT FALL BACK. `Ctrl+w` then `q` must not quit:
     # the user asked for a window command, and running `q`'s unprefixed meaning
     # is how a mistyped chord ends a session.
-    ck km.resolve(state, pending, "\x17", 3000).kind == krPending
-    let abandoned = km.resolve(state, pending, "q", 3001)
+    ck km.resolve(state, "\x17", 3000).kind == "pending"
+    let abandoned = km.resolve(state, "q", 3001)
     checkpoint("Ctrl+w q -> " & $abandoned.kind & " " & $abandoned.action)
-    ck abandoned.kind == krPendingAbandoned
+    ck abandoned.kind == "pending-abandoned"
     ck abandoned.action == kaNone
-    ck pendingIndicator(pending) == ""
+    ck km.router.pendingLabel == ""
     # …and `q` on its own DOES quit, through the same call, which is the
     # positive twin that makes the line above a statement about the prefix.
-    ck km.resolve(state, pending, "q", 3002).action == kaQuit
+    ck km.resolve(state, "q", 3002).action == kaQuit
 
     # A MOUSE REPORT DOES NOT CANCEL A PREFIX. It is not a key, and a user who
     # moved the mouse between `Ctrl+w` and `l` did not change their mind.
-    ck km.resolve(state, pending, "\x17", 4000).kind == krPending
-    let mouse = km.resolve(state, pending, "\x1b[<0;12;5M", 4001)
+    ck km.resolve(state, "\x17", 4000).kind == "pending"
+    let mouse = km.resolve(state, "\x1b[<0;12;5M", 4001)
     checkpoint("mouse during a prefix -> " & $mouse.kind & " pending '" &
                mouse.pending & "'")
-    ck mouse.kind == krNone
-    ck mouse.pending == "Ctrl+w-"
-    ck km.resolve(state, pending, "h", 4002).action == kaFocusLeft
+    ck mouse.kind == "none"
+    ck mouse.pending == "Ctrl+w…"
+    ck km.resolve(state, "h", 4002).action == kaFocusLeft
 
     # `Esc` clears a pending prefix through the state machine, which is the
     # §4.2 row that says it "cancels ... closes popups".
-    ck km.resolve(state, pending, "g", 5000).kind == krPending
-    let escaped = km.resolve(state, pending, "\x1b", 5001)
+    ck km.resolve(state, "g", 5000).kind == "pending"
+    let escaped = km.resolve(state, "\x1b", 5001)
     checkpoint("Esc during a prefix -> " & $escaped.kind & " " &
                $escaped.action)
-    ck escaped.kind == krPendingAbandoned
-    ck pendingIndicator(pending) == ""
+    ck escaped.kind == "pending-abandoned"
+    ck km.router.pendingLabel == ""
 
   test "key-to-command dispatch stays under CTUI-9's 2 ms gate":
     ## CTUI-9's verification gate: "Key-to-command dispatch < 2 ms."
@@ -450,7 +455,7 @@ suite "CTUI-9: the modal state machine decides every event":
     ## the one chord a user holds down. Every binding in every mode is driven
     ## through `resolve` once, from its own byte token, and the slowest is
     ## reported.
-    let km = defaultKeymap()
+    let table = navigationKeymap()
     var worstNs = 0'i64
     var totalNs = 0'i64
     var dispatches = 0
@@ -459,12 +464,12 @@ suite "CTUI-9: the modal state machine decides every event":
     # includes `keyName`'s decoding — which is the expensive half.
     for mode in ModalMode:
       var state = initModalState(mode)
-      for bnd in km.bindingsFor(mode):
+      for bnd in table.bindingsFor(mode):
         for token in [".", "n", "\x1b[21~", "\x1b[21;2~", "\x17", "\x1b[Z",
                       "\x1b[B", "\x7f", "\x1b", "\r", "g", "r", "\x1b[15;3~"]:
-          var pending = initPendingState()
+          var km = newNavResolver()
           let started = getMonoTime()
-          discard km.resolve(state, pending, token, 0)
+          discard km.resolve(state, token, 0)
           let elapsed = (getMonoTime() - started).inNanoseconds
           inc dispatches
           totalNs += elapsed
@@ -515,18 +520,24 @@ suite "CTUI-9: the modal state machine decides every event":
     # neither this file nor `resolve`. Until it is repaired, RUN THE `tui` LANE
     # ALONE — the number above is what it says otherwise.
     ck worstNs < 2_000_000
-    # THE NON-VACUITY FLOOR: 90 bindings x 13 tokens = 1170. A sweep that
+    # THE NON-VACUITY FLOOR: 102 bindings x 13 tokens = 1326. A sweep that
     # measured nothing would satisfy the gate above trivially.
     #
     # 1105 UNTIL PLAT-16 ADDED ONE BINDING (`Ctrl+F5`, the product-mode
     # toggle), 1118 until the session tabs added FOUR (`g t`, `g T`,
-    # `Ctrl+Tab`, `Ctrl+Shift+Tab` — CodeTracer-TUI.md §3.3.1). The literal
+    # `Ctrl+Tab`, `Ctrl+Shift+Tab` — CodeTracer-TUI.md §3.3.1), 1170 until
+    # PLAT-68 added THREE (`F6`, `Shift+F6`, `Ctrl+Shift+p`), 1209 until the
+    # shared jump history added TWO (`Alt+Left`, `Alt+Right`), 1235 until
+    # PLAT-70 added FIVE (the output panes' `z h`, `z l`, `z H`, `z L`, `0`),
+    # 1300 until the table panes' Show Detail added TWO (`Shift+K` under the
+    # Vim and Kakoune modes, Horizontal-Overflow.md §5.3).
+    # The literal
     # moves with `ExpectedBindingCount` in `test_keymap_no_conflicts.nim`,
     # and it is still written as a literal BESIDE the computed form rather
     # than replacing it: the line above is satisfied by any binding count,
     # and this one is what notices that the count changed.
-    ck dispatches == km.bindings.len * 13
-    ck dispatches == 1170
+    ck dispatches == table.bindings.len * 13
+    ck dispatches == 1326
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

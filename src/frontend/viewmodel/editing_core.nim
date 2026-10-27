@@ -35,10 +35,13 @@
 ## rather than deleted so the reason the two arms were ever different stays
 ## readable.
 ##
-## The WEB front-end is neither arm. It is Monaco plus the legacy Karax path
-## and it is not brought onto this model by this milestone;
-## `view_vocabulary/editor_surface.nim`'s header carries the measurement and
-## PLAT-34's status carries the boundary.
+## The WEB front-end is neither arm. It EDITS through Monaco's own buffer, not
+## through this module, and it READS the shared editor surface
+## (`view_vocabulary/editor_surface.editorSurfaceForView`, through
+## `ui/editor_points`) for the execution line, the gutter marks and the values
+## — Shared-DOM-Front-Ends D7.4 (a). Whether web editing is routed through
+## this core is PLAT-67's question (the shared editor on the desktop behind a
+## developer flag) and is not decided here.
 ##
 ## =========================================================================
 ## THE CLOCK IS A PARAMETER AND IT HAS NO DEFAULT
@@ -56,7 +59,8 @@
 ## =========================================================================
 ##
 ## Nothing here constructs a fake editor, a fake widget or a fake keymap. The
-## keymaps are `product_keymap`/`vim_keymap`/`kakoune_keymap`'s own tables and
+## keymaps are the shipped bases' own tables (`cua_keymap`, `emacs_keymap`,
+## `vim_keymap`, `kakoune_keymap`) and
 ## the operations are the shipped vocabulary.
 
 import std/[strutils, tables]
@@ -69,17 +73,23 @@ import ./editor/wrap
 import ./editor/change_set
 import ./editor/document_version
 import ./editor/reconcile
+import ./editor/transaction
+import ./viewmodels/horizontal_scroll
 
 import ./keymap/editing_keymap
-import ./keymap/product_keymap
+import ./keymap/base_rows
+import ./keymap/base_keymaps
+import ./keymap/cua_keymap
+import ./keymap/emacs_keymap
 import ./keymap/vim_keymap
 import ./keymap/kakoune_keymap
 import ./keymap/keymap_selection
 from ./keymap/vim_import import VimImport, ImportReportEntry, ImportReason,
   importVimConfig, coverageFraction, describeReport
 
-export editor_state, selection, wrap
-export editing_keymap, product_keymap, vim_keymap, kakoune_keymap
+export editor_state, selection, wrap, horizontal_scroll
+export editing_keymap, base_rows, base_keymaps, cua_keymap, emacs_keymap,
+  vim_keymap, kakoune_keymap
 export keymap_selection
 export document_version, reconcile
 export VimImport, ImportReportEntry, ImportReason, importVimConfig,
@@ -128,7 +138,7 @@ type
       ## **THE BUFFER.** There is no second one. `ci/test/editor-model-case-floor.sh`
       ## is not what enforces that — `test_editor_front_end_differential.nim`'s
       ## mutable-buffer scan is, with a planted positive control.
-    model*: KeymapModel
+    model*: BaseKeymap
       ## Which keymap this document resolves keys through. A document-level
       ## field rather than a global, because §4.2 makes the model the fifth
       ## scope dimension and a product that can only hold one model cannot
@@ -147,6 +157,12 @@ type
       ## acknowledgement) can name the version it was computed against and be
       ## reconciled against this document rather than applied as though it had
       ## not moved. Bounded to `TimelineDepth` change sets.
+    delivery*: KeyDelivery
+      ## PLAT-68: how keys reach this document — the front-end, the platform
+      ## and the negotiated key protocol, Base-Keymaps §4.2's three keys a
+      ## front-end supplies. A field for `settings`' reason: a document is
+      ## opened BY a front-end, and that front-end's delivery is what the
+      ## `when` of a legacy-fallback row reads.
     imported*: ImportedKeymap
       ## PLAT-36. A user's Vim configuration, imported on top of the Vim
       ## keymap (`:source <file>` in the terminal). Nil — the common case —
@@ -154,6 +170,25 @@ type
       ## model. A `ref` so the one imported keymap is shared by every buffer
       ## of a session rather than copied into each, and because it never
       ## changes after the import: a new `:source` installs a new one.
+    widths*: LineWidths
+      ## Horizontal-Overflow.md §4.1: every line's width in view columns
+      ## (`ViewColumnPolicy`) and the widest — the editor's EXACT content
+      ## width, maintained per line by `drainJournal` as change sets arrive,
+      ## never re-measured over the document on a frame (`contentCols`).
+
+  LineWidths* = object
+    ## The width of every line in view columns (`ViewColumnPolicy`), the
+    ## widest, and how many lines are that wide — so a change re-measures only
+    ## the lines it touched, and a shrinking widest line is found again from
+    ## the stored numbers, not from the text.
+    widths*: seq[int]
+    widest*: int
+    atWidest*: int
+    valid*: bool
+      ## Measured; until then the first `contentCols` measures every line.
+    version*: DocumentVersion
+      ## The timeline version the widths describe.
+    docLen*: int
 
   ImportedKeymap* = ref object
     ## An imported configuration, reduced to what resolution needs: the
@@ -194,13 +229,11 @@ func terminalWrapSettings*(): WrapSettings =
   ## the one thing a debugger's source column may not do.
   WrapSettings(wrapColumn: 0, policy: DefaultColumnPolicy)
 
-func initialModeFor*(model: KeymapModel): EditingMode =
+func initialModeFor*(model: BaseKeymap): EditingMode =
   ## The mode a document opens in under `model` — see `initEditingDocument` on
-  ## why it is the model's to decide. One `case`, total over the enum, used by
-  ## both the constructor and `switchModel`.
-  case model
-  of kmProductDefault: emInsert
-  of kmVim, kmKakoune: emNormal
+  ## why it is the base's to decide: the modal bases open in normal, the
+  ## others ready to type (Editor-ViewModel §3.2 as amended by PLAT-68).
+  if isModal(model): emNormal else: emInsert
 
 proc dropImported(d: var EditingDocument) =
   ## Take an imported configuration off `d`, macros included: a macro id the
@@ -211,7 +244,7 @@ proc dropImported(d: var EditingDocument) =
     d.state.macros.del id
   d.imported = nil
 
-proc switchModel*(d: var EditingDocument; model: KeymapModel) =
+proc switchModel*(d: var EditingDocument; model: BaseKeymap) =
   ## PLAT-43. Re-key an OPEN document to `model`.
   ##
   ## The text, the selection, the registers, the marks, the undo history and
@@ -228,29 +261,119 @@ proc switchModel*(d: var EditingDocument; model: KeymapModel) =
   d.state.pending = PendingChords()
   d.state.recording = ""
 
+const TerminalLegacyDelivery* = KeyDelivery(
+    frontEnd: feTerminal, platform: hostPlatform(), keyProtocol: kpLegacy)
+  ## A terminal that negotiated no extended key reporting — the most
+  ## conservative delivery, and the one a document opened with no front-end
+  ## (a suite, a headless run) resolves under.
+
 proc initEditingDocument*(path, text: string;
-                          model = kmProductDefault;
+                          model = bkCua;
                           settings = terminalWrapSettings();
-                          viewportRows = DefaultViewportRows): EditingDocument =
+                          viewportRows = DefaultViewportRows;
+                          delivery = TerminalLegacyDelivery): EditingDocument =
   ## A document over `text`, named `path`, with the caret at the top.
   ##
-  ## **THE MODE IS `emInsert` AND THAT IS NOT A DETAIL.** `initEditorState`
-  ## opens at `emNormal` because that is the right default for a modal model,
-  ## and `product_keymap`'s thirteen rows are scoped to `{emInsert}` — see
-  ## `ProductDefaultModes`, whose reason is that *"the terminal's Edit mode
-  ## has no modal editing at all"*. A product document left at `emNormal`
-  ## resolves none of its own bindings, so `Left` does nothing and every
-  ## printable key is handed back to the debugger's keymap. The mode is set
-  ## from the MODEL rather than hardcoded, because a Vim document must open in
-  ## normal mode or `dd` is typed into the buffer.
+  ## **THE MODE IS THE BASE'S.** `initEditorState` opens at `emNormal`
+  ## because that is the right default for a modal base; a CUA or Emacs
+  ## document opens in `emInsert`, ready to type, and a Vim document must
+  ## open in normal mode or `dd` is typed into the buffer (`initialModeFor`).
   result = EditingDocument(
     path: path,
     state: initEditorState(text),
     model: model,
     settings: settings,
     viewportRows: max(1, viewportRows),
-    timeline: initVersionedDocument(text))
+    timeline: initVersionedDocument(text),
+    delivery: delivery)
   result.state.mode = initialModeFor(model)
+
+const ViewColumnPolicy* = ColumnPolicy(tabSize: 1, ambiguous: awNarrow)
+  ## THE COLUMNS OF THE HORIZONTAL VIEW (Horizontal-Overflow.md §4): the
+  ## columns the native front-ends DRAW a line in. A tab is ONE column —
+  ## neither the terminal's grid (`styled_row.cellWidthOf`) nor GPUI's rows
+  ## (`leaves.dropColumns`, by rune) expand it — and a wide glyph two. The
+  ## editing settings' `policy` (tabs to the next multiple of 4) decides goal
+  ## columns; measuring the view with it would make a tabbed line's bar
+  ## promise columns the pane never draws, and put the caret-follow's caret
+  ## where the caret is not.
+
+func lineViewWidth*(line: string): int =
+  ## A line's width in view columns (`ViewColumnPolicy`): `selection.columnAt`
+  ## at its end. A line of printable ASCII is its length, without segmenting
+  ## it.
+  for c in line:
+    if ord(c) >= 0x80 or ord(c) < 0x20:
+      return columnAt(line, line.len, ViewColumnPolicy)
+  line.len
+
+proc recountWidest(w: var LineWidths) =
+  w.widest = 0
+  w.atWidest = 0
+  for x in w.widths:
+    if x > w.widest:
+      w.widest = x
+      w.atWidest = 1
+    elif x == w.widest:
+      inc w.atWidest
+
+proc measureLines(text: string; first, count: int): seq[int] =
+  ## The widths of `count` lines of `text` from the line starting at byte
+  ## `first`.
+  var at = first
+  for i in 0 ..< count:
+    var stop = text.find('\n', at)
+    if stop < 0: stop = text.len
+    result.add lineViewWidth(text[at ..< stop])
+    at = stop + 1
+
+proc measureAll(d: var EditingDocument) =
+  let text = d.state.doc
+  var lines = 1
+  for c in text:
+    if c == '\n': inc lines
+  d.widths = LineWidths(widths: measureLines(text, 0, lines),
+                        valid: true, version: d.timeline.version,
+                        docLen: text.len)
+  d.widths.recountWidest()
+
+proc remeasure(d: var EditingDocument; before, after: string; cs: ChangeSet) =
+  ## The lines one change set touched, measured again: from the line its
+  ## first change starts on to the line its last change ends on, in the old
+  ## text, replaced by the same span of the new one.
+  let ranges = cs.changedRangeSeq()
+  if ranges.len == 0:
+    return
+  let aFrom = ranges[0].fromA
+  var firstLine = 0
+  var lineStart = 0
+  for i in 0 ..< aFrom:
+    if before[i] == '\n':
+      inc firstLine
+      lineStart = i + 1
+  var oldLast = firstLine
+  for i in aFrom ..< ranges[^1].toA:
+    if before[i] == '\n': inc oldLast
+  var newLast = firstLine
+  for i in aFrom ..< ranges[^1].toB:
+    if after[i] == '\n': inc newLast
+  let fresh = measureLines(after, lineStart, newLast - firstLine + 1)
+  var w = d.widths
+  if oldLast >= w.widths.len:
+    d.widths.valid = false
+    return
+  for i in firstLine .. oldLast:
+    if w.widths[i] == w.widest: dec w.atWidest
+  w.widths = w.widths[0 ..< firstLine] & fresh & w.widths[oldLast + 1 .. ^1]
+  for x in fresh:
+    if x > w.widest:
+      w.widest = x
+      w.atWidest = 1
+    elif x == w.widest:
+      inc w.atWidest
+  if w.atWidest <= 0:
+    w.recountWidest()
+  d.widths = w
 
 proc drainJournal*(d: var EditingDocument) =
   ## Move the change sets the last step applied from the model's journal onto
@@ -259,10 +382,19 @@ proc drainJournal*(d: var EditingDocument) =
   ## EVERY writer of `d.state` calls it — `applyKey`, `applyNamed`,
   ## `applyChangeSet` here, and the collaboration projection's two — so a
   ## document leaves each call with an empty journal.
+  ##
+  ## Each change set also re-measures the lines it touched (`widths`), once
+  ## they have been measured at all.
   for cs in d.state.journal:
+    let before = d.timeline.text
     discard d.timeline.applyChanges(cs)
+    if d.widths.valid:
+      d.remeasure(before, d.timeline.text, cs)
   d.state.journal.setLen(0)
   d.timeline.keepRecent(TimelineDepth)
+  if d.widths.valid:
+    d.widths.version = d.timeline.version
+    d.widths.docLen = d.state.doc.len
 
 func version*(d: EditingDocument): DocumentVersion =
   ## The version an asynchronous producer names when it is handed this
@@ -283,11 +415,11 @@ proc applyChangeSet*(d: var EditingDocument; cs: ChangeSet;
 
 proc installImported*(d: var EditingDocument; imported: ImportedKeymap) =
   ## PLAT-36. Put `d` under an imported Vim configuration. The model becomes
-  ## `kmVim` — the import is layered on the Vim keymap, so the grammar the
+  ## `bkVim` — the import is layered on the Vim keymap, so the grammar the
   ## document is in IS Vim's — through `switchModel`, which keeps the text and
   ## history and resets a half-typed chord exactly as a `:keymap` does. A nil
   ## `imported` leaves `d` under the plain Vim keymap.
-  d.switchModel(kmVim)
+  d.switchModel(bkVim)
   if imported.isNil:
     return
   d.imported = imported
@@ -332,15 +464,6 @@ func sourcedSummary*(c: SourcedConfig): string =
     result.add "; " & $c.report.len & " not translated, first at line " &
                $first.line & ": " & $first.reason
 
-proc keymapOf*(model: KeymapModel): KeymapDefinition =
-  ## The three shipped models, by name. **ONE `case`, and it is total over the
-  ## enum**, so a fourth model does not compile rather than resolving to the
-  ## default and looking like it works.
-  case model
-  of kmProductDefault: productKeymap()
-  of kmVim: vimKeymap()
-  of kmKakoune: kakouneKeymap()
-
 proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
                nowMs: int64): KeyApplication =
   ## **ONE KEY, THROUGH THE KEYMAP LAYER, ONTO THE MODEL.** This is the whole
@@ -384,6 +507,59 @@ proc applyKey*(d: var EditingDocument; scope: EditingScope; key: string;
   KeyApplication(outcome: outcome, operations: step.operations,
                  resolution: step.kind, timedOut: step.timedOut)
 
+func isReadOnly*(d: EditingDocument): bool =
+  ## The document refuses local edits (PLAT-33's read-only filter) — the
+  ## Debug-mode editor until `editor.toggle-read-only`, the desktop's
+  ## `Ctrl+E`.
+  isReadOnly(d.state)
+
+proc setReadOnly*(d: var EditingDocument; readOnly: bool) =
+  ## **THE EDITOR'S READ-ONLY OPERATION**, one place for every front-end: put
+  ## PLAT-33's read-only filter on the document, or take it off. Selection,
+  ## caret motion and copy are untouched by it — only edits are refused —
+  ## which is Monaco's read-only mode and the user's requirement
+  ## (2026-10-12: Shift+arrows select in the read-only editor).
+  var kept: seq[TransactionFilter] = @[]
+  for f in d.state.filters:
+    if f.kind != tfReadOnly: kept.add f
+  if readOnly: kept.add TransactionFilter(kind: tfReadOnly)
+  d.state.filters = kept
+
+func clipboardText*(d: EditingDocument): string =
+  ## What the last `clipboard-copy` / `clipboard-cut` put on the clipboard
+  ## register, for the host to hand to the platform's clipboard (§5.2: the
+  ## core performs no I/O).
+  d.state.registers.getOrDefault(ClipboardRegister).text
+
+proc offerClipboard*(d: var EditingDocument; text: string) =
+  ## The platform's clipboard, handed in by the host before a
+  ## `clipboard-paste`: a payload ending in a newline is linewise, VS Code's
+  ## whole-line copy coming back as whole lines.
+  d.state.setRegister(ClipboardRegister, Register(
+    text: text, kind: (if text.endsWith("\n"): rkLinewise else: rkCharwise)))
+
+proc applyResolved*(d: var EditingDocument; res: EditingResolution;
+                    nowMs: int64): KeyApplication =
+  ## A resolution a ROUTER computed (`keymap_router.route`: every layer on the
+  ## scope path, the user's rows, the pushed modes), executed on this
+  ## document. The router owns the pending prefix, so the document's stays
+  ## empty; everything else is `applyKey`'s reading of the answer.
+  var local = res
+  local.pending = PendingChords()
+  let docBefore = d.state.doc
+  let (next, ops) = applyResolution(d.state, local, d.settings, nowMs,
+                                    d.viewportRows)
+  d.state = next
+  d.drainJournal()
+  let outcome =
+    case res.kind
+    of erNothing: eoIgnored
+    of erPending: eoMoved
+    of erOperation, erCharacter:
+      if d.state.doc != docBefore: eoChanged else: eoMoved
+  KeyApplication(outcome: outcome, operations: ops, resolution: res.kind,
+                 timedOut: res.timedOut)
+
 func followedViewportTop*(top, caretLine, rows: int): int =
   ## The first visible line after the minimal scroll that brings `caretLine`
   ## into a `rows`-high window starting at `top` — ONE rule for every
@@ -404,24 +580,18 @@ func followedViewportTop*(top, caretLine, rows: int): int =
 func editScopeOf*(d: EditingDocument): EditingScope =
   ## **THE SCOPE A FRONT-END'S EDITOR PANE RESOLVES KEYS IN**, for a focused
   ## editor in Edit product mode — one rule for every front-end (PLAT-44: the
-  ## terminal and GPUI both call this; §30b).
+  ## terminal and GPUI both call this; §30b). The front-end supplied only the
+  ## document's `delivery` (Base-Keymaps §4.2's three keys); the context keys
+  ## a `when` reads are `context_keys.editorContextKeys`'s.
   ##
-  ## `textEntry` follows the document's MODE: a printable key stands for
-  ## itself exactly in insert mode, whichever model put the document there.
-  ## PLAT-43 measured the alternative: the terminal passed `true`
-  ## unconditionally, and under Vim in normal mode `d` `w` typed `dw`.
+  ## `textEntry` follows the document's MODE under a modal base — a printable
+  ## key stands for itself exactly in insert mode (PLAT-43 measured the
+  ## alternative: under Vim in normal mode `d` `w` typed `dw`) — and is always
+  ## on under CUA and Emacs, which have no command mode.
   EditingScope(model: d.model, product: pmEdit, pane: epEditor,
-               mode: d.state.mode, textEntry: d.state.mode == emInsert)
-
-proc claimsKey*(d: EditingDocument; scope: EditingScope; key: string;
-                nowMs: int64): bool =
-  ## PLAT-43. Would `applyKey` treat `key` as the editor's? The same resolver,
-  ## asked without executing: `erNothing` is the one answer that hands the key
-  ## back to the product keymap, exactly as `applyKey` reads it.
-  if key.len == 0:
-    return false
-  editing_keymap.resolveKey(d.state, keymapOf(d.model).keymap, scope, key,
-                            nowMs).kind != erNothing
+               mode: d.state.mode,
+               textEntry: not isModal(d.model) or d.state.mode == emInsert,
+               context: editorContextKeys(d.state, pmEdit, d.delivery))
 
 proc applyNamed*(d: var EditingDocument; name: string; args: OpArgs;
                  nowMs: int64): EditingOutcome =
@@ -537,6 +707,17 @@ proc caretLine*(d: EditingDocument): int =
   ## one place, which is here.
   d.caretPos.line + 1
 
+proc caretLineText(d: EditingDocument): tuple[text: string; byteCol: int] =
+  ## The caret's line only — its start is `column` bytes back from the head,
+  ## its end the next newline — rather than every line of the document; and
+  ## the caret's byte offset in it.
+  let pos = d.caretPos
+  let head = clamp(d.state.primaryHead, 0, d.state.doc.len)
+  let lineStart = head - pos.column
+  var lineEnd = d.state.doc.find('\n', lineStart)
+  if lineEnd < 0: lineEnd = d.state.doc.len
+  (d.state.doc[lineStart ..< lineEnd], pos.column)
+
 proc caretColumn*(d: EditingDocument): int =
   ## **0-based GRAPHEME-CLUSTER column within the caret's line.**
   ##
@@ -548,31 +729,60 @@ proc caretColumn*(d: EditingDocument): int =
   ## every display row is built from — rather than a second walk, because a
   ## second walk is §30a's whole subject.
   ##
-  ## **THE CELL COLUMN IS A DIFFERENT NUMBER AND IT IS NOT PUBLISHED HERE.** A
-  ## tab is one cluster and `policy.tabSize` cells, and a wide CJK cluster is
-  ## one cluster and two cells, so a painter placing a cursor wants cells
-  ## while a caller asking "which cluster is the caret on" wants this. A
-  ## `caretDisplayColumn` was written and DELETED before it landed, because
-  ## nothing reached it: `views/edit_pane` places the caret at
-  ## `area.col + gutter + caretColumn`, which is the cells reading of a
-  ## clusters number and agrees on ASCII. That disagreement is a real one and
-  ## it is recorded HERE rather than as an export with no consumer (PLAT-31's
-  ## ratchet rule: *"a public helper nobody calls is not a backlog item
-  ## waiting for a caller; it is coverage-shaped dead code"*). The day a
-  ## medium places a cursor on a tab, the function arrives with its caller.
-  let pos = d.caretPos
-  # The caret's line only — its start is `column` bytes back from the head,
-  # its end the next newline — rather than every line of the document.
-  let head = clamp(d.state.primaryHead, 0, d.state.doc.len)
-  let lineStart = head - pos.column
-  var lineEnd = d.state.doc.find('\n', lineStart)
-  if lineEnd < 0: lineEnd = d.state.doc.len
-  let metrics = lineMetrics(d.state.doc[lineStart ..< lineEnd],
-                            d.settings.policy)
+  ## **THE VIEW COLUMN IS A DIFFERENT NUMBER** — `caretViewColumn`. A wide
+  ## CJK cluster is one cluster and two columns; the horizontal view
+  ## (Horizontal-Overflow.md §4.5) scrolls in view columns
+  ## (`ViewColumnPolicy`), so its caret-follow reads that one.
+  let (text, byteCol) = d.caretLineText
+  let metrics = lineMetrics(text, d.settings.policy)
   for i, c in metrics.clusters:
-    if c.startByte >= pos.column:
+    if c.startByte >= byteCol:
       return i
   metrics.clusters.len
+
+proc caretViewColumn*(d: EditingDocument): int =
+  ## The caret's 0-based column in the horizontal view (`ViewColumnPolicy`):
+  ## the column the view follows and the bar's mark.
+  let (text, byteCol) = d.caretLineText
+  columnAt(text, byteCol, ViewColumnPolicy)
+
+proc contentCols*(d: var EditingDocument): int =
+  ## Horizontal-Overflow.md §4.1: the editor's content width — its widest
+  ## line in view columns, exact, from the per-line widths `drainJournal`
+  ## maintains (measured once, the first time it is asked).
+  if not d.widths.valid or d.widths.version != d.timeline.version or
+     d.widths.docLen != d.state.doc.len:
+    d.measureAll()
+  d.widths.widest
+
+proc followView*(d: var EditingDocument; v: var HorizontalView;
+                 f: var CaretFollow; viewportCols: int): bool =
+  ## THE EDITOR'S HORIZONTAL VIEW before a frame, one rule for every
+  ## front-end: the content width and the view's width brought up to date,
+  ## then §4.5's caret-follow when the caret moved since it was last
+  ## followed (`horizontal_scroll.followCaret`). Answers whether the view
+  ## moved.
+  let before = v.leftCol
+  v.setContent(d.contentCols)
+  v.setViewport(viewportCols)
+  let (text, byteCol) = d.caretLineText
+  discard v.followCaret(f, d.caretLine, columnAt(text, byteCol, ViewColumnPolicy),
+                        lineViewWidth(text))
+  v.leftCol != before
+
+func offsetAt*(d: EditingDocument; line, column: int): int =
+  ## The byte offset of the 0-based (line, cluster column), clamped into the
+  ## document.
+  let ls = d.lines
+  if ls.len == 0:
+    return 0
+  let l = clamp(line, 0, ls.len - 1)
+  let metrics = lineMetrics(ls[l], d.settings.policy)
+  let byteInLine =
+    if column <= 0: 0
+    elif column >= metrics.clusters.len: metrics.byteLen
+    else: metrics.clusters[column].startByte
+  toTextStore(d.state.doc).offsetOf(TextPos(line: l, column: byteInLine))
 
 proc moveCaretTo*(d: var EditingDocument; line, column: int) =
   ## Place the caret at a 0-based (line, cluster column).
@@ -583,19 +793,49 @@ proc moveCaretTo*(d: var EditingDocument; line, column: int) =
   ## there" and none of them is a keystroke. It goes through
   ## `selection.caretSelection` rather than assigning a range, so the
   ## normalisation invariant `FUZZ-3` asserts holds by construction.
+  d.state.selection = caretSelection(d.offsetAt(line, column))
+
+proc extendSelectionTo*(d: var EditingDocument; line, column: int) =
+  ## Keep the main selection's anchor and move its head to the 0-based
+  ## (line, cluster column) — a pointer DRAG over the text, every
+  ## front-end's (a press placed the anchor with `moveCaretTo`). Edits stay
+  ## refused on a read-only document; selecting is not an edit.
+  d.state.selection = singleSelection(d.state.selection.mainRange.anchor,
+                                      d.offsetAt(line, column))
+
+proc selectSpan*(d: var EditingDocument; anchor, head: int) =
+  ## Select the bytes `[anchor, head)` (head may precede anchor) — the other
+  ## non-key writer, for a find match and a pointer drag. Through
+  ## `selection.singleSelection`, so the selection is normalised by
+  ## construction, as `moveCaretTo`'s is.
+  let n = d.state.doc.len
+  d.state.selection = singleSelection(clamp(anchor, 0, n), clamp(head, 0, n))
+
+type
+  SelectionCells* = seq[tuple[line, fromColumn, toColumn: int]]
+    ## A selection as a front-end paints it: per 1-based line, the 1-based
+    ## display columns `[from, to)`.
+
+proc selectionCells*(d: EditingDocument): SelectionCells =
+  ## THE SELECTION AS EVERY FRONT-END PAINTS IT — the terminal's source pane
+  ## and GPUI's editor rows read this one derivation: display columns from
+  ## `selection.columnAt` (tabs expanded, wide glyphs two columns), and a
+  ## range that continues past a line's end covers one cell for the line
+  ## break, as Monaco's selection does.
+  result = @[]
+  let text = d.text
   let ls = d.lines
-  if ls.len == 0:
-    d.state.selection = caretSelection(0)
-    return
-  let l = clamp(line, 0, ls.len - 1)
-  let metrics = lineMetrics(ls[l], d.settings.policy)
-  let byteInLine =
-    if column <= 0: 0
-    elif column >= metrics.clusters.len: metrics.byteLen
-    else: metrics.clusters[column].startByte
-  let store = toTextStore(d.state.doc)
-  d.state.selection = caretSelection(
-    store.offsetOf(TextPos(line: l, column: byteInLine)))
+  for r in d.state.selection.ranges:
+    if r.isEmpty: continue
+    let a = caretPosOf(text, r.rangeFrom)
+    let b = caretPosOf(text, r.rangeTo)
+    for line in a.line .. min(b.line, ls.len - 1):
+      let lineText = ls[line]
+      let fromCol = if line == a.line: columnAt(lineText, a.column) else: 0
+      let toCol = if line == b.line: columnAt(lineText, b.column)
+                  else: columnAt(lineText, lineText.len) + 1
+      if toCol > fromCol:
+        result.add (line + 1, fromCol + 1, toCol + 1)
 
 func hasSelection*(d: EditingDocument): bool =
   ## Whether any range spans text. A caret is a range of zero length, so

@@ -51,10 +51,11 @@
 ## `Ctrl+w h` from the leftmost pane jump to the rightmost, which is the same
 ## keystroke meaning two opposite things depending on where the user was.
 
-import std/[algorithm, strutils]
+import std/[algorithm, strutils, tables]
 
 import isonim_tui
 
+import codetracer_embed   # PLAT-68: the scope path's element vocabulary
 import headless_app/layout_model
 
 import ../layout/profile
@@ -83,6 +84,19 @@ type
       ## and therefore the order the focus chain visits them.
     nodeIds*: seq[int]
       ## `nodeIds[i]` is the focus-chain node for `regions[i]`.
+    tab*: TerminalNode
+      ## PLAT-68: the session tab's node — the window's child and every
+      ## pane's parent, so the tree is Base-Keymaps §5.2's
+      ## `window ─ session tab ─ pane ─ …`.
+    inner*: seq[TerminalNode]
+      ## PLAT-68: the nodes below a pane (the editor, an open find widget
+      ## and its field) or below the window (the palette, the command line,
+      ## a context menu) that `scopePathOf` hung for the current focus.
+    heldPane*: int
+      ## The region that held the focus when a window-owned overlay took it
+      ## (`scopePathOf(atWindow = true)`), or -1: the focus goes back to it
+      ## when the overlay's nodes come down, as a closed palette returns the
+      ## keys to the pane it was opened from.
 
   MaximizeState* = object
     ## `z`. Which pane is filling the screen, and whether one is.
@@ -155,7 +169,12 @@ proc directSelectPane*(action: KeyAction): (bool, PaneKind) =
 # The focus chain
 # ---------------------------------------------------------------------------
 
-proc newPaneFocus*(projection: Projection): PaneFocus =
+proc scopeNode(r: TerminalRenderer; kind: ElementKind; id: string): TerminalNode =
+  result = r.createElement("div")
+  r.setAttribute(result, ScopeKindAttribute, $kind)
+  r.setAttribute(result, ScopeIdAttribute, id)
+
+proc newPaneFocus*(projection: Projection; tabId = "tab:1"): PaneFocus =
   ## Lift a projection's visible panes into an `isonim-tui` focus chain.
   ##
   ## One node per region, appended in projection order, each marked focusable.
@@ -163,15 +182,20 @@ proc newPaneFocus*(projection: Projection): PaneFocus =
   ## order IS its insertion order — so the chain this returns is the order the
   ## panes are laid out in, which is what makes `Tab`'s order stable across
   ## repaints rather than dependent on which pane was painted last.
+  ##
+  ## PLAT-68: the panes hang below a window node and a session-tab node, so
+  ## `focusPath` over this tree is the scope path's frame.
   var r: TerminalRenderer
-  let root = r.createElement("div")
+  let root = scopeNode(r, ekWindow, "window")
+  let tab = scopeNode(r, ekTab, tabId)
+  r.appendChild(root, tab)
   result = PaneFocus(manager: newFocusManager(), root: root, regions: @[],
-                     nodeIds: @[])
+                     nodeIds: @[], tab: tab, inner: @[], heldPane: -1)
   for region in projection.regions:
-    let node = r.createElement("div")
+    let node = scopeNode(r, ekPane, $region.pane)
     r.setAttribute(node, "data-focusable", "true")
     r.setAttribute(node, "data-pane", $region.pane)
-    r.appendChild(root, node)
+    r.appendChild(tab, node)
     result.regions.add region
     result.nodeIds.add node.id
   if result.nodeIds.len > 0:
@@ -184,8 +208,75 @@ proc indexOfNode(pf: PaneFocus; id: int): int =
   -1
 
 proc focusedIndex*(pf: PaneFocus): int =
-  ## Which region has focus, or -1.
-  if pf.isNil: -1 else: pf.indexOfNode(pf.manager.focusedId)
+  ## Which region has focus, or -1 — the pane on the focus path, whether the
+  ## pane itself or something inside it (the editor, a find field) holds the
+  ## focus; while a window overlay holds it, the pane it was taken from (the
+  ## window's focused pane is still that one, as the desktop's selected
+  ## panel stays selected under its palette).
+  if pf.isNil: return -1
+  for id in pf.manager.focusPath(pf.root):
+    let i = pf.indexOfNode(id)
+    if i >= 0: return i
+  if pf.heldPane >= 0 and pf.heldPane < pf.nodeIds.len and pf.inner.len > 0:
+    return pf.heldPane
+  -1
+
+proc dropInner*(pf: PaneFocus) =
+  ## Take down the inner nodes `scopePathOf` hung, and put the focus back on
+  ## the pane that holds it (or the pane a window overlay took it from, or
+  ## the first pane), without moving it between panes. A producer calls it
+  ## before reading which pane is focused, so a closed overlay's nodes are
+  ## not mistaken for the focus.
+  var r: TerminalRenderer
+  let pane = pf.focusedIndex()
+  for n in pf.inner:
+    if not n.parent.isNil: r.removeChild(n.parent, n)
+  pf.inner = @[]
+  let target = if pane >= 0: pf.nodeIds[pane]
+               elif pf.heldPane >= 0 and pf.heldPane < pf.nodeIds.len:
+                 pf.nodeIds[pf.heldPane]
+               elif pf.nodeIds.len > 0: pf.nodeIds[0]
+               else: 0
+  if pf.manager.focusedId != target:
+    discard pf.manager.setFocus(pf.root, target)
+
+proc scopePathOf*(pf: PaneFocus; inner: openArray[ScopeElement];
+                  atWindow = false): ScopePath =
+  ## **THE TERMINAL'S SCOPE PATH** (Base-Keymaps §6.2): hang `inner` — the
+  ## focused pane's editor and its open find widget, or (`atWindow`) a
+  ## window-owned overlay — as nodes below the focused pane or the window,
+  ## focus the deepest, and read `FocusManager.focusPath` back as elements.
+  ## The path comes from the tree, so a node per pane and per overlay is
+  ## what the resolver sees — not a second description of the screen.
+  var r: TerminalRenderer
+  pf.dropInner()
+  pf.heldPane = if atWindow: pf.focusedIndex() else: -1
+  var parent =
+    if atWindow or pf.focusedIndex() < 0: pf.root
+    else:
+      var node: TerminalNode = nil
+      for c in pf.tab.children:
+        if c.id == pf.nodeIds[pf.focusedIndex()]: node = c
+      node
+  for e in inner:
+    let node = scopeNode(r, e.kind, e.id)
+    r.appendChild(parent, node)
+    pf.inner.add node
+    parent = node
+  if pf.inner.len > 0:
+    discard pf.manager.setFocus(pf.root, pf.inner[^1].id)
+  result = @[]
+  var byId = initTable[int, TerminalNode]()
+  var stack = @[pf.root]
+  while stack.len > 0:
+    let n = stack.pop()
+    byId[n.id] = n
+    for c in n.children: stack.add c
+  for id in pf.manager.focusPath(pf.root):
+    let n = byId[id]
+    result.add elementOfAttributes(
+      n.attributes.getOrDefault(ScopeKindAttribute),
+      n.attributes.getOrDefault(ScopeIdAttribute))
 
 proc focusedPane*(pf: PaneFocus): (bool, PaneKind) =
   let idx = pf.focusedIndex()
@@ -205,6 +296,7 @@ proc focusNextPane*(pf: PaneFocus): (bool, PaneKind) =
   ## `Tab`. Wraps, which is what "cycle" means and what `FocusManager` does.
   if pf.nodeIds.len == 0:
     return (false, paneEditor)
+  pf.dropInner()
   discard pf.manager.focusNext(pf.root)
   pf.focusedPane()
 
@@ -212,6 +304,7 @@ proc focusPrevPane*(pf: PaneFocus): (bool, PaneKind) =
   ## `Shift+Tab`.
   if pf.nodeIds.len == 0:
     return (false, paneEditor)
+  pf.dropInner()
   discard pf.manager.focusPrev(pf.root)
   pf.focusedPane()
 
@@ -220,6 +313,7 @@ proc focusPaneKind*(pf: PaneFocus; kind: PaneKind): bool =
   ## profile does not show it.
   for i, region in pf.regions:
     if region.pane == kind:
+      pf.dropInner()
       discard pf.manager.setFocus(pf.root, pf.nodeIds[i])
       return true
   false

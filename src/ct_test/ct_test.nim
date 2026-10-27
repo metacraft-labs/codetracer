@@ -84,7 +84,7 @@ proc ctTestUsageMessage*(): string =
   "discover (--workspace <path> | --file <path>) [--json] " &
   "[--scope auto|vcs|walk|unscoped] [--unscoped] " &
   "| run --workspace <path> [--file <f>] [--partition file:<path>] " &
-  "[--threads N] [--json] [--summary <path>] " &
+  "[--threads N] [--json] [--summary <path>] [--events <path>] " &
   "[--no-certificate] [--untracked reads|strict] " &
   "[--sign-key <path> --key-id <id>] " &
   "| verify (--staged | --worktree | --commit <rev>) [--workspace <path>] " &
@@ -120,6 +120,12 @@ proc ctTestUsageMessage*(): string =
   "unusable `.codetracer/test.toml` is reported before the tests run, " &
   "which still run, and the certificate is withheld; withholding never " &
   "changes the exit status; " &
+  "`--events <path>` also writes every per-test event the run produced " &
+  "(the `TestEvent` contract, one JSON object per line, units in test-id " &
+  "order) to <path>, for a consumer that shows each test's outcome rather " &
+  "than the totals; it is written whatever the verdict, and a path that " &
+  "cannot be written is reported on stderr without changing the exit " &
+  "status; " &
   "`--no-certificate` suppresses issuance entirely, so nothing is written; " &
   "signing is OPTIONAL and OFF " &
   "unless `--sign-key` is passed; " &
@@ -185,6 +191,7 @@ type
     threads: int                 ## 0 ⇒ REPRO_TEST_THREADS / CPU count
     jsonOutput: bool
     summaryPath: string          ## optional path to also write the summary to
+    eventsPath: string           ## optional path for the per-test events (JSON Lines)
     noCertificate: bool          ## suppress issuance entirely
     signKeyPath: string          ## OpenSSH ed25519 private key; empty ⇒ unsigned
     keyId: string                ## which key signed, for a consumer's key store
@@ -208,7 +215,7 @@ proc parseUntrackedMode(value: string; into: var RunOptions) =
 proc parseRunArgs(args: seq[string]): RunOptions =
   ## Parse the ``test run`` argument vector:
   ## ``--workspace <root> [--file <f>] [--partition file:<path>]``
-  ## ``[--threads N] [--json] [--summary <path>]``.
+  ## ``[--threads N] [--json] [--summary <path>] [--events <path>]``.
   result = RunOptions(threads: 0, jsonOutput: false, errors: @[])
   var i = 0
   while i < args.len:
@@ -232,6 +239,9 @@ proc parseRunArgs(args: seq[string]): RunOptions =
     of "--summary":
       if i + 1 >= args.len: result.errors.add "missing value for --summary"
       else: result.summaryPath = args[i + 1]; inc i
+    of "--events":
+      if i + 1 >= args.len: result.errors.add "missing value for --events"
+      else: result.eventsPath = args[i + 1]; inc i
     of "--no-certificate":
       result.noCertificate = true
     of "--sign-key":
@@ -527,6 +537,27 @@ proc runRun(args: seq[string]; registry: var ProviderRegistry;
   if opts.summaryPath.len > 0:
     createDir(parentDir(opts.summaryPath))
     writeFile(opts.summaryPath, summaryJson.pretty)
+
+  # ---- The per-test outcomes, for a consumer that shows them ---------------
+  # The summary above is totals; a consumer that renders WHICH test passed and
+  # which failed — the desktop Test Results pane, which runs the suite through
+  # `ct test run` — needs the providers' own events. They are written whatever
+  # the verdict (a red suite is exactly when the per-test answer matters), in
+  # `runEvents`' worker-independent order, by the contracts serialiser.
+  #
+  # A path that cannot be written is REPORTED, not fatal: the tests have run
+  # and the exit status is theirs, as the certificate's withholding rule says
+  # of its own failures. The consumer then finds no events and has to say so,
+  # which the desktop host does.
+  if opts.eventsPath.len > 0:
+    try:
+      let dir = parentDir(opts.eventsPath)
+      if dir.len > 0:
+        createDir(dir)
+      writeFile(opts.eventsPath, runEventsJsonLines(outcome.runResult))
+    except CatchableError as err:
+      stderr.writeLine "ct test: warning — the --events file " &
+                       opts.eventsPath & " could not be written: " & err.msg
 
   # ---- Say why, in the same breath as saying so ----------------------------
   # An exit code that changes from 0 to non-zero with no explanation is worse

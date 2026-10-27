@@ -239,11 +239,9 @@ type
     aRunToEntry,                  # CTRL+ALT+E — toolbar `run-to-entry`
     aResetOperation,              # CTRL+ALT+R — toolbar `reset-operation`
     aRunTests,                    # ALT+L      — toolbar `run-tests`
-    # OPENS THE KEYBOARD-SHORTCUTS DIALOG, and it is an action rather than a
-    # hardcoded `Mousetrap.bind` for the same reason everything above it is:
-    # a chord bound in code is one `renderChord` cannot see, so the menu item
-    # that opens the shortcuts dialog would be the one menu item in the product
-    # with no chord printed beside it.
+    # OPENS THE KEYBOARD-SHORTCUTS DIALOG, and it is an action so the menu item
+    # that opens it shows the chord that runs it (`help.keyboard-shortcuts`,
+    # CUA's `Ctrl+K Ctrl+S`, resolved by the key router).
     #
     # Appended, per the note above — `actions` in `ui_js.nim` is a positional
     # literal and an insertion anywhere else re-points every handler after it.
@@ -320,7 +318,15 @@ type
     # the desktop's own saved layout files (the terminal and the GPUI window
     # keep theirs, and are not touched). Appended at the end, for the reason
     # every note above gives.
-    aResetLayout                  # View > Reset Layout
+    aResetLayout,                 # View > Reset Layout
+    # PLAT-70 Part B (Horizontal-Overflow.md §5): the table panes' palette
+    # entries — **Show Detail** (`list.show-detail`, the focused row's full
+    # text under it) and **Widen Column** / **Narrow Column**
+    # (`table.resize-column` on the Event Log's focused column). Appended at
+    # the end, for the reason every note above gives.
+    aShowDetail,                  # palette: Show Detail
+    aWidenColumn,                 # palette: Widen Column
+    aNarrowColumn                 # palette: Narrow Column
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

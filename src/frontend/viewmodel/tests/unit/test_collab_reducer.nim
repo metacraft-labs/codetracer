@@ -336,11 +336,11 @@ suite "collaborative ViewModel M1 reducers and codec":
 
     var wrongPath = op(vokSetRegister, "wrong-path-register", 4,
       principalId = user,
-      targetPath = "statePane.activeTab",
-      payload = %*{"value": "locals"})
+      targetPath = "statePane.selectedPath",
+      payload = %*{"value": "locals.x"})
     wrongPath.capabilityIds = @["grant-calltrace-mutator"]
     check doc.applyViewOp(wrongPath).status == asRejected
-    check doc.state.statePane.activeTab.value == ""
+    check doc.state.statePane.selectedPath.value == ""
 
   test "test_collab_debug_command_requires_capability_and_active_driver_lease":
     var doc = newDoc()

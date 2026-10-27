@@ -5,13 +5,13 @@
     "Regenerate with `just plat42-surfaces-record`. Asserted by",
     "src/frontend/gpui/tests/test_plat42_surfaces.nim, which reads no binary."
   ],
-  "takenAt": "2026-09-29T23:43:52Z",
-  "host": "gpu-server-001",
+  "takenAt": "2026-10-17T04:58:57Z",
+  "host": "nixos-ci-bare-001",
   "scenarios": {
     "entry-shell": {
       "replayOps": "",
-      "planSha256": "bc2d59c0ed8601544708b2156fb9e252e974d5955d2e0fed68857322c8e066de",
-      "rowCount": 37,
+      "planSha256": "eb15277e3f4112c018f0e77445e35c3f43e78039b277b380f1b5848461de9113",
+      "rowCount": 45,
       "rows": [
         {
           "row": 1,
@@ -21,17 +21,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "#404040",
-          "text": "\u25b6 1\u00a0\u00a0\u00a0\u00a0#!/usr/bin/env python3"
+          "text": "1#!/usr/bin/env python3",
+          "code": "#!/usr/bin/env python3"
         },
         {
           "row": 2,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=nil|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "2\u00a0\u00a0\u00a0\u00a0\"\"\"calc \u2014 the small, fast, deterministic program behind CTUI-1's ``calc`` f"
+          "text": "2\"\"\"calc \u2014 the small, fast, deterministic program behind CTUI-1's ``calc`` fixtu",
+          "code": "\"\"\"calc \u2014 the small, fast, deterministic program behind CTUI-1's ``calc`` fixtur"
         },
         {
           "row": 3,
@@ -41,7 +43,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "3"
+          "text": "3",
+          "code": ""
         },
         {
           "row": 4,
@@ -51,7 +54,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "4\u00a0\u00a0\u00a0\u00a0WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS LIKE THIS"
+          "text": "4WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS LIKE THIS",
+          "code": "WHY THIS PROGRAM EXISTS, AND WHY IT LOOKS LIKE THIS"
         },
         {
           "row": 5,
@@ -61,7 +65,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "5\u00a0\u00a0\u00a0\u00a0---------------------------------------------------"
+          "text": "5---------------------------------------------------",
+          "code": "---------------------------------------------------"
         },
         {
           "row": 6,
@@ -71,7 +76,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "6\u00a0\u00a0\u00a0\u00a0``codetracer-specs/Front-Ends/CodeTracer-TUI.milestones.org`` (CTUI-1) asks"
+          "text": "6``codetracer-specs/Front-Ends/CodeTracer-TUI.milestones.org`` (CTUI-1) asks for",
+          "code": "``codetracer-specs/Front-Ends/CodeTracer-TUI.milestones.org`` (CTUI-1) asks for"
         },
         {
           "row": 7,
@@ -81,7 +87,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "7\u00a0\u00a0\u00a0\u00a0a fixture that is \"small, fast, deterministic; the default for stepping and"
+          "text": "7a fixture that is \"small, fast, deterministic; the default for stepping and",
+          "code": "a fixture that is \"small, fast, deterministic; the default for stepping and"
         },
         {
           "row": 8,
@@ -91,7 +98,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "8\u00a0\u00a0\u00a0\u00a0layout tests\".  Every constraint in that sentence is a constraint on this f"
+          "text": "8layout tests\".  Every constraint in that sentence is a constraint on this file:",
+          "code": "layout tests\".  Every constraint in that sentence is a constraint on this file:"
         },
         {
           "row": 9,
@@ -101,7 +109,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "9"
+          "text": "9",
+          "code": ""
         },
         {
           "row": 10,
@@ -111,7 +120,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "10\u00a0\u00a0\u00a0\u00a0* **small / fast** \u2014 the fixture is recorded on demand by"
+          "text": "10* **small / fast** \u2014 the fixture is recorded on demand by",
+          "code": "* **small / fast** \u2014 the fixture is recorded on demand by"
         },
         {
           "row": 11,
@@ -121,7 +131,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "11\u00a0\u00a0\u00a0\u00a0  ``src/frontend/tui/tests/fixtures/fixture_provider.nim`` and the Tier-1 "
+          "text": "11  ``src/frontend/tui/tests/fixtures/fixture_provider.nim`` and the Tier-1 TUI",
+          "code": "  ``src/frontend/tui/tests/fixtures/fixture_provider.nim`` and the Tier-1 TUI"
         },
         {
           "row": 12,
@@ -131,7 +142,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "12\u00a0\u00a0\u00a0\u00a0  lane pays for that recording the first time it runs on a workspace.  The"
+          "text": "12  lane pays for that recording the first time it runs on a workspace.  The",
+          "code": "  lane pays for that recording the first time it runs on a workspace.  The"
         },
         {
           "row": 13,
@@ -141,7 +153,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "13\u00a0\u00a0\u00a0\u00a0  whole program is a few hundred recorded steps, so the record step costs"
+          "text": "13  whole program is a few hundred recorded steps, so the record step costs",
+          "code": "  whole program is a few hundred recorded steps, so the record step costs"
         },
         {
           "row": 14,
@@ -151,7 +164,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "14\u00a0\u00a0\u00a0\u00a0  seconds rather than minutes."
+          "text": "14  seconds rather than minutes.",
+          "code": "  seconds rather than minutes."
         },
         {
           "row": 15,
@@ -161,7 +175,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "15\u00a0\u00a0\u00a0\u00a0* **deterministic** \u2014 no clock, no randomness, no environment lookups, no "
+          "text": "15* **deterministic** \u2014 no clock, no randomness, no environment lookups, no I/O",
+          "code": "* **deterministic** \u2014 no clock, no randomness, no environment lookups, no I/O"
         },
         {
           "row": 16,
@@ -171,7 +186,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "16\u00a0\u00a0\u00a0\u00a0  other than ``print``.  A fixture whose trace differs between two recordi"
+          "text": "16  other than ``print``.  A fixture whose trace differs between two recordings",
+          "code": "  other than ``print``.  A fixture whose trace differs between two recordings"
         },
         {
           "row": 17,
@@ -181,7 +197,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "17\u00a0\u00a0\u00a0\u00a0  cannot be the ground truth for a stepping test."
+          "text": "17  cannot be the ground truth for a stepping test.",
+          "code": "  cannot be the ground truth for a stepping test."
         },
         {
           "row": 18,
@@ -191,7 +208,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "18\u00a0\u00a0\u00a0\u00a0* **stepping and layout** \u2014 it is written as a chain of *small named calls"
+          "text": "18* **stepping and layout** \u2014 it is written as a chain of *small named calls*",
+          "code": "* **stepping and layout** \u2014 it is written as a chain of *small named calls*"
         },
         {
           "row": 19,
@@ -201,7 +219,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "19\u00a0\u00a0\u00a0\u00a0  (``main`` -> ``evaluate`` -> ``apply_op`` -> ``add``/``sub``/``mul``/``d"
+          "text": "19  (``main`` -> ``evaluate`` -> ``apply_op`` -> ``add``/``sub``/``mul``/``div``",
+          "code": "  (``main`` -> ``evaluate`` -> ``apply_op`` -> ``add``/``sub``/``mul``/``div``)"
         },
         {
           "row": 20,
@@ -211,7 +230,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "20\u00a0\u00a0\u00a0\u00a0  rather than as one flat loop, because a calltrace pane with a single fra"
+          "text": "20  rather than as one flat loop, because a calltrace pane with a single frame i",
+          "code": "  rather than as one flat loop, because a calltrace pane with a single frame in"
         },
         {
           "row": 21,
@@ -221,7 +241,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "21\u00a0\u00a0\u00a0\u00a0  it exercises nothing.  Every step lands in a named function with live lo"
+          "text": "21  it exercises nothing.  Every step lands in a named function with live locals",
+          "code": "  it exercises nothing.  Every step lands in a named function with live locals."
         },
         {
           "row": 22,
@@ -231,7 +252,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "22"
+          "text": "22",
+          "code": ""
         },
         {
           "row": 23,
@@ -241,7 +263,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "23\u00a0\u00a0\u00a0\u00a0Nothing here asserts anything.  The assertions live in"
+          "text": "23Nothing here asserts anything.  The assertions live in",
+          "code": "Nothing here asserts anything.  The assertions live in"
         },
         {
           "row": 24,
@@ -251,7 +274,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "24\u00a0\u00a0\u00a0\u00a0``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the record"
+          "text": "24``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded",
+          "code": "``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded"
         },
         {
           "row": 25,
@@ -261,7 +285,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "25\u00a0\u00a0\u00a0\u00a0trace through a real ``HeadlessDebugSession``."
+          "text": "25trace through a real ``HeadlessDebugSession``.",
+          "code": "trace through a real ``HeadlessDebugSession``."
         },
         {
           "row": 26,
@@ -271,7 +296,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "26\u00a0\u00a0\u00a0\u00a0\"\"\""
+          "text": "26\"\"\"",
+          "code": "\"\"\""
         },
         {
           "row": 27,
@@ -281,7 +307,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "27"
+          "text": "27",
+          "code": ""
         },
         {
           "row": 28,
@@ -291,17 +318,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "28"
+          "text": "28",
+          "code": ""
         },
         {
           "row": 29,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "29\u00a0\u00a0\u00a0\u00a0def add(left, right):"
+          "text": "29def add(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def add(left, right):"
         },
         {
           "row": 30,
@@ -311,7 +340,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "30\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer addition, as its own frame so stepping has somewhere to ste"
+          "text": "30    \"\"\"Integer addition, as its own frame so stepping has somewhere to step.\"\"",
+          "code": "    \"\"\"Integer addition, as its own frame so stepping has somewhere to step.\"\"\""
         },
         {
           "row": 31,
@@ -321,7 +351,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "31\u00a0\u00a0\u00a0\u00a0    return left + right"
+          "text": "31    return left + right",
+          "code": "    return left + right"
         },
         {
           "row": 32,
@@ -331,7 +362,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "32"
+          "text": "32",
+          "code": ""
         },
         {
           "row": 33,
@@ -341,17 +373,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "33"
+          "text": "33",
+          "code": ""
         },
         {
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34\u00a0\u00a0\u00a0\u00a0def sub(left, right):"
+          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def sub(left, right):"
         },
         {
           "row": 35,
@@ -361,7 +395,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "35\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer subtraction.\"\"\""
+          "text": "35    \"\"\"Integer subtraction.\"\"\"",
+          "code": "    \"\"\"Integer subtraction.\"\"\""
         },
         {
           "row": 36,
@@ -371,7 +406,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "36\u00a0\u00a0\u00a0\u00a0    return left - right"
+          "text": "36    return left - right",
+          "code": "    return left - right"
         },
         {
           "row": 37,
@@ -381,15 +417,148 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "37"
+          "text": "37",
+          "code": ""
+        },
+        {
+          "row": 38,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "38",
+          "code": ""
+        },
+        {
+          "row": 39,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def mul(left, right):"
+        },
+        {
+          "row": 40,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "40    \"\"\"Integer multiplication.\"\"\"",
+          "code": "    \"\"\"Integer multiplication.\"\"\""
+        },
+        {
+          "row": 41,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "41    return left * right",
+          "code": "    return left * right"
+        },
+        {
+          "row": 42,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "42",
+          "code": ""
+        },
+        {
+          "row": 43,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "43",
+          "code": ""
+        },
+        {
+          "row": 44,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def div(left, right):"
+        },
+        {
+          "row": 45,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "45    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an",
+          "code": "    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an"
         }
       ]
     },
     "stepped-editor": {
-      "replayOps": "stepIn=6",
-      "planSha256": "aedac12092a10a27a9979ea6cd3df7a26f07c179792df6f740e4e9d93977bc5c",
-      "rowCount": 37,
+      "replayOps": "stepIn=5",
+      "planSha256": "aa3ae7b251ffeaf4a43ad92e216f9037276525e7645a3de8bde8d31658699b22",
+      "rowCount": 45,
       "rows": [
+        {
+          "row": 22,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "22",
+          "code": ""
+        },
+        {
+          "row": 23,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "23Nothing here asserts anything.  The assertions live in",
+          "code": "Nothing here asserts anything.  The assertions live in"
+        },
+        {
+          "row": 24,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "24``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded",
+          "code": "``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded"
+        },
+        {
+          "row": 25,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "25trace through a real ``HeadlessDebugSession``.",
+          "code": "trace through a real ``HeadlessDebugSession``."
+        },
         {
           "row": 26,
           "pointer": "eptNone",
@@ -398,7 +567,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "26\u00a0\u00a0\u00a0\u00a0\"\"\""
+          "text": "26\"\"\"",
+          "code": "\"\"\""
         },
         {
           "row": 27,
@@ -408,7 +578,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "27"
+          "text": "27",
+          "code": ""
         },
         {
           "row": 28,
@@ -418,17 +589,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "28"
+          "text": "28",
+          "code": ""
         },
         {
           "row": 29,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "29\u00a0\u00a0\u00a0\u00a0def add(left, right):"
+          "text": "29def add(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def add(left, right):"
         },
         {
           "row": 30,
@@ -438,7 +611,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "30\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer addition, as its own frame so stepping has somewhere to ste"
+          "text": "30    \"\"\"Integer addition, as its own frame so stepping has somewhere to step.\"\"",
+          "code": "    \"\"\"Integer addition, as its own frame so stepping has somewhere to step.\"\"\""
         },
         {
           "row": 31,
@@ -448,7 +622,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "31\u00a0\u00a0\u00a0\u00a0    return left + right"
+          "text": "31    return left + right",
+          "code": "    return left + right"
         },
         {
           "row": 32,
@@ -458,7 +633,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "32"
+          "text": "32",
+          "code": ""
         },
         {
           "row": 33,
@@ -468,17 +644,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "33"
+          "text": "33",
+          "code": ""
         },
         {
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34\u00a0\u00a0\u00a0\u00a0def sub(left, right):"
+          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def sub(left, right):"
         },
         {
           "row": 35,
@@ -488,7 +666,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "35\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer subtraction.\"\"\""
+          "text": "35    \"\"\"Integer subtraction.\"\"\"",
+          "code": "    \"\"\"Integer subtraction.\"\"\""
         },
         {
           "row": 36,
@@ -498,7 +677,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "36\u00a0\u00a0\u00a0\u00a0    return left - right"
+          "text": "36    return left - right",
+          "code": "    return left - right"
         },
         {
           "row": 37,
@@ -508,7 +688,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "37"
+          "text": "37",
+          "code": ""
         },
         {
           "row": 38,
@@ -518,17 +699,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "38"
+          "text": "38",
+          "code": ""
         },
         {
           "row": 39,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "39\u00a0\u00a0\u00a0\u00a0def mul(left, right):"
+          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def mul(left, right):"
         },
         {
           "row": 40,
@@ -538,7 +721,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "40\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer multiplication.\"\"\""
+          "text": "40    \"\"\"Integer multiplication.\"\"\"",
+          "code": "    \"\"\"Integer multiplication.\"\"\""
         },
         {
           "row": 41,
@@ -548,7 +732,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "41\u00a0\u00a0\u00a0\u00a0    return left * right"
+          "text": "41    return left * right",
+          "code": "    return left * right"
         },
         {
           "row": 42,
@@ -558,7 +743,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "42"
+          "text": "42",
+          "code": ""
         },
         {
           "row": 43,
@@ -568,17 +754,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "43"
+          "text": "43",
+          "code": ""
         },
         {
           "row": 44,
           "pointer": "eptExecution",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "#404040",
-          "text": "\u25b6 44\u00a0\u00a0\u00a0\u00a0def div(left, right):"
+          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def div(left, right):"
         },
         {
           "row": 45,
@@ -588,7 +776,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "45\u00a0\u00a0\u00a0\u00a0    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded valu"
+          "text": "45    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an",
+          "code": "    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an"
         },
         {
           "row": 46,
@@ -598,7 +787,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "46\u00a0\u00a0\u00a0\u00a0    ``int``: a float would make the printed output depend on the interpret"
+          "text": "46    ``int``: a float would make the printed output depend on the interpreter's",
+          "code": "    ``int``: a float would make the printed output depend on the interpreter's"
         },
         {
           "row": 47,
@@ -608,7 +798,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "47\u00a0\u00a0\u00a0\u00a0    repr, and this program's whole job is to be identical on every host.\"\""
+          "text": "47    repr, and this program's whole job is to be identical on every host.\"\"\"",
+          "code": "    repr, and this program's whole job is to be identical on every host.\"\"\""
         },
         {
           "row": 48,
@@ -618,7 +809,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "48\u00a0\u00a0\u00a0\u00a0    return left // right"
+          "text": "48    return left // right",
+          "code": "    return left // right"
         },
         {
           "row": 49,
@@ -628,7 +820,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "49"
+          "text": "49",
+          "code": ""
         },
         {
           "row": 50,
@@ -638,7 +831,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "50"
+          "text": "50",
+          "code": ""
         },
         {
           "row": 51,
@@ -648,7 +842,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "51\u00a0\u00a0\u00a0\u00a0# The dispatch table is deliberately module-level and constant: the operat"
+          "text": "51# The dispatch table is deliberately module-level and constant: the operator",
+          "code": "# The dispatch table is deliberately module-level and constant: the operator"
         },
         {
           "row": 52,
@@ -658,57 +853,63 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "52\u00a0\u00a0\u00a0\u00a0# lookup is then a value the debugger can show, not a branch it has to unf"
+          "text": "52# lookup is then a value the debugger can show, not a branch it has to unfold.",
+          "code": "# lookup is then a value the debugger can show, not a branch it has to unfold."
         },
         {
           "row": 53,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "53\u00a0\u00a0\u00a0\u00a0OPERATIONS = {"
+          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7f\u2026",
+          "code": "OPERATIONS = {"
         },
         {
           "row": 54,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "add=<function add at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "54\u00a0\u00a0\u00a0\u00a0    \"+\": add,"
+          "text": "54    \"+\": add,add<function add at 0x7fffe862c4\u2026",
+          "code": "    \"+\": add,"
         },
         {
           "row": 55,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "55\u00a0\u00a0\u00a0\u00a0    \"-\": sub,"
+          "text": "55    \"-\": sub,sub<function sub at 0x7fffe862c4\u2026",
+          "code": "    \"-\": sub,"
         },
         {
           "row": 56,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "mul=<function mul at 0x7fffe862c5\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "56\u00a0\u00a0\u00a0\u00a0    \"*\": mul,"
+          "text": "56    \"*\": mul,mul<function mul at 0x7fffe862c5\u2026",
+          "code": "    \"*\": mul,"
         },
         {
           "row": 57,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "div=<function div at 0x7fffe862c5\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "57\u00a0\u00a0\u00a0\u00a0    \"/\": div,"
+          "text": "57    \"/\": div,div<function div at 0x7fffe862c5\u2026",
+          "code": "    \"/\": div,"
         },
         {
           "row": 58,
@@ -718,7 +919,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "58\u00a0\u00a0\u00a0\u00a0}"
+          "text": "58}",
+          "code": "}"
         },
         {
           "row": 59,
@@ -728,7 +930,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "59"
+          "text": "59",
+          "code": ""
         },
         {
           "row": 60,
@@ -738,17 +941,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "60"
+          "text": "60",
+          "code": ""
         },
         {
           "row": 61,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "61\u00a0\u00a0\u00a0\u00a0def apply_op(symbol, left, right):"
+          "text": "61def apply_op(symbol, left, right):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__bu",
+          "code": "def apply_op(symbol, left, right):"
         },
         {
           "row": 62,
@@ -758,264 +963,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "62\u00a0\u00a0\u00a0\u00a0    \"\"\"Resolve one operator symbol and apply it."
-        }
-      ]
-    },
-    "advanced-state": {
-      "replayOps": "stepIn=6,next=3",
-      "planSha256": "4fe843cb61611fa77b0fd405ee2c7249b8613e2aa0164f4e525dc10f1678e930",
-      "rowCount": 37,
-      "rows": [
-        {
-          "row": 38,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "38"
-        },
-        {
-          "row": 39,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "39\u00a0\u00a0\u00a0\u00a0def mul(left, right):"
-        },
-        {
-          "row": 40,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "40\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer multiplication.\"\"\""
-        },
-        {
-          "row": 41,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "41\u00a0\u00a0\u00a0\u00a0    return left * right"
-        },
-        {
-          "row": 42,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "42"
-        },
-        {
-          "row": 43,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "43"
-        },
-        {
-          "row": 44,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "44\u00a0\u00a0\u00a0\u00a0def div(left, right):"
-        },
-        {
-          "row": 45,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "45\u00a0\u00a0\u00a0\u00a0    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded valu"
-        },
-        {
-          "row": 46,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "46\u00a0\u00a0\u00a0\u00a0    ``int``: a float would make the printed output depend on the interpret"
-        },
-        {
-          "row": 47,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "47\u00a0\u00a0\u00a0\u00a0    repr, and this program's whole job is to be identical on every host.\"\""
-        },
-        {
-          "row": 48,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "48\u00a0\u00a0\u00a0\u00a0    return left // right"
-        },
-        {
-          "row": 49,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "49"
-        },
-        {
-          "row": 50,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "50"
-        },
-        {
-          "row": 51,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "51\u00a0\u00a0\u00a0\u00a0# The dispatch table is deliberately module-level and constant: the operat"
-        },
-        {
-          "row": 52,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "52\u00a0\u00a0\u00a0\u00a0# lookup is then a value the debugger can show, not a branch it has to unf"
-        },
-        {
-          "row": 53,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "53\u00a0\u00a0\u00a0\u00a0OPERATIONS = {"
-        },
-        {
-          "row": 54,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "54\u00a0\u00a0\u00a0\u00a0    \"+\": add,"
-        },
-        {
-          "row": 55,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "55\u00a0\u00a0\u00a0\u00a0    \"-\": sub,"
-        },
-        {
-          "row": 56,
-          "pointer": "eptExecution",
-          "mark": "emNone",
-          "values": "mul=<function mul at 0x7fffe7ebf560>",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "#404040",
-          "text": "\u25b6 56\u00a0\u00a0\u00a0\u00a0    \"*\": mul,/* mul: <function mul at 0x7fffe7ebf560> */"
-        },
-        {
-          "row": 57,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "57\u00a0\u00a0\u00a0\u00a0    \"/\": div,"
-        },
-        {
-          "row": 58,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "58\u00a0\u00a0\u00a0\u00a0}"
-        },
-        {
-          "row": 59,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "59"
-        },
-        {
-          "row": 60,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "60"
-        },
-        {
-          "row": 61,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "61\u00a0\u00a0\u00a0\u00a0def apply_op(symbol, left, right):"
-        },
-        {
-          "row": 62,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "62\u00a0\u00a0\u00a0\u00a0    \"\"\"Resolve one operator symbol and apply it."
+          "text": "62    \"\"\"Resolve one operator symbol and apply it.",
+          "code": "    \"\"\"Resolve one operator symbol and apply it."
         },
         {
           "row": 63,
@@ -1025,7 +974,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "63"
+          "text": "63",
+          "code": ""
         },
         {
           "row": 64,
@@ -1035,7 +985,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "64\u00a0\u00a0\u00a0\u00a0    This frame exists so that the calltrace has a middle layer \u2014 the value"
+          "text": "64    This frame exists so that the calltrace has a middle layer \u2014 the value",
+          "code": "    This frame exists so that the calltrace has a middle layer \u2014 the value"
         },
         {
           "row": 65,
@@ -1045,7 +996,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "65\u00a0\u00a0\u00a0\u00a0    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is t"
+          "text": "65    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is the",
+          "code": "    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is the"
         },
         {
           "row": 66,
@@ -1055,938 +1007,26 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "66\u00a0\u00a0\u00a0\u00a0    shape a value-origin or a call-stack pane is read against."
-        },
-        {
-          "row": 67,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "67\u00a0\u00a0\u00a0\u00a0    \"\"\""
-        },
-        {
-          "row": 68,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "68\u00a0\u00a0\u00a0\u00a0    operation = OPERATIONS[symbol]"
-        },
-        {
-          "row": 69,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "69\u00a0\u00a0\u00a0\u00a0    return operation(left, right)"
-        },
-        {
-          "row": 70,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "70"
-        },
-        {
-          "row": 71,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "71"
-        },
-        {
-          "row": 72,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "72\u00a0\u00a0\u00a0\u00a0def evaluate(expression):"
-        },
-        {
-          "row": 73,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "73\u00a0\u00a0\u00a0\u00a0    \"\"\"Evaluate a strictly left-to-right space-separated integer expressio"
-        },
-        {
-          "row": 74,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "74"
+          "text": "66    shape a value-origin or a call-stack pane is read against.",
+          "code": "    shape a value-origin or a call-stack pane is read against."
         }
       ]
     },
-    "returned-calltrace": {
-      "replayOps": "stepIn=21,stepOut=1",
-      "planSha256": "c8c99f7268c27ac30072d7baf2c5a037205db666702a1960d0a71fc7cc2264f5",
-      "rowCount": 37,
+    "advanced-state": {
+      "replayOps": "stepIn=5,next=3",
+      "planSha256": "173f98ad741a85096b9421e66139488602e911d0c3a59b9bcac235a9f45e616e",
+      "rowCount": 45,
       "rows": [
-        {
-          "row": 80,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "80\u00a0\u00a0\u00a0\u00a0    total = int(tokens[0])"
-        },
-        {
-          "row": 81,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "81\u00a0\u00a0\u00a0\u00a0    index = 1"
-        },
-        {
-          "row": 82,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "82\u00a0\u00a0\u00a0\u00a0    while index < len(tokens):"
-        },
-        {
-          "row": 83,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "83\u00a0\u00a0\u00a0\u00a0        symbol = tokens[index]"
-        },
-        {
-          "row": 84,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "84\u00a0\u00a0\u00a0\u00a0        operand = int(tokens[index + 1])"
-        },
-        {
-          "row": 85,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "85\u00a0\u00a0\u00a0\u00a0        total = apply_op(symbol, total, operand)"
-        },
-        {
-          "row": 86,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "86\u00a0\u00a0\u00a0\u00a0        index += 2"
-        },
-        {
-          "row": 87,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "87\u00a0\u00a0\u00a0\u00a0    return total"
-        },
-        {
-          "row": 88,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "88"
-        },
-        {
-          "row": 89,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "89"
-        },
-        {
-          "row": 90,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "90\u00a0\u00a0\u00a0\u00a0EXPRESSIONS = ["
-        },
-        {
-          "row": 91,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "91\u00a0\u00a0\u00a0\u00a0    \"2 + 3\","
-        },
-        {
-          "row": 92,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "92\u00a0\u00a0\u00a0\u00a0    \"10 - 4 + 1\","
-        },
-        {
-          "row": 93,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "93\u00a0\u00a0\u00a0\u00a0    \"6 * 7\","
-        },
-        {
-          "row": 94,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "94\u00a0\u00a0\u00a0\u00a0    \"100 / 5 - 3\","
-        },
-        {
-          "row": 95,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "95\u00a0\u00a0\u00a0\u00a0    \"1 + 2 * 3 - 4 / 2\","
-        },
-        {
-          "row": 96,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "96\u00a0\u00a0\u00a0\u00a0]"
-        },
-        {
-          "row": 97,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "97"
-        },
-        {
-          "row": 98,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "98"
-        },
-        {
-          "row": 99,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "99\u00a0\u00a0\u00a0\u00a0def main():"
-        },
-        {
-          "row": 100,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "100\u00a0\u00a0\u00a0\u00a0    \"\"\"Evaluate every expression and print the result."
-        },
-        {
-          "row": 101,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "101"
-        },
-        {
-          "row": 102,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "102\u00a0\u00a0\u00a0\u00a0    Called unconditionally at module level rather than from an"
-        },
-        {
-          "row": 103,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "103\u00a0\u00a0\u00a0\u00a0    ``if __name__ == \"__main__\"`` guard: recorders launch this file in se"
-        },
-        {
-          "row": 104,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "104\u00a0\u00a0\u00a0\u00a0    different ways (as a script, as a module, through a wrapper) and the "
-        },
-        {
-          "row": 105,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "105\u00a0\u00a0\u00a0\u00a0    is one more way for a recording to come back empty."
-        },
-        {
-          "row": 106,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "106\u00a0\u00a0\u00a0\u00a0    \"\"\""
-        },
-        {
-          "row": 107,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "107\u00a0\u00a0\u00a0\u00a0    results = []"
-        },
-        {
-          "row": 108,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "108\u00a0\u00a0\u00a0\u00a0    for expression in EXPRESSIONS:"
-        },
-        {
-          "row": 109,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "109\u00a0\u00a0\u00a0\u00a0        value = evaluate(expression)"
-        },
-        {
-          "row": 110,
-          "pointer": "eptExecution",
-          "mark": "emNone",
-          "values": "results=@[]|value=5",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "#404040",
-          "text": "\u25b6 110\u00a0\u00a0\u00a0\u00a0        results.append(value)/* results: @[], value: 5 */"
-        },
-        {
-          "row": 111,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "111\u00a0\u00a0\u00a0\u00a0        print(\"%s = %d\" % (expression, value))"
-        },
-        {
-          "row": 112,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "112\u00a0\u00a0\u00a0\u00a0    print(\"checksum = %d\" % sum(results))"
-        },
-        {
-          "row": 113,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "113\u00a0\u00a0\u00a0\u00a0    return results"
-        },
-        {
-          "row": 114,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "114"
-        },
-        {
-          "row": 115,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "115"
-        },
-        {
-          "row": 116,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "116\u00a0\u00a0\u00a0\u00a0main()"
-        }
-      ]
-    },
-    "continued-event-log": {
-      "replayOps": "continueForward=1",
-      "planSha256": "9c16c023c239ea90f2790233a075b3033c80243f23b66edf2c7a335f6a97c30c",
-      "rowCount": 37,
-      "rows": [
-        {
-          "row": 80,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "80\u00a0\u00a0\u00a0\u00a0    total = int(tokens[0])"
-        },
-        {
-          "row": 81,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "81\u00a0\u00a0\u00a0\u00a0    index = 1"
-        },
-        {
-          "row": 82,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "82\u00a0\u00a0\u00a0\u00a0    while index < len(tokens):"
-        },
-        {
-          "row": 83,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "83\u00a0\u00a0\u00a0\u00a0        symbol = tokens[index]"
-        },
-        {
-          "row": 84,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "84\u00a0\u00a0\u00a0\u00a0        operand = int(tokens[index + 1])"
-        },
-        {
-          "row": 85,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "85\u00a0\u00a0\u00a0\u00a0        total = apply_op(symbol, total, operand)"
-        },
-        {
-          "row": 86,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "86\u00a0\u00a0\u00a0\u00a0        index += 2"
-        },
-        {
-          "row": 87,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "87\u00a0\u00a0\u00a0\u00a0    return total"
-        },
-        {
-          "row": 88,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "88"
-        },
-        {
-          "row": 89,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "89"
-        },
-        {
-          "row": 90,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "90\u00a0\u00a0\u00a0\u00a0EXPRESSIONS = ["
-        },
-        {
-          "row": 91,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "91\u00a0\u00a0\u00a0\u00a0    \"2 + 3\","
-        },
-        {
-          "row": 92,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "92\u00a0\u00a0\u00a0\u00a0    \"10 - 4 + 1\","
-        },
-        {
-          "row": 93,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "93\u00a0\u00a0\u00a0\u00a0    \"6 * 7\","
-        },
-        {
-          "row": 94,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "94\u00a0\u00a0\u00a0\u00a0    \"100 / 5 - 3\","
-        },
-        {
-          "row": 95,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "95\u00a0\u00a0\u00a0\u00a0    \"1 + 2 * 3 - 4 / 2\","
-        },
-        {
-          "row": 96,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "96\u00a0\u00a0\u00a0\u00a0]"
-        },
-        {
-          "row": 97,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "97"
-        },
-        {
-          "row": 98,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "98"
-        },
-        {
-          "row": 99,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "99\u00a0\u00a0\u00a0\u00a0def main():"
-        },
-        {
-          "row": 100,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "100\u00a0\u00a0\u00a0\u00a0    \"\"\"Evaluate every expression and print the result."
-        },
-        {
-          "row": 101,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "101"
-        },
-        {
-          "row": 102,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "102\u00a0\u00a0\u00a0\u00a0    Called unconditionally at module level rather than from an"
-        },
-        {
-          "row": 103,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "103\u00a0\u00a0\u00a0\u00a0    ``if __name__ == \"__main__\"`` guard: recorders launch this file in se"
-        },
-        {
-          "row": 104,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "104\u00a0\u00a0\u00a0\u00a0    different ways (as a script, as a module, through a wrapper) and the "
-        },
-        {
-          "row": 105,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "105\u00a0\u00a0\u00a0\u00a0    is one more way for a recording to come back empty."
-        },
-        {
-          "row": 106,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "106\u00a0\u00a0\u00a0\u00a0    \"\"\""
-        },
-        {
-          "row": 107,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "107\u00a0\u00a0\u00a0\u00a0    results = []"
-        },
-        {
-          "row": 108,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "108\u00a0\u00a0\u00a0\u00a0    for expression in EXPRESSIONS:"
-        },
-        {
-          "row": 109,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "109\u00a0\u00a0\u00a0\u00a0        value = evaluate(expression)"
-        },
-        {
-          "row": 110,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "110\u00a0\u00a0\u00a0\u00a0        results.append(value)"
-        },
-        {
-          "row": 111,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "111\u00a0\u00a0\u00a0\u00a0        print(\"%s = %d\" % (expression, value))"
-        },
-        {
-          "row": 112,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "112\u00a0\u00a0\u00a0\u00a0    print(\"checksum = %d\" % sum(results))"
-        },
-        {
-          "row": 113,
-          "pointer": "eptExecution",
-          "mark": "emNone",
-          "values": "results=@[5, 7, 42, 17, 2]",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "#404040",
-          "text": "\u25b6 113\u00a0\u00a0\u00a0\u00a0    return results/* results: @[5, 7, 42, 17, 2] */"
-        },
-        {
-          "row": 114,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "114"
-        },
-        {
-          "row": 115,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "115"
-        },
-        {
-          "row": 116,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "116\u00a0\u00a0\u00a0\u00a0main()"
-        }
-      ]
-    },
-    "breakpoint-editor": {
-      "replayOps": "stepIn=6,setBreakpoint@1",
-      "planSha256": "be7dc9d2bb120deecbb644677f5e919833f10b096c32c10d4ba4db45ebe2b3b4",
-      "rowCount": 37,
-      "rows": [
-        {
-          "row": 26,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "26\u00a0\u00a0\u00a0\u00a0\"\"\""
-        },
-        {
-          "row": 27,
-          "pointer": "eptNone",
-          "mark": "emBreakpoint",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "\u25cf27"
-        },
-        {
-          "row": 28,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "28"
-        },
-        {
-          "row": 29,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsTaken",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "29\u00a0\u00a0\u00a0\u00a0def add(left, right):"
-        },
-        {
-          "row": 30,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "30\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer addition, as its own frame so stepping has somewhere to ste"
-        },
-        {
-          "row": 31,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "31\u00a0\u00a0\u00a0\u00a0    return left + right"
-        },
-        {
-          "row": 32,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "32"
-        },
-        {
-          "row": 33,
-          "pointer": "eptNone",
-          "mark": "emNone",
-          "values": "",
-          "flow": "efsUnknown",
-          "codeOpacity": "",
-          "rowBackground": "",
-          "text": "33"
-        },
         {
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34\u00a0\u00a0\u00a0\u00a0def sub(left, right):"
+          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def sub(left, right):"
         },
         {
           "row": 35,
@@ -1996,7 +1036,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "35\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer subtraction.\"\"\""
+          "text": "35    \"\"\"Integer subtraction.\"\"\"",
+          "code": "    \"\"\"Integer subtraction.\"\"\""
         },
         {
           "row": 36,
@@ -2006,7 +1047,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "36\u00a0\u00a0\u00a0\u00a0    return left - right"
+          "text": "36    return left - right",
+          "code": "    return left - right"
         },
         {
           "row": 37,
@@ -2016,7 +1058,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "37"
+          "text": "37",
+          "code": ""
         },
         {
           "row": 38,
@@ -2026,17 +1069,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "38"
+          "text": "38",
+          "code": ""
         },
         {
           "row": 39,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "39\u00a0\u00a0\u00a0\u00a0def mul(left, right):"
+          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def mul(left, right):"
         },
         {
           "row": 40,
@@ -2046,7 +1091,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "40\u00a0\u00a0\u00a0\u00a0    \"\"\"Integer multiplication.\"\"\""
+          "text": "40    \"\"\"Integer multiplication.\"\"\"",
+          "code": "    \"\"\"Integer multiplication.\"\"\""
         },
         {
           "row": 41,
@@ -2056,7 +1102,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "41\u00a0\u00a0\u00a0\u00a0    return left * right"
+          "text": "41    return left * right",
+          "code": "    return left * right"
         },
         {
           "row": 42,
@@ -2066,7 +1113,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "42"
+          "text": "42",
+          "code": ""
         },
         {
           "row": 43,
@@ -2076,17 +1124,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "43"
+          "text": "43",
+          "code": ""
         },
         {
           "row": 44,
-          "pointer": "eptExecution",
+          "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
-          "rowBackground": "#404040",
-          "text": "\u25b6 44\u00a0\u00a0\u00a0\u00a0def div(left, right):"
+          "rowBackground": "",
+          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def div(left, right):"
         },
         {
           "row": 45,
@@ -2096,7 +1146,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "45\u00a0\u00a0\u00a0\u00a0    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded valu"
+          "text": "45    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an",
+          "code": "    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an"
         },
         {
           "row": 46,
@@ -2106,7 +1157,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "46\u00a0\u00a0\u00a0\u00a0    ``int``: a float would make the printed output depend on the interpret"
+          "text": "46    ``int``: a float would make the printed output depend on the interpreter's",
+          "code": "    ``int``: a float would make the printed output depend on the interpreter's"
         },
         {
           "row": 47,
@@ -2116,7 +1168,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "47\u00a0\u00a0\u00a0\u00a0    repr, and this program's whole job is to be identical on every host.\"\""
+          "text": "47    repr, and this program's whole job is to be identical on every host.\"\"\"",
+          "code": "    repr, and this program's whole job is to be identical on every host.\"\"\""
         },
         {
           "row": 48,
@@ -2126,7 +1179,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "48\u00a0\u00a0\u00a0\u00a0    return left // right"
+          "text": "48    return left // right",
+          "code": "    return left // right"
         },
         {
           "row": 49,
@@ -2136,7 +1190,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "49"
+          "text": "49",
+          "code": ""
         },
         {
           "row": 50,
@@ -2146,7 +1201,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "50"
+          "text": "50",
+          "code": ""
         },
         {
           "row": 51,
@@ -2156,7 +1212,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "51\u00a0\u00a0\u00a0\u00a0# The dispatch table is deliberately module-level and constant: the operat"
+          "text": "51# The dispatch table is deliberately module-level and constant: the operator",
+          "code": "# The dispatch table is deliberately module-level and constant: the operator"
         },
         {
           "row": 52,
@@ -2166,57 +1223,63 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "52\u00a0\u00a0\u00a0\u00a0# lookup is then a value the debugger can show, not a branch it has to unf"
+          "text": "52# lookup is then a value the debugger can show, not a branch it has to unfold.",
+          "code": "# lookup is then a value the debugger can show, not a branch it has to unfold."
         },
         {
           "row": 53,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "53\u00a0\u00a0\u00a0\u00a0OPERATIONS = {"
+          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7f\u2026",
+          "code": "OPERATIONS = {"
         },
         {
           "row": 54,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "add=<function add at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "54\u00a0\u00a0\u00a0\u00a0    \"+\": add,"
+          "text": "54    \"+\": add,add<function add at 0x7fffe862c4\u2026",
+          "code": "    \"+\": add,"
         },
         {
           "row": 55,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "55\u00a0\u00a0\u00a0\u00a0    \"-\": sub,"
+          "text": "55    \"-\": sub,sub<function sub at 0x7fffe862c4\u2026",
+          "code": "    \"-\": sub,"
         },
         {
           "row": 56,
-          "pointer": "eptNone",
+          "pointer": "eptExecution",
           "mark": "emNone",
-          "values": "",
+          "values": "mul=<function mul at 0x7fffe862c5\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
-          "rowBackground": "",
-          "text": "56\u00a0\u00a0\u00a0\u00a0    \"*\": mul,"
+          "rowBackground": "#404040",
+          "text": "56    \"*\": mul,mul<function mul at 0x7fffe862c5\u2026",
+          "code": "    \"*\": mul,"
         },
         {
           "row": 57,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "div=<function div at 0x7fffe862c5\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "57\u00a0\u00a0\u00a0\u00a0    \"/\": div,"
+          "text": "57    \"/\": div,div<function div at 0x7fffe862c5\u2026",
+          "code": "    \"/\": div,"
         },
         {
           "row": 58,
@@ -2226,7 +1289,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "58\u00a0\u00a0\u00a0\u00a0}"
+          "text": "58}",
+          "code": "}"
         },
         {
           "row": 59,
@@ -2236,7 +1300,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "59"
+          "text": "59",
+          "code": ""
         },
         {
           "row": 60,
@@ -2246,17 +1311,19 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "60"
+          "text": "60",
+          "code": ""
         },
         {
           "row": 61,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "61\u00a0\u00a0\u00a0\u00a0def apply_op(symbol, left, right):"
+          "text": "61def apply_op(symbol, left, right):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__bu",
+          "code": "def apply_op(symbol, left, right):"
         },
         {
           "row": 62,
@@ -2266,237 +1333,1206 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "62\u00a0\u00a0\u00a0\u00a0    \"\"\"Resolve one operator symbol and apply it."
+          "text": "62    \"\"\"Resolve one operator symbol and apply it.",
+          "code": "    \"\"\"Resolve one operator symbol and apply it."
+        },
+        {
+          "row": 63,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "63",
+          "code": ""
+        },
+        {
+          "row": 64,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "64    This frame exists so that the calltrace has a middle layer \u2014 the value",
+          "code": "    This frame exists so that the calltrace has a middle layer \u2014 the value"
+        },
+        {
+          "row": 65,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "65    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is the",
+          "code": "    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is the"
+        },
+        {
+          "row": 66,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "66    shape a value-origin or a call-stack pane is read against.",
+          "code": "    shape a value-origin or a call-stack pane is read against."
+        },
+        {
+          "row": 67,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "67    \"\"\"",
+          "code": "    \"\"\""
+        },
+        {
+          "row": 68,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "68    operation = OPERATIONS[symbol]",
+          "code": "    operation = OPERATIONS[symbol]"
+        },
+        {
+          "row": 69,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "69    return operation(left, right)",
+          "code": "    return operation(left, right)"
+        },
+        {
+          "row": 70,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "70",
+          "code": ""
+        },
+        {
+          "row": 71,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "71",
+          "code": ""
+        },
+        {
+          "row": 72,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|apply_op=<function apply_op at 0x7fffe\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "72def evaluate(expression):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__builtins__@",
+          "code": "def evaluate(expression):"
+        },
+        {
+          "row": 73,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "73    \"\"\"Evaluate a strictly left-to-right space-separated integer expression.",
+          "code": "    \"\"\"Evaluate a strictly left-to-right space-separated integer expression."
+        },
+        {
+          "row": 74,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "74",
+          "code": ""
+        },
+        {
+          "row": 75,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "75    No operator precedence on purpose: precedence would need a parser, and a",
+          "code": "    No operator precedence on purpose: precedence would need a parser, and a"
+        },
+        {
+          "row": 76,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "76    parser is a second thing that can be wrong in a file whose only job is to",
+          "code": "    parser is a second thing that can be wrong in a file whose only job is to"
+        },
+        {
+          "row": 77,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "77    be boring.",
+          "code": "    be boring."
+        },
+        {
+          "row": 78,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "78    \"\"\"",
+          "code": "    \"\"\""
         }
       ]
-    }
-  },
-  "flowTrace": "noir_space_ship-f9f31b01a0d2",
-  "flowScenarios": {
-    "noir-declined-arm": {
-      "replayOps": "stepIn=33",
-      "planSha256": "72e7f0608a9593024cc5719c11bec041f30661fa67aca90a141c02ccbda513de",
-      "rowCount": 37,
+    },
+    "returned-calltrace": {
+      "replayOps": "stepIn=21,stepOut=1",
+      "planSha256": "638735a7c8172605dc426aa72f67f0fb6c5231316940fcc41b9de80a3552919c",
+      "rowCount": 45,
       "rows": [
         {
-          "row": 1,
+          "row": 72,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "1\u00a0\u00a0\u00a0\u00a0pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Fi"
+          "text": "72def evaluate(expression):",
+          "code": "def evaluate(expression):"
         },
         {
-          "row": 2,
+          "row": 73,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "2\u00a0\u00a0\u00a0\u00a0    let mut remaining_shield = initial_shield;"
+          "text": "73    \"\"\"Evaluate a strictly left-to-right space-separated integer expression.",
+          "code": "    \"\"\"Evaluate a strictly left-to-right space-separated integer expression."
         },
         {
-          "row": 3,
+          "row": 74,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "3"
+          "text": "74",
+          "code": ""
         },
         {
-          "row": 4,
+          "row": 75,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "4\u00a0\u00a0\u00a0\u00a0    for i in 0..8 {"
+          "text": "75    No operator precedence on purpose: precedence would need a parser, and a",
+          "code": "    No operator precedence on purpose: precedence would need a parser, and a"
         },
         {
-          "row": 5,
+          "row": 76,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "5\u00a0\u00a0\u00a0\u00a0        let mass = masses[i];"
+          "text": "76    parser is a second thing that can be wrong in a file whose only job is to",
+          "code": "    parser is a second thing that can be wrong in a file whose only job is to"
         },
         {
-          "row": 6,
+          "row": 77,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "6\u00a0\u00a0\u00a0\u00a0        let damage = calculate_damage(initial_shield, remaining_shield, mas"
+          "text": "77    be boring.",
+          "code": "    be boring."
         },
         {
-          "row": 7,
+          "row": 78,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "7\u00a0\u00a0\u00a0\u00a0        remaining_shield -= damage;"
+          "text": "78    \"\"\"",
+          "code": "    \"\"\""
         },
         {
-          "row": 8,
+          "row": 79,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "8"
+          "text": "79    tokens = expression.split()",
+          "code": "    tokens = expression.split()"
         },
         {
-          "row": 9,
+          "row": 80,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "9\u00a0\u00a0\u00a0\u00a0        let mut regeneration = 0;"
+          "text": "80    total = int(tokens[0])",
+          "code": "    total = int(tokens[0])"
         },
         {
-          "row": 10,
+          "row": 81,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "10\u00a0\u00a0\u00a0\u00a0        if (remaining_shield as u32 > 0){"
+          "text": "81    index = 1",
+          "code": "    index = 1"
         },
         {
-          "row": 11,
+          "row": 82,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "11\u00a0\u00a0\u00a0\u00a0        regeneration = calculate_shield_regeneration(initial_shield ,remai"
+          "text": "82    while index < len(tokens):",
+          "code": "    while index < len(tokens):"
         },
         {
-          "row": 12,
+          "row": 83,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "12\u00a0\u00a0\u00a0\u00a0        remaining_shield += regeneration;"
+          "text": "83        symbol = tokens[index]",
+          "code": "        symbol = tokens[index]"
         },
         {
-          "row": 13,
+          "row": 84,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "13\u00a0\u00a0\u00a0\u00a0        }"
+          "text": "84        operand = int(tokens[index + 1])",
+          "code": "        operand = int(tokens[index + 1])"
         },
         {
-          "row": 14,
+          "row": 85,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "14\u00a0\u00a0\u00a0\u00a0        status_report(i,initial_shield, remaining_shield, damage, regenera"
+          "text": "85        total = apply_op(symbol, total, operand)",
+          "code": "        total = apply_op(symbol, total, operand)"
         },
         {
-          "row": 15,
+          "row": 86,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "15\u00a0\u00a0\u00a0\u00a0    }"
+          "text": "86        index += 2",
+          "code": "        index += 2"
         },
         {
-          "row": 16,
+          "row": 87,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "16"
+          "text": "87    return total",
+          "code": "    return total"
         },
         {
-          "row": 17,
+          "row": 88,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "17\u00a0\u00a0\u00a0\u00a0    // We need to have at least 1 unit of shields left in order to survive"
+          "text": "88",
+          "code": ""
         },
         {
-          "row": 18,
+          "row": 89,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "18\u00a0\u00a0\u00a0\u00a0    let result = remaining_shield as u32 > 0;"
+          "text": "89",
+          "code": ""
         },
         {
-          "row": 19,
+          "row": 90,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "19\u00a0\u00a0\u00a0\u00a0    result"
+          "text": "90EXPRESSIONS = [",
+          "code": "EXPRESSIONS = ["
         },
         {
-          "row": 20,
+          "row": 91,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "20\u00a0\u00a0\u00a0\u00a0}"
+          "text": "91    \"2 + 3\",",
+          "code": "    \"2 + 3\","
         },
         {
-          "row": 21,
+          "row": 92,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "21"
+          "text": "92    \"10 - 4 + 1\",",
+          "code": "    \"10 - 4 + 1\","
         },
+        {
+          "row": 93,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "93    \"6 * 7\",",
+          "code": "    \"6 * 7\","
+        },
+        {
+          "row": 94,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "94    \"100 / 5 - 3\",",
+          "code": "    \"100 / 5 - 3\","
+        },
+        {
+          "row": 95,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "95    \"1 + 2 * 3 - 4 / 2\",",
+          "code": "    \"1 + 2 * 3 - 4 / 2\","
+        },
+        {
+          "row": 96,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "96]",
+          "code": "]"
+        },
+        {
+          "row": 97,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "97",
+          "code": ""
+        },
+        {
+          "row": 98,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "98",
+          "code": ""
+        },
+        {
+          "row": 99,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "return=nil",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "99def main():returnnil",
+          "code": "def main():"
+        },
+        {
+          "row": 100,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "100    \"\"\"Evaluate every expression and print the result.",
+          "code": "    \"\"\"Evaluate every expression and print the result."
+        },
+        {
+          "row": 101,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "101",
+          "code": ""
+        },
+        {
+          "row": 102,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "102    Called unconditionally at module level rather than from an",
+          "code": "    Called unconditionally at module level rather than from an"
+        },
+        {
+          "row": 103,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "103    ``if __name__ == \"__main__\"`` guard: recorders launch this file in severa",
+          "code": "    ``if __name__ == \"__main__\"`` guard: recorders launch this file in several"
+        },
+        {
+          "row": 104,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "104    different ways (as a script, as a module, through a wrapper) and the guar",
+          "code": "    different ways (as a script, as a module, through a wrapper) and the guard"
+        },
+        {
+          "row": 105,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "105    is one more way for a recording to come back empty.",
+          "code": "    is one more way for a recording to come back empty."
+        },
+        {
+          "row": 106,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "106    \"\"\"",
+          "code": "    \"\"\""
+        },
+        {
+          "row": 107,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "results=@[]",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "107    results = []results@[]",
+          "code": "    results = []"
+        },
+        {
+          "row": 108,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "108    for expression in EXPRESSIONS:",
+          "code": "    for expression in EXPRESSIONS:"
+        },
+        {
+          "row": 109,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "109        value = evaluate(expression)",
+          "code": "        value = evaluate(expression)"
+        },
+        {
+          "row": 110,
+          "pointer": "eptExecution",
+          "mark": "emNone",
+          "values": "results=@[]|value=5",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "#404040",
+          "text": "110        results.append(value)results@[]value5",
+          "code": "        results.append(value)"
+        },
+        {
+          "row": 111,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "111        print(\"%s = %d\" % (expression, value))",
+          "code": "        print(\"%s = %d\" % (expression, value))"
+        },
+        {
+          "row": 112,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "<stdout>=checksum = 73\n|results=@[5, 7, 42, 17, 2]",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "112    print(\"checksum = %d\" % sum(results))<stdout>checksum = 73\nresults@[5, 7,",
+          "code": "    print(\"checksum = %d\" % sum(results))"
+        },
+        {
+          "row": 113,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "results=@[5, 7, 42, 17, 2]|return=nil",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "113    return resultsresults@[5, 7, 42, 17, 2]returnnil",
+          "code": "    return results"
+        },
+        {
+          "row": 114,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "114",
+          "code": ""
+        },
+        {
+          "row": 115,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "115",
+          "code": ""
+        },
+        {
+          "row": 116,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "116main()",
+          "code": "main()"
+        }
+      ]
+    },
+    "continued-event-log": {
+      "replayOps": "continueForward=1",
+      "planSha256": "693987040d50328d2139c5c30a5fc666772ef2df7e420ce72f42030ebb9757fa",
+      "rowCount": 45,
+      "rows": [
+        {
+          "row": 72,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "72def evaluate(expression):",
+          "code": "def evaluate(expression):"
+        },
+        {
+          "row": 73,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "73    \"\"\"Evaluate a strictly left-to-right space-separated integer expression.",
+          "code": "    \"\"\"Evaluate a strictly left-to-right space-separated integer expression."
+        },
+        {
+          "row": 74,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "74",
+          "code": ""
+        },
+        {
+          "row": 75,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "75    No operator precedence on purpose: precedence would need a parser, and a",
+          "code": "    No operator precedence on purpose: precedence would need a parser, and a"
+        },
+        {
+          "row": 76,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "76    parser is a second thing that can be wrong in a file whose only job is to",
+          "code": "    parser is a second thing that can be wrong in a file whose only job is to"
+        },
+        {
+          "row": 77,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "77    be boring.",
+          "code": "    be boring."
+        },
+        {
+          "row": 78,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "78    \"\"\"",
+          "code": "    \"\"\""
+        },
+        {
+          "row": 79,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "79    tokens = expression.split()",
+          "code": "    tokens = expression.split()"
+        },
+        {
+          "row": 80,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "80    total = int(tokens[0])",
+          "code": "    total = int(tokens[0])"
+        },
+        {
+          "row": 81,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "81    index = 1",
+          "code": "    index = 1"
+        },
+        {
+          "row": 82,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "82    while index < len(tokens):",
+          "code": "    while index < len(tokens):"
+        },
+        {
+          "row": 83,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "83        symbol = tokens[index]",
+          "code": "        symbol = tokens[index]"
+        },
+        {
+          "row": 84,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "84        operand = int(tokens[index + 1])",
+          "code": "        operand = int(tokens[index + 1])"
+        },
+        {
+          "row": 85,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "85        total = apply_op(symbol, total, operand)",
+          "code": "        total = apply_op(symbol, total, operand)"
+        },
+        {
+          "row": 86,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "86        index += 2",
+          "code": "        index += 2"
+        },
+        {
+          "row": 87,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "87    return total",
+          "code": "    return total"
+        },
+        {
+          "row": 88,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "88",
+          "code": ""
+        },
+        {
+          "row": 89,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "89",
+          "code": ""
+        },
+        {
+          "row": 90,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "90EXPRESSIONS = [",
+          "code": "EXPRESSIONS = ["
+        },
+        {
+          "row": 91,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "91    \"2 + 3\",",
+          "code": "    \"2 + 3\","
+        },
+        {
+          "row": 92,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "92    \"10 - 4 + 1\",",
+          "code": "    \"10 - 4 + 1\","
+        },
+        {
+          "row": 93,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "93    \"6 * 7\",",
+          "code": "    \"6 * 7\","
+        },
+        {
+          "row": 94,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "94    \"100 / 5 - 3\",",
+          "code": "    \"100 / 5 - 3\","
+        },
+        {
+          "row": 95,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "95    \"1 + 2 * 3 - 4 / 2\",",
+          "code": "    \"1 + 2 * 3 - 4 / 2\","
+        },
+        {
+          "row": 96,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "96]",
+          "code": "]"
+        },
+        {
+          "row": 97,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "97",
+          "code": ""
+        },
+        {
+          "row": 98,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "98",
+          "code": ""
+        },
+        {
+          "row": 99,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "return=nil",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "99def main():returnnil",
+          "code": "def main():"
+        },
+        {
+          "row": 100,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "100    \"\"\"Evaluate every expression and print the result.",
+          "code": "    \"\"\"Evaluate every expression and print the result."
+        },
+        {
+          "row": 101,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "101",
+          "code": ""
+        },
+        {
+          "row": 102,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "102    Called unconditionally at module level rather than from an",
+          "code": "    Called unconditionally at module level rather than from an"
+        },
+        {
+          "row": 103,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "103    ``if __name__ == \"__main__\"`` guard: recorders launch this file in severa",
+          "code": "    ``if __name__ == \"__main__\"`` guard: recorders launch this file in several"
+        },
+        {
+          "row": 104,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "104    different ways (as a script, as a module, through a wrapper) and the guar",
+          "code": "    different ways (as a script, as a module, through a wrapper) and the guard"
+        },
+        {
+          "row": 105,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "105    is one more way for a recording to come back empty.",
+          "code": "    is one more way for a recording to come back empty."
+        },
+        {
+          "row": 106,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "106    \"\"\"",
+          "code": "    \"\"\""
+        },
+        {
+          "row": 107,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "results=@[]",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "107    results = []results@[]",
+          "code": "    results = []"
+        },
+        {
+          "row": 108,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "108    for expression in EXPRESSIONS:",
+          "code": "    for expression in EXPRESSIONS:"
+        },
+        {
+          "row": 109,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "109        value = evaluate(expression)",
+          "code": "        value = evaluate(expression)"
+        },
+        {
+          "row": 110,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "110        results.append(value)",
+          "code": "        results.append(value)"
+        },
+        {
+          "row": 111,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "111        print(\"%s = %d\" % (expression, value))",
+          "code": "        print(\"%s = %d\" % (expression, value))"
+        },
+        {
+          "row": 112,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "<stdout>=checksum = 73\n|results=@[5, 7, 42, 17, 2]",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "112    print(\"checksum = %d\" % sum(results))<stdout>checksum = 73\nresults@[5, 7,",
+          "code": "    print(\"checksum = %d\" % sum(results))"
+        },
+        {
+          "row": 113,
+          "pointer": "eptExecution",
+          "mark": "emNone",
+          "values": "results=@[5, 7, 42, 17, 2]|return=nil",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "#404040",
+          "text": "113    return resultsresults@[5, 7, 42, 17, 2]returnnil",
+          "code": "    return results"
+        },
+        {
+          "row": 114,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "114",
+          "code": ""
+        },
+        {
+          "row": 115,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "115",
+          "code": ""
+        },
+        {
+          "row": 116,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "116main()",
+          "code": "main()"
+        }
+      ]
+    },
+    "breakpoint-editor": {
+      "replayOps": "stepIn=5,setBreakpoint@1",
+      "planSha256": "d6bfa9da670d2ce221648b96a822e580db4e05b2107126ecd4fd174949a3af30",
+      "rowCount": 45,
+      "rows": [
         {
           "row": 22,
           "pointer": "eptNone",
-          "mark": "emNone",
+          "mark": "emBreakpoint",
           "values": "",
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "22\u00a0\u00a0\u00a0\u00a0fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass: "
+          "text": "22",
+          "code": ""
         },
         {
           "row": 23,
@@ -2506,7 +2542,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "23\u00a0\u00a0\u00a0\u00a0    // Shields get exponentially less efficient"
+          "text": "23Nothing here asserts anything.  The assertions live in",
+          "code": "Nothing here asserts anything.  The assertions live in"
         },
         {
           "row": 24,
@@ -2516,7 +2553,8 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "24\u00a0\u00a0\u00a0\u00a0    // At 100% shields 1 unit of mass will drain 1 point of energy"
+          "text": "24``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded",
+          "code": "``src/frontend/tui/tests/test_fixture_corpus.nim``, which opens the recorded"
         },
         {
           "row": 25,
@@ -2526,47 +2564,52 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "25\u00a0\u00a0\u00a0\u00a0    // At 50% shields 1 unit of mass will drain 50 points of energy"
+          "text": "25trace through a real ``HeadlessDebugSession``.",
+          "code": "trace through a real ``HeadlessDebugSession``."
         },
         {
           "row": 26,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "26\u00a0\u00a0\u00a0\u00a0    let shield_pct = calculate_remaining_shield_pct(initial_shield, remain"
+          "text": "26\"\"\"",
+          "code": "\"\"\""
         },
         {
           "row": 27,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "27\u00a0\u00a0\u00a0\u00a0    let mut damage = 0;"
+          "text": "27",
+          "code": ""
         },
         {
           "row": 28,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "28\u00a0\u00a0\u00a0\u00a0    if(shield_pct == 100){"
+          "text": "28",
+          "code": ""
         },
         {
           "row": 29,
-          "pointer": "eptExecution",
+          "pointer": "eptNone",
           "mark": "emNone",
-          "values": "damage=\"0x0000000000000000000000000000000000000000000000000000000000000000\"|mass=\"0x0000000000000000000000000000000000000000000000000000000000000064\"",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil",
           "flow": "efsTaken",
           "codeOpacity": "",
-          "rowBackground": "#404040",
-          "text": "\u25b6 29\u00a0\u00a0\u00a0\u00a0        damage = mass * 1;/* damage: \"0x00000000000000000000000000000000"
+          "rowBackground": "",
+          "text": "29def add(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def add(left, right):"
         },
         {
           "row": 30,
@@ -2576,67 +2619,74 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "30\u00a0\u00a0\u00a0\u00a0    }"
+          "text": "30    \"\"\"Integer addition, as its own frame so stepping has somewhere to step.\"\"",
+          "code": "    \"\"\"Integer addition, as its own frame so stepping has somewhere to step.\"\"\""
         },
         {
           "row": 31,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsTaken",
+          "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "31\u00a0\u00a0\u00a0\u00a0    else{"
+          "text": "31    return left + right",
+          "code": "    return left + right"
         },
         {
           "row": 32,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
-          "text": "32\u00a0\u00a0\u00a0\u00a0        damage = mass * (100 - shield_pct);"
+          "text": "32",
+          "code": ""
         },
         {
           "row": 33,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
-          "text": "33\u00a0\u00a0\u00a0\u00a0    }"
+          "text": "33",
+          "code": ""
         },
         {
           "row": 34,
           "pointer": "eptNone",
           "mark": "emNone",
-          "values": "",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026",
           "flow": "efsTaken",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "34\u00a0\u00a0\u00a0\u00a0    if(damage as u32 > remaining_shield as u32){"
+          "text": "34def sub(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def sub(left, right):"
         },
         {
           "row": 35,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
-          "text": "35\u00a0\u00a0\u00a0\u00a0        damage = remaining_shield;"
+          "text": "35    \"\"\"Integer subtraction.\"\"\"",
+          "code": "    \"\"\"Integer subtraction.\"\"\""
         },
         {
           "row": 36,
           "pointer": "eptNone",
           "mark": "emNone",
           "values": "",
-          "flow": "efsNotTaken",
-          "codeOpacity": "0.5",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
           "rowBackground": "",
-          "text": "36\u00a0\u00a0\u00a0\u00a0        }"
+          "text": "36    return left - right",
+          "code": "    return left - right"
         },
         {
           "row": 37,
@@ -2646,7 +2696,832 @@
           "flow": "efsUnknown",
           "codeOpacity": "",
           "rowBackground": "",
-          "text": "37\u00a0\u00a0\u00a0\u00a0    damage as Field"
+          "text": "37",
+          "code": ""
+        },
+        {
+          "row": 38,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "38",
+          "code": ""
+        },
+        {
+          "row": 39,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "39def mul(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def mul(left, right):"
+        },
+        {
+          "row": 40,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "40    \"\"\"Integer multiplication.\"\"\"",
+          "code": "    \"\"\"Integer multiplication.\"\"\""
+        },
+        {
+          "row": 41,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "41    return left * right",
+          "code": "    return left * right"
+        },
+        {
+          "row": 42,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "42",
+          "code": ""
+        },
+        {
+          "row": 43,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "43",
+          "code": ""
+        },
+        {
+          "row": 44,
+          "pointer": "eptExecution",
+          "mark": "emNone",
+          "values": "__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "#404040",
+          "text": "44def div(left, right):__builtins__@[(\"__name__\", \"builtins\"), (\u2026__cached__nil__",
+          "code": "def div(left, right):"
+        },
+        {
+          "row": 45,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "45    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an",
+          "code": "    \"\"\"Floor division.  ``//`` rather than ``/`` keeps every recorded value an"
+        },
+        {
+          "row": 46,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "46    ``int``: a float would make the printed output depend on the interpreter's",
+          "code": "    ``int``: a float would make the printed output depend on the interpreter's"
+        },
+        {
+          "row": 47,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "47    repr, and this program's whole job is to be identical on every host.\"\"\"",
+          "code": "    repr, and this program's whole job is to be identical on every host.\"\"\""
+        },
+        {
+          "row": 48,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "48    return left // right",
+          "code": "    return left // right"
+        },
+        {
+          "row": 49,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "49",
+          "code": ""
+        },
+        {
+          "row": 50,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "50",
+          "code": ""
+        },
+        {
+          "row": 51,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "51# The dispatch table is deliberately module-level and constant: the operator",
+          "code": "# The dispatch table is deliberately module-level and constant: the operator"
+        },
+        {
+          "row": 52,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "52# lookup is then a value the debugger can show, not a branch it has to unfold.",
+          "code": "# lookup is then a value the debugger can show, not a branch it has to unfold."
+        },
+        {
+          "row": 53,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "53OPERATIONS = {OPERATIONS@[(\"+\", <function add at 0x7f\u2026",
+          "code": "OPERATIONS = {"
+        },
+        {
+          "row": 54,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "add=<function add at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "54    \"+\": add,add<function add at 0x7fffe862c4\u2026",
+          "code": "    \"+\": add,"
+        },
+        {
+          "row": 55,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "55    \"-\": sub,sub<function sub at 0x7fffe862c4\u2026",
+          "code": "    \"-\": sub,"
+        },
+        {
+          "row": 56,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "mul=<function mul at 0x7fffe862c5\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "56    \"*\": mul,mul<function mul at 0x7fffe862c5\u2026",
+          "code": "    \"*\": mul,"
+        },
+        {
+          "row": 57,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "div=<function div at 0x7fffe862c5\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "57    \"/\": div,div<function div at 0x7fffe862c5\u2026",
+          "code": "    \"/\": div,"
+        },
+        {
+          "row": 58,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "58}",
+          "code": "}"
+        },
+        {
+          "row": 59,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "59",
+          "code": ""
+        },
+        {
+          "row": 60,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "60",
+          "code": ""
+        },
+        {
+          "row": 61,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "OPERATIONS=@[(\"+\", <function add at 0x7f\u2026|__builtins__=@[(\"__name__\", \"builtins\"), (\u2026|__cached__=nil|__doc__=\"calc \u2014 the small, fast, dete\u2026|__file__=\"/home/zahary/m/codetracer/te\u2026|__loader__=nil|__name__=\"__main__\"|__package__=\"\"|__spec__=nil|add=<function add at 0x7fffe862c4\u2026|div=<function div at 0x7fffe862c5\u2026|mul=<function mul at 0x7fffe862c5\u2026|sub=<function sub at 0x7fffe862c4\u2026",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "61def apply_op(symbol, left, right):OPERATIONS@[(\"+\", <function add at 0x7f\u2026__bu",
+          "code": "def apply_op(symbol, left, right):"
+        },
+        {
+          "row": 62,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "62    \"\"\"Resolve one operator symbol and apply it.",
+          "code": "    \"\"\"Resolve one operator symbol and apply it."
+        },
+        {
+          "row": 63,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "63",
+          "code": ""
+        },
+        {
+          "row": 64,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "64    This frame exists so that the calltrace has a middle layer \u2014 the value",
+          "code": "    This frame exists so that the calltrace has a middle layer \u2014 the value"
+        },
+        {
+          "row": 65,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "65    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is the",
+          "code": "    ``left`` visibly flows main -> evaluate -> apply_op -> add, which is the"
+        },
+        {
+          "row": 66,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "66    shape a value-origin or a call-stack pane is read against.",
+          "code": "    shape a value-origin or a call-stack pane is read against."
+        }
+      ]
+    }
+  },
+  "flowTrace": "noir_space_ship-f9f31b01a0d2",
+  "flowScenarios": {
+    "noir-declined-arm": {
+      "replayOps": "stepIn=28",
+      "planSha256": "747c78f11a05b2193319ff7894538a9b25d48cdbf12eb84337bd3e3b9bf6a8fe",
+      "rowCount": 45,
+      "rows": [
+        {
+          "row": 1,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "1pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field,",
+          "code": "pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field, "
+        },
+        {
+          "row": 2,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "2    let mut remaining_shield = initial_shield;",
+          "code": "    let mut remaining_shield = initial_shield;"
+        },
+        {
+          "row": 3,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "3",
+          "code": ""
+        },
+        {
+          "row": 4,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "4    for i in 0..8 {",
+          "code": "    for i in 0..8 {"
+        },
+        {
+          "row": 5,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "5        let mass = masses[i];",
+          "code": "        let mass = masses[i];"
+        },
+        {
+          "row": 6,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "6        let damage = calculate_damage(initial_shield, remaining_shield, mass);",
+          "code": "        let damage = calculate_damage(initial_shield, remaining_shield, mass);"
+        },
+        {
+          "row": 7,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "7        remaining_shield -= damage;",
+          "code": "        remaining_shield -= damage;"
+        },
+        {
+          "row": 8,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "8",
+          "code": ""
+        },
+        {
+          "row": 9,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "9        let mut regeneration = 0;",
+          "code": "        let mut regeneration = 0;"
+        },
+        {
+          "row": 10,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "10        if (remaining_shield as u32 > 0){",
+          "code": "        if (remaining_shield as u32 > 0){"
+        },
+        {
+          "row": 11,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "11        regeneration = calculate_shield_regeneration(initial_shield ,remaining",
+          "code": "        regeneration = calculate_shield_regeneration(initial_shield ,remaining_s"
+        },
+        {
+          "row": 12,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "12        remaining_shield += regeneration;",
+          "code": "        remaining_shield += regeneration;"
+        },
+        {
+          "row": 13,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "13        }",
+          "code": "        }"
+        },
+        {
+          "row": 14,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "14        status_report(i,initial_shield, remaining_shield, damage, regeneration",
+          "code": "        status_report(i,initial_shield, remaining_shield, damage, regeneration);"
+        },
+        {
+          "row": 15,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "15    }",
+          "code": "    }"
+        },
+        {
+          "row": 16,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "16",
+          "code": ""
+        },
+        {
+          "row": 17,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "17    // We need to have at least 1 unit of shields left in order to survive the",
+          "code": "    // We need to have at least 1 unit of shields left in order to survive the c"
+        },
+        {
+          "row": 18,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "18    let result = remaining_shield as u32 > 0;",
+          "code": "    let result = remaining_shield as u32 > 0;"
+        },
+        {
+          "row": 19,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "19    result",
+          "code": "    result"
+        },
+        {
+          "row": 20,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "20}",
+          "code": "}"
+        },
+        {
+          "row": 21,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "21",
+          "code": ""
+        },
+        {
+          "row": 22,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "initial_shield=0x2710|remaining_shield=0x2710|mass=0x64|return=nil",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "22fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass: Fiel",
+          "code": "fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass: Field)"
+        },
+        {
+          "row": 23,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "23    // Shields get exponentially less efficient",
+          "code": "    // Shields get exponentially less efficient"
+        },
+        {
+          "row": 24,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "24    // At 100% shields 1 unit of mass will drain 1 point of energy",
+          "code": "    // At 100% shields 1 unit of mass will drain 1 point of energy"
+        },
+        {
+          "row": 25,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "25    // At 50% shields 1 unit of mass will drain 50 points of energy",
+          "code": "    // At 50% shields 1 unit of mass will drain 50 points of energy"
+        },
+        {
+          "row": 26,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "shield_pct=0x64|initial_shield=0x2710|remaining_shield=0x2710",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "26    let shield_pct = calculate_remaining_shield_pct(initial_shield, remaining_",
+          "code": "    let shield_pct = calculate_remaining_shield_pct(initial_shield, remaining_sh"
+        },
+        {
+          "row": 27,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "damage=0x0",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "27    let mut damage = 0;damage0x0",
+          "code": "    let mut damage = 0;"
+        },
+        {
+          "row": 28,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "shield_pct=0x64",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "28    if(shield_pct == 100){shield_pct0x64",
+          "code": "    if(shield_pct == 100){"
+        },
+        {
+          "row": 29,
+          "pointer": "eptExecution",
+          "mark": "emNone",
+          "values": "damage=0x0|mass=0x64",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "#404040",
+          "text": "29        damage = mass * 1;damage0x0mass0x64",
+          "code": "        damage = mass * 1;"
+        },
+        {
+          "row": 30,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "30    }",
+          "code": "    }"
+        },
+        {
+          "row": 31,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "31    else{",
+          "code": "    else{"
+        },
+        {
+          "row": 32,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
+          "rowBackground": "",
+          "text": "32        damage = mass * (100 - shield_pct);",
+          "code": "        damage = mass * (100 - shield_pct);"
+        },
+        {
+          "row": 33,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
+          "rowBackground": "",
+          "text": "33    }",
+          "code": "    }"
+        },
+        {
+          "row": 34,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "damage=0x64|remaining_shield=0x2710|return=nil",
+          "flow": "efsTaken",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "34    if(damage as u32 > remaining_shield as u32){damage0x64remaining_shield0x27",
+          "code": "    if(damage as u32 > remaining_shield as u32){"
+        },
+        {
+          "row": 35,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
+          "rowBackground": "",
+          "text": "35        damage = remaining_shield;",
+          "code": "        damage = remaining_shield;"
+        },
+        {
+          "row": 36,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsNotTaken",
+          "codeOpacity": "0.5",
+          "rowBackground": "",
+          "text": "36        }",
+          "code": "        }"
+        },
+        {
+          "row": 37,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "37    damage as Field",
+          "code": "    damage as Field"
+        },
+        {
+          "row": 38,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "38}",
+          "code": "}"
+        },
+        {
+          "row": 39,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "39",
+          "code": ""
+        },
+        {
+          "row": 40,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "40fn calculate_shield_regeneration(initial_shield:Field, remaining_shield:Field,",
+          "code": "fn calculate_shield_regeneration(initial_shield:Field, remaining_shield:Field, s"
+        },
+        {
+          "row": 41,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "41    // shields regain a percentage of the maxium capacity after each hit",
+          "code": "    // shields regain a percentage of the maxium capacity after each hit"
+        },
+        {
+          "row": 42,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "42    let mut regen = (initial_shield * shield_regen_percentage) / 100;",
+          "code": "    let mut regen = (initial_shield * shield_regen_percentage) / 100;"
+        },
+        {
+          "row": 43,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "43    if((remaining_shield + regen) as u32 > initial_shield as u32){",
+          "code": "    if((remaining_shield + regen) as u32 > initial_shield as u32){"
+        },
+        {
+          "row": 44,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "44        regen = initial_shield - remaining_shield;",
+          "code": "        regen = initial_shield - remaining_shield;"
+        },
+        {
+          "row": 45,
+          "pointer": "eptNone",
+          "mark": "emNone",
+          "values": "",
+          "flow": "efsUnknown",
+          "codeOpacity": "",
+          "rowBackground": "",
+          "text": "45    }",
+          "code": "    }"
         }
       ]
     }

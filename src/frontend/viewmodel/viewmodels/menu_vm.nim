@@ -54,6 +54,12 @@ type
       ## vocabulary the desktop's keyboard shortcuts, its command palette and
       ## its native macOS menu already share. "" for a folder.
     enabled*: bool
+    reason*: string
+      ## Why a DISABLED action item cannot run now, in words the user is
+      ## shown ("" while it is enabled). Edit-Mode-Toolbar.md EMT-D14:
+      ## *"Every disabled state carries a non-empty reason"* — a greyed item
+      ## that says nothing is indistinguishable from a broken one, which is
+      ## how codetracer#841 was filed. Set by `setAvailability`.
     checked*: bool
       ## A toggle item's state. No item of today's tree is a toggle; the
       ## field is here so one can be added without changing the model.
@@ -67,11 +73,22 @@ type
       ## `MenuNode.isBeforeNextSubGroup`).
     role*: string
       ## The macOS native-menu role, for the items macOS draws itself.
+    mnemonic*: char
+      ## A top-level folder's access key, lower-case: `Alt+<mnemonic>` opens
+      ## it (CUA-Keymap.md §3.8) and the renderers underline it
+      ## (`mnemonicAt`). `'\0'` for none.
     os*: int
       ## The desktop's `MenuNodeOS` bits: which platforms the item is for.
       ## Carried so the desktop can build its `MenuNode` tree — and the
       ## native macOS menu — from this one tree.
     children*: seq[MenuItem]
+
+  MenuAvailability* = object
+    ## Whether a front-end can run an action NOW, and if not, why. What a
+    ## front-end's action table answers for `setAvailability`.
+    enabled*: bool
+    reason*: string
+      ## Non-empty exactly when `enabled` is false.
 
   MenuActivation* = object
     ## What activating an item did.
@@ -115,15 +132,31 @@ const
     ## How long a type-to-select prefix waits for its next character before
     ## a new keystroke starts a new prefix — the common menu convention.
   MenuShortcutNone* = ""
+  MenuUnavailableReason* = "not available in this front-end"
+    ## The reason `setEnabled` gives an item its predicate refuses: that
+    ## predicate answers only yes or no, and a disabled item still says
+    ## something (EMT-D14). A front-end that knows WHY uses
+    ## `setAvailability` instead.
 
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
 
 func folder*(label: string; children: seq[MenuItem]; os = 0;
-             role = ""; hidden = false): MenuItem =
+             role = ""; hidden = false; mnemonic = '\0'): MenuItem =
   MenuItem(kind: mikFolder, label: label, enabled: true, os: os, role: role,
-           hidden: hidden, children: children)
+           hidden: hidden, children: children, mnemonic: mnemonic)
+
+func mnemonicAt*(it: MenuItem): int =
+  ## Where `it.mnemonic` is in its label (the first occurrence, either
+  ## case) — the character a renderer underlines. -1 when it has none.
+  if it.mnemonic == '\0':
+    return -1
+  let m = it.mnemonic.toLowerAscii
+  for i, ch in it.label:
+    if ch.toLowerAscii == m:
+      return i
+  -1
 
 func item*(label, action: string; enabled = true; os = 0;
            role = ""): MenuItem =
@@ -268,18 +301,62 @@ proc setShortcuts*(vm: MenuVM; shortcuts: Table[string, string]) =
   vm.shortcuts = shortcuts
   vm.changed()
 
-proc setEnabled*(vm: MenuVM; available: proc(action: string): bool) =
-  ## Mark every action item enabled exactly when `available` says the
-  ## front-end can perform it. A front-end that cannot run an action shows it
-  ## disabled rather than dropping it, so every front-end has the same menu.
+func availableNow*(): MenuAvailability =
+  ## An action the front-end can run now.
+  MenuAvailability(enabled: true)
+
+func unavailable*(reason: string): MenuAvailability =
+  ## An action the front-end cannot run now, and why. An empty `reason` is
+  ## replaced by `MenuUnavailableReason`, so a disabled item is never silent.
+  MenuAvailability(enabled: false,
+                   reason: (if reason.len > 0: reason
+                            else: MenuUnavailableReason))
+
+proc setAvailability*(vm: MenuVM;
+                      availability: proc(action: string): MenuAvailability) =
+  ## Mark every action item enabled exactly when `availability` says the
+  ## front-end can perform it now, and give each disabled one its reason. A
+  ## front-end that cannot run an action shows it disabled rather than
+  ## dropping it, so every front-end has the same menu.
+  ##
+  ## STATE-AWARE BY BEING CALLED AGAIN: what a front-end can run depends on
+  ## its state (a host to open a recording with, the files open in its
+  ## editor), so a front-end calls this whenever that state may have changed
+  ## — when the menu opens, before its commands are listed — and not once at
+  ## start-up (codetracer#841: a table fixed at start-up cannot follow the
+  ## application). `revision` moves only when an item actually changed, so a
+  ## renderer that skips an unchanged menu still skips it.
+  var moved = false
   proc walk(n: var MenuItem) =
     for c in n.children.mitems:
       if c.kind == mikFolder:
         walk(c)
       else:
-        c.enabled = available(c.action)
+        var now = availability(c.action)
+        if not now.enabled and now.reason.len == 0:
+          now.reason = MenuUnavailableReason
+        let reason = if now.enabled: "" else: now.reason
+        if c.enabled != now.enabled or c.reason != reason:
+          c.enabled = now.enabled
+          c.reason = reason
+          moved = true
   walk(vm.root)
-  vm.changed()
+  if moved:
+    vm.changed()
+
+proc setEnabled*(vm: MenuVM; available: proc(action: string): bool) =
+  ## `setAvailability` for a predicate that answers only yes or no: a refused
+  ## item is disabled with `MenuUnavailableReason`.
+  vm.setAvailability(proc(action: string): MenuAvailability =
+    if available(action): availableNow() else: unavailable(""))
+
+func refusalOf*(it: MenuItem): string =
+  ## What a front-end says when a disabled item is chosen — the item and its
+  ## reason, `"<label>: <reason>"`, the shape the Welcome Screen's refused
+  ## options use — or "" for an item that is not refused.
+  if it.kind != mikAction or it.enabled:
+    return ""
+  it.label & ": " & (if it.reason.len > 0: it.reason else: MenuUnavailableReason)
 
 # ---------------------------------------------------------------------------
 # Opening and closing
@@ -308,6 +385,16 @@ proc close*(vm: MenuVM) =
 
 proc toggle*(vm: MenuVM) =
   if vm.isOpen: vm.close() else: vm.open(keyboard = false)
+
+proc folderIndexOf*(vm: MenuVM; name: string): int =
+  ## The SHOWN top-level folder labelled `name` (case-insensitive), or -1. A
+  ## name may label a hidden twin (Help, on macOS and elsewhere); the one this
+  ## front-end shows is the one meant.
+  for i, it in vm.root.children:
+    if it.kind == mikFolder and not it.hidden and
+       it.label.toLowerAscii == name.toLowerAscii:
+      return i
+  -1
 
 proc openFolder*(vm: MenuVM; index: int; keyboard = true) =
   ## Open the top-level folder `index` directly — a menu bar's click on a
@@ -499,7 +586,9 @@ type
     ## visible items, and which of them is highlighted / on the open path.
     folderPath*: seq[int]
     items*: seq[tuple[index: int, label, shortcut: string, folder,
-                      enabled, active, separatorAfter: bool]]
+                      enabled, active, separatorAfter: bool, mnemonic: int]]
+      ## `mnemonic`: where the item's access key is in `label` (the cell or
+      ## character a renderer underlines), -1 for none (`mnemonicAt`).
 
 proc openLevels*(vm: MenuVM): seq[MenuLevelView] =
   ## The levels an open menu shows, outermost first: the top level, then one
@@ -517,5 +606,5 @@ proc openLevels*(vm: MenuVM): seq[MenuLevelView] =
                                else: ""),
                     folder: c.kind == mikFolder, enabled: c.enabled,
                     active: vm.isOnPath(fp & @[i]),
-                    separatorAfter: c.separatorAfter)
+                    separatorAfter: c.separatorAfter, mnemonic: c.mnemonicAt)
     result.add lv

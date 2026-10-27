@@ -36,10 +36,15 @@ type
 proc layoutPreferencesPath*(product: LayoutProduct): string =
   nativeStateRoot() / ($product & "-preferences")
 
+func productDefaults*(product: LayoutProduct): LayoutSettings =
+  ## The defaults of `product`: the overflow markers are on in the terminal
+  ## and off in GPUI (Horizontal-Overflow.md §4.6, OQ-H1).
+  defaultLayoutSettings(overflowMarkers = product == lpTerminal)
+
 proc loadLayoutPreferences*(product: LayoutProduct): LayoutPreferencesLoad =
   let path = layoutPreferencesPath(product)
   result = LayoutPreferencesLoad(status: lpsAbsent,
-                                 settings: defaultLayoutSettings(),
+                                 settings: productDefaults(product),
                                  path: path)
   if not fileExists(path):
     return
@@ -51,7 +56,7 @@ proc loadLayoutPreferences*(product: LayoutProduct): LayoutPreferencesLoad =
     result.message = "the stored layout preferences could not be read: " &
                      path & ": " & e.msg
     return
-  let decoded = decodeLayoutSettings(text)
+  let decoded = decodeLayoutSettings(text, productDefaults(product))
   if decoded.ok:
     result.status = lpsLoaded
     result.settings = decoded.settings
@@ -60,13 +65,37 @@ proc loadLayoutPreferences*(product: LayoutProduct): LayoutPreferencesLoad =
     result.message = decoded.message & " (in " & path & ")"
 
 proc saveLayoutPreference*(product: LayoutProduct; which: LayoutSetting;
-                           on: bool): string =
-  ## Remember one setting; the others keep what is stored. "" on success,
-  ## else why it could not be saved.
+                           value: string): string =
+  ## Remember one setting's value word; the others keep what is stored. ""
+  ## on success, else why it could not be saved.
   var current = loadLayoutPreferences(product)
   var s = if current.status == lpsLoaded: current.settings
-          else: defaultLayoutSettings()
-  s.assign(which, on)
+          else: productDefaults(product)
+  if not s.assignValue(which, value):
+    return "'" & value & "' is not a value of " & $which
+  let failure = writeStaged(layoutPreferencesPath(product),
+                            encodeLayoutSettings(s))
+  if failure.len == 0: ""
+  else: "the " & $which & " setting could not be saved: " & failure
+
+proc saveLayoutPreference*(product: LayoutProduct; which: LayoutSetting;
+                           on: bool): string =
+  ## An on / off setting remembered.
+  saveLayoutPreference(product, which, if on: "on" else: "off")
+
+proc saveScopedPreference*(product: LayoutProduct; glob: string;
+                           which: LayoutSetting; value: string): string =
+  ## PLAT-71 (Terminal-Adaptation §5.3, OQ-T6): remember `which = value` for
+  ## the terminals `glob` matches — a `[terminal "<glob>"]` section of the
+  ## same file. "" on success, else why not.
+  var current = loadLayoutPreferences(product)
+  if current.status == lpsRefused:
+    return current.message
+  var s = if current.status == lpsLoaded: current.settings
+          else: productDefaults(product)
+  if not s.setScoped(glob, which, value):
+    return "'" & value & "' is not a value of " & $which &
+           " for one terminal"
   let failure = writeStaged(layoutPreferencesPath(product),
                             encodeLayoutSettings(s))
   if failure.len == 0: ""

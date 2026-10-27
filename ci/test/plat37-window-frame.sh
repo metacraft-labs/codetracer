@@ -138,7 +138,9 @@ FRAME_H=900
 # screen. That is a budget defect and it is fixed as one.
 #
 # **IT IS NOT FIXED BY GIVING THE TWO ARMS DIFFERENT BUDGETS.** The featureless
-# arm's binary exits in about 8 s and then the capture polls an empty screen
+# arm's binary exits in about 8 s (since the no-window refusal, with rc 3 and
+# a `codetracer-gpui: … no window backend` line, which the row records as
+# `refusal`; it used to be a silent rc 0) and then the capture polls an empty screen
 # for the rest of the window, which is pure wall clock spent proving a
 # negative. Shortening it there would be the cheapest thing in this file and it
 # would also destroy `DIFF-6`: an arm that was given less time to produce a
@@ -260,6 +262,15 @@ use_shim() {
 		SHIM_BACKUP="${LIVE_SHIM}.plat37-backup"
 		cp -f "${LIVE_SHIM}" "${SHIM_BACKUP}"
 	fi
+	# UNLINK FIRST, NEVER COPY ONTO IT. Cargo uplifts `target/debug/
+	# libgpui_nim_shim.so` as a HARDLINK to `target/debug/deps/…`, so a `cp`
+	# onto the live path rewrites cargo's own cached output through the shared
+	# inode. Cargo judges freshness by fingerprint, not by bytes, so the next
+	# `cargo build` reports the unit fresh and re-uplifts THIS arm's bytes —
+	# measured 2026-10-18: after a capture, `isonim-gpui`'s `plat37-shims`
+	# staged a "featureless" shim byte-identical to the headless one
+	# (341,153,248 bytes; a genuine featureless link is 8,083,520).
+	rm -f "${LIVE_SHIM}"
 	cp -f "${src}" "${LIVE_SHIM}"
 	echo "shim in place: ${config} ($(wc -c <"${LIVE_SHIM}") bytes, \
 $(ldd "${LIVE_SHIM}" | wc -l) ldd entries)"
@@ -392,6 +403,26 @@ capture_one() {
 			        pass
 			    return -1
 
+			# THE REFUSAL, IF THE BINARY MADE ONE. A launch that cannot open a
+			# window refuses by kind on stderr with exit 3
+			# (`src/frontend/gpui/window_preflight.nim`), so the featureless arm
+			# ends that way rather than with a silent rc 0. Recorded as the line
+			# itself, read from the run log (stdout and stderr together), so the
+			# gate can assert WHICH refusal was made and not only that the rc is
+			# non-zero: a crash that happened to exit 3 must not read as one.
+			# "" means no refusal line, which is a state, not a missing field.
+			def refusal_of(path):
+			    try:
+			        with open(path, errors="replace") as fh:
+			            for line in fh:
+			                if re.match(r"codetracer-gpui: (this build of the GPUI "
+			                            r"shim has no window backend|no graphical "
+			                            r"session)", line):
+			                    return line.rstrip("\n")
+			    except OSError:
+			        pass
+			    return ""
+
 			caplog = ppm + ".log"
 			print(json.dumps({
 			    "blankAtTick": tick_of(r"phase1 tick (\d+): output is blank", caplog),
@@ -404,6 +435,7 @@ capture_one() {
 			    "ops": ops,
 			    "outcome": outcome,
 			    "binaryRc": int(rc),
+			    "refusal": refusal_of(log),
 			    "captureRc": int(cap_rc),
 			    "elapsedMs": int(elapsed),
 			    "quitAfterMs": int(quit_ms),

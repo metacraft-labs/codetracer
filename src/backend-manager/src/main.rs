@@ -45,7 +45,7 @@ use tokio::{
 };
 
 use crate::backend_manager::BackendManager;
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, DaemonPaths};
 use crate::dap_parser::DapParser;
 use crate::paths::CODETRACER_PATHS;
 
@@ -187,6 +187,17 @@ enum Commands {
         /// recording however long it takes.
         #[arg(long, value_name = "DURATION")]
         idle_timeout: Option<String>,
+        /// Write the recording under this `recording_id` (a canonical
+        /// lowercase UUIDv7) instead of a freshly minted one.
+        ///
+        /// For a caller that runs the host for exactly one recording whose
+        /// identity it derives itself: CodeTracer's JS boundary replay runner
+        /// derives the id of a materialised trace from the boundary session,
+        /// so that materialising it again writes a byte-identical trace
+        /// (`codetracer-specs/Recording-Backends/JS-Boundary-Recording.md`
+        /// §12).  The host then writes one recording; a second is refused.
+        #[arg(long, value_name = "UUIDV7")]
+        recording_id: Option<String>,
     },
 }
 
@@ -387,7 +398,17 @@ enum TraceAction {
     ///
     /// The server connects to the daemon (auto-starting if needed) to
     /// execute tool operations.
-    Mcp,
+    Mcp {
+        /// Let `read_source_file` read a file the recording's source list
+        /// names from this host when the recording carries no copy of it.
+        ///
+        /// Off by default: the source list is part of the recording, so a
+        /// recording made elsewhere can name any file on this machine.  Set
+        /// it when reading your own recordings; leave it unset for an agent
+        /// that reads recordings other people's traffic produced.
+        #[arg(long)]
+        allow_host_source_reads: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -801,6 +822,121 @@ async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// The variables the mock DAP backend's fake trace pretends to have
+/// recorded.
+///
+/// These are exactly the names its `variables` / `scopes` responses
+/// report (`x`, `y`, `point` in the default frame; `worker_id` and
+/// `task_count` in the worker frame).  A watchpoint on any other name
+/// must be refused as `VariableNotInTrace` — the mock does not get to
+/// claim it recorded something it never reports.
+///
+/// Kept here rather than inside `ct-data-breakpoints` because it is the
+/// mock's *vocabulary*, not a *rule*.  The rules are shared with the
+/// real backend; a vocabulary is properly per-trace, and moving it into
+/// the shared crate would only relocate the lie.
+pub(crate) const MOCK_TRACE_VARIABLES: [&str; 5] = ["x", "y", "point", "worker_id", "task_count"];
+
+/// The mock's view of itself for the shared admission rules.
+///
+/// `has_values` is true: the mock stands in for the materialised replay
+/// session, which is the one backend that DOES keep a per-step value
+/// table and can therefore answer a value-change watchpoint.
+pub(crate) fn mock_trace_vocabulary() -> ct_data_breakpoints::FixedVocabulary {
+    ct_data_breakpoints::FixedVocabulary::new(MOCK_TRACE_VARIABLES)
+}
+
+/// Decode one DAP `DataBreakpoint` JSON entry into the shared request
+/// shape.  Mirrors `db_backend::dap_handler::Handler::decode_data_breakpoint`,
+/// including the empty-string normalisation for `condition` /
+/// `hitCondition` that keeps a frontend which cannot elide the key from
+/// having every watchpoint refused.
+pub(crate) fn decode_mock_data_breakpoint(
+    bp: &serde_json::Value,
+) -> ct_data_breakpoints::DataBreakpointRequest {
+    ct_data_breakpoints::DataBreakpointRequest {
+        data_id: bp
+            .get("dataId")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        access_type: bp
+            .get("accessType")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        condition: bp
+            .get("condition")
+            .and_then(serde_json::Value::as_str)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string),
+        hit_condition: bp
+            .get("hitCondition")
+            .and_then(serde_json::Value::as_str)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string),
+    }
+}
+
+/// The mock's `setDataBreakpoints` body, as
+/// `(accepted_expressions, per_entry_results)`.
+///
+/// THE VERDICT IS NOT THIS MOCK'S TO MAKE.  It used to be: this
+/// returned `verified: true` for every entry it was handed, while the
+/// real replay backend had no `setDataBreakpoints` arm in its DAP
+/// dispatch at all and refused every request with the free-text
+/// fallthrough `command setDataBreakpoints not supported here`.
+///
+/// A test double more capable than the component it stands in for is a
+/// blindfold: every test of the watchpoint path passed, against a
+/// backend that could not do the thing being tested, and
+/// `Trace.add_watchpoint` was broken for the whole life of the feature
+/// without one test going red.
+///
+/// So the rules come from `ct_data_breakpoints::verdict` — the SAME
+/// function `db_backend`'s real `Handler::set_data_breakpoints` calls.
+/// The only thing this mock supplies is `vocabulary`: the variables its
+/// fake trace pretends to record.  If you are tempted to special-case
+/// something here, that is the exact instinct that produced the defect.
+///
+/// Extracted from the message loop so
+/// `mock_matches_the_shared_data_breakpoint_verdict` can drive the real
+/// mock code path rather than a re-implementation of it.
+pub(crate) fn mock_set_data_breakpoints_results(
+    bps: &[serde_json::Value],
+    vocabulary: &ct_data_breakpoints::FixedVocabulary,
+) -> (Vec<String>, Vec<serde_json::Value>) {
+    let mut accepted: Vec<String> = Vec::new();
+    let mut results: Vec<serde_json::Value> = Vec::with_capacity(bps.len());
+    for bp in bps {
+        let request = decode_mock_data_breakpoint(bp);
+        match ct_data_breakpoints::verdict(&request, vocabulary) {
+            Ok(watched) => {
+                // Ids are assigned by position among the ACCEPTED
+                // entries, matching the real backend, so the daemon can
+                // pair each verdict back with the watchpoint id that
+                // asked for it.
+                let id = accepted.len() + 1;
+                accepted.push(watched.name.clone());
+                results.push(json!({
+                    "id": id,
+                    "verified": true,
+                    "dataId": watched.name,
+                }));
+            }
+            Err(refusal) => {
+                results.push(json!({
+                    "verified": false,
+                    "message": refusal.description(),
+                    "refusalCode": refusal.as_u32(),
+                    "refusal": refusal.token(),
+                    "dataId": request.data_id,
+                }));
+            }
+        }
+    }
+    (accepted, results)
+}
+
 /// A DAP-speaking mock backend for integration tests.
 ///
 /// Connects to the parent's listener socket, reads DAP messages, and
@@ -811,10 +947,10 @@ async fn run_mock_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 /// `reverseContinue`, `ct/goto-ticks`) with stateful tracking: each
 /// command updates the mock's current position (file, line, ticks) and
 /// emits a `stopped` event.  `stackTrace` returns the current position.
-#[cfg(unix)]
 ///
 /// This enables end-to-end testing of the `ct/open-trace` and
 /// `ct/py-navigate` flows without needing a real replay-server binary.
+#[cfg(unix)]
 async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
     use tokio::io::AsyncReadExt as _;
 
@@ -1670,29 +1806,38 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                 //
                 // Replaces all data breakpoints (watchpoints).  Each entry
                 // has a `dataId` field containing the watched expression.
+                //
+                // THE VERDICT IS NOT THIS MOCK'S TO MAKE.  It used to be:
+                // this arm answered `verified: true` for every entry it was
+                // handed, while the real replay backend had no
+                // `setDataBreakpoints` arm in its DAP dispatch at all and
+                // refused every request with the free-text fallthrough
+                // `command setDataBreakpoints not supported here`.
+                //
+                // A test double more capable than the component it stands
+                // in for is a blindfold: every test of the watchpoint path
+                // passed, against a backend that could not do the thing
+                // being tested, and `Trace.add_watchpoint` was broken for
+                // the whole life of the feature without one test going red.
+                //
+                // So the rules come from `ct_data_breakpoints::verdict` —
+                // the SAME function `db_backend`'s real
+                // `Handler::set_data_breakpoints` calls.  The only thing
+                // this mock supplies is its own vocabulary: the variables
+                // its fake trace pretends to record.  If you are tempted to
+                // special-case something here, that is the exact instinct
+                // that produced the defect.
                 "setDataBreakpoints" => {
                     let bp_array = msg
                         .get("arguments")
                         .and_then(|a| a.get("breakpoints"))
                         .and_then(serde_json::Value::as_array);
 
-                    watchpoints.clear();
-                    let mut result_bps = vec![];
-                    if let Some(bps) = bp_array {
-                        for (i, bp) in bps.iter().enumerate() {
-                            let expr = bp
-                                .get("dataId")
-                                .and_then(serde_json::Value::as_str)
-                                .unwrap_or("")
-                                .to_string();
-                            watchpoints.push(expr.clone());
-                            result_bps.push(json!({
-                                "id": i + 1,
-                                "verified": true,
-                                "dataId": expr,
-                            }));
-                        }
-                    }
+                    let (accepted, result_bps) = mock_set_data_breakpoints_results(
+                        bp_array.map_or(&[], |a| a.as_slice()),
+                        &mock_trace_vocabulary(),
+                    );
+                    watchpoints = accepted;
 
                     let response = json!({
                         "type": "response",
@@ -1840,14 +1985,20 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                         .write_all(&DapParser::to_bytes(&response))
                         .await?;
                 }
-                // --- ct/read-source: returns mock source file content ---
+                // --- source (DAP) / ct/read-source: mock source file content ---
                 //
                 // Returns different content based on the requested path,
-                // simulating a multi-file project.
-                "ct/read-source" => {
+                // simulating a multi-file project.  The daemon's
+                // `ct/py-read-source` sends DAP `source` (the path in
+                // `source.path`), which the real replay server answers;
+                // `ct/read-source` (the path in `path`) is kept for clients
+                // that still send it.
+                "source" | "ct/read-source" => {
                     let args = msg.get("arguments");
                     let path = args
-                        .and_then(|a| a.get("path"))
+                        .and_then(|a| a.get("source"))
+                        .and_then(|s| s.get("path"))
+                        .or_else(|| args.and_then(|a| a.get("path")))
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("main.nim");
 
@@ -1861,7 +2012,7 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
 
                     let response = json!({
                         "type": "response",
-                        "command": "ct/read-source",
+                        "command": command,
                         "request_seq": seq,
                         "success": true,
                         "body": {
@@ -2494,6 +2645,20 @@ async fn ensure_daemon_connected(
 // Trace CLI implementations
 // ---------------------------------------------------------------------------
 
+/// `args` for a daemon request the `ct trace` commands make for a trace,
+/// marked as reading the recording's listed sources from this host.
+///
+/// These commands run on the user's own behalf, like the desktop GUI, so they
+/// keep the replay backend's host reads, which the daemon otherwise turns off
+/// for a client that does not ask (`session::HostSourceReads`).  The setting
+/// that keeps a recording's listed host files away from an agent is the MCP
+/// server's `--allow-host-source-reads`, left off for an agent reading
+/// recordings someone else produced.
+fn cli_trace_request(mut args: Value) -> Value {
+    session::HostSourceReads::Allowed.mark_request(&mut args);
+    args
+}
+
 /// Implements `ct trace query`.
 ///
 /// Reads the script (from a file or inline `-c`), connects to the daemon,
@@ -2559,12 +2724,12 @@ async fn run_trace_query(
         &mut stream,
         "ct/exec-script",
         1,
-        json!({
+        cli_trace_request(json!({
             "tracePath": trace_path_str,
             "script": script,
             "timeout": timeout_secs,
             "sessionId": session_id,
-        }),
+        })),
         timeout_secs + 30, // daemon-side timeout + overhead for open-trace
     )
     .await?;
@@ -2626,7 +2791,7 @@ async fn run_session_close(
         &mut stream,
         "ct/close-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -2666,7 +2831,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -2685,7 +2850,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -2765,7 +2930,7 @@ async fn run_trace_origin(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -2851,7 +3016,7 @@ async fn run_trace_origin(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -2955,12 +3120,12 @@ async fn run_trace_query(
         &mut stream,
         "ct/exec-script",
         1,
-        json!({
+        cli_trace_request(json!({
             "tracePath": trace_path_str,
             "script": script,
             "timeout": timeout_secs,
             "sessionId": session_id,
-        }),
+        })),
         timeout_secs + 30,
     )
     .await?;
@@ -3014,7 +3179,7 @@ async fn run_session_close(
         &mut stream,
         "ct/close-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -3047,7 +3212,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/open-trace",
         1,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         180,
     )
     .await?;
@@ -3065,7 +3230,7 @@ async fn run_trace_info(
         &mut stream,
         "ct/trace-info",
         2,
-        json!({"tracePath": trace_path_str}),
+        cli_trace_request(json!({"tracePath": trace_path_str})),
         10,
     )
     .await?;
@@ -3128,6 +3293,7 @@ async fn run_record_web(
     workdir: Option<&Path>,
     stream_consumer: browser_stream_host::StreamConsumerConfig,
     idle_timeout: Option<std::time::Duration>,
+    recording_id: Option<browser_stream_host::PinnedRecordingId>,
 ) -> Result<(), Box<dyn Error>> {
     let bind_addr: std::net::SocketAddr = bind
         .parse()
@@ -3144,6 +3310,7 @@ async fn run_record_web(
         workdir,
         stream_consumer: stream_consumer.clone(),
         idle_timeout,
+        recording_id: recording_id.clone(),
     };
     let host = browser_stream_host::BrowserStreamHost::new(config);
     let mut running = host.bind().await?;
@@ -3153,6 +3320,9 @@ async fn run_record_web(
         browser_stream_host::DEFAULT_ENDPOINT_PATH,
     );
     eprintln!("writing recorded `.ct` files under: {}", out_dir.display());
+    if let Some(id) = &recording_id {
+        eprintln!("the recording carries the recording id {}", id.as_str());
+    }
     if !stream_consumer.command.is_empty() {
         eprintln!(
             "streaming each recording into: {}",
@@ -3222,11 +3392,14 @@ async fn wait_for_stop(
 async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    // Resolve well-known daemon paths once.
-    let (daemon_socket_path, daemon_pid_path) = {
-        let paths = CODETRACER_PATHS.lock()?;
-        (paths.daemon_socket_path(), paths.daemon_pid_path())
-    };
+    // Resolve the daemon's paths once, for the daemon and every client verb
+    // alike (`DaemonConfig::daemon_paths`): an override such as
+    // `CODETRACER_DAEMON_SOCKET` must move both sides or neither.
+    let daemon_config = DaemonConfig::load();
+    let DaemonPaths {
+        socket: daemon_socket_path,
+        pid: daemon_pid_path,
+    } = daemon_config.daemon_paths(&*CODETRACER_PATHS.lock()?);
 
     // ------------------------------------------------------------------
     // MockBackend subcommand (used by integration tests)
@@ -3352,7 +3525,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 )
                 .await;
             }
-            TraceAction::Mcp => {
+            TraceAction::Mcp {
+                allow_host_source_reads,
+            } => {
                 // MCP server: redirect all logging to stderr only.
                 // stdout is reserved exclusively for JSON-RPC transport.
                 if let Err(e) = flexi_logger::Logger::try_with_str("info")
@@ -3363,6 +3538,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let config = mcp_server::McpServerConfig {
                     daemon_socket_path: daemon_socket_path.clone(),
                     daemon_pid_path: daemon_pid_path.clone(),
+                    host_source_reads: if *allow_host_source_reads {
+                        mcp_server::HostSourceReads::Allowed
+                    } else {
+                        mcp_server::HostSourceReads::Refused
+                    },
                 };
                 return mcp_server::run_mcp_server(config).await;
             }
@@ -3378,6 +3558,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         workdir,
         snapshot_consumer,
         idle_timeout,
+        recording_id,
     }) = &cli.command
     {
         flexi_logger::init();
@@ -3389,12 +3570,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // caller who asked for a specific watchdog and got a different one
         // would have no way to tell.
         let idle_timeout = resolve_record_web_idle_timeout(idle_timeout.as_ref())?;
+        let recording_id = recording_id
+            .as_deref()
+            .map(browser_stream_host::PinnedRecordingId::new)
+            .transpose()
+            .map_err(|e| format!("--recording-id: {e}"))?;
         return run_record_web(
             bind,
             out_dir,
             workdir.as_deref(),
             stream_consumer,
             idle_timeout,
+            recording_id,
         )
         .await;
     }
@@ -3405,18 +3592,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(Commands::Daemon { action }) = cli.command {
         match action {
             DaemonAction::Start => {
-                // Load configuration from env vars / config file / defaults.
-                let config = DaemonConfig::load();
-
-                // Apply config overrides: if CODETRACER_DAEMON_SOCKET is set,
-                // use it (and derive the PID path from the same directory).
-                let (daemon_socket_path, daemon_pid_path) = if let Some(ref sp) = config.socket_path
-                {
-                    let pid = sp.with_extension("pid");
-                    (sp.clone(), pid)
-                } else {
-                    (daemon_socket_path, daemon_pid_path)
-                };
+                // Configuration from env vars / config file / defaults, the
+                // same value the paths above were resolved from.
+                let config = daemon_config;
 
                 // Detach from the controlling terminal (if any) so that the
                 // daemon survives the parent process exiting.
@@ -3511,6 +3689,218 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// "no watchdog" would restore the orphaned-daemon leak while leaving the
 /// flag present and apparently honoured.  The parser therefore rejects
 /// what it cannot understand, and these cases pin that.
+/// Mock/real parity for DAP data breakpoints (watchpoints).
+///
+/// # Why this module exists
+///
+/// For the whole life of the watchpoint feature the ONLY implementation
+/// of `setDataBreakpoints` in this tree was the mock DAP backend a few
+/// hundred lines above, and it answered `verified: true` for every
+/// entry it was handed.  The real replay backend had no
+/// `setDataBreakpoints` arm in its DAP dispatch at all: the command
+/// fell through to `dap_command_to_step_action` and came back as
+/// `command setDataBreakpoints not supported here`.
+///
+/// So the test double could do something the product could not, and
+/// every test that exercised the watchpoint path passed for that
+/// reason.  `Trace.add_watchpoint` returned a plausible integer for a
+/// watchpoint nothing had accepted, `continue_forward()` then ran to
+/// the end of the trace and raised `StopIteration`, and no test in the
+/// tree could see any of it.
+///
+/// These tests are the missing half.  `db-backend`'s
+/// `tests/dap_data_breakpoints_test.rs::conformance_cases_agree_with_the_real_backend`
+/// drives the REAL backend through
+/// `ct_data_breakpoints::conformance_cases()`; this module drives the
+/// MOCK through the same table.  Either one going red means the two
+/// have diverged again.
+#[cfg(test)]
+mod mock_data_breakpoint_parity_tests {
+    use super::{MOCK_TRACE_VARIABLES, mock_set_data_breakpoints_results, mock_trace_vocabulary};
+    use ct_data_breakpoints::{DataBreakpointRefusal, TraceVocabulary, conformance_cases, verdict};
+    use serde_json::json;
+
+    /// Render a shared `DataBreakpointRequest` as the DAP JSON the
+    /// daemon actually puts on the wire in `handle_py_add_watchpoint`.
+    fn as_wire_entry(request: &ct_data_breakpoints::DataBreakpointRequest) -> serde_json::Value {
+        let mut entry = json!({ "dataId": request.data_id });
+        if let Some(a) = &request.access_type {
+            entry["accessType"] = json!(a);
+        }
+        if let Some(c) = &request.condition {
+            entry["condition"] = json!(c);
+        }
+        if let Some(h) = &request.hit_condition {
+            entry["hitCondition"] = json!(h);
+        }
+        entry
+    }
+
+    /// STRICT — the mock's `setDataBreakpoints` must answer exactly
+    /// what the shared admission rules say, case for case.
+    ///
+    /// The mock is driven through its REAL code path
+    /// (`mock_set_data_breakpoints_results`, which the message loop
+    /// calls), not a re-implementation of it, so a future edit to the
+    /// mock that reintroduces a special case shows up here.
+    #[test]
+    fn mock_matches_the_shared_data_breakpoint_verdict() {
+        let mut checked = 0usize;
+        for (request, vocabulary, expected) in conformance_cases() {
+            let (accepted, results) =
+                mock_set_data_breakpoints_results(&[as_wire_entry(&request)], &vocabulary);
+            assert_eq!(results.len(), 1, "one entry in, one verdict out");
+            let verified = results[0]["verified"]
+                .as_bool()
+                .expect("verified is a bool");
+            let refusal_code = results[0]["refusalCode"].as_u64().map(|c| c as u32);
+
+            match &expected {
+                Ok(watched) => {
+                    assert!(
+                        verified,
+                        "the mock refused {request:?}, which the shared rules ACCEPT. A mock less \
+                         capable than the real backend hides working behaviour; a mock more \
+                         capable than it hides broken behaviour. Neither is acceptable."
+                    );
+                    assert_eq!(
+                        refusal_code, None,
+                        "an accepted entry carries no refusal code"
+                    );
+                    assert_eq!(
+                        accepted,
+                        vec![watched.name.clone()],
+                        "the mock must install the name the rules admitted"
+                    );
+                }
+                Err(refusal) => {
+                    assert!(
+                        !verified,
+                        "the mock answered verified:true for {request:?}, which the shared rules \
+                         REFUSE with {}. This is the exact defect this module exists to catch: a \
+                         test double claiming a capability the real backend does not have.",
+                        refusal.token()
+                    );
+                    assert_eq!(
+                        refusal_code,
+                        Some(refusal.as_u32()),
+                        "the mock must report the same closed-set refusal the rules produced \
+                         ({}) for {request:?}",
+                        refusal.token()
+                    );
+                    assert!(
+                        accepted.is_empty(),
+                        "a refused entry must not be installed; the mock kept {accepted:?}"
+                    );
+                }
+            }
+            checked += 1;
+        }
+        // A zero here would mean this test asserted nothing at all.
+        assert!(
+            checked >= 15,
+            "only {checked} conformance cases were exercised against the mock; the shared table \
+             has stopped covering the rules it is supposed to pin"
+        );
+    }
+
+    /// STRICT — the mock must refuse a watchpoint on a variable its own
+    /// fake trace never reports.
+    ///
+    /// This is the specific shape of the original inversion: the mock
+    /// accepted ANY `dataId`, including names nothing in its own
+    /// `variables` response had ever mentioned.
+    #[test]
+    fn the_mock_refuses_a_variable_it_does_not_pretend_to_record() {
+        let (accepted, results) = mock_set_data_breakpoints_results(
+            &[json!({ "dataId": "a_name_the_mock_never_reports" })],
+            &mock_trace_vocabulary(),
+        );
+        assert_eq!(results[0]["verified"].as_bool(), Some(false));
+        assert_eq!(
+            results[0]["refusalCode"].as_u64().map(|c| c as u32),
+            Some(DataBreakpointRefusal::VariableNotInTrace.as_u32())
+        );
+        assert!(accepted.is_empty());
+    }
+
+    /// STRICT — every name the mock's vocabulary claims must actually
+    /// be watchable through the mock.
+    ///
+    /// Guards the other direction: a vocabulary that has drifted away
+    /// from what the mock's `variables` response reports would make the
+    /// mock refuse things the real backend accepts, which hides
+    /// working behaviour just as effectively as the reverse hid broken
+    /// behaviour.
+    #[test]
+    fn every_variable_the_mock_claims_to_record_is_watchable() {
+        let vocabulary = mock_trace_vocabulary();
+        for name in MOCK_TRACE_VARIABLES {
+            assert!(
+                vocabulary.knows_variable(name),
+                "`{name}` is in MOCK_TRACE_VARIABLES but the vocabulary does not know it"
+            );
+            let (accepted, results) =
+                mock_set_data_breakpoints_results(&[json!({ "dataId": name })], &vocabulary);
+            assert_eq!(
+                results[0]["verified"].as_bool(),
+                Some(true),
+                "the mock refused `{name}`, which its own fake trace reports as a variable"
+            );
+            assert_eq!(accepted, vec![name.to_string()]);
+        }
+    }
+
+    /// STRICT — a `read` watchpoint must be refused by the mock for the
+    /// reason that is INTRINSIC to replay, not merely unimplemented.
+    ///
+    /// A recording samples what each variable held at each step; it does
+    /// not record reads, which leave no trace in the data.  If the mock
+    /// ever accepts one, a test could "prove" a read watchpoint works
+    /// against a product that can never deliver it.
+    #[test]
+    fn the_mock_refuses_a_read_watchpoint() {
+        let (_, results) = mock_set_data_breakpoints_results(
+            &[json!({ "dataId": "x", "accessType": "read" })],
+            &mock_trace_vocabulary(),
+        );
+        assert_eq!(results[0]["verified"].as_bool(), Some(false));
+        assert_eq!(
+            results[0]["refusalCode"].as_u64().map(|c| c as u32),
+            Some(DataBreakpointRefusal::AccessTypeNotRecorded.as_u32())
+        );
+    }
+
+    /// STRICT — the mock's decode must agree with the shared rules on
+    /// the empty-string normalisation for `condition` / `hitCondition`.
+    ///
+    /// A frontend whose strict types cannot elide the key ships `""` to
+    /// mean "no condition".  Treating that as a condition would refuse
+    /// every watchpoint such a client sets — and the two sides
+    /// disagreeing about it would be a silent per-client divergence.
+    #[test]
+    fn an_empty_condition_string_is_not_a_condition() {
+        let (accepted, results) = mock_set_data_breakpoints_results(
+            &[json!({ "dataId": "x", "condition": "", "hitCondition": "" })],
+            &mock_trace_vocabulary(),
+        );
+        assert_eq!(
+            results[0]["verified"].as_bool(),
+            Some(true),
+            "an empty-string condition means `no condition`, not `a condition I cannot honour`"
+        );
+        assert_eq!(accepted, vec!["x".to_string()]);
+        // And the shared rules agree, from the other side.
+        assert!(
+            verdict(
+                &ct_data_breakpoints::DataBreakpointRequest::new("x"),
+                &mock_trace_vocabulary()
+            )
+            .is_ok()
+        );
+    }
+}
+
 #[cfg(test)]
 mod idle_timeout_parsing_tests {
     use super::parse_idle_timeout;

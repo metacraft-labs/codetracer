@@ -28,14 +28,15 @@ when defined(js):
 # `strutils` went out with the parsing that moved to
 # `store/replay_data_store.eventLogRowFromJson`: the inline wire decode this
 # module used to carry was its last user here.
-import std/[json, options, asyncdispatch, osproc, os, streams, strutils]
+import std/[json, options, asyncdispatch, osproc, os, streams, strutils, tables]
 
 import isonim/core/[signals, computation, async_compat]
 
-import backend/stdio_backend
+import backend/[backend_service, stdio_backend]
 export stdio_backend.DapReadBound, stdio_backend.DapStalledError,
        stdio_backend.DapInterruptedError, stdio_backend.DapLaunchRefusedError
-import store/[replay_data_store, types]
+import store/[replay_data_store, types, locals_answer]
+export locals_answer
 # PLAT-2's value-presentation pipeline. `json_adapter` is qualified at its call
 # sites because `toPValue` also exists on the `Value` side of the bridge, and a
 # reader of `headless_session` has to be able to tell which one is meant — this
@@ -45,9 +46,23 @@ from ../../common/lang import toLangFromFilename, langWireName
 import ../../common/value_presentation/json_adapter
 import session_vm
 import app/app_vm
-import sdk/[debugger_session, trace_source]
+import sdk/[debugger_session, trace_source, breakpoints]
 import viewmodels/[state_vm, calltrace_vm, scratchpad_vm, event_log_vm,
                   origin_chain_types]
+
+type
+  EngineStalledAfterOpenError* = object of DapStalledError
+    ## The engine went quiet AFTER it opened the recording: it reached its
+    ## first stop, then sent nothing for a whole budget on a later request
+    ## (the requests the session sends as it is built, the first pane loads).
+    ##
+    ## A SUBTYPE, so every `except DapStalledError` still catches it, and
+    ## distinct, because it calls for a different remedy than a stall before
+    ## the first stop: the engine READ this recording, so re-recording it
+    ## cannot help (codetracer-pm `spec/CLI/ct/ui-selection.md` §8b).
+    ## `newHeadlessDebugSession` raises it for a stall after the first
+    ## `stopped`; the terminal's `tui_session` for one in the requests it
+    ## sends after that.
 
 type
   HeadlessDebugSession* = ref object
@@ -76,6 +91,11 @@ type
       ## Path to the replay-server binary.
     lastCompleteMoveEvent*: JsonNode
       ## Latest raw ``ct/complete-move`` event observed by the session.
+    lastSweepId: int
+      ## The id the last ``runTracepoints`` sweep was sent with (its
+      ## request's ``session.id``, which the engine echoes back as the
+      ## answer's ``sessionId``). Each sweep takes the next one, so a late
+      ## answer to an earlier sweep can be told from this one's.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,6 +112,20 @@ proc drain() =
     discard
   drainPlatformCallbacks()
 
+proc settle*(s: HeadlessDebugSession) =
+  ## Let the requests the session's ViewModels sent apply their answers. The
+  ## stdio backend answers each request as it is sent, and the ViewModel's
+  ## continuation runs on the next turn of the event loop — this one. A host
+  ## that reported a viewport (`setViewport`) reads the window it asked for
+  ## after this.
+  drain()
+
+proc pumpCallbacks*() =
+  ## Apply the answers to requests a ViewModel sent on its own (a viewport's
+  ## window): the native backend answers synchronously, and the callbacks
+  ## that apply each answer run here.
+  drain()
+
 proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
                                     completeMoveEvent: JsonNode) =
   ## Extract the debugger position from a ``ct/complete-move`` event
@@ -100,43 +134,11 @@ proc updatePositionFromCompleteMove(session: HeadlessDebugSession;
   ## The ``ct/complete-move`` event body is a ``MoveState`` JSON object
   ## with ``location.path``, ``location.line``, ``location.rrTicks``, etc.
   ## See ``src/db-backend/src/task.rs`` for the Rust definition.
-  let body = completeMoveEvent.getOrDefault("body")
   session.lastCompleteMoveEvent = completeMoveEvent
+  let body = completeMoveEvent.getOrDefault("body")
   if body.isNil:
     return
-
-  var rrTicks: uint64 = 0
-  var file = ""
-  var line = 0
-  var sourceGeneration = 0
-  var sourceDigest = ""
-  var geid = none(uint64)
-
-  # The location is nested under body.location (MoveState.location).
-  if body.hasKey("location"):
-    let loc = body["location"]
-    file = loc.getOrDefault("path").getStr("")
-    line = loc.getOrDefault("line").getInt(0)
-    sourceGeneration = loc.getOrDefault("sourceGeneration").getInt(0)
-    sourceDigest = loc.getOrDefault("sourceDigest").getStr("")
-    if loc.hasKey("rrTicks"):
-      rrTicks = loc["rrTicks"].getBiggestInt().uint64
-    if loc.hasKey("geid"):
-      geid = some(loc["geid"].getBiggestInt().uint64)
-  if body.hasKey("geid"):
-    geid = some(body["geid"].getBiggestInt().uint64)
-  elif body.hasKey("currentGeid"):
-    geid = some(body["currentGeid"].getBiggestInt().uint64)
-
-  session.session.store.updateDebuggerPosition(
-    rrTicks, file, line, geid,
-    sourceGeneration = sourceGeneration,
-    sourceDigest = sourceDigest)
-
-  # Update the debugger status back to idle after the step completes.
-  var dbg = session.session.store.debugger.val
-  dbg.status = dsIdle
-  session.session.store.debugger.val = dbg
+  session.session.store.applyCompleteMove(body)
   # Tell the SDK session where the move landed. The SDK cannot observe this
   # itself on the stdio transport — the position arrives on an event this
   # harness pumps — so the host reports it rather than the session guessing.
@@ -186,12 +188,18 @@ proc newHeadlessDebugSession*(
   ## ``handshake`` is CTUI-14's ``DapReadBound``, and it applies to steps 2-5
   ## and then STAYS ON the backend for the rest of the session.  The default is
   ## the zero value — unbounded, exactly what every caller had before — and
-  ## `src/frontend/tui/host/native_host.openLocalTrace` is the caller that
-  ## passes one, because it is the caller holding a terminal it would otherwise
-  ## never give back.  ``stdio_backend.nim``'s header has the reproduction.
+  ## both native front-ends pass one through
+  ## `src/frontend/tui/host/native_host.openLocalTrace`: the terminal because
+  ## it holds a terminal it would otherwise never give back, and the GPUI
+  ## window (`gpui/host/gpui_host.openGpuiTrace`) because without it a silent
+  ## engine left the process blocked for ever with nothing on stdout or
+  ## stderr.  The GPUI window then takes the clock off again
+  ## (`gpui_host.liftOpenBound`) when it starts taking input; the terminal
+  ## keeps it.  ``stdio_backend.nim``'s header has the reproduction.
 
   # 1. Spawn
   let backend = startReplayServer(replayServerBin, bound = handshake)
+  var reachedFirstStop = false
 
   # THE CHILD IS REAPED ON EVERY FAILING PATH, not only on the two the code
   # below already named. CTUI-14 made that matter: with a `DapReadBound`
@@ -247,6 +255,11 @@ proc newHeadlessDebugSession*(
     # version it found, the version it requires and the re-record remedy, and
     # the front-end threw it away. See `DapLaunchRefusedError`.
     discard backend.waitForEventOrRefusal("stopped")
+    # THE ENGINE HAS READ THE RECORDING. A stall from here on is a stall after
+    # the open (`EngineStalledAfterOpenError`): the session's first requests
+    # (the flow window for this stop, sent as the first position is applied)
+    # are answered by an engine that opened the recording.
+    reachedFirstStop = true
 
     # 6. Create the ViewModel layer through the Embed SDK session, with the
     #    stdio backend injected as the BackendService (spec §3.1 — the
@@ -257,15 +270,16 @@ proc newHeadlessDebugSession*(
     #    DAP handshake on the raw channel, because they need the blocking
     #    `waitForEvent` that `BackendService.onEvent` does not provide.
     let backendService = backend.toBackendService()
-    let sdkSession = newDebuggerSession(backendService)
-    # THE LOCALS ARE THIS HOST'S TO ASK FOR, in the language of the file the
-    # debugger is stopped in. Set before `attach`, which builds the StateVM
-    # whose auto-load would otherwise send its own `ct/load-locals` — naming
-    # `c` whatever the file — on every stop, over a transport whose answer to
-    # it no decoder reads: `fetchLocals` / `applyLocals` are how the terminal
-    # and GPUI front-ends load the locals (`native_host.loadStopPanes`).
+    # HOST-DRIVEN STOP LOADING: the terminal's and GPUI's loops decide when a
+    # stop has settled and then call `native_host.loadStopPanes`, which runs
+    # the SDK's stop loader (`sdk/stop_loader`) — the same sender and decoder
+    # the web uses, driven by this host's clock instead of by an effect. The
+    # loader claims the locals, so `StateVM`'s own request stands down.
+    let sdkSession = newDebuggerSession(backendService,
+                                        stopLoading = slmHostDriven)
+    # The locals are asked for in the language of the file the debugger is
+    # stopped in.
     let store = sdkSession.session.store
-    store.localsLoadedByHost = true
     store.sourceLanguageOf = proc(file: string): string =
       langWireName(toLangFromFilename(file))
     sdkSession.attach(localFolderTrace(tracePath))
@@ -279,16 +293,23 @@ proc newHeadlessDebugSession*(
       replayServerBin: replayServerBin,
     )
 
+    # PLAT-47: the native front-ends show the call STACK when a recording has
+    # no call trace; the GUI has no such pane, so only this host opens it.
+    sdkSession.stops.setPaneOpen(spCallStackFallback, true)
+
     # Push initial position into the store from the ct/complete-move event.
     let completeMoveEvent = backend.waitForEvent("ct/complete-move")
     result.updatePositionFromCompleteMove(completeMoveEvent)
-  except CatchableError:
+  except CatchableError as e:
     try:
       backend.close()
     except CatchableError:
       # A child that cannot be closed is not a reason to lose the diagnosis of
       # why the handshake failed, which is what re-raising from here would do.
       discard
+    if reachedFirstStop and e of DapStalledError and
+       not (e of EngineStalledAfterOpenError):
+      raise newException(EngineStalledAfterOpenError, e.msg, e)
     raise
 
 # ---------------------------------------------------------------------------
@@ -470,8 +491,8 @@ proc getCalltraceLines*(s: HeadlessDebugSession): seq[CallLine] =
 
 proc getVisibleCalltraceLines*(s: HeadlessDebugSession): seq[CallLine] =
   ## Get the visible calltrace lines from the CalltraceVM's viewport memo.
-  ## Requires that ``calltraceVM.viewportHeight`` is set to a value > 0
-  ## (e.g. via ``calltraceVM.setViewportHeight(50)``).
+  ## Requires a measured viewport
+  ## (e.g. ``calltraceVM.setViewport(Viewport(rows: 50))``).
   s.session.calltraceVM.visibleLines.val
 
 proc getCurrentFile*(s: HeadlessDebugSession): string =
@@ -518,113 +539,17 @@ proc getDebuggerStatus*(s: HeadlessDebugSession): DebuggerStatus =
   s.session.store.debugger.val.status
 
 # ---------------------------------------------------------------------------
-# DAP response parsing helpers
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # `ct/load-locals` value decoding — PLAT-2
 #
-# THIS MODULE NO LONGER RENDERS VALUES. It decodes the wire into `PValue` and
-# hands it to the ONE presenter, at a budget it declares by name.
-#
-# What used to be here was `extractValueText`: a 130-line, kind-directed
-# renderer that reproduced `common_types/utils/text_representation.textRepr`'s
-# conventions over `JsonNode` because it could not import them (`common_types`
-# is `include`d twice under incompatible `langstring` bindings). It was the
-# FOURTH of seven independent implementations of "value -> string" in this
-# repository, and the divergences were not stylistic: it wrote a struct `{…}`
-# where the desktop wrote `Type(…)`, it had no member cap at all, and it was
-# not language-aware, so a Rust `Vec` read `[…]` in the terminal and `vec![…]`
-# in the desktop.
-#
-# `../../common/value_presentation/json_adapter.toPValue` is the decode half of
-# that function with the renderer removed. The wire ordinals it needs moved
-# with it — `src/common/value_presentation_bridge_test.nim` asserts the
-# transcription still matches `TypeKind` (suite "PLAT-2: the wire ordinals in
-# json_adapter ARE TypeKind's", which walks every member of the enum and
-# asserts the COUNT is 34). That is the check that was missing when the
-# PREVIOUS set of ordinals was wrong on six kinds; the sixty lines of
-# measurement that used to stand here are preserved in that file's header,
-# where the assertion that would catch a recurrence now lives beside them.
+# The decoder is `store/locals_answer`, shared with every front-end (the stop
+# loader applies the same answer on the web); it is re-exported here so the
+# suites and hosts that name `variableFromValue` & co. through this module
+# keep compiling.
 # ---------------------------------------------------------------------------
-
-proc valueTypeName*(valueNode: JsonNode): string =
-  ## `Value.typ.langType`, or "" when the response carries no type.
-  json_adapter.typeNameOf(valueNode)
-
-proc valuePresentation*(valueNode: JsonNode; budget: Budget): Presentation =
-  ## One wire value, presented at `budget`. THE decoding entry point.
-  present(json_adapter.toPValue(valueNode), budget)
-
-proc presentedValueText*(valueNode: JsonNode;
-                         budget: Budget = tuiValueBudget()): string =
-  ## The single-line rendering a `store/types.Variable` carries.
-  valuePresentation(valueNode, budget).root.text
-
-
-proc variableFromPValue*(name: string; pv: PValue): Variable =
-  ## One `Variable` and, RECURSIVELY, its members.
-  ##
-  ## THE RECURSION IS THE POINT, and its absence was a real limitation rather
-  ## than a simplification: an earlier implementation built children with
-  ## neither `hasChildren` nor `children` set, so a compound member — every
-  ## entry of `wide_state`'s `wide_mapping`, which is a `(key, value)` tuple —
-  ## arrived at a tree view as a leaf that could not be opened. The engine's
-  ## own answer already carries the whole subtree (bounded by the request's
-  ## `depthLimit`), so nothing extra is fetched; it was being discarded.
-  ##
-  ## PLAT-2: THE ROW CARRIES THE VALUE, NOT ONLY ITS RENDERING. `presented` is
-  ## the normalised value, so a pane that knows its own width can ask the
-  ## presenter for a rendering that fits IT rather than clipping a string
-  ## rendered for somebody else. `value` remains, and is the presenter's answer
-  ## at `tui-value` — it is pipeline output, not a second formatter.
-  result = Variable(name: name,
-                    value: present(pv, tuiValueBudget()).root.text,
-                    typeName: (if pv.isNil: "" else: pv.typeName),
-                    presented: pv)
-  if pv.isNil:
-    return
-  if pv.kind == pvkMap:
-    if pv.entries.len == 0:
-      return
-    result.hasChildren = true
-    for idx, entry in pv.entries:
-      # A map's child is named by its KEY's own rendering, at the same budget
-      # the row uses. Before PLAT-2 a map had no children at all here: the
-      # decoder looked for `elements`, and a `TableKind` carries `items`.
-      result.children.add variableFromPValue(
-        present(entry.key, tuiValueBudget()).root.text, entry.val)
-    return
-  if not isContainer(pv.kind) or pv.members.len == 0:
-    return
-  result.hasChildren = true
-  for idx, m in pv.members:
-    let childName = if m.label.len > 0: m.label else: "[" & $idx & "]"
-    result.children.add variableFromPValue(childName, m.value)
-
-proc variableFromValue*(name: string; valueNode: JsonNode): Variable =
-  ## One wire variable, decoded and presented.
-  variableFromPValue(name, json_adapter.toPValue(valueNode))
-
-proc parseVariable(localNode: JsonNode): Variable =
-  ## Parse a single variable entry from the ct/load-locals response.
-  variableFromValue(localNode.getOrDefault("expression").getStr(""),
-                    localNode.getOrDefault("value"))
 
 # ---------------------------------------------------------------------------
 # Data loading — send DAP requests and feed responses into the store
 # ---------------------------------------------------------------------------
-
-type
-  LocalsAnswer = object
-    ## One `ct/load-locals` answer, not yet applied. The TYPE is not exported
-    ## — only `fetchLocals` makes one and only `applyLocals` consumes one —
-    ## while its fields are, so a caller can inspect what it holds.
-    ok*: bool
-      ## The backend answered with a locals list.
-    rows*: seq[Variable]
-    requestedAt*: StopStamp
-      ## The stop the request was SENT at — see `fetchLocals`.
 
 proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
   ## Send ``ct/load-locals`` to the backend and parse the answer, WITHOUT
@@ -649,35 +574,15 @@ proc fetchLocals*(s: HeadlessDebugSession): LocalsAnswer =
   var watches: seq[string] = @[]
   if not s.session.isNil and not s.session.stateVM.isNil:
     watches = s.session.stateVM.watchExpressions.val
-  let args = %*{
-    "rrTicks": s.getCurrentRRTicks().int64,
-    "countBudget": 3000,
-    "minCountLimit": 50,
-    "depthLimit": 7,
-    "watchExpressions": watches,
-    # The language's wire name (LRS-1) — of the file the debugger is stopped
-    # in (`sourceLanguageOf`, installed by `newHeadlessDebugSession`). This used
-    # to be `LoadLocalsDefaultLang` (`c`) for every trace: `Db::load_locals`
-    # does not read it for a materialized trace, but the native replay
-    # backend renders values through the named language's printers.
-    "lang": s.session.store.localsLanguage(),
-  }
-  result.requestedAt = s.session.store.stopStamp()
+  # The language is the stopped-in file's wire name (LRS-1,
+  # `sourceLanguageOf`, installed by `newHeadlessDebugSession`): the native
+  # replay backend renders values through the named language's printers.
+  let args = s.session.store.localsLoadArgs(s.getCurrentRRTicks(), watches)
+  let requestedAt = s.session.store.stopStamp()
   let resp = s.backend.sendDapRequest("ct/load-locals", args)
-  if resp.getOrDefault("success").getBool(false):
-    let body = resp.getOrDefault("body")
-    if not body.isNil and body.kind == JObject:
-      let localsNode = body.getOrDefault("locals")
-      if not localsNode.isNil and localsNode.kind == JArray:
-        # Watch answers ride the same list, marked `value.isWatch`. The
-        # split itself is `applyLocalsResponse`'s — the one place every
-        # host does it.
-        for localNode in localsNode:
-          var parsed = parseVariable(localNode)
-          parsed.isWatch =
-            localNode.getOrDefault("value").getOrDefault("isWatch").getBool(false)
-          result.rows.add(parsed)
-        result.ok = true
+  if responseSucceeded(resp):
+    result = localsAnswerOf(responseBody(resp))
+  result.requestedAt = requestedAt
 
 proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
   ## Apply a fetched answer through the store's reconciliation. `false` when
@@ -688,6 +593,8 @@ proc applyLocals*(s: HeadlessDebugSession; answer: LocalsAnswer): bool =
   if not s.session.store.applyLocalsResponse(answer.rows, answer.requestedAt):
     return false
   s.session.store.locals.loadedForRRTicks.val = s.getCurrentRRTicks()
+  if not s.session.stateVM.isNil:
+    s.session.stateVM.updateOriginSummaries(answer.origins)
   drain()
   true
 
@@ -734,31 +641,39 @@ proc requestAndLoadCalltrace*(s: HeadlessDebugSession;
 # Navigation — calltrace and event jumps
 # ---------------------------------------------------------------------------
 
-proc calltraceJump*(s: HeadlessDebugSession; file: string; line: int;
-                    rrTicks: uint64) =
-  ## Jump to a specific calltrace entry by its location.
-  ## This mirrors the GUI's double-click-on-calltrace-entry action.
-  ## Sends ``ct/calltrace-jump`` and waits for the ``stopped`` +
-  ## ``ct/complete-move`` events that carry the new debugger position.
+proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
+  ## Go to the call a call-trace row names, as the desktop's double-click on
+  ## that row does (`CalltraceVM.doubleClickEntry`). Every front end built on
+  ## this session (the TUI, GPUI, the headless app) reaches the call trace's
+  ## jump through here.
   ##
-  ## The handler does send a DAP response (see ``Handler::calltrace_jump``),
-  ## but this helper synchronises on the events rather than on the reply, so
-  ## it uses ``sendDapRequestNoResponse`` and lets ``waitForEvent`` drop the
-  ## response.  The note that previously stood here -- that the handler sends
-  ## no response at all -- described a defect that has since been fixed.
-  let args = %*{
-    "file": file,
-    "line": line,
-    "rrTicks": rrTicks,
-  }
-  s.backend.sendDapRequestNoResponse("ct/calltrace-jump", args)
+  ## The payload is `calltraceJumpArgs`, the one the desktop sends, so it
+  ## carries the row's frame identity: `callstackDepth`, and on a native
+  ## (rr / MCR) recording the `replayPosition` the replay worker stamped on the
+  ## row. The backend refuses a native row without it, because the row's tick
+  ## alone does not name the stop it was loaded at (Click-Navigation.md §2.2,
+  ## §3.3). This helper used to send `{file, line, rrTicks}` only.
+  ##
+  ## Waits for the response, then for the `stopped` and `ct/complete-move`
+  ## events the move sent before it. A refusal raises `IOError` with the
+  ## backend's reason. Before it raises, a `ct/complete-move` sent with the
+  ## refusal is applied to the store: the backend reports where the session
+  ## is when it had to run the replay to find out that it could not serve the
+  ## row.
+  let resp = s.backend.sendDapRequest("ct/calltrace-jump",
+    calltraceJumpArgs(callLine.location, callLine.rrTicks,
+                      callLine.codeGeneration))
+  if not resp.getOrDefault("success").getBool(false):
+    var reportedMove = false
+    for event in s.backend.eventQueue:
+      if event.getOrDefault("event").getStr("") == "ct/complete-move":
+        reportedMove = true
+    if reportedMove:
+      s.consumeCompleteMoveEvent()
+    raise newException(IOError, "ct/calltrace-jump was refused: " &
+      resp.getOrDefault("message").getStr("(no reason given)"))
   discard s.backend.waitForEvent("stopped")
   s.consumeCompleteMoveEvent()
-
-proc calltraceJumpByLine*(s: HeadlessDebugSession; callLine: CallLine) =
-  ## Convenience: jump to a calltrace entry using a CallLine object.
-  s.calltraceJump(callLine.location.file, callLine.location.line,
-                  callLine.rrTicks)
 
 # ---------------------------------------------------------------------------
 # Breakpoints
@@ -863,42 +778,23 @@ proc drainEvents*(s: HeadlessDebugSession): seq[JsonNode]
   ## Forward: defined with the rest of the event queue below.
 
 proc sendBreakpoints(s: HeadlessDebugSession; path: string;
-                     anchors: seq[BreakpointAnchor];
-                     disabled: seq[BreakpointAnchor] = @[]): bool =
-  ## `setBreakpoints` for `path` with exactly `anchors` (a column breakpoint
-  ## carries its `column`, Column-Aware Navigation M1's wire), and the store's
-  ## rows for `path` replaced by what the engine verified — at the line and
-  ## column it BOUND, which it echoes — plus the `disabled` breakpoints the
-  ## engine does not hold (PLAT-50). False (and nothing changed) when the
-  ## engine refused.
-  var wanted = newJArray()
-  for a in anchors:
-    var bp = %*{"line": a.line}
-    if a.column > 0:
-      bp["column"] = %a.column
-    wanted.add bp
+                     plan: seq[BreakpointSpec]): bool =
+  ## `setBreakpoints` for `path` with the planned set (`sdk/breakpoints`, the
+  ## planners every front-end shares), and the store's rows for `path`
+  ## replaced by what the engine verified (`answeredBreakpoints`). False (and
+  ## nothing changed) when the engine refused.
   let resp = s.backend.sendDapRequest("setBreakpoints",
-    %*{"source": {"path": path}, "breakpoints": wanted})
+    setBreakpointsArgs(path, plan))
   discard s.drainEvents()
   if not resp.getOrDefault("success").getBool(false):
     return false
-  var verified: seq[BreakpointAnchor] = @[]
-  for i, bp in resp{"body", "breakpoints"}.getElems:
-    if bp.getOrDefault("verified").getBool(false):
-      let asked = if i < anchors.len: anchors[i].column else: 0
-      verified.add (bp.getOrDefault("line").getInt(0),
-                    (if asked > 0: bp.getOrDefault("column").getInt(asked)
-                     else: 0))
-  s.session.store.applyVerifiedBreakpoints(path, verified, disabled)
+  s.session.store.applyVerifiedBreakpoints(path,
+    answeredBreakpoints(plan, resp.getOrDefault("body")))
   true
 
-proc heldBreakpoints(s: HeadlessDebugSession; path: string):
-    tuple[enabled, disabled: seq[BreakpointAnchor]] =
-  ## `path`'s breakpoints as the store holds them, enabled and disabled.
-  for r in s.session.store.pointList.rows.val:
-    if r.kind == PointKindBreakpoint and r.path == path:
-      if r.enabled: result.enabled.add (r.line, r.column)
-      else: result.disabled.add (r.line, r.column)
+proc heldBreakpoints(s: HeadlessDebugSession; path: string): seq[BreakpointSpec] =
+  ## `path`'s breakpoints as the store holds them, armed and disabled.
+  heldBreakpoints(s.session.store, path)
 
 proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
                        line: int): bool =
@@ -928,38 +824,18 @@ proc toggleBreakpoint*(s: HeadlessDebugSession; path: string;
   ## disabled, unless it is the line being toggled (toggling a disabled
   ## breakpoint removes it, as a gutter click does on the desktop). A column
   ## breakpoint on another line keeps its column.
-  let held = s.heldBreakpoints(path)
-  var anchors, disabled: seq[BreakpointAnchor] = @[]
-  var removing = false
-  for a in held.enabled:
-    if a.line == line: removing = true
-    else: anchors.add a
-  for a in held.disabled:
-    if a.line == line: removing = true
-    else: disabled.add a
-  if not removing:
-    anchors.add (line, 0)
-  s.sendBreakpoints(path, anchors, disabled)
+  s.sendBreakpoints(path, plannedToggle(s.heldBreakpoints(path), line))
 
 proc setColumnBreakpoint*(s: HeadlessDebugSession; path: string; line,
                           column: int): bool =
   ## PLAT-50: a breakpoint at `path:line` ANCHORED AT `column` — the
-  ## desktop's Alt+click on the editor's text (`ui/editor.lineActionClickAt`
-  ## → `DebuggerService.addColumnBreakpoint`), which REPLACES whatever
-  ## breakpoint the line had (one breakpoint per line, as the desktop's
-  ## `breakpointTable[path][line]` holds one) and is never a toggle. The
-  ## engine stops on it only at a step recorded at that column. False when
-  ## the engine refused, or `column` is not a column.
+  ## desktop's Alt+click (`ui/editor.lineActionClickAt`), which REPLACES
+  ## whatever breakpoint the line had and is never a toggle
+  ## (`plannedAnchored`). The engine stops on it only at a step recorded at
+  ## that column. False when the engine refused, or `column` is not a column.
   if column < 1:
     return false
-  let held = s.heldBreakpoints(path)
-  var anchors, disabled: seq[BreakpointAnchor] = @[]
-  for a in held.enabled:
-    if a.line != line: anchors.add a
-  for a in held.disabled:
-    if a.line != line: disabled.add a
-  anchors.add (line, column)
-  s.sendBreakpoints(path, anchors, disabled)
+  s.sendBreakpoints(path, plannedAnchored(s.heldBreakpoints(path), line, column))
 
 proc clearBreakpoints*(s: HeadlessDebugSession; path: string): bool =
   ## PLAT-50: delete every breakpoint of `path` — the editor menu's "Delete
@@ -970,25 +846,58 @@ proc clearBreakpoints*(s: HeadlessDebugSession; path: string): bool =
 proc setBreakpointEnabled*(s: HeadlessDebugSession; path: string; line: int;
                            enabled: bool): bool =
   ## PLAT-50: enable or disable the breakpoint at `path:line` — the desktop's
-  ## gutter right-click (`ui/editor.lineActionContextMenu` →
-  ## `DebuggerService.enable` / `disable`). A disabled breakpoint stays on
-  ## the point list and the gutter, dimmed, and is NOT sent to the engine (the
-  ## desktop's `dapSetBreakpoints` sends only `enabled` ones), so the replay
-  ## no longer stops there; its column, if it has one, is kept. False when
-  ## there is no breakpoint at the line or the engine refused.
-  let held = s.heldBreakpoints(path)
-  var found = false
-  var anchors, disabled: seq[BreakpointAnchor] = @[]
-  for a in held.enabled & held.disabled:
-    if a.line == line:
-      found = true
-      if enabled: anchors.add a
-      else: disabled.add a
-    elif a in held.enabled: anchors.add a
-    else: disabled.add a
-  if not found:
+  ## gutter right-click. A disabled breakpoint stays on the point list and the
+  ## gutter, dimmed, and is NOT sent to the engine, so the replay no longer
+  ## stops there; its column, if it has one, is kept (`plannedEnabled`).
+  ## False when there is no breakpoint at the line or the engine refused.
+  let plan = plannedEnabled(s.heldBreakpoints(path), line, enabled)
+  if plan.isNone:
     return false
-  s.sendBreakpoints(path, anchors, disabled)
+  s.sendBreakpoints(path, plan.get)
+
+proc hasBreakpointAt*(s: HeadlessDebugSession; path: string;
+                      line: int): bool =
+  ## Whether the store holds a breakpoint — enabled or disabled — at
+  ## `path:line`.
+  breakpointAt(s.heldBreakpoints(path), line).isSome
+
+proc deleteBreakpointAt*(s: HeadlessDebugSession; path: string;
+                         line: int): bool =
+  ## M76: the program menu's "Delete Breakpoint" — the breakpoint at
+  ## `path:line` removed (the desktop's `removeBreakpointAtPosition`), and
+  ## NEVER a toggle: with none there, nothing is sent and the answer is
+  ## false, where `toggleBreakpoint` would have ADDED one.
+  if not s.hasBreakpointAt(path, line):
+    return false
+  s.toggleBreakpoint(path, line)
+
+proc clearAllBreakpoints*(s: HeadlessDebugSession; path = ""): int =
+  ## Delete every breakpoint of `path`, or of every file when `path` is ""
+  ## — the editor menu's "Delete breakpoints in file" / "Delete ALL
+  ## breakpoints" and the program menu's "Delete All Breakpoints", one
+  ## `setBreakpoints` with none per file (`clearBreakpoints`). Answers how
+  ## many files the engine cleared; a file it refused keeps its rows.
+  for p in breakpointFiles(s.session.store, path):
+    if s.clearBreakpoints(p):
+      inc result
+
+proc setAllBreakpointsEnabled*(s: HeadlessDebugSession; enabled: bool): int =
+  ## M76: the program menu's "Enable / Disable All Breakpoints" — every
+  ## breakpoint of every file enabled or disabled, one `setBreakpoints` per
+  ## file with the enabled set (a disabled breakpoint is not on the engine;
+  ## see `setBreakpointEnabled`), columns kept. Answers how many breakpoints
+  ## CHANGED state; a file already in the asked state is not sent again.
+  for p in breakpointFiles(s.session.store, ""):
+    var plan = s.heldBreakpoints(p)
+    var changing = 0
+    for sp in plan.mitems:
+      if sp.enabled != enabled:
+        sp.enabled = enabled
+        inc changing
+    if changing == 0:
+      continue
+    if s.sendBreakpoints(p, plan):
+      result += changing
 
 const LineJumpQuietMs* = 15_000
   ## How long `sourceLineJump` waits for the engine's next message before it
@@ -1162,6 +1071,9 @@ type
     stdout*: bool
     eventIndex*: int
     maxRRTicks*: uint64
+    noPosition*: bool
+      ## The producer reported no position (`EventLogRow.noPosition`): the
+      ## entry is shown but is not a place to jump to.
 
 func toEventLogEntry*(row: EventLogRow): EventLogEntry =
   ## One store row in this module's legacy compatibility shape.
@@ -1180,7 +1092,8 @@ func toEventLogEntry*(row: EventLogRow): EventLogEntry =
     kind: row.kindId,
     stdout: row.stdout,
     eventIndex: row.eventIndex,
-    maxRRTicks: row.maxRRTicks)
+    maxRRTicks: row.maxRRTicks,
+    noPosition: row.noPosition)
 
 proc requestAndLoadEventLog*(s: HeadlessDebugSession;
                              start: int = 0;
@@ -1226,22 +1139,23 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
   # regardless — a fact this repository has measured twice (see
   # `tui_session.serveSourceWindow`). So the effect's window sits queued until
   # something polls, and a poll AFTER this request would overwrite the window
-  # this caller just asked for with the one the effect asked for at
-  # construction — the first 20, since the effect sends no `start`/`count`.
+  # this caller just asked for with the one the effect asked for — its own
+  # viewport's window (`listWindow`), once a host has measured the pane with
+  # `setViewport`. An unmeasured pane's effect asks for nothing.
   #
   # STATED AS A MECHANISM RATHER THAN AS A MEASUREMENT, because it was
   # PREVENTED rather than observed: this flush was written before the first run
   # on a fixture large enough to show it. The recording that would have shown
-  # it is `noir_space_ship`, which has 70 events against the effect's 20, and
+  # it is `noir_space_ship`, which has 70 events against the 20 the effect's
+  # request answered when this flush was written, and
   # `tui/tests/test_event_log_jump.nim` asserts all 70 reach the ViewModel —
   # so the case that would catch a regression here exists and is green.
   #
   # Flushing before the request puts the effect's write where it belongs — in
   # the past — so the last writer is the caller. Bounded rather than looped to
-  # quiescence: `poll(0)` advances one round, the effect fires at most twice per
-  # session (once at construction, once when a position first exists), and an
-  # unbounded drain in a harness is a hang waiting for a producer that never
-  # stops.
+  # quiescence: `poll(0)` advances one round, the effect fires only when the
+  # viewport, the sort or the search changes, and an unbounded drain in a
+  # harness is a hang waiting for a producer that never stops.
   for _ in 0 ..< 4:
     drain()
   var args = %*{
@@ -1275,6 +1189,26 @@ proc requestAndLoadEventLog*(s: HeadlessDebugSession;
       for row in s.session.store.eventLog.rows.val:
         result.add(toEventLogEntry(row))
 
+proc showEventLogWindow*(s: HeadlessDebugSession; top, rows: int;
+                         order = RecordedEventOrder) =
+  ## Show the event log from row `top` in a pane that shows `rows`, through
+  ## the session's ``EventLogVM`` (Viewport-Driven-Loading V3, HSF-D6): the
+  ## pane's order and its viewport are reported, the ViewModel asks for the
+  ## window the shared policy derives (``listWindow``) naming the stop
+  ## (``followStop``), and its answer lands in the store — rows,
+  ## ``loadedStart``, ``recordsTotal`` and the "now" row
+  ## (``eventLog.currentIndex``). The window is settled before this returns:
+  ## the answer's callback runs on the dispatcher, so it is polled here.
+  let vm = s.session.eventLogVM
+  if vm.isNil or rows <= 0:
+    return
+  vm.followStop()
+  if vm.order != order:
+    vm.sortBy(order)
+  vm.setViewport(Viewport(rows: rows, firstRow: max(0, top)))
+  for _ in 0 ..< 4:
+    drain()
+
 proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
   ## Jump to the location of an event log entry.
   ## Sends ``ct/event-jump`` and waits for the position update.
@@ -1284,6 +1218,11 @@ proc eventJump*(s: HeadlessDebugSession; event: EventLogEntry) =
   ## keys must match what the Rust deserializer expects.
   ## EventLogKind is repr(u8) with Serialize_repr/Deserialize_repr:
   ##   0 = Write, 1 = WriteFile, 2 = WriteOther, 3 = Read, etc.
+  ##
+  ## An entry with no reported position is not a place to go, so nothing is
+  ## sent for it.
+  if event.noPosition:
+    return
   let args = %*{
     "kind": 0,
     "content": event.content,
@@ -1377,14 +1316,38 @@ proc runTracepoints*(s: HeadlessDebugSession;
   ## arrive within the message budget, rather than returning an empty sequence:
   ## "the sweep found nothing" and "the sweep never answered" are different
   ## facts and only one of them is a result.
+  ##
+  ## ## THE SWEEP IS SILENT UNTIL IT IS DONE, AND ITS ANSWER IS ITS OWN
+  ##
+  ## Nothing at all arrives while the engine sweeps, so the wait is an
+  ## OPERATION wait (``waitForEvent(operation = true)``): untimed on a channel
+  ## whose bound says so (``DapReadBound.untimedOperations``, an attended
+  ## front-end), timed — and, when the clock runs out, the channel declared
+  ## dead — on one nobody watches. Either way a slow sweep is never reported
+  ## as a stall in front of a user, and its late answer is never read as the
+  ## answer to a later request (codetracer-pm `spec/CLI/ct/ui-selection.md`
+  ## §8b).
+  ##
+  ## Each sweep is also sent with its own id, ``lastSweepId``, as the
+  ## request's ``session.id``; the engine echoes it as the answer's
+  ## ``sessionId`` (``TracepointResultsAggregate``, ``task.rs``). An answer
+  ## carrying another id is an earlier sweep's — left in the stream when that
+  ## sweep's wait ran out of its message budget — and is discarded rather than
+  ## returned as this one's.
   # The request body is `store/replay_data_store.tracepointSweepRequest`, the
   # one place this side spells a `Tracepoint`'s keys (and, since LRS-1, does
   # NOT spell a `lang`: the ordinal that used to ride here was dead on both
   # sides and is gone from both).
+  inc s.lastSweepId
+  let sweepId = s.lastSweepId
   s.backend.sendDapRequestNoResponse("ct/run-tracepoints",
-                                     tracepointSweepRequest(specs))
+                                     tracepointSweepRequest(specs,
+                                                            sweepId = sweepId))
   let event = s.backend.waitForEvent("ct/tracepoint-results",
-                                     maxMessages = maxMessages)
+                                     maxMessages = maxMessages,
+                                     operation = true,
+                                     accept = proc(e: JsonNode): bool =
+    e{"body", "sessionId"}.getInt(-1) == sweepId)
   let body = event.getOrDefault("body")
   if body.isNil or body.kind != JObject:
     return
@@ -1400,14 +1363,8 @@ proc runTracepoints*(s: HeadlessDebugSession;
       line: stop.getOrDefault("line").getBiggestInt(0).int,
       values: @[],
       errorMessage: stop.getOrDefault("errorMessage").getStr(""))
-    let locals = stop.getOrDefault("locals")
-    if not locals.isNil and locals.kind == JArray:
-      for pair in locals:
-        # `StringAndValueTuple` serialises as `{"Field0": name, "Field1": value}`
-        # — a tuple struct, so the names are positional and not descriptive.
-        let name = pair.getOrDefault("Field0").getStr("")
-        let value = pair.getOrDefault("Field1")
-        hit.values.add (name, presentedValueText(value, TracepointBudget))
+    # The sweep answers ticks and locations (Q4); a hit's locals are read by
+    # window, for the hits a pane shows (`loadTracepointHitValues`).
     hits.add hit
   # THE ONE PLACE THE SWEEP BECOMES DATA. The `Value` rendering above is
   # PLAT-2's presenter and cannot move into the store — the store is below
@@ -1417,6 +1374,81 @@ proc runTracepoints*(s: HeadlessDebugSession;
   s.session.store.applyTracepointResults(specs, hits)
   drain()
   result = s.session.store.pointList.tracepointHits.val
+
+const TracepointValueWindow* = 64
+  ## How many hits' values a text listing of a sweep reads at a time: a
+  ## screenful of the overlay that lists them, with room to scroll.
+
+proc hitValuesOf(local: JsonNode): seq[(string, string)] =
+  ## One hit's locals, as `StringAndValueTuple`s serialise them —
+  ## `{"Field0": name, "Field1": value}`, a tuple struct whose names are
+  ## positional — presented at the tracepoint budget.
+  if local.isNil or local.kind != JArray:
+    return
+  for pair in local:
+    result.add (pair.getOrDefault("Field0").getStr(""),
+                presentedValueText(pair.getOrDefault("Field1"),
+                                   TracepointBudget))
+
+proc loadTracepointHitValues*(s: HeadlessDebugSession;
+                              hits: var seq[TracepointSweepHit];
+                              first, count: int) =
+  ## Read the locals of `hits[first ..< first + count]` that are not read yet
+  ## (Viewport-Driven-Loading, Decided Q4): for each tracepoint among them,
+  ## ONE `ct/update-table` on its event slot for the window of its hits they
+  ## span. The engine answers the window's locals on the `tracepoint-locals`
+  ## event, indexed by the hit's place among that tracepoint's hits.
+  let lo = max(0, first)
+  let hi = min(hits.len, first + count)
+  if lo >= hi:
+    return
+  # Each hit's place among its own tracepoint's hits.
+  var ordinal = newSeq[int](hits.len)
+  var seen = initTable[int, int]()
+  for i, h in hits:
+    ordinal[i] = seen.getOrDefault(h.tracepointId, 0)
+    seen[h.tracepointId] = ordinal[i] + 1
+  var spans = initTable[int, (int, int)]()   # tracepoint -> (first, last)
+  for i in lo ..< hi:
+    if hits[i].valuesLoaded:
+      continue
+    let id = hits[i].tracepointId
+    let (a, b) = spans.getOrDefault(id, (high(int), -1))
+    spans[id] = (min(a, ordinal[i]), max(b, ordinal[i]))
+  for id, span in spans:
+    let (start, last) = span
+    discard s.backend.sendDapRequest("ct/update-table", %*{
+      "tableArgs": {"columns": [], "draw": 0, "length": last - start + 1,
+                    "order": [], "search": {"value": "", "regex": false},
+                    "start": start},
+      "selectedKinds": {},
+      "isTrace": true,
+      "eventSlot": id})
+    var locals = newJArray()
+    for event in s.backend.drainEvents():
+      if event.getOrDefault("event").getStr("") == "tracepoint-locals":
+        locals = event{"body", "locals"}
+    for i in lo ..< hi:
+      if hits[i].tracepointId == id and not hits[i].valuesLoaded and
+         ordinal[i] < locals.len:
+        hits[i].values = hitValuesOf(locals[ordinal[i]])
+        hits[i].valuesLoaded = true
+
+proc tracepointHitsText*(s: HeadlessDebugSession;
+                         hits: var seq[TracepointSweepHit];
+                         top: int): string =
+  ## A sweep's hits as a text listing, one line per hit, with the values of
+  ## the hits around line `top` read (`loadTracepointHitValues`); a hit whose
+  ## values are not read yet shows its tick alone until it is scrolled to.
+  s.loadTracepointHitValues(hits, top - TracepointValueWindow div 4,
+                            TracepointValueWindow)
+  for h in hits:
+    var parts: seq[string] = @[]
+    for (name, value) in h.values:
+      parts.add name & " = " & value
+    result.add "tick " & $h.rrTicks & "  " &
+               (if h.errorMessage.len > 0: h.errorMessage
+                else: parts.join(", ")) & "\n"
 
 # ---------------------------------------------------------------------------
 # Trace recording
@@ -1592,3 +1624,17 @@ proc close*(s: HeadlessDebugSession) =
   ## `DapStdioBackend.close` twice on the same handle.
   s.sdk.dispose(disconnectBackend = false)
   s.backend.close()
+
+proc replayPid*(s: HeadlessDebugSession): int =
+  ## The `replay-server` child's process id, or -1 when there is none. Still
+  ## answered after `close` (the id of the process that was ended), so a
+  ## caller can ask the OS whether it is really gone.
+  if s.isNil or s.backend.isNil or s.backend.process.isNil:
+    return -1
+  int(s.backend.process.processID)
+
+proc replayRunning*(s: HeadlessDebugSession): bool =
+  ## Whether this session's `replay-server` is still being driven: the
+  ## channel is open and the child has not exited. False after `close`.
+  not s.isNil and not s.backend.isNil and not s.backend.isClosed and
+    s.backend.process.running

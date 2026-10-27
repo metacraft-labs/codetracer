@@ -33,14 +33,9 @@ import {
   test,
   expect,
   wait,
-  codetracerInstallDir,
 } from "../../lib/fixtures";
 import { recordChromeTraceFixture } from "../../lib/js-trace-fixture";
 import { LayoutPage } from "../../page-objects/layout-page";
-import {
-  ensureDefaultLayout,
-  restoreUserLayout,
-} from "../../lib/layout-reset";
 import {
   DOCKED_OPEN_CLASS,
   FIND_IN_FILES_TAB_TITLE,
@@ -366,15 +361,6 @@ const fixture = recordChromeTraceFixture("comprehensive-v2");
 test.describe("Visual Audit v2 — Trace Mode Screens", () => {
   test.setTimeout(180_000);
   test.use({ sourcePath: fixture.traceDir, launchMode: "trace-folder" });
-
-  // Ensure the bundled default layout is used, not the user's custom one.
-  test.beforeAll(() => {
-    ensureDefaultLayout(codetracerInstallDir);
-  });
-
-  test.afterAll(() => {
-    restoreUserLayout();
-  });
 
   test("Screen 1: Normal layout", async ({ ctPage }) => {
     const layout = new LayoutPage(ctPage);

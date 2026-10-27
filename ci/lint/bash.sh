@@ -84,7 +84,7 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # while `command -v python3` said yes throughout. Requirements are declared here
 # in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
+	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl
 
 lint_step "shellcheck: CI scripts" \
 	shellcheck ci/**/*.sh
@@ -199,17 +199,15 @@ lint_step "shellcheck: build-alignment harness ('just test' runs it)" \
 # below is: an aggregate that has never been SEEN to report a second failure is
 # indistinguishable from one that still hides it.
 #
-# It is HERMETIC — it stubs `just` on PATH rather than needing the real one —
-# and that is a correctness requirement of running it here, not a convenience.
-# nix/shells/lint.nix carries no `just` on purpose, so the first version of this
-# registration refused to run and turned this job red. The stub costs nothing:
+# It stubs `just` on PATH to control each lane's exit status. The real `just`
+# is supplied by nix/shells/lint.nix for the argument-forwarding contract suite.
+# The stub isolates this aggregate test from actual builds and test lanes:
 # ci/lib/run-just-lanes.sh's whole interface to the outside is `just <lane>`,
 # one argument and one exit status. So: no nix, no build, no network, seconds.
 #
 # One section of the suite does need a real `just` (it asserts what `just`
 # itself does with a failing DEPENDENCY, which is why `test-bpf` could not stay
-# a dependency list). That section self-skips here and the suite's expected
-# assertion count drops to match, so a short tally is still a finding.
+# a dependency list). The lint shell supplies it, so that section also runs here.
 lint_step "contract suite: an aggregate runs every lane and names every failure" \
 	bash ci/test/run-just-lanes-test.sh
 
@@ -246,11 +244,19 @@ lint_step "shellcheck: stale-artefact guards" \
 	scripts/build-desktop-component.sh \
 	scripts/developer-setup.sh \
 	scripts/run-cross-repo-tests.sh \
+	scripts/build-siblings.sh \
 	browser-replay/setup-certs.sh \
 	browser-replay/deploy-wasm.sh \
 	browser-replay/build-dist.sh \
 	browser-replay/tests/test_dist.sh \
 	ci/test/stale-artefact-guards-test.sh
+
+# `just test-frontend-units` captures this script's stdout as the
+# session-manager path and relies on it failing, by name, when a tool the
+# `cross-process-three-trace` recording needs cannot be built. It sits in
+# scripts/, which the glob at the top does not reach.
+lint_step "shellcheck: cross-process recording provisioning" \
+	shellcheck scripts/provision-cross-process-recording.sh
 
 # Executed here, and not only linted, for the reason the whole sweep exists: a
 # freshness guard that has never been SEEN to refuse a stale artefact is
@@ -269,6 +275,12 @@ lint_step "contract suite: existence is not freshness" \
 lint_step "shellcheck: flake pin alignment guard" \
 	shellcheck scripts/test-flake-pin-alignment.sh
 
+# scripts/test-reprobuild-catalog-coverage.sh is the static guard on the pair
+# `repro.nim` `uses:` list / pinned `reprobuild-packages` catalog. Same reason:
+# it is under scripts/, which the glob does not reach.
+lint_step "shellcheck: reprobuild catalog coverage guard" \
+	shellcheck scripts/test-reprobuild-catalog-coverage.sh
+
 # CTUI-0's grammar-archive builder. Not under ci/, so the glob does not reach
 # it, and it is the FIRST thing `just tui-prereqs`, `just build-tui` and
 # `just test-tui` all run — a shell defect in it presents as a link error
@@ -285,6 +297,15 @@ lint_step "shellcheck: TUI grammar-archive builder" \
 # it either.
 lint_step "shellcheck: flake lock node dates guard" \
 	shellcheck scripts/test-flake-lock-node-dates.sh
+
+# scripts/test-sibling-cargo-locks.sh is the trace-format pin / Cargo.lock
+# coherence guard `just test` runs. Not under ci/, so the glob at the top does
+# not reach it. Its contract suite (ci/test/sibling-cargo-locks-test.sh) IS
+# under the glob and is shellchecked there, but it does not RUN here: it drives
+# real cargo, which the lint shell does not provide, so it runs in the
+# `test-sibling-cargo-locks` recipe instead.
+lint_step "shellcheck: sibling cargo locks guard" \
+	shellcheck scripts/test-sibling-cargo-locks.sh
 
 # Not covered by the `ci/**/*.sh` glob above, and it runs in the deploy lane on
 # every push to `cloud`, where a shell defect would surface as a deploy failure
@@ -307,6 +328,35 @@ lint_step "shellcheck: toolchain resolver" \
 # that defect is invisible to shellcheck and to every happy-path run.
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
+
+# The catalog coverage guard has the same exposure, and more ways to earn it:
+# it PARSES four inputs (repro.nim, two reprobuild source files, repro.lock),
+# and a parser that rots reports the whole recipe unresolved and sends the
+# reader to move a catalog pin that is correct. The suite drives the real
+# script over fixture trees through its overrides -- no nix, about two seconds
+# -- and reconstructs the defect it was written for: a catalog without
+# `shellcheck` (reprobuild-packages 9d9176bff5c5) under a reprobuild that lists
+# `shellcheck` as moved, and a moved name placed in `buildDeps:`,
+# `nativeBuildDeps:` or `runtimeDeps:`, which reprobuild resolves (and fails)
+# exactly as it does `uses:`. Every extraction-failure case asserts the pin
+# remedy is ABSENT. Measured 2026-10-26 at codetracer 845e390fb2 plus this
+# change: mutations of the guard (dropping the moved-name exclusion, the
+# lock-equality check, the three extra dependency blocks, the block-name
+# normalisation) each fail 3-12 of its 151 assertions.
+lint_step "contract suite: reprobuild catalog coverage guard" \
+	bash ci/test/reprobuild-catalog-coverage-test.sh
+
+# ...and the guard itself, against the REAL pins. The suite above proves the
+# script; only this proves the pair is in step. It locates the two pinned trees
+# with `nix eval` on this flake's own inputs -- nix is on PATH here, because
+# this stage is entered with `nix develop`, as the backend-manager suite below
+# also relies on -- and reads only text after that, so it costs two small
+# input fetches on a cold store and under a second on a warm one. STRICT, so a
+# runner where it could not run fails by name instead of skipping: the lane
+# exists to make the drift impossible to miss, and a skip here would be the
+# 2026-09-30 gap again. `just test` runs it too, non-strict.
+lint_step "reprobuild catalog covers every repro.nim uses: name (real pins)" \
+	env CT_CATALOG_COVERAGE_STRICT=1 bash scripts/test-reprobuild-catalog-coverage.sh
 
 # The same argument for the lock-node-dates guard, and it needed making twice
 # over: that guard has SEVEN failure paths that could accuse the wrong thing,
@@ -587,12 +637,25 @@ lint_step "contract suite: recorder probes track the built artefact" \
 lint_step "contract suite: the dev shell's nargo is not shadowed by a sibling build" \
 	bash ci/test/detect-siblings-nargo-test.sh
 
+# Likewise for `nim`: a codetracer-nim sibling's bin/nim is whatever that
+# checkout last built, and with it first on PATH a stale build compiled the
+# db-backend tests' Nim fixtures instead of the pinned fork. Pure bash fixtures.
+lint_step "contract suite: the dev shell's nim is not shadowed by a sibling build" \
+	bash ci/test/detect-siblings-nim-test.sh
+
 # A lane that runs with graceful skipping off excludes, by name, the tests it
 # does not provide the tools for. A misspelled or stale entry excludes nothing
 # and says nothing, so every entry must name a test binary that exists, and
 # the job that does run it: no test may be excluded everywhere (`NO LANE`).
 lint_step "contract suite: lane not-provided lists name real tests and the lane that runs each" \
 	bash ci/test/lane-not-provided-test.sh
+
+# The same lists name two crates' tests, and nextest refuses a filterset that
+# names a binary its crate does not have; the lane that runs an entry selects
+# it from the same line. not-provided-filter.sh is the one place a list becomes
+# a filterset, both ways. Pure bash fixtures, no cargo.
+lint_step "contract suite: not-provided-filter.sh restricts a list to one crate and selects a lane's entries" \
+	bash ci/test/not-provided-filter-test.sh
 
 # The other half of the same defect: an honest detector reporting "not built" is
 # still a red job if no job builds it. Registered here because the check reads
@@ -613,12 +676,13 @@ lint_step "contract suite: the runner defect register still cites real things" \
 	bash ci/test/runner-register-citations-test.sh
 
 # THE RUST TEST-ASSERTION GATE. `tools/check-test-assertions.sh` is a vendored
-# copy of a lint codetracer-specs has shipped "for the product repos" since M0.
-# This repository invoked it NOWHERE, and could not have: the specs repo is
+# copy of a lint codetracer-pm (then named codetracer-specs) has shipped "for
+# the product repos" since M0. This repository invoked it NOWHERE, and could
+# not have: the specs repo is
 # never checked out here. A guard was written, shipped, and connected to
 # nothing -- which is how assertion-less Rust tests came to live inside a
 # required gate. The glob at the top does not reach `tools/`.
-lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-specs)" \
+lint_step "shellcheck: Rust test-assertion lint (vendored from codetracer-pm)" \
 	shellcheck tools/check-test-assertions.sh
 
 # Registered here rather than left to be discovered, for the reason the lint
@@ -653,5 +717,14 @@ lint_step "shellcheck: Rust test-crate coverage gate" \
 	shellcheck ci/test/rust-test-crate-coverage.sh
 lint_step "contract suite: every Rust crate with tests is run (enumerated baseline)" \
 	bash ci/test/rust-test-crate-coverage.sh
+
+# Exercise the shell argument boundary without launching Electron.
+lint_step "contract suite: Playwright recipe arguments stay intact" \
+	bash ci/test/e2e-argument-forwarding-test.sh
+
+# The agent instructions must name the directory those Playwright recipes run,
+# and no spec may sit where no Playwright config collects it. Pure bash + git.
+lint_step "contract suite: AGENTS.md names the Playwright suite the recipes run" \
+	bash ci/test/agents-md-playwright-dir-test.sh
 
 lint_summary

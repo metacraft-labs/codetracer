@@ -287,7 +287,7 @@ suite "Scenario 3: Calltrace viewport loading on scroll":
       session.store.updateDebuggerPosition(100'u64, "main.py", 1)
 
       # Set viewport to show 30 rows.
-      session.calltraceVM.setViewportHeight(30)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(30))
       drain()
 
       # The initial request should have been sent.
@@ -302,28 +302,28 @@ suite "Scenario 3: Calltrace viewport loading on scroll":
       session.store.calltrace.startLineIndex.val = 0'i64
 
       # At position 0, there should be nothing above.
-      session.calltraceVM.scroll(0)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(0))
       check session.calltraceVM.hasMoreAbove.val == false
       check session.calltraceVM.hasMoreBelow.val == true
 
       # 2. Scroll to position 100.
       mock.clearReceivedCommands()
-      session.calltraceVM.scroll(100)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(100))
       drain()
 
       # Verify a request was sent with the buffered start index.
       let scrollCmd = mock.findCommand("ct/load-calltrace-section")
       check scrollCmd.isSome
       let startIdx = scrollCmd.get.args["startCallLineIndex"].getBiggestInt
-      check startIdx == 100 - CALLTRACE_BUFFER
+      check startIdx == 100 - TrailRows
       check session.calltraceVM.hasMoreAbove.val == true
 
       # 7. Scroll to position 0 — hasMoreAbove = false.
-      session.calltraceVM.scroll(0)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(0))
       check session.calltraceVM.hasMoreAbove.val == false
 
       # 8. Scroll near the end — hasMoreBelow = false when viewport covers rest.
-      session.calltraceVM.scroll(970)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(970))
       check session.calltraceVM.hasMoreBelow.val == false
 
       dispose()
@@ -481,7 +481,7 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
 
       # The auto-load effect fires on creation at rrTicks=0.
       # Mark the initial request complete so the tracker allows new ones.
-      session.store.requestTracker.markComplete("load-locals")
+      session.store.requestTracker.forget("load-locals")
       mock.clearReceivedCommands()
 
       # First step — rrTicks 200.  This triggers a requestLocals.
@@ -498,7 +498,7 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       # Instead, test with a different rrTicks while the first is pending.
 
       # Manually mark the first request as complete so the next can fire.
-      session.store.requestTracker.markComplete("load-locals")
+      session.store.requestTracker.forget("load-locals")
 
       # Second step — rrTicks 300.
       session.store.updateDebuggerPosition(300'u64, "main.py", 6)
@@ -507,7 +507,7 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       check count2 == 2
 
       # Mark complete again and step to rrTicks 400.
-      session.store.requestTracker.markComplete("load-locals")
+      session.store.requestTracker.forget("load-locals")
       session.store.updateDebuggerPosition(400'u64, "main.py", 7)
       drain()
       let count3 = mock.countCommands("ct/load-locals")
@@ -525,7 +525,7 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 1)
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       let initialCount = mock.countCommands("ct/load-calltrace-section")
@@ -535,7 +535,7 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       # backend, so the request tracker is already clear.  Scroll to
       # a new position to trigger a fresh request.
       mock.clearReceivedCommands()
-      session.calltraceVM.scroll(50)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(50))
       drain()
 
       let afterScroll = mock.countCommands("ct/load-calltrace-section")
@@ -548,7 +548,7 @@ suite "Scenario 5: Rapid stepping deduplicates requests":
       # With autoRespond, the request completes immediately, so the
       # tracker is clear and a new request IS sent.
       mock.clearReceivedCommands()
-      session.calltraceVM.scroll(50)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.scrolledTo(50))
       drain()
 
       # Since scrollPosition is set to the same value, the signal does
@@ -878,7 +878,7 @@ suite "Scenario 8: Cross-VM consistency after move":
       drain()
 
       # Set up calltrace viewport so its effect will fire.
-      session.calltraceVM.setViewportHeight(25)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(25))
       drain()
       mock.clearReceivedCommands()
 
@@ -925,7 +925,7 @@ suite "Scenario 8: Cross-VM consistency after move":
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let session = app.session
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       # Move 1.
@@ -991,9 +991,9 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
       let localsCount1 = mock.countCommands("ct/load-locals")
       check localsCount1 == 1
 
-      # Simulate some other non-move event (e.g. tab switch).
-      session.stateVM.selectTab(stGlobals)
-      session.stateVM.selectTab(stLocals)
+      # Simulate some other non-move event (e.g. expanding a row).
+      session.stateVM.toggleExpand("x")
+      session.stateVM.toggleExpand("x")
       drain()
 
       # No new locals request should have been sent because the
@@ -1057,7 +1057,7 @@ suite "Scenario 9: Data minimality — unchanged position does not re-request":
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let session = app.session
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       session.store.updateDebuggerPosition(100'u64, "main.py", 10)

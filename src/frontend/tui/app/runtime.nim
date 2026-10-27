@@ -38,13 +38,17 @@
 
 import std/[options, os, strutils, tables]
 
-import codetracer_embed   # PLAT-43: `KeymapModel`, `selectKeymap`
+import codetracer_embed   # PLAT-43: `BaseKeymap`, `selectKeymap`
 import headless_app/auto_hide_hover
+import headless_app/file_tree_menu   # K19: the Files pane's menu
 
 import ./commands/interpreter
 import ./edit_binding
 import ./input/keymap
 import ./input/motions
+import ./input/operation_dispatch
+import ./input/key_check
+import ./clipboard_read
 import ./layout/persistence
 import ./layout/project
 import ./theme/degradation
@@ -55,6 +59,10 @@ import ./views/welcome_view
 import headless_app/welcome_tabs
 import ./views/event_log
 import ./views/vcs_pane
+import ./views/search_results_pane
+import ./views/terminal_info
+import ./theme/terminal_report
+import ./views/test_results_pane
 
 export interpreter, keymap, motions, command_line, tui_app, degradation
 export persistence
@@ -131,7 +139,7 @@ type
       ## expanded, relative paths against the project. Unlike `readFile` it
       ## may reach outside the project — see `host/edit_host
       ## .readUserConfigFile`. Nil in a session with no host filesystem.
-    saveKeymap*: proc(model: KeymapModel): string {.closure.}
+    saveKeymap*: proc(model: BaseKeymap): string {.closure.}
       ## PLAT-43. Remember the chosen keymap model for the next session; ""
       ## on success, else a one-line message naming the path. Nil in a session
       ## whose host keeps no state — the choice then holds for this session
@@ -139,6 +147,24 @@ type
       ## Starts a build and takes ownership of the process. The SESSION it
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
+    readSource*: proc(path: string): EditReadResult {.closure.}
+      ## PLAT-68: the whole text of a file of the RECORDING (the source
+      ## provider's, generation 0 — what the Debug-mode editor shows), for
+      ## the read-only document the Debug-mode editor's keys act on
+      ## (selection, copy, find, the tracepoint line). Nil in a session with
+      ## no recording; the editor then has no document and its facts are
+      ## `sourceViewFacts`.
+    reloadKeybindings*: proc(): string {.closure.}
+      ## PLAT-68: re-read the user's `keybindings.json` and lay it over the
+      ## base (`:keys reload`); answers the load summary. Nil in a host that
+      ## keeps no configuration.
+    wireFileTree*: proc(vm: FilesystemVM; openedFolder: proc(): string;
+                        done: proc(r: FileTreeOperationResult)) {.closure.}
+      ## K19: make Edit mode's Files model (`TuiApp.editFilesVM`) act on the
+      ## disk — the host's `native_file_tree.wireNativeFileOperations`, which
+      ## `app/` may not import. Nil in a session with no host filesystem: the
+      ## menu then disables Create, Rename and Delete ("This front end cannot
+      ## change files").
 
   PaneClickKind* = enum
     ## PLAT-50: what a click in a pane asks the HOST to do — the operations
@@ -194,10 +220,32 @@ type
     pcTerminalView
       ## PLAT-52: the Terminal Output pane's toggle — show the view named by
       ## `text` (`lines` / `screen`), remembered for this recording.
+    pcSearchResult
+      ## PLAT-57 (K35): Find in Files' result `index` — selected and opened
+      ## in the editor at its line, the match selected; the recording
+      ## position does not move.
+    pcSearchOption
+      ## PLAT-57: Find in Files' toggle whose operation is `text`
+      ## (`search.toggle-case` / `-whole-word` / `-regex`) flipped, and the
+      ## search run again.
+    pcTestsRun
+      ## PLAT-53: the Test Results pane's ▶ — the project's suite run
+      ## (`TestResultsVM.startRun`).
+    pcTestsRefresh
+      ## PLAT-53: a Test Results row's `⟳` on the test `text` names (its
+      ## id): record it again and stay (`TestResultsVM.triggerRefresh`).
+    pcTestsOpen
+      ## PLAT-53: a Test Results row's `⏵` on the test `text` names: open its
+      ## recording in a new tab, recording it first when it has none
+      ## (`TestResultsVM.triggerOpen`).
     pcFrameSeek
       ## PLAT-51: the frame viewer's own scrubber — show frame `index`
       ## (`behaviour` "drag" while held, "release" where it is let go:
       ## Visual-Replay.md's Scrub Slider, whose release settles there).
+    pcPointMenu
+      ## M76: the program menu's breakpoint or tracepoint item whose
+      ## `ClientAction` is `text` (`point_menu_ops`), at `path:line` — the
+      ## editor caret's line (the desktop's `pointsOperationsSetup`).
 
   PaneClickRequest* = object
     kind*: PaneClickKind
@@ -214,6 +262,40 @@ type
       ## The (expression, value) pairs `pcScratchpadAdd` pins.
     order*: EventLogOrder
       ## `pcEventOrder`'s order.
+
+  SourceScrollKind* = enum
+    ## M73 (#840): what the user asked the Debug-mode source pane's WINDOW to
+    ## do. The pane draws `SourceVM`'s window, which the HOST owns
+    ## (`host/tui_session`), so this layer says what was asked and the host
+    ## moves the window and serves the lines it then lacks — the same split as
+    ## `awaitsMove`. Until M73 nothing the user did reached that window: only
+    ## a stop's `followExecutionPointer` moved it.
+    sskNone
+    sskBy
+      ## Scroll by `delta` lines, down positive: the wheel over the editor
+      ## (CodeTracer-TUI.md §4.4), `j` / `k` and `Ctrl+d` / `Ctrl+u` while it
+      ## is focused (§4.2 Source Navigation). The execution pointer and the
+      ## caret stay where they are.
+    sskTo
+      ## Put line `top` at the top: the vertical bar's track or thumb
+      ## (Scrollbar-Scrubbers.md §3.2, §3.3).
+    sskCentreOnPointer
+      ## `.`: "Reset source scroll so the current execution pointer is
+      ## centered" (§4.2).
+    sskFollowCaret
+      ## The read-only caret moved to `line`:`column`: the smallest scroll
+      ## that keeps it on screen (Editor-Pane.md § The caret in a read-only
+      ## editor).
+
+  SourceScroll* = object
+    ## M73 (#840): one request for the source window. See `SourceScrollKind`.
+    kind*: SourceScrollKind
+    delta*: int
+    top*: int
+      ## 1-based.
+    line*: int
+    column*: int
+      ## 1-based, both.
 
   RuntimeOutcome* = object
     ## Everything one token decided, as a value the host acts on.
@@ -252,12 +334,21 @@ type
       ## `ct/collapse-calls`) and reloads the section.
     callIndex*: int64
       ## The trace index `jumpsToCall` / `togglesCall` act on.
+    stopsSession*: bool
+      ## M76: *Stop* (the Debug menu, CUA's `Shift+F5`): the workspace is in
+      ## Edit mode already (`stopDebugging`), and the host ends the session
+      ## behind the tab — its replay backend terminated — and makes the
+      ## runtime forget it (`tui_session.stop`).
     paneClick*: PaneClickRequest
       ## PLAT-50: a click in a pane that the host carries out.
       ## PLAT-47. The reader scrolled the call trace: the host loads the
       ## section of the trace the pane now shows, if it does not hold it
       ## (`tui_session.pageCallTrace`), and nothing else — no pump, no
       ## rebuild of the other panes.
+    sourceScroll*: SourceScroll
+      ## M73 (#840): the source window moved by the user — the host applies
+      ## it to `SourceVM` and serves the lines it then lacks
+      ## (`tui_session.scrollSource`). `sskNone` for every other token.
     action*: KeyAction
       ## What fired, for the status line and for a test that wants to assert
       ## the binding rather than its effect.
@@ -266,15 +357,77 @@ type
       ## here too so a caller can tell "nothing happened" from "the engine
       ## refused".
 
+  BarGrab* = object
+    ## PLAT-70 Part H: a thumb held (§7.4) — the bar, and the point of the
+    ## thumb the pointer took (`scrollbar_interaction.grabOffset`).
+    active*: bool
+    pane*: PaneKind
+    axis*: BarAxis
+    offset*: float
+
+  BarHold* = object
+    ## A paging press held on a track: the bar, and when it pages again.
+    pane*: PaneKind
+    axis*: BarAxis
+    hold*: TrackHold
+
+  ScrollbarRuntime* = object
+    ## PLAT-70 Part H (Scrollbar-Scrubbers.md §7): the scrollbars' medium
+    ## state — the options, what the pointer is doing to which bar, the held
+    ## thumb or paging press, each pane's fade, and what each bar showed the
+    ## last time a frame was painted (a scroll wakes its pane's bars).
+    options*: ScrollbarOptions
+    pointer*: BarPointer
+    grab*: BarGrab
+    paging*: BarHold
+    fades*: array[PaneKind, FadeState]
+    started*: bool
+      ## The fades were given the clock (the first tick).
+    pointerPane*: tuple[found: bool, pane: PaneKind]
+      ## The pane the pointer was last in: entering one wakes its bars.
+    shownTops*: array[PaneKind, array[BarAxis, int]]
+      ## Each bar's first visible row / column as last painted, -1 for none.
+    painted*: seq[BarSpot]
+      ## The bars of the last frame painted — what a passing pointer is
+      ## hit-tested against (a press reads the bars afresh).
+    paintedValid*: bool
+    clockMs*: int64
+      ## The latest time the runtime was told (a token, a tick).
+
+  TerminalService* = ref object
+    ## PLAT-71 (Terminal-Adaptation §5, §10): what only the host can do
+    ## about the terminal — it holds the start-up negotiation.
+    setChoice*: proc(which: LayoutSetting; value: string): string {.closure.}
+      ## `:set <terminal setting> <value>` (rank 1): re-resolve the profile
+      ## with it, adopt it, remember it. Answers the status line's text.
+    setForThisTerminal*: proc(which: LayoutSetting;
+                              value: string): string {.closure.}
+      ## The glyph test card's `y` / `n`: the setting for THIS terminal only
+      ## (a `[terminal "<name>"]` section, OQ-T6).
+    rerun*: proc(): string {.closure.}
+      ## Ask the terminal again (`:terminal-info`'s `r`).
+    dismissHints*: proc(): string {.closure.}
+      ## `:terminal-info dismiss`: no start-up hint ever again (§10.2).
+
   TuiRuntime* = ref object
     ## The running front-end's state, minus the terminal and minus the process.
     app*: TuiApp
+    scrollbars*: ScrollbarRuntime
+      ## PLAT-70 Part H: the scrollbars' options, pointer, grab, paging and
+      ## fades (§7).
+    terminalInfo*: TerminalInfoView
+      ## PLAT-71: `:terminal-info` — the live report and the glyph test card.
     caps*: TerminalCapabilities
       ## Handed in by `host/capabilities.negotiateCapabilities` before this
       ## object exists, for CTUI-11's "resolved before first paint".
-    keymap*: Keymap
+    router*: KeymapRouter
+      ## PLAT-68: THE ONE ROUTE FROM A KEY TO AN OPERATION — the active base,
+      ## the user's `keybindings.json` over it, the pushed layers and the
+      ## pending prefix (`viewmodel/keymap/keymap_router`, shared with GPUI
+      ## and the desktop). This runtime supplies the scope path
+      ## (`scopePath`), the ViewModels' facts (`sessionFacts`) and the
+      ## dispatch (`runResolution`).
     modal*: ModalState
-    pending*: PendingState
     focus*: PaneFocus
     maximize*: MaximizeState
     prompt*: CommandLineModel
@@ -302,16 +455,29 @@ type
       ## and wrote to another would silently keep two arrangements for one
       ## recording. `host/layout_store.nim` is what fills it, and it is the only
       ## thing in this front-end that touches a file for this purpose.
-    keymapModel*: KeymapModel
-      ## PLAT-43. The keymap model a NEW edit session starts under: the stored
-      ## preference the host loaded, or the last `:keymap` choice. The product
-      ## default until a host says otherwise.
+    eraseByte*: char
+      ## PLAT-68. The byte this terminal sends for Backspace (termios
+      ## `VERASE`, read by the host's driver); the other of `0x7f` / `0x08` is
+      ## Ctrl+Backspace. Every token is named through `keyOf`, which reads it.
+    tabMovesFocus*: bool
+      ## PLAT-68: VS Code's `Ctrl+M` mode (`editor.toggle-tab-moves-focus`):
+      ## while on, `Tab` in a buffer is not indentation. The `tabMovesFocus`
+      ## context key reads it.
+    keyCheck*: KeyCheck
+      ## PLAT-68: `:keys check` (Help: Check Key Delivery) while it runs.
+    clipboardRead*: ClipboardRead
+      ## PLAT-68: a paste asks the terminal for its clipboard (OSC 52) and is
+      ## held for the answer; `clipboard_read` has the conversation.
     keymapNotice*: string
       ## PLAT-43. A stored keymap preference the host REFUSED, by name, to be
       ## shown when Edit mode is furnished — where it wins the status line over
       ## `editing … — N file(s)`, which would otherwise overwrite it within the
       ## same frame (measured by the pty suite's first run). Shown once.
     editServices*: EditServices
+    filesReprompt*: string
+      ## K19: the command line to open again after the one just submitted —
+      ## a Files name the model refused (`commitNameEdit`), whose field stays
+      ## open with its reason.
       ## PLAT-16. The HOST's three filesystem/process capabilities, injected.
       ##
       ## THE SAME CATEGORY AS CTUI-8's `EventPages` SEAM AND CTUI-10's
@@ -343,13 +509,23 @@ type
       ## it across a token to know a committed arrangement may have resized
       ## a pane — the ONE moment a pane fetches for its new size (Layout-
       ## ViewModel §4.3a: never mid-drag).
-    savePreference*: proc(name: string; on: bool): string {.closure.}
+    savePreference*: proc(name, value: string): string {.closure.}
       ## PLAT-51: the HOST's write of a layout preference (`:set
-      ## focus-highlight` / `:set live-resize`), "" on success, else why not.
-      ## Nil in a host that keeps no state.
+      ## focus-highlight off`, `:set scrollbar-thickness thin`), "" on
+      ## success, else why not. Nil in a host that keeps no state.
+    terminalService*: TerminalService
+      ## PLAT-71: the HOST's half of the terminal settings and the report —
+      ## re-resolving the capability profile when `:set` changes one (rank 1
+      ## of Terminal-Adaptation §5.2), the scoped `y` / `n` of the glyph test
+      ## card, and `:terminal-info`'s report. Nil in a host with no terminal.
     saveIcons*: proc(mode: IconsMode): string {.closure.}
       ## PLAT-48: the HOST's write of the `icons` setting (`:icons`), "" on
       ## success. Nil in a host that keeps no state.
+    saveColumnWidths*: proc(table: string;
+                            entries: seq[ColumnWidthEntry]): string {.closure.}
+      ## PLAT-70 Part B: the HOST's write of a table's column widths
+      ## (`host/table_column_widths`, the one document every front-end reads),
+      ## "" on success. Nil in a host that keeps no state.
     autoHide*: AutoHideHover
       ## PLAT-49 part B (finding 9): the pointer's timing over the auto-hide
       ## labels — the desktop's hover preview and leave dismissal
@@ -367,6 +543,16 @@ type
       ## answered by overwriting it on exit would destroy a user's arrangement
       ## because they opened an older binary once. See
       ## `app/layout/persistence.LayoutPersistIntent`.
+    hostedRows*: Table[PaneKind, int]
+      ## HSF-E1: THE PANE SERVER'S PANES, each sized by the editor window it
+      ## is shown in (Editor-Hosted-Front-Ends §E5). Empty in the terminal.
+      ## When any pane is hosted, a pane's content rows are its window's
+      ## (`paneBodyRows`, `sourcePaneRows`) and not a rectangle of this
+      ## runtime's own screen — so every viewport the session sets from them
+      ## follows the editor's windows, and a pane the editor does not show
+      ## has none.
+    hostedCols*: Table[PaneKind, int]
+      ## HSF-V2: the same windows' widths, in cells (`paneBodyCols`).
 
 const
   QuitDetail* = "quit"
@@ -382,9 +568,36 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int
   ## FORWARD-DECLARED for the call trace's scroll keys; defined beside
   ## `sourcePaneRows`.
 
+proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome)
+proc runFindInFiles(rt: TuiRuntime; pattern: string;
+                    outcome: var RuntimeOutcome)
+proc stepFindInFiles(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome)
+  ## PLAT-57: FORWARD-DECLARED for the command line's `:grep`, `:cnext` and
+  ## `:cprev`; defined beside `showPane`, whose rule they use.
+
 proc runFileJob(rt: TuiRuntime; job: FileJob)
+proc writeBuffers(rt: TuiRuntime; verb: string; all = false)
+proc sessionFacts*(rt: TuiRuntime): SessionFacts
+proc debugBuffer*(rt: TuiRuntime): EditBuffer
+proc editorBuffer(rt: TuiRuntime): EditBuffer
+  ## Forward-declared for PLAT-70's horizontal views; defined below.
+proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
+proc scopePath*(rt: TuiRuntime): ScopePath
+proc navMode(rt: TuiRuntime): NavigationMode
+proc unmountGoneOwners(rt: TuiRuntime)
+  ## FORWARD-DECLARED (PLAT-68) for the chord displays and the focus ring;
+  ## defined with the router's section beside `handleToken`.
   ## FORWARD-DECLARED for the `:w` and `:e!` arms of `runPromptLine`; defined
   ## beside `deliverFileJob`, the answer it hands a job to.
+
+proc initScrollbarRuntime*(options = DefaultScrollbarOptions):
+    ScrollbarRuntime =
+  ## Every bar drawn and resting; the fades take the clock at the first tick.
+  result = ScrollbarRuntime(options: options)
+  for pane in PaneKind:
+    result.fades[pane] = initFade(0)
+    for axis in BarAxis:
+      result.shownTops[pane][axis] = -1
 
 proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
                     width, height: int): TuiRuntime =
@@ -396,11 +609,15 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
   ## reason, and a Compact profile has fewer panes than an Ultra-wide one.
   let model = app.shellModel(width, height)
   let projection = projectLayout(model.layout, bodyArea(width, height))
-  TuiRuntime(
+  result = TuiRuntime(
     app: app, caps: caps,
-    keymap: defaultKeymap(),
+    # The base an edit session was opened under, else the product default
+    # until the host's `selectBase` (the flag, the stored preference).
+    router: initKeymapRouter(
+      (if app.editSession.isNil: bkCua else: app.editSession.model),
+      KeyDelivery(frontEnd: feTerminal, platform: hostPlatform(),
+                  keyProtocol: caps.keyProtocol)),
     modal: initModalState(),
-    pending: initPendingState(),
     focus: newPaneFocus(projection),
     maximize: initMaximizeState(),
     prompt: initCommandLineModel(),
@@ -408,7 +625,65 @@ proc newTuiRuntime*(app: TuiApp; caps: TerminalCapabilities;
     context: CommandContext(),
     lastToken: "", lastKey: "",
     width: width, height: height,
-    autoHide: initAutoHideHover())
+    autoHide: initAutoHideHover(),
+    scrollbars: initScrollbarRuntime(),
+    eraseByte: '\x7f')
+  # PLAT-71: the options the profile owns (`adoptProfileOptions`).
+  result.scrollbars.options.modernUnicode = caps.modernUnicode
+  result.scrollbars.options.reduceMotion = caps.reduceMotion
+
+proc keyOf*(rt: TuiRuntime; token: string): string =
+  ## The canonical name of an input token on THIS terminal — `keyName` with the
+  ## terminal's own erase byte. Every token the runtime names goes through it.
+  keyName(token, rt.eraseByte)
+
+proc keyDelivery*(rt: TuiRuntime): KeyDelivery =
+  ## Base-Keymaps-And-Layer-Stack.md §4.2's three keys this front-end
+  ## supplies: the terminal, the host's platform, and the key protocol the
+  ## driver negotiated. Derived from `caps` — never stored beside it.
+  KeyDelivery(frontEnd: feTerminal, platform: hostPlatform(),
+              keyProtocol: rt.caps.keyProtocol)
+
+proc openTerminalInfo*(rt: TuiRuntime) =
+  ## PLAT-71: `:terminal-info` / **Terminal: Show Capabilities**.
+  rt.terminalInfo = TerminalInfoView(open: true)
+
+proc adoptProfileOptions(rt: TuiRuntime) =
+  ## PLAT-71: the scrollbar options the terminal's profile owns —
+  ## `modern-unicode` for all chrome (OQ-T9) and `reduce-motion` (or a
+  ## conservative link, §4.6), which makes the fade jump to its end state.
+  rt.scrollbars.options.modernUnicode = rt.caps.modernUnicode
+  rt.scrollbars.options.reduceMotion = rt.caps.reduceMotion
+
+proc adoptCaps*(rt: TuiRuntime; caps: TerminalCapabilities) =
+  ## The host re-negotiated (a late reply, `:theme`): take the new
+  ## capabilities, and hand an open edit session the key protocol they carry.
+  rt.caps = caps
+  rt.adoptProfileOptions()
+  if not rt.app.editSession.isNil:
+    rt.app.editSession.adoptDelivery(rt.keyDelivery)
+  # The user's rows are judged again: a chord a legacy terminal could not
+  # deliver loads once the Kitty protocol is on (§7.4).
+  rt.router.delivery = rt.keyDelivery
+  rt.router.applyUserKeymap(rt.router.userKeymap)
+
+proc keymapModel*(rt: TuiRuntime): BaseKeymap =
+  ## The active base keymap (Base-Keymaps-And-Layer-Stack.md §3.1).
+  rt.router.base
+
+proc selectBase*(rt: TuiRuntime; base: BaseKeymap; source: BaseSource) =
+  ## Make `base` the active base, for the router and for every open buffer
+  ## (`--keymap`, the stored preference, `:keymap`, the palette's Select
+  ## Base Keymap all arrive here).
+  rt.router.switchBase(base, source)
+  if not rt.app.editSession.isNil:
+    rt.app.editSession.selectModel(base)
+
+proc applyUserKeymap*(rt: TuiRuntime; uk: UserKeymap): string =
+  ## Lay the user's `keybindings.json` over the base; answers the load
+  ## summary for the status line (`keymap_router.loadSummary`).
+  rt.router.applyUserKeymap(uk)
+  rt.router.loadSummary
 
 proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   ## Whether PLAT-6's layout binding is driving this runtime's arrangement.
@@ -432,9 +707,12 @@ proc rebuildFocus(rt: TuiRuntime) =
   let (had, focused) = rt.focus.focusedPane()
   let model = rt.app.shellModel(rt.width, rt.height)
   let projection = projectLayout(model.layout, bodyArea(rt.width, rt.height))
-  rt.focus = newPaneFocus(projection)
+  rt.focus = newPaneFocus(projection,
+                         tabId = "tab:" & $(rt.app.shell.activeTabIndex() + 1))
   if had:
     discard rt.focus.focusPaneKind(focused)
+  # PLAT-68: a pane gone from the screen takes its pushed layers with it.
+  rt.unmountGoneOwners()
 
 proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry =
   ## The binding's geometry at this terminal size — the dock strips, the inner
@@ -470,8 +748,10 @@ proc enableLayoutBinding*(rt: TuiRuntime): LayoutBinding =
   ## one the desktop persists — and it is PLAT-4-level work rather than a
   ## binding's to make.
   ##
-  ## The binding is seeded from the ACTIVE SESSION's own tree, so the first
-  ## frame after this call is the frame that would have been painted without it.
+  ## The binding is seeded from the ACTIVE SESSION's own tree in Debug mode,
+  ## and from the current product mode's default otherwise (an Edit-mode
+  ## runtime — `ct edit` — has no session), so the first frame after this call
+  ## is the frame that would have been painted without it.
   result = rt.app.enableLayoutBinding(rt.width, rt.height)
   # THE FOCUSED PANE IS THE RUNTIME'S, not a second one. `LayoutBinding.focus`
   # is what `:dock`, `:move-tab` and `:resize` act on, and `Tab` / `Ctrl+w` are
@@ -549,9 +829,46 @@ proc layoutPersistPlanOf*(rt: TuiRuntime): LayoutPersistPlan =
   ## rather than a coincidence of spelling: **quarantine is the intent that
   ## touches nothing**, which is exactly the answer "the flag is off" needs. A
   ## host that called this without checking would still write no file.
+  ##
+  ## **THE DOCUMENT IS THE DEBUG ARRANGEMENT**, in whichever mode the session
+  ## exits. The terminal keeps ONE document and it is not keyed by mode
+  ## (Mode-Transitions.md §4.6, "the terminal's `ct edit` arrangement lives in
+  ## the register only"), and the replay loop restores it into Debug mode. So
+  ## while the binding holds Edit mode's arrangement the plan is made from the
+  ## Debug arrangement the mode register holds (`shell.switchBound`): a user
+  ## who rearranged Debug mode and quit from Edit mode keeps that arrangement,
+  ## one who never touched Debug mode gets the untouched answer (remove), and
+  ## Edit's arrangement is never written. A register with no Debug cell —
+  ## unreachable, since a bound runtime with a document starts in Debug mode —
+  ## answers the intent that touches nothing.
   if not rt.layoutPersistenceEnabled():
     return LayoutPersistPlan(intent: lpiQuarantine, text: "")
-  layoutPersistPlan(rt.app.layoutBinding, rt.layoutDocumentQuarantined)
+  let b = rt.app.layoutBinding
+  if b.product == pmDebug:
+    return layoutPersistPlan(b, rt.layoutDocumentQuarantined)
+  let debug = rt.app.modes.bound[pmDebug]
+  if not debug.stored:
+    return LayoutPersistPlan(intent: lpiQuarantine, text: "")
+  layoutPersistPlan(debug.layout, debug.userModified,
+                    rt.layoutDocumentQuarantined)
+
+proc debugArrangementOf*(rt: TuiRuntime): Layout =
+  ## The DEBUG arrangement of a bound runtime, in whichever mode is on screen:
+  ## the binding's own while it holds Debug mode, the mode register's Debug
+  ## cell while it holds Edit mode (`toggleBoundArrangement`). This is what a
+  ## host writes onto a replay session's slot — when it leaves a tab, when it
+  ## opens a new one — because a slot's `Layout` is a REPLAY arrangement
+  ## (`HeadlessApp` has no edit slot), so writing the binding there while it
+  ## holds Edit mode's panes would put them into the session's replay
+  ## arrangement. A Debug cell never stored — Edit mode entered without ever
+  ## leaving Debug mode, which the replay loop cannot do — answers Debug
+  ## mode's default at the current size. Precondition: the binding is enabled.
+  let b = rt.app.layoutBinding
+  if b.product == pmDebug:
+    return b.layout
+  let debug = rt.app.modes.bound[pmDebug]
+  if debug.stored: debug.layout
+  else: layoutValueForMode(pmDebug, selectProfile(rt.width, rt.height))
 
 proc afterLayoutCommit(rt: TuiRuntime) =
   ## A layout command or gesture committed a change. Two consequences, both
@@ -564,14 +881,71 @@ proc afterLayoutCommit(rt: TuiRuntime) =
   ##   * **the host writes it through** (`layoutCommitted`), so the terminal's
   ##     remembered arrangement is current after every change rather than only
   ##     after a clean exit.
+  ##
+  ## **BOTH ARE DEBUG MODE'S, AND ONLY DEBUG MODE'S COMMITS REACH THEM.** The
+  ## slot's `Layout` is the session's REPLAY arrangement (`HeadlessApp` has no
+  ## edit slot) and the document is the Debug arrangement
+  ## (`layoutPersistPlanOf`). A commit made while the binding holds Edit
+  ## mode's arrangement — a VCS tab clicked in a replay toggled into Edit mode
+  ## — is that arrangement's alone: it is kept in the binding, and in the mode
+  ## register across a switch, and written onto neither. Writing it to the
+  ## slot would put Edit's panes into the session's replay arrangement, and
+  ## writing it through would overwrite the user's remembered Debug
+  ## arrangement with an Edit one. The commit is still COUNTED: the host's
+  ## `layoutCommits` watch re-measures the source pane after any arrangement
+  ## change, in either mode.
   if not rt.layoutBindingEnabled():
+    return
+  inc rt.layoutCommits
+  if rt.app.layoutBinding.product != pmDebug:
     return
   let slot = rt.app.shell.activeSlot()
   if not slot.isNil:
     slot.layout = rt.app.layoutBinding.layout.clone()
-  inc rt.layoutCommits
   if not rt.layoutCommitted.isNil:
     rt.layoutCommitted(rt)
+
+proc toggleBoundArrangement(rt: TuiRuntime; profile: LayoutProfile): bool =
+  ## `Ctrl+F5` WITH A LAYOUT BINDING: swap the binding's arrangement with the
+  ## mode register's cell for the entering mode (Mode-Transitions.md §4.6, "a
+  ## switch carries the gestures with it"). Returns whether the mode changed.
+  ##
+  ## The binding is the only arrangement a bound runtime draws and the one a
+  ## click is hit-tested against, so it must hold the CURRENT mode's
+  ## arrangement in both modes. Before codetracer-pm issue 2026-10-21's fix the
+  ## toggle moved only the register's trees and `shellModel` drew those over
+  ## the binding: the replay loop toggled into Edit mode drew Edit's tree and
+  ## hit-tested Debug's, and after one round trip in either loop the frame
+  ## drew a snapshot while every gesture moved only the hit-test.
+  ##
+  ##   * the LEAVING arrangement is stored whole — tree, docked panes, whether
+  ##     it is the user's, the size it was left at — in its mode's cell (§4
+  ##     requirement 2);
+  ##   * the ENTERING mode's cell is loaded into the binding, or the mode's
+  ##     default on a first visit (§4 requirement 1, §4c obligation 3: a first
+  ##     visit is not a degradation and says nothing);
+  ##   * mode and arrangement change in one call (§4 requirement 4);
+  ##   * the entering arrangement starts a NEW undo history
+  ##     (`binding.adoptModeArrangement`): an undo never crosses a switch.
+  ##
+  ## Debug mode's cell keeps the session slot's relationship: every Debug
+  ## commit is written onto the slot (`afterLayoutCommit`), so the cell stored
+  ## on the way out is the slot's arrangement, and nothing written in Edit mode
+  ## reaches the slot.
+  let b = rt.app.layoutBinding
+  let target = toggled(rt.app.modes.product)
+  let leaving = BoundCell(stored: true, layout: b.layout.clone(),
+                          userModified: b.userModified, profile: b.profile)
+  let (changed, entering) = rt.app.modes.switchBound(leaving, target)
+  if not changed:
+    return false
+  if entering.stored:
+    b.adoptModeArrangement(entering.layout, target, entering.profile,
+                           entering.userModified, rt.width, rt.height)
+  else:
+    b.adoptModeArrangement(layoutValueForMode(target, profile), target,
+                           profile, false, rt.width, rt.height)
+  true
 
 proc resize*(rt: TuiRuntime; width, height: int) =
   ## Adopt a new terminal geometry, re-deriving the focus ring from the layout
@@ -621,7 +995,7 @@ proc movesTheDebugger*(action: KeyAction): bool =
   of kaStepOver, kaReverseStepOver, kaStepInto, kaReverseStepInto,
      kaStepOut, kaReverseStepOut, kaContinue, kaReverseContinue,
      kaPrevCall, kaNextCall, kaPrevMutation, kaNextMutation,
-     kaJumpToStart, kaJumpToEnd, kaSeekToTick,
+     kaJumpToStart, kaJumpToEnd, kaSeekToTick, kaHistoryBack, kaHistoryForward,
      kaValueOrigin, kaReverseOrigin: true
   else: false
 
@@ -629,7 +1003,7 @@ proc refreshMenuForKeymap*(rt: TuiRuntime)
   ## FORWARD-DECLARED for `:keys`; defined with the top bar below.
 
 const EventLogColumnVerbs* = ["columns", "column-show", "column-hide",
-                              "column-left", "column-right"]
+                              "column-left", "column-right", ColumnWidthVerb]
 const WatchVerbs* = ["watch", "unwatch", "watch-edit"]
   ## PLAT-51: the watch verbs (`runPromptLine`).
   ## PLAT-49 part B: the event log's column verbs (`runColumnVerb`).
@@ -641,11 +1015,32 @@ proc describeColumns(c: EventLogColumns): string =
               (if c.isVisible(col): "" else: ")")
   "event log columns: " & parts.join(" ") & " — hidden in parentheses"
 
+proc rememberEventLogWidths(rt: TuiRuntime): string =
+  ## PLAT-70 Part B: the Event Log's widths into the remembered document
+  ## (Horizontal-Overflow.md §5.2, HO-9); "" when written or not kept.
+  if rt.saveColumnWidths.isNil: ""
+  else: rt.saveColumnWidths(EventLogTableName,
+                            rt.app.eventLog.columns.columnWidthEntries)
+
+proc describeWidth(rt: TuiRuntime; col: EventLogColumn): string =
+  let failure = rt.rememberEventLogWidths()
+  "event log column " & eventLogColumnTitle(col) & ": " &
+    $rt.app.eventLog.columns.widths[col] & " cells" &
+    (if failure.len > 0: " (" & failure & ")" else: "")
+
 proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
   ## One column verb against the event log's `EventLogColumns`; answers the
   ## status line's text (every verb says what it did, or why it did nothing).
   if verb == "columns":
     return describeColumns(rt.app.eventLog.columns)
+  if verb == ColumnWidthVerb:
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.2): `:column-width <title>
+    # <cells>`, never narrower than `MinColumnCells`.
+    let parsed = parseColumnWidthLine(@[verb] & arg.splitWhitespace)
+    if not parsed.ok:
+      return parsed.message
+    discard rt.app.eventLog.columns.setColumnWidth(parsed.column, parsed.cells)
+    return rt.describeWidth(parsed.column)
   if arg.len == 0:
     return ":" & verb & " needs a column: tick, #, location, kind or output"
   let (ok, col) = parseEventLogColumn(arg)
@@ -671,42 +1066,372 @@ proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
   rt.app.eventLog.columns = c
   describeColumns(c)
 
-proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
+proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;
                          remember = true): string =
-  ## PLAT-51 deliverables 9 and 11: turn the focus highlight or live resize
-  ## on or off for this session and — from a command, not a CLI flag —
-  ## REMEMBER it (`savePreference`, beside the remembered layout). Answers
-  ## the status line's text.
+  ## PLAT-51 deliverables 9 and 11, PLAT-70 Part H: set one layout setting —
+  ## the focus highlight, live resize, the overflow markers, a scrollbar
+  ## option — for this session and, from a command rather than a CLI flag,
+  ## REMEMBER it (`savePreference`, beside the remembered layout). `value` is
+  ## the setting's word (`on`, `thick` …). Answers the status line's text.
+  var current = LayoutSettings(scrollbars: rt.scrollbars.options)
+  if not current.assignValue(which, value):
+    return "'" & value & "' is not a value of " & $which
+  let on = value == "on"
+  if which.isTerminalSetting:
+    # PLAT-71: a TERMINAL setting is a rank of the capability profile
+    # (Terminal-Adaptation §5.2): the host re-resolves, and the screen is
+    # repainted from the new profile. `modern-unicode` among them (OQ-T9).
+    if rt.terminalService.isNil or rt.terminalService.setChoice.isNil:
+      return describe(which, value) & " (no terminal to apply it to)"
+    result = rt.terminalService.setChoice(which, value)
+    for pane in PaneKind:
+      rt.scrollbars.fades[pane].wake(rt.scrollbars.clockMs)
+    if remember:
+      let saved =
+        if rt.savePreference.isNil: "not remembered: this session keeps no state"
+        else: rt.savePreference($which, value)
+      if saved.len > 0:
+        result.add " (" & saved & ")"
+    return
   case which
   of lsFocusHighlight:
     rt.app.focusHighlightOff = not on
   of lsLiveResize:
     if not rt.app.layoutBinding.isNil:
       rt.app.layoutBinding.liveResize = on
-  result = describe(which, on)
+  of lsOverflowMarkers:
+    rt.app.overflowMarkersOff = not on
+  of lsModernUnicode, lsGlyphs, lsAmbiguousWidth, lsColors,
+     lsTerminalProbe, lsReduceMotion, lsTerminalHints:
+    discard
+  of lsScrollbarThickness, lsScrollbarFade, lsScrollbarTrack,
+     lsScrollbarClick:
+    rt.scrollbars.options = current.scrollbars
+    # A changed option shows on every bar at once.
+    for pane in PaneKind:
+      rt.scrollbars.fades[pane].wake(rt.scrollbars.clockMs)
+  result = describe(which, value)
   if remember:
     let saved =
       if rt.savePreference.isNil: "not remembered: this session keeps no state"
-      else: rt.savePreference($which, on)
+      else: rt.savePreference($which, value)
     if saved.len > 0:
       result.add " (" & saved & ")"
 
-proc runPromptLine(rt: TuiRuntime; line: string;
-                   outcome: var RuntimeOutcome) =
-  ## A committed prompt line, through CTUI-10's interpreter.
-  ##
-  ## Search prompts do not reach the interpreter: `/pattern` is not a §4.3
-  ## command, and handing it to `parseCommand` would report "unknown command
-  ## pattern" for a perfectly good search. It is reported as an unbuilt seam
-  ## instead, by name — CTUI-10 built the incremental search MODEL
-  ## (`app/views/search.nim`) and no pane in the shell binds it yet.
-  if rt.prompt.kind != pkCommand:
-    rt.note("search for `" & line & "` needs the source pane's search binding," &
-            " which no milestone has wired to the shell yet")
+proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; on: bool;
+                         remember = true): string =
+  ## An on / off setting.
+  rt.applyLayoutSetting(which, (if on: "on" else: "off"), remember)
+
+proc chooseKeymap*(rt: TuiRuntime; name: string) =
+  ## PLAT-43 / PLAT-68: the base-keymap selector — `:keymap <name>` and the
+  ## palette's **Preferences: Select Base Keymap** both land here. The NAME is
+  ## decided by `keymap_selection.selectKeymap` and nowhere else — the same
+  ## function the stored preference and `--keymap` go through — so an unknown
+  ## base (including the retired `default`) is refused by name with the
+  ## accepted set rather than silently defaulted. With no name it says which
+  ## base is active and why.
+  let current = rt.keymapModel
+  if name.len == 0:
+    let sourced =
+      if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
+      else: " with " & rt.app.editSession.imported.source & " sourced"
+    rt.note("keymap " & $current & " (" & $rt.router.baseSource & ")" &
+            sourced & "; the accepted values are " &
+            acceptedKeymapNamesText())
     return
+  let selection = selectKeymap(name)
+  if not selection.ok:
+    rt.note(selection.refusal)
+    return
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(selection.model, rt.keyDelivery)
+  rt.selectBase(selection.model, ksCommand)
+  let saved =
+    if rt.editServices.saveKeymap.isNil:
+      "not remembered: this session keeps no state"
+    else: rt.editServices.saveKeymap(selection.model)
+  rt.note("keymap " & $selection.model &
+          (if saved.len == 0: "" else: " (" & saved & ")"))
+
+# ---------------------------------------------------------------------------
+# K19: THE FILES PANE'S MENU — Create, Rename, Delete, Edit
+# (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Context menu")
+# ---------------------------------------------------------------------------
+#
+# The entries, their order and their disabled reasons are the shared Files
+# model's (`FilesystemVM.fileTreeMenu`, read as a native menu by
+# `headless_app/file_tree_menu`): the replay's tree is the session's model,
+# Edit mode's is `TuiApp.editFilesVM` over the opened folder. This terminal
+# has no inline name field, so Create and Rename open the command line with
+# `create ` / `rename <name>` typed, and Delete — which asks first here — with
+# `trash <path>`; Enter answers, Escape cancels. Those three words are read
+# ONLY while the model has that field or question open: they are not
+# commands (§4.3's table is unchanged), and with nothing open they fall
+# through to the interpreter as before.
+
+const
+  CreateVerb = "create"
+  RenameVerb = "rename"
+  TrashVerb = "trash"
+
+proc openContextMenu(rt: TuiRuntime; menu: ContextMenuModel; row, col: int;
+                     outcome: var RuntimeOutcome)
+  ## Forward-declared: defined with the other click routes below.
+
+proc editTreeRoot*(rt: TuiRuntime): string =
+  ## The opened folder Edit mode's Files tree is rooted at, absolute and
+  ## without a trailing separator (`projectTreeOf`'s spelling of its row).
+  let root = if rt.app.projectRoot.len > 0: rt.app.projectRoot
+             else: getCurrentDir()
+  result = absolutePath(root).normalizedPath
+  while result.len > 1 and result[^1] in {'/', '\\'}:
+    result.setLen(result.len - 1)
+
+proc filesMenuVM(rt: TuiRuntime): FilesystemVM =
+  ## The Files model the pane's rows belong to: a replay's tree (the
+  ## session's), or Edit mode's opened folder.
+  if rt.app.fileTree.entries.len > 0: rt.app.filesVM
+  else: rt.app.editFilesVM
+
+proc filesRowPath(rt: TuiRuntime; i: int): string =
+  ## The Files model's path of row `i` of the pane.
+  let t = rt.app.fileTree
+  if t.entries.len > 0:
+    if i >= 0 and i < t.entries.len: t.entries[i].path else: ""
+  elif i >= 0 and i < t.files.len:
+    joinTreePath(rt.editTreeRoot(), t.files[i])
+  else: ""
+
+proc fileTreeOperationDone*(rt: TuiRuntime; r: FileTreeOperationResult)
+
+proc installProjectListing*(rt: TuiRuntime; listing: EditListResult) =
+  ## Edit mode's Files pane over `listing` (the project walk): the rows, and
+  ## the Files model the menu decides on. The open file, the selection and
+  ## the reader's place are kept where the rows still hold them.
+  let old = rt.app.fileTree
+  var tree = initFileTreeModel(files = listing.files,
+                               selected = (if listing.files.len > 0: 0
+                                           else: -1),
+                               truncated = listing.truncated)
+  tree.openPath = old.openPath
+  tree.scrollTop = old.scrollTop
+  if old.selected >= 0 and old.selected < old.files.len:
+    let at = listing.files.find(old.files[old.selected])
+    if at >= 0: tree.selected = at
+  rt.app.fileTree = tree
+  if rt.app.editFilesVM.isNil:
+    let vm = createFilesystemVM(nil)
+    # With no host to act on the disk, the opened folder is still the tree,
+    # and the menu says nothing carries the operations out.
+    let root = proc(): string = rt.editTreeRoot()
+    vm.hostFacts = proc(): FileTreeHostFacts =
+      FileTreeHostFacts(layout: ToolbarMode.EditMode, openedFolder: root(),
+                        hasIndexProcess: false, canTrash: false)
+    if not rt.editServices.wireFileTree.isNil:
+      rt.editServices.wireFileTree(vm, root,
+        proc(r: FileTreeOperationResult) = rt.fileTreeOperationDone(r))
+    rt.app.editFilesVM = vm
+  rt.app.editFilesVM.setRoot(projectTreeOf(rt.editTreeRoot(), listing.files))
+
+proc openProjectFile(rt: TuiRuntime; relative: string): bool =
+  ## Edit mode's K17 (and the Files menu's Edit): the project file in the
+  ## editor, as `:e <relative>` opens it.
+  if rt.editServices.readFile.isNil:
+    rt.note("this session has no reader for " & relative)
+    return false
+  let opened = rt.editServices.readFile(relative)
+  if not opened.ok:
+    rt.note(opened.message)
+    return false
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
+  discard rt.app.editSession.openFile(relative, opened.text,
+                                      max(1, rt.sourcePaneRows()))
+  rt.app.fileTree.openPath = relative
+  rt.note("editing " & relative)
+  true
+
+proc fileTreeOperationDone*(rt: TuiRuntime; r: FileTreeOperationResult) =
+  ## The host's answer to a Create, Rename or Delete: the folder is listed
+  ## again (the pane follows the disk), the status line says what changed or
+  ## why not, and a new file opens in the editor (Filesystem-Pane.md, "Create
+  ## makes an empty file and opens it in the editor"). Open editor tabs are
+  ## left alone.
+  let root = rt.editTreeRoot()
+  if r.error.len == 0 and not rt.editServices.listFiles.isNil:
+    rt.installProjectListing(rt.editServices.listFiles())
+    let rel = relativeToRoot(root, r.path)
+    let at = rt.app.fileTree.files.find(rel)
+    if at >= 0 and r.operation != ftaDelete:
+      rt.app.fileTree.selected = at
+    if r.operation == ftaCreate and rel.len > 0:
+      discard rt.openProjectFile(rel)
+  rt.note(describeFileTreeOperation(r, root))
+
+proc filesFieldOpen(rt: TuiRuntime): bool =
+  ## Whether the Files model has a name field or a Delete question open.
+  let vm = rt.filesMenuVM()
+  not vm.isNil and (vm.nameEdit.val.kind != fneNone or
+                    vm.pendingDelete.len > 0)
+
+proc cancelFilesField(rt: TuiRuntime): string =
+  ## Close an open name field or Delete question without acting; what to say.
+  let vm = rt.filesMenuVM()
+  if vm.isNil:
+    return ""
+  if vm.pendingDelete.len > 0:
+    let kept = entryNameOf(vm.pendingDelete)
+    vm.cancelDelete()
+    return "kept " & kept
+  if vm.nameEdit.val.kind != fneNone:
+    let what = nameEditPrompt(vm.nameEdit.val)
+    vm.cancelNameEdit()
+    return what & ": cancelled"
+  ""
+
+proc askOnPrompt(rt: TuiRuntime; question: string) =
+  ## Say `question` where it is read while the command line is open: after
+  ## the line (`CommandLineModel.message`, which the next edit clears), and
+  ## on the status line once it closes.
+  rt.prompt.message = question
+  rt.note(question)
+
+proc promptForFilesField(rt: TuiRuntime) =
+  ## The model opened a name field or asked about Delete: the command line,
+  ## with the answer's word typed, and what Enter and Escape do.
+  let vm = rt.filesMenuVM()
+  if vm.isNil:
+    return
+  let root = rt.editTreeRoot()
+  if vm.pendingDelete.len > 0:
+    let rel = relativeToRoot(root, vm.pendingDelete)
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert(TrashVerb & " " &
+                             (if rel.len > 0: rel else: vm.pendingDelete))
+    rt.askOnPrompt(deletePrompt(vm.pendingDelete) &
+                   " Enter moves it to the trash, Escape keeps it")
+    return
+  let edit = vm.nameEdit.val
+  case edit.kind
+  of fneCreate:
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert(CreateVerb & " ")
+    rt.askOnPrompt(nameEditPrompt(edit) &
+                   " — type its name; Enter creates it, Escape cancels")
+  of fneRename:
+    discard rt.openPrompt(pkCommand)
+    discard rt.prompt.insert(RenameVerb & " " & edit.name)
+    rt.askOnPrompt(nameEditPrompt(edit) &
+                   " — edit the name; Enter renames it, Escape cancels")
+  of fneNone:
+    discard
+
+proc runFilesFieldLine(rt: TuiRuntime; text: string): bool =
+  ## A submitted command line while the Files model has a field or a
+  ## question open: its answer, when the line is one (`create <name>`,
+  ## `rename <name>`, `trash …`). Any other line closes the field first and
+  ## is run as itself (false).
+  if not rt.filesFieldOpen():
+    return false
+  let vm = rt.filesMenuVM()
+  let words = text.splitWhitespace()
+  let verb = if words.len > 0: words[0] else: ""
+  let rest = if words.len > 0: text.strip()[verb.len .. ^1].strip() else: ""
+  if vm.pendingDelete.len > 0 and verb == TrashVerb:
+    let asked = vm.pendingDelete
+    if vm.confirmDelete():
+      if rt.app.notification.len == 0:
+        rt.note("moved " & entryNameOf(asked) & " to the trash")
+    return true
+  let edit = vm.nameEdit.val
+  if (edit.kind == fneCreate and verb == CreateVerb) or
+     (edit.kind == fneRename and verb == RenameVerb):
+    rt.app.notification = ""
+    if vm.commitNameEdit(rest):
+      if edit.kind == fneRename and rest == edit.name:
+        rt.note("the name is unchanged")
+    else:
+      # The field stays open with its reason (the spec's refused name).
+      rt.filesReprompt = verb & " " & rest
+      rt.note(vm.nameEdit.val.error)
+    return true
+  discard rt.cancelFilesField()
+  false
+
+proc openFilesMenu(rt: TuiRuntime; i, row, col: int;
+                   outcome: var RuntimeOutcome) =
+  ## K19: row `i`'s menu, at the cell (`row`, `col`), the row selected.
+  let vm = rt.filesMenuVM()
+  let path = rt.filesRowPath(i)
+  if vm.isNil or (path.len == 0 and rt.app.fileTree.entries.len == 0):
+    rt.note("the Files pane has no menu here")
+    outcome.repaint = true
+    return
+  rt.app.fileTree.selected = i
+  rt.openContextMenu(vm.fileTreeContextMenuOf(path), row, col, outcome)
+
+proc activateFilesRow(rt: TuiRuntime; i: int; outcome: var RuntimeOutcome) =
+  ## K17 / K18 from the keyboard or a press: a file opens, a folder opens or
+  ## closes.
+  let t = rt.app.fileTree
+  rt.app.fileTree.selected = i
+  outcome.repaint = true
+  if t.entries.len > 0:
+    if i < 0 or i >= t.entries.len:
+      return
+    let e = t.entries[i]
+    outcome.paneClick = PaneClickRequest(
+      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path)
+  elif i >= 0 and i < t.files.len:
+    discard rt.openProjectFile(t.files[i])
+
+proc runFilesMenuAction(rt: TuiRuntime; action: ContextAction;
+                        target: ContextTarget; outcome: var RuntimeOutcome) =
+  ## A chosen Files entry, as the model decides it now.
+  let vm = rt.filesMenuVM()
+  outcome.repaint = true
+  if action == caFileEdit:
+    # Opening a file is this front-end's editor: the model is asked only
+    # whether the entry acts here.
+    let why = vm.fileTreeEntryReason(target.path, action)
+    if why.len > 0:
+      rt.note(why)
+    elif rt.app.fileTree.entries.len > 0:
+      outcome.paneClick = PaneClickRequest(kind: pcOpenFile, path: target.path)
+    else:
+      discard rt.openProjectFile(relativeToRoot(rt.editTreeRoot(),
+                                                target.path))
+    return
+  let why = vm.runFileTreeAction(target.path, action)
+  if why.len > 0:
+    rt.note(why)
+    return
+  rt.promptForFilesField()
+
+proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
+                    unknownFallsThrough = false): bool =
+  ## One command line, through CTUI-10's interpreter and the verbs beside it —
+  ## from the command prompt (`runPromptLine`) or typed into the omnibar after
+  ## its `:` (`acceptOmnibar`). Answers whether the line was run: always,
+  ## unless `unknownFallsThrough` is set and its verb is no command at all, in
+  ## which case NOTHING has happened and the caller decides (the omnibar then
+  ## takes its chosen palette entry instead).
+  result = true
   if line.strip().len == 0:
+    discard rt.cancelFilesField()
     rt.note("")
     return
+
+  # K19: the answer to an open Files name field or Delete question.
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    if rt.runFilesFieldLine(text):
+      outcome.repaint = true
+      outcome.detail = rt.app.notification
+      return
 
   # PLAT-51: `:set focus-highlight on|off`, `:set live-resize on|off` — the
   # two layout preferences (`layout_settings.parseSetLine`), remembered. A
@@ -718,7 +1443,29 @@ proc runPromptLine(rt: TuiRuntime; line: string;
       if not sl.ok:
         rt.note(sl.message)
       else:
-        rt.note(rt.applyLayoutSetting(sl.setting, sl.on))
+        rt.note(rt.applyLayoutSetting(sl.setting, sl.value))
+      outcome.detail = rt.app.notification
+      return
+
+  # PLAT-71: `:terminal-info` (Terminal-Adaptation §10.1) — the live report
+  # and the glyph test card — and `:terminal-info dismiss`, which turns the
+  # start-up hint off for good (§10.2).
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and words[0] == "terminal-info":
+      outcome.repaint = true
+      if words.len > 1 and words[1] == "dismiss":
+        rt.note(if rt.terminalService.isNil or
+                   rt.terminalService.dismissHints.isNil:
+                  "no terminal hints to dismiss in this session"
+                else: rt.terminalService.dismissHints())
+      elif words.len > 1:
+        rt.note(":terminal-info takes nothing or `dismiss`")
+      else:
+        rt.openTerminalInfo()
       outcome.detail = rt.app.notification
       return
 
@@ -730,6 +1477,20 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     if text.startsWith(":"):
       text = text[1 .. ^1].strip()
     let words = text.splitWhitespace()
+    # PLAT-57 (CodeTracer-TUI.md §4.3): `:grep <pattern>` searches the
+    # recording's sources into Find in Files — nothing opens — and `:grep`
+    # alone opens its field; `:cnext` / `:cprev` (`:cn` / `:cp`) open the
+    # next / previous result.
+    if words.len > 0 and words[0] == "grep":
+      if words.len == 1: rt.openFindInFiles(outcome)
+      else: rt.runFindInFiles(text[4 .. ^1].strip(), outcome)
+      outcome.detail = rt.app.notification
+      return
+    if words.len == 1 and words[0] in ["cnext", "cn", "cprev", "cp"]:
+      rt.stepFindInFiles((if words[0] in ["cnext", "cn"]: 1 else: -1),
+                         outcome)
+      outcome.detail = rt.app.notification
+      return
     if words.len > 0 and words[0] in ["icons", "keys"]:
       let arg = if words.len > 1: words[1] else: ""
       if words[0] == "icons":
@@ -756,25 +1517,25 @@ proc runPromptLine(rt: TuiRuntime; line: string;
               msg.add " (" & saved & ")"
             rt.note(msg)
       else:
-        # `:keys <file>` layers a `.cttui-keys` file (CTUI-9's user keymap)
-        # over the built-in table; `:keys default` goes back to the table.
-        # The menu's shortcuts and the controls' tooltips follow at once —
-        # they are read from the active keymap, never written beside it.
-        if arg.len == 0 or arg == "default":
-          rt.keymap = defaultKeymap()
-          rt.note("keys: the built-in table")
+        # PLAT-68: `keybindings.json` is the one user keymap
+        # (Base-Keymaps-And-Layer-Stack.md §3.5), so `:keys` reports it:
+        # `:keys` its load summary, `:keys reload` reads it again, and
+        # `:keys check` is Help: Check Key Delivery (§7.3). The menu's
+        # shortcuts and the controls' tooltips follow a reload at once —
+        # they are resolved from the router, never written beside it.
+        case arg
+        of "":
+          rt.note(rt.router.loadSummary)
+        of "reload":
+          rt.note(if rt.editServices.reloadKeybindings.isNil:
+                    "keys: this session keeps no configuration"
+                  else: rt.editServices.reloadKeybindings())
+        of "check":
+          rt.keyCheck = startCheck()
+          rt.note("keys check: press keys to see how they arrive; " &
+                  "Esc ends the check")
         else:
-          if not fileExists(expandTilde(arg)):
-            rt.note("keys: no such file: " & arg)
-            outcome.detail = rt.app.notification
-            return
-          try:
-            let load = loadKeymapFile(defaultKeymap(), expandTilde(arg))
-            rt.keymap = load.keymap
-            rt.note(if load.errors.len == 0: "keys " & arg
-                    else: describeError(load.errors[0]))
-          except CatchableError as e:
-            rt.note("keys: " & arg & ": " & e.msg)
+          rt.note("keys: '" & arg & "' is not a keys verb (reload, check)")
         rt.refreshMenuForKeymap()
       outcome.detail = rt.app.notification
       return
@@ -790,7 +1551,8 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     let words = text.splitWhitespace()
     if words.len > 0 and words[0] in EventLogColumnVerbs:
       rt.note(rt.runColumnVerb(words[0],
-                               (if words.len > 1: words[1] else: "")))
+                               (if words.len > 1: words[1 .. ^1].join(" ")
+                                else: "")))
       outcome.detail = rt.app.notification
       outcome.repaint = true
       return
@@ -891,34 +1653,7 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     let rest = if words.len > 1: text[text.find(words[1]) .. ^1] else: ""
     case verb
     of "keymap":
-      # PLAT-43. The keymap selector. The NAME is decided by
-      # `keymap_selection.selectKeymap` and nowhere else — the same function
-      # the stored preference goes through — so an unknown model is refused
-      # by name with the accepted set rather than silently defaulted.
-      let current =
-        if rt.app.editSession.isNil: rt.keymapModel
-        else: rt.app.editSession.model
-      if rest.len == 0:
-        let sourced =
-          if rt.app.editSession.isNil or rt.app.editSession.imported.isNil: ""
-          else: " with " & rt.app.editSession.imported.source & " sourced"
-        rt.note("keymap " & $current & sourced &
-                "; the accepted values are " & acceptedKeymapNamesText())
-      else:
-        let selection = selectKeymap(rest)
-        if not selection.ok:
-          rt.note(selection.refusal)
-        else:
-          if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession(selection.model)
-          rt.app.editSession.selectModel(selection.model)
-          rt.keymapModel = selection.model
-          let saved =
-            if rt.editServices.saveKeymap.isNil:
-              "not remembered: this session keeps no state"
-            else: rt.editServices.saveKeymap(selection.model)
-          rt.note("keymap " & $selection.model &
-                  (if saved.len == 0: "" else: " (" & saved & ")"))
+      rt.chooseKeymap(rest)
       outcome.detail = rt.app.notification
       return
     of "break", "b":
@@ -967,28 +1702,16 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         else:
           let sourced = sourceVimConfig(rest, read.text)
           if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession(kmVim)
+            rt.app.editSession = newEditSession(bkVim, rt.keyDelivery)
           rt.app.editSession.installImported(sourced.imported)
-          rt.keymapModel = kmVim
+          rt.router.switchBase(bkVim, ksCommand)
+          rt.router.importedEditor = sourced.imported.keymap
+          rt.router.hasImported = true
           rt.note(sourcedSummary(sourced))
       outcome.detail = rt.app.notification
       return
     of "w", "write":
-      let buf = if rt.app.editSession.isNil: nil
-                else: rt.app.editSession.activeBuffer()
-      if buf.isNil:
-        rt.note(":w needs an open file")
-      elif rt.editServices.writeFile.isNil and
-           rt.editServices.submitFileJob.isNil:
-        rt.note(":w has no writer in this session")
-      else:
-        # PLAT-29: a WRITE IS A PRODUCER. The bytes of this version go to the
-        # host's file worker; its acknowledgement arrives through
-        # `deliverFileJob`, which marks the buffer saved as of exactly those
-        # bytes and says "wrote …". A session with no worker runs it inline,
-        # down the same path.
-        rt.note("writing " & buf.path & "…")
-        rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
+      rt.writeBuffers(":w")
       outcome.detail = rt.app.notification
       return
     of "e!", "edit!":
@@ -1015,7 +1738,7 @@ proc runPromptLine(rt: TuiRuntime; line: string;
         let opened = rt.editServices.readFile(rest)
         if opened.ok:
           if rt.app.editSession.isNil:
-            rt.app.editSession = newEditSession(rt.keymapModel)
+            rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
           discard rt.app.editSession.openFile(
             rest, opened.text, max(1, rt.sourcePaneRows()))
           rt.app.fileTree.openPath = rest
@@ -1057,6 +1780,9 @@ proc runPromptLine(rt: TuiRuntime; line: string;
     else:
       discard
 
+  if unknownFallsThrough and parseCommand(line).status == csUnknown:
+    return false
+
   # PLAT-50: "Add tracepoint" on an editor line chose WHERE the next
   # `:tracepoint` goes (the desktop's tracepoint editor opens on that line);
   # any other command forgets it.
@@ -1067,12 +1793,12 @@ proc runPromptLine(rt: TuiRuntime; line: string;
       context.file = rt.app.tracepointAt.path
       context.line = rt.app.tracepointAt.line
     rt.app.tracepointAt = ("", 0)
-  let result = runCommand(rt.dispatcher, context, line)
-  outcome.detail = result.message
-  var text = describeOutcome(result)
+  let ran = runCommand(rt.dispatcher, context, line)
+  outcome.detail = ran.message
+  var text = describeOutcome(ran)
   if text.len == 0:
-    text = result.message
-  for extra in result.lines:
+    text = ran.message
+  for extra in ran.lines:
     text.add "  |  " & extra
   rt.note(text)
   # THE ACTION THE COMMAND RESOLVED TO IS CARRIED OUT, so `handleToken` can
@@ -1086,21 +1812,36 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   # stops is `main.nim`'s, and only `applyLocalAction` reaches it. The key path
   # (`q`, `Ctrl+c`) always went through there and always worked, which is why a
   # published command was broken behind two working keys.
-  outcome.action = result.dispatch.action
+  outcome.action = ran.dispatch.action
   # ONLY A NAVIGATION IS PUMPED. This said `drDone` alone until 2026-09-23,
   # which was harmless while every command that answered `drDone` moved the
   # debugger; `:break` answering `drDone` (its service is now wired) would have
   # blocked the loop on a `stopped` event no engine sends — see
   # `movesTheDebugger` on why that is a hang rather than a wrong screen.
-  if result.dispatch.status == drDone:
+  if ran.dispatch.status == drDone:
     outcome.awaitsMove = movesTheDebugger(outcome.action)
     outcome.refreshesSession = changesSessionState(outcome.action)
     # PLAT-50: an origin query is not a move (`awaitsOrigin`).
     if outcome.action == kaValueOrigin and
-       result.message.startsWith(OriginPendingText):
+       ran.message.startsWith(OriginPendingText):
       outcome.awaitsMove = false
       outcome.awaitsOrigin = true
       outcome.originRetry = line
+
+proc runPromptLine(rt: TuiRuntime; line: string;
+                   outcome: var RuntimeOutcome) =
+  ## A committed prompt line.
+  ##
+  ## Search prompts do not reach the interpreter: `/pattern` is not a §4.3
+  ## command, and handing it to `parseCommand` would report "unknown command
+  ## pattern" for a perfectly good search. It is reported as an unbuilt seam
+  ## instead, by name — CTUI-10 built the incremental search MODEL
+  ## (`app/views/search.nim`) and no pane in the shell binds it yet.
+  if rt.prompt.kind != pkCommand:
+    rt.note("search for `" & line & "` needs the source pane's search binding," &
+            " which no milestone has wired to the shell yet")
+    return
+  discard rt.runCommandLine(line, outcome)
 
 const CallTraceWheelRows* = 3
   ## Rows one wheel notch scrolls the call trace — the common terminal
@@ -1178,14 +1919,30 @@ proc terminalOutputArea(rt: TuiRuntime; geometry: LayoutGeometry): CellArea =
       return paneUnderStrip(geometry, i)
   CellArea()
 
+proc terminalOutputRows*(rt: TuiRuntime): int =
+  ## How many lines the Terminal Output's line view shows on the current
+  ## screen — what its viewport reports (Viewport-Driven-Loading Q3); 0 when
+  ## the pane is not on the screen.
+  let area = rt.terminalOutputArea(rt.layoutGeometry())
+  if area.width <= 0:
+    return 0
+  terminalPaneGeometry(rt.app.terminalOutput, area).contentRows
+
 proc terminalWriteJump(rt: TuiRuntime; write: int;
                        outcome: var RuntimeOutcome): bool =
   ## Go to the moment write `write` was produced: the host's `ct/event-jump`
   ## (`pcEventJump`), the desktop's fragment click (K32).
   let m = rt.app.terminalOutput
-  if m.screen.isNil or write < 0 or write >= m.screen.writes.len:
+  var ev: TerminalOutputEvent
+  if not m.screen.isNil and write >= 0 and write < m.screen.writes.len:
+    ev = m.screen.writes[write]
+  elif not m.writeOf.isNil:
+    # The line view's writes are not loaded: the held lines name them.
+    ev = m.writeOf(write)
+    if ev.eventIndex < 0:
+      return false
+  else:
     return false
-  let ev = m.screen.writes[write]
   outcome.requestClick(PaneClickRequest(
     kind: pcEventJump, index: ev.logIndex, tick: ev.rrTicks, path: ev.path,
     line: ev.line))
@@ -1198,28 +1955,11 @@ proc scrollTerminalOutput(rt: TuiRuntime; delta: int;
   let geo = terminalPaneGeometry(rt.app.terminalOutput, area)
   let rows = max(1, geo.contentRows)
   let m = rt.app.terminalOutput
-  let top = max(0, min(max(0, m.lines.len - rows), m.visibleTop(rows) + delta))
+  let top = max(0, min(max(0, m.lineCount - rows), m.visibleTop(rows) + delta))
   rt.app.terminalOutput.scrollTop = top
   rt.app.terminalOutput.follow = false
+  rt.app.terminalOutput.ensureShown(rows)
   outcome.repaint = true
-
-proc scrubTerminalLines(rt: TuiRuntime; area: CellArea; row: int;
-                        click: bool) =
-  ## The line view's scrubber (Scrollbar-Scrubbers.md §3): a click on the
-  ## track centres the line at the clicked fraction of the WHOLE output; a
-  ## dragged thumb follows the pointer. It moves the view, never the
-  ## debugger.
-  let m = rt.app.terminalOutput
-  let geo = terminalPaneGeometry(m, area)
-  if geo.contentRows <= 0:
-    return
-  let sm = m.scrubberOf(geo.contentRows)
-  let f = trackFractionAt(row - geo.contentTop, geo.contentRows)
-  let top =
-    if click: sm.clickAt(f)
-    else: sm.dragTo(f - sm.thumbLength / 2.0)
-  rt.app.terminalOutput.scrollTop = top
-  rt.app.terminalOutput.follow = false
 
 proc scrubTerminalScreen(rt: TuiRuntime; area: CellArea; col: int;
                          outcome: var RuntimeOutcome) =
@@ -1246,6 +1986,11 @@ proc endTerminalScrub(rt: TuiRuntime) =
   rt.app.terminalOutput.previewing = false
   rt.app.terminalOutput.scrubSent = -1
 
+proc pointerCellX(event: MouseEvent; fallback = -1.0): float =
+  ## PLAT-70: the pointer's column in fractional cells when the terminal
+  ## reports pixels (SGR-pixel, DECSET 1016), else `fallback`.
+  if event.pixel: event.px / mouseMetrics().cellW else: fallback
+
 proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
                               event: MouseEvent;
                               outcome: var RuntimeOutcome): bool =
@@ -1254,11 +1999,18 @@ proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
   ## the pane, so a right press is not taken.
   if event.button != mbLeft or not rt.app.terminalOutput.loaded:
     return false
-  let hit = rt.app.terminalOutput.terminalOutputHitAt(area, event.row,
-                                                      event.col)
+  let hit = rt.app.terminalOutput.terminalOutputHitAt(
+    area, event.row, event.col, event.pointerCellX)
   case hit.kind
   of thNone, thScreen:
     return false
+  of thCorner:
+    # PLAT-70 (HO-7): the cell between the two tracks belongs to neither.
+    discard
+  of thHBarTrack, thHBarThumb, thLineTrack, thLineThumb:
+    # PLAT-70 Part H: the line view's two scrollbars are every bar's
+    # (`routeScrollbars` took the press before the pane saw it).
+    discard
   of thViewLines:
     outcome.requestClick(PaneClickRequest(kind: pcTerminalView,
                                           text: $tvLines))
@@ -1267,13 +2019,6 @@ proc routeTerminalOutputClick(rt: TuiRuntime; area: CellArea;
                                           text: $tvScreen))
   of thFragment:
     return rt.terminalWriteJump(hit.eventIndex, outcome)
-  of thLineTrack:
-    rt.scrubTerminalLines(area, event.row, click = true)
-    outcome.repaint = true
-  of thLineThumb:
-    rt.app.terminalDrag = tdLineThumb
-    rt.scrubTerminalLines(area, event.row, click = false)
-    outcome.repaint = true
   of thScreenTrack:
     rt.app.terminalDrag = tdScreen
     rt.app.terminalOutput.scrubSent = -1
@@ -1297,9 +2042,6 @@ proc routeTerminalDrag(rt: TuiRuntime; event: MouseEvent;
   let area = rt.terminalOutputArea(rt.layoutGeometry())
   if event.kind == mekMotion:
     case kind
-    of tdLineThumb:
-      rt.scrubTerminalLines(area, event.row, click = false)
-      outcome.repaint = true
     of tdScreen: rt.scrubTerminalScreen(area, event.col, outcome)
     of tdNone: discard
     return true
@@ -1359,26 +2101,31 @@ proc routeFrameViewerMouse(rt: TuiRuntime; event: MouseEvent;
   true
 
 proc terminalOutputOwnsToken*(rt: TuiRuntime; token: string): bool =
-  ## The pane's own keys while it is focused: Left / Right step a write back /
-  ## forward (the screen's "step-by-write keys ... scoped to the pane", which
-  ## the line view keeps too), `v` toggles lines / screen.
+  ## The pane's own keys while it is focused: in the SCREEN view Left / Right
+  ## step a write back / forward (Terminal-Output-Pane.md §3's "step-by-write
+  ## keys ... scoped to the pane", the desktop's screen keys); `v` toggles
+  ## lines / screen. In the LINE view the arrows are the view's
+  ## (Horizontal-Overflow.md §4.4: the pane has no caret, so `Left` / `Right`
+  ## scroll it sideways — `view.scroll-left` / `-right`, through the router).
   let (had, focused) = rt.focus.focusedPane()
   if not had or focused != paneTerminalOutput or
      not rt.app.terminalOutput.loaded:
     return false
-  keyName(token) in ["Left", "Right", "v"]
+  let key = rt.keyOf(token)
+  key == "v" or
+    (key in ["Left", "Right"] and rt.app.terminalOutput.screenShown)
 
 proc routeTokenToTerminalOutput(rt: TuiRuntime; token: string;
                                 outcome: var RuntimeOutcome) =
   let m = rt.app.terminalOutput
-  case keyName(token)
+  case rt.keyOf(token)
   of "v":
     outcome.requestClick(PaneClickRequest(
       kind: pcTerminalView,
       text: (if m.view == tvScreen: $tvLines else: $tvScreen)))
   of "Left", "Right":
     let n = if m.screen.isNil: 0 else: m.screen.writeCount
-    let delta = if keyName(token) == "Left": -1 else: 1
+    let delta = if rt.keyOf(token) == "Left": -1 else: 1
     let at = m.shownWrite
     let target = if at < 0 and delta > 0: 0 else: at + delta
     if n == 0 or target < 0 or target >= n:
@@ -1399,7 +2146,58 @@ proc copyToClipboard(rt: TuiRuntime; text, what: string) =
   ## PLAT-50: hand `text` to the terminal's clipboard (OSC 52, written by the
   ## next frame) and say what was copied, as the desktop's copy does.
   rt.app.clipboard = text
+  rt.app.pasteBuffer = text
   rt.note("copied " & what)
+
+proc terminalInfoBody*(rt: TuiRuntime): seq[StyledRow] =
+  ## What `:terminal-info` shows under its live lines: the report
+  ## (`terminal_report.profileReport`, the one renderer `--capabilities`
+  ## and `ct doctor terminal` share) and the glyph test card.
+  for line in profileReport(rt.caps):
+    result.add @[StyledSpan(text: line)]
+  result.add @[StyledSpan(text: "")]
+  result.add glyphTestCard(rt.caps)
+
+proc handleTerminalInfoToken(rt: TuiRuntime; token: string;
+                             outcome: var RuntimeOutcome) =
+  ## Every token while `:terminal-info` is open is its own: a key is shown
+  ## decoded (the interactive half of the report), a pointer report is shown
+  ## as the cell it is over, and the view's few keys act.
+  outcome.repaint = true
+  let (isMouse, event) = decodeMouse(token)
+  if isMouse:
+    rt.terminalInfo.pointer = "cell " & $event.col & "," & $event.row &
+      (if event.kind == mekPress: " pressed " & $event.button else: "")
+    return
+  let name = rt.keyOf(token)
+  rt.terminalInfo.lastKey = name
+  let service = rt.terminalService
+  case name
+  of "Esc", "q":
+    rt.terminalInfo.open = false
+  of "Up":
+    rt.terminalInfo.scroll = max(0, rt.terminalInfo.scroll - 1)
+  of "Down":
+    rt.terminalInfo.scroll = min(max(0, rt.terminalInfoBody().len - 1),
+                                 rt.terminalInfo.scroll + 1)
+  of "r":
+    rt.terminalInfo.note =
+      if service.isNil or service.rerun.isNil: "no terminal to ask"
+      else: service.rerun()
+  of "y", "n":
+    # §10.3: the answer to "do the Legacy Computing glyphs look right?"
+    # sets modern-unicode for THIS terminal only (OQ-T6).
+    let value = if name == "y": "on" else: "off"
+    rt.terminalInfo.note =
+      if service.isNil or service.setForThisTerminal.isNil:
+        "this session keeps no state"
+      else: service.setForThisTerminal(lsModernUnicode, value)
+  of "c":
+    rt.copyToClipboard(TerminalInfoCopyText, "an OSC 52 test string")
+    rt.terminalInfo.note = "copied '" & TerminalInfoCopyText &
+      "' (" & rt.caps.clipboard & "): paste it to check"
+  else:
+    discard
 
 proc eventRowAt(model: EventLogModel; area: CellArea;
                 row: int): (bool, event_log.EventLogRow, EventLogScreen) =
@@ -1408,65 +2206,402 @@ proc eventRowAt(model: EventLogModel; area: CellArea;
   ## that screen (its header, for a header press).
   var g = newStyledGrid(area.col + area.width, area.row + area.height)
   let screen = paintEventLog(g, area, model)
-  let firstBody = area.row + (if screen.headerRow >= 0: 2 else: 1)
-  let i = row - firstBody
-  if i < 0 or i >= screen.visible.len or screen.visible[i].kind != elrEvent:
-    return (false, event_log.EventLogRow(), screen)
-  (true, screen.visible[i], screen)
+  let (ok, hit) = screen.eventRowAtScreen(row)
+  (ok, hit, screen)
+
+proc paneAt(geometry: LayoutGeometry; row, col: int):
+    tuple[found: bool, region: PaneRegion, under: CellArea] =
+  ## The pane painted at `(row, col)` and the rectangle its painter was
+  ## handed: a pane of the tiled arrangement, or — PLAT-57 — a docked pane
+  ## shown open in its band or revealed over the body, which `shell` paints
+  ## through the same `paintPane` (so its box is its whole area).
+  # The revealed overlay is painted OVER the arrangement, so it is asked
+  # first.
+  if geometry.revealing and geometry.reveal.contains(row, col):
+    return (true, PaneRegion(pane: geometry.revealPane, area: geometry.reveal,
+                             activeTab: -1),
+            geometry.reveal)
+  let idx = geometry.regionIndexAt(row, col)
+  if idx >= 0:
+    return (true, geometry.projection.regions[idx],
+            paneUnderStrip(geometry, idx))
+  if not geometry.openDock.isEmptyArea and geometry.openDock.contains(row, col):
+    return (true, PaneRegion(pane: geometry.openDockPane,
+                             area: geometry.openDock, activeTab: -1),
+            geometry.openDock)
 
 proc paneAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
   ## The rectangle pane `kind` is painted into (its strip row first), or an
-  ## empty one when it is not on the screen.
+  ## empty one when it is not on the screen — PLAT-57: a docked pane shown
+  ## open or revealed included.
   let geometry = rt.layoutGeometry()
   for i, region in geometry.projection.regions:
     if region.pane == kind:
       return paneUnderStrip(geometry, i)
+  if geometry.revealing and geometry.revealPane == kind:
+    return geometry.reveal
+  if not geometry.openDock.isEmptyArea and geometry.openDockPane == kind:
+    return geometry.openDock
   CellArea()
 
-proc scrubEventLog(rt: TuiRuntime; area: CellArea; row: int;
-                   dragging: bool): bool =
-  ## PLAT-51 (Scrollbar-Scrubbers.md §3): the Event Log's scrollbar scrubber
-  ## pressed (a jump, centring the row at the fraction of the WHOLE log) or
-  ## its thumb held (the view follows). The VIEW moves; the debugger does
-  ## not. The window it lands on is fetched (`ensureWindow`, one request per
-  ## page not held) and the pages far from it released.
-  var g = newStyledGrid(area.col + area.width, area.row + area.height)
-  let screen = paintEventLog(g, area, rt.app.eventLog)
-  if screen.trackCol < 0 or screen.trackRows <= 0:
+# ---------------------------------------------------------------------------
+# PLAT-70: the text panes' horizontal views (Horizontal-Overflow.md §4) — the
+# editor (both modes), the Terminal Output line view and Build Output. The
+# model is `codetracer_embed.horizontal_scroll` (and the editor's
+# `editing_core.followView`); this section only finds where each pane is
+# painted, feeds it its width, and routes the wheel, the bar and the keys.
+# ---------------------------------------------------------------------------
+
+proc paintedAreaOf(rt: TuiRuntime; kind: PaneKind): CellArea =
+  ## The rectangle pane `kind`'s painter is handed this frame (its strip row
+  ## first): the maximized pane's under `z`, else `paneAreaOf`'s (a tiled
+  ## pane, or a docked one shown open or revealed).
+  if rt.maximize.active:
+    let body = bodyArea(rt.width, rt.height)
+    let projection = projectLayout(
+      rt.maximize.layoutFor(selectProfile(rt.width, rt.height)), body)
+    for region in projection.regions:
+      if region.pane == kind:
+        let frame = paneFrame(region.area, body)
+        return CellArea(col: region.area.col, row: region.area.row,
+                        width: frame.box.width, height: frame.box.height)
+    return CellArea()
+  rt.paneAreaOf(kind)
+
+proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
+  ## The editor's part of a frame's model: PLAT-68's Debug-mode document (its
+  ## selection over the recording's source while read-only; the Edit pane
+  ## once writable) and PLAT-70's horizontal view — the content width and the
+  ## pane's code width brought up to date and, when `follow`, the caret
+  ## followed (§4.5) — before the frame is painted from it.
+  if rt.app.modes.product == pmDebug and not rt.app.editSession.isNil:
+    let at = rt.app.editSession.indexOfPath(rt.app.source.path)
+    if at >= 0:
+      let buf = rt.app.editSession.buffers[at]
+      if buf.doc.isReadOnly:
+        model.source.selected = selectedCells(buf)
+      else:
+        model.editorWritable = true
+        model.edit = editPaneModelFor(rt.app.editSession, buf)
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    return
+  let editShown = model.product == pmEdit or model.editorWritable
+  if not editShown and model.source.path != buf.path:
+    return
+  let area = rt.paintedAreaOf(paneEditor)
+  # M73: the read-only pane's code columns are the painter's own
+  # (`sourceCodeWidth`), one fewer while its vertical bar is shown — so the
+  # view is measured against the cells the code is really drawn in.
+  var probe = model.source
+  probe.hview = buf.hview
+  let cols = if area.width <= 0: buf.hview.viewportCols
+             elif editShown: max(0, area.width - paneGutterWidth(model.edit))
+             else: probe.sourceCodeWidth(area)
+  if follow:
+    # The first frame that knows the pane's width follows the caret where
+    # it already is; after that only a caret move does (§4.5).
+    if buf.hview.viewportCols == 0 and cols > 0:
+      buf.follow.armed = false
+    discard buf.doc.followView(buf.hview, buf.follow, cols)
+  let markers = not rt.app.overflowMarkersOff
+  if editShown:
+    model.edit.hview = buf.hview
+    model.edit.caretViewColumn = buf.doc.caretViewColumn
+    model.edit.overflowMarkers = markers
+  else:
+    model.source.hview = buf.hview
+    model.source.caretViewColumn = buf.doc.caretViewColumn
+    model.source.overflowMarkers = markers
+
+proc syncOutputViews(rt: TuiRuntime) =
+  ## The output panes' widths, before a frame: Build Output's content (the
+  ## widest line measured so far of this build) and both panes' text widths
+  ## where they are painted. A pane not on the screen keeps its last width.
+  rt.app.buildView.measureContent(rt.app.build)
+  let b = rt.paintedAreaOf(paneBuildOutput)
+  if b.width > 0:
+    rt.app.buildView.hview.setViewport(b.width)
+  let t = rt.paintedAreaOf(paneTerminalOutput)
+  if t.width > 0:
+    let geo = terminalPaneGeometry(rt.app.terminalOutput, t)
+    rt.app.terminalOutput.hview.setViewport(geo.textWidth)
+
+const TableViewPanes = {paneEventLog, paneCalltrace, paneState}
+  ## PLAT-70 Part I (Horizontal-Overflow.md §5.5): the table panes, whose
+  ## columns scroll sideways when their floors do not fit.
+
+proc tableViewOf(rt: TuiRuntime; pane: PaneKind):
+    tuple[shown: bool; row, left, cols: int; view: HorizontalView] =
+  ## A table pane's horizontal view this frame, settled over its fit, and
+  ## where its bar is — the painters' own geometry functions, so the wheel,
+  ## the bar and the drawing read one decision.
+  let area = rt.paintedAreaOf(pane)
+  if area.width <= 0 or area.height <= 0:
+    return
+  case pane
+  of paneEventLog:
+    if not rt.app.eventLog.hasContent: return
+    let geo = rt.app.eventLog.eventLogGeometry(area)
+    (geo.barRow >= 0, geo.barRow, area.col, geo.width, geo.view)
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty: return
+    let geo = rt.app.callTrace.callTraceGeometry(area)
+    (geo.barRow >= 0, geo.barRow, area.col, geo.rowWidth, geo.view)
+  of paneState:
+    if rt.app.variables.isEmpty: return
+    let geo = rt.app.variables.variablesGeometry(area)
+    (geo.barRow >= 0, geo.barRow, area.col, geo.width, geo.view)
+  else: (false, -1, 0, 0, HorizontalView())
+
+proc storeTableView(rt: TuiRuntime; pane: PaneKind; v: HorizontalView) =
+  case pane
+  of paneEventLog: rt.app.eventLog.hview = v
+  of paneCalltrace: rt.app.callTrace.hview = v
+  of paneState: rt.app.variables.hview = v
+  else: discard
+
+proc syncTableViews(rt: TuiRuntime) =
+  ## PLAT-70 Part I: each table pane's view settled over this frame's fit
+  ## before the frame is painted — so a pane widened until its columns fit
+  ## comes back at column 0, and is there when its bar next appears (§4.1).
+  for pane in TableViewPanes:
+    let area = rt.paintedAreaOf(pane)
+    if area.width <= 0:
+      continue
+    let t = rt.tableViewOf(pane)
+    if t.cols > 0:
+      rt.storeTableView(pane, t.view)
+
+proc horizontalViewPane(rt: TuiRuntime; pane: PaneKind): bool =
+  ## Whether `pane` is a text pane with a horizontal view now (§4.1): the
+  ## editor with a document, the Terminal Output's LINE view (the screen
+  ## view has no bar, OQ-H3), Build Output.
+  case pane
+  of paneEditor: not rt.editorBuffer().isNil
+  of paneTerminalOutput: rt.app.terminalOutput.loaded and
+                         not rt.app.terminalOutput.screenShown
+  of paneBuildOutput: true
+  of paneEventLog, paneCalltrace, paneState: rt.tableViewOf(pane).view.overflows
+  else: false
+
+proc scrollPaneView(rt: TuiRuntime; pane: PaneKind;
+                    step: proc(v: var HorizontalView): bool): bool =
+  ## Apply one view step to `pane`'s horizontal view; answers whether it
+  ## moved. The caret, the selection and the debugger are not touched
+  ## (HO-4): only the view is handed over.
+  case pane
+  of paneEditor:
+    let buf = rt.editorBuffer()
+    if buf.isNil: return false
+    step(buf.hview)
+  of paneTerminalOutput: step(rt.app.terminalOutput.hview)
+  of paneBuildOutput: step(rt.app.buildView.hview)
+  of paneEventLog, paneCalltrace, paneState:
+    # PLAT-70 Part I: the view as this frame settled it, stepped, kept.
+    var v = rt.tableViewOf(pane).view
+    let moved = step(v)
+    rt.storeTableView(pane, v)
+    moved
+  else: false
+
+proc routeHorizontalWheel(rt: TuiRuntime; event: MouseEvent;
+                          outcome: var RuntimeOutcome): bool =
+  ## §4.3: a horizontal wheel notch (SGR 66 / 67, or a delivered Shift +
+  ## wheel) over a text pane moves its view `WheelColumns` columns — the pane
+  ## under the pointer, focused or not, as the vertical wheel does. Never
+  ## the rows (HO-6).
+  if event.kind != mekPress or event.button notin {mbWheelLeft, mbWheelRight}:
     return false
-  let sm = rt.app.eventLog.scrubberOf(screen.trackRows)
-  let at = clamp(row, screen.trackTop, screen.trackTop + screen.trackRows - 1)
-  let hit = sm.verticalScrubberHit(screen.trackTop, screen.trackRows, at)
-  if hit.kind == shNone:
+  let at = rt.layoutGeometry().paneAt(event.row, event.col)
+  var pane = if at.found: at.region.pane else: paneEditor
+  if rt.maximize.active:
+    for kind in [paneEditor, paneTerminalOutput, paneBuildOutput,
+                 paneEventLog, paneCalltrace, paneState]:
+      if rt.paintedAreaOf(kind).contains(event.row, event.col):
+        pane = kind
+  elif not at.found:
     return false
-  let top = sm.scrubTo(hit, dragging)
-  let before = rt.app.eventLog.fetchCount
-  rt.app.eventLog.scrollTop = top
-  rt.app.eventLog.ensureWindow(top, screen.trackRows)
-  rt.app.eventLog.releaseOutside(top, screen.trackRows)
-  rt.app.listScrubFetches += rt.app.eventLog.fetchCount - before
+  if not rt.horizontalViewPane(pane):
+    return false
+  let cols = if event.button == mbWheelRight: WheelColumns else: -WheelColumns
+  if rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
+                         v.scrollBy(cols)):
+    outcome.repaint = true
   true
 
-proc scrubCallTrace(rt: TuiRuntime; area: CellArea; row: int;
-                    dragging: bool; outcome: var RuntimeOutcome): bool =
-  ## PLAT-51: the Call Trace's scrollbar scrubber — the same rule over the
-  ## whole trace (`totalCallsCount`); the host loads the section the view
-  ## then shows (`pagesCallTrace`), as a scroll does.
-  if area.width <= 0 or not area.tracked:
-    return false
-  let body = area.height - 1
-  let sm = rt.app.callTrace.scrubberOf(body)
-  let at = clamp(row, area.row + 1, area.row + body)
-  let hit = sm.verticalScrubberHit(area.row + 1, body, at)
-  if hit.kind == shNone:
-    return false
-  rt.app.callTrace.scrollTop = sm.scrubTo(hit, dragging)
-  rt.app.callTraceAtEnd = rt.app.callTrace.scrollTop >= sm.maxFirstVisible
-  rt.app.callTrace.follow = false
-  rt.app.callTraceScrolled = true
-  outcome.pagesCallTrace = true
+proc runViewOperation(rt: TuiRuntime; operation: string;
+                      outcome: var RuntimeOutcome): bool =
+  ## §4.4's `view.*` operations on the focused output pane: by `WheelColumns`
+  ## (`view.scroll-left` / `-right`), by half the view, back to column 0.
+  let (had, focused) = rt.focus.focusedPane()
+  let pane = if had: focused else: paneEditor
+  if pane notin {paneTerminalOutput, paneBuildOutput} + TableViewPanes or
+     not rt.horizontalViewPane(pane):
+    rt.note("`" & operation & "` scrolls a pane wider than its content " &
+            "area: Terminal Output, Build Output, or a table pane whose " &
+            "columns do not fit")
+    outcome.repaint = true
+    return true
+  discard rt.scrollPaneView(pane, proc(v: var HorizontalView): bool =
+    case operation
+    of "view.scroll-left": v.scrollBy(-WheelColumns)
+    of "view.scroll-right": v.scrollBy(WheelColumns)
+    of "view.scroll-left-half": v.scrollHalf(right = false)
+    of "view.scroll-right-half": v.scrollHalf(right = true)
+    of "view.scroll-to-line-start": v.scrollToLineStart()
+    else: false)
   outcome.repaint = true
   true
+
+proc searchPaneScreen(rt: TuiRuntime): tuple[area: CellArea,
+                                             screen: SearchPaneScreen] =
+  ## PLAT-57: Find in Files' rows below its strip, and where the painter put
+  ## its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneSearch)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintSearchResults(g, result.area, rt.app.search)
+
+proc scrollSearch(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-57: the wheel over Find in Files scrolls its rows.
+  let (_, screen) = rt.searchPaneScreen()
+  rt.app.search.scrollTop = rt.app.search.clampScrollTop(
+    rt.app.search.scrollTop + delta, screen.listRows)
+  outcome.repaint = true
+
+proc testsPaneScreen*(rt: TuiRuntime): tuple[area: CellArea,
+                                            screen: TestsPaneScreen] =
+  ## PLAT-53: Test Results' rows below its strip, and where the painter put
+  ## its parts — the arithmetic a press is read back with.
+  let under = rt.paneAreaOf(paneTestResults)
+  result.area = CellArea(col: under.col, row: under.row + 1,
+                         width: under.width, height: max(0, under.height - 1))
+  if result.area.width <= 0:
+    return
+  var g = newStyledGrid(result.area.col + result.area.width,
+                        result.area.row + result.area.height)
+  result.screen = paintTestResults(g, result.area, rt.app.tests)
+
+proc scrollTests(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## PLAT-53: the wheel over Test Results scrolls its list.
+  let (_, screen) = rt.testsPaneScreen()
+  rt.app.tests.scrollTop = clampTestsTop(screen.wrapped.len,
+    rt.app.tests.scrollTop + delta, screen.listRows)
+  outcome.repaint = true
+
+proc selectTestRow(rt: TuiRuntime; row: int) =
+  ## PLAT-53: select Test Results row `row`, kept in view.
+  if row < 0 or row >= rt.app.tests.rows.len:
+    return
+  rt.app.tests.selected = row
+  let (_, screen) = rt.testsPaneScreen()
+  rt.app.tests.scrollTop = rt.app.tests.revealRow(screen, row)
+
+proc pressTestsControl(rt: TuiRuntime; control: TestsPaneControl;
+                       request: PaneClickRequest;
+                       outcome: var RuntimeOutcome) =
+  ## PLAT-53: the ▶, a `⟳` or a `⏵`, pressed. An enabled control is the
+  ## host's (`test_results_source.applyClick`); a disabled one says why on
+  ## the status line — its title, the ViewModel's (§8.4) — and does nothing.
+  outcome.repaint = true
+  if control.enabled:
+    outcome.requestClick(request)
+  else:
+    rt.note(control.title)
+
+# ---------------------------------------------------------------------------
+# M71 (#838): the panes whose whole content is in hand — State, Files, VCS —
+# keep an ORDINARY scrollbar (Scrollbar-Scrubbers.md §2), drawn by their
+# painters in their last column while they overflow (§4), pressed by the
+# same §3 rule as every list pane's (a press centres the row at its
+# fraction, the held thumb drags), and scrolled by the wheel without focus
+# (CodeTracer-TUI.md §4.4). Each is read back from its own painter, re-run on
+# a scratch grid, so a press and the drawing cannot disagree.
+# ---------------------------------------------------------------------------
+
+const InHandPanes = {paneState, paneFileTree, paneVcs}
+
+const NearBarCells = 3
+  ## PLAT-70 Part H (§7.5): how close to a vertical bar the pointer wakes it.
+
+type InHandTrack = object
+  ## An in-hand pane's scrollbar as its painter drew it.
+  model: ScrubberModel
+    ## Every row the pane lists, the view's top and height.
+  col, top, rows: int
+    ## The track's column and its rows; `col` is -1 while the rows fit.
+
+proc inHandTrack(rt: TuiRuntime; pane: PaneKind; under: CellArea):
+    InHandTrack =
+  ## Pane `pane`'s scrollbar, for the pane painted in `under` (its strip row
+  ## first, as `shell.paintPane` hands it out).
+  result = InHandTrack(col: -1)
+  if under.width <= 0 or under.height <= 1:
+    return
+  var g = newStyledGrid(under.col + under.width, under.row + under.height)
+  case pane
+  of paneState:
+    let s = paintVariables(g, under, rt.app.variables)
+    result = InHandTrack(model: s.scrubberOf, col: s.trackCol,
+                         top: under.row + 1, rows: s.bodyHeight)
+  of paneFileTree:
+    let s = paintFileTree(g, under, rt.app.fileTree)
+    result = InHandTrack(model: s.scrubberOf, col: s.trackCol,
+                         top: under.row + 1, rows: s.bodyRows)
+  of paneVcs:
+    # The VCS pane has no heading of its own: it is painted BELOW the strip
+    # (`shell`'s `belowStrip`).
+    let content = CellArea(col: under.col, row: under.row + 1,
+                           width: under.width, height: under.height - 1)
+    let s = paintVcsPane(g, content, rt.app.vcs)
+    result = InHandTrack(model: s.scrubberOf, col: s.trackCol,
+                         top: content.row, rows: content.height)
+  else: discard
+
+proc setInHandTop(rt: TuiRuntime; pane: PaneKind; top: int) =
+  case pane
+  of paneState: rt.app.variables.scrollTop = top
+  of paneFileTree: rt.app.fileTree.scrollTop = top
+  of paneVcs: rt.app.vcs.scrollTop = top
+  else: discard
+
+proc inHandLoaded(rt: TuiRuntime; pane: PaneKind): bool =
+  ## Whether the pane draws its rows (else the shell left its rectangle to
+  ## something else, and a gesture there is not the pane's).
+  case pane
+  of paneState: not rt.app.variables.isEmpty
+  of paneFileTree: not rt.app.fileTree.isEmpty
+  of paneVcs: rt.app.vcs.loaded
+  else: false
+
+proc vcsHistoryWindow*(rt: TuiRuntime): VcsHistoryWindow =
+  ## The VCS pane's history window on the current screen — what the host
+  ## reports as the history list's viewport (Viewport-Driven-Loading V6, the
+  ## terminal's reporter is the layout projection): the rows of the pane's
+  ## rectangle below its tab strip, as `inHandTrack` paints it, and the
+  ## commits its scroll position has passed. `rows` 0 when the pane is not
+  ## on screen (another tab of its stack shown, or closed), so the host keeps
+  ## the viewport it last reported instead of reporting an unmeasured one.
+  let under = rt.paneAreaOf(paneVcs)
+  if under.width <= 0 or under.height <= 1:
+    return
+  vcsHistoryWindow(CellArea(col: under.col, row: under.row + 1,
+                            width: under.width, height: under.height - 1),
+                   rt.app.vcs)
+
+proc scrollInHand(rt: TuiRuntime; pane: PaneKind; under: CellArea;
+                  delta: int; outcome: var RuntimeOutcome) =
+  ## The wheel over the pane: rows, as a scroll does (§3.4 — only the track
+  ## and the thumb are scrubber gestures), kept inside the pane's rows.
+  let t = rt.inHandTrack(pane, under)
+  rt.setInHandTop(pane, clamp(t.model.firstVisible + delta, 0,
+                              t.model.maxFirstVisible))
+  outcome.repaint = true
 
 proc routeVariablesResize(rt: TuiRuntime; event: MouseEvent;
                           outcome: var RuntimeOutcome): bool =
@@ -1487,28 +2622,201 @@ proc routeVariablesResize(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
   true
 
-proc routeListScrubDrag(rt: TuiRuntime; event: MouseEvent;
+# ---------------------------------------------------------------------------
+# PLAT-70 Part B — the table panes' cut cells, their full text, and the Event
+# Log's column widths (Horizontal-Overflow.md §5)
+# ---------------------------------------------------------------------------
+
+const TablePanes = {paneState, paneEventLog, paneCalltrace}
+  ## The panes whose cells truncate with `…` (§5).
+
+proc tablePaneName(pane: PaneKind): string =
+  ## A pane's name in a `DetailToggle` / a hover: the names the panes' own
+  ## modules use.
+  case pane
+  of paneState: DetailPaneName
+  of paneEventLog: EventLogTableName
+  of paneCalltrace: CallTracePaneName
+  else: ""
+
+proc chordOfOperation(rt: TuiRuntime; name: string): string =
+  ## The chord that runs operation `name` where the focus is now (KL-8).
+  rt.router.chordFor(name, rt.sessionFacts, rt.scopePath, rt.navMode, "")
+
+type TableCellHit = object
+  found: bool
+  pane: PaneKind
+  cut: CutCell
+  bodyRows: int
+
+proc tableCellAt(rt: TuiRuntime; row, col: int): TableCellHit =
+  ## The cut cell drawn at `(row, col)` in a table pane, as that pane's
+  ## painter drew it (re-run on a scratch grid, so the hit is the paint's).
+  let geometry = rt.layoutGeometry()
+  let (onPane, region, under) = geometry.paneAt(row, col)
+  if not onPane or region.pane notin TablePanes or
+     not under.contains(row, col):
+    return
+  var g = newStyledGrid(under.col + under.width, under.row + under.height)
+  var cuts: seq[CutCell] = @[]
+  var body = 0
+  case region.pane
+  of paneState:
+    if rt.app.variables.isEmpty: return
+    let screen = paintVariables(g, under, rt.app.variables)
+    cuts = screen.cuts
+    body = screen.bodyHeight
+  of paneEventLog:
+    if not rt.app.eventLog.hasContent: return
+    let screen = paintEventLog(g, under, rt.app.eventLog)
+    cuts = screen.cuts
+    body = screen.bodyHeight
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty: return
+    cuts = paintCallTraceScreen(g, under, rt.app.callTrace).cuts
+    body = rt.app.callTrace.callTraceBodyRows(under)
+  else: return
+  let i = cuts.cutCellAt(row, col)
+  if i < 0:
+    return
+  TableCellHit(found: true, pane: region.pane, cut: cuts[i], bodyRows: body)
+
+proc cellHoverPointer(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
+                      outcome: var RuntimeOutcome) =
+  ## §5.3: the pointer passing over the screen (`?1003` motion, no button) —
+  ## a truncated cell under it starts the 500 ms clock; anywhere else hides
+  ## a shown tooltip.
+  let hit = rt.tableCellAt(event.row, event.col)
+  let changed =
+    if hit.found:
+      rt.app.cellHoverAnchor = (hit.cut.row, hit.cut.col, hit.bodyRows)
+      rt.app.cellHover.pointerOver(tablePaneName(hit.pane), hit.cut.key,
+                                   hit.cut.column, hit.cut.full, true, nowMs)
+    else:
+      rt.app.cellHover.pointerOver("", "", "", "", false, nowMs)
+  if changed:
+    rt.app.cellTooltip = CellTooltip()
+    outcome.repaint = true
+
+proc tickCellHover*(rt: TuiRuntime; nowMs: int64): bool =
+  ## The hover's clock: the tooltip shows once the pointer has rested
+  ## `HoverDelayMs` on a truncated cell. True when the screen changed.
+  if not rt.app.cellHover.tick(nowMs):
+    return false
+  let a = rt.app.cellHoverAnchor
+  let view = tooltipView(rt.app.cellHover.full, rt.width, a.bodyRows,
+                         rt.chordOfOperation("list.copy"), terminalMeasure)
+  rt.app.cellTooltip = CellTooltip(lines: view.lines, row: a.row, col: a.col)
+  true
+
+proc cellHoverDueMs*(rt: TuiRuntime): int64 =
+  ## When `tickCellHover` next has something to do, -1 for never.
+  rt.app.cellHover.dueMs
+
+proc dismissCellHover(rt: TuiRuntime): bool =
+  ## A key or a press: the tooltip goes (§5.3).
+  result = rt.app.cellHover.dismiss()
+  rt.app.cellTooltip = CellTooltip()
+
+proc openDetail(rt: TuiRuntime; pane: PaneKind; key, column: string): bool =
+  ## §5.3: the row's full text under it — again closes it; one row at a time
+  ## (opening one closes any other pane's). True when it is now open.
+  let name = tablePaneName(pane)
+  var toggle = case pane
+               of paneState: rt.app.variables.detail
+               of paneEventLog: rt.app.eventLog.detail
+               else: rt.app.callTrace.detail
+  result = toggle.toggleDetail(name, key, column)
+  rt.app.variables.detail = DetailToggle()
+  rt.app.eventLog.detail = DetailToggle()
+  rt.app.callTrace.detail = DetailToggle()
+  let chord = rt.chordOfOperation("list.copy")
+  case pane
+  of paneState:
+    rt.app.variables.detail = toggle
+    rt.app.variables.copyChord = chord
+  of paneEventLog:
+    rt.app.eventLog.detail = toggle
+    rt.app.eventLog.copyChord = chord
+  else:
+    rt.app.callTrace.detail = toggle
+    rt.app.callTrace.copyChord = chord
+
+proc routeEllipsisClick(rt: TuiRuntime; event: MouseEvent;
                         outcome: var RuntimeOutcome): bool =
-  ## PLAT-51: a press held on a list pane's scrubber thumb owns the pointer
-  ## until it is released: each motion moves the VIEW to the thumb under the
-  ## pointer (one window fetch when it lands on rows not held).
-  if not rt.app.listScrub.active:
+  ## §5.3: a left press on a cut cell's `…` opens (or closes) its row's
+  ## detail. A press anywhere else in the cell is the row's ordinary click.
+  if event.kind != mekPress or event.button != mbLeft:
+    return false
+  let hit = rt.tableCellAt(event.row, event.col)
+  if not hit.found or [hit.cut].ellipsisAt(event.row, event.col) < 0:
+    return false
+  discard rt.openDetail(hit.pane, hit.cut.key, hit.cut.column)
+  outcome.repaint = true
+  true
+
+proc showDetail(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `list.show-detail`: the FOCUSED row's full text, under it (§5.3) — the
+  ## variable under the cursor, the selected event, the call the debugger is
+  ## in.
+  outcome.repaint = true
+  let (had, focused) = rt.focus.focusedPane()
+  if not had or focused notin TablePanes:
+    rt.note("Show Detail works in the Variables, Event Log and Call Trace panes")
+    return
+  var key = ""
+  case focused
+  of paneState:
+    key = rt.app.variables.focused
+    if key.len == 0: key = rt.app.variables.selected
+  of paneEventLog:
+    let (ok, ev) = rt.app.eventLog.rowAt(rt.app.eventLog.selected)
+    if ok: key = $ev.index
+  else:
+    let at = rt.app.callTrace.currentTraceIndex
+    if at >= 0: key = $at
+  if key.len == 0:
+    rt.note("no row is selected here to show")
+    return
+  discard rt.openDetail(focused, key, "")
+
+proc eventLogArea(rt: TuiRuntime): CellArea =
+  rt.paneAreaOf(paneEventLog)
+
+proc resizeEventLogColumn(rt: TuiRuntime; arg: string;
+                          outcome: var RuntimeOutcome) =
+  ## `table.resize-column([column,]delta)` on the Event Log (§5.2): the named
+  ## column, else the focused one, by `delta` cells from the width it is
+  ## drawn at.
+  outcome.repaint = true
+  let target = rt.app.eventLog.columns.columnResizeTarget(arg)
+  if not target.ok:
+    rt.note(target.message)
+    return
+  let area = rt.paintedAreaOf(paneEventLog)
+  var current = 0
+  # PLAT-70 Part I: the width the column is DRAWN at (the fit's).
+  var g = newStyledGrid(area.col + max(1, area.width), area.row + max(1, area.height))
+  for (c, _, w) in paintEventLog(g, area, rt.app.eventLog).columnCells:
+    if c == target.col: current = w
+  discard rt.app.eventLog.columns.resizeColumn(target.col, target.delta, current)
+  rt.note(rt.describeWidth(target.col))
+
+proc routeEventLogResize(rt: TuiRuntime; event: MouseEvent;
+                         outcome: var RuntimeOutcome): bool =
+  ## §5.2: an Event Log column separator held — each motion puts the
+  ## separator under the pointer (the column's width, never under
+  ## `MinColumnCells`), the release ends it and remembers the widths.
+  if not rt.app.eventLogResize.active:
     return false
   if event.kind == mekPress:
-    rt.app.listScrub.active = false
+    rt.app.eventLogResize.active = false
     return false
-  let pane = rt.app.listScrub.pane
-  let area = rt.paneAreaOf(pane)
+  let r = rt.app.eventLogResize
+  discard rt.app.eventLog.columns.setColumnWidth(r.column, event.col - r.startCol)
   if event.kind != mekMotion:
-    rt.app.listScrub.active = false
-  if area.width > 0:
-    case pane
-    of paneEventLog:
-      if rt.scrubEventLog(area, event.row, dragging = true):
-        outcome.repaint = true
-    of paneCalltrace:
-      discard rt.scrubCallTrace(area, event.row, dragging = true, outcome)
-    else: discard
+    rt.app.eventLogResize.active = false
+    rt.note(rt.describeWidth(r.column))
   outcome.repaint = true
   true
 
@@ -1532,25 +2840,21 @@ proc routeEventLogClick(rt: TuiRuntime; area: CellArea; event: MouseEvent;
   ## desktop's row click); a right click shows its whole content (the desktop
   ## opens it in a read-only editor view); a left click on a column's header
   ## orders the log by it, again to reverse (the desktop's DataTables order).
-  ## PLAT-51: a left press on the scrollbar scrubber's column jumps the VIEW
-  ## (the track) or starts a drag (the thumb).
-  block scrubber:
-    var g = newStyledGrid(area.col + area.width, area.row + area.height)
-    let s = paintEventLog(g, area, rt.app.eventLog)
-    if s.trackCol >= 0 and event.col == s.trackCol and
-       event.row >= s.trackTop and event.row < s.trackTop + s.trackRows:
-      if event.button != mbLeft:
-        return true
-      let hit = rt.app.eventLog.scrubberOf(s.trackRows).verticalScrubberHit(
-        s.trackTop, s.trackRows, event.row)
-      if hit.kind == shThumb:
-        rt.app.listScrub = (active: true, pane: paneEventLog)
-      discard rt.scrubEventLog(area, event.row,
-                               dragging = hit.kind == shThumb)
-      outcome.repaint = true
-      return true
+  ## (A press on its scrollbar is the bar's — `routeScrollbars`, PLAT-70
+  ## Part H.)
   let (ok, row, screen) = eventRowAt(rt.app.eventLog, area, event.row)
   if not ok:
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.2): a press on a separator
+    # holds it — the motion that follows resizes the column to its left.
+    let (onSeparator, sepColumn) = screen.separatorAt(event.row, event.col)
+    if onSeparator and event.button == mbLeft:
+      var startCol = 0
+      for (c, at, _) in screen.columnCells:
+        if c == sepColumn: startCol = at
+      rt.app.eventLogResize = (active: true, column: sepColumn,
+                               startCol: startCol)
+      outcome.repaint = true
+      return true
     let (onHeader, column) = screen.headerColumnAt(event.row, event.col)
     if onHeader and event.button == mbLeft:
       outcome.requestClick(PaneClickRequest(
@@ -1598,6 +2902,420 @@ proc lineValues(target: SourceClickTarget): seq[NamedValue] =
   for v in target.values:
     result.add (v.name, v.value)
 
+proc sourceWithView(rt: TuiRuntime): SourcePaneModel =
+  ## The source pane's model with its document's horizontal view (PLAT-70),
+  ## so a press is read back at the column it was painted at.
+  result = rt.app.source
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == result.path:
+    result.hview = buf.hview
+
+proc placeCaret(rt: TuiRuntime; path: string; line, column: int) =
+  ## The read-only editor's caret onto `line:column` (1-based) of `path`:
+  ## the caret of the file's document (`debugBuffer`), so the keys move it
+  ## from there and a drag selects from there.
+  let buf = rt.debugBuffer()
+  if not buf.isNil and buf.path == path:
+    buf.moveCaretTo(line - 1, column - 1)
+    rt.syncCaretFrom(buf)
+  else:
+    rt.app.caret = (path, line, column)
+
+# ---------------------------------------------------------------------------
+# M73 (#840): THE DEBUG-MODE SOURCE PANE'S WINDOW, MOVED BY THE USER
+#
+# The pane draws `SourceVM`'s window (`source_binding`: `viewportTop =
+# vm.visibleFirstLine`), and until M73 only a stop moved it
+# (`editor_surface.followAndRequest`). The wheel was routed to four other
+# panes, the scroll keys answered for two, the caret scrolled a document
+# window this pane does not draw, and there was no vertical bar. Each input
+# below says what it asks for (`SourceScroll`); the host moves `SourceVM` and
+# serves the lines the window then lacks (`tui_session.scrollSource`), as it
+# serves a stop's. The execution pointer is never moved by any of it.
+# ---------------------------------------------------------------------------
+
+const SourceWheelRows* = 3
+  ## Lines one wheel notch scrolls the source — the call trace's, the event
+  ## log's and the terminal output's (`CallTraceWheelRows`,
+  ## `TerminalWheelRows`): the common terminal default.
+
+proc sourceWindowShown(rt: TuiRuntime): bool =
+  ## Whether the editor pane draws the recording's source READ-ONLY now:
+  ## Debug mode, a file on it, and its document not made writable — `Ctrl+E`
+  ## hands the pane to the edit pane (`editorPaneModel`), which draws its
+  ## document's own window and is not this milestone's (the issue's "Edit
+  ## mode is not part of this report").
+  if rt.app.modes.product != pmDebug or rt.app.source.isEmpty:
+    return false
+  if not rt.app.editSession.isNil:
+    let at = rt.app.editSession.indexOfPath(rt.app.source.path)
+    if at >= 0 and not rt.app.editSession.buffers[at].doc.isReadOnly:
+      return false
+  true
+
+proc requestSourceScroll(rt: TuiRuntime; scroll: SourceScroll;
+                         outcome: var RuntimeOutcome) =
+  outcome.sourceScroll = scroll
+  outcome.repaint = true
+
+# ---------------------------------------------------------------------------
+# PLAT-70 Part H (Scrollbar-Scrubbers.md §7): EVERY scrollbar of every pane,
+# one implementation. The panes' painters record each bar they draw
+# (`scrollbar_styles.paintBar` → `ShellScreen.bars`); the pointer is
+# hit-tested against those, so the hover states, the grab (its offset kept),
+# the track's two rules, the held page's repeat and the fade's wake are the
+# same code for the Event Log, the editor, Find in Files and the rest. A pane
+# contributes only `applyBarTop` — how its view moves to a first visible row
+# (or column) — because that is the one thing that differs: the Event Log
+# fetches the window it lands on, the editor asks the session to scroll, the
+# Call Trace pages its section in.
+# ---------------------------------------------------------------------------
+
+proc scrollbarFrame*(rt: TuiRuntime): ScrollbarFrame =
+  ## What this frame's bars are drawn with: the options, the pointer's
+  ## state, and each pane's fade.
+  let s = rt.scrollbars
+  result = ScrollbarFrame(options: s.options, pointer: s.pointer)
+  for pane in PaneKind:
+    result.faded[pane] = float32(1.0 - s.fades[pane].visibility(s.options))
+
+proc barScreen(rt: TuiRuntime): ShellScreen =
+  ## The screen as the last frame drew it, for reading bars back: the
+  ## frame's model (`shellScreenOf`) without its side effects — no caret
+  ## follow, no highlight scheduling — so a mouse report never moves
+  ## anything by being hit-tested.
+  var model = rt.app.shellModel(rt.width, rt.height)
+  rt.editorPaneModel(model, follow = false)
+  if rt.maximize.active:
+    model.layout = rt.maximize.layoutFor(model.profile)
+  let (hasFocus, focused) = rt.focus.focusedPane()
+  model.hasFocus = hasFocus
+  model.focused = focused
+  model.scrollbars = rt.scrollbarFrame()
+  model.glyphs = glyphProfileOf(rt.caps)
+  model.ambiguous = ambiguousPolicyOf(rt.caps)
+  model.topBar.glyphs = model.glyphs
+  shellScreen(model, rt.width, rt.height)
+
+proc applyBarTop(rt: TuiRuntime; bar: BarSpot; top: int;
+                 outcome: var RuntimeOutcome) =
+  ## Move pane `bar.pane`'s view so its first visible row (vertical) or
+  ## column (horizontal) is `top`. The VIEW only (§3.5, HO-4).
+  let rows = bar.model.visible
+  case bar.axis
+  of axVertical:
+    case bar.pane
+    of paneEventLog:
+      let before = rt.app.eventLog.fetchCount
+      rt.app.eventLog.scrollTop = top
+      rt.app.eventLog.ensureWindow(top, rows)
+      rt.app.eventLog.releaseOutside(top, rows)
+      rt.app.listScrubFetches += rt.app.eventLog.fetchCount - before
+    of paneCalltrace:
+      rt.app.callTrace.scrollTop = top
+      rt.app.callTraceAtEnd = top >= bar.model.maxFirstVisible
+      rt.app.callTrace.follow = false
+      rt.app.callTraceScrolled = true
+      outcome.pagesCallTrace = true
+    of paneSearch:
+      rt.app.search.scrollTop = top
+    of paneTestResults:
+      rt.app.tests.scrollTop = top
+    of paneEditor:
+      rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top + 1), outcome)
+    of InHandPanes:
+      rt.setInHandTop(bar.pane, top)
+    of paneTerminalOutput:
+      rt.app.terminalOutput.scrollTop = top
+      rt.app.terminalOutput.follow = false
+      rt.app.terminalOutput.ensureShown(rows)
+    else: discard
+  of axHorizontal:
+    discard rt.scrollPaneView(bar.pane, proc(v: var HorizontalView): bool =
+      v.setViewport(bar.cells)
+      v.scrollBy(top - v.leftCol))
+  outcome.repaint = true
+
+proc barFraction(bar: BarSpot; event: MouseEvent): float =
+  ## The pointer along `bar` as the scrubber model's track fraction — to the
+  ## pixel where the terminal reports pixels (DECSET 1016).
+  if event.pixel:
+    let m = mouseMetrics()
+    let units = bar.cells * 8
+    let pos =
+      if bar.axis == axVertical: (event.py / m.cellH - float(bar.at)) * 8.0
+      else: (event.px / m.cellW - float(bar.at)) * 8.0
+    trackFractionAt(clamp(int(pos), 0, units - 1), units)
+  else:
+    trackFractionAt(bar.cellAlong(event.row, event.col), bar.cells)
+
+proc findBar(bars: seq[BarSpot]; pane: PaneKind; axis: BarAxis):
+    tuple[found: bool, bar: BarSpot] =
+  for b in bars:
+    if b.pane == pane and b.axis == axis:
+      return (true, b)
+
+proc nearBar(bar: BarSpot; row, col: int): bool =
+  ## The pointer is approaching `bar` (§7.5): within `NearBarCells` cells of
+  ## it, level with it.
+  case bar.axis
+  of axVertical:
+    row >= bar.at and row < bar.at + bar.cells and
+      col >= bar.origin - NearBarCells and col <= bar.origin
+  of axHorizontal:
+    col >= bar.at and col < bar.at + bar.cells and
+      row >= bar.origin - 1 and row <= bar.origin
+
+proc noteBarsPainted*(rt: TuiRuntime; bars: seq[BarSpot]) =
+  ## After a frame: a bar whose view moved since the last frame — a wheel, a
+  ## key, a find, a jump — wakes its pane's bars (§7.5: they fade in when the
+  ## pane scrolls, by any means).
+  rt.scrollbars.painted = bars
+  rt.scrollbars.paintedValid = true
+  for b in bars:
+    let top = b.model.firstVisible
+    let shown = rt.scrollbars.shownTops[b.pane][b.axis]
+    if shown >= 0 and shown != top:
+      rt.scrollbars.fades[b.pane].wake(rt.scrollbars.clockMs)
+    rt.scrollbars.shownTops[b.pane][b.axis] = top
+
+proc setBarPointer(rt: TuiRuntime; p: BarPointer;
+                   outcome: var RuntimeOutcome) =
+  if p != rt.scrollbars.pointer:
+    rt.scrollbars.pointer = p
+    outcome.repaint = true
+
+proc pressBar(rt: TuiRuntime; bar: BarSpot; event: MouseEvent; nowMs: int64;
+              outcome: var RuntimeOutcome) =
+  ## A press on `bar` (§7.4). On the thumb (either button) the thumb is
+  ## grabbed where it was taken; on the track the left button follows
+  ## `scrollbar-click` and the middle button the other rule: the jump (the
+  ## press then holds the thumb by its middle) or a page toward the pointer,
+  ## repeated while held.
+  let o = rt.scrollbars.options
+  let f = bar.barFraction(event)
+  let cell = bar.cellAlong(event.row, event.col)
+  rt.scrollbars.fades[bar.pane].wake(nowMs)
+  if o.onThumb(bar, cell):
+    rt.scrollbars.grab = BarGrab(active: true, pane: bar.pane, axis: bar.axis,
+                                 offset: bar.model.grabOffset(f))
+  else:
+    let rule = if event.button == mbLeft: o.click else: o.click.otherRule
+    case rule
+    of tcJump:
+      rt.applyBarTop(bar, bar.model.clickAt(f), outcome)
+      rt.scrollbars.grab = BarGrab(active: true, pane: bar.pane,
+                                   axis: bar.axis,
+                                   offset: bar.model.jumpGrabOffset)
+    of tcPage:
+      let dir = bar.model.pageDirection(f)
+      let top = bar.model.pageToward(f, dir)
+      if top >= 0:
+        rt.applyBarTop(bar, top, outcome)
+      rt.scrollbars.paging = BarHold(pane: bar.pane, axis: bar.axis)
+      rt.scrollbars.paging.hold.start(f, dir, nowMs)
+  let state = if rt.scrollbars.grab.active: bsHeld else: bsHoverTrack
+  rt.setBarPointer(BarPointer(active: true, pane: bar.pane, axis: bar.axis,
+                              state: state), outcome)
+  outcome.repaint = true
+
+proc routeScrollbars(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
+                     outcome: var RuntimeOutcome): bool =
+  ## Every mouse report, before the panes see it: a held thumb or paging
+  ## press owns the pointer until released; otherwise the bar under the
+  ## pointer takes a press, and any motion updates the hover state and wakes
+  ## the bars it comes near. True when the report was a scrollbar's.
+  rt.scrollbars.clockMs = max(rt.scrollbars.clockMs, nowMs)
+  if rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open:
+    return false
+  # Another gesture in flight owns the pointer (a pane dragged, a divider
+  # held, a selection or a column being drawn): no bar is read back, which
+  # also keeps a live drag's frames as cheap as they were.
+  if not rt.scrollbars.grab.active and not rt.scrollbars.paging.hold.active:
+    let b = rt.app.layoutBinding
+    if rt.app.textDrag or rt.app.variablesResize.active or
+       rt.app.eventLogResize.active or
+       (not b.isNil and b.interaction.kind in GestureInteractions):
+      return false
+  # A passing pointer (most reports, under any-motion tracking) is read
+  # against the bars of the frame on screen; a press, a held thumb and a held
+  # paging press against the bars as they are now.
+  let passing = event.kind == mekMotion and event.button != mbLeft and
+                not rt.scrollbars.grab.active and
+                not rt.scrollbars.paging.hold.active
+  let bars = if passing and rt.scrollbars.paintedValid: rt.scrollbars.painted
+             else: rt.barScreen().bars
+  # A HELD THUMB follows the pointer wherever it goes, until released.
+  if rt.scrollbars.grab.active:
+    let g = rt.scrollbars.grab
+    let (found, bar) = bars.findBar(g.pane, g.axis)
+    case event.kind
+    of mekMotion:
+      if found:
+        rt.applyBarTop(bar, bar.model.grabbedTop(bar.barFraction(event),
+                                                 g.offset), outcome)
+    of mekRelease:
+      rt.scrollbars.grab.active = false
+      let over = found and bar.contains(event.row, event.col)
+      rt.setBarPointer(
+        if over: BarPointer(active: true, pane: g.pane, axis: g.axis,
+                            state: (if rt.scrollbars.options.onThumb(
+                                      bar, bar.cellAlong(event.row,
+                                                         event.col)):
+                                      bsHoverThumb else: bsHoverTrack))
+        else: BarPointer(), outcome)
+    of mekPress:
+      rt.scrollbars.grab.active = false
+      rt.setBarPointer(BarPointer(), outcome)
+      return false
+    rt.scrollbars.fades[g.pane].wake(nowMs)
+    outcome.repaint = true
+    return true
+  # A HELD PAGING PRESS: the pointer may move along the track; the release
+  # ends it. The repeat itself is the tick's (`tickScrollbars`).
+  if rt.scrollbars.paging.hold.active:
+    let h = rt.scrollbars.paging
+    let (found, bar) = bars.findBar(h.pane, h.axis)
+    case event.kind
+    of mekMotion:
+      if found:
+        rt.scrollbars.paging.hold.fraction = bar.barFraction(event)
+    of mekRelease, mekPress:
+      rt.scrollbars.paging.hold.active = false
+    return true
+  # The pointer's bar, if any; entering a pane or nearing a bar wakes it.
+  var under = (found: false, bar: BarSpot())
+  for b in bars:
+    if b.contains(event.row, event.col):
+      under = (true, b)
+    elif b.nearBar(event.row, event.col):
+      rt.scrollbars.fades[b.pane].wake(nowMs)
+  var inPane = false
+  for b in bars:
+    if rt.paintedAreaOf(b.pane).contains(event.row, event.col):
+      if not rt.scrollbars.pointerPane.found or
+         rt.scrollbars.pointerPane.pane != b.pane:
+        rt.scrollbars.fades[b.pane].wake(nowMs)
+        outcome.repaint = true
+      rt.scrollbars.pointerPane = (true, b.pane)
+      inPane = true
+      break
+  if not inPane:
+    # Left every pane with a bar: coming back into one wakes it again.
+    rt.scrollbars.pointerPane.found = false
+  if not under.found:
+    rt.setBarPointer(BarPointer(), outcome)
+    return false
+  let bar = under.bar
+  rt.scrollbars.fades[bar.pane].wake(nowMs)
+  let thumb = rt.scrollbars.options.onThumb(
+    bar, bar.cellAlong(event.row, event.col))
+  rt.setBarPointer(BarPointer(active: true, pane: bar.pane, axis: bar.axis,
+                              state: (if thumb: bsHoverThumb
+                                      else: bsHoverTrack)), outcome)
+  if event.kind != mekPress:
+    return false
+  if event.button in {mbLeft, mbMiddle}:
+    rt.pressBar(bar, event, nowMs, outcome)
+  # Any other button on a bar is the bar's, and does nothing.
+  true
+
+proc tickScrollbars*(rt: TuiRuntime; nowMs: int64): RuntimeOutcome =
+  ## The loop's clock for the scrollbars: a held paging press pages again
+  ## when due; every pane's fade moves toward where it is going. `repaint`
+  ## when the screen changed; the host applies the outcome as a token's (a
+  ## page of the editor is a source scroll the session makes).
+  rt.scrollbars.clockMs = max(rt.scrollbars.clockMs, nowMs)
+  if not rt.scrollbars.started:
+    rt.scrollbars.started = true
+    for pane in PaneKind:
+      rt.scrollbars.fades[pane] = initFade(nowMs)
+  let o = rt.scrollbars.options
+  if rt.scrollbars.paging.hold.due(nowMs):
+    let h = rt.scrollbars.paging
+    let (found, bar) = rt.barScreen().bars.findBar(h.pane, h.axis)
+    let top = if found: bar.model.pageToward(h.hold.fraction, h.hold.dir)
+              else: -1
+    if top < 0:
+      rt.scrollbars.paging.hold.active = false
+    else:
+      rt.applyBarTop(bar, top, result)
+      rt.scrollbars.paging.hold.repeated(nowMs)
+      rt.scrollbars.fades[h.pane].wake(nowMs)
+  for pane in PaneKind:
+    let held = (rt.scrollbars.pointer.active and
+                rt.scrollbars.pointer.pane == pane) or
+               (rt.scrollbars.grab.active and rt.scrollbars.grab.pane == pane)
+    let before = rt.scrollbars.fades[pane].level
+    discard rt.scrollbars.fades[pane].stepFade(o, nowMs, held)
+    if rt.scrollbars.fades[pane].level != before:
+      result.repaint = true
+
+proc scrollbarDueMs*(rt: TuiRuntime): int64 =
+  ## When `tickScrollbars` next has something to do, -1 for never: a frame
+  ## from now while a fade moves or a paging press is held, else when the
+  ## first resting bar starts fading out.
+  let s = rt.scrollbars
+  let now = s.clockMs
+  if s.paging.hold.active:
+    return min(s.paging.hold.dueMs, now + FadeFrameMs)
+  result = -1
+  for pane in PaneKind:
+    let f = s.fades[pane]
+    let held = (s.pointer.active and s.pointer.pane == pane) or
+               (s.grab.active and s.grab.pane == pane)
+    let target = f.fadeTarget(s.options, now, held)
+    let due =
+      if f.level != target: now + FadeFrameMs
+      else: f.nextFadeMs(s.options)
+    if due >= 0 and (result < 0 or due < result):
+      result = due
+
+proc followCaretInSource(rt: TuiRuntime; buf: EditBuffer;
+                         before: (int, int); outcome: var RuntimeOutcome) =
+  ## The read-only caret moved (a key, a find): the drawn window follows it
+  ## by the least amount (`SourceVM.followCursor`), so it cannot leave the
+  ## screen. `buf.followCaret` scrolls the DOCUMENT's own window, which the
+  ## Debug-mode pane does not draw; that was the gap. A key that did not move
+  ## the caret (a copy, a refused edit) does not scroll: after a wheel the
+  ## user's window is theirs until the caret moves (Monaco's rule too).
+  if buf.isNil or not buf.doc.isReadOnly or buf.path != rt.app.source.path or
+     not rt.sourceWindowShown:
+    return
+  if (buf.caretLine, buf.caretColumn) == before:
+    return
+  rt.requestSourceScroll(SourceScroll(kind: sskFollowCaret,
+                                      line: buf.caretLine,
+                                      column: buf.caretColumn + 1), outcome)
+
+proc routeTextDrag(rt: TuiRuntime; event: MouseEvent;
+                   outcome: var RuntimeOutcome): bool =
+  ## PLAT-68: a press held on the editor's text owns the pointer until it is
+  ## released: each motion extends the document's selection to the cell
+  ## under the pointer (`extendSelectionTo`, every front-end's drag).
+  if not rt.app.textDrag:
+    return false
+  if event.kind == mekPress:
+    rt.app.textDrag = false
+    return false
+  if event.kind == mekRelease:
+    rt.app.textDrag = false
+  let buf = rt.debugBuffer()
+  let geometry = rt.layoutGeometry()
+  var area = CellArea()
+  for i, region in geometry.projection.regions:
+    if region.pane == paneEditor: area = paneUnderStrip(geometry, i)
+  if buf.isNil or area.width <= 0:
+    return true
+  let row = clamp(event.row, area.row, area.row + area.height - 1)
+  let col = clamp(event.col, area.col, area.col + area.width - 1)
+  let target = rt.sourceWithView().sourceClickTargetAt(area, row, col)
+  if target.line >= 1:
+    buf.doc.extendSelectionTo(target.line - 1, max(1, target.column) - 1)
+    rt.syncCaretFrom(buf)
+  outcome.repaint = true
+  true
+
 proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
                       outcome: var RuntimeOutcome): bool =
   ## K10-K15 and K36 on the recording's source in Debug: the gutter's toggle
@@ -1606,7 +3324,7 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
   ## menu — `ui/editor`'s and `ui/flow`'s mouse handlers.
   if rt.app.modes.product == pmEdit or rt.app.source.isEmpty:
     return false
-  let src = rt.app.source
+  let src = rt.sourceWithView()
   let target = src.sourceClickTargetAt(under, event.row, event.col)
   if target.line < 1:
     return false
@@ -1640,8 +3358,8 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
         outcome.requestClick(PaneClickRequest(kind: pcScratchpadAdd,
                                               values: @[(v.name, v.value)]))
       else:
-        # The value IS the current step's (the terminal annotates only the
-        # line the debugger is on), so the step it was observed at is here.
+        # The note GPUI's window gives for the same click (`gpui/main.nim`'s
+        # inline-value press) — the line's value as the flow recorded it.
         rt.note(v.name & " = " & v.value & " is the value at this step")
         outcome.repaint = true
     else:
@@ -1651,7 +3369,9 @@ proc routeEditorClick(rt: TuiRuntime; under: CellArea; event: MouseEvent;
   # a read-only model — a plain left press, and a right press before its menu.
   if event.button == mbRight or
      (event.button == mbLeft and not event.ctrl and not event.alt):
-    rt.app.caret = (src.path, line, max(1, target.column))
+    rt.placeCaret(src.path, line, max(1, target.column))
+    # PLAT-68: a held left press SELECTS as the pointer moves.
+    rt.app.textDrag = event.button == mbLeft
     outcome.repaint = true
   case event.button
   of mbRight:
@@ -1706,57 +3426,6 @@ proc openTracepointEditorAt(rt: TuiRuntime; path: string; line: int) =
   rt.note("a tracepoint at " & path.extractFilename & ":" & $line &
           " — type its expression and press Enter")
 
-proc caretTakesAltChord(rt: TuiRuntime; name: string): bool =
-  ## PLAT-51: whether `name` (an `Alt+<char>` key) is one the read-only
-  ## editor's caret takes right now — Alt+T, with the caret placed, the source
-  ## pane focused and nothing modal open (an open prompt, menu, omnibox or
-  ## overlay owns its keys first, as `handleToken` orders them).
-  if name != "Alt+t" or rt.app.modes.product == pmEdit or rt.prompt.open or
-     rt.app.contextMenu.open or rt.app.content.open or
-     rt.app.omnibar.isOpen or rt.app.menu.isOpen:
-    return false
-  if rt.app.caret.line <= 0 or rt.app.source.isEmpty or
-     rt.app.caret.path != rt.app.source.path:
-    return false
-  let (had, focused) = rt.focus.focusedPane()
-  had and focused == paneEditor
-
-proc handleCaretKey(rt: TuiRuntime; token: string;
-                    outcome: var RuntimeOutcome): bool =
-  ## PLAT-51: the caret's keys while it is placed and the source pane has the
-  ## focus — the arrows, Home and End move it (never the debugger); Alt+T
-  ## and Ctrl+Enter, the desktop's chords, open the tracepoint editor on its
-  ## line.
-  if rt.app.caret.line <= 0 or rt.app.source.isEmpty or
-     rt.app.caret.path != rt.app.source.path:
-    return false
-  let (had, focused) = rt.focus.focusedPane()
-  if not had or focused != paneEditor:
-    return false
-  let name = keyName(token)
-  if name in ["Alt+t", "Ctrl+Enter"]:
-    rt.openTracepointEditorAt(rt.app.caret.path, rt.app.caret.line)
-    outcome.repaint = true
-    return true
-  var (path, line, column) = rt.app.caret
-  let total = max(1, rt.app.source.totalLineCount)
-  case name
-  of "Up": line = max(1, line - 1)
-  of "Down": line = min(total, line + 1)
-  of "Left": column = max(1, column - 1)
-  of "Right": column = column + 1
-  of "Home": column = 1
-  of "End":
-    let local = line - rt.app.source.firstHeldLine
-    column =
-      if local >= 0 and local < rt.app.source.heldLines.len:
-        cellWidthOf(rt.app.source.heldLines[local]) + 1
-      else: column
-  else: return false
-  rt.app.caret = (path, line, column)
-  outcome.repaint = true
-  true
-
 proc routeDockLabelClick(rt: TuiRuntime; geometry: LayoutGeometry;
                          event: MouseEvent;
                          outcome: var RuntimeOutcome): bool =
@@ -1797,11 +3466,9 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     rt.copyToClipboard(path, "the path " & path)
     outcome.repaint = true
     return true
-  let idx = geometry.regionIndexAt(event.row, event.col)
-  if idx < 0:
+  let (onPane, region, under) = geometry.paneAt(event.row, event.col)
+  if not onPane:
     return false
-  let region = geometry.projection.regions[idx]
-  let under = paneUnderStrip(geometry, idx)
   # K7: a right-click on a TAB opens the tab's menu.
   if event.row == region.area.row:
     if event.button != mbRight:
@@ -1817,18 +3484,22 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     return false   # the divider
   case region.pane
   of paneFileTree:
-    # K17 / K18 (K19: the desktop has no Files menu).
-    if event.button != mbLeft:
+    # K17 / K18, and K19: a right-click opens the Files pane's menu.
+    if event.button notin {mbLeft, mbRight}:
       return false
     let tree = rt.app.fileTree
-    if tree.entries.len == 0:
+    if tree.isEmpty:
       return false
-    let i = tree.scrollTop + (event.row - under.row - 1)
-    if i < 0 or i >= tree.entries.len:
+    # The row under the press, by the top the painter drew from (M71: the
+    # pane scrolls, and `scrollTop` is clamped there).
+    var g = newStyledGrid(under.col + under.width, under.row + under.height)
+    let i = paintFileTree(g, under, tree).entryIndexAt(event.row)
+    if i < 0 or i >= tree.rowCount:
       return false
-    let e = tree.entries[i]
-    outcome.requestClick(PaneClickRequest(
-      kind: (if e.isFolder: pcToggleFolder else: pcOpenFile), path: e.path))
+    if event.button == mbRight:
+      rt.openFilesMenu(i, event.row, event.col, outcome)
+      return true
+    rt.activateFilesRow(i, outcome)
     return true
   of paneEditor:
     return rt.routeEditorClick(under, event, outcome)
@@ -1954,6 +3625,63 @@ proc routePaneClick(rt: TuiRuntime; geometry: LayoutGeometry;
     outcome.requestClick(PaneClickRequest(kind: pcScratchpadRemove,
                                           index: hit.row))
     return true
+  of paneSearch:
+    # PLAT-57 (K35): a result opens at its line; a toggle flips and the
+    # search runs again; the field opens the omnibox on `:grep <query>`;
+    # the scrubber column moves the view.
+    if event.button != mbLeft or not rt.app.search.loaded:
+      return false
+    let (area, screen) = rt.searchPaneScreen()
+    let t = rt.app.search.searchTargetAt(screen, area, event.row, event.col)
+    case t.kind
+    of stMatch:
+      outcome.requestClick(PaneClickRequest(kind: pcSearchResult,
+                                            index: t.index, path: t.path))
+      return true
+    of stOption:
+      outcome.requestClick(PaneClickRequest(kind: pcSearchOption,
+                                            text: t.option))
+      return true
+    of stQuery:
+      rt.openFindInFiles(outcome)
+      return true
+    of stTrack:
+      # PLAT-70 Part H: the scrollbar's (`routeScrollbars`).
+      return true
+    of stFile, stNone:
+      return false
+  of paneTestResults:
+    # PLAT-53: the ▶ runs the suite; a row's `⟳` records it again and `⏵`
+    # opens its recording in a new tab; a press elsewhere on a row (or its
+    # message) selects it; the scrollbar is the scrollbars' (`routeScrollbars`).
+    # The desktop opens no menu on a row, so a right press does nothing here.
+    if event.button != mbLeft or not rt.app.tests.loaded:
+      return false
+    let (area, screen) = rt.testsPaneScreen()
+    let t = rt.app.tests.testsTargetAt(screen, area, event.row, event.col)
+    case t.kind
+    of tpRun:
+      rt.pressTestsControl(rt.app.tests.run,
+                           PaneClickRequest(kind: pcTestsRun), outcome)
+      return true
+    of tpRefresh, tpOpen:
+      let r = rt.app.tests.rows[t.row]
+      rt.app.tests.selected = t.row
+      if t.kind == tpRefresh:
+        rt.pressTestsControl(r.refresh, PaneClickRequest(kind: pcTestsRefresh,
+                             text: r.testId), outcome)
+      else:
+        rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
+                             text: r.testId), outcome)
+      return true
+    of tpRow:
+      rt.selectTestRow(t.row)
+      outcome.repaint = true
+      return true
+    of tpTrack:
+      return true
+    of tpText, tpNone:
+      return false
   of paneVcs:
     # K34 / K53: a changed file opens its diff; a commit opens (lists the
     # files it changed) or closes; a commit's file opens that change.
@@ -2069,6 +3797,9 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
   of caJumpToValue:
     rt.note(target.expression & " = " & target.text &
             " is the value at this step")
+  of caFileCreate, caFileRename, caFileDelete, caFileEdit:
+    # K19: the Files pane's entries, as the shared Files model decides them.
+    rt.runFilesMenuAction(action, target, outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -2105,27 +3836,14 @@ proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
     if event.kind == mekPress:
       if event.button in {mbWheelUp, mbWheelDown}:
         rt.app.content.scroll(if event.button == mbWheelDown: 3 else: -3)
+      elif event.button in {mbWheelLeft, mbWheelRight}:
+        # PLAT-70: a sideways swipe is not a press; the overlay stays.
+        discard
       else:
         rt.app.content = ContentOverlay()
       outcome.repaint = true
     return event.kind != mekMotion
   false
-
-proc handleContextMenuKey(rt: TuiRuntime; token: string;
-                          outcome: var RuntimeOutcome) =
-  ## Up / Down move, Enter chooses, Esc closes — the program menu's keys.
-  outcome.repaint = true
-  case keyName(token)
-  of "Up": rt.app.contextMenu.move(-1)
-  of "Down": rt.app.contextMenu.move(1)
-  of "Enter":
-    let chosen = rt.app.contextMenu.choose(-1)
-    if chosen.chosen:
-      rt.runContextAction(chosen.action, chosen.target, outcome)
-  of "Escape", "Esc": rt.app.contextMenu.close()
-  else:
-    if token == "\x1b":
-      rt.app.contextMenu.close()
 
 proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
                       outcome: var RuntimeOutcome) =
@@ -2216,6 +3934,11 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # PLAT-49 part B: A CLICK ON THE CALL TRACE — on a row, go to that call;
   # on its toggle, expand or collapse it — as the desktop's row does
   # (`isonim_calltrace_view.rowHandlers`).
+  # PLAT-70 Part B (Horizontal-Overflow.md §5.3): a press on a cut cell's
+  # `…` opens its row's detail, in every table pane.
+  if acted.status == lasNoGesture and not inGesture and
+     rt.routeEllipsisClick(event, outcome):
+    return
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button == mbLeft and not rt.app.callTrace.isEmpty:
     let idx = geometry.regionIndexAt(event.row, event.col)
@@ -2239,15 +3962,15 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         outcome.repaint = true
         return
       of cthTrack, cthThumb:
-        # PLAT-51: the scrollbar scrubber — the VIEW jumps (the track) or
-        # follows the thumb from here (a drag); the debugger does not move.
-        if hit.kind == cthThumb:
-          rt.app.listScrub = (active: true, pane: paneCalltrace)
-        discard rt.scrubCallTrace(area, event.row,
-                                  dragging = hit.kind == cthThumb, outcome)
+        # PLAT-70 Part H: the scrollbar's (`routeScrollbars`).
         return
       of cthNone:
         discard
+  # PLAT-70: a horizontal wheel over a text pane moves its view sideways
+  # (Horizontal-Overflow.md §4.3). (A press on any pane's scrollbar is the
+  # bar's — `routeScrollbars`, before the panes.)
+  if acted.status == lasNoGesture and rt.routeHorizontalWheel(event, outcome):
+    return
   if acted.status == lasNoGesture and event.kind == mekPress and
      event.button in {mbWheelUp, mbWheelDown}:
     let idx = geometry.regionIndexAt(event.row, event.col)
@@ -2264,6 +3987,28 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
         (if event.button == mbWheelDown: CallTraceWheelRows
          else: -CallTraceWheelRows), outcome)
       return
+    # PLAT-57: the wheel scrolls Find in Files' rows (a docked one shown
+    # open or revealed included).
+    let at = geometry.paneAt(event.row, event.col)
+    if at.found and at.region.pane == paneSearch and rt.app.search.loaded:
+      rt.scrollSearch(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # PLAT-53: the wheel scrolls Test Results' list.
+    if at.found and at.region.pane == paneTestResults and rt.app.tests.loaded:
+      rt.scrollTests(
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
+    # M71 (#838): the wheel scrolls the State, Files and VCS panes — the pane
+    # beneath the pointer, focused or not (CodeTracer-TUI.md §4.4).
+    if at.found and at.region.pane in InHandPanes and
+       rt.inHandLoaded(at.region.pane):
+      rt.scrollInHand(at.region.pane, at.under,
+        (if event.button == mbWheelDown: CallTraceWheelRows
+         else: -CallTraceWheelRows), outcome)
+      return
     # PLAT-52: the wheel scrolls the Terminal Output's line view.
     if idx >= 0 and
        geometry.projection.regions[idx].pane == paneTerminalOutput and
@@ -2271,6 +4016,18 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
       rt.scrollTerminalOutput(
         (if event.button == mbWheelDown: TerminalWheelRows
          else: -TerminalWheelRows), outcome)
+      return
+    # M73 (#840): THE WHEEL OVER THE EDITOR scrolls the recording's source —
+    # CodeTracer-TUI.md §4.4, "the pane beneath the pointer ... without
+    # requiring pane focus" (nor taking it). The rectangle is the one the
+    # editor is PAINTED into (`paintedAreaOf`), so a maximized editor takes
+    # it too. The pointer and the caret stay where they are.
+    if rt.sourceWindowShown and
+       rt.paintedAreaOf(paneEditor).contains(event.row, event.col):
+      rt.requestSourceScroll(SourceScroll(
+        kind: sskBy,
+        delta: (if event.button == mbWheelDown: SourceWheelRows
+                else: -SourceWheelRows)), outcome)
       return
   # PLAT-50: every other press the layout did not act on is the pane's —
   # the desktop's click behaviour there (`routePaneClick`).
@@ -2294,85 +4051,27 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   outcome.repaint = true
 
 
-const EditorOwnedKeys* = [
-    "Backspace", "Delete", "Enter", "Left", "Right", "Up", "Down",
-    "Home", "End", "Ctrl+z", "Ctrl+y"]
-  ## The NON-PRINTABLE keys the editor takes when it is focused in Edit mode.
-  ##
-  ## `Tab` and `Shift+Tab` are DELIBERATELY ABSENT, and their absence is the
-  ## escape hatch: with every printable key going into the buffer, a user needs
-  ## one chord that is guaranteed to move focus off the editor, and this is it.
-  ## `edit_binding.applyEditKey` still implements indent and dedent for them —
-  ## the buffer can do it, nothing routes it — so the day an INSERT input mode
-  ## exists the behaviour is already there rather than needing to be written.
-
-const EditorEscapeKeys* = ["Tab", "Shift+Tab"]
-  ## The keys the editor NEVER owns, whatever a model binds — `EditorOwnedKeys`'
-  ## header gives the reason: a user needs one chord guaranteed to move focus
-  ## off the editor. Named separately because PLAT-43's resolver clause below
-  ## would otherwise hand `Tab` to the product default's `indent` binding —
-  ## measured: the pty suite's first run typed an indent where it meant to
-  ## leave the editor, and never reached the prompt.
-
-proc editorOwnsToken*(rt: TuiRuntime; token: string): bool =
-  ## Whether this token is text for the open buffer rather than a command.
-  ##
-  ## FOUR CONDITIONS, ALL OF THEM ALREADY-MODELLED STATE: Edit product mode,
-  ## NORMAL input mode, the editor pane focused, and a buffer open. See the
-  ## comment at the call site in `handleToken` for why it is not a fifth input
-  ## mode, and for what that costs.
-  if rt.isNil or rt.app.isNil:
-    return false
-  if rt.app.modes.product != pmEdit or rt.modal.mode != mmNormal:
-    return false
-  if rt.app.editSession.isNil or rt.app.editSession.activeBuffer().isNil:
-    return false
-  let (had, focused) = rt.focus.focusedPane()
-  if not had or focused != paneEditor:
-    return false
-  let name = keyName(token)
-  if name.len == 0:
-    return false
-  # PLAT-43: OR THE ACTIVE MODEL BINDS IT. `EditorOwnedKeys` is the product
-  # default's non-printable set; a Vim buffer needs `Esc` and a Kakoune one
-  # `Ctrl+x`, and a fixed list would hand those to the debugger's keymap. The
-  # model's own resolver is asked — the one `applyEditKey` then runs — so the
-  # two cannot disagree about whose key it is.
-  if name in EditorEscapeKeys:
-    return false
-  name in EditorOwnedKeys or isTextKey(name) or
-    rt.app.editSession.activeBuffer().claimsEditKey(name, 0)
-
-proc routeTokenToEditor*(rt: TuiRuntime; token: string;
-                         nowMs: int64): EditKeyOutcome =
-  ## Apply one token to the open buffer and keep the session's bookkeeping
-  ## honest.
-  ##
-  ## The three things that happen on a CHANGE and not on a move are the point:
-  ## the edited path is recorded (so `assessTrace` sees it), the pane follows
-  ## the caret, and nothing else. A caller that recorded an edit for an arrow
-  ## key would declare a recording stale because somebody scrolled — see
-  ## `edit_binding.EditKeyOutcome` on why the outcome is three-valued.
-  ##
-  ## **`nowMs` IS THE CLOCK PLAT-32's UNDO GROUPING NEEDS, AND IT WAS ALREADY
-  ## HERE.** `handleToken` has taken it since CTUI-2 so the debugger keymap's
-  ## prefix timeout is assertable at its bound without a sleep; the editing
-  ## path simply never asked for it, and `editing_keymap.applyResolution`'s
-  ## `applyOperation` call therefore ran at time zero on every keystroke. The
-  ## parameter carries it the last step, and `applyEditKey` will not compile
-  ## without it.
-  ##
-  ## `keyCharacter` IS NO LONGER CALLED HERE. `applyEditKey` takes the key
-  ## name only and the resolver derives the character from it — one derivation
-  ## instead of one per call site, which is CTUI-10's defect removed rather
-  ## than re-avoided.
-  let buf = rt.app.editSession.activeBuffer()
-  result = rt.app.editSession.applyEditKeyIn(buf, keyName(token), nowMs)
-  if result == ekChanged:
-    rt.app.editSession.recordEdit(buf.path)
-    rt.app.editSession.refreshEditedPaths()
-  if result != ekIgnored:
-    buf.followCaret(max(1, rt.sourcePaneRows()))
+proc writeBuffers(rt: TuiRuntime; verb: string; all = false) =
+  ## Write the open buffer — or, `all`, every buffer with unsaved changes —
+  ## through the host's file worker: `:w`, and the `save` / `save-all` a base
+  ## binds (`Ctrl+S` under CUA, `C-x C-s` under Emacs). ONE writer, whichever
+  ## asked.
+  let active = if rt.app.editSession.isNil: nil
+               else: rt.app.editSession.activeBuffer()
+  if active.isNil:
+    rt.note(verb & " needs an open file")
+    return
+  if rt.editServices.writeFile.isNil and rt.editServices.submitFileJob.isNil:
+    rt.note(verb & " has no writer in this session")
+    return
+  # PLAT-29: a WRITE IS A PRODUCER. The bytes of this version go to the
+  # host's file worker; its acknowledgement arrives through `deliverFileJob`,
+  # which marks the buffer saved as of exactly those bytes and says
+  # "wrote …". A session with no worker runs it inline, down the same path.
+  for buf in rt.app.editSession.buffers:
+    if buf == active or (all and buf.isDirty):
+      rt.note("writing " & buf.path & "…")
+      rt.runFileJob(fileJobFor(fjWrite, buf.doc, buf.path, buf.serial))
 
 proc ensureEditWorkspace*(rt: TuiRuntime): string =
   ## Give this session an Edit-mode workspace if it has not got one: the file
@@ -2416,15 +4115,13 @@ proc ensureEditWorkspace*(rt: TuiRuntime): string =
   if rt.isNil or rt.app.isNil:
     return ""
   if rt.app.editSession.isNil:
-    rt.app.editSession = newEditSession(rt.keymapModel)
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
   if rt.app.editSession.furnished or rt.editServices.listFiles.isNil:
     return ""
   rt.app.editSession.furnished = true
   let listing = rt.editServices.listFiles()
-  rt.app.fileTree = initFileTreeModel(
-    files = listing.files,
-    selected = (if listing.files.len > 0: 0 else: -1),
-    truncated = listing.truncated)
+  rt.app.fileTree = FileTreeModel()
+  rt.installProjectListing(listing)
   let where = if rt.app.projectRoot.len > 0: rt.app.projectRoot else: "."
   result = "editing " & where & " — " & $listing.files.len & " file(s)" &
     (if listing.truncated: " (truncated)" else: "")
@@ -2542,6 +4239,9 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
        rt.app.terminalOutput.loaded and not rt.app.terminalOutput.screenShown:
       if action == kaCenterOnPointer:
         rt.app.terminalOutput.follow = true
+        rt.app.terminalOutput.ensureShown(terminalPaneGeometry(
+          rt.app.terminalOutput,
+          rt.terminalOutputArea(rt.layoutGeometry())).contentRows)
         rt.note("terminal output follows the current position")
         outcome.repaint = true
         return true
@@ -2550,6 +4250,19 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
                                              area).contentRows)
       let (_, delta) = scrollDelta(action, rows)
       rt.scrollTerminalOutput(delta, outcome)
+      return true
+    # M73 (#840): THE FOCUSED EDITOR'S SOURCE SCROLLS — §4.2 Source
+    # Navigation: `j` / `k` (and `Down` / `Up`, CUA's `Ctrl+Down` /
+    # `Ctrl+Up`) a line, `Ctrl+d` / `Ctrl+u` half the pane, "without moving
+    # execution pointer"; `.` "Reset source scroll so the current execution
+    # pointer is centered". Before M73 these keys reached the dispatcher here,
+    # which has no source window to move.
+    if had and focused == paneEditor and rt.sourceWindowShown:
+      if action == kaCenterOnPointer:
+        rt.requestSourceScroll(SourceScroll(kind: sskCentreOnPointer), outcome)
+      else:
+        let (_, delta) = scrollDelta(action, max(1, rt.sourcePaneRows()))
+        rt.requestSourceScroll(SourceScroll(kind: sskBy, delta: delta), outcome)
       return true
     if not had or focused != paneCalltrace or rt.app.callTrace.isEmpty:
       return false
@@ -2595,8 +4308,10 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     # "is instant in both directions, because both modes' state is already in
     # memory".
     let profile = selectProfile(rt.width, rt.height)
-    let changed = rt.app.modes.toggle(rt.app.shellModel(rt.width, rt.height).layout,
-                                      profile)
+    let changed =
+      if rt.layoutBindingEnabled(): rt.toggleBoundArrangement(profile)
+      else: rt.app.modes.toggle(rt.app.shellModel(rt.width, rt.height).layout,
+                                profile)
     if not changed:
       # Unreachable through `toggled`, which never answers the current mode.
       # Reported rather than dropped so a future caller of `switchTo` with an
@@ -2628,9 +4343,9 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
     rt.note(message)
     outcome.detail = message
     rt.rebuildFocus()
-    # THE EDITOR TAKES THE FOCUS ON ARRIVAL, and it has to: `editorOwnsToken`
-    # requires the editor pane focused before a typed byte is text rather than
-    # a command, so a user who toggled into Edit mode and started typing would
+    # THE EDITOR TAKES THE FOCUS ON ARRIVAL, and it has to: a typed byte is
+    # text only while the editor is on the scope path the router resolves
+    # with, so a user who toggled into Edit mode and started typing would
     # otherwise be issuing keybindings at their own source. `rebuildFocus`
     # above re-derives the ring from the arrangement the next frame paints —
     # Edit mode's panes are not Debug's — and this names which of them wins.
@@ -2650,14 +4365,35 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
 # ---------------------------------------------------------------------------
 
 const
-  MenuKey* = "F12"
-    ## Opens the program menu. The desktop's `Ctrl+M` is `Enter` on a
-    ## terminal's wire and `Alt+<letter>` reaches this front-end as the bare
-    ## letter (`host/terminal_driver.feed`), so the menu takes the one free
-    ## function key; it is also a click on `≡` or a folder title.
-  RevealKey* = "Ctrl+o"
-    ## Reveals the next auto-hidden pane (and, after the last, hides again):
-    ## the auto-hide strips' keyboard route beside a click and `:reveal`.
+  MenuOperations = ["menu.open", "menu.toggle", "menu.open-folder"]
+    ## The keymap's menu keys (CUA-Keymap.md §3.8: `` Alt+` ``,
+    ## `Alt+<mnemonic>`, `F10` in Edit mode; Vim's `F12`). The menu is also a
+    ## click on `≡` or a folder title.
+
+proc probeKey*(rt: TuiRuntime; name: string): EditingResolution
+proc refreshMenuAvailability*(rt: TuiRuntime)
+  ## Forward-declared; defined beside the menu's action table below.
+
+proc runMenuOperation(rt: TuiRuntime; operation, argument: string) =
+  ## A menu key, whether the menu is open or not: `menu.open-folder(x)`
+  ## opens folder x; `menu.open` and `menu.toggle` open the menu when it is
+  ## closed and close it when it is open (VS Code's Alt and F10 both toggle).
+  let vm = rt.app.menu
+  # What is enabled is read for the state the menu opens in (codetracer#841).
+  if not vm.isOpen or operation == "menu.open-folder":
+    rt.refreshMenuAvailability()
+  if operation == "menu.open-folder":
+    let i = vm.folderIndexOf(argument)
+    if i < 0:
+      rt.note("menu: no " & argument & " folder")
+      return
+    vm.openFolder(i)
+  elif vm.isOpen:
+    vm.close()
+    return
+  else:
+    vm.open(keyboard = true)
+  rt.note("menu: arrows to move, Enter to choose, Esc to close")
 
 proc transportKeyAction*(id: string): KeyAction =
   ## The terminal's action for a debugger control (`TransportControls` id).
@@ -2715,25 +4451,219 @@ proc menuOmnibarQuery*(action: string): (bool, string) =
   of "findInFiles": (true, ":grep ")
   else: (false, "")
 
-proc menuActionAvailable*(action: string): bool =
-  ## Whether the terminal performs a menu item. The rest are drawn DISABLED,
-  ## not dropped, so every front-end shows the same menu.
-  menuKeyAction(action) != kaNone or menuPaneOf(action)[0] or
-    menuPromptLine(action).len > 0 or menuOmnibarQuery(action)[0]
+type
+  MenuRouteKind* = enum
+    ## How the terminal performs a menu item (`menuRouteOf`).
+    mrNone
+      ## Not something the terminal does.
+    mrKey
+      ## A key action (`menuKeyAction`), through `performAction`.
+    mrPane
+      ## A View-menu pane brought forward (`menuPaneOf`).
+    mrPromptLine
+      ## A `:` line (`menuPromptLine`).
+    mrFindInFiles
+      ## Find in Files shown, its field open.
+    mrOmnibar
+      ## The omnibar opened on a query (`menuOmnibarQuery`).
+    mrNewTab
+      ## File › New Trace Tab: the strip's "+".
+    mrWelcomeOption
+      ## File › Open Trace… / Open Trace in New Tab… / Record New Trace…: a
+      ## welcome tab's start option (`option`), in a new tab or the shown one.
+    mrBuffer
+      ## File › Close / Reopen / Next / Previous / Switch File: Edit mode's
+      ## open buffers (`buffer`).
+    mrStop
+      ## M76 (codetracer#843): Debug › Stop — `stopDebugging`, the chord's and
+      ## the toolbar control's performer too.
+    mrPoint
+      ## M76: a Debug-menu breakpoint or tracepoint item (`point`, the shared
+      ## `point_menu_ops` table GPUI's menu reads too), at the editor caret.
+
+  MenuBufferOp* = enum
+    mboClose, mboReopen, mboNext, mboPrevious, mboSwitch
+
+  MenuRoute* = object
+    ## THE TERMINAL'S ANSWER FOR ONE MENU ITEM, NOW: how it is performed and,
+    ## when it cannot be performed in the current state, why not.
+    kind*: MenuRouteKind
+    key*: KeyAction
+    pane*: PaneKind
+    line*: string
+      ## `mrPromptLine`'s line; `mrOmnibar`'s query.
+    option*: WelcomeStartOptionKind
+    newTab*: bool
+      ## `mrWelcomeOption`: always a new welcome tab (Open Trace in New Tab…),
+      ## or the shown welcome tab when there is one.
+    buffer*: MenuBufferOp
+    point*: PointMenuOp
+      ## `mrPoint`'s operation.
+    reason*: string
+      ## Non-empty when the item cannot run now — what the menu shows it
+      ## disabled with and says when it is chosen (EMT-D14).
+
+const
+  NoMenuHostReason* =
+    "this terminal has no host to open a recording or record a program in"
+    ## The trace and tab items in a runtime no host has given a welcome flow
+    ## (an in-process caller with no engine to spawn).
+  BufferItemsInDebugReason* =
+    "in Debug mode the editor shows the file the recording is at; the open " &
+    "files are Edit mode's"
+  NoFileOpenReason* = "no file is open"
+  OneFileOpenReason* = "only one file is open"
+  NoOtherFileShownReason* = "no other open file has been shown"
+  NoClosedFileReason* = "no file has been closed"
+  NoFileReaderReason* = "this session has no file reader to reopen it with"
+  NoDebugSessionReason* = "there is no debugging session to stop"
+    ## M76: Stop with no replay behind the runtime (`ct edit`, or after Stop).
+  PointsNeedReplayReason* =
+    "the breakpoint and tracepoint items act on a replay: open a recording " &
+    "to debug it"
+  PointsInEditModeReason* =
+    "in Edit mode the breakpoint and tracepoint items act on the replay; " &
+    "Ctrl+F5 switches to Debug mode"
+  NoRecordingFileReason* = "the editor shows no file of the recording"
+
+proc pointMenuReason(rt: TuiRuntime): string =
+  ## M76: why a Debug-menu point item cannot run now, or "" when it can — it
+  ## acts on the replay, at the caret of the recording file the editor shows.
+  if not rt.app.hasDebugSession: PointsNeedReplayReason
+  elif rt.app.modes.product != pmDebug: PointsInEditModeReason
+  elif rt.app.source.path.len == 0: NoRecordingFileReason
+  else: ""
+
+func unsavedCloseReason(path: string): string =
+  ## Close Current File on a buffer with unsaved changes. The desktop asks in a
+  ## save dialog (`closeActiveTab`); the terminal has none, and closing would
+  ## discard the changes — Mode-Transitions.md §5's data loss by name — so the
+  ## item is refused, and says how to make it run.
+  path & " has unsaved changes: write it (:w) or reload it (:e!) first"
+
+proc menuBufferReason(rt: TuiRuntime; op: MenuBufferOp): string =
+  ## Why buffer item `op` cannot run now, or "" when it can.
+  if rt.app.modes.product != pmEdit:
+    return BufferItemsInDebugReason
+  let s = rt.app.editSession
+  if op == mboReopen:
+    if s.reopenCandidate().len == 0: return NoClosedFileReason
+    if rt.editServices.readFile.isNil: return NoFileReaderReason
+    return ""
+  if s.isNil or s.activeBuffer().isNil:
+    return NoFileOpenReason
+  case op
+  of mboClose:
+    if s.activeBuffer().isDirty:
+      return unsavedCloseReason(s.activeBuffer().path)
+  of mboNext, mboPrevious:
+    if s.buffers.len < 2: return OneFileOpenReason
+  of mboSwitch:
+    if s.previouslyShownBuffer() == NoBuffer: return NoOtherFileShownReason
+  of mboReopen:
+    discard
+  ""
+
+proc menuRouteOf*(rt: TuiRuntime; action: string): MenuRoute =
+  ## THE ONE TABLE from a menu item's `ClientAction` to what the terminal does
+  ## with it, read by BOTH `menuAvailability` (what the menu shows enabled)
+  ## and `runMenuAction` (what choosing it does), so "enabled" and "can run"
+  ## are one answer and cannot drift (codetracer#841: the enabled set was a
+  ## second, static copy that had stopped listing what the terminal performs).
+  ##
+  ## STATE-AWARE: an item that depends on the session's state — a host to open
+  ## a recording with, the files open in Edit mode — carries the reason it
+  ## cannot run now, and the menu re-reads this whenever it opens.
+  let ka = menuKeyAction(action)
+  if ka != kaNone:
+    return MenuRoute(kind: mrKey, key: ka)
+  let (isPane, pane) = menuPaneOf(action)
+  if isPane:
+    return MenuRoute(kind: mrPane, pane: pane)
+  let line = menuPromptLine(action)
+  if line.len > 0:
+    return MenuRoute(kind: mrPromptLine, line: line)
+  if action == "findInFiles":
+    return MenuRoute(kind: mrFindInFiles)
+  let (isOmni, query) = menuOmnibarQuery(action)
+  if isOmni:
+    return MenuRoute(kind: mrOmnibar, line: query)
+  # File. The trace and tab items are the Welcome Screen's own flows
+  # (Multi-Window-Tab-Management.md rule 3, Welcome-Screen.md § The native
+  # front-ends): a new tab showing it, or one of its start options' forms —
+  # the terminal's dialog — whose choice the host performs. A recording opens
+  # in the welcome tab's place, so in a new session tab: the spec's default
+  # (§ Which tab a replay opens in), never an automatic replacement.
+  case action
+  of "aNewTraceTab":
+    # The "+" (`thTabAdd`): the welcome flow, or the `:open ` omnibar of a
+    # host that opens recordings but has no welcome flow.
+    result = MenuRoute(kind: mrNewTab)
+    if rt.app.welcomeHost.isNil and rt.app.recordingOpener.isNil:
+      result.reason = NoMenuHostReason
+  of "aOpenTrace", "aOpenTraceInNewTab", "aRecordNewTrace":
+    result = MenuRoute(kind: mrWelcomeOption,
+                       option: (if action == "aRecordNewTrace": wsoRecordNewTrace
+                                else: wsoOpenLocalTrace),
+                       newTab: action == "aOpenTraceInNewTab")
+    if rt.app.welcomeHost.isNil:
+      result.reason = NoMenuHostReason
+  of "closeTab", "reopenTab", "switchTabRight", "switchTabLeft",
+     "switchTabHistory":
+    let op = case action
+             of "closeTab": mboClose
+             of "reopenTab": mboReopen
+             of "switchTabRight": mboNext
+             of "switchTabLeft": mboPrevious
+             else: mboSwitch
+    result = MenuRoute(kind: mrBuffer, buffer: op)
+    result.reason = rt.menuBufferReason(op)
+  of StopMenuAction:
+    # M76: Stop ends the session behind the tab; with none, it is disabled
+    # and says so.
+    result = MenuRoute(kind: mrStop)
+    if not rt.app.hasDebugSession:
+      result.reason = NoDebugSessionReason
+  else:
+    let op = pointMenuOpOf(action)
+    if op != pmoNone:
+      result = MenuRoute(kind: mrPoint, point: op, reason: rt.pointMenuReason())
+    else:
+      result = MenuRoute(kind: mrNone, reason: "not available in the terminal")
+
+proc menuAvailability*(rt: TuiRuntime; action: string): MenuAvailability =
+  ## Whether the terminal can perform menu item `action` now, and why not.
+  let route = rt.menuRouteOf(action)
+  if route.reason.len > 0: unavailable(route.reason) else: availableNow()
+
+proc refreshMenuAvailability*(rt: TuiRuntime) =
+  ## Mark the menu's items from `menuRouteOf` for the CURRENT state. Run
+  ## whenever the menu is about to be shown or listed — it opens, the omnibar
+  ## lists its commands — so what is enabled follows what the terminal can do
+  ## now, not what it could do at start-up. The rest are drawn DISABLED, not
+  ## dropped, so every front-end shows the same menu.
+  if rt.isNil or rt.app.isNil or rt.app.menu.isNil:
+    return
+  rt.app.menu.setAvailability(proc(action: string): MenuAvailability =
+    rt.menuAvailability(action))
 
 proc chordOf*(rt: TuiRuntime; action: KeyAction): string =
-  ## The ACTIVE keymap's first NORMAL-mode binding for `action`, as §4.2
-  ## spells it — what the menu and a control's tooltip display.
-  if action == kaNone:
+  ## The chord that RUNS `action` where the focus is now — what the menu
+  ## and a control's tooltip display (KL-8): resolved by the router from
+  ## the active base and the user's `keybindings.json`, so a rebinding is
+  ## shown the moment it loads and a shadowed row is never shown.
+  let op = operationOfAction(action)
+  if op.len == 0:
     return ""
-  for bnd in rt.keymap.bindingsOf(action):
-    if bnd.mode == mmNormal:
-      return bnd.spelling
-  ""
+  let (name, arg) = splitOperation(op)
+  let path = rt.scopePath
+  rt.router.chordFor(name, rt.sessionFacts, path, rt.navMode, arg)
 
 proc refreshMenuForKeymap*(rt: TuiRuntime) =
   ## Enable the items the terminal performs and show the ACTIVE keymap's
-  ## chords beside them. Run at start-up and after every keymap switch.
+  ## chords beside them. Run at start-up and after every keymap switch; what
+  ## is enabled is read again whenever the menu opens
+  ## (`refreshMenuAvailability`).
   var chords = initTable[string, string]()
   for (_, it) in rt.app.menu.root.actionItems():
     let chord = rt.chordOf(menuKeyAction(it.action))
@@ -2744,7 +4674,13 @@ proc refreshMenuForKeymap*(rt: TuiRuntime) =
     let chord = rt.chordOf(kaCommandPalette)
     if chord.len > 0:
       chords["findSymbol"] = chord
-  rt.app.menu.setEnabled(menuActionAvailable)
+  # M76: Stop is an operation the router resolves (`debugger.stop`), not a
+  # `KeyAction`; its chord is asked for by the operation's name.
+  let stopChord = rt.router.chordFor("debugger.stop", rt.sessionFacts,
+                                     rt.scopePath, rt.navMode, "")
+  if stopChord.len > 0:
+    chords[StopMenuAction] = stopChord
+  rt.refreshMenuAvailability()
   rt.app.menu.setShortcuts(chords)
   rt.app.refreshOmnibarIndex()
 
@@ -2826,6 +4762,57 @@ proc enterProductMode*(rt: TuiRuntime; product: ProductMode) =
   elif product == pmEdit:
     discard rt.ensureEditWorkspace()
 
+proc hasDebugSession*(rt: TuiRuntime): bool =
+  ## Whether a replay session is behind this runtime — the host pointed the
+  ## panes at one (`tui_session.refresh` installs its store) and *Stop* has
+  ## not made the runtime forget it (`forgetSession`).
+  not rt.app.store.isNil
+
+proc forgetSession*(rt: TuiRuntime) =
+  ## M76: the runtime's half of *Stop* ending a session — every handle the
+  ## host gave it onto that session dropped, so the tab is an edit tab that
+  ## is "indistinguishable from one that was never run" (Debugger-Controls.md
+  ## § "Ending a session from inside it", requirement 3): no recording name
+  ## (so a later `Ctrl+F5` onto the debugger is the empty debugger, with no
+  ## stale-trace notice about a recording that is no longer open), no engine
+  ## behind the dispatcher (a step answers "unavailable" instead of writing to
+  ## a closed pipe), and the debugger's panes back to what a runtime with no
+  ## session shows. The Edit-mode workspace — its buffers, the project's file
+  ## tree — is the user's and is kept.
+  # The panes' values with no session are READ from the one constructor that
+  # defines them (`newTuiApp`), not restated here, so "what the empty
+  # debugger shows" has one definition. Creating it opens nothing.
+  let blank = newTuiApp()
+  rt.app.store = nil
+  rt.app.controls = nil
+  rt.app.filesVM = nil
+  rt.app.traceName = ""
+  rt.app.tick = 0
+  rt.app.totalTicks = 0
+  rt.app.location = ""
+  rt.app.viewedFile = ""
+  rt.app.source = blank.source
+  rt.app.callStack = blank.callStack
+  rt.app.callTrace = blank.callTrace
+  rt.app.callTraceLoaded = false
+  rt.app.callTraceScrolled = false
+  rt.app.callTraceAtEnd = false
+  rt.app.variables = blank.variables
+  rt.app.eventLog = blank.eventLog
+  rt.app.points = blank.points
+  rt.app.scratchpad = blank.scratchpad
+  rt.app.terminalOutput = blank.terminalOutput
+  rt.app.search = blank.search
+  rt.app.openHistories.clear()
+  rt.app.openOrigins = @[]
+  rt.app.tracepointAt = ("", 0)
+  rt.app.content = ContentOverlay()
+  rt.editServices.readSource = nil
+  rt.dispatcher = Dispatcher(services: CommandServices(
+    setTheme: rt.themeService))
+  rt.context = CommandContext()
+  rt.app.refreshOmnibarIndex()
+
 proc showWelcomeTab*(rt: TuiRuntime; index: int; outcome: var RuntimeOutcome) =
   ## Show welcome tab `index`: its Welcome Screen, or — a tab that became an
   ## Edit-mode session over a folder — Edit mode at that folder (the host
@@ -2890,7 +4877,7 @@ proc routeWelcomeKey(rt: TuiRuntime; token: string;
   let w = rt.app.shownWelcome()
   if w.isNil or rt.app.menu.isOpen or rt.app.omnibar.isOpen or rt.prompt.open:
     return false
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   var key = name
   if isTextKey(name):
     key = keyCharacter(name)
@@ -2923,12 +4910,89 @@ proc routeWelcomeMouse(rt: TuiRuntime; event: MouseEvent;
 proc openOmnibar*(rt: TuiRuntime; query = "") =
   if rt.app.menu.isOpen:
     rt.app.menu.close()
+  # The omnibar lists the menu's ENABLED commands: read them for now.
+  rt.refreshMenuAvailability()
   rt.app.refreshOmnibarIndex()
   rt.app.omnibar.open(query)
   if query == OpenRecordingQuery:
     rt.note("new tab: choose a recording, or type its folder")
   else:
     rt.note("omnibar: type a file, :sym <function>, :<command> or #<tick>")
+
+proc addTab*(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## The strip's "+" and *File › New Trace Tab*, one performer
+  ## (Multi-Window-Tab-Management.md rule 3: "The "+" button (and File › New
+  ## Trace Tab) opens a new tab showing the Welcome Screen"). PLAT-49 part B
+  ## opened the omnibar on `:open ` instead; a host with no welcome flow still
+  ## does.
+  if not rt.app.welcomeHost.isNil:
+    rt.openWelcomeTab(outcome)
+  else:
+    rt.openOmnibar(OpenRecordingQuery)
+    outcome.repaint = true
+
+proc openWelcomeOption(rt: TuiRuntime; option: WelcomeStartOptionKind;
+                       newTab: bool; outcome: var RuntimeOutcome) =
+  ## *File › Open Trace…* / *Open Trace in New Tab…* / *Record New Trace…*:
+  ## the Welcome Screen's start option `option`, chosen — its form opened, the
+  ## terminal's dialog, whose choice the host performs (`runWelcomeIntent`).
+  ## In the shown welcome tab unless `newTab` or none is shown, the desktop's
+  ## *Open Trace in New Tab…* being a new tab and then the dialog.
+  ##
+  ## M76: chosen without `newTab` on a session tab whose session *Stop*
+  ## ended, the welcome tab this opens stands in for THAT tab: what it opens
+  ## starts its session in the stopped tab (`TuiApp.stoppedTabWelcome`,
+  ## which the host reads). Debugger-Controls.md § "Ending a session from
+  ## inside it", requirement 3.
+  let fromStoppedTab = not newTab and not rt.app.welcomeTabs.welcomeShown and
+                       not rt.app.shell.activeSlot().isNil and
+                       not rt.hasDebugSession
+  if newTab or rt.app.shownWelcome().isNil:
+    rt.openWelcomeTab(outcome)
+    if fromStoppedTab:
+      let tabs = rt.app.welcomeTabs
+      if tabs.active >= 0 and tabs.active < tabs.tabs.len:
+        rt.app.stoppedTabWelcome = tabs.tabs[tabs.active].serial
+  let w = rt.app.shownWelcome()
+  if w.isNil:
+    rt.note("there is no welcome tab to open the form in")
+    outcome.repaint = true
+    return
+  w.chooseOption(option, rt.welcomeFolderDefault())
+  rt.note(if w.form != nwfNone: formPrompt(w.form) & "type it, Enter to " &
+            "choose, Esc to close"
+          else: w.message)
+  outcome.repaint = true
+
+proc runBufferOp(rt: TuiRuntime; op: MenuBufferOp;
+                 outcome: var RuntimeOutcome) =
+  ## *File › Close / Reopen / Next / Previous / Switch File* over Edit mode's
+  ## buffers (the session's `EditSession`). `menuRouteOf` has already said the
+  ## operation can run; what it cannot know in advance — a reopened file that
+  ## is no longer readable — is said here.
+  let s = rt.app.editSession
+  outcome.repaint = true
+  case op
+  of mboNext, mboPrevious:
+    discard s.stepBuffer(if op == mboNext: 1 else: -1)
+  of mboSwitch:
+    s.activateBuffer(s.previouslyShownBuffer())
+  of mboClose:
+    let closed = s.closeActiveBuffer()
+    rt.note("closed " & closed)
+  of mboReopen:
+    let path = s.reopenCandidate()
+    let read = rt.editServices.readFile(path)
+    if not read.ok:
+      rt.note(read.message)
+      return
+    discard s.openFile(path, read.text, max(1, rt.sourcePaneRows()))
+  let buf = s.activeBuffer()
+  if not buf.isNil:
+    rt.app.fileTree.openPath = buf.path
+    if op != mboClose:
+      rt.note("editing " & buf.path)
+    discard rt.focus.focusPaneKind(paneEditor)
 
 proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
   ## A View-menu item: bring `pane` forward — reveal it when it is docked,
@@ -2965,14 +5029,65 @@ proc showPane(rt: TuiRuntime; pane: PaneKind; outcome: var RuntimeOutcome) =
       rt.note($pane & ": " & added.message)
   outcome.repaint = true
 
+proc openFindInFiles(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `search.find-in-files` with no pattern — `Ctrl+Shift+F` under CUA, the
+  ## Edit menu's Find in Files, `:grep` alone, a press on the pane's field:
+  ## Find in Files shown (`showPane`'s rule) and its field opened. The
+  ## terminal's field is the omnibox's `:grep` line, holding the pane's
+  ## current query (Find-And-Incremental-Search.md §5.2).
+  rt.showPane(paneSearch, outcome)
+  rt.openOmnibar(":grep " & rt.app.search.query)
+  outcome.repaint = true
+
+proc runFindInFiles(rt: TuiRuntime; pattern: string;
+                    outcome: var RuntimeOutcome) =
+  ## `:grep <pattern>` (§5.1): the host's search of the recording's sources
+  ## into Find in Files, which is shown (`showPane`'s rule). Nothing opens:
+  ## the user's OQ-F2, *"Only open the results panel"*.
+  outcome.repaint = true
+  if rt.app.findInFiles.isNil:
+    rt.note("Find in Files needs a recording or a project to search")
+    return
+  let why = rt.app.findInFiles(pattern)
+  rt.showPane(paneSearch, outcome)
+  rt.note(if why.len > 0: why
+          else: "searching the sources for \"" & pattern & "\"")
+
+proc stepFindInFiles(rt: TuiRuntime; delta: int; outcome: var RuntimeOutcome) =
+  ## `search.next-result` / `search.previous-result`: the host selects the
+  ## next / previous result and opens it at its line (§5.3).
+  outcome.repaint = true
+  if rt.app.stepSearchResult.isNil:
+    rt.note("there are no search results")
+    return
+  let why = rt.app.stepSearchResult(delta)
+  if why.len > 0:
+    rt.note(why)
+
+proc stopDebugging(rt: TuiRuntime; outcome: var RuntimeOutcome)
+proc runPointMenuItem(rt: TuiRuntime; op: PointMenuOp; action: string;
+                      outcome: var RuntimeOutcome)
+
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
+  # PLAT-71: **Terminal: Show Capabilities** (`:terminal-info`).
+  if action == TerminalInfoCommandTarget:
+    rt.openTerminalInfo()
+    outcome.repaint = true
+    return
   # PLAT-51: the omnibox's layout-setting commands (`:set …` without the
   # prompt, `omnibar_sources.layoutSettingCommands`).
   let setting = parseSettingCommandTarget(action)
   if setting.ok:
-    rt.note(rt.applyLayoutSetting(setting.setting, setting.on))
+    rt.note(rt.applyLayoutSetting(setting.setting, setting.value))
+    outcome.repaint = true
+    return
+  # PLAT-70: **View: Toggle Overflow Markers** flips the markers.
+  let toggle = parseSettingToggleTarget(action)
+  if toggle.ok and toggle.setting == lsOverflowMarkers:
+    rt.note(rt.applyLayoutSetting(lsOverflowMarkers,
+                                  rt.app.overflowMarkersOff))
     outcome.repaint = true
     return
   # PLAT-49 part B: the omnibar's event-log column commands
@@ -2987,34 +5102,90 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     rt.note(rt.runColumnVerb(verb, eventLogColumnTitle(col.column)))
     outcome.repaint = true
     return
-  let ka = menuKeyAction(action)
-  if ka != kaNone:
-    rt.performAction(ka, outcome)
+  # PLAT-70 Part B: the palette's operation entries (**Show Detail**,
+  # **Widen Column**, **Narrow Column** — `omnibar_sources.tableCommands`).
+  let operation = parseOperationCommand(action)
+  if operation.ok:
+    let (name, arg) = splitOperation(operation.operation)
+    case name
+    of "list.show-detail": rt.showDetail(outcome)
+    of "table.resize-column": rt.resizeEventLogColumn(arg, outcome)
+    else: rt.note(operation.operation & " is not available in the terminal")
+    outcome.repaint = true
     return
-  let (isPane, pane) = menuPaneOf(action)
-  if isPane:
-    rt.showPane(pane, outcome)
+  # PLAT-68: the palette's base-keymap commands
+  # (`keymap_selection.baseKeymapCommandTargets`).
+  let base = parseBaseKeymapCommand(action)
+  if base.ok:
+    rt.chooseKeymap($base.model)
+    outcome.repaint = true
     return
-  let line = menuPromptLine(action)
-  if line.len > 0:
-    rt.runPromptLine(line, outcome)
+  # THE SAME TABLE THE MENU WAS ENABLED FROM (`menuRouteOf`), read again for
+  # now: a command the omnibar listed, or an item chosen after the state
+  # moved, is refused with the reason the menu would show it disabled with.
+  let route = rt.menuRouteOf(action)
+  outcome.repaint = true
+  if route.reason.len > 0:
+    let at = rt.app.menu.pathOfAction(action)
+    let label = if at.len > 0: rt.app.menu.itemAt(at).label else: action
+    rt.note(label & ": " & route.reason)
+    outcome.detail = rt.app.notification
+    return
+  case route.kind
+  of mrKey:
+    rt.performAction(route.key, outcome)
+  of mrStop:
+    rt.stopDebugging(outcome)
+  of mrPoint:
+    rt.runPointMenuItem(route.point, action, outcome)
+  of mrPane:
+    rt.showPane(route.pane, outcome)
+  of mrPromptLine:
+    rt.runPromptLine(route.line, outcome)
     if outcome.action != kaNone:
       discard rt.applyLocalAction(outcome.action, outcome)
     outcome.repaint = true
-    return
-  let (isOmni, query) = menuOmnibarQuery(action)
-  if isOmni:
-    rt.openOmnibar(query)
-    outcome.repaint = true
-    return
-  rt.note(action & " is not available in the terminal")
-  outcome.repaint = true
+  of mrFindInFiles:
+    rt.openFindInFiles(outcome)
+  of mrOmnibar:
+    rt.openOmnibar(route.line)
+  of mrNewTab:
+    rt.addTab(outcome)
+  of mrWelcomeOption:
+    rt.openWelcomeOption(route.option, route.newTab, outcome)
+  of mrBuffer:
+    rt.runBufferOp(route.buffer, outcome)
+  of mrNone:
+    # Unreachable: `menuRouteOf` gives `mrNone` a reason.
+    rt.note(action & " is not available in the terminal")
 
 proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## `Enter` in the omnibar: act on the chosen entry. A tick and a symbol go
   ## to that point in time (`:goto`), a command runs its menu item, a file is
   ## selected in the Files pane (the debugger's source pane shows where the
   ## recording is; in Edit mode it is opened).
+  ##
+  ## A `:` QUERY IS A COMMAND LINE FIRST ("run a :command", the omnibar's own
+  ## placeholder): under CUA and Emacs the palette is how the command line is
+  ## reached (CodeTracer-TUI.md §4 — `Ctrl+Shift+P` / `F1`), so `:w`, `:q`,
+  ## `:keymap` and `:break 12` run as typed. Only a line whose verb is no
+  ## command takes the chosen palette entry, which is what fuzzy-picks one.
+  let (mode, needle) = classifyOmnibarQuery(rt.app.omnibar.query)
+  # PLAT-57: `:grep <text>` is Find in Files (§5.1): the omnibar closes and
+  # the search runs into the pane; `:grep` alone keeps the field open.
+  if mode == omProgram:
+    if needle.len == 0:
+      rt.openFindInFiles(outcome)
+    else:
+      rt.app.omnibar.close()
+      rt.runFindInFiles(needle, outcome)
+    return
+  if mode == omCommand and
+     rt.runCommandLine(":" & needle, outcome,
+                       unknownFallsThrough = true):
+    rt.app.omnibar.close()
+    outcome.repaint = true
+    return
   let (ok, entry) = rt.app.omnibar.accept()
   outcome.repaint = true
   if not ok:
@@ -3045,32 +5216,14 @@ proc acceptOmnibar(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   else:
     rt.note(entry.label)
 
-proc handleOmnibarKey(rt: TuiRuntime; token: string;
-                      outcome: var RuntimeOutcome) =
-  ## Every key while the omnibar is open belongs to it.
-  let name = keyName(token)
-  outcome.repaint = true
-  case name
-  of "Esc":
-    rt.app.omnibar.close()
-    rt.note("")
-  of "Enter":
-    rt.acceptOmnibar(outcome)
-  of "Up": rt.app.omnibar.moveSelection(-1)
-  of "Down": rt.app.omnibar.moveSelection(1)
-  of "Backspace": rt.app.omnibar.backspace()
-  # PLAT-49: the query is edited at a caret, in insert or overwrite mode.
-  of "Delete": rt.app.omnibar.deleteForward()
-  of "Left": rt.app.omnibar.moveCursor(-1)
-  of "Right": rt.app.omnibar.moveCursor(1)
-  of "Home": rt.app.omnibar.cursorHome()
-  of "End": rt.app.omnibar.cursorEnd()
-  of "Insert": rt.app.omnibar.toggleOverwrite()
-  else:
-    if isTextKey(name):
-      rt.app.omnibar.typeText(keyCharacter(name))
-    else:
-      outcome.repaint = false
+proc sayRefusal(rt: TuiRuntime; chosen: MenuItem) =
+  ## A DISABLED item was chosen: it does nothing (the menu stays open), and
+  ## the status line says why — `"<label>: <reason>"` (EMT-D14: a disabled
+  ## state carries a reason, and a choice that does nothing says so rather
+  ## than nothing). Silent for a folder, which opened.
+  let refusal = refusalOf(chosen)
+  if refusal.len > 0:
+    rt.note(refusal)
 
 proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
                    outcome: var RuntimeOutcome) =
@@ -3079,15 +5232,23 @@ proc handleMenuKey(rt: TuiRuntime; token: string; nowMs: int64;
   ## `Right` (or `Enter`) on a folder opens its submenu beside it, `Left`
   ## backs out of a submenu, `Esc` backs out and closes at the first level.
   let vm = rt.app.menu
-  let name = keyName(token)
+  let name = rt.keyOf(token)
   outcome.repaint = true
+  # The keymap's own menu keys keep their meaning inside it: another
+  # mnemonic switches folder, `` Alt+` `` / `F10` close it.
+  let res = rt.probeKey(name)
+  if res.kind == erOperation and res.operation in MenuOperations:
+    rt.runMenuOperation(res.operation, res.argument)
+    return
   case name
   of "Esc": vm.escape()
-  of MenuKey: vm.close()
   of "Enter":
+    let chosen = vm.highlightedItem()
     let act = vm.activate()
     if act.ran:
       rt.runMenuAction(act.action, outcome)
+    else:
+      rt.sayRefusal(chosen)
   of "Up": vm.moveHighlight(-1)
   of "Down": vm.moveHighlight(1)
   of "Right": discard vm.enterFolder()
@@ -3207,11 +5368,14 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     # Hover: the row's controls, and the open menu's items.
     var hovered = -1
     var hoveredTab = -1
+    var hoveredStop = false
     var hoveredAdd = false
     if event.row == 0:
       let hit = lay.topBarHitAt(event.col)
       if hit.kind == thControl:
         hovered = hit.index
+      elif hit.kind == thStop:
+        hoveredStop = true
       elif hit.kind == thTab:
         hoveredTab = hit.index
       elif hit.kind == thTabAdd:
@@ -3233,6 +5397,18 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
         vm.hoverPath(path)
         if vm.revision != before:
           outcome.repaint = true
+    if hoveredStop != rt.app.hoveredStop:
+      # M76: Stop's tooltip — the desktop's words and the chord that runs
+      # `debugger.stop` here (CUA's `Shift+F5`), as a transport's is.
+      rt.app.hoveredStop = hoveredStop
+      if hoveredStop:
+        rt.app.hoveredTooltip = tooltipText(StopControl.label,
+          rt.router.chordFor("debugger.stop", rt.sessionFacts, rt.scopePath,
+                             rt.navMode, ""))
+        rt.note(rt.app.hoveredTooltip)
+      elif hovered < 0:
+        rt.app.hoveredTooltip = ""
+      outcome.repaint = true
     if hovered != rt.app.hoveredControl:
       rt.app.hoveredControl = hovered
       # PLAT-49: the tooltip is the ViewModel's (`transportTooltip`: label
@@ -3243,7 +5419,7 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
         rt.app.hoveredTooltip = transportTooltip(
           c.id, rt.chordOf(transportKeyAction(c.id)))
         rt.note(rt.app.hoveredTooltip)
-      else:
+      elif not hoveredStop:
         rt.app.hoveredTooltip = ""
       outcome.repaint = true
     return true
@@ -3256,9 +5432,12 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
       rt.topBarPressConsumed = true
       outcome.repaint = true
       if path.len > 0:
+        let chosen = vm.itemAt(path)
         let act = vm.clickPath(path)
         if act.ran:
           rt.runMenuAction(act.action, outcome)
+        else:
+          rt.sayRefusal(chosen)
       return true
     if event.row != 0:
       vm.close()
@@ -3288,7 +5467,11 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
     rt.app.welcomeTabs))
   case hit.kind
   of thMenuButton:
-    if vm.isOpen: vm.close() else: vm.open(keyboard = false)
+    if vm.isOpen:
+      vm.close()
+    else:
+      rt.refreshMenuAvailability()
+      vm.open(keyboard = false)
   of thControl:
     let c = TransportControls[hit.index]
     let ka = transportKeyAction(c.id)
@@ -3301,6 +5484,14 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   of thOmnibar:
     if not rt.app.omnibar.isOpen:
       rt.openOmnibar()
+  of thStop:
+    # M76: the toolbar's Stop — the same proc the menu item and the chord
+    # run (`stopDebugging`); with no session it answers so.
+    rt.app.hoveredStop = false
+    if not rt.hasDebugSession:
+      rt.note("Stop: " & NoDebugSessionReason)
+    else:
+      rt.stopDebugging(outcome)
   of thTab:
     # A click on a session tab switches to it; the switch is on the screen,
     # so nothing is echoed (PLAT-49 part B). PLAT-51: a welcome tab (or a
@@ -3326,18 +5517,828 @@ proc routeTopBarMouse(rt: TuiRuntime; event: MouseEvent;
   of thTabAdd:
     # PLAT-51 deliverable 8 (Multi-Window-Tab-Management.md rule 3): the
     # strip's "+" opens a new tab showing the WELCOME SCREEN, as the
-    # desktop's does. (PLAT-49 part B opened the omnibar on `:open ` here; a
-    # host with no welcome flow still does.)
+    # desktop's does — the performer File › New Trace Tab shares.
     rt.app.hoveredTabAdd = false
-    if not rt.app.welcomeHost.isNil:
-      rt.openWelcomeTab(outcome)
-    else:
-      rt.openOmnibar(OpenRecordingQuery)
+    rt.addTab(outcome)
   of thTabMore:
     rt.app.tabScroll = max(0, rt.app.tabScroll + hit.index)
   of thNone:
     discard
   true
+
+# ---------------------------------------------------------------------------
+# PLAT-68 — KEYS THROUGH THE ROUTER (Base-Keymaps-And-Layer-Stack.md §6)
+#
+# The terminal's half of the front-end contract: its SCOPE PATH (read off the
+# focus tree, `motions.scopePathOf`: a node per pane and per overlay), the
+# ViewModels' FACTS for `contextKeysOf`, and the DISPATCH of what the shared
+# router resolved. What a key MEANS is the router's; nothing below has a
+# `case` over key names.
+# ---------------------------------------------------------------------------
+
+proc navMode(rt: TuiRuntime): NavigationMode =
+  ## The navigation mode the derived layers read (§5.5): an open prompt's —
+  ## the command line's or the search field's, decided by what is OPEN, the
+  ## fact the scope path is built from too, so the two cannot disagree —
+  ## else the modal machine's.
+  if rt.prompt.open:
+    return if rt.prompt.kind == pkCommand: nmCommand else: nmSearch
+  case rt.modal.mode
+  of mmNormal, mmCommand, mmSearch: nmNormal
+  of mmInspect: nmInspect
+
+proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer) =
+  ## The read-only editor's displayed caret IS its document's (PLAT-51's
+  ## caret, now the head of a real selection).
+  if buf.isNil: return
+  rt.app.caret = (buf.path, buf.caretLine, buf.caretColumn + 1)
+
+proc debugBuffer*(rt: TuiRuntime): EditBuffer =
+  ## THE DEBUG-MODE EDITOR'S DOCUMENT: the file the source pane shows, opened
+  ## from the recording (`EditServices.readSource`) as an `EditingDocument`
+  ## with PLAT-33's read-only filter — so selection, the caret, copy and find
+  ## act on a real document, edits are refused, and `editor.toggle-read-only`
+  ## (`Ctrl+E`, the desktop's) makes the same document writable. Nil when
+  ## there is no recording file to open.
+  if rt.app.modes.product == pmEdit or rt.app.source.path.len == 0:
+    return nil
+  let path = rt.app.source.path
+  if rt.app.editSession.isNil:
+    rt.app.editSession = newEditSession(rt.keymapModel, rt.keyDelivery)
+  let at = rt.app.editSession.indexOfPath(path)
+  if at >= 0:
+    return rt.app.editSession.buffers[at]
+  if rt.editServices.readSource.isNil:
+    return nil
+  let read = rt.editServices.readSource(path)
+  if not read.ok:
+    return nil
+  let keep = rt.app.editSession.active
+  discard rt.app.editSession.openFile(path, read.text,
+                                      max(1, rt.sourcePaneRows()))
+  result = rt.app.editSession.buffers[^1]
+  if keep >= 0: rt.app.editSession.active = keep
+  result.doc.setReadOnly(true)
+  # The caret starts where the user placed it, else on the execution line —
+  # where Monaco's cursor is when a replay stops.
+  let line = if rt.app.caret.line > 0 and rt.app.caret.path == path:
+               rt.app.caret.line
+             else: max(1, rt.app.source.executionLine)
+  let column = if rt.app.caret.line > 0 and rt.app.caret.path == path:
+                 rt.app.caret.column
+               else: 1
+  result.moveCaretTo(line - 1, column - 1)
+
+proc editorBuffer(rt: TuiRuntime): EditBuffer =
+  ## The document behind the `editor` pane: Edit mode's active buffer, or
+  ## Debug mode's document of the shown file.
+  if rt.app.modes.product == pmEdit:
+    if rt.app.editSession.isNil: nil else: rt.app.editSession.activeBuffer()
+  else: rt.debugBuffer()
+
+proc editorCaretLine(rt: TuiRuntime): int =
+  ## The line the editor's caret is on — the line the desktop's Debug-menu
+  ## point items act at (Monaco's cursor, `pointsOperationsSetup`) and
+  ## `editor.toggle-tracepoint`'s line: the document's caret, else the last
+  ## caret placed, else the execution line.
+  let buf = rt.editorBuffer()
+  result = if not buf.isNil: buf.caretLine
+           elif rt.app.caret.line > 0: rt.app.caret.line
+           else: rt.app.source.executionLine
+  result = max(1, result)
+
+proc stopDebugging(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## M76 (codetracer#843): *Stop* — the Debug menu's item and the keymap's
+  ## `debugger.stop` (CUA's `Shift+F5`). Debugger-Controls.md § "Ending a
+  ## session from inside it": the workspace returns to Edit mode, the replay
+  ## backend for the session is terminated, and the tab survives as an edit
+  ## tab. The mode switch is this layer's and is made here, through the same
+  ## transition `Ctrl+F5` makes (Mode-Transitions.md §1: Debug → Edit "cannot
+  ## fail"); ending the backend is the host's, so the outcome asks for it
+  ## (`stopsSession`) and `tui_session.stop` performs it.
+  ##
+  ## With no session behind the runtime — `ct edit`, or a second Stop — there
+  ## is nothing to end, and the status line says so: not an error, the
+  ## desktop's `stopAlreadyInEditMode`.
+  outcome.repaint = true
+  if not rt.hasDebugSession:
+    rt.note(NoDebugSessionReason)
+    outcome.detail = rt.app.notification
+    return
+  rt.setProductMode(pmEdit, outcome)
+  outcome.stopsSession = true
+  rt.note("stopping the debugging session")
+  outcome.detail = rt.app.notification
+
+proc runPointMenuItem(rt: TuiRuntime; op: PointMenuOp; action: string;
+                      outcome: var RuntimeOutcome) =
+  ## M76 (codetracer#843): a Debug-menu breakpoint or tracepoint item. The
+  ## ones that name one point act at the editor caret's line in the file the
+  ## editor shows — the desktop's semantics. "Add a Tracepoint" opens this
+  ## terminal's tracepoint editor there (the command line, `:tracepoint `
+  ## typed, as K13's "Add tracepoint" does); every other item is the host's,
+  ## over the session (`PaneClickRequest(kind: pcPointMenu)` →
+  ## `session_driver.performPointMenuOp`). Reached only through
+  ## `menuRouteOf`, whose `pointMenuReason` refused it first when there is no
+  ## replay, the workspace is in Edit mode or the editor shows no file of it.
+  outcome.repaint = true
+  let path = rt.app.source.path
+  let line = rt.editorCaretLine()
+  if op == pmoAddTracepoint:
+    rt.openTracepointEditorAt(path, line)
+    return
+  outcome.requestClick(PaneClickRequest(kind: pcPointMenu, path: path,
+                                        line: line, text: action))
+
+proc editorFocused(rt: TuiRuntime): bool =
+  let (had, focused) = rt.focus.focusedPane()
+  had and focused == paneEditor
+
+proc sessionFacts*(rt: TuiRuntime): SessionFacts =
+  ## The ViewModels' facts `contextKeysOf` derives the context keys from —
+  ## each the owning model's own answer (`editorFactsOf` of the document, the
+  ## overlays' `open`), never a key spelled here.
+  let buf = if rt.editorFocused: rt.editorBuffer() else: nil
+  let editor =
+    if not buf.isNil: editorFactsOf(buf.doc.state, rt.tabMovesFocus)
+    elif rt.app.modes.product == pmDebug: sourceViewFacts()
+    else: EditorFacts()
+  let drag = rt.layoutBindingEnabled() and
+             rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
+                                                       ikResizingSplit,
+                                                       ikRevealingDock}
+  SessionFacts(product: rt.app.modes.product,
+               replayLoaded: rt.app.traceName.len > 0,
+               editor: editor,
+               findWidgetVisible: rt.prompt.open and rt.prompt.kind != pkCommand,
+               paletteVisible: rt.app.omnibar.isOpen,
+               contextMenuVisible: rt.app.contextMenu.open,
+               dragActive: drag)
+
+proc editorElementId(rt: TuiRuntime): string =
+  ## The editor element the `editor` pane holds — always one: in Debug mode
+  ## it is the read-only source view even when no document could be opened
+  ## for it (no recording yet, an unreadable file), so the read-only editor's
+  ## keys (§4's letters, `:`) are its keys there too.
+  let buf = rt.editorBuffer()
+  let path = if not buf.isNil: buf.path else: rt.app.source.path
+  "editor:" & path
+
+proc scopePath*(rt: TuiRuntime): ScopePath =
+  ## **THE TERMINAL'S SCOPE PATH**: window, session tab and focused pane
+  ## from the focus tree, then what holds the focus inside — the editor and
+  ## an open find widget's field, or a window-owned overlay (the palette,
+  ## the command line, a context menu).
+  rt.focus.dropInner()
+  if rt.app.omnibar.isOpen:
+    return rt.focus.scopePathOf([element(ekOverlay, "palette"),
+                                 paletteFieldOf(rt.app.omnibar.query)],
+                                atWindow = true)
+  if rt.app.contextMenu.open:
+    return rt.focus.scopePathOf([element(ekOverlay, "context-menu")],
+                                atWindow = true)
+  if rt.prompt.open and rt.prompt.kind == pkCommand:
+    return rt.focus.scopePathOf([element(ekOverlay, "command-line"),
+                                 element(ekInput, "prompt")],
+                                atWindow = true)
+  var inner: seq[ScopeElement] = @[]
+  if rt.editorFocused:
+    let id = rt.editorElementId()
+    if id.len > 0: inner.add element(ekEditor, id)
+  if rt.prompt.open:
+    inner.add element(ekOverlay, "find")
+    inner.add element(ekInput, "find-query")
+  rt.focus.scopePathOf(inner)
+
+proc focusOwnerId(rt: TuiRuntime): string =
+  ## The element a mode opened now is owned by: the editor when it has the
+  ## focus, else the focused pane.
+  if rt.editorFocused and rt.editorElementId().len > 0:
+    return rt.editorElementId()
+  let (had, focused) = rt.focus.focusedPane()
+  if had: $focused else: "window"
+
+proc syncOverlayLayers(rt: TuiRuntime) =
+  ## THE PUSHED LAYERS MIRROR THE OVERLAYS (§5.3). An overlay is opened by an
+  ## operation or by a click, and closed by one or by a click elsewhere; the
+  ## layer its mode pushes follows it here, by token, so the stack is never
+  ## a second, disagreeing record of which mode is open.
+  proc want(rt: TuiRuntime; table, owner, label: string; open: bool) =
+    let at = rt.router.stack.indexOfLayer(table, owner)
+    if open and at < 0:
+      discard rt.router.pushLayer(table, owner, label)
+    elif not open and at >= 0:
+      discard rt.router.popLayer(rt.router.stack.layers[at].token)
+  # Popped newest-first, so a pop is always of the top.
+  let promptCommand = rt.prompt.open and rt.prompt.kind == pkCommand
+  let promptFind = rt.prompt.open and rt.prompt.kind != pkCommand
+  if not rt.app.contextMenu.open:
+    rt.want(ContextMenuTable, "window", "MENU", false)
+  if not rt.app.omnibar.isOpen:
+    rt.want(PaletteTable, "window", "PALETTE", false)
+  if not promptCommand:
+    rt.want(CommandLineTable, "window", "COMMAND", false)
+  if not promptFind:
+    for l in rt.router.stack.layers:
+      if l.table == FindTable:
+        rt.want(FindTable, l.owner, "FIND", false)
+        break
+  if promptFind and rt.router.stack.indexOfLayer(FindTable, rt.app.findOwner) < 0:
+    rt.want(FindTable, rt.app.findOwner, "FIND", true)
+  rt.want(CommandLineTable, "window", "COMMAND", promptCommand)
+  rt.want(PaletteTable, "window", "PALETTE", rt.app.omnibar.isOpen)
+  rt.want(ContextMenuTable, "window", "MENU", rt.app.contextMenu.open)
+
+proc unmountGoneOwners(rt: TuiRuntime) =
+  ## §5.4: a layer's lifetime is bounded by its owner. After the panes are
+  ## re-derived, a layer whose owner is no longer on screen is popped, and
+  ## its mode told: the find widget closes.
+  var present = @["window"]
+  for r in rt.focus.regions: present.add $r.pane
+  let editorId = rt.editorElementId()
+  if editorId.len > 0 and paneEditor in rt.focus.focusOrder:
+    present.add editorId
+  var gone: seq[string] = @[]
+  for l in rt.router.stack.layers:
+    if l.owner notin present and l.owner notin gone: gone.add l.owner
+  for owner in gone:
+    for popped in rt.router.unmountOwner(owner):
+      if popped.table == FindTable and rt.prompt.open and
+         rt.prompt.kind != pkCommand:
+        discard rt.prompt.cancel()
+        discard rt.modal.applyModalEvent(meCancel)
+
+proc routeKey*(rt: TuiRuntime; name: string; nowMs: int64): EditingResolution =
+  ## One canonical key through the shared router, for THIS terminal's scope
+  ## path and facts. The router keeps the pending prefix.
+  rt.syncOverlayLayers()
+  # The PATH FIRST: building it re-hangs the focus tree for what is open
+  # now (a closed overlay's nodes come down), and the facts read that tree.
+  let path = rt.scopePath
+  rt.router.route(rt.sessionFacts, path, rt.navMode, name, nowMs)
+
+proc probeKey*(rt: TuiRuntime; name: string): EditingResolution =
+  ## What `name` WOULD resolve to now, with no effect on the router.
+  rt.syncOverlayLayers()
+  let path = rt.scopePath
+  var probe = rt.router
+  probe.route(rt.sessionFacts, path, rt.navMode, name, 0)
+
+proc offerClipboardTo(rt: TuiRuntime; buf: EditBuffer) =
+  ## Paste reads the INTERNAL clipboard (what this session copied, or what
+  ## the terminal answered to an OSC 52 read): the core performs no I/O
+  ## (Editing-Operations §5.2), so the host hands the text in first.
+  if rt.app.pasteBuffer.len > 0:
+    buf.doc.offerClipboard(rt.app.pasteBuffer)
+
+proc holdPaste(rt: TuiRuntime; target: PasteTarget;
+               res: EditingResolution): bool =
+  ## Hold a paste while the terminal is asked for its clipboard (OSC 52,
+  ## written with the next frame), unless it is known not to answer or a
+  ## paste is already held. Answers whether it was held.
+  if not rt.clipboardRead.asks or rt.clipboardRead.pending.active:
+    return false
+  rt.clipboardRead.pending = PendingPaste(active: true, target: target,
+                                          resolution: res)
+  rt.clipboardRead.requested = true
+  true
+
+proc runEditorOperation(rt: TuiRuntime; buf: EditBuffer;
+                        res: EditingResolution; nowMs: int64;
+                        outcome: var RuntimeOutcome; askTerminal = true) =
+  ## A vocabulary operation (or a character) on the editor's document,
+  ## with the session's bookkeeping: an edit is recorded, the pane follows
+  ## the caret, a copy reaches the clipboard, a save is written. A paste
+  ## first asks the terminal for its clipboard (`holdPaste`), and is run
+  ## again by `completePaste` once the answer — or the silence — is in.
+  if res.operation == "clipboard-paste":
+    if askTerminal and not buf.doc.isReadOnly and
+       rt.holdPaste(ptEditor, res):
+      outcome.repaint = true
+      return
+    rt.offerClipboardTo(buf)
+  let caretBefore = (buf.caretLine, buf.caretColumn)
+  let applied = rt.app.editSession.applyResolvedIn(buf, res, nowMs)
+  if applied.outcome == eoChanged:
+    rt.app.editSession.recordEdit(buf.path)
+    rt.app.editSession.refreshEditedPaths()
+  if res.operation in ["clipboard-copy", "clipboard-cut"]:
+    let copied = buf.doc.clipboardText
+    if copied.len > 0:
+      rt.copyToClipboard(copied, $copied.countLines & " line(s)")
+  buf.followCaret(max(1, rt.sourcePaneRows()))
+  if rt.app.modes.product == pmDebug:
+    rt.syncCaretFrom(buf)
+    # M73 (#840): and the window the Debug pane DRAWS follows the caret too.
+    rt.followCaretInSource(buf, caretBefore, outcome)
+  if "save" in applied.operations or "save-all" in applied.operations:
+    rt.writeBuffers(res.spelling, all = "save-all" in applied.operations)
+  elif "save-as" in applied.operations:
+    rt.note("Save As takes a path: `:w` writes " & buf.path)
+  if applied.outcome == eoIgnored and res.kind == erOperation and
+     buf.doc.isReadOnly:
+    rt.note("the editor is read-only — Ctrl+E makes it writable")
+  outcome.repaint = true
+
+proc pasteIntoField(rt: TuiRuntime; target: PasteTarget) =
+  ## The internal clipboard into the open palette's or prompt's field, as
+  ## typed text (a field is one line: the first line of a multi-line copy).
+  let text = rt.app.pasteBuffer.splitLines()
+  if text.len == 0 or text[0].len == 0:
+    rt.note("the clipboard is empty")
+    return
+  case target
+  of ptPalette:
+    if rt.app.omnibar.isOpen: rt.app.omnibar.typeText(text[0])
+  of ptPrompt:
+    if rt.prompt.open: discard rt.prompt.insert(text[0])
+  of ptEditor: discard
+
+proc completePaste*(rt: TuiRuntime; answered: bool; text: string;
+                    nowMs: int64): bool =
+  ## The terminal's answer to the clipboard read (`answered`, its `text`),
+  ## or the wait ran out: the answer becomes the internal clipboard, a
+  ## terminal that stayed silent is not asked again, and the held paste is
+  ## run. Answers whether there was one to run.
+  rt.clipboardRead.open = false
+  rt.clipboardRead.requested = false
+  if answered:
+    rt.clipboardRead.support = crsAnswers
+    if text.len > 0: rt.app.pasteBuffer = text
+  elif rt.clipboardRead.support == crsUnknown:
+    rt.clipboardRead.support = crsSilent
+  let held = rt.clipboardRead.pending
+  rt.clipboardRead.pending = PendingPaste()
+  if not held.active:
+    return false
+  case held.target
+  of ptEditor:
+    let buf = rt.editorBuffer()
+    if not buf.isNil:
+      var outcome = RuntimeOutcome()
+      rt.runEditorOperation(buf, held.resolution, nowMs, outcome,
+                            askTerminal = false)
+  of ptPrompt, ptPalette:
+    rt.pasteIntoField(held.target)
+  true
+
+proc focusedRowText(rt: TuiRuntime): (string, string) =
+  ## What `list.copy` copies from the focused list: the row (or value) it
+  ## has selected, and how to name it. Empty when the pane holds no
+  ## selection.
+  let (had, focused) = rt.focus.focusedPane()
+  if not had: return ("", "")
+  case focused
+  of paneFileTree:
+    let t = rt.app.fileTree
+    if t.selected >= 0 and t.selected < t.files.len:
+      return (t.files[t.selected], "the path")
+  of paneState:
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3): the variable's WHOLE
+    # value, untruncated — what its detail and its tooltip show.
+    let path = rt.app.variables.selected
+    if path.len > 0:
+      for r in rt.app.variables.paneRows():
+        if r.kind == vrkVariable and r.node.path == path:
+          return (rt.app.variables.fullValueOf(r.node),
+                  "the value of " & r.node.name)
+      return (path, "the variable")
+  of paneEventLog:
+    let (ok, ev) = rt.app.eventLog.rowAt(rt.app.eventLog.selected)
+    if ok:
+      return (ev.content, "event #" & $ev.index)
+  of paneCalltrace:
+    let (ok, r) = rt.app.callTrace.rowAt(rt.app.callTrace.currentTraceIndex)
+    if ok:
+      return (callRowText(r.callOf), "the call")
+  else: discard
+  ("", "")
+
+proc runFind(rt: TuiRuntime; forward: bool; outcome: var RuntimeOutcome) =
+  ## `find.next` / `find.previous`: the next occurrence of the find field's
+  ## query in the owner's document, selected, from the caret — the find
+  ## widget's matches as VS Code's walk them (CUA-Keymap.md §3.5).
+  let query = if rt.prompt.open: rt.prompt.buffer else: rt.app.findQuery
+  outcome.repaint = true
+  if query.len == 0:
+    rt.note("find: type what to look for")
+    return
+  rt.app.findQuery = query
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    rt.note("find: this pane has no text to search")
+    return
+  let text = buf.doc.text
+  let sel = buf.doc.state.selection.mainRange
+  var at = -1
+  if forward:
+    at = text.find(query, min(sel.rangeTo, text.len))
+    if at < 0: at = text.find(query)
+  else:
+    for i in countdown(min(sel.rangeFrom - 1, text.len - query.len), 0):
+      if text.continuesWith(query, i):
+        at = i
+        break
+    if at < 0: at = text.rfind(query)
+  if at < 0:
+    rt.note("find: no match for `" & query & "`")
+    return
+  let caretBefore = (buf.caretLine, buf.caretColumn)
+  buf.doc.selectSpan(at, at + query.len)
+  buf.followCaret(max(1, rt.sourcePaneRows()))
+  rt.syncCaretFrom(buf)
+  # M73 (#840): a match off the drawn window brings the window to it.
+  rt.followCaretInSource(buf, caretBefore, outcome)
+  rt.note("find: `" & query & "` at line " & $buf.caretLine)
+
+proc runPromptKey(rt: TuiRuntime; key: string;
+                  outcome: var RuntimeOutcome)
+  ## The command line's own editing step, for the `input.*` operations the
+  ## router resolved on it; defined beside `handleToken`.
+
+proc filesPaneArea(rt: TuiRuntime): CellArea =
+  ## The rectangle the Files pane is painted into (its strip row first), or
+  ## an empty one when it is not on the screen.
+  let geometry = rt.layoutGeometry()
+  for i, region in geometry.projection.regions:
+    if region.pane == paneFileTree:
+      return paneUnderStrip(geometry, i)
+  CellArea()
+
+proc runFilesKeyOperation(rt: TuiRuntime; operation: string;
+                          outcome: var RuntimeOutcome): bool =
+  ## K17 / K18 / K19 FROM THE KEYBOARD, while the Files pane has the focus:
+  ## Up / Down (and the modal bases' `j` / `k`) move the selected row, Home /
+  ## End go to the ends, Enter opens the file or opens or closes the folder,
+  ## and `context-menu.open` (CUA's `Shift+F10` in Edit mode; the palette's
+  ## "Show Context Menu" everywhere) opens the selected row's menu beside it.
+  ## Answers whether `operation` was the pane's.
+  let n = rt.app.fileTree.rowCount
+  let sel = rt.app.fileTree.selected
+  proc select(rt: TuiRuntime; i: int) =
+    rt.app.fileTree.selected = i
+    # Keep the selected row in view (the pane scrolls, M71).
+    let body = max(1, rt.paneBodyRows(paneFileTree))
+    var top = rt.app.fileTree.clampScrollTop(rt.app.fileTree.scrollTop, body)
+    if i < top: top = i
+    elif i >= top + body: top = i - body + 1
+    rt.app.fileTree.scrollTop = top
+  case operation
+  of "list.focus-next", "list.focus-previous", "editor.scroll-line-down",
+     "editor.scroll-line-up", "list.focus-first", "list.focus-last",
+     "list.focus-page-down", "list.focus-page-up":
+    outcome.repaint = true
+    if n == 0:
+      rt.note("the Files pane lists nothing")
+      return true
+    let page = max(1, rt.paneBodyRows(paneFileTree) - 1)
+    let next =
+      case operation
+      of "list.focus-first": 0
+      of "list.focus-last": n - 1
+      of "list.focus-page-down": (if sel < 0: 0 else: sel + page)
+      of "list.focus-page-up": (if sel < 0: 0 else: sel - page)
+      of "list.focus-next", "editor.scroll-line-down":
+        (if sel < 0: 0 else: sel + 1)
+      else: (if sel < 0: n - 1 else: sel - 1)
+    rt.select(clamp(next, 0, n - 1))
+    true
+  of "list.activate", "list.expand", "list.toggle-expand":
+    if sel < 0 or sel >= n:
+      rt.note("no row of the Files pane is selected")
+      outcome.repaint = true
+      return true
+    rt.activateFilesRow(sel, outcome)
+    true
+  of "context-menu.open":
+    if sel < 0 or sel >= n:
+      rt.note("no row of the Files pane is selected")
+      outcome.repaint = true
+      return true
+    let area = rt.filesPaneArea()
+    let top = rt.app.fileTree.clampScrollTop(rt.app.fileTree.scrollTop,
+                                             max(1, area.height - 1))
+    let row = if area.width > 0: area.row + 1 + (sel - top) else: 1
+    let col = if area.width > 0: area.col + 2 else: 0
+    rt.openFilesMenu(sel, row, col, outcome)
+    true
+  else: false
+
+proc runTestsKeyOperation(rt: TuiRuntime; operation: string;
+                          outcome: var RuntimeOutcome): bool =
+  ## PLAT-53 FROM THE KEYBOARD, while Test Results has the focus (§8.4): Up /
+  ## Down (and the modal bases' `j` / `k`), Home / End and the pages move the
+  ## selected row; Enter is its `⏵`. Answers whether `operation` was the
+  ## pane's.
+  let n = rt.app.tests.rows.len
+  let sel = rt.app.tests.selected
+  case operation
+  of "list.focus-next", "list.focus-previous", "editor.scroll-line-down",
+     "editor.scroll-line-up", "list.focus-first", "list.focus-last",
+     "list.focus-page-down", "list.focus-page-up":
+    outcome.repaint = true
+    if n == 0:
+      rt.note("the Test Results pane lists no test")
+      return true
+    let page = max(1, rt.paneBodyRows(paneTestResults) - 2)
+    let next =
+      case operation
+      of "list.focus-first": 0
+      of "list.focus-last": n - 1
+      of "list.focus-page-down": (if sel < 0: 0 else: sel + page)
+      of "list.focus-page-up": (if sel < 0: 0 else: sel - page)
+      of "list.focus-next", "editor.scroll-line-down":
+        (if sel < 0: 0 else: sel + 1)
+      else: (if sel < 0: n - 1 else: sel - 1)
+    rt.selectTestRow(clamp(next, 0, n - 1))
+    true
+  of "list.activate":
+    if sel < 0 or sel >= n:
+      rt.note("no test of the Test Results pane is selected")
+      outcome.repaint = true
+      return true
+    let r = rt.app.tests.rows[sel]
+    rt.pressTestsControl(r.open, PaneClickRequest(kind: pcTestsOpen,
+                         text: r.testId), outcome)
+    true
+  else: false
+
+proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
+                  outcome: var RuntimeOutcome) =
+  ## **THE TERMINAL'S DISPATCH** of a resolved operation onto its ViewModels:
+  ## the editing vocabulary onto the editor's document, the overlays' and
+  ## inputs' operations onto the overlay that is open, everything the
+  ## terminal's action vocabulary has onto `performAction`. An operation the
+  ## terminal does not perform is INERT AND SAYS SO (Input-Routing IR-6).
+  let op = if res.argument.len > 0: res.operation & "(" & res.argument & ")"
+           else: res.operation
+  outcome.repaint = true
+  if '.' notin res.operation:
+    let buf = rt.editorBuffer()
+    if buf.isNil:
+      rt.note("`" & res.operation & "` needs a document in the editor")
+    else:
+      rt.runEditorOperation(buf, res, nowMs, outcome)
+    return
+  # The overlays and inputs.
+  if res.operation.startsWith("palette.") and rt.app.omnibar.isOpen:
+    case res.operation
+    of "palette.focus-previous": rt.app.omnibar.moveSelection(-1)
+    of "palette.focus-next": rt.app.omnibar.moveSelection(1)
+    of "palette.focus-page-up": rt.app.omnibar.moveSelection(-10)
+    of "palette.focus-page-down": rt.app.omnibar.moveSelection(10)
+    of "palette.accept": rt.acceptOmnibar(outcome)
+    of "palette.close":
+      rt.app.omnibar.close()
+      rt.note("")
+    else: discard
+    return
+  if res.operation.startsWith("input.") and rt.app.omnibar.isOpen:
+    case res.operation
+    of "input.move-left": rt.app.omnibar.moveCursor(-1)
+    of "input.move-right": rt.app.omnibar.moveCursor(1)
+    of "input.move-start": rt.app.omnibar.cursorHome()
+    of "input.move-end": rt.app.omnibar.cursorEnd()
+    of "input.delete-backward": rt.app.omnibar.backspace()
+    of "input.delete-forward": rt.app.omnibar.deleteForward()
+    of "input.toggle-overwrite": rt.app.omnibar.toggleOverwrite()
+    of "input.copy", "input.cut":
+      # A field holds no selection: the whole of it is what is copied.
+      if rt.app.omnibar.query.len > 0:
+        rt.copyToClipboard(rt.app.omnibar.query, "the query")
+        if res.operation == "input.cut": rt.app.omnibar.setQuery("")
+    of "input.paste":
+      if not rt.holdPaste(ptPalette, res): rt.pasteIntoField(ptPalette)
+    of "input.commit": rt.acceptOmnibar(outcome)
+    of "input.cancel":
+      rt.app.omnibar.close()
+      rt.note("")
+    else: rt.note("`" & op & "` is not available in the palette")
+    return
+  if res.operation.startsWith("context-menu.") and rt.app.contextMenu.open:
+    case res.operation
+    of "context-menu.focus-previous": rt.app.contextMenu.move(-1)
+    of "context-menu.focus-next": rt.app.contextMenu.move(1)
+    of "context-menu.focus-first": rt.app.contextMenu.moveToEnd(last = false)
+    of "context-menu.focus-last": rt.app.contextMenu.moveToEnd(last = true)
+    of "context-menu.accept":
+      let chosen = rt.app.contextMenu.choose(-1)
+      if chosen.chosen:
+        rt.runContextAction(chosen.action, chosen.target, outcome)
+    of "context-menu.close": rt.app.contextMenu.close()
+    else: discard
+    return
+  # K17 / K18 / K19 from the keyboard, on the focused Files pane.
+  if not rt.prompt.open:
+    let (had, focused) = rt.focus.focusedPane()
+    if had and focused == paneFileTree and
+       rt.runFilesKeyOperation(res.operation, outcome):
+      return
+    if had and focused == paneTestResults and rt.app.tests.loaded and
+       rt.runTestsKeyOperation(res.operation, outcome):
+      return
+  if res.operation.startsWith("input.") and rt.prompt.open:
+    case res.operation
+    of "input.copy", "input.cut":
+      if rt.prompt.buffer.len > 0:
+        rt.copyToClipboard(rt.prompt.buffer, "the command line")
+        if res.operation == "input.cut":
+          discard rt.prompt.moveCursor(KeyEnd)
+          while rt.prompt.buffer.len > 0:
+            discard rt.prompt.backspace()
+      return
+    of "input.paste":
+      if not rt.holdPaste(ptPrompt, res): rt.pasteIntoField(ptPrompt)
+      return
+    else: discard
+    let key = case res.operation
+              of "input.commit": "Enter"
+              of "input.cancel": "Esc"
+              of "input.delete-backward": "Backspace"
+              of "input.delete-forward": "Delete"
+              of "input.move-left": "Left"
+              of "input.move-right": "Right"
+              of "input.move-start": "Home"
+              of "input.move-end": "End"
+              of "input.history-previous": "Up"
+              of "input.history-next": "Down"
+              of "input.complete": "Tab"
+              else: ""
+    if key.len == 0:
+      rt.note("`" & op & "` is not available in the command line")
+    else:
+      rt.runPromptKey(key, outcome)
+    return
+  case res.operation
+  of "find.next", "find.previous":
+    if rt.router.base.isModal or rt.prompt.open or rt.app.findQuery.len > 0:
+      rt.runFind(res.operation == "find.next", outcome)
+      return
+  of "find.close":
+    if rt.prompt.open and rt.prompt.kind != pkCommand:
+      discard rt.prompt.cancel()
+      discard rt.modal.applyModalEvent(meCancel)
+      rt.note("")
+    return
+  of "find.open", "find.open-backward":
+    rt.app.findOwner = rt.focusOwnerId()
+  of "editor.toggle-read-only":
+    let buf = rt.editorBuffer()
+    if buf.isNil:
+      rt.note("there is no document in the editor to make writable")
+    else:
+      buf.doc.setReadOnly(not buf.doc.isReadOnly)
+      rt.note(if buf.doc.isReadOnly: "the editor is read-only"
+              else: "the editor is writable — Ctrl+E makes it read-only again")
+    return
+  of "editor.toggle-tracepoint":
+    rt.openTracepointEditorAt(rt.app.source.path, rt.editorCaretLine())
+    return
+  of "debugger.stop":
+    # M76: the keymap's Stop (CUA's `Shift+F5`) — the menu item's proc.
+    rt.stopDebugging(outcome)
+    return
+  of "editor.toggle-tab-moves-focus":
+    rt.tabMovesFocus = not rt.tabMovesFocus
+    rt.note(if rt.tabMovesFocus: "Tab moves the focus (Ctrl+M again to indent)"
+            else: "Tab indents")
+    return
+  of "list.show-detail":
+    # PLAT-70 Part B (Horizontal-Overflow.md §5.3).
+    rt.showDetail(outcome)
+    return
+  of "table.resize-column":
+    # PLAT-70 Part B (§5.2): the Event Log is the table whose columns resize.
+    rt.resizeEventLogColumn(res.argument, outcome)
+    return
+  of "list.copy":
+    let (text, what) = rt.focusedRowText()
+    if text.len == 0: rt.note("nothing is selected here to copy")
+    else: rt.copyToClipboard(text, what)
+    return
+  of "list.focus-previous": rt.performAction(kaScrollLineUp, outcome); return
+  of "list.focus-next": rt.performAction(kaScrollLineDown, outcome); return
+  of "list.focus-page-up": rt.performAction(kaHalfPageUp, outcome); return
+  of "list.focus-page-down": rt.performAction(kaHalfPageDown, outcome); return
+  of "view.scroll-left", "view.scroll-right", "view.scroll-left-half",
+     "view.scroll-right-half", "view.scroll-to-line-start":
+    # PLAT-70 (Horizontal-Overflow.md §4.4): the output panes' view.
+    discard rt.runViewOperation(res.operation, outcome)
+    return
+  of "help.check-key-delivery":
+    rt.keyCheck = startCheck()
+    rt.note("keys check: press keys to see how they arrive; Esc ends the check")
+    return
+  of "menu.open", "menu.toggle", "menu.open-folder":
+    rt.runMenuOperation(res.operation, res.argument)
+    outcome.repaint = true
+    return
+  of "layout.reveal-next-docked":
+    rt.cycleReveal(outcome)
+    return
+  of "search.find-in-files":
+    # PLAT-57: `search.find-in-files(query?)` — with a pattern, the search;
+    # without, the pane and its field (`Ctrl+Shift+F`).
+    if res.argument.len > 0: rt.runFindInFiles(res.argument, outcome)
+    else: rt.openFindInFiles(outcome)
+    return
+  of "search.next-result", "search.previous-result":
+    # PLAT-57 (§5.3): `F4` / `Shift+F4`, `Alt+G N` / `Alt+G P`.
+    rt.stepFindInFiles((if res.operation == "search.next-result": 1 else: -1),
+                       outcome)
+    return
+  of "search.toggle-case", "search.toggle-whole-word", "search.toggle-regex":
+    # PLAT-57: `Alt+C` / `Alt+W` / `Alt+R` in Find in Files' field (the
+    # omnibox on `:grep`, `searchInputFocus`) — the toggle flips and a search
+    # that ran runs again.
+    rt.note(if rt.app.toggleSearchOption.isNil:
+              "Find in Files needs a recording or a project to search"
+            else: rt.app.toggleSearchOption(res.operation))
+    return
+  else: discard
+  let palette = paletteQueryOf(res.operation)
+  if palette.ok:
+    outcome.action = kaCommandPalette
+    rt.openOmnibar(palette.query)
+    return
+  let action = actionOfOperation(op)
+  if action == kaNone:
+    rt.note("`" & op & "` (" & operationLabelOf(res.operation) &
+            ") is not available in the terminal")
+    return
+  rt.performAction(action, outcome)
+
+proc runResolution(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
+                   outcome: var RuntimeOutcome) =
+  ## What a resolution does on this terminal: an operation is dispatched, a
+  ## character goes into the focused text element, a pending prefix and the
+  ## reason for nothing are shown (§6.1 step 5).
+  case res.kind
+  of erPending:
+    rt.note(rt.router.pendingLabel)
+    outcome.repaint = true
+  of erNothing:
+    case res.reason
+    of nrPrefixAbandoned:
+      rt.note("")
+      outcome.repaint = true
+    of nrPrefixTimedOut:
+      rt.note("")
+      outcome.repaint = true
+    of nrDisabled:
+      # Mode-Transitions §8.1: inert in this product mode, and SAID — the
+      # operation, the mode it needs, the chord that switches.
+      rt.note(rt.router.inertNote(res, rt.sessionFacts, rt.scopePath,
+                                  rt.navMode))
+      outcome.repaint = true
+    else: discard
+  of erCharacter:
+    outcome.repaint = true
+    if rt.app.omnibar.isOpen:
+      rt.app.omnibar.typeText(res.character)
+    elif rt.prompt.open:
+      rt.runPromptKey(res.character, outcome)
+    else:
+      let buf = rt.editorBuffer()
+      if not buf.isNil and rt.editorFocused:
+        rt.runEditorOperation(buf, res, nowMs, outcome)
+  of erOperation:
+    rt.runOperation(res, nowMs, outcome)
+
+proc runPromptKey(rt: TuiRuntime; key: string;
+                  outcome: var RuntimeOutcome) =
+  ## One editing step of the open command line or find field: `key` is a
+  ## canonical name of one of the keys `command_line.applyKey` reads
+  ## (`Enter`, `Esc`, `Backspace`, the arrows, `Tab`) or a character. The
+  ## router decided the key is this; the prompt's model performs it.
+  let before = rt.prompt.buffer
+  let line = if key == "Enter": rt.prompt.buffer else: ""
+  let cla = rt.prompt.applyKey(key, rt.promptCandidates())
+  outcome.repaint = true
+  case cla
+  of claUnhandled:
+    discard
+  of claSubmitted:
+    rt.runPromptLine(line, outcome)
+    # A §4.3 COMMAND MAY RESOLVE TO A LOCAL ACTION, and `quit` does. Routed
+    # through the SAME `applyLocalAction` the key path uses rather than
+    # answered here, so `:quit` and `Ctrl+Q` cannot end a session
+    # differently.
+    if outcome.action != kaNone:
+      discard rt.applyLocalAction(outcome.action, outcome)
+    discard rt.modal.applyModalEvent(meCommit)
+    # K19: a refused Files name keeps its field open, with the name typed.
+    if rt.filesReprompt.len > 0:
+      discard rt.openPrompt(pkCommand)
+      discard rt.prompt.insert(rt.filesReprompt)
+      rt.prompt.message = rt.app.notification
+      rt.filesReprompt = ""
+  of claCancelled:
+    discard rt.modal.applyModalEvent(meCancel)
+    # K19: Escape on a Files name field or Delete question cancels it.
+    rt.note(rt.cancelFilesField())
+  else:
+    discard before
 
 proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ## ONE input token, end to end.
@@ -3348,33 +6349,41 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ##   0. **A mouse report is not a key, and it goes to the layout binding.**
   ##      PLAT-6, and only when a binding is enabled — see `routeMouseReport`
   ##      for the precedence rule and `enableLayoutBinding` for the opt-in.
-  ##      Ahead of the prompt because a report is not a prompt key and
-  ##      `command_line.applyKey` answers `claUnhandled` for one (its printable
-  ##      arm requires `token.len == 1`), so taking it here removes nothing from
-  ##      an open prompt.
-  ##   1. **An open prompt owns its keys first.** `command_line.applyKey`
-  ##      answers `claUnhandled` for anything that is not a prompt key, so this
-  ##      is a filter and not a swallow — but `Esc`, `Enter`, `Backspace`,
-  ##      `Tab`, the arrows and every printable character belong to the prompt
-  ##      while it is open, and CTUI-10 found the one that bites: `Space` is
-  ##      `keyName` `"Space"`, and a resolver that classified it as a command
-  ##      lost every space in `:goto 4500`.
-  ##   2. **`keymap.resolve`**, which owns the pending-chord timeout and the
-  ##      text-entry shadow.
-  ##   3. **Local actions** — focus, maximize, opening a prompt, quitting.
-  ##   4. **CTUI-10's dispatcher** for everything that is a debugger command.
+  ##      Ahead of the keys because a report is not one: `keyName` answers ""
+  ##      for it, so taking it here removes nothing from the router or from an
+  ##      open prompt.
+  ##   1. **The terminal's own widgets, outside the keymap**: a gesture in
+  ##      flight takes `Esc` (PLAT-47), a new tab's Welcome Screen its form
+  ##      (PLAT-51), an event's content overlay and the program menu every key
+  ##      while open (PLAT-48/49/50), the focused terminal output its few keys
+  ##      (PLAT-52), and `:keys check` reports keys instead of running them.
+  ##   2. **Every other key goes through the router** (PLAT-68, Base-Keymaps
+  ##      §6.1): `routeKey` resolves the key's canonical name against this
+  ##      terminal's scope path (`scopePath`, read off the `isonim-tui` focus
+  ##      tree) and facts, and `runResolution` runs the answer. An open prompt
+  ##      is a pushed layer of that same router, so its keys — `Esc`, `Enter`,
+  ##      `Backspace`, the arrows, every printable character (CTUI-10: `Space`
+  ##      included, or `:goto 4500` lost its spaces) — resolve to the prompt's
+  ##      operations or to characters typed into it, and the router owns the
+  ##      pending-chord timeout.
   result = RuntimeOutcome(repaint: false, quit: false, awaitsMove: false,
                           action: kaNone, detail: "")
   rt.lastToken = token
-  rt.lastKey = keyName(token)
-  # PLAT-51: ALT + A CHARACTER arrives as ONE `ESC <char>` token (the
-  # framer, `host/terminal_driver.feed`). The caret's Alt+T — the desktop's
-  # "Add tracepoint" chord — is the one this front-end binds; any other is the
-  # character alone, which is what the framer delivered before it framed Alt.
-  if token.len == 2 and token[0] == '\x1b' and
-     rt.lastKey.startsWith("Alt+") and
-     not rt.caretTakesAltChord(rt.lastKey):
+  rt.lastKey = rt.keyOf(token)
+  # PLAT-51: ALT + A KEY arrives as ONE `ESC <byte>` token (the framer,
+  # `host/terminal_driver.feed`). An Alt chord the router resolves to
+  # something here (the desktop's `Alt+T`, Emacs's `M-f`, CUA's `Alt+Up`, a
+  # user's row) is taken as the chord; any other is the key alone, which is
+  # what the framer delivered before it framed Alt.
+  if token.len == 2 and token[0] == '\x1b' and token[1] != '\x1b' and
+     not rt.app.menu.isOpen and not rt.app.content.open and
+     not rt.terminalInfo.open and
+     rt.probeKey(rt.lastKey).kind == erNothing:
     return rt.handleToken(token[1 .. 1], nowMs)
+  # PLAT-71: `:terminal-info` takes every token while it is open.
+  if rt.terminalInfo.open:
+    rt.handleTerminalInfoToken(token, result)
+    return
 
   # PLAT-6's MOUSE HALF, ROUTED HERE AND ONLY WHEN A BINDING IS ENABLED. The
   # decoder is not even CALLED without one, so with the flag off this is one
@@ -3393,7 +6402,19 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     # Shift-modified report finds the TUI standing down exactly as the
     # browser build's handlers do on Shift — no menu, no drag, no focus, no
     # repaint. (`--no-mouse` stays the whole-session escape.)
+    #
+    # THE ONE EXCEPTION IS THE WHEEL (Horizontal-Overflow.md §4.3): a
+    # delivered Shift + vertical wheel scrolls sideways, as it does on the
+    # desktop and GPUI — best effort, because many terminals keep that
+    # gesture for their own scrollback and never report it.
     if isMouse and event.shift:
+      if event.kind == mekPress and event.button in {mbWheelUp, mbWheelDown}:
+        var sideways = event
+        sideways.shift = false
+        sideways.button = if event.button == mbWheelUp: mbWheelLeft
+                          else: mbWheelRight
+        if rt.routeHorizontalWheel(sideways, result):
+          return
       rt.lastToken = token
       return
     if isMouse:
@@ -3401,6 +6422,12 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       if event.kind == mekMotion and event.button != mbLeft and
          rt.layoutBindingEnabled():
         rt.autoHidePointer(event, nowMs, result)
+      # PLAT-70 Part B (Horizontal-Overflow.md §5.3): and a truncated table
+      # cell's tooltip clock; a press hides a shown tooltip.
+      if event.kind == mekMotion and event.button != mbLeft:
+        rt.cellHoverPointer(event, nowMs, result)
+      elif event.kind == mekPress and rt.dismissCellHover():
+        result.repaint = true
       # PLAT-50: an open right-click menu or content overlay first — it is
       # over everything, the top bar included.
       if rt.routeOverlayMouse(event, result):
@@ -3411,11 +6438,19 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
       # PLAT-51: the open frame viewer's own scrubber (it is over the panes).
       if rt.routeFrameViewerMouse(event, result):
         return
-      # PLAT-51: and on a list pane's scrubber thumb, and on the Variables
-      # pane's column separator.
-      if rt.routeListScrubDrag(event, result):
+      # PLAT-70 Part H: every pane's scrollbars — a held thumb or paging
+      # press, a press on a bar, and the hover states and fade wakes of any
+      # motion (Scrollbar-Scrubbers.md §7.4).
+      if rt.layoutBindingEnabled() and
+         rt.routeScrollbars(event, nowMs, result):
         return
+      # PLAT-51: and on the Variables pane's column separator.
       if rt.routeVariablesResize(event, result):
+        return
+      # PLAT-70 Part B: and on an Event Log column separator.
+      if rt.routeEventLogResize(event, result):
+        return
+      if rt.routeTextDrag(event, result):
         return
       if rt.routeTopBarMouse(event, result):
         return
@@ -3424,6 +6459,10 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
         return
       if event.kind == mekMotion and event.button != mbLeft:
         return
+    elif rt.dismissCellHover():
+      # PLAT-70 Part B (Horizontal-Overflow.md §5.3): a key hides a shown
+      # tooltip.
+      result.repaint = true
   if rt.layoutBindingEnabled():
     let (isMouse, event) = decodeMouse(token)
     if isMouse:
@@ -3433,7 +6472,7 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     # ghost go, a held divider snaps back, and nothing is committed (`cancel`
     # takes no layout). Only when one is in flight: otherwise `Esc` is the
     # mode key it has always been.
-    if token == "\x1b" and not rt.app.menu.isOpen and
+    if rt.keyOf(token) == "Esc" and not rt.app.menu.isOpen and
         not rt.app.omnibar.isOpen and
         rt.app.layoutBinding.interaction.kind in {ikDraggingTab,
                                                   ikResizingSplit,
@@ -3449,47 +6488,12 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   if rt.routeWelcomeKey(token, result):
     return
 
-  if rt.prompt.open:
-    let before = rt.prompt.buffer
-    let candidates = rt.promptCandidates()
-    let submitted = token == "\r" or token == "\n"
-    let line = if submitted: rt.prompt.buffer else: ""
-    let cla = rt.prompt.applyKey(token, candidates)
-    case cla
-    of claUnhandled:
-      discard
-    of claSubmitted:
-      rt.runPromptLine(line, result)
-      # A §4.3 COMMAND MAY RESOLVE TO A LOCAL ACTION, and `quit` does. Routed
-      # through the SAME `applyLocalAction` the key path uses rather than
-      # answered here, so `:quit` and `q` cannot end a session differently.
-      if result.action != kaNone:
-        discard rt.applyLocalAction(result.action, result)
-      discard rt.modal.applyModalEvent(meCommit)
-      result.repaint = true
-      return
-    of claCancelled:
-      discard rt.modal.applyModalEvent(meCancel)
-      rt.note("")
-      result.repaint = true
-      return
-    else:
-      result.repaint = rt.prompt.buffer != before or cla == claCursorMoved or
-                       cla == claNoCompletion or cla == claNoHistory
-      if not result.repaint:
-        # An edit that changed nothing still redraws: `claNoCompletion` puts a
-        # message on the line, and a message the user cannot see is the same as
-        # no message at all.
-        result.repaint = true
-      return
-
-  # PLAT-50: an open right-click menu owns the keys, as the program menu
-  # does; the content overlay closes on Esc / q / Enter.
-  if rt.app.contextMenu.open:
-    rt.handleContextMenuKey(token, result)
-    return
+  # PLAT-50: an event's content overlay closes on Esc / q / Enter and
+  # scrolls; the program menu (PLAT-48/49) owns every key while open, with
+  # its type-to-select. Both are the terminal's own widgets over their
+  # ViewModels (`ContentOverlay`, `MenuVM`), outside the keymap.
   if rt.app.content.open:
-    case keyName(token)
+    case rt.keyOf(token)
     of "Escape", "Esc", "Enter", "q":
       rt.app.content = ContentOverlay()
       result.repaint = true
@@ -3500,67 +6504,9 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     of "PageDown", "Space":
       rt.app.content.scroll(10); result.repaint = true; return
     else: discard
-  # PLAT-48: AN OPEN OMNIBAR, THEN AN OPEN MENU, OWN EVERY KEY — the text
-  # field and the menu are modal, as the desktop's are.
-  if rt.app.omnibar.isOpen:
-    rt.handleOmnibarKey(token, result)
-    return
   if rt.app.menu.isOpen:
     rt.handleMenuKey(token, nowMs, result)
     return
-  case keyName(token)
-  of MenuKey:
-    rt.app.menu.open(keyboard = true)
-    rt.note("menu: arrows to move, Enter to choose, Esc to close")
-    result.repaint = true
-    return
-  of RevealKey:
-    rt.cycleReveal(result)
-    return
-  else:
-    discard
-  # PLAT-51: THE READ-ONLY EDITOR'S CARET, once a click placed it, takes the
-  # arrows (and the tracepoint chords) while the source pane has the focus.
-  if rt.app.modes.product != pmEdit and rt.handleCaretKey(token, result):
-    return
-
-  # PLAT-16, STEP 1a: THE EDITOR OWNS ITS OWN KEYS, and it owns them by FOCUS
-  # rather than by a fifth input mode.
-  #
-  # The question "is this key text?" is answered by three facts that are all
-  # already modelled: the PRODUCT mode is Edit, the INPUT mode is NORMAL, and
-  # the FOCUSED pane is the editor. None of them is new state, which is why
-  # this is what the milestone shipped.
-  #
-  # **THE REASON IS SCOPE, NOT §1.2, AND THE EARLIER SPELLING OF THIS COMMENT
-  # HAD THAT WRONG.** It said §1.2 "forbids the obvious implementation — an
-  # INSERT mode beside NORMAL/COMMAND/SEARCH/INSPECT". It does not. §1.2
-  # forbids `UiMode` gaining **`EDIT`** — a PRODUCT mode masquerading as an
-  # input mode — and its sentence is precise about which collapse it is
-  # written against: *"`UiMode` … enumerates input modes and its cardinality is
-  # asserted by `test_layout_profiles.nim`"*. `INSERT` is an INPUT mode, the
-  # same family §4.1 enumerates, and adding it would be a fifth member of a
-  # list that already has four; it is not the two-dimensions-into-one collapse
-  # §1.2 exists to prevent. Deferring it is still right — a fifth input mode
-  # moves `modal_state`'s machine, every transition into and out of it, the
-  # cursor policy, the status indicator and the cardinality assertion, which is
-  # a milestone of its own — but it is deferred because it is BIG, not because
-  # it is FORBIDDEN, and a false prohibition in a comment is worse than an
-  # acknowledged gap: it tells the next author the door is locked.
-  #
-  # WHAT THE DEFERRAL COSTS, RECORDED RATHER THAN DISCOVERED LATER: `:` is a
-  # printable key, so while the editor is focused it types a colon instead of
-  # opening the command prompt, and `q` types a `q` instead of quitting. `Tab`
-  # is therefore deliberately NOT routed to the buffer — it stays "focus the
-  # next pane", so there is always a key that gets the user out — and neither
-  # is `Shift+Tab`. The consequence is that `:w`, `:build` and `:run` are
-  # reached by tabbing off the editor first. That is an ergonomic hole and it
-  # is named in PLAT-16's status note.
-  if rt.editorOwnsToken(token):
-    let outcome = rt.routeTokenToEditor(token, nowMs)
-    if outcome != ekIgnored:
-      result.repaint = true
-      return
 
   # PLAT-52: THE TERMINAL OUTPUT'S OWN KEYS while it is focused — the
   # previous / next write and the view toggle, keys no global binding uses.
@@ -3568,50 +6514,32 @@ proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
     rt.routeTokenToTerminalOutput(token, result)
     return
 
-  let resolution = rt.keymap.resolve(rt.modal, rt.pending, token, nowMs,
-                                     rt.app.modes.product)
-  case resolution.kind
-  of krNone:
-    return
-  of krInertInMode:
-    # Mode-Transitions.md §8.1: "A chord whose action has no meaning in the
-    # current mode must be inert AND SAY SO. … A key that silently does nothing
-    # is indistinguishable from a key that is broken."
-    #
-    # The reason goes on the status line, which is "the surface the user is
-    # looking at". `result.action` carries the action that WOULD have fired so
-    # a caller can name it; `result.detail` carries the sentence so a test
-    # asserts what the user was told rather than that something happened.
-    result.action = resolution.action
-    result.detail = resolution.reason
-    rt.note(resolution.reason)
-    result.repaint = true
-    return
-  of krPending, krPendingAbandoned, krPendingTimedOut:
-    # The pending indicator is part of the screen (§4.2: "a visible pending
-    # indicator"), so every one of these repaints.
-    rt.note(if resolution.pending.len > 0: resolution.pending else: "")
-    result.repaint = true
-    return
-  of krText:
-    # A printable key in a text-accepting mode with no prompt open. Nothing in
-    # this front-end is in that state today — the prompt is what makes a mode
-    # text-accepting — so it is reported rather than dropped.
-    rt.note("no text field is open for `" & resolution.character & "`")
-    result.repaint = true
-    return
-  of krAction:
-    discard
-
-  # PLAT-48: §4.2's `Ctrl+p` / `F1` "Fuzzy Command Palette" IS THE OMNIBAR —
-  # the desktop's palette is its omnibar, and one model draws both.
-  if resolution.action == kaCommandPalette:
-    result.action = kaCommandPalette
-    rt.openOmnibar()
+  # PLAT-68: `:keys check` — every key is reported, none is run, until Esc.
+  let name = rt.keyOf(token)
+  if rt.keyCheck.active:
+    if name == "Esc":
+      var bound: seq[string] = @[]
+      for b in rt.router.effective.bindings & rt.router.user.bindings:
+        if b.chords.len == 1: bound.add b.chords[0]
+      rt.note(rt.keyCheck.report(bound))
+      rt.keyCheck = KeyCheck()
+    elif name.len > 0:
+      rt.keyCheck.note(name)
+      let res = rt.probeKey(name)
+      rt.note(arrivalLine(name, case res.kind
+        of erOperation: (if res.argument.len > 0:
+                           res.operation & "(" & res.argument & ")"
+                         else: res.operation)
+        of erCharacter: "types `" & res.character & "`"
+        of erPending: "starts " & res.spelling & "…"
+        of erNothing: ""))
     result.repaint = true
     return
 
-  rt.performAction(resolution.action, result)
+  # EVERY OTHER KEY GOES THROUGH THE ROUTER (Base-Keymaps §6.1): the
+  # canonical name, this terminal's scope path and facts, the shared
+  # resolver; the answer is dispatched by `runResolution`.
+  rt.runResolution(rt.routeKey(name, nowMs), nowMs, result)
 
 # ---------------------------------------------------------------------------
 # The screen
@@ -3725,8 +6653,20 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   ## LAYOUT through `motions.layoutFor` — so `z` really replaces the tree with a
   ## single-pane one rather than merely noting that it was pressed.
   rt.scheduleHighlights()
+  # PLAT-70: the output panes' widths before the model is taken from them.
+  rt.syncOutputViews()
+  # PLAT-70 Part I: the table panes' views over this frame's fit.
+  rt.syncTableViews()
   var model = rt.app.shellModel(rt.width, rt.height)
   model.status.mode = statusMode(rt.modal.mode)
+  # PLAT-68: the indicator's text is the router's (a pending prefix, a
+  # pushed mode, the modal mode under Vim / Kakoune, else the base).
+  rt.syncOverlayLayers()
+  model.status.label = rt.router.statusLabel(rt.scopePath, rt.navMode)
+  # PLAT-68: the Debug-mode editor's document — painted as the Edit pane
+  # once writable, and its selection over the recording's source while not;
+  # PLAT-70: its horizontal view, the caret followed.
+  rt.editorPaneModel(model, follow = true)
   if rt.maximize.active:
     # `z`. `motions.layoutFor` builds a one-pane `LayoutNode` of the SAME type
     # the profiles build, so `projectLayout`'s totality checks apply to the
@@ -3738,7 +6678,22 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   let (hasFocus, focused) = rt.focus.focusedPane()
   model.hasFocus = hasFocus
   model.focused = focused
+  model.scrollbars = rt.scrollbarFrame()
+  model.glyphs = glyphProfileOf(rt.caps)
+  model.ambiguous = ambiguousPolicyOf(rt.caps)
+  model.topBar.glyphs = model.glyphs
   result = shellScreen(model, rt.width, rt.height)
+  rt.noteBarsPainted(result.bars)
+  if rt.terminalInfo.open and result.styledRows.len == rt.height:
+    # PLAT-71: `:terminal-info` over the body, top bar and status kept.
+    var g = newStyledGrid(rt.width, rt.height)
+    g.glyphs = model.glyphs
+    g.ambiguous = model.ambiguous
+    let area = terminalInfoArea(rt.width, rt.height)
+    paintTerminalInfo(g, area, rt.terminalInfo, rt.terminalInfoBody())
+    for r in area.row ..< area.row + area.height:
+      result.styledRows[r] = g.rowSpans(r)
+      result.rows[r] = g.rowText(r)
   if rt.prompt.open and result.rows.len > 0:
     # §3.3.6's prompt replaces the status row while it is open. Painted over the
     # finished screen rather than folded into `ShellModel`, because
@@ -3755,6 +6710,8 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
   ## below it): the rectangle `shell.paintPane` hands its painter, less the
   ## divider row a pane with a neighbour below gives up (`shell.paneFrame`).
   ## Zero when the pane is not on the screen.
+  if rt.hostedRows.len > 0:
+    return rt.hostedRows.getOrDefault(pane)
   let model = rt.app.shellModel(rt.width, rt.height)
   let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
                else: model.layout
@@ -3765,6 +6722,34 @@ proc paneBodyRows*(rt: TuiRuntime; pane: PaneKind): int =
       let frame = paneFrame(region.area, body)
       return max(0, frame.box.height - 1)
   0
+
+proc paneBodyCols*(rt: TuiRuntime; pane: PaneKind): int =
+  ## How many columns `pane` has for its content on the CURRENT screen: the
+  ## rectangle `shell.paintPane` hands its painter, less a right divider
+  ## (`shell.paneFrame`). Zero when the pane is not on the screen. With the
+  ## pane server, the editor window's width (`hostedCols`).
+  if rt.hostedRows.len > 0:
+    return rt.hostedCols.getOrDefault(pane)
+  let model = rt.app.shellModel(rt.width, rt.height)
+  let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
+               else: model.layout
+  let body = bodyArea(rt.width, rt.height)
+  let projection = projectLayout(layout, body)
+  for region in projection.regions:
+    if region.pane == pane:
+      return max(0, paneFrame(region.area, body).box.width)
+  0
+
+proc editorBarShown*(rt: TuiRuntime): bool =
+  ## PLAT-70: whether the editor's document is wider than its pane, so its
+  ## horizontal bar takes the last row. The buffer is looked up, never
+  ## opened: opening one asks `sourcePaneRows` for its height.
+  if rt.app.editSession.isNil:
+    return false
+  let at = if rt.app.modes.product == pmEdit: rt.app.editSession.active
+           else: rt.app.editSession.indexOfPath(rt.app.source.path)
+  at >= 0 and at < rt.app.editSession.buffers.len and
+    rt.app.editSession.buffers[at].hview.overflows
 
 proc sourcePaneRows*(rt: TuiRuntime): int =
   ## How many rows the `editor` rectangle has on the CURRENT screen, minus its
@@ -3780,13 +6765,20 @@ proc sourcePaneRows*(rt: TuiRuntime): int =
   ##
   ## Zero when no profile gives the editor a rectangle, which the caller must
   ## clamp — `setViewport(0)` would hold no lines at all.
+  if rt.hostedRows.len > 0:
+    return rt.hostedRows.getOrDefault(paneEditor)
   let model = rt.app.shellModel(rt.width, rt.height)
   let layout = if rt.maximize.active: rt.maximize.layoutFor(model.profile)
                else: model.layout
   let projection = projectLayout(layout, bodyArea(rt.width, rt.height))
+  # PLAT-70: the horizontal bar takes the pane's last row while the
+  # document is wider than the pane (Horizontal-Overflow.md §4.7) — a window
+  # one row taller would put the execution line under it.
+  let bar = rt.editorBarShown()
   for region in projection.regions:
     if region.pane == paneEditor:
-      return max(0, region.area.height - 1)
+      let rows = max(0, region.area.height - 1)
+      return if bar and rows >= 2: rows - 1 else: rows
   0
 
 proc promptCursor*(rt: TuiRuntime): (bool, int, int) =
@@ -3817,3 +6809,230 @@ proc retryOrigin*(rt: TuiRuntime; line: string): RuntimeOutcome =
   else:
     rt.performAction(kaValueOrigin, result)
   result.repaint = true
+
+# ---------------------------------------------------------------------------
+# HSF-E1: a pane hosted by an editor (Editor-Hosted-Front-Ends §E5, §E6)
+# ---------------------------------------------------------------------------
+#
+# The pane server shows each pane in an editor window of the editor's size.
+# A pane's content is the terminal's own painting of that pane MAXIMIZED at
+# that size (`z`'s one-pane layout), less the header, the pane's tab strip and
+# the status row — the window's own frame names the pane. So the editor gets
+# exactly the rows the terminal would draw at that size, from the same
+# painters, and a click is read against the same rectangle the rows were
+# painted into.
+
+type
+  PaneOpArgs* = object
+    ## The arguments of a pane operation (`runPaneOperation`): whichever of
+    ## them the operation names.
+    index*: int64
+    tick*: uint64
+    path*: string
+    line*: int
+    text*: string
+
+  PaneHotspot* = object
+    ## A cell range of a hosted pane's row that does something when clicked
+    ## (§E6): `[startCol, endCol)` in cells, the pane operation and its
+    ## arguments.
+    startCol*, endCol*: int
+    operation*: string
+    args*: PaneOpArgs
+
+const
+  PaneOperations* = [
+    ("calltrace.go-to-call", "Go to this call"),
+    ("calltrace.toggle-call", "Expand or collapse this call"),
+    ("event-log.jump", "Go to this event"),
+    ("variables.toggle-expand", "Expand or collapse this value"),
+    ("variables.value-history", "Show this value's history"),
+    ("variables.value-origin", "Show this value's origin"),
+    ("variables.load-more", "Load more members"),
+    ("history.seek-to-tick", "Go to this moment"),
+    ("file-tree.open", "Open this file"),
+    ("file-tree.toggle-folder", "Expand or collapse this folder")]
+    ## The operations a hosted pane's rows offer: what a click on the same
+    ## cells of the terminal's pane does (`routeMouseReport`,
+    ## `routePaneClick`), named so an editor can bind them.
+
+proc hostedArea(height, width: int): CellArea =
+  ## The rectangle a hosted pane's painter is handed: its heading row (row 0,
+  ## which the terminal's tab strip covers and the editor does not show) and
+  ## the `height` content rows under it.
+  CellArea(col: 0, row: 0, width: width, height: height + 1)
+
+proc hostedPaneRows*(rt: TuiRuntime; pane: PaneKind;
+                     width, height: int): seq[StyledRow] =
+  ## The `height` content rows of `pane` at `width` cells: the terminal's own
+  ## screen with that pane maximized, without the header, the pane's strip
+  ## and the status row.
+  if width <= 0 or height <= 0:
+    return @[]
+  let savedMaximize = rt.maximize
+  let savedWidth = rt.width
+  let savedHeight = rt.height
+  rt.maximize = MaximizeState(active: true, pane: pane)
+  rt.width = width
+  rt.height = height + ChromeRows + 1
+  try:
+    let screen = rt.shellScreenOf()
+    for r in HeaderRows + 1 .. HeaderRows + height:
+      result.add (if r < screen.styledRows.len: screen.styledRows[r] else: @[])
+  finally:
+    rt.maximize = savedMaximize
+    rt.width = savedWidth
+    rt.height = savedHeight
+
+proc addRun(spots: var seq[PaneHotspot]; col: int; operation: string;
+            args: PaneOpArgs) =
+  ## Extend the hotspot ending at `col` when it is the same operation on the
+  ## same target, else start one.
+  if spots.len > 0 and spots[^1].endCol == col and
+     spots[^1].operation == operation and spots[^1].args == args:
+    spots[^1].endCol = col + 1
+  else:
+    spots.add PaneHotspot(startCol: col, endCol: col + 1,
+                          operation: operation, args: args)
+
+proc hostedHotspots*(rt: TuiRuntime; pane: PaneKind;
+                     width, height: int): seq[seq[PaneHotspot]] =
+  ## What a click on each cell of `pane`'s `height` content rows does, as
+  ## hotspots per row — read off the same hit tests the terminal's mouse
+  ## uses, against the rectangle `hostedPaneRows` painted.
+  result = newSeq[seq[PaneHotspot]](max(0, height))
+  if width <= 0 or height <= 0:
+    return
+  let area = hostedArea(height, width)
+  case pane
+  of paneFileTree:
+    # K17 / K18: a row opens its file or opens or closes its folder, as a
+    # press on the terminal's row does (`routePaneClick`).
+    let tree = rt.app.fileTree
+    if tree.entries.len == 0:
+      return
+    var g = newStyledGrid(area.col + area.width, area.row + area.height)
+    let screen = paintFileTree(g, area, tree)
+    for r in 0 ..< height:
+      let i = screen.entryIndexAt(r + 1)
+      if i < 0 or i >= tree.entries.len:
+        continue
+      let e = tree.entries[i]
+      result[r].add PaneHotspot(startCol: 0, endCol: width,
+        operation: (if e.isFolder: "file-tree.toggle-folder" else: "file-tree.open"),
+        args: PaneOpArgs(path: e.path))
+  of paneCalltrace:
+    if rt.app.callTrace.isEmpty:
+      return
+    for r in 0 ..< height:
+      for c in 0 ..< width:
+        let hit = rt.app.callTrace.callTraceHitAt(area, r + 1, c)
+        case hit.kind
+        of cthRow:
+          result[r].addRun(c, "calltrace.go-to-call", PaneOpArgs(index: hit.index))
+        of cthToggle:
+          result[r].addRun(c, "calltrace.toggle-call", PaneOpArgs(index: hit.index))
+        else: discard
+  of paneEventLog:
+    if not rt.app.eventLog.hasContent:
+      return
+    for r in 0 ..< height:
+      let (ok, row, _) = eventRowAt(rt.app.eventLog, area, r + 1)
+      if ok:
+        let ev = row.event
+        result[r].add PaneHotspot(startCol: 0, endCol: width,
+          operation: "event-log.jump",
+          args: PaneOpArgs(index: int64(ev.index), tick: ev.tick,
+                           path: ev.file, line: ev.line, text: ev.content))
+  of paneState:
+    if rt.app.variables.isEmpty:
+      return
+    var g = newStyledGrid(width, height + 1)
+    let screen = paintVariables(g, area, rt.app.variables)
+    for r in 0 ..< height:
+      let (anyRow, prow) = screen.rowAtScreenRow(r + 1)
+      if not anyRow:
+        continue
+      case prow.kind
+      of vrkHistory:
+        result[r].add PaneHotspot(startCol: 0, endCol: width,
+          operation: "history.seek-to-tick", args: PaneOpArgs(tick: prow.ticks))
+      of vrkMore:
+        result[r].add PaneHotspot(startCol: 0, endCol: width,
+          operation: "variables.load-more", args: PaneOpArgs(path: prow.node.path))
+      of vrkVariable:
+        for c in 0 ..< width:
+          case screen.controlAt(rt.app.variables, r + 1, c)
+          of vcHistory:
+            result[r].addRun(c, "variables.value-history",
+                             PaneOpArgs(path: prow.node.path))
+          of vcOrigin:
+            result[r].addRun(c, "variables.value-origin",
+                             PaneOpArgs(path: prow.node.path))
+          of vcNone:
+            if prow.expandable:
+              result[r].addRun(c, "variables.toggle-expand",
+                               PaneOpArgs(path: prow.node.path))
+          else: discard
+      else: discard
+  else:
+    discard
+
+proc runPaneOperation*(rt: TuiRuntime; operation: string; args: PaneOpArgs;
+                       outcome: var RuntimeOutcome): bool =
+  ## A hosted pane's operation (`PaneOperations`), as the outcome the same
+  ## click on the terminal's pane produces; the host applies it as it applies
+  ## a click's (`tui_session.applyOutcome`). False for an unknown operation.
+  outcome.repaint = true
+  case operation
+  of "calltrace.go-to-call":
+    outcome.jumpsToCall = true
+    outcome.callIndex = args.index
+  of "calltrace.toggle-call":
+    outcome.togglesCall = true
+    outcome.callIndex = args.index
+  of "event-log.jump":
+    outcome.requestClick(PaneClickRequest(kind: pcEventJump, index: args.index,
+                                          tick: args.tick, path: args.path,
+                                          line: args.line, text: args.text))
+  of "variables.toggle-expand":
+    discard rt.app.variables.toggleNode(args.path)
+  of "variables.value-history":
+    outcome.requestClick(PaneClickRequest(kind: pcValueHistory, path: args.path))
+  of "variables.value-origin":
+    outcome.requestClick(PaneClickRequest(kind: pcValueOrigin, path: args.path))
+  of "variables.load-more":
+    discard rt.app.variables.expandMore(args.path)
+  of "history.seek-to-tick":
+    outcome.requestClick(PaneClickRequest(kind: pcSeek, tick: args.tick))
+  of "file-tree.open":
+    outcome.requestClick(PaneClickRequest(kind: pcOpenFile, path: args.path))
+  of "file-tree.toggle-folder":
+    outcome.requestClick(PaneClickRequest(kind: pcToggleFolder, path: args.path))
+  else:
+    outcome.repaint = false
+    return false
+  true
+
+proc runNamedOperation*(rt: TuiRuntime; operation, argument: string;
+                        nowMs: int64): RuntimeOutcome =
+  ## A catalogued operation (`operation_catalogue`) by name — what a key bound
+  ## to it runs, through the same dispatch (`runOperation`).
+  result = RuntimeOutcome(action: kaNone)
+  rt.runOperation(EditingResolution(kind: erOperation, operation: operation,
+                                    argument: argument), nowMs, result)
+
+proc focusHostedPane*(rt: TuiRuntime; pane: PaneKind): bool =
+  ## Give `pane` the keyboard focus, as a click in it does: the operations
+  ## that act on the focused pane then act on it.
+  rt.rebuildFocus()
+  rt.focus.focusPaneKind(pane)
+
+proc paneShortcutReference*(rt: TuiRuntime; pane: PaneKind): seq[ReferenceEntry] =
+  ## Every binding live while `pane` has the focus (the router's shortcut
+  ## reference at that scope path): the bindings an editor installs in the
+  ## pane's buffer (§E6). The focus is put back afterwards.
+  let saved = rt.focus
+  discard rt.focusHostedPane(pane)
+  result = rt.router.shortcutReference(rt.sessionFacts, rt.scopePath, rt.navMode)
+  rt.focus = saved

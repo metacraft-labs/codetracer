@@ -87,7 +87,7 @@
 ## Nothing here constructs a ViewModel, a store or a backend. It takes the ones
 ## a real session built.
 
-import std/strutils
+import std/[algorithm, strutils, tables]
 
 import codetracer_embed
 
@@ -267,6 +267,27 @@ proc annotationsOf*(values: openArray[EditorValue]):
   for v in values:
     result.add inline_annotations.Annotation(name: v.name, value: v.value)
 
+proc lineAnnotationsOf*(byLine: Table[int, seq[EditorValue]]):
+                       seq[(int, seq[inline_annotations.Annotation])] =
+  ## The flow's per-line values (`editor_surface.flowValuesByLine`), in the
+  ## terminal pane's shape, by line. The values arrive pre-rendered; the one
+  ## thing the terminal does to them is its medium's: a cell holds no line
+  ## break, so a value's surrounding whitespace is trimmed and a break inside
+  ## it (a `<stdout>` chip's written text) is drawn as a space. The pane fits
+  ## the joined comment to the row as it fits every inline value.
+  var lines: seq[int] = @[]
+  for line in byLine.keys:
+    lines.add line
+  lines.sort()
+  for line in lines:
+    var anns: seq[inline_annotations.Annotation] = @[]
+    for v in byLine[line]:
+      var value = v.value.strip()
+      for c in ['\n', '\r', '\t']:
+        value = value.replace(c, ' ')
+      anns.add inline_annotations.Annotation(name: v.name, value: value)
+    result.add (line, anns)
+
 proc sourcePaneModelFor*(vm: SourceVM;
                          availability: SourceAvailability;
                          points: seq[SourcePoint] = @[];
@@ -274,8 +295,14 @@ proc sourcePaneModelFor*(vm: SourceVM;
                          heat = LineHeat();
                          gutterMode = gutLineNumbers;
                          notTakenLines: seq[int] = @[];
-                         inlineValues: seq[EditorValue] = @[]): SourcePaneModel =
+                         inlineValues: seq[EditorValue] = @[];
+                         lineValues = initTable[int, seq[EditorValue]]()):
+                        SourcePaneModel =
   ## The pane's model for the CURRENT frame.
+  ##
+  ## `lineValues` is the flow's values per line (`flowValuesByLine`, what
+  ## GPUI's rows carry): drawn on every line that has them, in place of the
+  ## execution line's names in scope there.
   ##
   ## `inlineValues` is what the shipped host passes (PLAT-42, 2026-09-23):
   ## `editor_surface.inlineValuesOf` — THE producer GPUI's editor uses — so
@@ -306,9 +333,32 @@ proc sourcePaneModelFor*(vm: SourceVM;
     heat = heat,
     gutterMode = gutterMode,
     degradedMessage = (
-      if availability == savAbsent: degradedMessageFor(vm.degradedState.val)
+      if availability == savAbsent: absentSourceMessageFor(path)
       else: ""),
-    notTakenLines = notTakenLines)
+    notTakenLines = notTakenLines,
+    lineValues = lineAnnotationsOf(lineValues))
+
+proc withSourceWindow*(model: SourcePaneModel; vm: SourceVM): SourcePaneModel =
+  ## `model` with `vm`'s CURRENT window: the held lines, their first line and
+  ## entry context, the file's length and the first visible line — and
+  ## everything else (the marks, the inline values, the flow overlay, the
+  ## provenance) as the stop's `sourcePaneModelFor` left it.
+  ##
+  ## M73 (#840): what a USER's scroll changes. Those other fields are facts
+  ## about the STOP — a line's inline value is the same whichever window
+  ## shows it — so a scroll re-reads only the window rather than rebuilding
+  ## the stop's whole model, and the pane cannot show values from one stop
+  ## beside another's window. Only for the file `model` already shows: any
+  ## other is the stop's business (`sourcePaneModelFor`).
+  result = model
+  if vm.path.val != model.path:
+    return
+  result.firstHeldLine = vm.heldFirstLine.val
+  result.heldLines = vm.heldLines.val
+  result.entryContext = (if vm.heldLineContexts.val.len > 0:
+                           vm.heldLineContexts.val[0] else: "")
+  result.totalLineCount = vm.totalLineCount.val
+  result.viewportTop = vm.visibleFirstLine.val
 
 # `followAndRequest` IS NO LONGER DECLARED HERE. PLAT-22 moved it to
 # `view_vocabulary/editor_surface.nim` and this module re-exports it (see the

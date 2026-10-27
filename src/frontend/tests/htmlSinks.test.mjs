@@ -602,6 +602,18 @@ assertEqual(filesMatching(/^ +result\.escape_html = true$/m),
 assertEqual(filesMatching(/escape_html\s*=\s*false/), '',
   'no source turns escape_html off');
 
+// --- the desktop Event Log: its cells are text nodes -----------------------
+//
+// The Event Log's rows used to be DataTables cells, which insert a column's
+// render result as HTML; the pane is now the generic IsoNim view, which draws
+// every recorded string with the DSL's `text` (a text node). Pinned so a cell
+// that went back to markup is a red run.
+{
+  const viewNim = shipped.get('src/frontend/viewmodel/views/isonim_event_log_view.nim') ?? '';
+  assert(viewNim.length > 0 && !/innerHTML|insertAdjacentHTML|verbatim/.test(viewNim),
+    'the Event Log view writes no markup: its cells are text nodes');
+}
+
 describe('S2. The other innerHTML sinks — each one\'s input, and what fixes it');
 
 // Everything below was read and set aside once already, on the assumption that
@@ -645,9 +657,17 @@ assert(/let text = tab\.titleElement\.textContent/.test(
 // HTML, JSX, Vue, PHP or template file it is markup by construction, and for
 // anything else a string literal will do.  Scan-only coverage: the module
 // reaches `ui_imports` and, through it, isonim.
-assertEqual(shippedMatching(/textDom\.textContent = cstring\(fmt"\{highLevelLine\}\| \{sourceCode\}"\)/),
-  'src/frontend/ui/low_level_code.nim',
-  "the low-level view writes the program's source line as text");
+//
+// f2c1d12f9 removed `ui/low_level_code.nim`: the pane is now
+// `viewmodel/views/isonim_low_level_code_view.nim`, which sets the source line
+// with `textContent`, and `tests/low_level_code_markup_dom_test.nim` (the
+// `renderer-dom` lane) renders a line of markup through it into jsdom and
+// asserts it reads as text.  This arm used to pin the deleted component's
+// `textDom.textContent` line; it now pins that the component is gone and that
+// its replacement is covered.
+assert(!sources.has('src/frontend/ui/low_level_code.nim')
+    && fs.existsSync(path.join(REPO, 'src/frontend/tests/low_level_code_markup_dom_test.nim')),
+  "the low-level component that wrote the program's source line is gone, and its replacement has a DOM test");
 assertEqual(shippedMatching(/textDom\.innerHTML/), '',
   'and never as markup');
 
@@ -697,18 +717,30 @@ assert(/rowsCount\*: int\n\s+startRow\*: int\n\s+endRow\*: int/.test(
     "the Run-test button's label is restored as text, not as markup");
 }
 
-// --- the `setInnerHtml` helpers: a constant chevron, and a CLOSED call set --
+// --- the chevron helpers: a constant chevron, and a CLOSED call set ---------
 //
 // "The payload is a constant SVG" is only true while nothing else calls the
-// helper, so the assertion is the whole call set, not the constant.
-assertEqual(filesMatching(/proc setInnerHtml\(r: WebRenderer/),
+// helper, so the assertion is the whole call set, not the constant.  The
+// Request panel's copy has been named `setPickerChevron` since 167227860; the
+// VCS view's is still `setInnerHtml`.  Both names are scanned, so a third
+// helper under either name, or a call with another argument, is a red run.
+// Since 09239daa3 the VCS view's helper is ONE generic proc,
+// `setInnerHtml[R, N](r: R; …)`, whose write is the `importjs`
+// `setInnerHtmlJS` — so the declaration is matched in either shape.
+assertEqual(filesMatching(/proc (setInnerHtml|setPickerChevron)(\[R, N\])?\(r: (WebRenderer|R);/),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim,'
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim',
-  'the scan finds both setInnerHtml helpers');
-assertEqual(matchesAcross(/r\.setInnerHtml\([^)]*\)/g),
-  'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setInnerHtml(chevronHost, chevronSvg) | '
+  'the scan finds both chevron helpers');
+assertEqual(matchesAcross(/r\.(setInnerHtml|setPickerChevron)\([^)]*\)/g),
+  'src/frontend/viewmodel/views/isonim_request_panel_view.nim:r.setPickerChevron(chevronHost, chevronSvg) | '
   + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:r.setInnerHtml(chevronHost, chevronSvg)',
   'and every call passes chevronSvg — the call set is closed');
+// The generic helper's raw `importjs` write takes any string, so the closed
+// call set above only holds while the helper is its one caller.
+assertEqual(matchesAcross(/\bsetInnerHtmlJS\(/g),
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS( | '
+  + 'src/frontend/viewmodel/views/isonim_vcs_view.nim:setInnerHtmlJS(',
+  'and it is named only by its declaration and that one call');
 assertEqual(matchesAcross(/^const chevron(Up|Down)Svg/gm),
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronDownSvg | '
   + 'src/frontend/viewmodel/views/isonim_request_panel_view.nim:const chevronUpSvg | '
@@ -743,20 +775,21 @@ describe('S3. The whole innerHTML population, pinned');
 /** Every shipped front-end file that writes innerHTML: `[file, clears, live]`. */
 const INNER_HTML_BY_FILE = [
   ['src/frontend/renderer.nim', 1, 0],
-  ['src/frontend/storybook_components.nim', 7, 2],
+  ['src/frontend/storybook_components.nim', 7, 0],
   ['src/frontend/subwindow.nim', 1, 0],
   ['src/frontend/ui/auto_hide_overlay.nim', 1, 0],
   ['src/frontend/ui/auto_hide.nim', 3, 0],
-  ['src/frontend/ui/calltrace.nim', 1, 0],
   ['src/frontend/ui/datatable.nim', 0, 2],
   ['src/frontend/ui/editor.nim', 0, 1],
-  ['src/frontend/ui/event_log.nim', 1, 0],
   ['src/frontend/ui/file_conflict_dialog.nim', 0, 1],
-  ['src/frontend/ui/flow.nim', 2, 0],
+  ['src/frontend/ui/flow.nim', 1, 0],
   ['src/frontend/ui/hcr_live_edit_panel.nim', 0, 1],
   ['src/frontend/ui/layout.nim', 3, 0],
-  ['src/frontend/ui/request_panel.nim', 1, 0],
-  ['src/frontend/ui/trace.nim', 6, 3],
+  // HSF-X2 removed the VS Code extension's components, and with them
+  // `ui/calltrace_extension.nim`'s, `ui/event_log.nim`'s and
+  // `ui/request_panel.nim`'s clears and one each of `ui/flow.nim`'s and
+  // `ui/trace.nim`'s.
+  ['src/frontend/ui/trace.nim', 5, 3],
   ['src/frontend/ui/welcome_screen.nim', 2, 0],
   ['src/frontend/viewmodel/views/context_menu_bridge.nim', 1, 0],
   // TRIAGED 2026-09-30, and the fact that it needed triaging is the finding.
@@ -774,6 +807,11 @@ const INNER_HTML_BY_FILE = [
   //     and `b` escapes `&`, `<` and `>` before emitting anything. The only
   //     markup it produces is `<span class="agent-inline-code">`, and its
   //     input is the user's own textarea.
+  //     RE-TRIAGED 2026-10-21: the function now also returns `s`, so the
+  //     view can repaint after it writes the prompt itself (it no longer
+  //     dispatches a synthetic `input` event to get that). The write and its
+  //     escaping are unchanged, and `s` still reads only `ta.value`; a value
+  //     the view writes reached it before as well, through that event.
   //
   // Three entries left this table in the same change — `ui/scratchpad.nim`,
   // `ui/state.nim`, `ui/terminal_output.nim` and one of `ui/calltrace.nim`'s
@@ -797,8 +835,6 @@ const INNER_HTML_BY_FILE = [
  * literal `&#x2715;`.  Its icon is now drawn by CSS, so the write is gone.)
  */
 const INNER_HTML_LIVE_WRITES = [
-  'src/frontend/storybook_components.nim: denseHost.innerHTML = `denseHtml`;',
-  'src/frontend/storybook_components.nim: if (detailedHost) detailedHost.innerHTML = `detailedHtml`;',
   'src/frontend/ui/datatable.nim: endRowField.innerHTML = cstring($(self.endRow))',
   'src/frontend/ui/datatable.nim: rowsCountField.innerHTML = cstring($(self.rowsCount))',
   'src/frontend/ui/editor.nim: el.innerHTML = frames[i]',
@@ -808,10 +844,10 @@ const INNER_HTML_LIVE_WRITES = [
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = "Loading..."',
   'src/frontend/ui/trace.nim: self.resultsOverlayDom.children[0].innerHTML = NO_RESULTS_MESSAGE',
   "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: el.innerHTML = cstring(html)",
-  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();})(#,#)\"\"\".}",
+  "src/frontend/viewmodel/views/isonim_agent_activity_view.nim: {.importjs: \"\"\"(function(ta,hl){function e(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}function b(v){var h='',i=0;while(i<v.length){if(v[i]==='`'){if(i+2<v.length&&v[i+1]==='`'&&v[i+2]==='`'){h+=e('```');i+=3;}else{var j=v.indexOf('`',i+1);if(j===i+1){h+=e('``');i+=2;}else if(j>0){h+='<span class=\"agent-inline-code\">`'+e(v.slice(i+1,j))+'`</span>';i=j+1;}else{h+=e(v[i]);i++;}}}else{var n=v.indexOf('`',i);if(n<0)n=v.length;h+=e(v.slice(i,n));i=n;}}return h+'\\n';}function s(){hl.innerHTML=b(ta.value);hl.scrollTop=ta.scrollTop;}ta.addEventListener('input',s);ta.addEventListener('scroll',function(){hl.scrollTop=ta.scrollTop;});s();return s;})(#,#)\"\"\".}",
   'src/frontend/viewmodel/views/isonim_build_view.nim: lineNode.innerHTML = cstring(lineCopy.htmlText)',
   'src/frontend/viewmodel/views/isonim_request_panel_view.nim: node.innerHTML = cstring(html)',
-  'src/frontend/viewmodel/views/isonim_vcs_view.nim: node.innerHTML = cstring(html)',
+  'src/frontend/viewmodel/views/isonim_vcs_view.nim: {.importjs: "#.innerHTML = #".}',
 ];
 
 const foundByFile = new Map();
@@ -868,8 +904,10 @@ assertEqual(
   assert(!/pinBtn\.innerHTML/.test(
     sources.get('src/frontend/ui/auto_hide.nim')),
     'auto_hide\'s floating unpin button writes no markup — CSS draws its icon');
-  assert(/htmlEscape\(/.test(sources.get('src/frontend/storybook_components.nim')),
-    'the storybook table builder escapes the values it interpolates');
+  // The storybook's Event Log is the generic view now; the table markup it
+  // used to build (and escape) is gone with DataTables.
+  assert(!/denseHost\.innerHTML/.test(sources.get('src/frontend/storybook_components.nim')),
+    'the storybook builds no Event Log table markup');
 }
 
 // The sink deleted rather than fixed: an exported proc whose whole body was
@@ -996,7 +1034,19 @@ assertEqual(shippedMatchesAcross(/"nodeIntegration": true/g),
 // and that adds the panel to `INNER_HTML_BY_FILE` / `INNER_HTML_LIVE_WRITES`,
 // rather than the reconciliation being relaxed — this check is what forced the
 // new sink to be triaged by name instead of appearing unnoticed.
-const EXPECTED_ASSERTIONS = 163;
+// 163 -> 208 on 2026-10-22, for arm D (the desktop Event Log's DataTables
+// cells: 4 newly published probe entry points, the DataTables control, 4
+// assertions for each of 6 hostile outputs and 2 hostile locations, the two
+// corpus counts and the three plain-row checks) and its three column-wiring
+// assertions in arm S.  Raised in the same diff that adds them.
+// 208 -> 209 on 2026-10-22, for the assertion that the VCS view's raw
+// `setInnerHtmlJS` write (the generic chevron helper's, since 09239daa3) is
+// named only by its declaration and the helper's one call, so the chevron's
+// closed call set still covers the sink.  Raised in the same diff.
+// 209 -> 165 on 2026-10-22: the desktop Event Log is no longer a DataTables
+// table, so arm D and its probe entry points (41) and the column-wiring scan
+// (3) went with it; the scan that its view writes no markup came in (+1).
+const EXPECTED_ASSERTIONS = 165;
 const total = passed + failed;
 console.log(`\n\x1b[1m${total} assertions, ${failed} failed\x1b[0m`);
 // Trap 4b again, at the top level: a silent skip anywhere above moves this.

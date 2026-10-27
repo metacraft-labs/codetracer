@@ -67,10 +67,15 @@ import std/[sequtils, strutils, unicode]
 
 import isonim_tui
 
+import headless_app/layout_model
+
 import ../theme/capabilities
 import ../theme/palette
+import ./glyph_table
+import ./scrollbar_frame
 
-export palette
+export palette, scrollbar_frame, glyph_table
+export isonim_tui.AmbiguousWidth
 
 type
   FrameOverlayKind* = enum
@@ -110,10 +115,35 @@ type
     width*: int
     height*: int
     cells: seq[StyledCell]
+    scrollbars*: ScrollbarFrame
+      ## PLAT-70 Part H: how this frame's scrollbars are drawn — set by the
+      ## shell before the panes paint (`scrollbar_frame`). The zero value
+      ## draws every bar at rest.
+    painting*: PaneKind
+      ## The pane being painted: what a bar drawn now belongs to.
+    bars*: seq[BarSpot]
+      ## Every scrollbar painted into this grid (`scrollbar_styles.paintBar`).
+    glyphs*: GlyphProfile
+      ## PLAT-71 (Terminal-Adaptation §6): which column of the glyph table
+      ## this frame's chrome is drawn from — set by the shell from the
+      ## terminal's profile. The zero value is the extended, narrow screen.
+    ambiguous*: AmbiguousWidth
+      ## The width policy for East Asian Width `A` (§6.6): how many cells
+      ## `paint` gives an ambiguous glyph. Passed explicitly, never read from
+      ## a thread-local.
 
 # ---------------------------------------------------------------------------
 # The grid
 # ---------------------------------------------------------------------------
+
+func cellsOfRune*(r: Rune; ambiguous: AmbiguousWidth): int =
+  ## The cells one rune takes in this front-end's grid: its display width
+  ## under `ambiguous`, except that a CONTROL character (a tab in a recorded
+  ## line) keeps the one cell the grid has always given it. A combining
+  ## mark, a joiner or a variation selector takes none.
+  let cp = int(r)
+  if cp < 0x20 or (cp >= 0x7f and cp <= 0x9f): 1
+  else: displayWidth(r, ambiguous)
 
 proc newStyledGrid*(width, height: int): StyledGrid =
   result = StyledGrid(width: max(0, width), height: max(0, height), cells: @[])
@@ -139,7 +169,12 @@ proc paint*(g: var StyledGrid; row, col: int; text: string;
   for r in runes(text):
     if c >= g.width:
       break
-    let w = displayWidth($r)
+    let w = cellsOfRune(r, g.ambiguous)
+    if w == 0:
+      # A combining mark, a joiner, a control: no cell of its own — the
+      # compositor draws none for it either (`isonim_tui.compositor`), so
+      # counting it would shift every cell after it.
+      continue
     if c >= 0:
       let i = row * g.width + c
       var s = style
@@ -150,6 +185,15 @@ proc paint*(g: var StyledGrid; row, col: int; text: string;
         if s2.surface == srNone: s2.surface = g.cells[i + 1].style.surface
         g.cells[i + 1] = StyledCell(rune: "", style: s2)
     c += max(1, w)
+
+proc newStyledGridLike*(g: StyledGrid; width, height: int): StyledGrid =
+  ## A scratch grid that draws as `g` does: the same glyph profile and width
+  ## policy (PLAT-71), for a pane that composes a table off-screen first.
+  result = newStyledGrid(width, height)
+  result.glyphs = g.glyphs
+  result.ambiguous = g.ambiguous
+  result.scrollbars = g.scrollbars
+  result.painting = g.painting
 
 proc fillSurface*(g: var StyledGrid; row, col, width, height: int;
                   surface: SemanticRole) =
@@ -261,11 +305,11 @@ func rowText*(row: StyledRow): string =
   ## The text of a already-encoded row.
   row.mapIt(it.text).join("")
 
-proc cellCount*(row: StyledRow): int =
+proc cellCount*(row: StyledRow; ambiguous = awNarrow): int =
   ## How many terminal cells the row occupies.
   for span in row:
     for r in runes(span.text):
-      result += max(1, displayWidth($r))
+      result += cellsOfRune(r, ambiguous)
 
 # ---------------------------------------------------------------------------
 # Handing a row to the compositor
@@ -305,11 +349,27 @@ proc styledRowsTree*(r: TerminalRenderer; rows: seq[StyledRow]): TerminalNode =
 # Small text helpers the pane modules share
 # ---------------------------------------------------------------------------
 
-proc padLeft*(s: string; width: int): string =
-  ## `s` right-aligned in `width` CELLS (not bytes, not runes).
-  var cells = 0
+proc cellWidthOf*(s: string; ambiguous: AmbiguousWidth): int =
+  ## How many terminal cells `s` occupies — THE width function of the
+  ## terminal front-end (Terminal-Adaptation §6.6), under an explicit
+  ## ambiguous-width policy.
+  ##
+  ## A rune that takes no cell of its own — a combining mark, a zero-width
+  ## joiner, a variation selector — counts NOTHING. It used to count one
+  ## (`max(1, w)`), while the compositor, which draws no cell for it, counted
+  ## none: a string with an accent or an emoji sequence was measured wider
+  ## than it was drawn, and every cell after it on the row shifted.
   for r in runes(s):
-    cells += max(1, displayWidth($r))
+    result += cellsOfRune(r, ambiguous)
+
+proc cellWidthOf*(s: string): int =
+  ## `cellWidthOf` on a narrow terminal — the spelling a caller that hands
+  ## the width function on as a value (`measureLines`) uses.
+  cellWidthOf(s, awNarrow)
+
+proc padLeft*(s: string; width: int; ambiguous = awNarrow): string =
+  ## `s` right-aligned in `width` CELLS (not bytes, not runes).
+  let cells = cellWidthOf(s, ambiguous)
   if cells >= width:
     return s
   repeat(' ', width - cells) & s
@@ -332,12 +392,9 @@ proc pathBaseName*(path: string): string =
     if path[i] == '/' or path[i] == '\\':
       return path[i + 1 .. ^1]
 
-proc cellWidthOf*(s: string): int =
-  ## How many terminal cells `s` occupies.
-  for r in runes(s):
-    result += max(1, displayWidth($r))
 
-proc cellSlice*(s: string; startCell, endCell: int): string =
+proc cellSlice*(s: string; startCell, endCell: int;
+                ambiguous = awNarrow): string =
   ## The `[startCell, endCell)` CELLS of `s`.
   ##
   ## By cell rather than by byte or by rune, because a syntax span is expressed
@@ -352,19 +409,26 @@ proc cellSlice*(s: string; startCell, endCell: int): string =
   ## resolves unchanged.
   result = ""
   var at = 0
+  var lastIn = false
   for r in runes(s):
-    let w = max(1, displayWidth($r))
+    let w = cellsOfRune(r, ambiguous)
+    if w == 0:
+      # Belongs to the rune before it: kept with it, never split from it.
+      if lastIn:
+        result.add $r
+      continue
     if at >= endCell:
       break
-    if at >= startCell:
+    lastIn = at >= startCell
+    if lastIn:
       result.add $r
     at += w
 
-proc truncateToCells*(s: string; cells: int): string =
+proc truncateToCells*(s: string; cells: int; ambiguous = awNarrow): string =
   ## `s` clipped to `cells` columns.
-  if cells <= 0: "" else: cellSlice(s, 0, cells)
+  if cells <= 0: "" else: cellSlice(s, 0, cells, ambiguous)
 
-proc padRight*(s: string; width: int): string =
+proc padRight*(s: string; width: int; ambiguous = awNarrow): string =
   ## `s` left-aligned in `width` CELLS (not bytes, not runes), and clipped to
   ## them.
   ##
@@ -372,11 +436,11 @@ proc padRight*(s: string; width: int): string =
   ## a field padded by BYTES would shift every column after it. Clipping is part
   ## of the contract — a field is a COLUMN a Tier-2 case reads at a fixed
   ## offset, so an over-long value must lose its tail rather than the layout.
-  let cells = cellWidthOf(s)
-  if cells >= width: truncateToCells(s, width)
+  let cells = cellWidthOf(s, ambiguous)
+  if cells >= width: truncateToCells(s, width, ambiguous)
   else: s & repeat(' ', width - cells)
 
-proc repeatGlyph*(glyph: string; cells: int): string =
+proc repeatGlyph*(glyph: string; cells: int; ambiguous = awNarrow): string =
   ## `glyph` repeated until it occupies `cells` columns.
   ##
   ## EVERY PANE TITLE ENDS WITH ONE OF THESE, and this exists because the
@@ -415,8 +479,26 @@ proc repeatGlyph*(glyph: string; cells: int): string =
   result = ""
   if cells <= 0 or glyph.len == 0:
     return
-  let unit = max(1, cellWidthOf(glyph))
+  let unit = max(1, cellWidthOf(glyph, ambiguous))
   var at = 0
   while at + unit <= cells:
     result.add glyph
     at += unit
+
+proc paintGlyph*(g: var StyledGrid; row, col: int; role: GlyphRole;
+                 style = DefaultCellStyle) =
+  ## Paint the glyph `role` resolves to on this frame's profile. A
+  ## reverse-video space (`RvSpace`) is a space with `reverse` set.
+  let glyph = g.glyphs.glyph(role)
+  if glyph == RvSpace:
+    var s = style
+    s.reverse = true
+    g.paint(row, col, " ", s)
+  else:
+    g.paint(row, col, glyph, style)
+
+proc glyphText*(g: StyledGrid; role: GlyphRole): string =
+  ## The glyph as TEXT, for a view that builds a string: a reverse-video
+  ## space reads as a space here (only `paintGlyph` can reverse it).
+  let glyph = g.glyphs.glyph(role)
+  if glyph == RvSpace: " " else: glyph

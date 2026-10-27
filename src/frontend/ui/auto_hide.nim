@@ -119,10 +119,16 @@ type
       ## BUILD, PROBLEMS, SEARCH RESULTS and REQUESTS, registered by
       ## `addStandaloneAutoHidePanel` from `ui/layout.nim` on every startup.
       ##
-      ## They must NOT be persisted: their live element is created fresh each
-      ## launch, so a restored copy would occupy the content slot
-      ## (`findPanelByContent`) and suppress the real registration, leaving a
-      ## dead strip tab.
+      ## They ARE persisted, like every other strip tab, because §6.3 of
+      ## `Planned-Features/Auto-Hide-Panes.md` saves "which panels are
+      ## auto-hidden, at which edge, in what order" with no exception for
+      ## these four, and §6.1 calls "pinned by default" a starting position,
+      ## not a category.  Skipping them is what sent a pane the user re-pinned
+      ## to Left back to Bottom on the next launch (#807).  Their live
+      ## element is still created fresh each launch: the restored entry has
+      ## none, and `addStandaloneAutoHidePanel` ADOPTS it — taking its edge,
+      ## position and overlay size — rather than leaving it to occupy the
+      ## content slot (`findPanelByContent`) as a dead strip tab.
       ##
       ## They DO carry a re-attachable `config`, built by
       ## `standaloneComponentConfig` — that is issue #692's fix.  Being
@@ -521,15 +527,38 @@ proc addStandaloneAutoHidePanel*(
   ## It is passed in rather than derived from `content` because the
   ## derivation does not hold: PROBLEMS is `Content.BuildErrors` and mounts
   ## into `errorsComponent-0`, not `buildErrorsComponent-0`.
+  ##
+  ## `edge` is the pane's DEFAULT position, used only when nothing was saved
+  ## for it.  When `restoreAutoHideState` has already put an entry for this
+  ## content in the state — the user re-pinned or resized the pane in an
+  ## earlier session — that entry is ADOPTED: it keeps its edge, its place in
+  ## the panel order and its overlay size, and gains the live element, the
+  ## config and the `standalone` mark it could not carry across a restart.
+  ## Registering a second entry instead would leave the restored one shadowing
+  ## it in `findPanelByContent`; dropping the restored one would put the pane
+  ## back at `edge`, which is #807.
   if autoHideState.isNil:
     initAutoHideState()
 
-  # Avoid duplicates: if a panel with this content is already registered,
-  # skip the add.
-  for existing in autoHideState.panels:
-    if existing.content == content:
+  let existing = autoHideState.findPanelByContent(content)
+  if not existing.isNil:
+    # Already live — registered earlier in this process, or a restored entry
+    # the user revealed (and so instantiated from its config) before this
+    # registration ran.  Either way there is a working pane; keep it.
+    if existing.standalone or not existing.liveElement.isNil:
       cdebug fmt"auto_hide: standalone panel for content {content} already registered, skipping"
       return
+    existing.title = title
+    existing.componentId = componentId
+    existing.config = standaloneComponentConfig(componentLabel, ord(content), componentId)
+    existing.liveElement = liveElement
+    existing.containerElement = nil
+    existing.isUnpinning = false
+    existing.standalone = true
+    cdebug fmt"auto_hide: adopted the saved entry for standalone panel '{title}' at edge {existing.edge}"
+    if not autoHideState.onChanged.isNil:
+      autoHideState.onChanged()
+    return
 
   let panel = AutoHidePanel(
     edge: edge,
@@ -556,6 +585,26 @@ type
   UnpinPanelTargetProc* = proc(layout: GoldenLayout, panel: AutoHidePanel) {.nimcall.}
 
 var unpinPanelTarget*: UnpinPanelTargetProc
+
+proc releaseReparentedPanel*(panel: AutoHidePanel) =
+  ## The GoldenLayout half of an unpin: called by EVERY component
+  ## registration in `layout.nim` (`editorComponent` and `genericUiComponent`)
+  ## once it has moved `panel.liveElement`'s children into the new GL
+  ## container.  From then on the pane lives in the layout, so it stops being
+  ## an auto-hide panel and its strip tab goes.
+  ##
+  ## `unpinPanel`'s `finally` reads "still in `autoHideState.panels`" as "the
+  ## re-attach did not complete" and puts the panel back on its strip.  A
+  ## registration that reparents without calling this therefore leaves the
+  ## pane in BOTH places — its GL tab and its strip tab.  That is what the
+  ## editor registration did: an unpinned editor came back to the layout and
+  ## kept its strip tab, where `Auto-Hide-Panes.md` §3.2-§3.3 has Unpin
+  ## restore the panel to GL and nothing else.
+  if autoHideState.isNil or panel.isNil:
+    return
+  autoHideState.panels = autoHideState.panels.filterIt(it != panel)
+  if not autoHideState.onChanged.isNil:
+    autoHideState.onChanged()
 
 proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
   ## Re-attach a pinned panel back into Golden Layout and remove it
@@ -652,8 +701,10 @@ proc unpinPanel*(layout: GoldenLayout, panel: AutoHidePanel) =
     #
     # A successful re-attach is the one case that may leave it set, and only
     # because the panel is no longer in `autoHideState.panels` at all by then:
-    # `layout.nim`'s `genericUiComponent` registration runs synchronously
-    # inside `addItem`, reparents the live element and filters the panel out.
+    # the `layout.nim` registration (`editorComponent` or
+    # `genericUiComponent`) runs synchronously inside `addItem`, reparents the
+    # live element and calls `releaseReparentedPanel`, which filters the
+    # panel out.
     # If the panel is STILL registered, the re-attach did not complete —
     # `addItem` added nothing, or the registration did not take the
     # reparenting branch — and the panel must go back to being an ordinary
@@ -2178,9 +2229,15 @@ proc serializeAutoHideState*(): JsObject =
   ##
   ## A panel with ``isUnpinning`` set is mid-animation on its way *back* into
   ## the layout — persisting it would resurrect a panel the user just
-  ## un-pinned.  A ``standalone`` panel is re-registered from scratch on every
-  ## launch and has no GL config to re-attach from, so persisting it would
-  ## only suppress that registration.
+  ## un-pinned.
+  ##
+  ## A ``standalone`` panel (BUILD, PROBLEMS, SEARCH RESULTS, REQUESTS) IS
+  ## written, with the config `standaloneComponentConfig` built for it: §6.3
+  ## of `Planned-Features/Auto-Hide-Panes.md` persists every auto-hidden
+  ## panel's edge and order, and these four used to be skipped, so a pane
+  ## re-pinned to Left came back on Bottom after a restart (#807).  The next
+  ## launch's registration adopts the restored entry
+  ## (`addStandaloneAutoHidePanel`) instead of being suppressed by it.
   if autoHideState.isNil:
     return js{"panels": newJsArray(), "leftMinimal": false, "rightMinimal": false}
 
@@ -2191,7 +2248,7 @@ proc serializeAutoHideState*(): JsObject =
   # <lent AutoHidePanel> which cannot be captured").
   for panelIndex in 0 ..< autoHideState.panels.len:
     let panel = autoHideState.panels[panelIndex]
-    if panel.isUnpinning or panel.standalone:
+    if panel.isUnpinning:
       continue
     let edge = panel.edge
     let title = panel.title

@@ -51,8 +51,11 @@ const
   Rows = 40
   FrameTimeoutMs = 20000
   ProjectFile = "doc.txt"
-  QuitByte = "q"
-  Tab = "\t"
+  F1 = "\eOP"
+    ## F1 (`SS3 P`): the command palette under CUA, Vim and Kakoune alike
+    ## (PLAT-68). A `:` line typed into it is a command line, wherever the
+    ## focus is — under CUA a bare `:` is text in a buffer and means nothing
+    ## in Edit mode's other panes.
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   KeymapFile = "keymap"
 
@@ -183,27 +186,37 @@ proc sendKey(sess: var TuiTestSession; name: string) =
   sess.send(keyBytes(name))
   discard sess.drainOutput(if name == "Esc": 250 else: 30)
 
-proc quit(sess: var TuiTestSession) =
-  sess.send(QuitByte)
+proc runCommand(sess: var TuiTestSession; line: string; base = bkCua) =
+  ## `:<line>` through `base`'s palette (`F1`; Emacs's `Alt+X`), from wherever
+  ## the focus is; the focus is where it was once the palette closes.
+  sess.send(if base == bkEmacs: "\ex" else: F1)
+  discard waitForScreenText(sess, "PALETTE ")
+  sess.send(":" & line & "\r")
+
+proc quit(sess: var TuiTestSession; base = bkCua) =
+  ## `:q`, the same under every base (CUA's own key is `Ctrl+Q`, Vim's `q`).
+  ## `Esc` first leaves a modal base's insert mode; under Emacs it is the Meta
+  ## prefix, and there is no insert mode to leave.
+  if base != bkEmacs:
+    sess.sendKey("Esc")
+  sess.runCommand("q", base)
   discard sess.waitExit(initDuration(seconds = 10))
   sess.close()
 
 proc selectByKeys(sess: var TuiTestSession; name: string): string =
-  ## `Tab` off the editor, then `:keymap <name>` typed and submitted.
-  sess.send(Tab)
-  discard waitForScreenText(sess, "focus ")
-  sess.send(":keymap " & name & "\r")
+  ## `:keymap <name>` typed and submitted.
+  sess.runCommand("keymap " & name)
   waitForScreenText(sess, "keymap")
 
-proc saveByKeys(sess: var TuiTestSession) =
-  ## Leave any insert mode (`Esc` changes no text), `Tab` off the editor, `:w`.
-  sess.sendKey("Esc")
-  sess.send(Tab)
-  discard waitForScreenText(sess, "focus ")
-  sess.send(":w\r")
+proc saveByKeys(sess: var TuiTestSession; base = bkCua) =
+  ## Leave any insert mode (`Esc` changes no text; under Emacs it is the Meta
+  ## prefix and there is none to leave), then `:w`.
+  if base != bkEmacs:
+    sess.sendKey("Esc")
+  sess.runCommand("w", base)
   discard waitForScreenText(sess, "wrote " & ProjectFile)
 
-proc inProcess(model: KeymapModel; text: string; keys: seq[string]): string =
+proc inProcess(model: BaseKeymap; text: string; keys: seq[string]): string =
   ## The same key NAMES through the same model, in-process — the document the
   ## binary's bytes must reproduce.
   let s = newEditSession(model)
@@ -231,7 +244,7 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
 
   test "a KEY selects each model, the choice is on disk, and a restart keeps it":
     let d = asciiDoc()
-    for model in KeymapModel:
+    for model in BaseKeymap:
       let state = stateDirFor("select-" & $model)
       let project = projectFor("select-" & $model, d.text)
       var sess = spawnEditor(project, state)
@@ -241,7 +254,7 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
         checkpoint(told.splitLines()[^1])
         ck told.contains("keymap " & $model)
       finally:
-        sess.quit()
+        sess.quit(model)
       ck readFile(state / KeymapFile) == $model & "\n"
 
       # THE RESTART. `x` is the probe: Vim deletes the character under the
@@ -252,9 +265,9 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
       try:
         discard waitForEditorTab(again, ProjectFile)
         again.sendKey("x")
-        again.saveByKeys()
+        again.saveByKeys(model)
       finally:
-        again.quit()
+        again.quit(model)
       let onDisk = readFile(project / ProjectFile)
       let expected = inProcess(model, d.text, @["x", "Esc"])
       checkpoint($model & ": on disk starts " & onDisk[0 ..< min(12, onDisk.len)].escape)
@@ -269,9 +282,11 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
     try:
       let opened = waitForScreenText(sess, "'nano'")
       ck opened.contains("'nano'")
-      let typed = selectByKeys(sess, "emacs")
-      discard waitForScreenText(sess, "'emacs'")
-      ck sess.screenContents().contains("'emacs'")
+      # PLAT-68: `emacs` is a base now; the RETIRED name is what a typed
+      # surface refuses (only the stored-preference decoder reads it as cua).
+      let typed = selectByKeys(sess, "default")
+      discard waitForScreenText(sess, "'default'")
+      ck sess.screenContents().contains("'default'")
       checkpoint(typed.splitLines()[^1])
     finally:
       sess.quit()
@@ -285,9 +300,9 @@ suite "PLAT-43 Tier 2: the keymap selector in a real terminal":
     ck tasks.len == DivergentOperationTasks
     var compared = 0
     var mismatches: seq[string] = @[]
-    for model in [kmVim, kmKakoune]:
+    for model in [bkVim, bkKakoune]:
       for t in tasks:
-        let taskKeys = if model == kmVim: t.vimKeys else: t.kakouneKeys
+        let taskKeys = if model == bkVim: t.vimKeys else: t.kakouneKeys
         let keys = navKeys(d, t) & taskKeys
         let name = $model & "-" & t.id
         let state = stateDirFor(name)
@@ -348,7 +363,7 @@ suite "PLAT-31 Tier 2: a pending prefix times out at its bound, on a real pty":
     # operator-pending MODE, which — as in Vim — waits without a timeout.
     let original = asciiDoc().text
     let composed = typedUnderVim("prefix-within", @["g", "U", "w"], 0)
-    let expected = inProcess(kmVim, original, @["g", "U", "w", "Esc"])
+    let expected = inProcess(bkVim, original, @["g", "U", "w", "Esc"])
     ck composed == expected
     ck composed != original
     # PAST THE BOUND: the `g` has been dropped when `U` arrives, so the chord
@@ -371,7 +386,6 @@ suite "PLAT-36 Tier 2: a `:source`d mapping, typed on a real pty":
   const
     VimrcFile = "vimrc"
     Vimrc = "nnoremap Q D\nnnoremap Z jJ\n"
-    ShiftTab = "\x1b[Z"
 
   proc typedAfterSource(name: string; keys: seq[string]): string =
     let d = asciiDoc()
@@ -381,15 +395,11 @@ suite "PLAT-36 Tier 2: a `:source`d mapping, typed on a real pty":
     var sess = spawnEditor(project, state)
     try:
       discard waitForEditorTab(sess, ProjectFile)
-      sess.send(Tab)
-      discard waitForScreenText(sess, "focus ")
-      sess.send(":source " & VimrcFile & "\r")
+      sess.runCommand("source " & VimrcFile)
       let told = waitForScreenText(sess, "sourced " & VimrcFile)
       checkpoint(told.splitLines().filterIt(it.contains("sourced")).join(" | "))
       ck told.contains("2 of 2 mapping line(s) translated")
-      # Back onto the editor: `Shift+Tab` is the focus ring's reverse step,
-      # and never the editor's key (PLAT-43's ownership case).
-      sess.send(ShiftTab)
+      # The palette closed and the focus is the editor's again.
       discard sess.drainOutput(100)
       for k in keys:
         sess.sendKey(k)
@@ -406,7 +416,7 @@ suite "PLAT-36 Tier 2: a `:source`d mapping, typed on a real pty":
                                 ("source-macro", @["Z", "Z"],
                                  @["j", "J", "j", "J"])]:
       let onDisk = typedAfterSource(name, mapped)
-      let expected = inProcess(kmVim, original, rhs & @["Esc"])
+      let expected = inProcess(bkVim, original, rhs & @["Esc"])
       checkpoint(name & ": on disk starts " &
                  onDisk[0 ..< min(24, onDisk.len)].escape)
       ck onDisk == expected

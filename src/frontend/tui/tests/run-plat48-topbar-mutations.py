@@ -115,8 +115,10 @@ WINGEOM = "src/frontend/gpui/window_geometry.nim"
 WINTOP = "src/frontend/gpui/window_top_bar.nim"
 DESKMENU = "src/frontend/ui/menu.nim"
 GPUIMAIN = "src/frontend/gpui/main.nim"
-KEYMAP = "src/frontend/tui/app/input/keymap.nim"
 KEYNAMES = "src/common/key_names.nim"
+CLIENTACTIONS = "src/frontend/viewmodel/keymap/client_actions.nim"
+CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
+NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 
 # --- suites and gates ---------------------------------------------------------
 VMU = "src/frontend/viewmodel/tests/unit/test_plat48_topbar_models.nim"
@@ -131,8 +133,8 @@ DESKTOP_GATE = "scripts/plat48-capture-electron.sh"
 
 SUBJECTS = [MENUVM, PRODMENU, OMNIVM, OMNISRC, ICONS, RASTER, LAYOUTMODEL,
             TABS, TOPBAR, SHELL, BINDING, PROFILE, RUNTIME, CTLICONS, TUIMAIN,
-            DOCKPROJ, WINGEOM, WINTOP, DESKMENU, DRIVER, GPUIMAIN, KEYMAP,
-            KEYNAMES]
+            DOCKPROJ, WINGEOM, WINTOP, DESKMENU, DRIVER, GPUIMAIN,
+            KEYNAMES, CLIENTACTIONS, CUA, NAVIGATION]
 SUITES = [VMU, T1, PTY, GTB, GPLAN, BIND, ROUTE, ESCD, DESKTOP_GATE]
 TOUCHED = SUBJECTS + SUITES
 
@@ -199,7 +201,7 @@ P_CLICK = "a click on each control performs it on the recording"
 G_TOP = ("a top-docked layout projects, lays out a top strip, and the top "
          "margin docks")
 G_POPOVER = "the first level drops below the button; a folder opens to its right"
-G_BINDINGS = "the desktop's default bindings, spelled as its menu spells them"
+G_BINDINGS = "each transport item's chord is the one that runs it from the window"
 B_VERBS = "every keyboard gesture has a spelling, and none of them is silent"
 R_UNBOUND = "enabling it changes NOTHING on screen, compared as rendered rows"
 R_EDGES = "no drag docks, anywhere on the screen; `:dock` is how a pane docks"
@@ -207,8 +209,8 @@ E_LATE = ("a sequence already waiting behind its ESC is one token, however "
           "late the reader")
 T_TABKEYS = ("g t / g T and Ctrl+Tab / Ctrl+Shift+Tab step the tabs, "
              "wrapping (§3.3.1)")
-G_TABKEYS = ("the session tabs' keys: Ctrl+Alt+PageDown / PageUp, no desktop "
-             "chord reused")
+G_TABKEYS = ("the session tabs' keys are the router's CUA rows (Ctrl+PageDown / "
+             "PageUp)")
 G_PINSHOWN = "a pin button under a revealed pane is not drawn, and not pressable"
 W_BAND = ("the band: the shared menu's root button, the desktop's nine marks, "
           "the omnibar")
@@ -423,9 +425,11 @@ ARMS = [
         "a pane redocked onto an edge that already has panes keeps its old "
         "order and collides"),
     # --- the terminal's menu -----------------------------------------------------------
+    # TM1 RE-AIMED 2026-10-12 (PLAT-68 Phase B): the menu's chords are the
+    # router's (`chordOf`), gathered by `refreshMenuForKeymap`.
     Arm("TM1", RUNTIME,
-        "      return bnd.spelling\n",
-        "      return \"\"\n",
+        "      chords[it.action] = chord\n",
+        "      discard\n",
         T_REBIND,
         "the terminal's menu shows no chord for any item"),
     Arm("TM2", RUNTIME,
@@ -491,32 +495,41 @@ ARMS = [
         "      x = px\n",
         G_POPOVER,
         "a nested menu popover opens over its parent instead of to its right"),
-    Arm("GK1", WINTOP,
-        "      inBindings = raw.startsWith(\"bindings:\")\n",
-        "      inBindings = raw.startsWith(\"binding:\")\n",
+    # GK1 RE-AIMED 2026-10-12 (PLAT-68 Phase B): the window no longer reads
+    # the desktop's YAML; a control's chord is the router's for the
+    # operation its ClientAction names (`keymap/client_actions`).
+    Arm("GK1", CLIENTACTIONS,
+        "    (\"debugger.step-into\", \"forwardStep\"),\n",
+        "    (\"debugger.step-over\", \"forwardStep\"),\n",
         G_BINDINGS,
-        "the window reads no binding from the desktop's config: no chord "
-        "works, none is shown"),
+        "a control's ClientAction names another operation: the window shows "
+        "and runs the wrong chord"),
     Arm("GP1", WINTOP,
         "    if pin.overlaps(c):\n      return false\n",
         "    if false:\n      return false\n",
         G_PINSHOWN,
         "a pane's pin button is drawn over (and pressed through) the pane "
         "revealed on top of it, or a drag's drop tint"),
-    Arm("GS1", WINTOP,
-        "  of \"pagedown\": 1\n",
-        "  of \"pagedown\": 0\n",
+    # GS1 RE-AIMED 2026-10-12 (PLAT-68 Phase B): the window's tab keys are
+    # the CUA rows, resolved by the router.
+    Arm("GS1", CUA,
+        "    BaseRow(chords: \"Ctrl+PageDown\", operation: \"session-tabs.next\", table: G),\n",
+        "    BaseRow(chords: \"Ctrl+PageDown\", operation: \"session-tabs.previous\", table: G),\n",
         G_TABKEYS,
-        "the window's next-session-tab key does nothing"),
+        "the window's next-session-tab key steps backwards"),
     # --- session tabs from the terminal's keyboard (§3.3.1) ----------------------
-    Arm("TK1", KEYMAP,
-        "  r.add b(mmNormal, \"g t\", @[\"g\", \"t\"], kaNextSessionTab)\n",
-        "  r.add b(mmNormal, \"g t\", @[\"g\", \"t\"], kaPrevSessionTab)\n",
+    # TK1 RE-AIMED 2026-10-12 (PLAT-68 Phase B): §4.2's rows are the modal
+    # bases' navigation table (`keymap/navigation_keymap`).
+    Arm("TK1", NAVIGATION,
+        "    BaseRow(chords: \"g t\", operation: \"session-tabs.next\", table: G, navModes: N),\n",
+        "    BaseRow(chords: \"g t\", operation: \"session-tabs.previous\", table: G, navModes: N),\n",
         T_TABKEYS,
         "`g t` steps to the PREVIOUS session tab"),
+    # TK2 RE-AIMED 2026-10-11 (PLAT-68): `key_names` decodes the whole Kitty
+    # `CSI u` form now, not TAB and ENTER only; the defect is planted on TAB.
     Arm("TK2", KEYNAMES,
-        "    if parts.len == 2 and parts[0] in [\"9\", \"13\"]:\n",
-        "    if false:\n",
+        "    if not ok: return NoKey\n    return decoded(mods, codepointKey(code))\n",
+        "    if not ok or code == 9: return NoKey\n    return decoded(mods, codepointKey(code))\n",
         T_TABKEYS,
         "the `CSI u` spelling of Ctrl+Tab is not a key: the terminals that "
         "report Ctrl+Tab that way cannot step the tabs"),
@@ -531,9 +544,13 @@ ARMS = [
         "      r.setAttribute(icon, \"src\", markSvgPath(sg.index, false))\n",
         W_BAND,
         "an enabled control is drawn in the disabled ink"),
+    # GW3 RE-AIMED 2026-10-17: the redesign draws the desktop's LOGO
+    # (`#menu-logo-img`) where the root button drew "≡", so its mark is the
+    # logo image; the defect drops it, leaving an empty button.
     Arm("GW3", GPUIMAIN,
-        '      r.appendChild(b, r.createTextNode("≡"))\n',
-        '      r.appendChild(b, r.createTextNode(""))\n',
+        '      r.setStyle(logo, "height", "20px")\n'
+        '      r.appendChild(b, logo)\n',
+        '      r.setStyle(logo, "height", "20px")\n',
         W_BAND,
         "the band's root menu button is drawn without its mark"),
     Arm("GW4", GPUIMAIN,
@@ -578,18 +595,25 @@ ARMS = [
         "      let shown = false or\n",
         W_REVEAL,
         "the footer does not mark which docked pane is revealed"),
+    # GW9 RE-AIMED 2026-10-17: the redesign retired the pin BUTTON drawn
+    # over each box (and its `pinButtonShown` drawing guard); a pin is now an
+    # icon in its tab, painted with the pane tree and so under every overlay
+    # by paint order (which the case still asserts). What `pinButtonShown`
+    # still guards is the PRESS: a pin under a revealed pane must not be
+    # pressed through it. The defect drops that guard; the case presses
+    # Files' pin under a revealed State and requires that nothing docked.
     Arm("GW9", GPUIMAIN,
-        "    if not pinButtonShown(pr, covers):\n"
-        "      continue\n",
-        "    discard covers\n",
-        # PLAT-51 part B: graded on the footer's reveal (Ctrl+O) — the top
-        # strip's reveal is not reachable from a scripted run since a drag no
-        # longer docks (and a pane docked at start has no element: filed).
+        "      let onPin = n.pins[t].contains(x, y) and pinButtonShown(n.pins[t], covers)\n",
+        "      let onPin = n.pins[t].contains(x, y)\n",
+        # PLAT-51 part B: graded on the footer's reveal (Ctrl+O), which
+        # replaced the top strip's after a drag stopped docking.
         W_REVEAL,
-        "the window draws the tree's pin buttons over a revealed pane"),
+        "the window presses the tree's pins through a revealed pane"),
+    # GW10 RE-AIMED 2026-10-17: the pin is a tab icon since the redesign,
+    # and its press docks through one conditional command (pin or close).
     Arm("GW10", GPUIMAIN,
-        "          applyGestureCommand(r, cmdDock(k, leBottom))\n",
-        "          applyGestureCommand(r, cmdDock(k, leRight))\n",
+        "          applyGestureCommand(r, if onPin: cmdDock(k, leBottom)\n",
+        "          applyGestureCommand(r, if onPin: cmdDock(k, leRight)\n",
         W_PIN,
         "the pin button docks the pane to the right edge, not the footer"),
 ]

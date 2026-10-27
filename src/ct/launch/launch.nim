@@ -6,7 +6,8 @@ import
   ../cli/[ logging, list, help, build, print_trace],
   ../online_sharing/[ upload, download, delete, remote,
                       activate_command, check_license_command, remote_config ],
-  ../trace/[ replay, record, run, metadata, host, import_command, trace_forward ],
+  ../trace/[ replay, record, run, metadata, host, import_command, trace_forward,
+             replay_backend_env ],
   ../ci/[ ci_commands ],
   ../codetracerconf,
   ../review_cli,
@@ -14,6 +15,7 @@ import
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
   ../doctor,
+  ui_dispatch,
   ../gfx_replay,
   backends,
   electron,
@@ -99,6 +101,27 @@ proc loadEnvFiles(
           removeFile(envFile)
         except CatchableError:
           discard
+
+proc publishReplayBackendOptions*(
+    given: openArray[(string, Option[string])]): bool =
+  ## Decide `ct replay`'s replay-engine options (`--thread-sync-order`,
+  ## `--os-simulation`, and their environment twins) and publish the twins
+  ## into this process's environment, which every process started from here
+  ## inherits (`trace/replay_backend_env.nim`).  A bad value is printed,
+  ## naming the flag or the variable that gave it, and exits 1 before
+  ## anything is launched.  Returns whether a twin was published.
+  ##
+  ## Called for the Electron replay below and for the `--ui` handoffs in the
+  ## `codetracer.nim` prologue, so every front-end gets the same decision.
+  let forwarding = replayBackendForwarding(given,
+    proc (name: string): string = getEnv(name))
+  if forwarding.refusal.len > 0:
+    for line in forwarding.refusal:
+      errorMessage(line)
+    quit(1)
+  for (name, value) in forwarding.env:
+    putEnv(name, value)
+  forwarding.env.len > 0
 
 proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
   ## `uiSelection` is PLAT-1's resolved front-end name (`electron`, `gui`,
@@ -247,12 +270,32 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
       quit(0)
 
     of StartupCommand.replay:
+      # Replay-engine options (`--thread-sync-order`, `--os-simulation`) are
+      # decided first, before a trace is resolved or a window opens: a bad
+      # value is refused here, naming the flag or the variable that gave it.
+      # A good one is published as its environment twin, which every process
+      # between here and the replay engine inherits
+      # (`trace/replay_backend_env.nim`).
+      let publishedBackendOptions = publishReplayBackendOptions(
+        [(ThreadSyncOrderFlag, conf.replayThreadSyncOrder),
+         (OsSimulationFlag, conf.replayOsSimulation)])
       # Resolve the effective new-trace policy:
       # CLI flags override the config setting.
-      let replayPolicy =
+      var replayPolicy =
         if conf.newTab: "tab"
         elif conf.newWindow: "window"
         else: "" # empty = defer to config/default
+      if publishedBackendOptions and replayPolicy != "window":
+        # Under "tab" (the default), an open CodeTracer window takes this
+        # trace over through Electron's single-instance lock, and only the
+        # argument list crosses over: that window's replay backend keeps the
+        # environment it was started with, so the options would be dropped
+        # without a word.  A replay that carries them opens its own window.
+        if conf.newTab:
+          errorMessage("note: --new-tab is ignored: an open window's " &
+            "replay backend cannot take --thread-sync-order or " &
+            "--os-simulation, so this replay opens a new window")
+        replayPolicy = "window"
       replay(
         conf.lastTraceMatchingPattern,
         conf.replayRecordingId,
@@ -632,6 +675,19 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
         conf.gfxReplayBackend))
     of StartupCommand.doctor:
       # P7.1: recorder readiness probe.  See ``doctor.nim``.
+      #
+      # ``ct doctor terminal`` (CodeTracer-TUI-Terminal-Adaptation.md §10.1):
+      # the TERMINAL's report and glyph test card, which only the terminal
+      # front-end can produce — it negotiates with the terminal it runs in.
+      # ``terminal`` is reserved beside the language names, and the TUI
+      # binary is EXEC'd (not spawned) because it needs this process's tty.
+      if conf.doctorLanguage.toLowerAscii == "terminal":
+        let tui = resolveTuiBinary("codetracer-tui")
+        if tui.len == 0:
+          echo "ct doctor terminal: codetracer-tui was not found; set " &
+               "CODETRACER_TUI_BIN or build it with `just build-tui`"
+          quit(1)
+        execHandoff(tui, @["--capabilities", "--card"])
       quit(doctorCommand(conf.doctorLanguage))
     of StartupCommand.`ct-describe-commands`:
       # M7: emit the line-oriented description used by the launcher's

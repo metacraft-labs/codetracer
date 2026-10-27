@@ -36,6 +36,7 @@ use db_backend::ctfs_trace_reader::CTFSTraceReader;
 use db_backend::ctfs_trace_reader::ctfs_container::{CtfsProfile, CtfsReader, write_compact_ctfs, write_minimal_ctfs};
 use db_backend::db::CellChange;
 use db_backend::expr_loader::ExprLoader;
+use db_backend::source_access::HostSourceReads;
 use db_backend::task::CoreTrace;
 use db_backend::trace_reader::TraceReader;
 
@@ -200,6 +201,40 @@ fn probes() -> Vec<Probe> {
                 .join("|")
         }),
         ("step_count", |r| r.step_count().to_string()),
+        ("first_step_id", |r| {
+            let expected = r.steps_from(StepId(0)).first().map(|step| step.step_id);
+            let actual = r.first_step_id();
+            assert_eq!(actual, expected, "first_step_id must identify the first source row");
+            format!("{actual:?}")
+        }),
+        ("last_step_id", |r| {
+            let expected = r.steps_from(StepId(0)).last().map(|step| step.step_id);
+            let actual = r.last_step_id();
+            assert_eq!(actual, expected, "last_step_id must identify the last source row");
+            format!("{actual:?}")
+        }),
+        ("adjacent_step_id", |r| {
+            // Ground each answer in the actual source rows, independently of
+            // the helper's execution-slot walk. Probe both directions from
+            // recorded positions, each trace boundary and invalid positions.
+            let rows: Vec<StepId> = r.steps_from(StepId(0)).iter().map(|step| step.step_id).collect();
+            let mut starts = probe_steps(r);
+            starts.extend([StepId(i64::MIN), StepId(-1), StepId(i64::MAX)]);
+            let mut out = Vec::new();
+            for start in starts {
+                for forward in [true, false] {
+                    let expected = if forward {
+                        rows.iter().copied().filter(|id| *id > start).min()
+                    } else {
+                        rows.iter().copied().filter(|id| *id < start).max()
+                    };
+                    let actual = r.adjacent_step_id(start, forward);
+                    assert_eq!(actual, expected, "adjacent_step_id({start:?}, {forward})");
+                    out.push(format!("{start:?}/{forward}:{actual:?}"));
+                }
+            }
+            out.join("|")
+        }),
         ("variables_at", |r| {
             probe_steps(r)
                 .into_iter()
@@ -564,6 +599,31 @@ fn probes() -> Vec<Probe> {
             ["program.rs", SRC, "ccp5/program.rs", "nope.rs", ""]
                 .into_iter()
                 .map(|p| format!("{:?}", r.fuzzy_path_ids_for(p)))
+                .collect::<Vec<_>>()
+                .join("|")
+        }),
+        // Both source-reading rules, because they take different routes through
+        // the resolver: `Refused` skips the two host-canonicalize stages, so a
+        // loader difference visible only to the string stages (or only behind
+        // them) shows up in one mode and not the other. The `..` query is the
+        // one that gets past the exact, workdir and suffix stages, so it is the
+        // one that reaches the canonicalize stages only `Allowed` runs (and
+        // then the filename stage both run).
+        ("fuzzy_path_ids_for_under", |r| {
+            [HostSourceReads::Allowed, HostSourceReads::Refused]
+                .into_iter()
+                .flat_map(|reads| {
+                    [
+                        "program.rs",
+                        SRC,
+                        "ccp5/program.rs",
+                        "/tmp/ccp5/../ccp5/program.rs",
+                        "nope.rs",
+                        "",
+                    ]
+                    .into_iter()
+                    .map(move |p| format!("{reads:?}:{:?}", r.fuzzy_path_ids_for_under(p, reads)))
+                })
                 .collect::<Vec<_>>()
                 .join("|")
         }),

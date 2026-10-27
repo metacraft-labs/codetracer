@@ -76,8 +76,8 @@
 # text.
 #
 # Run: bash ci/test/build-once-workspace-test.sh
-# Lane: a step of the `ci-verdict` job (stock ubuntu-latest, bash only -- no
-#       Nix, no dev shell), alongside ci/test/sibling-provisioning-test.sh.
+# Lane: a step of the `ci-contract-suites` job (stock ubuntu-latest, bash only
+#       -- no Nix, no dev shell), alongside ci/test/sibling-provisioning-test.sh.
 # =============================================================================
 set -uo pipefail
 
@@ -263,43 +263,32 @@ unset _act _dir
 # `provision-repro-lock-siblings` has no `siblings:` block to read, and that is
 # not an oversight in the action -- it is the point of it. It runs
 #
-#     repro develop --all --reset --into=<siblings root>
+#     repro develop --all --only=<build inputs> --reset --into=<siblings root>
 #
-# which clones exactly the `deps` this repo's own `repro.lock` declares, at the
-# revisions it pins. Its predecessor, `setup-isonim-siblings`, hand-wrote a
-# NINE-repo list resolved against the workspace lock in metacraft-manifests --
-# a repo set that reflected whatever the last pusher happened to have checked
-# out, and which disagreed with `repro.lock` about isonim's revision.
+# where <build inputs> is what `ci/repro-lock-build-input-siblings.sh` derives
+# from this repo's own `repro.lock`: the members of the develop set that the
+# lock also solves as packages. Its predecessor, `setup-isonim-siblings`,
+# hand-wrote a NINE-repo list resolved against the workspace lock in
+# metacraft-manifests -- a repo set that reflected whatever the last pusher
+# happened to have checked out.
 #
-# The names are therefore read from `repro.lock` rather than restated here.
-# That keeps this check falsifiable in the direction that matters: if a repo
-# stops being declared in the lock, the action stops cloning it, and this
-# suite must report the jobs that need it as broken. A hard-coded list here
-# would keep saying "provisioned" after the action had stopped providing it,
-# which is precisely the class of gate this suite exists to be the opposite of.
+# The names are therefore read through that same selector rather than
+# restated here. That keeps this check falsifiable in the direction that
+# matters: if a repo stops being a build input, the action stops cloning it,
+# and this suite must report the jobs that need it as broken.
 #
-# The self entry (`path = "."`) is skipped: the primary checkout is not one of
-# its own siblings, and handing it to a clone step would `rm -rf` the work tree
-# mid-run -- a defect the sibling wiring has already had once.
+# This read the WHOLE develop set (every `deps` entry) until 2026-10-22, three
+# weeks after `04e2812fd` narrowed the action to `--only=<build inputs>`. From
+# then on it credited the action with siblings it no longer cloned --
+# `codetracer-trace-format` and `codetracer-native-recorder` among them -- and
+# reported the two KNOWN_GAPS entries for `viewmodel-tests` as spent while that
+# job still provisioned neither: the "provisioned" it was written never to
+# say about a repo the action had stopped providing.
 repro_lock_deps() { # echoes one bare repo name per line
 	[ -f "$REPO_ROOT/repro.lock" ] || return 0
-	awk '
-		/^deps[ \t]*=/ {
-			line = $0
-			n = split(line, entries, /\}[ \t]*,[ \t]*\{/)
-			for (i = 1; i <= n; i++) {
-				e = entries[i]
-				if (e !~ /path[ \t]*=[ \t]*"\.\"/) {
-					if (match(e, /name[ \t]*=[ \t]*"[^"]+"/)) {
-						nm = substr(e, RSTART, RLENGTH)
-						sub(/^name[ \t]*=[ \t]*"/, "", nm)
-						sub(/"$/, "", nm)
-						print nm
-					}
-				}
-			}
-		}
-	' "$REPO_ROOT/repro.lock"
+	local inputs
+	inputs="$(bash "$REPO_ROOT/ci/repro-lock-build-input-siblings.sh" "$REPO_ROOT/repro.lock")" || return 0
+	printf '%s\n' "${inputs//,/$'\n'}"
 }
 
 _repro_provides="$(repro_lock_deps | tr '\n' ' ')"

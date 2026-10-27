@@ -5,21 +5,70 @@
  * - Build output is displayed correctly in the GL layout
  * - stderr lines have visually distinct styling from stdout lines
  * - The build panel renders within the Golden Layout container
+ *
+ * THE ONE STAND-IN, AND WHY IT IS NOT A MOCK: a recording opened in `trace`
+ * mode never runs a build — `ct record` ran before the app started — so build
+ * output reaches the renderer only if something sends it. These tests send the
+ * main process's own `CODETRACER::build-command` / `build-stdout` /
+ * `build-stderr` / `build-code` messages from the real Electron main process,
+ * as `tests/layout/plat70a-output-hscroll.spec.ts` does; everything after that
+ * (`onBuildStdout` / `onBuildStderr` → the BuildVM → the IsoNim view and its
+ * stylesheet) is the product's own, unchanged.
+ *
+ * Until 2026-10-22 the two styling tests instead polled for 60 s for output
+ * from a build that never happens and then skipped themselves, so they never
+ * checked anything; and on a loaded host the 60 polls plus the launch ran past
+ * the 120 s test timeout (codetracer-pm issue
+ * `2026-10-17-electron-build-specs-fail-on-clean-agents-under-host-load`).
+ *
+ * No mocks otherwise: a real recording, the real `ct`, a real replay backend,
+ * the real Electron app.
  */
 
-import { test, expect, codetracerInstallDir } from "../../lib/fixtures";
+import type { ElectronApplication, Page } from "@playwright/test";
+import { test, expect } from "../../lib/fixtures";
 import { retry } from "../../lib/retry-helpers";
+import { openBottomPanel, waitForDefaultBottomTabs } from "../../page-objects/auto-hide-strip";
 import { BuildPane } from "../../page-objects/panes/build/build-pane";
-import { ensureDefaultLayout, restoreUserLayout } from "../../lib/layout-reset";
+import { LayoutPage } from "../../page-objects/layout-page";
+
+/**
+ * A build's output as the main process reports it: plain progress lines on
+ * stdout and on stderr. Neither carries a `file:line` location or a severity
+ * keyword, so the panel styles each by its stream alone — which is what these
+ * tests check — and not as an error or a warning row.
+ */
+const STDOUT_LINES = ["Compiling main", "Linking main"];
+const STDERR_LINES = ["progress: 2 of 2 units done"];
+
+/**
+ * Run one build through the main process's messages: once the base
+ * components have loaded, open the BUILD panel, then send the command, the
+ * stdout lines, the stderr lines and the exit code, and wait until the panel
+ * shows every line. The wait comes first as in `problems-panel.spec.ts`: on a
+ * loaded host (2026-10-22) a BUILD strip tab found visible right after launch
+ * was no longer in the DOM when it was clicked, and the click waited 30 s.
+ */
+async function runBuild(page: Page, app: ElectronApplication): Promise<BuildPane> {
+  await new LayoutPage(page).waitForBaseComponentsLoaded();
+  await waitForDefaultBottomTabs(page);
+  await openBottomPanel(page, "BUILD");
+  await app.evaluate(({ BrowserWindow }, out) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    w.webContents.send("CODETRACER::build-command", { command: "make main" });
+    for (const data of out.stdout) w.webContents.send("CODETRACER::build-stdout", { data });
+    for (const data of out.stderr) w.webContents.send("CODETRACER::build-stderr", { data });
+    w.webContents.send("CODETRACER::build-code", { code: 0 });
+  }, { stdout: STDOUT_LINES, stderr: STDERR_LINES });
+  const buildPane = new BuildPane(page);
+  await expect(buildPane.stdoutLines()).toHaveCount(STDOUT_LINES.length);
+  await expect(buildPane.stderrLines()).toHaveCount(STDERR_LINES.length);
+  return buildPane;
+}
 
 test.describe("Build Output Panel", () => {
   test.setTimeout(120_000);
-  // Use a trace source that triggers a build step with both stdout and stderr output.
-  // noir_space_ship produces build output during its compilation phase.
   test.use({ sourcePath: "py_console_logs/main.py", launchMode: "trace" });
-
-  test.beforeAll(() => ensureDefaultLayout(codetracerInstallDir));
-  test.afterAll(() => restoreUserLayout());
 
   test("build panel renders within GL layout", async ({ ctPage }) => {
     const buildPane = new BuildPane(ctPage);
@@ -45,79 +94,36 @@ test.describe("Build Output Panel", () => {
     }
   });
 
-  test("build output displays stdout and stderr with different styling", async ({ ctPage }) => {
-    const buildPane = new BuildPane(ctPage);
+  test("build output displays stdout and stderr with different styling", async ({ ctPage, electronApp }) => {
+    const buildPane = await runBuild(ctPage, electronApp!);
 
-    // Wait for build output to appear (the build step runs before the trace)
-    const hasOutput = await retry(
-      async () => {
-        const totalLines = await buildPane.allLines().count();
-        return totalLines > 0;
-      },
-      { maxAttempts: 60, delayMs: 1000 },
-    ).then(() => true as const).catch(() => false);
+    // Every line arrives, in its stream's order and with its text.
+    await expect(buildPane.stdoutLines()).toHaveText(STDOUT_LINES);
+    await expect(buildPane.stderrLines()).toHaveText(STDERR_LINES);
 
-    if (!hasOutput) {
-      // If there is no build output (e.g. pre-compiled trace), skip the
-      // style assertion but do not fail the test.
-      test.skip(true, "No build output produced for this trace");
-      return;
-    }
-
-    // Verify stdout lines exist
-    const stdoutCount = await buildPane.stdoutLines().count();
-    expect(stdoutCount).toBeGreaterThan(0);
-
-    // Check that stderr lines, if present, have a different color than stdout
-    const stderrCount = await buildPane.stderrLines().count();
-    if (stderrCount > 0) {
-      const stdoutColor = await buildPane.stdoutColor();
-      const stderrColor = await buildPane.stderrColor();
-
-      // stderr should be styled differently from stdout (red/orange vs normal)
-      expect(stderrColor).not.toBeNull();
-      expect(stdoutColor).not.toBeNull();
-      expect(stderrColor).not.toEqual(stdoutColor);
-    }
-
-    // Verify output lines contain text (not empty divs)
-    const firstLine = buildPane.allLines().first();
-    const text = await firstLine.textContent();
-    expect(text).toBeTruthy();
-    expect((text ?? "").length).toBeGreaterThan(0);
+    // stderr is styled differently from stdout (red/orange vs normal).
+    const stdoutColor = await buildPane.stdoutColor();
+    const stderrColor = await buildPane.stderrColor();
+    expect(stderrColor).not.toBeNull();
+    expect(stdoutColor).not.toBeNull();
+    expect(stderrColor).not.toEqual(stdoutColor);
   });
 
-  test("stderr lines have warning color styling", async ({ ctPage }) => {
-    const buildPane = new BuildPane(ctPage);
-
-    // Wait for any build output
-    const hasStderr = await retry(
-      async () => {
-        const count = await buildPane.stderrLines().count();
-        return count > 0;
-      },
-      { maxAttempts: 60, delayMs: 1000 },
-    ).then(() => true as const).catch(() => false);
-
-    if (!hasStderr) {
-      test.skip(true, "No stderr output produced for this trace");
-      return;
-    }
+  test("stderr lines have warning color styling", async ({ ctPage, electronApp }) => {
+    const buildPane = await runBuild(ctPage, electronApp!);
 
     // Verify stderr lines have italic font style (our CSS sets font-style: italic)
     const fontStyle = await buildPane.stderrLines().first().evaluate(
       (el) => window.getComputedStyle(el).fontStyle,
     );
     expect(fontStyle).toBe("italic");
+    // ...and stdout lines do not, so the italic belongs to the stream.
+    const stdoutFontStyle = await buildPane.stdoutLines().first().evaluate(
+      (el) => window.getComputedStyle(el).fontStyle,
+    );
+    expect(stdoutFontStyle).not.toBe("italic");
 
-    // Verify the stderr color is distinct (should be #f85149 / rgb(248, 81, 73) or similar)
-    const color = await buildPane.stderrColor();
-    expect(color).not.toBeNull();
-    // The color should not be the default text color - it should be a red/warning tone.
-    // We verify it's not the same as stdout which uses the default COLOR.
-    const stdoutColor = await buildPane.stdoutColor();
-    if (stdoutColor !== null) {
-      expect(color).not.toEqual(stdoutColor);
-    }
+    // The stderr color is not the default text color stdout uses.
+    expect(await buildPane.stderrColor()).not.toEqual(await buildPane.stdoutColor());
   });
 });

@@ -73,7 +73,7 @@ suite "Integration: debugger move loads locals and calltrace":
 
       # Set a viewport height on calltrace so its auto-load effect
       # will fire when the debugger position changes.
-      session.calltraceVM.setViewportHeight(25)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(25))
       drain()
 
       # Clear initial commands to isolate the position change.
@@ -168,9 +168,9 @@ suite "Integration: locals update when debugger steps":
 
 suite "Integration: tab switching shows correct variables":
 
-  test "switching tabs changes which variables are displayed":
-    ## Replicates the GUI scenario where the user switches between
-    ## locals, globals, and watches tabs in the state panel.
+  test "the variables pane lists locals, globals and watches together":
+    ## The pane has no Locals / Globals / Watches tabs
+    ## (Variable-State-Pane.md, "Decisions (2026-10-24)").
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
@@ -186,32 +186,23 @@ suite "Integration: tab switching shows correct variables":
                  hasChildren: false, children: @[]),
       ]
 
-      # Initially on the locals tab.
-      check session.stateVM.activeTab.val == stLocals
-      check session.stateVM.currentVariables.val.len == 1
-      check session.stateVM.currentVariables.val[0].name == "local_var"
+      # One list: the locals, then the globals.
+      let rows = session.stateVM.currentVariables.val
+      check rows.len == 2
+      check rows[0].name == "local_var"
+      check rows[1].name == "global_counter"
 
-      # Switch to globals.
-      session.stateVM.selectTab(stGlobals)
-      check session.stateVM.activeTab.val == stGlobals
-      check session.stateVM.currentVariables.val.len == 1
-      check session.stateVM.currentVariables.val[0].name == "global_counter"
-
-      # Switch to watches (empty since watch results are not yet wired).
-      session.stateVM.selectTab(stWatches)
-      check session.stateVM.activeTab.val == stWatches
-      check session.stateVM.currentVariables.val.len == 0
-
-      # Switch back to locals.
-      session.stateVM.selectTab(stLocals)
-      check session.stateVM.currentVariables.val.len == 1
-      check session.stateVM.currentVariables.val[0].name == "local_var"
+      # A watch joins the same list after them.
+      session.stateVM.addWatch("local_var + 1")
+      check session.stateVM.currentVariables.val.len == 3
+      check session.stateVM.currentVariables.val[2].name == "local_var + 1"
+      check session.stateVM.currentVariables.val[2].isWatch
 
       dispose()
 
   test "updating store locals reactively updates the state panel":
     ## Verifies that the memo recomputes when the underlying store
-    ## data changes, even without a tab switch.
+    ## data changes.
     createRoot proc(dispose: proc()) =
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
@@ -268,7 +259,7 @@ suite "Integration: calltrace double-click triggers navigation":
       session.store.calltrace.totalCallsCount.val = 50'u64
 
       # Set viewport so visibleLines computes correctly.
-      session.calltraceVM.setViewportHeight(10)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(10))
 
       let visible = session.calltraceVM.visibleLines.val
       check visible.len == 3
@@ -510,7 +501,7 @@ suite "Integration: cross-VM coordination":
       drain()
 
       # Set up calltrace viewport.
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       mock.clearReceivedCommands()
@@ -539,7 +530,7 @@ suite "Integration: cross-VM coordination":
       let mock = newMockBackendService(autoRespond = true)
       let app = createAppViewModel(mock.toBackendService())
       let session = app.session
-      session.calltraceVM.setViewportHeight(20)
+      session.calltraceVM.setViewport(session.calltraceVM.viewport.val.withRows(20))
       drain()
 
       # 1. Initial debugger position.
@@ -641,7 +632,7 @@ suite "Integration: all ViewModel commands are valid DAP commands":
       for dir in StepDirection:
         mock.clearReceivedCommands()
         # Reset request tracker so deduplication doesn't block.
-        store.requestTracker.markComplete("step")
+        store.requestTracker.forget("step")
         # Reset debugger status to idle so the step is accepted.
         store.debugger.val = DebuggerState(
           rrTicks: 100'u64,

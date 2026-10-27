@@ -6,6 +6,12 @@ import
   rr_gdb
 
 from viewmodel/viewmodels/menu_vm import MenuVM
+from viewmodel/viewmodels/flow_layout import FlowLayoutStep, FlowLayoutLoop,
+  FlowLayoutWindow, FlowValueText, FlowLayoutEvent
+export FlowLayoutStep, FlowLayoutLoop, FlowLayoutWindow, FlowValueText,
+  FlowLayoutEvent
+import context_menu_item
+export context_menu_item
 
 type
   defaultstring = cstring
@@ -27,6 +33,16 @@ type
   CodetracerFileData* = object
     text*:          langstring
     path*:          langstring
+      ## The display path: the folder or file the node stands for.
+    payloadPath*:   langstring
+      ## Where the index process read the node in a self-contained trace's
+      ## payload, relative to its ``files/`` root (``src/lib``); empty for
+      ## a node read from the live disk.  Sent back with
+      ## ``load-path-content`` so a "Loading..." stub is listed from the
+      ## same place the root load read it (``index/files.loadFile``).  A
+      ## DECLARED field on purpose: ``ui_js.onUpdatePathContent`` copies
+      ## the answer into the tree with ``node[] = content[]``, which keeps
+      ## only the fields the Nim type declares.
 
   Group* = ref object
     baseID*:        int
@@ -71,41 +87,6 @@ type
     cwd*: cstring
     configType*: cstring
 
-  UIBreakpoint* = object
-    line*: int
-    ## M1 — Column-Aware Replay Navigation: 1-indexed column when the
-    ## breakpoint is anchored at a specific column on the line; ``0``
-    ## preserves the legacy line-only semantics.  Multiple
-    ## column-aware breakpoints can coexist on the same line (the
-    ## breakpoint registry on the replay-server keys ``(path, line,
-    ## column)``); the GUI exposes them through the same gutter
-    ## marker for now.
-    column*: int
-    ## M9 — Column-Aware Conditional Breakpoint: optional condition
-    ## expression evaluated by the replay engine at the candidate
-    ## stop step.  Empty string preserves the unconditional behaviour
-    ## M1 shipped with; a non-empty string is forwarded on the DAP
-    ## ``setBreakpoints`` request so the replay engine can evaluate
-    ## it against the locals at the matched step.  Composes
-    ## orthogonally with ``column``.
-    condition*: cstring
-    ## M10 — Column-Aware Tracepoint / Logpoint: when non-empty, the
-    ## entry describes a DAP *logpoint* (tracepoint) at
-    ## ``(line, column)`` rather than a breakpoint.  The replay engine
-    ## emits a DAP ``output`` event carrying ``logMessage`` as
-    ## execution passes through the matched step and CONTINUES
-    ## without stopping.  ``""`` (the default) preserves the M1
-    ## breakpoint behaviour; the GUI keeps the same gutter marker
-    ## table for both surfaces.  Spec:
-    ## codetracer-specs/Planned-Features/Column-Aware-Navigation.status.org §M10.
-    logMessage*: cstring
-    path*: cstring
-    fun*: cstring
-    level*: int
-    id*: int
-    enabled*: bool
-    error*: bool
-
   BreakpointMenu* = ref object
     program*: int
     frame*: seq[int]
@@ -117,34 +98,7 @@ type
     actions*: JsAssoc[int, proc()]
     dom*: dom.Node
 
-  ContextMenuItem* = ref object
-    name*: cstring
-    hint*: cstring
-    handler*: proc(ev: kdom.Event) {.closure.}
-    disabled*: bool
-      ## RESERVED FOR "APPLICABLE HERE, UNAVAILABLE NOW".
-      ##
-      ## An entry that has no meaning in the current mode is not disabled — it
-      ## is ABSENT. A greyed-out list of ten debug operations is still a menu
-      ## about debugging, and it fails the complaint that produced this field
-      ## ("the right click menu content over the editor area is not context
-      ## dependent") exactly as squarely as an enabled one. The rule is the
-      ## toolbar's, stated once in
-      ## `codetracer-specs/Planned-Features/Edit-Mode-Toolbar.md` §8: hidden
-      ## when the verb does not apply, disabled when it applies and the command
-      ## cannot run right now.
-    disabledReason*: cstring
-      ## WHY, IN WORDS, AND ON THE ROW. Not a tooltip: `.ct-menu-item--disabled`
-      ## sets `pointer-events: none`, so a disabled row cannot be hovered — a
-      ## reason parked in `title` would be unreachable by construction. It is
-      ## rendered as the row's sublabel instead.
-      ##
-      ## A disabled entry with an empty reason is a defect (the toolbar's
-      ## EMT-D14, asserted there and asserted here by
-      ## `ci/test/editor-context-menu-modes.sh`): "an action whose absence
-      ## cannot be explained is one whose absence was a guess".
-
-  EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents, EventEvm
+  EventTag* = enum EventStd, EventReads, EventWrites, EventNetwork, EventTrace, EventFiles, EventErrorEvents, EventEvm, EventProcess
 
   EventDropDownBox* = enum Filter, OnlyTrace, OnlyRecordedEvent, EnableDisable
 
@@ -183,6 +137,10 @@ type
     line*: int
     column*: int
     newWindow*: bool
+    keepWindow*: bool
+      ## Record the test and STAY: do not load the recording into this window
+      ## (`index/traces.onRunTest`). The Test Results row's `⟳`; false for
+      ## every caller that existed before it, which keeps their behaviour.
 
   ValueWithExpression* = ref object
     expression*: cstring
@@ -210,16 +168,6 @@ type
     loaded*: bool
 
   Overlay* {.pure.} = enum None, LowLevel, Hit
-
-  MessageLevel* = enum MsgInfo, MsgWarn, MsgError
-
-  LogMessage* = object
-    message*: string
-    level*: MessageLevel
-    time*: BiggestInt
-    # just finish it
-    # when we finish messages, jumping busy stuff etc and breakpoints
-    # and simple diffing and testing before
 
   TagKind* = enum TagLine, TagRegex
 
@@ -309,7 +257,11 @@ type
     lastAction*:            cstring
     cLocation*:             Location
     error*:                 DebuggerError
-    breakpointTable*: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]
+    pointStore*: JsObject
+      ## The session's `ReplayDataStore`, where its breakpoints are held
+      ## (`services/debugger_service`, Shared-DOM-Front-Ends D7.4). Opaque here
+      ## because this module cannot import the ViewModel types; the renderer
+      ## sets it when it builds the session. Nil until then.
     currentJump*: int
     stopSignal*:            RRGDBStopSignal
     frameInfo*:             FrameInfo
@@ -317,8 +269,6 @@ type
     operationCount*:        int
     lastRRTickTime*:        float
     avgRRTickTime*:         float
-    expressionMap*:         JsAssoc[cstring, seq[FlowExpression]]
-    showInlineValues*:      bool
     valueHistory*:          JsAssoc[cstring, ValueHistory]
     skipInternal*:          bool
     skipNoSource*:          bool
@@ -375,6 +325,11 @@ type
     untitledIndex*: int
     changeLine*: bool
     filesystem*: CodetracerFile
+    filesystemLoadError*: cstring
+      ## Why the last root load of the file tree failed, as the index process
+      ## reported it in ``filesystem-loaded``; empty or nil when ``filesystem``
+      ## holds the answer.  The Files pane shows it instead of "Loading..."
+      ## (GitHub #785).
     currentLine*: int
     tags*:                  JsAssoc[cstring, seq[Tag]]
     completeMoveResponses*: JsAssoc[cstring, MoveState]
@@ -459,7 +414,7 @@ type
     pluginCommands*: JsAssoc[cstring, SearchSource]
     activeCommandName*: cstring
     query*: SearchQuery
-    onSearchResultsUpdated*: proc(self: SearchService, results: seq[SearchResult]): Future[void]
+    onSearchResultsUpdated*: proc(self: SearchService, batch: SearchResultsBatch): Future[void]
 
   QueryKind* = enum
     CommandQuery,
@@ -636,7 +591,6 @@ type
     readOnly*: js
     content*: Content
     layoutItem*: GoldenContentItem
-    inExtension*: bool
     api*: MediatorWithSubscribers
     location*: Location
     stableBusy*: bool
@@ -647,146 +601,16 @@ type
     startRow*: int
     endRow*: int
     scrollAreaHeight*: int
-    rowHeight*: int
+    rowHeight*: float
     activeRowIndex*: int
     autoScroll*: bool
     inputFieldChange*: bool
     footerDom*: kdom.Element
 
-  EventLogRowExtras* = object
-    ## The parts of a `ct/update-table` row that this front-end keeps for
-    ## itself, one entry per row of the window on screen.
-    ##
-    ## ## WHY THESE ARE HERE AND NOT ON `EventLogRow`
-    ##
-    ## `store/types.EventLogRow` is the neutral shape three front-ends agree
-    ## on, and "a shared row that grew a field for each front-end's private
-    ## needs would stop being the thing three front-ends can agree on". So the
-    ## five fields `ProgramEvent` carries and `EventLogRow` does not were
-    ## decided one at a time, on what reads them:
-    ##
-    ## * `bytes` — **no reader anywhere in `src/frontend`**, and
-    ##   `TableRow::new` drops it before the row reaches this host at all. It
-    ##   is not carried here either: it is dead, not private.
-    ## * `tracepointResultIndex` — likewise no reader; the desktop wrote the
-    ##   literal `0` into it. A sweep's results have their own store signal
-    ##   (`PointListStore.tracepointHits`), which is where that index's
-    ##   meaning lives. Dead here too.
-    ## * `metadata` — real recorded data (the path a read/write event touched)
-    ##   but read by exactly two desktop renderers,
-    ##   `eventLogDescriptionRepr` and `flow.nim`'s `-std` box, both of which
-    ##   are composing display text. Private.
-    ## * `semanticKind` in its RAW form — `EventLogRow.kind` already IS the
-    ##   semantic kind whenever the producer sent one (`eventKindLabel`), so
-    ##   what is kept here is only the distinction between "the producer sent
-    ##   none" and "the producer sent the word `event`". `datatable.rowSemanticKind`
-    ##   turns it into a CSS class and `eventLogDescriptionRepr` switches on
-    ##   it. Private.
-    ## * `base64Encoded` — by the time a row exists the flag is SPENT:
-    ##   `onUpdatedTable` decodes `content` in place before `loadEvents` runs.
-    ##   It is carried only so the row handed to DataTables is byte-identical
-    ##   to the one it used to receive. Its live reader,
-    ##   `terminal_output.nim`, is on the `ct/loaded-terminal` route and never
-    ##   sees these rows.
-    ##
-    ## The two path fields are here for a different reason: they are not on
-    ## `ProgramEvent` at all. DataTables names `fullPath` as a column's `data`
-    ## key, and `TableRow::new` composes it as `"<basename>:<line>"` by
-    ## splitting on `/` only — so recomposing it from `EventLogRow.file` and
-    ## `.line` would quietly differ from the backend's own answer on a Windows
-    ## path. It is echoed, not rebuilt.
-    fullPath*: cstring
-    lowLevelLocation*: cstring
-    metadata*: cstring
-    semanticKind*: cstring
-    base64Encoded*: bool
-    rawEventId*: int
-      ## `TableRow.rrEventId` verbatim.
-      ##
-      ## `EventLogRow.eventId` is the row's best available IDENTITY and falls
-      ## back to the tick, then to the position, for a producer that sends no
-      ## id — which is right for a store whose consumers need every row to be
-      ## distinguishable. This column, though, is titled *"rr event id"* and
-      ## shows the recorder's own number; substituting a synthesised one would
-      ## print a plausible id for an event that has none.
-    rawLocationRRTicks*: int
-      ## `TableRow.directLocationRRTicks` verbatim.
-      ##
-      ## `EventLogRow.rrTicks` is a `uint64` and stores 0 for anything not
-      ## positive, because a tick count is what a pane seeks to. The wire
-      ## field is an `i64` on which some producers spell "no position" as a
-      ## NEGATIVE value, and `findActiveRow` compares it for equality against
-      ## the debugger's own raw tick — so folding -1 to 0 would make a row
-      ## with no position compare equal to a debugger standing at tick 0.
-
   EventLogComponent* = ref object of Component
-    init*:          bool
-    denseTable*:     DataTableComponent
-    detailedTable*:  DataTableComponent
-    drawId*:         int
-    tableCallback*: proc(data: js)
-    autoScrollUpdate*: bool
-    isDetailed*:   bool
-    kinds*: JsAssoc[EventLogKind, bool]
-    columns*: JsAssoc[EventOptionalColumn, bool]
-    tags*: JsAssoc[EventTag, bool]
-    kindsEnabled*: JsAssoc[EventLogKind, bool]
-    redrawColumns*: bool
-    index*: int
-    eventsIndex*:   int
+    ## The Event Log's identity in the layout. Its view is the session's
+    ## `EventLogVM` rendered by the panel host (`ui/event_log.nim`).
     service*:       EventLogService
-    dropDowns*: array[EventDropDownBox, bool]
-    focusedDropDowns*: array[EventDropDownBox, bool]
-    dropdownOutsideHandlerInstalled*: bool
-    selectedKinds*: array[EventLogKind, bool]
-    isOptionalColumnsMenuOpen*: bool
-    resizeObserver*: ResizeObserver
-    traceRenderedLength*: int
-    traceService*:  TraceService
-    traceSessionID*: int
-    traceUpdateID*:  int
-    rowSelected*: int
-    activeRowTicks*:  int
-    hiddenRows*: int
-    lastJumpFireTime*: int64
-    isFlowUpdate*: bool
-    started*: bool
-    ignoreOutput*: bool
-    programEvents*: seq[ProgramEvent]
-      ## The window currently on screen, as the legacy row shape.
-      ##
-      ## **A PROJECTION OF `ReplayDataStore.eventLog.rows`, NOT A SECOND COPY
-      ## OF THE WIRE.** `ui/event_log.nim:syncProgramEventsFromStore` is the
-      ## only writer: it reads the store's rows back out and pairs each with
-      ## the entry of `rowExtras` at the same offset. Everything a pane can
-      ## answer from a neutral row comes from the store; only the four fields
-      ## `EventLogRow` deliberately does not carry come from beside it.
-    rowExtras*: seq[EventLogRowExtras]
-      ## Per-row, index-aligned with `programEvents`: the parts of a
-      ## `ct/update-table` row that are this front-end's presentation and not
-      ## a fact about the recorded event. See `EventLogRowExtras`.
-    liveDebugRows*: seq[TableRow]
-    receivedUpdates*: bool
-    pendingReloadRetries*: int
-    extensionRendererId*: cstring
-
-
-  DebugComponent* = ref object of Component
-    service*:       DebuggerService
-    message*:       LogMessage
-    # TODO dropdown
-    after*: bool
-    before*: bool
-    listHistory*: bool
-    fullHistory*: bool
-    historyIndex*: int
-    usingContextMenu*: bool
-    historyDirection*: bool
-    activeHistory*: cstring
-    finished*: bool
-    jumpHistory*: seq[JumpHistory]
-    currentOperation*: cstring
-    isLoading*: bool
 
 
 
@@ -841,7 +665,6 @@ type
     values*:        seq[ValueComponent]
     service*:       DebuggerService
     locals*:        seq[Variable]
-    extensionRendererId*: cstring
 
   # (PLAT-51: `TimelineMode` and `TimelineComponent` stood here; the Timeline
   # panel is removed.)
@@ -868,6 +691,37 @@ type
     fullHash*: cstring     ## full 40-char SHA-1; used for graph lane tracking
     author*: cstring       ## author name shown in the expanded accordion row
     parents*: seq[cstring] ## full hashes of parent commits (1 normal, 2+ merge)
+
+  VcsRefreshCheck* = ref object
+    ## The VCS panel's change check in flight, if any — the state
+    ## `ui/git_cli.requestRefreshCheck` keeps so that overlapping triggers
+    ## (the 5 s tick, window focus, the first baseline) coalesce instead of
+    ## stacking up git processes or being lost. VCS-Panel.md, "An
+    ## auto-refresh never stalls the window": "A trigger that arrives while a
+    ## check is in flight is not dropped: one more check follows the one in
+    ## flight."
+    inFlight*: bool
+      ## A status + log read has been issued and has not answered yet.
+    followUp*: bool
+      ## At least one trigger arrived while `inFlight`: exactly one more
+      ## check starts when the current one answers, however many arrived.
+
+  VcsPanelReload* = ref object
+    ## The VCS panel's reload in flight, if any — the state
+    ## `ui/vcs_reload.requestPanelReload` keeps so that a reload requested
+    ## while one is reading is neither stacked nor lost. VCS-Panel.md, "An
+    ## auto-refresh never stalls the window": "A reload superseded by a newer
+    ## check or reload is still applied, and the newer one then reads again".
+    inFlight*: bool
+      ## The reload's reads have been issued and have not all answered.
+    followUp*: bool
+      ## Another reload was requested while `inFlight` (or the answer turned
+      ## out stale): exactly one more reload starts when the reads in flight
+      ## answer — after they are applied, or discarded if stale.
+    released*: bool
+      ## The reads in flight were given up by ``vcs_reload.releaseInFlight``:
+      ## the panel's state was written by someone else while they read, so
+      ## their answers are discarded and no follow-up starts from them.
 
   VCSChangedFile* = object
     status*: cstring       ## "M", "A", "D", etc.
@@ -908,9 +762,24 @@ type
       ## ID of the periodic ``windowSetTimeout`` timer. -1 when no timer
       ## is active. Stored so it can be cancelled.
     lastStatusSnapshot*: cstring
-      ## Concatenation of ``git status --porcelain`` and ``git log``
-      ## output from the most recent refresh.  Used to detect whether
-      ## anything actually changed before triggering a redraw.
+      ## The most recent ``git_cli.readRefreshSnapshot`` answer — the
+      ## working tree's status and the last 30 commit ids, in one string.
+      ## Used to detect whether anything actually changed before reloading
+      ## and redrawing. Nil until ``startFileWatching``'s baseline (or the
+      ## first check after it) has answered: the first answer is recorded,
+      ## not compared, so it cannot cause a spurious reload.
+    refreshCheck*: VcsRefreshCheck
+      ## The change check in flight, if any (``VcsRefreshCheck``). Created
+      ## by the first ``ui/vcs.requestSnapshotCheck`` — the baseline
+      ## ``startFileWatching`` requests.
+    reload*: VcsPanelReload
+      ## The reload in flight, if any (``VcsPanelReload``). Created by the
+      ## first ``ui/vcs.refreshVCSData``.
+    watchAfterReload*: bool
+      ## The first load is in flight: when it is applied, auto-refresh starts
+      ## if it found a repository (``ui/vcs.ensureVCSDataLoaded``). The load
+      ## used to finish before ``refreshVCSData`` returned, so this was a
+      ## plain ``if`` after the call.
     debounceTimerId*: int
       ## ID of the debounce ``windowSetTimeout``. -1 when idle.
     debounceActive*: bool
@@ -967,10 +836,29 @@ type
       ## ``diff:file:<path>``, ``diff:commit:<hash>[:<path>]`` or
       ## ``diff:Working Tree``.  It is the tab's identity: asking for the same
       ## target again focuses this tab instead of stacking a duplicate.
+    sectionPath*: cstring
+      ## Non-empty for one section of a whole-commit document (VCS-Panel.md,
+      ## "Whole-Commit Document"): the one file of the parent's target this
+      ## tab shows. The loaded diff is narrowed to it.
+    sectionOf*: UnifiedDiffComponent
+      ## The document tab this section belongs to, or nil for a tab of its
+      ## own. A section is never in GoldenLayout's component mapping.
+    sections*: seq[UnifiedDiffComponent]
+      ## A document tab's sections, one per file, in document order; empty
+      ## for a single-file tab.
     diffData*: DeepReviewData
       ## Parsed hunks for the target.  Filled from the review dataset when the
       ## session is a review and from ``git diff`` otherwise — VCS-Panel.md,
       ## "Data Sources and Instantiation Modes".
+    gitNewRevision*: cstring
+      ## For a git-loaded tab, the revision its diff's new side shows
+      ## (``DiffGitPlan.newRevision``; ``""`` is the working tree), recorded
+      ## when the diff is loaded so context expansion keeps reading that
+      ## revision even after the review that scoped it has ended.
+    gitReviewScoped*: bool
+      ## True when a git-loaded tab diffs the active review's commit
+      ## (``DiffGitPlan.reviewScoped``) rather than the working tree.  Such a
+      ## diff is read-only, like a review-backed one.
     reviewBacked*: bool
       ## True when ``diffData`` came from ``deepReviewData`` rather than from
       ## live git.  Drives *only* whether the mutating hunk operations are
@@ -1024,8 +912,8 @@ type
       ## a single collection would make each rebuild throw the other away.
     flowValueWidgets*: seq[js]
       ## The Monaco **content widgets** carrying the review's parallel value
-      ## bands (UD-3) — one per annotated line, each holding the
-      ## `.flow-parallel` row the debugger's own `ui/flow.renderFlow` builds.
+      ## bands (UD-3) — one per annotated line, each holding a `.flow-parallel`
+      ## row of the shared flow views (`isonim_flow_value_view`).
       ##
       ## A content widget rather than an injected-text decoration, which is
       ## what RV-5 used: injected text is part of the code line, so it starts
@@ -1075,7 +963,6 @@ type
     minNameWidth*: float # %
     maxNameWidth*: float # %
     totalValueWidth*: float # %
-    extensionRendererId*: cstring
 
   CallExpandedValuesComponent* = ref object of Component
     values*:        JsAssoc[cstring, ValueComponent]
@@ -1135,14 +1022,10 @@ type
     forceCollapse*: bool
     depthStart*: int
     coordinates*: seq[(float, float, float)]
-    startPositionX*: float
-    startPositionY*: float
-    scrollLeftOffset*: float
     callValuePosition*: JsAssoc[cstring, float]
     width*: cstring
     resizeObserver*: ResizeObserver
     isCalltrace*: bool
-    extensionRendererId*: cstring
 
     debugger*:       DebuggerService
     service*:        CalltraceService
@@ -1197,6 +1080,12 @@ type
     thinkingEndedAt*: float
     images*: seq[string]
       ## Base64 data URLs of images the user attached to this message.
+    failed*: bool
+      ## #862: the agent refused or aborted this turn (`session/prompt`
+      ## answered with an error) — `AgentFailed` in
+      ## `DeepReview/Agentic-Coding-Integration.md` §3.2.
+    errorMessage*: cstring
+      ## The agent's reason when `failed`, as the main process described it.
 
   AgentTerminal* = object
     id*: cstring
@@ -1280,7 +1169,8 @@ type
     ## user workspace and agent workspace views.
     progress*: AgentProgress
     viewState*: WorkspaceViewState
-    containerId*: cstring
+    host*: JsObject
+      ## The container the progress is rendered into (`mountCaptionBarProgress`).
     animationFrame*: int
     expanded*: bool
     lastUpdateMs*: int
@@ -1332,19 +1222,17 @@ type
 
   RequestPanelComponent* = ref object of Component
     panelState*: RequestPanelState
-    extensionRendererId*: cstring
 
   LowLevelCodeComponent* = ref object of Component
-    editor*: EditorViewComponent
-    instructionsMapping*: JsAssoc[int, int]
-    viewZones*: JsAssoc[int, int]
-    multilineZones*: JsAssoc[int, MultilineZone]
-    viewDom*: JsAssoc[int, kdom.Node]
-    mutationObserver*: MutationObserver
-    path*: cstring
-    partialTabInfo*: TabInfo
+    ## The Low Level Code pane's layout entry. The pane itself is the
+    ## session's `LowLevelCodeVM`, mounted by the panel host
+    ## (`ui/panel_host`) and loaded by the session's stop loader; the
+    ## component holds nothing.
 
   EditorViewComponent* = ref object of Component
+    renderedByIsoNim*: bool
+      ## The IsoNim editor view renders this editor (`ui/editor
+      ## .takeOverEditorRendering`); it dies with the component.
     editorView*:     EditorView
     path*:           cstring
     line*:           int
@@ -1376,7 +1264,6 @@ type
     isExpansion*:   bool # is an expansion editor
     parentLine*:    int
     tabInfo*:       TabInfo
-    flowUpdate*:    FlowUpdate
     flow*:          FlowComponent
     traces*:        JsAssoc[int, TraceComponent]
     expanded*:      JsAssoc[int, EditorViewComponent]
@@ -1486,7 +1373,6 @@ type
     runTraceButtonDom*:     kdom.Element
     searchInput*:           kdom.Element
     traceViewDom*:          kdom.Element
-    extensionRendererId*:   cstring
     lineCount*:             int
     resultsHeight*:         int
     toggleState*:           bool
@@ -1587,7 +1473,7 @@ type
     totalLineWidth*: int
     indentationsCount*: int
     variablesPositions*: JsAssoc[cstring, int]
-    sortedVariables*: JsAssoc[cstring, Value]
+    sortedVariables*: JsAssoc[cstring, FlowValueText]
     decorationsIds*: seq[cstring]
     decorationsDoms*: JsAssoc[cstring, kdom.Node]
     stepLoopCells*: JsAssoc[int, JsAssoc[int, kdom.Node]]
@@ -1604,11 +1490,15 @@ type
     legendDom*: kdom.Node
     loopStepCounts*: JsAssoc[int, seq[int]]
 
+  FlowWindowRef* = ref FlowLayoutWindow
+    ## A flow window held by reference, so the component and its readers share
+    ## one decoded window instead of copying it.
+
   FlowLoop* = ref object
     flowDom*: kdom.Node
     flowZones*: MultilineZone
     sliderDom*: kdom.Node
-    loopStep*: FlowStep
+    loopStep*: FlowLayoutStep
 
   FlowComponent* = ref object of Component
     bufferMaxOffsetInPx*: int
@@ -1617,7 +1507,9 @@ type
     editor*: EditorService
     editorUI*: EditorViewComponent
     focusedLine*: int
-    flow*: FlowViewUpdate
+    flow*: FlowWindowRef
+      ## The flow window this component draws: the session `FlowVM`'s decoded
+      ## window for this editor's view (`flow_layout.FlowLayoutWindow`).
     ## Set when `EditorViewComponent.loadFlow` replaces this component with a
     ## newer one for the same editor.  A superseded component still owns the
     ## loop-control DOM the user can see and click until the replacement has
@@ -1640,7 +1532,7 @@ type
     fontSize*: int
     shouldRecalcFlow*: bool
     flowDom*: JsAssoc[int, kdom.Node]
-    activeStep*: FlowStep
+    activeStep*: FlowLayoutStep
     groups*: seq[Group]
     inlineDecorations*: JsAssoc[int, InlineDecorations]
     inlineValueWidth*: int
@@ -1664,7 +1556,6 @@ type
     mutationObserver*: MutationObserver
     pixelsPerSymbol*: int
     recalculate*: bool
-    scratchpadUI*: ScratchpadComponent
     selected*: bool
     selectedLine*: int
     selectedLineInGroup*: int
@@ -1689,7 +1580,6 @@ type
     leftPos*: cstring
     lastScrollFireTime*: int64
     position*: int
-    extensionRendererId*: cstring
     # codeID*: int64
 
 
@@ -1917,7 +1807,6 @@ type
     activePathOffsets*: JsAssoc[int, int]
     prepared*: seq[js]
     nameMap*: JsAssoc[cstring, ClientAction]
-    debug*: DebugComponent
     service*: EditorService
     iconWidth*: int
     mainMenuWidth*: int
@@ -1978,6 +1867,9 @@ type
     isBeforeNextSubGroup*:  bool
     menuOs*:                int
     role*:                  cstring
+    mnemonic*:              char
+      ## A top-level folder's access key (`menu_vm.MenuItem.mnemonic`),
+      ## `'\0'` for none.
 
   StatusComponent* = ref object of Component
     build*: BuildComponent
@@ -2016,7 +1908,6 @@ type
     renderedEventIndex*: int
     currentLine*:    int
     initialUpdate*:  bool
-    extensionRendererId*: cstring
 
   LayoutSizes* = ref object
     normalSize*: float
@@ -2169,6 +2060,13 @@ type
   # During the incremental migration (M1-M6) the corresponding fields in
   # Data will be forwarded here via templates so that existing code keeps
   # compiling without changes.
+  PendingTabAnswer* = object
+    ## One answer queued for a hidden tab (`ReplaySession.pendingTabAnswers`):
+    ## the IPC message it is and its handler applied to it. An object, not a
+    ## tuple, so its fields keep their names in the JS a test reads.
+    message*: cstring
+    deliver*: proc()
+
   ReplaySession* = ref object
     id*:              ReplaySessionId
     trace*:           Trace
@@ -2205,23 +2103,35 @@ type
     visualReplayAvailable*: bool
     visualReplayPlayerUrl*: cstring
     visualReplayPlayerError*: cstring
+    # THE SESSION'S OWN VIEWMODELS — its `SessionViewModel` and the
+    # `DebuggerSession` (or `ct host` mirror) that built it, plus the
+    # per-tab panes' ViewModels the session layer does not hold
+    # (Multi-Window-Tab-Management.md §Tab Behavior rule 1: each tab is an
+    # independent session; Shared-DOM-Front-Ends.md D7: one VM set per
+    # session). A `ui/session_viewmodels.SessionViewModels`, which this module
+    # cannot name: the ViewModel layer is built over the types declared here.
+    # Read and written only through `ui/session_viewmodels.nim`. Nil until the
+    # session first gets a trace, an edit session or a dataset review
+    # (`ui_js.onTraceLoaded`, `ui_js.onNoTrace`, `ui_js.onStartDeepReview`),
+    # or is first asked for a per-tab pane ViewModel.
+    viewModels*: RootRef
+    # THE ANSWERS THAT ARRIVED FOR THIS TAB WHILE ANOTHER WAS ON SCREEN, in
+    # arrival order. An answer from the main process names the tab that asked
+    # (`index/tab_answers.nim`); its handler writes through `Data`'s
+    # active-session forwarding and draws the window's chrome, so it runs
+    # when its tab is the one shown: at once if it is, else from here, when
+    # the tab is next shown (`ui/tab_answer_routing.deliverTabAnswer`,
+    # `switchSession`). Dropped with the tab when it closes.
+    pendingTabAnswers*: seq[PendingTabAnswer]
 
   Data* = ref object
     redraw*:                proc: void
-    onBreakpointsVerified*: proc(path: cstring; lines: seq[int])
-      ## PLAT-40: where the debugger service hands the ENGINE's answer to a
-      ## `setBreakpoints` request — the lines it verified for `path`. The
-      ## renderer installs it to call `ReplayDataStore.applyVerifiedBreakpoints`
-      ## on the ViewModel session's store, the same decoder the native
-      ## front-ends reach, so the point list holds what the engine bound.
-      ## Nil until the ViewModel session exists; the service checks.
     ipc*:                   JsObject
     config*:                Config
     lastNoInfoMessage*:     cstring
     functions*:             Functions
     actions*: array[ClientAction, ClientActionHandler]
     contentActions*: array[ClientAction, array[Content, proc(data: Data): void]]
-    keyPlugins*:            array[Content, JsAssoc[cstring, proc(context: KeyPluginContext): Future[void]]]
     recentProjects*:        seq[Project]
     recentTraces*:          seq[Trace]
     recentFolders*:         seq[RecentFolder]
@@ -2272,16 +2182,6 @@ type
     activeSessionIndex*:    int
 
 
-  KeyPluginContext* = ref object
-    ## "" / -1 might mean no valid word info for that position
-    path*:    cstring
-    line*:    int
-    column*:  int
-    startColumn*: int
-    endColumn*: int
-    word*:    cstring
-    data*:    Data
-
   # workaround for calling data ui_js functions: their impls are be defined there to be able to eventually use
   # services and components, but we need to call them sometimes in components/services
   Functions* = object
@@ -2299,13 +2199,9 @@ type
 
   PointListData* = ref object
     init*: bool
-    breakpointTable*: js
     tracepointTable*: js
-    lastBreakpoint*: int
     lastTracepoint*: int
-    breakpoints*: seq[UIBreakpoint]
     tracepoints*: JsAssoc[int, Tracepoint]
-    redrawBreakpoints*: bool
     redrawTracepoints*: bool
 
   ProblemSeverity* = enum
@@ -2354,6 +2250,24 @@ type
     customFields*: seq[cstring]
     # names are in SearchSource
 
+  SearchResultRow* = object
+    ## One Find in Files row as the main process sends it
+    ## (`index/ipc_utils.searchBatchToJs`).
+    text*:      cstring
+    path*:      cstring
+    line*:      int
+    matchStart*: int
+    matchLength*: int
+
+  SearchResultsBatch* = object
+    ## `CODETRACER::search-results-updated`: one batch of the shared runner's
+    ## rows for the search `id`; `done` on the last one, `note` saying why a
+    ## search could read nothing.
+    id*: int
+    rows*: seq[SearchResultRow]
+    done*: bool
+    note*: cstring
+
   FlowConfigObjWrapper* = object
     enabled*: bool
     ui*: cstring
@@ -2392,6 +2306,25 @@ type
     rrBackend*:               RRBackendConfig
     ## "tab" (default) or "window" — see common/config.nim for docs.
     newTracePolicy*:          cstring
+    vcs*:                     VcsConfig
+      ## The `vcs:` entry, or nil in a config file written before it existed.
+      ## Read through `vcsFileClickOpensFullFile`.
+    window*:                  WindowConfig
+      ## PLAT-69: the `window:` entry, as js-yaml read it. nil (undefined)
+      ## in a config file written before the entry existed; its fields are
+      ## whatever the user typed, so they are read defensively
+      ## (`index/window.windowLaunchOf`) and validated by
+      ## `common/window_policy`, never trusted as typed here.
+
+  VcsConfig* = ref object
+    fileClickOpensFullFile*: bool
+      ## VCS-Panel.md, "Configuration": a click on a file in the VCS panel
+      ## opens the full file rather than the unified diff.
+
+  WindowConfig* = ref object
+    initial*: cstring
+    width*: int
+    height*: int
 
   RRBackendConfig* = ref object
     enabled*: bool
@@ -2439,6 +2372,22 @@ template `startOptions=`*(d: Data, v: StartOptions) = d.sessions[d.activeSession
 # M2 migration: dapApi and asyncSendCache forwarding.
 template dapApi*(d: Data): untyped = d.sessions[d.activeSessionIndex].dapApi
 template `dapApi=`*(d: Data, v: DapApi) = d.sessions[d.activeSessionIndex].dapApi = v
+
+proc sessionOwning*(d: Data; dapApi: DapApi): ReplaySession =
+  ## The replay session whose `DapApi` is `dapApi`, or nil when no open
+  ## session owns it.
+  ##
+  ## A handler registered on one session's `DapApi` runs for that session's
+  ## events whichever tab is on screen (`event_helpers.deliverDapEvent` routes
+  ## each event by the session it was tagged with), so it must act on this
+  ## session's state, not on the `Data` forwarders above, which name the tab on
+  ## screen.
+  if dapApi.isNil:
+    return nil
+  for session in d.sessions:
+    if not session.isNil and session.dapApi == dapApi:
+      return session
+  nil
 
 template asyncSendCache*(d: Data): untyped = d.sessions[d.activeSessionIndex].asyncSendCache
 template `asyncSendCache=`*(d: Data, v: auto) =
@@ -2497,6 +2446,60 @@ when defined(ctRenderer):
     let x = Transport()
     newMediatorWithSubscribers(name, isRemote=true, singleSubscriber=false, transport=x)
 
+  proc wireSessionServiceMoves*(data: Data; session: ReplaySession;
+                                source: Services = nil) =
+    ## Make `session`'s own legacy services follow `session`'s moves: its
+    ## debugger service (location, frame, stop signal — what the status bar
+    ## is seeded from and the debugger actions read) and, while its tab is the
+    ## one on screen, its editor service (which opens the moved-to file in the
+    ## layout on screen, so never in another tab's editor).
+    ##
+    ## EVERY TAB'S SESSION, not only the window's first (rule 1 of
+    ## `GUI/Multi-Window-Tab-Management.md` §Tab Behavior: each tab is an
+    ## independent session). The callbacks are installed by
+    ## `services/*_service.nim` on the first session's services when those
+    ## modules load; a tab opened later gets copies of them from `source` (the
+    ## services of a session that has them, `session_switch.createNewSession`
+    ## passes the tab it was opened from). They act on `self` — the service
+    ## object they are called on — so a copy updates this tab's services.
+    ## Before this, a later tab's debugger service never took a move, and the
+    ## status bar refresh in `ui_js.onTraceLoaded` copied its empty location
+    ## over the tab's real one.
+    ##
+    ## A move is routed to the `DapApi` of the session it was tagged for
+    ## (`event_helpers.deliverDapEvent`), so this handler runs for `session`'s
+    ## moves whichever tab is on screen.
+    if session.isNil or session.dapApi.isNil:
+      return
+    if not source.isNil and not session.services.isNil:
+      let target = session.services
+      if not target.debugger.isNil and not source.debugger.isNil and
+         target.debugger.onCompleteMove.isNil:
+        target.debugger.onCompleteMove = source.debugger.onCompleteMove
+      if not target.editor.isNil and not source.editor.isNil and
+         target.editor.onCompleteMove.isNil:
+        target.editor.onCompleteMove = source.editor.onCompleteMove
+    let sessionDapApi = session.dapApi
+    sessionDapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
+      # Guard against -1 sentinel: activeSessionIndex is -1 when no session
+      # is active (a CtCompleteMove before the session is fully initialized).
+      # Dropping the event is safe; the component path (register ->
+      # api.subscribe) handles it independently.
+      if data.activeSessionIndex >= 0:
+        # The callbacks are installed by `services/*_service.nim` when they
+        # load; a session whose services have none yet takes no service
+        # update.
+        let owner = data.sessionOwning(sessionDapApi)
+        if owner.isNil or owner.services.isNil:
+          return
+        let debugger = owner.services.debugger
+        if not debugger.isNil and not debugger.onCompleteMove.isNil:
+          discard debugger.onCompleteMove(debugger, value)
+        let editor = owner.services.editor
+        if owner == data.sessions[data.activeSessionIndex] and
+            not editor.isNil and not editor.onCompleteMove.isNil:
+          discard editor.onCompleteMove(editor, value))
+
   var data* = Data(
     lastAgentPrompt: "",
     breakpointMenu: JsAssoc[cstring, JsAssoc[int, BreakpointMenu]]{},
@@ -2517,13 +2520,11 @@ when defined(ctRenderer):
       debugger: DebuggerService(
         locals: @[],
         registerState: JsAssoc[cstring, cstring]{},
-        breakpointTable: JsAssoc[cstring, JsAssoc[int, UIBreakpoint]]{},
         valueHistory: JsAssoc[cstring, ValueHistory()]{},
         paths: @[],
         skipInternal: true,
         skipNoSource: false,
-        historyIndex: 1,
-        showInlineValues: true),
+        historyIndex: 1),
       editor: EditorService(
         open: JsAssoc[cstring, TabInfo]{},
         loading: @[],
@@ -2605,14 +2606,7 @@ when defined(ctRenderer):
   console.log "data.viewsApi"
   console.log data.viewsApi
 
-  data.dapApi.on(CtCompleteMove, proc(kind: CtEventKind, value: MoveState) =
-    # Guard against -1 sentinel: activeSessionIndex is -1 when no session is
-    # active (e.g. extension webview receives a CtCompleteMove before the
-    # session is fully initialized).  Dropping the event is safe; the component
-    # path (register -> api.subscribe) handles it independently.
-    if data.activeSessionIndex >= 0:
-      discard data.services.debugger.onCompleteMove(data.services.debugger, value)
-      discard data.services.editor.onCompleteMove(data.services.editor, value))
+  wireSessionServiceMoves(data, data.sessions[0])
 
   data.dapApi.on(CtUpdateExpansionResponse, proc(kind: CtEventKind, value: Location) =
     ## Handle the macro expansion response from the backend (S6).
@@ -2985,9 +2979,6 @@ method showHistory*(self: Component, expression: cstring) {.base, async.} =
 method onUpdatedHistory*(self: Component, update: HistoryUpdate) {.base, async.} =
   discard
 
-method onUpdatedFlow*(self: Component, update: FlowUpdate) {.base, async.} =
-  discard
-
 method onUpdatedTable*(self: Component, update: TableUpdate) {.base, async.} =
   discard
 
@@ -3077,63 +3068,27 @@ method onUploadTraceProgress*(self: Component, uploadProgress: UploadProgress) {
 # `handleHistoryJump` WAS HERE, AS A `{.base.}` METHOD RETURNING `discard`,
 # AND IT ATE A GESTURE.
 #
-# `ui/debug.nim` implements history navigation as a `proc` on
-# `DebugComponent`, not as a `method`, so this base was never overridden.
-# `ui/shortcuts.nim` does not import `ui/debug` — it gets `Component` from
-# `ui_imports`' re-export of this module — so its two mouse side-button
-# handlers bound to THIS declaration, dispatched dynamically, and discarded.
-# The browser Back and Forward mouse buttons did nothing for the whole period,
-# and the call sites read as if they worked.
-#
-# Deleted rather than fixed, so the compiler is the thing that answers. With
-# no base here, `shortcuts.nim` must import `ui/debug` to call it, and a
-# missing implementation is a build error instead of a silent `discard`.
-method redrawForExtension*(self: Component) {.base.} =
-  discard
+# The debugger's history was a `proc` on the debug component, so this base was
+# never overridden: `ui/shortcuts.nim`'s two mouse side-button handlers bound
+# to THIS declaration, dispatched dynamically, and discarded. Deleted rather
+# than fixed; the history now belongs to `DebugControlsVM`, which the mouse
+# handlers reach through `ui/debug_toolbar.moveInDebugHistory`.
 
 method redrawForSinglePage*(self: Component) {.base.} =
   discard
 
 method redraw*(self: Component) {.base.} =
-  if self.inExtension:
-    self.redrawForExtension()
-  else:
-    self.redrawForSinglePage()
-
-# templates for singletons
-template debugComponent*(data: Data): DebugComponent =
-  DebugComponent(data.ui.componentMapping[Content.Debug][0])
-
-template welcomeScreen*(data: Data): WelcomeScreenComponent =
-  WelcomeScreenComponent(data.ui.componentMapping[Content.WelcomeScreen][0])
+  self.redrawForSinglePage()
 
 # templates for getting a component from the common mapping
-template stateComponent*(data: Data, id: int): StateComponent =
-  StateComponent(data.ui.componentMapping[Content.State][id])
-
 template buildComponent*(data: Data, id: int): BuildComponent =
   BuildComponent(data.ui.componentMapping[Content.Build][id])
 
 template errorsComponent*(data: Data, id: int): ErrorsComponent =
   ErrorsComponent(data.ui.componentMapping[Content.BuildErrors][id])
 
-template scratchpadComponent*(data: Data, id: int): ScratchpadComponent =
-  ScratchpadComponent(data.ui.componentMapping[Content.Scratchpad][id])
-
 template shellComponent*(data: Data, id: int): ShellComponent =
   ShellComponent(data.ui.componentMapping[Content.Shell][id])
-
-template traceLogComponent*(data: Data, id: int): TraceLogComponent =
-  TraceLogComponent(data.ui.componentMapping[Content.TraceLog][id])
-
-template testResultsComponent*(data: Data, id: int): TestResultsComponent =
-  TestResultsComponent(data.ui.componentMapping[Content.TestResults][id])
-
-template pointListComponent*(data: Data, id: int): PointListComponent =
-  PointListComponent(data.ui.componentMapping[Content.PointList][id])
-
-template constraintsComponent*(data: Data, id: int): ConstraintsComponent =
-  ConstraintsComponent(data.ui.componentMapping[Content.Constraints][id])
 
 
 # macro delegate*(namespace: static[string], messages: untyped): untyped =

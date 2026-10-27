@@ -101,7 +101,10 @@ proc spawnTui(args: seq[string]; cols, rows: int; colorFgBg = "";
                                   "-" & $spawnCount)
   removeDir(layoutDir)
   createDir(layoutDir)
-  var b = newTuiTest(tuiBinary(), args & @[resolved.tracePath])
+  # PLAT-70 Part H: the bars' look is fixed for this suite — `thin`, the
+  # track drawn, never faded.
+  var b = newTuiTest(tuiBinary(), @["--scrollbar-thickness=thin", "--scrollbar-track=on", "--scrollbar-fade=off"] & args &
+                                  @[resolved.tracePath])
     .envSet("CODETRACER_TUI_LAYOUT_DIR", layoutDir)
     .width(cols).height(rows).transcript()
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX")
@@ -114,7 +117,7 @@ proc spawnTui(args: seq[string]; cols, rows: int; colorFgBg = "";
   b.spawn()
 
 proc quit(sess: var TuiTestSession) =
-  sess.send("q")
+  sess.send("\x11")  # Ctrl+Q, the CUA base's quit
   discard sess.waitExit(initDuration(seconds = 15))
   sess.close()
 
@@ -217,10 +220,17 @@ suite "PLAT-47: the terminal shows what the desktop shows":
     # the band's colour — past the end of `#!/usr/bin/env python3`, as the
     # desktop's band is read 30px inside its editor's right edge — and the
     # gutter is not (the desktop draws no band under the line numbers).
+    #
+    # M73 (#840): the right edge is the CODE's — the column before the
+    # pane's vertical bar while the file is taller than the pane, as the
+    # desktop's band ends at Monaco's scrollbar (Scrollbar-Scrubbers.md §4:
+    # the track is the pane's rightmost column).
+    const VerticalBarGlyphs = ["│", "┃", "╹", "╻", "╿", "╽"]
     let codeCol = colOf(sess, lineOne, Cols, "#!/usr")
     var edge = codeCol
     while edge + 1 < Cols and
-          glyph(sess, lineOne, edge + 1) notin VerticalDividerGlyphs:
+          glyph(sess, lineOne, edge + 1) notin VerticalDividerGlyphs and
+          glyph(sess, lineOne, edge + 1) notin VerticalBarGlyphs:
       inc edge
     var banded = 0
     for c in codeCol .. edge:
@@ -482,7 +492,8 @@ suite "PLAT-47: the focused pane is outlined as the desktop outlines it":
         ck ok
         if ring in seen: break
         seen.add ring
-        sess.send("\t")
+        # F6: the CUA base's next pane (PLAT-68; `Tab` indents in a buffer).
+        sess.send("\e[17~")
         # WAIT FOR THE REPAINT THE KEY CAUSES, not for 300 ms: on a loaded
         # host the frame read after a fixed pause can still be the one from
         # BEFORE the Tab, and then this loop meets its own previous ring and
@@ -517,7 +528,7 @@ suite "PLAT-47: --goto centres the stop, and auto-detection keeps Dark":
     ck pointer > 0
     # The source view's rows: from its tab strip (the file's tab, PLAT-49) to
     # the last row with a gutter.
-    let title = rowOf(sess, Cols, Rows, " main.py ")
+    let title = rowOf(sess, Cols, Rows, " calc/main.py ")
     var last = title
     for r in title + 1 ..< Rows - 1:
       let t = sess.regionText(r, 0, Cols, 1)

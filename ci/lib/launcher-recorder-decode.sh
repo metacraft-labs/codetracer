@@ -135,7 +135,7 @@ lrd_v4_empty_reason() {
 #
 #   `counts.io_events` is NOT among them, and that is a measurement rather than
 #   an oversight.  On a real interpose-mode recording it is 0: the OS event LOG
-#   (`event_log.dat`) is what that count reports, and interpose records the
+#   (`eventlog.dat`) is what that count reports, and interpose records the
 #   program's writes as per-thread `evOsWrite` events instead.  Measured
 #   2026-09-19 with codetracer-native-recorder@698832ce's `ct_cli` recording an
 #   extension-less C program that writes two lines to stdout, decoded by

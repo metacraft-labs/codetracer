@@ -23,9 +23,13 @@ const here = path.dirname(url.fileURLToPath(import.meta.url));
 // repo but consumes the recorder runtimes from their own repos, so it
 // has to resolve them rather than vendoring copies that would drift.
 const workspaceRoot = path.resolve(here, "../../../../../../../..");
-const jsRecorder =
-  process.env.CODETRACER_JS_RECORDER_PATH ??
-  path.join(workspaceRoot, "codetracer-js-recorder");
+const jsRecorderCli = process.env.CODETRACER_JS_RECORDER_PATH ??
+  path.join(workspaceRoot, "codetracer-js-recorder/packages/cli/dist/index.js");
+const cliSuffix = `${path.sep}packages${path.sep}cli${path.sep}dist${path.sep}index.js`;
+if (!path.resolve(jsRecorderCli).endsWith(cliSuffix)) {
+  throw new Error("CODETRACER_JS_RECORDER_PATH must name <repo>/packages/cli/dist/index.js");
+}
+const jsRecorder = path.resolve(jsRecorderCli, "../../../..");
 const wasmInstrumenter =
   process.env.CODETRACER_WASM_INSTRUMENTER_PATH ??
   path.join(workspaceRoot, "codetracer-wasm-instrumenter");
@@ -84,6 +88,16 @@ export default defineConfig({
       "@codetracer/runtime-browser": path.join(
         jsRecorder,
         "packages/runtime-browser/src/index.ts",
+      ),
+      // The runtime's own dependency, at its source for the same reason.
+      // Its `dist/` is CommonJS, and Vite converts CommonJS only under a
+      // `node_modules` path: the recorder's workspace links the package
+      // from `packages/`, whose real path is outside one, so a named import
+      // of the CommonJS build (`encodeBatch`, by the batch transport) fails
+      // the build with "is not exported".
+      "@codetracer/boundary-format": path.join(
+        jsRecorder,
+        "packages/boundary-format/src/index.ts",
       ),
       "codetracer-wasm-instrumenter/recorder-runtime": path.join(
         wasmInstrumenter,

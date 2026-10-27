@@ -24,21 +24,33 @@
 ##   * deliverable 7 — Shift + right-click opens the SAME menu as a plain
 ##     right-click, with no "terminal / browser menu" hint row (GPUI has no
 ##     native menu to fall back to);
-##   * deliverable 12 — the omnibox on the editor's ground and foreground in
-##     every state;
+##   * deliverable 12 — the omnibox on the bar's own ground in every state
+##     (the desktop's, measured 2026-10-17), its results on the editor's;
 ##   * deliverable 13 — the execution pointer is the desktop's
 ##     `highlight_line_arrow.svg`, never the `▶` glyph.
 ##
 ## No mocks: the binary, the engine and the recordings are the product's.
 
+import replay_prerequisite
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
+import ./gpui_child_env
 
 import gpui/app/leaves
+import gpui/chrome
 import gpui/list_scrubber
+import styles/generated/design_tokens
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 104
+const ExpectedAssertions = 93
+  ## 104 -> 90, measured 2026-10-22 with `__name__`'s history under both
+  ## engine rules: since `12d7cd18b` a value's history keeps an entry only
+  ## when the value CHANGED, so `__name__` (bound once) has 1 entry where it
+  ## had 15 (one per step of the module's call), and the value-history
+  ## case's per-entry loop asserts 14 fewer times. Its first check now says
+  ## so exactly.
+  ## 90 -> 93, 2026-10-23: the Call Trace's track case also presses the
+  ## track where a call row is drawn under it (three checks).
 
 var countedAssertions = 0
 
@@ -74,8 +86,7 @@ proc windowPlan(ops: string; subject: string; pre: seq[string] = @[];
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env[StateDirEnvVar] = state
   env["XDG_STATE_HOME"] = state
   # Every other per-user location (trace index, config, caches) of the
@@ -245,6 +256,20 @@ suite "PLAT-51 GPUI: list-pane scrollbars are scrubbers over the whole list":
     ck marks.len == 1
     ck marks[0].attr(ListMarkAttribute) == marksBefore[0].attr(ListMarkAttribute)
     ck parseInt(marks[0].attr(ListMarkAttribute)) < 3
+    # A press on the track where a call row IS drawn under it — its middle —
+    # is the track's too. The press at the track's end above lands below the
+    # last drawn row, where no row could have taken it, so it alone cannot
+    # tell the scrubber's press from the row's (the call row answering first
+    # would survive it). Here a row lies under the pointer: the view moves to
+    # the middle of the trace, and the debugger stays.
+    var midTrace = ""
+    let mid = windowPlan("scrub:calltrace:track:500", calls, trace = midTrace)
+    checkpoint(midTrace)
+    ck midTrace.countLines("calltrace jump") == 0
+    ck mid.executionLine == before.executionLine
+    let midFirst = mid.scrubInt("calltrace", "first")
+    checkpoint("first after the middle press " & $midFirst)
+    ck midFirst > 200 and midFirst < 400
 
   test "a held thumb dragged to the end follows, one fetch per motion at most":
     var trace = ""
@@ -272,10 +297,14 @@ suite "PLAT-51 GPUI: list-pane scrollbars are scrubbers over the whole list":
 suite "PLAT-51 GPUI: values, the caret, menus, the omnibox, the pointer":
 
   test "a changed value takes the desktop's accent; nothing at the entry":
+    # Every value row carries the attribute; a CHANGED one says `"true"`.
+    proc changedRows(plan: JsonNode): seq[JsonNode] =
+      for n in plan.nodesWith(StateChangedAttribute):
+        if n.attr(StateChangedAttribute) == "true": result.add n
     let entry = windowPlan("", calc)
-    ck entry.nodesWith(StateChangedAttribute).len == 0
+    ck entry.changedRows.len == 0
     let stepped = windowPlan("", calc, pre = @["--replay-ops=next=3"])
-    let changed = stepped.nodesWith(StateChangedAttribute)
+    let changed = stepped.changedRows
     checkpoint("changed rows: " & $changed.len)
     ck changed.len > 0
     var lit = 0
@@ -296,7 +325,9 @@ suite "PLAT-51 GPUI: values, the caret, menus, the omnibox, the pointer":
                           pre = @["--replay-ops=next=3"], trace = trace)
     let entries = plan.nodesWith(StateHistoryEntryAttribute)
     checkpoint(trace)
-    ck entries.len > 0
+    # `__name__` is bound once and never changes: its history is ONE entry
+    # (a history keeps an entry only when the value changed).
+    ck entries.len == 1
     ck trace.contains("history __name__")
     # Each entry names a recording position (its ticks).
     for e in entries:
@@ -324,15 +355,20 @@ suite "PLAT-51 GPUI: values, the caret, menus, the omnibox, the pointer":
     for e in b:
       ck not e.contains("Shift + right-click")
 
-  test "the omnibox is on the editor's ground and foreground in every state":
+  test "the omnibox is on the bar's ground in every state; its results on the editor's":
+    # 2026-10-17: the field on the bar's own ground in every state, as the
+    # desktop's `.command-input-row` is measured (#1b1b1b) — no longer the
+    # editor's; the typed query in the field's own #c8c8c8 (the label tier).
     for ops in ["", "key:p:control", "key:p:control,key:a"]:
       let plan = windowPlan(ops, calc)
       let field = plan.nodesWith("data-ct-omnibar")
       ck field.len == 1
-      ck field[0]{"styles"}{"bg"}.getStr == EditorGround
+      ck field[0]{"styles"}{"bg"}.getStr == chromeOf(crWindowBackground)
     let typed = windowPlan("key:p:control,key:a", calc)
-    ck typed.nodesWith("data-ct-omnibar")[0]{"styles"}{"text_color"}.getStr ==
-       EditorTextColour
+    var queryColour = ""
+    for c in typed.nodesWith("data-ct-omnibar")[0]{"children"}.getElems:
+      if c.textOf == "a▏": queryColour = c{"styles"}{"text_color"}.getStr
+    ck queryColour == DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
     let results = typed.nodesWith("data-ct-omnibar-results")
     ck results.len == 1
     ck results[0]{"styles"}{"bg"}.getStr == EditorGround

@@ -57,7 +57,9 @@ const
     ## Colours no token of the system resolves to, so a rung that still shows
     ## the old keyword pink could not have come from the new hex by accident.
   ThemeModules = ["roles.nim", "cell_style.nim", "colour_math.nim",
-                  "palette.nim", "capabilities.nim", "editor_theme.nim"]
+                  "palette.nim", "capabilities.nim", "editor_theme.nim",
+                  "terminal_profile.nim"]
+    ## (PLAT-71: `capabilities.nim` imports `terminal_profile.nim`.)
   ProbeSource = """
 import ./palette
 import ./capabilities
@@ -127,6 +129,14 @@ proc buildProbe(scratchTree, tokensNim, root: string): string =
   for m in ["tiers.nim", "oklab.nim", "raster.nim"]:
     copyFile(root / "src" / "common" / "terminal_graphics" / m,
              scratchTree / "src" / "common" / "terminal_graphics" / m)
+  # `capabilities.nim` names the negotiated key protocol (PLAT-68), whose
+  # type lives in the one key-name module.
+  copyFile(root / "src" / "common" / "key_names.nim",
+           scratchTree / "src" / "common" / "key_names.nim")
+  # `roles.nim` reads the focused strip's contrast floor (PLAT-68), a
+  # constant every front-end shares.
+  copyFile(root / "src" / "frontend" / "styles" / "contrast_floors.nim",
+           scratchTree / "src" / "frontend" / "styles" / "contrast_floors.nim")
   copyFile(tokensNim,
            scratchTree / "src" / "frontend" / "styles" / "generated" /
              "design_tokens.nim")

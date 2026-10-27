@@ -106,6 +106,9 @@ pub struct RequestRecord {
     /// disk. `None` for an inline span (the normal case — the execution is in
     /// *this* container) and for an external binding whose target is missing.
     pub external_trace_path: Option<String>,
+    /// An explicit recorder refusal: scheduler boundaries are not handler steps.
+    /// Empty for recorders that provide a source entry or omit the capability.
+    pub seek_unavailable_reason: String,
 }
 
 /// Status-class buckets the panel filters on, matching `statusBucket` in
@@ -198,6 +201,11 @@ pub struct LoadRequestSpansArguments {
     /// Maximum number of records to return. Omitted or `0` means "no limit".
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Matching records to skip before the page starts: a pane's window by
+    /// row (Viewport-Driven-Loading V2), where `fromSpanId` is a cursor for
+    /// walking pages. Omitted means none. Applied after `fromSpanId`.
+    #[serde(default)]
+    pub start: Option<usize>,
     /// Optional method / status-class / URL-substring filters.
     #[serde(default)]
     pub filters: Option<RequestSpanFilters>,
@@ -294,7 +302,8 @@ impl RequestSpans {
         let limit = args.limit.unwrap_or(0);
         let mut page: Vec<RequestRecord> = Vec::new();
         let mut next_span_id: Option<u64> = None;
-        for record in matching.into_iter().filter(|r| r.id >= from) {
+        let skip = args.start.unwrap_or(0);
+        for record in matching.into_iter().filter(|r| r.id >= from).skip(skip) {
             if limit > 0 && page.len() >= limit {
                 // The first record we did NOT return is where the next page
                 // starts, so a caller that follows the cursor never skips or
@@ -333,6 +342,11 @@ pub fn to_request_record(span: &SpanRecord, base_dir: &Path) -> RequestRecord {
         duration_ms: parse_numeric_metadata(span, KEY_HTTP_DURATION_MS),
         response_size: parse_numeric_metadata(span, KEY_HTTP_RESPONSE_SIZE),
         start_geid: span.start_step,
+        seek_unavailable_reason: if span.metadata_value("beam.handler_step_available") == Some("false") {
+            "Handler source steps were not recorded.".to_string()
+        } else {
+            String::new()
+        },
         is_open: span.is_open,
         status: status_name(span.status).to_string(),
         external_trace_path: resolve_external_container(span, base_dir).map(|p| p.to_string_lossy().into_owned()),
@@ -1120,6 +1134,24 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_beam_handler_is_projected_as_a_seek_refusal() {
+        let mut request = span(1, "GET", "/excluded", 200, 1);
+        request
+            .metadata
+            .push(("beam.handler_step_available".into(), "false".into()));
+        let row = serde_json::to_value(to_request_record(&request, Path::new("."))).unwrap();
+        assert_eq!(row["seekUnavailableReason"], "Handler source steps were not recorded.");
+        request.metadata.retain(|(key, _)| key != "beam.handler_step_available");
+        let row = serde_json::to_value(to_request_record(&request, Path::new("."))).unwrap();
+        assert_eq!(row["seekUnavailableReason"], "");
+        request
+            .metadata
+            .push(("beam.handler_step_available".into(), "true".into()));
+        let row = serde_json::to_value(to_request_record(&request, Path::new("."))).unwrap();
+        assert_eq!(row["seekUnavailableReason"], "");
+    }
+
+    #[test]
     fn non_request_spans_are_not_rows() {
         let mut spans = fixture();
         let mut process = span(6, "", "", 0, 0);
@@ -1180,11 +1212,34 @@ mod tests {
                 from_span_id: Some(from),
                 limit: Some(1),
                 filters: Some(filters.clone()),
+                start: None,
             });
             walked.extend(page.requests.iter().map(|r| r.id));
             cursor = page.next_span_id;
         }
         assert_eq!(walked, full.requests.iter().map(|r| r.id).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_window_by_row_skips_the_matching_rows_before_it() {
+        let spans = fixture();
+        let all = spans.page(&LoadRequestSpansArguments::default());
+        let window = spans.page(&LoadRequestSpansArguments {
+            start: Some(2),
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(window.total, all.total);
+        assert_eq!(
+            window.requests.iter().map(|r| r.id).collect::<Vec<_>>(),
+            all.requests[2..4].iter().map(|r| r.id).collect::<Vec<_>>()
+        );
+        let past = spans.page(&LoadRequestSpansArguments {
+            start: Some(99),
+            ..Default::default()
+        });
+        assert!(past.requests.is_empty());
+        assert_eq!(past.total, all.total);
     }
 
     #[test]

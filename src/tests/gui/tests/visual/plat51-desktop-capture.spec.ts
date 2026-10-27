@@ -176,7 +176,6 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
   test.use({
     sourcePath: recording("noir_space_ship"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -214,7 +213,7 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
     await ctPage.evaluate(() => (globalThis as any).__ctMenuVM.close());
 
     // ---- the Event Log's scrubber --------------------------------------------
-    await showTab(ctPage, "EVENT LOG", ".dt-scroll-body tbody tr");
+    await showTab(ctPage, "EVENT LOG", ".eventLog-scroll-body tbody tr");
     const start = await where(ctPage);
     const t0 = await settledTrack(ctPage, "eventLog");
     out.trackAtStart = t0;
@@ -224,7 +223,7 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
     // The rows IN VIEW (inside the scroll body's box), as the table drew
     // them — the last one must be the log's last event.
     out.rowsAtEnd = await ctPage.evaluate(() => {
-      const body = document.querySelector(".dt-scroll-body") as HTMLElement | null;
+      const body = document.querySelector(".eventLog-scroll-body") as HTMLElement | null;
       if (!body) return [];
       const box = body.getBoundingClientRect();
       return Array.from(body.querySelectorAll("tbody tr"))
@@ -251,14 +250,14 @@ test.describe("PLAT-51: the desktop's Event Log scrubber, no Timeline", () => {
     // A ROW click still moves the debugger; the mark follows it.
     await pressTrack(ctPage, "eventLog", 0.0);
     const before = await where(ctPage);
-    await ctPage.locator(".dt-scroll-body tbody tr").nth(5).click();
+    await ctPage.locator(".eventLog-scroll-body tbody tr").nth(5).click();
     out.afterRowClick = await waitMoved(ctPage, before);
     await ctPage.waitForTimeout(2_000);
     out.trackAfterRowClick = await settledTrack(ctPage, "eventLog");
     out.pageErrors = pageErrors;
     out.scrollBody = await ctPage.evaluate(() => {
-      const b = document.querySelector(".dt-scroll-body") as HTMLElement | null;
-      const r = document.querySelector(".dt-scroll-body tbody tr") as HTMLElement | null;
+      const b = document.querySelector(".eventLog-scroll-body") as HTMLElement | null;
+      const r = document.querySelector(".eventLog-scroll-body tbody tr") as HTMLElement | null;
       return b ? { scrollTop: b.scrollTop, scrollHeight: b.scrollHeight, clientHeight: b.clientHeight,
                    rowHeight: r ? r.getBoundingClientRect().height : -1 } : null;
     });
@@ -311,8 +310,16 @@ test.describe("PLAT-51: a saved desktop layout that held the Timeline", () => {
         .filter((e) => (e.textContent ?? "").trim().length === 0).length);
     out.pageErrors = pageErrors;
     expect(out.timelineTabs).toBe(0);
+    expect(out.emptyTabs).toBe(0);
     expect((out.tabs as string[])).toContain("EVENT LOG");
     expect((out.tabs as string[])).toContain("TERMINAL OUTPUT");
+    // THE USER'S LAYOUT IS THE ONE THAT OPENED, not the mode's default in
+    // its place: only the saved tree keeps TEST RESULTS and CONSTRAINTS in a
+    // column of their own (the Debug default puts the tests beside VCS and
+    // shows no CONSTRAINTS on `calc`). A layout the desktop could not load
+    // because the Timeline was left in it also opens without a Timeline tab
+    // — on the default — and only this tells the two apart.
+    expect((out.tabs as string[])).toContain("CONSTRAINTS");
     writeAnswers("savedLayout", out);
   });
 });
@@ -321,7 +328,6 @@ test.describe("PLAT-51: the desktop's Call Trace scrubber", () => {
   test.use({
     sourcePath: recording("call_pages"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -372,7 +378,6 @@ test.describe("PLAT-51: the desktop's Terminal Output line scrubber", () => {
   test.use({
     sourcePath: recording("terminal_colours"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -386,17 +391,39 @@ test.describe("PLAT-51: the desktop's Terminal Output line scrubber", () => {
     out.trackAtStart = await settledTrack(ctPage, "terminalOutput");
     await pressTrack(ctPage, "terminalOutput", 1.0);
     out.trackAtEnd = await settledTrack(ctPage, "terminalOutput");
-    out.lastLineVisible = await ctPage.evaluate(() => {
+    // The lines THE USER SEES after the press: those inside the `pre`'s
+    // visible box. The view holds a WINDOW of lines, padded above and below
+    // to every line's height, so the last `.terminal-line` in the DOM is the
+    // window's last held line — which need not be on screen (it trails the
+    // scroll until the window is refetched). What the press must show is the
+    // output's LAST line, at the bottom of what is drawn. The window follows
+    // the scroll asynchronously, so the reading is retried until it settles.
+    const shown = () => ctPage.evaluate(() => {
       const pre = document.querySelector(".isonim-terminal-output pre") as HTMLElement | null;
-      const lines = Array.from(document.querySelectorAll(".isonim-terminal-output pre .terminal-line"));
-      const last = lines[lines.length - 1] as HTMLElement | undefined;
-      if (!pre || !last) return false;
-      const a = pre.getBoundingClientRect(), b = last.getBoundingClientRect();
-      return b.bottom <= a.bottom + 1 && b.top >= a.top - 1;
+      if (!pre) return { first: -1, last: -1 };
+      const a = pre.getBoundingClientRect();
+      const top = a.top + pre.clientTop, bottom = top + pre.clientHeight;
+      const inView = Array.from(pre.querySelectorAll(".terminal-line"))
+        .filter((l) => {
+          const b = l.getBoundingClientRect();
+          return b.height > 0 && b.top >= top - 1 && b.bottom <= bottom + 1;
+        })
+        .map((l) => Number(l.id.replace("terminal-line-", "")));
+      return inView.length === 0 ? { first: -1, last: -1 }
+        : { first: Math.min(...inView), last: Math.max(...inView) };
     });
+    const lastLine = (out.trackAtStart as Track).total - 1;
+    let seen = await shown();
+    for (let i = 0; i < 40 && seen.last !== lastLine; i++) {
+      await ctPage.waitForTimeout(250);
+      seen = await shown();
+    }
+    out.linesShownAtEnd = seen;
+    out.lastLineVisible = seen.last === lastLine;
     out.afterEndPress = await where(ctPage);
     out.pageErrors = pageErrors;
     expect((out.trackAtStart as Track).total).toBe(129);
+    expect(seen.last).toBe(lastLine);
     expect(out.lastLineVisible).toBe(true);
     expect((out.afterEndPress as { ticks: number }).ticks).toBe(start.ticks);
     writeAnswers("terminalOutput", out);
@@ -407,7 +434,6 @@ test.describe("PLAT-51: the desktop's changed-value style", () => {
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -488,7 +514,6 @@ test.describe("PLAT-51: GoldenLayout's drop decisions, for the pointer-trace dif
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 
@@ -733,7 +758,6 @@ test.describe("PLAT-51: the desktop's new tab opens the Welcome Screen", () => {
   test.use({
     sourcePath: recording("calc"),
     launchMode: "trace-folder",
-    noUserLayout: true,
     codetracerPrefixOverride: prefix,
   });
 

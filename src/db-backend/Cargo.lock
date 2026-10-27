@@ -299,6 +299,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "codetracer_ctfs"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
  "serde",
  "serde_json",
  "sha2",
@@ -486,6 +487,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct-data-breakpoints"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "ct-home"
 version = "0.1.0"
 
@@ -497,6 +505,13 @@ dependencies = [
  "num-traits",
  "schemars 0.8.22",
  "serde",
+]
+
+[[package]]
+name = "ct-open-beneath"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -1203,6 +1218,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsbound"
+version = "0.1.0"
+dependencies = [
+ "codetracer_ctfs",
+ "codetracer_trace_writer",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1606,8 +1632,10 @@ dependencies = [
  "console_error_panic_hook",
  "criterion",
  "ct-dap-client",
+ "ct-data-breakpoints",
  "ct-home",
  "ct-lang",
+ "ct-open-beneath",
  "env_logger",
  "filetime",
  "futures",
@@ -1616,6 +1644,7 @@ dependencies = [
  "gimli",
  "indexmap 1.9.3",
  "js-sys",
+ "jsbound",
  "libc",
  "log",
  "mapping-catalog",

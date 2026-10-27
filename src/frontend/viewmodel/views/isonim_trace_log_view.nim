@@ -7,9 +7,12 @@
 ## ``frontend/ui/trace_log.nim`` (the IsoNim view is the single source
 ## of truth for the panel's DOM).
 ##
-## Both renderer overloads (Mock and Web) produce the same outer
-## structure mirroring the legacy ``componentContainerClass(
-## "traceLog")`` layout::
+## ONE generic view (Shared-DOM-Front-Ends D3), ``renderTraceLogPanel[R, N]``,
+## rendered under ``MockRenderer`` in the headless tests and ``WebRenderer`` on
+## the desktop and the web page, where the panel host (``ui/panel_host``)
+## mounts it and reports the rows it shows to ``TraceLogVM.setViewport``. The
+## structure mirrors the legacy ``componentContainerClass("traceLog")``
+## layout::
 ##
 ##   div.component-container.traceLog
 ##     div.trace-log-table-header
@@ -37,7 +40,7 @@
 ##   based on ``vm.isEmpty``.
 
 import isonim/core/[signals, computation]
-import isonim/dsl/ui
+import isonim/dsl/[ui, components]
 import isonim/testing/mock_dom
 
 when defined(js):
@@ -46,6 +49,9 @@ when defined(js):
 
 import ../store/types
 import ../viewmodels/trace_log_vm
+
+# The generic procs expand the DSL at their instantiation site.
+export signals, computation, components
 
 const TraceLogContainerClass* = "component-container traceLog"
   ## Verbatim string the legacy ``componentContainerClass(
@@ -88,20 +94,18 @@ proc onRowClick(vm: TraceLogVM; index: int): proc() =
   result = proc() = vm.jumpToEntry(captured)
 
 # ---------------------------------------------------------------------------
-# Mock renderer — headless test DOM
+# The panel
 # ---------------------------------------------------------------------------
 
-proc renderRowMock(r: MockRenderer; vm: TraceLogVM; entry: TraceLogEntry;
-                   index: int; selected: bool): MockNode =
-  ## Render a single trace-log row.  The click handler maps onto
-  ## ``vm.jumpToEntry`` (which dispatches ``ct/event-jump``); the
-  ## rr-ticks column wraps the indicator span so CSS can colour it
-  ## independently.
-  let onClick = onRowClick(vm, index)
+proc renderTraceLogRow[R, N](r: R; vm: TraceLogVM; entry: TraceLogEntry;
+                             index: int; selected: bool): N =
+  ## One trace-log row. A click goes to the stop (``vm.jumpToEntry``,
+  ## ``ct/event-jump``); the rr-ticks column wraps the indicator span so CSS
+  ## can colour it independently.
   let lineStyle = rrTicksLineStyle(entry)
-  let row = ui(r):
+  ui(r):
     tdiv(class = rowClass(selected),
-         onclick = onClick):
+         onclick = onRowClick(vm, index)):
       tdiv(class = "trace-col-rr-ticks"):
         span(class = "event-rr-ticks-line",
              style = lineStyle):
@@ -113,17 +117,12 @@ proc renderRowMock(r: MockRenderer; vm: TraceLogVM; entry: TraceLogEntry;
         text entry.functionName
       tdiv(class = "trace-col-locals"):
         text entry.localsText
-  row
 
-proc renderTraceLogPanel*(r: MockRenderer; vm: TraceLogVM): MockNode =
-  ## Render the Trace Log panel for the Mock renderer.
-  ##
-  ## The static shell (table-header + table-body containers) is built
-  ## once via the DSL.  A single outer ``createRenderEffect`` rebuilds
-  ## the body whenever ``entries`` or ``selectedIndex`` change and
-  ## also toggles the empty-state placeholder.
-  var bodyContainer: MockNode
-  var emptyContainer: MockNode
+proc renderTraceLogPanel*[R, N](r: R; vm: TraceLogVM): N =
+  ## The Trace Log panel. The static shell (header and body) is built once;
+  ## one render effect rebuilds the body whenever ``entries`` or
+  ## ``selectedIndex`` change and toggles the empty-state placeholder.
+  var bodyContainer, emptyContainer: N
 
   let panel = ui(r):
     tdiv(class = TraceLogContainerClass, tabIndex = "2"):
@@ -141,140 +140,17 @@ proc renderTraceLogPanel*(r: MockRenderer; vm: TraceLogVM): MockNode =
       tdiv(ref = emptyContainer, class = "trace-log-empty"):
         text EmptyStateText
 
-  # Body + empty-state — rebuilt whenever the entry list or selection
-  # changes.  ``selectedIndex`` is read inside the effect so the
-  # subscription edge is established for it too.
   createRenderEffect proc() =
     let entries = vm.entries.val
     let selected = vm.selectedIndex.val
     r.clearChildren(bodyContainer)
     for i, entry in entries:
-      let row = renderRowMock(r, vm, entry, i, i == selected)
-      r.appendChild(bodyContainer, row)
-
-    # Toggle the empty-state placeholder via a class instead of
-    # remove/insert so the held ``emptyContainer`` reference stays
-    # stable across reactive updates (matches the request_panel
-    # count-badge pattern).
-    if entries.len == 0:
-      r.setAttribute(emptyContainer, "class", "trace-log-empty")
-    else:
-      r.setAttribute(emptyContainer, "class", "trace-log-empty hidden")
+      r.appendChild(bodyContainer,
+                    renderTraceLogRow[R, N](r, vm, entry, i, i == selected))
+    # The placeholder is toggled by class, so the held reference stays
+    # stable across updates.
+    r.setAttribute(emptyContainer, "class",
+                   if entries.len == 0: "trace-log-empty"
+                   else: "trace-log-empty hidden")
 
   panel
-
-# ---------------------------------------------------------------------------
-# Web renderer — production DOM
-# ---------------------------------------------------------------------------
-
-when defined(js):
-
-  proc createWebElement(tag: string; cssClass: string = "";
-                        elemId: string = ""): isonim_dom.Element =
-    ## Helper: create a DOM element with optional class + id
-    ## attributes.
-    let n = isonim_dom.createElement(isonim_dom.document, cstring(tag))
-    if cssClass.len > 0:
-      isonim_dom.setAttribute(n, cstring"class", cstring(cssClass))
-    if elemId.len > 0:
-      isonim_dom.setAttribute(n, cstring"id", cstring(elemId))
-    n
-
-  proc createWebTextElement(tag: string; textValue: string;
-                            cssClass: string = "";
-                            elemId: string = ""): isonim_dom.Element =
-    ## Helper: create an element with a text-node child in one shot.
-    let n = createWebElement(tag, cssClass, elemId)
-    let t = isonim_dom.createTextNode(isonim_dom.document, cstring(textValue))
-    isonim_dom.appendChild(isonim_dom.Node(n), t)
-    n
-
-  proc clearWebChildren(node: isonim_dom.Element) =
-    let asNode = isonim_dom.Node(node)
-    while not isonim_dom.isNodeNil(asNode.firstChild):
-      discard isonim_dom.removeChild(asNode, asNode.firstChild)
-
-  proc renderRowWeb(vm: TraceLogVM; entry: TraceLogEntry;
-                    index: int; selected: bool): isonim_dom.Element =
-    ## Build a trace-log row in the real DOM.  Same shape as the Mock
-    ## variant; click handler is wired imperatively via
-    ## ``addEventListener``.
-    let row = createWebElement("div", rowClass(selected))
-
-    let rrDiv = createWebElement("div", "trace-col-rr-ticks")
-    let lineSpan = createWebElement("span", "event-rr-ticks-line")
-    isonim_dom.setAttribute(lineSpan, cstring"style",
-                            cstring(rrTicksLineStyle(entry)))
-    isonim_dom.appendChild(isonim_dom.Node(rrDiv), isonim_dom.Node(lineSpan))
-    let rrText = isonim_dom.createTextNode(isonim_dom.document,
-                                            cstring($entry.rrTicks))
-    isonim_dom.appendChild(isonim_dom.Node(rrDiv), rrText)
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(rrDiv))
-
-    let locDiv = createWebTextElement("div", fileLineText(entry),
-                                      "trace-col-location")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(locDiv))
-
-    let fnDiv = createWebTextElement("div", entry.functionName,
-                                     "trace-col-function")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(fnDiv))
-
-    let localsDiv = createWebTextElement("div", entry.localsText,
-                                         "trace-col-locals")
-    isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(localsDiv))
-
-    let onClick = onRowClick(vm, index)
-    isonim_dom.addEventListener(isonim_dom.Node(row), cstring"click",
-                                proc(ev: isonim_dom.Event) = onClick())
-    row
-
-  proc renderTraceLogPanel*(r: WebRenderer; vm: TraceLogVM): isonim_dom.Element =
-    ## Render the Trace Log panel for the real DOM.  Same dispatch
-    ## shape as the Mock variant — outer wrapper plus a render-effect
-    ## that rebuilds the body and toggles the empty-state placeholder.
-    var bodyContainer: isonim_dom.Element
-    var emptyContainer: isonim_dom.Element
-
-    let panel = ui(r):
-      tdiv(class = TraceLogContainerClass, tabIndex = "2"):
-        tdiv(class = "trace-log-table-header"):
-          tdiv(class = "trace-col-rr-ticks"):
-            text "rr-ticks"
-          tdiv(class = "trace-col-location"):
-            text "Location"
-          tdiv(class = "trace-col-function"):
-            text "Function"
-          tdiv(class = "trace-col-locals"):
-            text "Locals"
-        tdiv(ref = bodyContainer, class = "trace-log-table-body"):
-          discard
-        tdiv(ref = emptyContainer, class = "trace-log-empty"):
-          text EmptyStateText
-
-    createRenderEffect proc() =
-      let entries = vm.entries.val
-      let selected = vm.selectedIndex.val
-      clearWebChildren(bodyContainer)
-      for i, entry in entries:
-        let row = renderRowWeb(vm, entry, i, i == selected)
-        isonim_dom.appendChild(isonim_dom.Node(bodyContainer),
-                               isonim_dom.Node(row))
-
-      if entries.len == 0:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"trace-log-empty")
-      else:
-        isonim_dom.setAttribute(emptyContainer, cstring"class",
-                                cstring"trace-log-empty hidden")
-
-    panel
-
-  proc mountIsoNimTraceLogPanel*(container: isonim_dom.Element;
-                                 vm: TraceLogVM) =
-    ## Mount the IsoNim Trace Log panel as a child of ``container``.
-    ## Reactive effects handle every subsequent update — no manual
-    ## redraw is needed.
-    let r = WebRenderer()
-    let panel = renderTraceLogPanel(r, vm)
-    isonim_dom.appendChild(isonim_dom.Node(container),
-                           isonim_dom.Node(panel))

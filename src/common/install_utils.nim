@@ -144,12 +144,24 @@ proc installCodetracerOnPath*(
       return err "Failed to put CodeTracer on the PATH: " & e.msg
 
   elif defined(macosx):
-    let
-      homeDir = getEnv("HOME")
-      shellLaunchersDir = shellLaunchersDir()
+    let homeDir = getEnv("HOME")
 
     if homeDir.len == 0:
       return err "Unable to obtain user's home directory"
+
+    # `shellLaunchersDir()` resolves the per-user data area through
+    # `ct_home.ctDataDirIgnoringXdg`, which consults `$CODETRACER_HOME` and
+    # otherwise falls back to the user's home directory -- a lookup that can
+    # raise `ValueError` when neither is determinable. This proc is
+    # `{.raises: [].}`, so that lookup has to be a checked step like every
+    # other failure in this branch rather than an uncaught effect.
+    let shellLaunchersDir =
+      try:
+        shellLaunchersDir()
+      except CatchableError as error:
+        return err(
+          "Unable to locate the CodeTracer shell launchers " &
+          "directory: " & error.msg)
 
     try:
       createDir(shellLaunchersDir)

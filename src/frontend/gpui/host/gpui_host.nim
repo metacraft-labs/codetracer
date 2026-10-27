@@ -67,7 +67,7 @@
 when defined(js):
   {.error: "src/frontend/gpui/host is native-only: it spawns replay-server.".}
 
-import std/strutils
+import std/[strutils, tables]
 
 import codetracer_embed
 
@@ -75,6 +75,8 @@ import ../../view_vocabulary/editor_surface
 
 import tui/host/native_host
 export native_host
+
+import pane_viewport   # HSF-V2: a pane's size as a Viewport
 
 # PLAT-22. The working-tree reader, for the same reason and at the same cost as
 # `native_host` above: `editProjectProblem`, `listProjectFiles` and
@@ -120,6 +122,55 @@ proc gpuiFrontEndVersion*(): string =
   ## future about-box cannot part.
   GpuiFrontEndVersion
 
+const
+  GpuiHandshakeEnvVar* = "CODETRACER_GPUI_HANDSHAKE_MS"
+    ## Overrides `native_host.DefaultHandshakeMs` for THIS front-end, in
+    ## milliseconds, parsed by `native_host.handshakeBudgetMs` — so a value
+    ## that does not parse or is not positive keeps the default rather than
+    ## switching the clock off.
+    ##
+    ## ITS OWN VARIABLE rather than the terminal's
+    ## `CODETRACER_TUI_HANDSHAKE_MS`, because a test that shortens one
+    ## front-end's clock must not shorten the other's: a shell that exported
+    ## the TUI's knob for a lifecycle suite would otherwise give every GPUI
+    ## window it started a budget meant for a fake engine. Like the TUI's, it
+    ## is a knob and not a command-line flag;
+    ## `tests/test_gpui_handshake_bound.nim` is the reason it exists.
+
+  GpuiExitEngineStalled* = 4
+    ## The folder has a recording's shape, the engine accepted `launch`, and
+    ## then sent nothing for a whole budget. Equal to the terminal
+    ## front-end's `cli.ExitEngineStalled` on purpose, so a script driving
+    ## `ct replay --ui=<either>` reads one code for one fact
+    ## (`codetracer-pm/spec/CLI/ct/ui-selection.md` §8b).
+
+  GpuiExitUnreadableRecording* = 5
+    ## The engine ANSWERED that it cannot read this recording
+    ## (`DapLaunchRefusedError`). Equal to the terminal front-end's
+    ## `cli.ExitUnreadableRecording`, for the same reason.
+
+type
+  GpuiOpenStalledError* = object of DapStalledError
+    ## The engine went quiet DURING THE OPEN — before `openGpuiTrace`
+    ## returned a session — as opposed to after it, while the run was loading
+    ## panes, replaying `--replay-ops` or building a `--report-plan`.
+    ##
+    ## A SUBTYPE, so every `except DapStalledError` still catches it, and
+    ## because the two moments call for opposite advice. A stall in the open
+    ## means the engine could not get the recording to its first stop, which
+    ## is what a recording it cannot read looks like when it says nothing, so
+    ## re-recording is worth suggesting. A stall after the open is an engine
+    ## that HAS read the recording and then stopped answering a request:
+    ## telling that user to re-record a recording that opened sends them to
+    ## redo work that will not help.
+
+  GpuiTabStalledError* = object of DapStalledError
+    ## A recording opened for a new tab (`openTabSession`) whose engine read
+    ## it and then went quiet while the tab was being opened. Its message is
+    ## already the user's sentence (`native_host.StalledAfterOpenPhrase`), its
+    ## `parent` the original stall, and its engine is closed by the time it
+    ## is raised.
+
 proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   ## Spawn `replay-server` on `traceFolder` and complete the DAP handshake.
   ##
@@ -129,14 +180,147 @@ proc openGpuiTrace*(traceFolder: string): HeadlessDebugSession =
   ## exactly one site, which is what makes the residue above a one-line move
   ## rather than a sweep.
   ##
-  ## No `DapReadBound` is threaded: CTUI-14's read bound exists because a
-  ## stalled adapter can wedge a TERMINAL a user cannot get back, and a window
-  ## that has not opened yet is not in that state. A GPUI equivalent is
-  ## PLAT-21's, when there is a pane whose data can stall.
+  ## ## The read bound, and why the earlier reasoning against it was wrong
+  ##
+  ## Every read of the handshake is bounded by `handshakeBudgetMs
+  ## (GpuiHandshakeEnvVar)` — `native_host.DefaultHandshakeMs` (30 s) unless
+  ## `CODETRACER_GPUI_HANDSHAKE_MS` says otherwise — and an engine that sends
+  ## nothing for that long raises `DapStalledError`, which `main` reports by
+  ## name with `GpuiExitEngineStalled`.
+  ##
+  ## This function used to pass NO bound, on the reasoning that CTUI-14's
+  ## bound exists because a stalled adapter wedges a TERMINAL a user cannot
+  ## get back, "and a window that has not opened yet is not in that state".
+  ## That was measured false (codetracer-pm `issues/2026-10-02-codetracer-
+  ## gpui-hangs-for-ever-on-a-replay-server-that-never-reports-a-stop.md`):
+  ## `replay-server` answered `launch` with `success: true`, never sent
+  ## `stopped`, and `codetracer-gpui --report-plan <trace>` was killed by
+  ## `timeout` at 100 s with 0 bytes on stdout and 0 on stderr — both ends
+  ## blocked in `read`, diagnosable only with `sample(1)`. A window that has
+  ## not opened is WORSE off than a wedged terminal, not better: nothing on
+  ## screen says where it is, and there is no window yet to take a keystroke,
+  ## so the clock is the only thing that ends the wait by name. `interruptFd`
+  ## is therefore `-1`.
+  ##
+  ## ## The bound covers the OPEN, not the window
+  ##
+  ## The returned session still carries the bound, so everything the caller
+  ## does before the window takes input — loading the first panes,
+  ## `--replay-ops`, the whole of `--report-plan` — is bounded too: none of
+  ## it has a user watching, and an unattended run must end. The caller lifts
+  ## it with `liftOpenBound` when the session becomes INTERACTIVE, and this is
+  ## where this front-end deliberately differs from the terminal, which keeps
+  ## its clock for the whole session (`tui_session.disarmHandshakeInterrupt`).
+  ##
+  ## The reason is operations that are silent BY DESIGN for longer than any
+  ## budget that is short enough to be useful at open: `ct/run-tracepoints`
+  ## sends nothing at all until the sweep over the whole recording is done
+  ## (`Handler::run_tracepoints`), and a `continue` across a long native
+  ## recording answers only when it stops. Under a 30 s per-message clock a
+  ## user's sweep over a large recording would be reported as a failure, and
+  ## the sweep's answer — which still arrives — would sit in the event queue
+  ## to be read as the answer to the NEXT sweep. A window the user started an
+  ## operation in is a window they are watching; a slow answer there is the
+  ## right outcome and a wrong one is not.
+  ##
+  ## The contract is codetracer-pm `spec/CLI/ct/ui-selection.md` §8b.
   if traceFolder.strip().len == 0:
     raise newException(TuiHostError,
       "codetracer-gpui: name a recording folder")
-  openLocalTrace(traceFolder)
+  try:
+    openLocalTrace(traceFolder,
+                   bound = DapReadBound(
+                     timeoutMs: handshakeBudgetMs(GpuiHandshakeEnvVar),
+                     interruptFd: -1))
+  except GpuiOpenStalledError:
+    raise
+  except EngineStalledAfterOpenError:
+    # The engine reached its first stop and THEN went quiet, inside the
+    # handshake's last wait (`newHeadlessDebugSession`). It read the
+    # recording, so this is the post-open stall and keeps that kind: re-labelled
+    # as the open's, it would reach the user as "re-record it" (§8b).
+    raise
+  except DapStalledError as e:
+    # Re-raised as the open's own kind, carrying the original as `parent`, so
+    # the caller can tell this stall from one later in the run (see
+    # `GpuiOpenStalledError`). The child is already reaped:
+    # `newHeadlessDebugSession` closes it on every failing path.
+    raise newException(GpuiOpenStalledError, e.msg, e)
+
+proc liftOpenBound*(session: HeadlessDebugSession) =
+  ## Take the clock `openGpuiTrace` installed off `session`'s engine channel,
+  ## because the session is about to answer a user rather than a script.
+  ##
+  ## Call it once the open is complete and the window is about to take input
+  ## (`runOpen` before `launchWindow`, `openRecordingInTab` once the new tab's
+  ## panes are loaded) — never on a path with nobody at it: a run that ends
+  ## without a window, or a window `--quit-after-ms` will close, stays
+  ## bounded. See `openGpuiTrace`'s "The bound covers the OPEN, not
+  ## the window" for why the window is unbounded.
+  ##
+  ## Operations that carry their OWN budget are unaffected: `awaitJump`
+  ## installs `LineJumpQuietMs` whenever the channel's clock is off or longer,
+  ## and restores what it found.
+  if session.isNil or session.backend.isNil:
+    return
+  session.backend.bound = DapReadBound(interruptFd: -1)
+
+proc openTabSession*(path: string; showFlowOverlay: bool): HeadlessDebugSession =
+  ## PLAT-49 part B: the open-and-load of a recording the "+" opens in a new
+  ## tab — spawned and handshaken (`openGpuiTrace`), the flow overlay set as
+  ## the run's command line asks, and the recording's panes loaded
+  ## (`loadRecordingPanes`), with the open's clock still on. Renderer-free, so
+  ## a suite opens a tab without a window; `main.openRecordingInTab` adopts
+  ## what it returns into the shell and lifts the clock (`liftOpenBound`).
+  ##
+  ## Raises what `openGpuiTrace` raises for a folder that does not open (its
+  ## engine already reaped by `newHeadlessDebugSession`). An engine that read
+  ## the recording and then went quiet — in the handshake's last wait, or on
+  ## the tab's first pane requests — raises `GpuiTabStalledError` worded as
+  ## the stall after the open, and its engine is CLOSED first (killed if it
+  ## does not exit on its stdin closing, as a busy engine does not) rather
+  ## than left behind a tab nobody can use. A load that fails any other way
+  ## closes the engine too and re-raises what it raised.
+  try:
+    result = openGpuiTrace(path)
+  except EngineStalledAfterOpenError as e:
+    raise newException(GpuiTabStalledError,
+      StalledAfterOpenPhrase & " (" & e.msg.splitLines()[0] & ")", e)
+  if not result.session.editorVM.isNil:
+    result.session.editorVM.showFlowOverlay.val = showFlowOverlay
+  try:
+    discard result.loadRecordingPanes(raiseOnStall = true)
+  except CatchableError as e:
+    # Whatever ends the load, the session is not returned, so its engine is
+    # closed here: nobody else holds it. Only a stall is re-worded; anything
+    # else reaches the caller as it was raised.
+    try:
+      result.close()
+    except CatchableError:
+      discard
+    if e of DapStalledError:
+      raise newException(GpuiTabStalledError,
+        StalledAfterOpenPhrase & " (" & e.msg.splitLines()[0] & ")", e)
+    # `e` by name: the nested `try` above may have caught (and discarded) an
+    # exception of its own since `e` was raised.
+    raise e
+
+proc closeTabSessions*(sessions: openArray[HeadlessDebugSession];
+                       keep: HeadlessDebugSession = nil) =
+  ## PLAT-49 part B: the end of a window run closes the sessions its "+"
+  ## opened, and so their engines (`HeadlessDebugSession.close`, which kills
+  ## an engine that does not exit on its stdin closing), every one but `keep`
+  ## — the run's own session, which `main.runOpen` closes on every path out
+  ## of it. One close that fails does not leave the rest running: each is
+  ## attempted, and a failure is dropped, since the run is ending and has no
+  ## one left to report it to.
+  for s in sessions:
+    if s.isNil or s == keep:
+      continue
+    try:
+      s.close()
+    except CatchableError:
+      discard
 
 const GpuiSourceOverscan* = 6
   ## Lines held above and below the viewport. The terminal's number, and the
@@ -157,6 +341,34 @@ type
     store*: ReplayDataStore
     contexts*: LexerContextCache
       ## PLAT-47 B1: each held line's tokenizer entry state, per file text.
+    visibleRows*: int
+      ## How many of the window's rows are WHOLLY in view above the editor's
+      ## horizontal scrollbar band — what Monaco calls the viewport when it
+      ## decides whether a stop is "outside" it. 0: every row counts.
+    followed: string
+      ## The stop (`<path>:<line>@<tick>`) the window last followed, so a
+      ## scroll the user made afterwards is never taken back.
+    followOwed*: bool
+      ## M73 (#840): the editor's height changed — the next `serveWindow`
+      ## follows the pointer even at the same stop, as it always did then, so
+      ## a shrunken pane does not leave the pointer below its last row.
+    fullRows*: int
+      ## How many whole rows the editor shows (its body over the row pitch,
+      ## the partial last row not counted) — where Monaco stops scrolling at
+      ## a file's end. 0: not known.
+    monacoLineCount*: int
+      ## The file's lines as Monaco counts them: the empty one after a final
+      ## newline included.
+    bottomAligned*: bool
+      ## The window sits at the file's end, its last line's bottom on the
+      ## editor's bottom edge (`main.editorTopInsetPx` then offsets the rows
+      ## by the remainder at the top).
+    fileLines*: Table[string, seq[string]]
+      ## Each file's whole text as the provider last read it — the lines
+      ## above the window the editor's sticky scope headers are read from.
+    trailingNewline*: Table[string, bool]
+      ## Whether that text ends in a newline (Monaco counts the empty line
+      ## after it).
 
 proc newGpuiSourceService*(session: HeadlessDebugSession;
                            traceFolder: string;
@@ -164,7 +376,8 @@ proc newGpuiSourceService*(session: HeadlessDebugSession;
   ## Build the source window for a live session.
   let store = session.session.store
   let vm = createSourceVM(store, session.session.editorVM)
-  vm.setViewport(height = max(1, viewportHeight), overscan = GpuiSourceOverscan)
+  vm.setOverscan(GpuiSourceOverscan)
+  vm.setViewport(vm.viewport.withRows(max(1, viewportHeight)))
   GpuiSourceService(
     vm: vm,
     provider: newCtfsSourceProvider(traceFolder, allowWorkingTree = false),
@@ -175,6 +388,51 @@ const ServeRounds = 4
   ## How many follow-and-fetch rounds `serveWindow` may take to converge.
 
 proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest])
+
+proc serveRounds(s: GpuiSourceService; follow: bool) =
+  ## Up to `ServeRounds` rounds of asking for what the window lacks and
+  ## serving it — after following the execution pointer each round when
+  ## `follow` (a stop), or with the window held where it is (a user's scroll,
+  ## M73: `requestMissing`, the second half of `followAndRequest` alone).
+  for _ in 0 ..< ServeRounds:
+    let requests = if follow: s.vm.followAndRequest()
+                   else: s.vm.requestMissing()
+    if requests.len == 0:
+      break
+    s.serveRequests(requests)
+
+proc settleAtFileEnd(s: GpuiSourceService; follow: bool) =
+  ## MONACO'S END OF FILE: it scrolls no further than the file's last line —
+  ## the empty one after a final newline included — resting on the editor's
+  ## bottom edge. The shared window clamps its top by its own line count and
+  ## height; a window at that clamp is at the file's end, and the editor
+  ## draws its rows bottom-aligned to Monaco's count (`main.editorTopInsetPx`).
+  s.bottomAligned = false
+  let path = s.vm.revision.val.path
+  s.monacoLineCount = (if s.fileLines.hasKey(path): s.fileLines[path].len
+                       else: s.vm.totalLineCount.val) +
+                      (if s.trailingNewline.getOrDefault(path, false): 1 else: 0)
+  let ownTotal = s.vm.totalLineCount.val
+  let height = s.vm.viewportHeight.val
+  if s.fullRows > 0 and ownTotal > height and s.vm.viewportTop.val > 1 and
+     s.vm.viewportTop.val >= ownTotal - height:
+    # ONE ROW SHORT OF THE CLAMP — a window that grew (the top clamped to the
+    # taller end) and shrank back keeps its top — is drawn at the end too:
+    # its held rows then reach the file's last line, which the bottom-aligned
+    # rows need, rather than stopping one short of it over a blank strip.
+    #
+    # M73: but NOT after a user's scroll. There "one row short" is where a
+    # one-line scroll up from the end lands (`k`, `Ctrl+Up`, a fine wheel
+    # delta), and moving it back to the end undid that scroll, so the window
+    # could never leave the file's end one line at a time. That window is an
+    # ordinary scrolled one, drawn top-aligned.
+    let atEnd = ownTotal - height + 1
+    if s.vm.viewportTop.val < atEnd:
+      if not follow:
+        return
+      s.vm.viewportTop.val = atEnd
+      s.serveRounds(follow)
+    s.bottomAligned = true
 
 proc serveWindow*(s: GpuiSourceService) =
   ## Follow the execution pointer and serve every line the window then lacks.
@@ -193,13 +451,77 @@ proc serveWindow*(s: GpuiSourceService) =
   ## loading (measured on `calc` after `stepIn=21,stepOut=1`: 15 of 54 rows).
   ## The terminal converges by itself because it serves on every frame; a
   ## window that draws once must converge before it draws.
+  ##
+  ## M73 (#840): ONLY A NEW STOP FOLLOWS (or a height change,
+  ## `followOwed`). This is also called after a breakpoint toggle and other
+  ## refreshes at the same stop, and now that the user can scroll the window
+  ## (`scrollWindowBy` & co.), following there snapped a window the user had
+  ## scrolled away from the pointer back to it. The stop is named by its tick
+  ## as well as its line: a loop's next iteration on the same line is a stop.
   if s.isNil or s.vm.isNil:
     return
-  for _ in 0 ..< ServeRounds:
-    let requests = s.vm.followAndRequest()
-    if requests.len == 0:
-      break
-    s.serveRequests(requests)
+  # MONACO'S "OUTSIDE THE VIEWPORT" (`revealLineInCenterIfOutsideViewport`,
+  # what the desktop calls after every stop): a line under the horizontal
+  # scrollbar's band is not in its viewport, so a NEW stop on one of the
+  # window's last, partly hidden rows is centred, as the desktop's editor
+  # centres it. Done through the shared rule — the window's top moved past
+  # the line, so `followExecutionPointer` sees it outside and centres it with
+  # its own clamping — rather than a second centring computed here.
+  let line = s.vm.executionLine.val
+  let stop = $s.vm.revision.val.path & ":" & $line & "@" &
+             $s.store.debugger.val.rrTicks
+  let follow = stop != s.followed or s.followOwed
+  if s.visibleRows > 0 and stop != s.followed and line > 0:
+    let top = s.vm.viewportTop.val
+    if line >= top + s.visibleRows and line < top + s.vm.viewportHeight.val:
+      s.vm.viewportTop.val = line + 1
+  s.followed = stop
+  s.followOwed = false
+  s.serveRounds(follow)
+  s.settleAtFileEnd(follow)
+
+proc settleUserScroll(s: GpuiSourceService) =
+  ## After the user moved the window: serve what it lacks without following
+  ## the pointer, and settle Monaco's end of file.
+  s.serveRounds(follow = false)
+  s.settleAtFileEnd(follow = false)
+
+proc scrollWindowBy*(s: GpuiSourceService; lines: int) =
+  ## M73 (#840): the wheel over the editor and §4.2's scroll keys — the
+  ## window `lines` lines down (negative: up), `SourceVM.scrollBy`. The
+  ## execution pointer and the caret stay where they are.
+  if s.isNil or s.vm.isNil or lines == 0:
+    return
+  s.vm.scrollBy(lines)
+  s.settleUserScroll()
+
+proc scrollWindowTo*(s: GpuiSourceService; top: int) =
+  ## M73: line `top` first — the editor's vertical scrubber pressed or held
+  ## (Scrollbar-Scrubbers.md §3.2, §3.3), `SourceVM.scrollTo`. The pointer
+  ## and the caret stay where they are (§3.5).
+  if s.isNil or s.vm.isNil:
+    return
+  s.vm.scrollTo(top)
+  s.settleUserScroll()
+
+proc centreWindowOnPointer*(s: GpuiSourceService) =
+  ## M73: `.` — "Reset source scroll so the current execution pointer is
+  ## centered" (CodeTracer-TUI.md §4.2), `SourceVM.centreOnExecutionPointer`.
+  if s.isNil or s.vm.isNil:
+    return
+  s.vm.centreOnExecutionPointer()
+  s.settleUserScroll()
+
+proc followCaretInWindow*(s: GpuiSourceService; line, column: int) =
+  ## M73: the read-only caret moved to `line`:`column` (1-based): it is
+  ## written into `EditorVM` (the editor caret `followCursor` reads) and the
+  ## window follows it by the least amount, so it cannot leave the screen
+  ## (Editor-Pane.md § The caret in a read-only editor).
+  if s.isNil or s.vm.isNil or s.vm.editor.isNil:
+    return
+  s.vm.editor.setCursor(line, column)
+  s.vm.followCursor()
+  s.settleUserScroll()
 
 proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
   for request in requests:
@@ -226,6 +548,9 @@ proc serveRequests(s: GpuiSourceService; requests: seq[SourceLineRequest]) =
                                captured.firstLine,
                                captured.firstLine + captured.lines.len - 1)
       else: @[]
+    if captured.fileLines.len > 0:
+      s.fileLines[captured.revision.path] = captured.fileLines
+      s.trailingNewline[captured.revision.path] = captured.endsWithNewline
     discard s.store.applySourceFetch(s.vm, captured, contexts)
 
 proc availability*(s: GpuiSourceService): SourceAvailability =
@@ -275,6 +600,23 @@ proc refreshGpuiVcs*(vm: VCSVM; directory: string): bool =
   vm.refreshFromFacade(nativeVcs(NativeVcsProfile), directory)
   vm.workingStateKey() != before
 
+proc followGpuiVcsViewport*(vm: VCSVM; directory: string;
+                            rows, firstRow: int): bool =
+  ## The VCS pane's history list was given `rows` rows with `firstRow`
+  ## commits scrolled past (`leaves.vcsHistoryWindow`, from the body's
+  ## laid-out height and the reader's place): write it as the list's viewport
+  ## (Viewport-Driven-Loading V6), so every read asks `git log` for the
+  ## commits the pane can show rather than a fixed 50 — and when the list now
+  ## reaches the last commit the last read got, re-read `directory` AT ONCE
+  ## (`refreshGpuiVcs`), the native Load More. Answers whether what the pane
+  ## draws changed, so the window redraws it only then. An unmeasured body
+  ## (`rows` 0) reports nothing and keeps the last viewport.
+  if vm.isNil or rows <= 0:
+    return false
+  if vm.setHistoryViewport(Viewport(rows: rows, firstRow: max(0, firstRow))):
+    return refreshGpuiVcs(vm, directory)
+  false
+
 const GpuiCalltraceBuffer* = CALLTRACE_BUFFER
   ## Rows read above and below the ones the pane shows: the desktop's
   ## `CalltraceVM` pre-fetch, as the terminal's `tui_session.CallTraceBuffer`.
@@ -288,44 +630,31 @@ type
     total*: int
       ## The whole trace's call count.
 
-proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int):
-    CalltracePage =
+proc pageCalltrace*(session: HeadlessDebugSession; rows, delta: int;
+                    widthPx, pxPerLevel: int): CalltracePage =
   ## PLAT-47 B3: scroll the call trace by `delta` rows in a pane that shows
-  ## `rows`, and read the section around the rows then shown — plus the
-  ## desktop's buffer either side — when the store does not hold them all.
-  ## `ct/load-calltrace-section`, the desktop's paging, exactly as the
-  ## terminal's `tui_session.pageCallTrace` does. The ViewModel's
-  ## `scrollPosition` / `viewportHeight` are what the pane then lists
-  ## (`CalltraceVM.visibleLines`).
+  ## `rows` and is `widthPx` wide. HSF-V2: the pane REPORTS that — rows,
+  ## the row it is scrolled to, the depth levels that fit at `pxPerLevel`
+  ## (`pane_viewport.cellPaneViewport`) — and `CalltraceVM` asks for the
+  ## window it needs (the policy every front-end shares). `loaded` says
+  ## whether the section the store holds changed.
   if session.isNil:
     return
   let vm = session.session.calltraceVM
   if vm.isNil:
     return
   let store = session.session.store
-  result.total = int(store.calltrace.totalCallsCount.val)
-  if result.total <= 0:
-    return
   let body = max(1, rows)
-  vm.viewportHeight.val = body
+  let total = int(store.calltrace.totalCallsCount.val)
   result.top = clamp(int(vm.scrollPosition.val) + delta, 0,
-                     max(0, result.total - body))
-  vm.scroll(int64(result.top))
-  let first = int(store.calltrace.startLineIndex.val)
-  let held = store.calltrace.lines.val.len
-  let last = result.top + min(body, result.total - result.top)
-  if result.top >= first and last <= first + held:
-    return
-  let start = max(0, result.top - GpuiCalltraceBuffer)
-  try:
-    session.requestAndLoadCalltrace(startIndex = int64(start),
-                                    height = body + 2 * GpuiCalltraceBuffer,
-                                    depth = RecordingCalltraceDepth)
-    result.loaded = true
-  except CatchableError:
-    # The rows stay unlisted; the next scroll asks again.
-    discard
-  vm.scroll(int64(result.top))
+                     max(0, total - body))
+  let held = (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len)
+  vm.setViewport(cellPaneViewport(body, widthPx, result.top,
+                                  colsPerLevel = pxPerLevel))
+  session.settle()
+  result.total = int(store.calltrace.totalCallsCount.val)
+  result.loaded =
+    (store.calltrace.startLineIndex.val, store.calltrace.lines.val.len) != held
 
 # ---------------------------------------------------------------------------
 # PLAT-51: the Event Log's window, for its scrollbar scrubber
@@ -341,15 +670,11 @@ type
       ## The whole log's event count (the engine's, `ct/event-load`'s
       ## `total`), -1 while unknown.
 
-const GpuiEventLogBuffer* = 10
-  ## Rows read below the ones the pane shows.
-
-proc pageEventLog*(session: HeadlessDebugSession; top, rows: int;
-                   atRRTicks: int64 = -1): EventLogPage =
-  ## Show the event log from row `top` in a pane that shows `rows`: read the
-  ## window `[top, top + rows + buffer)` of the WHOLE log when the store does
-  ## not hold it (`ct/event-load`, naming the stop so the answer also says
-  ## which row is "now"). The view moves; the debugger does not.
+proc pageEventLog*(session: HeadlessDebugSession; top, rows: int): EventLogPage =
+  ## Show the event log from row `top` in a pane that shows `rows`: when the
+  ## store does not hold that window, report it to the session's
+  ## `EventLogVM`, which asks for it naming the stop, so the answer also says
+  ## which row is "now". The view moves; the debugger does not.
   if session.isNil:
     return EventLogPage(total: -1)
   let ev = session.session.store.eventLog
@@ -363,10 +688,11 @@ proc pageEventLog*(session: HeadlessDebugSession; top, rows: int;
   if result.top == first and (last <= first + held or
                               (total >= 0 and first + held >= total)):
     return
+  # HSF-D6: the pane's window is reported to the session's `EventLogVM`,
+  # which asks for it (naming the stop, so the answer says which row is
+  # "now") and leaves the answer in the store.
   try:
-    discard session.requestAndLoadEventLog(start = result.top,
-                                           count = rows + GpuiEventLogBuffer,
-                                           atRRTicks = atRRTicks)
+    session.showEventLogWindow(result.top, rows)
     result.loaded = true
   except CatchableError:
     discard

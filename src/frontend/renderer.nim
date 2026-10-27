@@ -103,18 +103,19 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
     self.dom.toJs.classList.remove("visible"))
 
   for key, option in self.options:
-    let action = self.actions[key]
-    let optionDom = kdom.document.createElement("div")
-    optionDom.class = cstring"context-menu-option ct-menu-item"
-    optionDom.addEventListener(cstring"click", proc(e: Event) =
-      action()
-      self.dom.toJs.classList.remove("visible"))
+    closureScope:
+      let action = self.actions[key]
+      let optionDom = kdom.document.createElement("div")
+      optionDom.class = cstring"context-menu-option ct-menu-item"
+      optionDom.addEventListener(cstring"click", proc(e: Event) =
+        action()
+        self.dom.toJs.classList.remove("visible"))
 
-    let textDom = kdom.document.createElement("div")
-    textDom.class = cstring"context-menu-option-text"
-    textDom.appendChild(kdom.document.createTextNode(option))
-    optionDom.appendChild(textDom)
-    root.appendChild(optionDom)
+      let textDom = kdom.document.createElement("div")
+      textDom.class = cstring"context-menu-option-text"
+      textDom.appendChild(kdom.document.createTextNode(option))
+      optionDom.appendChild(textDom)
+      root.appendChild(optionDom)
 
   return cast[dom.Node](root)
 
@@ -549,7 +550,6 @@ proc createUILayoutComponents(content: JsObject) =
 
 proc createUIComponents*(data: Data) =
   # create singletons
-  discard data.makeDebugComponent()
   discard data.makeMenuComponent()
   discard data.makeBuildComponent()
   discard data.makeErrorsComponent()
@@ -559,14 +559,18 @@ proc createUIComponents*(data: Data) =
   discard data.makeRequestPanelComponent(0)
   discard data.makeCommandPaletteComponent()
 
-  # create components defined in layout
+  # create components defined in layout — after giving any editor or diff pane
+  # whose saved id another tab already uses an id of its own (#835; see
+  # `utils.claimWindowUniqueLayoutIds`).
   if not data.ui.resolvedConfig.isNil:
+    data.claimWindowUniqueLayoutIds(data.ui.resolvedConfig.root)
     createUILayoutComponents(data.ui.resolvedConfig.root)
 
 proc requestInitialPanelData*(data: Data) =
   ## Ask backend to resend panel data that isn't automatically replayed.
   data.viewsApi.emit(CtEventLoad, EmptyArg())
-  data.viewsApi.emit(CtLoadTerminal, EmptyArg())
+  # The terminal output's line view asks for the lines it shows
+  # (`TerminalOutputVM.setViewport`).
 
 # proc saveNew(data: Data, file: SaveFile) =
 #   ipc.send "CODETRACER::save-new", file
@@ -639,9 +643,6 @@ proc onContextStartHistory*(sender: js, response: jsobject(inState=bool, express
   # redrawAll()
   discard
 
-proc onLoadParsedExprsReceived*(sender: js, response: jsobject(argId=cstring, value=JsAssoc[cstring, seq[FlowExpression]])) =
-  jsAsFunction[proc(response: JsAssoc[cstring, seq[FlowExpression]]): void](data.network.futures["load-parsed-exprs"][response.argId])(response.value)
-
 proc onUploadTraceFileReceived*(sender: js, response: jsobject(argId=cstring, value=UploadedTraceData)) =
   jsAsFunction[proc(response: UploadedTraceData): void](data.network.futures["upload-trace-file"][response.argId])(response.value)
 
@@ -664,9 +665,6 @@ proc onLoadCallstackDirectChildrenBeforeReceived*(sender: js, response: jsobject
   jsAsFunction[proc(response: seq[Call]): void](data.network.futures["load-callstack-direct-children-before"][response.argId])(response.value)
 
 # value
-proc onEvaluateExpressionReceived*(sender: js, response: jsobject(argId=cstring, value=Value)) =
-  jsAsFunction[proc(response: Value): void](data.network.futures["evaluate-expression"][response.argId])(response.value)
-
 proc onExpandValueReceived*(sender: js, response: jsobject(argId=cstring, value=Value)) =
   jsAsFunction[proc(response: Value): void](data.network.futures["expand-value"][response.argId])(response.value)
 
@@ -735,12 +733,8 @@ proc expand*(path: cstring, line: int) {.exportc, used.} =
   ## The response is handled by the `ct/update-expansion` DAP response
   ## handler which opens the expanded code inline or in a tab.
   ##
-  ## VSCode-extension builds (`-d:ctInExtension`) use a different
-  ## `DapApi` shape (no `seq` / `sessionId`) and dispatch DAP through
-  ## a separate path entirely. Without the guard the body fails to
-  ## type-check there — `data.dapApi.seq` resolves to the typedesc
-  ## `seq[T]` rather than reporting the missing field, which broke
-  ## `just build-ui-js`.
+  ## Under `-d:ctInExtension` (the JS suites built with dap's extension arm)
+  ## `DapApi` has no `seq` / `sessionId`; the request is the renderer's alone.
   when not defined(ctInExtension):
     # `DapApi.seq` collides with something in this module's import
     # graph: `d.seq` for `d: DapApi` resolves to a typedesc lookup
@@ -828,7 +822,7 @@ proc step*(
     cdebug &"renderer: step call for step {action}", taskId
 
   # FU-E: gate rapid successive DAP step requests on the same in-flight
-  # signal used by `dapStep` in ``ui/debug.nim``.  Without this guard,
+  # signal used by `dapStep` in ``ui/debug_toolbar.nim``.  Without this guard,
   # holding F10 (or rapid-clicking the toolbar) could queue several
   # `DapNext` requests before the previous `stopped` / `CtCompleteMove`
   # notification landed, racing the UI's `currentStep` / location state
@@ -876,7 +870,7 @@ template reverseStepIn*(fromShortcut: bool) =
 template reverseStepOut*(fromShortcut: bool) =
   data.step CtReverseStepOut, fromShortcutArg=fromShortcut
 
-# proc continueTo(breakpoints: seq[UIBreakpoint]) =
+# proc continueTo(breakpoints) =
 #   changeLine(data.lastLine)
 #   data.stableBusy = true
 #   data.currentOperation = "continue"
@@ -1138,9 +1132,20 @@ proc focusComponent*(data: Data, component: Component) =
   discard component.onFocus()
 
 proc focusEditorView*(data: Data) =
-  let map = data.ui.componentMapping
-  focusComponent(data, map[Content.EditorView][0])
-  cast[JsObject](data.ui.editors[data.services.editor.active].monacoEditor).focus()
+  ## Focus the active editor tab.
+  ##
+  ## It used to focus `componentMapping[Content.EditorView][0]` and the active
+  ## tab's Monaco instance — two different editors whenever editor 0 was not
+  ## the active one, and a nil component when there was no editor 0 at all:
+  ## after it was closed, or in any tab but the first, whose editor ids are
+  ## unique across the window (#835, `utils.WindowUniqueIdContents`).
+  let active = data.services.editor.active
+  if active.isNil or not data.ui.editors.hasKey(active):
+    return
+  let editor = data.ui.editors[active]
+  focusComponent(data, editor)
+  if not editor.monacoEditor.isNil:
+    cast[JsObject](editor.monacoEditor).focus()
 
 proc focusEventLog*(data: Data) =
   let map = data.ui.componentMapping
@@ -1514,6 +1519,16 @@ proc onCommandSearch*(query: cstring) {.async.} =
 # `download.openFileDialog` already exists for a caller that actually wants
 # one.
 
+proc paletteModePrefix(mode: SearchMode): cstring =
+  ## The text a search mode starts the palette's input with: the command
+  ## prefix, `:grep ` or `:sym ` (VS Code's `>` / `#` for its show-commands
+  ## and show-all-symbols); nothing for the file search.
+  case mode
+  of SearchCommandRealTime: cstring(commandPrefix)
+  of SearchFindInFiles: cstring":grep "
+  of SearchFindSymbol: cstring":sym "
+  else: cstring""
+
 proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
   cdebug fmt"search: {query}"
   if not data.ui.commandPalette.active:
@@ -1522,10 +1537,22 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
     # TODO command component
     # data.activeFocus = Content.EditorView
     data.ui.commandPalette.active = true
-    discard windowSetTimeout(proc =
+    # The input takes the keyboard once it is mounted — IF THE PALETTE IS
+    # STILL OPEN. A choice made within the delay closed the palette and handed
+    # the keyboard to its destination (`command.runChosen`); focusing the
+    # hidden input afterwards took it back from the editor the choice opened.
+    proc focusPaletteInput() =
       let input = cstring"#command-query-text"
       data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
-      cast[kdom.Node](data.ui.commandPalette.inputField).focus(), 200)
+      if data.ui.commandPalette.active:
+        cast[kdom.Node](data.ui.commandPalette.inputField).focus()
+        # The mode's prefix, as the branch below writes it for a palette
+        # that is already open: `Find Symbol` chosen IN the palette closes it
+        # first (`command.runChosen`) and lands here.
+        let prefix = paletteModePrefix(mode)
+        if query.len == 0 and prefix.len > 0:
+          data.ui.commandPalette.inputField.toJs.value = prefix
+    discard windowSetTimeout(focusPaletteInput, 200)
 
   else:
     data.ui.commandPalette.selected = 0
@@ -1534,16 +1561,12 @@ proc search*(data: Data, mode: SearchMode, query: cstring = cstring"") =
       discard windowSetTimeout(
         proc =
           data.ui.commandPalette.inputField = cast[dom.Node](jq(input))
+          if not data.ui.commandPalette.active:
+            return  # closed within the delay: see the branch above
           cast[kdom.Node](data.ui.commandPalette.inputField).focus()
-          case mode
-          of SearchCommandRealTime:
-            data.ui.commandPalette.inputField.toJs.value = cstring(commandPrefix)
-          of SearchFindInFiles:
-            data.ui.commandPalette.inputField.toJs.value = cstring(":grep ")
-          of SearchFindSymbol:
-            data.ui.commandPalette.inputField.toJs.value = cstring(":sym ")
-          else:
-            discard
+          let prefix = paletteModePrefix(mode)
+          if prefix.len > 0:
+            data.ui.commandPalette.inputField.toJs.value = prefix
         ,
         100
       )
@@ -1634,7 +1657,7 @@ proc appendContextMenuBrowserHint*(container: dom.Element) =
   hintRow.textContent = cstring text
   container.append(cast[dom.Element](hintRow))
 
-proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtension: bool = false): void =
+proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int): void =
   let container = dom.document.getElementById("context-menu-container")
   container.style.display = "flex"
   container.innerHTML = ""
@@ -1691,11 +1714,6 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
   let clientWidth = cast[int](dom.window.toJs.innerWidth)
   let contextHeight = cast[dom.Element](container).clientHeight
   let clientHeight = cast[int](dom.window.toJs.innerHeight)
-  let heightOffset =
-    if inExtension:
-      40
-    else:
-      0
   # Anchor the menu corner closest to the cursor:
   # default is top-left at cursor; flip horizontally if too far right,
   # flip vertically if too far down.
@@ -1703,7 +1721,7 @@ proc showContextMenu*(options: seq[ContextMenuItem], x: int, yPos: int, inExtens
   let tooFarDown  = yPos + contextHeight > clientHeight
   let leftPos = max(0, if tooFarRight: x - contextWidth else: x)
   let topPos  = max(0, if tooFarDown:  yPos - contextHeight else: yPos)
-  container.style.top = cstring(fmt"{topPos + heightOffset}px")
+  container.style.top = cstring(fmt"{topPos}px")
   container.style.left = cstring(fmt"{leftPos}px")
 
   kdom.document.addEventListener("click", proc(e: Event) =
@@ -1925,11 +1943,7 @@ proc updateDialog(data: Data, path: cstring) {.async.} =
         "Re-recording aborted: could not resolve the conflict for " & $path)
     ipc.send "CODETRACER::no-reload-file", js{path: path}
 
-  for action in [cstring"discard", cstring"save", cstring"merge", cstring"keep"]:
-    let button = overlay.toJs.querySelector(cstring("[data-action='" & $action & "']"))
-    if not button.isNil:
-      button.addEventListener(cstring"click", proc(e: Event) =
-        handleAction(action))
+  wireFileConflictActions(overlay, handleAction)
 
   kdom.document.body.appendChild(overlay)
 
@@ -2017,8 +2031,13 @@ proc dispatchSaveEffect(data: Data, effect: ReRecordEffect,
         edits = model.getVersionId().to(int)
     except:
       edits = -1
-    let verdict = classifyWrite(
-      BufferProvenance(contentLength: value.len, editsSinceLoad: edits))
+    #
+    # AN UNTITLED BUFFER HAS NO STORED COPY to protect: a New File buffer is
+    # built empty at version 1, which is exactly the wipe's provenance, and
+    # saving it empty must still reach the save-as chooser (issue #792).
+    let verdict = classifyWrite(BufferProvenance(
+      contentLength: value.len, editsSinceLoad: edits,
+      untitled: effect.kind == rreSaveUntitled))
     if verdict == tvRefuseUnproven:
       # NOT COUNTED AS DISPATCHED. The caller uses the count to decide whether
       # anything can ever answer it, and nothing will answer a message that was
@@ -2100,10 +2119,41 @@ proc resetBeforeRestart*(data: Data) =
         cwarn fmt"resetBeforeRestart exception for {content}#{id}: {getCurrentExceptionMsg()}"
 
 proc runTests*(data: Data, options: RunTestOptions) =
-  data.lastRestartKind = RestartNewTrace
-  if not options.newWindow:
-    data.resetBeforeRestart()
+  # A `keepWindow` run records and stays (the Test Results row's `⟳`): no new
+  # trace will arrive in this window, so neither the restart kind nor the
+  # component reset that prepares the window for one applies — resetting here
+  # would blank the very pane the user asked to stay in.
+  if not options.keepWindow:
+    data.lastRestartKind = RestartNewTrace
+    if not options.newWindow:
+      data.resetBeforeRestart()
   data.ipc.send("CODETRACER::run-test", options)
+
+proc runTestSuite*(data: Data, workspaceRoot: string) =
+  ## The desktop Test Results pane's header ▶: ask the main process to run
+  ## `ct test run` over `workspaceRoot`. Answered, on every exit, with
+  ## `CODETRACER::test-suite-settled` (`index/traces.onRunTestSuite`).
+  ##
+  ## No restart and no reset: a suite run loads nothing into this window.
+  data.ipc.send(cstring"CODETRACER::run-test-suite",
+                js{workspaceRoot: cstring(workspaceRoot)})
+
+proc openRecordingById*(data: Data, recordingId: string) =
+  ## Enter an EXISTING recording in this window, running nothing — the Test
+  ## Results row's `⏵`. The same IPC the welcome screen's recent-traces list
+  ## and the tab-vs-window policy already use (`index/traces
+  ## .onLoadRecentTrace`: `prepareForLoadingTrace` + `loadExistingRecord`),
+  ## rather than a second path to the same two calls.
+  ##
+  ## PREPARED EXACTLY AS `runTests` PREPARES AN OPENING RUN: the main process
+  ## answers both with the same `prepareForLoadingTrace` + `loadExistingRecord`
+  ## pair into this window, so the renderer is readied the same way for the
+  ## trace that arrives — the restart kind the middleware reads, and the
+  ## component reset.
+  data.lastRestartKind = RestartNewTrace
+  data.resetBeforeRestart()
+  data.ipc.send(cstring"CODETRACER::load-recent-trace",
+                js{traceId: cstring(recordingId)})
 
 const reRecordWatchdogMs = 15_000
   ## How long a queued re-record request may wait for its saves before it is

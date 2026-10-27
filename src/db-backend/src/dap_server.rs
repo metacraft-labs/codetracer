@@ -27,6 +27,7 @@ use crate::recreator_session::{RecreatorArgs, ReplayWorkerStartError};
 // `Handler` so requests can route per-thread to the owning trace.
 use crate::session_handler::{SessionHandler, TraceSlot, compose_thread_id, decompose_thread_id};
 use crate::session_manifest::SessionManifest;
+use crate::source_access::{HostSourceReads, SourceAccess};
 use crate::task;
 use crate::task::{
     Action, CallSearchArg, CalltraceLoadArgs, CollapseCallsArgs, CtLoadFlowArguments, CtLoadLocalsArguments,
@@ -437,9 +438,55 @@ fn setup(
     for_launch: bool,
     thread_name: &str,
     rename_list_path: Option<&Path>,
+    host_reads: HostSourceReads,
 ) -> Result<Handler, Box<dyn Error>> {
     info!("run setup() for {:?}", trace_folder);
+    // The session's source-reading rule, in force from the handler's
+    // construction on (see `crate::source_access`). The copy roots are
+    // filled in as the trace folder and the bundle become known.
+    let source_access = SourceAccess {
+        host_reads,
+        ..SourceAccess::default()
+    };
     let trace_path = trace_folder.join(trace_file);
+
+    // A JS boundary recording (codetracer-pm CTFS-Binary-Format.md §4.8) is a
+    // container of `meta.dat` and the `jsbound.*` members, with no trace
+    // streams. This reader does not replay boundary logs (a replay worker
+    // materialises a separate JavaScript trace from one,
+    // JS-Boundary-Recording.md §12), so it opens one as a trace with no
+    // steps, as the format's unknown-member rule promises, instead of taking
+    // a non-MCR container without `steps.dat` for a native recording and
+    // failing inside the replay worker. The kind is recognised the way the
+    // spec declares it: `jsbound.log` present and a
+    // `codetracer-js-boundary/` recorder id.
+    for candidate in [trace_folder, trace_path.as_path()] {
+        if jsbound::container::is_boundary_recording_file(candidate) {
+            info!(
+                "JS boundary recording: {} has no steps (open its materialised trace to step through it)",
+                candidate.display()
+            );
+            let workdir = candidate.parent().map(Path::to_path_buf).unwrap_or_default();
+            let reader: Arc<dyn TraceReader> = Arc::new(CTFSTraceReader::from_events(Vec::new(), &workdir)?);
+            let mut handler = Handler::construct_with_reader_and_source_access(
+                TraceKind::Materialized,
+                RecreatorArgs {
+                    name: thread_name.to_string(),
+                    ..RecreatorArgs::default()
+                },
+                reader,
+                false,
+                source_access.clone(),
+            );
+            handler.raw_diff_index = raw_diff_index;
+            handler.set_trace_folder(trace_folder);
+            if for_launch {
+                handler.run_to_launch_position(restore_location, sender)?;
+            }
+            handler.initialized = true;
+            return Ok(handler);
+        }
+    }
 
     // Materialized traces are CTFS-only. Native MCR traces are also CTFS
     // containers, but they carry recorder streams such as `t00000000000`
@@ -481,7 +528,7 @@ fn setup(
                     ctfs_reader.event_count(),
                 );
                 let reader: Arc<dyn TraceReader> = Arc::new(ctfs_reader);
-                let mut handler = Handler::construct_with_reader(
+                let mut handler = Handler::construct_with_reader_and_source_access(
                     TraceKind::Materialized,
                     RecreatorArgs {
                         name: thread_name.to_string(),
@@ -489,6 +536,7 @@ fn setup(
                     },
                     reader,
                     false,
+                    source_access.clone(),
                 );
                 if let Some(decoder) = load_materialized_origin_metadata_decoder_from_path(&ctfs_path) {
                     handler.install_materialized_origin_metadata_decoder(decoder);
@@ -525,7 +573,7 @@ fn setup(
                 // §P5 — user-provided variable rename list.
                 handler.load_rename_list(trace_folder, rename_list_path);
                 if for_launch {
-                    handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+                    handler.run_to_launch_position(restore_location, sender)?;
                 }
                 handler.initialized = true;
                 return Ok(handler);
@@ -613,7 +661,7 @@ fn setup(
             reader.event_count(),
         );
         let reader: Arc<dyn TraceReader> = Arc::new(reader);
-        let mut handler = Handler::construct_with_reader(
+        let mut handler = Handler::construct_with_reader_and_source_access(
             TraceKind::Materialized,
             RecreatorArgs {
                 name: thread_name.to_string(),
@@ -621,6 +669,7 @@ fn setup(
             },
             reader,
             false,
+            source_access.clone(),
         );
         handler.raw_diff_index = raw_diff_index;
         // RS-M2 — remember the recording directory so
@@ -634,7 +683,7 @@ fn setup(
         // §P5 — user-provided variable rename list.
         handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+            handler.run_to_launch_position(restore_location, sender)?;
         }
         handler.initialized = true;
         return Ok(handler);
@@ -656,10 +705,7 @@ fn setup(
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    warn!(
-                        "native replay-worker setup: failed to load terminal events from {}: {e}",
-                        path.display()
-                    );
+                    return Err(format!("native event log of {}: {e}", path.display()).into());
                 }
             }
         }
@@ -676,7 +722,13 @@ fn setup(
             ..RecreatorArgs::default()
         };
         info!("ct_rr_args {:?}", ct_rr_args);
-        let mut handler = Handler::new(TraceKind::Recreator, ct_rr_args, Box::new(db));
+        let mut handler = Handler::construct_with_reader_and_source_access(
+            TraceKind::Recreator,
+            ct_rr_args,
+            Arc::new(crate::in_memory_trace_reader::InMemoryTraceReader::new(db)),
+            false,
+            source_access,
+        );
         handler.raw_diff_index = raw_diff_index;
         // Load macro sourcemaps for Nim macro expansion support (S6).
         // RS-M2 — remember the recording directory so
@@ -691,7 +743,7 @@ fn setup(
         handler.load_rename_list(trace_folder, rename_list_path);
         if for_launch {
             eprintln!("[db-backend setup] calling run_to_entry");
-            handler.run_to_entry(dap::Request::default(), restore_location, sender)?;
+            handler.run_to_launch_position(restore_location, sender)?;
             eprintln!("[db-backend setup] run_to_entry completed");
         }
         handler.initialized = true;
@@ -796,6 +848,7 @@ fn setup_session(
     for_launch: bool,
     thread_name: &str,
     rename_list_path: Option<&Path>,
+    host_reads: HostSourceReads,
 ) -> Result<SessionHandler, Box<dyn Error>> {
     info!("setup_session: loading manifest from {}", manifest_path.display());
     let manifest = SessionManifest::load(manifest_path)
@@ -830,6 +883,7 @@ fn setup_session(
             trace_for_launch,
             &per_trace_thread_name,
             rename_list_path,
+            host_reads,
         )
         .map_err(|e| -> Box<dyn Error> {
             format!(
@@ -860,36 +914,16 @@ pub fn wrap_single_trace_as_session(handler: Handler, trace_path: PathBuf) -> Re
         .map_err(|e| -> Box<dyn Error> { format!("failed to wrap single trace as session: {e}").into() })
 }
 
-/// Build the per-slot list of inner thread ids by querying each
-/// trace's `ReplaySession::list_processes()`. Mirrors the projection
-/// the `Handler::threads` implementation already does — we replicate
-/// it here so the SessionHandler can build the aggregated thread list
-/// without mutating each handler's internal state.
-fn inner_threads_for_slot(
-    session: &SessionHandler,
-    slot: TraceSlot,
-) -> Result<Vec<(u32, String)>, crate::session_handler::SessionHandlerError> {
-    let loaded = session
-        .trace(slot)
-        .ok_or(crate::session_handler::SessionHandlerError::UnknownSlot { slot })?;
-    // We do not have `&mut Handler` here, but `list_processes` on the
-    // ReplaySession trait is `&mut self`. For M24 we use the
-    // pre-cached single-thread fallback the existing `threads`
-    // handler also falls back to; the production wiring of multi-thread
-    // enumeration per trace is a follow-on once
-    // `Handler::collect_thread_descriptors()` lands. The behaviour
-    // matches today's `Handler::threads`: when no per-trace process
-    // metadata is available, surface one synthetic `<thread 1>`.
-    let _ = loaded; // suppress unused-binding warning while still asserting the slot is valid
-    Ok(vec![(1, "<thread 1>".to_string())])
-}
-
 /// Build the DAP `threads` response from a SessionHandler. The
-/// aggregated thread list applies each trace's manifest prefix and
-/// surfaces composed thread ids — see `session_handler::compose_thread_id`.
-fn build_session_threads_response(session: &SessionHandler) -> Result<Vec<crate::dap_types::Thread>, Box<dyn Error>> {
+/// aggregated thread list is built from each trace's own thread
+/// descriptors (`Handler::collect_thread_descriptors`), applies each
+/// trace's manifest prefix and surfaces composed thread ids — see
+/// `session_handler::compose_thread_id`.
+fn build_session_threads_response(
+    session: &mut SessionHandler,
+) -> Result<Vec<crate::dap_types::Thread>, Box<dyn Error>> {
     let aggregated = session
-        .aggregated_thread_list(|slot| inner_threads_for_slot(session, slot))
+        .thread_list()
         .map_err(|e| -> Box<dyn Error> { format!("session threads aggregation failed: {e}").into() })?;
     Ok(aggregated
         .into_iter()
@@ -958,9 +992,9 @@ fn build_session_pair_index_lookup_response(
 /// `ct/listProcesses` *event* dispatched at session-load (see
 /// [`dispatch_session_load_event`]); both surfaces carry the same wire
 /// shape so the frontend has a single deserialiser.
-fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, Box<dyn Error>> {
+fn build_ct_list_processes_response(session: &mut SessionHandler) -> Result<Value, Box<dyn Error>> {
     let processes = session
-        .list_processes(|slot| inner_threads_for_slot(session, slot))
+        .process_list()
         .map_err(|e| -> Box<dyn Error> { format!("session list_processes failed: {e}").into() })?;
     let processes_json: Vec<Value> = processes
         .into_iter()
@@ -1014,7 +1048,11 @@ fn build_ct_list_processes_response(session: &SessionHandler) -> Result<Value, B
 /// Errors building the payload are logged but never surfaced to the
 /// caller — emission is best-effort; a missing event must not block
 /// session bring-up.
-pub fn dispatch_session_load_event(session: &SessionHandler, sender: &Sender<DapMessage>) {
+///
+/// Takes `&mut` because each trace reports its own processes through
+/// `Handler::collect_thread_descriptors`, which may query the trace's
+/// replay worker.
+pub fn dispatch_session_load_event(session: &mut SessionHandler, sender: &Sender<DapMessage>) {
     let body = match build_ct_list_processes_response(session) {
         Ok(b) => b,
         Err(e) => {
@@ -2025,7 +2063,18 @@ fn dap_command_to_step_action(command: &str) -> Result<(Action, IsReverseAction)
     }
 }
 
-fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMessage>) -> Result<(), Box<dyn Error>> {
+/// The DAP command dispatch.
+///
+/// `pub` so integration tests can assert which commands this backend
+/// actually dispatches, rather than inferring it.  That distinction is
+/// not academic: `setDataBreakpoints` had no arm here for the whole
+/// life of the watchpoint feature, and the only thing that noticed was
+/// a user whose `continue_forward()` ran off the end of the trace.
+pub fn handle_request(
+    handler: &mut Handler,
+    req: dap::Request,
+    sender: Sender<DapMessage>,
+) -> Result<(), Box<dyn Error>> {
     match req.command.as_str() {
         "scopes" => handler.scopes(
             req.clone(),
@@ -2059,12 +2108,32 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
             req.load_args::<dap_types::SetBreakpointsArguments>()?,
             sender.clone(),
         )?,
+        // Data breakpoints (watchpoints).  These two arms are the
+        // whole reason `Trace.add_watchpoint` can work at all: before
+        // they existed the command fell through to
+        // `dap_command_to_step_action` and came back as the free-text
+        // `command setDataBreakpoints not supported here`, while the
+        // daemon's mock backend — the only implementation in the tree
+        // — answered `verified: true` for everything.  See
+        // `ct_data_breakpoints` for what a data breakpoint means over
+        // a recording and what it genuinely cannot mean.
+        "setDataBreakpoints" => handler.set_data_breakpoints(
+            req.clone(),
+            req.load_args::<dap_types::SetDataBreakpointsArguments>()?,
+            sender.clone(),
+        )?,
+        "dataBreakpointInfo" => handler.data_breakpoint_info(
+            req.clone(),
+            req.load_args::<dap_types::DataBreakpointInfoArguments>()?,
+            sender.clone(),
+        )?,
         "ct/load-locals" => {
             handler.load_locals(req.clone(), req.load_args::<CtLoadLocalsArguments>()?, sender.clone())?
         }
         "ct/update-table" => handler.update_table(req.clone(), req.load_args::<UpdateTableArgs>()?, sender.clone())?,
         "ct/event-load" => handler.event_load(req.clone(), sender.clone())?,
         "ct/load-terminal" => handler.load_terminal(req.clone(), sender.clone())?,
+        "ct/load-terminal-lines" => handler.load_terminal_lines(req.clone(), sender.clone())?,
         "ct/collapse-calls" => handler.collapse_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         "ct/expand-calls" => handler.expand_calls(req.clone(), req.load_args::<CollapseCallsArgs>()?)?,
         // NOT `req.load_args::<Location>()`. `Location` is `#[serde(default)]`
@@ -2114,6 +2183,12 @@ fn handle_request(handler: &mut Handler, req: dap::Request, sender: Sender<DapMe
         "ct/history-jump" => handler.history_jump(
             req.clone(),
             task::location_from_jump_arguments(&req.command, &req.arguments)?,
+            sender.clone(),
+        )?,
+        "ct/load-symbols" => handler.load_symbols(req.clone(), sender.clone())?,
+        "ct/load-value-elements" => handler.load_value_elements(
+            req.clone(),
+            req.load_args::<task::LoadValueElementsArguments>()?,
             sender.clone(),
         )?,
         "ct/search-calltrace" => {
@@ -2368,6 +2443,9 @@ pub struct Ctx {
     /// CLI default (`cli_default_rename_list`) or the sibling lookup
     /// `<recording-dir>/renames.toml`.
     pub launch_rename_list: Option<PathBuf>,
+    /// The `launch` argument `hostSourceReads`: the session's source-reading
+    /// rule (see `crate::source_access`).
+    pub launch_host_source_reads: HostSourceReads,
     /// CLI-supplied default rename list path
     /// (`replay-server dap-server --rename-list <p>`).  Applies to
     /// every trace the server opens unless overridden by a per-launch
@@ -2399,6 +2477,7 @@ impl Default for Ctx {
             launch_trace_file: PathBuf::from(""),
             launch_raw_diff_index: None,
             launch_rename_list: None,
+            launch_host_source_reads: HostSourceReads::default(),
             cli_default_rename_list: None,
             launch_program: None,
             launch_program_args: Vec::new(),
@@ -2475,6 +2554,16 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 supports_disassemble_request: Some(true),
                 supports_log_points: Some(true),
                 supports_restart_request: Some(true),
+                // Watchpoints. Unlike the column bits below, this one
+                // does NOT depend on the loaded trace: the commands are
+                // dispatched unconditionally, and a backend that cannot
+                // honour them (MCR/emulator, recreator — neither keeps a
+                // per-step value table) refuses per entry with
+                // `BackendLacksValueHistory` from the closed set.  A
+                // per-entry refusal a client can read is strictly better
+                // here than a missing capability bit that hides the
+                // affordance and explains nothing.
+                supports_data_breakpoints: Some(true),
                 // M-capability-flags: the `initialize` response is
                 // sent before any trace has been loaded, so we can't
                 // know yet whether per-column affordances should be
@@ -2511,7 +2600,37 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
         }
         DapMessage::Request(req) if req.command == "launch" => {
             // ctx.received_launch = true;
-            let args = req.load_args::<dap::LaunchRequestArguments>()?;
+            //
+            // Launch arguments this build cannot parse (an unknown field from
+            // a newer client, a wrong type) are refused with a launch
+            // response naming the reason, for the same reason as the
+            // `traceSource` refusal below: the native loop only logs an
+            // `Err`, so returning one leaves the client waiting for a
+            // response that never comes.
+            let args = match req.load_args::<dap::LaunchRequestArguments>() {
+                Ok(args) => args,
+                Err(e) => {
+                    let reason = format!(
+                        "launch arguments not understood by this replay server: {e}; \
+                         a field it does not know usually means the client is newer than the server"
+                    );
+                    warn!("refusing launch: {reason}");
+                    let resp = DapMessage::Response(Response {
+                        base: ProtocolMessage {
+                            seq: ctx.seq,
+                            type_: "response".to_string(),
+                        },
+                        request_seq: req.base.seq,
+                        success: false,
+                        command: "launch".to_string(),
+                        message: Some(reason),
+                        body: json!({}),
+                    });
+                    ctx.seq += 1;
+                    sender.send(resp)?;
+                    return Ok(());
+                }
+            };
 
             // A `traceSource` the engine cannot open must be refused by name,
             // with a launch response — not swallowed. Both halves of that
@@ -2559,6 +2678,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 // §P5.4: per-launch arg wins; fall back to CLI default
                 // when the DAP `launch.renameList` field is unset.
                 ctx.launch_rename_list = args.rename_list.clone().or_else(|| ctx.cli_default_rename_list.clone());
+                ctx.launch_host_source_reads = HostSourceReads::from_launch_argument(args.host_source_reads);
 
                 // Only resolve the replay-worker executable for non-DB traces.
                 // DB-based traces (JavaScript, Python, Ruby, etc.) never use
@@ -2594,6 +2714,7 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 ctx.launch_trace_file = PathBuf::new();
                 ctx.launch_raw_diff_index = args.raw_diff_index.clone();
                 ctx.launch_rename_list = args.rename_list.clone().or_else(|| ctx.cli_default_rename_list.clone());
+                ctx.launch_host_source_reads = HostSourceReads::from_launch_argument(args.host_source_reads);
                 ctx.recreator_exe = resolve_recreator_exe(args.recreator_exe);
                 ctx.restore_location = args.restore_location.clone();
 
@@ -3128,6 +3249,29 @@ fn send_launch_failure_notification(sender: &Sender<DapMessage>, text: &str) {
     }
 }
 
+/// M29 §5.2 — announce a freshly loaded session to the client with a
+/// `ct/listProcesses` event, from the task thread that announces sessions.
+///
+/// Every task thread (`stable`, `flow`, `tracepoint`) loads the launched
+/// trace into a session of its own, but only the `stable` one serves the
+/// client's requests, so only its snapshot is the one the client acts on.
+/// The others must not announce theirs: building the snapshot asks each
+/// trace for its processes (`Handler::collect_thread_descriptors`), which
+/// would start a replay worker in the `flow` and `tracepoint` threads that
+/// they never otherwise use — a whole extra `rr replay` per thread — and the
+/// client would receive three copies of one snapshot. (Those workers used to
+/// collide on one socket with the first flow or history worker, too; worker
+/// indices are now reserved process-wide by
+/// `crate::paths::reserve_worker_index`, which removes the collision itself.)
+fn announce_session_load(announces_session: bool, session: &mut SessionHandler, sender: &Sender<DapMessage>) {
+    if announces_session {
+        dispatch_session_load_event(session, sender);
+    }
+}
+
+/// Serve the requests routed to one task thread (`name`) against the session
+/// it loads on `launch`. `announces_session` is true for the one thread whose
+/// session answers the client — see [`announce_session_load`].
 fn task_thread(
     name: &str,
     from_thread_receiver: Receiver<dap::Request>,
@@ -3135,6 +3279,7 @@ fn task_thread(
     ctx_with_cached_launch: &Ctx,
     cached_launch: bool,
     run_to_entry: bool,
+    announces_session: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Track the trace folder + file currently loaded into `session` so we can
     // skip a redundant `setup()` reload when the renderer issues a duplicate
@@ -3148,6 +3293,9 @@ fn task_thread(
     let mut loaded_trace_folder: Option<PathBuf> = None;
     let mut loaded_trace_file: Option<PathBuf> = None;
     let mut loaded_raw_diff_index: Option<String> = None;
+    // The source-reading rule the loaded trace was set up with: a launch
+    // that asks for a different one reloads rather than reusing it.
+    let mut loaded_host_reads = HostSourceReads::default();
 
     // M24 — every dispatch path routes through a [`SessionHandler`].
     // The single-trace flow synthesises a one-entry session via
@@ -3168,7 +3316,7 @@ fn task_thread(
         } else {
             None
         };
-        let s = if let Some(manifest_path) = session_manifest_path {
+        let mut s = if let Some(manifest_path) = session_manifest_path {
             setup_session(
                 &manifest_path,
                 ctx_with_cached_launch.launch_raw_diff_index.clone(),
@@ -3178,6 +3326,7 @@ fn task_thread(
                 for_launch,
                 name,
                 ctx_with_cached_launch.launch_rename_list.as_deref(),
+                ctx_with_cached_launch.launch_host_source_reads,
             )
             .map_err(|e| {
                 error!("launch error (session): {e:?}");
@@ -3209,6 +3358,7 @@ fn task_thread(
                     for_launch,
                     name,
                     ctx_with_cached_launch.launch_rename_list.as_deref(),
+                    ctx_with_cached_launch.launch_host_source_reads,
                 )
             }
             .map_err(|e| {
@@ -3225,6 +3375,7 @@ fn task_thread(
             loaded_trace_folder = Some(ctx_with_cached_launch.launch_trace_folder.clone());
             loaded_trace_file = Some(ctx_with_cached_launch.launch_trace_file.clone());
             loaded_raw_diff_index = ctx_with_cached_launch.launch_raw_diff_index.clone();
+            loaded_host_reads = ctx_with_cached_launch.launch_host_source_reads;
         }
         // M29 §5.2 — emit `ct/listProcesses` on session-load. The
         // cached-launch path has just built a productive
@@ -3232,7 +3383,7 @@ fn task_thread(
         // frontend's process tree consumes this event without having
         // to race a follow-up request. Idempotent on re-load — every
         // launch dispatches a fresh snapshot.
-        dispatch_session_load_event(&s, &sender);
+        announce_session_load(announces_session, &mut s, &sender);
         s
     } else {
         // No cached launch yet → synthesise an empty single-trace
@@ -3279,6 +3430,7 @@ fn task_thread(
                     info!("stored launch trace folder: {0:?}", launch_trace_folder);
 
                     let launch_raw_diff_index = args.raw_diff_index.clone();
+                    let launch_host_reads = HostSourceReads::from_launch_argument(args.host_source_reads);
                     let session_manifest_path = resolve_session_manifest_path(&launch_trace_folder, &launch_trace_file);
                     // Only resolve the replay-worker executable for non-DB traces
                     // (see the parallel comment in the initial launch handler).
@@ -3307,6 +3459,7 @@ fn task_thread(
                     let same_trace = loaded_trace_folder.as_ref() == Some(&launch_trace_folder)
                         && loaded_trace_file.as_ref() == Some(&launch_trace_file)
                         && loaded_raw_diff_index == launch_raw_diff_index
+                        && loaded_host_reads == launch_host_reads
                         && session_initialized
                         && restore_location.is_none();
 
@@ -3335,6 +3488,7 @@ fn task_thread(
                             for_launch,
                             name,
                             effective_rename_list.as_deref(),
+                            launch_host_reads,
                         )
                         // #689: `inspect_err`, not `map_err` to a `String` — the
                         // formatting would destroy the concrete
@@ -3345,10 +3499,11 @@ fn task_thread(
                         // M29 §5.2 — emit `ct/listProcesses` on
                         // session.toml re-load. Idempotent: each launch
                         // produces a fresh full snapshot.
-                        dispatch_session_load_event(&session, &sender);
+                        announce_session_load(announces_session, &mut session, &sender);
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
+                        loaded_host_reads = launch_host_reads;
                     } else {
                         let for_launch = run_to_entry;
                         // §P5.4 — per-launch arg wins; CLI default fills in.
@@ -3366,6 +3521,7 @@ fn task_thread(
                             for_launch,
                             name,
                             effective_rename_list.as_deref(),
+                            launch_host_reads,
                         )
                         // #689: see the `inspect_err` note above — the concrete
                         // error type must survive to `launch_failure_text`.
@@ -3376,10 +3532,11 @@ fn task_thread(
                         // trace launch. The synthetic single-trace
                         // session yields a one-entry process list with the
                         // recorded `.ct` file as `displayName`.
-                        dispatch_session_load_event(&session, &sender);
+                        announce_session_load(announces_session, &mut session, &sender);
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
+                        loaded_host_reads = launch_host_reads;
                     }
                 }
                 if let Some(program) = &args.program
@@ -3415,7 +3572,7 @@ fn task_thread(
                     // `displayName` falls back to the recording id (path
                     // is empty for live recordings until the recorder
                     // finishes).
-                    dispatch_session_load_event(&session, &sender);
+                    announce_session_load(announces_session, &mut session, &sender);
                     loaded_trace_folder = None;
                     loaded_trace_file = None;
                     loaded_raw_diff_index = None;
@@ -3549,6 +3706,7 @@ where
     info!("create stable thread");
     let cached_launch = false;
     let run_to_entry = true;
+    let announces_session = true;
     let builder = thread::Builder::new().name("stable".to_string());
     let _stable_thread_handle = builder.spawn(move || -> Result<(), String> {
         task_thread(
@@ -3558,6 +3716,7 @@ where
             &stable_ctx,
             cached_launch,
             run_to_entry,
+            announces_session,
         )
         .map_err(|e| {
             error!("task_thread error: {e:?}");
@@ -3577,6 +3736,7 @@ where
     info!("create flow thread");
     let cached_launch = false;
     let run_to_entry = false;
+    let announces_session = false;
     let builder = thread::Builder::new().name("flow".to_string());
     let _flow_thread_handle = builder.spawn(move || -> Result<(), String> {
         task_thread(
@@ -3586,6 +3746,7 @@ where
             &flow_ctx,
             cached_launch,
             run_to_entry,
+            announces_session,
         )
         .map_err(|e| {
             error!("task_thread error: {e:?}");
@@ -3602,6 +3763,7 @@ where
     info!("create tracepoint thread");
     let cached_launch = false;
     let run_to_entry = false;
+    let announces_session = false;
     let builder = thread::Builder::new().name("tracepoint".to_string());
     let _tracepoint_thread_handle = builder.spawn(move || -> Result<(), String> {
         task_thread(
@@ -3611,6 +3773,7 @@ where
             &tracepoint_ctx,
             cached_launch,
             run_to_entry,
+            announces_session,
         )
         .map_err(|e| {
             error!("task_thread error: {e:?}");
@@ -3653,6 +3816,7 @@ where
                 | "ct/setup-trace-session"
                 | "ct/update-table"
                 | "ct/load-terminal"
+                | "ct/load-terminal-lines"
                 | "ct/tracepoint-toggle"
                 | "ct/tracepoint-delete"
                 | "ct/load-history" => {
@@ -4105,6 +4269,7 @@ mod tests {
             false,
             "oracle-test",
             None,
+            HostSourceReads::Allowed,
         ) {
             Ok(_) => panic!("{} was opened as a recording", trace_folder.join(trace_file).display()),
             Err(e) => e.to_string(),

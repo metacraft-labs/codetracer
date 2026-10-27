@@ -27,6 +27,10 @@
 import std/[algorithm, json, strutils, unittest]
 
 import ../../viewmodels/flow_vm
+import ../../backend/[backend_service, mock_backend]
+import ../../store/replay_data_store
+import isonim/core/signals
+import isonim/viewmodel
 import ../../../view_vocabulary/editor_surface
 import ../../../../common/types except NotTaken, Taken, Unknown
 from ../../../../common/types import BranchState
@@ -140,3 +144,53 @@ suite "PLAT-42: the flow overlay's per-line facts":
     let enabled = yamlFlowEnabled(DefaultConfigYaml)
     check enabled in ["true", "false"]
     check FlowOverlayShownByDefault == (enabled == "true")
+
+suite "the flow window as the inline-value layout reads it (Shared-DOM-Front-Ends D8)":
+  # `flowLayoutWindowOf` is BlockTracer's window decoder, moved into the SDK so
+  # a consumer drawing its own overlay keeps no second decoder of the wire.
+  # Checked against the window the engine wrote, not one invented here.
+
+  test "every recorded (line, expression, pass) reaches the layout window":
+    let view = parseJson(FixtureJson)["viewUpdate"]
+    let window = flowLayoutWindowOf(view)
+    check window.steps.len == view["steps"].len
+    check window.loops.len == view["loops"].len
+    check window.sourceLines.len == 0          # the source is the consumer's
+    # The naive reading of the wire, beside the decoder's.
+    var wire, decoded: seq[string] = @[]
+    for st in view["steps"]:
+      for field in ["beforeValues", "afterValues"]:
+        let map = st{field}
+        if map.isNil or map.kind != JObject: continue
+        for name, _ in map:
+          if name == "return": continue
+          wire.add $st["position"].getInt & ":" & name & ":" & field
+    for st in window.steps:
+      for v in st.beforeValues: decoded.add $st.line & ":" & v.expression & ":beforeValues"
+      for v in st.afterValues: decoded.add $st.line & ":" & v.expression & ":afterValues"
+    wire.sort(); decoded.sort()
+    check wire.len > 0
+    check decoded == wire
+    # A real loop carries its passes' line tables.
+    var withPasses = 0
+    for loop in window.loops:
+      if loop.iterationSteps.len > 0: inc withPasses
+    check withPasses >= 1
+
+  test "applying the window keeps it on the ViewModel with its file and function":
+    let mock = newMockBackendService(autoRespond = true)
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createFlowVM(store)
+    let capture = parseJson(FixtureJson)
+    vm.applyFlowUpdate(%*{"viewUpdates": [capture["viewUpdate"]],
+                          "location": capture["viewUpdate"]["location"]})
+    check vm.layoutWindow.val.steps.len == capture["viewUpdate"]["steps"].len
+    check vm.windowPath.val.len > 0
+    check vm.windowPath.val.endsWith(".nr")
+    vm.dispose()
+    store.dispose()
+
+  test "malformed input answers an empty window rather than raising":
+    check flowLayoutWindowOf(nil).steps.len == 0
+    check flowLayoutWindowOf(%*{"steps": 3}).steps.len == 0
+    check flowWindowReturnsOf(%*[]).len == 0

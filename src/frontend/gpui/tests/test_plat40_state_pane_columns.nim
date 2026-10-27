@@ -14,6 +14,24 @@
 ##   nim c -r --path:src/frontend/viewmodel \
 ##     src/frontend/gpui/tests/test_plat40_state_pane_columns.nim
 ##
+## ## SUPERSEDED 2026-10-17: THE PANE IS THE DESKTOP'S NOW
+##
+## The GPUI front-end was redesigned to replicate the Electron desktop pixel
+## for pixel (`849d152bb`, `0835c7926`, `84f594bd5`, `e731c9aea`), and the
+## desktop's state pane is NOT a two-column table: it draws `name:value` with
+## nothing between them (`.value-name` then `.value-view`), the value's type,
+## and history / origin buttons, under a segmented Locals / Globals / Watches
+## control, a watch field and the stop's code line. So the two-column design
+## documented below — the `Name` / `Value` header, the fixed name column, the
+## 1 px rule and the shared value x — is history, kept for the record of how
+## it was measured. Suite 3 now gates the NEW invariants: exactly one `name`
+## and one `value` `data-column` cell per row in that order, `name:` with the
+## value directly after it, the desktop's inks, the row facts the click model
+## reads, the scroll box, the tab control, `data-column` scoped to the pane,
+## and the empty state. The suite that pinned the name-column rule
+## (`stateNameColumnPx` / `stateValueColumnPx`) was removed with that rule,
+## which nothing drew by any more; references to "suite 1" below are history.
+##
 ## ## The finding, and what it was measured as
 ##
 ## `PLAT35-F4`: *"the state pane's rows are flat `name: value` strings: no
@@ -140,7 +158,8 @@
 ##      "all at x=0" trap); and the body rows are required to contain **at
 ##      least two different name lengths**, without which equal widths would
 ##      prove nothing.
-##   4. *the width is right* — satisfied by a constant. So suite 1 pins
+##   4. (REMOVED 2026-10-17 with the rule it gated.)
+##      *the width is right* — satisfied by a constant. So suite 1 pinned
 ##      `stateNameColumnPx` against LITERALS over row sets no recording has
 ##      to reach (empty, one short name, a deep row, a name past the
 ##      ceiling), and the pane case then requires the DRAWN width to equal
@@ -210,12 +229,16 @@
 ##
 ## Every helper that calls `check` is a `template`. The `proc`s return values.
 
+import replay_prerequisite
 import std/[json, os, osproc, sets, streams, strtabs, strutils, tables,
             tempfiles, unittest]
+import ./gpui_child_env
 
 import codetracer_embed
 import gpui/app/leaves
+import gpui/chrome
 import view_vocabulary/pane_views
+import styles/generated/design_tokens
 
 var CHECKS = 0
 template ck(cond: untyped) =
@@ -223,7 +246,26 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 1747
+  ExpectedAssertions = 3263
+    ## **3269 → 3263, 2026-10-20 (PLAT-70 Part B): NO HORIZONTAL THUMB** — the
+    ## state pane does not scroll sideways (Horizontal-Overflow §5), so the
+    ## thumb's three readings (`position`, `h`, `left`) are gone at each of the
+    ## two viewports; `horizontal == 0` is asserted instead.
+    ## **3291 → 3269, 2026-10-17: THE NAME-COLUMN RULE'S SUITE WAS REMOVED**
+    ## with `leaves.stateNameColumnPx` / `stateValueColumnPx` themselves — six
+    ## cases, 21 assertions, plus the one reading in the empty-ViewModel case
+    ## that asked the rule for its floor. 25 cases now: four in the rows
+    ## suite, TEN × two viewports in the pane suite, and the count case.
+    ##
+    ## **1747 → 3291, 2026-10-17, AND SUITE 3 WAS REWRITTEN** for the
+    ## redesigned pane (see "SUPERSEDED" above): still 31 cases, TEN × two
+    ## viewports in suite 3, but every one of them now reads the desktop's
+    ## rows, and most of the total is the per-row loops — about twenty
+    ## readings per row (two cells, the pair, the inks, the depth, the two
+    ## controls) over 11, 12 and 19 rows at three stops and two viewports.
+    ## MEASURED from the run, not derived. The history below is the
+    ## two-column design's.
+    ##
     ## Written from a run, not estimated: **31** cases (six in suite 1, four
     ## in suite 2, TEN × two viewports in suite 3, and the count case) over
     ## this host's plan at both viewports and three populated stops. It was
@@ -281,45 +323,19 @@ const
     ## `data-state-value-x` 95, over 19 body rows**, at both viewports. A
     ## second answer is what makes the correspondence falsifiable (§7b).
   UnsteppedOps = ""
-    ## `entry-shell`'s. The population control for case 6: at entry the pane
-    ## has no variables and must still be the vocabulary's report.
-  StateGroundHex = "#282828"
-    ## The state pane's own background, as the plan reports it. Asserted
-    ## against the plan rather than assumed, because it is one end of the
-    ## blend the column rule's rendered colour is.
-    ##
-    ## **RE-MEASURED AT THE PLAT-50 MERGE (2026-10-05), AND IT MOVED.** It
-    ## read `#1b222c` until then. PLAT-50 (`0a52bd0aa`, *"the desktop's chrome
-    ## colours"*) re-grounded the panes on the DESKTOP'S measured tokens —
-    ## `main.PanelGround = "#282828"  # ui/surface/base/panel, Dark` — and
-    ## that commit's own notes name `#1b222c` as the value it replaced and
-    ## describe the border *"(#565656) over the #282828 panes"*. So this is
-    ## upstream's deliberate change showing through a carried literal, not a
-    ## regression here: the rule's GEOMETRY did not move at all (x 767, 277 of
-    ## 277 rows, y 176-452 contiguous, measured both before and after).
-  SeparatorRenderedHex = "#4b4b4b"
-    ## **WHAT THE FRAMEBUFFER HOLDS WHERE THE RULE IS DRAWN**, and it is NOT
-    ## `leaves.StateSeparatorColour`. `(75, 75, 75)`, MEASURED in
-    ## `build/plat35/gpui/state.png` at the merged bytes — the declared
-    ## `#565656` over `StateGroundHex` at coverage ≈ 0.76. A CARRIED
-    ## measurement: nothing in this file opens a window, and the case that
-    ## uses it says so and asserts the arithmetic instead.
-    ##
-    ## **RE-MEASURED AT THE PLAT-50 MERGE, AND IT MOVED WITH THE GROUND.** It
-    ## read `#47494c` = `(71, 73, 76)` over the old `#1b222c`. The rule still
-    ## declares the same token; only the ground under it changed, so the
-    ## composite did. Found by a STRUCTURAL probe that discovers the rule
-    ## rather than searching for a colour — the column where one pixel sits
-    ## between two pixels of the same ground on the most rows — which answered
-    ## x = 767 on 281 rows against 28 for the runner-up, and the colour was
-    ## then READ OFF those rows. The declared `#565656` meanwhile counts 429
-    ## in this very frame, which is why an exact-token probe is not merely
-    ## blind here but insensitive (`Verification-Harness-Traps` §67).
+    ## `entry-shell`'s. The population control: at entry the pane has no
+    ## variables and draws the tab's empty-state sentence (the vocabulary's
+    ## report until the 2026-10-17 redesign).
   PaneAttr = "data-ct-pane"               # `leaves.PaneRoleAttribute`
   StateAttr = "data-ct-state"             # `leaves.StateAttribute`
   HighlightedAttr = "data-highlighted"    # the vocabulary binding's
   ViewKindAttr = "data-view-kind"
   ViewIdAttr = "data-view-id"
+  TabActiveAttr = "data-ct-tab-active"    # `renderState`'s tab buttons
+  ScrollAttr = "data-ct-state-scroll"     # the rows' scroll box
+  ScrollbarAttr = "data-ct-state-scrollbar" # its thumbs
+  EmptyAttr = "data-ct-state-empty"       # the pane's empty-state sentence
+  ColumnIndexAttr = "data-column-index"   # the event log's column cells
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
 let bin = repo / "build/bin/codetracer-gpui"
@@ -357,8 +373,7 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
   var env = newStringTable()
   for k, v in envPairs():
     env[k] = v
-  env["LD_LIBRARY_PATH"] = shimDir &
-    (if existsEnv("LD_LIBRARY_PATH"): ":" & getEnv("LD_LIBRARY_PATH") else: "")
+  env["LD_LIBRARY_PATH"] = gpuiLibraryPath(shimDir)
   env["DYLD_LIBRARY_PATH"] = shimDir &
     (if existsEnv("DYLD_LIBRARY_PATH"): ":" & getEnv("DYLD_LIBRARY_PATH")
      else: "")
@@ -401,8 +416,8 @@ proc windowPlan(width, height: int; ops: string): JsonNode =
 # viewports. The reason it survived two graded runs is worth the line: the case
 # printed a `[FAILED]` verdict anyway, because `std/unittest` catches the
 # defect — so in the log an ABORTED case is indistinguishable from a FAILED
-# one, and only one of them ran its remaining assertions. `bodyRowAt` and
-# `cellAt` close it; see `bodyRowAt`.
+# one, and only one of them ran its remaining assertions. `cellAt`, `cellOf`
+# and `pairOf` answer nil rather than indexing, for the same reason.
 proc attr(n: JsonNode; name: string): string =
   if n.isNil: return ""
   if n{"attributes"}.kind == JObject: n["attributes"]{name}.getStr else: ""
@@ -489,115 +504,46 @@ proc tableOf(pane: JsonNode): JsonNode =
   for n in pane.nodesWith(StateTableAttribute): return n
   nil
 
-proc headerRow(pane: JsonNode): JsonNode =
-  if pane.isNil: return nil
-  for n in pane.nodesWith(StateHeaderAttribute):
-    if n.attr(StateHeaderAttribute) == "true": return n
-  nil
-
 proc bodyRows(pane: JsonNode): seq[JsonNode] =
   if pane.isNil: return @[]
   pane.nodesWith(StateRowAttribute)
 
-proc cells(row: JsonNode): seq[JsonNode] =
+proc columnCells(row: JsonNode): seq[JsonNode] =
+  ## Every node in this row carrying `data-column`, in plan order. **DEEP,
+  ## not the row's children**: since 2026-10-17 the name and value sit inside
+  ## a `name:value` pair (the desktop's `.value-name` then `.value-view`),
+  ## not directly in the row.
   if row.isNil: return @[]
-  for c in row{"children"}.getElems:
-    if c.has(StateColumnAttribute): result.add c
+  row.nodesWith(StateColumnAttribute)
 
-proc cell(row: JsonNode; column: string): JsonNode =
-  for c in row.cells:
+proc cellOf(row: JsonNode; column: string): JsonNode =
+  ## This row's cell for `column`, nil when it has none.
+  for c in row.columnCells:
     if c.attr(StateColumnAttribute) == column: return c
   nil
 
-func channels(hex: string): array[3, int] =
-  ## `#rrggbb` as three ints, `[-1, -1, -1]` for anything else — so a hex
-  ## that stopped parsing cannot read as black and satisfy an inequality.
-  if hex.len != 7 or hex[0] != '#': return [-1, -1, -1]
-  for i in 0 .. 2:
-    try:
-      result[i] = parseHexInt(hex[1 + 2 * i .. 2 + 2 * i])
-    except ValueError:
-      return [-1, -1, -1]
-
-func mixAtThreeQuarters(fg, bg: string): array[3, int] =
-  ## `fg` over `bg` at coverage 3/4, per channel, truncated — the composite a
-  ## 1 px rule that does not land on one whole device pixel produces.
-  let f = channels(fg)
-  let b = channels(bg)
-  if f[0] < 0 or b[0] < 0: return [-1, -1, -1]
-  for i in 0 .. 2:
-    result[i] = (3 * f[i] + b[i]) div 4
-
-proc kidAt(row: JsonNode; i: int): JsonNode =
-  ## A row's `i`-th child, nil when there is none.
-  ##
-  ## **A RED CONTROL THAT REMOVES A ROW REACHES THIS LINE HOLDING NOTHING**,
-  ## and `row.kids[i]` on a shorter seq raises `IndexDefect` — which scores
-  ## MIS-ATTRIBUTED, not KILLED, and is how two earlier drafts of this file
-  ## died instead of failing. `check` does not abort a case, so the next line
-  ## always runs; every reader here has to answer for an absent node.
-  let ks = row.kids
-  if i < 0 or i >= ks.len: return nil
-  ks[i]
-
-proc bodyRowAt(pane: JsonNode; i: int): JsonNode =
-  ## The pane's `i`-th body row, nil when it has none.
-  ##
-  ## **`pane.bodyRows[0]` RAISED `IndexDefect` UNDER ARM A, MEASURED AT
-  ## ITERATION 8, AND THAT WENT UNNOTICED FOR A REASON WORTH WRITING DOWN.**
-  ## With the dispatch reverted the pane has no body rows; `check` does not
-  ## abort, so the line after `ck drawn.len > 1` indexed an empty seq. The
-  ## case still printed a `[FAILED]` line — `std/unittest` catches the defect
-  ## — so in the log an ABORTED case and a FAILED case look identical, and
-  ## only one of them ran its remaining assertions. **A crashed arm scores
-  ## MIS-ATTRIBUTED, not KILLED**, and the two earlier drafts of this file
-  ## that died in `has` and on `n{"children"}.len` are the same defect: this
-  ## file's rule is that EVERY reader tolerates an absent node, and a bare
-  ## `[0]` is not one.
-  let rows = pane.bodyRows
-  if i < 0 or i >= rows.len: return nil
-  rows[i]
-
 proc cellAt(row: JsonNode; i: int): JsonNode =
-  ## This row's `i`-th CELL (the rule is not one), nil when there is none —
-  ## `bodyRowAt`'s rule one level down. The three call sites below are each
-  ## preceded by `ck cs.len == 2`, which does not abort, so an arm that made a
-  ## row one cell would have aborted here rather than failing.
-  let cs = row.cells
+  ## This row's `i`-th cell, nil when there is none. Every reader here
+  ## tolerates an absent node: `check` does not abort a case, so a bare `[i]`
+  ## after a failed length check would turn a FAILED case into an aborted one.
+  let cs = row.columnCells
   if i < 0 or i >= cs.len: return nil
   cs[i]
 
-proc separator(row: JsonNode): JsonNode =
-  ## This row's column rule, nil when it has none.
-  if row.isNil: return nil
-  for c in row{"children"}.getElems:
-    if c.has(StateSeparatorAttribute): return c
+proc pairOf(row: JsonNode): JsonNode =
+  ## The row's child that holds the name cell — the `name:value` pair. Nil
+  ## when no child does.
+  for c in row.kids:
+    if c.has(StateColumnAttribute) or
+       c.nodesWith(StateColumnAttribute).len > 0:
+      return c
   nil
 
-proc valueColumnXOf(row: JsonNode): int =
-  ## **WHERE THIS ROW'S VALUE TEXT BEGINS, recomputed from the DRAWN
-  ## geometry** — the name cell's width, THE RULE'S WIDTH and the value
-  ## cell's own inset — and never read out of `StateAlignAttribute`. An
-  ## attribute agreeing with itself is §7's assertion that cannot fail; this
-  ## is the sum a layout engine would add up, and it adds up the rule because
-  ## the layout engine does.
-  ##
-  ## -1 when any part is missing, so an absent width cannot read as zero.
-  let name = row.cell(StateNameColumn)
-  if name.isNil: return -1
-  let w = name.pxStyle("w")
-  if w < 0: return -1
-  var x = w
-  let rule = row.separator
-  if rule.isNil: return -1
-  let ruleW = rule.pxStyle("w")
-  if ruleW < 0: return -1
-  x += ruleW
-  let value = row.cell(StateValueColumn)
-  if value.isNil: return -1
-  let pad = value.pxStyle("padding_left")
-  if pad < 0: return -1
-  x + pad
+proc nameInk(name: JsonNode): JsonNode =
+  ## The node that carries the name's TEXT inside its cell (after the caret
+  ## of a compound value, when there is one): the cell's last child.
+  let ks = name.kids
+  if ks.len == 0: nil else: ks[^1]
 
 # ---------------------------------------------------------------------------
 # A StateVM with constructed variables, for suite 2
@@ -611,7 +557,7 @@ proc nestedStateVM(): StateVM =
   let mock = newMockBackendService(autoRespond = false)
   let store = createReplayDataStore(mock.toBackendService())
   store.locals.locals.val = @[
-    Variable(name: "alpha", value: "1"),
+    Variable(name: "alpha", value: "1", typeName: "int"),
     Variable(name: "beta", value: "2", hasChildren: true, children: @[
       Variable(name: "gamma", value: "3"),
       Variable(name: "delta", value: "4", hasChildren: true, children: @[
@@ -621,68 +567,6 @@ proc nestedStateVM(): StateVM =
   result.selectedPath.val = "beta.gamma"
 
 # ---------------------------------------------------------------------------
-
-suite "PLAT-40 / PLAT35-F4: the rule that decides the name column":
-
-  # `leaves.stateNameColumnPx` is what makes the alignment claim true: ONE
-  # width for the whole pane. Pinned against literals here so a drawing that
-  # merely agrees with a changed rule cannot pass the pane cases below.
-
-  test "the header alone sets the floor, not `Name`'s own four characters":
-    # 4 * StateCharPx = 32, under the floor.
-    ck stateNameColumnPx([]) == StateNameMinPx
-    ck StateNameMinPx == 72
-    ck StateHeaderNameLabel.len * StateCharPx == 32
-
-  test "the WIDEST drawn name decides the column, not the first row":
-    let rows = @[
-      StateRow(name: "x", depth: 0),
-      StateRow(name: "__builtins__", depth: 0),   # 12 * 8 = 96
-      StateRow(name: "add", depth: 0)]
-    ck stateNameColumnPx(rows) == 96
-    # …and the answer does not depend on the order they are given in.
-    ck stateNameColumnPx(@[rows[1], rows[0], rows[2]]) == 96
-    # The widest name ALONE answers the same, which is what "one column for
-    # the pane" means.
-    ck stateNameColumnPx(@[rows[1]]) == 96
-
-  test "a short pane still gets a readable column (the floor)":
-    ck stateNameColumnPx(@[StateRow(name: "x", depth: 0)]) == StateNameMinPx
-    ck stateNameColumnPx(@[StateRow(name: "ab", depth: 0)]) == StateNameMinPx
-
-  test "DEPTH counts toward the name column, because the indent is inside it":
-    # 2 * 14 + 10 * 8 = 108 — wider than the same name at depth 0 (80). A rule
-    # that ignored depth would let a nested name overflow the column it is
-    # supposed to end in.
-    ck stateNameColumnPx(@[StateRow(name: "abcdefghij", depth: 2)]) == 108
-    ck stateNameColumnPx(@[StateRow(name: "abcdefghij", depth: 0)]) == 80
-    ck StateIndentPx == 14
-    # One level of nesting costs exactly one indent.
-    ck stateNameColumnPx(@[StateRow(name: "abcdefghij", depth: 1)]) ==
-       80 + StateIndentPx
-
-  test "one long dunder cannot push the value column off the pane (the ceiling)":
-    let long = StateRow(name: repeat("z", 40), depth: 0)   # 320 px
-    ck stateNameColumnPx(@[long]) == StateNameMaxPx
-    ck StateNameMaxPx == 260
-    # And the ceiling binds whatever else is in the set.
-    ck stateNameColumnPx(@[long, StateRow(name: "x", depth: 0)]) ==
-       StateNameMaxPx
-
-  test "the value column's x is the name column, the RULE and the value cell's inset":
-    # THREE terms, and the middle one is the drawn rule. **THIS CASE'S
-    # LITERAL MOVED FROM 102 TO 103 IN THIS PASS**, because the rule the two
-    # previous passes had deleted on a false reading is drawn again: the
-    # 1 px `div` sits between the two cells, so a value x that skipped it
-    # would be a published number the drawing disagrees with.
-    ck stateValueColumnPx(96) == 96 + StateSeparatorPx + StateValuePadPx
-    ck stateValueColumnPx(96) == 103
-    ck StateValuePadPx == 6
-    ck StateSeparatorPx == 1
-    # It is strictly to the right of the name column on any pane, and by more
-    # than the inset alone — a rule of zero width would be an invisible rule.
-    ck stateValueColumnPx(StateNameMinPx) > StateNameMinPx
-    ck stateValueColumnPx(StateNameMinPx) > StateNameMinPx + StateValuePadPx
 
 suite "PLAT-40 / PLAT35-F4: the rows are the ViewModel's, not this renderer's":
 
@@ -726,7 +610,7 @@ suite "PLAT-40 / PLAT35-F4: the rows are the ViewModel's, not this renderer's":
                   "beta.delta.epsilon"]
     vm.dispose()
 
-  test "a row carries its depth, its value and the selection, and the type it does NOT draw":
+  test "a row carries its depth, its value, the selection and its type":
     let vm = nestedStateVM()
     let rows = stateRows(vm, GpuiPanelBudget)
     ck rows.len == 4
@@ -740,16 +624,10 @@ suite "PLAT-40 / PLAT35-F4: the rows are the ViewModel's, not this renderer's":
       if row.selected: inc selected
     ck selected == 1
     ck rows[2].selected
-    # `typeName` is CARRIED, which is what this line gates — the field is in
-    # reach of `renderState` and readable here. **IT DOES NOT GATE "NOT
-    # DRAWN", and saying so is the point**: this fixture sets no `typeName`,
-    # so a renderer that drew a third column would still satisfy it. The
-    # not-drawn half is gated in suite 3, by `header.cells.len == 2`,
-    # `cs.len == 2` and `row.textNodeCount == 2` — a third column reddens
-    # those at both viewports. Recorded at adversarial review, 2026-10-04,
-    # because an assertion whose case NAME claims more than the assertion
-    # checks is §7 in miniature.
-    ck rows[0].typeName == ""
+    # `typeName` is CARRIED from the Variable to the row — since the
+    # 2026-10-17 redesign the pane draws it after the value, as the desktop
+    # does — so the fixture sets one and the row must carry it verbatim.
+    ck rows[0].typeName == "int"
     vm.dispose()
 
   test "an empty ViewModel yields no rows, so the pane keeps its own report":
@@ -757,292 +635,210 @@ suite "PLAT-40 / PLAT35-F4: the rows are the ViewModel's, not this renderer's":
     let store = createReplayDataStore(mock.toBackendService())
     let vm = createStateVM(store)
     ck stateRows(vm, GpuiPanelBudget).len == 0
-    ck stateNameColumnPx(stateRows(vm, GpuiPanelBudget)) == StateNameMinPx
     vm.dispose()
     ck stateRows(nil, GpuiPanelBudget).len == 0
 
-suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
+suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
+
+  # **SINCE 2026-10-17 THE STATE PANE IS DRAWN AS THE ELECTRON DESKTOP DRAWS
+  # IT** (`isonim_state_view`, `components/state.styl`, measured): the
+  # Locals / Globals / Watches control, the watch field, the stop's code line,
+  # then one 24 px monospace row per value — `name:` in indigo and the value
+  # directly after it, its type, and the history and origin controls. The
+  # two-column table this suite used to gate (a `Name` / `Value` header, a
+  # fixed-width name column, a 1 px rule, every value at one x) is SUPERSEDED:
+  # the desktop is the reference (`tools/visual-review-brief.md`) and it draws
+  # no table. What is still published — and what these cases protect — is the
+  # STRUCTURE a reader needs to tell a name from a value: `data-column` on
+  # exactly one name and one value per row, in that order, plus the row facts
+  # the click model reads.
 
   for (w, h) in Viewports:
     let vp = $w & "x" & $h
 
-    test "at " & vp & " the pane publishes a Name/Value HEADER":
+    test "at " & vp & " no Name/Value HEADER, no column RULE and no shared value x":
+      # The desktop draws no table; a header or a rule reappearing would be
+      # the superseded design coming back beside the new one.
       for ops in PopulatedOps:
         let plan = windowPlan(w, h, ops)
         let pane = plan.paneOf("state")
         ck not pane.isNil
         ck pane.attr(StateAttr) == "live"
-        let header = pane.headerRow
-        ck not header.isNil
-        # Exactly one, and it is not also a body row.
-        ck pane.nodesWith(StateHeaderAttribute).len == 1
-        ck not header.has(StateRowAttribute)
-        let hn = header.cell(StateNameColumn)
-        let hv = header.cell(StateValueColumn)
-        ck not hn.isNil
-        ck not hv.isNil
-        checkpoint(vp & " ops='" & ops & "' header " & hn.textOf & " | " &
-                   hv.textOf)
-        # The spec's two headings, verbatim.
-        ck hn.textOf == "Name"
-        ck hv.textOf == "Value"
-        ck hn.textOf == StateHeaderNameLabel
-        ck hv.textOf == StateHeaderValueLabel
-        # …and no third heading: the spec publishes TWO columns.
-        ck header.cells.len == 2
+        var desktop = 0
+        for n in pane.nodesWith(StateAttr):
+          if n.attr(StateAttr) == "desktop": inc desktop
+        ck desktop == 1
+        ck pane.bodyRows.len > 1          # population control: rows exist
+        ck pane.nodesWith(StateHeaderAttribute).len == 0
+        ck pane.nodesWith(StateSeparatorAttribute).len == 0
+        let table = pane.tableOf
+        ck not table.isNil
+        ck table.attr(StateAlignAttribute) == ""
+        var headings = 0
+        for t in pane.textNodes:
+          if t.strip() in [StateHeaderNameLabel, StateHeaderValueLabel]:
+            inc headings
+        ck headings == 0
 
-    test "at " & vp & " every row is two cells, name then value, each with data-column":
+    test "at " & vp & " every row is a name then a value, each with data-column":
+      # The census is never asserted alone: exactly two cells per row, `name`
+      # then `value` in that order, over more than one row.
       for ops in PopulatedOps:
         let plan = windowPlan(w, h, ops)
         let pane = plan.paneOf("state")
         ck not pane.isNil
         let rows = pane.bodyRows
-        # Not "a row exists": one row would make every alignment claim below
-        # vacuous.
         ck rows.len > 1
         let census = pane.nodesWith(StateColumnAttribute).len
         checkpoint(vp & " ops='" & ops & "' rows=" & $rows.len &
                    " data-column=" & $census)
-        # The census is pinned to the rows it is supposed to describe: two
-        # cells per body row plus the header's two. A census alone is §7.
-        ck census == 2 * (rows.len + 1)
+        ck census == 2 * rows.len
         for i, row in rows:
           ck row.attr(StateRowAttribute) == $i      # in draw order
-          let cs = row.cells
-          ck cs.len == 2
+          ck row.columnCells.len == 2
           ck row.cellAt(0).attr(StateColumnAttribute) == StateNameColumn
           ck row.cellAt(1).attr(StateColumnAttribute) == StateValueColumn
-          # THE FLAT `name: value` RUN IS GONE: the name is its own text node
-          # in its own cell, and it does not carry the separator the old label
-          # was built with (`pane_views.VariableLabelSeparator`).
-          ck VariableLabelSeparator notin row.cellAt(0).textOf
-          ck row.cellAt(0).textOf.len > 0
-          # The row holds the two cells' text and nothing else — exactly two
-          # text nodes, so a stray third run cannot hide here, and the column
-          # RULE between them (a third CHILD, counted in the case that owns
-          # it) contributes no text of its own.
-          # (PLAT-51: plus the row's value controls, `↺` and `⇠`, each a text
-          # node of its own after the value cell.)
-          ck row.textNodeCount == 4
-          ck not row.textOf.startsWith(row.cellAt(0).textOf &
-                                      VariableLabelSeparator)
+          # The name cell is the NAME: `name:` and nothing of the value.
+          let name = row.cellAt(0).textOf
+          ck name.len > 1
+          ck name.endsWith(":")
+          ck VariableLabelSeparator notin name
 
-    test "at " & vp & " EVERY VALUE CELL STARTS AT THE SAME X, and it is not zero":
-      # The finding's own sentence — *"nothing aligns vertically"*,
-      # *"its starting x-position varies per row"* — and the §7b trap: two
-      # cells that both start at x = 0 satisfy a `data-column` census.
+    test "at " & vp & " the value follows `name:` with NOTHING between them":
+      # The desktop's `.value-name` then `.value-view`: `name:value`, no
+      # gap, no column. Both cells are siblings in one pair, the pair sets no
+      # gap, neither cell pads toward the other, and the value is
+      # content-sized (no width that would put it at a column).
       for ops in PopulatedOps:
         let plan = windowPlan(w, h, ops)
         let pane = plan.paneOf("state")
         ck not pane.isNil
         let rows = pane.bodyRows
         ck rows.len > 1
-        var widths = initHashSet[int]()
-        var xs = initHashSet[int]()
         var lengths = initHashSet[int]()
         for row in rows:
-          let name = row.cell(StateNameColumn)
+          let name = row.cellOf(StateNameColumn)
+          let value = row.cellOf(StateValueColumn)
           ck not name.isNil
-          widths.incl name.pxStyle("w")
-          xs.incl row.valueColumnXOf
+          ck not value.isNil
+          let pair = row.pairOf
+          ck not pair.isNil
+          let pk = pair.kids
+          ck pk.len == 2
+          if pk.len == 2:
+            ck pk[0].attr(StateColumnAttribute) == StateNameColumn
+            ck pk[1].attr(StateColumnAttribute) == StateValueColumn
+          ck pair.style("gap") == ""
+          ck name.style("padding_right") == ""
+          ck value.style("padding_left") == ""
+          ck value.style("margin_left") == ""
+          ck value.style("w") == ""
+          ck name.style("w") == ""
+          # Read as a reader would: the row's text BEGINS `name:value`.
+          ck row.textOf.startsWith(name.textOf & value.textOf)
+          # One line, as the desktop's `white-space: nowrap` collapses it.
+          ck '\n' notin value.textOf
+          ck "  " notin value.textOf
           lengths.incl name.textOf.len
-        checkpoint(vp & " ops='" & ops & "' name widths " & $widths &
-                   " value x " & $xs & " name lengths " & $lengths)
-        # ONE width and ONE x across every row.
-        ck widths.len == 1
-        ck xs.len == 1
-        for x in xs:
-          ck x > 0                 # the "all at x = 0" trap
-        for width in widths:
-          ck width > 0
-        # **AND THE ROWS MUST DIFFER IN NAME LENGTH**, or equal widths would
-        # prove nothing at all. `calc`'s module scope has `__builtins__` and
-        # `add` in the same pane.
+        # Names of different lengths, without which "no column" proves
+        # nothing about where the values start.
         ck lengths.len > 1
-        # The header is in the same column as the rows it names.
-        let header = pane.headerRow
-        ck not header.isNil
-        ck header.cell(StateNameColumn).pxStyle("w") in widths
-        ck header.valueColumnXOf in xs
-        # The table's published x is the one the geometry adds up to — one
-        # number, two readers (§30).
-        let table = pane.tableOf
-        ck not table.isNil
-        for x in xs:
-          ck table.attr(StateAlignAttribute) == $x
 
-    test "at " & vp & " the drawn width is the one the rule answers for these names":
-      # The correspondence, not the presence: a width that is not the rule's
-      # answer passes the alignment case above and fails here. The expectation
-      # comes from `leaves.stateNameColumnPx` — the product's own rule, pinned
-      # against literals in suite 1 — applied to the names THE PLAN DREW.
-      #
-      # **AND IT TAKES MORE THAN ONE STOP TO MEAN THAT.** With only
-      # `stepIn=5` and `stepIn=5,next=3` in `PopulatedOps` this case was
-      # satisfied by a HARDCODED `96px`, because both of those stops answer
-      # 96. `stepIn=21,stepOut=1` answers 88, so the constant now fails here
-      # and nowhere else — see `PopulatedOps` and the §7 note above.
+    test "at " & vp & " names, values and changed values are in the desktop's inks":
       for ops in PopulatedOps:
         let plan = windowPlan(w, h, ops)
         let pane = plan.paneOf("state")
         ck not pane.isNil
-        var drawn: seq[StateRow] = @[]
-        for row in pane.bodyRows:
-          var depth = 0
+        let rows = pane.bodyRows
+        ck rows.len > 1
+        var unchanged = 0
+        for row in rows:
+          let name = row.cellOf(StateNameColumn)
+          let value = row.cellOf(StateValueColumn)
+          ck name.nameInk.style("text_color") == StateNameColour
+          ck value.style("font_family") == MonoFontFamily
+          case row.attr(StateChangedAttribute)
+          of "true":
+            ck value.style("text_color") == StateChangedColour
+          of "false":
+            inc unchanged
+            ck value.style("text_color") ==
+               DesignTokenHex[dtColorsUiTextWarningPrimary][dmDark]
+          else:
+            ck false                  # every row says whether it changed
+        ck unchanged > 0
+
+    test "at " & vp & " every row carries its depth, its history and origin controls":
+      # The row facts the click model reads (PLAT-51 K40 / K41), named by
+      # the row's own path, and the desktop's 24 px row and 16 px indent.
+      for ops in PopulatedOps:
+        let plan = windowPlan(w, h, ops)
+        let pane = plan.paneOf("state")
+        ck not pane.isNil
+        let rows = pane.bodyRows
+        ck rows.len > 1
+        for row in rows:
+          let path = row.attr(ViewIdAttr)
+          ck path.len > 0
+          var depth = -1
           try: depth = parseInt(row.attr(StateDepthAttribute))
           except ValueError: depth = -1
           ck depth >= 0
-          drawn.add StateRow(name: row.cell(StateNameColumn).textOf,
-                             depth: depth)
-        ck drawn.len > 1
-        let expected = stateNameColumnPx(drawn)
-        let actual = pane.bodyRowAt(0).cell(StateNameColumn).pxStyle("w")
-        checkpoint(vp & " ops='" & ops & "' expected " & $expected &
-                   " drawn " & $actual)
-        ck actual == expected
-        # It is a real content-dependent answer and not the floor by accident.
-        ck expected > StateNameMinPx
+          ck row.pxStyle("h") == StateValueRowPx
+          ck row.style("padding_left") ==
+             (if depth > 0: $(depth * StateRowIndentPx) & "px" else: "")
+          var controls: seq[string] = @[]
+          for c in row.nodesWith(StateControlAttribute):
+            controls.add c.attr(StateControlAttribute)
+            ck c.pxStyle("w") == 20
+            ck c.pxStyle("h") == 20
+          ck ("history:" & path) in controls
+          ck ("origin:" & path) in controls
 
-    test "at " & vp & " the Name/Value column RULE is drawn, and declares what makes it paint":
-      # **THIS CASE IS THE RE-POINTING ITS OWN PREDECESSOR ASKED FOR.** It
-      # was *"at <vp> NO column boundary is drawn, and none is faked"*, and
-      # its comment said a later pass that drew a VISIBLE rule should
-      # re-point it at the rule's geometry and its measured colour rather
-      # than read it as a blocker. This is that pass. The spec census that
-      # refuted the absence is in this file's header; what is asserted here
-      # is the DRAWING.
-      #
-      # **A CENSUS OF `data-state-separator` IS WORTH NOTHING ON ITS OWN, AND
-      # THAT IS MEASURED RATHER THAN FEARED** (§7a): a 1 px `div` with a
-      # background and no height of its own occupies its width in the layout
-      # and paints NOTHING. That element — present, laid out, invisible — is
-      # exactly what a previous pass built, and the absence case that replaced
-      # it existed to stop it being reinstated and called "drawn". So the two
-      # declarations that make it paint are asserted here beside its
-      # presence, and the drag it must NOT advertise is asserted with them.
+    test "at " & vp & " the rows scroll inside the table's scroll box":
+      # The rows are children of ONE scroll box inside the state table,
+      # at rest at its origin, and the scroll box lets each row take its
+      # natural width (`items: start`) so a long value reaches past the pane.
+      # `stepIn=5` holds `__builtins__`, whose value is thousands of columns
+      # wide. Since PLAT-70 Part B (Horizontal-Overflow §5, Variable-State-Pane
+      # Decision 3) a table pane does not scroll sideways: the value is cut
+      # with `…` and revealed by its hover / detail, so NO horizontal thumb.
       let plan = windowPlan(w, h, PopulatedOps[0])
       let pane = plan.paneOf("state")
       ck not pane.isNil
-      let rows = pane.bodyRows
-      ck rows.len > 1
-      let header = pane.headerRow
-      ck not header.isNil
-      # ONE RULE PER ROW, THE HEADER'S INCLUDED, and the census is pinned to
-      # the rows it is supposed to describe — a bare count is §7.
-      checkpoint(vp & " rows=" & $rows.len & " rules=" &
-                 $pane.nodesWith(StateSeparatorAttribute).len)
-      ck pane.nodesWith(StateSeparatorAttribute).len == rows.len + 1
-      for row in rows & @[header]:
-        # **THE RULE IS THE MIDDLE CHILD, AND ITS POSITION IS AN ASSERTION**:
-        # a rule appended after the value cell would paint at the pane's right
-        # edge instead of between the columns, and every width assertion in
-        # this suite would still pass.
-        # (PLAT-51: a variable row carries its value controls after the
-        # value cell — history and origin — so it has five children.)
-        ck row.kids.len == (if row.has(StateHeaderAttribute): 3 else: 5)
-        ck row.kidAt(0).attr(StateColumnAttribute) == StateNameColumn
-        ck row.kidAt(1).has(StateSeparatorAttribute)
-        ck row.kidAt(2).attr(StateColumnAttribute) == StateValueColumn
-        let rule = row.separator
-        ck not rule.isNil
-        # ITS GEOMETRY: one pixel wide, and the second term of
-        # `stateValueColumnPx`.
-        ck rule.pxStyle("w") == StateSeparatorPx
-        ck rule.pxStyle("w") == 1
-        # **AND ITS OWN HEIGHT, WHICH IS NECESSARY AND SUFFICIENT FOR IT TO
-        # PAINT AT ALL.** A childless flex child inherits none from a row that
-        # declares `height: 26px`. Four arms were measured: this pair →
-        # 276 of 276 scanned rows; height alone → 194 of 276; `flex-shrink: 0`
-        # with no height → nothing; a bare div with a background → nothing.
-        ck rule.pxStyle("h") == StateRowPx
-        ck rule.pxStyle("h") == 26
-        ck rule.style("flex_shrink") == "0"
-        # Its colour is the design TOKEN and not a hex somebody typed.
-        ck rule.style("bg") == StateSeparatorColour
-        ck StateSeparatorColour == "#565656"
-        # It is a rule and not a cell: no column, no text, no affordance.
-        ck not rule.has(StateColumnAttribute)
-        ck rule.textNodeCount == 0
-        ck rule{"has_click_handler"}.getBool == false
-        ck rule.style("cursor") == ""
-      # **THE DRAG IS STILL NOT DRAWN AND IS STILL NAMED RESIDUE.** It is
-      # spec-ranked `Low`, it needs a persisted width and a pointer-capture
-      # model, and the governing clause is `PLAT35-F7`'s — *"A rendered
-      # affordance must do the thing it advertises, or not be rendered"*. A
-      # static rule is not an affordance; a `col-resize` cursor over no drag
-      # would be, which is why the rule's own `cursor` is asserted empty
-      # above and the cells' are asserted empty here.
-      ck pane.nodesWith("data-ct-drag").len == 0
-      for row in rows & @[header]:
-        for c in row.cells:
-          ck c{"has_click_handler"}.getBool == false
-          ck c.style("cursor") == ""
+      let table = pane.tableOf
+      ck not table.isNil
+      let boxes = table.nodesWith(ScrollAttr)
+      ck boxes.len == 1
+      let box = if boxes.len > 0: boxes[0] else: nil
+      ck box.attr(ScrollAttr) == "0,0"
+      var direct = false
+      for k in table.kids:
+        if k.has(ScrollAttr): direct = true
+      ck direct
+      ck box.style("items") == "start"
+      ck box.style("margin_top") == "0px"
+      ck box.style("margin_left") == "0px"
+      var inBox = 0
+      for k in box.kids:
+        if k.has(StateRowAttribute): inc inBox
+      ck inBox == pane.bodyRows.len
+      ck inBox > 1
+      var horizontal = 0
+      for t in pane.nodesWith(ScrollbarAttr):
+        ck t.style("position") == "absolute"
+        case t.attr(ScrollbarAttr)
+        of "horizontal":
+          inc horizontal
+          ck t.pxStyle("h") == 8
+          ck t.pxStyle("left") == 0
+        of "vertical":
+          ck t.pxStyle("w") == 8
+        else:
+          ck false
+      ck horizontal == 0
 
-    test "at " & vp & " the rule's RENDERED colour is not the colour it declares":
-      # **THE FALSE NEGATIVE THAT DELETED THIS RULE TWICE, PINNED SO IT
-      # CANNOT BE REPEATED.** A frame probe searched for pixels of exactly
-      # `#565656`, found zero, and the rule was removed as "painting
-      # nothing". An exact-token search returns zero in a WORKING build: the
-      # rule paints at `(71, 73, 76)` = `#47494C`, which is that token over
-      # the pane's own `#1b222c` ground at coverage ≈ 0.75 (0.746 / 0.750 /
-      # 0.762 on R / G / B — the blend is the rasteriser's, a 1 px logical box
-      # failing to land on one whole device pixel; the shim parses a 6-digit
-      # hex at FULL alpha).
-      #
-      # **WHAT THIS CASE CAN AND CANNOT DO, STATED.** Nothing in this file
-      # opens a window, so the 71/73/76 is a frame measurement CARRIED (the
-      # capture lane's, with its own positive control, recorded in
-      # `PLAT35-F4.confirmedBy`). What IS asserted here is the arithmetic
-      # that connects the two numbers, over the token and the ground READ OFF
-      # THE PLAN: if either moves, the composite moves with it and this case
-      # reddens — which is the right alarm, because the frame probe's
-      # constant would then be stale. That is `Verification-Harness-Traps`
-      # §67's requirement met at this instrument's level: a probe is gated on
-      # knowing what the right answer looks like.
-      let plan = windowPlan(w, h, PopulatedOps[0])
-      let pane = plan.paneOf("state")
-      ck not pane.isNil
-      ck pane.bodyRows.len > 1
-      let rule = pane.bodyRowAt(0).separator
-      ck not rule.isNil
-      # Both ends of the blend come out of the plan.
-      ck rule.style("bg") == "#565656"
-      ck pane.style("bg") == StateGroundHex
-      ck StateGroundHex == "#282828"
-      let mixed = mixAtThreeQuarters(rule.style("bg"), pane.style("bg"))
-      let rendered = channels(SeparatorRenderedHex)
-      checkpoint(vp & " declared " & rule.style("bg") & " over " &
-                 pane.style("bg") & " at 3/4 = " & $mixed &
-                 ", frame holds " & $rendered & " (" & SeparatorRenderedHex &
-                 ")")
-      # Within one unit per channel, because the measured coverage is not
-      # exactly 3/4 (≈ 0.76 over the `#282828` ground) and the rasteriser
-      # rounds: truncated 3/4 gives 74 per channel and the frame holds 75.
-      # A token or a ground that MOVED would miss by tens — which is exactly
-      # what this case did at the PLAT-50 merge, by 3 and 2 on two channels,
-      # when the ground went from `#1b222c` to `#282828` and these two
-      # constants still held the old composite. It was re-measured, not
-      # widened: the tolerance is still one unit.
-      for i in 0 .. 2:
-        ck abs(rendered[i] - mixed[i]) <= 1
-      # **AND IT IS NOT THE DECLARED TOKEN**, which is the whole point: a
-      # probe that looks for `#565656` in the framebuffer is looking for bytes
-      # no build contains.
-      ck SeparatorRenderedHex != rule.style("bg")
-      ck rendered != channels(rule.style("bg"))
-      ck rendered != channels(pane.style("bg"))
-      # It is strictly between the ground and the token on every channel —
-      # the shape of a composite, which is what makes `#47494C` a plausible
-      # reading of a `#565656` rule rather than a coincidence.
-      for i in 0 .. 2:
-        ck rendered[i] > channels(pane.style("bg"))[i]
-        ck rendered[i] < channels(rule.style("bg"))[i]
-
-    test "at " & vp & " the pane's TAB STRIP is still the vocabulary's":
-      # `renderState` takes over `state.root` only. A pass that drew the three
-      # roots natively would lose `Locals` from `--report-plan`, which
-      # `test_gpui_editing_surface` asserts, and would give the tab strip a
-      # second owner.
+    test "at " & vp & " the pane's TAB STRIP is the desktop's segmented control":
       let plan = windowPlan(w, h, PopulatedOps[0])
       let pane = plan.paneOf("state")
       ck not pane.isNil
@@ -1052,31 +848,17 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
       ck not tabs.isNil
       ck tabs.attr(ViewKindAttr) == "Tabs"
       var labels: seq[string] = @[]
-      for o in tabs{"children"}.getElems: labels.add o.textOf
+      for i, o in tabs.kids:
+        labels.add o.textOf
+        # The click model's option index, in order.
+        ck o.attr("data-option-index") == $i
       ck labels == @["Locals", "Globals", "Watches"]
-      # Exactly one highlighted option, and it is the active tab's.
-      var highlighted = 0
-      for n in pane.nodesWith(HighlightedAttr):
-        if n.attr(HighlightedAttr) == "true": inc highlighted
-      ck highlighted == 1
-      # **THE STATE TREE HAS EXACTLY ONE OWNER AND IT IS THIS TABLE.**
-      #
-      # RE-AIMED AT THE PLAT-50 MERGE, 2026-10-05. This block asserted that
-      # NOTHING in the pane carried `state.root`, because `renderState` had
-      # removed the vocabulary's `Tree` outright. PLAT-50 then made that
-      # absence a REGRESSION rather than a virtue: `window_clicks` decides a
-      # press is a variable press by walking for `data-view-kind == "Tree"`
-      # UNDER an ancestor whose `data-view-id` is `state.root`, so with the id
-      # absent every variable press in this pane stopped being recognised and
-      # PLAT-50's own case *"a value expands; a variable's menu"* went red
-      # (measured: 95 assertions against upstream's own 104 at the same
-      # merge). The table therefore CLAIMS the id — it IS the state tree now.
-      #
-      # So the invariant worth holding was never "the id is absent"; it is
-      # that the id is not DUPLICATED, because two owners of one node is §30.
-      # That is what is asserted, and it is a FIXED number of assertions
-      # rather than one per `data-view-id` node, which is what made the old
-      # loop's contribution move with the rows it happened to find.
+      var active = 0
+      for n in pane.nodesWith(TabActiveAttr):
+        if n.attr(TabActiveAttr) == "true": inc active
+      ck active == 1
+      # The vocabulary binding's highlight is gone with the vocabulary strip.
+      ck pane.nodesWith(HighlightedAttr).len == 0
       var treeOwners = 0
       var tableOwnsTree = false
       for n in pane.nodesWith(ViewIdAttr):
@@ -1085,77 +867,14 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
           if n.attr(StateTableAttribute).len > 0: tableOwnsTree = true
       ck treeOwners == 1
       ck tableOwnsTree
-      # And every body row names the variable it draws, as a vocabulary
-      # `Tree` row, in the spelling `stateVM.toggleExpand` and
-      # `variablesContextMenu` take — the two attributes PLAT-50 dispatches
-      # on, published here so this renderer's agreement with that click model
-      # is GATED and not merely intended.
       for row in pane.bodyRows:
         ck row.attr(ViewKindAttr) == "Tree"
         ck row.attr(ViewIdAttr).len > 0
 
     test "at " & vp & " the pane draws its ACTIVE TAB's word exactly ONCE":
-      # **PLAT35-F9's residue, GATED.** The finding, rewritten to its residue
-      # on 2026-10-03: *"The state pane's variable tree labels its root
-      # `locals` directly under the active tab `Locals`, so the same word is
-      # drawn twice in the same pane."*
-      #
-      # It is CLOSED, and not by anything done for it. `renderState` strips
-      # the vocabulary's `state.root` `Tree` out of `pv.root.children` before
-      # binding (`leaves.nim`'s `kept` loop) and redraws the variables from
-      # `vm.currentVariables.val` at depth 0, so the node that CARRIED that
-      # label — `pane_views.statePaneView`'s `viewTreeNode("state.root", …)`,
-      # whose text is `"locals"` / `"globals"` / `"watches"` by active tab —
-      # is not in the window plan at all. The id survives, on the TABLE, which
-      # is the PLAT-50 click contract and not a drawn label.
-      #
-      # **SO THIS CASE EXISTS BECAUSE THE FIX IS SOMEBODY ELSE'S.** PLAT35-F2
-      # is the precedent: a finding closed upstream, with no assertion left
-      # behind, is a finding that regresses silently.
-      #
-      # **AND IT IS NOT SUBSUMED BY THE CASE ABOVE IT, WHICH WAS MEASURED
-      # RATHER THAN ASSUMED — TWO RED-CONTROL ARMS, BOTH KILLED.** Arm R1
-      # drops the `kept` filter so the vocabulary `Tree` is drawn again: that
-      # reds BOTH this case (`repeats was 2`, `sole was locals`) and *"the
-      # pane's TAB STRIP is still the vocabulary's"* (`treeOwners == 2`),
-      # because the node carrying the label is also the node carrying the id.
-      # So R1 alone does not show this case is needed. **Arm R2 does.** It
-      # keeps the filter and substitutes `viewText("state.caption",
-      # child.label)` for the dropped child — the regression PLAT-49 named in
-      # `statePaneView` (*"a label here drew a second 'State' as the pane's
-      # first row"*): the word is drawn twice, `state.root` still has exactly
-      # ONE owner, and the table, the columns, the rule, the widths and the
-      # tab strip are all still exactly right. Under R2, at both viewports and
-      # all three stops, **this is the only case in the file this arm reds**:
-      # 28 OK / 3 FAILED, where the two new reds are this case at the two
-      # viewports and the third is the §7 count case that is red at the
-      # unmodified bytes too. Counted 1683 under the arm and 1683 without it,
-      # so no case aborted (§69). Measured at `bc915c73d` plus that one arm,
-      # with `leaves.nim` restored by copy afterwards and its digest
-      # `10411cb1f3ee…` asserted both ways.
-      #
-      # ## §7b: what would satisfy this case if it stood alone
-      #
-      # `repeats == 1` alone is satisfied by a pane with NO ROWS — the three
-      # tab labels would be the only text and the active one would appear
-      # once. That is why `bodyRows.len > 0` is asserted beside it and why the
-      # needle is READ OFF the plan rather than written here: a hardcoded
-      # `"Locals"` would keep passing on a pane whose tabs had been renamed,
-      # and the finding is about a pane repeating ITS OWN tab, whatever that
-      # tab says.
-      #
-      # **THE EMPTY PANE IS OUT OF SCOPE HERE, DELIBERATELY, AND IT IS WHERE
-      # THE RESIDUE SURVIVES.** `renderState` returns false when there are no
-      # rows, so at an UNSTEPPED stop the vocabulary draws the root again and
-      # the pane really does read `Locals` over `locals — no variables at this
-      # position`. That path is the next case's subject (*"an UNSTEPPED
-      # session draws the report, not an empty table"*), it is recorded in the
-      # ledger as `PLAT35-F9.residue`, and asserting its absence here would
-      # red this case against behaviour nobody has decided to change.
-      #
-      # ALL THREE STOPS AND BOTH VIEWPORTS: the plans are already cached by
-      # the cases above, so the coverage is free and a stop-dependent answer
-      # cannot hide.
+      # `PLAT35-F9`: the active tab's word drawn twice (the tab, and a
+      # heading repeating it) was the finding. Counted over every text node
+      # in the pane, case-insensitively, by prefix.
       for ops in PopulatedOps:
         checkpoint(vp & " " & ops)
         let plan = windowPlan(w, h, ops)
@@ -1165,25 +884,15 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
         for n in pane.nodesWith(ViewIdAttr):
           if n.attr(ViewIdAttr) == "state.tabs": tabs = n
         ck not tabs.isNil
-        # The needle: the pane's OWN active tab, read off the plan.
         var active = ""
         var activeCount = 0
         for o in tabs.kids:
-          if o.attr(HighlightedAttr) == "true":
+          if o.attr(TabActiveAttr) == "true":
             inc activeCount
             if active.len == 0: active = o.textOf
         ck activeCount == 1
         ck active == "Locals"
-        # The population control. Without it the scan below is a count over
-        # three tab labels and would pass on an empty pane.
         ck pane.bodyRows.len > 0
-        # THE GATE. A PREFIX match and not equality, because the label the
-        # finding named is `locals — no variables at this position`, not
-        # `locals`; and case-folded, because the two spellings that collided
-        # are `Locals` and `locals`. `repeats` is -1 rather than a count when
-        # the needle is empty, so an empty needle — which `startsWith` says
-        # every string begins with — fails loudly instead of matching
-        # everything or being quietly skipped (§4).
         var repeats = -1
         var sole = ""
         if active.len > 0:
@@ -1194,27 +903,14 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
               inc repeats
               sole = t
         ck repeats == 1
-        # And the one occurrence is the TAB, not a row that swallowed it: an
-        # equality here separates `Locals` from `Locals — …` in the case where
-        # the tab itself went missing and a row took its place.
         ck sole == active
 
-    test "at " & vp & " `data-column` ELSEWHERE in the window is the Table's fact":
-      # §4: the instrument must measure the subject. The mirror of the mistake
-      # that sent `test_plat40_calltrace_current_frame`'s first draft red at 3
-      # would be counting `data-column` over the whole plan — and here that is
-      # not hypothetical. **`data-column` IS ALREADY TAKEN**: the vocabulary
-      # binding publishes a `Table`'s own `column` field as a fact under
-      # exactly that name (`view_vocabulary/gpui_binding.nim`, the `pkTable`
-      # arm; `fact_reader.factAttributeName("column")`), and the EVENT LOG is
-      # a `Table`. Measured on this plan: 25 occurrences in the window, 24 in
-      # the state pane, ONE on the event log's `Table` node carrying `"0"`.
-      #
-      # So a window-wide census is not a reading of this pane, and the name is
-      # kept — it is what `PLAT35-F4`'s remedy asks for and what a reader
-      # looks for — with the collision GATED rather than glossed: everything
-      # outside the pane must be a `Table` fact, and everything inside must be
-      # one of the spec's two column names.
+    test "at " & vp & " `data-column` is the state pane's alone":
+      # §4: scoped to the pane. The event log used to be a vocabulary
+      # `Table` publishing `data-column: "0"`; it is drawn natively now and
+      # names its columns `data-column-index`, so NO node outside this pane
+      # carries `data-column` — and the event log really does draw column
+      # cells (the positive control that the scan reaches other panes).
       let plan = windowPlan(w, h, PopulatedOps[0])
       let pane = plan.paneOf("state")
       ck not pane.isNil
@@ -1223,52 +919,40 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the spec's two columns":
       var seen = initHashSet[string]()
       for c in inside: seen.incl c.attr(StateColumnAttribute)
       ck seen == toHashSet([StateNameColumn, StateValueColumn])
-      # What the rest are.
       let outside = plan.nodesWithOutside(StateColumnAttribute, "state")
       for n in outside:
         checkpoint(vp & " outside the pane: " & $n{"attributes"})
-        # A vocabulary fact on a Table node, whose value is an index.
-        ck n.attr(ViewKindAttr) == "Table"
-        ck n.attr(StateColumnAttribute).len > 0
-        ck n.attr(StateColumnAttribute).allCharsInSet(Digits)
-      checkpoint(vp & " data-column: " & $plan.nodesWith(
-        StateColumnAttribute).len & " in the window, " & $inside.len &
-        " in the pane, " & $outside.len & " elsewhere")
-      ck outside.len == 1
-      ck plan.nodesWith(StateColumnAttribute).len == inside.len + outside.len
-      # And none of the other panes has a state-pane cell in it.
-      #
-      # **THE PANE MUST BE THERE BEFORE ITS EMPTINESS MEANS ANYTHING.** This
-      # loop used to open `if p.isNil: continue`, which made it a SILENT SKIP:
-      # a plan that stopped publishing `data-ct-pane`, or a renaming of any of
-      # these four roles, would have scored four passes without reading a
-      # single node — §7's assertion that cannot fail, in the middle of the
-      # case that exists to enforce §4. The presence is now asserted. All
-      # four ARE in this window's plan, measured on this host at both
-      # viewports and all three stops: `editor`, `calltrace`, `eventLog`,
-      # `fileTree`, plus `state`. Gated at adversarial review, 2026-10-04.
+      ck outside.len == 0
+      ck plan.nodesWith(StateColumnAttribute).len == inside.len
+      let events = plan.paneOf("eventLog")
+      ck not events.isNil
+      ck events.nodesWith(ColumnIndexAttr).len > 0
       for other in ["editor", "calltrace", "eventLog", "fileTree"]:
         let p = plan.paneOf(other)
         checkpoint(vp & " other pane: " & other)
         ck not p.isNil
         ck p.nodesWith(StateRowAttribute).len == 0
-        ck p.nodesWith(StateHeaderAttribute).len == 0
+        ck p.nodesWith(StateColumnAttribute).len == 0
 
-    test "at " & vp & " an UNSTEPPED session draws the report, not an empty table":
-      # The population control, and the false-return path: at entry the pane
-      # has no variables, so `renderState` must decline and the vocabulary's
-      # own report must still be what the pane says.
+    test "at " & vp & " an UNSTEPPED session draws the desktop's empty state":
+      # The population control: at entry there are no variables, and the
+      # pane draws its empty-state sentence (`.empty-overlay`) — not a
+      # table with no rows, and not a row with no data.
       let plan = windowPlan(w, h, UnsteppedOps)
       let pane = plan.paneOf("state")
       ck not pane.isNil
-      ck pane.attr(StateAttr) == "pane-report"
       ck pane.nodesWith(StateColumnAttribute).len == 0
       ck pane.nodesWith(StateRowAttribute).len == 0
       ck pane.nodesWith(StateHeaderAttribute).len == 0
-      ck pane.tableOf.isNil
-      ck "no variables at this position" in pane.textOf
-      # And the tab strip is still there even with nothing to tabulate.
-      ck "Locals" in pane.textOf
+      ck pane.nodesWith(ScrollAttr).len == 0
+      let empty = pane.nodesWith(EmptyAttr)
+      ck empty.len == 1
+      if empty.len == 1:
+        ck empty[0].attr(EmptyAttr) == "variables"
+        ck empty[0].textOf == stateEmptyText()
+      # One list of variables and watches: no Locals / Globals / Watches tabs
+      # (Variable-State-Pane.md, "Decisions (2026-10-24)").
+      ck "Globals" notin pane.textOf
 
 suite "PLAT-40 / PLAT35-F4: every case in this file ran":
 
