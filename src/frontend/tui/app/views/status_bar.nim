@@ -93,13 +93,22 @@ type
     prompt*: string
       ## What the user has typed after `:` or `/`, shown after the mode
       ## indicators in `umCommand` / `umSearch`.
+    build*: string
+      ## PLAT-56 (Build-Output-Pane.md §3.10): the build indicator — the
+      ## current build in the shared words (`BuildVM.statusText`), its icon
+      ## first. Drawn after the mode indicators, in its verdict's colour;
+      ## empty draws nothing.
+    buildState*: BuildStatus
 
 proc initStatusBarModel*(mode = umNormal;
                          profile = selectProfile(80, 24);
                          notification = ""; prompt = "";
-                         product = pmDebug; fold = ""): StatusBarModel =
+                         product = pmDebug; fold = "";
+                         build = "";
+                         buildState = low(BuildStatus)): StatusBarModel =
   StatusBarModel(mode: mode, product: product, profile: profile,
-                 notification: notification, prompt: prompt, fold: fold)
+                 notification: notification, prompt: prompt, fold: fold,
+                 build: build, buildState: buildState)
 
 proc productIndicator*(product: ProductMode): string =
   ## §1.2's separate indicator, in its separate position.
@@ -243,6 +252,14 @@ func modeText*(m: StatusBarModel): string =
   ## The mode indicator as drawn: the router's label, else the input mode.
   if m.label.len > 0: m.label else: $m.mode
 
+proc buildColumn*(m: StatusBarModel): int =
+  ## PLAT-56: where the build indicator starts, in cells from the row's
+  ## start, or -1 when there is none.
+  if m.build.len == 0:
+    return -1
+  textCells(m.modeText & " " & productIndicator(m.product) &
+            (if m.fold.len > 0: " " & m.fold else: "") & "  ")
+
 proc statusBarText*(m: StatusBarModel; width: int;
                     glyphs = DefaultGlyphs): string =
   ## The bottom row, exactly `width` cells wide.
@@ -260,7 +277,8 @@ proc statusBarText*(m: StatusBarModel; width: int;
   # just the input half. A product mode that vanished at 14 columns would leave
   # a user editing a file on a screen that says NORMAL and nothing else.
   let mode = m.modeText & " " & productIndicator(m.product) &
-             (if m.fold.len > 0: " " & m.fold else: "")
+             (if m.fold.len > 0: " " & m.fold else: "") &
+             (if m.build.len > 0: "  " & m.build else: "")
   # PLAT-49: the prompt's text when one is open, and nothing otherwise — no
   # key-hint strip.
   let middle =

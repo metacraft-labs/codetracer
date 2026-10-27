@@ -20,10 +20,18 @@
 ## the build's working directory (EMT-A36), and a row whose file is not there
 ## is listed and NOT opened, with the reason (EMT-D20).
 ##
+## PLAT-56: the same reader fills the window's `BuildVM` — the Build Output
+## pane's ViewModel, the one the desktop's BUILD panel draws: each line is read
+## ONCE, by the build's own `BuildLineReader` (`BuildVM.feedOutput`: its text,
+## its styled runs, its location), and the diagnostics rule's reading of it is
+## what the Problems list gets. A new session begins a new build in the
+## `BuildVM` (the last one goes to its history); its end finishes it, with its
+## exit code, its end time and whether the user cancelled it.
+##
 ## One per window, shared by every tab: a build is of the working tree, not of
-## a recording. PLAT-56's Build Output pane on GPUI reads the same
-## `BuildSession`. The GPUI window imports this module as it imports
-## `native_host`; the terminal's pane value is `problems_source`'s.
+## a recording. The GPUI window imports this module as it imports
+## `native_host`; the terminal's pane values are `problems_source`'s and
+## `build_output_source`'s.
 
 import std/os
 
@@ -32,14 +40,17 @@ import isonim/core/[owner, computation, signals]
 import ../app/build_session
 import ../../viewmodel/viewmodels/errors_vm
 import ../../viewmodel/viewmodels/build_diagnostics
+import ../../viewmodel/viewmodels/build_vm
 import ../../viewmodel/store/types
 
-export errors_vm, build_diagnostics
+export errors_vm, build_diagnostics, build_vm
 
 type
   BuildProblems* = ref object
     vm*: ErrorsVM
     feed*: BuildProblemsFeed
+    build*: BuildVM
+      ## PLAT-56: the window's Build Output ViewModel, fed the same lines.
     session: BuildSession
       ## The build being followed (identity: a new `:build` is a new object).
     consumed: int
@@ -61,18 +72,22 @@ proc newBuildProblems*(): BuildProblems =
   let p = result
   createRoot proc(dispose: proc()) =
     p.vm = createErrorsVM(nil)
+    p.build = createBuildVM(nil)
     p.dispose = dispose
   p.feed = newBuildProblemsFeed(p.vm)
 
-proc follow*(p: BuildProblems; session: BuildSession): bool =
+proc follow*(p: BuildProblems; session: BuildSession; nowMs = 0'i64): bool =
   ## Read what `session` wrote since the last call. Whether the list (or its
-  ## selection) changed.
+  ## selection) or the build's output changed. `nowMs` (when given) ticks the
+  ## running build's elapsed time.
   if p.isNil or session.isNil:
     return false
   if session != p.session:
     p.session = session
     p.consumed = 0
     p.feed.beginBuild(session.workingDir)
+    p.build.beginBuild(session.command, float(session.startedMs),
+                       noun = $session.kind)
     result = true
   let pending = session.received - p.consumed
   if pending > 0:
@@ -81,11 +96,21 @@ proc follow*(p: BuildProblems; session: BuildSession): bool =
     # pane reports) and cannot be read now.
     let first = max(0, session.lines.len - pending)
     for i in first ..< session.lines.len:
-      if p.feed.feedLine(session.lines[i]):
-        result = true
+      let read = p.build.feedOutput(session.lines[i],
+                                    isStdout = not session.isStderr(i))
+      discard p.feed.addRow(read.fed)
     p.consumed = session.received
+    result = true
+  if session.verdict == bvRunning and nowMs > 0 and p.build.running.val:
+    if nowMs - int64(p.build.clockMs.val) >= 100:
+      p.build.tickClock(float(nowMs))
+      result = true
   if p.feed.active and session.verdict notin {bvIdle, bvRunning}:
     p.feed.endBuild(failed = session.verdict == bvFailed)
+    p.build.finishBuild(session.exitCode,
+                        float(if session.endedMs > 0: session.endedMs
+                              else: max(nowMs, session.startedMs)),
+                        cancelled = session.verdict == bvCancelled)
     result = true
 
 proc targetOf*(p: BuildProblems; index: int): ProblemTarget =

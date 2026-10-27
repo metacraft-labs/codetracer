@@ -69,7 +69,7 @@ import ../host/build_runner
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 44
+const ExpectedAssertions = 48
 
 var countedAssertions = 0
 
@@ -189,7 +189,7 @@ suite "PLAT-16 §5: the build process, and the bound that makes it cancellable":
     # non-zero — §5a's two events, held apart on a REAL signal rather than on a
     # number this suite chose.
     ck rb.session.verdict != bvFailed
-    ck statusOf(rb.session.verdict) == bsIdle
+    ck statusOf(rb.session.verdict) == bsCancelled
 
   test "output written just before the child exits is not lost":
     # THE TAIL. `drain` is bounded per poll, and the poll that notices the exit
@@ -230,8 +230,8 @@ suite "PLAT-16 §5: the build process, and the bound that makes it cancellable":
     ck rb.session.lines[^1].contains("1s")
 
   test "a failing child reports its exit code and its diagnostics":
-    # The ordinary sad path, end to end through a real `sh -c`: stderr is
-    # folded into the pane (`poStdErrToStdOut`), the exit code survives, and
+    # The ordinary sad path, end to end through a real `sh -c`: stderr reaches
+    # the pane on its own pipe (PLAT-56), the exit code survives, and
     # `errorLines` offers the diagnostic.
     let rb = startBuild(bkBuild,
                         "echo 'a.nim(3, 5) Error: nope' >&2; echo fine; exit 3",
@@ -240,10 +240,17 @@ suite "PLAT-16 §5: the build process, and the bound that makes it cancellable":
     checkpoint(rb.session.lines.join(" | "))
     ck rb.session.verdict == bvFailed
     ck rb.session.exitCode == 3
-    # BOTH STREAMS REACHED THE PANE, which is what `poStdErrToStdOut` is for
-    # and what a front-end that let the child write on the inherited terminal
-    # would have painted over its own alternate screen.
+    # BOTH STREAMS REACHED THE PANE — what a front-end that let the child
+    # write on the inherited terminal would have painted over its own
+    # alternate screen — EACH TAGGED WITH ITS STREAM (PLAT-56: the pane draws
+    # stderr as the desktop's `.build-stderr`).
     ck "fine" in rb.session.lines
+    let fineAt = rb.session.lines.find("fine")
+    let nopeAt = rb.session.lines.find("a.nim(3, 5) Error: nope")
+    ck fineAt >= 0 and nopeAt >= 0
+    ck not rb.session.isStderr(fineAt)
+    ck rb.session.isStderr(nopeAt)
+    ck rb.session.stderrFlags.len == rb.session.lines.len
     let errors = errorLines(rb.session)
     ck errors.len == 1
     ck errors[0].contains("Error: nope")

@@ -145,10 +145,11 @@ suite "PLAT-55: the Problems pane on a real terminal":
     sess.omnibox(":build " & Plat55BuildCommand)
     discard sess.waitFor("build FAILED", BuildBudgetMs)
 
-    # F8: the next error (from the one the failed build highlighted), opened
-    # and announced; the docked pane revealed.
+    # F8: the error the failed build highlighted, opened and announced (its
+    # highlight is where the first `next error` lands, EMT-D21); the docked
+    # pane revealed.
     sess.send("\x1b[19~")
-    discard sess.waitFor("error 2 of 2")
+    discard sess.waitFor("error 1 of 2")
     let (hr, _) = sess.waitFor("Total: 3")
     var s = sess.snap()
 

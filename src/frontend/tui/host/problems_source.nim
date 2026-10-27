@@ -140,11 +140,13 @@ proc newProblemsSource*(rt: TuiRuntime; open: ProblemsOpener): ProblemsSource =
     s.command(rt, kind, index)
   s.publish(rt)
 
-proc tick*(s: ProblemsSource; rt: TuiRuntime): bool =
+proc tick*(s: ProblemsSource; rt: TuiRuntime; nowMs = 0'i64): bool =
   ## Follow the window's build (`rt.app.build`). Whether the pane changed.
+  ## `nowMs` ticks the running build's clock (PLAT-56: the Build Output
+  ## pane's duration and the status line's indicator).
   if s.isNil:
     return false
-  result = s.problems.follow(rt.app.build)
+  result = s.problems.follow(rt.app.build, nowMs)
   if result:
     s.publish(rt)
 

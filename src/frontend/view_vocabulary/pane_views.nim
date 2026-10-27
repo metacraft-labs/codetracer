@@ -96,6 +96,8 @@ import viewmodels/agent_activity_vm
 import viewmodels/agent_activity_feed
 # PLAT-55 — the Problems pane's ViewModel.
 import viewmodels/errors_vm
+# PLAT-56 — the Build Output pane's ViewModel.
+import viewmodels/build_vm
 
 import headless_app/layout_model
 
@@ -149,7 +151,11 @@ const
                                          paneAgentActivity,
                                          # PLAT-55: a build's diagnostics,
                                          # from the window's `ErrorsVM`.
-                                         paneProblems}
+                                         paneProblems,
+                                         # PLAT-56: a build's output, verdict
+                                         # and history, from the window's
+                                         # `BuildVM`.
+                                         paneBuildOutput}
     ## The panes expressed in the vocabulary. A CLOSED SET a test asserts, not
     ## a list a reader infers from which procs exist.
 
@@ -162,12 +168,13 @@ const
     ## the scrubbers that remain — Visual Replay's, the terminal screen's —
     ## are parts of their panes, not panes.)
 
-  PaneAcceptedExceptions*: set[PaneKind] = {paneBuildOutput,
+  PaneAcceptedExceptions*: set[PaneKind] = {
                                             # PLAT-45 — the desktop's panes
                                             # (PLAT-47 drew `paneVcs`,
                                             # PLAT-52 `paneTerminalOutput`,
                                             # PLAT-53 `paneTestResults`,
-                                            # PLAT-54 `paneAgentActivity`).
+                                            # PLAT-54 `paneAgentActivity`;
+                                            # PLAT-56 `paneBuildOutput`).
                                             paneConstraints,
                                             # PLAT-48 — the desktop's footer
                                             # panels the shared default docks
@@ -182,8 +189,9 @@ const
     ## having to be justified out loud and counted against `PaneKind`, not a
     ## reader trusting that somebody thought about it.
     ##
-    ## `paneBuildOutput` is an edit-mode pane whose subject is the working
-    ## tree, and the only session in scope is a replay one. The one PLAT-45
+    ## (`paneBuildOutput` was here until PLAT-56: an edit-mode pane whose
+    ## subject is the working tree; it is drawn now from the WINDOW's
+    ## `BuildVM`, attached by the front-end as Problems' is.) The one PLAT-45
     ## added that remains, `paneConstraints` (it added five; PLAT-47, -52,
     ## -53 and -54 drew the VCS, Terminal Output, Test Results and Agent
     ## Activity panes), and PLAT-48's two footer panels are the desktop's own
@@ -800,6 +808,48 @@ proc problemsPaneView*(vm: ErrorsVM): PaneView =
                              expanded = true)
   result.entries = entriesOf(result.root)
 
+proc buildOutputPaneView*(vm: BuildVM): PaneView =
+  ## PLAT-56. THE BUILD OUTPUT PANE (`Build-Output-Pane.md` §3.13): the shown
+  ## build's verdict and duration, the history picker's entries when there is
+  ## a history, then the output's lines as a `List` (each its text; a located
+  ## line is an option a press opens) — or the idle statement as `Text`. Every
+  ## word is the ViewModel's (`build_output_model`). The headless replay
+  ## session owns no `BuildVM` (a build is the window's, of the working tree),
+  ## so a front-end attaches the window's.
+  result.pane = paneBuildOutput
+  if vm.isNil:
+    result.report = "the build output has no ViewModel; no host attached one"
+    result.root = viewText("buildOutput.report", result.report)
+    result.entries = entriesOf(result.root)
+    return
+  let shown = vm.shownSnapshot()
+  var children: seq[ViewNode] = @[]
+  let header = shown.headerText
+  let duration = shown.durationText(vm.clockMs.val)
+  children.add viewText("buildOutput.verdict",
+                        header & (if duration.len > 0: "  " & duration else: ""))
+  if vm.history.val.len > 0:
+    var options: seq[ViewOption] = @[]
+    for i, label in vm.historyLabels():
+      options.add ViewOption(id: $(i - 1), label: label)
+    children.add viewSelect("buildOutput.history", options,
+                            selected = (if vm.showingLatest: 0
+                                        else: vm.shownIndex.val + 1))
+  if shown.status == bsIdle and shown.output.len == 0:
+    children.add viewText("buildOutput.empty", BuildIdleText)
+    result.report = "no build"
+  elif shown.output.len > 0:
+    var lines: seq[ViewOption] = @[]
+    for i, line in shown.output:
+      lines.add ViewOption(id: $i, label: line.text,
+                           disabled: not line.located)
+    children.add viewList("buildOutput.lines", lines)
+  else:
+    result.report = "no output"
+  result.root = viewTreeNode("buildOutput", "Build Output", children,
+                             expanded = true)
+  result.entries = entriesOf(result.root)
+
 proc shellPaneView*(vm: ShellVM): PaneView =
   ## The shell: a `Tree` of the input `Input` and a `List` of history.
   ##
@@ -987,29 +1037,10 @@ proc paneView*(kind: PaneKind; vm: ViewModel; budget: Budget;
   of paneShell: shellPaneView(ShellVM(vm))
   of paneFileTree: fileTreePaneView(FilesystemVM(vm))
   # PLAT-41 — the ACCEPTED EXCEPTION, named with its reason.
-  of paneBuildOutput:
-    # **AN ACCEPTED EXCEPTION, NAMED, WITH THE REASON — NOT A SILENT OMISSION.**
-    #
-    # The one `PaneKind` with no replay ViewModel, and that is a DECISION
-    # rather than a gap: a BUILD is an edit-mode act whose subject is the
-    # working tree, `headless_app.paneViewModel` answers `nil` for it under a
-    # comment saying so, and the desktop — the reference — draws no build
-    # output in replay either. No vocabulary entry is missing (build output is
-    # a `Table` or a `Text`); what is missing is a SOURCE, and a replay session
-    # is not one.
-    #
-    # PLAT-41 first held `paneFileTree` here on the same argument; the desktop
-    # draws the recording's own sources in replay, which refuted it, and that
-    # pane has a view above (`fileTreePaneView`). The remedy for this one is
-    # named so it does not read as permanent: an edit-mode session owns a
-    # build, and the view can be written the day one exists to ask.
-    PaneView(
-      pane: kind,
-      root: viewText($kind & ".report",
-        "the " & $kind & " pane is an edit-mode view; a replay session does " &
-        "not build the working tree and will not claim to"),
-      entries: {pkText},
-      report: "accepted exception: edit-mode pane, no replay-session source")
+  # PLAT-56: the window's build — not the replay session's, which owns
+  # none (`headless_app.paneViewModel` answers nil); the front-end attaches
+  # its `BuildVM`, as it attaches Problems' `ErrorsVM`.
+  of paneBuildOutput: buildOutputPaneView(BuildVM(vm))
   # PLAT-47 deliverable 4.
   of paneVcs: vcsPaneView(VCSVM(vm))
   # PLAT-52.

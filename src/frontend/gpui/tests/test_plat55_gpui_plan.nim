@@ -20,8 +20,7 @@
 ##   * THE ERRORS FILTER and GROUP BY FILE, pressed where they were drawn:
 ##     the rows and the file headers the desktop showed;
 ##   * THE FIRST ERROR HIGHLIGHTED after the failed build, nothing opened
-##     (EMT-D21; the desktop's panel highlights none — codetracer-pm issue
-##     `2026-10-26-desktop-failed-build-highlights-no-problems-row`);
+##     (EMT-D21), as the desktop's panel highlights it;
 ##   * A PRESS ON A ROW opens ITS file at ITS line in the Edit window's editor
 ##     (K35); `problems.next` steps to the next error, opening it and
 ##     announcing; the keys move the selection with the pane focused.
@@ -39,7 +38,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 19
+  ExpectedAssertions = 23
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -185,8 +184,10 @@ suite "PLAT-55: the Problems pane in the GPUI window":
     for c in after["counts"].getElems: counts.add c.getStr
     ck plan.countsOf() == counts
     ck plan.buttonsOf() == desktopButtons(after)
-    # EMT-D21: the first error highlighted, nothing opened.
+    # EMT-D21: the first error highlighted, nothing opened — the row the
+    # desktop's panel highlights for the same build.
     ck plan.selectedOf() == @["1"]
+    ck answers["after"]["rows"][1]["selected"].getBool
     ck not tr.contains("problems: opened")
     removeDir(project)
 
@@ -213,12 +214,19 @@ suite "PLAT-55: the Problems pane in the GPUI window":
     ck tr.contains("problems: opened src/util.nr:2:9")
     ck tr.contains("caret 2:9")
     ck plan.selectedOf() == @["0"]
+    # The first `next error` lands on the error the failed build highlighted
+    # (EMT-D21); the second steps on.
     let (nplan, ntr) = windowPlan(project,
       Build & ",problems:show,problems:next")
-    ck ntr.contains("problems: error 2 of 2")
-    ck ntr.contains("problems: opened src/main.nr:5:19")
-    ck ntr.contains("caret 5:19")
-    ck nplan.selectedOf() == @["2"]
+    ck ntr.contains("problems: error 1 of 2")
+    ck ntr.contains("problems: opened src/util.nr:3:22")
+    ck ntr.contains("caret 3:22")
+    ck nplan.selectedOf() == @["1"]
+    let (n2plan, n2tr) = windowPlan(project,
+      Build & ",problems:show,problems:next,problems:next")
+    ck n2tr.contains("problems: error 2 of 2")
+    ck n2tr.contains("problems: opened src/main.nr:5:19")
+    ck n2plan.selectedOf() == @["2"]
     let (kplan, _) = windowPlan(project,
       Build & ",problems:show,problems:key:list.focus-first," &
       "problems:key:list.focus-next")
