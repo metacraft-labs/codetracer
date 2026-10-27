@@ -418,16 +418,19 @@ jobs:
             # flake.lock (which `repro.lock` agrees with), so the renderer is
             # compiled against the same siblings the Nix lane uses. Refreshed
             # 2026-10-09: the 2026-08-31 pins predated APIs the renderer now
-            # calls (`selection.nim` no longer compiled against them).
-            isonim=45673bbabb207773d307ddc39041b46dc79ce751
-            isonim-tui=c6e2e03e3844b837c07a0a639ded1d8e27ae1cd1
-            isonim-gpui=a76a77df0adfc29e2c73f55ca0150b74feff122a
-            nim-everywhere=b4e2b6aad6858e0494fdfc200ddfe715e2367071
-            nim-termctl=3f105d1e4cc52781c4c1c42482b279294332b688
-            nim-pty=50cccb5aab9f11134a4fa87dbfa14fc57026f61c
-            nim-acp=d894960d22c7174ec71808669fd986871a376b5f
-            nim-agent-harbor=3753c7267834902c3bd292a42e1c9f770988c003
-            nim-agents=3809eba4b658f35939a25b34bd291fa57cd1ce5b
+            # calls (`selection.nim` no longer compiled against them). Refreshed
+            # again 2026-10-27: deploy run 40431335005 failed at "renderer: did
+            # not build" -- `isonim_menu_shell_view.nim` calls
+            # `firstElementChild`, which isonim 45673bba does not define.
+            isonim=c85eff8a30cf0b20977373c29ed93dd4f681a4c7
+            isonim-tui=029cc0cf21ec32a1628e7870a41359956cf29f32
+            isonim-gpui=a46be3761c4e0276646eed048b80e8472fa39460
+            nim-everywhere=95977e85e3aa9f3d8f54ecb42fdc9505ac3d3107
+            nim-termctl=b0ab31bc0d2859a5f8a6f28820ef4974fe5039d1
+            nim-pty=2845abd58dd2073475177301590c8b51aa5c9094
+            nim-acp=28fafeadeac7b31420eaef9cd7cf87f5c2770abf
+            nim-agent-harbor=7953355d91edebdac055a4b5623f4454b4b760ff
+            nim-agents=d49813aaeadfe0c64615316414e171012d7e0d6e
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock `reprobuild`, 9ceb532d) is tested
             # against: its own `.github/sibling-repos` pins
