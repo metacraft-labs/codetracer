@@ -726,9 +726,10 @@ suite "CTUI-8: selecting a recorded event moves every pane to its tick":
       ck bound.getOrDefault("line").getInt(0) == targetLine
 
       # ---- ARM TWO: THE SWEEP, WHICH IS THE ONE WITH TICKS ----------------
-      # `ct/run-tracepoints` sends NO DAP RESPONSE — see
-      # `headless_session.runTracepoints`'s header, and the hang that
-      # established it. This call synchronises on the event.
+      # The sweep's hits are the `ct/tracepoint-results` EVENT (its response
+      # is an empty body that follows it) — see
+      # `headless_session.runTracepoints`'s header. This call synchronises on
+      # the event.
       var hits = h.session.runTracepoints(@[TracepointSweepSpec(
         tracepointId: 0, path: request.path, line: request.line,
         expression: request.expression)])

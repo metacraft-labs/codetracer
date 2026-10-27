@@ -138,6 +138,13 @@ const
     op("find.replace-all", FindTable, "Replace All"),
     op("find.select-all-matches", FindTable, "Select All Matches"),
     op("find.close", FindTable, "Close Find"),
+    # PLAT-70 Part C (Find-And-Incremental-Search.md §3.5, §4.5): the
+    # session's two exits by name — `find.close` is CUA's spelling of the
+    # first — Emacs's `C-w`, and Emacs's `M-s .` launcher.
+    op("find.accept", FindTable, "Find: Accept"),
+    op("find.cancel", FindTable, "Find: Cancel and Return"),
+    op("find.yank-word", FindTable, "Find: Pull Word into Query"),
+    op("find.open-symbol-at-caret", GlobalTable, "Find Symbol at Caret"),
 
     # --- Lists and trees (§3.6) -------------------------------------------
     op("list.focus-previous", ListTable, "Previous Row"),

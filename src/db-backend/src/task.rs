@@ -207,9 +207,10 @@ pub struct UpdateTableArgs {
     #[serde(deserialize_with = "deserialize_selected_kinds")]
     pub selected_kinds: [bool; EVENT_KINDS_COUNT],
     pub is_trace: bool,
-    /// Index into the in-memory event-slot table (`EventDb::single_tables`):
-    /// `0` is the global event log, slot `N + 1` is the result table for
-    /// tracepoint `N`.  M-REC-4 renamed this from the historically
+    /// Which table: `0` with `is_trace: false` is the global event log;
+    /// otherwise it is the id of the tracepoint whose results are wanted
+    /// (`EventDb::tracepoint_table` finds that tracepoint's table; one with
+    /// no table yet has no rows).  M-REC-4 renamed this from the historically
     /// overloaded `trace_id` to `event_slot`; "trace_id" is now reserved for
     /// OpenTelemetry W3C TraceContext (parent spec §2's third meaning).
     /// JSON wire-format key is `eventSlot` (serde camelCase); the matching

@@ -422,7 +422,10 @@ fn a_tracepoint_run_adds_its_trace_log_rows_in_step_order() {
     }
 
     // A toggled-off tracepoint takes its rows out again.
-    let table = handler.event_db.make_single_table_id(0);
+    let table = handler
+        .event_db
+        .tracepoint_table(0)
+        .expect("the run made tracepoint 0 its table");
     handler.event_db.disable_table(table);
     handler.event_db.refresh_global();
     let body = load(&mut handler, serde_json::json!({ "start": 0, "count": 100 }));

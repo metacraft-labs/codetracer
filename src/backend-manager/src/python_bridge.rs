@@ -614,6 +614,19 @@ pub enum UnobservedReason {
     /// so a backend that refused them would leave the caller stepping
     /// from wherever the previous script stopped.
     OpenTraceCachedSessionReset,
+    /// The answer to a `ct/run-tracepoints` whose `ct/tracepoint-results`
+    /// event has already been turned into the `ct/py-run-tracepoints`
+    /// response.
+    ///
+    /// The replay server sends that event and then answers the request, so
+    /// by the time the answer arrives the client has its results, and the
+    /// answer (an empty success) carries nothing it was not already told.
+    /// Waiting for it here keeps it from matching no pending request and
+    /// being broadcast to every client. A run that is refused answers
+    /// `success: false` with no event, and that answer still reaches the
+    /// `RunTracepoints` entry itself, which passes it on to the client as
+    /// an error ([`format_run_tracepoints_answer`]).
+    RunTracepointsAnswer,
 }
 
 /// A pending synchronous Python bridge request waiting for a backend
@@ -1368,6 +1381,38 @@ pub fn format_read_source_response(backend_response: &Value) -> (bool, Value) {
         body["sourceOrigin"] = origin;
     }
     (true, body)
+}
+
+/// Formats the backend's answer to `ct/run-tracepoints` when it reaches the
+/// pending `ct/py-run-tracepoints` itself, that is, when no
+/// `ct/tracepoint-results` event came before it.
+///
+/// A sweep that succeeds sends its results event first and is answered
+/// from that event; its answer then reaches only the
+/// [`UnobservedReason::RunTracepointsAnswer`] entry. So an answer that gets
+/// here is always an error for the Python client: either the backend refused
+/// the sweep (its `message` is passed on), or it reported success without
+/// the results it owes, which the client cannot be answered with either.
+/// Answering is what matters: before this, the answer was consumed and the
+/// client waited for ever.
+///
+/// Returns `(false, json!({"message": "..."}))`.
+pub fn format_run_tracepoints_answer(backend_response: &Value) -> (bool, Value) {
+    let success = backend_response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let message = if success {
+        "the backend answered ct/run-tracepoints without sending its \
+         ct/tracepoint-results event, so there are no results to return"
+            .to_string()
+    } else {
+        match backend_response.get("message").and_then(Value::as_str) {
+            Some(reason) => format!("ct/run-tracepoints failed: {reason}"),
+            None => "ct/run-tracepoints failed, and the backend gave no reason".to_string(),
+        }
+    };
+    (false, serde_json::json!({ "message": message }))
 }
 
 /// Formats a backend `ct/list-processes` response into the simplified

@@ -332,7 +332,12 @@ type
     # focused output pane, or a table pane while its columns scroll.
     # Appended at the end, for the reason every note above gives.
     aScrollViewLeft,              # palette: View: Scroll Left
-    aScrollViewRight              # palette: View: Scroll Right
+    aScrollViewRight,             # palette: View: Scroll Right
+    # PLAT-70 Part C (Find-And-Incremental-Search.md §3.5): the palette's
+    # **Find: Cancel and Return** (`find.cancel`) — under CUA the only exit
+    # that restores the selection and the scroll. Appended at the end, for
+    # the reason every note above gives.
+    aFindCancel                   # palette: Find: Cancel and Return
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

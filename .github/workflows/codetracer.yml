@@ -3634,6 +3634,29 @@ jobs:
         # Chromium is a lane defect, not an absent optional capability.
         run: nix develop .#devShells.x86_64-linux.default --command just test-state-values-in-browser
 
+      - name: Every call-trace row is its row box, at every zoom
+        # The Call Trace pane's rows, measured in a real layout: the real view
+        # (`renderCalltracePanel`), the compiled shipped theme
+        # (`default_dark_theme_electron.styl`), and the SpaceMono / SpaceGrotesk
+        # faces actually loaded (an instrument control refuses the reading
+        # otherwise). Every row's height and every row-to-row advance must
+        # equal the toggle's 1.5625em box at 16, 20, 13 and 12 px roots, and a
+        # return value's arrow and value must sit on the call name's baseline.
+        #
+        # WHAT IT ADDS. A row showing a return value laid out ~0.8 px taller
+        # than the rest, because its arrow and value are two typefaces on one
+        # baseline-aligned line; the pane's advance was the data-dependent mean
+        # of the two heights. `calltrace_guides_chromium_test.nim` restates the
+        # row CSS and has no fonts, so it cannot see this. Its mutation arms
+        # strip the fix (whole, and each declaration alone) from the compiled
+        # sheet and require the assertion to redden for exactly the rows with a
+        # return value.
+        #
+        # Runs here for the same reasons as the two steps above: `nim js`,
+        # stylus and Chromium, no engine on the page. It EXITS 2 when one is
+        # missing, which in this lane must be red.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-calltrace-row-box-in-browser
+
       - name: A registered known failure signals when it goes green
         # The ledger `just test-vm` now consults, gated in both directions.
         #

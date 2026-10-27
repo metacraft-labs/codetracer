@@ -107,7 +107,9 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 2864
+const ExpectedAssertions = 2879
+  ## +15 on 2026-10-24: PLAT-70 Part C's `find_match.nim` joined the editor
+  ## directory, so the §35 scan covers one more module.
   ## **AND AGAIN ON 2026-09-20: PLAT-33 ADDED `collab_text.nim`, THE SEVENTH
   ## FIRING OF §35's ENUMERATION.** Five suites went red by name on the first
   ## run of the floor gate — PLAT-25's, PLAT-27's, PLAT-28's, PLAT-29's and
@@ -1170,6 +1172,7 @@ const
   OperationsSource = staticRead("../../editor/operations.nim")
   HistorySource = staticRead("../../editor/history.nim")
   CollabTextSource = staticRead("../../editor/collab_text.nim")
+  FindMatchSource = staticRead("../../editor/find_match.nim")
     ## **PLAT-28's FIVE, AND THE FOURTH TIME §35's ENUMERATION HAS PAID.** This
     ## case went red by name when `viewmodel/editor/` grew from eight modules to
     ## thirteen, before PLAT-28's own suites existed. `inlay.nim` is the one
@@ -1182,7 +1185,7 @@ const
 const ScannedModules = ["anchor.nim", "change_set.nim", "collab_text.nim",
                         "decoration.nim",
                         "document_version.nim", "editor_state.nim",
-                        "history.nim",
+                        "find_match.nim", "history.nim",
                         "inlay.nim", "operations.nim", "range_set.nim",
                         "reconcile.nim", "rope.nim", "row_projection.nim",
                         "selection.nim", "selection_ops.nim",
@@ -1242,6 +1245,9 @@ const OtherModules = block:
   # collaborative rebase is over logical positions, which is what
   # `wrap.nim`'s own header says PLAT-33's convergence would be over.
   xs.add ("collab_text.nim", CollabTextSource)
+  # PLAT-70 Part C's `find_match.nim`: the one document matcher, over bytes;
+  # it has no display question either.
+  xs.add ("find_match.nim", FindMatchSource)
   xs
 
 proc codeOnly(src: string): string =
@@ -1326,7 +1332,7 @@ suite "PLAT-27 — the suite's own non-vacuity":
     for name in EditorDirModules:
       checkpoint(name)
       counted name in ScannedModules
-    counted ScannedModules.len == 19
+    counted ScannedModules.len == 20
     counted OtherModules.len == ScannedModules.len - 1
 
   test "NO MODULE OF THE CORE REACHES A RENDERER — the dependency does not invert":

@@ -32,7 +32,7 @@ spec and use the auto-generated DAP types in `src/db-backend/src/dap_types.rs`.
 | `stackTrace` | `StackTraceArguments` | `StackTraceResponseBody` | Uses db-backend call stack. |
 | `scopes` | `ScopesArguments` | `ScopesResponseBody` | Standard variable scopes. |
 | `variables` | `VariablesArguments` | `VariablesResponseBody` | Standard variables resolution. |
-| `restart` | none | `{}` | Mapped to `ct/run-to-entry`. |
+| `restart` | none | `{}` | Mapped to `ct/run-to-entry`; responds with an empty body (the DAP `RestartResponse`). |
 | `stepIn` / `stepOut` / `next` / `continue` / `stepBack` / `reverseContinue` | `StepInArguments` etc. | `{}` | Emit `stopped`, `ct/complete-move`, and `output` events. |
 
 ### Data breakpoints are value-change watchpoints
@@ -79,24 +79,24 @@ response behavior per command.
 | `ct/update-table` | `UpdateTableArgs` | Emits `ct/updated-table` with `CtUpdatedTableResponseBody`. |
 | `ct/event-load` | none | Emits `ct/updated-events` and `ct/updated-events-content`. |
 | `ct/load-terminal` | none | Emits `ct/loaded-terminal`. |
-| `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
-| `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state. |
+| `ct/collapse-calls` | `CollapseCallsArgs` | Updates internal calltrace state; responds with an empty body (`success: false` for a call key no call has, or one that is not an integer). |
+| `ct/expand-calls` | `CollapseCallsArgs` | Updates internal calltrace state; responds as `ct/collapse-calls` does, and refuses a `nonExpandedKind` that names no expansion (`Siblings`, `Calls`, `CallstackInternalChild`). |
 | `ct/load-calltrace-section` | `CalltraceLoadArgs` | Emits `ct/updated-calltrace`. |
 | `ct/calltrace-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/event-jump` | `ProgramEvent` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/load-history` | `LoadHistoryArg` | Emits `ct/updated-history`. |
-| `ct/history-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`. |
+| `ct/history-jump` | `Location` (must carry `rrTicks`) | Emits `stopped`, `ct/complete-move`, `output`, then responds with an empty body. |
 | `ct/search-calltrace` | `CallSearchArg` | Emits `ct/calltrace-search-res`. |
 | `ct/source-line-jump` | `SourceLocation` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/source-call-jump` | `SourceCallJumpTarget` | Emits `stopped`, `ct/complete-move`, `output`, and may emit `ct/notification` on failure. |
-| `ct/local-step-jump` | `LocalStepJump` | Emits `stopped`, `ct/complete-move`, `output`. |
-| `ct/tracepoint-toggle` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log). |
-| `ct/tracepoint-delete` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log). |
+| `ct/local-step-jump` | `LocalStepJump` | Emits `stopped`, `ct/complete-move`, `output`, then responds with an empty body. |
+| `ct/tracepoint-toggle` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log), then responds with an empty body. |
+| `ct/tracepoint-delete` | `TracepointId` | Emits `ct/updated-trace` (refreshes trace log), then responds with an empty body; an id with no trace table yet is refused. |
 | `ct/trace-jump` | `ProgramEvent` | Emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/load-flow` | `CtLoadFlowArguments` | Emits `ct/updated-flow`. |
-| `ct/run-to-entry` | none | Emits `stopped`, `ct/complete-move`, `output`. |
-| `ct/run-tracepoints` | `RunTracepointsArg` | Emits `ct/updated-trace` per tracepoint. |
-| `ct/setup-trace-session` | `RunTracepointsArg` | Prepares trace tables; no payload. |
+| `ct/run-to-entry` | none | Emits `stopped`, `ct/complete-move`, `output`, then responds with an empty body. |
+| `ct/run-tracepoints` | `RunTracepointsArg` | Emits `ct/updated-trace` per tracepoint and `ct/tracepoint-results`, then responds with an empty body. |
+| `ct/setup-trace-session` | `RunTracepointsArg` | Prepares trace tables; responds with an empty body. |
 | `ct/load-asm-function` | `FunctionLocation` | Response body `Instructions`. |
 | `ct/reverseStepIn` | none | Reverse step-in; emits `stopped`, `ct/complete-move`, `output`. |
 | `ct/reverseStepOut` | none | Reverse step-out; emits `stopped`, `ct/complete-move`, `output`. |

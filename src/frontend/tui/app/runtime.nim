@@ -598,6 +598,15 @@ proc sessionFacts*(rt: TuiRuntime): SessionFacts
 proc debugBuffer*(rt: TuiRuntime): EditBuffer
 proc editorBuffer(rt: TuiRuntime): EditBuffer
   ## Forward-declared for PLAT-70's horizontal views; defined below.
+proc openFindSession(rt: TuiRuntime; backward: bool; symbol: bool;
+                     outcome: var RuntimeOutcome)
+  ## Forward-declared for `applyLocalAction`'s `/` / `?` (PLAT-70 Part C);
+  ## defined with the find session's section.
+proc cancelFind(rt: TuiRuntime; outcome: var RuntimeOutcome)
+  ## Forward-declared for the palette's **Find: Cancel and Return**.
+proc revealFind(rt: TuiRuntime; buf: EditBuffer; reveal: FindReveal;
+                outcome: var RuntimeOutcome)
+  ## Forward-declared for `runPromptLine`'s committed find field.
 proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer)
 proc scopePath*(rt: TuiRuntime): ScopePath
 proc navMode(rt: TuiRuntime): NavigationMode
@@ -1861,8 +1870,12 @@ proc runPromptLine(rt: TuiRuntime; line: string;
   ## instead, by name — CTUI-10 built the incremental search MODEL
   ## (`app/views/search.nim`) and no pane in the shell binds it yet.
   if rt.prompt.kind != pkCommand:
-    rt.note("search for `" & line & "` needs the source pane's search binding," &
-            " which no milestone has wired to the shell yet")
+    # PLAT-70 Part C: the field committed is the session accepted (the
+    # prompt itself already closed).
+    let buf = rt.editorBuffer()
+    if not buf.isNil and rt.app.find.open:
+      let reveal = rt.app.find.accept(buf.doc)
+      rt.revealFind(buf, reveal, outcome)
     return
   discard rt.runCommandLine(line, outcome)
 
@@ -2334,14 +2347,26 @@ proc editorPaneModel(rt: TuiRuntime; model: var ShellModel; follow: bool) =
       buf.follow.armed = false
     discard buf.doc.followView(buf.hview, buf.follow, cols)
   let markers = not rt.app.overflowMarkersOff
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §3.3 step 4): the find
+  # session's highlights on the lines this frame draws, from the shared
+  # session — the editor's own surface, not an overlay.
+  let rows = max(1, area.height)
+  let first = if editShown: max(1, buf.viewportTop)
+              else: max(1, rt.app.source.viewportTop)
+  var marks: seq[tuple[line, fromColumn, toColumn: int; current: bool]] = @[]
+  for m in rt.app.find.marksInWindow(buf.doc, first, rows):
+    marks.add (m.line, m.fromColumn, m.toColumn, m.current)
   if editShown:
     model.edit.hview = buf.hview
     model.edit.caretViewColumn = buf.doc.caretViewColumn
     model.edit.overflowMarkers = markers
+    model.edit.selected = selectedCells(buf)
+    model.edit.findMarks = marks
   else:
     model.source.hview = buf.hview
     model.source.caretViewColumn = buf.doc.caretViewColumn
     model.source.overflowMarkers = markers
+    model.source.findMarks = marks
 
 proc syncOutputViews(rt: TuiRuntime) =
   ## The output panes' widths, before a frame: Build Output's content (the
@@ -4455,11 +4480,10 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
   of kaOpenCommandPrompt:
     outcome.repaint = rt.openPrompt(pkCommand)
     true
-  of kaSearchForward:
-    outcome.repaint = rt.openPrompt(pkSearchForward)
-    true
-  of kaSearchBackward:
-    outcome.repaint = rt.openPrompt(pkSearchBackward)
+  of kaSearchForward, kaSearchBackward:
+    # PLAT-70 Part C: the find session, its field the status line's prompt.
+    rt.openFindSession(backward = action == kaSearchBackward, symbol = false,
+                       outcome)
     true
   of kaToggleBreakpoint:
     # EDIT MODE ANSWERS IT HERE; DEBUG MODE SENDS IT TO THE ENGINE. An edit
@@ -5369,6 +5393,10 @@ proc runMenuAction*(rt: TuiRuntime; action: string;
     of "view.scroll-left", "view.scroll-right":
       # PLAT-70 Part I: the focused output or table pane's view.
       discard rt.runViewOperation(name, outcome)
+    of "find.cancel":
+      # PLAT-70 Part C: **Find: Cancel and Return**.
+      if rt.app.find.open: rt.cancelFind(outcome)
+      else: rt.note("find: there is no find to cancel")
     else: rt.note(operation.operation & " is not available in the terminal")
     outcome.repaint = true
     return
@@ -5813,7 +5841,14 @@ proc navMode(rt: TuiRuntime): NavigationMode =
   if rt.prompt.open:
     return if rt.prompt.kind == pkCommand: nmCommand else: nmSearch
   case rt.modal.mode
-  of mmNormal, mmCommand, mmSearch: nmNormal
+  of mmNormal, mmCommand: nmNormal
+  of mmSearch:
+    # PLAT-70 Part C: a COMMITTED search (`/foo Enter`) is §4.2's SEARCH
+    # mode, browsing — `n` / `N` walk the matches until `Escape` returns to
+    # NORMAL (where `n` steps). Before Part C nothing committed a search, so
+    # the phase was never reached with a pattern to walk.
+    if rt.modal.phase == spBrowsing and rt.router.base.isModal: nmSearch
+    else: nmNormal
   of mmInspect: nmInspect
 
 proc syncCaretFrom(rt: TuiRuntime; buf: EditBuffer) =
@@ -6082,6 +6117,10 @@ proc unmountGoneOwners(rt: TuiRuntime) =
          rt.prompt.kind != pkCommand:
         discard rt.prompt.cancel()
         discard rt.modal.applyModalEvent(meCancel)
+      if popped.table == FindTable:
+        # PLAT-70 Part C: the session ends with its owner; the pattern
+        # stays the document's (`EditorState.search`).
+        rt.app.find = FindVM()
 
 proc routeKey*(rt: TuiRuntime; name: string; nowMs: int64): EditingResolution =
   ## One canonical key through the shared router, for THIS terminal's scope
@@ -6230,42 +6269,204 @@ proc focusedRowText(rt: TuiRuntime): (string, string) =
   else: discard
   ("", "")
 
-proc runFind(rt: TuiRuntime; forward: bool; outcome: var RuntimeOutcome) =
-  ## `find.next` / `find.previous`: the next occurrence of the find field's
-  ## query in the owner's document, selected, from the caret — the find
-  ## widget's matches as VS Code's walk them (CUA-Keymap.md §3.5).
-  let query = if rt.prompt.open: rt.prompt.buffer else: rt.app.findQuery
-  outcome.repaint = true
-  if query.len == 0:
-    rt.note("find: type what to look for")
+# ---------------------------------------------------------------------------
+# PLAT-70 Part C: THE FIND SESSION (Find-And-Incremental-Search.md §3, §4).
+# The session is the shared `find_vm.FindVM` (`rt.app.find`), over the
+# editor's document; its field is the status line's `/` / `?` prompt. This
+# section only moves the pane's view where the session asks (`FindReveal`)
+# and restores it on a cancel: what a match is, which one is current and what
+# the count reads are the ViewModel's.
+# ---------------------------------------------------------------------------
+
+proc findPromptOpen(rt: TuiRuntime): bool =
+  rt.prompt.open and rt.prompt.kind != pkCommand
+
+proc findView(rt: TuiRuntime; buf: EditBuffer): tuple[top, leftCol: int] =
+  ## Where the editor's view is now: the Debug-mode window's top while the
+  ## read-only source is drawn, else the document's own; the horizontal
+  ## view's left column.
+  let top = if rt.sourceWindowShown and buf.path == rt.app.source.path:
+              rt.app.source.viewportTop
+            else: buf.viewportTop
+  (max(1, top), buf.hview.leftCol)
+
+proc setFindView(rt: TuiRuntime; buf: EditBuffer; top, leftCol: int;
+                 outcome: var RuntimeOutcome) =
+  ## Put the editor's view at `top` / `leftCol` EXACTLY (a cancel, §3.5):
+  ## and record the caret as followed, so the next frame's caret-follow
+  ## (§4.5: only a caret move moves the view) does not move it again.
+  if rt.sourceWindowShown and buf.path == rt.app.source.path:
+    rt.requestSourceScroll(SourceScroll(kind: sskTo, top: top), outcome)
+  else:
+    buf.viewportTop = top
+  discard buf.hview.scrollBy(leftCol - buf.hview.leftCol)
+  buf.follow = buf.doc.caretFollowOf
+
+proc revealFind(rt: TuiRuntime; buf: EditBuffer; reveal: FindReveal;
+                outcome: var RuntimeOutcome) =
+  ## §3.3 step 3: the current match revealed — vertically centred when it
+  ## was off-screen; horizontally by the caret-follow the next frame runs.
+  rt.syncCaretFrom(buf)
+  if reveal.line <= 0:
     return
-  rt.app.findQuery = query
+  let rows = max(1, rt.sourcePaneRows())
+  let (top, _) = rt.findView(buf)
+  let want = revealTop(top, rows, reveal.line)
+  if want == top:
+    return
+  if rt.sourceWindowShown and buf.path == rt.app.source.path:
+    rt.requestSourceScroll(SourceScroll(kind: sskTo, top: want), outcome)
+  else:
+    buf.viewportTop = want
+
+proc showFindStatus(rt: TuiRuntime; buf: EditBuffer) =
+  ## §3.3 step 5 on the terminal: the count in the status line, beside the
+  ## field (the prompt's message), or as a note once the field is closed.
+  let text = rt.app.find.statusText(buf.doc)
+  if rt.findPromptOpen:
+    rt.prompt.message = text
+  else:
+    rt.note(if text.len > 0: "find: " & text else: "")
+
+proc fillFieldWith(rt: TuiRuntime; text: string) =
+  ## The prompt's text replaced by `text`, its caret at the end.
+  discard rt.prompt.moveCursor(KeyEnd)
+  while rt.prompt.buffer.len > 0:
+    discard rt.prompt.backspace()
+  if text.len > 0:
+    discard rt.prompt.insert(text)
+
+proc fillFindField(rt: TuiRuntime) =
+  ## The prompt's text set to the session's field (a seed, a pulled word).
+  rt.fillFieldWith(rt.app.find.field)
+
+proc openFindSession(rt: TuiRuntime; backward: bool; symbol: bool;
+                     outcome: var RuntimeOutcome) =
+  ## `find.open` / `find.open-backward` / `find.open-symbol-at-caret`: the
+  ## field opened in the status line and the session over the editor's
+  ## document (§3.6: Vim's and Kakoune's `/` in a list pane searches the
+  ## editor too). CUA seeds from the selection or the word (§4.1); Vim's,
+  ## Kakoune's and Emacs's prompts open empty.
+  outcome.repaint = true
   let buf = rt.editorBuffer()
   if buf.isNil:
-    rt.note("find: this pane has no text to search")
+    rt.note("find: there is no document in the editor to search")
     return
-  let text = buf.doc.text
-  let sel = buf.doc.state.selection.mainRange
-  var at = -1
-  if forward:
-    at = text.find(query, min(sel.rangeTo, text.len))
-    if at < 0: at = text.find(query)
-  else:
-    for i in countdown(min(sel.rangeFrom - 1, text.len - query.len), 0):
-      if text.continuesWith(query, i):
-        at = i
-        break
-    if at < 0: at = text.rfind(query)
-  if at < 0:
-    rt.note("find: no match for `" & query & "`")
+  discard rt.prompt.open(if backward: pkSearchBackward else: pkSearchForward)
+  rt.app.findOwner = rt.focusOwnerId()
+  let (top, leftCol) = rt.findView(buf)
+  let base = rt.router.base
+  let reveal =
+    if symbol:
+      rt.app.find.openSymbolAtCaret(buf.doc, base, rt.app.findOwner, top,
+                                    leftCol)
+    else:
+      rt.app.find.openFind(buf.doc, base, rt.app.findOwner, backward,
+                           (if base == bkCua: fsSelectionOrWord else: fsNone),
+                           top, leftCol)
+  rt.fillFindField()
+  rt.revealFind(buf, reveal, outcome)
+  rt.showFindStatus(buf)
+
+proc closeFindField(rt: TuiRuntime; event: ModalEvent) =
+  if rt.findPromptOpen:
+    discard rt.prompt.cancel()
+    discard rt.modal.applyModalEvent(event)
+
+proc acceptFind(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `find.accept` / CUA's `find.close`: closed, the current match kept
+  ## selected (FS-5); the pattern stays the editor's.
+  outcome.repaint = true
+  let buf = rt.editorBuffer()
+  # A modal base's committed search is SEARCH mode, browsing (`n` walks);
+  # the others go back to their one mode.
+  rt.closeFindField(if rt.router.base.isModal: meCommit else: meCancel)
+  if buf.isNil or not rt.app.find.open:
     return
-  let caretBefore = (buf.caretLine, buf.caretColumn)
-  buf.doc.selectSpan(at, at + query.len)
-  buf.followCaret(max(1, rt.sourcePaneRows()))
+  let wasField = rt.app.find.field
+  let reveal = rt.app.find.accept(buf.doc)
+  rt.revealFind(buf, reveal, outcome)
+  rt.note(if wasField.len == 0 and buf.doc.state.search.pattern.len == 0:
+            "find: " & NoPreviousPatternText
+          else: "")
+
+proc cancelFind(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## `find.cancel`: closed, the selection and both scroll offsets put back
+  ## exactly (FS-4).
+  outcome.repaint = true
+  let buf = rt.editorBuffer()
+  rt.closeFindField(meCancel)
+  if buf.isNil or not rt.app.find.open:
+    return
+  let (top, leftCol) = rt.app.find.cancel(buf.doc)
   rt.syncCaretFrom(buf)
-  # M73 (#840): a match off the drawn window brings the window to it.
-  rt.followCaretInSource(buf, caretBefore, outcome)
-  rt.note("find: `" & query & "` at line " & $buf.caretLine)
+  rt.setFindView(buf, top, leftCol, outcome)
+  rt.note("")
+
+proc walkFind(rt: TuiRuntime; next: bool; outcome: var RuntimeOutcome) =
+  ## `find.next` / `find.previous` (§3.4): the open session's walk, or —
+  ## closed — the last pattern from the caret (`F3`, `n`).
+  outcome.repaint = true
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    rt.note("find: there is no document in the editor to search")
+    return
+  if rt.app.find.open:
+    let reveal = rt.app.find.step(buf.doc, next)
+    rt.revealFind(buf, reveal, outcome)
+    rt.showFindStatus(buf)
+    return
+  let walked = walkClosed(buf.doc, rt.router.base, next)
+  rt.revealFind(buf, walked.reveal, outcome)
+  if walked.message.len > 0:
+    rt.note("find: " & walked.message)
+  else:
+    rt.note("find: `" & buf.doc.state.search.pattern & "` at line " &
+            $buf.caretLine)
+
+proc findSelectionMatch(rt: TuiRuntime; backward: bool; nowMs: int64;
+                        outcome: var RuntimeOutcome) =
+  ## CUA's `Ctrl+F3` / `Ctrl+Shift+F3` (§4.2): the word at the caret (or the
+  ## selection) as the pattern, its next occurrence selected; the find
+  ## widget stays closed.
+  outcome.repaint = true
+  let buf = rt.editorBuffer()
+  if buf.isNil:
+    rt.note("find: there is no document in the editor to search")
+    return
+  let ran = nextSelectionMatch(buf.doc, backward, nowMs)
+  rt.revealFind(buf, ran.reveal, outcome)
+  rt.note(if ran.message.len > 0: ran.message
+          else: "find: `" & buf.doc.state.search.pattern & "` at line " &
+                $buf.caretLine)
+
+proc changeFind(rt: TuiRuntime; op: string; outcome: var RuntimeOutcome) =
+  ## The open session's toggles and Emacs's `C-w`.
+  outcome.repaint = true
+  let buf = rt.editorBuffer()
+  if buf.isNil or not rt.app.find.open:
+    rt.note("find: open the find field first")
+    return
+  let reveal = case op
+               of "find.toggle-case": rt.app.find.toggleCase(buf.doc)
+               of "find.toggle-whole-word": rt.app.find.toggleWholeWord(buf.doc)
+               else: rt.app.find.yankWord(buf.doc)
+  if op == "find.yank-word":
+    rt.fillFindField()
+  rt.revealFind(buf, reveal, outcome)
+  rt.showFindStatus(buf)
+
+proc findFieldEdited(rt: TuiRuntime; outcome: var RuntimeOutcome) =
+  ## The field's text changed (typed, deleted, pasted): §3.3 — the store
+  ## written, the matches recomputed, the first at or after the origin
+  ## selected and revealed.
+  let buf = rt.editorBuffer()
+  if buf.isNil or not rt.app.find.open:
+    return
+  let reveal = rt.app.find.setQuery(buf.doc, rt.prompt.buffer,
+                                    rt.prompt.cursor)
+  rt.revealFind(buf, reveal, outcome)
+  rt.showFindStatus(buf)
 
 proc runPromptKey(rt: TuiRuntime; key: string;
                   outcome: var RuntimeOutcome)
@@ -6533,18 +6734,30 @@ proc runOperation(rt: TuiRuntime; res: EditingResolution; nowMs: int64;
       rt.runPromptKey(key, outcome)
     return
   case res.operation
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §3, §4): the find
+  # session's operations, onto the shared `FindVM`.
   of "find.next", "find.previous":
-    if rt.router.base.isModal or rt.prompt.open or rt.app.findQuery.len > 0:
-      rt.runFind(res.operation == "find.next", outcome)
-      return
-  of "find.close":
-    if rt.prompt.open and rt.prompt.kind != pkCommand:
-      discard rt.prompt.cancel()
-      discard rt.modal.applyModalEvent(meCancel)
-      rt.note("")
+    rt.walkFind(res.operation == "find.next", outcome)
     return
-  of "find.open", "find.open-backward":
-    rt.app.findOwner = rt.focusOwnerId()
+  of "find.close", "find.accept":
+    rt.acceptFind(outcome)
+    return
+  of "find.cancel":
+    rt.cancelFind(outcome)
+    return
+  of "find.open", "find.open-backward", "find.open-symbol-at-caret":
+    if res.operation == "find.open-symbol-at-caret":
+      rt.openFindSession(backward = false, symbol = true, outcome)
+      return
+    # Through the local action, which the modal machine's transition and the
+    # context menu's Find share (`applyLocalAction`).
+  of "find.next-selection-match", "find.previous-selection-match":
+    rt.findSelectionMatch(res.operation == "find.previous-selection-match",
+                          nowMs, outcome)
+    return
+  of "find.toggle-case", "find.toggle-whole-word", "find.yank-word":
+    rt.changeFind(res.operation, outcome)
+    return
   of "editor.toggle-read-only":
     let buf = rt.editorBuffer()
     if buf.isNil:
@@ -6684,9 +6897,27 @@ proc runPromptKey(rt: TuiRuntime; key: string;
   ## (`Enter`, `Esc`, `Backspace`, the arrows, `Tab`) or a character. The
   ## router decided the key is this; the prompt's model performs it.
   let before = rt.prompt.buffer
+  let cursorBefore = rt.prompt.cursor
+  let findField = rt.findPromptOpen and rt.app.find.open
+  if findField and rt.app.find.fieldSelected:
+    # §3.2: a seed is selected in the field, so the first typed character
+    # replaces it (and a delete removes it).
+    if key in ["Backspace", "Delete", "\x7f", "\b"]:
+      rt.fillFieldWith("")
+      rt.findFieldEdited(outcome)
+      outcome.repaint = true
+      return
+    if key.len > 0 and key notin ["Enter", "Esc", "\r", "\n", "\x1b",
+                                  "Tab", "\t", "Left", "Right", "Up", "Down",
+                                  "Home", "End"]:
+      rt.fillFieldWith("")
+    rt.app.find.fieldSelected = false
   let line = if key == "Enter": rt.prompt.buffer else: ""
   let cla = rt.prompt.applyKey(key, rt.promptCandidates())
   outcome.repaint = true
+  if findField and rt.prompt.open and
+     (rt.prompt.buffer != before or rt.prompt.cursor != cursorBefore):
+    rt.findFieldEdited(outcome)
   case cla
   of claUnhandled:
     discard
@@ -6709,6 +6940,17 @@ proc runPromptKey(rt: TuiRuntime; key: string;
     discard rt.modal.applyModalEvent(meCancel)
     # K19: Escape on a Files name field or Delete question cancels it.
     rt.note(rt.cancelFilesField())
+    if findField:
+      # The field's own `Esc`: each base's native exit (§3.5) — CUA's keeps
+      # the match (OQ-F1), the others restore.
+      let buf = rt.editorBuffer()
+      if not buf.isNil:
+        if rt.router.base == bkCua:
+          rt.revealFind(buf, rt.app.find.accept(buf.doc), outcome)
+        else:
+          let (top, leftCol) = rt.app.find.cancel(buf.doc)
+          rt.syncCaretFrom(buf)
+          rt.setFindView(buf, top, leftCol, outcome)
   else:
     discard before
 

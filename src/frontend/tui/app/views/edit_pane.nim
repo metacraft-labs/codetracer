@@ -108,6 +108,13 @@ type
     caretColumn*: int
       ## 0-based grapheme-cluster column of the caret within its line.
     selectionActive*: bool
+    selected*: seq[tuple[line, fromColumn, toColumn: int]]
+      ## PLAT-70 Part C: the selection's cells (`editing_core.selectionCells`),
+      ## drawn on the selection ground as the Debug-mode source pane draws
+      ## them — a find match is selected, and must be seen to be.
+    findMarks*: seq[tuple[line, fromColumn, toColumn: int; current: bool]]
+      ## PLAT-70 Part C: the find session's matches on the drawn lines
+      ## (`source_pane.SourcePaneModel.findMarks`' meaning).
     dirty*: bool
       ## Whether the buffer differs from what was loaded. Shown in the title as
       ## a marker, because Mode-Transitions.md §5 requires an unsaved buffer to
@@ -425,6 +432,20 @@ proc paintEditPane*(g: var StyledGrid; area: CellArea; model: EditPaneModel;
       if caretCell >= 0 and (caretCell < codeW or not view.overflows):
         result.caretRow = row
         result.caretCol = min(area.col + gw + caretCell, limit - 1)
+    if codeW > 0:
+      # PLAT-70 Part C: the selection, then the find highlights over it —
+      # after the caret row's tint, which they sit on.
+      let codeCol = area.col + gw
+      for sel in model.selected:
+        if sel.line == line:
+          paintCellBand(g, row, codeCol, codeW, left, sel.fromColumn,
+                        sel.toColumn, srSurfaceSelection)
+      for m in model.findMarks:
+        if m.line == line:
+          paintCellBand(g, row, codeCol, codeW, left, m.fromColumn,
+                        m.toColumn,
+                        (if m.current: srSurfaceFindMatchCurrent
+                         else: srSurfaceFindMatch))
   if bar.shown:
     # §4.7: the last row, one cell high, over the code columns; the gutter's
     # cells of the row are left to the editor's ground.

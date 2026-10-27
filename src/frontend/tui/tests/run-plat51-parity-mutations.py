@@ -115,7 +115,9 @@ TEVENT = "src/frontend/tui/app/views/event_log.nim"
 TCALL = "src/frontend/tui/app/views/call_trace.nim"
 TTRACK = "src/frontend/tui/app/views/scrubber_track.nim"
 TTREE = "src/frontend/tui/app/views/tree_node.nim"
-TGLYPH = "src/frontend/tui/app/views/glyph_table.nim"
+TGUTTER = "src/frontend/tui/app/views/gutter.nim"
+TBORDERS = "src/frontend/tui/app/views/borders.nim"
+TGLYPHS = "src/frontend/tui/app/views/glyph_table.nim"
 TTOPBAR = "src/frontend/tui/app/views/top_bar.nim"
 TCTX = "src/frontend/tui/app/views/context_menu.nim"
 TFRAME = "src/frontend/tui/app/views/frame_viewer.nim"
@@ -137,6 +139,7 @@ TBINDING = "src/frontend/tui/app/layout/binding.nim"
 TSHELL = "src/frontend/tui/app/views/shell.nim"
 TROLES = "src/frontend/tui/app/theme/roles.nim"
 TPALETTE = "src/frontend/tui/app/theme/palette.nim"
+TCAPS = "src/frontend/tui/app/theme/capabilities.nim"
 TPROBE = "src/frontend/tui/host/terminal_probe.nim"
 TOUTPANE = "src/frontend/tui/app/views/terminal_output_pane.nim"
 TMAIN = "src/frontend/tui/main.nim"
@@ -170,6 +173,7 @@ GLHIT = "src/frontend/viewmodel/tests/unit/test_golden_layout_hit.nim"
 DROPREF = "src/frontend/tui/tests/test_plat51_dropzones_reference.nim"
 PARITYB = "src/frontend/tui/tests/test_plat51b_parity.nim"
 TOUT = "src/frontend/tui/tests/test_plat52_terminal_output.nim"
+CAPRES = "src/frontend/tui/app/tests/test_capability_resolution.nim"
 PTYB = "src/frontend/tui/tests/real_terminal/test_plat51b_pty.nim"
 TOUTPTY = "src/frontend/tui/tests/real_terminal/test_plat52_terminal_output_pty.nim"
 GPLANB = "src/frontend/gpui/tests/test_plat51b_gpui_plan.nim"
@@ -183,15 +187,15 @@ DE_SAVED = CAPTURE + "#Timeline.tab.is.dropped.on.load"
 DE_CHANGED = CAPTURE + "#carries..value-changed.in.the.accent"
 
 SUBJECTS = [LAYOUT, PMENU, SCRUB, VCH, NAVIGATION, RUNTIME, TSESSION, TEVENT,
-            TCALL, TTRACK, TTREE, TGLYPH, TTOPBAR, TCTX, TFRAME,
+            TCALL, TTRACK, TTREE, TGLYPHS, TTOPBAR, TCTX, TFRAME,
             TDRIVER,
             READER, GMAIN, GLEAVES, GLIST, DEVLOG, DCONFIG, DSTATE, ENGINE,
-            GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TPROBE,
+            GLHITS, LINTER, TBINDING, TSHELL, TROLES, TPALETTE, TCAPS, TPROBE,
             TOUTPANE, TMAIN, LSETTINGS, WELCOMEVM, GCHROME, LPREFS, TMOUSE,
             TVARS, TFILES, TVCS, TVCSSRC]
 SUITES = [LAYU, MODELU, SCRUBT, PARITY, PRODUCERS, FRAMEV, PTY, GPLAN,
           DE_EVENTLOG, DE_SAVED, DE_CHANGED,
-          GLHIT, DROPREF, PARITYB, TOUT, PTYB, TOUTPTY, GPLANB,
+          GLHIT, DROPREF, PARITYB, TOUT, CAPRES, PTYB, TOUTPTY, GPLANB,
           GPLANM71]
 
 
@@ -223,6 +227,7 @@ SUITE_KIND = {
     DROPREF: ("c", "tui"),
     PARITYB: ("c", "tui"),
     TOUT: ("c", "tui"),
+    CAPRES: ("c", "tui"),
     PTYB: ("c", "tui-real-terminal"),
     TOUTPTY: ("c", "tui-real-terminal"),
     GPLANB: ("c", "gpui-shell"),
@@ -294,6 +299,7 @@ B_PIXEL = "SGR-pixel (1016) is decided at its pixel; a cell report at the cell's
 B_ANSWERS = "the terminal's answers: DECRQM 1016 and the cell size, and what they mean"
 B_WELCOME = "the + opens it: the six options in the desktop's order, the recent panels"
 B_FUTURE = "the pane paints each run in its attributes; the future is muted"
+B_PROBE = "PLAT-46: a positive 24-bit answer beats a conservative TERM"
 Z_FOCUS = "one strip on the focus colour, moving with Tab; :set off is remembered; the flag"
 Z_EDGES = ("the focused pane's edges: its ground stops at its own cells; the "
            "lines are the dividers'")
@@ -347,7 +353,7 @@ CASE_SUITE = {
     B_STRIP: PARITYB, B_TOKEN: PARITYB, B_FLAGS: PARITYB, B_PREF: PARITYB,
     B_LIVE: PARITYB, B_LIFT: PARITYB, B_PIXEL: PARITYB, B_ANSWERS: PARITYB,
     B_WELCOME: PARITYB,
-    B_FUTURE: TOUT,
+    B_FUTURE: TOUT, B_PROBE: CAPRES,
     Z_FOCUS: PTYB, Z_EDGES: PTYB, Z_LIVE: PTYB, Z_PIXEL: PTYB, Z_RECORD: PTYB,
     Z_COMPOSITE: TOUTPTY,
     W_FOCUS: GPLANB, W_LIVE: GPLANB, W_DROP: GPLANB, W_WELCOME: GPLANB,
@@ -481,15 +487,15 @@ ARMS = [
         "  OmnibarGround* = srSurfaceEditor\n",
         "  OmnibarGround* = srSurfaceField\n",
         P_OMNIBOX, "the omnibox field is on the input surface"),
-    # T12 / T13 RE-AIMED 2026-10-27: the pointer mark is the glyph table's
-    # `grExecPointer` row (the gutter and the ASCII map read it from there).
-    Arm("T12", TGLYPH,
-        "    grExecPointer:         [\"▸\",      \"►\",    \">\",   \"▸\"],\n",
-        "    grExecPointer:         [\"▶\",      \"►\",    \">\",   \"▸\"],\n",
+    # T12 and T13 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) draws the mark,
+    # and its ASCII stand-in, from one glyph table by role and tier.
+    Arm("T12", TGLYPHS,
+        '    grExecPointer:         ["▸",',
+        '    grExecPointer:         ["▶",',
         P_POINTER, "the current-line mark is the emoji-prone ▶"),
-    Arm("T13", TGLYPH,
-        "    grExecPointer:         [\"▸\",      \"►\",    \">\",   \"▸\"],\n",
-        "    grExecPointer:         [\"▸\",      \"►\",    \"-\",   \"▸\"],\n",
+    Arm("T13", TGLYPHS,
+        '    grExecPointer:         ["▸",      "►",    ">",',
+        '    grExecPointer:         ["▸",      "►",    "-",',
         Y_ASCII, "the ASCII tier does not draw the mark as >"),
     Arm("P1", RUNTIME,
         "    of paneEventLog:\n      let before = rt.app.eventLog.fetchCount\n",
@@ -514,9 +520,11 @@ ARMS = [
     # G1 RE-AIMED 2026-10-21 (PLAT-70 Part B): the table panes' own gestures
     # (a `…`, a column separator) sit between the bars and the call row now;
     # the defect is unchanged — the call row answers before the scrubber.
+    # RE-AIMED AGAIN 2026-10-27: `e2bc8336c` put the table panes' sideways
+    # bar between the editor's two bars; the needle stops before it.
     Arm("G1", GMAIN,
-        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # PLAT-70 Part I: a table pane's sideways bar, before the row under it.\n    if pressTableHBar(r, x, y):\n      return\n",
-        "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n    # PLAT-70 Part I: a table pane's sideways bar, before the row under it.\n    if pressTableHBar(r, x, y):\n      return\n",
+        "    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n",
+        "    if clickCalltrace(r, x, y):\n      return\n    if pressListScrubber(r, x, y):\n      return\n    # PLAT-70: the editor's horizontal bar, before the row under it.\n    if pressEditorBar(r, x, y):\n      return\n",
         G_CALLS, "a press on GPUI's call-trace track jumps to the call row under it"),
     Arm("G2", GLIST,
         "               fraction: trackFractionAt(local, track.h))\n",
@@ -661,13 +669,15 @@ ARMS += [
         "      let output = nativeStateRoot() / \"recordings\" /\n",
         "      let output = getTempDir() / \"recordings\" /\n",
         Z_RECORD, "a welcome tab records outside the product's state root"),
-    # B13 RE-AIMED 2026-10-27: the round always runs now (Terminal-Adaptation
-    # §4.2); what is left of the rule is that the pointer's questions are
-    # skipped under `--no-mouse` and asked otherwise.
-    Arm("B13", TPROBE,
-        "  if not flags.noMouse:\n    result.add PixelMouseQuery & CellSizeQuery\n",
-        "  if flags.noMouse:\n    result.add PixelMouseQuery & CellSizeQuery\n",
-        B_ANSWERS, "the pointer's questions are asked only under --no-mouse"),
+    # B13 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`, Terminal-Adaptation
+    # §4.2) asks the round on every start unless the user turned it off, so
+    # the defect is the round skipped because colour flags decide the depth
+    # and the mode.
+    Arm("B13", TCAPS,
+        "  not (choice.found and not choice.value)\n",
+        "  not (choice.found and not choice.value) and\n"
+        "    not (flags.forceTrueColor and flags.themePinned)\n",
+        B_PROBE, "colour flags that decide everything skip the start-up round"),
     Arm("B14", TSHELL,
         "              focusedStrip = highlight and region.pane == model.focused,\n",
         "              focusedStrip = false,\n",
@@ -713,9 +723,11 @@ ARMS += [
     # --- M71 (codetracer#838): State, Files and VCS keep an ordinary scrollbar
     # (Scrollbar-Scrubbers.md §2-§4) and the wheel scrolls them unfocused
     # (CodeTracer-TUI.md §4.4). The terminal first, then GPUI.
+    # M1 RE-AIMED 2026-10-27: PLAT-70 Part I (`44f8cfba8`) repeats the line in
+    # `variablesGeometry`; the needle takes the painter's next line too.
     Arm("M1", TVARS,
-        "  # history overflow. Rows that fit keep the whole width.\n  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells\n",
-        "  # history overflow. Rows that fit keep the whole width.\n  let overflow = rows.len >= bodyHeight and area.width > ScrubberTrackCells\n",
+        "  let overflow = rows.len > bodyHeight and area.width > ScrubberTrackCells\n  let width = if overflow:",
+        "  let overflow = rows.len >= bodyHeight and area.width > ScrubberTrackCells\n  let width = if overflow:",
         N_STATE, "a State pane exactly full of rows still draws a scrollbar"),
     Arm("M2", TFILES,
         "  let overflow = bodyRows > 0 and model.rowCount > bodyRows and\n",

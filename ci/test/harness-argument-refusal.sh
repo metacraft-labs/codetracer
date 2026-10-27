@@ -47,7 +47,7 @@ python3 ci/lib/harness_guard.py || {
 	exit 1
 }
 
-# THE DISCOVERY IS GENERAL AND THE EXEMPTIONS ARE NAMED, COUNTED AND FROZEN.
+# THE DISCOVERY IS GENERAL, AND ANY EXEMPTION IS NAMED, COUNTED AND FROZEN.
 #
 # It was `run-plat*mutations*.py` alone, which was a statement about the only
 # naming scheme that existed when it was written. The first harness named after
@@ -61,42 +61,60 @@ python3 ci/lib/harness_guard.py || {
 # now covered on the day it lands, whatever it is called, which is the property
 # the narrow glob could not have.
 #
-# **The exemptions are real defects in those harnesses, not in this rule.**
-# Widening the discovery brings in harnesses that do not satisfy this probe:
-# they exit 1 rather than 2, or they invoke the compiler BEFORE parsing their
-# command line, which is the very ordering this script exists to check. Those
-# are theirs to fix — but a discovery rule that turns red for somebody else's
-# defect gets reverted rather than fixed, so each one is listed here, with its
-# issue, and the list's SIZE is asserted against a written constant.
+# **An exemption is a real defect in that harness, not in this rule.**
+# Widening the discovery brought in harnesses that did not satisfy this probe:
+# they exited 1 rather than 2, or they invoked the compiler BEFORE parsing
+# their command line, which is the very ordering this script exists to check.
+# Those are theirs to fix — but a discovery rule that turns red for somebody
+# else's defect gets reverted rather than fixed, so each one is listed here,
+# with its issue, and the list's SIZE is asserted against a written constant.
 #
 # That constant is what makes this different from the glob it replaces: the
 # list cannot grow silently. A newly landed harness that fails this probe makes
 # the count assertion fail, and the only ways forward are to fix the harness or
 # to add it here deliberately and say why.
-# Filed as
-# `codetracer-specs/issues/2026-10-27-five-mutation-harnesses-run-a-full-grading-run-instead-of-refusing-an-unknown-argument.md`.
-# Four of the five are the SECOND class and the dangerous one: they drop the
-# unrecognised argument and perform a full, mutating grading run. Measured
-# 2026-10-27 in the repo dev shell, `run-run-control-refusal-mutations.py`
-# answered `--no-such-harness-flag` with exit 0 after 43 s, printed
-# `RESULT: 5/5 arms killed their own assertion`, and changed the working tree
-# while doing it. Fixing one is deleting its line here and decrementing the
-# constant.
-EXEMPT_EXPECTED=5
-declare -a EXEMPT_HARNESSES=(
-	'src/frontend/viewmodel/tests/unit/run-edit-mode-toolbar-mutations.py'
-	'src/frontend/viewmodel/tests/unit/run-noir-edit-persistence-mutations.py'
-	'src/frontend/viewmodel/tests/unit/run-run-control-refusal-mutations.py'
-	'src/frontend/viewmodel/tests/unit/run-vnm5-mutations.py'
-	'src/frontend/viewmodel/tests/unit/run-vnm5-render-mutations.py'
-)
+#
+# **THE LIST IS EMPTY, AND THAT IS WHY IT IS STILL HERE.** It held five
+# harnesses — `run-edit-mode-toolbar-mutations.py`,
+# `run-noir-edit-persistence-mutations.py`,
+# `run-run-control-refusal-mutations.py`, `run-vnm5-mutations.py` and
+# `run-vnm5-render-mutations.py`, all under
+# `src/frontend/viewmodel/tests/unit/` — and all five now apply
+# `ci/lib/harness_guard.py`'s rule before they compile, mutate or spawn
+# anything, so every discovered harness is probed. The mechanism stays because
+# the next harness that fails this probe has to be listed DELIBERATELY, with
+# the constant moved by hand, rather than discovered to be exempt.
+#
+# Four of those five were the SECOND class and the dangerous one: they dropped
+# the unrecognised argument and performed a full, mutating grading run.
+# Measured 2026-10-27 in the repo dev shell at `5ab3ed923`,
+# `run-run-control-refusal-mutations.py` answered `--no-such-harness-flag`
+# with exit 0 after 51 s, printed `RESULT: 5/5 arms killed their own
+# assertion`, and changed the working tree while doing it; the other three
+# were killed by this probe's 60 s timeout mid-grade and each LEFT A REAL
+# MUTATION behind — `run-vnm5-mutations.py` in
+# `viewmodels/verification_payload.nim`, `run-vnm5-render-mutations.py` in
+# `viewmodels/counterexample_session_vm.nim`, and
+# `run-noir-edit-persistence-mutations.py` in `ui/web_project_store.nim`.
+# Each harness is named with its own file rather than left to a
+# "respectively", because the three files are each reachable from exactly one
+# of the three harnesses and an ordering slip here would misattribute all
+# three. That is the cost this script exists to refuse.
+EXEMPT_EXPECTED=0
+# `=()` and not a bare `declare -a`: under `set -u` an array declared without
+# an initialiser is UNBOUND, so even `${#EXEMPT_HARNESSES[@]}` aborts.
+declare -a EXEMPT_HARNESSES=()
 
 mapfile -t discovered < <(find src ci scripts -name 'run-*mutations*.py' -type f | sort)
 harnesses=()
 exempted=0
 for h in "${discovered[@]}"; do
 	skip=0
-	for e in "${EXEMPT_HARNESSES[@]}"; do
+	# `${arr[@]+"${arr[@]}"}`: expanding an EMPTY array as `"${arr[@]}"` is an
+	# unbound-variable error under `set -u` before bash 4.4, and the list being
+	# empty is the normal state now. The guarded form expands to nothing and the
+	# loop body simply does not run.
+	for e in ${EXEMPT_HARNESSES[@]+"${EXEMPT_HARNESSES[@]}"}; do
 		[ "${h}" = "${e}" ] && skip=1 && break
 	done
 	if [ "${skip}" -eq 1 ]; then
@@ -115,6 +133,19 @@ if [ "${#EXEMPT_HARNESSES[@]}" -ne "${EXEMPT_EXPECTED}" ]; then
 	echo "FAIL: the exemption list holds ${#EXEMPT_HARNESSES[@]} entries but" \
 		"EXEMPT_EXPECTED says ${EXEMPT_EXPECTED} — the list grew without the" \
 		"constant being moved deliberately" >&2
+	exit 1
+fi
+# AT ZERO EXEMPTIONS THE TWO ASSERTIONS ABOVE BOTH COMPARE 0 WITH 0, which is
+# true however broken the subtraction above is — an accounting check that
+# cannot fail is the shape this whole script exists to refuse. The property
+# with content at ANY list size, zero included, is that every discovered
+# harness is accounted for exactly once: probed or exempted, never both and
+# never neither.
+if [ $((${#harnesses[@]} + exempted)) -ne "${#discovered[@]}" ]; then
+	echo "FAIL: ${#discovered[@]} harness(es) discovered, but ${#harnesses[@]} probed" \
+		"+ ${exempted} exempted = $((${#harnesses[@]} + exempted)) — the subtraction" \
+		"lost or duplicated a harness, so this probe's coverage is not what it" \
+		"prints" >&2
 	exit 1
 fi
 echo "discovered ${#discovered[@]} mutation harness(es); ${exempted} exempted by name," \

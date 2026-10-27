@@ -144,3 +144,11 @@ proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
     showCaret = true)
   if arm.status.len > 0 and result.notice.len == 0:
     result.notice = arm.status
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §4.3): after Vim's `*` /
+  # `#` (macro rows of this document's own keymap) or CUA's `Ctrl+F3`, the
+  # matches stay highlighted while the caret is on one — the closed
+  # session's highlights, from the shared session.
+  result.selection = arm.doc.selectionCells
+  var closed: FindVM
+  for m in closed.marksInWindow(arm.doc, arm.viewportTop, viewportHeight):
+    result.findMarks.add (m.line, m.fromColumn, m.toColumn, m.current)

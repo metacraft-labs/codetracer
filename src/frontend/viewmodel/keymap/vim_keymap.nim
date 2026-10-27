@@ -100,6 +100,43 @@ const
     ## before any case asserted it, which is the campaign's own signature defect
     ## in a doc comment: a sentence about a check is not a check.
 
+const
+  VimStarMacro* = "base:vim-star"
+  VimHashMacro* = "base:vim-hash"
+  VimGStarMacro* = "base:vim-g-star"
+  VimGHashMacro* = "base:vim-g-hash"
+  VimVisualStarMacro* = "base:vim-visual-star"
+
+  VimMacros*: seq[BaseMacro] = @[
+    ## Find-And-Incremental-Search.md §4.3, row for row. `select-inner-word`
+    ## takes the word at the caret (the text object), `search-selection-whole-
+    ## word` makes it the pattern with Vim's `\<…\>` (when it is a word),
+    ## `search-forward` / `search-backward` set the direction `n` continues
+    ## in, `flip-selections` + `simplify-selection` collapse to the word's
+    ## START (so the walk leaves the word itself behind in both directions),
+    ## and `move-search-next` lands on the start of the next occurrence in
+    ## that direction.
+    BaseMacro(id: VimStarMacro, steps: @["select-inner-word",
+      "search-selection-whole-word", "search-forward", "flip-selections",
+      "simplify-selection",
+      "move-search-next"]),
+    BaseMacro(id: VimHashMacro, steps: @["select-inner-word",
+      "search-selection-whole-word", "search-backward", "flip-selections",
+      "simplify-selection",
+      "move-search-next"]),
+    BaseMacro(id: VimGStarMacro, steps: @["select-inner-word",
+      "search-selection", "search-forward", "flip-selections",
+      "simplify-selection",
+      "move-search-next"]),
+    BaseMacro(id: VimGHashMacro, steps: @["select-inner-word",
+      "search-selection", "search-backward", "flip-selections",
+      "simplify-selection",
+      "move-search-next"]),
+    BaseMacro(id: VimVisualStarMacro, steps: @["search-selection",
+      "search-forward", "simplify-selection", "enter-normal",
+      "move-search-next"]),
+  ]
+
 proc eb(chords: seq[string]; op: string; modes: set[EditingMode];
         args = OpArgs()): EditingBinding =
   EditingBinding(model: bkVim,
@@ -281,9 +318,24 @@ proc buildVimKeymap(): EditingKeymap =
   r.add eb(@["u"], "undo", {emNormal})
   r.add eb(@["Ctrl+r"], "redo", {emNormal})
   r.add eb(@["."], "repeat-last-change", {emNormal})
-  r.add eb(@["/"], "search-forward", {emNormal})
-  r.add eb(@["?"], "search-backward", {emNormal})
-  r.add eb(@["*"], "search-selection", {emNormal} + VisualModes)
+  # PLAT-70 Part C (Find-And-Incremental-Search.md §3, §4.3). `/` and `?`
+  # open the find session — the global rows of §4.2 (`navigation_keymap`),
+  # which this table no longer shadows with the bare direction setters; the
+  # session sets the direction (`search-forward` / `search-backward` are
+  # steps of the macros below). `*`, `#`, `g*`, `g#` are MACRO ROWS
+  # (`VimMacros`): Vim's `:help star`, composed of the vocabulary's own
+  # primitives. In visual mode `*` searches the selection literally (Neovim
+  # 0.10's visual `*`).
+  # Bound HERE too (not only in §4.2's navigation rows), so a `.vimrc`'s
+  # `map <space> /` translates against this table (PLAT-36's importer
+  # resolves right-hand sides through the editor's keymap).
+  r.add eb(@["/"], "find.open", {emNormal})
+  r.add eb(@["?"], "find.open-backward", {emNormal})
+  r.add eb(@["*"], "replay-macro", {emNormal}, OpArgs(id: VimStarMacro))
+  r.add eb(@["#"], "replay-macro", {emNormal}, OpArgs(id: VimHashMacro))
+  r.add eb(@["g", "*"], "replay-macro", {emNormal}, OpArgs(id: VimGStarMacro))
+  r.add eb(@["g", "#"], "replay-macro", {emNormal}, OpArgs(id: VimGHashMacro))
+  r.add eb(@["*"], "replay-macro", VisualModes, OpArgs(id: VimVisualStarMacro))
   r.add eb(@["Ctrl+l"], "search-clear", {emNormal})
   r.add eb(@["Ctrl+s"], "save", {emNormal} + {emInsert})
   r.add eb(@["z", "c"], "fold", {emNormal})
@@ -400,7 +452,19 @@ const
       "needs a parse (§5.1)"),
     FiledDeclaration(decl: "simplify-selection", forms: {}, reason:
       "Kakoune's multi-selection vocabulary; Vim has ONE selection, so there " &
-      "is nothing to simplify"),
+      "is nothing to simplify (a STEP of the `*` / `#` macro rows, " &
+      "`VimMacros`, which no key reaches alone)"),
+    FiledDeclaration(decl: "search-forward", forms: {}, reason:
+      "PLAT-70 Part C: `/` opens the find session, which sets the direction " &
+      "(Find-And-Incremental-Search.md §3.2); the bare setter is a step of " &
+      "the `*` / `g*` macro rows (`VimMacros`), not a key of its own"),
+    FiledDeclaration(decl: "search-backward", forms: {}, reason:
+      "as `search-forward`: `?` and the `#` / `g#` macro rows"),
+    FiledDeclaration(decl: "search-selection", forms: {}, reason:
+      "a step of the `g*` / `g#` and visual `*` macro rows (`VimMacros`, " &
+      "§4.3), which is how Vim reaches it"),
+    FiledDeclaration(decl: "search-selection-whole-word", forms: {}, reason:
+      "a step of the `*` / `#` macro rows (`VimMacros`, §4.3)"),
     FiledDeclaration(decl: "collapse-to-cursors", forms: {}, reason: "as `simplify-selection`"),
     FiledDeclaration(decl: "flip-selections", forms: {}, reason: "as `simplify-selection`"),
     FiledDeclaration(decl: "keep-primary-selection", forms: {}, reason: "as `simplify-selection`"),
@@ -467,4 +531,5 @@ proc vimKeymap*(): KeymapDefinition =
   ## **THE VIM MODEL.** Called by name, so a `DIFF-4` arm that made one side
   ## call the other is visible in the source as well as in the answer
   ## (Verification-Harness-Traps §30a).
-  KeymapDefinition(model: bkVim, keymap: VimKeymapTable, filed: VimFiled)
+  KeymapDefinition(model: bkVim, keymap: VimKeymapTable, filed: VimFiled,
+                   macros: VimMacros)

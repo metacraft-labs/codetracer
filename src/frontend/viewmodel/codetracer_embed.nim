@@ -289,6 +289,13 @@ export table_fit
 from viewmodels/errors_vm import problemsFit, ProblemColumnNames
 export problemsFit, ProblemColumnNames
 
+# PLAT-70 Part C: the editor's find session — highlight as you type, the
+# walk, accept and cancel, the seeds and the word-under-the-caret launchers
+# (Find-And-Incremental-Search.md §3, §4). Imports only `editing_core` (here
+# already) and `std/*`.
+import viewmodels/find_vm
+export find_vm
+
 # ---------------------------------------------------------------------------
 # Visual replay (PLAT-15)
 #

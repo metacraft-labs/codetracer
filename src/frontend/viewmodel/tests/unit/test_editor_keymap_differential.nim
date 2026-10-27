@@ -64,7 +64,8 @@ import ../../keymap/kakoune_keymap
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a static assertion count when a suite dies before printing.
-const ExpectedAssertions = 16077
+const ExpectedAssertions = 16078
+  ## +1 on 2026-10-24 (PLAT-70 Part C): one more vocabulary operation.
 
 var countedAssertions = 0
 

@@ -16,7 +16,7 @@ use crate::ctfs_trace_reader::ctfs_container::CtfsReader;
 use crate::ctfs_trace_reader::span_stream::{SpanRecord, SpanStreamReader};
 use crate::dap::{self, DapClient, DapMessage};
 use crate::db::{Db, DbCall, MaterializedReplaySession, program_event_of_record};
-use crate::event_db::{EventDb, SingleTableId};
+use crate::event_db::EventDb;
 use crate::expr_loader::ExprLoader;
 use crate::flow_preloader::FlowPreloader;
 use crate::in_memory_trace_reader::InMemoryTraceReader;
@@ -1246,6 +1246,24 @@ impl Handler {
         Ok(())
     }
 
+    /// `restart` and `ct/run-to-entry`: go back to the entry and answer.
+    ///
+    /// [`Handler::run_to_entry`] itself does not answer, because the launch
+    /// paths position a session with it too and they have no request of
+    /// their own to answer. A request does: the DAP answers every request,
+    /// and for `restart` it defines the answer, a `RestartResponse` with no
+    /// body (<https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Restart>).
+    /// The answer follows the move's `stopped` / `ct/complete-move`, as the
+    /// other moves' answers do.
+    pub fn run_to_entry_request(
+        &mut self,
+        req: dap::Request,
+        sender: Sender<DapMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.run_to_entry(req.clone(), None, sender.clone())?;
+        self.respond_dap(req, serde_json::json!({}), sender)
+    }
+
     /// Position a freshly launched session: where a launch opens.
     ///
     /// * A launch carrying a `restoreLocation` (a subsystem restart) goes back
@@ -1409,47 +1427,75 @@ impl Handler {
     //     Ok(())
     // }
 
+    /// The call key a `ct/collapse-calls` / `ct/expand-calls` request names,
+    /// checked against the call trace before anything changes.
+    ///
+    /// The key is the client's and every expansion indexes by it, so a key
+    /// that is not an integer, or that no call has, is refused by name
+    /// (`command` prefixes the message) rather than logged or indexed with.
+    fn expansion_call_key(&self, command: &str, args: &CollapseCallsArgs) -> Result<CallKey, Box<dyn Error>> {
+        let num_key = args
+            .call_key
+            .parse::<i64>()
+            .map_err(|_| format!("{command}: call key {:?} is not an integer", args.call_key))?;
+        if !self.calltrace.has_call(CallKey(num_key)) {
+            return Err(format!("{command}: no call has key {num_key}").into());
+        }
+        Ok(CallKey(num_key))
+    }
+
+    /// `ct/collapse-calls`: hide the children of a call.
+    ///
+    /// Answered with an empty body once the state has changed: the request
+    /// carries no data back (the caller reads the changed tree through its
+    /// next `ct/load-calltrace-section`), but the DAP answers every request
+    /// (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>).
+    /// A refused key is answered `success: false` by the caller's error path.
     pub fn collapse_calls(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         // Shape the tree for this stop BEFORE applying the collapse, so the
         // read that follows it does not re-shape and drop it
         // (`Calltrace::reshape_if_stop_changed`).
         self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
-        if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
-            self.calltrace.change_expand_state(CallKey(num_key), false);
-        } else {
-            error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
-        }
-
-        // self.return_task((task, VOID_RESULT.to_string()))?;
-        Ok(())
+        let call_key = self.expansion_call_key("ct/collapse-calls", &collapse_calls_args)?;
+        self.calltrace.change_expand_state(call_key, false);
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
+    /// `ct/expand-calls`: show a call's children, or unfold a collapsed
+    /// stretch of the call stack, as `non_expanded_kind` says. Answered as
+    /// `collapse_calls` is; a kind that names no expansion (`Siblings`,
+    /// `Calls`, `CallstackInternalChild`) is refused by name.
     pub fn expand_calls(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         collapse_calls_args: CollapseCallsArgs,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         // As in `collapse_calls`: shape for this stop first, then expand.
         self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
-        let kind = collapse_calls_args.non_expanded_kind;
-        if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
-            if kind == CalltraceNonExpandedKind::CallstackInternal {
-                self.calltrace
-                    .expand_callstack_internal(CallKey(num_key), collapse_calls_args.count)
-            } else if kind == CalltraceNonExpandedKind::Callstack {
-                self.calltrace.expand_callstack(CallKey(num_key));
-            } else if kind == CalltraceNonExpandedKind::Children {
-                self.calltrace.change_expand_state(CallKey(num_key), true);
+        let call_key = self.expansion_call_key("ct/expand-calls", &collapse_calls_args)?;
+        match collapse_calls_args.non_expanded_kind {
+            CalltraceNonExpandedKind::CallstackInternal => self
+                .calltrace
+                .expand_callstack_internal(call_key, collapse_calls_args.count),
+            CalltraceNonExpandedKind::Callstack => self.calltrace.expand_callstack(call_key),
+            CalltraceNonExpandedKind::Children => self.calltrace.change_expand_state(call_key, true),
+            // These kinds name no expansion this command makes. Answering
+            // them `success: true` would tell the client something changed
+            // when nothing did, so they are refused by name, before (and
+            // instead of) any change.
+            other @ (CalltraceNonExpandedKind::Siblings
+            | CalltraceNonExpandedKind::Calls
+            | CalltraceNonExpandedKind::CallstackInternalChild) => {
+                return Err(format!("ct/expand-calls: nonExpandedKind {other:?} names no expansion to make").into());
             }
-        } else {
-            error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
         }
-        // self.return_task((task, VOID_RESULT.to_string()))?;
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     fn load_local_calltrace(&mut self, args: CalltraceLoadArgs) -> Result<Vec<CallLine>, Box<dyn Error>> {
@@ -3680,17 +3726,21 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/history-jump`: move to a recorded location. Answered with an empty
+    /// body after the move's `stopped` / `ct/complete-move` (the DAP answers
+    /// every request); a location the replay cannot reach is refused by the
+    /// caller's error path before anything moves.
     pub fn history_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         loc: Location,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         info!("history_jump: doing location jump to {loc:?}");
         self.replay.location_jump(&loc)?;
         self.step_id = self.replay.current_step_id();
-        self.complete_move(false, sender)?;
-        Ok(())
+        self.complete_move(false, sender.clone())?;
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     // -----------------------------------------------------------------
@@ -4975,12 +5025,11 @@ impl Handler {
                 // historical `Err`, because for it a miss really does mean the
                 // location is unknown.
                 //
-                // Returning `Err` here would be the worse of two bugs, not the
-                // safer one: `dap_server.rs`'s dispatcher does not respond on
-                // the error path, so the request never settles and a strict
-                // DAP client waits forever. That is the same failure the
-                // `respond_dap` above exists to prevent, and the failure
-                // `local_step_jump` still has.
+                // So it is answered as a success, with a warning saying why
+                // nothing moved. Returning `Err` would answer the request
+                // `success: false` (`dap_server.rs`'s task thread answers
+                // every handler error that way), reporting an ordinary
+                // outcome as a failed request.
                 let direction = if behaviour == JumpBehaviour::Forward {
                     "forward"
                 } else {
@@ -5000,24 +5049,24 @@ impl Handler {
             //   just discard it? or jump back to original start?
             //   for now if we can't go there, we run to entry(maybe TODO notification)
 
-            //  if this fails, we stop and don't do the run to entry(the error returns because of `?`):
-            //    i think it can't really return an error in our current impl though
-            self.replay.disable_breakpoints()?;
-            let b = self.replay.add_breakpoint(
+            // A failed move is reported below rather than returned, so the
+            // bracket's `moves` hand it back as a value; only opening or
+            // closing the bracket fails the request, and the bracket is
+            // closed again on every one of those paths.
+            let moves = self.with_run_to_line_bracket(
                 &source_location.path,
                 source_location.line as i64,
                 source_location.column,
                 source_location.condition.clone(),
+                |handler| Ok(handler.source_line_jump_moves_for_rr(&source_location)),
             )?;
 
             let mut move_error = false;
-            if let Err(e) = self.source_line_jump_moves_for_rr(&source_location) {
+            if let Err(e) = moves {
                 warn!("  error in source line jump moves: {e:?}");
                 warn!("  will try to run to entry");
                 move_error = true;
             }
-            self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
-            self.replay.enable_breakpoints()?;
 
             let location = self.replay.load_location(&mut self.expr_loader)?;
             if move_error || location.path != source_location.path || location.line != source_location.line as i64 {
@@ -6021,6 +6070,11 @@ impl Handler {
         }
     }
 
+    /// `ct/run-tracepoints`: sweep the recording for the session's tracepoints.
+    ///
+    /// The results travel as events (`ct/updated-trace` per tracepoint, then
+    /// `ct/tracepoint-results`), and the request is answered with an empty
+    /// body after the last of them.
     pub fn run_tracepoints(
         &mut self,
         req: dap::Request,
@@ -6035,8 +6089,9 @@ impl Handler {
         };
         info!("run_tracepoints trace_kind {:?}", self.trace_kind);
 
-        // Sort steps in StepId Ord
-        self.setup_trace_session(req, args.clone(), sender.clone())?;
+        // The tables only: `setup_trace_session` would answer the request,
+        // and this one is answered once the sweep is over (below).
+        self.prepare_trace_tables(&args);
 
         let tracepoints = &args.session.tracepoints;
         let is_empty = false; // TODO: check if there is at least one enabled non-empty log?
@@ -6084,7 +6139,12 @@ impl Handler {
         let results_event = self.dap_client.tracepoint_results_event(aggregate)?;
         sender.send(results_event)?;
 
-        Ok(())
+        // The answer comes last, once every event of the sweep is out: a
+        // client that reads the results event and then its response (or
+        // only the response) never sees one without the other. The DAP
+        // answers every request; the results travel in the events, so the
+        // body is empty.
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn trace_jump(
@@ -6112,28 +6172,43 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/tracepoint-delete`: drop a tracepoint's results.
+    ///
+    /// Only a tracepoint that has been run has a table to clear, so an id
+    /// with none is refused by name before anything changes (it used to
+    /// index past the tables and panic). Answered with an empty body after
+    /// the `ct/updated-trace` event.
     pub fn tracepoint_delete(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         tracepoint_id: TracepointId,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        self.event_db.clear_single_table(SingleTableId(tracepoint_id.id + 1));
+        let Some(table_id) = self.event_db.tracepoint_table(tracepoint_id.id) else {
+            return Err(format!("ct/tracepoint-delete: no tracepoint has id {}", tracepoint_id.id).into());
+        };
+        self.event_db.clear_single_table(table_id);
         self.event_db.refresh_global();
         let mut t_update = TraceUpdate::new(0, false, tracepoint_id.id, self.event_db.tracepoint_errors.clone());
         t_update.refresh_event_log = true;
         let raw_event = self.dap_client.updated_trace_event(t_update)?;
         sender.send(raw_event)?;
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
+    /// `ct/tracepoint-toggle`: enable or disable a tracepoint's results.
+    ///
+    /// The disabled state is kept by table id whether or not the tracepoint
+    /// has been run yet, so a tracepoint switched off before its first run
+    /// gets its (empty) table here, and stays off when it is run. Answered
+    /// with an empty body after the `ct/updated-trace` event.
     pub fn tracepoint_toggle(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         tracepoint_id: TracepointId,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        let table_id = self.event_db.make_single_table_id(tracepoint_id.id);
+        let table_id = self.event_db.ensure_tracepoint_table(tracepoint_id.id);
         if self.event_db.disabled_tables.contains(&table_id) {
             self.event_db.enable_table(table_id);
         } else {
@@ -6144,7 +6219,7 @@ impl Handler {
         t_update.refresh_event_log = true;
         let raw_event = self.dap_client.updated_trace_event(t_update)?;
         sender.send(raw_event)?;
-        Ok(())
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn search_program(&mut self, query: String, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -6225,9 +6300,11 @@ impl Handler {
         Ok(())
     }
 
+    /// `ct/local-step-jump`: move to another iteration of a loop. Answered
+    /// with an empty body after the move's `stopped` / `ct/complete-move`.
     pub fn local_step_jump(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         arg: LocalStepJump,
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
@@ -6235,43 +6312,102 @@ impl Handler {
             self.replay.jump_to(StepId(arg.rr_ticks))?;
             self.step_id = self.replay.current_step_id();
 
-            self.complete_move(false, sender)?;
+            self.complete_move(false, sender.clone())?;
         } else {
-            self.replay.disable_breakpoints()?;
-            let bp = self
-                .replay
-                .add_breakpoint(&arg.path, arg.first_loop_line + 1, None, None)?;
-            let location = self.replay.load_location(&mut self.expr_loader)?;
-            if location.line < arg.first_loop_line {
-                self.replay.step(Action::Continue, true)?;
-            } else if location.line > arg.first_loop_line {
-                self.replay.step(Action::Continue, false)?;
-            }
-
-            if arg.active_iteration < arg.target_iteration {
-                for _ in arg.active_iteration..arg.target_iteration {
-                    self.replay.step(Action::Continue, true)?;
-                }
-            } else {
-                for _ in arg.target_iteration..arg.active_iteration {
-                    self.replay.step(Action::Continue, false)?;
-                }
-            }
-
-            if location.line < arg.first_loop_line + 1 {
-                self.replay.step(Action::Continue, true)?;
-            } else if location.line > arg.first_loop_line + 1 {
-                self.replay.step(Action::Continue, false)?;
-            }
-            self.replay.delete_breakpoint(&bp)?;
-            self.replay.enable_breakpoints()?;
+            // The moves run inside a run-to-line bracket, which is closed
+            // again however they end: a `Continue` that fails part-way must
+            // not leave the user's breakpoints disabled.
+            self.with_run_to_line_bracket(&arg.path, arg.first_loop_line + 1, None, None, |handler| {
+                handler.local_step_jump_moves_for_rr(&arg)
+            })?;
 
             self.step_id = self.replay.current_step_id();
 
-            self.complete_move(false, sender)?;
+            self.complete_move(false, sender.clone())?;
             // warn!("local_step_jump not implemented for RR traces");
         }
+        self.respond_dap(req, serde_json::json!({}), sender)
+    }
+
+    /// The `Continue`s of `ct/local-step-jump` on a replay that is not
+    /// materialized: onto the loop's first line, across the iterations
+    /// between the active and the target one, then onto the line after.
+    /// Runs inside [`Self::with_run_to_line_bracket`], whose temporary
+    /// breakpoint on `first_loop_line + 1` is where every `Continue` stops.
+    fn local_step_jump_moves_for_rr(&mut self, arg: &LocalStepJump) -> Result<(), Box<dyn Error>> {
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        if location.line < arg.first_loop_line {
+            self.replay.step(Action::Continue, true)?;
+        } else if location.line > arg.first_loop_line {
+            self.replay.step(Action::Continue, false)?;
+        }
+
+        if arg.active_iteration < arg.target_iteration {
+            for _ in arg.active_iteration..arg.target_iteration {
+                self.replay.step(Action::Continue, true)?;
+            }
+        } else {
+            for _ in arg.target_iteration..arg.active_iteration {
+                self.replay.step(Action::Continue, false)?;
+            }
+        }
+
+        if location.line < arg.first_loop_line + 1 {
+            self.replay.step(Action::Continue, true)?;
+        } else if location.line > arg.first_loop_line + 1 {
+            self.replay.step(Action::Continue, false)?;
+        }
         Ok(())
+    }
+
+    /// Run `moves` inside a *run-to-line bracket*: the user's breakpoints
+    /// suppressed (`disable_breakpoints`) and one temporary breakpoint set at
+    /// `path:line` (with `column` and `condition`), so that a `Continue`
+    /// stops at that line and nowhere else.
+    ///
+    /// The bracket is closed on every way out — the temporary breakpoint
+    /// deleted and the suppression lifted — whether opening it, or `moves`,
+    /// failed part-way or not. A request that fails must leave its session
+    /// consistent (DAP-extensions spec, "Every request is answered"), and a
+    /// session left with its breakpoints suppressed goes on serving while
+    /// never stopping at them again, with nothing saying so.
+    ///
+    /// The first error wins. When closing the bracket fails as well, that
+    /// failure is appended to the first error's message rather than lost.
+    fn with_run_to_line_bracket<T>(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        condition: Option<String>,
+        moves: impl FnOnce(&mut Self) -> Result<T, Box<dyn Error>>,
+    ) -> Result<T, Box<dyn Error>> {
+        // A `disable_breakpoints` that fails may have suppressed some
+        // breakpoints already; lifting the suppression is harmless when it
+        // did not, so it is lifted either way.
+        if let Err(e) = self.replay.disable_breakpoints() {
+            let restored = self.replay.enable_breakpoints();
+            return Err(error_with_cleanup_failures(e, [restored.err()]));
+        }
+        let temporary = match self.replay.add_breakpoint(path, line, column, condition) {
+            Ok(breakpoint) => breakpoint,
+            Err(e) => {
+                let restored = self.replay.enable_breakpoints();
+                return Err(error_with_cleanup_failures(e, [restored.err()]));
+            }
+        };
+        let outcome = moves(self);
+        // Both closing steps run even when the first fails: a temporary
+        // breakpoint that cannot be deleted is no reason to keep the user's
+        // breakpoints suppressed as well.
+        let deleted = self.replay.delete_breakpoint(&temporary).err();
+        let restored = self.replay.enable_breakpoints().err();
+        match (outcome, deleted, restored) {
+            (Ok(value), None, None) => Ok(value),
+            (Ok(_), Some(first), later) => Err(error_with_cleanup_failures(first, [later])),
+            (Ok(_), None, Some(first)) => Err(first),
+            (Err(e), deleted, restored) => Err(error_with_cleanup_failures(e, [deleted, restored])),
+        }
     }
 
     pub fn register_events(&mut self, arg: RegisterEventsArg, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -6281,19 +6417,31 @@ impl Handler {
         Ok(())
     }
 
+    /// Make sure every tracepoint of the session has its event table.
+    ///
+    /// The shared half of `ct/setup-trace-session` and `ct/run-tracepoints`,
+    /// kept apart from both so that each answers its own request once.
+    ///
+    /// One table per tracepoint id the request names, and none for any id it
+    /// does not: an id is a label the client chose, so its size says nothing
+    /// about how many tracepoints there are (see
+    /// `EventDb::ensure_tracepoint_table`).
+    fn prepare_trace_tables(&mut self, arg: &RunTracepointsArg) {
+        for trace in &arg.session.tracepoints {
+            self.event_db.ensure_tracepoint_table(trace.tracepoint_id);
+        }
+    }
+
+    /// `ct/setup-trace-session`: make the session's tracepoint tables.
+    /// Answered with an empty body (the DAP answers every request).
     pub fn setup_trace_session(
         &mut self,
-        _req: dap::Request,
+        req: dap::Request,
         arg: RunTracepointsArg,
-        _sender: Sender<DapMessage>,
+        sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
-        for trace in arg.session.tracepoints {
-            while trace.tracepoint_id + 1 >= self.event_db.single_tables.len() {
-                self.event_db.add_new_table(DbEventKind::Trace, &[]);
-            }
-            assert!(self.event_db.single_tables.len() > trace.tracepoint_id + 1);
-        }
-        Ok(())
+        self.prepare_trace_tables(&arg);
+        self.respond_dap(req, serde_json::json!({}), sender)
     }
 
     pub fn register_tracepoint_logs(&mut self, arg: TracepointResults, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -6358,31 +6506,42 @@ impl Handler {
         Ok(())
     }
 
-    fn load_steps_for_call(&mut self, call_key: CallKey) -> IndexMap<i64, StepId> {
+    /// The step each line of `call_key`'s function was (or will next be)
+    /// reached at in that call. `call_key` comes from the client (the `key`
+    /// of `ct/load-asm-function`), so a key no call has, or a call the trace
+    /// records incompletely, is a named `Err` rather than a panic.
+    fn load_steps_for_call(&mut self, call_key: CallKey) -> Result<IndexMap<i64, StepId>, Box<dyn Error>> {
         let mut list: IndexMap<i64, StepId> = IndexMap::default();
-        let db_call = self
-            .reader
-            .call(call_key)
-            .expect("load_steps_for_call: invalid call_key")
-            .clone();
-        let function_step = *self
-            .reader
-            .step(db_call.step_id)
-            .expect("load_steps_for_call: invalid step_id");
+        let Some(db_call) = self.reader.call(call_key).cloned() else {
+            return Err(format!("no call has key {}", call_key.0).into());
+        };
+        let Some(function_step) = self.reader.step(db_call.step_id).copied() else {
+            return Err(format!(
+                "call {} starts at step {}, which the trace does not record",
+                call_key.0, db_call.step_id.0
+            )
+            .into());
+        };
+        let Some(function_path_id) = self.reader.function(db_call.function_id).map(|f| f.path_id) else {
+            return Err(format!(
+                "call {} names function {}, which the trace does not record",
+                call_key.0, db_call.function_id.0
+            )
+            .into());
+        };
         let location = self.load_location(db_call.step_id);
         let function_location = self
             .flow_preloader
             .expr_loader
             .find_function_location(&location, &function_step.line);
         for line in function_location.function_first..function_location.function_last {
-            let function_id = self
-                .reader
-                .function(db_call.function_id)
-                .expect("load_steps_for_call: invalid function_id");
-            let step_map = self
-                .reader
-                .step_map_for_path(function_id.path_id)
-                .expect("load_steps_for_call: missing step_map");
+            let Some(step_map) = self.reader.step_map_for_path(function_path_id) else {
+                return Err(format!(
+                    "call {}'s function is in path {}, for which the trace has no step map",
+                    call_key.0, function_path_id.0
+                )
+                .into());
+            };
             if let Some(steps) = step_map.get(&(line as usize)) {
                 for step in steps {
                     if step.call_key == call_key {
@@ -6401,7 +6560,7 @@ impl Handler {
                 list.insert(line, StepId(-1));
             }
         }
-        list
+        Ok(list)
     }
 
     pub fn load_asm_function(
@@ -6414,7 +6573,9 @@ impl Handler {
         match args.key.parse::<i64>() {
             Ok(number) => {
                 let call_key = CallKey(number);
-                let interesting_steps = self.load_steps_for_call(call_key);
+                let interesting_steps = self
+                    .load_steps_for_call(call_key)
+                    .map_err(|e| format!("ct/load-asm-function: {e}"))?;
                 for (line, step_id) in interesting_steps.iter() {
                     if step_id.0 != NO_STEP_ID {
                         let Some(current_step) = self.reader.step(*step_id).copied() else {
@@ -6440,16 +6601,16 @@ impl Handler {
                             }
                         }
                     } else {
-                        let fn_id = self
-                            .reader
-                            .call(call_key)
-                            .expect("load_asm_function: invalid call_key")
-                            .function_id;
+                        // `load_steps_for_call` has already refused a key
+                        // with no call or no function, so this `Err` is
+                        // unreachable today; it is one so that it stays an
+                        // answer if that ever changes.
                         let fn_path_id = self
                             .reader
-                            .function(fn_id)
-                            .expect("load_asm_function: invalid function_id")
-                            .path_id;
+                            .call(call_key)
+                            .and_then(|call| self.reader.function(call.function_id))
+                            .map(|function| function.path_id)
+                            .ok_or_else(|| format!("ct/load-asm-function: no function for call {}", call_key.0))?;
                         instructions.push(Instruction::empty(
                             *line,
                             self.reader.path(fn_path_id).unwrap_or(""),
@@ -7095,7 +7256,10 @@ impl Handler {
         Ok(res)
     }
 
-    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> dap_types::StackFrame {
+    /// The DAP frame for `call_record`. `Err` when the replay's current step
+    /// is not one the trace records, which `stackTrace` answers as a named
+    /// failure rather than a panic.
+    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> Result<dap_types::StackFrame, Box<dyn Error>> {
         // for this simplified scenario:
         // step 1: call 1
         // step 2: call 1
@@ -7111,10 +7275,13 @@ impl Handler {
         //   how to do it efficiently is a non-trivial question: maybe by iterating through previous steps,
         //   or a new kind of index?
         let call = self.reader.to_call(call_record, &mut self.expr_loader);
-        let current_step = self
-            .reader
-            .step(self.step_id)
-            .expect("produce_stack_frame: invalid step_id");
+        let Some(current_step) = self.reader.step(self.step_id).copied() else {
+            return Err(format!(
+                "stackTrace: the current step {} is not one the trace records",
+                self.step_id.0
+            )
+            .into());
+        };
         let current_call_key = current_step.call_key;
         // P6.3 — pull the column from the DbStep so the source-map
         // translation can use it.  Falls back to column=1 when the
@@ -7136,7 +7303,7 @@ impl Handler {
         // segment is sparse.
         let (frame_path, frame_line, frame_column) =
             self.apply_sourcemap_translation(&location.path, location.line, recorded_column);
-        dap_types::StackFrame {
+        Ok(dap_types::StackFrame {
             id: call_record.key.0,
             name: location.function_name,
             source: Some(dap_types::Source {
@@ -7157,7 +7324,7 @@ impl Handler {
             module_id: None,
             presentation_hint: None,
             can_restart: None,
-        }
+        })
     }
 
     /// Apply Source Map V3 translation to a recorded `(path, line, column)`.
@@ -7349,7 +7516,7 @@ impl Handler {
                         // expanded children count not relevant in raw callstack
                         self.produce_stack_frame(call_record)
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>, _>>()?
             }
         } else {
             vec![]
@@ -7409,14 +7576,19 @@ impl Handler {
             self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![scope] }, sender)?;
             return Ok(());
         }
-        let call = self
-            .reader
-            .call(CallKey(arg.frame_id))
-            .expect("load_dap_scopes: invalid call_key");
-        let function = self
-            .reader
-            .function(call.function_id)
-            .expect("load_dap_scopes: invalid function_id");
+        // `frameId` is the client's: one no frame has is refused by name, as
+        // DAP answers any request it cannot carry out
+        // (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>).
+        let Some(call) = self.reader.call(CallKey(arg.frame_id)) else {
+            return Err(format!("scopes: no frame has frameId {}", arg.frame_id).into());
+        };
+        let Some(function) = self.reader.function(call.function_id) else {
+            return Err(format!(
+                "scopes: frame {} names function {}, which the trace does not record",
+                arg.frame_id, call.function_id.0
+            )
+            .into());
+        };
         let scope = dap_types::Scope {
             name: function.name.clone(),
             presentation_hint: Some("locals".to_string()),
@@ -7649,6 +7821,26 @@ impl Handler {
         self.respond_dap(request, dap::DisconnectResponseBody {}, sender)?;
 
         Ok(())
+    }
+}
+
+/// `primary`, with the message of each cleanup step that failed after it
+/// appended, so that a failure while restoring the session is reported
+/// alongside the failure that made the restore necessary instead of hiding
+/// it (or being hidden by it).
+fn error_with_cleanup_failures<const N: usize>(
+    primary: Box<dyn Error>,
+    cleanup: [Option<Box<dyn Error>>; N],
+) -> Box<dyn Error> {
+    let failures: Vec<String> = cleanup.into_iter().flatten().map(|e| e.to_string()).collect();
+    if failures.is_empty() {
+        primary
+    } else {
+        format!(
+            "{primary}; restoring the breakpoints afterwards also failed: {}",
+            failures.join("; ")
+        )
+        .into()
     }
 }
 
@@ -9014,6 +9206,116 @@ mod tests {
         Ok(())
     }
 
+    /// A tracepoint id is a label its client chose (each client counts its
+    /// ids up and never reuses one), not a position: `ct/setup-trace-session`
+    /// makes a table for each id it names and for nothing else, however
+    /// large the id. It used to make one for every id up to the one named,
+    /// so one request naming a large id allocated a table per smaller id.
+    #[test]
+    fn setup_trace_session_makes_a_table_only_for_the_ids_it_names() -> Result<(), Box<dyn Error>> {
+        const LARGE_ID: usize = 1_000_000;
+        let db = setup_db();
+        let (sender, _r) = mpsc::channel();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        let before = handler.event_db.single_tables.len();
+
+        handler.setup_trace_session(
+            dap::Request::default(),
+            make_tracepoints_args(1, LARGE_ID),
+            sender.clone(),
+        )?;
+        assert_eq!(
+            handler.event_db.single_tables.len(),
+            before + 1,
+            "one tracepoint named, so one table made"
+        );
+
+        // Naming it again makes nothing more.
+        handler.setup_trace_session(dap::Request::default(), make_tracepoints_args(1, LARGE_ID), sender)?;
+        assert_eq!(handler.event_db.single_tables.len(), before + 1);
+        Ok(())
+    }
+
+    /// Each tracepoint's results land in its own table, and are read back by
+    /// its id (`ct/update-table`'s `eventSlot`), whatever the ids and in
+    /// whatever order they are first named. The control for the test
+    /// above: making fewer tables must not mix up whose results are whose.
+    #[test]
+    fn sparse_tracepoint_ids_keep_their_own_results() -> Result<(), Box<dyn Error>> {
+        let db = setup_db_loop(3);
+        let (sender, _r) = mpsc::channel();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.event_load(dap::Request::default(), sender.clone())?;
+
+        // The Python bridge's first id is 1; a later one is far above it.
+        const LATER_ID: usize = 40_000_000;
+        let mut args = make_tracepoints_args(2, LATER_ID);
+        let mut first = make_tracepoints_args(1, 1).session.tracepoints;
+        args.session.tracepoints.append(&mut first);
+        handler.run_tracepoints(dap::Request::default(), args, sender)?;
+
+        let later = handler
+            .event_db
+            .tracepoint_table(LATER_ID)
+            .expect("a table for the later id");
+        let early = handler.event_db.tracepoint_table(1).expect("a table for id 1");
+        assert_ne!(later, early);
+        assert!(handler.event_db.tracepoint_table(0).is_none(), "id 0 was never named");
+        assert!(handler.event_db.single_tables.len() <= 3);
+
+        let rows = |handler: &mut Handler, id: usize| -> Result<Vec<i64>, Box<dyn Error>> {
+            let (update, _) = handler.event_db.update_table(crate::task::UpdateTableArgs {
+                table_args: crate::task::TableArgs {
+                    length: 100,
+                    ..crate::task::TableArgs::default()
+                },
+                selected_kinds: [true; crate::task::EVENT_KINDS_COUNT],
+                is_trace: true,
+                event_slot: id,
+            })?;
+            Ok(update
+                .data
+                .data
+                .iter()
+                .map(|row| row.direct_location_rr_ticks)
+                .collect())
+        };
+        let later_rows = rows(&mut handler, LATER_ID)?;
+        assert_eq!(later_rows.len(), 3, "the loop line is hit once per iteration");
+        assert_eq!(handler.event_db.get_trace_length(LATER_ID), 3);
+        assert_eq!(rows(&mut handler, 1)?.len(), handler.event_db.get_trace_length(1));
+        assert!(rows(&mut handler, 7)?.is_empty(), "an id with no table has no rows");
+        Ok(())
+    }
+
+    /// `ct/tracepoint-delete` of an id no request named is refused by name
+    /// and makes no table; `ct/tracepoint-toggle` of one makes its table
+    /// (one), so that it stays off when it is first run.
+    #[test]
+    fn delete_refuses_an_unnamed_id_and_toggle_keeps_one_switched_off() -> Result<(), Box<dyn Error>> {
+        let db = setup_db();
+        let (sender, _r) = mpsc::channel();
+        let mut handler: Handler = Handler::new(TraceKind::Materialized, RecreatorArgs::default(), Box::new(db));
+        handler.event_load(dap::Request::default(), sender.clone())?;
+        let before = handler.event_db.single_tables.len();
+
+        let refused =
+            handler.tracepoint_delete(dap::Request::default(), TracepointId { id: usize::MAX }, sender.clone());
+        let message = refused.expect_err("an unnamed id is refused").to_string();
+        assert!(message.contains("no tracepoint has id"), "{message}");
+        assert_eq!(handler.event_db.single_tables.len(), before);
+
+        handler.tracepoint_toggle(dap::Request::default(), TracepointId { id: usize::MAX }, sender)?;
+        assert_eq!(handler.event_db.single_tables.len(), before + 1);
+        let table = handler
+            .event_db
+            .tracepoint_table(usize::MAX)
+            .expect("toggle made its table");
+        assert!(handler.event_db.disabled_tables.contains(&table));
+        Ok(())
+    }
+
     #[test]
     fn test_step_in() -> Result<(), Box<dyn Error>> {
         let db = setup_db();
@@ -9467,6 +9769,7 @@ mod tests {
 
         handler.step_id = StepId(handler.reader.step_count() as i64 + 10);
         collapse(&mut handler, CallKey(0))?;
+        let (sender, _receiver) = mpsc::channel();
         handler.expand_calls(
             dap::Request::default(),
             CollapseCallsArgs {
@@ -9474,6 +9777,7 @@ mod tests {
                 non_expanded_kind: CalltraceNonExpandedKind::Children,
                 count: 0,
             },
+            sender,
         )?;
         Ok(())
     }
@@ -9526,6 +9830,9 @@ mod tests {
 
     /// `ct/collapse-calls` for `key`, as the front ends send it.
     fn collapse(handler: &mut Handler, key: CallKey) -> Result<(), Box<dyn Error>> {
+        // The answer is not read here; the receiver is kept alive so the
+        // handler's `respond_dap` has somewhere to send it.
+        let (sender, _receiver) = mpsc::channel();
         handler.collapse_calls(
             dap::Request::default(),
             CollapseCallsArgs {
@@ -9533,6 +9840,7 @@ mod tests {
                 non_expanded_kind: CalltraceNonExpandedKind::Children,
                 count: 0,
             },
+            sender,
         )
     }
 

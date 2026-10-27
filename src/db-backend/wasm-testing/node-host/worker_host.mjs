@@ -81,7 +81,22 @@ globalThis.removeEventListener = (type, fn) => {
   if (i >= 0) listeners[type].splice(i, 1);
 };
 
+// --- optional deliberate panic (opt-in; off by default) --------------------
+//
+// `CT_ENGINE_TEST_PANIC_ON_COMMAND=<command>` arms the engine to panic on
+// purpose in that command's handler (`wasm_test_panic_on_command`), which is
+// how `probe_panic_is_answered.mjs` tests the browser panic net: no real
+// request is guaranteed to panic. It is armed when `start` arrives, the last
+// moment before the engine serves a request, by which time `worker.js` has
+// initialised the module. The module is imported here only to reach that
+// export: it is the same module instance `worker.js` imports.
+const testPanicCommand = process.env.CT_ENGINE_TEST_PANIC_ON_COMMAND || '';
+const enginePkg = testPanicCommand ? await import('../pkg/db_backend.js') : null;
+
 parentPort.on('message', (data) => {
+  if (enginePkg && data && data.type === 'start') {
+    enginePkg.wasm_test_panic_on_command(testPanicCommand);
+  }
   const event = { data };
   for (const fn of listeners.message) {
     try { fn(event); } catch (err) { reportError(err); }

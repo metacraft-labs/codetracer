@@ -356,6 +356,43 @@
   .return-text
     color: CALLTRACE_RETURN_COLOR
 
+  // A ROW THAT SHOWS A RETURN VALUE MUST NOT BE TALLER THAN ONE THAT DOESN'T.
+  //
+  // The row box is the toggle's `height: 1.5625em` (`.toggle-call` below);
+  // the text line inside it is `line-height: 1.55em` (`.calltrace-row`), a
+  // little shorter, so normally no text sets the row's height. `.return` was
+  // the exception. It is a flex item of `.call-child-box`, so it is a block
+  // with ONE line box, and that line holds boxes in two typefaces: its own
+  // strut in the panel's SpaceGrotesk, the arrow in SpaceGrotesk, and the
+  // value in SpaceMono (`code_font.styl`). Each box is `line-height` tall
+  // around ITS OWN font's ascent and descent, and baseline alignment
+  // (https://www.w3.org/TR/CSS2/visudet.html#line-height) sets the two faces'
+  // boxes at different offsets, so the line box they share was taller than
+  // either — 25.796875 px at a 16 px root, against the 25 px toggle. That
+  // grew every row with a return value by ~0.8 px, and only those rows,
+  // which is why the pane's mean row advance measured ~25.28 px against a
+  // 25 px box and moved with the data (codetracer-pm issue
+  // 2026-10-18-electron-calltrace-row-advance-exceeds-its-own-row-box.md).
+  //
+  // So the line is given ONE full-height face: `.return`'s strut is set in
+  // SpaceMono, the value's own face, and the arrow keeps SpaceGrotesk but
+  // with `line-height: 1`, a box well inside the strut's. The line box is
+  // then exactly the strut, `line-height` tall, and the toggle sets the row
+  // again: every row is 1.5625em at every zoom. And because nothing leaves
+  // the baseline, the arrow, the value and the call's name (`.call-text`, a
+  // SpaceMono block of the same `line-height`) all sit on one baseline.
+  // (`vertical-align: top` on the two spans also fixes the height, but sets
+  // the arrow ~1 px above the value it introduces.)
+  // `ci/test/calltrace-row-box-in-browser.sh` holds both the height and the
+  // shared baseline, with the real fonts loaded, and shows each declaration
+  // is needed.
+  .return
+    font-family: "SpaceMono"
+
+  .return-arrow
+    font-family: "SpaceGrotesk", sans-serif
+    line-height: 1
+
   .hidden-calls-button
     background-color: colors-ui-surface-input-default
     border-radius: 0.625em

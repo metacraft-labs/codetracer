@@ -79,7 +79,9 @@ const
     ## `when`, their tuples unchanged in number; +2 for §3.6's `Left` /
     ## `Right` on the output panes, `view.scroll-left` / `-right`, PLAT-70;
     ## +1 for §3.6's `Ctrl+K Ctrl+I`, `list.show-detail`, PLAT-70 Part B).
-  ExpectedEmacsTuples = 188
+  ExpectedEmacsTuples = 190
+    ## 188 until PLAT-70 Part C moved isearch's `Ctrl+W` (§3.9) and `Alt+S .`
+    ## (§3.6) into the oracle (`Ctrl+G` and `Enter` changed operation only).
     ## Emacs-Keymap.md §3.1 – §3.12's (+1: `` Alt+` ``, `tmm-menubar`; +1:
     ## §3.8's `Enter` in the read-only Debug editor, the tracepoint editor;
     ## +2: §3.6's `Alt+G N` / `Alt+G P`, `next-error` / `previous-error`;

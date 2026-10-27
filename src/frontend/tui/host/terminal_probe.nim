@@ -169,6 +169,11 @@ proc isCprToken*(token: string): bool =
 proc cprOpen*(probe: TerminalProbe): bool =
   ## §4.3's F3 rule: while the width probe has asked for N cursor reports and
   ## fewer have arrived, a `CSI r ; c R` is a REPLY; after that it is a key.
+  ## The window also closes with the round: the reports are asked before the
+  ## DA1 fence, so none is still coming once the fence has arrived, and none
+  ## is waited for once `ReplyWindowMs` has passed without it.
+  if probe.answered or probe.replyWindowClosed:
+    return false
   probe.cprAnswers.len < probe.cprExpected
 
 proc isReplyTokenFor*(probe: TerminalProbe; token: string): bool =
@@ -620,6 +625,7 @@ proc closeReplyWindow*(n: StartupNegotiation; d: TerminalDriver) =
   if n.isNil:
     return
   if not replyWindowOpen(n.probe, n.startedMs, monoMs()):
+    n.probe.replyWindowClosed = true
     d.expectReplies(false)
 
 proc switchTheme*(n: StartupNegotiation; d: TerminalDriver;

@@ -16,7 +16,7 @@ import ../host/terminal_probe
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 40
+const ExpectedAssertions = 48
 
 var countedAssertions = 0
 
@@ -77,6 +77,23 @@ suite "PLAT-71 Tier 1: the start-up round":
     # A key is never taken for an answer.
     ck not noteReply(p, "q")
     ck not noteReply(p, "\x1b[A")
+
+  test "§4.3's F3 rule: the window closes with the round, reports owed or not":
+    # A terminal that answers the fence but no cursor report: the reports
+    # are asked before the fence, so none is still coming after it.
+    var fenced = TerminalProbe(attempted: true, cprExpected: 6)
+    ck fenced.cprOpen
+    ck noteReply(fenced, "\x1b[?62;22c")
+    ck not fenced.cprOpen
+    ck not fenced.isReplyTokenFor("\x1b[1;5R")
+    # A terminal that answers nothing: once `ReplyWindowMs` has passed (the
+    # main loop's `closeReplyWindow`), Ctrl+F3 is a key again.
+    var silent = TerminalProbe(attempted: true, cprExpected: 6)
+    ck silent.isReplyTokenFor("\x1b[1;5R")
+    silent.replyWindowClosed = true
+    ck not silent.cprOpen
+    ck not noteReply(silent, "\x1b[1;5R")
+    ck silent.cprAnswers.len == 0
 
   test "assertion count":
     echo "CHECKS: " & $countedAssertions

@@ -72,7 +72,9 @@ import ../../editor/operations
 import ../generators/vocabulary_generator
 import ../../../test_support/spec_documents
 
-const ExpectedAssertions = 1046
+const ExpectedAssertions = 1052
+  ## +6 on 2026-10-24 (PLAT-70 Part C): `search-selection-whole-word`, one
+  ## more row of §2.2 compared both ways.
 
 var countedAssertions = 0
 
@@ -93,11 +95,13 @@ const
   SectionStart = "### 2.2 The four categories"
   SectionEnd = "### 2.3 "
 
-  ExpectedDeclarations = 161
-  ExpectedOperations = 245
+  ExpectedDeclarations = 162
+    ## 161 until PLAT-70 Part C added `search-selection-whole-word` to D's
+    ## Search row (and the census, both parsers, re-taken).
+  ExpectedOperations = 246
   ExpectedDisplayDependent = 24
-  ExpectedDisplayIndependent = 221
-  ExpectedPerCategory = [34, 16, 21, 90]      ## A, B, C, D
+  ExpectedDisplayIndependent = 222
+  ExpectedPerCategory = [34, 16, 21, 91]      ## A, B, C, D
   ExpectedDisplayColumnRows = 50              ## A's 34 and B's 16 carry one
 
   # The forms each category generates. §2.2 A and §2.2 B state them; this is

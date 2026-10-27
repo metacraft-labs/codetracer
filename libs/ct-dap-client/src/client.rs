@@ -555,19 +555,49 @@ impl DapStdioClient {
 
     /// Run tracepoints and collect results.
     ///
-    /// Sends `ct/run-tracepoints`, then waits for a `ct/tracepoint-results`
-    /// event carrying the aggregate results. Note: this request does not
-    /// produce a DAP response — only events (trace updates + results).
+    /// Sends `ct/run-tracepoints` and returns the aggregate results.
+    ///
+    /// The results arrive as events (`ct/updated-trace` per tracepoint, then
+    /// `ct/tracepoint-results`), and the request's own response follows the
+    /// last of them. Both are read here: the response must not be left for
+    /// the next [`Self::recv_response`], which takes the first response it
+    /// finds whatever its `request_seq`. A refused run answers
+    /// `success: false` with no results event, and is returned as that
+    /// refusal instead of waiting the timeout out.
     pub fn run_tracepoints(
         &mut self,
         args: RunTracepointsArg,
     ) -> Result<TracepointResultsAggregate, BoxError> {
-        self.send_request("ct/run-tracepoints", serde_json::to_value(&args)?)?;
+        let seq = self.send_request("ct/run-tracepoints", serde_json::to_value(&args)?)?;
 
-        // Wait for the aggregate results event (skips intermediate trace update events)
-        let event = self.recv_event("ct/tracepoint-results", scaled(Duration::from_secs(10)))?;
-        let results: TracepointResultsAggregate = serde_json::from_value(event.body)?;
-        Ok(results)
+        let deadline = std::time::Instant::now() + scaled(Duration::from_secs(10));
+        let mut results: Option<TracepointResultsAggregate> = None;
+        let mut answered = false;
+        while results.is_none() || !answered {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(format!(
+                    "Timeout waiting for ct/run-tracepoints (results event seen: {}, response seen: {answered})",
+                    results.is_some()
+                )
+                .into());
+            }
+            match self.recv_message(remaining)? {
+                DapMessage::Event(e) if e.event == "ct/tracepoint-results" => {
+                    results = Some(serde_json::from_value(e.body)?);
+                }
+                DapMessage::Response(r) if r.request_seq == seq => {
+                    if !r.success {
+                        return Err(
+                            format!("ct/run-tracepoints was refused: {:?}", r.message).into()
+                        );
+                    }
+                    answered = true;
+                }
+                other => info!("DAP <- {other:?} (while running tracepoints)"),
+            }
+        }
+        results.ok_or_else(|| "ct/run-tracepoints: no results event".into())
     }
 
     // === Terminal output ===

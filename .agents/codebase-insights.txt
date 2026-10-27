@@ -6700,11 +6700,11 @@ Two traps in the same area, both live:
   it is red; stage the gitlink at 3d0703d with `git update-index --cacheinfo`
   to grade, and restore it after.
 - PLAT-49 part B (2026-10-02) facts:
-  * The engine sends NO DAP response to `ct/expand-calls` / `ct/collapse-calls`
-    (the desktop fires them with `backend.send`). A blocking
-    `DapStdioBackend.sendDapRequest` for either never returns and wedges the
-    front-end's loop; use `sendDapRequestNoResponse`, then reload the section.
-    After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
+  * `ct/expand-calls` / `ct/collapse-calls` are answered (an empty body, or a
+    refusal naming the key) since the 2026-10-27 fix; until then the engine
+    sent nothing on success. The TUI still fires them with
+    `sendDapRequestNoResponse` and reloads the section, leaving the answer
+    unread (every later read matches by `request_seq`). After a collapse the section's `#N` indices RENUMBER (`callLineOf` numbers a
     row by its place in the section), on the desktop too.
   * Call rows: `ct/load-calltrace-section` carries every call's `args` (with
     `value`s) and `returnValue`; the response's top-level `args` /
@@ -7907,3 +7907,24 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
 - docs/book-isonim tests need a hand-written `nim.cfg` (paths to isonim-docs,
   codetracer-design-system/nim, isonim, vendor chronicles …; see its README);
   its nav test counts every content page (`entries.len`), so a new page bumps it.
+- PLAT-70 Part C (incremental search): the ONE matcher is
+  `viewmodel/editor/find_match.matchesOf` (literal, case + whole word; the
+  editor core may not import nim-regex). The pattern AND its options live in
+  `EditorState.search` (`options: MatchOptions`); `find_vm.FindVM` is the
+  session (origin, matches, current) and holds no pattern after close
+  (FS-2). The terminal's find field is the status-line prompt
+  (`pkSearchForward/Backward`); each prompt edit calls `findFieldEdited`.
+  GPUI's widget is drawn inside `drawEditorBody` (`data-ct-find-widget`).
+- Base macro rows: a base's `KeymapDefinition.macros` (`BaseMacro`) are
+  installed into `EditorState.macros` by `editing_core.installBaseDefaults`
+  (init + `switchModel`); a row binds `replay-macro(base:<id>)`. Vim's `*`
+  family is `vim_keymap.VimMacros`.
+- Vim/Kakoune `/` and `?` in the EDITOR now fall through to the navigation
+  table's `find.open` (the editor table no longer binds the bare
+  `search-forward` / `search-backward`, which are filed).
+- A committed search under a modal base is SEARCH browsing:
+  `runtime.navMode` maps `mmSearch`+`spBrowsing` to `nmSearch` (so `n` walks
+  until `Escape`); GPUI mirrors it with `gFindBrowsing`.
+- Letters typed into a find field resolve as characters even where the
+  global table binds them (`n`, `l`): the router gives the focused input's
+  text priority.

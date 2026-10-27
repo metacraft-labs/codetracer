@@ -4726,6 +4726,26 @@ test-state-values-in-browser *args:
   exec > >(tee test-logs/test-state-values-in-browser.log) 2>&1
   bash ci/test/state-values-in-browser.sh {{args}}
 
+# Every Call Trace row is exactly its row box, 1.5625em, at every zoom --
+# including the rows that show a return value.
+#
+# A row with a return value used to lay out ~0.8 px taller than the others
+# (two typefaces on one baseline-aligned line), so the pane's row advance was
+# not its row box and drifted with the data (codetracer-pm issue
+# 2026-10-18-electron-calltrace-row-advance-exceeds-its-own-row-box.md). This
+# mounts the real view under the real stylesheet and the real fonts, measures
+# every row at 16/20/13/12 px roots, and its mutation arms strip the fix to
+# show the assertion reddens for exactly those rows.
+#
+# Needs nim, Chromium and stylus from the dev shell; it EXITS 2 rather than
+# passing when any is absent. Pass a path to write a screenshot.
+test-calltrace-row-box-in-browser *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-calltrace-row-box-in-browser.log) 2>&1
+  bash ci/test/calltrace-row-box-in-browser.sh {{args}}
+
 test-noir-replay-in-browser:
   #!/usr/bin/env bash
   set -euo pipefail

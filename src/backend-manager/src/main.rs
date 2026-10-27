@@ -1620,6 +1620,19 @@ async fn run_mock_dap_backend(socket_path: &str) -> Result<(), Box<dyn Error>> {
                     write_half
                         .write_all(&DapParser::to_bytes(&results_event))
                         .await?;
+
+                    // Then the request's own answer, after the events, as
+                    // the real replay-server sends it.
+                    let response = json!({
+                        "type": "response",
+                        "command": "ct/run-tracepoints",
+                        "request_seq": seq,
+                        "success": true,
+                        "body": {}
+                    });
+                    write_half
+                        .write_all(&DapParser::to_bytes(&response))
+                        .await?;
                 }
                 // --- ct/load-flow: returns mock flow/omniscience data ---
                 //

@@ -1413,6 +1413,18 @@ impl BackendManager {
                     .position(|p| p.kind == PendingPyRequestKind::RunTracepoints)
             {
                 let pending = ds.py_bridge.pending_requests.remove(idx);
+                // The backend answers the request right after this event;
+                // consume that answer here rather than broadcast it.
+                ds.py_bridge.pending_requests.push(PendingPyRequest {
+                    kind: PendingPyRequestKind::Unobserved(
+                        python_bridge::UnobservedReason::RunTracepointsAnswer,
+                    ),
+                    client_id: 0,
+                    original_seq: 0,
+                    backend_seq: pending.backend_seq,
+                    response_command: String::new(),
+                    expression: String::new(),
+                });
                 let body = msg.get("body").unwrap_or(&Value::Null);
 
                 // Extract Stop objects from the results array and convert
@@ -1809,10 +1821,13 @@ impl BackendManager {
                         python_bridge::format_select_process_response(msg)
                     }
                     PendingPyRequestKind::RunTracepoints => {
-                        // RunTracepoints is resolved via event interception
-                        // (ct/tracepoint-results), not via a DAP response.
-                        // If we reach here, silently consume.
-                        return;
+                        // A sweep that succeeds is answered from its
+                        // ct/tracepoint-results event, which comes before
+                        // this answer and retires this entry. Reaching it
+                        // here means there was no event: a refusal (or a
+                        // success without results), which the Python client
+                        // must still be answered with, or it waits for ever.
+                        python_bridge::format_run_tracepoints_answer(msg)
                     }
                     PendingPyRequestKind::OriginChain => {
                         // Forward the OriginChain wire shape verbatim (spec §4.1).
@@ -4594,7 +4609,9 @@ impl BackendManager {
     /// Builds a `ct/run-tracepoints` DAP command from all stored tracepoints
     /// and sends it to the backend's tracepoint thread.  Registers a pending
     /// request that is resolved when the backend emits a
-    /// `ct/tracepoint-results` event.
+    /// `ct/tracepoint-results` event, or, when the backend refuses the sweep
+    /// (it then answers `success: false` and sends no event), by that
+    /// refusal, which the client gets as `success: false` with the reason.
     ///
     /// # Wire protocol
     ///
@@ -6534,15 +6551,27 @@ impl BackendManager {
             .or_else(|_| std::env::var("CODETRACER_DB_BACKEND_CMD"))
             .unwrap_or_else(|_| "replay-server".to_string());
 
-        // Build the arguments: the backend command + "dap-server" subcommand.
-        let backend_args_owned: Vec<String> =
-            if backend_cmd.contains("backend-manager") || backend_cmd.contains("session-manager") {
-                // For mock-dap-backend, the subcommand is `mock-dap-backend`.
-                vec!["mock-dap-backend".to_string()]
-            } else {
-                vec!["dap-server".to_string()]
-            };
-        let backend_args: Vec<&str> = backend_args_owned.iter().map(|s| s.as_str()).collect();
+        // The subcommand: `dap-server`, or the mock's when the explicit test
+        // flag asks for it.  Never inferred from `backend_cmd`: that path is
+        // wherever the user, the workspace or the CI runner put the build,
+        // so a word in it says nothing about which program it is.
+        let subcommand = match replay_backend_subcommand(
+            std::env::var_os(REPLAY_SERVER_MOCK_DAP_ENV).as_deref(),
+        ) {
+            Ok(subcommand) => subcommand,
+            Err(e) => {
+                let response = json!({
+                    "type": "response",
+                    "request_seq": seq,
+                    "success": false,
+                    "command": "ct/open-trace",
+                    "message": format!("cannot choose the replay backend: {e}")
+                });
+                self.send_response_for_seq(seq, response);
+                return Ok(());
+            }
+        };
+        let backend_args = [subcommand];
 
         // Spawn the backend process (raw, without installing channels).
         let (backend_id, sender, mut receiver) =
@@ -7152,6 +7181,71 @@ impl BackendManager {
     }
 }
 
+/// The test flag that makes `ct/open-trace` start its replay backend as
+/// `<CODETRACER_REPLAY_SERVER_CMD> mock-dap-backend <socket>` (the session
+/// manager's own DAP test double) instead of `<…> dap-server <socket>`.
+/// `1` turns it on; unset, empty or `0` leaves the real `dap-server`.
+pub const REPLAY_SERVER_MOCK_DAP_ENV: &str = "CODETRACER_REPLAY_SERVER_MOCK_DAP";
+
+/// The subcommand `ct/open-trace` starts the replay backend with, given the
+/// value of [`REPLAY_SERVER_MOCK_DAP_ENV`].
+///
+/// The mock is chosen only when that flag asks for it.  It used to be
+/// inferred from the backend command containing `backend-manager` or
+/// `session-manager`, so a real `replay-server` built under a directory
+/// with either word in its name was started as `replay-server
+/// mock-dap-backend`, which it does not have, and every trace open timed
+/// out.  A value other than `1`, `0` or empty is refused rather than read
+/// as either: a misspelt flag that quietly selected one backend would make
+/// a test pass or fail for the wrong reason.
+pub fn replay_backend_subcommand(
+    mock_dap: Option<&std::ffi::OsStr>,
+) -> Result<&'static str, String> {
+    match mock_dap {
+        None => Ok("dap-server"),
+        Some(value) => match value.to_str() {
+            Some("" | "0") => Ok("dap-server"),
+            Some("1") => Ok("mock-dap-backend"),
+            _ => Err(format!(
+                "{REPLAY_SERVER_MOCK_DAP_ENV}={} is neither 1 nor 0",
+                value.to_string_lossy()
+            )),
+        },
+    }
+}
+
+#[cfg(test)]
+mod replay_backend_subcommand_tests {
+    use super::replay_backend_subcommand;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn the_real_dap_server_unless_the_flag_asks_for_the_mock() {
+        assert_eq!(replay_backend_subcommand(None), Ok("dap-server"));
+        assert_eq!(
+            replay_backend_subcommand(Some(OsStr::new(""))),
+            Ok("dap-server")
+        );
+        assert_eq!(
+            replay_backend_subcommand(Some(OsStr::new("0"))),
+            Ok("dap-server")
+        );
+        assert_eq!(
+            replay_backend_subcommand(Some(OsStr::new("1"))),
+            Ok("mock-dap-backend")
+        );
+    }
+
+    #[test]
+    fn a_value_that_is_neither_1_nor_0_is_refused_by_name() {
+        let err = replay_backend_subcommand(Some(OsStr::new("yes"))).unwrap_err();
+        assert!(
+            err.contains("CODETRACER_REPLAY_SERVER_MOCK_DAP=yes"),
+            "{err}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod replay_id_tag_tests {
     use super::{REPLAY_ID_TAG, tag_with_replay_id};
@@ -7171,5 +7265,176 @@ mod replay_id_tag_tests {
     #[test]
     fn a_message_that_is_not_an_object_passes_through() {
         assert_eq!(tag_with_replay_id(json!("raw"), 1), json!("raw"));
+    }
+}
+
+/// `ct/py-run-tracepoints` is answered whichever way the backend's
+/// `ct/run-tracepoints` ends.
+///
+/// Spec: codetracer-specs `spec/Architecture/CodeTracer-DAP-Extensions.md`,
+/// "Every request is answered": a request the replay server cannot carry out
+/// gets `success: false` and a `message`, never only logged. The session
+/// manager's Python bridge is the client of that request, so the refusal has
+/// to reach the Python client it was made for; it used to be consumed here,
+/// and the client waited for ever.
+///
+/// These drive the daemon's real message router (`route_daemon_message`)
+/// with the messages a replay server sends. No backend process is started:
+/// what is under test is what the router does with each message, and the
+/// client is the receiving end of the channel the daemon writes to.
+#[cfg(test)]
+mod py_run_tracepoints_answer_tests {
+    use super::{BackendManager, ClientHandle, DaemonState};
+    use crate::config::DaemonConfig;
+    use crate::python_bridge::{PendingPyRequest, PendingPyRequestKind, PyBridgeState};
+    use crate::session::SessionManager;
+    use serde_json::{Value, json};
+    use std::collections::HashMap;
+    use std::time::Duration;
+    use tokio::sync::mpsc::{self, UnboundedReceiver};
+
+    const CLIENT: u64 = 7;
+    const CLIENT_SEQ: i64 = 3;
+    const BACKEND_SEQ: i64 = 1_000_005;
+
+    /// A daemon with one Python client and its `ct/py-run-tracepoints`
+    /// already forwarded to the backend as `ct/run-tracepoints`.
+    fn daemon_awaiting_a_sweep() -> (BackendManager, UnboundedReceiver<Value>) {
+        let (session_manager, _expiries) = SessionManager::new(Duration::from_secs(60), 4);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut py_bridge = PyBridgeState::new();
+        py_bridge.pending_requests.push(PendingPyRequest {
+            kind: PendingPyRequestKind::RunTracepoints,
+            client_id: CLIENT,
+            original_seq: CLIENT_SEQ,
+            backend_seq: BACKEND_SEQ,
+            response_command: "ct/py-run-tracepoints".to_string(),
+            expression: String::new(),
+        });
+        let manager = BackendManager {
+            children: vec![],
+            children_receivers: vec![],
+            parent_senders: vec![],
+            selected: 0,
+            manager_receiver: None,
+            manager_sender: None,
+            daemon_state: Some(DaemonState {
+                clients: HashMap::from([(CLIENT, ClientHandle { tx })]),
+                request_client_map: HashMap::new(),
+                shutdown_tx: None,
+                session_manager,
+                config: DaemonConfig::default(),
+                py_bridge,
+            }),
+        };
+        (manager, rx)
+    }
+
+    fn answer(success: bool, message: Option<&str>) -> Value {
+        let mut answer = json!({
+            "type": "response",
+            "request_seq": BACKEND_SEQ,
+            "success": success,
+            "command": "ct/run-tracepoints",
+            "body": {},
+        });
+        if let Some(message) = message {
+            answer["message"] = json!(message);
+        }
+        answer
+    }
+
+    fn sent(rx: &mut UnboundedReceiver<Value>) -> Vec<Value> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    fn nothing_pending(manager: &BackendManager) -> bool {
+        manager
+            .daemon_state
+            .as_ref()
+            .is_some_and(|ds| ds.py_bridge.pending_requests.is_empty())
+    }
+
+    #[test]
+    fn a_refused_sweep_is_answered_to_the_python_client_as_an_error() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        let refusal = "ct/run-tracepoints: the tracepoint thread has no trace loaded";
+        manager.route_daemon_message(Some(0), &answer(false, Some(refusal)));
+
+        let sent = sent(&mut rx);
+        assert_eq!(
+            sent.len(),
+            1,
+            "the refused sweep must be answered exactly once, got {sent:?}"
+        );
+        assert_eq!(sent[0]["type"], json!("response"));
+        assert_eq!(sent[0]["command"], json!("ct/py-run-tracepoints"));
+        assert_eq!(sent[0]["request_seq"], json!(CLIENT_SEQ));
+        assert_eq!(sent[0]["success"], json!(false));
+        let message = sent[0]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains(refusal),
+            "the answer must carry the backend's reason, got {message:?}"
+        );
+        assert!(
+            nothing_pending(&manager),
+            "the request must not stay pending"
+        );
+    }
+
+    #[test]
+    fn a_refusal_without_a_message_is_still_an_error_answer() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        manager.route_daemon_message(Some(0), &answer(false, None));
+
+        let sent = sent(&mut rx);
+        assert_eq!(sent.len(), 1, "got {sent:?}");
+        assert_eq!(sent[0]["success"], json!(false));
+        assert!(
+            sent[0]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("ct/run-tracepoints")),
+            "the answer must name what failed, got {:?}",
+            sent[0]
+        );
+    }
+
+    #[test]
+    fn a_success_without_its_results_event_is_not_left_unanswered() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        manager.route_daemon_message(Some(0), &answer(true, None));
+
+        let sent = sent(&mut rx);
+        assert_eq!(sent.len(), 1, "got {sent:?}");
+        assert_eq!(sent[0]["request_seq"], json!(CLIENT_SEQ));
+        assert_eq!(sent[0]["success"], json!(false));
+        assert!(
+            sent[0]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("ct/tracepoint-results")),
+            "the answer must say the results never came, got {:?}",
+            sent[0]
+        );
+    }
+
+    /// The order a sweep that succeeds keeps: its results event, then its
+    /// answer. The client gets the results once, and the answer after them
+    /// reaches no client.
+    #[test]
+    fn a_sweep_that_succeeds_is_answered_once_with_its_results() {
+        let (mut manager, mut rx) = daemon_awaiting_a_sweep();
+        let results = json!({
+            "type": "event",
+            "event": "ct/tracepoint-results",
+            "body": {"sessionId": 1, "results": [], "errors": {}},
+        });
+        manager.route_daemon_message(Some(0), &results);
+        manager.route_daemon_message(Some(0), &answer(true, None));
+
+        let sent = sent(&mut rx);
+        assert_eq!(sent.len(), 1, "got {sent:?}");
+        assert_eq!(sent[0]["success"], json!(true));
+        assert_eq!(sent[0]["body"]["results"], json!([]));
+        assert!(nothing_pending(&manager), "the answer must be consumed");
     }
 }
