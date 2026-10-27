@@ -5050,24 +5050,24 @@ impl Handler {
             //   just discard it? or jump back to original start?
             //   for now if we can't go there, we run to entry(maybe TODO notification)
 
-            //  if this fails, we stop and don't do the run to entry(the error returns because of `?`):
-            //    i think it can't really return an error in our current impl though
-            self.replay.disable_breakpoints()?;
-            let b = self.replay.add_breakpoint(
+            // A failed move is reported below rather than returned, so the
+            // bracket's `moves` hand it back as a value; only opening or
+            // closing the bracket fails the request, and the bracket is
+            // closed again on every one of those paths.
+            let moves = self.with_run_to_line_bracket(
                 &source_location.path,
                 source_location.line as i64,
                 source_location.column,
                 source_location.condition.clone(),
+                |handler| Ok(handler.source_line_jump_moves_for_rr(&source_location)),
             )?;
 
             let mut move_error = false;
-            if let Err(e) = self.source_line_jump_moves_for_rr(&source_location) {
+            if let Err(e) = moves {
                 warn!("  error in source line jump moves: {e:?}");
                 warn!("  will try to run to entry");
                 move_error = true;
             }
-            self.replay.delete_breakpoint(&b)?; // make sure we do it before potential `?` fail in next functions
-            self.replay.enable_breakpoints()?;
 
             let location = self.replay.load_location(&mut self.expr_loader)?;
             if move_error || location.path != source_location.path || location.line != source_location.line as i64 {
@@ -6326,34 +6326,12 @@ impl Handler {
 
             self.complete_move(false, sender.clone())?;
         } else {
-            self.replay.disable_breakpoints()?;
-            let bp = self
-                .replay
-                .add_breakpoint(&arg.path, arg.first_loop_line + 1, None, None)?;
-            let location = self.replay.load_location(&mut self.expr_loader)?;
-            if location.line < arg.first_loop_line {
-                self.replay.step(Action::Continue, true)?;
-            } else if location.line > arg.first_loop_line {
-                self.replay.step(Action::Continue, false)?;
-            }
-
-            if arg.active_iteration < arg.target_iteration {
-                for _ in arg.active_iteration..arg.target_iteration {
-                    self.replay.step(Action::Continue, true)?;
-                }
-            } else {
-                for _ in arg.target_iteration..arg.active_iteration {
-                    self.replay.step(Action::Continue, false)?;
-                }
-            }
-
-            if location.line < arg.first_loop_line + 1 {
-                self.replay.step(Action::Continue, true)?;
-            } else if location.line > arg.first_loop_line + 1 {
-                self.replay.step(Action::Continue, false)?;
-            }
-            self.replay.delete_breakpoint(&bp)?;
-            self.replay.enable_breakpoints()?;
+            // The moves run inside a run-to-line bracket, which is closed
+            // again however they end: a `Continue` that fails part-way must
+            // not leave the user's breakpoints disabled.
+            self.with_run_to_line_bracket(&arg.path, arg.first_loop_line + 1, None, None, |handler| {
+                handler.local_step_jump_moves_for_rr(&arg)
+            })?;
 
             self.step_id = self.replay.current_step_id();
 
@@ -6361,6 +6339,87 @@ impl Handler {
             // warn!("local_step_jump not implemented for RR traces");
         }
         self.respond_dap(req, serde_json::json!({}), sender)
+    }
+
+    /// The `Continue`s of `ct/local-step-jump` on a replay that is not
+    /// materialized: onto the loop's first line, across the iterations
+    /// between the active and the target one, then onto the line after.
+    /// Runs inside [`Self::with_run_to_line_bracket`], whose temporary
+    /// breakpoint on `first_loop_line + 1` is where every `Continue` stops.
+    fn local_step_jump_moves_for_rr(&mut self, arg: &LocalStepJump) -> Result<(), Box<dyn Error>> {
+        let location = self.replay.load_location(&mut self.expr_loader)?;
+        if location.line < arg.first_loop_line {
+            self.replay.step(Action::Continue, true)?;
+        } else if location.line > arg.first_loop_line {
+            self.replay.step(Action::Continue, false)?;
+        }
+
+        if arg.active_iteration < arg.target_iteration {
+            for _ in arg.active_iteration..arg.target_iteration {
+                self.replay.step(Action::Continue, true)?;
+            }
+        } else {
+            for _ in arg.target_iteration..arg.active_iteration {
+                self.replay.step(Action::Continue, false)?;
+            }
+        }
+
+        if location.line < arg.first_loop_line + 1 {
+            self.replay.step(Action::Continue, true)?;
+        } else if location.line > arg.first_loop_line + 1 {
+            self.replay.step(Action::Continue, false)?;
+        }
+        Ok(())
+    }
+
+    /// Run `moves` inside a *run-to-line bracket*: the user's breakpoints
+    /// suppressed (`disable_breakpoints`) and one temporary breakpoint set at
+    /// `path:line` (with `column` and `condition`), so that a `Continue`
+    /// stops at that line and nowhere else.
+    ///
+    /// The bracket is closed on every way out — the temporary breakpoint
+    /// deleted and the suppression lifted — whether opening it, or `moves`,
+    /// failed part-way or not. A request that fails must leave its session
+    /// consistent (DAP-extensions spec, "Every request is answered"), and a
+    /// session left with its breakpoints suppressed goes on serving while
+    /// never stopping at them again, with nothing saying so.
+    ///
+    /// The first error wins. When closing the bracket fails as well, that
+    /// failure is appended to the first error's message rather than lost.
+    fn with_run_to_line_bracket<T>(
+        &mut self,
+        path: &str,
+        line: i64,
+        column: Option<i64>,
+        condition: Option<String>,
+        moves: impl FnOnce(&mut Self) -> Result<T, Box<dyn Error>>,
+    ) -> Result<T, Box<dyn Error>> {
+        // A `disable_breakpoints` that fails may have suppressed some
+        // breakpoints already; lifting the suppression is harmless when it
+        // did not, so it is lifted either way.
+        if let Err(e) = self.replay.disable_breakpoints() {
+            let restored = self.replay.enable_breakpoints();
+            return Err(error_with_cleanup_failures(e, [restored.err()]));
+        }
+        let temporary = match self.replay.add_breakpoint(path, line, column, condition) {
+            Ok(breakpoint) => breakpoint,
+            Err(e) => {
+                let restored = self.replay.enable_breakpoints();
+                return Err(error_with_cleanup_failures(e, [restored.err()]));
+            }
+        };
+        let outcome = moves(self);
+        // Both closing steps run even when the first fails: a temporary
+        // breakpoint that cannot be deleted is no reason to keep the user's
+        // breakpoints suppressed as well.
+        let deleted = self.replay.delete_breakpoint(&temporary).err();
+        let restored = self.replay.enable_breakpoints().err();
+        match (outcome, deleted, restored) {
+            (Ok(value), None, None) => Ok(value),
+            (Ok(_), Some(first), later) => Err(error_with_cleanup_failures(first, [later])),
+            (Ok(_), None, Some(first)) => Err(first),
+            (Err(e), deleted, restored) => Err(error_with_cleanup_failures(e, [deleted, restored])),
+        }
     }
 
     pub fn register_events(&mut self, arg: RegisterEventsArg, _task: Task) -> Result<(), Box<dyn Error>> {
@@ -7772,6 +7831,26 @@ impl Handler {
         self.respond_dap(request, dap::DisconnectResponseBody {}, sender)?;
 
         Ok(())
+    }
+}
+
+/// `primary`, with the message of each cleanup step that failed after it
+/// appended, so that a failure while restoring the session is reported
+/// alongside the failure that made the restore necessary instead of hiding
+/// it (or being hidden by it).
+fn error_with_cleanup_failures<const N: usize>(
+    primary: Box<dyn Error>,
+    cleanup: [Option<Box<dyn Error>>; N],
+) -> Box<dyn Error> {
+    let failures: Vec<String> = cleanup.into_iter().flatten().map(|e| e.to_string()).collect();
+    if failures.is_empty() {
+        primary
+    } else {
+        format!(
+            "{primary}; restoring the breakpoints afterwards also failed: {}",
+            failures.join("; ")
+        )
+        .into()
     }
 }
 
