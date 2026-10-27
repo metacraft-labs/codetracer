@@ -1419,6 +1419,10 @@ impl Handler {
         // (`Calltrace::reshape_if_stop_changed`).
         self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
+            // The key is the client's; `change_expand_state` indexes by it.
+            if !self.calltrace.has_call(CallKey(num_key)) {
+                return Err(format!("ct/collapse-calls: no call has key {num_key}").into());
+            }
             self.calltrace.change_expand_state(CallKey(num_key), false);
         } else {
             error!("invalid i64 number for call key: {}", collapse_calls_args.call_key);
@@ -1437,6 +1441,10 @@ impl Handler {
         self.calltrace.reshape_if_stop_changed(self.step_id, &*self.reader);
         let kind = collapse_calls_args.non_expanded_kind;
         if let Ok(num_key) = collapse_calls_args.call_key.clone().parse::<i64>() {
+            // The key is the client's; every expansion below indexes by it.
+            if !self.calltrace.has_call(CallKey(num_key)) {
+                return Err(format!("ct/expand-calls: no call has key {num_key}").into());
+            }
             if kind == CalltraceNonExpandedKind::CallstackInternal {
                 self.calltrace
                     .expand_callstack_internal(CallKey(num_key), collapse_calls_args.count)
@@ -6358,31 +6366,42 @@ impl Handler {
         Ok(())
     }
 
-    fn load_steps_for_call(&mut self, call_key: CallKey) -> IndexMap<i64, StepId> {
+    /// The step each line of `call_key`'s function was (or will next be)
+    /// reached at in that call. `call_key` comes from the client (the `key`
+    /// of `ct/load-asm-function`), so a key no call has, or a call the trace
+    /// records incompletely, is a named `Err` rather than a panic.
+    fn load_steps_for_call(&mut self, call_key: CallKey) -> Result<IndexMap<i64, StepId>, Box<dyn Error>> {
         let mut list: IndexMap<i64, StepId> = IndexMap::default();
-        let db_call = self
-            .reader
-            .call(call_key)
-            .expect("load_steps_for_call: invalid call_key")
-            .clone();
-        let function_step = *self
-            .reader
-            .step(db_call.step_id)
-            .expect("load_steps_for_call: invalid step_id");
+        let Some(db_call) = self.reader.call(call_key).cloned() else {
+            return Err(format!("no call has key {}", call_key.0).into());
+        };
+        let Some(function_step) = self.reader.step(db_call.step_id).copied() else {
+            return Err(format!(
+                "call {} starts at step {}, which the trace does not record",
+                call_key.0, db_call.step_id.0
+            )
+            .into());
+        };
+        let Some(function_path_id) = self.reader.function(db_call.function_id).map(|f| f.path_id) else {
+            return Err(format!(
+                "call {} names function {}, which the trace does not record",
+                call_key.0, db_call.function_id.0
+            )
+            .into());
+        };
         let location = self.load_location(db_call.step_id);
         let function_location = self
             .flow_preloader
             .expr_loader
             .find_function_location(&location, &function_step.line);
         for line in function_location.function_first..function_location.function_last {
-            let function_id = self
-                .reader
-                .function(db_call.function_id)
-                .expect("load_steps_for_call: invalid function_id");
-            let step_map = self
-                .reader
-                .step_map_for_path(function_id.path_id)
-                .expect("load_steps_for_call: missing step_map");
+            let Some(step_map) = self.reader.step_map_for_path(function_path_id) else {
+                return Err(format!(
+                    "call {}'s function is in path {}, for which the trace has no step map",
+                    call_key.0, function_path_id.0
+                )
+                .into());
+            };
             if let Some(steps) = step_map.get(&(line as usize)) {
                 for step in steps {
                     if step.call_key == call_key {
@@ -6401,7 +6420,7 @@ impl Handler {
                 list.insert(line, StepId(-1));
             }
         }
-        list
+        Ok(list)
     }
 
     pub fn load_asm_function(
@@ -6414,7 +6433,9 @@ impl Handler {
         match args.key.parse::<i64>() {
             Ok(number) => {
                 let call_key = CallKey(number);
-                let interesting_steps = self.load_steps_for_call(call_key);
+                let interesting_steps = self
+                    .load_steps_for_call(call_key)
+                    .map_err(|e| format!("ct/load-asm-function: {e}"))?;
                 for (line, step_id) in interesting_steps.iter() {
                     if step_id.0 != NO_STEP_ID {
                         let Some(current_step) = self.reader.step(*step_id).copied() else {
@@ -6440,16 +6461,16 @@ impl Handler {
                             }
                         }
                     } else {
-                        let fn_id = self
-                            .reader
-                            .call(call_key)
-                            .expect("load_asm_function: invalid call_key")
-                            .function_id;
+                        // `load_steps_for_call` has already refused a key
+                        // with no call or no function, so this `Err` is
+                        // unreachable today; it is one so that it stays an
+                        // answer if that ever changes.
                         let fn_path_id = self
                             .reader
-                            .function(fn_id)
-                            .expect("load_asm_function: invalid function_id")
-                            .path_id;
+                            .call(call_key)
+                            .and_then(|call| self.reader.function(call.function_id))
+                            .map(|function| function.path_id)
+                            .ok_or_else(|| format!("ct/load-asm-function: no function for call {}", call_key.0))?;
                         instructions.push(Instruction::empty(
                             *line,
                             self.reader.path(fn_path_id).unwrap_or(""),
@@ -7095,7 +7116,10 @@ impl Handler {
         Ok(res)
     }
 
-    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> dap_types::StackFrame {
+    /// The DAP frame for `call_record`. `Err` when the replay's current step
+    /// is not one the trace records, which `stackTrace` answers as a named
+    /// failure rather than a panic.
+    pub fn produce_stack_frame(&mut self, call_record: &DbCall) -> Result<dap_types::StackFrame, Box<dyn Error>> {
         // for this simplified scenario:
         // step 1: call 1
         // step 2: call 1
@@ -7111,10 +7135,13 @@ impl Handler {
         //   how to do it efficiently is a non-trivial question: maybe by iterating through previous steps,
         //   or a new kind of index?
         let call = self.reader.to_call(call_record, &mut self.expr_loader);
-        let current_step = self
-            .reader
-            .step(self.step_id)
-            .expect("produce_stack_frame: invalid step_id");
+        let Some(current_step) = self.reader.step(self.step_id).copied() else {
+            return Err(format!(
+                "stackTrace: the current step {} is not one the trace records",
+                self.step_id.0
+            )
+            .into());
+        };
         let current_call_key = current_step.call_key;
         // P6.3 — pull the column from the DbStep so the source-map
         // translation can use it.  Falls back to column=1 when the
@@ -7136,7 +7163,7 @@ impl Handler {
         // segment is sparse.
         let (frame_path, frame_line, frame_column) =
             self.apply_sourcemap_translation(&location.path, location.line, recorded_column);
-        dap_types::StackFrame {
+        Ok(dap_types::StackFrame {
             id: call_record.key.0,
             name: location.function_name,
             source: Some(dap_types::Source {
@@ -7157,7 +7184,7 @@ impl Handler {
             module_id: None,
             presentation_hint: None,
             can_restart: None,
-        }
+        })
     }
 
     /// Apply Source Map V3 translation to a recorded `(path, line, column)`.
@@ -7349,7 +7376,7 @@ impl Handler {
                         // expanded children count not relevant in raw callstack
                         self.produce_stack_frame(call_record)
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>, _>>()?
             }
         } else {
             vec![]
@@ -7409,14 +7436,19 @@ impl Handler {
             self.respond_dap(request, dap_types::ScopesResponseBody { scopes: vec![scope] }, sender)?;
             return Ok(());
         }
-        let call = self
-            .reader
-            .call(CallKey(arg.frame_id))
-            .expect("load_dap_scopes: invalid call_key");
-        let function = self
-            .reader
-            .function(call.function_id)
-            .expect("load_dap_scopes: invalid function_id");
+        // `frameId` is the client's: one no frame has is refused by name, as
+        // DAP answers any request it cannot carry out
+        // (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>).
+        let Some(call) = self.reader.call(CallKey(arg.frame_id)) else {
+            return Err(format!("scopes: no frame has frameId {}", arg.frame_id).into());
+        };
+        let Some(function) = self.reader.function(call.function_id) else {
+            return Err(format!(
+                "scopes: frame {} names function {}, which the trace does not record",
+                arg.frame_id, call.function_id.0
+            )
+            .into());
+        };
         let scope = dap_types::Scope {
             name: function.name.clone(),
             presentation_hint: Some("locals".to_string()),

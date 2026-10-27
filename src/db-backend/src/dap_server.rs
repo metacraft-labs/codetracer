@@ -2868,8 +2868,13 @@ pub fn handle_message(msg: &DapMessage, sender: Sender<DapMessage>, ctx: &mut Ct
                 && let Err(send_err) = to_stable_sender.send(req.clone())
             {
                 // The stable task-thread's ``from_stable_receiver``
-                // has been dropped — almost always because the
-                // thread panicked.  Surface an error DAP response
+                // has been dropped: the thread has ended.  A handler
+                // panic no longer does that (`run_answering_panics`
+                // answers it and the thread refuses later requests by
+                // name until a relaunch), so this arm now covers the
+                // thread failing outside a request (its cached-launch
+                // setup, a panic in the loop itself).
+                // Surface an error DAP response
                 // to the client so its ``customRequest`` promise
                 // resolves immediately instead of waiting the full
                 // 30 s for nothing (see the Leo deep-test
@@ -3332,6 +3337,152 @@ fn announce_session_load(announces_session: bool, session: &mut SessionHandler, 
     }
 }
 
+/// Run one request's handler, catching a panic inside it.
+///
+/// The Debug Adapter Protocol requires a response to every request
+/// (<https://microsoft.github.io/debug-adapter-protocol/overview#requests>);
+/// one that cannot be carried out is answered `success: false` with a
+/// `message`. [`task_thread`] answers a handler's `Err` that way, but a handler
+/// that *panicked* used to unwind out of `task_thread` and end the thread: the
+/// request that panicked was never answered, so its client waited out its own
+/// timeout. This returns the handler's own result as `Ok`, and a panic as
+/// `Err` carrying the text the request is answered with: the command, its
+/// `seq` and the panic message.
+///
+/// # Why a panic poisons the session
+///
+/// `AssertUnwindSafe` asserts that whatever `handle` borrows mutably (the
+/// task thread's session) may be touched after an unwind. It may be touched,
+/// but it cannot be trusted: a handler can panic halfway through a change.
+/// `run_tracepoints`, for one, disables the user's breakpoints and moves the
+/// replay before it evaluates anything, and restores both only on the way
+/// out. The panics a client can provoke with a bad argument are refused by
+/// name before anything changes, so a panic that still reaches this function
+/// is a defect whose effect on the session is unknown. [`task_thread`]
+/// therefore stops serving from that session ([`ThreadPoison`]): every later
+/// request is refused by name until a `launch` loads the trace again. That is
+/// the same contract `std::sync::Mutex` keeps after a panic, and it is what
+/// keeps a defect from turning into wrong answers that look right.
+///
+/// Where a panic aborts instead of unwinding (`panic = "abort"`, or
+/// `wasm32-unknown-unknown`, where the browser build dispatches inline) this
+/// function never sees the panic; the browser build answers from its panic
+/// hook instead (`browser_panic_net` in `dap.rs`).
+fn run_answering_panics<F>(
+    thread_name: &str,
+    request: &dap::Request,
+    handle: F,
+) -> Result<Result<(), Box<dyn Error>>, String>
+where
+    F: FnOnce() -> Result<(), Box<dyn Error>>,
+{
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        panic_if_test_hook_names(&request.command);
+        handle()
+    }))
+    .map_err(|payload| {
+        let reason = panic_payload_text(&*payload);
+        error!(
+            "the '{thread_name}' thread's handler for {} (seq {}) panicked: {reason}",
+            request.command, request.base.seq
+        );
+        format!(
+            "the replay server's handler for {} (seq {}) panicked: {reason}",
+            request.command, request.base.seq
+        )
+    })
+}
+
+/// The environment variable that makes the native replay server panic, on
+/// purpose, in the handler of the command it names.
+///
+/// It exists for one reason: the panic net above must be tested through the
+/// shipping binary, and a deliberate panic is the only panic a test can rely
+/// on. Every panic a client could provoke with a bad argument is refused by
+/// name before it happens, so no real request is left that is guaranteed to
+/// panic, and a test that depended on one would stop testing anything the day
+/// that request was fixed. Unset (always, outside tests) it changes nothing.
+pub const TEST_PANIC_ON_COMMAND_ENV: &str = "CODETRACER_REPLAY_SERVER_TEST_PANIC_ON_COMMAND";
+
+/// The command whose handler panics on purpose, decided once per process: by
+/// [`arm_test_panic_on_command`] when it is called before the first request,
+/// otherwise by [`TEST_PANIC_ON_COMMAND_ENV`].
+static TEST_PANIC_COMMAND: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Make the handler of `command` panic on purpose, for a test. This is how a
+/// test arms the panic in the browser build, which has no environment; it has
+/// to be called before the engine serves its first request, and refuses once
+/// the choice has been made.
+pub fn arm_test_panic_on_command(command: &str) -> Result<(), String> {
+    TEST_PANIC_COMMAND
+        .set(Some(command.to_string()))
+        .map_err(|_| "the test panic is decided once, before the first request, and it already was".to_string())
+}
+
+/// Panic if a test armed a panic for `command` (see [`TEST_PANIC_COMMAND`]).
+/// Called inside the panic net, just before the handler runs.
+// A panic is this function's whole purpose, and it happens only when a test
+// armed it.
+#[allow(clippy::panic)]
+pub(crate) fn panic_if_test_hook_names(command: &str) {
+    let named = TEST_PANIC_COMMAND.get_or_init(|| std::env::var(TEST_PANIC_ON_COMMAND_ENV).ok());
+    if named.as_deref() == Some(command) {
+        panic!("a test armed a panic for {command}: deliberate panic");
+    }
+}
+
+/// The message a panic was raised with: `panic!` and `expect` carry a `&str`
+/// or a `String`; anything else (`std::panic::panic_any`) has no text to show.
+pub(crate) fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "a panic payload that is not a string".to_string()
+    }
+}
+
+/// Answer `request` with `success: false` and `message`. The response's own
+/// `seq` is filled in by the sending thread (see `patch_message_seq`).
+fn send_failed_response(sender: &Sender<DapMessage>, request: &dap::Request, message: String) {
+    let response = DapMessage::Response(Response {
+        base: ProtocolMessage {
+            seq: 0,
+            type_: "response".to_string(),
+        },
+        request_seq: request.base.seq,
+        success: false,
+        command: request.command.clone(),
+        message: Some(message),
+        body: json!({}),
+    });
+    if let Err(send_err) = sender.send(response) {
+        error!(
+            "failed to send the failure response for {}: {send_err:?}",
+            request.command
+        );
+    }
+}
+
+/// Why a task thread no longer serves from its session: the panic that
+/// poisoned it (see [`run_answering_panics`]). Cleared by a `launch` that
+/// loads the trace again.
+struct ThreadPoison {
+    panic: String,
+}
+
+impl ThreadPoison {
+    /// The refusal every request gets while the thread is poisoned.
+    fn refusal(&self, thread_name: &str, command: &str) -> String {
+        format!(
+            "the replay server's '{thread_name}' session cannot serve {command}: it stopped serving after {}; \
+             launch the trace again to reload it",
+            self.panic
+        )
+    }
+}
+
 /// Serve the requests routed to one task thread (`name`) against the session
 /// it loads on `launch`. `announces_session` is true for the one thread whose
 /// session answers the client — see [`announce_session_load`].
@@ -3469,6 +3620,10 @@ fn task_thread(
             .map_err(|e| -> String { format!("placeholder session wrap error: {e:?}") })?
     };
 
+    // Set when a handler panics; while set, this thread refuses every request
+    // but `launch` (see [`run_answering_panics`]).
+    let mut poison: Option<ThreadPoison> = None;
+
     loop {
         info!("waiting for new message from DAP server");
         let request = from_thread_receiver.recv().map_err(|e| {
@@ -3484,7 +3639,14 @@ fn task_thread(
             // reported failure *and* the thread survives to serve the next
             // request — which is how the non-launch branch below has always
             // treated a failed request.
-            let launch_result: Result<(), Box<dyn Error>> = (|| {
+            //
+            // The closure also runs under `catch_unwind` (see
+            // [`run_answering_panics`]): a panic during setup would otherwise
+            // end this thread just as the `?`s used to, and report nothing.
+            // `session_loaded` says whether it replaced the session, which is
+            // what clears a poisoned thread.
+            let mut session_loaded = false;
+            let launch_result = run_answering_panics(name, &request, || {
                 let args = request.load_args::<dap::LaunchRequestArguments>()?;
                 if let Some(folder) = &args.trace_folder {
                     let launch_trace_folder = folder.clone();
@@ -3563,6 +3725,7 @@ fn task_thread(
                         // session.toml re-load. Idempotent: each launch
                         // produces a fresh full snapshot.
                         announce_session_load(announces_session, &mut session, &sender);
+                        session_loaded = true;
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
@@ -3596,6 +3759,7 @@ fn task_thread(
                         // session yields a one-entry process list with the
                         // recorded `.ct` file as `displayName`.
                         announce_session_load(announces_session, &mut session, &sender);
+                        session_loaded = true;
                         loaded_trace_folder = Some(launch_trace_folder);
                         loaded_trace_file = Some(launch_trace_file);
                         loaded_raw_diff_index = launch_raw_diff_index;
@@ -3636,16 +3800,44 @@ fn task_thread(
                     // is empty for live recordings until the recorder
                     // finishes).
                     announce_session_load(announces_session, &mut session, &sender);
+                    session_loaded = true;
                     loaded_trace_folder = None;
                     loaded_trace_file = None;
                     loaded_raw_diff_index = None;
                 }
                 Ok(())
-            })();
-            if let Err(e) = launch_result {
-                error!("launch error: {e:?}");
-                send_launch_failure_notification(&sender, &launch_failure_text(&*e));
+            });
+            match launch_result {
+                Ok(Ok(())) => {
+                    if session_loaded {
+                        poison = None;
+                    }
+                }
+                Ok(Err(e)) => {
+                    error!("launch error: {e:?}");
+                    send_launch_failure_notification(&sender, &launch_failure_text(&*e));
+                }
+                Err(panic_text) => {
+                    // The launch reports its failure with an event, not a
+                    // response (the protocol-level `launch` response has
+                    // already been sent), so the panic is reported the same
+                    // way. A panic part-way through setup can leave the
+                    // session half-replaced: poison it, and forget which trace
+                    // was loaded so that the next `launch` reloads instead of
+                    // taking the duplicate-launch shortcut.
+                    send_launch_failure_notification(&sender, &panic_text);
+                    poison = Some(ThreadPoison { panic: panic_text });
+                    loaded_trace_folder = None;
+                    loaded_trace_file = None;
+                    loaded_raw_diff_index = None;
+                }
             }
+        } else if let Some(poison) = &poison {
+            // A handler panicked on this thread earlier; its session is not
+            // trusted until a `launch` loads the trace again (see
+            // [`run_answering_panics`]).
+            warn!("  '{name}' thread is poisoned, refusing {:?}", request.command);
+            send_failed_response(&sender, &request, poison.refusal(name, &request.command));
         } else {
             // Any session whose primary trace is initialized is
             // dispatched through the session router. The router
@@ -3653,30 +3845,32 @@ fn task_thread(
             // single-trace Handler (unchanged code path) per M24.
             let primary_initialized = session.trace(0).map(|t| t.handler.initialized).unwrap_or(false);
             if primary_initialized {
-                let res = handle_request_via_session(&mut session, request.clone(), sender.clone());
-                if let Err(e) = res {
-                    warn!("  handle_request error in thread: {e:?}");
-                    // Send an error response back to the daemon so it does not
-                    // wait indefinitely for events that will never arrive
-                    // (e.g., a `stopped` event after an unrecognized
-                    // navigation command like `ct/goto-ticks`).
-                    let error_response = DapMessage::Response(Response {
-                        base: ProtocolMessage {
-                            seq: 0, // Will be patched by write_dap_messages
-                            type_: "response".to_string(),
-                        },
-                        request_seq: request.base.seq,
-                        success: false,
-                        command: request.command.clone(),
-                        message: Some(format!("{e}")),
-                        body: json!({}),
-                    });
-                    if let Err(send_err) = sender.send(error_response) {
-                        error!("failed to send error response for {}: {send_err:?}", request.command);
+                let res = run_answering_panics(name, &request, || {
+                    handle_request_via_session(&mut session, request.clone(), sender.clone())
+                });
+                match res {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        warn!("  handle_request error in thread: {e:?}");
+                        // Send an error response back to the daemon so it does not
+                        // wait indefinitely for events that will never arrive
+                        // (e.g., a `stopped` event after an unrecognized
+                        // navigation command like `ct/goto-ticks`). The thread
+                        // goes on serving: a handler that returns `Err` is
+                        // expected to leave its session consistent.
+                        send_failed_response(&sender, &request, format!("{e}"));
                     }
-                    // continue with other requests; trying to be more robust
-                    // assuming it's for individual requests to fail
-                    //   TODO: is it possible for some to leave bad state ?
+                    Err(panic_text) => {
+                        // Answer the request that panicked, then stop serving
+                        // from a session the panic may have left half-changed.
+                        // The trace is forgotten so that a `launch` of the same
+                        // trace reloads it.
+                        send_failed_response(&sender, &request, panic_text.clone());
+                        poison = Some(ThreadPoison { panic: panic_text });
+                        loaded_trace_folder = None;
+                        loaded_trace_file = None;
+                        loaded_raw_diff_index = None;
+                    }
                 }
             } else {
                 // #689: this branch used to drop the request silently, and
@@ -3689,26 +3883,14 @@ fn task_thread(
                 // exists to remove. Answer it instead, the same way the
                 // initialized-but-failing arm above does.
                 warn!("  handler NOT initialized, refusing {:?}", request.command);
-                let error_response = DapMessage::Response(Response {
-                    base: ProtocolMessage {
-                        seq: 0, // Will be patched by the sending thread
-                        type_: "response".to_string(),
-                    },
-                    request_seq: request.base.seq,
-                    success: false,
-                    command: request.command.clone(),
-                    message: Some(format!(
+                send_failed_response(
+                    &sender,
+                    &request,
+                    format!(
                         "no trace is loaded in the '{name}' thread; cannot service {}",
                         request.command
-                    )),
-                    body: json!({}),
-                });
-                if let Err(send_err) = sender.send(error_response) {
-                    error!(
-                        "failed to send not-initialized response for {}: {send_err:?}",
-                        request.command
-                    );
-                }
+                    ),
+                );
             }
         }
     }
@@ -5211,6 +5393,97 @@ mod tests {
                 "the jump must reach line 5, and the user's line-3 breakpoint must still \
                  stop the Continue that follows it",
             );
+        }
+    }
+
+    /// `run_answering_panics` is what keeps a task thread alive through a
+    /// handler panic (`tests/handler_panic_is_answered_test.rs` drives it
+    /// through the shipping binary). These pin its contract directly, with
+    /// closures that panic on purpose: no handler path is mocked, the
+    /// closure *is* the unit under test's input.
+    mod run_answering_panics_contract {
+        use super::*;
+
+        fn request(command: &str, seq: i64) -> dap::Request {
+            dap::Request {
+                base: ProtocolMessage {
+                    seq,
+                    type_: "request".to_string(),
+                },
+                command: command.to_string(),
+                arguments: json!({}),
+            }
+        }
+
+        fn panic_text(result: Result<Result<(), Box<dyn Error>>, String>) -> String {
+            match result {
+                Err(text) => text,
+                Ok(handled) => panic!(
+                    "a panic must come back as the outer Err, got the handler's own result {:?}",
+                    handled.map_err(|e| e.to_string())
+                ),
+            }
+        }
+
+        #[test]
+        fn a_panic_becomes_a_message_naming_the_command_seq_and_reason() {
+            let req = request("scopes", 41);
+            let message = panic_text(run_answering_panics("stable", &req, || {
+                panic!("load_dap_scopes: invalid call_key")
+            }));
+            assert!(message.contains("scopes"), "{message}");
+            assert!(message.contains("seq 41"), "{message}");
+            assert!(message.contains("panicked"), "{message}");
+            assert!(message.contains("load_dap_scopes: invalid call_key"), "{message}");
+        }
+
+        #[test]
+        fn a_formatted_panic_message_is_kept() {
+            let req = request("stackTrace", 2);
+            let id = 7;
+            let message = panic_text(run_answering_panics("flow", &req, || panic!("no step {id}")));
+            assert!(message.contains("no step 7"), "{message}");
+        }
+
+        #[test]
+        fn a_non_string_payload_still_answers() {
+            let req = request("ct/load-flow", 3);
+            let message = panic_text(run_answering_panics("flow", &req, || std::panic::panic_any(17_u32)));
+            assert!(
+                message.contains("ct/load-flow") && message.contains("panicked"),
+                "{message}"
+            );
+        }
+
+        /// A handler's own result is not a panic: success and a refusal both
+        /// come back unchanged as the inner result, so `task_thread` answers a
+        /// refusal and keeps serving instead of poisoning the session.
+        #[test]
+        fn success_and_errors_pass_through_unchanged() {
+            let req = request("threads", 4);
+            assert!(matches!(run_answering_panics("stable", &req, || Ok(())), Ok(Ok(()))));
+            match run_answering_panics("stable", &req, || Err("plain refusal".into())) {
+                Ok(Err(e)) => assert_eq!(e.to_string(), "plain refusal"),
+                other => panic!(
+                    "an Err must pass through as the handler's result, got {:?}",
+                    other.map(|r| r.map_err(|e| e.to_string()))
+                ),
+            }
+        }
+
+        /// The refusal a poisoned thread gives every later request names the
+        /// thread, the refused command, the panic that poisoned it, and the
+        /// way out.
+        #[test]
+        fn a_poisoned_thread_refuses_by_name() {
+            let poison = ThreadPoison {
+                panic: "the replay server's handler for scopes (seq 6) panicked: boom".to_string(),
+            };
+            let refusal = poison.refusal("stable", "stackTrace");
+            assert!(refusal.contains("'stable'"), "{refusal}");
+            assert!(refusal.contains("stackTrace"), "{refusal}");
+            assert!(refusal.contains("scopes (seq 6) panicked: boom"), "{refusal}");
+            assert!(refusal.contains("launch"), "{refusal}");
         }
     }
 }

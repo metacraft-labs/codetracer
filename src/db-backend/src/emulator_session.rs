@@ -43,12 +43,15 @@
 //! `run_to_entry`'s `restore_location`, before any click at all), and
 //! `tracepoint_jump` from a tracepoint result row.
 //!
-//! It was wrong about *loudly*: there is no `catch_unwind` on the request
-//! path, so on wasm32 a `todo!()` is a trap that kills the worker. Every
-//! pending request then hangs to its timeout and the user sees a dead
-//! pane with no message — the quietest failure the system can produce.
-//! A `todo!()` is only a loud failure to someone reading a native
-//! backtrace.
+//! It was wrong about *loudly*: on wasm32 a `todo!()` is a trap that kills
+//! the worker. At the time, every pending request then hung to its timeout
+//! and the user saw a dead pane with no message — the quietest failure the
+//! system can produce. A panic is answered now (the panic net:
+//! `dap_server::run_answering_panics` natively, `dap::browser_panic_net` in
+//! the browser), but it still costs the whole session: the native thread
+//! refuses everything until the trace is launched again, and the browser
+//! engine until it is replaced. A `todo!()` is only a loud failure to
+//! someone reading a native backtrace.
 //!
 //! All four now either do the jump or return a typed `Err`, which becomes
 //! a DAP error response and reaches the user through the frontend's

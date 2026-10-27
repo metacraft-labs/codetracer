@@ -222,6 +222,13 @@ impl Calltrace {
         }
     }
 
+    /// Whether `call_key` names a call of this trace. The expand/collapse
+    /// methods below index by it, so a key a client supplies is checked with
+    /// this first and refused by name when it is not one.
+    pub fn has_call(&self, call_key: CallKey) -> bool {
+        call_key.0 >= 0 && (call_key.0 as usize) < self.calls.len() && (call_key.0 as usize) < self.call_states.len()
+    }
+
     pub fn change_expand_state(&mut self, call_key: CallKey, showing_children: bool) {
         self.call_states[call_key].hidden_children = !showing_children;
         self.call_states[call_key].expanded = true;
