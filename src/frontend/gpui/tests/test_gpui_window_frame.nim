@@ -95,7 +95,10 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 750
+const ExpectedAssertions = 759
+  ## 2026-10-27 (the native Problems pane): 750 -> 759, measured —
+  ## `CHECKS: 759`, `scanned 29 source files`. One more scanned source file,
+  ## `problems_leaf.nim`, at 1 + 8 = 9 per file.
   ## 2026-10-26 (the native Agent Activity pane): 741 -> 750, measured —
   ## `CHECKS: 750`, `scanned 28 source files`. One more scanned source file,
   ## `agent_activity_leaf.nim`, at 1 + 8 = 9 per file.

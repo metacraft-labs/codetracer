@@ -117,7 +117,12 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 1945
+const ExpectedAssertions = 1966
+  ## *1945 -> 1966 on 2026-10-27: seven production modules x three
+  ## assertions — `platform/session_allocation.nim`, `sdk/expression_eval.nim`,
+  ## `store/row_address.nim`, `viewmodels/build_diagnostics.nim`,
+  ## `views/pane_measure_dom.nim`, `views/row_link_dom.nim` and
+  ## `views/row_links.nim`. None calls `rebase(` or spells `mapOver`.*
   ## *1930 -> 1945 on 2026-10-26: the Agent Activity pane's five production
   ## modules (codetracer `6673057756`) — `host/agent_live_worker.nim`,
   ## `host/agent_session_files.nim`, `host/native_agent_host.nim`,
