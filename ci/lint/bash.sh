@@ -329,6 +329,12 @@ lint_step "shellcheck: toolchain resolver" \
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
 
+# The real tree's two locks: every sibling both pin, pinned at one revision.
+# `repro.lock` once lagged `flake.lock` by an `isonim-tui` the code needed
+# (2026-10-26); this is the gate that would have said so before a push.
+lint_step "sibling pins: repro.lock agrees with flake.lock" \
+	bash ci/test/repro-lock-flake-lock-agreement.sh
+
 # The catalog coverage guard has the same exposure, and more ways to earn it:
 # it PARSES four inputs (repro.nim, two reprobuild source files, repro.lock),
 # and a parser that rots reports the whole recipe unresolved and sends the

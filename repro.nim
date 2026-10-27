@@ -2108,6 +2108,19 @@ package codeTracer:
       extraEnvValue = GateEnv)
     target("gate-flake-pin-alignment", gateFlakePinAlignment)
 
+    # The real tree's two locks agree on every sibling both pin. A GATE over
+    # the real files, so they are its inputs: a lock bump re-runs it.
+    let gateReproLockAgreement = ctShell(
+      actionIdValue = "codetracer.gate.repro-lock-flake-lock-agreement",
+      commandValue = "bash ci/test/repro-lock-flake-lock-agreement.sh",
+      extraInputsValue = @[
+        "ci/test/repro-lock-flake-lock-agreement.sh",
+        "flake.lock",
+        "repro.lock"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-repro-lock-flake-lock-agreement", gateReproLockAgreement)
+
     let gatePythonVersionAlignment = ctShell(
       actionIdValue = "codetracer.gate.python-version-alignment",
       commandValue = "bash ci/test/python-version-alignment-test.sh",
