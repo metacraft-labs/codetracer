@@ -5608,6 +5608,16 @@ plat53-capture-electron *args:
 plat55-capture-electron *args:
   bash scripts/plat55-capture-electron.sh "$@"
 
+# PLAT-56: the desktop's BUILD panel and status bar are the reference the
+# terminal's and the GPUI window's Build Output panes are measured against:
+# each line's class, text and colours after real coloured `gcc` builds (one
+# failing, one passing), the verdict, the status bar's build indicator, a
+# press on a located line and the history picker — written to
+# `src/tests/visual/answers/plat56-build-output.electron.json`.
+[positional-arguments]
+plat56-capture-electron *args:
+  bash scripts/plat56-capture-electron.sh "$@"
+
 # The §30a arm: the two answer producers are independent readers.
 plat35-answer-independence:
   bash ci/test/plat35-answer-independence.sh
