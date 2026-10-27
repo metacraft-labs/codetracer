@@ -57,6 +57,7 @@ CUA = "src/frontend/viewmodel/keymap/cua_keymap.nim"
 EMACS = "src/frontend/viewmodel/keymap/emacs_keymap.nim"
 NAVIGATION = "src/frontend/viewmodel/keymap/navigation_keymap.nim"
 BORDERS = "src/frontend/tui/app/views/borders.nim"
+GLYPHS = "src/frontend/tui/app/views/glyph_table.nim"
 TUI_EVENTS = "src/frontend/tui/app/views/event_log.nim"
 TUI_CALLS = "src/frontend/tui/app/views/call_trace.nim"
 TUI_SHELL = "src/frontend/tui/app/views/shell.nim"
@@ -72,7 +73,7 @@ PTY = "src/frontend/tui/tests/real_terminal/test_plat70b_tables_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat70b_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/layout/plat70b-table-overflow.spec.ts"
 
-SUBJECTS = [MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, BORDERS,
+SUBJECTS = [MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, GLYPHS,
             TUI_EVENTS, TUI_CALLS, TUI_SHELL, RUNTIME, GPUI_MAIN, GPUI_LEAVES,
             DOM]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC]
@@ -144,8 +145,11 @@ ARMS = [
      [(VMU, None)],
      "Vim: Shift+K shows a detail in the editor too"),
     # ---- the terminal ------------------------------------------------------------
-    ("T1", [(BORDERS, "  (\"█\", \"#\"), (\"…\", \"~\"), (\"·\", \".\"),",
-             "  (\"█\", \"#\"), (\"…\", \"…\"), (\"·\", \".\"),")],
+    # T1 and T4 RE-AIMED 2026-10-27: PLAT-71 (`4ea31ecc4`) draws the cut from
+    # the glyph table's ASCII column and measures under the terminal's
+    # ambiguous-width policy.
+    ("T1", [(GLYPHS, '    grTruncation:          ["…",      "…",    "~",   "…"],',
+             '    grTruncation:          ["…",      "…",    "…",   "…"],')],
      [(TBL, None)],
      "the ASCII tier draws `…`, not `~`"),
     ("T2", [(TUI_EVENTS, "    if col == at:\n      return (true, c)",
@@ -158,8 +162,8 @@ ARMS = [
      "HO-9: the terminal draws its defaults, not the model's widths "
      "(re-aimed by PLAT-70 Part I: the widths reach the painters through the "
      "shared fit's declaration, `eventLogFitColumns`)"),
-    ("T4", [(TUI_CALLS, "    let fitted = fitCell(full, stop - textAt, terminalMeasure)",
-             "    let fitted = fitCell(full, stop - textAt + 2, terminalMeasure)")],
+    ("T4", [(TUI_CALLS, "    let fitted = fitCell(full, stop - textAt, measureOf(g))",
+             "    let fitted = fitCell(full, stop - textAt + 2, measureOf(g))")],
      [(TBL, None)],
      "HO-8: the Call Trace's row is fitted at a width other than its own"),
     ("T5", [(TUI_SHELL, "  let row = if below + h <= height - 1: below else: max(0, t.row - h)",
@@ -218,7 +222,7 @@ ARMS = [
 
 DECLARED_SURVIVORS = {"N1"}
 
-IN_BINARY = {MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, BORDERS,
+IN_BINARY = {MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, GLYPHS,
              TUI_EVENTS, TUI_CALLS, TUI_SHELL, RUNTIME}
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, GPUI_MAIN,
